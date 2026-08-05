@@ -240,12 +240,20 @@ stays a two-valued control flag; this field carries the full act vocabulary.
 {:event/type :workflow/completed
  :workflow/id uuid
 
- :workflow/status :success       ; :success | :failure
  :workflow/duration-ms long
  :workflow/evidence-bundle-id uuid
 
  :message "Workflow completed successfully"}
 ```
+
+`workflow/completed` reports success. The three terminal events are disjoint and
+the event type IS the outcome: `workflow/completed` (succeeded),
+`workflow/failed` (§3.1), `workflow/cancelled` (§3.21). No status field
+discriminates among them, so no consumer can read an outcome that contradicts
+the event it arrived on.
+
+This is distinct from N1's `:workflow/status`, the derived projection on the
+Workflow entity, which retains its full enum.
 
 #### workflow/failed
 
@@ -598,6 +606,7 @@ executes. The two are distinct identifiers and both are REQUIRED.
  :task/id uuid
  :pr/id uuid
  :pr/number long
+ :pr/repo string
  :pr/url string
  :pr/branch string
  :pr/base-sha string
@@ -615,6 +624,7 @@ executes. The two are distinct identifiers and both are REQUIRED.
  :task/id uuid
  :pr/id uuid
  :pr/number long
+ :pr/repo string
  :sha string
  :ci/checks [{:name string :status :success :duration-ms long}]
 
@@ -630,6 +640,7 @@ executes. The two are distinct identifiers and both are REQUIRED.
  :task/id uuid
  :pr/id uuid
  :pr/number long
+ :pr/repo string
  :sha string
  :ci/checks [{:name string :status :failure :output string}]
  :ci/failure-summary string
@@ -646,6 +657,7 @@ executes. The two are distinct identifiers and both are REQUIRED.
  :task/id uuid
  :pr/id uuid
  :pr/number long
+ :pr/repo string
  :sha string
  :review/approvers [string ...]
  :review/approval-count long
@@ -662,6 +674,7 @@ executes. The two are distinct identifiers and both are REQUIRED.
  :task/id uuid
  :pr/id uuid
  :pr/number long
+ :pr/repo string
  :sha string
  :review/requesters [string ...]
  :review/comments [{:file string :line long :body string}]
@@ -678,6 +691,7 @@ executes. The two are distinct identifiers and both are REQUIRED.
  :task/id uuid
  :pr/id uuid
  :pr/number long
+ :pr/repo string
  :sha string
  :comment/id string
  :comment/author string
@@ -698,6 +712,7 @@ executes. The two are distinct identifiers and both are REQUIRED.
  :task/id uuid
  :pr/id uuid
  :pr/number long
+ :pr/repo string
  :sha string                     ; New commit SHA
  :fix/type keyword               ; :ci-failure, :review-changes, :conflict
  :fix/iteration long             ; Fix attempt number
@@ -715,6 +730,7 @@ executes. The two are distinct identifiers and both are REQUIRED.
  :task/id uuid
  :pr/id uuid
  :pr/number long
+ :pr/repo string
  :sha string                     ; Merge commit SHA
  :pr/merge-method keyword        ; :merge, :squash, :rebase
 
@@ -730,6 +746,7 @@ executes. The two are distinct identifiers and both are REQUIRED.
  :task/id uuid
  :pr/id uuid
  :pr/number long
+ :pr/repo string
  :sha string
  :close/reason keyword           ; :abandoned, :superseded, :failed
 
@@ -2001,9 +2018,9 @@ checkpoint/resume contract of N2-delta-phase-checkpoint-and-resume §9.
 #### workflow/cancelled
 
 A terminal state distinct from `:workflow/failed` — the workflow did not fail,
-it was stopped. Cancellation is reported by this event alone;
-`:workflow/completed` MUST NOT carry a `:cancelled` status, and consumers that
-count failures MUST NOT count cancellations.
+it was stopped. Cancellation is reported by this event alone; it is never
+folded into `workflow/completed` or `workflow/failed` (§3.1), and consumers
+that count failures MUST NOT count cancellations.
 
 ```clojure
 {:event/type :workflow/cancelled
@@ -2013,6 +2030,7 @@ count failures MUST NOT count cancellations.
  :cancel/requested-by string           ; REQUIRED: principal that requested it
  :cancel/source keyword                ; REQUIRED: :cli | :api | :tui | :control-action | :supervisor
  :cancel/reason string                 ; OPTIONAL: free-text
+ :action/id uuid                       ; REQUIRED when :cancel/source is :control-action (§3.15)
  :workflow/duration-ms long
 
  :message "Workflow cancelled by {requested-by}"}
@@ -3001,7 +3019,6 @@ Complete event sequence for simple workflow:
 ;; N. Workflow completes
 {:event/type :workflow/completed
  :event/sequence-number N
- :workflow/status :success
  :message "Workflow completed successfully"}
 ```
 
