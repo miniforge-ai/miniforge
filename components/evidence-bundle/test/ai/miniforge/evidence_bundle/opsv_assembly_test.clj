@@ -168,3 +168,26 @@
                 f/pack-artifact-id)]
     (is (response/anomaly-map? result))
     (is (contains? (error-codes result) :referenced-artifact-not-found))))
+
+(deftest ^{:stratum 1} finalization-canonicalizes-reference-order
+  (let [second-capability-id "grant-2"
+        second-effect (assoc f/governed-effect
+                             :evidence/capability-id second-capability-id)
+        evidence-value (-> f/opsv-evidence
+                           (update :opsv/capability-refs
+                                   conj second-capability-id)
+                           (update-in [:opsv/actuation :governed-effects]
+                                      conj second-effect))
+        reordered (-> evidence-value
+                      (update :opsv/event-refs #(vec (reverse %)))
+                      (update :opsv/artifact-refs #(vec (reverse %)))
+                      (update :opsv/capability-refs #(vec (reverse %)))
+                      (update-in [:opsv/actuation :governed-effects]
+                                 #(vec (reverse %))))
+        finalize (fn [input]
+                   (let [[store bundle-id] (accumulated-store input)]
+                     (evidence/finalize-opsv-evidence!
+                      store bundle-id f/base-bundle input
+                      (set f/artifact-ids))))]
+    (with-redefs [random-uuid (constantly f/canonical-bundle-id)]
+      (is (= (finalize evidence-value) (finalize reordered))))))

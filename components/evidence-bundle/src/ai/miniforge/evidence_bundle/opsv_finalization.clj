@@ -53,7 +53,34 @@
         (:opsv/metric-snapshot-artifact-refs evidence)
         (:opsv/diff-artifact-refs evidence))))
 
+(def ^{:stratum 0} ^:private reference-paths
+  [[:opsv/event-refs]
+   [:opsv/artifact-refs]
+   [:opsv/capability-refs]
+   [:opsv/actuation :pr-refs]
+   [:opsv/actuation :apply-refs]
+   [:opsv/actuation :postcondition-artifact-refs]
+   [:opsv/actuation :rollback :artifact-refs]
+   [:opsv/metric-query-artifact-refs]
+   [:opsv/metric-snapshot-artifact-refs]
+   [:opsv/diff-artifact-refs]])
+
+(defn- ^{:stratum 0} governed-effect-sort-key
+  [effect]
+  [(str (:evidence/intent-id effect))
+   (str (:evidence/oir-id effect))
+   (:evidence/capability-id effect)])
+
 ;------------------------------------------------------------------------------ Layer 1
+
+(defn- ^{:stratum 1} canonicalize-reference-order
+  [evidence]
+  (-> (reduce (fn [result path]
+                (update-in result path #(vec (sort %))))
+              evidence
+              reference-paths)
+      (update-in [:opsv/actuation :governed-effects]
+                 #(vec (sort-by governed-effect-sort-key %)))))
 
 (defn- ^{:stratum 1} reference-errors
   [record evidence available-artifact-ids]
@@ -90,6 +117,9 @@
   [store bundle-id base-bundle evidence available-artifact-ids]
   (let [record (assembly/get-assembly store bundle-id)
         schema-valid? (m/validate schema/OpsvEvidence evidence)
+        canonical-evidence (if schema-valid?
+                             (canonicalize-reference-order evidence)
+                             evidence)
         errors (cond-> []
                  (not schema-valid?)
                  (conj {:code :invalid-opsv-evidence})
@@ -98,12 +128,12 @@
                             (:evidence-bundle/workflow-id base-bundle)))
                  (conj {:code :workflow-reference-mismatch})
                  (and record schema-valid?)
-                 (into (reference-errors record evidence
+                 (into (reference-errors record canonical-evidence
                                          available-artifact-ids)))
         candidate (-> base-bundle
                       (dissoc :evidence/content-hash)
                       (assoc :evidence-bundle/id bundle-id
-                             :evidence/opsv evidence))
+                             :evidence/opsv canonical-evidence))
         bundle-errors (:errors (bundle/validate-bundle-impl candidate))
         errors (into errors
                      (map #(assoc % :code :invalid-evidence-bundle)
