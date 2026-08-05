@@ -201,7 +201,7 @@ CONVERGE MUST be expressed as a bounded loop with:
 
 ### 4.1 Experiment Pack schema (normative fields)
 
-An Experiment Pack MUST use the N1 §2.12 namespaced keys:
+An Experiment Pack MUST use the N1 §2.12 namespaced top-level keys:
 
 ```clojure
 {:experiment-pack/id string
@@ -227,7 +227,7 @@ and stop conditions. Actuation intent MUST be `:recommend-only`, `:pr-only`, or
 
 ### 4.2 Operational Policy Proposal schema (normative fields)
 
-A proposal MUST use the N1 §2.11 namespaced keys:
+A proposal MUST use the N1 §2.11 namespaced top-level keys:
 
 ```clojure
 {:operational-policy/id string
