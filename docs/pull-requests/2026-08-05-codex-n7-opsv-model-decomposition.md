@@ -37,9 +37,11 @@ Application transformation structure.
 
 ## Testing Plan
 
-- Run phase-OPSV tests in every composed project.
-- Run Poly structure, Clojure lint, stratum lint, and pre-commit gates.
-- Run the full Miniforge project test suite before merge.
+- Phase-OPSV tests pass in both composed projects (6 tests, 37 assertions).
+- All four commits passed Poly structure, staged Clojure lint, stratum lint,
+  smoke tests, and GraalVM compatibility gates.
+- The full Miniforge project test suite passes across all 87 bricks.
+- The Miniforge CLI uberjar builds successfully.
 
 ## Deployment Plan
 
@@ -48,10 +50,10 @@ outputs, anomaly behavior, and the default recommend-only posture.
 
 ## Checklist
 
-- [ ] Every implementation namespace uses at most three computed strata.
-- [ ] The seven public phase transformations preserve their contracts.
-- [ ] Runtime adapter precedence remains backward compatible.
-- [ ] No policy or verification map shape is duplicated in orchestration.
+- [x] Every implementation namespace uses at most three computed strata.
+- [x] The seven public phase transformations preserve their contracts.
+- [x] Runtime adapter precedence remains backward compatible.
+- [x] No policy or verification map shape is duplicated in orchestration.
 
 ## Follow-up
 
