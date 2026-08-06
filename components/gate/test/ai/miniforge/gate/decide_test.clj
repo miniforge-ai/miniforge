@@ -82,6 +82,12 @@
         (is (= :deny (:envelope/decision e)))
         (is (re-find #"cost-exceeded" (:reason/detail (first (:envelope/reasons e)))))))
 
+    (testing "an effect outside the grant scope has its own deny reason"
+      (let [e (decide/decide clean pins {:grant/outcome :scope-mismatch})]
+        (is (= :deny (:envelope/decision e)))
+        (is (= [:reason/grant-scope-mismatch]
+               (mapv :reason/code (:envelope/reasons e))))))
+
     (testing "an unrecognized outcome denies rather than passing silently"
       (let [e (decide/decide clean pins {:grant/outcome :something-new})]
         (is (= :deny (:envelope/decision e)))))

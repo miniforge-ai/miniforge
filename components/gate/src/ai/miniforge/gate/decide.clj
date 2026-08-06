@@ -23,7 +23,8 @@
    obligations, with NO branch that lets an unclassifiable violation
    pass."
   (:require
-   [ai.miniforge.decision-envelope.interface :as env]))
+   [ai.miniforge.decision-envelope.interface :as env]
+   [ai.miniforge.gate.messages :as msg]))
 
 ;------------------------------------------------------------------------------ Layer 0
 
@@ -75,7 +76,7 @@
      (concat (mapcat :envelope/reasons gate-envs)
              (map (fn [r]
                     {:reason/code :reason/gate-check-failed
-                     :reason/detail (str "gate " (name (or (:gate r) :unknown))
+                     :reason/detail (str "gate " (name (get r :gate :unknown))
                                          " failed: "
                                          (or (:message (first (:errors r))) "check failed"))})
                   mech-failures)
@@ -110,7 +111,7 @@
    effect — and yields no reasons, which is what keeps every existing
    `decide` caller behaving exactly as it does today.
 
-   Both non-authorized outcomes are deny-class. `:inactive` reports as
+   Every non-authorized outcome is deny-class. `:inactive` reports as
    `:reason/grant-absent` rather than a code of its own: a revoked or
    expired grant is precisely the case of 'no ACTIVE grant covers this
    effect', and the detail says which."
@@ -124,6 +125,8 @@
                 :reason/detail (str "grant is not active"
                                     (when-let [r (:grant/revocation-reason result)]
                                       (str " (revoked: " (name r) ")")))}]
+    :scope-mismatch [{:reason/code :reason/grant-scope-mismatch
+                      :reason/detail (msg/t :decide/grant-scope-mismatch)}]
     ;; An :exceeded outcome ALWAYS yields at least one deny reason. If
     ;; the breach detail is missing or empty, mapping over it would
     ;; produce zero reasons — and zero reasons is an ALLOW. The outcome

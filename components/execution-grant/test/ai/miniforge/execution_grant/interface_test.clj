@@ -32,6 +32,8 @@
 
 (def ^{:stratum 0} much-later (Instant/parse "2026-08-01T00:00:00Z"))
 
+(def ^{:stratum 0} repo-scope {:pr/repo "miniforge-ai/miniforge"})
+
 (defn ^{:stratum 0} lookup-of
   "An `id -> grant` resolver over the given grants."
   [& grants]
@@ -40,13 +42,15 @@
 
 ;------------------------------------------------------------------------------ Layer 1
 
+(def ^{:stratum 1} pr-scope (assoc repo-scope :pr/number 42))
+
 (defn ^{:stratum 1} root
   "A delegable root merge grant, bounded on every axis."
   ([] (root {}))
   ([overrides]
    (grant/issue (merge {:principal "operator:chris"
                         :effect-class :effect/merge
-                        :scope {:repo "miniforge-ai/miniforge"}
+                        :scope repo-scope
                         :constraints {:constraint/max-cost-usd 10.0
                                       :constraint/max-tokens 100000
                                       :constraint/max-count 5}
@@ -87,7 +91,7 @@
     (testing "a narrower child is issued and names its parent"
       (let [child (grant/delegate parent
                                   {:principal "agent:implementer"
-                                   :scope {:repo "miniforge-ai/miniforge" :pr 42}
+                                   :scope pr-scope
                                    :constraints {:constraint/max-cost-usd 2.0
                                                  :constraint/max-tokens 1000
                                                  :constraint/max-count 1}
@@ -100,7 +104,7 @@
     (testing "raising a ceiling is refused, naming the axis"
       (let [refused (grant/delegate parent
                                     {:principal "agent:x"
-                                     :scope {:repo "miniforge-ai/miniforge"}
+                                     :scope repo-scope
                                      :constraints {:constraint/max-cost-usd 999.0}
                                      :expires-at later}
                                     now)]
@@ -111,7 +115,7 @@
     (testing "OMITTING a ceiling the parent set is refused — absent means unbounded"
       (let [refused (grant/delegate parent
                                     {:principal "agent:x"
-                                     :scope {:repo "miniforge-ai/miniforge"}
+                                     :scope repo-scope
                                      :constraints {:constraint/max-cost-usd 1.0}
                                      :expires-at later}
                                     now)]
@@ -131,7 +135,7 @@
       (is (anomaly/anomaly?
            (grant/delegate parent
                            {:principal "agent:x"
-                            :scope {:repo "miniforge-ai/miniforge"}
+                            :scope repo-scope
                             :constraints (:grant/constraints parent)
                             :expires-at (Instant/parse "2026-12-01T00:00:00Z")}
                            now))))
@@ -140,7 +144,7 @@
       (let [child (grant/delegate parent
                                   {:principal "agent:x"
                                    :effect-class :effect/deploy
-                                   :scope {:repo "miniforge-ai/miniforge"}
+                                   :scope repo-scope
                                    :constraints (:grant/constraints parent)
                                    :expires-at later}
                                   now)]
@@ -152,22 +156,23 @@
     ;; scope may legitimately hold. Presence must be tested with
     ;; `contains?`, or a child could drop exactly this key undetected.
     (let [sentinel :ai.miniforge.execution-grant.attenuation/absent
-          parent (root {:scope {:repo "miniforge-ai/miniforge" :marker sentinel}})]
+          parent (root {:scope (assoc repo-scope :marker sentinel)})]
       (is (anomaly/anomaly?
            (grant/delegate parent
                            {:principal "agent:x"
-                            :scope {:repo "miniforge-ai/miniforge"}
+                            :scope repo-scope
                             :constraints (:grant/constraints parent)
                             :expires-at later}
                            now))
           "dropping a key whose value equals the sentinel is still a widening")))
 
   (testing "a key bound to nil must still be carried by the child"
-    (let [parent (root {:scope {:repo "miniforge-ai/miniforge" :branch nil}})]
+    (let [scope-with-nil (assoc repo-scope :branch nil)
+          parent (root {:scope scope-with-nil})]
       (is (anomaly/anomaly?
            (grant/delegate parent
                            {:principal "agent:x"
-                            :scope {:repo "miniforge-ai/miniforge"}
+                            :scope repo-scope
                             :constraints (:grant/constraints parent)
                             :expires-at later}
                            now))
@@ -175,7 +180,7 @@
       (is (grant/valid?
            (grant/delegate parent
                            {:principal "agent:x"
-                            :scope {:repo "miniforge-ai/miniforge" :branch nil}
+                            :scope scope-with-nil
                             :constraints (:grant/constraints parent)
                             :expires-at later}
                            now))
@@ -193,7 +198,7 @@
   (testing "a refused delegation from a valid parent is :unauthorized"
     (let [a (grant/delegate (root {:delegable? false})
                             {:principal "agent:x"
-                             :scope {:repo "miniforge-ai/miniforge"}
+                             :scope repo-scope
                              :constraints {:constraint/max-cost-usd 1.0
                                            :constraint/max-tokens 10
                                            :constraint/max-count 1}
@@ -207,7 +212,7 @@
       (is (anomaly/anomaly?
            (grant/delegate parent
                            {:principal "agent:x"
-                            :scope {:repo "miniforge-ai/miniforge"}
+                            :scope repo-scope
                             :constraints (:grant/constraints parent)
                             :expires-at later}
                            now)))))
@@ -217,7 +222,7 @@
       (is (anomaly/anomaly?
            (grant/delegate parent
                            {:principal "agent:x"
-                            :scope {:repo "miniforge-ai/miniforge"}
+                            :scope repo-scope
                             :constraints (:grant/constraints parent)
                             :expires-at later}
                            now)))))
@@ -227,7 +232,7 @@
       (is (anomaly/anomaly?
            (grant/delegate parent
                            {:principal "agent:x"
-                            :scope {:repo "miniforge-ai/miniforge"}
+                            :scope repo-scope
                             :constraints (:grant/constraints parent)
                             :expires-at later}
                            much-later))))))
@@ -250,7 +255,7 @@
   (let [parent (root)
         child (grant/delegate parent
                               {:principal "agent:implementer"
-                               :scope {:repo "miniforge-ai/miniforge" :pr 42}
+                               :scope pr-scope
                                :constraints {:constraint/max-cost-usd 2.0
                                              :constraint/max-tokens 1000
                                              :constraint/max-count 1}

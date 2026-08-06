@@ -32,7 +32,8 @@
   (testing "deny-class reasons force :deny"
     (doseq [code [:reason/rule-violation :reason/unknown-enforcement
                   :reason/unknown-severity :reason/missing-artifact
-                  :reason/gate-check-failed]]
+                  :reason/gate-check-failed :reason/grant-exceeded
+                  :reason/grant-scope-mismatch :reason/grant-absent]]
       (is (= :deny (env/derive-decision [{:reason/code code :reason/detail "x"}] []))
           (str code))))
   (testing "approval obligation denies until a workflow clears it"

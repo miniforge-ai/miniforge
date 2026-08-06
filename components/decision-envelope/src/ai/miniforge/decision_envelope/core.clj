@@ -44,6 +44,7 @@
     ;; reasons are deny-class, so an effect over budget or lacking
     ;; authority cannot be downgraded to an obligation and proceed.
     :reason/grant-exceeded
+    :reason/grant-scope-mismatch
     :reason/grant-absent})
 
 (def ^{:stratum 0} ^:private obligation-only-types

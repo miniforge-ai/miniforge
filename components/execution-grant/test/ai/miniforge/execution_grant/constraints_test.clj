@@ -30,14 +30,21 @@
 
 (def ^{:stratum 0} much-later (Instant/parse "2026-08-01T00:00:00Z"))
 
+(def ^{:stratum 0} effect-scope {:workflow/run-id "run-1"})
+
 ;------------------------------------------------------------------------------ Layer 1
+
+(defn ^{:stratum 1} usage
+  "Usage readings for the effect named by `effect-scope`."
+  ([] (usage {}))
+  ([readings] (assoc readings :effect/scope effect-scope)))
 
 (defn ^{:stratum 1} spend-grant
   ([] (spend-grant {}))
   ([overrides]
    (grant/issue (merge {:principal "agent:implementer"
                         :effect-class :effect/spend
-                        :scope {:workflow-run "run-1"}
+                        :scope effect-scope
                         :constraints {:constraint/max-cost-usd 5.0
                                       :constraint/max-tokens 100000}
                         :delegable? true
@@ -101,7 +108,8 @@
       ;; else in this component.
       (is (= [:constraint/max-cost-usd]
              (mapv :constraint/axis (grant/breaches g {:usage/cost-usd "lots"}))))
-      (is (= :exceeded (:grant/outcome (grant/authorize g {:usage/tokens :unknown} now)))))))
+      (is (= :exceeded (:grant/outcome
+                        (grant/authorize g (usage {:usage/tokens :unknown}) now)))))))
 
 (deftest ^{:stratum 2} authorize-fails-closed-test
   (testing "no grant at all is :absent — absence is not silence"
@@ -109,34 +117,54 @@
 
   (testing "a revoked grant is :inactive and carries the cause"
     (let [r (grant/revoke (spend-grant) :breach/cost-exceeded now)
-          result (grant/authorize r {} now)]
+          result (grant/authorize r (usage) now)]
       (is (= :inactive (:grant/outcome result)))
       (is (= :breach/cost-exceeded (:grant/revocation-reason result)))))
 
   (testing "an expired grant is :inactive even with a clean revocation stamp"
     (let [g (spend-grant)]
       (is (nil? (:grant/revoked-at g)))
-      (is (= :inactive (:grant/outcome (grant/authorize g {} much-later))))))
+      (is (= :inactive (:grant/outcome (grant/authorize g (usage) much-later))))))
 
   (testing "a delegated grant with no lookup is NOT authorized"
     (let [parent (spend-grant)
           child (grant/delegate parent
                                 {:principal "agent:sub"
-                                 :scope {:workflow-run "run-1"}
+                                 :scope effect-scope
                                  :constraints {:constraint/max-cost-usd 1.0
                                                :constraint/max-tokens 10}
                                  :expires-at later}
                                 now)]
-      (is (= :inactive (:grant/outcome (grant/authorize child {} now)))
+      (is (= :inactive (:grant/outcome (grant/authorize child (usage) now)))
           "an unverified grant must never read as a live one")
       (is (grant/authorized?
-           (grant/authorize child {} now
+           (grant/authorize child (usage) now
                             (fn [id] (when (= id (:grant/id parent)) parent)))))))
 
   (testing "within ceilings on a live grant is :authorized"
     (is (grant/authorized? (grant/authorize (spend-grant)
-                                            {:usage/cost-usd 1.0}
+                                            (usage {:usage/cost-usd 1.0})
                                             now)))))
+
+(deftest ^{:stratum 2} authorize-enforces-scope-test
+  (let [g (spend-grant)]
+    (testing "an absent effect scope fails closed"
+      (is (= :scope-mismatch (:grant/outcome (grant/authorize g {} now)))))
+    (testing "a changed grant binding is outside the grant scope"
+      (is (= :scope-mismatch
+             (:grant/outcome
+              (grant/authorize g
+                               {:effect/scope {:workflow/run-id "run-2"}}
+                               now)))))
+    (testing "a malformed persisted scope denies rather than becoming unbounded"
+      (let [malformed (assoc g :grant/scope nil)]
+        (is (= :scope-mismatch
+               (:grant/outcome (grant/authorize malformed (usage) now))))))
+    (testing "extra effect bindings narrow rather than widen"
+      (is (grant/authorized?
+           (grant/authorize g
+                            {:effect/scope (assoc effect-scope :phase :release)}
+                            now))))))
 
 (deftest ^{:stratum 2} ceiling-holds-on-every-path-test
   ;; The two-channel lesson (T3 contradiction 9): the 3h40m runaway
@@ -145,7 +173,7 @@
   ;; enforced by the same call no matter which path reaches the effect,
   ;; so there is no second path to forget to wire.
   (let [g (spend-grant)
-        over {:usage/cost-usd 6.0}
+        over (usage {:usage/cost-usd 6.0})
         path-a (grant/authorize g over now)
         path-b (grant/authorize g over now (constantly nil))]
     (is (= :exceeded (:grant/outcome path-a)))
@@ -156,22 +184,24 @@
 (deftest ^{:stratum 2} recheck-at-commit-catches-what-decide-could-not-test
   (testing "a grant revoked between decide and commit fails the commit"
     (let [g (spend-grant)
-          at-decide (grant/authorize g {:usage/cost-usd 1.0} now)
+          at-decide (grant/authorize g (usage {:usage/cost-usd 1.0}) now)
           revoked (grant/revoke g :breach/cost-exceeded now)
-          at-commit (grant/authorize revoked {:usage/cost-usd 1.0} now)]
+          at-commit (grant/authorize revoked (usage {:usage/cost-usd 1.0}) now)]
       (is (grant/authorized? at-decide))
       (is (not (grant/authorized? at-commit)))
       (is (= :inactive (:grant/outcome at-commit)))))
 
   (testing "a grant that expires between decide and commit fails the commit"
     (let [g (spend-grant)]
-      (is (grant/authorized? (grant/authorize g {} now)))
-      (is (not (grant/authorized? (grant/authorize g {} much-later))))))
+      (is (grant/authorized? (grant/authorize g (usage) now)))
+      (is (not (grant/authorized? (grant/authorize g (usage) much-later))))))
 
   (testing "usage that grew past the ceiling between the two calls fails the second"
     (let [g (spend-grant)]
-      (is (grant/authorized? (grant/authorize g {:usage/cost-usd 4.0} now)))
-      (is (= :exceeded (:grant/outcome (grant/authorize g {:usage/cost-usd 5.5} now)))))))
+      (is (grant/authorized? (grant/authorize g (usage {:usage/cost-usd 4.0}) now)))
+      (is (= :exceeded
+             (:grant/outcome
+              (grant/authorize g (usage {:usage/cost-usd 5.5}) now)))))))
 
 (deftest ^{:stratum 2} malformed-ceiling-is-a-breach-test
   ;; A persisted grant could carry a non-numeric ceiling. The check site
@@ -194,4 +224,6 @@
     (is (= [:constraint/max-cost-usd]
            (mapv :constraint/axis (grant/breaches g {:usage/cost-usd 1.0})))
         "but the check site must still deny rather than throw")
-    (is (= :exceeded (:grant/outcome (grant/authorize g {:usage/cost-usd 1.0} now))))))
+    (is (= :exceeded
+           (:grant/outcome
+            (grant/authorize g (usage {:usage/cost-usd 1.0}) now))))))

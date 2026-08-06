@@ -1,3 +1,7 @@
+;; Title: Miniforge.ai
+;; Author: Christopher Lester (christopher@miniforge.ai)
+;; Copyright 2025-2026 Christopher Lester. Licensed under Apache 2.0.
+
 {:gate/messages
  {;; Review-approved gate — verdict not approved (carries the decision read)
   :review/not-approved
@@ -58,6 +62,9 @@
   ;; Policy-pack gate — pack compilation failed before evaluation.
   :policy-pack/compile-error
   "Policy pack compilation failed: {message}"
+
+  :decide/grant-scope-mismatch
+  "Effect is outside the grant scope"
 
   :opsv/instrumentation-description "Validates required OPSV signals"
   :opsv/instrumentation-failed "Required instrumentation is unavailable or unreliable"
