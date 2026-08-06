@@ -36,7 +36,7 @@
 (def ^{:stratum 0} ^:private precommit-smoke-config-path
   "Working-directory-relative filesystem path to the smoke-set config.
    Not loaded via `io/resource` because bb tasks already run from the
-   repo root by convention; if that ever changes the `(.exists f)` guard
+   repo root by convention; if that ever changes the `(.isFile f)` guard
    surfaces the misconfiguration loudly."
   "resources/precommit-smoke-tests.edn")
 
