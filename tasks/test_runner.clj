@@ -15,7 +15,6 @@
 ;; WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 ;; See the License for the specific language governing permissions and
 ;; limitations under the License.
-
 (ns test-runner
   (:require
    [ai.miniforge.bb-proc.interface :as proc]
@@ -24,7 +23,9 @@
    [clojure.java.io :as io]
    [clojure.string :as str]))
 
-(defn run-stream! [& args]
+;------------------------------------------------------------------------------ Layer 0
+
+(defn ^{:stratum 0} run-stream! [& args]
   (let [[opts cmd-args] (if (map? (first args))
                           [(merge {:out :inherit :err :inherit} (first args))
                            (rest args)]
@@ -32,7 +33,24 @@
         {:keys [exit]} (deref (apply p/process opts cmd-args))]
     exit))
 
-(defn- run-project-tests!
+(def ^{:stratum 0} ^:private precommit-smoke-config-path
+  "Working-directory-relative filesystem path to the smoke-set config.
+   Not loaded via `io/resource` because bb tasks already run from the
+   repo root by convention; if that ever changes the `(.exists f)` guard
+   surfaces the misconfiguration loudly."
+  "resources/precommit-smoke-tests.edn")
+
+(defn- ^{:stratum 0} valid-namespace-token?
+  "Conservative check: namespace entries in the EDN must look like
+   period-separated, dash-segmented symbol tokens. Rejects strings with
+   whitespace, quotes, comment chars, or any non-symbol character so a
+   typo in the config doesn't silently break the generated -e form."
+  [s]
+  (and (string? s) (re-matches #"[a-zA-Z][a-zA-Z0-9.\-_?!]*" s)))
+
+;------------------------------------------------------------------------------ Layer 1
+
+(defn- ^{:stratum 1} run-project-tests!
   [project test-nses]
   (let [deps (slurp (str "projects/" project "/deps.edn"))
         clojure-cmd (proc/clojure-command)
@@ -44,7 +62,57 @@
     (run-stream! {:dir (str "projects/" project)}
                  clojure-cmd "-Sdeps" deps "-M" "-e" expr)))
 
-(defn integration []
+(defn ^{:stratum 1} conformance []
+  (println "🧪 Running N1 conformance tests...")
+  (let [test-nses ["conformance.n1_architecture_test"
+                   "conformance.event_stream_test"
+                   "conformance.agent_context_handoff_test"
+                   "conformance.protocol_conformance_test"
+                   "conformance.gate_enforcement_test"]
+        clojure-cmd (proc/clojure-command)
+        require-expr (apply str (map (fn [ns] (str " '" ns)) test-nses))
+        run-expr (apply str (map (fn [ns] (str " '" ns)) test-nses))
+        expr (str "(require 'clojure.test" require-expr ") "
+                  "(clojure.test/run-tests" run-expr ")")
+        exit (run-stream! clojure-cmd "-M:conformance" "-e" expr)]
+    (when-not (zero? exit)
+      (println "❌ Conformance tests failed with exit code:" exit)
+      (System/exit exit))))
+
+(defn- ^{:stratum 1} read-precommit-smoke-nses!
+  []
+  (let [f (io/file precommit-smoke-config-path)]
+    (when-not (.exists f)
+      (println "❌ Pre-commit smoke config not found:" precommit-smoke-config-path)
+      (System/exit 1))
+    (let [{:keys [smoke/namespaces]} (edn/read-string (slurp f))]
+      (when (empty? namespaces)
+        (println "❌ Pre-commit smoke config has no :smoke/namespaces")
+        (System/exit 1))
+      (when-let [bad (seq (remove valid-namespace-token? namespaces))]
+        (println "❌ Pre-commit smoke config has invalid namespace tokens:"
+                 (pr-str bad))
+        (System/exit 1))
+      namespaces)))
+
+(defn ^{:stratum 1} graalvm []
+  (println "🧪 Testing GraalVM/Babashka compatibility...")
+  (let [clojure-cmd (proc/clojure-command)
+        ;; Use :dev alias to get full component classpath
+        cp (-> (p/sh {:out :string} clojure-cmd "-A:dev" "-Spath")
+               :out
+               str/trim)
+        ;; Add tests directory to classpath
+        full-cp (str cp ":tests")
+        expr "(require 'graalvm-compatibility-test) (graalvm-compatibility-test/-main)"
+        exit (run-stream! "bb" "-cp" full-cp "-e" expr)]
+    (when-not (zero? exit)
+      (println "❌ GraalVM compatibility tests failed with exit code:" exit)
+      (System/exit exit))))
+
+;------------------------------------------------------------------------------ Layer 2
+
+(defn ^{:stratum 2} integration []
   (println "🧪 Running project integration tests...")
   (let [miniforge-tests ["ai.miniforge.workflow.release-integration-test"
                          "ai.miniforge.workflow.loader-integration-test"
@@ -76,6 +144,7 @@
                          "ai.miniforge.release-executor.artifact-validation-integration-test"
                          "ai.miniforge.web-dashboard.fleet-onboarding-integration-test"
                          "ai.miniforge.self-healing.integration-test"
+                         "ai.miniforge.workflow.opsv-lifecycle-integration-test"
                          "ai.miniforge.governance.e2e-test"]
         kernel-tests ["ai.miniforge.workflow.kernel-loader-integration-test"]
         miniforge-exit (run-project-tests! "miniforge" miniforge-tests)]
@@ -87,55 +156,7 @@
         (println "❌ Integration tests failed in project: miniforge-core")
         (System/exit kernel-exit)))))
 
-(defn conformance []
-  (println "🧪 Running N1 conformance tests...")
-  (let [test-nses ["conformance.n1_architecture_test"
-                   "conformance.event_stream_test"
-                   "conformance.agent_context_handoff_test"
-                   "conformance.protocol_conformance_test"
-                   "conformance.gate_enforcement_test"]
-        clojure-cmd (proc/clojure-command)
-        require-expr (apply str (map (fn [ns] (str " '" ns)) test-nses))
-        run-expr (apply str (map (fn [ns] (str " '" ns)) test-nses))
-        expr (str "(require 'clojure.test" require-expr ") "
-                  "(clojure.test/run-tests" run-expr ")")
-        exit (run-stream! clojure-cmd "-M:conformance" "-e" expr)]
-    (when-not (zero? exit)
-      (println "❌ Conformance tests failed with exit code:" exit)
-      (System/exit exit))))
-
-(def ^:private precommit-smoke-config-path
-  "Working-directory-relative filesystem path to the smoke-set config.
-   Not loaded via `io/resource` because bb tasks already run from the
-   repo root by convention; if that ever changes the `(.exists f)` guard
-   surfaces the misconfiguration loudly."
-  "resources/precommit-smoke-tests.edn")
-
-(defn- valid-namespace-token?
-  "Conservative check: namespace entries in the EDN must look like
-   period-separated, dash-segmented symbol tokens. Rejects strings with
-   whitespace, quotes, comment chars, or any non-symbol character so a
-   typo in the config doesn't silently break the generated -e form."
-  [s]
-  (and (string? s) (re-matches #"[a-zA-Z][a-zA-Z0-9.\-_?!]*" s)))
-
-(defn- read-precommit-smoke-nses!
-  []
-  (let [f (io/file precommit-smoke-config-path)]
-    (when-not (.exists f)
-      (println "❌ Pre-commit smoke config not found:" precommit-smoke-config-path)
-      (System/exit 1))
-    (let [{:keys [smoke/namespaces]} (edn/read-string (slurp f))]
-      (when (empty? namespaces)
-        (println "❌ Pre-commit smoke config has no :smoke/namespaces")
-        (System/exit 1))
-      (when-let [bad (seq (remove valid-namespace-token? namespaces))]
-        (println "❌ Pre-commit smoke config has invalid namespace tokens:"
-                 (pr-str bad))
-        (System/exit 1))
-      namespaces)))
-
-(defn precommit-smoke
+(defn ^{:stratum 2} precommit-smoke
   "Run the hand-curated pre-commit smoke set.
 
    Source of truth: resources/precommit-smoke-tests.edn. Aspirational
@@ -158,18 +179,3 @@
       (println "❌ Pre-commit smoke tests failed with exit code:" exit)
       (System/exit exit))
     (println (format "✓ Pre-commit smoke (%d namespaces) passed" (count nses)))))
-
-(defn graalvm []
-  (println "🧪 Testing GraalVM/Babashka compatibility...")
-  (let [clojure-cmd (proc/clojure-command)
-        ;; Use :dev alias to get full component classpath
-        cp (-> (p/sh {:out :string} clojure-cmd "-A:dev" "-Spath")
-               :out
-               str/trim)
-        ;; Add tests directory to classpath
-        full-cp (str cp ":tests")
-        expr "(require 'graalvm-compatibility-test) (graalvm-compatibility-test/-main)"
-        exit (run-stream! "bb" "-cp" full-cp "-e" expr)]
-    (when-not (zero? exit)
-      (println "❌ GraalVM compatibility tests failed with exit code:" exit)
-      (System/exit exit))))

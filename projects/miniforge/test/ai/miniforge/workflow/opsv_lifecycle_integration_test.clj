@@ -31,7 +31,15 @@
 ;------------------------------------------------------------------------------ Layer 0
 
 (def ^{:stratum 0} ^:private fixture
-  (-> "opsv/application-fixture.edn" io/resource slurp edn/read-string))
+  (let [resource-path "opsv/application-fixture.edn"
+        project-relative (io/file "../../components/phase-opsv/test-resources"
+                                  resource-path)
+        source (or (io/resource resource-path)
+                   (when (.isFile project-relative) project-relative))]
+    (when-not source
+      (throw (ex-info "OPSV application fixture not found"
+                      {:fixture/path resource-path})))
+    (-> source slurp edn/read-string)))
 
 (def ^{:stratum 0} ^:private artifact-id
   #uuid "00000000-0000-0000-0000-000000000799")
