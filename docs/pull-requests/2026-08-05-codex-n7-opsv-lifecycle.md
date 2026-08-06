@@ -10,7 +10,9 @@
 
 Register the seven deterministic OPSV transformations with the shared phase
 lifecycle and ship the exact versioned workflow resource with durable,
-run-scoped evidence identity.
+run-scoped evidence identity. This lifecycle slice does not project the N3
+OPSV domain events; that application-layer integration is the next dependent
+PR.
 
 ## Motivation
 
