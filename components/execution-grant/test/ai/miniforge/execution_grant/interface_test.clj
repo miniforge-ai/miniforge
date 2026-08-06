@@ -84,7 +84,10 @@
   (testing "an unknown effect class is refused, not coerced"
     (is (anomaly/anomaly? (root {:effect-class :effect/launch-missiles}))))
   (testing "a missing expiry is refused — an unbounded grant is not a grant"
-    (is (anomaly/anomaly? (root {:expires-at nil})))))
+    (is (anomaly/anomaly? (root {:expires-at nil}))))
+  (testing "explicit nil bounds are refused rather than silently broadened"
+    (is (anomaly/anomaly? (root {:scope nil})))
+    (is (anomaly/anomaly? (root {:constraints nil})))))
 
 (deftest ^{:stratum 2} delegation-attenuates-test
   (let [parent (root)]

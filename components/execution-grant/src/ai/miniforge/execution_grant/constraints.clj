@@ -72,7 +72,7 @@
   [result]
   (= :authorized (:grant/outcome result)))
 
-(defn- ^{:stratum 0} within-scope?
+(defn- ^{:stratum 0} effect-within-grant-scope?
   "True when `effect-scope` carries every binding the grant requires.
    The existing attenuation relation is the authority: an effect may
    add narrower bindings, but may not drop or change a grant binding.
@@ -168,7 +168,7 @@
           :grant/id (:grant/id grant)
           :grant/revocation-reason (:grant/revocation-reason grant)}
 
-         (not (within-scope? grant effect-scope))
+         (not (effect-within-grant-scope? grant effect-scope))
          {:grant/outcome :scope-mismatch
           :grant/id (:grant/id grant)
           :grant/scope (:grant/scope grant)
