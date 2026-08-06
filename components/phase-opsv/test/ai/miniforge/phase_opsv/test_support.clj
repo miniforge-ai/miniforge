@@ -76,7 +76,7 @@
 ;------------------------------------------------------------------------------ Layer 1
 
 (def ^{:stratum 1} ramp-steps
-  (:ramp-steps fixture))
+  (get-in fixture [:opsv/ramp-result :steps]))
 
 (defn ^{:stratum 1} execution-context
   [adapter]

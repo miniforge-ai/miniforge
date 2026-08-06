@@ -22,8 +22,8 @@
    [clojure.string :as str]
    [malli.core :as m]
    [ai.miniforge.event-stream.interface.opsv :as opsv-event]
-   [ai.miniforge.phase-opsv.interface :as opsv]
-   [ai.miniforge.phase-opsv.protocol :as port])
+   [ai.miniforge.opsv-adapter-simulated.interface :as simulated]
+   [ai.miniforge.phase-opsv.interface :as opsv])
   (:import
    [org.apache.commons.io FileUtils]))
 
@@ -66,12 +66,6 @@
                       {:fixture/path resource-path})))
     (-> source slurp edn/read-string)))
 
-(def ^{:stratum 0} ^:private environment-fingerprint
-  {:cluster "staging-1"
-   :node-pools ["general"]
-   :image-digests {"catalog" "sha256:abc"}
-   :config-hash "config-1"})
-
 (defn ^{:stratum 0} event-type-in?
   [event-types event]
   (contains? event-types (:event/type event)))
@@ -113,12 +107,7 @@
 
 (defn ^{:stratum 1} test-adapter
   []
-  (reify port/OPSVAdapter
-    (discover-signals [_ _targets]
-      [{:driver :cpu} {:driver :backlog}])
-    (run-guarded-ramp [_ _pack]
-      {:environment-fingerprint environment-fingerprint
-       :steps (:ramp-steps fixture)})))
+  (simulated/create-adapter fixture))
 
 (defn ^{:stratum 1} workflow-input
   []

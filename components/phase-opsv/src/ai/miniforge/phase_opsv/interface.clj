@@ -50,3 +50,14 @@
   [ctx]
   (actuation/actuate
    ctx (get-in ctx [:execution/phase-results :opsv/verify :result :output])))
+
+;------------------------------------------------------------------------------ Layer 1
+
+(defn ^{:stratum 1} functional-adapter
+  "Build an OPSV adapter from pure discovery and guarded-ramp functions."
+  [discover-fn guarded-ramp-fn]
+  (reify protocol/OPSVAdapter
+    (discover-signals [_ targets]
+      (discover-fn targets))
+    (run-guarded-ramp [_ experiment-pack]
+      (guarded-ramp-fn experiment-pack))))
