@@ -31,12 +31,12 @@
    [ai.miniforge.artifact.interface :as artifact]
    [ai.miniforge.agent.interface :as agent]
    [ai.miniforge.cli.messages :as messages]
-   [ai.miniforge.cli.resource-config :as resource-config]
    [ai.miniforge.cli.workflow-recommender :as recommender]
    [ai.miniforge.cli.workflow-runner.display :as display]
    [ai.miniforge.cli.workflow-runner.context :as context]
    [ai.miniforge.cli.workflow-runner.control :as control]
    [ai.miniforge.cli.workflow-runner.paths :as paths]
+   [ai.miniforge.cli.workflow-runner.preflight-support :as support]
    [ai.miniforge.cli.workflow-runner.process :as process]
    [ai.miniforge.cli.workflow-runner.provenance :as provenance]
    [ai.miniforge.cli.workflow-runner.spec-kanban :as spec-kanban]
@@ -111,51 +111,6 @@
    Never throws."
   []
   (gc-hooks/run-gc-pass-best-effort! worktree/worktree-root gc-queue/run-deferred-gc!))
-
-(def ^{:stratum 0} ^:private workflow-runner-config
-  (delay
-    (resource-config/merged-resource-config "config/cli/workflow-runner.edn"
-                                            :workflow-runner
-                                            {})))
-
-(defn- ^{:stratum 0} success-response
-  [output]
-  (response/success output))
-
-(defn- ^{:stratum 0} failure-response
-  [category error-type message data]
-  (-> (response/failure message {:data (assoc data :type error-type)})
-      (assoc :anomaly (response/make-anomaly category message data))))
-
-(defn- ^{:stratum 0} response-output
-  [response]
-  (let [output (get response :output)]
-    (merge (select-keys response [:content :exit-code :version])
-           (if (map? output) output {}))))
-
-(defn- ^{:stratum 0} response-succeeded?
-  [response]
-  (or (true? (:success response))
-      (response/success? response)))
-
-(defn- ^{:stratum 0} with-backend-version
-  [stamp version]
-  (assoc stamp :cmd-version version))
-
-(defn- ^{:stratum 0} parse-preflight-payload
-  [content]
-  (try
-    (some-> content str/trim not-empty (json/parse-string true))
-    (catch Exception _ nil)))
-
-(defn- ^{:stratum 0} backend-stream-content
-  [stream-parser output]
-  (let [content (atom "")]
-    (doseq [line (str/split-lines (or output ""))]
-      (when-let [parsed (stream-parser line)]
-        (when-let [delta (:delta parsed)]
-          (swap! content str delta))))
-    (some-> @content str/trim not-empty)))
 
 (defn- ^{:stratum 0} backend-cli-missing!
   [{:keys [backend cmd]}]
@@ -367,42 +322,63 @@
        :cmd cmd
        :cmd-path cmd-path})))
 
+(defn- ^{:stratum 0} backend-preflight-failed!
+  [{:keys [backend cmd cmd-path cmd-version]} probe-response]
+  (response/throw-anomaly! :anomalies/unavailable
+                           (messages/t :workflow-runner/backend-preflight-failed
+                                       {:backend (name backend)})
+                           {:backend backend
+                            :cmd cmd
+                            :cmd-path cmd-path
+                            :cmd-version cmd-version
+                            :probe-response (support/response-summary probe-response)}))
+
+(defn- ^{:stratum 0} read-cli-version
+  [cmd-path]
+  (let [{:keys [out err exit timeout-ms]} (process/run-cli-command [cmd-path "--version"] (support/backend-version-timeout-ms))]
+    (cond
+      timeout-ms
+      (support/failure-response :anomalies/unavailable
+                        "backend_version_timeout"
+                        (messages/t :workflow-runner/backend-version-timeout
+                                    {:timeout-ms timeout-ms})
+                        {:cmd-path cmd-path
+                         :timeout-ms timeout-ms})
+
+      (zero? exit)
+      (if-let [version (or (some-> out str/trim not-empty)
+                           (some-> err str/trim not-empty))]
+        (support/success-response {:version version})
+        (support/failure-response :anomalies/unavailable
+                          "backend_version_empty_output"
+                          (messages/t :workflow-runner/backend-version-empty)
+                          {:cmd-path cmd-path
+                           :exit-code exit}))
+
+      :else
+      (support/failure-response :anomalies/unavailable
+                        "backend_version_cli_error"
+                        (or (some-> err str/trim not-empty)
+                            (some-> out str/trim not-empty)
+                            (messages/t :workflow-runner/backend-version-exit
+                                        {:exit-code exit}))
+                        {:cmd-path cmd-path
+                         :exit-code exit}))))
+
+(defn- ^{:stratum 0} claude-preflight-command
+  [cmd-path]
+  (into [cmd-path "-p" (support/backend-preflight-prompt)]
+        (support/claude-preflight-args)))
+
+(defn- ^{:stratum 0} generic-preflight-command
+  [llm-client]
+  (let [{:keys [backend model]} (:config llm-client)
+        {:keys [cmd args-fn]} (get llm/backends backend)
+        request (cond-> {:prompt (support/backend-preflight-prompt)}
+                  model (assoc :model model))]
+    (into [cmd] (args-fn request))))
+
 ;------------------------------------------------------------------------------ Layer 1
-
-(defn- ^{:stratum 1} backend-preflight-config []
-  (:backend-preflight @workflow-runner-config))
-
-(defn- ^{:stratum 1} response-summary
-  [response]
-  (merge
-   (select-keys response [:success :error :anomaly :exit-code])
-   (select-keys (response-output response)
-                [:content :exit-code :version])))
-
-(defn- ^{:stratum 1} normalized-preflight-content
-  [content]
-  (loop [candidate (some-> content str/trim not-empty)]
-    (let [parsed (parse-preflight-payload candidate)
-          nested (or (some-> parsed :result str/trim not-empty)
-                     (some-> parsed :content str/trim not-empty))]
-      (cond
-        (and (:result parsed)
-             (not (and (= "result" (:type parsed))
-                       (= "success" (:subtype parsed))
-                       (not (:is_error parsed)))))
-        nil
-
-        (and nested (not= nested candidate))
-        (recur nested)
-
-        :else
-        candidate))))
-
-(defn- ^{:stratum 1} decoded-preflight-content
-  [backend-config output]
-  (if-let [stream-parser (:stream-parser backend-config)]
-    (backend-stream-content stream-parser output)
-    (some-> output str/trim not-empty)))
 
 (defn- ^{:stratum 1} ensure-cli-command-path!
   [stamp]
@@ -556,34 +532,105 @@
     (when (:requires-cli? (:backend-config stamp))
       stamp)))
 
+(defn- ^{:stratum 1} run-generic-backend-preflight
+  [llm-client cmd-path workdir]
+  (let [{:keys [backend]} (:config llm-client)
+        backend-config (get llm/backends backend)
+        full-cmd (into [cmd-path] (rest (generic-preflight-command llm-client)))
+        {:keys [out err exit timeout-ms]} (process/run-cli-command full-cmd
+                                                           (support/backend-preflight-timeout-ms)
+                                                           :workdir workdir)
+        content (support/decoded-preflight-content backend-config out)]
+    (cond
+      timeout-ms
+      (support/failure-response :anomalies/unavailable
+                        "backend_preflight_timeout"
+                        err
+                        {:cmd-path cmd-path
+                         :timeout-ms timeout-ms
+                         :exit-code exit})
+
+      (not (zero? exit))
+      (support/failure-response :anomalies/unavailable
+                        "backend_preflight_cli_error"
+                        (or (some-> err str/trim not-empty)
+                            content
+                            (messages/t :workflow-runner/backend-preflight-exit
+                                        {:exit-code exit}))
+                        {:cmd-path cmd-path
+                         :stdout (some-> out str/trim not-empty)
+                         :stderr (some-> err str/trim not-empty)
+                         :exit-code exit})
+
+      (support/preflight-success? content)
+      (support/success-response {:content content
+                         :exit-code exit})
+
+      :else
+      (support/failure-response :anomalies/unavailable
+                        "backend_preflight_unexpected_output"
+                        (messages/t :workflow-runner/backend-preflight-failed
+                                    {:backend (name backend)})
+                        {:cmd-path cmd-path
+                         :stdout (some-> out str/trim not-empty)
+                         :stderr (some-> err str/trim not-empty)
+                         :content (support/normalized-preflight-content content)
+                         :exit-code exit}))))
+
+(defn- ^{:stratum 1} run-claude-backend-preflight
+  [cmd-path workdir]
+  (let [{:keys [out err exit timeout-ms]} (process/run-cli-command (claude-preflight-command cmd-path)
+                                                           (support/backend-preflight-timeout-ms)
+                                                           :workdir workdir)
+        trimmed (some-> out str/trim)
+        content (support/normalized-preflight-content trimmed)]
+    (cond
+      timeout-ms
+      (assoc (support/failure-response :anomalies/unavailable
+                               "backend_preflight_timeout"
+                               err
+                               {:cmd-path cmd-path
+                                :timeout-ms timeout-ms
+                                :exit-code exit})
+             :exit-code exit)
+
+      (not (zero? exit))
+      (assoc (support/failure-response :anomalies/unavailable
+                               "backend_preflight_cli_error"
+                               (or (some-> err str/trim not-empty)
+                                   trimmed
+                                   (messages/t :workflow-runner/backend-preflight-exit
+                                               {:exit-code exit}))
+                               {:cmd-path cmd-path
+                                :exit-code exit})
+             :exit-code exit)
+
+      (support/preflight-success? content)
+      (-> (support/success-response {:content content
+                             :exit-code exit})
+          (assoc :exit-code exit
+                 :content content))
+
+      :else
+      (assoc (support/failure-response :anomalies/unavailable
+                               "backend_preflight_unexpected_output"
+                               (messages/t :workflow-runner/claude-preflight-unexpected-output)
+                               {:cmd-path cmd-path
+                                :stdout trimmed
+                                :content content
+                                :stderr (some-> err str/trim not-empty)
+                                :exit-code exit})
+             :exit-code exit))))
+
+(defn- ^{:stratum 1} versioned-backend-stamp
+  [stamp]
+  (let [version-response (read-cli-version (:cmd-path stamp))
+        version (get-in (support/response-output version-response) [:version])]
+    (when-not (support/response-succeeded? version-response)
+      (backend-version-failed! stamp version-response))
+    (support/with-backend-version stamp version)))
+
 ;------------------------------------------------------------------------------ Layer 2
-
-(defn- ^{:stratum 2} backend-preflight-prompt []
-  (:prompt (backend-preflight-config)))
-
-(defn- ^{:stratum 2} backend-preflight-timeout-ms []
-  (:timeout-ms (backend-preflight-config)))
-
-(defn- ^{:stratum 2} backend-version-timeout-ms []
-  (:version-timeout-ms (backend-preflight-config)))
-
-(defn- ^{:stratum 2} claude-preflight-args []
-  (:claude-args (backend-preflight-config)))
-
-(defn- ^{:stratum 2} preflight-success?
-  [content]
-  (= {:ok true} (parse-preflight-payload (normalized-preflight-content content))))
-
-(defn- ^{:stratum 2} backend-preflight-failed!
-  [{:keys [backend cmd cmd-path cmd-version]} probe-response]
-  (response/throw-anomaly! :anomalies/unavailable
-                           (messages/t :workflow-runner/backend-preflight-failed
-                                       {:backend (name backend)})
-                           {:backend backend
-                            :cmd cmd
-                            :cmd-path cmd-path
-                            :cmd-version cmd-version
-                            :probe-response (response-summary probe-response)}))
 
 (defn ^{:stratum 2} load-or-create-workflow [load-workflow workflow-type workflow-version]
   (let [workflow-type (resolve-workflow-alias workflow-type)]
@@ -726,173 +773,24 @@
       (println (display/colorize :red (messages/t :workflow-runner/list-failed {:error (ex-message e)})))
       (throw e))))
 
-;------------------------------------------------------------------------------ Layer 3
-
-(defn- ^{:stratum 3} read-cli-version
-  [cmd-path]
-  (let [{:keys [out err exit timeout-ms]} (process/run-cli-command [cmd-path "--version"] (backend-version-timeout-ms))]
-    (cond
-      timeout-ms
-      (failure-response :anomalies/unavailable
-                        "backend_version_timeout"
-                        (messages/t :workflow-runner/backend-version-timeout
-                                    {:timeout-ms timeout-ms})
-                        {:cmd-path cmd-path
-                         :timeout-ms timeout-ms})
-
-      (zero? exit)
-      (if-let [version (or (some-> out str/trim not-empty)
-                           (some-> err str/trim not-empty))]
-        (success-response {:version version})
-        (failure-response :anomalies/unavailable
-                          "backend_version_empty_output"
-                          (messages/t :workflow-runner/backend-version-empty)
-                          {:cmd-path cmd-path
-                           :exit-code exit}))
-
-      :else
-      (failure-response :anomalies/unavailable
-                        "backend_version_cli_error"
-                        (or (some-> err str/trim not-empty)
-                            (some-> out str/trim not-empty)
-                            (messages/t :workflow-runner/backend-version-exit
-                                        {:exit-code exit}))
-                        {:cmd-path cmd-path
-                         :exit-code exit}))))
-
-(defn- ^{:stratum 3} claude-preflight-command
-  [cmd-path]
-  (into [cmd-path "-p" (backend-preflight-prompt)]
-        (claude-preflight-args)))
-
-(defn- ^{:stratum 3} generic-preflight-command
-  [llm-client]
-  (let [{:keys [backend model]} (:config llm-client)
-        {:keys [cmd args-fn]} (get llm/backends backend)
-        request (cond-> {:prompt (backend-preflight-prompt)}
-                  model (assoc :model model))]
-    (into [cmd] (args-fn request))))
-
-;------------------------------------------------------------------------------ Layer 4
-
-(defn- ^{:stratum 4} run-generic-backend-preflight
-  [llm-client cmd-path workdir]
-  (let [{:keys [backend]} (:config llm-client)
-        backend-config (get llm/backends backend)
-        full-cmd (into [cmd-path] (rest (generic-preflight-command llm-client)))
-        {:keys [out err exit timeout-ms]} (process/run-cli-command full-cmd
-                                                           (backend-preflight-timeout-ms)
-                                                           :workdir workdir)
-        content (decoded-preflight-content backend-config out)]
-    (cond
-      timeout-ms
-      (failure-response :anomalies/unavailable
-                        "backend_preflight_timeout"
-                        err
-                        {:cmd-path cmd-path
-                         :timeout-ms timeout-ms
-                         :exit-code exit})
-
-      (not (zero? exit))
-      (failure-response :anomalies/unavailable
-                        "backend_preflight_cli_error"
-                        (or (some-> err str/trim not-empty)
-                            content
-                            (messages/t :workflow-runner/backend-preflight-exit
-                                        {:exit-code exit}))
-                        {:cmd-path cmd-path
-                         :stdout (some-> out str/trim not-empty)
-                         :stderr (some-> err str/trim not-empty)
-                         :exit-code exit})
-
-      (preflight-success? content)
-      (success-response {:content content
-                         :exit-code exit})
-
-      :else
-      (failure-response :anomalies/unavailable
-                        "backend_preflight_unexpected_output"
-                        (messages/t :workflow-runner/backend-preflight-failed
-                                    {:backend (name backend)})
-                        {:cmd-path cmd-path
-                         :stdout (some-> out str/trim not-empty)
-                         :stderr (some-> err str/trim not-empty)
-                         :content (normalized-preflight-content content)
-                         :exit-code exit}))))
-
-(defn- ^{:stratum 4} run-claude-backend-preflight
-  [cmd-path workdir]
-  (let [{:keys [out err exit timeout-ms]} (process/run-cli-command (claude-preflight-command cmd-path)
-                                                           (backend-preflight-timeout-ms)
-                                                           :workdir workdir)
-        trimmed (some-> out str/trim)
-        content (normalized-preflight-content trimmed)]
-    (cond
-      timeout-ms
-      (assoc (failure-response :anomalies/unavailable
-                               "backend_preflight_timeout"
-                               err
-                               {:cmd-path cmd-path
-                                :timeout-ms timeout-ms
-                                :exit-code exit})
-             :exit-code exit)
-
-      (not (zero? exit))
-      (assoc (failure-response :anomalies/unavailable
-                               "backend_preflight_cli_error"
-                               (or (some-> err str/trim not-empty)
-                                   trimmed
-                                   (messages/t :workflow-runner/backend-preflight-exit
-                                               {:exit-code exit}))
-                               {:cmd-path cmd-path
-                                :exit-code exit})
-             :exit-code exit)
-
-      (preflight-success? content)
-      (-> (success-response {:content content
-                             :exit-code exit})
-          (assoc :exit-code exit
-                 :content content))
-
-      :else
-      (assoc (failure-response :anomalies/unavailable
-                               "backend_preflight_unexpected_output"
-                               (messages/t :workflow-runner/claude-preflight-unexpected-output)
-                               {:cmd-path cmd-path
-                                :stdout trimmed
-                                :content content
-                                :stderr (some-> err str/trim not-empty)
-                                :exit-code exit})
-             :exit-code exit))))
-
-(defn- ^{:stratum 4} versioned-backend-stamp
-  [stamp]
-  (let [version-response (read-cli-version (:cmd-path stamp))
-        version (get-in (response-output version-response) [:version])]
-    (when-not (response-succeeded? version-response)
-      (backend-version-failed! stamp version-response))
-    (with-backend-version stamp version)))
-
-;------------------------------------------------------------------------------ Layer 5
-
-(defn- ^{:stratum 5} run-backend-probe
+(defn- ^{:stratum 2} run-backend-probe
   [llm-client {:keys [backend cmd-path]} workdir]
   (if (= backend :claude)
     (run-claude-backend-preflight cmd-path workdir)
     (run-generic-backend-preflight llm-client cmd-path workdir)))
 
-;------------------------------------------------------------------------------ Layer 6
+;------------------------------------------------------------------------------ Layer 3
 
-(defn- ^{:stratum 6} verify-backend-probe!
+(defn- ^{:stratum 3} verify-backend-probe!
   [llm-client stamp workdir]
   (let [probe-response (run-backend-probe llm-client stamp workdir)]
-    (when-not (response-succeeded? probe-response)
+    (when-not (support/response-succeeded? probe-response)
       (backend-preflight-failed! stamp probe-response))
     stamp))
 
-;------------------------------------------------------------------------------ Layer 7
+;------------------------------------------------------------------------------ Layer 4
 
-(defn- ^{:stratum 7} run-backend-preflight!
+(defn- ^{:stratum 4} run-backend-preflight!
   [quiet llm-client context]
   (when-let [stamp (cli-required-backend-stamp llm-client)]
     (let [stamp (-> stamp
@@ -901,9 +799,9 @@
       (provenance/print-backend-provenance! quiet stamp)
       (verify-backend-probe! llm-client stamp (:worktree-path context)))))
 
-;------------------------------------------------------------------------------ Layer 8
+;------------------------------------------------------------------------------ Layer 5
 
-(defn ^{:stratum 8} run-workflow-from-spec! [spec {:keys [quiet] :or {quiet false} :as opts}]
+(defn ^{:stratum 5} run-workflow-from-spec! [spec {:keys [quiet] :or {quiet false} :as opts}]
   ;; Piggyback deferred GC on each spec-driven workflow start.
   (run-gc-pass-best-effort!)
   (try+
@@ -1001,7 +899,7 @@
           (flush))
         (throw+)))))
 
-(defn ^{:stratum 8} run-chain!
+(defn ^{:stratum 5} run-chain!
   "Execute a chain of workflows.
 
    Arguments:
@@ -1048,10 +946,10 @@
           (println (display/colorize :red (messages/t :workflow-runner/chain-execution-failed {:error (ex-message e)}))))
         (throw e)))))
 
-;------------------------------------------------------------------------------ Layer 9
+;------------------------------------------------------------------------------ Layer 6
 
 ;; Resume workflow from checkpointed DAG state
-(defn ^{:stratum 9} resume-workflow-from-spec!
+(defn ^{:stratum 6} resume-workflow-from-spec!
   "Resume a previously failed or paused workflow from checkpointed DAG state.
 
    Arguments:
