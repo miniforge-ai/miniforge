@@ -162,21 +162,6 @@
    [:status (into [:enum] rollback-statuses)]
    [:artifact-refs [:vector :uuid]]])
 
-;; Canonical N1/N6/N7 records
-(def ^{:stratum 1} ExperimentPack
-  "N1 section 2.12 and N7 section 4.1 Experiment Pack."
-  [:map {:closed true}
-   [:experiment-pack/id :string]
-   [:experiment-pack/version :string]
-   [:experiment-pack/targets Targets]
-   [:experiment-pack/workload Workload]
-   [:experiment-pack/success-criteria KeywordMap]
-   [:experiment-pack/guardrails KeywordMap]
-   [:experiment-pack/convergence KeywordMap]
-   [:experiment-pack/actuation-intent
-    (into [:enum] requested-actuation-modes)]
-   [:experiment-pack/required-instrumentation [:vector :keyword]]])
-
 (def ^{:stratum 1} OperationalPolicy
   "N1 section 2.11 and N7 section 4.2 Operational Policy Proposal."
   [:map {:closed true}
@@ -226,6 +211,21 @@
    [:evaluation ConvergenceEvaluation]])
 
 ;------------------------------------------------------------------------------ Layer 2
+
+;; Canonical N1/N6/N7 records
+(def ^{:stratum 2} ExperimentPack
+  "N1 section 2.12 and N7 section 4.1 Experiment Pack."
+  [:map {:closed true}
+   [:experiment-pack/id :string]
+   [:experiment-pack/version :string]
+   [:experiment-pack/targets Targets]
+   [:experiment-pack/workload Workload]
+   [:experiment-pack/success-criteria KeywordMap]
+   [:experiment-pack/guardrails KeywordMap]
+   [:experiment-pack/convergence ConvergenceConfig]
+   [:experiment-pack/actuation-intent
+    (into [:enum] requested-actuation-modes)]
+   [:experiment-pack/required-instrumentation [:vector :keyword]]])
 
 (def ^{:stratum 2} EffectiveActuationInput
   [:map {:closed true}

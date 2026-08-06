@@ -30,6 +30,11 @@
   []
   (atom {}))
 
+(defn ^{:stratum 0} restore-store
+  "Restore an in-memory store from one durable OPSV assembly record."
+  [assembly]
+  (atom {(:evidence-bundle/id assembly) assembly}))
+
 (defn- ^{:stratum 0} anomaly
   [category message bundle-id errors]
   (response/make-anomaly category message

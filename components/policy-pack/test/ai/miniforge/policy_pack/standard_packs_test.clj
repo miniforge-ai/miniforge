@@ -51,12 +51,12 @@
       (edn/read-string (slurp resource)))))
 
 (def ^{:stratum 0} ^:private opsv-rule-phases
-  {:opsv/instrumentation-gate #{:discover :execute}
-   :opsv/environment-gate #{:plan :execute}
-   :opsv/blast-radius-gate #{:plan :execute}
-   :opsv/abort-gate #{:plan :execute}
-   :opsv/actuation-gate #{:actuate}
-   :opsv/evidence-completeness-gate #{:verify :actuate}})
+  {:opsv/instrumentation-gate #{:opsv/discover :opsv/execute}
+   :opsv/environment-gate #{:opsv/plan :opsv/execute}
+   :opsv/blast-radius-gate #{:opsv/plan :opsv/execute}
+   :opsv/abort-gate #{:opsv/plan :opsv/execute}
+   :opsv/actuation-gate #{:opsv/actuate}
+   :opsv/evidence-completeness-gate #{:opsv/verify :opsv/actuate}})
 
 (deftest ^{:stratum 0} compiled-standards-pack-is-valid-edn-test
   ;; Regression guard for the corruption that made policy unloadable: the

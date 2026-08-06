@@ -64,12 +64,12 @@
     (-> resource slurp edn/read-string)))
 
 (def ^{:stratum 0} policy-rule-phases
-  {:opsv/instrumentation-gate :discover
-   :opsv/environment-gate :plan
-   :opsv/blast-radius-gate :plan
-   :opsv/abort-gate :plan
-   :opsv/actuation-gate :actuate
-   :opsv/evidence-completeness-gate :verify})
+  {:opsv/instrumentation-gate :opsv/discover
+   :opsv/environment-gate :opsv/plan
+   :opsv/blast-radius-gate :opsv/plan
+   :opsv/abort-gate :opsv/plan
+   :opsv/actuation-gate :opsv/actuate
+   :opsv/evidence-completeness-gate :opsv/verify})
 
 ;------------------------------------------------------------------------------ Layer 1
 

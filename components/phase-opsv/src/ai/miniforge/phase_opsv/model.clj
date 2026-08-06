@@ -55,6 +55,11 @@
 
 ;------------------------------------------------------------------------------ Layer 1
 
+(defn- ^{:stratum 1} adapter-value
+  [ctx]
+  (or (get-in ctx [:execution/opts :opsv/adapter])
+      (input-value ctx :opsv/adapter)))
+
 (defn- ^{:stratum 1} operational-policy
   [ctx convergence]
   (let [pack (input-value ctx :opsv/experiment-pack)
@@ -149,17 +154,19 @@
                     (input-value ctx
                                  :opsv/metric-snapshot-artifact-refs)))))))))
 
-(defn ^{:stratum 1} discover
+;------------------------------------------------------------------------------ Layer 2
+
+(defn ^{:stratum 2} discover
   [ctx]
   (let [pack (opsv/validate-experiment-pack
               (input-value ctx :opsv/experiment-pack))
         invalid-adapter (adapter/adapter-anomaly
-                         (input-value ctx :opsv/adapter))]
+                         (adapter-value ctx))]
     (cond
       (anomaly/anomaly? pack) pack
       invalid-adapter invalid-adapter
       :else
-      (let [adapter (input-value ctx :opsv/adapter)
+      (let [adapter (adapter-value ctx)
             drivers (port/discover-signals
                      adapter (:experiment-pack/targets pack))]
         (if (anomaly/anomaly? drivers)
@@ -167,15 +174,15 @@
           {:opsv/experiment-pack pack
            :opsv/candidate-drivers drivers})))))
 
-(defn ^{:stratum 1} execute
+(defn ^{:stratum 2} execute
   [ctx]
   (preserve-anomaly
    (phase-output ctx :opsv/plan)
    (fn [planned]
      (if-let [invalid (adapter/adapter-anomaly
-                       (input-value ctx :opsv/adapter))]
+                       (adapter-value ctx))]
        invalid
-       (let [adapter (input-value ctx :opsv/adapter)
+       (let [adapter (adapter-value ctx)
              ramp (port/run-guarded-ramp
                    adapter (:opsv/experiment-pack planned))
              invalid-ramp (adapter/ramp-shape-anomaly ramp)]
@@ -186,8 +193,6 @@
                         {:opsv/environment-fingerprint
                          (:environment-fingerprint ramp)
                          :opsv/ramp-steps (:steps ramp)})))))))
-
-;------------------------------------------------------------------------------ Layer 2
 
 (defn ^{:stratum 2} synthesize
   [ctx]

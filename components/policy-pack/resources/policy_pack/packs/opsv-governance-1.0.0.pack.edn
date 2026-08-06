@@ -46,7 +46,7 @@
    :rule/description "Validates that the target environment has adequate observability instrumentation (metrics, logs, traces) before any change is applied. Changes to unmonitored environments are blocked."
    :rule/severity    :critical
    :rule/category    "500"
-   :rule/applies-to  {:phases #{:discover :execute}}
+   :rule/applies-to  {:phases #{:opsv/discover :opsv/execute}}
    :rule/detection   {:type :custom
                       :custom-fn ai.miniforge.gate.opsv/instrumentation-detector}
    :rule/enforcement {:action :hard-halt
@@ -58,7 +58,7 @@
    :rule/description "Requires target environments to be allowed, inside configured time windows, and explicitly allowlisted when production is targeted."
    :rule/severity    :critical
    :rule/category    "500"
-   :rule/applies-to  {:phases #{:plan :execute}}
+   :rule/applies-to  {:phases #{:opsv/plan :opsv/execute}}
    :rule/detection   {:type :custom
                       :custom-fn ai.miniforge.gate.opsv/environment-detector}
    :rule/enforcement {:action :hard-halt
@@ -70,7 +70,7 @@
    :rule/description "Enforces configured maximum replica delta, node delta, and namespace scope for an experiment."
    :rule/severity    :critical
    :rule/category    "500"
-   :rule/applies-to  {:phases #{:plan :execute}}
+   :rule/applies-to  {:phases #{:opsv/plan :opsv/execute}}
    :rule/detection   {:type :custom
                       :custom-fn ai.miniforge.gate.opsv/blast-radius-detector}
    :rule/enforcement {:action :hard-halt
@@ -82,7 +82,7 @@
    :rule/description "Requires error-budget burn, saturation, and tail-latency abort thresholds before experiment execution."
    :rule/severity    :critical
    :rule/category    "500"
-   :rule/applies-to  {:phases #{:plan :execute}}
+   :rule/applies-to  {:phases #{:opsv/plan :opsv/execute}}
    :rule/detection   {:type :custom
                       :custom-fn ai.miniforge.gate.opsv/abort-detector}
    :rule/enforcement {:action :hard-halt
@@ -94,7 +94,7 @@
    :rule/description "Keeps APPLY_ALLOWED disabled by default and requires explicit enablement plus a per-service allowlist."
    :rule/severity    :critical
    :rule/category    "500"
-   :rule/applies-to  {:phases #{:actuate}}
+   :rule/applies-to  {:phases #{:opsv/actuate}}
    :rule/detection   {:type :custom
                       :custom-fn ai.miniforge.gate.opsv/actuation-detector}
    :rule/enforcement {:action :hard-halt
@@ -106,7 +106,7 @@
    :rule/description "Requires the Experiment Pack hash, environment fingerprint, and metric snapshots before actuation."
    :rule/severity    :high
    :rule/category    "500"
-   :rule/applies-to  {:phases #{:verify :actuate}}
+   :rule/applies-to  {:phases #{:opsv/verify :opsv/actuate}}
    :rule/detection   {:type :custom
                       :custom-fn ai.miniforge.gate.opsv/evidence-completeness-detector}
    :rule/enforcement {:action :hard-halt
