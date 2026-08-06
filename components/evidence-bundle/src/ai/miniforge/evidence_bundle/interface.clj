@@ -44,6 +44,11 @@
   []
   (opsv-assembly/create-store))
 
+(defn ^{:stratum 0} restore-opsv-assembly-store
+  "Restore a run-scoped store from a durable OPSV assembly record."
+  [assembly]
+  (opsv-assembly/restore-store assembly))
+
 (defn ^{:stratum 0} allocate-opsv-assembly!
   "Preallocate an evidence bundle identifier before the first OPSV event."
   [store workflow-id]

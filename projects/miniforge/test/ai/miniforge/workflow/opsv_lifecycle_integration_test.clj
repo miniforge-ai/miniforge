@@ -82,6 +82,24 @@
                    :opsv/experiment-pack (:experiment-pack fixture)}})]
     (is (= :opsv-test-agent (get-in entered [:phase :agent])))))
 
+(deftest ^{:stratum 2} opsv-evidence-runtime-restores-from-durable-input-test
+  (let [workflow-id (random-uuid)
+        interceptor (phase/get-phase-interceptor {:phase :opsv/discover})
+        entered ((:enter interceptor)
+                 {:execution/id workflow-id
+                  :execution/input
+                  {:opsv/experiment-pack (:experiment-pack fixture)}
+                  :execution/opts {:opsv/adapter (test-adapter)}})
+        checkpointed ((:leave interceptor) entered)
+        resumed (dissoc checkpointed :opsv/evidence-assembly-store)
+        restored ((:enter interceptor) resumed)
+        bundle-id (get-in restored
+                          [:execution/input :opsv/evidence-bundle-id])]
+    (is (= (get-in checkpointed
+                   [:execution/input :opsv/evidence-assembly])
+           (evidence/get-opsv-assembly
+            (:opsv/evidence-assembly-store restored) bundle-id)))))
+
 (deftest ^{:stratum 2} opsv-run-emits-lifecycle-and-domain-events-test
   (with-temp-checkpoint-root
     (fn [checkpoint-root]
@@ -91,8 +109,7 @@
             stream (event-stream/create-event-stream)
             result (workflow/run-pipeline
                     workflow-config
-                    {:opsv/adapter (test-adapter)
-                     :opsv/experiment-pack
+                    {:opsv/experiment-pack
                      (assoc (:experiment-pack fixture)
                             :experiment-pack/actuation-intent
                             :recommend-only)
@@ -101,7 +118,9 @@
                      {:medium 0.3 :high 0.6 :critical 0.85}
                      :opsv/metric-snapshot-artifact-refs [artifact-id]
                      :opsv/policy-diff-artifact-refs [artifact-id]}
-                    {:event-stream stream :checkpoint/root checkpoint-root})
+                    {:event-stream stream
+                     :opsv/adapter (test-adapter)
+                     :checkpoint/root checkpoint-root})
             events (event-stream/get-events stream)
             lifecycle-events (filter #(contains? #{:workflow/phase-started
                                                    :workflow/phase-completed}
@@ -121,8 +140,10 @@
             domain-events (filter #(contains? domain-types (:event/type %))
                                   events)
             evidence-id (:opsv/evidence-bundle-id (first domain-events))
-            evidence-store (get-in result [:execution/input
-                                           :opsv/evidence-assembly-store])]
+            evidence-store (:opsv/evidence-assembly-store result)
+            checkpoint (workflow/load-checkpoint-data
+                        (:execution/id result)
+                        {:checkpoint/root checkpoint-root})]
         (testing "the shared runner executes all registered phases"
           (is (= :completed (:execution/status result)))
           (is (= (set (conj opsv/phase-keys :done))
@@ -151,7 +172,17 @@
           (let [assembly (evidence/get-opsv-assembly evidence-store evidence-id)]
             (is (= :assembling (:opsv.assembly/status assembly)))
             (is (= (set (map :event/id domain-events))
-                   (:opsv/event-refs assembly)))))
+                   (:opsv/event-refs assembly)))
+            (is (= assembly
+                   (get-in checkpoint
+                           [:machine-snapshot :execution/input
+                            :opsv/evidence-assembly])))
+            (is (not (contains?
+                      (get-in checkpoint [:machine-snapshot :execution/input])
+                      :opsv/evidence-assembly-store)))
+            (is (not (contains?
+                      (get-in checkpoint [:machine-snapshot :execution/input])
+                      :opsv/adapter)))))
         (testing "the default posture remains side-effect free"
           (let [actuation (get-in result
                                   [:execution/phase-results :opsv/actuate

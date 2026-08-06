@@ -139,10 +139,9 @@
                                   (evidence-id ctx) ctx phase-key output)]
         (let [published (event-stream/publish! stream-value event)]
           (when (and (= (:event/id event) (:event/id published))
-                     (get-in ctx [:execution/input
-                                  :opsv/evidence-assembly-store]))
+                     (:opsv/evidence-assembly-store ctx))
             (evidence/accumulate-opsv-evidence!
-             (get-in ctx [:execution/input :opsv/evidence-assembly-store])
+             (:opsv/evidence-assembly-store ctx)
              (evidence-id ctx)
              {:opsv/event-refs [(:event/id event)]}))))
       (catch Exception _ nil))))

@@ -45,8 +45,11 @@
 (defn- ^{:stratum 0} ensure-evidence-assembly
   [ctx]
   (let [bundle-id (get-in ctx [:execution/input :opsv/evidence-bundle-id])
-        supplied-store (get-in ctx [:execution/input
-                                    :opsv/evidence-assembly-store])
+        durable-assembly (get-in ctx [:execution/input
+                                      :opsv/evidence-assembly])
+        supplied-store (or (:opsv/evidence-assembly-store ctx)
+                           (get-in ctx [:execution/opts
+                                        :opsv/evidence-assembly-store]))
         supplied-assembly (when (and bundle-id supplied-store)
                             (evidence/get-opsv-assembly supplied-store
                                                        bundle-id))]
@@ -54,7 +57,16 @@
       (and supplied-assembly
            (= (:execution/id ctx)
               (:evidence-bundle/workflow-id supplied-assembly)))
-      ctx
+      (-> ctx
+          (assoc :opsv/evidence-assembly-store supplied-store)
+          (assoc-in [:execution/input :opsv/evidence-assembly]
+                    supplied-assembly))
+
+      (and (= bundle-id (:evidence-bundle/id durable-assembly))
+           (= (:execution/id ctx)
+              (:evidence-bundle/workflow-id durable-assembly)))
+      (assoc ctx :opsv/evidence-assembly-store
+             (evidence/restore-opsv-assembly-store durable-assembly))
 
       bundle-id
       (anomaly/anomaly :invalid-input
@@ -67,28 +79,20 @@
           assembly (evidence/allocate-opsv-assembly! store
                                                      (:execution/id ctx))]
         (-> ctx
-            (assoc-in [:execution/input :opsv/evidence-assembly-store] store)
+            (assoc :opsv/evidence-assembly-store store)
             (assoc-in [:execution/input :opsv/evidence-bundle-id]
-                      (:evidence-bundle/id assembly)))))))
+                      (:evidence-bundle/id assembly))
+            (assoc-in [:execution/input :opsv/evidence-assembly]
+                      assembly))))))
 
-(defn- ^{:stratum 0} leave-phase
+(defn- ^{:stratum 0} persist-evidence-assembly
   [ctx]
-  (let [phase-key (get-in ctx [:phase :name])
-        result (get-in ctx [:phase :result])
-        success? (= :success (:status result))
-        end-time (System/currentTimeMillis)
-        duration-ms (- end-time (get-in ctx [:phase :started-at]))]
-    (when success?
-      (events/emit-phase-events! ctx phase-key (:output result)))
-    (cond-> (-> ctx
-                (assoc-in [:phase :ended-at] end-time)
-                (assoc-in [:phase :duration-ms] duration-ms)
-                (assoc-in [:phase :status] (if success? :completed :failed))
-                (assoc-in [:phase :metrics] {:tokens 0 :cost-usd 0.0
-                                             :duration-ms duration-ms})
-                (assoc-in [:phase :result :metrics :duration-ms] duration-ms))
-      success?
-      (update-in [:execution :phases-completed] (fnil conj []) phase-key))))
+  (let [store (:opsv/evidence-assembly-store ctx)
+        bundle-id (get-in ctx [:execution/input :opsv/evidence-bundle-id])]
+    (if-let [assembly (and store bundle-id
+                           (evidence/get-opsv-assembly store bundle-id))]
+      (assoc-in ctx [:execution/input :opsv/evidence-assembly] assembly)
+      ctx)))
 
 (defn- ^{:stratum 0} error-phase
   [ctx ex]
@@ -98,10 +102,29 @@
 
 ;------------------------------------------------------------------------------ Layer 1
 
+(defn- ^{:stratum 1} leave-phase
+  [ctx]
+  (let [phase-key (get-in ctx [:phase :name])
+        result (get-in ctx [:phase :result])
+        success? (= :success (:status result))
+        end-time (System/currentTimeMillis)
+        duration-ms (- end-time (get-in ctx [:phase :started-at]))]
+    (when success?
+      (events/emit-phase-events! ctx phase-key (:output result)))
+    (cond-> (-> ctx
+                persist-evidence-assembly
+                (assoc-in [:phase :ended-at] end-time)
+                (assoc-in [:phase :duration-ms] duration-ms)
+                (assoc-in [:phase :status] (if success? :completed :failed))
+                (assoc-in [:phase :metrics] {:tokens 0 :cost-usd 0.0
+                                             :duration-ms duration-ms})
+                (assoc-in [:phase :result :metrics :duration-ms] duration-ms))
+      success?
+      (update-in [:execution :phases-completed] (fnil conj []) phase-key))))
+
 (defn- ^{:stratum 1} enter-phase
   [ctx phase-key transform config]
-  (let [prepared-ctx (cond-> ctx
-                       (= :opsv/discover phase-key) ensure-evidence-assembly)
+  (let [prepared-ctx (ensure-evidence-assembly ctx)
         start-time (System/currentTimeMillis)
         prepared? (not (anomaly/anomaly? prepared-ctx))
         result (phase-result (if prepared?
