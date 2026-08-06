@@ -24,7 +24,7 @@
    nil-event-stream short-circuit, exception-tolerant cleanup."
   (:require
    [ai.miniforge.anomaly.interface :as anomaly]
-   [ai.miniforge.cli.workflow-runner :as sut]
+   [ai.miniforge.cli.workflow-runner.lifecycle :as sut]
    [ai.miniforge.event-stream.interface :as es]
    [clojure.test :refer [deftest is]]))
 

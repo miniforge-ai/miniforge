@@ -21,7 +21,7 @@
    [clojure.test :refer [deftest testing is use-fixtures]]
    [clojure.string :as str]
    [babashka.fs :as fs]
-   [ai.miniforge.cli.workflow-runner :as sut]
+   [ai.miniforge.cli.workflow-runner.lifecycle :as lifecycle]
    [ai.miniforge.cli.workflow-runner.spec-kanban :as kanban]))
 
 ;------------------------------------------------------------------------------ Layer 0
@@ -51,20 +51,20 @@
   (testing "uses first error entry when errors exist"
     (let [result {:execution/errors [{:type :gate-failed :message "lint failed"}]
                   :execution/status :failed}
-          msg (#'sut/failure-message result)]
+          msg (#'lifecycle/failure-message result)]
       (is (str/includes? msg "lint failed")))))
 
 (deftest ^{:stratum 0} failure-message-without-errors-test
   (testing "includes execution status when no errors"
     (let [result {:execution/errors []
                   :execution/status :failed}
-          msg (#'sut/failure-message result)]
+          msg (#'lifecycle/failure-message result)]
       (is (str/includes? msg "failed")))))
 
 (deftest ^{:stratum 0} failure-message-nil-errors-test
   (testing "handles nil errors gracefully"
     (let [result {:execution/status :timeout}
-          msg (#'sut/failure-message result)]
+          msg (#'lifecycle/failure-message result)]
       (is (str/includes? msg "timeout")))))
 
 ;------------------------------------------------------------------------------ Layer 1
