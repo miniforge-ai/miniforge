@@ -46,7 +46,10 @@
    whitespace, quotes, comment chars, or any non-symbol character so a
    typo in the config doesn't silently break the generated -e form."
   [s]
-  (and (string? s) (re-matches #"[a-zA-Z][a-zA-Z0-9.\-_?!]*" s)))
+  (and (string? s)
+       (re-matches
+        #"[a-zA-Z][a-zA-Z0-9_-]*[?!]?(\.[a-zA-Z][a-zA-Z0-9_-]*[?!]?)*"
+        s)))
 
 ;------------------------------------------------------------------------------ Layer 1
 
@@ -82,7 +85,7 @@
 (defn- ^{:stratum 1} read-precommit-smoke-nses!
   []
   (let [f (io/file precommit-smoke-config-path)]
-    (when-not (.exists f)
+    (when-not (.isFile f)
       (println "❌ Pre-commit smoke config not found:" precommit-smoke-config-path)
       (System/exit 1))
     (let [{:keys [smoke/namespaces]} (edn/read-string (slurp f))]
@@ -103,7 +106,7 @@
                :out
                str/trim)
         ;; Add tests directory to classpath
-        full-cp (str cp ":tests")
+        full-cp (str cp java.io.File/pathSeparator "tests")
         expr "(require 'graalvm-compatibility-test) (graalvm-compatibility-test/-main)"
         exit (run-stream! "bb" "-cp" full-cp "-e" expr)]
     (when-not (zero? exit)
