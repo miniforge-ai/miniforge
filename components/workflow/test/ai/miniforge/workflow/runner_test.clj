@@ -15,7 +15,6 @@
 ;; WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 ;; See the License for the specific language governing permissions and
 ;; limitations under the License.
-
 (ns ai.miniforge.workflow.runner-test
   "Unit tests for the interceptor-based workflow runner.
    Tests that execute real phase pipelines (plan, implement, etc.)
@@ -24,6 +23,7 @@
    [clojure.java.io :as io]
    [clojure.test :refer [deftest is testing use-fixtures]]
    [ai.miniforge.event-stream.interface :as es]
+   [ai.miniforge.logging.interface :as log]
    [ai.miniforge.phase.interface]
    [ai.miniforge.response.interface :as response]
    [ai.miniforge.supervisory-state.interface :as supervisory]
@@ -34,7 +34,9 @@
    [ai.miniforge.workflow.runner-environment :as runner-environment]
    [ai.miniforge.workflow.context :as ctx]))
 
-(defn- with-stubbed-acquire-environment
+;------------------------------------------------------------------------------ Layer 0
+
+(defn- ^{:stratum 0} with-stubbed-acquire-environment
   "Force `acquire-execution-environment!` to return nil for every test
    in this namespace.
 
@@ -54,26 +56,19 @@
                    (fn [& _] nil)}
     f))
 
-;; Compose phase-test-support's loader setup with the acquire-environment
-;; stub. clojure.test/use-fixtures REPLACES prior :each fixtures, so both
-;; must be registered in a single call.
-(use-fixtures :each
-  phase-test-support/with-workflow-phase-test-support
-  with-stubbed-acquire-environment)
-
-(def test-plan-phase
+(def ^{:stratum 0} test-plan-phase
   phase-test-support/runner-test-plan)
 
-(def test-implement-phase
+(def ^{:stratum 0} test-implement-phase
   phase-test-support/runner-test-implement)
 
-(def test-verify-phase
+(def ^{:stratum 0} test-verify-phase
   phase-test-support/runner-test-verify)
 
-(def test-done-phase
+(def ^{:stratum 0} test-done-phase
   phase-test-support/runner-test-done)
 
-(defn- with-temp-checkpoint-root
+(defn- ^{:stratum 0} with-temp-checkpoint-root
   [f]
   (let [root (doto (io/file (System/getProperty "java.io.tmpdir")
                             (str "mf-runner-checkpoint-test-" (random-uuid)))
@@ -87,8 +82,7 @@
 ;; ============================================================================
 ;; Context creation tests
 ;; ============================================================================
-
-(deftest create-context-test
+(deftest ^{:stratum 0} create-context-test
   (testing "create-context initializes execution state"
     (let [workflow {:workflow/id :test
                     :workflow/version "1.0.0"}
@@ -104,7 +98,7 @@
       (is (vector? (:execution/artifacts ctx)))
       (is (number? (:execution/started-at ctx))))))
 
-(deftest create-context-preserves-source-root-test
+(deftest ^{:stratum 0} create-context-preserves-source-root-test
   (testing "create-context preserves :source-root passthrough options"
     (let [workflow {:workflow/id :test
                     :workflow/version "1.0.0"}
@@ -112,26 +106,30 @@
           ctx (ctx/create-context workflow {:task "Test"} {:source-root source-root})]
       (is (= source-root (:source-root ctx))))))
 
-(deftest run-pipeline-persists-final-terminal-snapshot-test
-  (testing "terminal failures produced after the loop overwrite the running checkpoint"
-    (with-temp-checkpoint-root
-      (fn [checkpoint-root]
-        (let [workflow {:workflow/id :empty-test
-                        :workflow/version "1.0.0"
-                        :workflow/pipeline []}
-              result (runner/run-pipeline workflow {:task "Test"}
-                                          {:checkpoint/root checkpoint-root
-                                           :skip-lifecycle-events true})
-              checkpoint-data (checkpoint-store/load-checkpoint-data
-                               (:execution/id result)
-                               {:checkpoint/root checkpoint-root})]
-          (is (= :failed (:execution/status result)))
-          (is (= :failed (get-in checkpoint-data
-                                 [:machine-snapshot :execution/status])))
-          (is (seq (get-in checkpoint-data
-                           [:machine-snapshot :execution/errors]))))))))
+(deftest ^{:stratum 0} context-normalizes-execution-logger-test
+  ;; :execution/logger is normalized at context creation — the ONE
+  ;; canonical writer. Before this, no writer set the key at all, so
+  ;; every consumer guarding on it (gap-wiring's ledger-failure
+  ;; warnings, codex-pin's consultation-skipped warning) silently
+  ;; dropped its best-effort warnings.
+  (let [workflow {:workflow/id :test
+                  :workflow/version "1.0.0"}]
+    (testing "create-context adopts the caller's :logger"
+      (let [[logger _entries] (log/collecting-logger)
+            ctx (ctx/create-context workflow {:task "Test"} {:logger logger})]
+        (is (identical? logger (:execution/logger ctx)))))
+    (testing "create-context defaults :execution/logger when opts carry none"
+      (let [ctx (ctx/create-context workflow {:task "Test"} {})]
+        (is (some? (:execution/logger ctx)))))
+    (testing "restore-context normalizes :execution/logger the same way"
+      (let [[logger _entries] (log/collecting-logger)
+            restored (ctx/restore-context workflow {:task "Test"} {} {}
+                                          {:logger logger})]
+        (is (identical? logger (:execution/logger restored))))
+      (let [restored (ctx/restore-context workflow {:task "Test"} {} {} {})]
+        (is (some? (:execution/logger restored)))))))
 
-(deftest restore-context-can-reset-terminal-snapshot-test
+(deftest ^{:stratum 0} restore-context-can-reset-terminal-snapshot-test
   (testing "failed checkpoint snapshots can resume a trimmed workflow"
     (let [workflow {:workflow/id :test
                     :workflow/version "1.0.0"
@@ -170,11 +168,73 @@
       (is (= {:plan {:status :completed}}
              (:execution/phase-results restored))))))
 
+(deftest ^{:stratum 0} build-pipeline-empty-test
+  (testing "build-pipeline handles empty pipeline"
+    (let [workflow {:workflow/pipeline []}
+          pipeline (runner/build-pipeline workflow)]
+      (is (empty? pipeline)))))
+
+(deftest ^{:stratum 0} validate-pipeline-nil-test
+  (testing "validate-pipeline handles nil pipeline"
+    (let [workflow {}
+          result (runner/validate-pipeline workflow)]
+      (is (not (:valid? result))))))
+
+;; ============================================================================
+;; Pipeline execution tests
+;; ============================================================================
+(deftest ^{:stratum 0} run-pipeline-empty-test
+  (testing "run-pipeline fails for empty workflow"
+    (let [workflow {:workflow/pipeline []}
+          result (runner/run-pipeline workflow {} {})]
+      (is (= :failed (:execution/status result)))
+      (is (some #(= :empty-pipeline (:type %)) (:execution/errors result))))))
+
+;; ============================================================================
+;; Response chain tests
+;; ============================================================================
+(deftest ^{:stratum 0} response-chain-created-test
+  (testing "response chain is initialized in context"
+    (let [workflow {:workflow/id :test
+                    :workflow/version "1.0.0"}
+          ctx (ctx/create-context workflow {:task "Test"} {})]
+      (is (contains? ctx :execution/response-chain))
+      (is (= :test (:operation (:execution/response-chain ctx))))
+      (is (true? (:succeeded? (:execution/response-chain ctx)))))))
+
+(deftest ^{:stratum 0} context-initializes-output-nil-test
+  (testing "create-context initializes :execution/output as nil"
+    (let [workflow {:workflow/id :test
+                    :workflow/version "1.0.0"}
+          ctx (ctx/create-context workflow {:task "Test"} {})]
+      (is (contains? ctx :execution/output))
+      (is (nil? (:execution/output ctx))))))
+
+;------------------------------------------------------------------------------ Layer 1
+
+(deftest ^{:stratum 1} run-pipeline-persists-final-terminal-snapshot-test
+  (testing "terminal failures produced after the loop overwrite the running checkpoint"
+    (with-temp-checkpoint-root
+      (fn [checkpoint-root]
+        (let [workflow {:workflow/id :empty-test
+                        :workflow/version "1.0.0"
+                        :workflow/pipeline []}
+              result (runner/run-pipeline workflow {:task "Test"}
+                                          {:checkpoint/root checkpoint-root
+                                           :skip-lifecycle-events true})
+              checkpoint-data (checkpoint-store/load-checkpoint-data
+                               (:execution/id result)
+                               {:checkpoint/root checkpoint-root})]
+          (is (= :failed (:execution/status result)))
+          (is (= :failed (get-in checkpoint-data
+                                 [:machine-snapshot :execution/status])))
+          (is (seq (get-in checkpoint-data
+                           [:machine-snapshot :execution/errors]))))))))
+
 ;; ============================================================================
 ;; Pipeline building tests
 ;; ============================================================================
-
-(deftest build-pipeline-simple-test
+(deftest ^{:stratum 1} build-pipeline-simple-test
   (testing "build-pipeline creates interceptors from config"
     (let [workflow {:workflow/pipeline
                     [{:phase test-plan-phase}
@@ -185,13 +245,7 @@
       (is (= 3 (count pipeline)))
       (is (every? #(contains? % :enter) pipeline)))))
 
-(deftest build-pipeline-empty-test
-  (testing "build-pipeline handles empty pipeline"
-    (let [workflow {:workflow/pipeline []}
-          pipeline (runner/build-pipeline workflow)]
-      (is (empty? pipeline)))))
-
-(deftest build-pipeline-legacy-format-test
+(deftest ^{:stratum 1} build-pipeline-legacy-format-test
   (testing "build-pipeline handles legacy phase format"
     (let [workflow {:workflow/phases
                     [{:phase/id test-plan-phase}
@@ -203,8 +257,7 @@
 ;; ============================================================================
 ;; Validation tests
 ;; ============================================================================
-
-(deftest validate-pipeline-valid-test
+(deftest ^{:stratum 1} validate-pipeline-valid-test
   (testing "validate-pipeline accepts valid workflow"
     (let [workflow {:workflow/pipeline
                     [{:phase test-plan-phase}
@@ -212,24 +265,7 @@
           result (runner/validate-pipeline workflow)]
       (is (:valid? result)))))
 
-(deftest validate-pipeline-nil-test
-  (testing "validate-pipeline handles nil pipeline"
-    (let [workflow {}
-          result (runner/validate-pipeline workflow)]
-      (is (not (:valid? result))))))
-
-;; ============================================================================
-;; Pipeline execution tests
-;; ============================================================================
-
-(deftest run-pipeline-empty-test
-  (testing "run-pipeline fails for empty workflow"
-    (let [workflow {:workflow/pipeline []}
-          result (runner/run-pipeline workflow {} {})]
-      (is (= :failed (:execution/status result)))
-      (is (some #(= :empty-pipeline (:type %)) (:execution/errors result))))))
-
-(deftest run-pipeline-stopped-control-state-test
+(deftest ^{:stratum 1} run-pipeline-stopped-control-state-test
   (testing "dashboard stop request returns a failed context"
     (let [workflow {:workflow/id :test
                     :workflow/version "1.0.0"
@@ -245,7 +281,7 @@
       (is (some #(= :dashboard-stop (:type %))
                 (:execution/errors result))))))
 
-(deftest run-pipeline-done-only-test
+(deftest ^{:stratum 1} run-pipeline-done-only-test
   (testing "run-pipeline completes with just :done phase"
     (let [workflow {:workflow/id :test
                     :workflow/version "1.0.0"
@@ -254,7 +290,7 @@
       (is (= :completed (:execution/status result)))
       (is (number? (:execution/ended-at result))))))
 
-(deftest run-pipeline-ensures-supervisory-attachment-test
+(deftest ^{:stratum 1} run-pipeline-ensures-supervisory-attachment-test
   (testing "run-pipeline auto-attaches supervisory-state for event-stream callers"
     (let [workflow {:workflow/id :test
                     :workflow/version "1.0.0"
@@ -267,7 +303,7 @@
         (is (true? (supervisory/attached? stream)))
         (is (some #{:supervisory/workflow-upserted} event-types))))))
 
-(deftest run-pipeline-persists-machine-snapshot-test
+(deftest ^{:stratum 1} run-pipeline-persists-machine-snapshot-test
   (with-temp-checkpoint-root
     (fn [checkpoint-root]
       (let [workflow {:workflow/id :test
@@ -284,7 +320,7 @@
         (is (= [test-done-phase]
                (get-in checkpoint-data [:manifest :workflow/phases-completed])))))))
 
-(deftest run-pipeline-callbacks-test
+(deftest ^{:stratum 1} run-pipeline-callbacks-test
   (testing "run-pipeline invokes callbacks"
     (let [workflow {:workflow/id :test
                     :workflow/version "1.0.0"
@@ -304,7 +340,7 @@
       (is (= [test-done-phase] @started))
       (is (= [test-done-phase] @completed)))))
 
-(deftest run-pipeline-max-phases-test
+(deftest ^{:stratum 1} run-pipeline-max-phases-test
   (testing "run-pipeline completes a simple workflow within max-phases limit"
     ;; Use :done phase only since other phases require LLM infrastructure
     (let [workflow {:workflow/id :test
@@ -313,7 +349,7 @@
           result (runner/run-pipeline workflow {:task "Test"} {:max-phases 50})]
       (is (= :completed (:execution/status result))))))
 
-(deftest run-pipeline-resume-machine-snapshot-test
+(deftest ^{:stratum 1} run-pipeline-resume-machine-snapshot-test
   (testing "resume-machine-snapshot preserves the original execution id"
     (let [workflow {:workflow/id :test
                     :workflow/version "1.0.0"
@@ -327,7 +363,7 @@
       (is (= :completed (:execution/status result)))
       (is (= (:execution/id resume-ctx) (:execution/id result))))))
 
-(deftest run-pipeline-resume-from-mid-workflow-snapshot-advances-test
+(deftest ^{:stratum 1} run-pipeline-resume-from-mid-workflow-snapshot-advances-test
   ;; Regression for the dogfood-2026-05-16 silent fast-fail: resume from a
   ;; snapshot whose FSM is actually parked at an intermediate phase must
   ;; advance through the remaining phases and reach `:completed` (not just
@@ -385,8 +421,7 @@
 ;; ============================================================================
 ;; Phase result recording tests
 ;; ============================================================================
-
-(deftest phase-results-recorded-test
+(deftest ^{:stratum 1} phase-results-recorded-test
   (testing "phase results are recorded in execution context"
     (let [workflow {:workflow/id :test
                     :workflow/version "1.0.0"
@@ -397,8 +432,7 @@
 ;; ============================================================================
 ;; Metrics accumulation tests
 ;; ============================================================================
-
-(deftest metrics-accumulated-test
+(deftest ^{:stratum 1} metrics-accumulated-test
   (testing "metrics are accumulated across phases"
     (let [workflow {:workflow/id :test
                     :workflow/version "1.0.0"
@@ -408,23 +442,9 @@
       (is (contains? (:execution/metrics result) :tokens)))))
 
 ;; ============================================================================
-;; Response chain tests
-;; ============================================================================
-
-(deftest response-chain-created-test
-  (testing "response chain is initialized in context"
-    (let [workflow {:workflow/id :test
-                    :workflow/version "1.0.0"}
-          ctx (ctx/create-context workflow {:task "Test"} {})]
-      (is (contains? ctx :execution/response-chain))
-      (is (= :test (:operation (:execution/response-chain ctx))))
-      (is (true? (:succeeded? (:execution/response-chain ctx)))))))
-
-;; ============================================================================
 ;; FSM state tracking tests
 ;; ============================================================================
-
-(deftest fsm-state-tracked-test
+(deftest ^{:stratum 1} fsm-state-tracked-test
   (testing "FSM state is tracked in context"
     (let [workflow {:workflow/id :test
                     :workflow/version "1.0.0"}
@@ -450,8 +470,7 @@
 ;; ============================================================================
 ;; Output extraction tests
 ;; ============================================================================
-
-(deftest extract-output-shape-test
+(deftest ^{:stratum 1} extract-output-shape-test
   (testing "extract-output populates :execution/output with expected shape"
     (let [;; Build a minimal context that looks like a completed pipeline
           fake-ctx {:execution/artifacts [{:type :file :path "out.txt"}]
@@ -470,7 +489,7 @@
       (is (= {:phase/status :succeeded} (:last-phase-result output)))
       (is (= :completed (:status output))))))
 
-(deftest run-pipeline-returns-execution-output-test
+(deftest ^{:stratum 1} run-pipeline-returns-execution-output-test
   (testing "run-pipeline returns context with :execution/output populated"
     (let [workflow {:workflow/id :test
                     :workflow/version "1.0.0"
@@ -486,19 +505,10 @@
         (is (contains? (:phase-results output) test-done-phase))
         (is (some? (:last-phase-result output)))))))
 
-(deftest context-initializes-output-nil-test
-  (testing "create-context initializes :execution/output as nil"
-    (let [workflow {:workflow/id :test
-                    :workflow/version "1.0.0"}
-          ctx (ctx/create-context workflow {:task "Test"} {})]
-      (is (contains? ctx :execution/output))
-      (is (nil? (:execution/output ctx))))))
-
 ;; ============================================================================
 ;; Execution environment tests
 ;; ============================================================================
-
-(deftest run-pipeline-uses-pre-acquired-executor-test
+(deftest ^{:stratum 1} run-pipeline-uses-pre-acquired-executor-test
   (testing "pre-acquired executor/environment-id in opts lands in initial context"
     (let [env-id (random-uuid)
           workflow {:workflow/id :test
@@ -512,7 +522,7 @@
       (is (= env-id (:execution/environment-id result)))
       (is (= "/tmp/worktree" (:execution/worktree-path result))))))
 
-(deftest run-pipeline-threads-acquired-default-branch-test
+(deftest ^{:stratum 1} run-pipeline-threads-acquired-default-branch-test
   (testing "the branch used to acquire a worktree is kept in execution opts"
     (let [acquire-var (resolve 'ai.miniforge.workflow.runner-environment/acquire-execution-environment!)]
       (with-redefs-fn
@@ -531,7 +541,7 @@
             (is (= {:base-branch "main"}
                    (:execution/environment-metadata result)))))))))
 
-(deftest run-pipeline-threads-resume-workspace-to-acquisition-test
+(deftest ^{:stratum 1} run-pipeline-threads-resume-workspace-to-acquisition-test
   (testing "resume workspace checkpoint reaches environment acquisition"
     (let [acquire-var (resolve 'ai.miniforge.workflow.runner-environment/acquire-execution-environment!)
           env-config-seen (atom nil)
@@ -555,7 +565,7 @@
             (is (= resume-workspace (:resume-workspace @env-config-seen)))
             (is (= :completed (:execution/status result)))))))))
 
-(deftest run-pipeline-resume-preserves-checkpoint-metadata-test
+(deftest ^{:stratum 1} run-pipeline-resume-preserves-checkpoint-metadata-test
   (testing "resume keeps checkpoint metadata when no fresh environment metadata is supplied"
     (let [acquire-var (resolve 'ai.miniforge.workflow.runner-environment/acquire-execution-environment!)
           workflow {:workflow/id :test
@@ -574,7 +584,7 @@
                                              :resume-phase-results {}})]
             (is (= metadata (:execution/environment-metadata result)))))))))
 
-(deftest run-pipeline-without-executor-skips-env-keys-test
+(deftest ^{:stratum 1} run-pipeline-without-executor-skips-env-keys-test
   (testing "when no executor in opts and acquisition yields nil, env keys are absent"
     ;; Force acquisition to return nil for deterministic test isolation.
     ;; Verifies the safe-nil path: acquisition failure → no env keys.
@@ -589,3 +599,10 @@
             (is (= :completed (:execution/status result)))
             (is (nil? (:execution/environment-id result)))
             (is (nil? (:execution/worktree-path result)))))))))
+
+;; Compose phase-test-support's loader setup with the acquire-environment
+;; stub. clojure.test/use-fixtures REPLACES prior :each fixtures, so both
+;; must be registered in a single call.
+(use-fixtures :each
+  phase-test-support/with-workflow-phase-test-support
+  with-stubbed-acquire-environment)
