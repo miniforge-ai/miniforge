@@ -1418,7 +1418,7 @@ Implementations MUST support these environment variables:
 | `MINIFORGE_WORKSPACE` | Workspace directory                      |
 | `MINIFORGE_LOG_LEVEL` | Logging level (debug, info, warn, error) |
 | `MINIFORGE_LOCALE`    | User locale for console output (§9.4)     |
-| `NO_COLOR`            | Disable colour output (§8.6)              |
+| `NO_COLOR`            | Disable color output (§8.6)              |
 
 ### 7.3 Configuration Precedence
 
@@ -1499,9 +1499,11 @@ usable by a script.
   result is data MUST NOT interleave progress, warnings, or decoration into
   stdout.
 - **stderr** carries progress, warnings, and diagnostics.
-- With `--json`, stdout MUST contain exactly one JSON document. A command that
-  streams MUST emit newline-delimited JSON, one document per line, and MUST
-  document which it does.
+- With `--json`, a non-streaming command's stdout MUST contain exactly one JSON
+  document. A streaming command MUST instead emit newline-delimited JSON, one
+  document per line. Whether a command streams is a property of the command,
+  MUST be stated in its `--help`, and MUST NOT vary by invocation — a consumer
+  chooses its parser before it sees output.
 
 A command that writes a progress spinner to stdout breaks every pipeline that
 consumes it, which is why the split is normative rather than stylistic.
@@ -1535,8 +1537,9 @@ that was itself doing the work exits 130.
   parsed by a script that does not know the operator's locale.
 - Enum values MUST be the keyword's name, not a display label — `merge-ready`,
   never "Merge Ready".
-- Absent and null MUST mean the same thing, so a consumer need not distinguish
-  them.
+- A consumer MUST treat an absent key and a `null` value identically. Producers
+  MAY do either. Requiring consumers to distinguish them would make adding an
+  optional key a breaking change.
 
 #### 8.4.4 Error Format
 
@@ -1592,7 +1595,7 @@ Implementations MUST detect and degrade for:
   reduced view or a clear message, and MUST NOT emit corrupted layout.
 
 Color MUST NOT be the only carrier of meaning anywhere in the TUI. An operator
-using a monochrome terminal, or with a colour-vision deficiency, sees the same
+using a monochrome terminal, or with a color-vision deficiency, sees the same
 information.
 
 ### 8.7 Conformance Requirements
@@ -1624,7 +1627,7 @@ withdrawn requirement is marked withdrawn, not deleted.
 | N5.TUI.3 | MUST | Derive every view from the event stream and entity state, never a separate model (§3.2.5, §3.2.8). |
 | N5.TUI.4 | MUST | Update in real time and throttle to at most one repaint per second (§3.4). |
 | N5.TUI.5 | MUST | Render within 80×24 and degrade below it without corruption (§8.2, §8.6). |
-| N5.TUI.6 | MUST NOT | Use colour as the only carrier of meaning (§8.6). |
+| N5.TUI.6 | MUST NOT | Use color as the only carrier of meaning (§8.6). |
 | N5.TUI.7 | MUST | Substitute ASCII when Unicode glyphs are unavailable (§8.6). |
 | N5.TUI.8 | MUST NOT | Render a waived gate as passing (§6.2). |
 
@@ -1741,8 +1744,6 @@ A key missing from the resolved locale's catalog MUST fall back to `en-US`
 rather than rendering the key or an empty string. A key missing from `en-US`
 is a defect: implementations MUST surface it in development and MUST NOT ship
 an interface that renders a raw key to a user.
-
----
 
 ---
 
