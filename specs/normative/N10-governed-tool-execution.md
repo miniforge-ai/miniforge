@@ -59,11 +59,11 @@ rechecked at commit, and the runtime decision that allowed it:
 
 ### 1.2 What This Specification Defines
 
-- Operational intent representation (§2)
+- Operational intent and IR design input (§2, informative legacy material)
 - Action classification and tool-declared risk (§3)
 - Verification pipeline (§4)
 - Validation requirements (§5)
-- Capability model and lifecycle (§6)
+- Capability model and lifecycle design input (§6, informative legacy material)
 - Execution capsule isolation (§7)
 - Crown jewel protection (§8)
 - Postcondition monitoring (§9)
