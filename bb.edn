@@ -60,6 +60,13 @@
    :requires ([lint])
    :task (lint/stratum-staged)}
 
+  check:bb-classpaths
+  {:doc  "Load-check entry namespaces of every bb.edn task declaring :extra-paths + :requires (catches classpath drift; load only, no task execution)"
+   :requires ([ai.miniforge.bb-task-classpath.interface :as task-classpath])
+   :task (let [exit (task-classpath/check-all! {})]
+           (when-not (zero? exit)
+             (System/exit exit)))}
+
   fmt:md
   {:doc  "Format staged Markdown files (lint --fix)"
    :requires ([fmt])
@@ -625,6 +632,10 @@
                  "components/messages/resources"
                  "components/config/src"
                  "components/config/resources"]
+   ;; response → anomaly requires slingshot; config → governance requires
+   ;; aero (both caught by check:bb-classpaths)
+   :extra-deps {slingshot/slingshot {:mvn/version "0.12.2"}
+                aero/aero {:mvn/version "1.1.6"}}
    :requires ([ai.miniforge.lsp-mcp-bridge.main :as bridge])
    :task    (bridge/-main)}
 
@@ -638,6 +649,8 @@
                  "components/messages/resources"
                  "components/config/src"
                  "components/config/resources"]
+   ;; response → anomaly requires slingshot (caught by check:bb-classpaths)
+   :extra-deps {slingshot/slingshot {:mvn/version "0.12.2"}}
    :requires ([ai.miniforge.lsp-mcp-bridge.tasks :as tasks])
    :task    (tasks/status)}
 
@@ -651,6 +664,8 @@
                  "components/messages/resources"
                  "components/config/src"
                  "components/config/resources"]
+   ;; response → anomaly requires slingshot (caught by check:bb-classpaths)
+   :extra-deps {slingshot/slingshot {:mvn/version "0.12.2"}}
    :requires ([ai.miniforge.lsp-mcp-bridge.tasks :as tasks])
    :task    (tasks/install *command-line-args*)}
 
@@ -664,6 +679,8 @@
                  "components/messages/resources"
                  "components/config/src"
                  "components/config/resources"]
+   ;; response → anomaly requires slingshot (caught by check:bb-classpaths)
+   :extra-deps {slingshot/slingshot {:mvn/version "0.12.2"}}
    :requires ([ai.miniforge.lsp-mcp-bridge.tasks :as tasks])
    :task    (tasks/setup *command-line-args*)}
 

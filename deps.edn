@@ -214,7 +214,8 @@
                        "components/bb-generate-icon/src"
                        "components/bb-r2/src"
                        "components/bb-data-plane-http/src"
-                       "components/bb-etl-runner/src"]
+                       "components/bb-etl-runner/src"
+                       "components/bb-task-classpath/src"]
          :extra-deps {ai.miniforge/schema {:local/root "components/schema"}
                       ai.miniforge/config {:local/root "components/config"}
                       ai.miniforge/lsp-mcp-bridge {:local/root "bases/lsp-mcp-bridge"}
@@ -489,7 +490,8 @@
                        "components/bb-generate-icon/test"
                        "components/bb-r2/test"
                        "components/bb-data-plane-http/test"
-                       "components/bb-etl-runner/test"]
+                       "components/bb-etl-runner/test"
+                       "components/bb-task-classpath/test"]
          :extra-deps {ai.miniforge/schema {:local/root "components/schema"}
                       ai.miniforge/config {:local/root "components/config"}
                       ai.miniforge/algorithms {:local/root "components/algorithms"}

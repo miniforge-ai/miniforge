@@ -841,7 +841,7 @@
             (publish-failure-event! event-stream workflow-id :interrupted
                                    (messages/t :workflow-runner/stopped {:error (ex-message e)}))
             (reset! completed? true))
-          (throw e)))
+          (throw+)))
       (finally
         (when-not @completed?
           (publish-failure-event! event-stream workflow-id :cancelled
@@ -1243,7 +1243,7 @@
         (when-not quiet
           (println (display/colorize :red (messages/t :workflow-runner/spec-execution-failed {:error (ex-message e)})))
           (flush))
-        (throw e)))))
+        (throw+)))))
 
 (defn ^{:stratum 8} run-chain!
   "Execute a chain of workflows.

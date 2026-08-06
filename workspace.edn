@@ -100,4 +100,5 @@
                                           "bb-generate-icon"
                                           "bb-platform"
                                           "bb-r2"
+                                          "bb-task-classpath"
                                           "bb-test-runner"]}}}
