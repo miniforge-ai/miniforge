@@ -48,14 +48,18 @@
     [:string {:min 1}]]])
 
 (defn ^{:stratum 0} decode-public-key
-  "Base64 raw Ed25519 public key to bytes; nil if not base64 or not 32 bytes."
-  [^String base64-key]
-  (try
-    (let [decoded (.decode (java.util.Base64/getDecoder) base64-key)]
-      (when (= crypto/ed25519-public-key-bytes (alength decoded))
-        decoded))
-    (catch IllegalArgumentException _
-      nil)))
+  "Base64 raw Ed25519 public key to bytes; nil when the value is not a
+   string, not base64, or not 32 bytes. `resolve-key` reaches this with
+   whatever a caller-supplied store holds, so the type check is here rather
+   than left to the schema."
+  [base64-key]
+  (when (string? base64-key)
+    (try
+      (let [decoded (.decode (java.util.Base64/getDecoder) ^String base64-key)]
+        (when (= crypto/ed25519-public-key-bytes (alength decoded))
+          decoded))
+      (catch IllegalArgumentException _
+        nil))))
 
 ;------------------------------------------------------------------------------ Layer 1
 

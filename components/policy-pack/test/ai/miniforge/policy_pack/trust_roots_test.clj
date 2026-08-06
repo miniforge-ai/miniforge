@@ -41,7 +41,11 @@
       (is (nil? (sut/decode-public-key "not base64!"))))
 
     (testing "base64 of the wrong length decodes to nil"
-      (is (nil? (sut/decode-public-key "c2hvcnQ="))))))
+      (is (nil? (sut/decode-public-key "c2hvcnQ="))))
+
+    (testing "a nil or non-string key decodes to nil rather than throwing"
+      (is (nil? (sut/decode-public-key nil)))
+      (is (nil? (sut/decode-public-key 42))))))
 
 ;------------------------------------------------------------------------------ Layer 1
 
@@ -112,4 +116,10 @@
       (is (nil? (sut/resolve-key store ""))))
 
     (testing "an empty store resolves nothing — the fail-closed default"
-      (is (nil? (sut/resolve-key {} "alice"))))))
+      (is (nil? (sut/resolve-key {} "alice"))))
+
+    (testing "a hand-built store holding a non-string key resolves to nothing"
+      ;; create-registry accepts an injected store, so resolution cannot
+      ;; assume every entry came through ->store's validation.
+      (is (nil? (sut/resolve-key {"alice" {:trust-root/public-key 42}} "alice")))
+      (is (nil? (sut/resolve-key {"alice" {}} "alice"))))))
