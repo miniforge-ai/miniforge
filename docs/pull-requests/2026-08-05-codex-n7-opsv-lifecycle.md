@@ -9,8 +9,8 @@
 ## Overview
 
 Register the seven deterministic OPSV transformations with the shared phase
-lifecycle, project their required N3 events at successful boundaries, and ship
-the exact versioned workflow resource.
+lifecycle and ship the exact versioned workflow resource with durable,
+run-scoped evidence identity.
 
 ## Motivation
 
@@ -30,10 +30,8 @@ Application integration and workflow wiring.
 
 - Register `:opsv/discover` through `:opsv/actuate` as shared phase
   interceptors with deterministic budgets and anomaly-preserving results.
-- Emit the N3 OPSV experiment, convergence, policy, verification, and
-  actuation events only after successful phase boundaries.
-- Preallocate the run's N6 evidence identity before the first OPSV event,
-  correlate emitted event references, and reject unmatched external IDs.
+- Preallocate the run's N6 evidence identity before the first OPSV phase and
+  reject unmatched external identifiers.
 - Keep runtime adapters and mutable evidence stores outside durable execution
   input so workflow checkpoints remain readable and resumable.
 - Apply the existing bounded convergence contract at the Experiment Pack
@@ -43,13 +41,15 @@ Application integration and workflow wiring.
 - Correct the OPSV governance pack's phase selectors to use the registered
   `:opsv/*` identifiers; the previous unqualified selectors could never match
   these phases during phase-scoped policy evaluation.
+- Decompose lifecycle evidence and result construction into focused
+  namespaces; centralize repeated result and metric shapes.
 
 ## Testing Plan
 
 - Run the complete `project:miniforge` Polylith test suite.
 - Verify exact resource loading and an end-to-end shared-runner execution.
-- Assert one shared start/completion pair per OPSV phase and the exact domain
-  event counts, evidence correlation, and side-effect-free actuation result.
+- Assert exact phase execution, durable evidence restoration, runtime adapter
+  isolation, and side-effect-free actuation.
 - Run focused lint, stratum, Poly, pre-commit, and CLI build gates.
 
 ## Deployment Plan
@@ -60,7 +60,6 @@ No deployment action is required. OPSV continues to default to
 ## Checklist
 
 - [x] Seven namespaced OPSV phases use the shared registry and runner.
-- [x] Successful boundaries project the required N3 OPSV events.
 - [x] `:opsv` version `1.0.0` loads the exact pipeline followed by `:done`.
 - [x] Governance pack phase selectors match the registered phase identifiers.
 - [x] End-to-end actuation remains recommend-only with zero external effects.
@@ -68,5 +67,6 @@ No deployment action is required. OPSV continues to default to
 
 ## Follow-up
 
-The next dependent PR supplies the deterministic simulated adapter and staging
-minimum conforming implementation required to complete the workflow work spec.
+The next dependent PR projects the required N3 OPSV events and completes the
+phase-model standards decomposition. The simulated adapter and staging minimum
+conforming implementation follow that application-layer slice.
