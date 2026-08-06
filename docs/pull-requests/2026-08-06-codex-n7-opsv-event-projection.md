@@ -54,7 +54,7 @@ OPSV application event projection and publication.
 
 - Phase-OPSV tests pass in both composed projects: 10 tests and 50 assertions
   per project, including fail-closed publication and evidence regressions.
-- Project integration passes: 310 tests and 1,098 assertions, including exact
+- Project integration passes: 310 tests and 1,099 assertions, including exact
   OPSV event cardinalities and durable evidence references.
 - The full Miniforge project suite passes across all 87 composed bricks.
 - Poly reports only the four known repository baseline warnings.
@@ -71,7 +71,7 @@ posture.
 
 ## Checklist
 
-- [x] All required N3 event types are projected exactly once per boundary.
+- [x] Required N3 event types have deterministic phase-boundary cardinalities.
 - [x] The planned event retains the full risk result record.
 - [x] Domain event IDs are durable evidence references.
 - [x] No runtime adapter or evidence-store object is checkpointed.
