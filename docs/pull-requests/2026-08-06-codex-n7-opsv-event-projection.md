@@ -45,16 +45,23 @@ OPSV application event projection and publication.
 - Each event payload is assembled once; no repeated policy or evidence maps
   are embedded across phase functions.
 - Event publication failures are not swallowed or converted to false success.
+- Legacy evidence failures are normalized to canonical anomalies at the
+  component boundary, preserving the original failure as diagnostic data.
 - Runtime objects remain outside checkpointed execution input.
 - Default actuation remains `:recommend-only` with no governed effects.
 
 ## Testing Plan
 
-- Phase-OPSV tests pass in both composed projects.
-- Registered OPSV project integration verifies lifecycle and domain events.
-- The full Miniforge project suite passes across all composed bricks.
-- Poly, clj-kondo, stratum lint, pre-commit smoke, GraalVM compatibility, and
-  CLI build gates pass.
+- Phase-OPSV tests pass in both composed projects: 10 tests and 50 assertions
+  per project, including fail-closed publication and evidence regressions.
+- Project integration passes: 310 tests and 1,098 assertions, including exact
+  OPSV event cardinalities and durable evidence references.
+- The full Miniforge project suite passes across all 87 composed bricks.
+- Poly reports only the four known repository baseline warnings.
+- Changed-file clj-kondo and stratum lint report no findings.
+- Pre-commit smoke passes 339 tests and 1,285 assertions; GraalVM compatibility
+  passes 8 tests and 602 assertions.
+- The Miniforge CLI uberjar builds successfully.
 
 ## Deployment Plan
 
