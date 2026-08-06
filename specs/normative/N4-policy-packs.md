@@ -2017,13 +2017,24 @@ contract the code already satisfies:
 
 - **Signature canonicalization (§8.1.1).** `policy-pack/crypto/pack-signable-bytes`
   already dissocs the signature fields, sorts keys via `(into (sorted-map) …)`,
-  and serializes `pr-str` as UTF-8 — the shape §8.1.1 now specifies.
-  **Partial:** `(into (sorted-map) …)` orders the top-level map only. Nested
-  maps — `:pack/metadata`, each rule map — keep the host's ordering, which is
-  insertion order for small maps and hash order above the array-map threshold.
-  §8.1.1 requires recursive ordering, so packs with larger nested maps can
-  currently produce different bytes on different runs. This is a signature
-  interoperability bug, not merely an unimplemented requirement.
+  and serializes `pr-str` as UTF-8 — the broad shape §8.1.1 now specifies.
+
+  **Partial on determinism.** Two §8.1.1 rendering rules are unimplemented,
+  and both are reachable today:
+
+  - _Recursive map ordering._ `(into (sorted-map) …)` orders the top-level map
+    only. Nested maps — `:pack/metadata`, each rule map — keep the host's
+    ordering, which is insertion order for small maps and hash order above the
+    array-map threshold.
+  - _Set normalization._ `pr-str` renders a set in iteration order. §8.1.1
+    requires sets to render as a sorted vector, because set iteration order is
+    not defined.
+
+  Either can make the same pack serialize to different bytes on different runs
+  or different hosts, so a signature valid on one machine fails on another.
+  This is a signature interoperability bug, not merely an unimplemented
+  requirement, and it is why §8.1.1 states the rendering rather than deferring
+  to `pr-str`.
 - **Legacy severity normalization (§2.3.1).** `schema/normalize-severity`
   already exists for `:major` → `:high` and `:minor` → `:low`; §2.3.1 adds
   `:error` → `:high` and `:warning` → `:medium` on the same seam.
