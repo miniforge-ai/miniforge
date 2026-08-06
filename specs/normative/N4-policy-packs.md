@@ -11,7 +11,7 @@
 **Status:** Draft
 **Conformance:** MUST
 
-_v0.7.0 unifies the severity vocabulary, adds pack resolution and gate binding
+_v0.7.0-draft unifies the severity vocabulary, adds pack resolution and gate binding
 (§5.3–§5.5), check-function execution semantics (§3.5), taxonomy compatibility
 (§2.1.1), signature canonicalization (§8.1.1), the override/waiver contract
 (§6.3.1), and conformance requirement IDs (§9.4)._
@@ -487,7 +487,7 @@ Check functions MAY:
         ;; Check for public access
         public-buckets (filter #(public-acl? %) s3-buckets)
 
-        violations (mapv (fn [bucket]
+        findings   (mapv (fn [bucket]
                           {:violation/rule-id :mf.rule/no-public-s3
                            :violation/severity :critical
                            :violation/message (str "S3 bucket '"
@@ -499,8 +499,8 @@ Check functions MAY:
                         public-buckets)]
 
     ;; findings, not complete violations — see §3.3.1
-    {:passed? (empty? violations)
-     :violations violations}))
+    {:passed? (empty? findings)
+     :violations findings}))
 ```
 
 ### 3.2 Repair Function Signature
@@ -695,6 +695,7 @@ as an absent rule. The runtime MUST synthesize a **complete** violation per
 fields of §3.3.1. The following §3.3 fields take specific values in this case:
 
 - `:violation/rule-id` — the rule that failed to execute
+- `:violation/pack-id` — the owning pack for that rule, per §5.3.2
 - `:violation/severity` — the rule's declared `:rule/severity`
 - `:failure/class` — the canonical class per N1 §5.3.3
 - `:violation/auto-fixable?` — `false`
@@ -783,7 +784,7 @@ Semantic intent validation MUST enforce these rules:
         actual-behavior (infer-intent creates updates destroys)
 
         ;; Validate match
-        violations (if (intent-matches? declared-intent
+        findings   (if (intent-matches? declared-intent
                                         creates updates destroys)
                      []
                      [{:violation/rule-id :mf.rule/semantic-intent-mismatch
@@ -800,8 +801,9 @@ Semantic intent validation MUST enforce these rules:
                             "1. Fix implementation to match " declared-intent " intent\n"
                             "2. Update intent declaration to " actual-behavior)}])]
 
-    {:passed? (empty? violations)
-     :violations violations
+    ;; findings, not complete violations — see §3.3.1
+    {:passed? (empty? findings)
+     :violations findings
      :metadata {:declared-intent declared-intent
                 :actual-behavior actual-behavior
                 :creates creates
