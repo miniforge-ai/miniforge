@@ -48,24 +48,6 @@
   [prs-by-commit commit]
   (first (get prs-by-commit (:commit/sha commit))))
 
-(defn ^{:stratum 0} commit-projection
-  [incident-id revision subject facts commit pr]
-  (let [commit-n (model/commit-node commit)
-        claim (model/attribution-claim incident-id subject commit)
-        evidence (model/blame-evidence revision subject facts commit)
-        pr-n (some-> pr model/pull-request-node)
-        nodes (cond-> [commit-n claim evidence] pr-n (conj pr-n))
-        edges (cond-> [(model/edge (:node/id subject) :changed-by (:node/id commit-n) :derived
-                                   [{:evidence/ref (:node/id evidence)}])
-                        (model/edge (:node/id evidence) :supports (:node/id claim) :derived
-                                   [{:evidence/type :git-blame}])]
-                pr-n (conj (model/edge (:node/id commit-n) :contained-in (:node/id pr-n) :derived
-                                       [{:evidence/type :local-merge-ancestry
-                                         :evidence/ref (:pull-request/merge-commit pr)}])))
-        path (cond-> [(:node/id subject) (:node/id commit-n)] pr-n (conj (:node/id pr-n)))]
-    {:nodes nodes :edges edges :claims [claim]
-     :paths [{:path/type :incident-change-candidate :path/nodes path}]}))
-
 ;; mapping/file-globs and policy-pack rule globs are always `/`-delimited
 ;; (per governance-provenance.git/valid-location?, which treats `\` as a
 ;; separator too); without normalizing here a Windows-style path would
@@ -81,6 +63,50 @@
   (policy/filter-applicable-rules
    rules (assoc (or policy-context {})
                 :artifact {:artifact/path (str/replace path "\\" "/")})))
+
+(defn ^{:stratum 0} commit-projection
+  [incident-id revision subject facts commit pr]
+  (let [commit-n (model/commit-node commit)
+        claim (model/attribution-claim incident-id subject commit)
+        evidence (model/blame-evidence revision subject facts commit)
+        pr-n (some-> pr model/pull-request-node)
+        nodes (cond-> [commit-n claim evidence] pr-n (conj pr-n))
+        changed-by-edge (model/edge1 (:node/id subject) :changed-by (:node/id commit-n) :derived
+                               {:evidence/ref (:node/id evidence)})
+        supports-edge (model/edge1 (:node/id evidence) :supports (:node/id claim) :derived
+                             {:evidence/type :git-blame})
+        contained-in-edge (when pr-n
+                            (model/edge1 (:node/id commit-n) :contained-in (:node/id pr-n) :derived
+                                   {:evidence/type :local-merge-ancestry
+                                    :evidence/ref (:pull-request/merge-commit pr)}))
+        edges (cond-> [changed-by-edge supports-edge] contained-in-edge (conj contained-in-edge))
+        path (cond-> [(:node/id subject) (:node/id commit-n)] pr-n (conj (:node/id pr-n)))]
+    {:nodes nodes :edges edges :claims [claim]
+     :paths [{:path/type :incident-change-candidate :path/nodes path}]}))
+
+(defn ^{:stratum 0} spec-governance-edge
+  [subject mapping spec]
+  (model/edge1 (:node/id subject) :governed-by (:node/id spec) :derived
+         {:evidence/type :specification-mapping :evidence/ref (:mapping/id mapping)}))
+
+(defn ^{:stratum 0} rule-governance-edge
+  [subject rule rule-n]
+  (model/edge1 (:node/id subject) :governed-by (:node/id rule-n) :derived
+         {:evidence/type :policy-applicability :evidence/ref (str (:rule/id rule))}))
+
+(defn ^{:stratum 0} location-implicates-edge
+  [incident-id subject]
+  (model/edge1 (str "incident:" incident-id) :implicates (:node/id subject) :asserted
+         {:evidence/type :operator-selected-location}))
+
+(defn ^{:stratum 0} location-cites-edge
+  "Edge from `subject` to `range-n`, or nil when there's no range or the
+   range and subject are already the same node (a symbol subject has no
+   independent range to cite)."
+  [subject range-n]
+  (when (and range-n (not= (:node/id range-n) (:node/id subject)))
+    (model/edge1 (:node/id subject) :cites (:node/id range-n) :asserted
+           {:evidence/type :operator-selected-location})))
 
 ;------------------------------------------------------------------------------ Layer 1
 
@@ -100,24 +126,6 @@
 (defn- ^{:stratum 1} location-mapped?
   [{:keys [location]} mappings]
   (some #(mapping-matches? (:path location) %) mappings))
-
-(defn ^{:stratum 1} governance-projection
-  [subject path mappings rules policy-context]
-  (let [matched-mappings (filterv #(mapping-matches? path %) mappings)
-        matched-rules (applicable-rules path rules policy-context)
-        specs (mapv model/specification-node matched-mappings)
-        rule-nodes (mapv model/rule-node matched-rules)
-        spec-edges (mapv (fn [mapping spec]
-                           (model/edge (:node/id subject) :governed-by (:node/id spec) :derived
-                                       [{:evidence/type :specification-mapping
-                                         :evidence/ref (:mapping/id mapping)}]))
-                         matched-mappings specs)
-        rule-edges (mapv (fn [rule rule-n]
-                           (model/edge (:node/id subject) :governed-by (:node/id rule-n) :derived
-                                       [{:evidence/type :policy-applicability
-                                         :evidence/ref (str (:rule/id rule))}]))
-                         matched-rules rule-nodes)]
-    {:nodes (into specs rule-nodes) :edges (into spec-edges rule-edges)}))
 
 (defn ^{:stratum 1} location-gaps
   [facts mappings rules policy-context]
@@ -150,6 +158,23 @@
                   :when (not (contains? pr-commits (:commit/sha commit)))]
               {:gap/type :pull-request-unresolved :gap/commit (:commit/sha commit)})))))
 
+(defn ^{:stratum 1} governance-projection
+  [subject path mappings rules policy-context]
+  (let [matched-mappings (filterv #(mapping-matches? path %) mappings)
+        matched-rules (applicable-rules path rules policy-context)
+        specs (mapv model/specification-node matched-mappings)
+        rule-nodes (mapv model/rule-node matched-rules)
+        spec-edges (mapv #(spec-governance-edge subject %1 %2) matched-mappings specs)
+        rule-edges (mapv #(rule-governance-edge subject %1 %2) matched-rules rule-nodes)]
+    {:nodes (into specs rule-nodes) :edges (into spec-edges rule-edges)}))
+
+(defn ^{:stratum 1} location-commit-projections
+  [incident-id revision subject facts]
+  (let [prs-by-commit (group-by :pull-request/contains-commit (:pull-requests facts))]
+    (mapv #(commit-projection incident-id revision subject facts %
+                              (pr-for-commit prs-by-commit %))
+          (:commits facts))))
+
 ;------------------------------------------------------------------------------ Layer 2
 
 (defn ^{:stratum 2} coverage
@@ -180,22 +205,15 @@
   (let [gaps (location-gaps facts mappings rules policy-context)]
     (if-let [subject (model/subject-node revision facts)]
       (let [range-n (model/range-node revision facts)
-            incident-edge (model/edge (str "incident:" incident-id) :implicates
-                                      (:node/id subject) :asserted
-                                      [{:evidence/type :operator-selected-location}])
-            range-edge (when (and range-n (not= (:node/id range-n) (:node/id subject)))
-                         (model/edge (:node/id subject) :cites (:node/id range-n) :asserted
-                                     [{:evidence/type :operator-selected-location}]))
+            implicates-edge (location-implicates-edge incident-id subject)
+            cites-edge (location-cites-edge subject range-n)
             governance (governance-projection subject (get-in facts [:location :path])
                                               mappings rules policy-context)
-            prs-by-commit (group-by :pull-request/contains-commit (:pull-requests facts))
-            commits (mapv #(commit-projection incident-id revision subject facts %
-                                              (pr-for-commit prs-by-commit %))
-                          (:commits facts))
+            commits (location-commit-projections incident-id revision subject facts)
             paths (mapv #(prepend-incident-node incident-id %) (mapcat :paths commits))
             nodes (into (cond-> [subject] range-n (conj range-n))
                         (concat (:nodes governance) (mapcat :nodes commits)))
-            edges (into (cond-> [incident-edge] range-edge (conj range-edge))
+            edges (into (cond-> [implicates-edge] cites-edge (conj cites-edge))
                         (concat (:edges governance) (mapcat :edges commits)))
             claims (vec (mapcat :claims commits))]
         {:nodes nodes :edges edges :claims claims :paths paths :gaps gaps})

@@ -55,6 +55,14 @@
 
 ;------------------------------------------------------------------------------ Layer 1
 
+(defn ^{:stratum 1} edge1
+  "Build an edge whose :edge/basis is a single evidence entry -- the
+   common case across every caller in this component, where an edge
+   always carries exactly one evidence map. Callers stop repeating the
+   `[{...}]` vector-wrapping at every call site."
+  [from type to status evidence]
+  (edge from type to status [evidence]))
+
 (defn ^{:stratum 1} range-node
   [revision {:keys [location blob-sha]}]
   (when blob-sha
