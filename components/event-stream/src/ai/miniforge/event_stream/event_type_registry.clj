@@ -88,7 +88,8 @@
 ;;     "workflow/completed" "workflow/failed" "agent/chunk"]
 (def ^{:stratum 1} browser-unhandled-events
   "Event types emitted server-side that the browser switch silently ignores.
-   These are the gap items for Tasks 1–7."
+   These are the gap items for Tasks 1–7. Returns the registry anomaly
+   when the backing resource cannot be loaded."
   (if (anomaly/anomaly? event-type-registry)
     event-type-registry
     (->> event-type-registry
@@ -113,7 +114,8 @@
    of the serialised event-type string.  A developer reading only
    `interface/events.clj` would guess the wrong browser case string.
 
-   Format: [constructor → json-string (note)]"
+   Format: [constructor → json-string (note)]. Returns the registry
+   anomaly when the backing resource cannot be loaded."
   (if (anomaly/anomaly? event-type-registry)
     event-type-registry
     (->> event-type-registry
