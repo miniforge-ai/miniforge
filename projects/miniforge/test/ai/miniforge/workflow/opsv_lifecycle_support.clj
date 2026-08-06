@@ -19,6 +19,8 @@
   (:require
    [clojure.edn :as edn]
    [clojure.java.io :as io]
+   [malli.core :as m]
+   [ai.miniforge.event-stream.interface.opsv :as opsv-event]
    [ai.miniforge.phase-opsv.interface :as opsv]
    [ai.miniforge.phase-opsv.protocol :as port])
   (:import
@@ -46,6 +48,15 @@
    :opsv.policy/proposed 1
    :opsv.verification/result 1
    :opsv.actuation/emitted 1})
+
+(def ^{:stratum 0} ^:private domain-event-schemas
+  {:opsv.experiment/planned opsv-event/ExperimentPlanned
+   :opsv.experiment/started opsv-event/ExperimentStarted
+   :opsv/load-step opsv-event/LoadStep
+   :opsv.convergence/iteration opsv-event/ConvergenceIteration
+   :opsv.policy/proposed opsv-event/PolicyProposed
+   :opsv.verification/result opsv-event/VerificationResult
+   :opsv.actuation/emitted opsv-event/ActuationEmitted})
 
 (def ^{:stratum 0} expected-pipeline
   (conj (mapv #(hash-map :phase %) opsv/phase-keys) {:phase :done}))
@@ -99,6 +110,11 @@
         (FileUtils/deleteDirectory root)))))
 
 ;------------------------------------------------------------------------------ Layer 1
+
+(defn ^{:stratum 1} valid-domain-event?
+  [event]
+  (when-let [schema (get domain-event-schemas (:event/type event))]
+    (m/validate schema event)))
 
 (defn ^{:stratum 1} test-adapter
   []

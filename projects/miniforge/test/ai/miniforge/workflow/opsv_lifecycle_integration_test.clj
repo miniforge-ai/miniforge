@@ -123,6 +123,7 @@
                   lifecycle-events phase-key :workflow/phase-completed)))))
     (testing "successful boundaries emit the required N3 OPSV events"
       (is (= support/expected-domain-type-counts domain-type-counts))
+      (is (every? support/valid-domain-event? domain-events))
       (is (= (:opsv/risk-result (support/phase-output result :opsv/plan))
              (:opsv/risk-score planned-event)))
       (is (number? (get-in planned-event [:opsv/risk-score :score])))
