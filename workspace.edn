@@ -48,6 +48,9 @@
                                           "governance-provenance"
                                           "knowledge-pack"
                                           "observer" "orchestrator"
+                                          ;; Deterministic staging MCI adapter, consumed by the
+                                          ;; project integration suite rather than a runtime base.
+                                          "opsv-adapter-simulated"
                                           "phase-opsv"
                                           "phase-software-factory"
                                           "phase-deployment"

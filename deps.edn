@@ -56,6 +56,7 @@
                        "components/phase-software-factory/resources"
                        "components/phase-opsv/src"
                        "components/phase-opsv/resources"
+                       "components/opsv-adapter-simulated/src"
                        "components/gate/src"
                        "components/workflow/src"
                        "components/workflow/resources"
@@ -251,6 +252,7 @@
                       ai.miniforge/phase {:local/root "components/phase"}
                       ai.miniforge/phase-software-factory {:local/root "components/phase-software-factory"}
                       ai.miniforge/phase-opsv {:local/root "components/phase-opsv"}
+                      ai.miniforge/opsv-adapter-simulated {:local/root "components/opsv-adapter-simulated"}
                       ai.miniforge/gate {:local/root "components/gate"}
                       ai.miniforge/workflow {:local/root "components/workflow"}
                       ai.miniforge/workflow-financial-etl {:local/root "components/workflow-financial-etl"}
@@ -383,6 +385,7 @@
                        "components/phase-software-factory/test"
                        "components/phase-opsv/test"
                        "components/phase-opsv/test-resources"
+                       "components/opsv-adapter-simulated/test"
                        "components/gate/test"
                        "components/workflow/test"
                        "components/workflow/test-resources"
@@ -527,6 +530,7 @@
                       ai.miniforge/phase {:local/root "components/phase"}
                       ai.miniforge/phase-software-factory {:local/root "components/phase-software-factory"}
                       ai.miniforge/phase-opsv {:local/root "components/phase-opsv"}
+                      ai.miniforge/opsv-adapter-simulated {:local/root "components/opsv-adapter-simulated"}
                       ai.miniforge/gate {:local/root "components/gate"}
                       ai.miniforge/workflow {:local/root "components/workflow"}
                       ai.miniforge/workflow-financial-etl {:local/root "components/workflow-financial-etl"}
