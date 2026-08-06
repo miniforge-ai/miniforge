@@ -25,6 +25,7 @@
    [clojure.string :as str]
    [ai.miniforge.phase.interface :as phase]
    [ai.miniforge.phase.loader :as loader]
+   [ai.miniforge.phase-software-factory.gap-wiring :as gap-wiring]
    [ai.miniforge.phase-software-factory.messages :as messages]
    [ai.miniforge.phase-software-factory.verify :as verify]))
 
@@ -172,6 +173,23 @@
             (is (str/ends-with? message suffix))
             (is (= (+ (count prefix) 1 preview-limit (count suffix))
                    (count message)))))))))
+
+(deftest ^{:stratum 1} leave-verify-records-gap-misses-test
+  (testing "leave-verify feeds the gap instrument before any result
+            rewriting — verify failures were the dominant unrecorded
+            signal in the first dogfood chunk (every failing run died at
+            verify with an empty ledger)"
+    (let [calls (atom [])]
+      (with-redefs [gap-wiring/record-phase-misses!
+                    (fn [ctx phase & _more]
+                      (swap! calls conj [phase (get-in ctx [:phase :error :message])]))]
+        (verify/leave-verify
+         (make-leave-ctx {:status :error
+                          :error {:message "Tests failed: 3 assertions"}}
+                         :implement)))
+      (is (= [[:verify "Tests failed: 3 assertions"]] @calls)
+          "recorder called once, tagged :verify, AFTER attach-verify-error
+           so the run-tests-error shape is visible as a terminal signal"))))
 
 (deftest ^{:stratum 1} leave-verify-normal-failure-emits-repair-requested-verdict-test
   (testing "Phase 3: normal verify failure with :on-fail configured sets

@@ -282,6 +282,18 @@
                :code/file-actions (mapv :action files)
                :code/file-count (count files))))))
 
+(defn ^{:stratum 0} preserve-consultation
+  "Carry :codex/consultation from the full phase result onto the
+   lightweight success result. The gap instrument (T2 s3.2) and the gap
+   report read consultation provenance from the durable phase record;
+   replacing the result wholesale at leave destroyed it, leaving
+   successful DAG-task implements with no evidence delivery happened.
+   Public for tests."
+  [lightweight result]
+  (if-let [consultation (get-in result [:output :codex/consultation])]
+    (assoc-in lightweight [:output :codex/consultation] consultation)
+    lightweight))
+
 (defn- ^{:stratum 0} ensure-valid-metrics
   "Phase-input boundary validation for the agent result's `:metrics`. The
    response builders guarantee non-nil numeric `:tokens`/`:duration-ms`, but a
@@ -686,7 +698,8 @@
 
             ;; On success: store lightweight result — code is in the environment, not here
             (= :completed phase-status)
-            (-> (assoc-in [:phase :result] (phase/success env-id summary))
+            (-> (assoc-in [:phase :result]
+                          (preserve-consultation (phase/success env-id summary) result))
                 (assoc-in [:phase :artifact]
                           (cond-> (lightweight-curated-artifact curated-artifact)
                             degraded-handoff?
