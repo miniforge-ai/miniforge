@@ -107,7 +107,8 @@
         result (phase-result (if prepared?
                                (transform prepared-ctx)
                                prepared-ctx))]
-    (phase/enter-context (if prepared? prepared-ctx ctx) phase-key nil
+    (phase/enter-context (if prepared? prepared-ctx ctx) phase-key
+                         (:agent config)
                          (:gates config) (:budget config)
                          start-time result)))
 

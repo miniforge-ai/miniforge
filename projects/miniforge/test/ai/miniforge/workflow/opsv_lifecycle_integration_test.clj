@@ -22,6 +22,7 @@
    [clojure.test :refer [deftest is testing]]
    [ai.miniforge.evidence-bundle.interface :as evidence]
    [ai.miniforge.event-stream.interface :as event-stream]
+   [ai.miniforge.phase.interface :as phase]
    [ai.miniforge.phase-opsv.interface :as opsv]
    [ai.miniforge.phase-opsv.protocol :as port]
    [ai.miniforge.workflow.interface :as workflow]))
@@ -70,6 +71,16 @@
     (is (= expected-pipeline (get-in loaded [:workflow :workflow/pipeline])))))
 
 ;------------------------------------------------------------------------------ Layer 2
+
+(deftest ^{:stratum 2} opsv-interceptor-preserves-agent-override-test
+  (let [interceptor (phase/get-phase-interceptor
+                     {:phase :opsv/discover :agent :opsv-test-agent})
+        entered ((:enter interceptor)
+                 {:execution/id (random-uuid)
+                  :execution/input
+                  {:opsv/adapter (test-adapter)
+                   :opsv/experiment-pack (:experiment-pack fixture)}})]
+    (is (= :opsv-test-agent (get-in entered [:phase :agent])))))
 
 (deftest ^{:stratum 2} opsv-run-emits-lifecycle-and-domain-events-test
   (with-temp-checkpoint-root
