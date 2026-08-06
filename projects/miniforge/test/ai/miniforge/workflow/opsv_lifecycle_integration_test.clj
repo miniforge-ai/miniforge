@@ -24,15 +24,29 @@
    [ai.miniforge.phase.interface :as phase]
    [ai.miniforge.phase-opsv.interface :as opsv]
    [ai.miniforge.phase-opsv.protocol :as port]
-   [ai.miniforge.workflow.interface :as workflow]))
+   [ai.miniforge.workflow.interface :as workflow])
+  (:import
+   [org.apache.commons.io FileUtils]))
 
 ;------------------------------------------------------------------------------ Layer 0
 
 (def ^{:stratum 0} ^:private fixture
   (-> "opsv/application-fixture.edn" io/resource slurp edn/read-string))
 
-(def ^{:stratum 0} expected-pipeline
+(def ^{:stratum 0} ^:private artifact-id
+  #uuid "00000000-0000-0000-0000-000000000799")
+
+(def ^{:stratum 0} ^:private expected-pipeline
   (conj (mapv #(hash-map :phase %) opsv/phase-keys) {:phase :done}))
+
+(defn- ^{:stratum 0} with-temp-checkpoint-root
+  [f]
+  (let [root (doto (io/file (System/getProperty "java.io.tmpdir")
+                            (str "opsv-lifecycle-" (random-uuid)))
+               .mkdirs)]
+    (try
+      (f (.getAbsolutePath root))
+      (finally (FileUtils/deleteDirectory root)))))
 
 ;------------------------------------------------------------------------------ Layer 1
 
@@ -49,7 +63,15 @@
         :config-hash "config-1"}
        :steps (:ramp-steps fixture)})))
 
-(deftest ^{:stratum 1} opsv-workflow-loads-exact-versioned-pipeline-test
+(defn- ^{:stratum 1} workflow-input
+  []
+  {:opsv/experiment-pack (:experiment-pack fixture)
+   :opsv/evidence-refs [artifact-id]
+   :opsv/risk-thresholds {:medium 0.3 :high 0.6 :critical 0.85}
+   :opsv/metric-snapshot-artifact-refs [artifact-id]
+   :opsv/policy-diff-artifact-refs [artifact-id]})
+
+(deftest ^{:stratum 1} test-exact-opsv-workflow-resource
   (let [loaded (workflow/load-workflow :opsv "1.0.0" {:skip-cache? true})]
     (is (= :resource (:source loaded)))
     (is (true? (get-in loaded [:validation :valid?])))
@@ -57,21 +79,27 @@
 
 ;------------------------------------------------------------------------------ Layer 2
 
-(deftest ^{:stratum 2} opsv-interceptor-preserves-agent-override-test
-  (let [adapter (test-adapter)
+(deftest ^{:stratum 2} test-runtime-adapter-authority
+  (let [legacy-adapter (test-adapter)
+        runtime-adapter (test-adapter)
         interceptor (phase/get-phase-interceptor
                      {:phase :opsv/discover :agent :opsv-test-agent})
-        entered ((:enter interceptor)
-                 {:execution/id (random-uuid)
-                  :execution/input
-                  {:opsv/adapter adapter
-                   :opsv/experiment-pack (:experiment-pack fixture)}})]
-    (is (= :opsv-test-agent (get-in entered [:phase :agent])))
-    (is (identical? adapter (get-in entered
-                                    [:execution/opts :opsv/adapter])))
-    (is (not (contains? (:execution/input entered) :opsv/adapter)))))
+        enter (:enter interceptor)
+        context {:execution/id (random-uuid)
+                 :execution/input (assoc (workflow-input)
+                                         :opsv/adapter legacy-adapter)}
+        migrated (enter context)
+        preferred (enter (assoc context :execution/opts
+                                {:opsv/adapter runtime-adapter}))]
+    (is (= :opsv-test-agent (get-in migrated [:phase :agent])))
+    (is (identical? legacy-adapter
+                    (get-in migrated [:execution/opts :opsv/adapter])))
+    (is (identical? runtime-adapter
+                    (get-in preferred [:execution/opts :opsv/adapter])))
+    (is (not (contains? (:execution/input migrated) :opsv/adapter)))
+    (is (not (contains? (:execution/input preferred) :opsv/adapter)))))
 
-(deftest ^{:stratum 2} opsv-evidence-runtime-restores-from-durable-input-test
+(deftest ^{:stratum 2} test-evidence-runtime-restores-from-durable-input
   (let [workflow-id (random-uuid)
         interceptor (phase/get-phase-interceptor {:phase :opsv/discover})
         entered ((:enter interceptor)
@@ -88,3 +116,26 @@
                    [:execution/input :opsv/evidence-assembly])
            (evidence/get-opsv-assembly
             (:opsv/evidence-assembly-store restored) bundle-id)))))
+
+(deftest ^{:stratum 2} test-opsv-lifecycle-checkpoint
+  (with-temp-checkpoint-root
+    (fn [checkpoint-root]
+      (let [config (:workflow
+                    (workflow/load-workflow
+                     :opsv "1.0.0" {:skip-cache? true}))
+            result (workflow/run-pipeline
+                    config (workflow-input)
+                    {:opsv/adapter (test-adapter)
+                     :checkpoint/root checkpoint-root})
+            checkpoint (workflow/load-checkpoint-data
+                        (:execution/id result)
+                        {:checkpoint/root checkpoint-root})
+            checkpoint-input (get-in checkpoint
+                                     [:machine-snapshot :execution/input])]
+        (is (= :completed (:execution/status result)))
+        (is (= (set (conj opsv/phase-keys :done))
+               (set (keys (:execution/phase-results result)))))
+        (is (map? (:opsv/evidence-assembly checkpoint-input)))
+        (is (not (contains? checkpoint-input :opsv/adapter)))
+        (is (not (contains? checkpoint-input
+                            :opsv/evidence-assembly-store)))))))
