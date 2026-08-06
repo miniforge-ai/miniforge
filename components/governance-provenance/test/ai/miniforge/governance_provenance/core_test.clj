@@ -17,6 +17,7 @@
 ;; limitations under the License.
 (ns ai.miniforge.governance-provenance.core-test
   (:require
+   [ai.miniforge.governance-provenance.core :as core]
    [ai.miniforge.governance-provenance.interface :as provenance]
    [clojure.test :refer [deftest is]]))
 
@@ -60,24 +61,38 @@
      :rule/enabled? true
      :rule/applies-to {:file-globs ["components/**"]}}]})
 
+(deftest ^{:stratum 0} mapping-and-rule-matching-normalizes-windows-separators
+  (let [win-path "components\\example\\core.clj"
+        mapping {:mapping/file-globs ["components/**"]}
+        rule {:rule/id :architecture/stratified-design
+              :rule/enabled? true
+              :rule/applies-to {:file-globs ["components/**"]}}]
+    (is (core/mapping-matches? win-path mapping))
+    (is (= [rule] (core/applicable-rules win-path [rule] {})))))
+
 ;------------------------------------------------------------------------------ Layer 1
 
 (defn ^{:stratum 1} fake-git
-  [merge? calls]
-  (fn [_repo-root args]
-    (swap! calls conj args)
-    (case (second args)
-      "rev-parse" {:success? true :output revision}
-      "ls-tree" {:success? true :output (str "100644 blob " blob "\tcomponents/example.clj")}
-      "blame" {:success? true :output (str commit " 8 8 3")}
-      "show" {:success? true
-              :output (str commit separator "2026-08-01T12:00:00Z" separator
-                           "Ada" separator "Add the implicated behavior")}
-      "log" {:success? true
-             :output (if merge?
-                       (str merge-commit separator "Merge pull request #42 from example/feature")
-                       "")}
-      {:success? false :error (str "unexpected command " args)})))
+  "`ls-tree-fails?` reproduces the case where a commit is pinned by
+   `blame` but its blob (and so its range) can't be resolved."
+  ([merge? calls] (fake-git merge? calls false))
+  ([merge? calls ls-tree-fails?]
+   (fn [_repo-root args]
+     (swap! calls conj args)
+     (case (second args)
+       "rev-parse" {:success? true :output revision}
+       "ls-tree" (if ls-tree-fails?
+                   {:success? false :error "ls-tree failed"}
+                   {:success? true :output (str "100644 blob " blob "\tcomponents/example.clj")})
+       "blame" {:success? true :output (str commit " 8 8 3")}
+       "show" {:success? true
+               :output (str commit separator "2026-08-01T12:00:00Z" separator
+                            "Ada" separator "Add the implicated behavior")}
+       "log" {:success? true
+              :output (if merge?
+                        (str merge-commit separator "Merge pull request #42 from example/feature")
+                        "")}
+       {:success? false :error (str "unexpected command " args)}))))
 
 (deftest ^{:stratum 1} fails-closed-when-revision-cannot-be-pinned
   (let [result (provenance/build-dossier
@@ -177,3 +192,18 @@
     (is (= :partial (:dossier/status result)))
     (is (contains? gaps :specification-revision-unavailable))
     (is (contains? gaps :policy-rule-revision-unavailable))))
+
+(deftest ^{:stratum 2} blame-evidence-marks-unresolved-range-explicitly
+  (let [location (assoc base-location :symbol {:symbol/id "local:clj:example:fn:run"})
+        result (provenance/build-dossier
+                (request location)
+                {:git-exec (fake-git true (atom []) true)})
+        gaps (set (map :gap/type (:dossier/gaps result)))
+        evidence (first (filter #(= :evidence (:node/type %)) (:dossier/nodes result)))]
+    (is (:success? result))
+    (is (contains? gaps :immutable-range-unavailable))
+    (is (some? evidence))
+    (is (false? (get-in evidence [:node/content :evidence/range-resolved?])))
+    (is (not (contains? (:node/content evidence) :evidence/range)))
+    (is (not (re-find #":nil:" (get-in evidence [:node/content :evidence/id]))))
+    (is (re-find #":unresolved-range:" (get-in evidence [:node/content :evidence/id])))))

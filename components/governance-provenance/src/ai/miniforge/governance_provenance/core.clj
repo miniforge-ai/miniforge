@@ -29,15 +29,6 @@
   []
   {:nodes [] :edges [] :claims [] :paths [] :gaps []})
 
-(defn ^{:stratum 0} mapping-matches?
-  [path mapping]
-  (some #(policy/glob-matches? % path) (:mapping/file-globs mapping)))
-
-(defn ^{:stratum 0} applicable-rules
-  [path rules policy-context]
-  (policy/filter-applicable-rules
-   rules (assoc (or policy-context {}) :artifact {:artifact/path path})))
-
 (defn ^{:stratum 0} valid-mapping?
   [mapping]
   (and (some? (:specification/id mapping))
@@ -66,6 +57,22 @@
         path (cond-> [(:node/id subject) (:node/id commit-n)] pr-n (conj (:node/id pr-n)))]
     {:nodes nodes :edges edges :claims [claim]
      :paths [{:path/type :incident-change-candidate :path/nodes path}]}))
+
+;; mapping/file-globs and policy-pack rule globs are always `/`-delimited
+;; (per governance-provenance.git/valid-location?, which treats `\` as a
+;; separator too); without normalizing here a Windows-style path would
+;; fail to match either, silently skipping expected specification
+;; mappings and rules.
+(defn ^{:stratum 0} mapping-matches?
+  [path mapping]
+  (let [path (str/replace path "\\" "/")]
+    (some #(policy/glob-matches? % path) (:mapping/file-globs mapping))))
+
+(defn ^{:stratum 0} applicable-rules
+  [path rules policy-context]
+  (policy/filter-applicable-rules
+   rules (assoc (or policy-context {})
+                :artifact {:artifact/path (str/replace path "\\" "/")})))
 
 ;------------------------------------------------------------------------------ Layer 1
 

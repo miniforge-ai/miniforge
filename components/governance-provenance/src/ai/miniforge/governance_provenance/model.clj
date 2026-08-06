@@ -118,11 +118,23 @@
     (range-node revision facts)))
 
 (defn ^{:stratum 2} blame-evidence
+  "Evidence node linking `subject` to the commit that changed it, per
+   git blame. `range-n` is nil when `facts` carries no `:blob-sha` (the
+   blame lookup couldn't resolve one) -- baking a nil straight into the
+   id string would produce a degenerate `...:nil:...` id indistinguishable
+   from any other unresolved-range evidence for the same subject/commit,
+   and silently returning `:evidence/range nil` while still claiming
+   `:evidence/type :git-blame` would leave consumers unable to tell
+   'no range' apart from 'range present but empty' without checking a
+   for a missing map key. `:evidence/range-resolved?` makes that explicit
+   and queryable instead."
   [revision subject facts commit]
   (let [sha (:commit/sha commit)
         range-n (range-node revision facts)
-        id (str "evidence:git-blame:" (:node/id subject) ":" (:node/id range-n) ":" sha)]
+        range-id (or (:node/id range-n) "unresolved-range")
+        id (str "evidence:git-blame:" (:node/id subject) ":" range-id ":" sha)]
     (node id :evidence revision {:source/type :git-blame :source/ref sha}
-          {:evidence/id id :evidence/type :git-blame
-           :evidence/subject (:node/id subject) :evidence/commit sha
-           :evidence/range (:node/content range-n)})))
+          (cond-> {:evidence/id id :evidence/type :git-blame
+                   :evidence/subject (:node/id subject) :evidence/commit sha
+                   :evidence/range-resolved? (some? range-n)}
+            range-n (assoc :evidence/range (:node/content range-n))))))
