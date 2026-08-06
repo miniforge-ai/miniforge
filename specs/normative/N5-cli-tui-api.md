@@ -1118,11 +1118,11 @@ GET /api/streams/:scope-type/:scope-id
 
 GET /api/workflows/:id/stream
   Alias for scope-type=workflow
-
-Event format:
-  event: agent-status
-  data: {"event/type":"agent/status","workflow/id":"...","message":"..."}
 ```
+
+The SSE wire format — the `event`, `id`, `data`, and `retry` fields, heartbeats,
+and the JSON serialization of the envelope — is specified in N3 §5.3.7 and is
+deliberately not reproduced here.
 
 **Requirements:**
 
