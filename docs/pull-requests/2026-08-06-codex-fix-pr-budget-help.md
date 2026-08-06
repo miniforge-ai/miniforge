@@ -27,7 +27,8 @@ Development-tool task metadata.
 
 ## Standards Audit
 
-- The help text now agrees with `pr-budget/default-budget` and `AGENTS.md`.
+- The help text now agrees with `pr-budget/default-budget` and the repository-root
+  `AGENTS.md`.
 - No executable behavior, namespace, component dependency, or data shape changes.
 - The correction is isolated from the N7 contract PR where the gap was found.
 
