@@ -22,7 +22,7 @@
 
  :spec/constraints
  ["PR creation and apply MUST require a real matching ExecutionGrant at execution time"
-  "Every effect MUST correlate its EffectTransaction, ExecutionGrant, and allow DecisionEnvelope"
+  "Every effect MUST record the IDs of its EffectTransaction, ExecutionGrant, and allowing DecisionEnvelope"
   "OPSV MUST NOT use :authority/unenforced"
   "Runtime differences MUST remain registry data and MUST NOT branch on :runtime/kind"
   "Direct apply MUST have verified rollback and configured postconditions"
