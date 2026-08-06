@@ -511,6 +511,18 @@ Incident → Symbol → Commit → PR
 These limits allow the feature to exercise existing N1, N4, and N6 contracts
 before proposing new ones.
 
+### Experimental implementation
+
+The repository-local slice is implemented by the `governance-provenance`
+component. Its read-only `build-dossier` interface pins a git revision, projects
+operator-selected symbols or immutable ranges through blame-derived commits and
+local merge ancestry, and attaches explicit specification mappings and
+applicable policy rules when supplied.
+
+The implementation emits `changed-by` candidates, evidence-bearing claims,
+coverage, and unresolved-source gaps. It does not emit `introduced-by`, query a
+remote provider, infer missing symbols, or authorize remediation.
+
 ---
 
 ## 10. Evaluation

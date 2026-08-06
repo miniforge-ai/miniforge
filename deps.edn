@@ -135,6 +135,7 @@
                        "components/repo-analyzer/resources"
                        "components/repo-index/src"
                        "components/repo-index/resources"
+                       "components/governance-provenance/src"
                        "components/context-pack/src"
                        "components/context-pack/resources"
                        "bases/mcp-context-server/src"
@@ -290,6 +291,7 @@
                      ai.miniforge/gate-classification {:local/root "components/gate-classification"}
                      ai.miniforge/repo-analyzer {:local/root "components/repo-analyzer"}
                      ai.miniforge/repo-index {:local/root "components/repo-index"}
+                     ai.miniforge/governance-provenance {:local/root "components/governance-provenance"}
                      ai.miniforge/context-pack {:local/root "components/context-pack"}
                      ai.miniforge/mcp-context-server {:local/root "bases/mcp-context-server"}
                      ai.miniforge/control-plane {:local/root "components/control-plane"}
@@ -427,6 +429,7 @@
                        "components/gate-classification/test"
                        "components/repo-analyzer/test"
                        "components/repo-index/test"
+                       "components/governance-provenance/test"
                        "components/context-pack/test"
                        "components/bb-dev-tools/test"
                        "bases/mcp-context-server/test"
@@ -558,6 +561,7 @@
                       ai.miniforge/gate-classification {:local/root "components/gate-classification"}
                       ai.miniforge/repo-analyzer {:local/root "components/repo-analyzer"}
                       ai.miniforge/repo-index {:local/root "components/repo-index"}
+                      ai.miniforge/governance-provenance {:local/root "components/governance-provenance"}
                       ai.miniforge/context-pack {:local/root "components/context-pack"}
                       ai.miniforge/mcp-context-server {:local/root "bases/mcp-context-server"}
                       ai.miniforge/control-plane {:local/root "components/control-plane"}

@@ -45,6 +45,7 @@
                                           "evaluation"
                                           "evidence-bundle"
                                           "failure-classifier"
+                                          "governance-provenance"
                                           "knowledge-pack"
                                           "observer" "orchestrator"
                                           "phase-opsv"
