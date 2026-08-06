@@ -41,8 +41,8 @@ document a reader consults to decide whether the implementation can be trusted.
 
 ## Testing Plan
 
-Documentation change to a single markdown file. `bb commit-budget` and the
-pre-commit gate cover it; CI runs the workspace checks.
+Two markdown files, no code: the N4 annex and this write-up. `bb commit-budget`
+and the pre-commit gate cover them; CI runs the workspace checks.
 
 ## Deployment Plan
 
