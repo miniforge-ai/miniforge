@@ -6,8 +6,8 @@
 
 # miniforge Specification Index
 
-**Version:** 0.8.0-draft
-**Date:** 2026-08-04
+**Version:** 0.10.0-draft
+**Date:** 2026-08-05
 **Status:** Living specification during OSS development
 
 ---
@@ -16,12 +16,12 @@
 
 These specifications define three products built on a shared kernel:
 
-- **MiniForge Core** (N1-N6) — the governed workflow engine. These six core specs define the engine contract that all
-  products must conform to.
-- **Miniforge** (N1-N10) — the autonomous software factory for SDLC. Consumes Core plus extension specs N7-N10 for fleet
-  operations, observability control, external PR integration, and governed tool execution.
-- **Data Foundry** (N1-N6) — a generic ETL product. Consumes the same Core engine contract with domain-specific workflow
-  packs and policy configurations.
+- **MiniForge Core** (N1-N6 plus applicable indexed amendments) — the governed workflow engine contract shared by all
+  products.
+- **Miniforge** — the autonomous software factory for SDLC. Consumes Core plus the Miniforge-scoped extensions and
+  amendments in the applicability table below.
+- **Data Foundry** — a generic ETL product. Consumes Core plus only the indexed amendments that declare applicability to
+  its workflow/runtime capabilities.
 
 ---
 
@@ -53,9 +53,22 @@ They use RFC 2119 terminology (MUST, SHALL, SHOULD, MAY).
   and evidence. These define the shared engine consumed by all products (Miniforge SDLC, Data Foundry, and any future
   product).
 
-**Extension specs (N7+) — product-specific capabilities.** Cross-cutting capabilities that extend core specs. Currently
-  these are Miniforge SDLC concerns (Fleet Mode, Control Interface, PR Integration, Governed Tool Execution); Data
-  Foundry does not consume N7-N10.
+**Amendments and extension specs — scoped capabilities.** Indexed delta specs amend a named base contract. N7+ specs
+  define product or capability extensions. Applicability is explicit rather than inferred from the filename alone.
+
+### Applicability
+
+| Spec set | Applies to |
+|----------|------------|
+| N1-N6 | Every product built on MiniForge Core |
+| N2 checkpoint/resume delta | Implementations that persist workflow state |
+| N4 policy-compilation delta | Implementations that originate compiled policy packs |
+| N5 supervisory deltas | Miniforge SDLC control-plane producers and consumers |
+| N7-N10 | Miniforge Fleet/SDLC capabilities |
+| N11 + runtime-adapter delta | Governed task runtimes in Core and consuming products |
+| N12-N13 | Miniforge agent context and policy-guidance runtime |
+| N14 | Experimental Miniforge deliberation runs, scoped by N14 §0.4 |
+| N15 | minibench/workbench evaluation protocol and N14 promotion gates |
 
 ### N1 — Core Architecture & Concepts ✅
 
@@ -105,15 +118,26 @@ Defines:
 
 Defines:
 
-- Event envelope fields; required event types (workflow, agent, status, subagent, tool,
-  LLM, messages, milestone, gate, pack lifecycle, pack run, chain edge)
-- Ordering guarantees (per-workflow sequence, causal ordering, replay determinism)
+- Event envelope fields and fixed envelope field types (§2.1.1); scope keys —
+  workflow, PR Work Item, pack, repo, supervisory entity, deployment (§2.3)
+- Required event types (workflow, agent, status, subagent, tool, LLM, messages,
+  milestone, gate, pack lifecycle, pack run, chain edge)
+- Ordering guarantees (per-scope sequence, causal ordering, replay determinism)
 - Streaming API (SSE/WebSocket) with subscription protocol
 - Throttling and performance requirements
 - Minimal fields needed to render "live" progress and drill-down
 - **Reliability metric events:** SLI computation, SLO breach, error budget, degradation mode (§3.17)
 - **Repository intelligence events:** Index quality, canary failure (§3.18)
+- **Supervisory snapshot family:** twelve `:supervisory/*` types, entity shapes owned by the N5 deltas (§3.19.1)
+- **Workflow control events:** cancellation, checkpoint write, machine snapshot, resume (§3.21)
+- **Event type registry:** the flat enumeration of every emittable `:event/type`, with scope and retention class (§6)
+- **Schema evolution:** what `:event/version` versions, change classification, consumer obligations (§7)
+- **Sensitive data & redaction:** never-emitted values, redaction marker, truncation, field classes (§8)
+- **Emission failure semantics:** fail-closed for durable/audit classes, sequence integrity (§9)
+- **Conformance requirement IDs** (`N3.EV.*`, `N3.EM.*`, `N3.ST.*`, `N3.API.*`, `N3.CP.*`,
+  `N3.SD.*`, `N3.EF.*`) and test obligations (§10.4–§10.5)
 - **Failure class enum** on all failure events (`:failure/class`, see N1 §5.3.3)
+- **Annex A (informative):** implementation conformance status — name divergences, unimplemented and unspecified event types
 
 ### N4 — Policy Packs & Gates Standard ✅
 
@@ -162,6 +186,18 @@ Defines:
 - **Reliability evidence:** SLI measurements, failure class, workflow tier, degradation mode in outcome (§2.6)
 - **Evaluation artifacts:** Golden set and eval-run-result artifact types (§3.1.1)
 
+### Indexed normative amendments
+
+| File | Base contract | Applicability |
+|------|---------------|---------------|
+| [N2-delta-phase-checkpoint-and-resume.md](normative/N2-delta-phase-checkpoint-and-resume.md) | N2 | Persisted workflow state |
+| [N4-delta-policy-compilation-contract.md](normative/N4-delta-policy-compilation-contract.md) | N4 | Policy-pack origination |
+| [N5-delta-supervisory-control-plane.md](normative/N5-delta-supervisory-control-plane.md) | N5 | Miniforge supervisory UI/API |
+| [N5-delta-2-pr-scoring.md](normative/N5-delta-2-pr-scoring.md) | N5 supervisory | Miniforge PR fleet |
+| [N5-delta-3-observational-entities.md](normative/N5-delta-3-observational-entities.md) | N5 supervisory | Miniforge entity projections |
+| [N5-delta-4-automation-edge-correlator.md](normative/N5-delta-4-automation-edge-correlator.md) | N5 supervisory | Miniforge automation causality |
+| [N11-delta-runtime-adapter.md](normative/N11-delta-runtime-adapter.md) | N11 | Governed task runtimes |
+
 ### N7 — Operational Policy Synthesis With Verification ✅
 
 **File:** [normative/N7-Operational-Policy-Synthesis.md](normative/N7-Operational-Policy-Synthesis.md)
@@ -175,7 +211,7 @@ Defines:
 - OPSV workflow family: DISCOVER → PLAN → EXECUTE → CONVERGE → SYNTHESIZE → VERIFY → ACTUATE
 - Verification requirements: pass/fail semantics, success criteria evaluation
 - Fleet Mode integration: per-service policy state, experiment governance
-- Risk scoring and actuation modes (RECOMMEND_ONLY, PR_ONLY, APPLY_ALLOWED)
+- Risk scoring plus requested/effective actuation decisions (RECOMMEND_ONLY, PR_ONLY, APPLY_ALLOWED)
 
 ### N8 — Observability Control Interface 🆕
 
@@ -236,6 +272,23 @@ Defines:
 - Audit integration: full event stream (N3) and evidence bundle (N6) linkage
 - **Tool operational semantics:** Timeout, retry, circuit-breaker, concurrency, fallback (§3.4–§3.5)
 - **Tool response validation:** Schema validation and injection sanitization at capsule boundary (§7.4)
+
+---
+
+### N11 — Task Capsule Isolation 🆕
+
+**File:** [normative/N11-task-capsule-isolation.md](normative/N11-task-capsule-isolation.md)
+**Status:** Draft
+**Purpose:** Make the per-task capsule the primary governed execution boundary
+
+Defines:
+
+- Full enclosure of the agent process, tools, filesystem writes, and emitted artifacts
+- Capsule lifecycle: bootstrap, execute, export, destroy
+- Local vs governed execution modes with no silent downgrade
+- Runtime specification, network, secret, resource, and evidence boundaries
+- TaskExecutor workspace persistence and phase continuity
+- OCI runtime abstraction through the indexed N11 runtime-adapter delta
 
 ---
 
@@ -345,16 +398,11 @@ These documents provide guidance, examples, and context but do NOT define contra
 - [informative/ux-tui-mockups.md](informative/ux-tui-mockups.md) - Visual design for CLI/TUI (informs N5)
 - [informative/ai-ux-flows.md](informative/ai-ux-flows.md) - AI-powered features (informs N3, N5)
 
-### Guides (How-To)
+### Design and Contract Notes
 
-- [informative/getting-started.md](informative/getting-started.md) - First workflow guide
-- [informative/authoring-policies.md](informative/authoring-policies.md) - Policy pack development
-- [informative/writing-workflows.md](informative/writing-workflows.md) - Workflow spec authoring
-- [informative/building-scanners.md](informative/building-scanners.md) - Scanner development
-
-### Vision & Positioning
-
-- [informative/operational-modes.md](informative/operational-modes.md) - OSS vs Paid operational differences
+- [informative/CONFIG-SYSTEM.md](informative/CONFIG-SYSTEM.md) - Configuration precedence and ownership
+- [informative/tool-registry.md](informative/tool-registry.md) - Tool registry guidance
+- [Workflow supervision architecture](informative/I-WORKFLOW-SUPERVISION-MACHINE-ARCHITECTURE.md) - Design note
 
 > Product strategy documents (pricing, roadmap, competitive positioning) are maintained
 > in the private [miniforge-fleet](https://github.com/miniforge-ai/miniforge-fleet) repository.
@@ -362,11 +410,6 @@ These documents provide guidance, examples, and context but do NOT define contra
 ### Future Workflows
 
 - [informative/pr-monitoring-workflow.md](informative/pr-monitoring-workflow.md) - PR monitoring and conflict resolution
-
-### Demo Scripts
-
-- [informative/yc-mvp-demo-script.md](informative/yc-mvp-demo-script.md) -
-  YC-ready MVP demo narrative, flow, and implementation breakdown
 
 ### Architecture & Internals
 
@@ -388,33 +431,6 @@ These documents provide guidance, examples, and context but do NOT define contra
 - [informative/I-INCIDENT-DIAGNOSTICS.md](informative/I-INCIDENT-DIAGNOSTICS.md) -
   Autonomous incident diagnostics and response workflow patterns
 
-### Roadmaps (Experimental/Future)
-
-- [informative/learning-meta-loop.md](informative/learning-meta-loop.md) - Future learning system (post-OSS)
-
----
-
-## Examples (Reference Implementations)
-
-Concrete examples that demonstrate compliance with normative specs.
-
-### Workflow Examples
-
-- [examples/workflows/rds-import.edn](examples/workflows/rds-import.edn) - Import existing RDS to Terraform
-- [examples/workflows/k8s-deployment.edn](examples/workflows/k8s-deployment.edn) - Deploy to Kubernetes
-- [examples/workflows/vpc-network-changes.edn](examples/workflows/vpc-network-changes.edn) - Network infrastructure
-
-### Evidence Bundle Examples
-
-- [examples/evidence/rds-import-bundle.edn](examples/evidence/rds-import-bundle.edn) - Complete evidence bundle
-- [examples/evidence/semantic-validation.edn](examples/evidence/semantic-validation.edn) - Intent validation example
-
-### Policy Pack Examples
-
-- [examples/policy-packs/terraform-aws/](examples/policy-packs/terraform-aws/) - Terraform AWS safety checks
-- [examples/policy-packs/kubernetes/](examples/policy-packs/kubernetes/) - K8s manifest validation
-- [examples/policy-packs/foundations/](examples/policy-packs/foundations/) - General code quality
-
 ---
 
 ## Deprecated Documents
@@ -433,7 +449,7 @@ Documents superseded by normative specs. Retained for reference during migration
 
 ### Language Rules
 
-**Normative specs (N1-N10):**
+**Indexed normative specs:**
 
 - MUST use RFC 2119 keywords: MUST, SHALL, SHOULD, MAY, MUST NOT, SHALL NOT
 - MUST define versioning and compatibility expectations
@@ -447,11 +463,17 @@ Documents superseded by normative specs. Retained for reference during migration
 
 ### Amendment Process
 
-**To add a new concept:**
+**To add or amend a contract:**
 
-1. It MUST land in N1 (glossary + concept model) first
-2. Runtime data MUST land in N3 (events) or N6 (evidence/artifacts)
-3. UX features MUST point to a contract in N3/N5/N6
+1. Universal concepts MUST land in N1
+2. Amendment/extension-local concepts MUST specialize an N1 concept
+3. Event and evidence wire contracts MUST be added to N3 or N6
+4. UX contracts MUST be added to or reference N3, N5, or N6
+
+**Delta amendments:**
+
+A separate delta MUST name its base spec and scope and appear in this index.
+It inherits the base spec's applicability unless this index narrows it.
 
 **Extension specs (N7+):**
 
@@ -465,12 +487,11 @@ They MUST:
 
 **Rules to prevent spec explosion:**
 
-1. **Core specs (N1-N6)** define fundamental contracts
-2. **Extension specs (N7+)** define cross-cutting capabilities
-3. **Every new concept must land in N1** or it's not real
-4. **Every new runtime datum must land in N3 or N6** or it's unobservable
-5. **Every UX feature must point to a contract** or it's just a mock
-6. **Roadmaps never contain contracts** - they link to specs
+1. **Core specs (N1-N6)** define universal contracts
+2. **Indexed deltas** amend a named contract without duplicating it
+3. **Extension specs (N7+)** define scoped product/capability requirements
+4. **Wire contracts stay centralized** in N3/N5/N6
+5. **Roadmaps never contain contracts** - they link to specs
 
 ### Conformance
 
@@ -506,6 +527,19 @@ Normative specs are enforced by:
 
 ## Version History
 
+- **0.10.0-draft** (2026-08-05) - N3 spec-completion pass. **N3**: canonical event type registry (§6),
+  schema evolution and consumer compatibility rules (§7), sensitive-data and redaction contract (§8),
+  emission-failure semantics with fail-closed durable/audit classes (§9), conformance requirement IDs
+  and test obligations (§10.4–§10.5), workflow control and checkpoint event family (§3.21) sourced from
+  N2 §5 and N2-delta §9, `listener/overflow` defined (§3.15), supervisory family enumerated at twelve
+  members (§3.19.1), retention classes (§4.3.1–§4.3.3), scope-key table generalized beyond PR-only
+  (§2.3). Contract fixes: `:pr/id` unified as PR Work Item UUID with `:pr/number` for provider numbers,
+  bare `:timestamp` removed, `:event/sequence-number` unified on `long`, duplicate §3.17 resolved
+  (Data Foundry → §3.20). Annex A records implementation divergence as tracked work.
+  Per-spec bumps: N3 0.9→0.10
+- **0.9.0-draft** (2026-08-04) - Indexed every normative amendment and extension with explicit
+  product applicability; reconciled N7 requested/effective actuation, OPSV event/evidence
+  correlation, and N8/N10 governance semantics
 - **0.8.0-draft** (2026-07-23) - Added N14 (Shared Deliberation Workspace) and N15 (Collective-Cognition
   Evaluation Harness). N14 is a speculative spec: conformance binds experimental implementations pre-gate and
   the spec demotes to Informative as a recorded negative result if N15 Gate G0 fails. N15's core protocol

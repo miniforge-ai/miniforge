@@ -10,6 +10,7 @@
                        "components/config/resources"
                        "components/algorithms/src"
                        "components/content-hash/src"
+                       "components/opsv/src"
                        "components/logging/src"
                        "components/logging/resources"
                        "components/llm/src"
@@ -53,6 +54,8 @@
                        "components/phase/resources"
                        "components/phase-software-factory/src"
                        "components/phase-software-factory/resources"
+                       "components/phase-opsv/src"
+                       "components/phase-opsv/resources"
                        "components/gate/src"
                        "components/workflow/src"
                        "components/workflow/resources"
@@ -217,6 +220,7 @@
                       ai.miniforge/lsp-mcp-bridge {:local/root "bases/lsp-mcp-bridge"}
                       ai.miniforge/algorithms {:local/root "components/algorithms"}
                       ai.miniforge/content-hash {:local/root "components/content-hash"}
+                      ai.miniforge/opsv {:local/root "components/opsv"}
                       ai.miniforge/logging {:local/root "components/logging"}
                       ai.miniforge/llm {:local/root "components/llm"}
                       ai.miniforge/tool {:local/root "components/tool"}
@@ -244,6 +248,7 @@
                       ai.miniforge/fsm {:local/root "components/fsm"}
                       ai.miniforge/phase {:local/root "components/phase"}
                       ai.miniforge/phase-software-factory {:local/root "components/phase-software-factory"}
+                      ai.miniforge/phase-opsv {:local/root "components/phase-opsv"}
                       ai.miniforge/gate {:local/root "components/gate"}
                       ai.miniforge/workflow {:local/root "components/workflow"}
                       ai.miniforge/workflow-financial-etl {:local/root "components/workflow-financial-etl"}
@@ -343,6 +348,7 @@
                        "components/config/test"
                        "components/algorithms/test"
                        "components/content-hash/test"
+                       "components/opsv/test"
                        "components/response/test"
                        "components/fsm/test"
                        "components/logging/test"
@@ -372,6 +378,8 @@
                        "components/heuristic/test"
                        "components/phase/test"
                        "components/phase-software-factory/test"
+                       "components/phase-opsv/test"
+                       "components/phase-opsv/test-resources"
                        "components/gate/test"
                        "components/workflow/test"
                        "components/workflow/test-resources"
@@ -486,6 +494,7 @@
                       ai.miniforge/config {:local/root "components/config"}
                       ai.miniforge/algorithms {:local/root "components/algorithms"}
                       ai.miniforge/content-hash {:local/root "components/content-hash"}
+                      ai.miniforge/opsv {:local/root "components/opsv"}
                       ai.miniforge/logging {:local/root "components/logging"}
                       ai.miniforge/llm {:local/root "components/llm"}
                       ai.miniforge/tool {:local/root "components/tool"}
@@ -512,6 +521,7 @@
                       ai.miniforge/fsm {:local/root "components/fsm"}
                       ai.miniforge/phase {:local/root "components/phase"}
                       ai.miniforge/phase-software-factory {:local/root "components/phase-software-factory"}
+                      ai.miniforge/phase-opsv {:local/root "components/phase-opsv"}
                       ai.miniforge/gate {:local/root "components/gate"}
                       ai.miniforge/workflow {:local/root "components/workflow"}
                       ai.miniforge/workflow-financial-etl {:local/root "components/workflow-financial-etl"}
@@ -587,6 +597,8 @@
                               "components/algorithms/test"
                               "components/content-hash/src"
                               "components/content-hash/test"
+                              "components/opsv/src"
+                              "components/opsv/test"
                               "components/logging/src"
                               "components/logging/test"
                               "components/llm/src"
@@ -638,6 +650,7 @@
                 :extra-deps {ai.miniforge/schema {:local/root "components/schema"}
                              ai.miniforge/algorithms {:local/root "components/algorithms"}
                              ai.miniforge/content-hash {:local/root "components/content-hash"}
+                             ai.miniforge/opsv {:local/root "components/opsv"}
                              ai.miniforge/logging {:local/root "components/logging"}
                              ai.miniforge/llm {:local/root "components/llm"}
                              ai.miniforge/tool {:local/root "components/tool"}

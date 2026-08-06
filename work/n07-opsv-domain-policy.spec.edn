@@ -1,0 +1,43 @@
+{:spec/title "Implement OPSV risk, convergence, verification, and authority decisions"
+
+ :spec/description
+ "Add pure domain functions for normalized explainable risk scoring, bounded
+  deterministic convergence, per-criterion verification, and monotonic effective
+  actuation. Effective authority combines requested mode, verification, N4 gates,
+  N8 safe mode, and current N10 capability without ever promoting autonomy."
+
+ :spec/intent
+ {:type :feature
+  :scope ["components/opsv/src/**"
+          "components/opsv/test/**"]}
+
+ :normative-refs
+ ["specs/normative/N4-policy-packs.md"
+  "specs/normative/N7-Operational-Policy-Synthesis.md"
+  "specs/normative/N8-observability-control-interface.md"
+  "specs/normative/N10-governed-tool-execution.md"]
+
+ :spec/constraints
+ ["Risk and decision functions MUST be deterministic and side-effect free"
+  "Convergence MUST terminate on success, abort, confidence, or iteration limit"
+  "Verification failure MUST make direct apply impossible"
+  "Safe mode MUST force effective actuation to :none"]
+
+ :spec/acceptance-criteria
+ ["assess-risk returns a normalized score, canonical level, and additive explainable factors"
+  "converge returns a typed terminal reason before exceeding the declared iteration limit"
+  "verify-policy emits one result per criterion plus overall confidence and caveats"
+  "effective-actuation never returns a mode more autonomous than the requested mode"
+  "effective-actuation returns :apply-allowed only with verification, gates, capability, rollback, and postconditions"]
+
+ :spec/priority
+ {:tier :blocker
+  :axes #{:correctness :dogfood-enabler}
+  :theme :operational-policy-synthesis
+  :rationale "The workflow cannot safely converge or actuate until its policy decisions are executable pure functions."
+  :blocks ["n07-opsv-workflow.spec.edn"
+           "n07-opsv-governed-actuation.spec.edn"]
+  :blocked-by ["n07-opsv-contracts.spec.edn"]}
+
+ :dag/id :n07-opsv-domain-policy
+ :spec/workflow-type :canonical-sdlc}
