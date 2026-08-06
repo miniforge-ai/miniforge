@@ -37,6 +37,8 @@
    [ai.miniforge.cli.workflow-runner.context :as context]
    [ai.miniforge.cli.workflow-runner.control :as control]
    [ai.miniforge.cli.workflow-runner.paths :as paths]
+   [ai.miniforge.cli.workflow-runner.process :as process]
+   [ai.miniforge.cli.workflow-runner.provenance :as provenance]
    [ai.miniforge.cli.workflow-runner.spec-kanban :as spec-kanban]
    [ai.miniforge.cli.workflow-runner.sandbox :as sandbox]
    [ai.miniforge.cli.workflow-runner.dashboard :as dashboard]
@@ -110,59 +112,11 @@
   []
   (gc-hooks/run-gc-pass-best-effort! worktree/worktree-root gc-queue/run-deferred-gc!))
 
-(defn- ^{:stratum 0} print-colored-lines!
-  [quiet lines]
-  (when-not quiet
-    (doseq [[color line] lines]
-      (println (display/colorize color line)))))
-
-(defn- ^{:stratum 0} runtime-provenance-lines
-  [context]
-  (concat
-   [[:cyan (messages/t :workflow-runner/runtime-source
-                       {:path (:source-root context)})]
-    [:cyan (messages/t :workflow-runner/runtime-worktree
-                       {:path (:worktree-path context)})]]
-   (when-let [branch (:git-branch context)]
-     [[:cyan (messages/t :workflow-runner/runtime-branch {:branch branch})]])
-   (when-let [commit (:git-commit context)]
-     [[:cyan (messages/t :workflow-runner/runtime-commit {:commit commit})]])
-   (when-let [upstream (:git-upstream context)]
-     [[:cyan (messages/t :workflow-runner/runtime-upstream {:upstream upstream})]])
-   (when (:git-detached? context)
-     [[:yellow (messages/t :workflow-runner/runtime-detached-warning)]])
-   (when (:git-dirty? context)
-     [[:yellow (messages/t :workflow-runner/runtime-dirty-warning)]])))
-
 (def ^{:stratum 0} ^:private workflow-runner-config
   (delay
     (resource-config/merged-resource-config "config/cli/workflow-runner.edn"
                                             :workflow-runner
                                             {})))
-
-(defn- ^{:stratum 0} cli-process-env
-  []
-  (when (System/getenv "CLAUDECODE")
-    (into {} (remove (fn [[k _]] (= k "CLAUDECODE"))) (System/getenv))))
-
-(defn- ^{:stratum 0} stream-reader
-  [stream]
-  (future
-    (with-open [stream stream]
-      (slurp stream))))
-
-(defn- ^{:stratum 0} destroy-cli-process!
-  [^Process process]
-  (try
-    (.destroyForcibly process)
-    (.waitFor process 1000 java.util.concurrent.TimeUnit/MILLISECONDS)
-    (catch Exception _ nil)))
-
-(defn- ^{:stratum 0} await-stream
-  [stream-future]
-  (try
-    @stream-future
-    (catch Exception _ "")))
 
 (defn- ^{:stratum 0} success-response
   [output]
@@ -187,16 +141,6 @@
 (defn- ^{:stratum 0} with-backend-version
   [stamp version]
   (assoc stamp :cmd-version version))
-
-(defn- ^{:stratum 0} backend-provenance-lines
-  [{:keys [backend cmd-path cmd-version]}]
-  (concat
-   [[:cyan (messages/t :workflow-runner/backend-label
-                       {:backend (name backend)})]]
-   (when cmd-path
-     [[:cyan (messages/t :workflow-runner/backend-path {:path cmd-path})]])
-   (when cmd-version
-     [[:cyan (messages/t :workflow-runner/backend-version {:version cmd-version})]])))
 
 (defn- ^{:stratum 0} parse-preflight-payload
   [content]
@@ -425,24 +369,8 @@
 
 ;------------------------------------------------------------------------------ Layer 1
 
-(defn- ^{:stratum 1} print-runtime-provenance!
-  [quiet context]
-  (print-colored-lines! quiet (runtime-provenance-lines context)))
-
 (defn- ^{:stratum 1} backend-preflight-config []
   (:backend-preflight @workflow-runner-config))
-
-(defn- ^{:stratum 1} start-cli-process
-  [cmd workdir]
-  (let [builder (ProcessBuilder. ^java.util.List cmd)]
-    (when-let [process-env (cli-process-env)]
-      (let [env (.environment builder)]
-        (.clear env)
-        (doseq [[k v] process-env]
-          (.put env k v))))
-    (when workdir
-      (.directory builder (java.io.File. workdir)))
-    (.start builder)))
 
 (defn- ^{:stratum 1} response-summary
   [response]
@@ -450,12 +378,6 @@
    (select-keys response [:success :error :anomaly :exit-code])
    (select-keys (response-output response)
                 [:content :exit-code :version])))
-
-(defn- ^{:stratum 1} print-backend-provenance!
-  [quiet {:keys [backend cmd-path cmd-version]}]
-  (print-colored-lines! quiet (backend-provenance-lines {:backend backend
-                                                         :cmd-path cmd-path
-                                                         :cmd-version cmd-version})))
 
 (defn- ^{:stratum 1} normalized-preflight-content
   [content]
@@ -648,27 +570,6 @@
 (defn- ^{:stratum 2} claude-preflight-args []
   (:claude-args (backend-preflight-config)))
 
-(defn- ^{:stratum 2} run-cli-command
-  [cmd timeout-ms & {:keys [workdir]}]
-  (let [^Process process (start-cli-process cmd workdir)
-        _ (.close (.getOutputStream process))
-        out-future (stream-reader (.getInputStream process))
-        err-future (stream-reader (.getErrorStream process))
-        completed? (.waitFor process timeout-ms java.util.concurrent.TimeUnit/MILLISECONDS)]
-    (if-not completed?
-      (do
-        (destroy-cli-process! process)
-        (future-cancel out-future)
-        (future-cancel err-future)
-        {:out ""
-         :err (messages/t :workflow-runner/cli-process-timeout
-                          {:timeout-ms timeout-ms})
-         :exit -1
-         :timeout-ms timeout-ms})
-      {:out (await-stream out-future)
-       :err (await-stream err-future)
-       :exit (.exitValue process)})))
-
 (defn- ^{:stratum 2} preflight-success?
   [content]
   (= {:ok true} (parse-preflight-payload (normalized-preflight-content content))))
@@ -829,7 +730,7 @@
 
 (defn- ^{:stratum 3} read-cli-version
   [cmd-path]
-  (let [{:keys [out err exit timeout-ms]} (run-cli-command [cmd-path "--version"] (backend-version-timeout-ms))]
+  (let [{:keys [out err exit timeout-ms]} (process/run-cli-command [cmd-path "--version"] (backend-version-timeout-ms))]
     (cond
       timeout-ms
       (failure-response :anomalies/unavailable
@@ -879,7 +780,7 @@
   (let [{:keys [backend]} (:config llm-client)
         backend-config (get llm/backends backend)
         full-cmd (into [cmd-path] (rest (generic-preflight-command llm-client)))
-        {:keys [out err exit timeout-ms]} (run-cli-command full-cmd
+        {:keys [out err exit timeout-ms]} (process/run-cli-command full-cmd
                                                            (backend-preflight-timeout-ms)
                                                            :workdir workdir)
         content (decoded-preflight-content backend-config out)]
@@ -921,7 +822,7 @@
 
 (defn- ^{:stratum 4} run-claude-backend-preflight
   [cmd-path workdir]
-  (let [{:keys [out err exit timeout-ms]} (run-cli-command (claude-preflight-command cmd-path)
+  (let [{:keys [out err exit timeout-ms]} (process/run-cli-command (claude-preflight-command cmd-path)
                                                            (backend-preflight-timeout-ms)
                                                            :workdir workdir)
         trimmed (some-> out str/trim)
@@ -997,7 +898,7 @@
     (let [stamp (-> stamp
                     ensure-cli-command-path!
                     versioned-backend-stamp)]
-      (print-backend-provenance! quiet stamp)
+      (provenance/print-backend-provenance! quiet stamp)
       (verify-backend-probe! llm-client stamp (:worktree-path context)))))
 
 ;------------------------------------------------------------------------------ Layer 8
@@ -1070,7 +971,7 @@
           (display/print-workflow-header (keyword (str "adhoc-" (hash spec))) "adhoc" quiet))
         (dashboard/print-dashboard-status! quiet)
         (assert-runtime-alignment! spec context)
-        (print-runtime-provenance! quiet context)
+        (provenance/print-runtime-provenance! quiet context)
         (run-backend-preflight! quiet llm-client context)
         (let [provenance (spec-kanban/move-spec-to-in-progress! (:spec/provenance enriched-spec))
               result (execute-with-events {:run-pipeline run-pipeline
