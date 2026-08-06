@@ -74,52 +74,61 @@
                         :anomaly/message "no movement"}}
              (gap-wiring/terminal-signal {:error err}))))))
 
-(deftest ^{:stratum 0} recording-is-a-no-op-without-a-configured-codex
-  (let [dir (str (java.nio.file.Files/createTempDirectory
-                   "gap-wiring-test-"
-                   (into-array java.nio.file.attribute.FileAttribute [])))
-        ctx {:execution/checkpoint-root dir
-             :execution/id "run-x"
-             :phase {:phase/status :failed
-                     :phase/gate-errors [{:reason/code :reason/gate-check-failed
-                                          :reason/detail "x"}]}}]
-    (gap-wiring/record-phase-misses! ctx :implement nil)
-    (is (= {:entries [] :skipped 0}
-           (gap/read-ledger (str dir "/run-x")))
-        "no codex configured -> no gap to measure -> nothing written")))
+(defn- ^{:stratum 0} temp-root
+  "Fresh temp checkpoint root for one test run."
+  []
+  (str (java.nio.file.Files/createTempDirectory
+         "gap-wiring-test-"
+         (into-array java.nio.file.attribute.FileAttribute []))))
 
-(deftest ^{:stratum 0} recording-never-throws-on-a-broken-codex-dir
-  (let [dir (str (java.nio.file.Files/createTempDirectory
-                   "gap-wiring-test-"
-                   (into-array java.nio.file.attribute.FileAttribute [])))
-        ctx {:execution/checkpoint-root dir
-             :execution/id "run-y"
-             :phase {:result {:output {:review/blocking-issues ["boom"]}}}}]
-    ;; unreadable codex: consider/load-graph return anomalies; entries
-    ;; still classify (landings-unavailable -> review queue) and record
-    (gap-wiring/record-phase-misses! ctx :review "/nonexistent/codex")
-    (let [{:keys [entries]} (gap/read-ledger (str dir "/run-y"))]
-      (is (= 1 (count entries)))
-      (is (= :review-queue (:miss/bucket (first entries))))
-      (is (= "quality-signal-might-be-lying"
-             (:miss/situation (first entries)))))))
+(defn- ^{:stratum 0} run-ctx
+  "Execution-context fragment shaped like the runner's real ctx at phase
+   leave: workflow.context/create-context sets :execution/checkpoint-root,
+   :execution/id, and :execution/logger; the phase interceptor stack sets
+   :phase. Extras merge over the base."
+  [root run-id & {:as extra}]
+  (merge {:execution/checkpoint-root root
+          :execution/id run-id}
+         extra))
 
-(deftest ^{:stratum 0} ledger-write-failure-warns-through-the-context-logger
+;------------------------------------------------------------------------------ Layer 1
+
+(deftest ^{:stratum 1} recording-is-a-no-op-without-a-configured-codex
+  (testing "no codex configured → no gap to measure → nothing written"
+    (let [dir (temp-root)
+          ctx (run-ctx dir "run-x"
+                       :phase {:phase/status :failed
+                               :phase/gate-errors [{:reason/code :reason/gate-check-failed
+                                                    :reason/detail "x"}]})]
+      (gap-wiring/record-phase-misses! ctx :implement nil)
+      (is (= {:entries [] :skipped 0}
+             (gap/read-ledger (str dir "/run-x")))))))
+
+(deftest ^{:stratum 1} recording-never-throws-on-a-broken-codex-dir
+  (testing "unreadable codex → entries still classify (landings-unavailable → review queue) and record"
+    (let [dir (temp-root)
+          ctx (run-ctx dir "run-y"
+                       :phase {:result {:output {:review/blocking-issues ["boom"]}}})]
+      (gap-wiring/record-phase-misses! ctx :review "/nonexistent/codex")
+      (let [{:keys [entries]} (gap/read-ledger (str dir "/run-y"))]
+        (is (= 1 (count entries)))
+        (is (= :review-queue (:miss/bucket (first entries))))
+        (is (= "quality-signal-might-be-lying"
+               (:miss/situation (first entries))))))))
+
+(deftest ^{:stratum 1} ledger-write-failure-warns-through-the-context-logger
   ;; The workflow runner normalizes :execution/logger at context creation
   ;; (workflow.context), so this warn path is live in production runs —
   ;; before that, no writer set the key and the warning vanished.
-  (let [root (str (java.nio.file.Files/createTempDirectory
-                    "gap-wiring-test-"
-                    (into-array java.nio.file.attribute.FileAttribute [])))
-        ;; occupy the run-dir path with a FILE so the ledger append fails
-        _ (spit (str root "/run-z") "occupied")
-        [logger entries] (log/collecting-logger)
-        ctx {:execution/checkpoint-root root
-             :execution/id "run-z"
-             :execution/logger logger
-             :phase {:result {:output {:review/blocking-issues ["boom"]}}}}]
-    (gap-wiring/record-phase-misses! ctx :review "/nonexistent/codex")
-    (is (= [:codex-gap/ledger-write-failed]
-           (mapv :log/event @entries))
-        "the best-effort warning must reach the ctx logger, not vanish")
-    (is (= [:warn] (mapv :log/level @entries)))))
+  (testing "run-dir path occupied by a file (ledger append fails) → warn reaches :execution/logger"
+    (let [root (temp-root)
+          _ (spit (str root "/run-z") "occupied")
+          [logger entries] (log/collecting-logger)
+          ctx (run-ctx root "run-z"
+                       :execution/logger logger
+                       :phase {:result {:output {:review/blocking-issues ["boom"]}}})]
+      (gap-wiring/record-phase-misses! ctx :review "/nonexistent/codex")
+      (is (= [:codex-gap/ledger-write-failed]
+             (mapv :log/event @entries))
+          "the best-effort warning must reach the ctx logger, not vanish")
+      (is (= [:warn] (mapv :log/level @entries))))))

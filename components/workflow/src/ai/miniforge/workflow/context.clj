@@ -254,7 +254,13 @@
    canonical writer of :execution/logger — before it existed, no writer
    set the key at all, so every consumer guarding on it (gap-wiring's
    ledger-failure warnings, codex-pin's consultation-skipped warning,
-   the phase loggers) silently dropped its best-effort warnings."
+   the phase loggers) silently dropped its best-effort warnings.
+
+   `or`, not `(get opts :logger default)` (rule 210 exception,
+   documented): the invariant is that the key is ALWAYS a usable
+   logger, so an opts map carrying an explicitly nil :logger must
+   still resolve to the default — `get` would adopt the nil and
+   resurrect the silent-drop bug this exists to fix."
   [opts]
   (or (:logger opts) default-execution-logger))
 
