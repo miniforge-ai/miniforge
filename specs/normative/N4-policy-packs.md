@@ -616,6 +616,32 @@ inherited rule at different severities.
 reference it; they MUST NOT restate it. Where a restatement exists and differs,
 this section governs.
 
+#### 3.3.1 Findings vs Recorded Violations
+
+The schema above describes a violation **as recorded** — in the gate result,
+the evidence bundle, and the event stream. A check function does not produce
+that map directly, and MUST NOT be expected to.
+
+Three fields are unknowable to a check function:
+
+| Field | Why the runtime supplies it |
+|-------|-----------------------------|
+| `:violation/id` | Minting a UUID is impure and non-deterministic; §3.1.1 forbids both |
+| `:violation/gate-id` | The gate invokes the rule; the rule does not know which one |
+| `:violation/pack-id` | Determined by §5.3 resolution, which happens above the rule |
+
+A check function therefore returns **findings**: violation maps carrying every
+field it can know — at minimum `:violation/rule-id`, `:violation/severity`,
+`:violation/message`, `:violation/auto-fixable?`, and
+`:violation/remediation`, plus `:violation/location` where applicable.
+
+The gate runtime MUST complete each finding into a conformant violation before
+recording it, supplying the three fields above. A finding is not a violation
+until completed; nothing outside the gate runtime observes an incomplete one.
+
+The examples in §3.1.2 and §4.2 return findings, which is why they carry no
+`:violation/id` or `:violation/gate-id`.
+
 ### 3.4 Validation Layer Taxonomy
 
 Validation in miniforge occurs at multiple layers with distinct responsibilities.
@@ -664,13 +690,16 @@ untrusted material reaches the system.
 
 A check function that throws, times out, or returns a value not matching the
 §3.1 shape MUST be treated as a **failure of that rule**, not as a pass and not
-as an absent rule. Implementations MUST synthesize a violation carrying:
+as an absent rule. The runtime MUST synthesize a **complete** violation per
+§3.3 — it is the gate runtime, so unlike a check function it knows all three
+fields of §3.3.1. Beyond the schema's requirements, the synthesized violation
+MUST carry:
 
 - `:violation/rule-id` — the rule that failed to execute
 - `:violation/severity` — the rule's declared `:rule/severity`
 - `:failure/class` — the canonical class per N1 §5.3.3
 - `:violation/auto-fixable?` — `false`
-- a message naming the execution failure rather than a policy finding
+- `:violation/message` — naming the execution failure rather than a policy finding
 
 Treating an erroring check as a pass converts every crash into a silent
 approval, which is the failure mode a policy gate exists to prevent. A rule
@@ -1773,15 +1802,15 @@ miniforge policy import terraform-aws.edn
 
 ## 11. Example Policy Pack
 
-### 11.1 Complete Example: Terraform Foundations
+### 11.1 Complete Example: A Third-Party Pack
 
 ```clojure
-{:pack/id      :miniforge/terraform-foundations
+{:pack/id      :acme/terraform-foundations
  :pack/version "1.0.0"
- :pack/title   "Terraform Foundations"
+ :pack/title   "Acme Terraform Foundations"
 
  :pack/description "Basic Terraform security and best practices"
- :pack/author      "miniforge.ai"
+ :pack/author      "acme.example"
  :pack/license     "Apache-2.0"
 
  :pack/taxonomy-ref
@@ -1789,7 +1818,7 @@ miniforge policy import terraform-aws.edn
   :taxonomy/min-version "1.0.0"}
 
  :pack/rules
- [{:rule/id          :mf.rule/no-hardcoded-secrets
+ [{:rule/id          :acme.rule/no-hardcoded-secrets
    :rule/title       "No Hardcoded Secrets"
    :rule/description "Detects hardcoded secrets in Terraform code"
    :rule/categories  [:dewey/security]
@@ -1802,7 +1831,7 @@ miniforge policy import terraform-aws.edn
    :rule/remediation-template
    "Move secrets to AWS Secrets Manager or environment variables"}
 
-  {:rule/id          :mf.rule/require-tags
+  {:rule/id          :acme.rule/require-tags
    :rule/title       "Require Resource Tags"
    :rule/description "All resources must have required tags"
    :rule/categories  [:dewey/operations]
@@ -1822,6 +1851,10 @@ miniforge policy import terraform-aws.edn
   :created-at   #inst "2026-01-23"
   :updated-at   #inst "2026-01-23"}}
 ```
+
+The `:acme/*` and `:acme.rule/*` namespaces are deliberate: this is a
+third-party pack, not a standard one. It is not in the §5.1 registry, and its
+name deliberately does not collide with the standard `:miniforge/terraform-aws`.
 
 This example is schema-valid against §2.2 and §2.3 as written. Earlier drafts
 of this section used a `:policy-pack/*` key namespace and a `:rule/name` field
