@@ -1,0 +1,20 @@
+;; Title: Miniforge.ai
+;; Author: Christopher Lester (christopher@miniforge.ai)
+;; Copyright 2025-2026 Christopher Lester. Licensed under Apache 2.0.
+
+{:workflow/id :opsv
+ :workflow/version "1.0.0"
+ :workflow/name "Operational Policy Synthesis"
+ :workflow/description "Discover, test, synthesize, verify, and govern an operational policy."
+ :workflow/pipeline
+ [{:phase :opsv/discover}
+  {:phase :opsv/plan}
+  {:phase :opsv/execute}
+  {:phase :opsv/converge}
+  {:phase :opsv/synthesize}
+  {:phase :opsv/verify}
+  {:phase :opsv/actuate}
+  {:phase :done}]
+ :workflow/config
+ {:max-iterations 8
+  :failure-strategy :fail-fast}}

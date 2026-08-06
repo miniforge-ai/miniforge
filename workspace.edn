@@ -69,6 +69,7 @@
                                           "workflow-compliance-scanner"
                                           "workflow-deployment"
                                           "workflow-financial-etl"
+                                          "workflow-opsv"
                                           "workflow-software-factory"]}
             "miniforge-tui"  {:alias "tui"
                               ;; miniforge-tui is being replaced by miniforge-console; the

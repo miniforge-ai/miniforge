@@ -9,6 +9,7 @@
         ai.miniforge/workflow-financial-etl {:local/root "../../components/workflow-financial-etl"}
         ai.miniforge/phase-software-factory {:local/root "../../components/phase-software-factory"}
         ai.miniforge/phase-opsv {:local/root "../../components/phase-opsv"}
+        ai.miniforge/workflow-opsv {:local/root "../../components/workflow-opsv"}
         ;; Deployment pack: Pulumi/Kustomize orchestration with policy gates and evidence
         ai.miniforge/phase-deployment {:local/root "../../components/phase-deployment"}
         ai.miniforge/workflow-deployment {:local/root "../../components/workflow-deployment"}
