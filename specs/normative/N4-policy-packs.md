@@ -1582,7 +1582,7 @@ For trusted policy packs, implementations MAY require cryptographic signatures:
 ```clojure
 {:pack/signature "base64-encoded-ed25519-signature"  ; over §8.1.1 bytes
  :pack/signed-by "base64-encoded-ed25519-public-key" ; publisher key
- :pack/signed-at #inst "2026-08-05T00:00:00Z"}
+ :pack/signed-at #inst "2026-08-05T00:00:00.000Z"}
 ```
 
 These are three flat fields on the pack map, matching `:pack/signature string`
@@ -1620,6 +1620,12 @@ identical bytes, so the rendering is fixed:
   iteration order is not defined.
 - **Scalars** — instants as ISO-8601 UTC with millisecond precision; no
   numeric reformatting beyond the EDN reader's round-trip form.
+
+These rules govern the **rendering** of the signed bytes, not what a pack
+author may write. `#inst "2026-01-23"` is valid EDN and a pack may contain it;
+the canonicalizer renders it as `#inst "2026-01-23T00:00:00.000Z"`. Examples
+in this spec show the canonical form so that copying one does not introduce a
+difference between what a reader sees and what gets signed.
 
 The pack **content hash** referenced by §5.5 and N1 §2.10.4.1 is a digest of
 this same byte sequence. It identifies the pack; it is not what the signature
@@ -1872,8 +1878,8 @@ miniforge policy import terraform-aws.edn
  :pack/metadata
  {:tags         ["terraform" "security" "best-practices"]
   :target-types [:infrastructure-change]
-  :created-at   #inst "2026-01-23"
-  :updated-at   #inst "2026-01-23"}}
+  :created-at   #inst "2026-01-23T00:00:00.000Z"
+  :updated-at   #inst "2026-01-23T00:00:00.000Z"}}
 ```
 
 The `:acme/*` and `:acme.rule/*` namespaces are deliberate: this is a

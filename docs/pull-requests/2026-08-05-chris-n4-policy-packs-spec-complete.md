@@ -134,10 +134,15 @@ contract.
 - **Specified, not implemented** — multi-pack resolution, gate binding,
   execution bounds, isolation, determinism sampling, and the waiver enforcement
   path.
-- **Implemented, matching** — recorded because this revision writes contracts
-  the code already satisfies: `pack-signable-bytes` implements §8.1.1's
-  algorithm exactly, and `normalize-severity` is the seam §2.3.1's legacy
-  handling extends.
+- **Implemented, matching in shape** — `pack-signable-bytes` already dissocs
+  the signature fields, sorts top-level keys, and serializes `pr-str` as UTF-8,
+  which is the broad shape §8.1.1 specifies. Two rendering rules are missing:
+  recursive map ordering and set normalization. Either can make the same pack
+  serialize to different bytes across runs, so a signature valid on one machine
+  fails on another — Annex A records it as a signature interoperability bug,
+  not merely an unimplemented requirement.
+- **Implemented, matching** — `normalize-severity` is the existing seam
+  §2.3.1's legacy handling extends.
 - **Structural** — eight code citations point at "N4 §2.4.2" (knowledge-safety,
   moved to §2.7.2 in 0.6); N2 §6.5 restates the violation schema with a string
   rule ID, which §3.3 now declares itself authoritative over.
