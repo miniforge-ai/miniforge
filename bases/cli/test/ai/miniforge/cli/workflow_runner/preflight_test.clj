@@ -22,7 +22,8 @@
    [clojure.test :refer [deftest is testing]]
    [slingshot.slingshot :refer [try+]]
    [ai.miniforge.llm.interface :as llm]
-   [ai.miniforge.cli.workflow-runner :as sut]))
+   [ai.miniforge.cli.workflow-runner :as sut]
+   [ai.miniforge.cli.workflow-runner.paths :as paths]))
 
 ;------------------------------------------------------------------------------ Layer 0
 
@@ -68,7 +69,7 @@
     (let [llm-client (llm/mock-client {:output "{\"ok\":true}"})
           preflight-client (atom nil)
           output (with-out-str
-                   (with-redefs-fn {#'sut/resolve-cli-command-path (fn [_] "/Users/chris/.local/bin/claude")
+                   (with-redefs-fn {#'paths/resolve-cli-command-path (fn [_] "/Users/chris/.local/bin/claude")
                                     #'sut/read-cli-version (fn [_] {:success true :version "2.1.126"})
                                     #'sut/run-claude-backend-preflight (fn [cmd-path workdir]
                                                                          (is (= "/Users/chris/.local/bin/claude" cmd-path))
@@ -93,7 +94,7 @@
   (testing "backend preflight carries the resolved path and version when the probe fails"
     (let [llm-client (llm/mock-client {:output "{\"ok\":true}"})]
       (try+
-        (with-redefs-fn {#'sut/resolve-cli-command-path (fn [_] "/opt/homebrew/bin/claude")
+        (with-redefs-fn {#'paths/resolve-cli-command-path (fn [_] "/opt/homebrew/bin/claude")
                          #'sut/read-cli-version (fn [_] {:success true :version "2.1.89"})
                          #'sut/run-claude-backend-preflight (fn [_cmd-path _workdir]
                                                               {:success false
@@ -117,7 +118,7 @@
   (testing "Claude preflight accepts success envelopes whose result field contains the canonical payload"
     (let [llm-client (llm/mock-client {:output "{\"ok\":true}"})
           output (with-out-str
-                   (with-redefs-fn {#'sut/resolve-cli-command-path (fn [_] "/opt/homebrew/bin/claude")
+                   (with-redefs-fn {#'paths/resolve-cli-command-path (fn [_] "/opt/homebrew/bin/claude")
                                     #'sut/read-cli-version (fn [_] {:success true :version "2.1.118 (Claude Code)"})
                                     #'sut/run-cli-command (fn [_cmd _timeout-ms & _]
                                                             {:out "{\"type\":\"result\",\"subtype\":\"success\",\"result\":\"{\\\"ok\\\":true}\"}"
@@ -136,7 +137,7 @@
   (testing "Claude preflight rejects wrapped payloads when the outer result envelope is not successful"
     (let [llm-client (llm/mock-client {:output "{\"ok\":true}"})]
       (try+
-        (with-redefs-fn {#'sut/resolve-cli-command-path (fn [_] "/opt/homebrew/bin/claude")
+        (with-redefs-fn {#'paths/resolve-cli-command-path (fn [_] "/opt/homebrew/bin/claude")
                          #'sut/read-cli-version (fn [_] {:success true :version "2.1.118 (Claude Code)"})
                          #'sut/run-cli-command (fn [_cmd _timeout-ms & _]
                                                  {:out "{\"type\":\"result\",\"subtype\":\"error\",\"is_error\":true,\"result\":\"{\\\"ok\\\":true}\"}"
@@ -161,7 +162,7 @@
           seen-timeout (atom nil)
           seen-workdir (atom nil)
           output (with-out-str
-                   (with-redefs-fn {#'sut/resolve-cli-command-path (fn [_] "/Users/chris/.local/bin/codex")
+                   (with-redefs-fn {#'paths/resolve-cli-command-path (fn [_] "/Users/chris/.local/bin/codex")
                                     #'sut/read-cli-version (fn [_] {:success true :version "1.2.3"})
                                     #'sut/run-cli-command (fn [cmd timeout-ms & {:keys [workdir]}]
                                                             (reset! seen-cmd cmd)

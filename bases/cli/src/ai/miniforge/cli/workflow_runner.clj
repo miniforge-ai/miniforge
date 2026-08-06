@@ -18,7 +18,6 @@
 (ns ai.miniforge.cli.workflow-runner
   (:require
    [ai.miniforge.anomaly.interface :as anomaly]
-   [babashka.fs :as fs]
    [clojure.string :as str]
    [clojure.edn :as edn]
    [cheshire.core :as json]
@@ -37,6 +36,8 @@
    [ai.miniforge.cli.workflow-runner.display :as display]
    [ai.miniforge.cli.workflow-runner.context :as context]
    [ai.miniforge.cli.workflow-runner.control :as control]
+   [ai.miniforge.cli.workflow-runner.paths :as paths]
+   [ai.miniforge.cli.workflow-runner.spec-kanban :as spec-kanban]
    [ai.miniforge.cli.workflow-runner.sandbox :as sandbox]
    [ai.miniforge.cli.workflow-runner.dashboard :as dashboard]
    [ai.miniforge.phase.interface :as phase]
@@ -47,19 +48,6 @@
    [ai.miniforge.cli.workflow-runner.gc-hooks :as gc-hooks]))
 
 ;------------------------------------------------------------------------------ Layer 0
-
-;; Work spec kanban lifecycle
-(def ^{:stratum 0} ^:private work-dirs
-  "Kanban folder structure under work/."
-  {:in-progress "work/in-progress"
-   :done        "work/done"
-   :failed      "work/failed"})
-
-(defn- ^{:stratum 0} work-spec?
-  "True when the spec provenance points to a file under work/."
-  [provenance]
-  (when-let [source (:source-file provenance)]
-    (str/starts-with? (str source) "work/")))
 
 ;; Meta-loop context — process-scoped, accumulates metrics across workflows
 (defn- ^{:stratum 0} trigger-meta-loop-after-workflow!
@@ -122,23 +110,6 @@
   []
   (gc-hooks/run-gc-pass-best-effort! worktree/worktree-root gc-queue/run-deferred-gc!))
 
-;; Source-root and execution-context validation helpers
-(defn- ^{:stratum 0} valid-source-root?
-  [source-root]
-  (and source-root
-       (fs/exists? source-root)
-       (fs/exists? (fs/path source-root ".git"))))
-
-(defn- ^{:stratum 0} normalize-path
-  [path]
-  (when path
-    (let [resolved (-> path
-                       fs/path
-                       fs/absolutize)]
-      (str (if (fs/exists? resolved)
-             (fs/canonicalize resolved)
-             (.normalize resolved))))))
-
 (defn- ^{:stratum 0} print-colored-lines!
   [quiet lines]
   (when-not quiet
@@ -168,22 +139,6 @@
     (resource-config/merged-resource-config "config/cli/workflow-runner.edn"
                                             :workflow-runner
                                             {})))
-
-(defn- ^{:stratum 0} executable-file?
-  [path]
-  (let [file (some-> path fs/file)]
-    (and file
-         (fs/exists? file)
-         (not (fs/directory? file))
-         (fs/executable? file))))
-
-(defn- ^{:stratum 0} direct-command-path?
-  [cmd]
-  (boolean (re-find #"[\\/]" (or cmd ""))))
-
-(defn- ^{:stratum 0} path-entries
-  []
-  (str/split (or (System/getenv "PATH") "") #":"))
 
 (defn- ^{:stratum 0} cli-process-env
   []
@@ -450,49 +405,25 @@
       (println (display/colorize :red (messages/t :workflow-runner/list-chains-failed {:error (ex-message e)})))
       (throw e))))
 
+(defn- ^{:stratum 0} assert-runtime-alignment!
+  [spec context]
+  (paths/assert-valid-source-root! context)
+  (paths/assert-execution-worktree! context)
+  (paths/assert-source-dir-alignment! spec context))
+
+(defn- ^{:stratum 0} backend-stamp
+  [llm-client]
+  (when-let [backend (llm/client-backend llm-client)]
+    (let [backend-config (get llm/backends backend)
+          cmd (:cmd backend-config)
+          cmd-path (when (:requires-cli? backend-config)
+                     (paths/resolve-cli-command-path cmd))]
+      {:backend backend
+       :backend-config backend-config
+       :cmd cmd
+       :cmd-path cmd-path})))
+
 ;------------------------------------------------------------------------------ Layer 1
-
-(defn- ^{:stratum 1} move-spec!
-  "Move a work spec file to the target kanban folder.
-   No-op if the spec isn't under work/ or the file doesn't exist."
-  [provenance target-key]
-  (when (work-spec? provenance)
-    (let [source (str (:source-file provenance))
-          target-dir (get work-dirs target-key)]
-      (when (and target-dir (fs/exists? source))
-        (fs/create-dirs target-dir)
-        (let [target (str target-dir "/" (fs/file-name source))]
-          (fs/move source target {:replace-existing true})
-          target)))))
-
-(defn- ^{:stratum 1} source-dir-under-root?
-  [source-dir source-root]
-  (let [source-dir-path (some-> source-dir normalize-path fs/path)
-        source-root-path (some-> source-root normalize-path fs/path)]
-    (or (nil? source-dir-path)
-        (nil? source-root-path)
-        (.startsWith source-dir-path source-root-path))))
-
-(defn- ^{:stratum 1} assert-valid-source-root!
-  [context]
-  (let [source-root (:source-root context)]
-    (when-not (valid-source-root? source-root)
-      (response/throw-anomaly! :anomalies/incorrect
-                               (str "Invalid workflow source root: " source-root)
-                               {:source-root source-root
-                                :worktree-path (:worktree-path context)}))))
-
-(defn- ^{:stratum 1} assert-execution-worktree!
-  [context]
-  (let [expected (normalize-path (get-in context [:execution/opts :worktree-path]))
-        actual (normalize-path (:worktree-path context))]
-    (when (and expected actual (not= expected actual))
-      (response/throw-anomaly! :anomalies/incorrect
-                               (str "Execution worktree mismatch: expected "
-                                    expected " but runtime is using " actual)
-                               {:expected-worktree expected
-                                :actual-worktree actual
-                                :source-root (:source-root context)}))))
 
 (defn- ^{:stratum 1} print-runtime-provenance!
   [quiet context]
@@ -500,19 +431,6 @@
 
 (defn- ^{:stratum 1} backend-preflight-config []
   (:backend-preflight @workflow-runner-config))
-
-(defn- ^{:stratum 1} normalize-command-path
-  [path]
-  (when (executable-file? path)
-    (str (-> path
-             fs/path
-             fs/absolutize))))
-
-(defn- ^{:stratum 1} matching-command-path
-  [entry cmd]
-  (let [candidate (fs/path entry cmd)]
-    (when (executable-file? candidate)
-      (str candidate))))
 
 (defn- ^{:stratum 1} start-cli-process
   [cmd workdir]
@@ -710,35 +628,13 @@
          (sort-by (juxt :workflow/id :workflow/version))
          format-workflow-listing)))
 
+(defn- ^{:stratum 1} cli-required-backend-stamp
+  [llm-client]
+  (when-let [stamp (backend-stamp llm-client)]
+    (when (:requires-cli? (:backend-config stamp))
+      stamp)))
+
 ;------------------------------------------------------------------------------ Layer 2
-
-(defn ^{:stratum 2} move-spec-to-in-progress!
-  "Move a work spec to in-progress when execution starts.
-   Returns updated provenance with new source-file path,
-   or the original provenance if the move was a no-op."
-  [provenance]
-  (if-let [new-path (move-spec! provenance :in-progress)]
-    (assoc provenance :source-file new-path)
-    provenance))
-
-(defn ^{:stratum 2} move-spec-on-completion!
-  "Move a work spec to done or failed based on workflow result."
-  [provenance result]
-  (if (phase/succeeded? result)
-    (move-spec! provenance :done)
-    (move-spec! provenance :failed)))
-
-(defn- ^{:stratum 2} assert-source-dir-alignment!
-  [spec context]
-  (let [source-dir (:spec/source-dir spec)
-        source-root (:source-root context)]
-    (when-not (source-dir-under-root? source-dir source-root)
-      (response/throw-anomaly! :anomalies/incorrect
-                               (str "Spec source directory is outside the workflow source root: "
-                                    source-dir)
-                               {:source-dir source-dir
-                                :source-root source-root
-                                :worktree-path (:worktree-path context)}))))
 
 (defn- ^{:stratum 2} backend-preflight-prompt []
   (:prompt (backend-preflight-config)))
@@ -751,12 +647,6 @@
 
 (defn- ^{:stratum 2} claude-preflight-args []
   (:claude-args (backend-preflight-config)))
-
-(defn- ^{:stratum 2} portable-command-path
-  [cmd]
-  (some-> cmd
-          fs/which
-          normalize-command-path))
 
 (defn- ^{:stratum 2} run-cli-command
   [cmd timeout-ms & {:keys [workdir]}]
@@ -937,23 +827,6 @@
 
 ;------------------------------------------------------------------------------ Layer 3
 
-(defn- ^{:stratum 3} assert-runtime-alignment!
-  [spec context]
-  (assert-valid-source-root! context)
-  (assert-execution-worktree! context)
-  (assert-source-dir-alignment! spec context))
-
-(defn- ^{:stratum 3} resolve-cli-command-path
-  [cmd]
-  (cond
-    (str/blank? cmd) nil
-    (direct-command-path? cmd)
-    (normalize-command-path cmd)
-
-    :else
-    (or (portable-command-path cmd)
-        (some #(matching-command-path % cmd) (path-entries)))))
-
 (defn- ^{:stratum 3} read-cli-version
   [cmd-path]
   (let [{:keys [out err exit timeout-ms]} (run-cli-command [cmd-path "--version"] (backend-version-timeout-ms))]
@@ -1000,18 +873,6 @@
     (into [cmd] (args-fn request))))
 
 ;------------------------------------------------------------------------------ Layer 4
-
-(defn- ^{:stratum 4} backend-stamp
-  [llm-client]
-  (when-let [backend (llm/client-backend llm-client)]
-    (let [backend-config (get llm/backends backend)
-          cmd (:cmd backend-config)
-          cmd-path (when (:requires-cli? backend-config)
-                     (resolve-cli-command-path cmd))]
-      {:backend backend
-       :backend-config backend-config
-       :cmd cmd
-       :cmd-path cmd-path})))
 
 (defn- ^{:stratum 4} run-generic-backend-preflight
   [llm-client cmd-path workdir]
@@ -1113,12 +974,6 @@
 
 ;------------------------------------------------------------------------------ Layer 5
 
-(defn- ^{:stratum 5} cli-required-backend-stamp
-  [llm-client]
-  (when-let [stamp (backend-stamp llm-client)]
-    (when (:requires-cli? (:backend-config stamp))
-      stamp)))
-
 (defn- ^{:stratum 5} run-backend-probe
   [llm-client {:keys [backend cmd-path]} workdir]
   (if (= backend :claude)
@@ -1217,7 +1072,7 @@
         (assert-runtime-alignment! spec context)
         (print-runtime-provenance! quiet context)
         (run-backend-preflight! quiet llm-client context)
-        (let [provenance (move-spec-to-in-progress! (:spec/provenance enriched-spec))
+        (let [provenance (spec-kanban/move-spec-to-in-progress! (:spec/provenance enriched-spec))
               result (execute-with-events {:run-pipeline run-pipeline
                                            :workflow workflow
                                            :workflow-input workflow-input
@@ -1228,7 +1083,7 @@
                                            :sandbox-cleanup sandbox-cleanup
                                            :opts opts})
               outcome-status (if (phase/succeeded? result) :completed :failed)]
-          (move-spec-on-completion! provenance result)
+          (spec-kanban/move-spec-on-completion! provenance result)
           ;; Trigger meta-loop learning cycle in background
           (trigger-meta-loop-after-workflow! workflow-id outcome-status nil)
           result)
