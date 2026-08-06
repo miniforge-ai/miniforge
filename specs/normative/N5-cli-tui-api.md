@@ -1542,8 +1542,16 @@ so an operator can tell "I stopped watching" from "I stopped the work".
 
 - Keys MUST be stable across patch and minor releases. Adding a key is minor;
   removing or renaming one is major (§8.5).
-- Values MUST NOT vary by locale (§9.2). A localized JSON payload cannot be
-  parsed by a script that does not know the operator's locale.
+- Every value a consumer is expected to **parse or branch on** — codes, enum
+  values, identifiers, numbers, timestamps — MUST NOT vary by locale. A script
+  cannot dispatch on a value it must first translate.
+- Prose fields inside a payload — `error.message` and any other rendered
+  human-readable text — are the exception. They come from the catalog (§9) and
+  are rendered in the resolved locale. Consumers MUST NOT branch on them; that
+  is what `error.code` is for (§8.4.4).
+- Implementations MUST make byte-stable output obtainable: `--locale en-US`
+  pins every prose field, so a caller that needs reproducible output across
+  environments has a supported way to get it.
 - Enum values MUST be the keyword's name, not a display label — `merge-ready`,
   never "Merge Ready".
 - A consumer MUST treat an absent key and a `null` value identically. Producers
@@ -1623,7 +1631,7 @@ withdrawn requirement is marked withdrawn, not deleted.
 | N5.CLI.4 | MUST | Results on stdout, diagnostics on stderr, never interleaved (§8.4.1). |
 | N5.CLI.5 | MUST | Emit exactly one JSON document under `--json`, or documented NDJSON (§8.4.1). |
 | N5.CLI.6 | MUST | Use the exit codes of §8.4.2, distinguishing failure from policy refusal. |
-| N5.CLI.7 | MUST NOT | Vary `--json` keys or values by locale (§8.4.3, §9.2). |
+| N5.CLI.7 | MUST NOT | Vary `--json` keys, codes, enum values, or identifiers by locale; prose fields MAY follow the locale and MUST NOT be branched on (§8.4.3, §9.2). |
 | N5.CLI.8 | MUST | Report errors with a stable code and catalog-sourced message (§8.4.4). |
 | N5.CLI.9 | MUST | Classify command changes per §8.5 and warn on stderr when deprecated. |
 
@@ -1680,7 +1688,9 @@ A conformance suite MUST cover, at minimum:
 2. **Exit code discrimination** — a workflow whose gates fail exits 4; a
    malformed flag exits 2; an unreadable config exits 3 (N5.CLI.6).
 3. **Locale invariance of data** — the same command under two locales produces
-   byte-identical `--json` output (N5.CLI.7).
+   `--json` output whose keys, codes, enum values, and identifiers are
+   identical; only prose fields differ. Under `--locale en-US` the two runs are
+   byte-identical (N5.CLI.7).
 4. **Catalog coverage** — no emitted prose originates at an emit site, and
    every key referenced exists in `en-US` (N5.L10N.1, N5.L10N.5).
 5. **Binding invariance** — key bindings are identical under every locale
@@ -1728,9 +1738,13 @@ These are exempt and MUST NOT be routed through a catalog:
 - Dynamically rendered values: IDs, counts, durations, file paths, user data.
 - Programmer-error assertions that indicate an invariant break.
 
-A `--json` payload carries data, not prose. Its keys are a wire contract
-(§8.4) and MUST NOT vary by locale. Human-readable values _inside_ a JSON
-payload — a rendered message field — are prose and come from the catalog.
+A `--json` payload is primarily data. Its keys, codes, enum values, and
+identifiers are a wire contract (§8.4.3) and MUST NOT vary by locale.
+
+The rendered message fields inside it _are_ prose and come from the catalog,
+so they do follow the resolved locale. That is not a contradiction with
+§8.4.3: nothing may branch on a message, and `--locale en-US` pins them when a
+caller needs byte-stable output.
 
 ### 9.3 Consequences for the Interface
 
@@ -1918,7 +1932,7 @@ any requirement in §1–§13.
   `agent`, and `gate` MUST; none has a command surface (N5.CLI.2). The `pack`
   namespace is the largest gap — §2.3.8 specifies eleven commands.
 - **`NO_COLOR` and terminal degradation (§8.6).** No handling anywhere in the
-  tree. The TUI has no documented behaviour under `TERM=dumb`, a non-TTY
+  tree. The TUI has no documented behavior under `TERM=dumb`, a non-TTY
   stdout, or a terminal narrower than 80 columns (N5.TUI.5–7).
 - **Exit code taxonomy (§8.4.2).** Policy refusal is not distinguished from
   command failure, so a caller cannot tell "the tool broke" from "the tool
