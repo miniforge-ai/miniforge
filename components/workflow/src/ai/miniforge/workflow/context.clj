@@ -99,6 +99,17 @@
    :execution/response-chain   — Structured response chain (per-phase
                                  success/failure tracking)
 
+   ### Logging
+   :execution/logger           — Structured logger (logging.interface).
+                                 Always set: the caller's :logger from
+                                 opts when supplied, else a default
+                                 debug-level human-output logger.
+                                 Normalized at context creation (the one canonical
+                                 writer) — consumers guard on this key
+                                 for best-effort warning paths and must
+                                 never mint their own. Never persisted
+                                 (checkpoint-store whitelists keys).
+
    ### Supervision Support
    :execution/supervision-runtime — Runtime for workflow health supervision
    :execution/meta-coordinator    — DEPRECATED alias for
@@ -111,6 +122,7 @@
    :knowledge-store — Knowledge base store
    :event-stream   — Event stream for telemetry"
   (:require [ai.miniforge.anomaly.interface :as anomaly]
+            [ai.miniforge.logging.interface :as log]
             [ai.miniforge.response.interface :as response]
             [ai.miniforge.workflow.checkpoint-store :as checkpoint-store]
             [ai.miniforge.workflow.fsm :as fsm]
@@ -130,6 +142,13 @@
    ;; Threaded by run-chain so every step of one ETL invocation shares
    ;; it; lifecycle events read it from the context (see runner-events).
    :workflow-run/correlation-id])
+
+(defonce ^{:stratum 0} ^:private default-execution-logger
+  ;; :min-level :debug, matching runner-logger and the strictest of the
+  ;; per-reader fallbacks this default replaces (release.clj used a
+  ;; :debug fallback) — a quieter default here would silently drop
+  ;; debug entries those paths used to emit.
+  (log/create-logger {:min-level :debug :output :human}))
 
 (defn- ^{:stratum 0} monitoring-runtime-fields
   [workflow]
@@ -229,6 +248,16 @@
   [opts]
   (select-keys opts execution-passthrough-option-keys))
 
+(defn- ^{:stratum 1} execution-logger
+  "The run's structured logger: the caller's :logger from opts when
+   supplied, else the default human-output logger. This is the ONE
+   canonical writer of :execution/logger — before it existed, no writer
+   set the key at all, so every consumer guarding on it (gap-wiring's
+   ledger-failure warnings, codex-pin's consultation-skipped warning,
+   the phase loggers) silently dropped its best-effort warnings."
+  [opts]
+  (or (:logger opts) default-execution-logger))
+
 (defn ^{:stratum 1} transition-execution
   "Apply an event to the authoritative execution machine and refresh projections."
   [ctx event]
@@ -294,8 +323,9 @@
    - workflow: Workflow configuration
    - input: Input data for the workflow
    - opts: Execution options (including :llm-backend, :artifact-store,
-           callbacks, and optionally :workflow-id — the caller's run id,
-           adopted as :execution/id so one run has one identity)
+           callbacks, optionally :workflow-id — the caller's run id,
+           adopted as :execution/id so one run has one identity — and
+           optionally :logger, adopted as :execution/logger)
 
    Returns execution context map with FSM state initialized."
   [workflow input opts]
@@ -320,7 +350,8 @@
        :execution/metrics {:tokens 0 :cost-usd 0.0 :duration-ms 0}
        :execution/started-at (System/currentTimeMillis)
        :execution/opts opts
-       :execution/checkpoint-root checkpoint-root}
+       :execution/checkpoint-root checkpoint-root
+       :execution/logger (execution-logger opts)}
       (monitoring-runtime-fields workflow)
       ;; Merge opts into top-level context so :llm-backend is accessible to agents
       (passthrough-option-values opts)))))
@@ -349,7 +380,8 @@
        :execution/input (get machine-snapshot :execution/input input)
        :execution/phase-results phase-results
        :execution/opts opts
-       :execution/checkpoint-root checkpoint-root}
+       :execution/checkpoint-root checkpoint-root
+       :execution/logger (execution-logger opts)}
       (monitoring-runtime-fields workflow)
       (passthrough-option-values opts)))))
 

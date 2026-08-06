@@ -22,6 +22,7 @@
    implement attach."
   (:require [ai.miniforge.anomaly.interface :as anomaly]
             [ai.miniforge.codex-gap.interface :as gap]
+            [ai.miniforge.logging.interface :as log]
             [ai.miniforge.phase-software-factory.gap-wiring :as gap-wiring]
             [clojure.test :refer [deftest is testing]]))
 
@@ -102,3 +103,23 @@
       (is (= :review-queue (:miss/bucket (first entries))))
       (is (= "quality-signal-might-be-lying"
              (:miss/situation (first entries)))))))
+
+(deftest ^{:stratum 0} ledger-write-failure-warns-through-the-context-logger
+  ;; The workflow runner normalizes :execution/logger at context creation
+  ;; (workflow.context), so this warn path is live in production runs —
+  ;; before that, no writer set the key and the warning vanished.
+  (let [root (str (java.nio.file.Files/createTempDirectory
+                    "gap-wiring-test-"
+                    (into-array java.nio.file.attribute.FileAttribute [])))
+        ;; occupy the run-dir path with a FILE so the ledger append fails
+        _ (spit (str root "/run-z") "occupied")
+        [logger entries] (log/collecting-logger)
+        ctx {:execution/checkpoint-root root
+             :execution/id "run-z"
+             :execution/logger logger
+             :phase {:result {:output {:review/blocking-issues ["boom"]}}}}]
+    (gap-wiring/record-phase-misses! ctx :review "/nonexistent/codex")
+    (is (= [:codex-gap/ledger-write-failed]
+           (mapv :log/event @entries))
+        "the best-effort warning must reach the ctx logger, not vanish")
+    (is (= [:warn] (mapv :log/level @entries)))))

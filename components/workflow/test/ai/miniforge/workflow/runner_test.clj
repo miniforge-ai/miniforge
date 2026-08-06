@@ -23,6 +23,7 @@
    [clojure.java.io :as io]
    [clojure.test :refer [deftest is testing use-fixtures]]
    [ai.miniforge.event-stream.interface :as es]
+   [ai.miniforge.logging.interface :as log]
    [ai.miniforge.phase.interface]
    [ai.miniforge.response.interface :as response]
    [ai.miniforge.supervisory-state.interface :as supervisory]
@@ -104,6 +105,29 @@
           source-root "/tmp/miniforge-source-root"
           ctx (ctx/create-context workflow {:task "Test"} {:source-root source-root})]
       (is (= source-root (:source-root ctx))))))
+
+(deftest ^{:stratum 0} context-normalizes-execution-logger-test
+  ;; :execution/logger is normalized at context creation — the ONE
+  ;; canonical writer. Before this, no writer set the key at all, so
+  ;; every consumer guarding on it (gap-wiring's ledger-failure
+  ;; warnings, codex-pin's consultation-skipped warning) silently
+  ;; dropped its best-effort warnings.
+  (let [workflow {:workflow/id :test
+                  :workflow/version "1.0.0"}]
+    (testing "create-context adopts the caller's :logger"
+      (let [[logger _entries] (log/collecting-logger)
+            ctx (ctx/create-context workflow {:task "Test"} {:logger logger})]
+        (is (identical? logger (:execution/logger ctx)))))
+    (testing "create-context defaults :execution/logger when opts carry none"
+      (let [ctx (ctx/create-context workflow {:task "Test"} {})]
+        (is (some? (:execution/logger ctx)))))
+    (testing "restore-context normalizes :execution/logger the same way"
+      (let [[logger _entries] (log/collecting-logger)
+            restored (ctx/restore-context workflow {:task "Test"} {} {}
+                                          {:logger logger})]
+        (is (identical? logger (:execution/logger restored))))
+      (let [restored (ctx/restore-context workflow {:task "Test"} {} {} {})]
+        (is (some? (:execution/logger restored)))))))
 
 (deftest ^{:stratum 0} restore-context-can-reset-terminal-snapshot-test
   (testing "failed checkpoint snapshots can resume a trimmed workflow"
