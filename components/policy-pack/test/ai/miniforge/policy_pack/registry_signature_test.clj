@@ -172,10 +172,19 @@
         registry  (registry-trusting "acme-publisher-2026" publisher)
         pack      (fixtures/sign-pack unsigned-pack publisher "acme-publisher-2026")]
 
-    (testing "an unsigned pack is reported as unsigned"
+    (testing "an unsigned pack is reported as unsigned, with no claimed signer"
       (let [result (sut/verify-signature registry unsigned-pack)]
         (is (not (:verified? result)))
-        (is (= "Pack is not signed" (:reason result)))))
+        (is (= "Pack is not signed" (:reason result)))
+        (is (not (contains? result :signer)))
+        (is (not (contains? result :timestamp)))))
+
+    (testing "a signed pack reports its claimed signer and timestamp"
+      (let [result (sut/verify-signature
+                    registry
+                    (assoc pack :pack/signed-at #inst "2026-08-05T00:00:00.000Z"))]
+        (is (= "acme-publisher-2026" (:signer result)))
+        (is (= #inst "2026-08-05T00:00:00.000Z" (:timestamp result)))))
 
     (testing "a signature with no key identifier fails"
       (let [result (sut/verify-signature registry (dissoc pack :pack/signed-by))]

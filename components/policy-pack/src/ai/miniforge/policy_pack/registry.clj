@@ -98,9 +98,11 @@
 
   (verify-signature [this pack]
     "Verify pack signature against the configured trust roots (N4 §8.2).
-     Returns {:verified? bool :signer string :timestamp inst}, where
-     :signer is the identifier the pack CLAIMS — it is verified only when
-     :verified? is true.")
+     Returns {:verified? bool :reason string}, plus :signer and :timestamp
+     when the pack carries a signature — an unsigned pack has neither, and
+     reporting a signer for one would imply something signed it. :signer is
+     the identifier the pack CLAIMS; it is verified only when :verified? is
+     true.")
 
   ;; Composition
   (resolve-pack [this pack-id]
