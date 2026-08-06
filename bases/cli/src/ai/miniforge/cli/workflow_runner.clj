@@ -97,7 +97,7 @@
   (try
     (let [{:keys [load-workflow run-pipeline]} (setup/resolve-workflow-interface)
           ;; Create event stream if not provided (dashboard-url takes precedence)
-          es (or event-stream
+          stream (or event-stream
                  (when-not dashboard-url
                    (try
                      (es/create-event-stream)
@@ -110,15 +110,15 @@
             ;; Pass dashboard-url in callbacks if provided
             callbacks-with-url (cond-> callbacks
                                  dashboard-url (assoc :dashboard-url dashboard-url))
-            progress-cleanup (display/start-progress! es quiet)
+            progress-cleanup (display/start-progress! stream quiet)
             ;; BD-2b sub-3a: per-workflow manifest. Stamps an :active /
             ;; :live manifest before the pipeline starts and keeps the
             ;; owner lease renewed via a heartbeat while alive. The
             ;; happy path below marks :completed/:failed after drain;
             ;; the finally falls back to :cancelled if neither fired.
-            manifest-handle (lifecycle/start-workflow-manifest! workflow-id es)]
+            manifest-handle (lifecycle/start-workflow-manifest! workflow-id stream)]
         (try
-          (let [result (execution/execute-workflow-pipeline run-pipeline workflow workflow-input callbacks-with-url artifact-store es)]
+          (let [result (execution/execute-workflow-pipeline run-pipeline workflow workflow-input callbacks-with-url artifact-store stream)]
             (execution/close-artifact-store artifact-store)
             (lifecycle/mark-manifest-terminal!
              manifest-handle
@@ -130,7 +130,7 @@
             ;; for in-flight publishes to settle and asks each sink to
             ;; flush. Without this, headless exits could land before the
             ;; producer-side completion event was durable.
-            (let [shutdown (lifecycle/event-stream-shutdown! es workflow-id opts)]
+            (let [shutdown (lifecycle/event-stream-shutdown! stream workflow-id opts)]
               ;; BD-2b sub-3b: archive happens after drain so any
               ;; events that landed between mark-terminal and drain
               ;; are inside live/{wid}/ before the rename. Best-effort

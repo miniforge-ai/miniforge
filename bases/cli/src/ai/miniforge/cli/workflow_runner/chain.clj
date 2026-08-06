@@ -99,7 +99,7 @@
             callbacks (setup/create-phase-callbacks quiet)
             chain-run-id (random-uuid)
             control-state (es/create-control-state)
-            context (context/create-workflow-context {:callbacks callbacks
+            wf-context (context/create-workflow-context {:callbacks callbacks
                                                       :event-stream event-stream
                                                       :llm-client llm-client
                                                       :quiet quiet
@@ -111,10 +111,10 @@
             progress-cleanup (display/start-progress! event-stream quiet)]
         (print-chain-header chain-id chain-def quiet)
         (dashboard/print-dashboard-status! quiet)
-        (preflight/run-backend-preflight! quiet llm-client context)
+        (preflight/run-backend-preflight! quiet llm-client wf-context)
         (try
           (control/register-workflow-control! chain-run-id control-state event-stream)
-          (let [result (workflow/run-chain chain-def chain-input context)]
+          (let [result (workflow/run-chain chain-def chain-input wf-context)]
             (print-chain-result result quiet)
             result)
           (finally
