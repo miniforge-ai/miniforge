@@ -215,7 +215,7 @@ miniforge fleet opsv emit SERVICE [flags]     # PR-only emission
 miniforge fleet opsv apply SERVICE [flags]    # Gated apply (if enabled)
 ```
 
-#### 2.3.3.1 Listener and Control Commands (N8)
+##### Listener and Control Commands (N8)
 
 These commands span the `listener`, `workflow`, `agent`, `gate`, and `fleet`
 namespaces. They are grouped here because they share the N8 control-interface
@@ -1503,9 +1503,9 @@ usable by a script.
 - **stderr** carries progress, warnings, and diagnostics.
 - With `--json`, a non-streaming command's stdout MUST contain exactly one JSON
   document. A streaming command MUST instead emit newline-delimited JSON, one
-  document per line. Whether a command streams is a property of the command,
-  MUST be stated in its `--help`, and MUST NOT vary by invocation — a consumer
-  chooses its parser before it sees output.
+  document per line. Whether a command streams is a fixed property of that
+  command: it MUST be stated in the command's `--help` and MUST NOT vary by
+  invocation, because a consumer chooses its parser before it sees output.
 
 A command that writes a progress spinner to stdout breaks every pipeline that
 consumes it, which is why the split is normative rather than stylistic.
