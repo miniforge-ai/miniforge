@@ -29,6 +29,7 @@
    [ai.miniforge.cli.main.commands.plan-executor :as plan-executor]
    [ai.miniforge.cli.main.display :as main-display]
    [ai.miniforge.cli.workflow-runner :as runner]
+   [ai.miniforge.cli.workflow-runner.setup :as setup]
    [ai.miniforge.cli.workflow-runner.context :as context]
    [ai.miniforge.cli.workflow-runner.control :as control]
    [ai.miniforge.cli.workflow-runner.dashboard :as dashboard]
@@ -61,7 +62,7 @@
 
 (deftest ^{:stratum 0} governed-workflow-id-is-always-a-uuid
   (testing "the operator channel routes by UUID, so a governed run must have one"
-    (let [gwid #'runner/governed-workflow-id]
+    (let [gwid #'setup/governed-workflow-id]
       ;; a UUID session-id is adopted as-is
       (let [u (random-uuid)]
         (is (= u (gwid u true))))
