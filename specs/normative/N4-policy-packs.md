@@ -207,9 +207,9 @@ decided.
 
 | Severity | Meaning | Enforcement |
 |----------|---------|-------------|
-| `:critical` | Unsafe or intent-violating; no autonomous path forward | MUST block phase completion; MUST NOT be overridable by `:gate/allow-override?` alone (§6.3) |
+| `:critical` | Unsafe or intent-violating; no autonomous path forward | MUST block phase completion; MUST NOT be overridable by `:gate/allow-override?` alone (§6.3.1) |
 | `:high` | Serious defect or policy breach | MUST block phase completion |
-| `:medium` | Should be fixed; auto-repair or review | SHOULD block unless auto-repaired or waived (§6.3) |
+| `:medium` | Should be fixed; auto-repair or review | SHOULD block unless auto-repaired or waived (§6.3.1) |
 | `:low` | Minor; worth reporting | MUST NOT block |
 | `:info` | Informational; no action required | MUST NOT block |
 
@@ -592,7 +592,7 @@ Repair functions SHOULD:
 
  :violation/auto-fixable? boolean  ; REQUIRED: Can this be auto-repaired?
  :violation/remediation string     ; REQUIRED: How to fix (human-readable)
- :violation/remediation-code string ; OPTIONAL: Machine-readable fix (diff, patch, etc.)
+ :violation/remediation-code {...}  ; OPTIONAL: Machine-readable fix; see §6.2
 
  :violation/context {...}          ; OPTIONAL: Additional context for debugging
  :violation/documentation-url string ; OPTIONAL: Link to docs
@@ -601,6 +601,10 @@ Repair functions SHOULD:
                                    ;   that failed to execute (§3.5.1);
                                    ;   canonical class per N1 §5.3.3
 ```
+
+`:violation/remediation-code` is a structured map, not a string: §6.2 defines
+its two forms (`:diff` and `:replacement`). A machine-readable repair that
+arrives as an opaque string is not machine-readable.
 
 `:violation/rule-id` is a keyword, matching `:rule/id` (§2.3). A violation that
 cannot name its rule as a keyword cannot be joined back to the pack that
