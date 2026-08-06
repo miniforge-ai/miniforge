@@ -151,6 +151,23 @@ Run:
 - `bb test:graalvm` passes; `canonical-edn` verified under Babashka directly
   (the graalvm suite does not cover policy-pack namespaces)
 
+## Review rounds
+
+Three Copilot rounds, all findings real and fixed:
+
+1. `decode-public-key` threw an NPE on a nil or non-string key. Reachable —
+   `create-registry` accepts an injected store, so `resolve-key` sees whatever
+   a caller holds, not only entries `->store` validated. A fail-closed path
+   should not throw.
+2. The protocol docstring promised `:signer` and `:timestamp` unconditionally
+   while the unsigned branch omits both. The behaviour is right — reporting a
+   signer for an unsigned pack would imply something signed it — so the
+   docstring moved to match and the tests now assert both presence and absence.
+3. `verify-ed25519` returned a bare `{:verified? false}` when `.verify` said
+   no: the one verification outcome an operator would read as blank. Added
+   `:crypto/invalid-signature` and a test that every failure path carries a
+   reason.
+
 ## Deployment Plan
 
 Ships with the trust-root resource empty. Signature verification is fail-closed
