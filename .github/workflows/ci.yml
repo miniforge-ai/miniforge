@@ -112,6 +112,7 @@ jobs:
 
       - name: Lint Clojure
         run: |
+          set -o pipefail
           echo "::group::Clojure Linting"
           bb lint:clj:all 2>&1 | tee clj-kondo.log
           echo "::endgroup::"

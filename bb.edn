@@ -61,7 +61,7 @@
    :task (lint/stratum-staged)}
 
   check:bb-classpaths
-  {:doc  "Load-check entry namespaces of every bb.edn task with :extra-paths (catches classpath drift; load only, no task execution)"
+  {:doc  "Load-check entry namespaces of every bb.edn task declaring :extra-paths + :requires (catches classpath drift; load only, no task execution)"
    :requires ([ai.miniforge.bb-task-classpath.interface :as task-classpath])
    :task (let [exit (task-classpath/check-all! {})]
            (when-not (zero? exit)

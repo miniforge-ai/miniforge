@@ -80,9 +80,11 @@
 ;------------------------------------------------------------------------------ Layer 2
 
 (defn ^{:stratum 2} check-all!
-  "Load-check every bb.edn task with :extra-paths. Prints one line per
-   task (plus captured output on failure) and returns a process exit
-   code: 0 when every entry namespace loads, 1 otherwise."
+  "Load-check every bb.edn task declaring both :extra-paths and
+   :requires (a task relying solely on root :requires has no entry
+   namespaces of its own to check). Prints one line per task (plus
+   captured output on failure) and returns a process exit code: 0 when
+   every entry namespace loads, 1 otherwise."
   [{:keys [repo-root bb-edn-path]
     :or   {repo-root "." bb-edn-path "bb.edn"}}]
   (let [bb-edn  (edn/read-string (slurp (io/file repo-root bb-edn-path)))
