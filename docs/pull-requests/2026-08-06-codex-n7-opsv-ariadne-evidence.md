@@ -33,7 +33,7 @@ Normative governed-effect and evidence contracts.
 - Establish the Ariadne adoption profile in N10 and make it authoritative over
   the retained legacy design material.
 - Correlate each governed effect by effect transaction, execution grant, and
-  allow decision envelope UUID.
+  allowing decision envelope UUID.
 - Replace aggregate capability references with execution-grant references.
 - Synchronize the closed OPSV, N3 event, and N6 evidence schemas and fixtures.
 - Make production grant issuance an explicit prerequisite for N7 actuation.
