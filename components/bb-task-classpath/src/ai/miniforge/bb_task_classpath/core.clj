@@ -36,7 +36,6 @@
 
 ;------------------------------------------------------------------------------ Layer 0
 
-;; ── Layer 0 ──────────────────────────────────────────────────────────
 (defn ^{:stratum 0} check-specs
   "One check spec per task declaring both :extra-paths and :requires.
    Root :paths/:deps are merged in because bb puts them on every
@@ -72,7 +71,6 @@
 
 ;------------------------------------------------------------------------------ Layer 1
 
-;; ── Layer 1 ──────────────────────────────────────────────────────────
 (defn- ^{:stratum 1} check-task!
   [repo-root spec]
   (let [{:keys [exit out err]} (shell/with-sh-dir repo-root

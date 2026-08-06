@@ -116,6 +116,17 @@ jobs:
           bb lint:clj:all 2>&1 | tee clj-kondo.log
           echo "::endgroup::"
 
+      # Guards the hand-maintained :extra-paths lists in bb.edn: loads each
+      # such task's entry namespaces in a fresh bb process (no execution).
+      # Without this, a grown require chain breaks `bb miniforge run` etc.
+      # on main with no signal (PR #1640 was the third occurrence).
+      - name: Check bb task classpaths
+        run: |
+          set -o pipefail
+          echo "::group::bb task classpath load check"
+          bb check:bb-classpaths 2>&1 | tee bb-classpaths.log
+          echo "::endgroup::"
+
       - name: Lint Markdown
         run: |
           echo "::group::Markdown Linting"
@@ -130,6 +141,7 @@ jobs:
           name: lint-logs-${{ github.sha }}
           path: |
             clj-kondo.log
+            bb-classpaths.log
             markdownlint.log
           retention-days: 7
 
