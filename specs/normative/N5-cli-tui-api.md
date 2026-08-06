@@ -6,10 +6,15 @@
 
 # N5 — Interface Standard: CLI/TUI/API
 
-**Version:** 0.4.0-draft
-**Date:** 2026-02-16
+**Version:** 0.5.0-draft
+**Date:** 2026-08-05
 **Status:** Draft
 **Conformance:** MUST
+
+_v0.5.0 adds the localization contract (§9), the CLI output and stability
+contracts (§8.4–§8.5), terminal capability degradation (§8.6), configuration
+precedence and validation (§7.3–§7.4), and conformance requirement IDs
+(§8.7–§8.8); and reconciles the override path with N4 §6.3.1._
 
 ---
 
@@ -59,6 +64,9 @@ Implementations MUST provide these namespaces:
 | `artifact` | Artifact queries              | `miniforge artifact provenance`, `miniforge artifact list` |
 | `etl`      | Repository → pack ETL         | `miniforge etl repo`, `miniforge etl report`               |
 | `pack`     | Pack inspection and promotion | `miniforge pack list`, `miniforge pack promote`            |
+| `listener` | Listener attach/detach (N8)   | `miniforge listener list`, `miniforge listener attach`     |
+| `agent`    | Agent control actions (N8)    | `miniforge agent quarantine`, `miniforge agent budget`     |
+| `gate`     | Gate control actions (N8)     | `miniforge gate approve`, `miniforge gate override`        |
 
 ### 2.3 Command Specifications
 
@@ -207,7 +215,11 @@ miniforge fleet opsv emit SERVICE [flags]     # PR-only emission
 miniforge fleet opsv apply SERVICE [flags]    # Gated apply (if enabled)
 ```
 
-##### Listener and Control Commands (N8)
+#### 2.3.3.1 Listener and Control Commands (N8)
+
+These commands span the `listener`, `workflow`, `agent`, `gate`, and `fleet`
+namespaces. They are grouped here because they share the N8 control-interface
+contract, not because they belong to `fleet`.
 
 ```bash
 # Listener management
@@ -890,17 +902,18 @@ The TUI MUST provide:
 │ acme/api        #51   Migrate DB        ○ needs-review  low    FAIL    ⚡ remediate   │
 │ acme/platform   #77   Monolith refactor ○ needs-review  med    pass    ◇ decompose   │
 ╰──────────────────────────────────────────────────────────────────────────────────────╯
-j/k:nav  Enter:detail  O:open  Space:select  p:filter  c:chat  t:train  /:search  ::cmd
+j/k:nav  Enter:detail  O:open  Space:select  p:filter  C:chat  t:train  /:search  ::cmd
 ```
 
 **Requirements:**
 
 - MUST show PR Work Items across repos with readiness/risk/policy/recommend columns
 - MUST derive from event stream (N3) and PR Work Item state — projections, not separate data
-- MUST compute readiness using `pr-train/explain-readiness` weighted factors (deps, CI, approval, gates, age, staleness)
-- MUST compute risk using `pr-train/assess-risk` explainable factors
-  (change size, dep fanout, coverage, author, staleness, complexity, critical files)
-- MUST evaluate policy using `policy-pack/evaluate-external-pr` against applicable policy packs
+- MUST compute readiness per N9 §2.2, showing the weighted factors it defines
+  (deps, CI, approval, gates, age, staleness)
+- MUST compute risk per N9 §1.6 with explainable factors (change size, dep
+  fanout, coverage, author, staleness, complexity, critical files)
+- MUST evaluate policy per N4 §5.1.7 against the applicable policy packs
 - MUST derive RECOMMEND column from enriched readiness, risk, policy, and PR size:
   - `→ merge` — all gates green, low risk, policy passes
   - `⊘ approve` — merge-ready but elevated risk requires human approval
@@ -931,7 +944,8 @@ j/k:nav  Enter:detail  O:open  Space:select  p:filter  c:chat  t:train  /:search
 
 **Chat Integration:**
 
-- `c` key MUST open conversational handoff to miniforge workflows
+- `C` key MUST open conversational handoff to miniforge workflows (§3.3;
+  lowercase `c` is Cancel everywhere in the TUI)
 - In fleet context: passes selected PRs + active filter as chat context
 - Dispatches through orchestrator (N7) for full agent capability
 
@@ -942,17 +956,17 @@ j/k:nav  Enter:detail  O:open  Space:select  p:filter  c:chat  t:train  /:search
 - MUST show readiness blockers, risk factors, policy results
 - MUST allow drill-down to evidence artifacts (N6)
 - MUST show automation tier and recent provider actions
-- MUST display readiness factor breakdown from `pr-train/explain-readiness`:
+- MUST display the readiness factor breakdown defined by N9 §2.2:
   - deps-merged, ci-passed, approved, gates-passed, age-penalty, staleness-penalty
   - Each factor shows weight, score, and contribution
-- MUST display risk factor breakdown from `pr-train/assess-risk`:
+- MUST display the risk factor breakdown defined by N9 §1.6:
   - change-size, dependency-fanout, test-coverage-delta, author-experience, review-staleness, complexity-delta, critical-files
   - Each factor shows weight, score, value, and explanation
-- MUST display policy evaluation results from `policy-pack/evaluate-external-pr`:
+- MUST display policy evaluation results per N4 §5.1.7:
   - Per-rule outcome (pass/fail/warn) with severity and message
   - Summary counts (critical/major/minor/info)
 - MUST show recommended action with explanation (why this action is suggested)
-- `c` key MUST open chat pane for conversing about this specific PR (risk, approach, etc.)
+- `C` key MUST open a chat pane scoped to this PR (risk, approach, etc.)
 - `O` key MUST open PR URL in default browser
 
 #### 3.2.10 Train View (N9)
@@ -1042,6 +1056,7 @@ Implementations MUST support:
 | `a`       | View artifacts                  |
 | `v`       | View events                     |
 | `c`       | Cancel workflow                 |
+| `C`       | Conversational handoff (§3.2.8) |
 | `q`       | Quit TUI                        |
 | `r`       | Refresh now                     |
 | `b`       | Kanban board (DAG view)         |
@@ -1098,8 +1113,11 @@ DELETE /api/workflows/:id
 #### 4.2.2 Event Stream Subscription
 
 ```text
-GET /api/workflows/:id/stream
+GET /api/streams/:scope-type/:scope-id
   Returns: Server-Sent Events (SSE) stream
+
+GET /api/workflows/:id/stream
+  Alias for scope-type=workflow
 
 Event format:
   event: agent-status
@@ -1109,8 +1127,17 @@ Event format:
 **Requirements:**
 
 - MUST support Server-Sent Events (SSE)
-- MUST emit all workflow events (see N3)
+- MUST emit all events for the subscribed scope (see N3)
 - MAY support WebSocket as alternative
+
+**N3 owns this wire contract.** N3 §5.3 defines the endpoint shape,
+authentication, listener attach handshake, subscription filters,
+resume-from-sequence, backpressure, and wire format. This section names the
+endpoint the console consumes; it MUST NOT restate or diverge from N3 §5.3.
+
+In particular, the stream is single-scope: N3 §2.3 defines six scopes
+(workflow, PR Work Item, pack, repository, supervisory entity, deployment) and
+the console subscribes to one per connection.
 
 #### 4.2.3 Evidence & Artifacts
 
@@ -1147,21 +1174,23 @@ enabling clients to subscribe to PR state changes, readiness changes, and policy
 
 ### 4.3 API Authentication
 
-Implementations SHOULD require authentication:
-
 ```text
 Authorization: Bearer <token>
 ```
 
-For local fleet (OSS), implementations MAY use:
+Per N3 §5.3.2, which owns this contract:
 
-- Local token stored in `~/.miniforge/token`
-- No auth (localhost only)
+- Unauthenticated requests MAY succeed only in local mode bound to
+  `localhost`. Any network-exposed deployment MUST fail with HTTP 401.
+- Tokens resolve to a principal and RBAC role (N8 §2.3).
 
-For enterprise fleet, implementations MUST use:
+For local fleet (OSS), implementations MAY use a token stored in
+`~/.miniforge/token`, or no token while bound to loopback.
 
-- SSO integration (Okta, Auth0)
-- RBAC for access control
+For enterprise fleet, implementations MUST use SSO integration and RBAC.
+
+The earlier "SHOULD require authentication" phrasing is withdrawn: it read as
+optional for a network-exposed console, which N3 §5.3.2 forbids.
 
 ### 4.4 API Rate Limiting
 
@@ -1188,7 +1217,12 @@ The operations console is NOT:
 
 1. **A PR management tool** - PRs are artifacts, not the focus
 2. **A code review interface** - Agents review code, humans review evidence
-3. **An AI chat interface** - No conversational interaction needed
+3. **A chat-first interface** - The console does not require conversation to
+   operate, and no primary workflow is driven through a chat prompt. It does
+   provide a **conversational handoff** (§3.2.8, §3.2.9): a key that carries
+   the current selection and filter into a workflow, so an operator who has
+   found something can act on it without retyping context. That is an
+   affordance on top of the views, not the way the console is used.
 4. **A micromanagement tool** - Don't require human input for every step
 
 ### 5.3 User Mental Model
@@ -1260,11 +1294,20 @@ Violations (2):
 Actions:
   1. [a] Auto-repair all violations
   2. [m] Manual fix (pause workflow, resume after fix)
-  3. [o] Override gate (requires justification)
-  4. [c] Cancel workflow
+  3. [c] Cancel workflow
 
-Choose action [a/m/o/c]:
+Choose action [a/m/c]:
+
+Override is not offered: CRITICAL and HIGH violations are not overridable
+here (N4 §6.3.1). Bypassing them requires multi-party approval (N8 §3).
 ```
+
+**Override availability is not a UI choice.** Implementations MUST offer `[o]`
+only when N4 §6.3.1 permits it — the gate declares `:gate/allow-override?` and
+every unrepaired violation is `:medium` or lower. Presenting an override that
+the policy layer will refuse trains operators to expect a bypass that does not
+exist; presenting one the policy layer would _accept_ for a `:critical`
+violation is worse.
 
 #### 6.1.3 Budget Exhausted
 
@@ -1295,21 +1338,32 @@ Choose action [f/s/c]:
 
 ### 6.2 Override Logging
 
-All overrides MUST be logged in evidence bundle:
+An override of a policy gate MUST produce a **Waiver** as defined in
+N5-delta-supervisory-control-plane §3.1 and required by N4 §6.3.1:
 
 ```clojure
-{:override/type :gate-override
- :override/gate-id :policy-validation
- :override/workflow-id uuid
- :override/phase :implement
-
- :override/reason "Approved by security team: bucket needs public access for CDN"
- :override/approved-by "chris@example.com"
- :override/approved-at inst
-
- :override/violations-overridden [...]
- :override/justification "Public bucket required for static website hosting"}
+{:waiver/id            uuid
+ :waiver/evaluation-id uuid      ; the PolicyEvaluation being waived
+ :waiver/violations    [keyword] ; rule IDs waived (N4 §2.3)
+ :waiver/actor         string    ; who granted it
+ :waiver/reason        string    ; justification — REQUIRED
+ :waiver/timestamp     inst}
 ```
+
+The Waiver is the record; the console is the surface that collects it. An
+override with no `:waiver/reason` MUST be refused at the prompt rather than
+recorded with an empty justification.
+
+Per N4 §6.3.1 the waived gate stays failed and its violations stay present.
+Implementations MUST NOT render a waived gate as passing in any view — §3.2.3's
+evidence viewer, §3.2.8's POLICY column, or elsewhere. "Waived" is its own
+state, and collapsing it into "pass" destroys the audit trail the waiver exists
+to create.
+
+Overrides at non-gate decision points (§6.1.1 plan approval, §6.1.3 budget
+exhaustion) are not policy waivers. They MUST be recorded in the evidence
+bundle per N6 with the deciding principal, timestamp, and justification, but
+they do not produce a Waiver — there is no PolicyEvaluation to waive.
 
 ---
 
@@ -1363,6 +1417,42 @@ Implementations MUST support these environment variables:
 | `MINIFORGE_CONFIG`    | Path to config file                      |
 | `MINIFORGE_WORKSPACE` | Workspace directory                      |
 | `MINIFORGE_LOG_LEVEL` | Logging level (debug, info, warn, error) |
+| `MINIFORGE_LOCALE`    | User locale for console output (§9.4)     |
+| `NO_COLOR`            | Disable colour output (§8.6)              |
+
+### 7.3 Configuration Precedence
+
+A setting can arrive from four places. Implementations MUST resolve them in
+this order, first match winning:
+
+1. Command-line flag
+2. Environment variable
+3. Configuration file (`~/.miniforge/config.edn`, or `MINIFORGE_CONFIG`)
+4. Built-in default
+
+Precedence MUST be uniform. A setting that reads its flag but ignores its
+environment variable, or vice versa, is non-conformant — an operator cannot
+reason about configuration that resolves differently per setting.
+
+`miniforge config show` SHOULD render the effective configuration and, for each
+setting, which layer supplied it. Debugging a wrong value otherwise requires
+guessing.
+
+### 7.4 Configuration Validation
+
+Implementations MUST validate the configuration file against a schema at load:
+
+- An unparseable or schema-invalid config MUST fail startup with exit code 3
+  (§8.4.2) and an error naming the offending key and why.
+- An **unknown** key MUST warn rather than fail. A typo'd key silently ignored
+  is how an operator concludes a setting does not work; failing outright makes
+  a config written for a newer version unusable on an older one.
+- Secrets MUST NOT be stored in the config file. `:api-key-env` names an
+  environment variable precisely so the key itself never lands on disk;
+  implementations MUST reject a config that inlines a key value.
+
+Configuration is data, not code. Implementations MUST NOT evaluate the config
+file as a program or resolve arbitrary symbols from it.
 
 ---
 
@@ -1372,7 +1462,8 @@ Implementations MUST support these environment variables:
 
 Implementations MUST:
 
-1. Support all required namespaces (init, workflow, fleet, policy, evidence, artifact)
+1. Support every namespace §2.2 marks MUST — currently init, workflow, fleet,
+   policy, evidence, artifact, etl, pack, listener, agent, gate
 2. Accept standard flags (--help, --version, --json)
 3. Return 0 exit code on success, non-zero on failure
 4. Emit structured logs to stderr, results to stdout
@@ -1397,11 +1488,267 @@ Implementations MUST:
 3. Provide OpenAPI spec (for API documentation)
 4. Support CORS for browser clients (if enabled)
 
+### 8.4 CLI Output Contract
+
+§8.1 requires results on stdout and logs on stderr. This section makes that
+usable by a script.
+
+#### 8.4.1 Streams
+
+- **stdout** carries the command's result and nothing else. A command whose
+  result is data MUST NOT interleave progress, warnings, or decoration into
+  stdout.
+- **stderr** carries progress, warnings, and diagnostics.
+- With `--json`, stdout MUST contain exactly one JSON document. A command that
+  streams MUST emit newline-delimited JSON, one document per line, and MUST
+  document which it does.
+
+A command that writes a progress spinner to stdout breaks every pipeline that
+consumes it, which is why the split is normative rather than stylistic.
+
+#### 8.4.2 Exit Codes
+
+| Code | Meaning |
+|------|---------|
+| 0 | Success |
+| 1 | Command failed — the operation ran and did not succeed |
+| 2 | Usage error — bad flags, missing arguments, unknown command |
+| 3 | Configuration error — config invalid or unreadable (§7) |
+| 4 | Policy refusal — a gate blocked the operation (N4) |
+| 5 | Not found — the named workflow, artifact, or pack does not exist |
+| 130 | Interrupted (SIGINT) |
+
+A workflow that runs and fails its gates exits 4, not 1: a caller MUST be able
+to distinguish "the tool broke" from "the tool worked and said no".
+
+Detaching from a followed workflow (Ctrl+C during `--follow`) exits 0 — the
+workflow continues, and the console said so (§2.3.2). Interrupting a command
+that was itself doing the work exits 130.
+
+#### 8.4.3 JSON Output Stability
+
+`--json` output is a wire contract, not a rendering:
+
+- Keys MUST be stable across patch and minor releases. Adding a key is minor;
+  removing or renaming one is major (§8.5).
+- Values MUST NOT vary by locale (§9.2). A localized JSON payload cannot be
+  parsed by a script that does not know the operator's locale.
+- Enum values MUST be the keyword's name, not a display label — `merge-ready`,
+  never "Merge Ready".
+- Absent and null MUST mean the same thing, so a consumer need not distinguish
+  them.
+
+#### 8.4.4 Error Format
+
+An error MUST be reported with a stable machine-readable code and a
+catalog-sourced message (§9):
+
+```json
+{"error": {"code": "workflow-not-found",
+           "message": "No workflow with id abc123",
+           "details": {"workflow-id": "abc123"}}}
+```
+
+`code` is dispatch and MUST NOT be localized. `message` is prose and MUST come
+from the catalog. Without a stable code, the only way to branch on an error is
+to match its text, which breaks the moment the text is translated.
+
+### 8.5 Command Stability
+
+The CLI is a contract. Scripts depend on it.
+
+| Change | Bump |
+|--------|------|
+| Adding a command, namespace, or flag | MINOR |
+| Adding a key to `--json` output | MINOR |
+| Changing a default | MAJOR |
+| Removing or renaming a command, namespace, or flag | MAJOR |
+| Removing or renaming a `--json` key | MAJOR |
+| Changing an exit code's meaning | MAJOR |
+
+A removed or renamed command MUST first be deprecated: it keeps working, warns
+on stderr naming its replacement, and is removed no earlier than the next MAJOR.
+Deprecation warnings MUST go to stderr so they never corrupt piped output.
+
+Because the product is pre-release, this spec does not require a deprecation
+period to have already elapsed for changes made before 1.0. It requires that
+the classification above be applied from now on.
+
+### 8.6 Terminal Capability Degradation
+
+§8.2 requires the TUI to render in common emulators. It MUST also render in
+constrained ones.
+
+Implementations MUST detect and degrade for:
+
+- **No color** — when `NO_COLOR` is set, `TERM=dumb`, or stdout is not a TTY.
+  Status MUST remain distinguishable without color; the glyphs of §3.2.1
+  (`●`, `✓`, `✗`, `○`) carry status independently, which is why they are
+  normative rather than decorative.
+- **No Unicode** — when the locale or terminal cannot render the box-drawing
+  and status glyphs, implementations MUST substitute ASCII equivalents rather
+  than emitting replacement characters.
+- **Narrow terminals** — below the 80×24 minimum, implementations MUST render a
+  reduced view or a clear message, and MUST NOT emit corrupted layout.
+
+Color MUST NOT be the only carrier of meaning anywhere in the TUI. An operator
+using a monochrome terminal, or with a colour-vision deficiency, sees the same
+information.
+
+### 8.7 Conformance Requirements
+
+Requirement IDs are stable identifiers for the normative statements of this
+spec, so a conformance suite can cite what it tests. IDs are never reused; a
+withdrawn requirement is marked withdrawn, not deleted.
+
+#### CLI
+
+| ID | Level | Requirement |
+|----|-------|-------------|
+| N5.CLI.1 | MUST | Follow `miniforge <namespace> <command>` structure (§2.1). |
+| N5.CLI.2 | MUST | Provide every namespace §2.2 marks MUST (§8.1). |
+| N5.CLI.3 | MUST | Accept `--help`, `--version`, `--json` on every command (§8.1). |
+| N5.CLI.4 | MUST | Results on stdout, diagnostics on stderr, never interleaved (§8.4.1). |
+| N5.CLI.5 | MUST | Emit exactly one JSON document under `--json`, or documented NDJSON (§8.4.1). |
+| N5.CLI.6 | MUST | Use the exit codes of §8.4.2, distinguishing failure from policy refusal. |
+| N5.CLI.7 | MUST NOT | Vary `--json` keys or values by locale (§8.4.3, §9.2). |
+| N5.CLI.8 | MUST | Report errors with a stable code and catalog-sourced message (§8.4.4). |
+| N5.CLI.9 | MUST | Classify command changes per §8.5 and warn on stderr when deprecated. |
+
+#### TUI
+
+| ID | Level | Requirement |
+|----|-------|-------------|
+| N5.TUI.1 | MUST | Provide the views of §3.2 that its feature set implies. |
+| N5.TUI.2 | MUST | Support the key bindings of §3.3, unmodified by locale (§9.3). |
+| N5.TUI.3 | MUST | Derive every view from the event stream and entity state, never a separate model (§3.2.5, §3.2.8). |
+| N5.TUI.4 | MUST | Update in real time and throttle to at most one repaint per second (§3.4). |
+| N5.TUI.5 | MUST | Render within 80×24 and degrade below it without corruption (§8.2, §8.6). |
+| N5.TUI.6 | MUST NOT | Use colour as the only carrier of meaning (§8.6). |
+| N5.TUI.7 | MUST | Substitute ASCII when Unicode glyphs are unavailable (§8.6). |
+| N5.TUI.8 | MUST NOT | Render a waived gate as passing (§6.2). |
+
+#### API
+
+| ID | Level | Requirement |
+|----|-------|-------------|
+| N5.API.1 | MUST | Follow REST conventions and return JSON or EDN by content negotiation (§8.3). |
+| N5.API.2 | MUST | Consume the event stream per N3 §5.3 without restating or diverging from it (§4.2.2). |
+| N5.API.3 | MUST | Fail 401 for unauthenticated requests in any network-exposed deployment (§4.3, N3 §5.3.2). |
+| N5.API.4 | MUST | Provide an OpenAPI description of the exposed surface (§8.3). |
+
+#### Configuration and localization
+
+| ID | Level | Requirement |
+|----|-------|-------------|
+| N5.CFG.1 | MUST | Resolve settings flag → env → file → default, uniformly (§7.3). |
+| N5.CFG.2 | MUST | Fail startup with exit 3 on an invalid config, naming the key (§7.4). |
+| N5.CFG.3 | MUST | Warn, not fail, on an unknown config key (§7.4). |
+| N5.CFG.4 | MUST NOT | Accept an inlined secret in the config file (§7.4). |
+| N5.L10N.1 | MUST NOT | Emit an authored prose string as a literal at the emit site (§9.1). |
+| N5.L10N.2 | MUST | Route user-facing prose to the user catalog and developer-facing prose to the system catalog (§9.1). |
+| N5.L10N.3 | MUST NOT | Localize command names, flag names, key bindings, or enum values (§9.2, §9.3). |
+| N5.L10N.4 | MUST | Resolve locale per §9.4 and fall back to `en-US` on a missing key. |
+| N5.L10N.5 | MUST NOT | Render a raw catalog key to a user (§9.4). |
+
+#### Override
+
+| ID | Level | Requirement |
+|----|-------|-------------|
+| N5.OV.1 | MUST | Offer gate override only where N4 §6.3.1 permits it (§6.1.2). |
+| N5.OV.2 | MUST | Produce a Waiver, with a justification, for every gate override (§6.2). |
+| N5.OV.3 | MUST | Record non-gate overrides in the evidence bundle per N6 (§6.2). |
+
+### 8.8 Test Obligations
+
+A conformance suite MUST cover, at minimum:
+
+1. **Stream separation** — piping a `--json` command's stdout to a parser
+   succeeds while progress output is present on stderr (N5.CLI.4, N5.CLI.5).
+2. **Exit code discrimination** — a workflow whose gates fail exits 4; a
+   malformed flag exits 2; an unreadable config exits 3 (N5.CLI.6).
+3. **Locale invariance of data** — the same command under two locales produces
+   byte-identical `--json` output (N5.CLI.7).
+4. **Catalog coverage** — no emitted prose originates at an emit site, and
+   every key referenced exists in `en-US` (N5.L10N.1, N5.L10N.5).
+5. **Binding invariance** — key bindings are identical under every locale
+   (N5.L10N.3, N5.TUI.2).
+6. **Degradation** — the TUI renders usably with `NO_COLOR`, with `TERM=dumb`,
+   and in a terminal narrower than 80 columns (N5.TUI.5, N5.TUI.6, N5.TUI.7).
+7. **Config precedence** — a setting supplied at all four layers resolves to
+   the flag, and removing layers falls through in order (N5.CFG.1).
+8. **Waiver visibility** — a waived gate renders as waived, never as passing,
+   in every view that shows gate state (N5.TUI.8, N5.OV.2).
+
 ---
 
-## 9. Example User Journeys
+## 9. Localization
 
-### 9.1 First-Time User
+Every interface this spec defines emits prose: CLI output, TUI labels and
+footers, prompts, error messages, API error bodies. This section states the
+contract those strings obey.
+
+### 9.1 No Raw Prose
+
+Implementations MUST NOT emit an authored, human-readable string as a literal
+at the emit site. Every such string MUST be looked up from a **catalog** by
+key. This is the `foundations/localization` standard (dewey 050) applied to
+the console surface; it is normative here because N5 defines the surface that
+produces the most prose in the system.
+
+Two catalogs, chosen by who reads the string:
+
+| Catalog | Holds |
+|---------|-------|
+| User locale (`en-US.edn`, and future locales) | Anything a user sees — TUI labels, CLI output, prompts, formatted error responses |
+| System locale (`system.edn`) | Anything a user never sees — logs, telemetry attributes, internal error tags |
+
+The split is by destination, not by whether the string deserves translating.
+A developer-facing string reclassified onto a user surface moves catalogs
+without touching the emit site.
+
+### 9.2 What Is Not Prose
+
+These are exempt and MUST NOT be routed through a catalog:
+
+- Machine dispatch values: command names, flag names, namespace names, event
+  type keywords, JSON and EDN keys.
+- Dynamically rendered values: IDs, counts, durations, file paths, user data.
+- Programmer-error assertions that indicate an invariant break.
+
+A `--json` payload carries data, not prose. Its keys are a wire contract
+(§8.4) and MUST NOT vary by locale. Human-readable values _inside_ a JSON
+payload — a rendered message field — are prose and come from the catalog.
+
+### 9.3 Consequences for the Interface
+
+- **CLI**: `--help` text, error messages, and progress lines are prose.
+  Command and flag names are not, and MUST NOT be localized — a script that
+  runs `miniforge workflow execute` MUST work under any locale.
+- **TUI**: column headings, status labels, footer hints, and prompt text are
+  prose. Key bindings are not: `j`/`k`/`q` are dispatch, and MUST NOT be
+  rebound by locale (§3.3).
+- **API**: error `:message` fields are prose. Error codes, field names, and
+  enum values are not.
+
+### 9.4 Locale Selection
+
+Implementations MUST resolve the user locale in this order, first match
+winning: the `--locale` flag, the `MINIFORGE_LOCALE` environment variable, the
+`:locale` config key (§7.1), the host locale, then `en-US`.
+
+A key missing from the resolved locale's catalog MUST fall back to `en-US`
+rather than rendering the key or an empty string. A key missing from `en-US`
+is a defect: implementations MUST surface it in development and MUST NOT ship
+an interface that renders a raw key to a user.
+
+---
+
+---
+
+## 10. Example User Journeys
+
+### 10.1 First-Time User
 
 ```bash
 # Day 1: Install and initialize
@@ -1424,7 +1771,7 @@ $ miniforge evidence show abc123
 [Shows complete evidence bundle]
 ```
 
-### 9.2 Regular User
+### 10.2 Regular User
 
 ```bash
 # Check fleet status
@@ -1443,7 +1790,7 @@ $ miniforge workflow status xyz789 --events
 $ miniforge workflow execute --resume xyz789
 ```
 
-### 9.3 Power User
+### 10.3 Power User
 
 ```bash
 # Create custom workflow spec
@@ -1466,9 +1813,9 @@ $ miniforge evidence export abc123 /tmp/audit-report.html --format html
 
 ---
 
-## 10. Rationale & Design Notes
+## 11. Rationale & Design Notes
 
-### 10.1 Why Minimal CLI?
+### 11.1 Why Minimal CLI?
 
 The CLI is minimal because:
 
@@ -1476,7 +1823,7 @@ The CLI is minimal because:
 - **TUI is the primary interface** - For monitoring and exploration
 - **API for programmatic access** - For CI/CD and scripting
 
-### 10.2 Why TUI Over Web Dashboard?
+### 11.2 Why TUI Over Web Dashboard?
 
 TUI is prioritized because:
 
@@ -1487,7 +1834,7 @@ TUI is prioritized because:
 
 Web dashboard is **Enterprise feature** for multi-user visibility.
 
-### 10.3 Why Minimal API?
+### 11.3 Why Minimal API?
 
 API is minimal because:
 
@@ -1497,9 +1844,9 @@ API is minimal because:
 
 ---
 
-## 11. Future Extensions
+## 12. Future Extensions
 
-### 11.1 Web Dashboard (Enterprise)
+### 12.1 Web Dashboard (Enterprise)
 
 Enterprise features will add:
 
@@ -1508,7 +1855,7 @@ Enterprise features will add:
 - Org-wide analytics
 - Central policy management
 
-### 11.2 IDE Integrations (Post-OSS)
+### 12.2 IDE Integrations (Post-OSS)
 
 Future versions may support:
 
@@ -1516,7 +1863,7 @@ Future versions may support:
 - JetBrains plugin
 - Neovim integration
 
-### 11.3 Mobile App (Future Research)
+### 12.3 Mobile App (Future Research)
 
 Research directions:
 
@@ -1526,7 +1873,7 @@ Research directions:
 
 ---
 
-## 12. References
+## 13. References
 
 - RFC 2119: Key words for use in RFCs to Indicate Requirement Levels
 - N1 (Architecture): Defines core concepts
@@ -1536,12 +1883,82 @@ Research directions:
 - N6 (Evidence & Provenance): CLI/TUI views evidence bundles
 - N7 (Operational Policy Synthesis): OPSV CLI commands and TUI drill-down (§2.3.3, §3.2.6)
 - N8 (Observability Control Interface): Listener/control CLI commands and TUI panels (§2.3.3, §3.2.7)
-- N9 (External PR Integration): Fleet PR CLI/TUI/API commands (§2.3.3, §3.2.8-3.2.10, §4.2.4)
+- N9 (External PR Integration): Fleet PR CLI/TUI/API commands (§2.3.3, §3.2.8-3.2.10, §4.2.4);
+  readiness (§2.2) and risk (§1.6) contracts the TUI renders
+- N5-delta-supervisory-control-plane: supervisory entities the TUI projects; Waiver (§3.1)
+- N5-delta-2-pr-scoring: PR readiness/risk scoring surfaced in §3.2.8–§3.2.9
+- N5-delta-3-observational-entities: evidence, artifact, task-node, decision, and
+  pack-manifest entities; Run Launcher (§3.2.12) scope
+- N5-delta-4-automation-edge-correlator: automation edges surfaced in fleet views
+- `standards/miniforge/foundations/localization` (dewey 050): the catalog rule §9 applies
+
+---
+
+## Annex A — Implementation Conformance Status (informative)
+
+This annex is **informative**. It records where the miniforge implementation
+diverges from the contract above, as of 2026-08-05. It is not a relaxation of
+any requirement in §1–§13.
+
+### A.1 Specified, Not Implemented
+
+- **Namespaces.** The CLI implements `init`, `workflow`, `fleet`, `policy`,
+  `evidence`, `artifact`, and `etl`. §2.2 also marks `pack`, `listener`,
+  `agent`, and `gate` MUST; none has a command surface (N5.CLI.2). The `pack`
+  namespace is the largest gap — §2.3.8 specifies eleven commands.
+- **`NO_COLOR` and terminal degradation (§8.6).** No handling anywhere in the
+  tree. The TUI has no documented behaviour under `TERM=dumb`, a non-TTY
+  stdout, or a terminal narrower than 80 columns (N5.TUI.5–7).
+- **Exit code taxonomy (§8.4.2).** Policy refusal is not distinguished from
+  command failure, so a caller cannot tell "the tool broke" from "the tool
+  worked and said no" (N5.CLI.6).
+- **Config precedence and validation (§7.3–§7.4).** No uniform resolution
+  order and no schema validation at load.
+- **Command stability (§8.5).** No deprecation mechanism.
+
+### A.2 Implemented, Matching
+
+- **Localization scaffolding (§9).** `bases/cli`, `components/tui-views`, and
+  `components/web-dashboard` each carry
+  `resources/config/<component>/messages/en-US.edn`, and
+  `bases/cli/.../messages.clj` resolves an active locale with an `en-US`
+  default. §9 writes down the contract that machinery already implements.
+  Coverage is not audited: §9.1 requires _every_ emitted prose string to route
+  through a catalog, and nothing verifies that today (N5.L10N.1).
+
+### A.3 Structural
+
+- **Locale resolution order.** `messages.clj` derives the locale from the host
+  language. §9.4 puts `--locale` and `MINIFORGE_LOCALE` ahead of it; neither
+  is currently consulted.
 
 ---
 
 **Version History:**
 
+- 0.5.0-draft (2026-08-05): Spec-completion pass.
+  **New normative sections:** localization contract (§9) applying dewey 050 to
+  the console surface — no raw prose, two catalogs by destination, what is not
+  prose, locale resolution; CLI output contract (§8.4) — stream separation,
+  exit codes, `--json` stability, error format; command stability and
+  deprecation (§8.5); terminal capability degradation (§8.6); configuration
+  precedence and validation (§7.3–§7.4); conformance requirement IDs and test
+  obligations (§8.7–§8.8).
+  **Contract fixes:** §5.2 claimed the console is not a chat interface while
+  §3.2.8 and §3.2.9 mandated a chat key — reworded to distinguish chat-first
+  operation from conversational handoff; `c` collided between Cancel (§3.3)
+  and chat, so chat moved to `C`; §2.2's namespace table gained `listener`,
+  `agent`, and `gate`, which §2.3.3 already defined commands for; §2.3.3's
+  control commands moved out of the fleet namespace they were nested under;
+  §8.1's required-namespace list resynced with §2.2; §6.1.2 no longer offers
+  override for a CRITICAL violation, which N4 §6.3.1 forbids; §6.2's bespoke
+  `:override/*` record replaced by the Waiver of
+  N5-delta-supervisory-control-plane §3.1; §4.2.2 and §4.3 aligned with N3
+  §5.3's streaming and authentication contract; §3.2.8–§3.2.9 stopped
+  mandating implementation namespaces (`pr-train/*`, `policy-pack/*`) and now
+  reference the N9 and N4 contracts, per standard 020.
+  **Structural:** §9 inserted; former §9–§12 renumbered to §10–§13.
+  Annex A records implementation divergence.
 - 0.4.0-draft (2026-02-16): Extended pack namespace with search/install/update/remove/run/trust
   commands (§2.3.8); added Pack Browser (§3.2.11) and Run Launcher (§3.2.12) TUI views
 - 0.3.0-draft (2026-02-07): Added extension spec interfaces from N7, N8, N9
