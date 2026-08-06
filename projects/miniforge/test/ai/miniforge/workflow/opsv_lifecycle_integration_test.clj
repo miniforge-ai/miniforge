@@ -17,87 +17,64 @@
 ;; limitations under the License.
 (ns ai.miniforge.workflow.opsv-lifecycle-integration-test
   (:require
-   [clojure.edn :as edn]
-   [clojure.java.io :as io]
-   [clojure.test :refer [deftest is]]
+   [clojure.test :refer [deftest is testing]]
    [ai.miniforge.evidence-bundle.interface :as evidence]
+   [ai.miniforge.event-stream.interface :as event-stream]
    [ai.miniforge.phase.interface :as phase]
    [ai.miniforge.phase-opsv.interface :as opsv]
-   [ai.miniforge.phase-opsv.protocol :as port]
-   [ai.miniforge.workflow.interface :as workflow])
-  (:import
-   [org.apache.commons.io FileUtils]))
+   [ai.miniforge.workflow.interface :as workflow]
+   [ai.miniforge.workflow.opsv-lifecycle-support :as support]))
 
 ;------------------------------------------------------------------------------ Layer 0
 
-(def ^{:stratum 0} ^:private fixture
-  (let [resource-path "opsv/application-fixture.edn"
-        project-relative (io/file "../../components/phase-opsv/test-resources"
-                                  resource-path)
-        source (or (io/resource resource-path)
-                   (when (.isFile project-relative) project-relative))]
-    (when-not source
-      (throw (ex-info "OPSV application fixture not found"
-                      {:fixture/path resource-path})))
-    (-> source slurp edn/read-string)))
+(defn- ^{:stratum 0} run-opsv-scenario
+  [checkpoint-root]
+  (let [workflow-config (:workflow
+                         (workflow/load-workflow
+                          :opsv "1.0.0" {:skip-cache? true}))
+        stream (event-stream/create-event-stream)
+        result (workflow/run-pipeline workflow-config
+                                      (support/workflow-input)
+                                      (support/workflow-options
+                                       stream checkpoint-root))
+        events (event-stream/get-events stream)
+        lifecycle-events (filter
+                          (partial support/event-type-in?
+                                   support/lifecycle-event-types)
+                          events)
+        domain-events (filter
+                       (partial support/event-type-in?
+                                support/domain-event-types)
+                       events)
+        evidence-id (:opsv/evidence-bundle-id (first domain-events))]
+    {:result result
+     :lifecycle-events lifecycle-events
+     :domain-events domain-events
+     :domain-type-counts (frequencies (map :event/type domain-events))
+     :planned-event (support/event-of-type
+                     domain-events :opsv.experiment/planned)
+     :evidence-id evidence-id
+     :evidence-store (:opsv/evidence-assembly-store result)
+     :checkpoint (workflow/load-checkpoint-data
+                  (:execution/id result)
+                  {:checkpoint/root checkpoint-root})}))
 
-(def ^{:stratum 0} ^:private artifact-id
-  #uuid "00000000-0000-0000-0000-000000000799")
-
-(def ^{:stratum 0} ^:private expected-pipeline
-  (conj (mapv #(hash-map :phase %) opsv/phase-keys) {:phase :done}))
-
-(defn- ^{:stratum 0} with-temp-checkpoint-root
-  [f]
-  (let [root (doto (io/file (System/getProperty "java.io.tmpdir")
-                            (str "opsv-lifecycle-" (random-uuid)))
-               .mkdirs)]
-    (try
-      (f (.getAbsolutePath root))
-      (finally (FileUtils/deleteDirectory root)))))
-
-;------------------------------------------------------------------------------ Layer 1
-
-(defn- ^{:stratum 1} test-adapter
-  []
-  (reify port/OPSVAdapter
-    (discover-signals [_ _targets]
-      [{:driver :cpu} {:driver :backlog}])
-    (run-guarded-ramp [_ _pack]
-      {:environment-fingerprint
-       {:cluster "staging-1"
-        :node-pools ["general"]
-        :image-digests {"catalog" "sha256:abc"}
-        :config-hash "config-1"}
-       :steps (:ramp-steps fixture)})))
-
-(defn- ^{:stratum 1} workflow-input
-  []
-  {:opsv/experiment-pack (:experiment-pack fixture)
-   :opsv/evidence-refs [artifact-id]
-   :opsv/risk-thresholds {:medium 0.3 :high 0.6 :critical 0.85}
-   :opsv/metric-snapshot-artifact-refs [artifact-id]
-   :opsv/policy-diff-artifact-refs [artifact-id]})
-
-(deftest ^{:stratum 1} test-exact-opsv-workflow-resource
+(deftest ^{:stratum 0} test-opsv-workflow-loads-exact-versioned-pipeline
   (let [loaded (workflow/load-workflow :opsv "1.0.0" {:skip-cache? true})]
     (is (= :resource (:source loaded)))
     (is (true? (get-in loaded [:validation :valid?])))
-    (is (= expected-pipeline (get-in loaded [:workflow :workflow/pipeline])))))
+    (is (= support/expected-pipeline
+           (get-in loaded [:workflow :workflow/pipeline])))))
 
-;------------------------------------------------------------------------------ Layer 2
-
-(deftest ^{:stratum 2} test-runtime-adapter-authority
-  (let [legacy-adapter (test-adapter)
-        runtime-adapter (test-adapter)
+(deftest ^{:stratum 0} test-opsv-interceptor-isolates-runtime-adapter
+  (let [legacy-adapter (support/test-adapter)
+        runtime-adapter (support/test-adapter)
         interceptor (phase/get-phase-interceptor
                      {:phase :opsv/discover :agent :opsv-test-agent})
         enter (:enter interceptor)
-        context {:execution/id (random-uuid)
-                 :execution/input (assoc (workflow-input)
-                                         :opsv/adapter legacy-adapter)}
-        migrated (enter context)
-        preferred (enter (assoc context :execution/opts
+        migrated (enter (support/legacy-adapter-context legacy-adapter))
+        preferred (enter (assoc (support/legacy-adapter-context legacy-adapter)
+                                :execution/opts
                                 {:opsv/adapter runtime-adapter}))]
     (is (= :opsv-test-agent (get-in migrated [:phase :agent])))
     (is (identical? legacy-adapter
@@ -107,43 +84,55 @@
     (is (not (contains? (:execution/input migrated) :opsv/adapter)))
     (is (not (contains? (:execution/input preferred) :opsv/adapter)))))
 
-(deftest ^{:stratum 2} test-evidence-runtime-restores-from-durable-input
+(deftest ^{:stratum 0} test-opsv-evidence-runtime-restores-from-durable-input
   (let [workflow-id (random-uuid)
+        runtime-adapter (support/test-adapter)
+        context (-> (support/legacy-adapter-context runtime-adapter)
+                    (assoc :execution/id workflow-id)
+                    (update :execution/input dissoc :opsv/adapter)
+                    (assoc :execution/opts {:opsv/adapter runtime-adapter}))
         interceptor (phase/get-phase-interceptor {:phase :opsv/discover})
-        entered ((:enter interceptor)
-                 {:execution/id workflow-id
-                  :execution/input
-                  {:opsv/experiment-pack (:experiment-pack fixture)}
-                  :execution/opts {:opsv/adapter (test-adapter)}})
+        entered ((:enter interceptor) context)
         checkpointed ((:leave interceptor) entered)
         resumed (dissoc checkpointed :opsv/evidence-assembly-store)
         restored ((:enter interceptor) resumed)
         bundle-id (get-in restored
                           [:execution/input :opsv/evidence-bundle-id])]
-    (is (= (get-in checkpointed
-                   [:execution/input :opsv/evidence-assembly])
+    (is (= (get-in checkpointed [:execution/input :opsv/evidence-assembly])
            (evidence/get-opsv-assembly
             (:opsv/evidence-assembly-store restored) bundle-id)))))
 
-(deftest ^{:stratum 2} test-opsv-lifecycle-checkpoint
-  (with-temp-checkpoint-root
-    (fn [checkpoint-root]
-      (let [config (:workflow
-                    (workflow/load-workflow
-                     :opsv "1.0.0" {:skip-cache? true}))
-            result (workflow/run-pipeline
-                    config (workflow-input)
-                    {:opsv/adapter (test-adapter)
-                     :checkpoint/root checkpoint-root})
-            checkpoint (workflow/load-checkpoint-data
-                        (:execution/id result)
-                        {:checkpoint/root checkpoint-root})
-            checkpoint-input (get-in checkpoint
-                                     [:machine-snapshot :execution/input])]
-        (is (= :completed (:execution/status result)))
-        (is (= (set (conj opsv/phase-keys :done))
-               (set (keys (:execution/phase-results result)))))
-        (is (map? (:opsv/evidence-assembly checkpoint-input)))
-        (is (not (contains? checkpoint-input :opsv/adapter)))
-        (is (not (contains? checkpoint-input
-                            :opsv/evidence-assembly-store)))))))
+;------------------------------------------------------------------------------ Layer 1
+
+(deftest ^{:stratum 1} test-opsv-run-emits-lifecycle-and-domain-events
+  (let [{:keys [result lifecycle-events domain-events domain-type-counts
+                planned-event evidence-id evidence-store checkpoint]}
+        (support/with-temp-checkpoint-root run-opsv-scenario)
+        assembly (evidence/get-opsv-assembly evidence-store evidence-id)
+        checkpoint-input (get-in checkpoint [:machine-snapshot :execution/input])
+        actuation (:opsv/actuation-record
+                   (support/phase-output result :opsv/actuate))]
+    (testing "the shared runner executes all registered phases"
+      (is (= :completed (:execution/status result)))
+      (is (= (set (conj opsv/phase-keys :done))
+             (set (keys (:execution/phase-results result)))))
+      (doseq [phase-key opsv/phase-keys]
+        (is (= 1 (support/lifecycle-event-count
+                  lifecycle-events phase-key :workflow/phase-started)))
+        (is (= 1 (support/lifecycle-event-count
+                  lifecycle-events phase-key :workflow/phase-completed)))))
+    (testing "successful boundaries emit the required N3 OPSV events"
+      (is (= support/expected-domain-type-counts domain-type-counts))
+      (is (= (:opsv/risk-result (support/phase-output result :opsv/plan))
+             (:opsv/risk-score planned-event)))
+      (is (number? (get-in planned-event [:opsv/risk-score :score])))
+      (is (uuid? evidence-id))
+      (is (every? #(= evidence-id (:opsv/evidence-bundle-id %)) domain-events))
+      (is (= :assembling (:opsv.assembly/status assembly)))
+      (is (= (set (map :event/id domain-events)) (:opsv/event-refs assembly)))
+      (is (= assembly (:opsv/evidence-assembly checkpoint-input)))
+      (is (not (contains? checkpoint-input :opsv/evidence-assembly-store)))
+      (is (not (contains? checkpoint-input :opsv/adapter))))
+    (testing "the default posture remains side-effect free"
+      (is (= :recommend-only (:effective-actuation-mode actuation)))
+      (is (= [] (:governed-effects actuation))))))
