@@ -6,10 +6,13 @@
 
 # N3 — Event Stream & Observability Contract
 
-**Version:** 0.10.0-draft
-**Date:** 2026-08-05
+**Version:** 0.10.1-draft
+**Date:** 2026-08-06
 **Status:** Draft
 **Conformance:** MUST
+
+_v0.10.1 aligns OPSV governed-effect correlation with the accepted Ariadne
+runtime contracts._
 
 _v0.10.0 closes the spec's structural gaps: a canonical event-type registry
 (§6), schema evolution and consumer compatibility rules (§7), sensitive-data
@@ -1344,10 +1347,10 @@ event types:
  :opsv/evidence-bundle-id uuid
  :opsv/requested-actuation-mode keyword ; :recommend-only, :pr-only, :apply-allowed
  :opsv/effective-actuation-mode keyword ; :none, :recommend-only, :pr-only, :apply-allowed
- :opsv/governed-effects              ; Correlates each N10 intent, OIR, and capability
- [{:evidence/intent-id uuid
-   :evidence/oir-id uuid
-   :evidence/capability-id string}]
+ :opsv/governed-effects              ; Correlates the Ariadne effect, grant, and decision
+ [{:evidence/effect-id uuid
+   :evidence/grant-id uuid
+   :evidence/envelope-id uuid}]
  :opsv/pr-refs [string ...]          ; PR URLs if PR_ONLY
  :opsv/apply-refs [string ...]       ; Applied resource refs if APPLY_ALLOWED
  :message "OPSV actuation emitted: {effective-actuation-mode}"}
@@ -3279,6 +3282,8 @@ resolution is an N3 amendment per §6.1, not silent acceptance.
 
 **Version History:**
 
+- 0.10.1-draft (2026-08-06): Replaced stale OPSV intent/OIR/capability
+  correlation with Ariadne effect, execution-grant, and decision-envelope IDs
 - 0.10.0-draft (2026-08-05): Spec-completion pass.
   **New normative sections:** event type registry (§6), schema evolution and
   consumer compatibility (§7), sensitive data and redaction (§8), emission

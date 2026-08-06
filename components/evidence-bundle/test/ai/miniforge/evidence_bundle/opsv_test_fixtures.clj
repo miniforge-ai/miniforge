@@ -41,14 +41,17 @@
 (def ^{:stratum 0} diff-artifact-id
   #uuid "00000000-0000-0000-0000-000000000108")
 
-(def ^{:stratum 0} intent-id
+(def ^{:stratum 0} effect-id
   #uuid "00000000-0000-0000-0000-000000000109")
 
-(def ^{:stratum 0} oir-id
+(def ^{:stratum 0} grant-id
   #uuid "00000000-0000-0000-0000-000000000110")
 
-(def ^{:stratum 0} canonical-bundle-id
+(def ^{:stratum 0} envelope-id
   #uuid "00000000-0000-0000-0000-000000000111")
+
+(def ^{:stratum 0} canonical-bundle-id
+  #uuid "00000000-0000-0000-0000-000000000112")
 
 ;------------------------------------------------------------------------------ Layer 1
 
@@ -57,9 +60,9 @@
    diff-artifact-id])
 
 (def ^{:stratum 1} governed-effect
-  {:evidence/intent-id intent-id
-   :evidence/oir-id oir-id
-   :evidence/capability-id "grant-1"})
+  {:evidence/effect-id effect-id
+   :evidence/grant-id grant-id
+   :evidence/envelope-id envelope-id})
 
 (def ^{:stratum 1} base-bundle
   {:evidence-bundle/workflow-id workflow-id
@@ -84,7 +87,7 @@
     :image-digests {"catalog" "sha256:image"} :config-hash "sha256:cfg"}
    :opsv/event-refs event-ids
    :opsv/artifact-refs artifact-ids
-   :opsv/capability-refs ["grant-1"]
+   :opsv/grant-refs [grant-id]
    :opsv/risk-score {:score 0.2 :level :low :factors []}
    :opsv/convergence-iterations 2
    :opsv/policy-proposals

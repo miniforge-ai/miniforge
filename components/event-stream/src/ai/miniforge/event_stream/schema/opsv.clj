@@ -46,9 +46,9 @@
 
 (def ^{:stratum 0} GovernedEffect
   [:map {:closed true}
-   [:evidence/intent-id :uuid]
-   [:evidence/oir-id :uuid]
-   [:evidence/capability-id :string]])
+   [:evidence/effect-id :uuid]
+   [:evidence/grant-id :uuid]
+   [:evidence/envelope-id :uuid]])
 
 (def ^{:stratum 0} EnvironmentFingerprint
   [:map {:closed true}

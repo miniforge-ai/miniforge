@@ -56,7 +56,7 @@
 (def ^{:stratum 0} ^:private reference-paths
   [[:opsv/event-refs]
    [:opsv/artifact-refs]
-   [:opsv/capability-refs]
+   [:opsv/grant-refs]
    [:opsv/actuation :pr-refs]
    [:opsv/actuation :apply-refs]
    [:opsv/actuation :postcondition-artifact-refs]
@@ -67,9 +67,9 @@
 
 (defn- ^{:stratum 0} governed-effect-sort-key
   [effect]
-  [(str (:evidence/intent-id effect))
-   (str (:evidence/oir-id effect))
-   (:evidence/capability-id effect)])
+  [(str (:evidence/effect-id effect))
+   (str (:evidence/grant-id effect))
+   (str (:evidence/envelope-id effect))])
 
 ;------------------------------------------------------------------------------ Layer 1
 
@@ -86,18 +86,18 @@
   [record evidence available-artifact-ids]
   (let [event-refs (reference-set (:opsv/event-refs evidence))
         artifact-refs (reference-set (:opsv/artifact-refs evidence))
-        capability-refs (reference-set (:opsv/capability-refs evidence))
+        grant-refs (reference-set (:opsv/grant-refs evidence))
         available-artifact-refs (reference-set available-artifact-ids)
         effects (reference-set (get-in evidence [:opsv/actuation
                                                  :governed-effects]))
-        effect-capabilities (set (map :evidence/capability-id effects))]
+        effect-grants (set (map :evidence/grant-id effects))]
     (cond-> []
       (not= (:opsv/event-refs record) event-refs)
       (conj {:code :event-reference-mismatch})
       (not= (:opsv/artifact-refs record) artifact-refs)
       (conj {:code :artifact-reference-mismatch})
-      (not= (:opsv/capability-refs record) capability-refs)
-      (conj {:code :capability-reference-mismatch})
+      (not= (:opsv/grant-refs record) grant-refs)
+      (conj {:code :grant-reference-mismatch})
       (not= (:opsv/governed-effects record) effects)
       (conj {:code :governed-effect-mismatch})
       (not (cset/subset? (detailed-artifact-refs evidence) artifact-refs))
@@ -107,7 +107,7 @@
              :missing (vec (sort (cset/difference
                                   artifact-refs
                                   available-artifact-refs)))})
-      (not (cset/subset? effect-capabilities capability-refs))
+      (not (cset/subset? effect-grants grant-refs))
       (conj {:code :uncorrelated-governed-effect}))))
 
 ;------------------------------------------------------------------------------ Layer 2

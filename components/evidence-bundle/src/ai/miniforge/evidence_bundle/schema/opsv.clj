@@ -50,9 +50,9 @@
 
 (def ^{:stratum 0} GovernedEffect
   [:map {:closed true}
-   [:evidence/intent-id uuid?]
-   [:evidence/oir-id uuid?]
-   [:evidence/capability-id string?]])
+   [:evidence/effect-id uuid?]
+   [:evidence/grant-id uuid?]
+   [:evidence/envelope-id uuid?]])
 
 (def ^{:stratum 0} RollbackResult
   [:map {:closed true}
@@ -107,8 +107,8 @@
     [:and [:vector {:min 1} uuid?] [:fn unique-values?]]]
    [:opsv/artifact-refs
     [:and [:vector {:min 1} uuid?] [:fn unique-values?]]]
-   [:opsv/capability-refs
-    [:and [:vector string?] [:fn unique-values?]]]
+   [:opsv/grant-refs
+    [:and [:vector uuid?] [:fn unique-values?]]]
    [:opsv/risk-score RiskResult]
    [:opsv/convergence-iterations [:int {:min 0}]]
    [:opsv/policy-proposals [:vector PolicyProposal]]

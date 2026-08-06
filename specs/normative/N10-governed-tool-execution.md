@@ -6,8 +6,8 @@
 
 # N10 — Governed Tool Execution
 
-**Version:** 0.2.0-draft
-**Date:** 2026-03-08
+**Version:** 0.3.0-draft
+**Date:** 2026-08-06
 **Status:** Draft
 **Conformance:** MUST
 
@@ -26,16 +26,44 @@ operations such as:
 - large-scale unintended infrastructure changes
 - credential leakage or privilege escalation
 
-The core model: agents express **operational intent**, which is verified, classified,
-policy-evaluated, and executed inside **isolated capsules** with **ephemeral capabilities**.
+The core model: agents request effects, while the runtime decides through an
+Ariadne DecisionEnvelope and executes only under a bounded ExecutionGrant and a
+durable EffectTransaction.
 
-### 1.1 What This Specification Defines
+### 1.1 Ariadne adoption profile
 
-- Operational intent representation (§2)
+The accepted Ariadne adoption RFC supersedes this document's older Operational
+IR and capability objects. Miniforge implementations MUST use the runtime-owned
+`DecisionEnvelope`, `ExecutionGrant`, and `EffectTransaction` contracts and MUST
+NOT implement a parallel capability broker. Sections that retain the older
+intent/OIR/capability vocabulary describe design inputs only; where they conflict
+with this profile, this profile governs.
+
+The following legacy material is explicitly informative: §2 and §6 in full;
+the Intent-, Operational-IR-, Capability-, and Capability-Broker-dependent
+clauses in §§3–5, §§7–10, §12, and §§13.2–13.4; and their architecture and
+glossary references in §§14–17. Within that material, every `REQUIRED` or
+`OPTIONAL` field annotation and every `MUST` or `MUST NOT` statement has no
+independent conformance force. Implementations MUST express the underlying
+safety requirement through the adopted Ariadne contracts. All other clauses
+remain normative.
+
+Governed-effect evidence MUST correlate the durable transaction, the grant
+rechecked at commit, and the runtime decision that allowed it:
+
+```clojure
+{:evidence/effect-id uuid
+ :evidence/grant-id uuid
+ :evidence/envelope-id uuid}
+```
+
+### 1.2 What This Specification Defines
+
+- Operational intent and IR design input (§2, informative legacy material)
 - Action classification and tool-declared risk (§3)
 - Verification pipeline (§4)
 - Validation requirements (§5)
-- Capability model and lifecycle (§6)
+- Capability model and lifecycle design input (§6, informative legacy material)
 - Execution capsule isolation (§7)
 - Crown jewel protection (§8)
 - Postcondition monitoring (§9)
@@ -44,14 +72,14 @@ policy-evaluated, and executed inside **isolated capsules** with **ephemeral cap
 - Audit integration (§12)
 - Conformance requirements (§13)
 
-### 1.2 What This Specification Does Not Define
+### 1.3 What This Specification Does Not Define
 
 - Fleet governance and trust scoring (future N12 enterprise extension)
 - Specific diagnostic or incident workflows (informative: I-INCIDENT-DIAGNOSTICS)
 - Extended validation strategies beyond static analysis and provider dry-run
   (informative: I-VALIDATION-STRATEGIES)
 
-### 1.3 Design Principles
+### 1.4 Design Principles
 
 1. **Intent over command** — agents declare what they want to achieve, not which
    commands to run
@@ -65,7 +93,7 @@ policy-evaluated, and executed inside **isolated capsules** with **ephemeral cap
 
 ---
 
-## 2. Operational Intent
+## 2. Operational Intent (Informative Legacy Design Input)
 
 ### 2.1 Intent Model
 
@@ -451,7 +479,7 @@ audit ledger (N6).
 
 ---
 
-## 6. Capability Model
+## 6. Capability Model (Informative Legacy Design Input)
 
 ### 6.1 Capability Structure
 
@@ -815,6 +843,13 @@ Validation and environment adapters (§5.3) register through the tool registry:
 All governed execution operations MUST emit events to the event stream (N3) and
 produce evidence for evidence bundles (N6).
 
+> **Ariadne profile:** Rows whose event, trigger, or data depends on Intent,
+> Operational IR, Capability, or Capability Broker are informative legacy
+> placeholders, despite this section's heading. Implementations MUST NOT emit
+> them as unregistered N3 event types. Conformant domain events correlate the
+> DecisionEnvelope, ExecutionGrant, and EffectTransaction identifiers; a new
+> lifecycle event type requires an N3 registry amendment.
+
 | Event | Trigger | Data |
 |-------|---------|------|
 | `:intent/created` | Agent expresses intent | Intent structure |
@@ -838,17 +873,16 @@ produce evidence for evidence bundles (N6).
 Governed execution produces a sub-bundle within the workflow's evidence bundle:
 
 ```clojure
-{:evidence/type           :governed-execution
- :evidence/intent-id      uuid
- :evidence/oir-id         uuid
- :evidence/action-class   keyword
- :evidence/policy-result  map
- :evidence/validation     map
- :evidence/capability-id  string
- :evidence/capsule-result map
- :evidence/postconditions [map]
- :evidence/duration-ms    long
- :evidence/timestamp      inst}
+{:evidence/type            :governed-execution
+ :evidence/effect-id       uuid
+ :evidence/grant-id        uuid
+ :evidence/envelope-id     uuid
+ :evidence/action-class    keyword
+ :evidence/validation      map
+ :evidence/effect-result   map
+ :evidence/postconditions  [map]
+ :evidence/duration-ms     long
+ :evidence/timestamp       inst}
 ```
 
 ---
@@ -879,7 +913,7 @@ Governed execution produces a sub-bundle within the workflow's evidence bundle:
 | N10.VL.2 | MUST | Class C and above MUST undergo provider dry-run |
 | N10.VL.3 | SHOULD | Implementations SHOULD support the ValidationAdapter interface for extended strategies |
 
-### 13.4 Capabilities
+### 13.4 Capabilities (Informative Legacy Design Input)
 
 | ID | Level | Requirement |
 |----|-------|-------------|
@@ -1033,6 +1067,9 @@ Audit Ledger (N3 events + N6 evidence bundles)
 
 **Version History:**
 
+- 0.3.0-draft (2026-08-06): Applied the accepted Ariadne adoption profile;
+  DecisionEnvelope, ExecutionGrant, and EffectTransaction supersede the
+  parallel intent/OIR/capability execution objects
 - 0.2.0-draft (2026-03-08): Reliability Nines amendments — Operational Semantics with
   timeout/retry/circuit-breaker/concurrency/fallback (§3.4), Tool Health Tracking (§3.5),
   Tool Response Validation (§7.4), unified autonomy model back-reference (§14),

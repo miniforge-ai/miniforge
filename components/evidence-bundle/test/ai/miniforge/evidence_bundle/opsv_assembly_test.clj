@@ -92,7 +92,7 @@
                 :missing)))))
 
 (deftest ^{:stratum 1} finalize-rejects-uncorrelated-governed-effect
-  (let [uncorrelated (assoc f/opsv-evidence :opsv/capability-refs [])
+  (let [uncorrelated (assoc f/opsv-evidence :opsv/grant-refs [])
         [store bundle-id] (accumulated-store
                            uncorrelated)
         result (evidence/finalize-opsv-evidence!
@@ -114,8 +114,8 @@
   (doseq [[expected-code change]
           [[:artifact-reference-mismatch
             #(update % :opsv/artifact-refs pop)]
-           [:capability-reference-mismatch
-            #(assoc % :opsv/capability-refs [])]
+           [:grant-reference-mismatch
+            #(assoc % :opsv/grant-refs [])]
            [:governed-effect-mismatch
             #(assoc-in % [:opsv/actuation :governed-effects] [])]]]
     (let [[store bundle-id] (accumulated-store f/opsv-evidence)
@@ -138,7 +138,7 @@
 (deftest ^{:stratum 1} finalize-rejects-duplicate-aggregate-references
   (doseq [reference-key [:opsv/event-refs
                          :opsv/artifact-refs
-                         :opsv/capability-refs]]
+                         :opsv/grant-refs]]
     (let [duplicate-evidence
           (update f/opsv-evidence reference-key #(conj % (first %)))
           [store bundle-id]
@@ -178,18 +178,17 @@
     (is (contains? (error-codes result) :referenced-artifact-not-found))))
 
 (deftest ^{:stratum 1} finalization-canonicalizes-reference-order
-  (let [second-capability-id "grant-2"
+  (let [second-grant-id #uuid "00000000-0000-0000-0000-000000000113"
         second-effect (assoc f/governed-effect
-                             :evidence/capability-id second-capability-id)
+                             :evidence/grant-id second-grant-id)
         evidence-value (-> f/opsv-evidence
-                           (update :opsv/capability-refs
-                                   conj second-capability-id)
+                           (update :opsv/grant-refs conj second-grant-id)
                            (update-in [:opsv/actuation :governed-effects]
                                       conj second-effect))
         reordered (-> evidence-value
                       (update :opsv/event-refs #(vec (reverse %)))
                       (update :opsv/artifact-refs #(vec (reverse %)))
-                      (update :opsv/capability-refs #(vec (reverse %)))
+                      (update :opsv/grant-refs #(vec (reverse %)))
                       (update-in [:opsv/actuation :governed-effects]
                                  #(vec (reverse %))))
         finalize (fn [input]
