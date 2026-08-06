@@ -31,8 +31,16 @@
   {:gate/id :actuation :gate/passed? true :gate/type :opsv}
   {:gate/id :evidence-completeness :gate/passed? true :gate/type :opsv}]
 
- :ramp-steps
- [{:step/id "1"
+ :opsv/candidate-drivers [{:driver :cpu} {:driver :backlog}]
+
+ :opsv/ramp-result
+ {:environment-fingerprint
+  {:cluster "staging-1"
+   :node-pools ["general"]
+   :image-digests {"catalog" "sha256:abc"}
+   :config-hash "config-1"}
+  :steps
+  [{:step/id "1"
    :step/intended-load {:requests-per-second 50}
    :step/observed-load {:requests-per-second 50}
    :step/observations
@@ -65,4 +73,4 @@
     :min-replicas 2
     :max-replicas 8
     :keda-backlog-target 100
-    :cpu-request-millicores 250}}]}
+    :cpu-request-millicores 250}}]}}

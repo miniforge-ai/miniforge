@@ -108,6 +108,9 @@
         assembly (when (and evidence-store evidence-id)
                    (evidence/get-opsv-assembly evidence-store evidence-id))
         checkpoint-input (get-in checkpoint [:machine-snapshot :execution/input])
+        discovery (support/phase-output result :opsv/discover)
+        policy (:opsv/operational-policy
+                (support/phase-output result :opsv/synthesize))
         actuation (:opsv/actuation-record
                    (support/phase-output result :opsv/actuate))]
     (testing "the shared runner executes all registered phases"
@@ -132,6 +135,16 @@
       (is (= assembly (:opsv/evidence-assembly checkpoint-input)))
       (is (not (contains? checkpoint-input :opsv/evidence-assembly-store)))
       (is (not (contains? checkpoint-input :opsv/adapter))))
+    (testing "the staging adapter yields interoperable scaling recommendations"
+      (is (= #{:cpu :backlog}
+             (set (map :driver (:opsv/candidate-drivers discovery)))))
+      (is (= ["staging"] (:operational-policy/target-envs policy)))
+      (is (= {:api-version "autoscaling/v2" :metric :cpu}
+             (select-keys
+              (get-in policy [:operational-policy/scaling :hpa])
+              [:api-version :metric])))
+      (is (= :backlog
+             (get-in policy [:operational-policy/scaling :keda :trigger]))))
     (testing "the default posture remains side-effect free"
       (is (= :recommend-only (:effective-actuation-mode actuation)))
       (is (= [] (:governed-effects actuation))))))
