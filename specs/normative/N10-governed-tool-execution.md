@@ -39,12 +39,14 @@ NOT implement a parallel capability broker. Sections that retain the older
 intent/OIR/capability vocabulary describe design inputs only; where they conflict
 with this profile, this profile governs.
 
-For avoidance of doubt, every `REQUIRED` or `OPTIONAL` annotation and every
-`MUST` or `MUST NOT` statement that depends on the legacy Intent, Operational
-IR, Capability, or Capability Broker objects is informative only and has no
+The following legacy material is explicitly informative: §2 and §6 in full;
+the Intent-, Operational-IR-, Capability-, and Capability-Broker-dependent
+clauses in §§3–5, §§7–10, §12, and §§13.2–13.4; and their architecture and
+glossary references in §§14–17. Within that material, every `REQUIRED` or
+`OPTIONAL` field annotation and every `MUST` or `MUST NOT` statement has no
 independent conformance force. Implementations MUST express the underlying
-safety requirement through the adopted Ariadne contracts. Requirements that do
-not depend on those superseded objects remain normative.
+safety requirement through the adopted Ariadne contracts. All other clauses
+remain normative.
 
 Governed-effect evidence MUST correlate the durable transaction, the grant
 rechecked at commit, and the runtime decision that allowed it:
@@ -91,7 +93,7 @@ rechecked at commit, and the runtime decision that allowed it:
 
 ---
 
-## 2. Operational Intent
+## 2. Operational Intent (Informative Legacy Design Input)
 
 ### 2.1 Intent Model
 
@@ -477,7 +479,7 @@ audit ledger (N6).
 
 ---
 
-## 6. Capability Model
+## 6. Capability Model (Informative Legacy Design Input)
 
 ### 6.1 Capability Structure
 
@@ -904,7 +906,7 @@ Governed execution produces a sub-bundle within the workflow's evidence bundle:
 | N10.VL.2 | MUST | Class C and above MUST undergo provider dry-run |
 | N10.VL.3 | SHOULD | Implementations SHOULD support the ValidationAdapter interface for extended strategies |
 
-### 13.4 Capabilities
+### 13.4 Capabilities (Informative Legacy Design Input)
 
 | ID | Level | Requirement |
 |----|-------|-------------|
