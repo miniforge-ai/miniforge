@@ -960,9 +960,12 @@ names that say what each checks.
 | 5.1.9 | `:miniforge/capability-grant` | REQUIRED for pack runs | Capability declaration and scope | N1 §2.25 |
 | 5.1.10 | `:miniforge/pack-high-risk-action` | RECOMMENDED for production | High-risk pack actions | N1 §2.26 |
 | 5.1.11 | `:miniforge/financial-statement-validation` | REQUIRED for DF financials | Accounting invariants | Data Foundry N4 |
-| 5.1.11 | `:miniforge/macro-series-integrity` | RECOMMENDED for DF macro | Distribution and continuity | Data Foundry N4 |
-| 5.1.11 | `:miniforge/valuation-consistency` | REQUIRED for DF valuation | Derivation consistency | Data Foundry N4 |
-| 5.1.11 | `:miniforge/time-series-completeness` | REQUIRED for DF time series | Period completeness | Data Foundry N4 |
+| ↳ | `:miniforge/macro-series-integrity` | RECOMMENDED for DF macro | Distribution and continuity | Data Foundry N4 |
+| ↳ | `:miniforge/valuation-consistency` | REQUIRED for DF valuation | Derivation consistency | Data Foundry N4 |
+| ↳ | `:miniforge/time-series-completeness` | REQUIRED for DF time series | Period completeness | Data Foundry N4 |
+
+`↳` marks a continuation of the section above it: §5.1.11 defines four Data
+Foundry packs in one section rather than four subsections.
 
 The **Status** column is normative and states when a pack is obligatory rather
 than optional. A pack marked REQUIRED for a context MUST be bound (§5.4) to the

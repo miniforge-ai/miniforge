@@ -152,8 +152,9 @@ Specification change; no runtime code touched.
 
 - `markdownlint` clean on all three changed files.
 - All Clojure example blocks verified brace-balanced after each edit.
-- Every internal `§N.N` reference resolved against defined headings; the one
-  apparent miss is a cross-spec reference to N1 §2.26.
+- Every internal `§N.N` reference resolved against defined headings. The check
+  covers intra-document references only; cross-spec references such as
+  N1 §2.26 are outside its scope and were verified by hand.
 - No duplicate section numbers; top-level sections ascending.
 - Verified zero remaining `:rule/severity :error|:warning` and zero string
   `:violation/rule-id` values.
