@@ -40,6 +40,14 @@
   [rule]
   (some? (:rule/id rule)))
 
+(defn ^{:stratum 0} prepend-incident-node
+  [incident-id path]
+  (update path :path/nodes #(into [(str "incident:" incident-id)] %)))
+
+(defn ^{:stratum 0} pr-for-commit
+  [prs-by-commit commit]
+  (first (get prs-by-commit (:commit/sha commit))))
+
 (defn ^{:stratum 0} commit-projection
   [incident-id revision subject facts commit pr]
   (let [commit-n (model/commit-node commit)
@@ -89,28 +97,9 @@
        (every? valid-mapping? (or specification-mappings []))
        (every? valid-rule-reference? (or policy-rules []))))
 
-(defn ^{:stratum 1} coverage
-  [location-facts mappings rules]
-  (let [location-count (count location-facts)
-        symbol-count (count (filter #(get-in % [:location :symbol :symbol/id]) location-facts))
-        range-count (count (filter :blob-sha location-facts))
-        commit-count (count (set (map :commit/sha (mapcat :commits location-facts))))
-        pr-count (count (set (map (juxt :pull-request/number :pull-request/contains-commit)
-                                  (mapcat :pull-requests location-facts))))
-        mapped? (some (fn [{:keys [location]}]
-                        (some #(mapping-matches? (:path location) %) mappings))
-                      location-facts)]
-    {:coverage/locations {:requested location-count :immutable-ranges range-count}
-     :coverage/symbols {:status (cond (= symbol-count location-count) :provided
-                                      (zero? symbol-count) :none
-                                      :else :partial)
-                        :resolved symbol-count :requested location-count}
-     :coverage/pull-requests {:status :local-merge-history
-                              :resolved pr-count :candidate-commits commit-count}
-     :coverage/specifications (cond (empty? mappings) :not-provided
-                                    mapped? :mapped
-                                    :else :unresolved)
-     :coverage/policy-rules (if (seq rules) :evaluated :not-provided)}))
+(defn- ^{:stratum 1} location-mapped?
+  [{:keys [location]} mappings]
+  (some #(mapping-matches? (:path location) %) mappings))
 
 (defn ^{:stratum 1} governance-projection
   [subject path mappings rules policy-context]
@@ -163,30 +152,51 @@
 
 ;------------------------------------------------------------------------------ Layer 2
 
+(defn ^{:stratum 2} coverage
+  [location-facts mappings rules]
+  (let [location-count (count location-facts)
+        symbol-count (count (filter #(get-in % [:location :symbol :symbol/id]) location-facts))
+        range-count (count (filter :blob-sha location-facts))
+        commit-count (count (set (map :commit/sha (mapcat :commits location-facts))))
+        pr-count (count (set (map (juxt :pull-request/number :pull-request/contains-commit)
+                                  (mapcat :pull-requests location-facts))))
+        mapped? (some #(location-mapped? % mappings) location-facts)
+        symbol-status (cond (= symbol-count location-count) :provided
+                            (zero? symbol-count) :none
+                            :else :partial)
+        spec-status (cond (empty? mappings) :not-provided
+                          mapped? :mapped
+                          :else :unresolved)
+        policy-status (if (seq rules) :evaluated :not-provided)]
+    {:coverage/locations {:requested location-count :immutable-ranges range-count}
+     :coverage/symbols {:status symbol-status :resolved symbol-count :requested location-count}
+     :coverage/pull-requests {:status :local-merge-history
+                              :resolved pr-count :candidate-commits commit-count}
+     :coverage/specifications spec-status
+     :coverage/policy-rules policy-status}))
+
 (defn ^{:stratum 2} project-location
   [incident-id revision facts mappings rules policy-context]
-  (if-let [subject (model/subject-node revision facts)]
-    (let [range-n (model/range-node revision facts)
-          incident-edge (model/edge (str "incident:" incident-id) :implicates
-                                    (:node/id subject) :asserted
-                                    [{:evidence/type :operator-selected-location}])
-          range-edge (when (and range-n (not= (:node/id range-n) (:node/id subject)))
-                       (model/edge (:node/id subject) :cites (:node/id range-n) :asserted
-                                   [{:evidence/type :operator-selected-location}]))
-          governance (governance-projection subject (get-in facts [:location :path])
-                                            mappings rules policy-context)
-          prs-by-commit (group-by :pull-request/contains-commit (:pull-requests facts))
-          commits (mapv #(commit-projection incident-id revision subject facts %
-                                            (first (get prs-by-commit (:commit/sha %))))
-                        (:commits facts))
-          paths (mapv #(update % :path/nodes (fn [nodes]
-                                              (into [(str "incident:" incident-id)] nodes)))
-                      (mapcat :paths commits))]
-      {:nodes (into (cond-> [subject] range-n (conj range-n))
-                    (concat (:nodes governance) (mapcat :nodes commits)))
-       :edges (into (cond-> [incident-edge] range-edge (conj range-edge))
-                    (concat (:edges governance) (mapcat :edges commits)))
-       :claims (vec (mapcat :claims commits))
-       :paths paths
-       :gaps (location-gaps facts mappings rules policy-context)})
-    (assoc (empty-projection) :gaps (location-gaps facts mappings rules policy-context))))
+  (let [gaps (location-gaps facts mappings rules policy-context)]
+    (if-let [subject (model/subject-node revision facts)]
+      (let [range-n (model/range-node revision facts)
+            incident-edge (model/edge (str "incident:" incident-id) :implicates
+                                      (:node/id subject) :asserted
+                                      [{:evidence/type :operator-selected-location}])
+            range-edge (when (and range-n (not= (:node/id range-n) (:node/id subject)))
+                         (model/edge (:node/id subject) :cites (:node/id range-n) :asserted
+                                     [{:evidence/type :operator-selected-location}]))
+            governance (governance-projection subject (get-in facts [:location :path])
+                                              mappings rules policy-context)
+            prs-by-commit (group-by :pull-request/contains-commit (:pull-requests facts))
+            commits (mapv #(commit-projection incident-id revision subject facts %
+                                              (pr-for-commit prs-by-commit %))
+                          (:commits facts))
+            paths (mapv #(prepend-incident-node incident-id %) (mapcat :paths commits))
+            nodes (into (cond-> [subject] range-n (conj range-n))
+                        (concat (:nodes governance) (mapcat :nodes commits)))
+            edges (into (cond-> [incident-edge] range-edge (conj range-edge))
+                        (concat (:edges governance) (mapcat :edges commits)))
+            claims (vec (mapcat :claims commits))]
+        {:nodes nodes :edges edges :claims claims :paths paths :gaps gaps})
+      (assoc (empty-projection) :gaps gaps))))
