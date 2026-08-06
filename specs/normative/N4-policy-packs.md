@@ -2001,11 +2001,13 @@ Research directions:
 ## Annex A — Implementation Conformance Status (informative)
 
 This annex is **informative**. It records where the miniforge implementation
-currently diverges from the contract above, as of 2026-08-05. It is not a
+currently diverges from the contract above, as of 2026-08-06. It is not a
 relaxation of any requirement in §1–§14: the spec is normative and the
 implementation conforms to it, not the reverse.
 
-Each row is work, not an exemption.
+Each row is work, not an exemption. A row that has been closed says so and
+names the change, rather than being deleted — the annex is the record of what
+the gap was, not only of what remains.
 
 ### A.1 Type Divergences
 
@@ -2043,45 +2045,49 @@ vocabulary was the outlier, and this revision withdraws it.
 Recorded because they were previously unspecified and this revision writes the
 contract the code already satisfies:
 
-- **Signature canonicalization (§8.1.1).** `policy-pack/crypto/pack-signable-bytes`
-  already dissocs the signature fields, sorts keys via `(into (sorted-map) …)`,
-  and serializes `pr-str` as UTF-8 — the broad shape §8.1.1 now specifies.
+- **Signature canonicalization (§8.1.1).** `policy-pack/canonical-edn` renders
+  the §8.1.1 rules directly rather than deferring to `pr-str`: recursive map
+  key ordering, sets as sorted vectors, sequences in declared order, instants
+  as millisecond-precision UTC, and single-space separation, with the
+  comparator in `policy-pack/canonical-order`. A value with no EDN reader form
+  — a live `:rule/check-fn` rather than the symbol §8.1.1 requires — throws
+  rather than serializing an identity hash.
 
-  **Partial on determinism.** Two §8.1.1 rendering rules are unimplemented,
-  and both are reachable today:
-
-  - _Recursive map ordering._ `(into (sorted-map) …)` orders the top-level map
-    only. Nested maps — `:pack/metadata`, each rule map — keep the host's
-    ordering, which is insertion order for small maps and hash order above the
-    array-map threshold.
-  - _Set normalization._ `pr-str` renders a set in iteration order. §8.1.1
-    requires sets to render as a sorted vector, because set iteration order is
-    not defined.
-
-  Either can make the same pack serialize to different bytes on different runs
-  or different hosts, so a signature valid on one machine fails on another.
-  This is a signature interoperability bug, not merely an unimplemented
-  requirement, and it is why §8.1.1 states the rendering rather than deferring
-  to `pr-str`.
+  The earlier `(pr-str (into (sorted-map) …))` sorted the top level only, left
+  sets in iteration order, and printed a `java.time.Instant` with an identity
+  hash, so the same pack could serialize to different bytes across runs. That
+  interoperability bug is closed (PR #1669); signatures produced against the
+  old bytes do not verify, and none could reliably have.
 - **Legacy severity normalization (§2.3.1).** `schema/normalize-severity`
   already exists for `:major` → `:high` and `:minor` → `:low`; §2.3.1 adds
   `:error` → `:high` and `:warning` → `:medium` on the same seam.
 
 ### A.4 Security
 
-- **Self-certifying signature verification.**
-  `policy-pack/registry.clj`'s `verify-signature` reads the verification key
-  from the pack being verified — `pub-key-str (:pack/signed-by pack)`, base64
-  decoded and passed straight to `verify-ed25519`. §8.2.1 forbids this, and
-  §8.1 now types `:pack/signed-by` as a key identifier rather than a key.
+- **Self-certifying signature verification — closed (PR #1669).**
+  `verify-signature` previously read the verification key from the pack being
+  verified, so an attacker could modify a pack, sign it with their own key,
+  write that public key into `:pack/signed-by`, and pass.
 
-  As implemented, signature verification establishes only that the pack was
-  signed by whoever holds the key the pack itself names. An attacker who
-  modifies a pack signs it with their own key, writes that public key into
-  `:pack/signed-by`, and verification passes. There is no configured trust
-  root to resolve against.
+  It now resolves `:pack/signed-by` as a key identifier against a configured
+  trust-root store and fails when it resolves to nothing (§8.2.1). The store
+  loads from `config/policy-pack/trust-roots.edn` on the classpath overlaid
+  with `~/.miniforge/config.edn` under `[:policy-pack :trust-roots]`; the
+  shipped resource is empty, so a deployment that configures nothing trusts
+  nothing.
 
-  This is the highest-priority item in this annex.
+  Two adjacent defects closed with it: `verify-ed25519` could not decode the
+  RFC 8032 raw public-key encoding at all (it read the bytes big-endian and
+  took x as always even), and the canonical serialization was not
+  reproducible — see A.3.
+
+  **Still open.** §8.2 steps 4 and 5 — checking the signature timestamp
+  against a key validity window, and confirming the publisher is permitted for
+  the pack (§5.1.8) — are unimplemented. So is the gate that would call any of
+  this: §5.1.8's `require-signature-verification` and
+  `enforce-publisher-allowlist` are declared with `:rule/detection
+  {:type :custom}` and no `:custom-fn`, so `verify-signature` has no caller
+  outside its component. The verifier is correct; it is not yet reachable.
 
 ### A.5 Structural
 
@@ -2099,6 +2105,10 @@ contract the code already satisfies:
 
 **Version History:**
 
+- 0.7.0-draft (2026-08-06): Annex A only, no normative change. A.4's
+  self-certifying verification and A.3's canonicalization gap are closed by
+  PR #1669 and now read as closed, naming what remains: §8.2 steps 4 and 5,
+  and the §5.1.8 gate that would call the verifier at all.
 - 0.7.0-draft (2026-08-05): Spec-completion pass.
   **Contract fixes:** one severity vocabulary — §2.3.1 rewritten from
   `:error`/`:warning`/`:info` to the canonical `:critical :high :medium :low
