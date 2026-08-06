@@ -32,6 +32,8 @@ Application integration and workflow wiring.
   interceptors with deterministic budgets and anomaly-preserving results.
 - Emit the N3 OPSV experiment, convergence, policy, verification, and
   actuation events only after successful phase boundaries.
+- Preallocate the run's N6 evidence identity before the first OPSV event,
+  correlate emitted event references, and reject unmatched external IDs.
 - Package `:opsv` version `1.0.0` as the exact seven-phase pipeline followed
   by `:done`, and include it in the Miniforge project and development bases.
 - Correct the OPSV governance pack's phase selectors to use the registered

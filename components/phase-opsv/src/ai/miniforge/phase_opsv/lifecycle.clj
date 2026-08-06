@@ -44,17 +44,32 @@
 
 (defn- ^{:stratum 0} ensure-evidence-assembly
   [ctx]
-  (if (get-in ctx [:execution/input :opsv/evidence-bundle-id])
-    ctx
-    (let [store (or (get-in ctx [:execution/input
-                                 :opsv/evidence-assembly-store])
-                    (evidence/create-opsv-assembly-store))
+  (let [bundle-id (get-in ctx [:execution/input :opsv/evidence-bundle-id])
+        supplied-store (get-in ctx [:execution/input
+                                    :opsv/evidence-assembly-store])
+        supplied-assembly (when (and bundle-id supplied-store)
+                            (evidence/get-opsv-assembly supplied-store
+                                                       bundle-id))]
+    (cond
+      (and supplied-assembly
+           (= (:execution/id ctx)
+              (:evidence-bundle/workflow-id supplied-assembly)))
+      ctx
+
+      bundle-id
+      (anomaly/anomaly :invalid-input
+                       "OPSV evidence identifier has no matching workflow assembly"
+                       {:opsv/evidence-bundle-id bundle-id})
+
+      :else
+      (let [store (or supplied-store
+                      (evidence/create-opsv-assembly-store))
           assembly (evidence/allocate-opsv-assembly! store
                                                      (:execution/id ctx))]
-      (-> ctx
-          (assoc-in [:execution/input :opsv/evidence-assembly-store] store)
-          (assoc-in [:execution/input :opsv/evidence-bundle-id]
-                    (:evidence-bundle/id assembly))))))
+        (-> ctx
+            (assoc-in [:execution/input :opsv/evidence-assembly-store] store)
+            (assoc-in [:execution/input :opsv/evidence-bundle-id]
+                      (:evidence-bundle/id assembly)))))))
 
 (defn- ^{:stratum 0} leave-phase
   [ctx]
@@ -88,8 +103,11 @@
   (let [prepared-ctx (cond-> ctx
                        (= :opsv/discover phase-key) ensure-evidence-assembly)
         start-time (System/currentTimeMillis)
-        result (phase-result (transform prepared-ctx))]
-    (phase/enter-context prepared-ctx phase-key nil
+        prepared? (not (anomaly/anomaly? prepared-ctx))
+        result (phase-result (if prepared?
+                               (transform prepared-ctx)
+                               prepared-ctx))]
+    (phase/enter-context (if prepared? prepared-ctx ctx) phase-key nil
                          (:gates config) (:budget config)
                          start-time result)))
 
