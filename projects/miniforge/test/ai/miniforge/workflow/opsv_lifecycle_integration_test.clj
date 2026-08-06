@@ -105,7 +105,8 @@
   (let [{:keys [result lifecycle-events domain-events domain-type-counts
                 planned-event evidence-id evidence-store checkpoint]}
         (support/with-temp-checkpoint-root run-opsv-scenario)
-        assembly (evidence/get-opsv-assembly evidence-store evidence-id)
+        assembly (when (and evidence-store evidence-id)
+                   (evidence/get-opsv-assembly evidence-store evidence-id))
         checkpoint-input (get-in checkpoint [:machine-snapshot :execution/input])
         actuation (:opsv/actuation-record
                    (support/phase-output result :opsv/actuate))]
