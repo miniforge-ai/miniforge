@@ -213,13 +213,17 @@ decided.
 | `:low` | Minor; worth reporting | MUST NOT block |
 | `:info` | Informational; no action required | MUST NOT block |
 
-Implementations MUST reject a pack whose `:rule/severity` is outside this set.
-
 **Legacy values.** `:error` and `:warning` appeared in earlier drafts of this
 spec and MAY be encountered in third-party packs authored against them.
 Implementations MUST normalize `:error` → `:high` and `:warning` → `:medium` at
 load time, and SHOULD warn that the pack targets a withdrawn vocabulary. They
 MUST NOT carry a legacy value past the load boundary.
+
+**Load order.** Normalization runs first; rejection second. After
+normalization, a `:rule/severity` outside the canonical set MUST cause the pack
+to be rejected. So `:error` loads and becomes `:high`, while `:blocker` — a
+value this spec has never defined — is rejected. Rejecting before normalizing
+would fail every pack the normalization rule exists to accept.
 
 ### 2.4 Mapping Artifact
 
