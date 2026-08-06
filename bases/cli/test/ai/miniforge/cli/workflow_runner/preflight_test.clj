@@ -24,6 +24,8 @@
    [ai.miniforge.llm.interface :as llm]
    [ai.miniforge.cli.workflow-runner :as sut]
    [ai.miniforge.cli.workflow-runner.paths :as paths]
+   [ai.miniforge.cli.workflow-runner.preflight :as preflight]
+   [ai.miniforge.cli.workflow-runner.preflight-probe :as probe]
    [ai.miniforge.cli.workflow-runner.process :as process]
    [ai.miniforge.cli.workflow-runner.provenance :as provenance]))
 
@@ -72,8 +74,8 @@
           preflight-client (atom nil)
           output (with-out-str
                    (with-redefs-fn {#'paths/resolve-cli-command-path (fn [_] "/Users/chris/.local/bin/claude")
-                                    #'sut/read-cli-version (fn [_] {:success true :version "2.1.126"})
-                                    #'sut/run-claude-backend-preflight (fn [cmd-path workdir]
+                                    #'probe/read-cli-version (fn [_] {:success true :version "2.1.126"})
+                                    #'probe/run-claude-backend-preflight (fn [cmd-path workdir]
                                                                          (is (= "/Users/chris/.local/bin/claude" cmd-path))
                                                                          (is (= "/tmp/runtime-worktree" workdir))
                                                                          {:success true :content "{\"ok\":true}" :exit-code 0})
@@ -83,7 +85,7 @@
                                     #'llm/complete (fn [_client _request]
                                                      (is false "Claude preflight should use the direct CLI probe path"))}
                      (fn []
-                       (#'sut/run-backend-preflight!
+                       (#'preflight/run-backend-preflight!
                         false
                         llm-client
                         {:worktree-path "/tmp/runtime-worktree"}))))]
@@ -97,14 +99,14 @@
     (let [llm-client (llm/mock-client {:output "{\"ok\":true}"})]
       (try+
         (with-redefs-fn {#'paths/resolve-cli-command-path (fn [_] "/opt/homebrew/bin/claude")
-                         #'sut/read-cli-version (fn [_] {:success true :version "2.1.89"})
-                         #'sut/run-claude-backend-preflight (fn [_cmd-path _workdir]
+                         #'probe/read-cli-version (fn [_] {:success true :version "2.1.89"})
+                         #'probe/run-claude-backend-preflight (fn [_cmd-path _workdir]
                                                               {:success false
                                                                :error {:type "backend_preflight_timeout"
                                                                        :message "Process timed out after 10000ms"}
                                                                :exit-code -1})}
           (fn []
-            (#'sut/run-backend-preflight!
+            (#'preflight/run-backend-preflight!
              true
              llm-client
              {:worktree-path "/tmp/runtime-worktree"})))
@@ -121,13 +123,13 @@
     (let [llm-client (llm/mock-client {:output "{\"ok\":true}"})
           output (with-out-str
                    (with-redefs-fn {#'paths/resolve-cli-command-path (fn [_] "/opt/homebrew/bin/claude")
-                                    #'sut/read-cli-version (fn [_] {:success true :version "2.1.118 (Claude Code)"})
+                                    #'probe/read-cli-version (fn [_] {:success true :version "2.1.118 (Claude Code)"})
                                     #'process/run-cli-command (fn [_cmd _timeout-ms & _]
                                                             {:out "{\"type\":\"result\",\"subtype\":\"success\",\"result\":\"{\\\"ok\\\":true}\"}"
                                                              :err ""
                                                              :exit 0})}
                      (fn []
-                       (#'sut/run-backend-preflight!
+                       (#'preflight/run-backend-preflight!
                         false
                         llm-client
                         {:worktree-path "/tmp/runtime-worktree"}))))]
@@ -140,13 +142,13 @@
     (let [llm-client (llm/mock-client {:output "{\"ok\":true}"})]
       (try+
         (with-redefs-fn {#'paths/resolve-cli-command-path (fn [_] "/opt/homebrew/bin/claude")
-                         #'sut/read-cli-version (fn [_] {:success true :version "2.1.118 (Claude Code)"})
+                         #'probe/read-cli-version (fn [_] {:success true :version "2.1.118 (Claude Code)"})
                          #'process/run-cli-command (fn [_cmd _timeout-ms & _]
                                                  {:out "{\"type\":\"result\",\"subtype\":\"error\",\"is_error\":true,\"result\":\"{\\\"ok\\\":true}\"}"
                                                   :err ""
                                                   :exit 0})}
           (fn []
-            (#'sut/run-backend-preflight!
+            (#'preflight/run-backend-preflight!
              false
              llm-client
              {:worktree-path "/tmp/runtime-worktree"})))
@@ -165,7 +167,7 @@
           seen-workdir (atom nil)
           output (with-out-str
                    (with-redefs-fn {#'paths/resolve-cli-command-path (fn [_] "/Users/chris/.local/bin/codex")
-                                    #'sut/read-cli-version (fn [_] {:success true :version "1.2.3"})
+                                    #'probe/read-cli-version (fn [_] {:success true :version "1.2.3"})
                                     #'process/run-cli-command (fn [cmd timeout-ms & {:keys [workdir]}]
                                                             (reset! seen-cmd cmd)
                                                             (reset! seen-timeout timeout-ms)
@@ -174,7 +176,7 @@
                                                              :err ""
                                                              :exit 0})}
                      (fn []
-                       (#'sut/run-backend-preflight!
+                       (#'preflight/run-backend-preflight!
                         false
                         llm-client
                         {:worktree-path "/tmp/runtime-worktree"}))))]
