@@ -37,7 +37,7 @@
      stream workflow-id evidence-id
      {:opsv/trigger (get abort-data :trigger :guardrail)
       :opsv/threshold (get abort-data :threshold {})
-      :opsv/observed (get abort-data :observed (:step/observations step))
+      :opsv/observed (or (:observed abort-data) (:step/observations step) {})
       :opsv/rollback-action (get abort-data :rollback-action
                                  :restore-previous-policy)})))
 

@@ -18,6 +18,7 @@
 (ns ai.miniforge.event-stream.interface.opsv
   "Public schemas and constructors for the N3 OPSV event family."
   (:require
+   [malli.core :as m]
    [ai.miniforge.event-stream.opsv :as opsv]
    [ai.miniforge.event-stream.schema.opsv :as schema]))
 
@@ -90,3 +91,16 @@
 (def ^{:stratum 0} drift-detected
   "Construct a drift-detected event."
   opsv/drift-detected)
+
+;------------------------------------------------------------------------------ Layer 1
+
+(def ^{:stratum 1} OPSVEvent
+  (into [:or] [ExperimentPlanned ExperimentStarted LoadStep GuardrailAbort
+               ConvergenceIteration PolicyProposed VerificationResult
+               ActuationEmitted DriftDetected]))
+
+;------------------------------------------------------------------------------ Layer 2
+
+(defn ^{:stratum 2} explain-invalid-event
+  [event]
+  (m/explain OPSVEvent event))

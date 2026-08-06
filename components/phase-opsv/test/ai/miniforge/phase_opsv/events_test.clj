@@ -63,7 +63,6 @@
   (let [stream (event-stream/create-event-stream)
         abort {:trigger :tail-latency
                :threshold {:milliseconds 500}
-               :observed {:milliseconds 650}
                :rollback-action :restore-previous-policy}]
     (events/emit-phase-events!
      (event-context stream)
@@ -87,9 +86,17 @@
       (testing "the canonical abort evidence is preserved"
         (is (= (:trigger abort) (:opsv/trigger abort-event)))
         (is (= (:threshold abort) (:opsv/threshold abort-event)))
-        (is (= (:observed abort) (:opsv/observed abort-event)))
+        (is (= {} (:opsv/observed abort-event)))
         (is (= (:rollback-action abort)
                (:opsv/rollback-action abort-event)))))))
+
+(deftest ^{:stratum 1} test-invalid-projection-is-not-published
+  (let [stream (event-stream/create-event-stream)
+        result (events/emit-phase-events!
+                (event-context stream) :opsv/plan
+                (dissoc planned-output :opsv/experiment-pack-hash))]
+    (is (anomaly/anomaly? result))
+    (is (empty? (event-stream/get-events stream)))))
 
 ;------------------------------------------------------------------------------ Layer 2
 

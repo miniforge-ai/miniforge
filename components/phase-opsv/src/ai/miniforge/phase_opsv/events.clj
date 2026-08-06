@@ -21,6 +21,7 @@
    [ai.miniforge.anomaly.interface :as anomaly]
    [ai.miniforge.evidence-bundle.interface :as evidence]
    [ai.miniforge.event-stream.interface :as event-stream]
+   [ai.miniforge.event-stream.interface.opsv :as opsv-event]
    [ai.miniforge.phase-opsv.event-projection :as projection]
    [ai.miniforge.phase-opsv.messages :as msg]))
 
@@ -69,6 +70,12 @@
                       :event/type (:event/type event)
                       :evidence/result assembly})))
 
+(defn- ^{:stratum 0} validation-anomaly
+  [event]
+  (when-let [explanation (opsv-event/explain-invalid-event event)]
+    (anomaly/validation-anomaly
+     (msg/ts :event/invalid) :opsv/event event explanation)))
+
 ;------------------------------------------------------------------------------ Layer 1
 
 (defn- ^{:stratum 1} publish-event!
@@ -94,6 +101,8 @@
       (reduce (fn [result event]
                 (if (anomaly/anomaly? result)
                   (reduced result)
-                  (publish-event! ctx stream-value event)))
+                  (if-let [invalid (validation-anomaly event)]
+                    (reduced invalid)
+                    (publish-event! ctx stream-value event))))
               nil
               events))))
