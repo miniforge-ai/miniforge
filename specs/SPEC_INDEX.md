@@ -547,7 +547,7 @@ Normative specs are enforced by:
   behaviour, resource bounds, and isolation (§3.5); taxonomy compatibility (§2.1.1); standard pack
   registry and identifier convention (§5.1); pack resolution and precedence (§5.3); gate binding
   (§5.4); events and evidence obligations (§5.5); override/waiver contract bound to
-  N5-delta-1 §3.1 (§6.3.1); signature canonicalization and trust roots (§8.1.1, §8.2.1);
+  N5-delta-supervisory-control-plane §3.1 (§6.3.1); signature canonicalization and trust roots (§8.1.1, §8.2.1);
   conformance requirement IDs and test obligations (§9.4–§9.5). Contract fixes: `:violation/rule-id`
   typed keyword, `:violation/pack-id` added, §11.1 example rewritten off the pre-0.6
   `:policy-pack/*` namespace, duplicate `require-capability-declaration` rule ID split.

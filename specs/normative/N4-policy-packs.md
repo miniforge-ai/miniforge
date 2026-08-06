@@ -1348,9 +1348,15 @@ to `:low` does not. Overlay `:pack/overrides` (§2.5) are the sanctioned way to
 lower a severity, and apply only within their own pack's expansion — an overlay
 cannot weaken a rule for a pack it does not extend.
 
-Implementations MUST record the winning pack in `:violation/pack-id` (§3.3) and
-MUST make the full resolution — every pack that contributed, and what each
-proposed — available in the evidence bundle (§5.5).
+Resolution is field-by-field, so "which pack won" has no single answer: an
+organization pack may supply the severity while the owning pack supplies the
+check function. `:violation/pack-id` (§3.3) therefore records the **owning
+pack** — the one whose `:rule/check-fn` executed. That is the pack whose code
+produced the finding, and the only one a reader can use to reproduce it.
+
+The full resolution — every pack that contributed, and what each proposed —
+MUST be recorded in the evidence bundle (§5.5). A severity escalation is
+visible there, not in `:violation/pack-id`.
 
 #### 5.3.3 Version Conflicts
 

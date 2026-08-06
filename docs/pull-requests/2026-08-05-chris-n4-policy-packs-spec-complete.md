@@ -112,8 +112,8 @@ which now holds the mapping artifact.
   nowhere in N4 — it is N2's `:gate/allow-override?`. Override now requires
   both that flag and severity ≤ `:medium`; `:critical` and `:high` need N8's
   multi-party approval, because bypassing them is an authorization decision.
-  Every override produces a Waiver per N5-delta-1 §3.1, and a waived gate MUST
-  NOT report as passing anywhere.
+  Every override produces a Waiver per N5-delta-supervisory-control-plane
+  §3.1, and a waived gate MUST NOT report as passing anywhere.
 - **§8.1.1 / §8.2.1 Signature canonicalization and trust roots.** §8 was
   unimplementable: it required verifying a signature without saying what bytes
   are signed. Now specified — and it matches what
