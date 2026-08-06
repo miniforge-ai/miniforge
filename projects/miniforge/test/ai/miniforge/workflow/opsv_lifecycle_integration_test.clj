@@ -73,14 +73,18 @@
 ;------------------------------------------------------------------------------ Layer 2
 
 (deftest ^{:stratum 2} opsv-interceptor-preserves-agent-override-test
-  (let [interceptor (phase/get-phase-interceptor
+  (let [adapter (test-adapter)
+        interceptor (phase/get-phase-interceptor
                      {:phase :opsv/discover :agent :opsv-test-agent})
         entered ((:enter interceptor)
                  {:execution/id (random-uuid)
                   :execution/input
-                  {:opsv/adapter (test-adapter)
+                  {:opsv/adapter adapter
                    :opsv/experiment-pack (:experiment-pack fixture)}})]
-    (is (= :opsv-test-agent (get-in entered [:phase :agent])))))
+    (is (= :opsv-test-agent (get-in entered [:phase :agent])))
+    (is (identical? adapter (get-in entered
+                                    [:execution/opts :opsv/adapter])))
+    (is (not (contains? (:execution/input entered) :opsv/adapter)))))
 
 (deftest ^{:stratum 2} opsv-evidence-runtime-restores-from-durable-input-test
   (let [workflow-id (random-uuid)

@@ -20,6 +20,8 @@
    [clojure.test :refer [deftest is testing]]
    [ai.miniforge.anomaly.interface :as anomaly]
    [ai.miniforge.content-hash.interface :as content-hash]
+   [ai.miniforge.event-stream.interface :as event-stream]
+   [ai.miniforge.phase-opsv.events :as events]
    [ai.miniforge.phase-opsv.interface :as opsv-phase]
    [ai.miniforge.phase-opsv.risk :as risk]
    [ai.miniforge.phase-opsv.test-support :as support]))
@@ -38,6 +40,20 @@
                  (assoc-in [:experiment-pack/guardrails :blast-radius :replica-delta]
                            Double/NaN))]
     (is (= 0.25 (:contribution (second (risk/factors pack nil)))))))
+
+(deftest ^{:stratum 0} missing-confidence-threshold-event-test
+  (let [stream (event-stream/create-event-stream)
+        workflow-id (random-uuid)
+        evidence-id (random-uuid)]
+    (events/emit-phase-events!
+     {:execution/id workflow-id
+      :execution/input {:opsv/evidence-bundle-id evidence-id}
+      :event-stream stream}
+     :opsv/synthesize
+     {:opsv/policy-hash "policy-hash"
+      :opsv/experiment-pack {:experiment-pack/convergence {}}
+      :opsv/convergence-result {:evaluation {:confidence 0.9}}})
+    (is (= :low (:opsv/confidence (first (event-stream/get-events stream)))))))
 
 (deftest ^{:stratum 0} seven-phase-value-flow-test
   (let [result (reduce support/run-transformation

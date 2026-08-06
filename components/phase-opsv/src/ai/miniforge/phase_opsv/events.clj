@@ -29,7 +29,11 @@
         threshold (get-in output [:opsv/experiment-pack
                                   :experiment-pack/convergence
                                   :confidence-threshold])]
-    (if (>= score threshold) :high :low)))
+    (if (and (number? score)
+             (number? threshold)
+             (>= score threshold))
+      :high
+      :low)))
 
 (defn- ^{:stratum 0} stream
   [ctx]

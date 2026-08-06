@@ -40,7 +40,11 @@
    :experiment-pack/guardrails
    {:abort-error-rate 0.05 :max-replicas 20 :window :staging}
    :experiment-pack/convergence
-   {:search-space {:min 2 :max 20} :iteration-limit 8 :stop :stable}
+   {:parameters {:min-replicas 2 :max-replicas 20}
+    :iteration-limit 8
+    :confidence-threshold 0.9
+    :minimum-measurement-window-seconds 30
+    :required-repetitions 2}
    :experiment-pack/actuation-intent :recommend-only
    :experiment-pack/required-instrumentation [:cpu :backlog]})
 
@@ -113,6 +117,14 @@
       (is (invalid? (opsv/validate-experiment-pack
                      (update-in valid-pack path dissoc field)))
           (str "missing " field))))
+  (testing "given incomplete convergence controls → validation returns an anomaly"
+    (doseq [field [:parameters :iteration-limit :confidence-threshold
+                   :minimum-measurement-window-seconds
+                   :required-repetitions]]
+      (is (invalid? (opsv/validate-experiment-pack
+                     (update valid-pack :experiment-pack/convergence
+                             dissoc field)))
+          (str "missing convergence control " field))))
   (testing "given an unknown key or mode → validation returns an anomaly"
     (is (invalid? (opsv/validate-experiment-pack
                    (assoc valid-pack :experiment-pack/unknown true))))

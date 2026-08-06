@@ -42,6 +42,17 @@
      :output output
      :metrics {:tokens 0 :cost-usd 0.0 :duration-ms 0}}))
 
+(defn- ^{:stratum 0} isolate-runtime-adapter
+  [ctx]
+  (let [input (:execution/input ctx)]
+    (if (contains? input :opsv/adapter)
+      (let [adapter (:opsv/adapter input)
+            durable-ctx (update ctx :execution/input dissoc :opsv/adapter)]
+        (if (get-in ctx [:execution/opts :opsv/adapter])
+          durable-ctx
+          (assoc-in durable-ctx [:execution/opts :opsv/adapter] adapter)))
+      ctx)))
+
 (defn- ^{:stratum 0} ensure-evidence-assembly
   [ctx]
   (let [bundle-id (get-in ctx [:execution/input :opsv/evidence-bundle-id])
@@ -124,13 +135,14 @@
 
 (defn- ^{:stratum 1} enter-phase
   [ctx phase-key transform config]
-  (let [prepared-ctx (ensure-evidence-assembly ctx)
+  (let [runtime-ctx (isolate-runtime-adapter ctx)
+        prepared-ctx (ensure-evidence-assembly runtime-ctx)
         start-time (System/currentTimeMillis)
         prepared? (not (anomaly/anomaly? prepared-ctx))
         result (phase-result (if prepared?
                                (transform prepared-ctx)
                                prepared-ctx))]
-    (phase/enter-context (if prepared? prepared-ctx ctx) phase-key
+    (phase/enter-context (if prepared? prepared-ctx runtime-ctx) phase-key
                          (:agent config)
                          (:gates config) (:budget config)
                          start-time result)))

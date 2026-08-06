@@ -34,6 +34,10 @@ Application integration and workflow wiring.
   actuation events only after successful phase boundaries.
 - Preallocate the run's N6 evidence identity before the first OPSV event,
   correlate emitted event references, and reject unmatched external IDs.
+- Keep runtime adapters and mutable evidence stores outside durable execution
+  input so workflow checkpoints remain readable and resumable.
+- Apply the existing bounded convergence contract at the Experiment Pack
+  boundary and degrade incomplete confidence projections to `:low`.
 - Package `:opsv` version `1.0.0` as the exact seven-phase pipeline followed
   by `:done`, and include it in the Miniforge project and development bases.
 - Correct the OPSV governance pack's phase selectors to use the registered
