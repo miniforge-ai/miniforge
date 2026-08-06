@@ -86,9 +86,9 @@
   {:requested-actuation-mode :pr-only
    :effective-actuation-mode :pr-only
    :governed-effects
-   [{:evidence/intent-id #uuid "00000000-0000-0000-0000-000000000002"
-     :evidence/oir-id #uuid "00000000-0000-0000-0000-000000000003"
-     :evidence/capability-id "grant-123"}]
+   [{:evidence/effect-id #uuid "00000000-0000-0000-0000-000000000002"
+     :evidence/grant-id #uuid "00000000-0000-0000-0000-000000000003"
+     :evidence/envelope-id #uuid "00000000-0000-0000-0000-000000000004"}]
    :pr-refs ["https://example.test/pr/1"]
    :apply-refs []
    :postcondition-artifact-refs []
@@ -183,9 +183,9 @@
   (is (= (assoc valid-actuation :effective-actuation-mode :none)
          (opsv/validate-actuation
           (assoc valid-actuation :effective-actuation-mode :none))))
-  (doseq [field [:evidence/intent-id
-                 :evidence/oir-id
-                 :evidence/capability-id]]
+  (doseq [field [:evidence/effect-id
+                 :evidence/grant-id
+                 :evidence/envelope-id]]
     (is (invalid? (opsv/validate-actuation
                    (update valid-actuation :governed-effects
                            #(mapv (fn [effect] (dissoc effect field)) %))))

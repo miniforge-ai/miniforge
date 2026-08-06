@@ -23,7 +23,7 @@
 ;------------------------------------------------------------------------------ Layer 0
 
 (def ^{:stratum 0} ^:private reference-keys
-  [:opsv/event-refs :opsv/artifact-refs :opsv/capability-refs])
+  [:opsv/event-refs :opsv/artifact-refs :opsv/grant-refs])
 
 (defn ^{:stratum 0} create-store
   "Create an in-memory store for run-scoped OPSV assembly records."
@@ -51,7 +51,7 @@
                     :opsv.assembly/status :assembling
                     :opsv/event-refs #{}
                     :opsv/artifact-refs #{}
-                    :opsv/capability-refs #{}
+                    :opsv/grant-refs #{}
                     :opsv/governed-effects #{}}
           [old-state _new-state]
           (swap-vals! store #(if (contains? % bundle-id)

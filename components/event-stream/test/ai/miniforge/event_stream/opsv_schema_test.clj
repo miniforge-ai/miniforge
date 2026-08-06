@@ -63,9 +63,9 @@
     {:opsv/requested-actuation-mode :pr-only
      :opsv/effective-actuation-mode :pr-only
      :opsv/governed-effects
-     [{:evidence/intent-id #uuid "00000000-0000-0000-0000-000000000005"
-       :evidence/oir-id #uuid "00000000-0000-0000-0000-000000000006"
-       :evidence/capability-id "grant-1"}]
+     [{:evidence/effect-id #uuid "00000000-0000-0000-0000-000000000005"
+       :evidence/grant-id #uuid "00000000-0000-0000-0000-000000000006"
+       :evidence/envelope-id #uuid "00000000-0000-0000-0000-000000000007"}]
      :opsv/pr-refs ["https://example.test/pr/1"] :opsv/apply-refs []}]
    [opsv-schema/DriftDetected :opsv.drift/detected
     {:opsv/signal :latency :opsv/deviation {:ratio 1.2}
