@@ -95,9 +95,9 @@
 
 ;; File access, and the public I/O that shares it.
 (defn- ^{:stratum 1} existing-cursors
-  "Cursors already persisted for this pipeline, or nil when no file
-   exists yet. Returns a schema result so malformed persisted content
-   stays on the value path used by both public operations.
+  "Return a schema result containing cursors already persisted for this
+   pipeline, or nil cursors when no file exists yet. Malformed persisted
+   content stays on the value path used by both public operations.
 
    A file that exists but does not hold a map is a failure, not an
    empty one. `edn/read-string` returns nil for an empty file, and a
@@ -139,7 +139,7 @@
           persisted-result (existing-cursors file)]
       (if (schema/failed? persisted-result)
         persisted-result
-        (let [persisted (merge (:cursors persisted-result) normalized)]
+        (let [persisted (merge (or (:cursors persisted-result) {}) normalized)]
           (if (empty? normalized)
             (do (when logger
                   (log/info logger :cursor-store :cursor-store/no-cursors
