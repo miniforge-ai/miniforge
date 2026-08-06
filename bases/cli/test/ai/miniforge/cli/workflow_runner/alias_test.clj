@@ -19,7 +19,7 @@
   "Tests for workflow type aliasing and spec key fallback in the workflow runner."
   (:require
    [clojure.test :refer [deftest is testing]]
-   [ai.miniforge.cli.workflow-runner :as sut]))
+   [ai.miniforge.cli.workflow-runner.setup :as sut]))
 
 ;------------------------------------------------------------------------------ Layer 0
 
