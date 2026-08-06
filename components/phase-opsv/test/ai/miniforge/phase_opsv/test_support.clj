@@ -81,9 +81,9 @@
 (defn ^{:stratum 1} execution-context
   [adapter]
   {:execution/id #uuid "00000000-0000-0000-0000-000000000700"
+   :execution/opts {:opsv/adapter adapter}
    :execution/input
-   {:opsv/adapter adapter
-    :opsv/experiment-pack (:experiment-pack fixture)
+   {:opsv/experiment-pack (:experiment-pack fixture)
     :opsv/evidence-bundle-id evidence-id
     :opsv/evidence-refs [artifact-id]
     :opsv/gate-results (:gate-results fixture)
