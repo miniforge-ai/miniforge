@@ -18,9 +18,11 @@
 (ns ai.miniforge.phase-opsv.events
   "Publish projected N3 events at successful OPSV phase boundaries."
   (:require
+   [ai.miniforge.anomaly.interface :as anomaly]
    [ai.miniforge.evidence-bundle.interface :as evidence]
    [ai.miniforge.event-stream.interface :as event-stream]
-   [ai.miniforge.phase-opsv.event-projection :as projection]))
+   [ai.miniforge.phase-opsv.event-projection :as projection]
+   [ai.miniforge.phase-opsv.messages :as msg]))
 
 ;------------------------------------------------------------------------------ Layer 0
 
@@ -38,17 +40,48 @@
   [ctx]
   (get-in ctx [:execution/input :opsv/evidence-bundle-id]))
 
+(defn- ^{:stratum 0} publication-anomaly
+  [event published]
+  (cond
+    (anomaly/anomaly? published) published
+    (anomaly/any-anomaly? published)
+    (anomaly/anomaly :unavailable
+                     (msg/ts :event/publication-failed)
+                     {:event/id (:event/id event)
+                      :event/type (:event/type event)
+                      :event-stream/result published})
+    (= (:event/id event) (:event/id published)) nil
+    :else (anomaly/anomaly
+           :conflict
+           (msg/ts :event/publication-failed)
+           {:event/id (:event/id event)
+            :event/type (:event/type event)
+            :event-stream/result published})))
+
+(defn- ^{:stratum 0} evidence-anomaly
+  [event assembly]
+  (cond
+    (anomaly/anomaly? assembly) assembly
+    (anomaly/any-anomaly? assembly)
+    (anomaly/anomaly :fault
+                     (msg/ts :evidence/accumulation-failed)
+                     {:event/id (:event/id event)
+                      :event/type (:event/type event)
+                      :evidence/result assembly})))
+
 ;------------------------------------------------------------------------------ Layer 1
 
 (defn- ^{:stratum 1} publish-event!
   [ctx stream-value event]
   (let [published (event-stream/publish! stream-value event)
         store (:opsv/evidence-assembly-store ctx)
-        published? (= (:event/id event) (:event/id published))]
-    (when (and published? store)
-      (evidence/accumulate-opsv-evidence!
-       store (evidence-id ctx)
-       {:opsv/event-refs [(:event/id event)]}))))
+        failure (publication-anomaly event published)]
+    (cond
+      failure failure
+      store (let [assembly (evidence/accumulate-opsv-evidence!
+                            store (evidence-id ctx)
+                            {:opsv/event-refs [(:event/id event)]})]
+              (evidence-anomaly event assembly)))))
 
 ;------------------------------------------------------------------------------ Layer 2
 
@@ -58,4 +91,9 @@
     (let [events (projection/phase-events
                   stream-value (workflow-id ctx) (evidence-id ctx)
                   ctx phase-key output)]
-      (run! (partial publish-event! ctx stream-value) events))))
+      (reduce (fn [result event]
+                (if (anomaly/anomaly? result)
+                  (reduced result)
+                  (publish-event! ctx stream-value event)))
+              nil
+              events))))

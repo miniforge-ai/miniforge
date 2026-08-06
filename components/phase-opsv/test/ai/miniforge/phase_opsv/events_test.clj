@@ -18,8 +18,11 @@
 (ns ai.miniforge.phase-opsv.events-test
   (:require
    [clojure.test :refer [deftest is testing]]
+   [ai.miniforge.anomaly.interface :as anomaly]
+   [ai.miniforge.evidence-bundle.interface :as evidence]
    [ai.miniforge.event-stream.interface :as event-stream]
-   [ai.miniforge.phase-opsv.events :as events]))
+   [ai.miniforge.phase-opsv.events :as events]
+   [ai.miniforge.phase-opsv.lifecycle :as lifecycle]))
 
 ;------------------------------------------------------------------------------ Layer 0
 
@@ -29,7 +32,22 @@
    :execution/input {:opsv/evidence-bundle-id (random-uuid)}
    :event-stream stream})
 
+(def ^{:stratum 0} ^:private planned-output
+  {:opsv/experiment-pack-hash "pack-hash"
+   :opsv/experiment-pack {:experiment-pack/targets
+                          {:services ["catalog"]
+                           :environments ["staging"]}}
+   :opsv/risk-result {:score 0.1 :level :low :factors []}})
+
 ;------------------------------------------------------------------------------ Layer 1
+
+(defn- ^{:stratum 1} leave-planned-phase
+  [ctx]
+  (let [leave (:leave (lifecycle/interceptor {} :opsv/plan identity))]
+    (leave (assoc ctx :phase
+                  {:name :opsv/plan
+                   :started-at (System/currentTimeMillis)
+                   :result {:status :success :output planned-output}}))))
 
 (deftest ^{:stratum 1} test-policy-confidence-degrades-safely
   (let [stream (event-stream/create-event-stream)]
@@ -72,3 +90,28 @@
         (is (= (:observed abort) (:opsv/observed abort-event)))
         (is (= (:rollback-action abort)
                (:opsv/rollback-action abort-event)))))))
+
+;------------------------------------------------------------------------------ Layer 2
+
+(deftest ^{:stratum 2} test-publication-rejection-fails-the-phase
+  (let [stream (event-stream/create-event-stream)
+        ctx (event-context stream)
+        workflow-id (:execution/id ctx)
+        _ (event-stream/quiesce! stream {:workflow-id workflow-id})
+        completed (leave-planned-phase ctx)]
+    (is (= :failed (get-in completed [:phase :status])))
+    (is (anomaly/anomaly? (get-in completed [:phase :result :output])))
+    (is (empty? (event-stream/get-events stream)))
+    (is (not-any? #{:opsv/plan}
+                  (get-in completed [:execution :phases-completed])))))
+
+(deftest ^{:stratum 2} test-evidence-accumulation-failure-fails-the-phase
+  (let [stream (event-stream/create-event-stream)
+        ctx (assoc (event-context stream)
+                   :opsv/evidence-assembly-store
+                   (evidence/create-opsv-assembly-store))
+        completed (leave-planned-phase ctx)]
+    (is (= :failed (get-in completed [:phase :status])))
+    (is (anomaly/anomaly? (get-in completed [:phase :result :output])))
+    (is (= [:opsv.experiment/planned]
+           (mapv :event/type (event-stream/get-events stream))))))
