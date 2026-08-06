@@ -156,7 +156,10 @@ no longer routes.
   :created-at   inst
   :updated-at   inst}
 
- :pack/signature string}               ; OPTIONAL: Cryptographic signature
+ ;; Signature metadata (§8). All three present or all three absent.
+ :pack/signature string                ; OPTIONAL: base64 Ed25519 signature over §8.1.1 bytes
+ :pack/signed-by string                ; OPTIONAL: key IDENTIFIER, not the key (§8.1)
+ :pack/signed-at inst}                 ; OPTIONAL: when signed
 ```
 
 ### 2.3 Policy Rule Schema
@@ -1591,14 +1594,21 @@ For trusted policy packs, implementations MAY require cryptographic signatures:
 
 ```clojure
 {:pack/signature "base64-encoded-ed25519-signature"  ; over §8.1.1 bytes
- :pack/signed-by "base64-encoded-ed25519-public-key" ; publisher key
+ :pack/signed-by "acme-publisher-2026"               ; key IDENTIFIER (§8.2.1)
  :pack/signed-at #inst "2026-08-05T00:00:00.000Z"}
 ```
 
-These are three flat fields on the pack map, matching `:pack/signature string`
-in §2.2. Earlier drafts of this section showed a nested map; a pack written
-that way fails §2.2 validation. The algorithm is Ed25519; a future algorithm
-change is a MAJOR pack-format change, not a per-pack field.
+These are three flat fields on the pack map, defined in §2.2. Earlier drafts
+of this section showed a nested map; a pack written that way fails §2.2
+validation. The algorithm is Ed25519; a future algorithm change is a MAJOR
+pack-format change, not a per-pack field.
+
+**`:pack/signed-by` is an identifier, never a key.** It names which trusted
+publisher key to verify against — a key id or fingerprint the verifier
+resolves through its configured trust roots (§8.2.1). Carrying the public key
+itself would let a pack nominate the key that verifies it, which verifies
+nothing: an attacker who modifies a pack re-signs it with their own key, writes
+their own public key into the field, and passes.
 
 #### 8.1.1 What Is Signed
 
@@ -1657,10 +1667,12 @@ verifies nothing that matters.
 Before executing policy pack:
 
 1. Recompute the canonical serialization (§8.1.1)
-2. Verify the signature over those bytes against the trusted public key
-3. Check the signature timestamp against the key's validity window
-4. Confirm the publisher is permitted for this pack (§5.1.8)
-5. Warn on unsigned packs, or fail where policy requires signatures
+2. Resolve `:pack/signed-by` to a public key in the configured trust roots;
+   fail if it resolves to nothing (§8.2.1)
+3. Verify the signature over those bytes against that key
+4. Check the signature timestamp against the key's validity window
+5. Confirm the publisher is permitted for this pack (§5.1.8)
+6. Warn on unsigned packs, or fail where policy requires signatures
 
 Verification failure MUST prevent execution of the pack. Implementations MUST
 NOT execute a pack whose signature is present and invalid — a broken signature
@@ -2055,7 +2067,23 @@ contract the code already satisfies:
   already exists for `:major` → `:high` and `:minor` → `:low`; §2.3.1 adds
   `:error` → `:high` and `:warning` → `:medium` on the same seam.
 
-### A.4 Structural
+### A.4 Security
+
+- **Self-certifying signature verification.**
+  `policy-pack/registry.clj`'s `verify-signature` reads the verification key
+  from the pack being verified — `pub-key-str (:pack/signed-by pack)`, base64
+  decoded and passed straight to `verify-ed25519`. §8.2.1 forbids this, and
+  §8.1 now types `:pack/signed-by` as a key identifier rather than a key.
+
+  As implemented, signature verification establishes only that the pack was
+  signed by whoever holds the key the pack itself names. An attacker who
+  modifies a pack signs it with their own key, writes that public key into
+  `:pack/signed-by`, and verification passes. There is no configured trust
+  root to resolve against.
+
+  This is the highest-priority item in this annex.
+
+### A.5 Structural
 
 - **Stale citations.** `policy-pack/knowledge_safety.clj`,
   `policy-pack/loader.clj`, and `policy-pack/rules/pack_dependency_validation.clj`

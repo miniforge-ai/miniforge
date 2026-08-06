@@ -143,6 +143,13 @@ contract.
   not merely an unimplemented requirement.
 - **Implemented, matching** — `normalize-severity` is the existing seam
   §2.3.1's legacy handling extends.
+- **Security** — `policy-pack/registry.clj` reads the verification key from the
+  pack being verified (`pub-key-str (:pack/signed-by pack)`). Verification
+  therefore establishes only that the pack was signed by whoever holds the key
+  the pack itself names: modify a pack, re-sign with your own key, write that
+  public key into `:pack/signed-by`, and it passes. §8.2.1 forbids this and
+  §8.1 now types the field as a key identifier resolved through configured
+  trust roots. Highest-priority item in the annex.
 - **Structural** — eight code citations point at "N4 §2.4.2" (knowledge-safety,
   moved to §2.7.2 in 0.6); N2 §6.5 restates the violation schema with a string
   rule ID, which §3.3 now declares itself authoritative over.
@@ -184,8 +191,10 @@ Each is tracked by Annex A:
 4. Add per-rule timeout and per-gate budget (§3.5.2).
 5. Isolate untrusted pack execution (§3.5.3).
 6. Wire the override path to produce a Waiver (§6.3.1).
-7. Fix the eight stale "N4 §2.4.2" citations to §2.7.2.
-8. Make N2 §6.5 reference N4 §3.3 rather than restate it.
+7. Resolve `:pack/signed-by` through configured trust roots rather than
+   trusting the key the pack carries (§8.2.1) — Annex A.4, highest priority.
+8. Fix the eight stale "N4 §2.4.2" citations to §2.7.2.
+9. Make N2 §6.5 reference N4 §3.3 rather than restate it.
 
 ## Related Issues/PRs
 
