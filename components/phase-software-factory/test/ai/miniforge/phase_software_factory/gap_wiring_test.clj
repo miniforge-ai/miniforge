@@ -83,9 +83,11 @@
 
 (defn- ^{:stratum 0} run-ctx
   "Execution-context fragment shaped like the runner's real ctx at phase
-   leave: workflow.context/create-context sets :execution/checkpoint-root,
-   :execution/id, and :execution/logger; the phase interceptor stack sets
-   :phase. Extras merge over the base."
+   leave. The base seeds only the identity keys
+   (:execution/checkpoint-root, :execution/id); tests supply the rest —
+   :execution/logger (set by workflow.context/create-context in
+   production) and :phase (set by the phase interceptor stack) — via
+   extras, which merge over the base."
   [root run-id & {:as extra}]
   (merge {:execution/checkpoint-root root
           :execution/id run-id}
