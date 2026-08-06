@@ -39,102 +39,106 @@
   [ctx key]
   (get-in ctx [:execution/input key]))
 
-;------------------------------------------------------------------------------ Layer 1
-
-(defn- ^{:stratum 1} adapter-value
+(defn- ^{:stratum 0} adapter-value
   [ctx]
   (or (get-in ctx [:execution/opts :opsv/adapter])
-      (input-value ctx :opsv/adapter)))
+      (get-in ctx [:execution/input :opsv/adapter])))
 
-(defn ^{:stratum 1} plan
+(defn- ^{:stratum 0} converged-output
+  [executed]
+  (let [config (get-in executed [:opsv/experiment-pack
+                                 :experiment-pack/convergence])
+        initial-state {:steps (:opsv/ramp-steps executed) :history []}
+        result (opsv/converge config initial-state
+                              evaluation/convergence-step
+                              evaluation/convergence-evaluation)]
+    (if (anomaly/anomaly? result)
+      result
+      (assoc executed :opsv/convergence-result result))))
+
+(defn- ^{:stratum 0} synthesized-output
+  [ctx converged]
+  (let [proposal (policy/operational-policy
+                  ctx (:opsv/convergence-result converged))
+        validated (opsv/validate-operational-policy proposal)]
+    (if (anomaly/anomaly? validated)
+      validated
+      (assoc converged
+             :opsv/operational-policy validated
+             :opsv/policy-hash (content-hash/content-hash validated)))))
+
+;------------------------------------------------------------------------------ Layer 1
+
+(defn- ^{:stratum 1} planned-output
+  [ctx discovery]
+  (let [pack (:opsv/experiment-pack discovery)
+        risk-result (opsv/assess-risk
+                     (risk/factors pack
+                                   (input-value ctx :opsv/service-criticality))
+                     (input-value ctx :opsv/risk-thresholds))
+        pack-hash (opsv/experiment-pack-hash pack)]
+    (cond
+      (anomaly/anomaly? risk-result) risk-result
+      (anomaly/anomaly? pack-hash) pack-hash
+      :else (assoc discovery :opsv/risk-result risk-result
+                   :opsv/experiment-pack-hash pack-hash))))
+
+(defn ^{:stratum 1} discover
   [ctx]
-  (flow/continue
-   (phase-output ctx :opsv/discover)
-   (fn [discovery]
-     (let [pack (:opsv/experiment-pack discovery)
-           risk-result (opsv/assess-risk
-                        (risk/factors
-                         pack (input-value ctx :opsv/service-criticality))
-                        (input-value ctx :opsv/risk-thresholds))
-           pack-hash (opsv/experiment-pack-hash pack)]
-       (cond
-         (anomaly/anomaly? risk-result) risk-result
-         (anomaly/anomaly? pack-hash) pack-hash
-         :else (assoc discovery
-                      :opsv/risk-result risk-result
-                      :opsv/experiment-pack-hash pack-hash))))))
+  (let [pack (opsv/validate-experiment-pack
+              (input-value ctx :opsv/experiment-pack))
+        runtime-adapter (adapter-value ctx)
+        invalid-adapter (adapter/adapter-anomaly runtime-adapter)]
+    (cond
+      (anomaly/anomaly? pack) pack
+      invalid-adapter invalid-adapter
+      :else
+      (let [drivers (port/discover-signals
+                     runtime-adapter (:experiment-pack/targets pack))]
+        (if (anomaly/anomaly? drivers)
+          drivers
+          {:opsv/experiment-pack pack
+           :opsv/candidate-drivers drivers})))))
+
+(defn- ^{:stratum 1} executed-output
+  [ctx planned]
+  (let [runtime-adapter (adapter-value ctx)
+        invalid-adapter (adapter/adapter-anomaly runtime-adapter)]
+    (if invalid-adapter
+      invalid-adapter
+      (let [ramp (port/run-guarded-ramp
+                  runtime-adapter (:opsv/experiment-pack planned))
+            invalid-ramp (adapter/ramp-shape-anomaly ramp)]
+        (cond
+          (anomaly/anomaly? ramp) ramp
+          invalid-ramp invalid-ramp
+          :else (assoc planned
+                       :opsv/environment-fingerprint
+                       (:environment-fingerprint ramp)
+                       :opsv/ramp-steps (:steps ramp)))))))
 
 (defn ^{:stratum 1} converge
   [ctx]
-  (flow/continue
-   (phase-output ctx :opsv/execute)
-   (fn [executed]
-     (let [config (get-in executed
-                          [:opsv/experiment-pack
-                           :experiment-pack/convergence])
-           initial-state {:steps (:opsv/ramp-steps executed) :history []}
-           result (opsv/converge config initial-state
-                                 evaluation/convergence-step
-                                 evaluation/convergence-evaluation)]
-       (if (anomaly/anomaly? result)
-         result
-         (assoc executed :opsv/convergence-result result))))))
+  (flow/continue (phase-output ctx :opsv/execute) converged-output))
+
+(defn ^{:stratum 1} synthesize
+  [ctx]
+  (flow/continue (phase-output ctx :opsv/converge)
+                 (partial synthesized-output ctx)))
 
 (defn ^{:stratum 1} verify
   [ctx]
   (flow/continue (phase-output ctx :opsv/synthesize)
                  (partial verification/output ctx)))
 
-(defn ^{:stratum 1} synthesize
-  [ctx]
-  (flow/continue
-   (phase-output ctx :opsv/converge)
-   (fn [converged]
-     (let [proposal (policy/operational-policy
-                     ctx (:opsv/convergence-result converged))
-           validated (opsv/validate-operational-policy proposal)]
-       (if (anomaly/anomaly? validated)
-         validated
-         (assoc converged
-                :opsv/operational-policy validated
-                :opsv/policy-hash (content-hash/content-hash validated)))))))
-
 ;------------------------------------------------------------------------------ Layer 2
 
-(defn ^{:stratum 2} discover
+(defn ^{:stratum 2} plan
   [ctx]
-  (let [pack (opsv/validate-experiment-pack
-              (input-value ctx :opsv/experiment-pack))
-        invalid-adapter (adapter/adapter-anomaly
-                         (adapter-value ctx))]
-    (cond
-      (anomaly/anomaly? pack) pack
-      invalid-adapter invalid-adapter
-      :else
-      (let [adapter (adapter-value ctx)
-            drivers (port/discover-signals
-                     adapter (:experiment-pack/targets pack))]
-        (if (anomaly/anomaly? drivers)
-          drivers
-          {:opsv/experiment-pack pack
-           :opsv/candidate-drivers drivers})))))
+  (flow/continue (phase-output ctx :opsv/discover)
+                 (partial planned-output ctx)))
 
 (defn ^{:stratum 2} execute
   [ctx]
-  (flow/continue
-   (phase-output ctx :opsv/plan)
-   (fn [planned]
-     (if-let [invalid (adapter/adapter-anomaly
-                       (adapter-value ctx))]
-       invalid
-       (let [adapter (adapter-value ctx)
-             ramp (port/run-guarded-ramp
-                   adapter (:opsv/experiment-pack planned))
-             invalid-ramp (adapter/ramp-shape-anomaly ramp)]
-         (cond
-           (anomaly/anomaly? ramp) ramp
-           invalid-ramp invalid-ramp
-           :else (merge planned
-                        {:opsv/environment-fingerprint
-                         (:environment-fingerprint ramp)
-                         :opsv/ramp-steps (:steps ramp)})))))))
+  (flow/continue (phase-output ctx :opsv/plan)
+                 (partial executed-output ctx)))
