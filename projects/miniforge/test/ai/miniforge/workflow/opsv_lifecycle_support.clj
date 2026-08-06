@@ -102,7 +102,7 @@
     (try
       (f (.getAbsolutePath root))
       (finally
-        (FileUtils/deleteDirectory root)))))
+        (FileUtils/deleteQuietly root)))))
 
 ;------------------------------------------------------------------------------ Layer 1
 
