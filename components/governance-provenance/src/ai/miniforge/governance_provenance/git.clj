@@ -64,7 +64,7 @@
                            (str (or revision "HEAD") "^{commit}"))]
     (if (and (:success? result) (sha? (:output result)))
       result
-      {:success? false :error (or (:error result) "git returned an invalid commit id")})))
+      {:success? false :error (get result :error "git returned an invalid commit id")})))
 
 (defn ^{:stratum 1} blob-sha
   [exec-fn repo-root revision path]

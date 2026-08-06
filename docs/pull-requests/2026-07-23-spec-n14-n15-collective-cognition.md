@@ -1,3 +1,8 @@
+<!--
+  Title: Miniforge.ai
+  Author: Christopher Lester (christopher.ai)
+  Copyright 2025-2026 Christopher Lester. Licensed under Apache 2.0.
+-->
 # spec: Add N14 Shared Deliberation Workspace and N15 Collective-Cognition Evaluation Harness
 
 ## Overview
