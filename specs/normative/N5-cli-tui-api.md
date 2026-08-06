@@ -1740,8 +1740,9 @@ payload — a rendered message field — are prose and come from the catalog.
 - **TUI**: column headings, status labels, footer hints, and prompt text are
   prose. Key bindings are not: `j`/`k`/`q` are dispatch, and MUST NOT be
   rebound by locale (§3.3).
-- **API**: error `:message` fields are prose. Error codes, field names, and
-  enum values are not.
+- **API**: the error message field is prose — `message` in JSON, `:message` in
+  EDN (§8.3, §8.4.4). Error codes, field names, and enum values are not, in
+  either encoding.
 
 ### 9.4 Locale Selection
 
