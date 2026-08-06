@@ -23,8 +23,11 @@
    [ai.miniforge.opsv.interface :as opsv]
    [ai.miniforge.phase-opsv.adapter :as adapter]
    [ai.miniforge.phase-opsv.evaluation :as evaluation]
+   [ai.miniforge.phase-opsv.flow :as flow]
+   [ai.miniforge.phase-opsv.policy :as policy]
    [ai.miniforge.phase-opsv.protocol :as port]
-   [ai.miniforge.phase-opsv.risk :as risk]))
+   [ai.miniforge.phase-opsv.risk :as risk]
+   [ai.miniforge.phase-opsv.verification :as verification]))
 
 ;------------------------------------------------------------------------------ Layer 0
 
@@ -36,23 +39,6 @@
   [ctx key]
   (get-in ctx [:execution/input key]))
 
-(defn- ^{:stratum 0} preserve-anomaly
-  [value continue]
-  (if (anomaly/anomaly? value)
-    value
-    (continue value)))
-
-(defn- ^{:stratum 0} verification-criteria
-  [pack]
-  (let [declared (:experiment-pack/success-criteria pack)]
-    (if (contains? declared :criteria)
-      (:criteria declared)
-      (->> declared
-           (sort-by (comp str key))
-           (mapv (fn [[criterion-id expected]]
-                   {:criterion/id (name criterion-id)
-                    :criterion/expected expected}))))))
-
 ;------------------------------------------------------------------------------ Layer 1
 
 (defn- ^{:stratum 1} adapter-value
@@ -60,36 +46,9 @@
   (or (get-in ctx [:execution/opts :opsv/adapter])
       (input-value ctx :opsv/adapter)))
 
-(defn- ^{:stratum 1} operational-policy
-  [ctx convergence]
-  (let [pack (input-value ctx :opsv/experiment-pack)
-        targets (:experiment-pack/targets pack)
-        evidence-refs (input-value ctx :opsv/evidence-refs)
-        selected-step (get-in convergence [:state :selected-step])
-        metrics (:step/metrics selected-step)]
-    {:operational-policy/id (str (:experiment-pack/id pack) "-policy")
-     :operational-policy/version "1.0.0"
-     :operational-policy/target-services (:services targets)
-     :operational-policy/target-envs (:environments targets)
-     :operational-policy/scaling
-     {:hpa {:api-version "autoscaling/v2"
-            :metric :cpu
-            :target-utilization (:hpa-target-utilization metrics)
-            :min-replicas (:min-replicas metrics)
-            :max-replicas (:max-replicas metrics)}
-      :keda {:trigger :backlog
-             :target (:keda-backlog-target metrics)}}
-     :operational-policy/resources
-     {:cpu-request-millicores (:cpu-request-millicores metrics)}
-     :operational-policy/guardrails (:experiment-pack/guardrails pack)
-     :operational-policy/verification-summary
-     {:passed? false :confidence :pending :caveats []}
-     :operational-policy/rollback-plan {:strategy :restore-previous-policy}
-     :operational-policy/evidence-refs evidence-refs}))
-
 (defn ^{:stratum 1} plan
   [ctx]
-  (preserve-anomaly
+  (flow/continue
    (phase-output ctx :opsv/discover)
    (fn [discovery]
      (let [pack (:opsv/experiment-pack discovery)
@@ -107,7 +66,7 @@
 
 (defn ^{:stratum 1} converge
   [ctx]
-  (preserve-anomaly
+  (flow/continue
    (phase-output ctx :opsv/execute)
    (fn [executed]
      (let [config (get-in executed
@@ -123,36 +82,22 @@
 
 (defn ^{:stratum 1} verify
   [ctx]
-  (preserve-anomaly
-   (phase-output ctx :opsv/synthesize)
-   (fn [synthesized]
-     (let [pack (:opsv/experiment-pack synthesized)
-           criteria (verification-criteria pack)
-           convergence (:opsv/convergence-result synthesized)
-           observations (get-in convergence [:state :selected-step :step/observations])
-           confidence-score (get-in convergence [:evaluation :confidence])
-           confidence-threshold (get-in pack [:experiment-pack/convergence
-                                              :confidence-threshold])
-           confidence (if (>= confidence-score confidence-threshold) :high :low)
-           verification (opsv/verify-policy criteria observations
-                                            evaluation/criterion-evaluation
-                                            confidence [])]
-       (if (anomaly/anomaly? verification)
-         verification
-         (let [summary (select-keys verification
-                                    [:passed? :confidence :caveats])
-               policy (assoc (:opsv/operational-policy synthesized)
-                             :operational-policy/verification-summary summary)
-               validated (opsv/validate-operational-policy policy)]
-           (if (anomaly/anomaly? validated)
-             validated
-             (assoc synthesized
-                    :opsv/verification-result verification
-                    :opsv/operational-policy validated
-                    :opsv/policy-hash (content-hash/content-hash validated)
-                    :opsv/metric-snapshot-artifact-refs
-                    (input-value ctx
-                                 :opsv/metric-snapshot-artifact-refs)))))))))
+  (flow/continue (phase-output ctx :opsv/synthesize)
+                 (partial verification/output ctx)))
+
+(defn ^{:stratum 1} synthesize
+  [ctx]
+  (flow/continue
+   (phase-output ctx :opsv/converge)
+   (fn [converged]
+     (let [proposal (policy/operational-policy
+                     ctx (:opsv/convergence-result converged))
+           validated (opsv/validate-operational-policy proposal)]
+       (if (anomaly/anomaly? validated)
+         validated
+         (assoc converged
+                :opsv/operational-policy validated
+                :opsv/policy-hash (content-hash/content-hash validated)))))))
 
 ;------------------------------------------------------------------------------ Layer 2
 
@@ -176,7 +121,7 @@
 
 (defn ^{:stratum 2} execute
   [ctx]
-  (preserve-anomaly
+  (flow/continue
    (phase-output ctx :opsv/plan)
    (fn [planned]
      (if-let [invalid (adapter/adapter-anomaly
@@ -193,17 +138,3 @@
                         {:opsv/environment-fingerprint
                          (:environment-fingerprint ramp)
                          :opsv/ramp-steps (:steps ramp)})))))))
-
-(defn ^{:stratum 2} synthesize
-  [ctx]
-  (preserve-anomaly
-   (phase-output ctx :opsv/converge)
-   (fn [converged]
-     (let [proposal (operational-policy
-                     ctx (:opsv/convergence-result converged))
-           validated (opsv/validate-operational-policy proposal)]
-       (if (anomaly/anomaly? validated)
-         validated
-         (assoc converged
-                :opsv/operational-policy validated
-                :opsv/policy-hash (content-hash/content-hash validated)))))))
