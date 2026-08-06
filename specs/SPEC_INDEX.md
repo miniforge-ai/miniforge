@@ -190,7 +190,7 @@ Defines:
   policy refusal from failure, `--json` stability, stable error codes
 - **Command stability and deprecation (§8.5)**
 - **Terminal capability degradation (§8.6):** `NO_COLOR`, no-Unicode, narrow terminals;
-  colour never the sole carrier of meaning
+  color never the sole carrier of meaning
 - **Configuration precedence and validation (§7.3–§7.4):** flag → env → file → default
 - **Override bound to the Waiver** of N5-delta-supervisory-control-plane §3.1; `:critical`
   and `:high` not overridable per N4 §6.3.1 (§6.2)

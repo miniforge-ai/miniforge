@@ -67,7 +67,7 @@ contracts.
 - **§8.5 Command stability.** What is MINOR versus MAJOR for a CLI surface, and
   deprecation on stderr so it never corrupts piped output.
 - **§8.6 Terminal capability degradation.** `NO_COLOR`, `TERM=dumb`, non-TTY,
-  no-Unicode, and sub-80-column handling. Colour is never the sole carrier of
+  no-Unicode, and sub-80-column handling. Color is never the sole carrier of
   meaning — which is why §3.2.1's status glyphs are normative rather than
   decorative.
 - **§7.3–§7.4 Configuration precedence and validation.** Flag → env → file →

@@ -1391,6 +1391,8 @@ Implementations MUST support configuration file at `~/.miniforge/config.edn`:
   :auto-approve-plan? false
   :auto-merge-pr? false}
 
+ :locale "en-US"                   ; User locale for console output (§9.4)
+
  :fleet
  {:tui-refresh-interval-seconds 15
   :max-concurrent-workflows 1}      ; OSS: single workflow
@@ -1464,7 +1466,7 @@ Implementations MUST:
 
 1. Support every namespace §2.2 marks MUST — currently init, workflow, fleet,
    policy, evidence, artifact, etl, pack, listener, agent, gate
-2. Accept standard flags (--help, --version, --json)
+2. Accept standard flags (`--help`, `--version`, `--json`, `--locale`)
 3. Return 0 exit code on success, non-zero on failure
 4. Emit structured logs to stderr, results to stdout
 5. Support piping output to other commands
@@ -1610,7 +1612,7 @@ withdrawn requirement is marked withdrawn, not deleted.
 |----|-------|-------------|
 | N5.CLI.1 | MUST | Follow `miniforge <namespace> <command>` structure (§2.1). |
 | N5.CLI.2 | MUST | Provide every namespace §2.2 marks MUST (§8.1). |
-| N5.CLI.3 | MUST | Accept `--help`, `--version`, `--json` on every command (§8.1). |
+| N5.CLI.3 | MUST | Accept `--help`, `--version`, `--json`, `--locale` on every command (§8.1, §9.4). |
 | N5.CLI.4 | MUST | Results on stdout, diagnostics on stderr, never interleaved (§8.4.1). |
 | N5.CLI.5 | MUST | Emit exactly one JSON document under `--json`, or documented NDJSON (§8.4.1). |
 | N5.CLI.6 | MUST | Use the exit codes of §8.4.2, distinguishing failure from policy refusal. |
