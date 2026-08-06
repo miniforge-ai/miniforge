@@ -128,7 +128,11 @@
    [:pack/homepage {:optional true} string?]
    [:pack/repository {:optional true} string?]
 
-   ;; Signing (paid feature)
+   ;; Signing (N4 §8.1). :pack/signature is base64 Ed25519 over the pack's
+   ;; canonical serialization (§8.1.1). :pack/signed-by is a key IDENTIFIER
+   ;; — a key id or fingerprint the verifier resolves through its configured
+   ;; trust roots (§8.2.1) — never the public key itself, which would let a
+   ;; pack nominate the key that verifies it.
    [:pack/signature {:optional true} string?]
    [:pack/signed-by {:optional true} string?]
    [:pack/signed-at {:optional true} inst?]

@@ -1,0 +1,32 @@
+;; Trusted publisher keys for policy pack signature verification (N4 §8.2.1).
+;;
+;; Verification resolves a pack's :pack/signed-by identifier against this
+;; store. A pack never supplies its own key: one that did would be
+;; self-certifying, since an attacker could re-sign a modified pack and
+;; nominate their own key to verify it.
+;;
+;; This file ships EMPTY on purpose. Verification is fail-closed, so with no
+;; entries no signed pack verifies. Publisher keys are a deployment concern
+;; and are configured out-of-band, in ~/.miniforge/config.edn:
+;;
+;;   {:policy-pack
+;;    {:trust-roots
+;;     {:trust-roots/publishers
+;;      [{:trust-root/key-id     "acme-publisher-2026"
+;;        :trust-root/public-key "kK1r...=="}]}}}
+;;
+;; Operator entries layer on top of this file; a shared :trust-root/key-id
+;; takes the operator's entry.
+;;
+;; :trust-root/key-id     — the identifier a pack names in :pack/signed-by.
+;;                          Opaque; a fingerprint works as well as a name.
+;; :trust-root/public-key — base64 of the RAW 32-byte Ed25519 public key
+;;                          (RFC 8032 §5.1.5), not a PEM or DER wrapper.
+;;                          From a PEM public key, the raw key is the final
+;;                          32 bytes of the DER SubjectPublicKeyInfo:
+;;                            openssl pkey -pubin -in pub.pem -outform DER \
+;;                              | tail -c 32 | base64
+;;
+;; Adding a key here means every pack it signs is trusted to run. Record who
+;; holds it and why it was added.
+{:trust-roots/publishers []}
