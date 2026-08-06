@@ -19,6 +19,7 @@
   (:require
    [clojure.edn :as edn]
    [clojure.java.io :as io]
+   [clojure.string :as str]
    [malli.core :as m]
    [ai.miniforge.event-stream.interface.opsv :as opsv-event]
    [ai.miniforge.phase-opsv.interface :as opsv]
@@ -30,15 +31,6 @@
 
 (def ^{:stratum 0} lifecycle-event-types
   #{:workflow/phase-started :workflow/phase-completed})
-
-(def ^{:stratum 0} domain-event-types
-  #{:opsv.experiment/planned
-    :opsv.experiment/started
-    :opsv/load-step
-    :opsv.convergence/iteration
-    :opsv.policy/proposed
-    :opsv.verification/result
-    :opsv.actuation/emitted})
 
 (def ^{:stratum 0} expected-domain-type-counts
   {:opsv.experiment/planned 1
@@ -53,10 +45,12 @@
   {:opsv.experiment/planned opsv-event/ExperimentPlanned
    :opsv.experiment/started opsv-event/ExperimentStarted
    :opsv/load-step opsv-event/LoadStep
+   :opsv.guardrail/abort opsv-event/GuardrailAbort
    :opsv.convergence/iteration opsv-event/ConvergenceIteration
    :opsv.policy/proposed opsv-event/PolicyProposed
    :opsv.verification/result opsv-event/VerificationResult
-   :opsv.actuation/emitted opsv-event/ActuationEmitted})
+   :opsv.actuation/emitted opsv-event/ActuationEmitted
+   :opsv.drift/detected opsv-event/DriftDetected})
 
 (def ^{:stratum 0} expected-pipeline
   (conj (mapv #(hash-map :phase %) opsv/phase-keys) {:phase :done}))
@@ -66,10 +60,7 @@
 
 (def ^{:stratum 0} ^:private fixture
   (let [resource-path "opsv/application-fixture.edn"
-        project-relative (io/file "../../components/phase-opsv/test-resources"
-                                  resource-path)
-        source (or (io/resource resource-path)
-                   (when (.isFile project-relative) project-relative))]
+        source (io/resource resource-path)]
     (when-not source
       (throw (ex-info "OPSV application fixture not found"
                       {:fixture/path resource-path})))
@@ -84,6 +75,10 @@
 (defn ^{:stratum 0} event-type-in?
   [event-types event]
   (contains? event-types (:event/type event)))
+
+(defn ^{:stratum 0} opsv-domain-event?
+  [event]
+  (some-> event :event/type namespace (str/starts-with? "opsv")))
 
 (defn ^{:stratum 0} event-of-type
   [events event-type]

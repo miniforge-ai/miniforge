@@ -42,10 +42,7 @@
                           (partial support/event-type-in?
                                    support/lifecycle-event-types)
                           events)
-        domain-events (filter
-                       (partial support/event-type-in?
-                                support/domain-event-types)
-                       events)
+        domain-events (filter support/opsv-domain-event? events)
         evidence-id (:opsv/evidence-bundle-id (first domain-events))]
     {:result result
      :lifecycle-events lifecycle-events
