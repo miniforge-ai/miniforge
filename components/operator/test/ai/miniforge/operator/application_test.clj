@@ -29,6 +29,7 @@
    finding a PolicyEvaluation in the materialized entity table that was
    not there before the publish."
   (:require
+   [ai.miniforge.anomaly.interface :as anomaly]
    [ai.miniforge.event-stream.interface :as es]
    [ai.miniforge.operator.application :as application]
    [ai.miniforge.operator.consumer :as consumer]
@@ -162,9 +163,7 @@
 (deftest ^{:stratum 0} register-runner-rejects-invalid-control-state
   (testing "runner wiring fails early instead of becoming an application error"
     (doseq [handles [{} {:control-state :not-an-atom} :not-a-map]]
-      (is (thrown-with-msg?
-           clojure.lang.ExceptionInfo
-           #"requires an atom :control-state"
+      (is (anomaly/anomaly?
            (application/register-runner! (random-uuid) handles))))))
 
 (deftest ^{:stratum 0} resume-launcher-registration-rejects-unusable-handles
@@ -173,9 +172,7 @@
     ;; let them register and fail later; they must be rejected here.
     (doseq [handles [{} {:launch! "not-a-fn"} :not-a-map
                      {:launch! :a-keyword} {:launch! {:not "a fn"}}]]
-      (is (thrown-with-msg?
-           clojure.lang.ExceptionInfo
-           #"requires a :launch! function"
+      (is (anomaly/anomaly?
            (application/register-resume-launcher! handles))))))
 
 (def ^{:stratum 0} ^:const golden-pr-target-id
@@ -194,9 +191,7 @@
   ;; string, keyword, and map are all NOT `fn?` (keyword/map are `ifn?`,
   ;; which the old check wrongly accepted).
   (doseq [bad ["not-a-fn" :a-keyword {:not "a fn"}]]
-    (is (thrown-with-msg?
-         clojure.lang.ExceptionInfo
-         #"requires a function"
+    (is (anomaly/anomaly?
          (application/register-policy-evaluator! bad))
         (str "bad evaluator " (pr-str bad)))))
 

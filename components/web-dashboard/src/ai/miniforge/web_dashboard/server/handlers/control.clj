@@ -19,6 +19,7 @@
   (:require
    [ai.miniforge.anomaly.interface :as anomaly]
    [ai.miniforge.event-stream.interface :as event-stream]
+   [ai.miniforge.response.interface :as response]
    [ai.miniforge.web-dashboard.server.responses :as responses]
    [ai.miniforge.web-dashboard.server.handlers.support :as support]))
 
@@ -66,9 +67,9 @@
 
 (defn ^{:stratum 1} execute-via-command!
   "Execution function that routes an authorized control action onto the
-   governed operator channel. Throws when the request cannot be written
-   — `execute-control-action!` records the failure rather than letting
-   an unapplied action report success."
+   governed operator channel. Returns a failure response when the request
+   cannot be written — `execute-control-action!` records the failure rather
+   than letting an unapplied action report success."
   ;; `_state`: the arg is part of the `execute-control-action!` executor
   ;; signature (partial-applied with workflow-id) but this verb reaches
   ;; the operator channel directly, without touching dashboard state.
@@ -83,10 +84,12 @@
                 cmd
                 (support/command-requester))]
     (when (anomaly/anomaly? result)
-      (throw (ex-info (:anomaly/message result) (:anomaly/data result))))
-    {:command cmd
-     :workflow-id workflow-id
-     :intervention-id (str (:intervention/id result))}))
+      (response/failure (:anomaly/message result)
+                        {:data (:anomaly/data result)}))
+    (when-not (anomaly/anomaly? result)
+      {:command cmd
+       :workflow-id workflow-id
+       :intervention-id (str (:intervention/id result))})))
 
 ;------------------------------------------------------------------------------ Layer 2
 
