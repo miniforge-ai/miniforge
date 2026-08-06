@@ -1,0 +1,76 @@
+<!--
+  Title: Miniforge.ai
+  Author: Christopher Lester (christopher@miniforge.ai)
+  Copyright 2025-2026 Christopher Lester. Licensed under Apache 2.0.
+-->
+
+# feat: project OPSV lifecycle events
+
+## Overview
+
+Project the required N3 OPSV domain events at successful phase boundaries and
+persist their identifiers in the durable evidence assembly.
+
+## Motivation
+
+The OPSV lifecycle executed end to end but exposed only generic workflow
+telemetry. N7 requires domain-specific event records that carry the evidence
+bundle identity, retain the complete risk result, and survive checkpointing.
+
+## Layer
+
+OPSV application event projection and publication.
+
+## Depends on
+
+- PR #1675 (OPSV model decomposition) — merged
+- PR #1677 (project integration registration) — merged
+
+## Changes in Detail
+
+- Construct the planned, started, load-step, convergence, policy,
+  verification, and actuation event records from phase outputs.
+- Publish events only after successful phase transformations.
+- Accumulate published event IDs in the canonical evidence assembly.
+- Reuse the shared bounded confidence classifier rather than duplicate its
+  threshold logic.
+- Exercise the registered project integration path with exact event
+  cardinalities, evidence linkage, checkpoint restoration, and side-effect
+  freedom assertions.
+
+## Standards Audit
+
+- Event construction, publication, and phase orchestration remain separate.
+- Every changed implementation namespace has at most three computed strata.
+- Each event payload is assembled once; no repeated policy or evidence maps
+  are embedded across phase functions.
+- Event publication failures are not swallowed or converted to false success.
+- Runtime objects remain outside checkpointed execution input.
+- Default actuation remains `:recommend-only` with no governed effects.
+
+## Testing Plan
+
+- Phase-OPSV tests pass in both composed projects.
+- Registered OPSV project integration verifies lifecycle and domain events.
+- The full Miniforge project suite passes across all composed bricks.
+- Poly, clj-kondo, stratum lint, pre-commit smoke, GraalVM compatibility, and
+  CLI build gates pass.
+
+## Deployment Plan
+
+No deployment action is required. The change adds deterministic event records
+to the existing successful workflow path and preserves the current actuation
+posture.
+
+## Checklist
+
+- [x] All required N3 event types are projected exactly once per boundary.
+- [x] The planned event retains the full risk result record.
+- [x] Domain event IDs are durable evidence references.
+- [x] No runtime adapter or evidence-store object is checkpointed.
+- [x] Guardrail aborts and missing confidence thresholds are covered.
+
+## Follow-up
+
+Add the deterministic simulated OPSV adapter as the next independently
+reviewable N7 slice.
