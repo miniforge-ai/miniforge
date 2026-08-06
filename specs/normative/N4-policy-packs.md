@@ -487,9 +487,8 @@ Check functions MAY:
         ;; Check for public access
         public-buckets (filter #(public-acl? %) s3-buckets)
 
-        violations (map (fn [bucket]
+        violations (mapv (fn [bucket]
                           {:violation/rule-id :mf.rule/no-public-s3
-                           :violation/pack-id  :miniforge/terraform-aws
                            :violation/severity :critical
                            :violation/message (str "S3 bucket '"
                                                   (:finding/resource-name bucket)
@@ -497,8 +496,9 @@ Check functions MAY:
                            :violation/location (:finding/location bucket)
                            :violation/auto-fixable? true
                            :violation/remediation "Set acl = \"private\" or use bucket policy"})
-                       public-buckets)]
+                        public-buckets)]
 
+    ;; findings, not complete violations — see §3.3.1
     {:passed? (empty? violations)
      :violations violations}))
 ```
@@ -784,10 +784,10 @@ Semantic intent validation MUST enforce these rules:
         actual-behavior (infer-intent creates updates destroys)
 
         ;; Validate match
-        violations (when-not (intent-matches? declared-intent
-                                             creates updates destroys)
+        violations (if (intent-matches? declared-intent
+                                        creates updates destroys)
+                     []
                      [{:violation/rule-id :mf.rule/semantic-intent-mismatch
-                       :violation/pack-id  :miniforge/core
                        :violation/severity :critical
                        :violation/message
                        (str "Declared intent is " declared-intent
