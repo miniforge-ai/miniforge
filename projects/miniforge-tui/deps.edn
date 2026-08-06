@@ -22,6 +22,7 @@
         ai.miniforge/codex-gap {:local/root "../../components/codex-gap"}
         ai.miniforge/coerce {:local/root "../../components/coerce"}
         ai.miniforge/content-hash {:local/root "../../components/content-hash"}
+        ai.miniforge/opsv {:local/root "../../components/opsv"}
         ai.miniforge/logging {:local/root "../../components/logging"}
         ai.miniforge/config {:local/root "../../components/config"}
         ai.miniforge/response {:local/root "../../components/response"}
@@ -33,6 +34,7 @@
         ai.miniforge/workflow-chain-software-factory {:local/root "../../components/workflow-chain-software-factory"}
         ai.miniforge/workflow-software-factory {:local/root "../../components/workflow-software-factory"}
         ai.miniforge/workflow-financial-etl {:local/root "../../components/workflow-financial-etl"}
+        ai.miniforge/phase-opsv {:local/root "../../components/phase-opsv"}
         ai.miniforge/phase-software-factory {:local/root "../../components/phase-software-factory"}
         ai.miniforge/llm {:local/root "../../components/llm"}
         ai.miniforge/tool {:local/root "../../components/tool"}
