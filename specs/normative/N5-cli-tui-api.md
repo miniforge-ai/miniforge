@@ -964,7 +964,8 @@ j/k:nav  Enter:detail  O:open  Space:select  p:filter  C:chat  t:train  /:search
   - Each factor shows weight, score, value, and explanation
 - MUST display policy evaluation results per N4 §5.1.7:
   - Per-rule outcome (pass/fail/warn) with severity and message
-  - Summary counts (critical/major/minor/info)
+  - Summary counts per severity, using N4 §2.3.1's vocabulary
+    (`:critical`, `:high`, `:medium`, `:low`, `:info`)
 - MUST show recommended action with explanation (why this action is suggested)
 - `C` key MUST open a chat pane scoped to this PR (risk, approach, etc.)
 - `O` key MUST open PR URL in default browser
