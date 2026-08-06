@@ -167,6 +167,10 @@ Three Copilot rounds, all findings real and fixed:
    no: the one verification outcome an operator would read as blank. Added
    `:crypto/invalid-signature` and a test that every failure path carries a
    reason.
+4. Two follow-ons from (3): the catch-all used `(.getMessage e)`, which is nil
+   for some exceptions, and `:crypto/undecodable-signature` said "not valid
+   base64" while `decode-signature` also rejects a non-string. Both fixed, with
+   a test that forces the nil-message path.
 
 ## Deployment Plan
 

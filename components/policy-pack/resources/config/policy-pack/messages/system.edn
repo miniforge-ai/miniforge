@@ -17,10 +17,13 @@
   "Trusted public key is not a 32-byte raw Ed25519 key"
 
   :crypto/undecodable-signature
-  "Pack signature is not valid base64"
+  "Pack signature is not a readable base64 string"
 
   :crypto/invalid-signature
   "Pack signature does not verify against the trusted public key"
+
+  :crypto/verification-error
+  "Ed25519 verification failed without an error message"
 
   :trust-roots/invalid-public-key
   "must be base64 of a raw {bytes}-byte Ed25519 public key"

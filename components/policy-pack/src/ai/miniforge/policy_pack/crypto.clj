@@ -100,4 +100,6 @@
           {:verified? true}
           {:verified? false :reason (t :crypto/invalid-signature)})))
     (catch Exception e
-      {:verified? false :reason (.getMessage e)})))
+      ;; .getMessage is nil for some exceptions (a bare NPE among them), and
+      ;; a nil reason is the one thing this fn promises never to return.
+      {:verified? false :reason (or (.getMessage e) (t :crypto/verification-error))})))

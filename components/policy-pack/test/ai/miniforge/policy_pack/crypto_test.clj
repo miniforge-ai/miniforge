@@ -54,4 +54,13 @@
       (is (not (:verified? (sut/verify-ed25519 content sig nil)))))
 
     (testing "a public key of the wrong length fails closed"
-      (is (not (:verified? (sut/verify-ed25519 content sig (byte-array 16))))))))
+      (is (not (:verified? (sut/verify-ed25519 content sig (byte-array 16))))))
+
+    (testing "an exception with no message still yields a reason"
+      ;; .getMessage is nil for some exceptions, and a nil reason is the one
+      ;; thing this fn promises never to return.
+      (let [result (with-redefs [sut/raw-ed25519-point
+                                 (fn [_] (throw (NullPointerException.)))]
+                     (sut/verify-ed25519 content sig (byte-array 32)))]
+        (is (not (:verified? result)))
+        (is (string? (:reason result)))))))

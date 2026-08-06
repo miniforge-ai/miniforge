@@ -196,14 +196,14 @@
       (let [result (sut/verify-signature registry
                                          (assoc pack :pack/signature "not base64!"))]
         (is (not (:verified? result)))
-        (is (= "Pack signature is not valid base64" (:reason result)))))
+        (is (= "Pack signature is not a readable base64 string" (:reason result)))))
 
     (testing "a signature that is not a string fails rather than throwing"
       ;; Verification runs on packs that have not necessarily been through
       ;; schema validation.
       (let [result (sut/verify-signature registry (assoc pack :pack/signature 42))]
         (is (not (:verified? result)))
-        (is (= "Pack signature is not valid base64" (:reason result)))))
+        (is (= "Pack signature is not a readable base64 string" (:reason result)))))
 
     (testing "a key identifier that is not a string fails"
       (let [result (sut/verify-signature registry (assoc pack :pack/signed-by 42))]
