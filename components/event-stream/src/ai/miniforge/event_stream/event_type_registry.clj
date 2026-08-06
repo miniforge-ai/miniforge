@@ -46,6 +46,7 @@
    file to add or modify event types.  This namespace loads it and
    derives the computed views below."
   (:require
+   [ai.miniforge.anomaly.interface :as anomaly]
    [ai.miniforge.event-stream.event-type-registry.audit :as audit]
    [ai.miniforge.event-stream.event-type-registry.data :as data]
    [clojure.string :as str]))
@@ -77,18 +78,22 @@
 (def ^{:stratum 1} browser-handled-events
   "Event types currently handled in `handleWorkflowEvent` in app.js.
    All strings confirmed correct — no mismatches."
-  (->> event-type-registry
-       (filter :browser?)
-       (mapv :json-string)))
+  (if (anomaly/anomaly? event-type-registry)
+    event-type-registry
+    (->> event-type-registry
+         (filter :browser?)
+         (mapv :json-string))))
 
 ;; => ["workflow/started" "workflow/phase-started" "workflow/phase-completed"
 ;;     "workflow/completed" "workflow/failed" "agent/chunk"]
 (def ^{:stratum 1} browser-unhandled-events
   "Event types emitted server-side that the browser switch silently ignores.
    These are the gap items for Tasks 1–7."
-  (->> event-type-registry
-       (remove :browser?)
-       (mapv :json-string)))
+  (if (anomaly/anomaly? event-type-registry)
+    event-type-registry
+    (->> event-type-registry
+         (remove :browser?)
+         (mapv :json-string))))
 
 ;; Asymmetries at a glance:
 ;;
@@ -109,12 +114,14 @@
    `interface/events.clj` would guess the wrong browser case string.
 
    Format: [constructor → json-string (note)]"
-  (->> event-type-registry
-       (filter :asymmetry?)
-       (mapv (fn [{:keys [constructor json-string asymmetry-note]}]
-               {:constructor    constructor
-                :json-string    json-string
-                :asymmetry-note asymmetry-note}))))
+  (if (anomaly/anomaly? event-type-registry)
+    event-type-registry
+    (->> event-type-registry
+         (filter :asymmetry?)
+         (mapv (fn [{:keys [constructor json-string asymmetry-note]}]
+                 {:constructor    constructor
+                  :json-string    json-string
+                  :asymmetry-note asymmetry-note})))))
 
 ;------------------------------------------------------------------------------ Rich Comment
 (comment
