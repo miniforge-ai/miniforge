@@ -692,8 +692,7 @@ A check function that throws, times out, or returns a value not matching the
 §3.1 shape MUST be treated as a **failure of that rule**, not as a pass and not
 as an absent rule. The runtime MUST synthesize a **complete** violation per
 §3.3 — it is the gate runtime, so unlike a check function it knows all three
-fields of §3.3.1. Beyond the schema's requirements, the synthesized violation
-MUST carry:
+fields of §3.3.1. The following §3.3 fields take specific values in this case:
 
 - `:violation/rule-id` — the rule that failed to execute
 - `:violation/severity` — the rule's declared `:rule/severity`
@@ -1598,10 +1597,29 @@ signed payload MUST be the pack's **canonical serialization**:
 
 1. Take the pack map, less `:pack/signature` and any signature metadata
    carried alongside it (`:pack/signed-by`, `:pack/signed-at`).
-2. Serialize as EDN with map keys sorted by their printed representation, no
-   insignificant whitespace, and UTF-8 encoding.
-3. The resulting byte sequence is the signed payload. Ed25519 signs it
+2. Serialize as EDN under the rendering rules below.
+3. Encode as UTF-8.
+4. The resulting byte sequence is the signed payload. Ed25519 signs it
    directly; implementations MUST NOT pre-hash and sign a digest instead.
+
+**Rendering rules.** "Canonical" is only useful if two implementations produce
+identical bytes, so the rendering is fixed:
+
+- **Map key order** — ascending by key, compared as `namespace` then `name`,
+  with an absent namespace sorting before any present one. Byte-wise
+  comparison of the UTF-8 key strings.
+- **Recursively** — every map at every depth is ordered this way, not only the
+  top level. A pack's `:pack/metadata` and each rule map are nested maps; if
+  only the outer map is sorted, nested key order falls to the host's map
+  implementation and stops being reproducible above the small-map threshold.
+- **Whitespace** — one space between a key and its value and between
+  successive entries; no newlines, no indentation, no trailing space.
+- **Collections** — vectors and lists render in their declared order.
+  Sequence order is data and MUST NOT be sorted.
+- **Sets** — rendered as a sorted vector under the same comparator, since set
+  iteration order is not defined.
+- **Scalars** — instants as ISO-8601 UTC with millisecond precision; no
+  numeric reformatting beyond the EDN reader's round-trip form.
 
 The pack **content hash** referenced by §5.5 and N1 §2.10.4.1 is a digest of
 this same byte sequence. It identifies the pack; it is not what the signature
@@ -1999,7 +2017,13 @@ contract the code already satisfies:
 
 - **Signature canonicalization (§8.1.1).** `policy-pack/crypto/pack-signable-bytes`
   already dissocs the signature fields, sorts keys via `(into (sorted-map) …)`,
-  and serializes `pr-str` as UTF-8 — the algorithm §8.1.1 now specifies.
+  and serializes `pr-str` as UTF-8 — the shape §8.1.1 now specifies.
+  **Partial:** `(into (sorted-map) …)` orders the top-level map only. Nested
+  maps — `:pack/metadata`, each rule map — keep the host's ordering, which is
+  insertion order for small maps and hash order above the array-map threshold.
+  §8.1.1 requires recursive ordering, so packs with larger nested maps can
+  currently produce different bytes on different runs. This is a signature
+  interoperability bug, not merely an unimplemented requirement.
 - **Legacy severity normalization (§2.3.1).** `schema/normalize-severity`
   already exists for `:major` → `:high` and `:minor` → `:low`; §2.3.1 adds
   `:error` → `:high` and `:warning` → `:medium` on the same seam.
