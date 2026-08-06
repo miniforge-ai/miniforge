@@ -39,6 +39,13 @@ NOT implement a parallel capability broker. Sections that retain the older
 intent/OIR/capability vocabulary describe design inputs only; where they conflict
 with this profile, this profile governs.
 
+For avoidance of doubt, every `REQUIRED` or `OPTIONAL` annotation and every
+`MUST` or `MUST NOT` statement that depends on the legacy Intent, Operational
+IR, Capability, or Capability Broker objects is informative only and has no
+independent conformance force. Implementations MUST express the underlying
+safety requirement through the adopted Ariadne contracts. Requirements that do
+not depend on those superseded objects remain normative.
+
 Governed-effect evidence MUST correlate the durable transaction, the grant
 rechecked at commit, and the runtime decision that allowed it:
 
