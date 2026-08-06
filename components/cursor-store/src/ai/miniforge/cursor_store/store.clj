@@ -96,8 +96,8 @@
 ;; File access, and the public I/O that shares it.
 (defn- ^{:stratum 1} existing-cursors
   "Cursors already persisted for this pipeline, or nil when no file
-   exists yet. Both callers turn a throw from here into a
-   schema/failure.
+   exists yet. Returns a schema result so malformed persisted content
+   stays on the value path used by both public operations.
 
    A file that exists but does not hold a map is a failure, not an
    empty one. `edn/read-string` returns nil for an empty file, and a
@@ -106,12 +106,14 @@
    run a success, which is the silent full re-ingest this store exists
    to prevent."
   [^java.io.File file]
-  (when (.exists file)
+  (if-not (.exists file)
+    (schema/success :cursors nil)
     (let [value (read-edn (slurp file))]
       (if (map? value)
-        value
-        (throw (ex-info (msg/t :store/not-a-map {:path (str file)})
-                        {:path (str file) :type (type value)}))))))
+        (schema/success :cursors value)
+        (schema/failure :cursors
+                        (msg/t :store/not-a-map {:path (str file)})
+                        {:path (str file) :type (type value)})))))
 
 ;------------------------------------------------------------------------------ Layer 2
 
@@ -134,23 +136,26 @@
   (try
     (let [normalized (normalize-for-storage logger cursor-map)
           file       (cursor-file pipeline-path)
-          persisted  (merge (existing-cursors file) normalized)]
-      (if (empty? normalized)
-        (do (when logger
-              (log/info logger :cursor-store :cursor-store/no-cursors
-                        {:message (msg/t :store/no-cursors)}))
-            (schema/success :cursors persisted))
-        (let [dir (.getParentFile file)]
-          (.mkdirs dir)
-          (spit file (write-edn persisted))
-          (when logger
-            (log/info logger :cursor-store :cursor-store/saved
-                      {:message (msg/t :store/saved {:count     (count normalized)
-                                                      :persisted (count persisted)})
-                       :data {:count     (count normalized)
-                              :persisted (count persisted)
-                              :path      (str file)}}))
-          (schema/success :cursors persisted))))
+          persisted-result (existing-cursors file)]
+      (if (schema/failed? persisted-result)
+        persisted-result
+        (let [persisted (merge (:cursors persisted-result) normalized)]
+          (if (empty? normalized)
+            (do (when logger
+                  (log/info logger :cursor-store :cursor-store/no-cursors
+                            {:message (msg/t :store/no-cursors)}))
+                (schema/success :cursors persisted))
+            (let [dir (.getParentFile file)]
+              (.mkdirs dir)
+              (spit file (write-edn persisted))
+              (when logger
+                (log/info logger :cursor-store :cursor-store/saved
+                          {:message (msg/t :store/saved {:count     (count normalized)
+                                                          :persisted (count persisted)})
+                           :data {:count     (count normalized)
+                                  :persisted (count persisted)
+                                  :path      (str file)}}))
+              (schema/success :cursors persisted))))))
     (catch Exception e
       (when logger
         (log/error logger :cursor-store :cursor-store/write-failed
@@ -169,17 +174,19 @@
   [logger pipeline-path]
   (try
     (let [file    (cursor-file pipeline-path)
-          cursors (existing-cursors file)]
-      (if cursors
-        (do (when logger
-              (log/info logger :cursor-store :cursor-store/loaded
-                        {:message (msg/t :store/loaded {:count (count cursors)})
-                         :data {:count (count cursors) :path (str file)}}))
-            (schema/success :cursors cursors))
-        (do (when logger
-              (log/info logger :cursor-store :cursor-store/first-run
-                        {:message (msg/t :store/first-run)}))
-            (schema/success :cursors {}))))
+          loaded (existing-cursors file)]
+      (if (schema/failed? loaded)
+        loaded
+        (if-let [cursors (:cursors loaded)]
+          (do (when logger
+                (log/info logger :cursor-store :cursor-store/loaded
+                          {:message (msg/t :store/loaded {:count (count cursors)})
+                           :data {:count (count cursors) :path (str file)}}))
+              (schema/success :cursors cursors))
+          (do (when logger
+                (log/info logger :cursor-store :cursor-store/first-run
+                          {:message (msg/t :store/first-run)}))
+              (schema/success :cursors {})))))
     (catch Exception e
       (when logger
         (log/error logger :cursor-store :cursor-store/read-failed
