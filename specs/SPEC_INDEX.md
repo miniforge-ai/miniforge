@@ -6,7 +6,7 @@
 
 # miniforge Specification Index
 
-**Version:** 0.10.0-draft
+**Version:** 0.11.0-draft
 **Date:** 2026-08-05
 **Status:** Living specification during OSS development
 
@@ -147,13 +147,27 @@ Defines:
 
 Defines:
 
-- Pack structure: schema, versioning, signature requirements, rule definitions
+- Four-artifact model: taxonomy (§2.1), pack (§2.2), mapping (§2.4), overlay (§2.5)
+- **One severity vocabulary** (`:critical :high :medium :low :info`) shared by rules,
+  violations, and every downstream projection (§2.3.1)
 - Gate execution contract: check/repair function interfaces with complete protocols
+- **Check-function execution semantics:** fail-closed on throw/timeout, resource
+  bounds, isolation for untrusted packs, determinism verification (§3.5)
 - Semantic intent validation: IMPORT/CREATE/UPDATE/DESTROY/REFACTOR/MIGRATE rules
 - Violation schema: severity levels, remediation templates, auto-fix capabilities
 - Terraform/Kubernetes-specific validation rules
+- **Standard pack registry** with canonical `:pack/id` values and obligation status (§5.1)
+- **Pack resolution and precedence:** resolved rule set, conflict rules, version
+  conflicts (§5.3)
+- **Gate binding:** how a gate acquires rules; an unbound gate fails closed (§5.4)
+- **Events and evidence obligations** for every gate execution (§5.5)
 - Pack trust, capability grant, and high-risk action gates for Workflow Packs
+- **Override and waiver:** what may be overridden, and the durable record (§6.3.1)
+- **Signature canonicalization** and trust roots (§8.1.1, §8.2.1)
 - **Validation Layer Taxonomy:** L0 Syntax → L1 Semantic → L2 Policy → L3 Operational → L4 Authorization (§3.4)
+- **Conformance requirement IDs** (`N4.PK.*`, `N4.EX.*`, `N4.RB.*`, `N4.EN.*`,
+  `N4.TR.*`) and test obligations (§9.4–§9.5)
+- **Annex A (informative):** implementation conformance status
 
 ### N5 — Interface Standard: CLI/TUI/API ✅
 
@@ -527,6 +541,17 @@ Normative specs are enforced by:
 
 ## Version History
 
+- **0.11.0-draft** (2026-08-05) - N4 spec-completion pass. **N4**: unified the severity vocabulary
+  (§2.3.1 had `:error`/`:warning`/`:info` against the canonical `:critical :high :medium :low :info`
+  used everywhere else in the same spec); check-function execution semantics with fail-closed
+  behaviour, resource bounds, and isolation (§3.5); taxonomy compatibility (§2.1.1); standard pack
+  registry and identifier convention (§5.1); pack resolution and precedence (§5.3); gate binding
+  (§5.4); events and evidence obligations (§5.5); override/waiver contract bound to
+  N5-delta-supervisory-control-plane §3.1 (§6.3.1); signature canonicalization and trust roots (§8.1.1, §8.2.1);
+  conformance requirement IDs and test obligations (§9.4–§9.5). Contract fixes: `:violation/rule-id`
+  typed keyword, `:violation/pack-id` added, §11.1 example rewritten off the pre-0.6
+  `:policy-pack/*` namespace, duplicate `require-capability-declaration` rule ID split.
+  Annex A records implementation divergence. Per-spec bumps: N4 0.6→0.7
 - **0.10.0-draft** (2026-08-05) - N3 spec-completion pass. **N3**: canonical event type registry (§6),
   schema evolution and consumer compatibility rules (§7), sensitive-data and redaction contract (§8),
   emission-failure semantics with fail-closed durable/audit classes (§9), conformance requirement IDs
