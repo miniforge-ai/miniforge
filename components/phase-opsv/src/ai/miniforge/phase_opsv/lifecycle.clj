@@ -21,6 +21,7 @@
    [ai.miniforge.anomaly.interface :as anomaly]
    [ai.miniforge.phase.interface :as phase]
    [ai.miniforge.phase-opsv.evidence-runtime :as evidence-runtime]
+   [ai.miniforge.phase-opsv.events :as events]
    [ai.miniforge.phase-opsv.lifecycle-result :as lifecycle-result]))
 
 ;------------------------------------------------------------------------------ Layer 0
@@ -42,17 +43,28 @@
           (not runtime-supplied?)
           (assoc-in [:execution/opts :opsv/adapter] adapter))))))
 
-(defn- ^{:stratum 0} leave-phase
+(defn- ^{:stratum 0} result-after-publication
+  [ctx phase-key result]
+  (if-not (phase/result-succeeded? result)
+    result
+    (let [published (events/emit-phase-events! ctx phase-key (:output result))]
+      (if (anomaly/anomaly? published)
+        (lifecycle-result/phase-result published)
+        result))))
+
+;------------------------------------------------------------------------------ Layer 1
+
+(defn- ^{:stratum 1} leave-phase
   [ctx]
   (let [phase-key (get-in ctx [:phase :name])
-        result (get-in ctx [:phase :result])
+        result (result-after-publication
+                ctx phase-key (get-in ctx [:phase :result]))
+        completed-ctx (assoc-in ctx [:phase :result] result)
         success? (phase/result-succeeded? result)
         end-time (System/currentTimeMillis)
         duration-ms (- end-time (get-in ctx [:phase :started-at]))]
-    (lifecycle-result/complete-phase ctx phase-key success? end-time
+    (lifecycle-result/complete-phase completed-ctx phase-key success? end-time
                                      duration-ms)))
-
-;------------------------------------------------------------------------------ Layer 1
 
 (defn- ^{:stratum 1} enter-phase
   [phase-key transform config ctx]
