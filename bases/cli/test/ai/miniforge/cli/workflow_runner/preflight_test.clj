@@ -23,7 +23,9 @@
    [slingshot.slingshot :refer [try+]]
    [ai.miniforge.llm.interface :as llm]
    [ai.miniforge.cli.workflow-runner :as sut]
-   [ai.miniforge.cli.workflow-runner.paths :as paths]))
+   [ai.miniforge.cli.workflow-runner.paths :as paths]
+   [ai.miniforge.cli.workflow-runner.process :as process]
+   [ai.miniforge.cli.workflow-runner.provenance :as provenance]))
 
 ;------------------------------------------------------------------------------ Layer 0
 
@@ -39,7 +41,7 @@
 (deftest ^{:stratum 0} await-stream-waits-for-reader-completion-test
   (testing "stream join waits for a completed reader instead of dropping late output"
     (let [started-at (System/currentTimeMillis)
-          result (#'sut/await-stream (future
+          result (#'process/await-stream (future
                                        (Thread/sleep 1100)
                                        "late-output"))
           elapsed-ms (- (System/currentTimeMillis) started-at)]
@@ -49,7 +51,7 @@
 (deftest ^{:stratum 0} print-runtime-provenance-includes-startup-warnings-test
   (testing "startup provenance prints upstream and source checkout warnings"
     (let [output (with-out-str
-                   (#'sut/print-runtime-provenance!
+                   (#'provenance/print-runtime-provenance!
                     false
                     {:source-root "/tmp/source-root"
                      :worktree-path "/tmp/runtime-worktree"
@@ -120,7 +122,7 @@
           output (with-out-str
                    (with-redefs-fn {#'paths/resolve-cli-command-path (fn [_] "/opt/homebrew/bin/claude")
                                     #'sut/read-cli-version (fn [_] {:success true :version "2.1.118 (Claude Code)"})
-                                    #'sut/run-cli-command (fn [_cmd _timeout-ms & _]
+                                    #'process/run-cli-command (fn [_cmd _timeout-ms & _]
                                                             {:out "{\"type\":\"result\",\"subtype\":\"success\",\"result\":\"{\\\"ok\\\":true}\"}"
                                                              :err ""
                                                              :exit 0})}
@@ -139,7 +141,7 @@
       (try+
         (with-redefs-fn {#'paths/resolve-cli-command-path (fn [_] "/opt/homebrew/bin/claude")
                          #'sut/read-cli-version (fn [_] {:success true :version "2.1.118 (Claude Code)"})
-                         #'sut/run-cli-command (fn [_cmd _timeout-ms & _]
+                         #'process/run-cli-command (fn [_cmd _timeout-ms & _]
                                                  {:out "{\"type\":\"result\",\"subtype\":\"error\",\"is_error\":true,\"result\":\"{\\\"ok\\\":true}\"}"
                                                   :err ""
                                                   :exit 0})}
@@ -164,7 +166,7 @@
           output (with-out-str
                    (with-redefs-fn {#'paths/resolve-cli-command-path (fn [_] "/Users/chris/.local/bin/codex")
                                     #'sut/read-cli-version (fn [_] {:success true :version "1.2.3"})
-                                    #'sut/run-cli-command (fn [cmd timeout-ms & {:keys [workdir]}]
+                                    #'process/run-cli-command (fn [cmd timeout-ms & {:keys [workdir]}]
                                                             (reset! seen-cmd cmd)
                                                             (reset! seen-timeout timeout-ms)
                                                             (reset! seen-workdir workdir)
@@ -189,14 +191,14 @@
 
 (deftest ^{:stratum 1} run-cli-command-captures-short-lived-process-output-test
   (testing "probe helper captures stdout, stderr, and exit code for short-lived commands"
-    (let [result (#'sut/run-cli-command [(shell-path) "-lc" "printf ok; printf warn >&2"] 5000)]
+    (let [result (#'process/run-cli-command [(shell-path) "-lc" "printf ok; printf warn >&2"] 5000)]
       (is (= "ok" (:out result)))
       (is (= "warn" (:err result)))
       (is (= 0 (:exit result))))))
 
 (deftest ^{:stratum 1} run-cli-command-times-out-fast-test
   (testing "probe helper returns a timeout result instead of hanging the caller"
-    (let [result (#'sut/run-cli-command [(shell-path) "-lc" "sleep 1"] 10)]
+    (let [result (#'process/run-cli-command [(shell-path) "-lc" "sleep 1"] 10)]
       (is (= -1 (:exit result)))
       (is (= 10 (:timeout-ms result)))
       (is (str/includes? (:err result) "10")))))
