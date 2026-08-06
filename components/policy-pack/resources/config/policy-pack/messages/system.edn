@@ -1,0 +1,29 @@
+{:policy-pack/system
+ {;; Signature verification outcomes (N4 §8.2) and trust-root config
+  ;; diagnostics (§8.2.1). Operator-facing: they explain why a pack was
+  ;; refused or why a trust root would not load, and they reach logs and
+  ;; evidence rather than a product surface, so they live in the system
+  ;; locale.
+  :verify/unsigned
+  "Pack is not signed"
+
+  :verify/missing-key-id
+  "Pack carries a signature but no :pack/signed-by key identifier"
+
+  :verify/untrusted-key-id
+  "Pack signer is not in the configured trust roots"
+
+  :crypto/bad-public-key-length
+  "Trusted public key is not a 32-byte raw Ed25519 key"
+
+  :crypto/undecodable-signature
+  "Pack signature is not valid base64"
+
+  :trust-roots/invalid-public-key
+  "must be base64 of a raw {bytes}-byte Ed25519 public key"
+
+  :trust-roots/invalid-entry
+  "Invalid policy pack trust root: {key-id}"
+
+  :trust-roots/invalid-config
+  "Invalid policy pack trust-root config: {source}"}}
