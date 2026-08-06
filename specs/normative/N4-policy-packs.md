@@ -928,10 +928,13 @@ Implementations SHOULD provide these standard policy packs.
 readability. The short name is not the identifier. Canonical forms are
 mechanical:
 
-| Shown as | Canonical |
-|----------|-----------|
-| **ID:** `foundations` | `:pack/id :miniforge/foundations` |
-| rule `no-hardcoded-secrets` | `:rule/id :mf.rule/no-hardcoded-secrets` |
+| Short name (display only) | Canonical identifier |
+|---------------------------|----------------------|
+| `foundations` | `:pack/id :miniforge/foundations` |
+| `no-hardcoded-secrets` | `:rule/id :mf.rule/no-hardcoded-secrets` |
+
+The **ID:** line under each pack heading below carries the short name for
+continuity with earlier drafts. It is a label, not the identifier.
 
 That is: a standard pack's `:pack/id` is `:miniforge/<short-name>`, and its
 rules are `:mf.rule/<rule-name>`, per §2.2 and §2.3. Short names are display
@@ -1540,12 +1543,15 @@ miniforge policy update terraform-aws@2.0.0
 For trusted policy packs, implementations MAY require cryptographic signatures:
 
 ```clojure
-{:pack/signature
- {:algorithm :ed25519
-  :public-key "..."
-  :signature "..."
-  :signed-at inst}}
+{:pack/signature "base64-encoded-ed25519-signature"  ; over §8.1.1 bytes
+ :pack/signed-by "base64-encoded-ed25519-public-key" ; publisher key
+ :pack/signed-at #inst "2026-08-05T00:00:00Z"}
 ```
+
+These are three flat fields on the pack map, matching `:pack/signature string`
+in §2.2. Earlier drafts of this section showed a nested map; a pack written
+that way fails §2.2 validation. The algorithm is Ed25519; a future algorithm
+change is a MAJOR pack-format change, not a per-pack field.
 
 #### 8.1.1 What Is Signed
 
@@ -1556,8 +1562,13 @@ signed payload MUST be the pack's **canonical serialization**:
    carried alongside it (`:pack/signed-by`, `:pack/signed-at`).
 2. Serialize as EDN with map keys sorted by their printed representation, no
    insignificant whitespace, and UTF-8 encoding.
-3. The resulting byte sequence is the signed payload; its digest is the pack's
-   content hash referenced by §5.5 and N1 §2.10.4.1.
+3. The resulting byte sequence is the signed payload. Ed25519 signs it
+   directly; implementations MUST NOT pre-hash and sign a digest instead.
+
+The pack **content hash** referenced by §5.5 and N1 §2.10.4.1 is a digest of
+this same byte sequence. It identifies the pack; it is not what the signature
+is computed over. Conflating the two produces signatures that verify in one
+implementation and fail in another.
 
 Implementations MUST NOT sign a pretty-printed or reader-dependent rendering.
 Two implementations that serialize the same pack MUST produce identical bytes,
@@ -1573,8 +1584,8 @@ verifies nothing that matters.
 
 Before executing policy pack:
 
-1. Recompute the canonical serialization (§8.1.1) and its digest
-2. Verify the signature over that digest against the public key
+1. Recompute the canonical serialization (§8.1.1)
+2. Verify the signature over those bytes against the trusted public key
 3. Check the signature timestamp against the key's validity window
 4. Confirm the publisher is permitted for this pack (§5.1.8)
 5. Warn on unsigned packs, or fail where policy requires signatures
