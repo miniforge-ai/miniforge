@@ -1501,11 +1501,15 @@ usable by a script.
   result is data MUST NOT interleave progress, warnings, or decoration into
   stdout.
 - **stderr** carries progress, warnings, and diagnostics.
-- With `--json`, a non-streaming command's stdout MUST contain exactly one JSON
-  document. A streaming command MUST instead emit newline-delimited JSON, one
-  document per line. Whether a command streams is a fixed property of that
-  command: it MUST be stated in the command's `--help` and MUST NOT vary by
-  invocation, because a consumer chooses its parser before it sees output.
+- With `--json`, a command that does not stream MUST emit exactly one JSON
+  document on stdout. A command that streams MUST emit newline-delimited JSON,
+  one document per line.
+- Whether a given invocation streams MUST be determined by the command and its
+  flags alone, and MUST be stated in `--help`. `miniforge workflow status --json`
+  emits one document; adding `--follow` makes it stream. Both are predictable
+  from the command line, which is what a consumer needs — it chooses its parser
+  before it sees output. What MUST NOT happen is the same command line
+  streaming on one run and not on the next.
 
 A command that writes a progress spinner to stdout breaks every pipeline that
 consumes it, which is why the split is normative rather than stylistic.
@@ -1520,14 +1524,16 @@ consumes it, which is why the split is normative rather than stylistic.
 | 3 | Configuration error — config invalid or unreadable (§7) |
 | 4 | Policy refusal — a gate blocked the operation (N4) |
 | 5 | Not found — the named workflow, artifact, or pack does not exist |
-| 130 | Interrupted (SIGINT) |
+| 130 | Interrupted by SIGINT while the command was doing the work |
 
 A workflow that runs and fails its gates exits 4, not 1: a caller MUST be able
 to distinguish "the tool broke" from "the tool worked and said no".
 
-Detaching from a followed workflow (Ctrl+C during `--follow`) exits 0 — the
-workflow continues, and the console said so (§2.3.2). Interrupting a command
-that was itself doing the work exits 130.
+Exit 130 covers SIGINT that aborts work the command was performing. Detaching
+is the documented exception: Ctrl+C during `--follow` exits 0, because the
+console is only watching — the workflow continues server-side and §2.3.2 says
+so on screen. A command MUST state which of the two it does when interrupted,
+so an operator can tell "I stopped watching" from "I stopped the work".
 
 #### 8.4.3 JSON Output Stability
 
