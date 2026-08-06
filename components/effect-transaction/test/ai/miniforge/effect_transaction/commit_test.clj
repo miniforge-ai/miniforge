@@ -141,6 +141,13 @@
   ;; merge. A second deploy.
   (let [dir (tmp-dir)
         g (merge-grant)]
+    (testing "falsey proposals retain the empty-map default"
+      (doseq [proposal [nil false]]
+        (is (= {} (:effect/proposal
+                   (fx/propose! dir {:effect-class :effect/merge
+                                     :grant-id (:grant/id g)
+                                     :proposal proposal}
+                                now))))))
     (doseq [state [:committing :succeeded :failed :unknown-outcome :reconciled]]
       (let [t (assoc (propose-merge! dir g) :effect/state state)
             fired (atom false)

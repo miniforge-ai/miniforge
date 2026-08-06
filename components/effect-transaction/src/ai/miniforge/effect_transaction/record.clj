@@ -76,12 +76,12 @@
                           (msg/t :proposal/no-store)
                           {})
      (propose! dir opts (Instant/now))))
-  ([dir {:keys [effect-class grant-id envelope-id] :as opts} ^Instant now]
+  ([dir {:keys [effect-class grant-id envelope-id proposal]} ^Instant now]
    (let [t {:effect/id (random-uuid)
             :effect/class effect-class
             :effect/grant-id grant-id
             :effect/envelope-id envelope-id
-            :effect/proposal (get opts :proposal {})
+            :effect/proposal (if proposal proposal {})
             :effect/state :proposed
             :effect/at now
             :effect/updated-at now}]
