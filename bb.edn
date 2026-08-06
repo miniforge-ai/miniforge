@@ -88,7 +88,7 @@
    :task (commit-budget/run nil)}
 
   pr-budget
-  {:doc  "CI-only: reject a whole PR's merge-base..head diff over 600 lines, same exclusions as commit-budget. Reads PR_BASE_SHA/PR_HEAD_SHA/PR_BODY from the environment. Override via a `MINIFORGE_PR_BUDGET_OVERRIDE: reason` line in the PR description."
+  {:doc  "CI-only: reject a whole PR's merge-base..head diff over 600 reportable lines, using the same exclusions as commit-budget. Reads PR_BASE_SHA/PR_HEAD_SHA/PR_BODY from the environment. Override via a `MINIFORGE_PR_BUDGET_OVERRIDE: reason` line in the PR description."
    :requires ([pr-budget])
    :task (pr-budget/run nil)}
 
