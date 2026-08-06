@@ -23,8 +23,15 @@ document a reader consults to decide whether the implementation can be trusted.
   (identifier resolved against a configured trust-root store, shipped empty so
   a deployment that configures nothing trusts nothing). Records the two
   adjacent defects closed with it, and states what is still open: §8.2 steps 4
-  and 5, and that §5.1.8's gate rules carry no `:custom-fn`, so the verifier
-  has no caller outside its component. Correct, not yet reachable.
+  and 5, and that the shipped pack's `:trust/*` rules carry no `:custom-fn`,
+  so the verifier has no caller outside its component. Correct, not yet
+  reachable.
+- **A.4, second entry** — a divergence the review surfaced: §5.1.8 names the
+  pack-trust rules `require-signature-verification` /
+  `enforce-publisher-allowlist` / `enforce-minimum-trust-level`, while the
+  shipped pack declares `:trust/require-signature` /
+  `:trust/publisher-allowlist` / `:trust/minimum-trust-level`. §1.1 makes rule
+  IDs the durable anchor, so the two should agree.
 - **A.3** — canonicalization rewritten for what `policy-pack/canonical-edn`
   and `canonical-order` now do, replacing the "partial on determinism" note.
 - **Annex preamble** — a closed row says so and names the change rather than

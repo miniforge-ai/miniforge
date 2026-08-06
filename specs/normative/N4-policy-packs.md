@@ -2084,10 +2084,18 @@ contract the code already satisfies:
   **Still open.** §8.2 steps 4 and 5 — checking the signature timestamp
   against a key validity window, and confirming the publisher is permitted for
   the pack (§5.1.8) — are unimplemented. So is the gate that would call any of
-  this: §5.1.8's `require-signature-verification` and
-  `enforce-publisher-allowlist` are declared with `:rule/detection
-  {:type :custom}` and no `:custom-fn`, so `verify-signature` has no caller
-  outside its component. The verifier is correct; it is not yet reachable.
+  this. The shipped `miniforge/pack-trust` pack declares its three rules —
+  `:trust/require-signature`, `:trust/publisher-allowlist`, and
+  `:trust/minimum-trust-level` — with `:rule/detection {:type :custom}` and no
+  `:custom-fn`, so none of them runs and `verify-signature` has no caller
+  outside its own component. The verifier is correct; it is not yet reachable.
+
+- **Pack-trust rule naming (§5.1.8).** §5.1.8 lists that pack's rules as
+  `require-signature-verification`, `enforce-publisher-allowlist`, and
+  `enforce-minimum-trust-level`. The shipped pack uses the `:trust/*` IDs
+  above. Since §1.1 makes rule IDs the durable anchor, the two should agree —
+  a reader matching §5.1.8 against the pack finds neither set of names in the
+  other.
 
 ### A.5 Structural
 
@@ -2108,7 +2116,9 @@ contract the code already satisfies:
 - 0.7.0-draft (2026-08-06): Annex A only, no normative change. A.4's
   self-certifying verification and A.3's canonicalization gap are closed by
   PR #1669 and now read as closed, naming what remains: §8.2 steps 4 and 5,
-  and the §5.1.8 gate that would call the verifier at all.
+  and the §5.1.8 gate that would call the verifier at all. Records a new
+  divergence — §5.1.8's rule names and the shipped pack's `:trust/*` rule IDs
+  do not match.
 - 0.7.0-draft (2026-08-05): Spec-completion pass.
   **Contract fixes:** one severity vocabulary — §2.3.1 rewritten from
   `:error`/`:warning`/`:info` to the canonical `:critical :high :medium :low
