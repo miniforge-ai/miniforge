@@ -108,6 +108,7 @@
         completed (leave-planned-phase ctx)]
     (is (= :failed (get-in completed [:phase :status])))
     (is (anomaly/anomaly? (get-in completed [:phase :result :output])))
+    (is (= :unavailable (get-in completed [:phase :result :output :anomaly/type])))
     (is (empty? (event-stream/get-events stream)))
     (is (not-any? #{:opsv/plan}
                   (get-in completed [:execution :phases-completed])))))

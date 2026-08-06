@@ -45,6 +45,12 @@
   [event published]
   (cond
     (anomaly/anomaly? published) published
+    (:rejected? published)
+    (anomaly/anomaly :unavailable
+                     (msg/ts :event/publication-failed)
+                     {:event/id (:event/id event)
+                      :event/type (:event/type event)
+                      :event-stream/result published})
     (anomaly/any-anomaly? published)
     (anomaly/anomaly :unavailable
                      (msg/ts :event/publication-failed)
