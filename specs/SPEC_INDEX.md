@@ -6,7 +6,7 @@
 
 # miniforge Specification Index
 
-**Version:** 0.11.0-draft
+**Version:** 0.12.0-draft
 **Date:** 2026-08-05
 **Status:** Living specification during OSS development
 
@@ -177,11 +177,26 @@ Defines:
 
 Defines:
 
-- CLI command taxonomy: seven namespaces (init, workflow, fleet, policy, evidence, artifact, pack)
+- CLI command taxonomy: eleven namespaces (init, workflow, fleet, policy, evidence,
+  artifact, etl, pack, listener, agent, gate)
 - TUI primitives: workflow list, detail view, evidence viewer, artifact browser, pack browser, run launcher
-- API surface: minimal REST endpoints for workflow control, event streaming, evidence/artifact access
+- API surface: minimal REST endpoints for workflow control, event streaming, evidence/artifact access;
+  streaming wire contract owned by N3 §5.3
 - Operations console purpose: monitoring autonomous factory (NOT PR management)
 - Manual override mechanisms: plan approval, gate handling, budget escalation
+- **Localization contract (§9):** no raw prose at emit sites, user vs system catalogs by
+  destination, what is not prose, locale resolution — dewey 050 applied to the console surface
+- **CLI output contract (§8.4):** stdout/stderr separation, exit-code taxonomy distinguishing
+  policy refusal from failure, `--json` stability, stable error codes
+- **Command stability and deprecation (§8.5)**
+- **Terminal capability degradation (§8.6):** `NO_COLOR`, no-Unicode, narrow terminals;
+  colour never the sole carrier of meaning
+- **Configuration precedence and validation (§7.3–§7.4):** flag → env → file → default
+- **Override bound to the Waiver** of N5-delta-supervisory-control-plane §3.1; `:critical`
+  and `:high` not overridable per N4 §6.3.1 (§6.2)
+- **Conformance requirement IDs** (`N5.CLI.*`, `N5.TUI.*`, `N5.API.*`, `N5.CFG.*`,
+  `N5.L10N.*`, `N5.OV.*`) and test obligations (§8.7–§8.8)
+- **Annex A (informative):** implementation conformance status
 
 ### N6 — Evidence & Provenance Standard ✅
 
@@ -541,6 +556,18 @@ Normative specs are enforced by:
 
 ## Version History
 
+- **0.12.0-draft** (2026-08-05) - N5 spec-completion pass. **N5**: localization contract (§9)
+  applying dewey 050 to the console surface — the spec defining the largest prose surface in the
+  system had none; CLI output contract with stdout/stderr separation, an exit-code taxonomy that
+  distinguishes policy refusal from failure, `--json` stability, and stable error codes (§8.4);
+  command stability and deprecation (§8.5); terminal capability degradation (§8.6); configuration
+  precedence and validation (§7.3–§7.4); conformance requirement IDs and test obligations
+  (§8.7–§8.8). Contract fixes: §5.2's "not a chat interface" against §3.2.8/§3.2.9 mandating a
+  chat key; `c` collided between Cancel and chat; §2.2's namespace table missing three namespaces
+  §2.3.3 defined commands for; §6.1.2 offering override for a CRITICAL violation that N4 §6.3.1
+  forbids; §6.2's bespoke override record replaced by the Waiver; §4.2.2/§4.3 aligned with N3 §5.3;
+  §3.2.8–§3.2.9 stopped mandating implementation namespaces per standard 020.
+  Annex A records implementation divergence. Per-spec bumps: N5 0.4→0.5
 - **0.11.0-draft** (2026-08-05) - N4 spec-completion pass. **N4**: unified the severity vocabulary
   (§2.3.1 had `:error`/`:warning`/`:info` against the canonical `:critical :high :medium :low :info`
   used everywhere else in the same spec); check-function execution semantics with fail-closed
