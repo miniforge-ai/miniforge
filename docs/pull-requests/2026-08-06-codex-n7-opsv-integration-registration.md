@@ -34,6 +34,7 @@ Test infrastructure.
 ## Validation
 
 - Direct OPSV lifecycle integration run: 4 tests, 14 assertions.
+- Full project integration task: 310 tests, 1075 assertions.
 - Changed-file Clojure lint: 0 errors, 0 warnings.
 - Changed-file stratum lint: 0 findings after autofix.
 - Poly check: only the four known repository baseline warnings.
