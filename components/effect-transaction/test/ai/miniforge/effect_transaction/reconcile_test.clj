@@ -18,52 +18,25 @@
 (ns ai.miniforge.effect-transaction.reconcile-test
   (:require
    [ai.miniforge.anomaly.interface :as anomaly]
+   [ai.miniforge.effect-transaction.fixtures :as fixture]
    [ai.miniforge.effect-transaction.interface :as fx]
-   [ai.miniforge.execution-grant.interface :as grant]
-   [clojure.test :refer [deftest is testing]])
-  (:import
-   [java.nio.file Files]
-   [java.nio.file.attribute FileAttribute]
-   [java.time Instant]))
+   [clojure.test :refer [deftest is testing]]))
 
 ;------------------------------------------------------------------------------ Layer 0
 
-(def ^{:stratum 0} now (Instant/parse "2026-08-01T00:00:00Z"))
+(def ^{:stratum 0} now fixture/now)
 
-(def ^{:stratum 0} later (Instant/parse "2026-08-01T01:00:00Z"))
+(def ^{:stratum 0} later fixture/later)
 
-(defn ^{:stratum 0} tmp-dir
-  "A fresh directory per test — records are files, so tests that shared
-   one would see each other's."
-  []
-  (str (.toFile (Files/createTempDirectory "fx-test" (into-array FileAttribute [])))))
+(def ^{:stratum 0} tmp-dir fixture/tmp-dir)
+
+(def ^{:stratum 0} merge-grant fixture/merge-grant)
+
+(def ^{:stratum 0} propose-merge! fixture/propose-merge!)
 
 ;------------------------------------------------------------------------------ Layer 1
 
-(defn ^{:stratum 1} merge-grant
-  ([] (merge-grant {}))
-  ([overrides]
-   (grant/issue (merge {:principal "agent:implementer"
-                        :effect-class :effect/merge
-                        :scope {:repo "miniforge-ai/miniforge" :pr 42}
-                        :constraints {:constraint/max-count 5}
-                        :delegable? false
-                        :expires-at later}
-                       overrides)
-                now)))
-
-(defn ^{:stratum 1} propose-merge!
-  [dir g]
-  (fx/propose! dir
-               {:effect-class :effect/merge
-                :grant-id (:grant/id g)
-                :envelope-id (random-uuid)
-                :proposal {:pr/repo "miniforge-ai/miniforge" :pr/number 42}}
-               now))
-
-;------------------------------------------------------------------------------ Layer 2
-
-(deftest ^{:stratum 2} reconcile-reads-the-world-not-the-log-test
+(deftest ^{:stratum 1} reconcile-reads-the-world-not-the-log-test
   (let [dir (tmp-dir)
         g (merge-grant)]
     (testing "the observation comes from the probe, and a match is recorded"
@@ -134,7 +107,7 @@
         (is (anomaly/anomaly?
              (fx/reconcile! dir done (constantly {:effect/observed :x}) later)))))))
 
-(deftest ^{:stratum 2} committing-is-reconcilable-after-a-restart-test
+(deftest ^{:stratum 1} committing-is-reconcilable-after-a-restart-test
   ;; A process that died mid-effect leaves the record at :committing.
   ;; That is not failure and not success — it is exactly the case
   ;; reconciliation exists for.
@@ -152,7 +125,7 @@
     (is (= :reconciled (:effect/state settled)))
     (is (false? (:effect/matched? settled)))))
 
-(deftest ^{:stratum 2} refusal-anomalies-route-correctly-test
+(deftest ^{:stratum 1} refusal-anomalies-route-correctly-test
   ;; :unauthorized would say "you lack permission", which is neither
   ;; true nor useful here. A wrong lifecycle position is a :conflict; a
   ;; probe that did not answer is :unavailable — transient, ask again.

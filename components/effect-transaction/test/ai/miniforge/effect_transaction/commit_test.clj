@@ -18,54 +18,28 @@
 (ns ai.miniforge.effect-transaction.commit-test
   (:require
    [ai.miniforge.anomaly.interface :as anomaly]
+   [ai.miniforge.effect-transaction.fixtures :as fixture]
    [ai.miniforge.effect-transaction.interface :as fx]
    [ai.miniforge.execution-grant.interface :as grant]
-   [clojure.test :refer [deftest is testing]])
-  (:import
-   [java.nio.file Files]
-   [java.nio.file.attribute FileAttribute]
-   [java.time Instant]))
+   [clojure.test :refer [deftest is testing]]))
 
 ;------------------------------------------------------------------------------ Layer 0
 
-(def ^{:stratum 0} now (Instant/parse "2026-08-01T00:00:00Z"))
+(def ^{:stratum 0} now fixture/now)
 
-(def ^{:stratum 0} later (Instant/parse "2026-08-01T01:00:00Z"))
+(def ^{:stratum 0} later fixture/later)
 
-(def ^{:stratum 0} much-later (Instant/parse "2026-08-02T00:00:00Z"))
+(def ^{:stratum 0} much-later fixture/much-later)
 
-(defn ^{:stratum 0} tmp-dir
-  "A fresh directory per test — records are files, so tests that shared
-   one would see each other's."
-  []
-  (str (.toFile (Files/createTempDirectory "fx-test" (into-array FileAttribute [])))))
+(def ^{:stratum 0} tmp-dir fixture/tmp-dir)
+
+(def ^{:stratum 0} merge-grant fixture/merge-grant)
+
+(def ^{:stratum 0} propose-merge! fixture/propose-merge!)
 
 ;------------------------------------------------------------------------------ Layer 1
 
-(defn ^{:stratum 1} merge-grant
-  ([] (merge-grant {}))
-  ([overrides]
-   (grant/issue (merge {:principal "agent:implementer"
-                        :effect-class :effect/merge
-                        :scope {:repo "miniforge-ai/miniforge" :pr 42}
-                        :constraints {:constraint/max-count 5}
-                        :delegable? false
-                        :expires-at later}
-                       overrides)
-                now)))
-
-(defn ^{:stratum 1} propose-merge!
-  [dir g]
-  (fx/propose! dir
-               {:effect-class :effect/merge
-                :grant-id (:grant/id g)
-                :envelope-id (random-uuid)
-                :proposal {:pr/repo "miniforge-ai/miniforge" :pr/number 42}}
-               now))
-
-;------------------------------------------------------------------------------ Layer 2
-
-(deftest ^{:stratum 2} interrupted-effect-is-unknown-not-failed-test
+(deftest ^{:stratum 1} interrupted-effect-is-unknown-not-failed-test
   ;; The state that earns this component its keep. Claiming failure for
   ;; a merge that actually landed is as wrong as claiming success.
   (let [dir (tmp-dir)
@@ -80,7 +54,7 @@
     (testing "and the unknown state is durable, so a restart can find it"
       (is (= :unknown-outcome (:effect/state (fx/read-record dir (:effect/id t))))))))
 
-(deftest ^{:stratum 2} definite-outcomes-are-recorded-as-such-test
+(deftest ^{:stratum 1} definite-outcomes-are-recorded-as-such-test
   (let [dir (tmp-dir)
         g (merge-grant)]
     (testing "a definite success is :succeeded and carries the observation"
@@ -110,7 +84,7 @@
             done (fx/commit! dir t g {} now (constantly nil))]
         (is (= :unknown-outcome (:effect/state done)))))))
 
-(deftest ^{:stratum 2} commit-rechecks-the-grant-test
+(deftest ^{:stratum 1} commit-rechecks-the-grant-test
   ;; Ariadne 2b Group 4: a constraint checked only at decide() is a check
   ;; against stale state.
   (testing "a grant revoked after the proposal fails the commit, and the effect never fires"
@@ -161,12 +135,19 @@
       (is (= :proposed (:effect/state (fx/read-record dir (:effect/id t))))
           "the durable record is left as it was"))))
 
-(deftest ^{:stratum 2} only-a-proposed-record-may-be-committed-test
+(deftest ^{:stratum 1} only-a-proposed-record-may-be-committed-test
   ;; The accident this component exists to prevent: committing a record
   ;; that has already moved on re-runs an irreversible effect. A second
   ;; merge. A second deploy.
   (let [dir (tmp-dir)
         g (merge-grant)]
+    (testing "falsey proposals retain the empty-map default"
+      (doseq [proposal [nil false]]
+        (is (= {} (:effect/proposal
+                   (fx/propose! dir {:effect-class :effect/merge
+                                     :grant-id (:grant/id g)
+                                     :proposal proposal}
+                                now))))))
     (doseq [state [:committing :succeeded :failed :unknown-outcome :reconciled]]
       (let [t (assoc (propose-merge! dir g) :effect/state state)
             fired (atom false)
@@ -181,7 +162,7 @@
             done (fx/commit! dir t g {} now (fn [] {:effect/outcome :succeeded}))]
         (is (= :succeeded (:effect/state done)))))))
 
-(deftest ^{:stratum 2} commit-must-use-the-grant-the-proposal-named-test
+(deftest ^{:stratum 1} commit-must-use-the-grant-the-proposal-named-test
   ;; The re-check is only worth anything if it re-checks the SAME grant.
   ;; Otherwise: propose under a narrow grant, commit under a broad one,
   ;; and the durable record attests to authority that was never used.
