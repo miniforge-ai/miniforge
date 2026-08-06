@@ -15,7 +15,6 @@
 ;; WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 ;; See the License for the specific language governing permissions and
 ;; limitations under the License.
-
 (ns ai.miniforge.workflow.context
   "Execution context management.
 
@@ -118,9 +117,10 @@
             [ai.miniforge.workflow.monitoring :as monitoring]
             [ai.miniforge.agent.interface :as agent]))
 
-;------------------------------------------------------------------------------ Internal helpers
+;------------------------------------------------------------------------------ Layer 0
 
-(def execution-passthrough-option-keys
+;------------------------------------------------------------------------------ Internal helpers
+(def ^{:stratum 0} execution-passthrough-option-keys
   "Execution options that are copied onto the top-level workflow context."
   [:llm-backend :artifact-store :knowledge-store
    :on-phase-start :on-phase-complete
@@ -131,11 +131,7 @@
    ;; it; lifecycle events read it from the context (see runner-events).
    :workflow-run/correlation-id])
 
-(defn- passthrough-option-values
-  [opts]
-  (select-keys opts execution-passthrough-option-keys))
-
-(defn- monitoring-runtime-fields
+(defn- ^{:stratum 0} monitoring-runtime-fields
   [workflow]
   (let [supervisors (monitoring/create-supervisors workflow)
         supervision-runtime (agent/create-supervision-coordinator supervisors)]
@@ -144,7 +140,7 @@
      :execution/streaming-activity []
      :execution/files-written #{}}))
 
-(defn- reset-terminal-snapshot-fields
+(defn- ^{:stratum 0} reset-terminal-snapshot-fields
   [machine-snapshot workflow]
   (-> machine-snapshot
       (dissoc :execution/ended-at
@@ -155,7 +151,7 @@
              :execution/metrics {:tokens 0 :cost-usd 0.0 :duration-ms 0}
              :execution/started-at (System/currentTimeMillis))))
 
-(defn sync-machine-projections
+(defn ^{:stratum 0} sync-machine-projections
   "Project workflow fields from the authoritative machine snapshot."
   [ctx]
   (let [machine (:execution/fsm-machine ctx)
@@ -168,7 +164,72 @@
                (assoc :execution/status :completed-with-warnings))]
     ctx'))
 
-(defn transition-execution
+(defn ^{:stratum 0} active-or-last-phase
+  "Return the active phase when present, otherwise the last completed phase in
+   workflow pipeline order."
+  [ctx]
+  (let [phase-results (:execution/phase-results ctx)
+        pipeline (:workflow/pipeline (:execution/workflow ctx))
+        last-recorded-phase (some->> pipeline
+                                     (map :phase)
+                                     (filter #(contains? phase-results %))
+                                     last)]
+    (if-some [current-phase (:execution/current-phase ctx)]
+      current-phase
+      last-recorded-phase)))
+
+;------------------------------------------------------------------------------ Context operations
+(defn- ^{:stratum 0} opts-run-id
+  "Adopt the caller's run identity when opts carry one. The CLI announces a
+   run id and publishes lifecycle events under it BEFORE the pipeline
+   starts; minting a second UUID here forks the run's identity — in the
+   2026-07-21 dogfood the phase/agent events landed under the pipeline's
+   id, the lifecycle events under the CLI's, and the staleness watchdog
+   false-fired on the half without heartbeats. Accepts a uuid or a
+   uuid-shaped string; anything else returns nil (fresh uuid fallback), so
+   non-uuid session labels never break event routing."
+  [opts]
+  (let [wid (:workflow-id opts)]
+    (cond
+      (uuid? wid)   wid
+      (string? wid) (parse-uuid wid)
+      :else         nil)))
+
+(defn ^{:stratum 0} merge-metrics
+  "Merge phase metrics into execution metrics.
+   Nil-safe: treats nil values as 0 to prevent NPE from merge-with +."
+  [exec-metrics phase-metrics]
+  (merge-with (fn [a b] (+ (or a 0) (or b 0)))
+              exec-metrics
+              (select-keys phase-metrics [:tokens :cost-usd :duration-ms])))
+
+(defn- ^{:stratum 0} ->epoch-millis
+  "Coerce a :execution/started-at / :execution/ended-at value to a
+   long epoch-millis. Different writers use different
+   representations (context.clj writes Long via
+   System/currentTimeMillis; runner.clj writes java.time.Instant via
+   Instant/now), and the wall-clock stamp needs to subtract them.
+   That inconsistency is its own bug; coercing here keeps the stamp
+   from failing on either shape — specifically:
+
+     - nil started-at / ended-at → nil here, caller skips the stamp;
+     - Instant input → unguarded subtraction would
+       ClassCastException (java.time.Instant is not a Number);
+     - any unrecognised type → nil, caller skips rather than
+       producing nonsense."
+  [t]
+  (cond
+    (number? t)                          (long t)
+    (instance? java.time.Instant t)      (.toEpochMilli ^java.time.Instant t)
+    :else                                nil))
+
+;------------------------------------------------------------------------------ Layer 1
+
+(defn- ^{:stratum 1} passthrough-option-values
+  [opts]
+  (select-keys opts execution-passthrough-option-keys))
+
+(defn ^{:stratum 1} transition-execution
   "Apply an event to the authoritative execution machine and refresh projections."
   [ctx event]
   (if-let [machine (:execution/fsm-machine ctx)]
@@ -183,7 +244,7 @@
         (assoc :execution/ended-at (System/currentTimeMillis))))
     ctx))
 
-(defn transition-execution-result
+(defn ^{:stratum 1} transition-execution-result
   "Apply an event to the authoritative execution machine and refresh
    projections, returning a canonical FSM anomaly for state-local unknown
    events instead of throwing."
@@ -202,39 +263,31 @@
             (assoc :execution/ended-at (System/currentTimeMillis))))))
     ctx))
 
-(defn active-or-last-phase
-  "Return the active phase when present, otherwise the last completed phase in
-   workflow pipeline order."
+(defn- ^{:stratum 1} stamp-wall-clock-duration
+  "Overwrite :execution/metrics :duration-ms with the actual workflow
+   wall-clock (`ended-at` − `started-at`). Tokens and cost still sum
+   correctly across phases — those are independent per-phase resource
+   consumption — but :duration-ms is the user-facing 'how long did
+   this run take' answer, which under DAG parallelism and per-phase
+   summing diverges from the wall-clock the user is watching.
+
+   Pre-fix, the runner banner reported `Duration: 9.7m` for a ~50m
+   wall run because :duration-ms was sum-of-phases — an aggregate
+   that means little when phases run in parallel and even less when
+   sub-workflow duration didn't propagate. Post-fix, banner shows
+   wall-clock; sum-of-phases is recoverable from the per-phase
+   results if a future analysis ever needs it."
   [ctx]
-  (let [phase-results (:execution/phase-results ctx)
-        pipeline (:workflow/pipeline (:execution/workflow ctx))
-        last-recorded-phase (some->> pipeline
-                                     (map :phase)
-                                     (filter #(contains? phase-results %))
-                                     last)]
-    (if-some [current-phase (:execution/current-phase ctx)]
-      current-phase
-      last-recorded-phase)))
+  (let [started-at (->epoch-millis (:execution/started-at ctx))
+        ended-at   (->epoch-millis (:execution/ended-at ctx))]
+    (if (and started-at ended-at)
+      (assoc-in ctx [:execution/metrics :duration-ms]
+                (max 0 (- ended-at started-at)))
+      ctx)))
 
-;------------------------------------------------------------------------------ Context operations
+;------------------------------------------------------------------------------ Layer 2
 
-(defn- opts-run-id
-  "Adopt the caller's run identity when opts carry one. The CLI announces a
-   run id and publishes lifecycle events under it BEFORE the pipeline
-   starts; minting a second UUID here forks the run's identity — in the
-   2026-07-21 dogfood the phase/agent events landed under the pipeline's
-   id, the lifecycle events under the CLI's, and the staleness watchdog
-   false-fired on the half without heartbeats. Accepts a uuid or a
-   uuid-shaped string; anything else returns nil (fresh uuid fallback), so
-   non-uuid session labels never break event routing."
-  [opts]
-  (let [wid (:workflow-id opts)]
-    (cond
-      (uuid? wid)   wid
-      (string? wid) (parse-uuid wid)
-      :else         nil)))
-
-(defn create-context
+(defn ^{:stratum 2} create-context
   "Create initial execution context.
 
    Arguments:
@@ -272,7 +325,7 @@
       ;; Merge opts into top-level context so :llm-backend is accessible to agents
       (passthrough-option-values opts)))))
 
-(defn restore-context
+(defn ^{:stratum 2} restore-context
   "Restore execution context from a durable machine snapshot and phase checkpoints."
   [workflow input machine-snapshot phase-results opts]
   (let [execution-machine (fsm/compile-execution-machine workflow)
@@ -300,57 +353,7 @@
       (monitoring-runtime-fields workflow)
       (passthrough-option-values opts)))))
 
-(defn merge-metrics
-  "Merge phase metrics into execution metrics.
-   Nil-safe: treats nil values as 0 to prevent NPE from merge-with +."
-  [exec-metrics phase-metrics]
-  (merge-with (fn [a b] (+ (or a 0) (or b 0)))
-              exec-metrics
-              (select-keys phase-metrics [:tokens :cost-usd :duration-ms])))
-
-(defn- ->epoch-millis
-  "Coerce a :execution/started-at / :execution/ended-at value to a
-   long epoch-millis. Different writers use different
-   representations (context.clj writes Long via
-   System/currentTimeMillis; runner.clj writes java.time.Instant via
-   Instant/now), and the wall-clock stamp needs to subtract them.
-   That inconsistency is its own bug; coercing here keeps the stamp
-   from failing on either shape — specifically:
-
-     - nil started-at / ended-at → nil here, caller skips the stamp;
-     - Instant input → unguarded subtraction would
-       ClassCastException (java.time.Instant is not a Number);
-     - any unrecognised type → nil, caller skips rather than
-       producing nonsense."
-  [t]
-  (cond
-    (number? t)                          (long t)
-    (instance? java.time.Instant t)      (.toEpochMilli ^java.time.Instant t)
-    :else                                nil))
-
-(defn- stamp-wall-clock-duration
-  "Overwrite :execution/metrics :duration-ms with the actual workflow
-   wall-clock (`ended-at` − `started-at`). Tokens and cost still sum
-   correctly across phases — those are independent per-phase resource
-   consumption — but :duration-ms is the user-facing 'how long did
-   this run take' answer, which under DAG parallelism and per-phase
-   summing diverges from the wall-clock the user is watching.
-
-   Pre-fix, the runner banner reported `Duration: 9.7m` for a ~50m
-   wall run because :duration-ms was sum-of-phases — an aggregate
-   that means little when phases run in parallel and even less when
-   sub-workflow duration didn't propagate. Post-fix, banner shows
-   wall-clock; sum-of-phases is recoverable from the per-phase
-   results if a future analysis ever needs it."
-  [ctx]
-  (let [started-at (->epoch-millis (:execution/started-at ctx))
-        ended-at   (->epoch-millis (:execution/ended-at ctx))]
-    (if (and started-at ended-at)
-      (assoc-in ctx [:execution/metrics :duration-ms]
-                (max 0 (- ended-at started-at)))
-      ctx)))
-
-(defn transition-to-completed
+(defn ^{:stratum 2} transition-to-completed
   "Transition workflow to completed state using FSM. Stamps
    :execution/ended-at and overwrites :execution/metrics
    :duration-ms with the wall-clock so the runner banner reflects
@@ -363,7 +366,7 @@
       (assoc :execution/ended-at (System/currentTimeMillis))
       stamp-wall-clock-duration))
 
-(defn transition-to-failed
+(defn ^{:stratum 2} transition-to-failed
   "Transition workflow to failed state using FSM. Same wall-clock
    duration semantics as transition-to-completed — duration is
    reported even on failure so the user can see how long the run
