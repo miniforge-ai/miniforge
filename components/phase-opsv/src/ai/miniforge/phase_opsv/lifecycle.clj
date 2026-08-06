@@ -21,7 +21,6 @@
    [ai.miniforge.anomaly.interface :as anomaly]
    [ai.miniforge.phase.interface :as phase]
    [ai.miniforge.phase-opsv.evidence-runtime :as evidence-runtime]
-   [ai.miniforge.phase-opsv.events :as events]
    [ai.miniforge.phase-opsv.lifecycle-result :as lifecycle-result]))
 
 ;------------------------------------------------------------------------------ Layer 0
@@ -50,8 +49,6 @@
         success? (phase/result-succeeded? result)
         end-time (System/currentTimeMillis)
         duration-ms (- end-time (get-in ctx [:phase :started-at]))]
-    (when success?
-      (events/emit-phase-events! ctx phase-key (:output result)))
     (lifecycle-result/complete-phase ctx phase-key success? end-time
                                      duration-ms)))
 
