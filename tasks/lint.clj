@@ -46,7 +46,10 @@
                                      "clj-kondo" "--lint" "bases" "components" "development/src")]
     (when-not (str/blank? out) (println out))
     (when-not (str/blank? err) (binding [*out* *err*] (println err)))
-    (when-not (zero? exit)
+    ;; Same policy as clj-staged: warnings (exit 2) pass, errors and
+    ;; unexpected exits fail. Moot while CI's tee pipe masked this exit;
+    ;; pipefail made it live, and repo-wide warnings must not gate CI.
+    (when-not (contains? #{0 2} exit)
       (println "❌ Linting failed with exit code:" exit)
       (System/exit exit))))
 
