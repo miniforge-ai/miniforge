@@ -6,8 +6,8 @@
 
 # N7 — Operational Policy Synthesis With Verification
 
-**Version:** 0.2.0-draft
-**Date:** 2026-08-04
+**Version:** 0.2.1-draft
+**Date:** 2026-08-06
 **Status:** Complete
 **Conformance:** MUST
 **Class:** Extension spec (N7+)
@@ -39,8 +39,9 @@ OPSV is an extension of existing Miniforge normative contracts:
 - **N6**: defines evidence bundle requirements for experiment provenance, reproducibility, and
           verification artifacts. Now landed in N6 §2.8 (OPSV Evidence) and §3.1.1 (artifact types).
 - **N8**: supplies emergency-stop and safe-mode behavior for active OPSV runs (§3.1.4, §3.4).
-- **N10**: governs PR creation and direct apply as external effects, including capability,
-           rollback verification, postconditions, audit events, and evidence (§§4–6, §9, §12).
+- **N10/Ariadne**: govern PR creation and direct apply as external effects using
+  DecisionEnvelopes, ExecutionGrants, EffectTransactions, rollback verification,
+  postconditions, audit events, and evidence.
 
 ### 0.3 Non-goals
 
@@ -302,7 +303,7 @@ If any gate fails, OPSV MUST produce remediation guidance as machine-readable ou
 - All OPSV runs MUST support a global emergency stop.
 
 An N8 emergency stop or safe-mode entry MUST prevent new OPSV effects, abort
-active experiments at the next safe boundary, revoke their mutation capabilities,
+active experiments at the next safe boundary, revoke their mutation grants,
 invoke verified rollback through the separately authorized recovery path, and
 record the disposition in N3/N6. Safe mode MUST set effective actuation to
 `:none` per N8's A0 posture.
@@ -311,14 +312,14 @@ record the disposition in N3/N6. Safe mode MUST set effective actuation to
 
 Before any external mutation, OPSV MUST compute an effective actuation decision
 from the requested mode, verification result, N4 gate results, N8 safe-mode
-state, and current N10 capability. The decision MAY reduce autonomy but MUST NOT
+state, and current Ariadne ExecutionGrant. The decision MAY reduce autonomy but MUST NOT
 promote beyond the requested mode.
 
 - `:none` emits only disposition evidence and is required when N8 forbids execution.
 - `:recommend-only` never produces an external mutation.
-- `:pr-only` requires authority for the PR-creation effect.
+- `:pr-only` requires a matching active grant for the PR-creation effect.
 - `:apply-allowed` requires successful verification, all gates, a valid scoped
-  capability at execution time, a verified rollback, and configured postconditions.
+  ExecutionGrant at execution time, a verified rollback, and configured postconditions.
 
 The decision and every authority/effect reference MUST be recorded in N6 evidence.
 
@@ -361,7 +362,7 @@ All changes MUST be emitted as artifacts with provenance per N6:
 
 - at least one PR per target repo or a coordinated patch set
 - included evidence bundle link/reference and rollback instructions in PR body
-- N10 capability and governed-action references for the provider mutation
+- Ariadne grant, decision-envelope, and effect-transaction references for the provider mutation
 
 ### 7.3 Apply emission (optional, gated)
 
@@ -403,6 +404,9 @@ A minimal compliant OPSV implementation MUST:
 
 **Version History:**
 
+- 0.2.1-draft (2026-08-06): Replaced stale N10 intent/OIR/capability
+  correlation with the adopted Ariadne DecisionEnvelope, ExecutionGrant, and
+  EffectTransaction contracts
 - 0.2.0-draft (2026-08-04): Reconciled canonical schemas, events, evidence,
   requested/effective actuation, verification blocking, N8 safe mode, and N10 effects
 - 0.1.0-draft (2026-02-01): Initial OPSV extension specification

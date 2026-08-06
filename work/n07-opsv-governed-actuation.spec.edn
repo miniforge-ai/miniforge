@@ -1,7 +1,7 @@
 {:spec/title "Implement governed OPSV PR, Kubernetes apply, and rollback effects"
 
  :spec/description
- "Add provider and Kubernetes adapter protocols plus N10-backed PR creation and
+ "Add provider and Kubernetes adapter protocols plus Ariadne-backed PR creation and
   direct apply. Direct apply uses the resolved OCI/Kubernetes command surface,
   verified rollback, postcondition monitoring, and effect reconciliation. N8
   emergency stop revokes new mutation, stops load at a safe boundary, and invokes
@@ -17,10 +17,12 @@
  ["specs/normative/N7-Operational-Policy-Synthesis.md"
   "specs/normative/N8-observability-control-interface.md"
   "specs/normative/N10-governed-tool-execution.md"
-  "specs/normative/N11-delta-runtime-adapter.md"]
+  "specs/normative/N11-delta-runtime-adapter.md"
+  "docs/architecture/rfc-ariadne-adoption.md"]
 
  :spec/constraints
- ["PR creation and apply MUST require real matching N10 grants at execution time"
+ ["PR creation and apply MUST require a real matching ExecutionGrant at execution time"
+  "Every effect MUST correlate its EffectTransaction, ExecutionGrant, and allow DecisionEnvelope"
   "OPSV MUST NOT use :authority/unenforced"
   "Runtime differences MUST remain registry data and MUST NOT branch on :runtime/kind"
   "Direct apply MUST have verified rollback and configured postconditions"
@@ -40,7 +42,8 @@
   :rationale "External mutations are the highest-risk N7 stratum and must reuse settled N8/N10 authority."
   :blocks ["n07-opsv-cli-tui-drift.spec.edn"]
   :blocked-by ["n07-opsv-domain-policy.spec.edn"
-               "n07-opsv-workflow.spec.edn"]}
+               "n07-opsv-workflow.spec.edn"
+               "ariadne-grant-issuance.spec.edn"]}
 
  :dag/id :n07-opsv-governed-actuation
  :spec/workflow-type :canonical-sdlc}

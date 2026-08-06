@@ -6,8 +6,8 @@
 
 # N6 — Evidence & Provenance Standard
 
-**Version:** 0.7.1-draft
-**Date:** 2026-08-05
+**Version:** 0.7.2-draft
+**Date:** 2026-08-06
 **Status:** Draft
 **Conformance:** MUST
 
@@ -327,7 +327,7 @@ The workflow MUST allocate the evidence bundle identifier before emitting its
 first OPSV event and accumulate material in a run-scoped assembly record. At
 terminal disposition it MUST publish one immutable bundle whose identifier is
 the preallocated value. Finalization MUST preserve references to every event,
-artifact, capability, and governed effect accumulated during the run.
+artifact, execution grant, and governed effect accumulated during the run.
 
 ```clojure
 {:evidence/opsv
@@ -342,7 +342,7 @@ artifact, capability, and governed effect accumulated during the run.
 
   :opsv/event-refs [uuid ...]          ; Complete N3 event identifier set
   :opsv/artifact-refs [uuid ...]       ; Complete referenced artifact set
-  :opsv/capability-refs [string ...]   ; Complete N10 capability identifier set
+  :opsv/grant-refs [uuid ...]          ; Complete Ariadne ExecutionGrant identifier set
 
   :opsv/risk-score
   {:score double                      ; [0.0, 1.0]
@@ -374,10 +374,10 @@ artifact, capability, and governed effect accumulated during the run.
   :opsv/actuation
   {:requested-actuation-mode keyword  ; :recommend-only, :pr-only, :apply-allowed
    :effective-actuation-mode keyword  ; :none, :recommend-only, :pr-only, :apply-allowed
-   :governed-effects                   ; One correlated record per N10 effect
-   [{:evidence/intent-id uuid
-     :evidence/oir-id uuid
-     :evidence/capability-id string}]
+   :governed-effects                   ; One correlated Ariadne transaction per effect
+   [{:evidence/effect-id uuid
+     :evidence/grant-id uuid
+     :evidence/envelope-id uuid}]
    :pr-refs [string ...]              ; PR URLs if PR_ONLY
    :apply-refs [string ...]           ; Applied resource refs if APPLY_ALLOWED
    :postcondition-artifact-refs [uuid ...]
@@ -1119,6 +1119,8 @@ Fleet-wide evidence will enable:
 
 **Version History:**
 
+- 0.7.2-draft (2026-08-06): Replaced stale OPSV capability references with
+  Ariadne effect, execution-grant, and decision-envelope correlation
 - 0.7.1-draft (2026-08-05): Added aggregate OPSV event, artifact, and capability
   reference fields required by the immutable-finalization contract in §2.8
 - 0.7.0-draft (2026-08-04): OPSV evidence now records preallocated bundle
