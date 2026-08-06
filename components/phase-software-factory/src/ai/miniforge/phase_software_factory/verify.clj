@@ -25,6 +25,7 @@
   (:require [ai.miniforge.anomaly.interface :as anomaly]
             [ai.miniforge.phase.interface :as phase]
             [ai.miniforge.workspace.interface :as workspace]
+            [ai.miniforge.phase-software-factory.gap-wiring :as gap-wiring]
             [ai.miniforge.phase-software-factory.phase-config :as phase-config]
             [ai.miniforge.phase-software-factory.messages :as messages]
             [ai.miniforge.phase-software-factory.phase-terminal :as phase-terminal]
@@ -321,6 +322,14 @@
 
                    :else
                    updated-ctx)]
+    ;; Gap-instrument miss recording (T2 s3): best-effort, opt-in, and it
+    ;; must never change the outcome it measures. On next-ctx, not ctx:
+    ;; gate failures sit on the untouched NAMESPACED [:phase :phase/...]
+    ;; keys either way, but the run-tests-error shape only gains its
+    ;; [:phase :error] map in attach-verify-error above. Verify has no
+    ;; static situation mapping, so its misses classify :uncovered —
+    ;; honest: no codex board addresses a failing-verify loop yet.
+    (gap-wiring/record-phase-misses! next-ctx :verify)
     (phase/emit-phase-completed! next-ctx :verify
       (merge {:outcome     (phase/outcome result (= :completed phase-status))
               :duration-ms duration-ms

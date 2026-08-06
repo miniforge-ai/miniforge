@@ -215,6 +215,14 @@
 (defn- ^{:stratum 0} backend-timeout? [result]
   (#'implement/backend-timeout-in-result? result))
 
+(deftest ^{:stratum 0} preserve-consultation-no-consultation-unchanged-test
+  (testing "no consultation on the full result -> lightweight result
+            untouched (no empty :output key invented)"
+    (let [lightweight {:status :success :environment-id :env}]
+      (is (identical? lightweight
+                      (implement/preserve-consultation
+                       lightweight {:output {:code/summary "done"}}))))))
+
 ;------------------------------------------------------------------------------ Layer 1
 
 (defn ^{:stratum 1} create-base-context
@@ -517,6 +525,33 @@
         (is (nil? (get-in final-result [:phase :result :output]))
             "Result should NOT contain serialized :output / :code/files")))))
 
+(deftest ^{:stratum 2} leave-implement-preserves-codex-consultation-test
+  (testing "the lightweight success result keeps :codex/consultation — the
+            gap instrument reads delivery provenance from the durable
+            record, and the wholesale result replacement was destroying it
+            (every successful DAG-task implement looked undelivered)"
+    (with-redefs [agent/create-implementer (fn [_] {:type :mock-implementer})
+                  agent/invoke (fn [_ _ _]
+                                (response/success nil {:tokens 800 :duration-ms 1500}))
+                  agent/curate-implement-output mock-curator-success]
+      (let [consultation {:pinned? true :status :delivered
+                          :situation "changing-one-side-of-a-boundary"}
+            ctx (-> (create-base-context)
+                    (assoc :execution/environment-id (random-uuid))
+                    (assoc :phase-config {:phase :implement}))
+            interceptor (phase/get-phase-interceptor {:phase :implement})
+            enter-result (-> ((:enter interceptor) ctx)
+                             (assoc-in [:phase :result :output :codex/consultation]
+                                       consultation)
+                             (assoc-in [:phase :result :output :code/summary] "done"))
+            final-result ((:leave interceptor) enter-result)]
+        (is (= :completed (get-in final-result [:phase :status])))
+        (is (= consultation
+               (get-in final-result [:phase :result :output :codex/consultation]))
+            "consultation provenance survives the lightweight replacement")
+        (is (nil? (get-in final-result [:phase :result :output :code/summary]))
+            "everything else in :output is still dropped")))))
+
 (deftest ^{:stratum 2} leave-implement-tolerates-nil-tokens-metrics-test
   (testing "an agent result with an EXPLICIT nil :tokens (file-artifact fallback
             path) does not NPE in leave — tokens coerce to 0, verdict survives"
@@ -789,8 +824,11 @@
         (is (= ["src/core.clj"] (get-in final-result [:phase :artifact :code/file-paths])))
         (is (= :success (get-in final-result [:phase :result :status]))
             "The persisted phase result stays lightweight")
-        (is (nil? (get-in final-result [:phase :result :output]))
-            "Serialized code does not go back into the environment-model result")
+        (is (= [:codex/consultation]
+               (keys (get-in final-result [:phase :result :output])))
+            "Serialized code does not go back into the environment-model
+             result — only consultation provenance survives (gap instrument
+             reads it from the durable record)")
         (is (nil? (get-in final-result [:phase :artifact :code/files]))
             "Serialized code should not be persisted on the outer phase artifact")))))
 

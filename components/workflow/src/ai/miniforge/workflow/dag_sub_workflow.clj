@@ -203,6 +203,12 @@
                     :quiet (boolean (get-in context [:execution/opts :quiet]))
                     :create-pr? true}]
      (cond-> base-opts
+       ;; Child runs checkpoint under the parent's root, not whatever the
+       ;; merged config resolves in the child process — one run tree, one
+       ;; root, so per-run tooling (gap ledger aggregation, bench arm
+       ;; partitioning) sees parent and DAG children together.
+       (:execution/checkpoint-root context)
+       (assoc :checkpoint/root (:execution/checkpoint-root context))
        (:llm-backend context)      (assoc :llm-backend (:llm-backend context))
        (:event-stream context)     (assoc :event-stream (:event-stream context))
        (get-in context [:execution/opts :event-stream])
