@@ -2083,12 +2083,21 @@ contract the code already satisfies:
 
   **Still open.** §8.2 steps 4 and 5 — checking the signature timestamp
   against a key validity window, and confirming the publisher is permitted for
-  the pack (§5.1.8) — are unimplemented. So is the gate that would call any of
-  this. The shipped `miniforge/pack-trust` pack declares its three rules —
+  the pack (§5.1.8) — are unimplemented.
+
+  So is the path from the pack-trust gate to the verifier. The shipped
+  `miniforge/pack-trust` pack declares its three rules —
   `:trust/require-signature`, `:trust/publisher-allowlist`, and
   `:trust/minimum-trust-level` — with `:rule/detection {:type :custom}` and no
-  `:custom-fn`, so none of them runs and `verify-signature` has no caller
-  outside its own component. The verifier is correct; it is not yet reachable.
+  `:custom-fn`. Per `policy-pack/compiler/resolve-detector`, a `:custom` rule
+  with no `:custom-fn` binds to `:semantic`, the LLM-as-judge mechanism. The
+  rules therefore do compile and do run; what they do not do is call
+  `verify-signature`, which has no caller outside its own component.
+
+  A model judging whether a pack looks signed is not a signature check.
+  `:trust/require-signature` in particular asserts a cryptographic property
+  and should bind to a `:custom-fn` over the verifier, not to `:semantic`.
+  Until it does, the verifier is correct and unreached.
 
 - **Pack-trust rule naming (§5.1.8).** §5.1.8 lists that pack's rules as
   `require-signature-verification`, `enforce-publisher-allowlist`, and

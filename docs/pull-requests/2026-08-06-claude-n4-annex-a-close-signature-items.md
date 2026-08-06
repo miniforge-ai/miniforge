@@ -23,9 +23,10 @@ document a reader consults to decide whether the implementation can be trusted.
   (identifier resolved against a configured trust-root store, shipped empty so
   a deployment that configures nothing trusts nothing). Records the two
   adjacent defects closed with it, and states what is still open: §8.2 steps 4
-  and 5, and that the shipped pack's `:trust/*` rules carry no `:custom-fn`,
-  so the verifier has no caller outside its component. Correct, not yet
-  reachable.
+  and 5, and that the shipped pack's `:trust/*` rules bind to `:semantic`
+  (LLM-as-judge) rather than to a `:custom-fn` over the verifier. They run;
+  they just never call `verify-signature`, which has no caller outside its
+  component.
 - **A.4, second entry** — a divergence the review surfaced: §5.1.8 names the
   pack-trust rules `require-signature-verification` /
   `enforce-publisher-allowlist` / `enforce-minimum-trust-level`, while the
@@ -38,6 +39,12 @@ document a reader consults to decide whether the implementation can be trusted.
   being deleted; the annex is the record of what the gap was, not only of what
   remains. Date moved to 2026-08-06.
 - **Version history** — one entry for this annex-only revision.
+
+A first draft of A.4 said the `:trust/*` rules "do not run" because they carry
+no `:custom-fn`. Review corrected it: `compiler/resolve-detector` binds a
+`:custom` rule with no `:custom-fn` to `:semantic`, so they run under the
+LLM judge. The gap is narrower and more specific than "unwired" — a model
+judging whether a pack looks signed is not a signature check.
 
 ## Testing Plan
 
