@@ -211,14 +211,24 @@
         (is (= "Pack carries a signature but no :pack/signed-by key identifier"
                (:reason result)))))
 
-    (testing "a well-formed but wrong signature fails"
+    (testing "a well-formed but wrong signature fails, with a reason to log"
       (let [other  (fixtures/sign-pack (assoc unsigned-pack :pack/version "2026.08.06")
                                        publisher
                                        "acme-publisher-2026")
             result (sut/verify-signature registry
                                          (assoc pack :pack/signature
                                                 (:pack/signature other)))]
-        (is (not (:verified? result)))))))
+        (is (not (:verified? result)))
+        (is (= "Pack signature does not verify against the trusted public key"
+               (:reason result)))))
+
+    (testing "every failure path carries a reason"
+      (is (every? (comp string? :reason)
+                  [(sut/verify-signature registry unsigned-pack)
+                   (sut/verify-signature registry (dissoc pack :pack/signed-by))
+                   (sut/verify-signature registry (assoc pack :pack/signature "not base64!"))
+                   (sut/verify-signature registry (assoc pack :pack/signed-by "who-is-this"))
+                   (sut/verify-signature registry (assoc pack :pack/author "mallory"))])))))
 
 (defn- ^{:stratum 1} keypair-of-each-parity
   "Draw keypairs until one of each x parity is in hand, or the limit runs out."

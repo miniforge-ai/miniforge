@@ -73,7 +73,9 @@
 
    Returns:
    - {:verified? true} on success
-   - {:verified? false :reason string} on failure or missing Java 15+ support"
+   - {:verified? false :reason string} on every failure, a signature that
+     simply does not verify included, so a caller always has something to
+     log"
   [content-bytes sig-bytes ^bytes pub-key-bytes]
   (try
     (if (or (nil? pub-key-bytes)
@@ -94,6 +96,8 @@
             verifier   (doto (java.security.Signature/getInstance "Ed25519")
                          (.initVerify public-key)
                          (.update ^bytes content-bytes))]
-        {:verified? (.verify verifier sig-bytes)}))
+        (if (.verify verifier sig-bytes)
+          {:verified? true}
+          {:verified? false :reason (t :crypto/invalid-signature)})))
     (catch Exception e
       {:verified? false :reason (.getMessage e)})))

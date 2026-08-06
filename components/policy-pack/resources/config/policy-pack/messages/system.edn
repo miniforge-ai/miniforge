@@ -19,6 +19,9 @@
   :crypto/undecodable-signature
   "Pack signature is not valid base64"
 
+  :crypto/invalid-signature
+  "Pack signature does not verify against the trusted public key"
+
   :trust-roots/invalid-public-key
   "must be base64 of a raw {bytes}-byte Ed25519 public key"
 
