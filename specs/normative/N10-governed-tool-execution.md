@@ -843,6 +843,13 @@ Validation and environment adapters (§5.3) register through the tool registry:
 All governed execution operations MUST emit events to the event stream (N3) and
 produce evidence for evidence bundles (N6).
 
+> **Ariadne profile:** Rows whose event, trigger, or data depends on Intent,
+> Operational IR, Capability, or Capability Broker are informative legacy
+> placeholders, despite this section's heading. Implementations MUST NOT emit
+> them as unregistered N3 event types. Conformant domain events correlate the
+> DecisionEnvelope, ExecutionGrant, and EffectTransaction identifiers; a new
+> lifecycle event type requires an N3 registry amendment.
+
 | Event | Trigger | Data |
 |-------|---------|------|
 | `:intent/created` | Agent expresses intent | Intent structure |
