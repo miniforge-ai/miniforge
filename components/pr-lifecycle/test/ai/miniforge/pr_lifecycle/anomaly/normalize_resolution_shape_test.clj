@@ -36,7 +36,8 @@
    [ai.miniforge.anomaly.interface :as anomaly]
    [ai.miniforge.dag-executor.interface :as dag]
    [ai.miniforge.pr-lifecycle.conflict-resolution :as conflict-resolution]
-   [ai.miniforge.pr-lifecycle.merge :as merge]))
+   [ai.miniforge.pr-lifecycle.merge :as merge]
+   [ai.miniforge.pr-lifecycle.merge-readiness :as readiness]))
 
 ;------------------------------------------------------------------------------ Layer 0
 
@@ -97,8 +98,8 @@
    return the supplied terminal anomaly. Returns the attempt-merge
    result for the caller to assert on."
   [terminal-anomaly]
-  (with-redefs [merge/evaluate-merge-readiness
-                (fn [_ _ _] conflicting-readiness)
+  (with-redefs [readiness/evaluate
+                (fn [_ _ _ _] conflicting-readiness)
                 conflict-resolution/resolve-pr-conflicts!
                 (fn [_] terminal-anomaly)
                 merge/run-gh-command
