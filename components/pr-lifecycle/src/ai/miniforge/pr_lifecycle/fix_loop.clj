@@ -249,7 +249,6 @@
   (let [comment-id (:fix/comment-id fix-context)
         parent-pr-number (:fix/parent-pr-number fix-context)]
 
-    ;; Conversation follow-up requires the original comment coordinates.
     (if (and comment-id parent-pr-number)
       (do
         (when logger
