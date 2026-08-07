@@ -56,6 +56,15 @@
 (def ^{:stratum 0} ^:private flat-shape
   [{:path "src/baz.clj" :line 1 :body "flat-shape body"}])
 
+(def ^{:stratum 0} ^:private github-origin-result
+  (dag/ok {:output "git@github.com:miniforge-ai/miniforge.git"}))
+
+(defn- ^{:stratum 0} review-thread-node
+  [id root-id resolved?]
+  {:id id
+   :isResolved resolved?
+   :comments {:nodes [{:databaseId root-id}]}})
+
 (defn- ^{:stratum 0} review-thread-page
   "Build one GraphQL response page without duplicating provider maps."
   [nodes has-next? end-cursor]
@@ -68,23 +77,6 @@
         :pageInfo {:hasNextPage has-next?
                    :endCursor end-cursor}}}}}}))
 
-(deftest ^{:stratum 0} unresolved-review-threads-rejects-incomplete-readback
-  (with-redefs [github/run-gh-command
-                (fn [_ _] (dag/ok {:output "git@github.com:miniforge-ai/miniforge.git"}))
-                github/graphql-query
-                (fn [& _]
-                  (dag/ok {:data {:repository {:pullRequest nil}}}))]
-    (let [result (github/unresolved-review-threads "/repo" 1703)]
-      (is (dag/err? result))
-      (is (= :invalid-review-thread-response (get-in result [:error :code]))))))
-
-(deftest ^{:stratum 0} unresolved-review-threads-propagates-provider-failure
-  (let [failure (dag/err :graphql-error "provider unavailable")]
-    (with-redefs [github/run-gh-command
-                  (fn [_ _] (dag/ok {:output "git@github.com:miniforge-ai/miniforge.git"}))
-                  github/graphql-query (fn [& _] failure)]
-      (is (= failure (github/unresolved-review-threads "/repo" 1703))))))
-
 (deftest ^{:stratum 0} invalid-remote-error-redacts-credentials
   (with-redefs [github/run-gh-command
                 (fn [_ _]
@@ -95,6 +87,23 @@
                               "secret-token"))))))
 
 ;------------------------------------------------------------------------------ Layer 1
+
+(deftest ^{:stratum 1} unresolved-review-threads-rejects-incomplete-readback
+  (with-redefs [github/run-gh-command
+                (fn [_ _] github-origin-result)
+                github/graphql-query
+                (fn [& _]
+                  (dag/ok {:data {:repository {:pullRequest nil}}}))]
+    (let [result (github/unresolved-review-threads "/repo" 1703)]
+      (is (dag/err? result))
+      (is (= :invalid-review-thread-response (get-in result [:error :code]))))))
+
+(deftest ^{:stratum 1} unresolved-review-threads-propagates-provider-failure
+  (let [failure (dag/err :graphql-error "provider unavailable")]
+    (with-redefs [github/run-gh-command
+                  (fn [_ _] github-origin-result)
+                  github/graphql-query (fn [& _] failure)]
+      (is (= failure (github/unresolved-review-threads "/repo" 1703))))))
 
 ;; ── tests ────────────────────────────────────────────────────────────
 (deftest ^{:stratum 1} unresolved-review-threads-paginates
@@ -121,7 +130,7 @@
 
 (deftest ^{:stratum 1} unresolved-review-threads-rejects-missing-page-cursor
   (with-redefs [github/run-gh-command
-                (fn [_ _] (dag/ok {:output "git@github.com:miniforge-ai/miniforge.git"}))
+                (fn [_ _] github-origin-result)
                 github/graphql-query
                 (fn [& _]
                   (review-thread-page [] true nil))]
@@ -131,7 +140,7 @@
 
 (deftest ^{:stratum 1} unresolved-review-threads-rejects-repeated-page-cursor
   (with-redefs [github/run-gh-command
-                (fn [_ _] (dag/ok {:output "git@github.com:miniforge-ai/miniforge.git"}))
+                (fn [_ _] github-origin-result)
                 github/graphql-query
                 (fn [& _]
                   (review-thread-page [] true "same-page"))]
@@ -141,16 +150,14 @@
 
 (deftest ^{:stratum 1} get-thread-id-follows-reply-root-and-paginates
   (let [requests (atom [])
-        thread (fn [id root-id resolved?]
-                 {:id id
-                  :isResolved resolved?
-                  :comments {:nodes [{:databaseId root-id}]}})
-        pages [(review-thread-page [(thread "other" 1 true)] true "next-page")
-               (review-thread-page [(thread "target" 10 false)] false nil)]]
+        pages [(review-thread-page
+                [(review-thread-node "other" 1 true)] true "next-page")
+               (review-thread-page
+                [(review-thread-node "target" 10 false)] false nil)]]
     (with-redefs [github/run-gh-command
                   (fn [args _]
-                    (if (= ["git" "config" "--get" "remote.origin.url"] args)
-                      (dag/ok {:output "git@github.com:miniforge-ai/miniforge.git"})
+                  (if (= ["git" "config" "--get" "remote.origin.url"] args)
+                      github-origin-result
                       (dag/ok {:output (json/generate-string
                                         {:id 99 :in_reply_to_id 10})})))
                   github/graphql-query
@@ -166,14 +173,13 @@
   (with-redefs [github/run-gh-command
                 (fn [args _]
                   (if (= "git" (first args))
-                    (dag/ok {:output "git@github.com:miniforge-ai/miniforge.git"})
+                    github-origin-result
                     (dag/ok {:output (json/generate-string
                                       {:id 10 :in_reply_to_id nil})})))
                 github/graphql-query
                 (fn [& _]
                   (review-thread-page
-                   [{:id "target" :isResolved true
-                     :comments {:nodes [{:databaseId 10}]}}]
+                   [(review-thread-node "target" 10 true)]
                    false nil))]
     (is (= {:thread-id "target" :is-resolved true}
            (:data (github/get-thread-id "/repo" 1704 10))))))
