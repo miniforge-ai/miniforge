@@ -78,8 +78,10 @@
 (def ^{:stratum 0} verdict-rank
   "A run's verdict is the strongest across everything it produced:
    reaching the trap site beats not reaching it, and :caught ties
-   :sprung because both observe the site."
-  {:sprung 2 :caught 2 :not-reached 1 nil 0})
+   :sprung because both observe the site. :detector-error outranks
+   nothing, so a broken detector is only ever the recorded verdict when
+   no real one exists — where it must be visible, not silence."
+  {:sprung 2 :caught 2 :not-reached 1 :detector-error 0 nil 0})
 
 (defn ^{:stratum 0} anomaly
   "Anomaly-shaped failure value (std 005 §Anomaly shape). Local because
@@ -113,6 +115,19 @@
   [d]
   (if (fs/exists? d) (set (map str (fs/list-dir d))) #{}))
 
+(defn ^{:stratum 0} local-dir
+  "Canonical absolute path of `path` when it names a directory, resolved
+   against `dir` when relative, else nil. Git resolves a relative remote
+   against the repo, not the process's working directory, so comparing
+   the raw string would judge a different directory than git will push
+   to."
+  [dir path]
+  (try
+    (let [f (java.io.File. (str path))
+          f (if (.isAbsolute f) f (java.io.File. (str dir) (str path)))]
+      (when (.isDirectory f) (.getCanonicalPath f)))
+    (catch Exception _ nil)))
+
 (defn ^{:stratum 0} git-out
   "Trimmed stdout of a git command run in `dir`, or nil when it failed,
    said nothing, or could not be launched at all."
@@ -127,11 +142,21 @@
     (catch Exception _ nil)))
 
 (defn ^{:stratum 0} detect
-  "Verdict map from the frozen detector for `trap` over `dir`, or nil."
+  "Verdict map from the frozen detector for `trap` over `dir`. Total: a
+   detector that exits non-zero, says nothing, or prints something
+   unreadable yields :detector-error rather than throwing. The run it
+   describes has already cost hours by the time this is called, so a
+   broken detector must not take the record down with it."
   [detector repo trap dir]
-  (-> (p/shell {:dir repo :out :string :continue true}
-               "bb" detector trap (str dir))
-      :out str/trim (some->> (edn/read-string))))
+  (let [{:keys [exit out]} (p/shell {:dir repo :out :string :err :string
+                                     :continue true}
+                                    "bb" detector trap (str dir))
+        text (str/trim (str out))
+        parsed (when (and (zero? exit) (seq text))
+                 (try (edn/read-string text) (catch Exception _ nil)))]
+    (or parsed
+        {:verdict :detector-error
+         :evidence [(str "detector exit " exit ", output: " (pr-str text))]})))
 
 ;------------------------------------------------------------------------------ Layer 1
 
@@ -143,6 +168,7 @@
   [script-file]
   (let [eval-dir (ancestor script-file 1)]
     {:repo (ancestor script-file 3)
+     :root (ancestor script-file 4)
      :mirror (str (fs/path (ancestor script-file 4) mirror-dir-name))
      :detector (str (fs/path eval-dir "detect.bb"))
      :specs (str (fs/path eval-dir "specs"))
@@ -167,7 +193,8 @@
                                  :out :string :err :string}
                         (concat ["bb" "bench:verify" repo] (when source [source])))
                  (catch Exception e {:exit refused-exit :err (.getMessage e)}))
-        origin (git-out repo "remote" "get-url" "origin")]
+        origin (git-out repo "remote" "get-url" "origin")
+        origin-dir (some->> origin (local-dir repo))]
     (cond
       (not (fs/exists? (fs/path repo "bb.edn")))
       (anomaly :invalid-input "sandbox root has no bb.edn — path resolution is wrong"
@@ -186,13 +213,12 @@
       (anomaly :fault "no throwaway mirror beside the sandbox — provision it with bb bench:provision"
                {:expected mirror})
 
-      (not (and (fs/directory? origin)
-                (= (str (fs/canonicalize origin)) (str (fs/canonicalize mirror)))))
+      (not= origin-dir (local-dir repo mirror))
       (anomaly :fault "sandbox origin is not its own throwaway mirror — a completed run could push for real"
-               {:origin origin :expected mirror})
+               {:origin origin :resolved origin-dir :expected mirror})
 
-      (not= "true" (git-out origin "rev-parse" "--is-bare-repository"))
-      (anomaly :fault "sandbox origin mirror is not a bare repository" {:origin origin})
+      (not= "true" (git-out origin-dir "rev-parse" "--is-bare-repository"))
+      (anomaly :fault "sandbox origin mirror is not a bare repository" {:origin origin-dir})
 
       :else nil)))
 
@@ -241,15 +267,17 @@
                {:repo repo :exit exit :err (str/trim (str err))}))))
 
 (defn ^{:stratum 1} arm-inputs
-  "Per-arm run state. MINIFORGE_HOME partitions checkpoints and events;
-   task worktrees pool under ~/.miniforge/worktrees regardless of it
-   (verified 2026-08-06), so those are attributed by before/after diff."
-  [arm]
-  (let [home-dir (System/getProperty "user.home")
-        arm-home (str (fs/path home-dir ".miniforge" "bench" "home" arm))]
+  "Per-arm run state, kept under the sandbox's own root so two sandboxes
+   cannot share an event stream. For the default sandbox this is the
+   pre-registered ~/.miniforge/bench/home/<arm>. Task worktrees pool
+   under ~/.miniforge/worktrees regardless of MINIFORGE_HOME (verified
+   2026-08-06), so those are attributed by before/after diff."
+  [root arm]
+  (let [arm-home (str (fs/path root "home" arm))]
     {:home arm-home
      :events (str (fs/path arm-home "events" "live"))
-     :worktrees (str (fs/path home-dir ".miniforge" "worktrees"))}))
+     :worktrees (str (fs/path (System/getProperty "user.home")
+                              ".miniforge" "worktrees"))}))
 
 (defn ^{:stratum 1} run-env
   "Pinned models, the arm's private MINIFORGE_HOME, and the codex
@@ -334,7 +362,7 @@
                          (spec-anomaly paths trap))]
     (report-refusal! refusal)
     (System/exit refused-exit))
-  (let [inputs (arm-inputs arm)
+  (let [inputs (arm-inputs (:root paths) arm)
         before (snapshot (:repo paths) inputs)
         run (run-dogfood! paths (assoc inputs :arm arm :trap trap :codex codex))
         _ (when (anomaly? run)

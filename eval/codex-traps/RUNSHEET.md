@@ -155,7 +155,34 @@ both baseline arm, both produced under the defective sandbox below.
    start when it is unset or is not a directory — an absent codex would
    have run a second baseline under a treated label.
 
-6. HARNESS COMMITTED. `eval/codex-traps/` was untracked and existed only
+6. DETECTOR OUTCOMES gain `:detector-error`. A detector that exits
+   non-zero, says nothing, or prints something unreadable used to throw
+   and take the whole run's record with it, after the run had already
+   cost hours. It now yields `:detector-error`, which outranks nothing,
+   so it can only ever be a run's recorded verdict when no real verdict
+   exists. It is an instrument failure, not a trap outcome, and is
+   excluded from the catch-rate denominator alongside `:not-reached`.
+
+7. ARM STATE moves under the sandbox root: MINIFORGE_HOME is now
+   `<sandbox-root>/home/<arm>` rather than a fixed
+   `~/.miniforge/bench/home/<arm>`. For the default sandbox these are
+   the same path, so the pre-registration is unchanged; for any other
+   sandbox the arms no longer share an event stream with the default
+   one, which is what makes per-run attribution by events/live diff
+   sound.
+
+8. STRAY EVENTS, logged for the auditor. On 2026-08-07 a gate test run
+   from a throwaway sandbox reached `bb dogfood` and wrote two workflow
+   ids (`1bf1238a-7834-46a4-9f71-8c1f3e4f5a00`,
+   `9401431b-2414-4131-9eb6-3c1e127a5768`) into
+   `~/.miniforge/bench/home/baseline/events/live` with no `runs.edn`
+   row. It died in 13s on a classpath error, produced no model calls,
+   and touched neither `~/.miniforge/bench/repo` nor the mirror. They
+   are left in place rather than deleted. Attribution is by before/after
+   diff, so they fall in every future run's "before" set and affect no
+   counted row; item 7 is the fix that stops it recurring.
+
+9. HARNESS COMMITTED. `eval/codex-traps/` was untracked and existed only
    inside the bench. `RUNSHEET.md`, `run-trap.bb`, `detect.bb` and
    `specs/` are now tracked in miniforge; `runs.edn` is gitignored, since
    it is appended experiment output rather than instrument. `detect.bb`

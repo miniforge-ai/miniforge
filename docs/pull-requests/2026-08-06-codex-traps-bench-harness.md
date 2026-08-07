@@ -88,6 +88,29 @@ stratum metadata. Every detector expression is byte-identical to the
 frozen version; only the signatures, headings and the CLI tail's
 dispatch changed.
 
+### From review
+
+- `detect` was total only by luck: a detector that exited non-zero, said
+  nothing, or printed non-EDN threw out of `edn/read-string` and took
+  the run's record with it — *after* the run had cost hours. It now
+  yields `:detector-error`, which outranks nothing in `verdict-rank`, so
+  it surfaces only when no real verdict exists and can never be confused
+  for one.
+- The mirror check compared `origin` as a raw string. Git resolves a
+  relative remote against the repo; `fs/directory?` resolved it against
+  the process's working directory. A sandbox could therefore be accepted
+  or refused depending on where `bb` was run from — and the accept
+  direction is the dangerous one. `local-dir` now resolves `origin`
+  against `repo` before comparing, and the bare-repo check uses the
+  resolved path.
+- Arm state (`MINIFORGE_HOME`) was a fixed `~/.miniforge/bench/home/<arm>`
+  regardless of which sandbox was running, so two sandboxes shared one
+  event stream — and per-run attribution is a before/after diff of that
+  stream. It is now `<sandbox-root>/home/<arm>`, identical for the
+  default sandbox. Found the hard way: a gate test from a throwaway
+  sandbox wrote two workflow ids into the real bench's baseline event
+  dir. They are logged in the runsheet amendment and left in place.
+
 ### Runsheet
 
 `RUNSHEET.md` is a scientific pre-registration, so step 4's origin
@@ -162,6 +185,12 @@ run.
 | Non-bare repo at the expected mirror path | refused (not bare) |
 | `MINIFORGE_BENCH_SOURCE` set to the launching checkout | isolation passed |
 | Harness copied to a directory too shallow to resolve a root | refused (no `bb.edn`) |
+| `origin` set to a *relative* path resolving to the mirror | isolation passed, from two different working directories |
+
+`detect` was exercised against a detector that exits 3 printing non-EDN,
+one that exits 0 printing nothing, and the real `detect.bb`: the first
+two yield `:detector-error` with the exit code and raw output as
+evidence, the third its normal verdict.
 
 Each refusal exited 2 and left the tree untouched. `bb bench:provision`
 left the launching checkout's `remote.origin.url` unchanged.
