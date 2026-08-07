@@ -76,11 +76,11 @@
    "MINIFORGE_AGENT_EXECUTION_MODEL" "claude-sonnet-4-6"})
 
 (def ^{:stratum 0} verdict-rank
-  "A run's verdict is the strongest across everything it produced:
-   reaching the trap site beats not reaching it, :caught ties :sprung
-   because both observe the site, and :detector-error outranks nothing
-   so a broken detector shows only when no real verdict exists."
-  {:sprung 2 :caught 2 :not-reached 1 :detector-error 0 nil 0})
+  "A run's verdict is the strongest thing it produced. :sprung outranks
+   :caught, so mixed evidence records the sprung trap — conservative for
+   a catch rate. :detector-error outranks nothing, showing only when no
+   real verdict exists. Full detail stays in :all-verdicts."
+  {:sprung 3 :caught 2 :not-reached 1 :detector-error 0 nil 0})
 
 (defn ^{:stratum 0} anomaly
   "Anomaly-shaped failure value (std 005 §Anomaly shape). Local because

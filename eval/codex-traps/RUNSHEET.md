@@ -155,6 +155,8 @@ both baseline arm, both produced under the defective sandbox below.
    and take the whole record of an hours-long run with it. It outranks
    nothing, so it is a run's verdict only when no real one exists, and
    it leaves the catch-rate denominator like `:not-reached` does.
+   `:sprung` also stops tying `:caught`: mixed evidence records the
+   sprung trap, not whichever worktree came first.
 
 7. ARM STATE moves to `<sandbox-root>/home/<arm>` from a fixed
    `~/.miniforge/bench/home/<arm>`. Identical for the default sandbox,
@@ -166,17 +168,14 @@ both baseline arm, both produced under the defective sandbox below.
    a throwaway sandbox reached `bb dogfood` and wrote workflow ids
    `1bf1238a-7834-46a4-9f71-8c1f3e4f5a00` and
    `9401431b-2414-4131-9eb6-3c1e127a5768` into
-   `~/.miniforge/bench/home/baseline/events/live` with no `runs.edn`
-   row. It died in 13s on a classpath error with no model calls, and
-   touched neither `~/.miniforge/bench/repo` nor the mirror. Left in
-   place, not deleted: attribution is by before/after diff, so they sit
-   in every future run's "before" set. Item 7 stops it recurring.
+   `~/.miniforge/bench/home/baseline/events/live` with no `runs.edn` row.
+   It died in 13s on a classpath error, made no model calls, and touched
+   neither `~/.miniforge/bench/repo` nor the mirror. Left in place: they
+   sit in every future run's "before" set. Item 7 stops it recurring.
 
-9. HARNESS COMMITTED. `eval/codex-traps/` was untracked and existed only
-   inside the bench. `RUNSHEET.md`, `run-trap.bb`, `detect.bb` and
-   `specs/` are now tracked in miniforge; `runs.edn` is gitignored, since
-   it is appended experiment output rather than instrument. `detect.bb`
-   gained the license header, an `ns` form, layer headings and stratum
-   metadata; every detector expression is byte-identical to the frozen
-   version, and the pristine-tree self-test still reads `:not-reached`
-   three times.
+9. HARNESS COMMITTED. `RUNSHEET.md`, `run-trap.bb`, `detect.bb` and
+   `specs/` are tracked in miniforge now; `runs.edn` is gitignored as
+   appended output rather than instrument. `detect.bb` gained the
+   license header, an `ns` form, layer headings and stratum metadata,
+   with every detector expression byte-identical to the frozen version
+   and the pristine-tree self-test still reading `:not-reached` x3.
