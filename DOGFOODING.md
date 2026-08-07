@@ -81,6 +81,39 @@ bb miniforge run <spec-path>
 When `gh` is authenticated but `GITHUB_TOKEN` is not exported, the wrapper
 passes `GITHUB_TOKEN=$(gh auth token)` into the Miniforge process.
 
+## Bench Runs
+
+A bench (an A/B experiment over repeated dogfood runs) points `origin` at a
+throwaway local mirror so a completed run cannot open a real PR. Provision
+the sandbox with:
+
+```bash
+bb bench:provision /path/to/launching/checkout
+```
+
+This clones to `~/.miniforge/bench/repo`, creates the bare mirror
+`~/.miniforge/bench/origin.git`, and redirects only the clone's `origin`.
+Override the root with `MINIFORGE_BENCH_ROOT`.
+
+Do **not** use `git worktree add` for a bench sandbox. A linked worktree
+owns HEAD, the index, and the working tree — `.git/config` and every other
+ref live in the shared common dir. Inside a linked worktree,
+`git remote set-url origin` rewrites the *launching* checkout's origin and
+`git fetch origin main` rewrites the *launching* checkout's
+`refs/remotes/origin/main`. On 2026-08-06 that left the live checkout
+pointing at the bench mirror with `origin/main` force-updated backwards to
+the mirror's stale head; branches cut from `origin/main` afterwards were
+based on a stale commit and pushed to the mirror instead of GitHub.
+
+A bench runner should gate on the guard before it touches anything:
+
+```bash
+bb bench:verify ~/.miniforge/bench/repo /path/to/launching/checkout
+```
+
+It exits non-zero when the bench shares a git common dir with the
+launching checkout.
+
 ## Resume, Do Not Restart
 
 When a dogfood run stops, do not re-run the same spec from scratch if a

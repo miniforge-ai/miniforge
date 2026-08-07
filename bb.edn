@@ -552,6 +552,16 @@
   ;; Dogfooding - Miniforge working on itself
   ;; ──────────────────────────────────────────────────────────────────────────
 
+  bench:provision
+  {:doc "Provision an isolated bench sandbox (usage: bb bench:provision [source-dir] [ref] [branch])"
+   :requires ([bench])
+   :task (apply bench/provision *command-line-args*)}
+
+  bench:verify
+  {:doc "Fail-closed check that a bench sandbox owns its own remotes and refs (usage: bb bench:verify [bench-repo-dir] [source-dir])"
+   :requires ([bench])
+   :task (apply bench/verify *command-line-args*)}
+
   dogfood:check
   {:doc "Check dogfooding prerequisites"
    :requires ([dogfood])
