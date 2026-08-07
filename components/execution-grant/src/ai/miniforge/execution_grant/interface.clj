@@ -78,6 +78,14 @@
   [input-schema value]
   (m/validate input-schema value))
 
+(defn- ^{:stratum 0} invalid-breach
+  "Return malformed breach data as an invalid-input anomaly."
+  [breach]
+  (anomaly/sub-anomaly :invalid-input
+                       :anomalies.execution-grant/invalid-breach
+                       (msg/t :breach/invalid)
+                       {:breach breach}))
+
 (def ^{:stratum 0} revoked?
   "Local revocation stamp only; says nothing about ancestors."
   lineage/revoked?)
@@ -131,11 +139,6 @@
    :detected (reconciliation found it after the effect)."
   schema/detections)
 
-(def ^{:stratum 0} record-breach!
-  "Append one breach to the history, or return an anomaly. One file per
-   breach, never rewritten — append-only by construction."
-  breach/record!)
-
 (def ^{:stratum 0} breach-history
   "Every recorded breach, optionally narrowed to one principal. Returns
    an anomaly rather than treating unreadable history as empty."
@@ -156,6 +159,14 @@
   revocation/revoke-for-cause!)
 
 ;------------------------------------------------------------------------------ Layer 1
+
+(defn ^{:stratum 1} record-breach!
+  "Append one breach to the history, or return an anomaly. One file per
+   breach, never rewritten — append-only by construction."
+  [dir breach-record]
+  (if (valid-input? schema/Breach breach-record)
+    (breach/record! dir breach-record)
+    (invalid-breach breach-record)))
 
 (defn ^{:stratum 1} issue
   "Issue a root grant; id and issued-at are runtime-owned. Invalid

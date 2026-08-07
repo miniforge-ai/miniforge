@@ -52,13 +52,6 @@
   [value]
   (when (anomaly/anomaly? value) value))
 
-(defn- ^{:stratum 0} invalid-record
-  [breach]
-  (anomaly/sub-anomaly :invalid-input
-                       :anomalies.execution-grant/invalid-breach
-                       (msg/t :breach/invalid)
-                       {:breach breach}))
-
 (defn- ^{:stratum 0} read-failure
   [^File file ex]
   (anomaly/sub-anomaly :fault
@@ -147,6 +140,4 @@
 (defn ^{:stratum 2} record!
   "Publish one complete breach record without replacing existing evidence."
   [dir breach]
-  (if (m/validate schema/Breach breach)
-    (persist! (io/file dir (str (:breach/id breach) ".edn")) breach)
-    (invalid-record breach)))
+  (persist! (io/file dir (str (:breach/id breach) ".edn")) breach))
