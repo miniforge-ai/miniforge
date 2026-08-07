@@ -29,6 +29,7 @@
    bare false: `delegate` reports which axis was widened, so a refused
    delegation is diagnosable."
   (:require
+   [ai.miniforge.execution-grant.messages :as msg]
    [ai.miniforge.execution-grant.schema :as schema])
   (:import
    [java.time Instant]))
@@ -51,22 +52,6 @@
       (nil? c) true
       :else (> c p))))
 
-(defn ^{:stratum 0} scope-widened?
-  "True when `child-scope` fails to carry every binding `parent-scope`
-   set. A child may ADD keys (that narrows); it may not drop or change
-   one (that widens).
-
-   Presence is tested with `contains?` rather than a sentinel default:
-   scope values are `any?`, so any sentinel is a value a scope could
-   legitimately hold, and a collision would let a child drop that key
-   undetected. `contains?` also distinguishes an absent key from one
-   bound to nil."
-  [parent-scope child-scope]
-  (not (every? (fn [[k v]]
-                 (and (contains? child-scope k)
-                      (= v (get child-scope k))))
-               parent-scope)))
-
 (defn ^{:stratum 0} expiry-extended?
   "True when the child outlives its parent. A delegate whose pass
    outlasts the pass it was cut from is authority created out of
@@ -75,6 +60,23 @@
   (let [^Instant p (:grant/expires-at parent)
         ^Instant c (:grant/expires-at child)]
     (or (nil? p) (nil? c) (.isAfter c p))))
+
+(defn- ^{:stratum 0} violation
+  "Describe one axis on which a child grant widens its parent."
+  [axis message-key]
+  {:attenuation/axis axis
+   :attenuation/detail (msg/t message-key)})
+
+(defn ^{:stratum 0} scope-widened?
+  "True when `child-scope` fails to carry every binding `parent-scope`
+   set. A child may ADD keys (that narrows); it may not drop or change
+   one (that widens).
+
+   `select-keys` preserves a binding to nil while excluding an absent
+   key, so it distinguishes those cases without inventing a sentinel
+   that could collide with a legitimate `any?` scope value."
+  [parent-scope child-scope]
+  (not= parent-scope (select-keys child-scope (keys parent-scope))))
 
 ;------------------------------------------------------------------------------ Layer 1
 
@@ -91,23 +93,18 @@
   (let [structural
         (cond-> []
           (not= (:grant/effect-class parent) (:grant/effect-class child))
-          (conj {:attenuation/axis :grant/effect-class
-                 :attenuation/detail "a delegated grant cannot change effect class"})
+          (conj (violation :grant/effect-class :attenuation/effect-class))
 
           (scope-widened? (:grant/scope parent) (:grant/scope child))
-          (conj {:attenuation/axis :grant/scope
-                 :attenuation/detail "child scope drops or changes a binding the parent set"})
+          (conj (violation :grant/scope :attenuation/scope))
 
           (expiry-extended? parent child)
-          (conj {:attenuation/axis :grant/expires-at
-                 :attenuation/detail "child expiry outlives the parent's"}))]
+          (conj (violation :grant/expires-at :attenuation/expiry)))]
     (into structural
           (comp (filter #(ceiling-widened? (:grant/constraints parent)
                                            (:grant/constraints child)
                                            %))
-                (map (fn [axis]
-                       {:attenuation/axis axis
-                        :attenuation/detail "child raises a ceiling above the parent, or drops a bound the parent set"})))
+                (map #(violation % :attenuation/ceiling)))
           schema/constraint-axes)))
 
 ;------------------------------------------------------------------------------ Layer 2

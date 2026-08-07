@@ -28,6 +28,7 @@
    [ai.miniforge.anomaly.interface :as anomaly]
    [ai.miniforge.execution-grant.attenuation :as attenuation]
    [ai.miniforge.execution-grant.lineage :as lineage]
+   [ai.miniforge.execution-grant.messages :as msg]
    [ai.miniforge.execution-grant.schema :as schema]
    [malli.core :as m]
    [malli.error :as me])
@@ -44,10 +45,10 @@
 
 (defn- ^{:stratum 0} invalid
   "An `:invalid-input` anomaly carrying a Malli explanation."
-  [message g]
+  [message-key g]
   (anomaly/sub-anomaly :invalid-input
                        :anomalies.execution-grant/invalid
-                       message
+                       (msg/t message-key)
                        {:explain (me/humanize (m/explain schema/ExecutionGrant g))}))
 
 (defn- ^{:stratum 0} refused
@@ -55,10 +56,10 @@
    runtime refuses to issue. Distinct from `invalid` on purpose — 'you
    asked for something malformed' and 'you asked for authority you do
    not have' are different answers and route differently."
-  [message data]
+  [message-key data]
   (anomaly/sub-anomaly :unauthorized
                        :anomalies.execution-grant/refused
-                       message
+                       (msg/t message-key)
                        data))
 
 ;; Assembly
@@ -92,53 +93,44 @@
    (let [g (assemble (assoc opts :parent-id nil) now)]
      (if (valid? g)
        g
-       (invalid "ExecutionGrant inputs failed validation" g)))))
+       (invalid :grant/input-invalid g)))))
 
-(defn ^{:stratum 1} delegate
-  "Cut a child grant from `parent`.
+(defn- ^{:stratum 1} parent-refusal
+  "Return why a parent cannot delegate, or nil when it may."
+  [parent ^Instant now]
+  (cond
+    (not (valid? parent))
+    (invalid :grant/parent-invalid parent)
 
-   Refuses — with an `:unauthorized` anomaly naming the cause — when the
-   parent is not delegable, is not live, or when the requested child
-   would be broader than the parent on any axis. Attenuation is
-   checked against the assembled CHILD, not against the caller's
-   intent, so an omitted ceiling cannot slip through as unbounded.
+    (not (:grant/delegable? parent))
+    (refused :grant/parent-not-delegable
+             {:grant/id (:grant/id parent)})
 
-   `now` defaults to the current instant and is threaded through the
-   liveness check so callers can test time-dependent behavior."
-  ([parent opts] (delegate parent opts (Instant/now)))
-  ([parent opts ^Instant now]
-   (cond
-     ;; A malformed parent is bad caller-supplied DATA, not a permission
-     ;; failure — `:invalid-input` keeps the two routable apart, and
-     ;; carries the Malli explanation of what was wrong with it.
-     (not (valid? parent))
-     (invalid "cannot delegate from a value that is not a valid ExecutionGrant" parent)
+    (not (lineage/live? parent now))
+    (refused :grant/parent-inactive
+             {:grant/id (:grant/id parent)
+              :grant/revocation-reason (:grant/revocation-reason parent)})
 
-     (not (:grant/delegable? parent))
-     (refused "parent grant is not delegable"
-              {:grant/id (:grant/id parent)})
+    :else nil))
 
-     (not (lineage/live? parent now))
-     (refused "parent grant is revoked or expired"
-              {:grant/id (:grant/id parent)
-               :grant/revocation-reason (:grant/revocation-reason parent)})
+(defn- ^{:stratum 1} delegated-child
+  "Assemble and assess one requested child grant."
+  [parent opts ^Instant now]
+  (let [parent-id (:grant/id parent)
+        effect-class (:grant/effect-class parent)
+        child-opts (assoc opts :parent-id parent-id :effect-class effect-class)
+        child (assemble child-opts now)
+        widened (when (valid? child) (attenuation/violations parent child))]
+    (cond
+      (not (valid? child))
+      (invalid :grant/delegated-invalid child)
 
-     :else
-     (let [child (assemble (assoc opts
-                                  :parent-id (:grant/id parent)
-                                  :effect-class (:grant/effect-class parent))
-                           now)
-           widened (when (valid? child) (attenuation/violations parent child))]
-       (cond
-         (not (valid? child))
-         (invalid "delegated ExecutionGrant inputs failed validation" child)
+      (seq widened)
+      (refused :grant/delegation-widened
+               {:grant/id parent-id
+                :attenuation/violations widened})
 
-         (seq widened)
-         (refused "delegated grant is broader than its parent"
-                  {:grant/id (:grant/id parent)
-                   :attenuation/violations widened})
-
-         :else child)))))
+      :else child)))
 
 (defn ^{:stratum 1} revoke
   "Revoke `grant` for `reason`, preserving the record.
@@ -151,7 +143,7 @@
   ([grant reason ^Instant now]
    (cond
      (not (valid? grant))
-     (invalid "cannot revoke a value that is not a valid ExecutionGrant" grant)
+     (invalid :grant/revoke-invalid grant)
 
      (lineage/revoked? grant) grant
 
@@ -159,4 +151,17 @@
      (let [g (assoc grant :grant/revoked-at now :grant/revocation-reason reason)]
        (if (valid? g)
          g
-         (invalid "revocation produced an invalid ExecutionGrant" g))))))
+         (invalid :grant/revocation-invalid g))))))
+
+;------------------------------------------------------------------------------ Layer 2
+
+(defn ^{:stratum 2} delegate
+  "Cut a child grant from `parent`.
+
+   Refuses when the parent cannot delegate or the requested child
+   widens any authority axis. The assembled child, rather than caller
+   intent, is checked so an omitted bound cannot become unbounded."
+  ([parent opts] (delegate parent opts (Instant/now)))
+  ([parent opts ^Instant now]
+   (or (parent-refusal parent now)
+       (delegated-child parent opts now))))
