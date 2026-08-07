@@ -1063,7 +1063,7 @@ To resume workflow:
 2. **Verify the snapshot and workflow definition are compatible** by comparing
    the recorded spec hash against the current spec. On mismatch, emit
    `workflow/spec-hash-mismatch` (N3 §3.21) and apply
-   N2-delta-phase-checkpoint-and-resume §9's disposition
+   N2-delta-phase-checkpoint-and-resume §4's disposition
 3. **Restore machine state, machine context, and completed phase artifacts**
 4. **Rebuild derived projections** such as `:workflow/status` and `:workflow/current-phase`
 5. **Resume execution** by dispatching the next legal machine event
@@ -1099,7 +1099,7 @@ A snapshot is stale when any of the following holds:
 1. Its age exceeds the deployment's configured resume window. Implementations
    MUST make this window configurable and MUST document the default.
 2. The workflow spec hash has changed and
-   N2-delta-phase-checkpoint-and-resume §9 dispositions the mismatch as
+   N2-delta-phase-checkpoint-and-resume §4 dispositions the mismatch as
    non-resumable.
 3. External state the snapshot depends on can no longer be reached — a
    worktree, a container, or a checked-out revision that no longer exists.
