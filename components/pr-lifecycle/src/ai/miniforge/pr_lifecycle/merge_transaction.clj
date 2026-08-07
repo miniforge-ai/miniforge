@@ -31,11 +31,10 @@
    GitHub reports. When the answer is 'not yet', the record stays
    reconcilable and a later pass asks again.
 
-   Grants are NOT enforced here. 2a built the grant object and 2b made
-   `decide()` check it, but nothing in production ISSUES one — requiring
-   a grant today would deny every merge permanently. That half waits on
-   the issuance spec (`work/ariadne-grant-issuance.spec.edn`); this half
-   stops the lying, which does not need to wait."
+   The caller supplies the runtime-issued grant and allowing envelope.
+   Their identifiers are durable on the proposal, and the effect
+   transaction rechecks the grant against that durable scope before the
+   provider command can run."
   (:require
    [ai.miniforge.effect-transaction.interface :as fx]
    [cheshire.core :as json])
@@ -117,14 +116,14 @@
 
 ;; The transaction
 (defn ^{:stratum 2} propose!
-  "Record the intent to merge, durably, before any gh command runs."
-  [context pr-number repo now]
+  "Record correlated merge authority and intent before any gh command runs."
+  [context authority now]
   (fx/propose! (store-dir context)
-               {:effect-class :effect/merge
-                :grant-id nil
-                :proposal {:pr/repo repo
-                           :pr/number pr-number
-                           :merge/method (:merge/method context)}}
+               {:effect-id (:effect/id authority)
+                :effect-class :effect/merge
+                :grant-id (get-in authority [:authority/grant :grant/id])
+                :envelope-id (get-in authority [:authority/envelope :envelope/id])
+                :proposal (:effect/proposal authority)}
                now))
 
 (defn ^{:stratum 2} commit!
@@ -138,19 +137,21 @@
 
    `enable!` performs the gh merge call and returns `{:ok? bool}`;
    `run-gh` answers the follow-up probe. Both injected."
-  [context t pr-number ^Instant now enable! run-gh]
-  (fx/commit! (store-dir context) t :authority/unenforced {} now
-              (fn []
-                (let [{:keys [ok? error]} (enable!)]
-                  (if-not ok?
-                    {:effect/outcome :failed :effect/failure (str error)}
-                    (if-let [answer (probe run-gh pr-number)]
-                      (if (:effect/matched? answer)
-                        {:effect/outcome :succeeded
-                         :effect/observed (:effect/observed answer)}
-                        {:effect/outcome :accepted
-                         :effect/observed (:effect/observed answer)})
-                      {:effect/outcome :accepted}))))))
+  ([context t pr-number ^Instant now enable! run-gh]
+   (commit! context t :authority/unenforced pr-number now enable! run-gh))
+  ([context t grant-record pr-number ^Instant now enable! run-gh]
+   (fx/commit! (store-dir context) t grant-record {} now
+               (fn []
+                 (let [{:keys [ok? error]} (enable!)]
+                   (if-not ok?
+                     {:effect/outcome :failed :effect/failure (str error)}
+                     (if-let [answer (probe run-gh pr-number)]
+                       (if (:effect/matched? answer)
+                         {:effect/outcome :succeeded
+                          :effect/observed (:effect/observed answer)}
+                         {:effect/outcome :accepted
+                          :effect/observed (:effect/observed answer)})
+                       {:effect/outcome :accepted})))))))
 
 (defn ^{:stratum 2} reconcile!
   "Ask GitHub again about a record whose outcome is still unknown.

@@ -21,6 +21,7 @@
    commit."
   (:require
    [ai.miniforge.effect-transaction.interface :as fx]
+   [ai.miniforge.pr-lifecycle.merge-authority :as authority]
    [ai.miniforge.pr-lifecycle.merge-transaction :as mt]
    [clojure.test :refer [deftest is testing]])
   (:import
@@ -35,8 +36,11 @@
 (def ^{:stratum 0} later (Instant/parse "2026-08-01T01:00:00Z"))
 
 (defn ^{:stratum 0} ctx []
-  {:effect-store-dir
+  {:run-id (random-uuid)
+   :effect-store-dir
    (str (.toFile (Files/createTempDirectory "merge-fx" (into-array FileAttribute []))))
+   :grant-breach-dir
+   (str (.toFile (Files/createTempDirectory "merge-grants" (into-array FileAttribute []))))
    :pr/repo "miniforge-ai/miniforge"})
 
 (defn ^{:stratum 0} gh-returning
@@ -60,6 +64,14 @@
 
 ;------------------------------------------------------------------------------ Layer 1
 
+(defn ^{:stratum 1} merge-case! []
+  (let [context (ctx)
+        prepared (authority/prepare context (random-uuid)
+                                    (:pr/repo context) 42 :squash now)]
+    {:context context
+     :authority prepared
+     :transaction (mt/propose! context prepared now)}))
+
 (deftest ^{:stratum 1} parse-pr-view-test
   (is (= {:pr/state "MERGED" :merge/sha "squash-sha-on-base"}
          (mt/parse-pr-view merged-json)))
@@ -68,12 +80,14 @@
     (is (nil? (mt/parse-pr-view "not json at all")))
     (is (nil? (mt/parse-pr-view "{\"unexpected\":true}")))))
 
-(deftest ^{:stratum 1} enabling-auto-merge-is-not-merging-test
+;------------------------------------------------------------------------------ Layer 2
+
+(deftest ^{:stratum 2} enabling-auto-merge-is-not-merging-test
   ;; The core correction. `merge-pr!` passes --auto unconditionally, so a
   ;; zero exit means auto-merge was ENABLED. GitHub still says OPEN.
-  (let [c (ctx)
-        t (mt/propose! c 42 "miniforge-ai/miniforge" now)
-        settled (mt/commit! c t 42 now (ok-enable) (gh-returning open-json))]
+  (let [{:keys [context authority transaction]} (merge-case!)
+        settled (mt/commit! context transaction (:authority/grant authority)
+                            42 now (ok-enable) (gh-returning open-json))]
     (is (= :unknown-outcome (:effect/state settled))
         "a request in flight is not a success")
     (is (not= :succeeded (:effect/state settled)))
@@ -82,62 +96,59 @@
     (testing "the record is reconcilable, so a later pass asks again"
       (is (contains? fx/reconcilable-states (:effect/state settled))))))
 
-(deftest ^{:stratum 1} observed-merge-carries-githubs-sha-test
-  (let [c (ctx)
-        t (mt/propose! c 42 "miniforge-ai/miniforge" now)
-        settled (mt/commit! c t 42 now (ok-enable) (gh-returning merged-json))]
+(deftest ^{:stratum 2} observed-merge-carries-githubs-sha-test
+  (let [{:keys [context authority transaction]} (merge-case!)
+        settled (mt/commit! context transaction (:authority/grant authority)
+                            42 now (ok-enable) (gh-returning merged-json))]
     (is (= :succeeded (:effect/state settled)))
     (is (= "squash-sha-on-base" (mt/substantiated-sha settled))
         "the published SHA is GitHub's mergeCommit, not a local branch tip")))
 
-(deftest ^{:stratum 1} a-failed-gh-call-is-a-definite-failure-test
-  (let [c (ctx)
-        t (mt/propose! c 42 "miniforge-ai/miniforge" now)
-        settled (mt/commit! c t 42 now
+(deftest ^{:stratum 2} a-failed-gh-call-is-a-definite-failure-test
+  (let [{:keys [context authority transaction]} (merge-case!)
+        settled (mt/commit! context transaction (:authority/grant authority) 42 now
                             (fn [] {:ok? false :error "PR already closed"})
                             (gh-returning merged-json))]
     (is (= :failed (:effect/state settled))
         "the gh call reported it did not happen — that is knowledge, not doubt")
     (is (nil? (mt/substantiated-sha settled)))))
 
-(deftest ^{:stratum 1} silent-github-leaves-it-unknown-test
-  (let [c (ctx)
-        t (mt/propose! c 42 "miniforge-ai/miniforge" now)
-        settled (mt/commit! c t 42 now (ok-enable)
+(deftest ^{:stratum 2} silent-github-leaves-it-unknown-test
+  (let [{:keys [context authority transaction]} (merge-case!)
+        settled (mt/commit! context transaction (:authority/grant authority)
+                            42 now (ok-enable)
                             (fn [_] {:ok? false :output nil}))]
     (is (= :unknown-outcome (:effect/state settled))
         "GitHub not answering is not GitHub saying no")
     (is (nil? (mt/substantiated-sha settled)))))
 
-(deftest ^{:stratum 1} the-intent-is-on-disk-before-any-gh-command-test
-  (let [c (ctx)
-        t (mt/propose! c 42 "miniforge-ai/miniforge" now)]
-    (is (= :proposed (:effect/state t)))
-    (is (= :effect/merge (:effect/class t)))
-    (is (= 42 (get-in t [:effect/proposal :pr/number])))
+(deftest ^{:stratum 2} the-intent-is-on-disk-before-any-gh-command-test
+  (let [{:keys [context authority transaction]} (merge-case!)]
+    (is (= :proposed (:effect/state transaction)))
+    (is (= :effect/merge (:effect/class transaction)))
+    (is (= 42 (get-in transaction [:effect/proposal :pr/number])))
+    (is (= (get-in authority [:authority/grant :grant/id])
+           (:effect/grant-id transaction)))
+    (is (= (get-in authority [:authority/envelope :envelope/id])
+           (:effect/envelope-id transaction)))
     (testing "a reader sharing no memory with the writer finds it"
-      (is (= (:effect/id t)
-             (:effect/id (fx/read-record (:effect-store-dir c) (:effect/id t))))))))
-
-;; Strata are per-file: the imported commit boundary does not add a local layer.
-(defn- ^{:stratum 1} pending-merge!
-  []
-  (let [c (ctx)
-        t (mt/propose! c 42 "miniforge-ai/miniforge" now)]
-    {:context c
-     :pending (mt/commit! c t 42 now (ok-enable) (gh-returning open-json))}))
-
-;------------------------------------------------------------------------------ Layer 2
+      (is (= (:effect/id transaction)
+             (:effect/id (fx/read-record (:effect-store-dir context)
+                                         (:effect/id transaction))))))))
 
 (deftest ^{:stratum 2} reconcile-settles-a-later-merge-test
   (testing "asking again after GitHub finishes settles it with the real SHA"
-    (let [{:keys [context pending]} (pending-merge!)]
+    (let [{:keys [context authority transaction]} (merge-case!)
+          pending (mt/commit! context transaction (:authority/grant authority)
+                              42 now (ok-enable) (gh-returning open-json))]
       (is (nil? (mt/substantiated-sha pending)))
       (let [settled (mt/reconcile! context pending 42 later (gh-returning merged-json))]
         (is (= :reconciled (:effect/state settled)))
         (is (= "squash-sha-on-base" (mt/substantiated-sha settled))))))
   (testing "a PR that closed unmerged reconciles as a mismatch, not a merge"
-    (let [{:keys [context pending]} (pending-merge!)
+    (let [{:keys [context authority transaction]} (merge-case!)
+          pending (mt/commit! context transaction (:authority/grant authority)
+                              42 now (ok-enable) (gh-returning open-json))
           settled (mt/reconcile! context pending 42 later
                                  (gh-returning "{\"state\":\"CLOSED\",\"mergeCommit\":null}"))]
       (is (= :reconciled (:effect/state settled)))
