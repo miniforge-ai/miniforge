@@ -13,8 +13,8 @@ provider namespace before N7 merge enforcement adds provider readback.
 
 ## Changes
 
-- Move the high-level fix-link workflow into a three-layer
-  `github-conversation` namespace.
+- Move the high-level fix-link workflow into focused conversation and
+  resolution namespaces, each with at most three strata.
 - Preserve the public PR-lifecycle API, telemetry, and result behavior.
 - Keep reply-only mode functional when automatic resolution is disabled.
 - Pass resolution identifiers as GraphQL variables.
@@ -24,9 +24,11 @@ provider namespace before N7 merge enforcement adds provider readback.
 ## Standards review
 
 - `github.clj` drops from five strata to at most three.
+- Reply and resolution workflows use flat conditional dispatch with one
+  concern per named function.
 - Repeated successful reply maps use one `reply-outcome` factory.
 - Provider transport and conversation orchestration remain separate concerns.
-- PR budget: 340 / 600 reportable lines; every commit is at most 200.
+- PR budget: 363 / 600 reportable lines; every commit is at most 200.
 - Kondo, Polylith, stratum lint, and the standards baseline are clean.
 
 ## Verification
