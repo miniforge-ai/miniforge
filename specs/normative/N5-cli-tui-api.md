@@ -135,7 +135,9 @@ Flags:
 miniforge workflow list [flags]
 
 Flags:
-  --status STATUS     Filter by status (:executing, :completed, :failed)
+  --status STATUS     Filter by status — N2 §2.2 vocabulary
+                      (:queued, :running, :paused, :blocked,
+                       :completed, :failed, :cancelled)
   --limit N           Show last N workflows (default: 10)
   --json              Output as JSON
 

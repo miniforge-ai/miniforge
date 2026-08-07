@@ -97,6 +97,18 @@ pause and block transitions be observable on the stream.
   be audited. No spec-hash comparison. No staleness check.
 - **Structural** — nothing prevents a resume attempt against a terminal run.
 
+### Consumer sweep
+
+A vocabulary unification that only changes the authority leaves the spec set
+contradictory, so this PR also corrects the two consumers that enumerated the
+old values:
+
+- **N5 §2.3.2** — `--status` filter documented `:executing, :completed,
+  :failed`. Now cites N2 §2.2's full set.
+- **N2-delta-phase-checkpoint-and-resume §manifest** — enumerated `:running,
+  :completed, :failed, :cancelled, :paused`, missing `:queued` and `:blocked`.
+  Now references N2 §2.2 rather than restating a subset.
+
 ### SPEC_INDEX
 
 N2 entry updated; index bumped to 0.14.0-draft. This branch predates the N6 PR,
