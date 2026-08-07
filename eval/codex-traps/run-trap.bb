@@ -77,10 +77,9 @@
 
 (def ^{:stratum 0} verdict-rank
   "A run's verdict is the strongest across everything it produced:
-   reaching the trap site beats not reaching it, and :caught ties
-   :sprung because both observe the site. :detector-error outranks
-   nothing, so a broken detector is only ever the recorded verdict when
-   no real one exists — where it must be visible, not silence."
+   reaching the trap site beats not reaching it, :caught ties :sprung
+   because both observe the site, and :detector-error outranks nothing
+   so a broken detector shows only when no real verdict exists."
   {:sprung 2 :caught 2 :not-reached 1 :detector-error 0 nil 0})
 
 (defn ^{:stratum 0} anomaly
@@ -91,10 +90,6 @@
    :anomaly/message message
    :anomaly/data data
    :anomaly/at (java.time.Instant/now)})
-
-(defn ^{:stratum 0} anomaly?
-  [x]
-  (boolean (and (map? x) (contains? x :anomaly/type))))
 
 (defn ^{:stratum 0} report-refusal!
   "Print a refusal to stderr. Called only from the CLI boundary below."
@@ -116,11 +111,10 @@
   (if (fs/exists? d) (set (map str (fs/list-dir d))) #{}))
 
 (defn ^{:stratum 0} local-dir
-  "Canonical absolute path of `path` when it names a directory, resolved
-   against `dir` when relative, else nil. Git resolves a relative remote
-   against the repo, not the process's working directory, so comparing
-   the raw string would judge a different directory than git will push
-   to."
+  "Canonical path of `path` when it names a directory, resolved against
+   `dir` when relative, else nil. Git resolves a relative remote against
+   the repo, not the process's cwd, so a raw string comparison would
+   judge a different directory than git will push to."
   [dir path]
   (try
     (let [f (java.io.File. (str path))
@@ -144,9 +138,8 @@
 (defn ^{:stratum 0} detect
   "Verdict map from the frozen detector for `trap` over `dir`. Total: a
    detector that exits non-zero, says nothing, or prints something
-   unreadable yields :detector-error rather than throwing. The run it
-   describes has already cost hours by the time this is called, so a
-   broken detector must not take the record down with it."
+   unreadable yields :detector-error rather than throwing away the
+   record of a run that has already cost hours."
   [detector repo trap dir]
   (let [{:keys [exit out]} (p/shell {:dir repo :out :string :err :string
                                      :continue true}
@@ -176,13 +169,11 @@
 
 (defn ^{:stratum 1} isolation-anomaly
   "nil when this sandbox is safe to run a bench in; an anomaly otherwise.
-
-   Both conditions are required. `bb bench:verify` rejects a sandbox
-   sharing a git common dir with another checkout; the mirror check
-   rejects one whose origin could still reach a real remote — which
-   bench:verify cannot see, and which a tracked harness run from an
-   ordinary checkout would otherwise pass. Anything undeterminable is a
-   refusal."
+   `bb bench:verify` rejects one sharing a git common dir with another
+   checkout; the mirror check rejects one whose origin could still reach
+   a real remote, which bench:verify cannot see and which a tracked
+   harness run from an ordinary checkout would pass. Anything
+   undeterminable is a refusal."
   [{:keys [repo mirror]}]
   ;; bb runs from the launching checkout when MINIFORGE_BENCH_SOURCE names
   ;; one, so a sandbox pinned before `bench:verify` existed is still
@@ -197,8 +188,7 @@
         origin-dir (some->> origin (local-dir repo))]
     (cond
       (not (fs/exists? (fs/path repo "bb.edn")))
-      (anomaly :invalid-input "sandbox root has no bb.edn — path resolution is wrong"
-               {:repo repo})
+      (anomaly :invalid-input "no bb.edn — path resolution is wrong" {:repo repo})
 
       (not (zero? (:exit verify)))
       (anomaly :fault "bb bench:verify rejected this sandbox"
@@ -210,11 +200,10 @@
       (anomaly :fault "sandbox has no readable origin remote" {:repo repo})
 
       (not (fs/directory? mirror))
-      (anomaly :fault "no throwaway mirror beside the sandbox — provision it with bb bench:provision"
-               {:expected mirror})
+      (anomaly :fault "no mirror beside the sandbox" {:expected mirror})
 
       (not= origin-dir (local-dir repo mirror))
-      (anomaly :fault "sandbox origin is not its own throwaway mirror — a completed run could push for real"
+      (anomaly :fault "origin is not the sandbox's mirror — a run could push for real"
                {:origin origin :resolved origin-dir :expected mirror})
 
       (not= "true" (git-out origin-dir "rev-parse" "--is-bare-repository"))
@@ -223,7 +212,6 @@
       :else nil)))
 
 (defn ^{:stratum 1} codex-path
-  "Codex directory the treated arm consults, or nil when unset."
   []
   (some-> (System/getenv codex-path-env) str/trim not-empty))
 
@@ -236,29 +224,26 @@
     (not= arm treated-arm) nil
 
     (nil? path)
-    (anomaly :invalid-input
-             (str "the treated arm needs " codex-path-env " set to the codex directory")
+    (anomaly :invalid-input (str "the treated arm needs " codex-path-env " set")
              {:arm arm :env codex-path-env})
 
     (not (fs/directory? path))
-    (anomaly :invalid-input
-             (str codex-path-env " does not point at a directory")
+    (anomaly :invalid-input (str codex-path-env " is not a directory")
              {:arm arm :env codex-path-env :path path})
 
     :else nil))
 
 (defn ^{:stratum 1} spec-anomaly
-  "nil when the spec master for `trap` is present; an anomaly otherwise.
-   The runner moves a failed spec into work/failed/ and `git reset`
-   cannot restore an untracked copy, so runs copy from the master."
+  "The workflow runner moves a failed spec into work/failed/ and
+   `git reset` cannot restore an untracked copy, so runs copy from the
+   master and it has to be there."
   [{:keys [specs]} trap]
   (let [master (fs/path specs (trap->spec trap))]
     (when-not (fs/exists? master)
       (anomaly :not-found "spec master missing from the harness" {:master (str master)}))))
 
 (defn ^{:stratum 1} reset-anomaly
-  "Return the sandbox to its pinned tracked state, or an anomaly. A tree
-   still carrying the last run's edits makes this run's verdict
+  "A tree still carrying the last run's edits makes this run's verdict
    unattributable."
   [repo]
   (let [{:keys [exit err]} (p/sh {:dir repo :continue true} "git" "reset" "--hard" "-q")]
@@ -267,11 +252,11 @@
                {:repo repo :exit exit :err (str/trim (str err))}))))
 
 (defn ^{:stratum 1} arm-inputs
-  "Per-arm run state, kept under the sandbox's own root so two sandboxes
-   cannot share an event stream. For the default sandbox this is the
+  "Per-arm run state under the sandbox's own root, so two sandboxes
+   cannot share an event stream; for the default sandbox this is the
    pre-registered ~/.miniforge/bench/home/<arm>. Task worktrees pool
    under ~/.miniforge/worktrees regardless of MINIFORGE_HOME (verified
-   2026-08-06), so those are attributed by before/after diff."
+   2026-08-06)."
   [root arm]
   (let [arm-home (str (fs/path root "home" arm))]
     {:home arm-home
@@ -280,8 +265,8 @@
                               ".miniforge" "worktrees"))}))
 
 (defn ^{:stratum 1} run-env
-  "Pinned models, the arm's private MINIFORGE_HOME, and the codex
-   present for exactly one arm."
+  "Pinned models, the arm's MINIFORGE_HOME, and the codex present for
+   exactly one arm."
   [arm codex home]
   (cond-> (merge {} (System/getenv) pinned-env {"MINIFORGE_HOME" home})
     (= arm treated-arm) (assoc codex-path-env codex)
@@ -296,9 +281,8 @@
        str str/split-lines (remove str/blank?) set))
 
 (defn ^{:stratum 1} detect-branch
-  "Materialize a task branch in a temp worktree, run the detector, clean
-   up. nil when the branch cannot be materialized — one unreadable branch
-   must not lose the whole run's record."
+  "nil when the branch cannot be materialized — one unreadable branch
+   must not cost the whole run's record."
   [{:keys [repo detector]} trap branch]
   (let [tmp (str (fs/path (fs/temp-dir) (str "trap-detect-" branch)))]
     (try
@@ -313,17 +297,16 @@
 ;; Composes Layer 1.
 
 (defn ^{:stratum 2} snapshot
-  "What already exists before a run, so the run's own output can be
-   attributed by difference afterwards."
+  "What exists before a run, so its own output can be attributed by
+   difference afterwards."
   [repo {:keys [events worktrees]}]
   {:events (list-dirs events)
    :worktrees (list-dirs worktrees)
    :branches (task-branches repo)})
 
 (defn ^{:stratum 2} run-dogfood!
-  "Reset the sandbox, re-copy the spec master, run `bb dogfood` over it.
-   Returns `{:exit .. :started .. :ended ..}`, or an anomaly when the run
-   could not be started cleanly."
+  "Returns `{:exit .. :started .. :ended ..}`, or an anomaly when the run
+   could not be started from a clean tree."
   [{:keys [repo specs]} {:keys [arm trap codex home]}]
   (let [spec-name (trap->spec trap)
         started (str (java.time.Instant/now))]
@@ -338,8 +321,8 @@
          :ended (str (java.time.Instant/now))}))))
 
 (defn ^{:stratum 2} run-verdict
-  "Strongest detector verdict across every worktree and task branch the
-   run produced, with the evidence that earned it."
+  "Strongest verdict across everything the run produced, with the
+   evidence that earned it."
   [{:keys [repo detector] :as paths} trap worktrees branches]
   (let [verdicts (into [] (concat (keep #(detect detector repo trap %) worktrees)
                                   (keep #(detect-branch paths trap %) branches)))
@@ -365,7 +348,7 @@
   (let [inputs (arm-inputs (:root paths) arm)
         before (snapshot (:repo paths) inputs)
         run (run-dogfood! paths (assoc inputs :arm arm :trap trap :codex codex))
-        _ (when (anomaly? run)
+        _ (when (:anomaly/type run)
             (report-refusal! run)
             (System/exit refused-exit))
         after (snapshot (:repo paths) inputs)

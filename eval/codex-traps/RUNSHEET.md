@@ -115,72 +115,62 @@ only rows in `runs.edn` are the uncounted trap-b and trap-a shakeouts,
 both baseline arm, both produced under the defective sandbox below.
 
 1. SANDBOX DEFECT. The bench repo was a linked `git worktree` of the
-   live checkout. A linked worktree owns HEAD, the index and the working
-   tree, while `.git/config` and every other ref live in the shared
-   common dir. So step 4's `git remote set-url origin <mirror>` rewrote
-   the LIVE checkout's origin, and the bench's `git fetch origin main`
-   force-updated the LIVE checkout's `refs/remotes/origin/main` backwards
-   to the mirror's stale head. Both silent. Fixed generically in
-   miniforge PR #1685; see `DOGFOODING.md` §Bench Runs.
+   live checkout, which shares `.git/config` and every ref. Step 4's
+   `remote set-url` therefore rewrote the LIVE checkout's origin and the
+   bench's `fetch` force-updated its `refs/remotes/origin/main`
+   backwards, both silently. Mechanism and fix: miniforge PR #1685 and
+   `DOGFOODING.md` §Bench Runs.
 
-2. PROVISIONING (replaces step 4's redirect). Never `git worktree add`:
+2. PROVISIONING replaces step 4's redirect — never `git worktree add`:
 
    ```bash
    bb bench:provision /path/to/launching/checkout <pin-sha> main
    ```
 
-   This clones to `~/.miniforge/bench/repo`, inits the bare mirror
-   `~/.miniforge/bench/origin.git`, pushes the pin to it, and redirects
-   only the clone's origin. It re-reads the launching checkout's
-   `remote.origin.url` afterwards and fails the provision if it moved.
+   Clones to `<root>/repo`, inits the bare mirror `<root>/origin.git`,
+   pushes the pin to it, and redirects only the clone's origin, failing
+   if the launching checkout's `remote.origin.url` moved.
    `MINIFORGE_BENCH_ROOT` overrides the root.
 
-3. RUNNER GATE. `run-trap.bb` refuses to start unless both
+3. RUNNER GATE. `run-trap.bb` refuses unless both
    `bb bench:verify <repo> [$MINIFORGE_BENCH_SOURCE]` exits 0 and the
-   sandbox's `origin` is the bare mirror beside it. The second condition
-   exists because the harness is now tracked: without it, running
-   `run-trap.bb` from an ordinary checkout would pass the first and then
-   `git reset --hard` that checkout. A refusal exits 2 and touches
-   nothing. Anything the guard cannot determine is a refusal.
+   sandbox's `origin` is the bare mirror beside it. The second exists
+   because the harness is now tracked: without it, running from an
+   ordinary checkout passes the first and then resets that checkout.
+   A refusal exits 2, touches nothing, and is what any undeterminable
+   state produces.
 
-4. PIN AND `MINIFORGE_BENCH_SOURCE`. The gate shells to `bb bench:verify`,
-   which does not exist at the pre-registered pin `bade0222fa6`. Set
-   `MINIFORGE_BENCH_SOURCE` to the launching checkout and the gate runs
-   the task from there instead of from the sandbox, so the pin stays as
-   pre-registered. Unset, the gate refuses on that pin. The pin itself is
-   unchanged.
+4. PIN AND `MINIFORGE_BENCH_SOURCE`. `bb bench:verify` does not exist at
+   the pre-registered pin `bade0222fa6`. Set `MINIFORGE_BENCH_SOURCE` to
+   the launching checkout and the gate runs the task from there, so the
+   pin stands unchanged; unset, the gate refuses on that pin.
 
-5. CODEX PATH. `run-trap.bb` carried a hardcoded personal path. It reads
-   `MINIFORGE_CODEX_PATH` with no default, and the treated arm refuses to
-   start when it is unset or is not a directory — an absent codex would
-   have run a second baseline under a treated label.
+5. CODEX PATH. `run-trap.bb` carried a hardcoded personal path. It now
+   reads `MINIFORGE_CODEX_PATH`, no default, and the treated arm refuses
+   when it is unset or not a directory — an absent codex would have run
+   a second baseline under a treated label.
 
-6. DETECTOR OUTCOMES gain `:detector-error`. A detector that exits
-   non-zero, says nothing, or prints something unreadable used to throw
-   and take the whole run's record with it, after the run had already
-   cost hours. It now yields `:detector-error`, which outranks nothing,
-   so it can only ever be a run's recorded verdict when no real verdict
-   exists. It is an instrument failure, not a trap outcome, and is
-   excluded from the catch-rate denominator alongside `:not-reached`.
+6. DETECTOR OUTCOMES gain `:detector-error` — a detector that exits
+   non-zero, says nothing, or prints unreadable output. It used to throw
+   and take the whole record of an hours-long run with it. It outranks
+   nothing, so it is a run's verdict only when no real one exists, and
+   it leaves the catch-rate denominator like `:not-reached` does.
 
-7. ARM STATE moves under the sandbox root: MINIFORGE_HOME is now
-   `<sandbox-root>/home/<arm>` rather than a fixed
-   `~/.miniforge/bench/home/<arm>`. For the default sandbox these are
-   the same path, so the pre-registration is unchanged; for any other
-   sandbox the arms no longer share an event stream with the default
-   one, which is what makes per-run attribution by events/live diff
-   sound.
+7. ARM STATE moves to `<sandbox-root>/home/<arm>` from a fixed
+   `~/.miniforge/bench/home/<arm>`. Identical for the default sandbox,
+   so the pre-registration stands; for any other, the arms stop sharing
+   an event stream with the default one, which is what makes per-run
+   attribution by events/live diff sound.
 
-8. STRAY EVENTS, logged for the auditor. On 2026-08-07 a gate test run
-   from a throwaway sandbox reached `bb dogfood` and wrote two workflow
-   ids (`1bf1238a-7834-46a4-9f71-8c1f3e4f5a00`,
-   `9401431b-2414-4131-9eb6-3c1e127a5768`) into
+8. STRAY EVENTS, logged for the auditor. On 2026-08-07 a gate test from
+   a throwaway sandbox reached `bb dogfood` and wrote workflow ids
+   `1bf1238a-7834-46a4-9f71-8c1f3e4f5a00` and
+   `9401431b-2414-4131-9eb6-3c1e127a5768` into
    `~/.miniforge/bench/home/baseline/events/live` with no `runs.edn`
-   row. It died in 13s on a classpath error, produced no model calls,
-   and touched neither `~/.miniforge/bench/repo` nor the mirror. They
-   are left in place rather than deleted. Attribution is by before/after
-   diff, so they fall in every future run's "before" set and affect no
-   counted row; item 7 is the fix that stops it recurring.
+   row. It died in 13s on a classpath error with no model calls, and
+   touched neither `~/.miniforge/bench/repo` nor the mirror. Left in
+   place, not deleted: attribution is by before/after diff, so they sit
+   in every future run's "before" set. Item 7 stops it recurring.
 
 9. HARNESS COMMITTED. `eval/codex-traps/` was untracked and existed only
    inside the bench. `RUNSHEET.md`, `run-trap.bb`, `detect.bb` and
