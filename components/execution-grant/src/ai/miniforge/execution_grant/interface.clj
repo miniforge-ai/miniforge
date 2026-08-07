@@ -26,14 +26,20 @@
    rules: issuance, attenuated delegation, revocation as a state, scope
    and ceiling authorization, and liveness over lineage."
   (:require
+   [ai.miniforge.anomaly.interface :as anomaly]
    [ai.miniforge.execution-grant.attenuation :as attenuation]
    [ai.miniforge.execution-grant.breach :as breach]
-   [ai.miniforge.execution-grant.eligibility :as eligibility]
-   [ai.miniforge.execution-grant.revocation :as revocation]
    [ai.miniforge.execution-grant.constraints :as constraints]
    [ai.miniforge.execution-grant.core :as core]
+   [ai.miniforge.execution-grant.eligibility :as eligibility]
    [ai.miniforge.execution-grant.lineage :as lineage]
-   [ai.miniforge.execution-grant.schema :as schema]))
+   [ai.miniforge.execution-grant.messages :as msg]
+   [ai.miniforge.execution-grant.revocation :as revocation]
+   [ai.miniforge.execution-grant.schema :as schema]
+   [malli.core :as m]
+   [malli.error :as me])
+  (:import
+   [java.time Instant]))
 
 ;------------------------------------------------------------------------------ Layer 0
 
@@ -53,22 +59,24 @@
   "Closed Malli schema for a grant."
   schema/ExecutionGrant)
 
-(def ^{:stratum 0} valid?
+(defn ^{:stratum 0} valid?
   "Validate a value against the closed grant schema."
-  core/valid?)
+  [grant]
+  (m/validate schema/ExecutionGrant grant))
 
-(def ^{:stratum 0} issue
-  "Issue a root grant; id and issued-at are runtime-owned."
-  core/issue)
+(defn- ^{:stratum 0} invalid
+  "Return an invalid-input anomaly with the boundary explanation."
+  [message-key input-schema value]
+  (anomaly/sub-anomaly
+   :invalid-input
+   :anomalies.execution-grant/invalid
+   (msg/t message-key)
+   {:explain (me/humanize (m/explain input-schema value))}))
 
-(def ^{:stratum 0} delegate
-  "Cut an attenuated child grant from a parent, or refuse with a
-   `:unauthorized` anomaly naming the widened axis."
-  core/delegate)
-
-(def ^{:stratum 0} revoke
-  "Revoke a grant for a reason, preserving the record."
-  core/revoke)
+(defn- ^{:stratum 0} valid-input?
+  "True when `value` satisfies its component-boundary schema."
+  [input-schema value]
+  (m/validate input-schema value))
 
 (def ^{:stratum 0} revoked?
   "Local revocation stamp only; says nothing about ancestors."
@@ -146,3 +154,44 @@
   "Revoke a grant AND record the breach that caused it, or return the
    recording anomaly without revoking."
   revocation/revoke-for-cause!)
+
+;------------------------------------------------------------------------------ Layer 1
+
+(defn ^{:stratum 1} issue
+  "Issue a root grant; id and issued-at are runtime-owned. Invalid
+   boundary data is returned as an `:invalid-input` anomaly."
+  ([opts] (issue opts (Instant/now)))
+  ([opts now]
+   (let [arguments [opts now]]
+     (if (valid-input? schema/IssueArguments arguments)
+       (core/issue opts now)
+       (invalid :grant/input-invalid schema/IssueArguments arguments)))))
+
+(defn ^{:stratum 1} delegate
+  "Cut an attenuated child grant from a parent, or refuse with a
+   `:unauthorized` anomaly naming the widened axis."
+  ([parent opts] (delegate parent opts (Instant/now)))
+  ([parent opts now]
+   (let [arguments [opts now]]
+     (cond
+       (not (valid? parent))
+       (invalid :grant/parent-invalid schema/ExecutionGrant parent)
+
+       (not (valid-input? schema/DelegationArguments arguments))
+       (invalid :grant/delegated-invalid schema/DelegationArguments arguments)
+
+       :else (core/delegate parent opts now)))))
+
+(defn ^{:stratum 1} revoke
+  "Revoke a grant for a reason, preserving the record."
+  ([grant reason] (revoke grant reason (Instant/now)))
+  ([grant reason now]
+   (let [arguments [reason now]]
+     (cond
+       (not (valid? grant))
+       (invalid :grant/revoke-invalid schema/ExecutionGrant grant)
+
+       (not (valid-input? schema/RevocationArguments arguments))
+       (invalid :grant/revocation-invalid schema/RevocationArguments arguments)
+
+       :else (core/revoke grant reason now)))))

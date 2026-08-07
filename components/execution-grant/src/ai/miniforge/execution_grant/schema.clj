@@ -133,3 +133,40 @@
    [:breach/observed number?]
    [:breach/detection (into [:enum] detections)]
    [:breach/at inst?]])
+
+(def ^{:stratum 1} IssueOptions
+  "Boundary input for issuing a root grant. The map remains open so
+   runtime-owned grant fields in agent-shaped data are ignored rather
+   than accepted as authority."
+  [:map
+   [:principal :string]
+   [:effect-class (into [:enum] effect-classes)]
+   [:scope {:optional true} Scope]
+   [:constraints {:optional true} Constraints]
+   [:delegable? {:optional true} :boolean]
+   [:expires-at inst?]])
+
+(def ^{:stratum 1} DelegationOptions
+  "Boundary input for cutting a child grant. Effect class and lineage
+   are deliberately absent because the runtime inherits both from the
+   validated parent."
+  [:map
+   [:principal :string]
+   [:scope {:optional true} Scope]
+   [:constraints {:optional true} Constraints]
+   [:delegable? {:optional true} :boolean]
+   [:expires-at inst?]])
+
+(def ^{:stratum 1} RevocationArguments
+  "Revocation reason plus the runtime-owned revocation instant."
+  [:tuple (into [:enum] revocation-reasons) inst?])
+
+;------------------------------------------------------------------------------ Layer 2
+
+(def ^{:stratum 2} IssueArguments
+  "Issue options plus the runtime-owned issuance instant."
+  [:tuple IssueOptions inst?])
+
+(def ^{:stratum 2} DelegationArguments
+  "Delegation options plus the runtime-owned issuance instant."
+  [:tuple DelegationOptions inst?])
