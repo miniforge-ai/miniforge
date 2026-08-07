@@ -46,6 +46,11 @@
    legitimately retires a remote-tracking ref when its upstream branch is
    deleted.
 
+   Credentials are stripped from a URL as it is read, so no snapshot and
+   no report ever holds one. The likeliest drift is exactly the
+   token-bearing URL above, and a guard that published it while reporting
+   it would be its own leak.
+
    This detects; it does not prevent. Only a sandbox that does not share a
    common dir (a clone rather than a linked worktree) prevents."
   (:require
@@ -77,6 +82,16 @@
   "ASCII unit separator (U+001F). Delimits `for-each-ref --format` fields;
    it cannot occur in a ref name or a SHA, so splitting on it is total."
   (str (char 0x1F)))
+
+(defn ^{:stratum 0} redact-credentials
+  "Replace the userinfo in a URL that carries one.
+
+   Matches only `scheme://user:secret@host`, so an scp-style SSH remote
+   keeps its literal `git@` — that is a username, not a secret, and losing
+   it would make a report harder to read for no gain. The token-bearing
+   HTTPS URL the release path writes is exactly the matched shape."
+  [value]
+  (str/replace (str value) #"://[^/@]*@" "://***@"))
 
 (defn ^{:stratum 0} moved-remote-refs
   "Remote-tracking refs present in BOTH snapshots whose SHA differs.
@@ -177,7 +192,11 @@
          ;; Accumulated into vectors, not a plain map: git config is
          ;; multi-valued, and collapsing to the last value would hide a
          ;; rewrite of the first — the one `git remote get-url` resolves to.
-         (reduce (fn [acc [k v]] (update acc k (fnil conj []) v))
+         ;;
+         ;; Redacted on the way in rather than at report time: snapshots
+         ;; are parked in a process-lifetime atom by the guarded executor,
+         ;; so a token that entered one would outlive the run that made it.
+         (reduce (fn [acc [k v]] (update acc k (fnil conj []) (redact-credentials v)))
                  {}
                  (parse-fields (get r :out "") " ")))
       1 (result/ok {})

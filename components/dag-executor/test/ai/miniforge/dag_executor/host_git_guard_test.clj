@@ -201,3 +201,13 @@
           (fixtures/git! host "worktree" "remove" "--force" linked)
           (fixtures/delete-tree! parent)
           (fixtures/delete-tree! host))))))
+
+(deftest ^{:stratum 1} redact-credentials-strips-userinfo-from-a-url-test
+  (testing "given a token-bearing https url → the token never reaches a snapshot"
+    (is (= "https://***@github.com/o/r.git"
+           (sut/redact-credentials
+            "https://x-access-token:ghs_SYNTHETICNOTAREALTOKEN@github.com/o/r.git"))))
+  (testing "given an scp-style ssh remote → left alone, git@ is a username not a secret"
+    (is (= "git@github.com:o/r.git" (sut/redact-credentials "git@github.com:o/r.git"))))
+  (testing "given a plain url → unchanged"
+    (is (= host-origin-url (sut/redact-credentials host-origin-url)))))
