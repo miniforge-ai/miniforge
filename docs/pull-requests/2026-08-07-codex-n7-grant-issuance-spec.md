@@ -20,6 +20,8 @@ repeat completed work or produce oversized, poorly layered changes.
 - Correct stale revocation and issuance acceptance criteria.
 - Record explicit issuance site, lifetime, ceiling, scope, and delegation
   decisions derived from N7.
+- Define the issuer as an execution-grant service with a closed runtime basis
+  record; merge and deploy specs own construction of that basis at call sites.
 - Split merge and deployment grant enforcement into separate work specs.
 - Regenerate the work queue from the reconciled contracts.
 

@@ -5,14 +5,20 @@
 {:spec/title "Issue narrow runtime-owned grants for irreversible effects"
 
  :spec/description
- "Build the production issuance path that turns a runtime-approved canonical
-  effect request into a short-lived ExecutionGrant. The basis is the active
-  workflow-run identity plus an effect-specific preflight result: merge
-  readiness for a PR, or deployment policy checks and provider dry-run for a
-  deploy. The workflow runtime is the principal; agents may propose inputs but
-  cannot mint or alter authority. Issuance occurs after the runtime preallocates
-  the effect transaction ID and knows the exact target, but before the durable
-  proposal and grant-aware decision are recorded.
+ "Build the production issuance service that turns a runtime-attested canonical
+  effect request into a short-lived ExecutionGrant. Its closed input carries
+  the active workflow-run identity, preallocated effect transaction ID, exact
+  target scope, and an allow-class effect-specific preflight basis. The workflow
+  runtime is the principal; agents may propose inputs but cannot mint or alter
+  authority. Issuance occurs before the durable proposal and grant-aware
+  decision are recorded.
+
+  This slice defines and validates the issuance service and its basis record in
+  execution-grant. The separate merge and deployment enforcement specs own the
+  runtime call sites that construct the basis after merge readiness or after
+  deployment policy checks and provider dry-run. This keeps policy mechanics
+  independent from application orchestration without leaving the production
+  integration implicit.
 
   Workflow-start issuance is rejected because it creates a broad, long-lived
   authority object; phase-entry issuance is rejected because the exact effect
@@ -44,7 +50,7 @@
 
  :spec/constraints
  ["Only deterministic runtime code may call the production issuer"
-  "Issuance requires an effect-specific allow-class preflight result"
+  "Issuance requires a validated allow-class effect-specific basis record"
   "The grant principal is the workflow-run runtime identity"
   "The issuer must know the complete effect scope before minting a grant"
   "Merge policy is a 15-minute non-delegable one-transaction grant"
