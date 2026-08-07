@@ -100,86 +100,82 @@
             done (fx/commit! dir t g no-usage now (constantly nil))]
         (is (= :unknown-outcome (:effect/state done)))))))
 
-(deftest ^{:stratum 1} commit-rechecks-the-grant-test
-  ;; Ariadne 2b Group 4: a constraint checked only at decide() is a check
-  ;; against stale state.
-  (testing "a grant revoked after the proposal fails the commit, and the effect never fires"
-    (let [dir (tmp-dir)
-          {g :grant t :transaction} (merge-case! dir)
-          revoked (grant/revoke g :breach/cost-exceeded now)
-          fired (atom false)
-          done (fx/commit! dir t revoked no-usage now
+(deftest ^{:stratum 1} revoked-grant-recheck-denies-effect-test
+  ;; A constraint checked only at decide time is a check against stale state.
+  (let [dir (tmp-dir)
+        {g :grant t :transaction} (merge-case! dir)
+        revoked (grant/revoke g :breach/cost-exceeded now)
+        fired (atom false)
+        done (fx/commit! dir t revoked no-usage now
+                         (partial record-success! fired))]
+    (is (= :failed (:effect/state done)))
+    (is (not @fired) "the effect MUST NOT fire when the re-check refuses")
+    (is (re-find #"inactive" (:effect/failure done)))))
+
+(deftest ^{:stratum 1} expired-grant-recheck-denies-effect-test
+  (let [dir (tmp-dir)
+        {g :grant t :transaction} (merge-case! dir)
+        fired (atom false)
+        done (fx/commit! dir t g no-usage much-later
+                         (partial record-success! fired))]
+    (is (= :failed (:effect/state done)))
+    (is (not @fired))))
+
+(deftest ^{:stratum 1} caller-cannot-fabricate-breached-usage-test
+  (let [dir (tmp-dir)
+        {g :grant t :transaction} (merge-case! dir)
+        fired (atom false)
+        done (fx/commit! dir t g (claimed-usage 99) now
+                         (partial record-success! fired))]
+    (is (= :succeeded (:effect/state done)))
+    (is @fired)))
+
+(deftest ^{:stratum 1} caller-zero-cannot-bypass-derived-count-test
+  (let [dir (tmp-dir)
+        {g :grant t :transaction}
+        (merge-case! dir {:constraints {:constraint/max-count 0}})
+        fired (atom false)
+        done (fx/commit! dir t g (claimed-usage 0) now
+                         (partial record-success! fired))]
+    (is (= :failed (:effect/state done)))
+    (is (not @fired))))
+
+(deftest ^{:stratum 1} missing-grant-leaves-proposal-untouched-test
+  ;; A missing argument is a caller conflict, not an authority lapse that
+  ;; should permanently fail the durable transaction.
+  (let [dir (tmp-dir)
+        {t :transaction} (merge-case! dir)
+        fired (atom false)
+        result (fx/commit! dir t nil no-usage now
                            (partial record-success! fired))]
-      (is (= :failed (:effect/state done)))
-      (is (not @fired) "the effect MUST NOT fire when the re-check refuses")
-      (is (re-find #"inactive" (:effect/failure done)))))
+    (is (anomaly/anomaly? result))
+    (is (not @fired))
+    (is (= :proposed (:effect/state (fx/read-record dir (:effect/id t)))))))
 
-  (testing "a grant that expired between propose and commit fails the commit"
-    (let [dir (tmp-dir)
-          {g :grant t :transaction} (merge-case! dir)
-          fired (atom false)
-          done (fx/commit! dir t g no-usage much-later
-                           (partial record-success! fired))]
-      (is (= :failed (:effect/state done)))
-      (is (not @fired))))
-
-  (testing "caller-supplied usage cannot fabricate a breached ceiling"
-    (let [dir (tmp-dir)
-          {g :grant t :transaction} (merge-case! dir)
-          fired (atom false)
-          done (fx/commit! dir t g (claimed-usage 99) now
-                           (partial record-success! fired))]
-      (is (= :succeeded (:effect/state done)))
-      (is @fired)))
-
-  (testing "caller-supplied zero cannot bypass the derived operation count"
-    (let [dir (tmp-dir)
-          {g :grant t :transaction}
-          (merge-case! dir {:constraints {:constraint/max-count 0}})
-          fired (atom false)
-          done (fx/commit! dir t g (claimed-usage 0) now
-                           (partial record-success! fired))]
-      (is (= :failed (:effect/state done)))
-      (is (not @fired))))
-
-  (testing "no grant at all is refused as a mismatch, and the record is untouched"
-    ;; Distinct from a revoked-or-expired grant above: passing nil when
-    ;; the record NAMES a grant is a caller supplying the wrong argument,
-    ;; not the authority lapsing. Marking the record :failed for that
-    ;; would blame the transaction for the caller's mistake.
-    (let [dir (tmp-dir)
-          {t :transaction} (merge-case! dir)
-          fired (atom false)
-          result (fx/commit! dir t nil no-usage now
-                             (partial record-success! fired))]
-      (is (anomaly/anomaly? result))
-      (is (not @fired))
-      (is (= :proposed (:effect/state (fx/read-record dir (:effect/id t))))
-          "the durable record is left as it was"))))
-
-(deftest ^{:stratum 1} only-a-proposed-record-may-be-committed-test
+(deftest ^{:stratum 1} falsey-proposals-retain-empty-default-test
   (let [dir (tmp-dir)]
-    (testing "falsey proposals retain the empty-map default"
-      (doseq [proposal [nil false]]
-        (let [g (merge-grant)
-              t (propose-merge! dir g proposal)]
-          (is (= {} (:effect/proposal t))))))
+    (doseq [proposal [nil false]]
+      (let [g (merge-grant)
+            t (propose-merge! dir g proposal)]
+        (is (= {} (:effect/proposal t)))))))
 
-    (testing "replaying the stale proposal cannot re-fire the effect"
-      (let [{g :grant t :transaction} (merge-case! dir)
-            calls (atom 0)
-            effect! (partial count-success! calls)
-            first-result (fx/commit! dir t g no-usage now effect!)
-            replay-result (fx/commit! dir t g no-usage now effect!)]
-        (is (= :succeeded (:effect/state first-result)))
-        (is (anomaly/anomaly? replay-result))
-        (is (= 1 @calls))))
+(deftest ^{:stratum 1} stale-proposal-replay-does-not-refire-test
+  (let [dir (tmp-dir)
+        {g :grant t :transaction} (merge-case! dir)
+        calls (atom 0)
+        effect! (partial count-success! calls)
+        first-result (fx/commit! dir t g no-usage now effect!)
+        replay-result (fx/commit! dir t g no-usage now effect!)]
+    (is (= :succeeded (:effect/state first-result)))
+    (is (anomaly/anomaly? replay-result))
+    (is (= 1 @calls))))
 
-    (testing "caller state cannot replace the durable proposal state"
-      (let [{g :grant t :transaction} (merge-case! dir)
-            forged (assoc t :effect/state :succeeded)
-            done (fx/commit! dir forged g no-usage now succeed!)]
-        (is (= :succeeded (:effect/state done)))))))
+(deftest ^{:stratum 1} caller-state-cannot-replace-durable-state-test
+  (let [dir (tmp-dir)
+        {g :grant t :transaction} (merge-case! dir)
+        forged (assoc t :effect/state :succeeded)
+        done (fx/commit! dir forged g no-usage now succeed!)]
+    (is (= :succeeded (:effect/state done)))))
 
 (deftest ^{:stratum 1} proposal-preserves-preallocated-id-without-replacement-test
   (let [dir (tmp-dir)
