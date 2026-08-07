@@ -100,8 +100,16 @@
         (is (dag/ok? result))
         (is (= "real-squash-sha" (get-in result [:data :merge/sha])))
         (is (= :committing (:effect/state @at-command)))
+        (is (= :granted (:effect/authority @at-command)))
         (is (uuid? (:effect/grant-id @at-command)))
         (is (uuid? (:effect/envelope-id @at-command)))
+        (is (= (:effect/id @at-command)
+               (get-in @at-command [:effect/proposal :effect/id])))
+        (is (= (:run-id context)
+               (get-in @at-command [:effect/proposal :workflow-run/id])))
+        (is (= "miniforge-ai/miniforge"
+               (get-in @at-command [:effect/proposal :pr/repo])))
+        (is (= 123 (get-in @at-command [:effect/proposal :pr/number])))
         (is (= :granted
                (:effect/authority
                 (first (fx/list-records (:effect-store-dir context))))))))))
@@ -129,6 +137,7 @@
     (let [{:keys [result merge-calls]} (attempt-with-issuer
                                         (fn [_ _ _] nil))]
       (is (dag/err? result))
+      (is (= :merge-authority-denied (get-in result [:error :code])))
       (is (zero? merge-calls))))
   (testing "a mismatched grant denies before the provider mutation"
     (let [issuer (fn [_ request now]
@@ -137,6 +146,7 @@
                                        (.plusSeconds now 60)))
           {:keys [result merge-calls]} (attempt-with-issuer issuer)]
       (is (dag/err? result))
+      (is (= :merge-authority-denied (get-in result [:error :code])))
       (is (zero? merge-calls))))
   (testing "an expired grant denies before the provider mutation"
     (let [issuer (fn [_ request now]
@@ -144,4 +154,5 @@
                                        (.minusSeconds now 1)))
           {:keys [result merge-calls]} (attempt-with-issuer issuer)]
       (is (dag/err? result))
+      (is (= :merge-authority-denied (get-in result [:error :code])))
       (is (zero? merge-calls)))))
