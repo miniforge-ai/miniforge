@@ -96,6 +96,7 @@
   :theme :ariadne-grants
   :rationale "Without an issuer the grant machinery is inert; with one, 2d part 2 and 2e's eligibility hook both become reachable. High rather than blocker because 2d part 1 already delivered the honesty half."
   :blocks []
-  :blocked-by ["ariadne-revocation-for-cause.spec.edn"]}
+  :blocked-by ["ariadne-revocation-for-cause.spec.edn"
+               "ariadne-grant-scope-enforcement.spec.edn"]}
 
  :spec/workflow-type :canonical-sdlc}

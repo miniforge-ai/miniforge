@@ -108,8 +108,9 @@ Step 2 of the ratified Ariadne adoption order: authority stops being
 
 | tier | r | theme | spec | axes |
 |---|---|---|---|---|
-| high | ● | ariadne-grants | `ariadne-grant-issuance.spec.edn` — Ariadne step 2f: grant issuance - who may authorize an irreversible effect, and on what basis | correctness+policyenforcement+governancecredibility |
+| blocker | ● | ariadne-grants | `ariadne-grant-scope-enforcement.spec.edn` — Enforce ExecutionGrant scope against durable effect proposals | correctness+policyenforcement+governancecredibility |
 | high | ● | ariadne-grants | `ariadne-granted-effect-call-sites.spec.edn` — Ariadne step 2d: migrate merge and deploy onto the granted, transacted path | correctness+observation+governancecredibility |
+| high | ○ | ariadne-grants | `ariadne-grant-issuance.spec.edn` — Ariadne step 2f: grant issuance - who may authorize an irreversible effect, and on what basis | correctness+policyenforcement+governancecredibility |
 
 ## Theme — Polylith compliance (`polylith-compliance`, status: in-flight)
 

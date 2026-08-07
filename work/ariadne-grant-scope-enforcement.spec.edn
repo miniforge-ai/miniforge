@@ -1,0 +1,63 @@
+;; =============================================================================
+;; Spec: Ariadne grant scope enforcement
+;; =============================================================================
+;;
+;; Normative refs: Ariadne §13.5 (scoped, attenuated grants and
+;; commit-time recheck); N10 §1.1 (bounded ExecutionGrant authority).
+
+{:spec/title "Enforce ExecutionGrant scope against durable effect proposals"
+
+ :spec/description
+ "Close an authority gap before production grant issuance is enabled.
+
+  ExecutionGrant records carry :grant/scope but authorize currently
+  checks only liveness and numeric ceilings. A grant for one PR can therefore
+  authorize another. Authorization must compare the proposed effect with the
+  grant's scope using the same containment rule used for delegation. A
+  non-empty grant scope with absent or mismatched effect scope fails closed.
+
+  EffectTransaction commit must supply :effect/scope from its durable
+  :effect/proposal. It must ignore any parallel caller-supplied scope so a
+  caller cannot present one effect for authorization while committing another."
+
+ :spec/intent
+ {:type :bugfix
+  :scope ["components/execution-grant/**"
+          "components/decision-envelope/**"
+          "components/gate/**"
+          "components/effect-transaction/**"
+          "specs/normative/N10-governed-tool-execution.md"]}
+
+ :normative-refs
+ ["docs/architecture/ariadne/tenancy-ownership-access.md §13.3, §13.5"
+  "specs/normative/N10-governed-tool-execution.md §1.1"]
+
+ :spec/constraints
+ ["Reuse execution-grant's existing scope containment primitive; do not duplicate its map comparison"
+  "Authorization remains pure and fail-closed"
+  "Commit-time scope comes from the durable effect proposal, not a parallel caller-supplied map"
+  "A refused scope recheck records failure and never invokes the effect"
+  "No duplicated proposal or grant fixture maps across transaction tests"
+  "Unknown authorization outcomes remain deny-class"
+  "Stratified design, max three layers per implementation namespace"]
+
+ :spec/acceptance-criteria
+ ["A non-empty grant scope with absent effect scope returns :scope-mismatch"
+  "An effect for another workflow run returns :scope-mismatch"
+  "An effect scope carrying every grant binding plus narrower bindings authorizes"
+  "EffectTransaction commit authorizes the durable proposal rather than caller-supplied scope"
+  "A mismatched durable proposal fails without invoking the effect"
+  "Interrupted effects and reconciliation behavior remain unchanged"
+  "Gate translation turns :scope-mismatch into a deny DecisionEnvelope"
+  "poly check reports no new errors or warnings"
+  "full bb test is green"]
+
+ :spec/priority
+ {:tier :blocker
+  :axes #{:correctness :policy-enforcement :governance-credibility}
+  :theme :ariadne-grants
+  :rationale "Production issuance would otherwise mint grants whose recorded scope is not enforced."
+  :blocks ["ariadne-grant-issuance.spec.edn"]
+  :blocked-by []}
+
+ :spec/workflow-type :canonical-sdlc}
