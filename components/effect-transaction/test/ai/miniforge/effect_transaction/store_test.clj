@@ -25,6 +25,7 @@
    [ai.miniforge.effect-transaction.persistence :as persistence]
    [ai.miniforge.effect-transaction.record :as effect-record]
    [ai.miniforge.effect-transaction.store :as store]
+   [clojure.java.io :as io]
    [clojure.test :refer [deftest is testing]])
   (:import
    [java.nio.file Files]
@@ -38,6 +39,13 @@
 
 (defn ^{:stratum 0} tmp-dir []
   (str (.toFile (Files/createTempDirectory "fx-store-test" (into-array FileAttribute [])))))
+
+(deftest ^{:stratum 0} directory-listing-failure-is-returned-as-data-test
+  (let [denied (proxy [java.io.File] ["denied"]
+                 (isDirectory [] true)
+                 (listFiles [] (throw (SecurityException. "denied"))))]
+    (with-redefs [io/file (constantly denied)]
+      (is (anomaly/anomaly? (persistence/list-records "denied"))))))
 
 ;------------------------------------------------------------------------------ Layer 1
 

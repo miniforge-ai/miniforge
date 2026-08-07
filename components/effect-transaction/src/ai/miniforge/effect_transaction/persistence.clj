@@ -140,6 +140,15 @@
         (lock-conflict id)
         (write-failure file ex)))))
 
+(defn- ^{:stratum 1} list-files
+  [^File directory]
+  (try
+    (if (.isDirectory directory)
+      (or (.listFiles directory) (read-failure directory nil))
+      [])
+    (catch Exception ex
+      (read-failure directory ex))))
+
 ;------------------------------------------------------------------------------ Layer 2
 
 (defn ^{:stratum 2} create!
@@ -174,12 +183,10 @@
 (defn ^{:stratum 2} list-records
   [dir]
   (let [^File directory (io/file dir)
-        files (.listFiles directory)
+        files (list-files directory)
         xform (comp (filter #(.endsWith (.getName ^File %) ".edn"))
                     (map read-file))]
-    (cond
-      (not (.isDirectory directory)) []
-      (nil? files) (read-failure directory nil)
-      :else
+    (if (anomaly/anomaly? files)
+      files
       (let [records (into [] xform files)]
         (or (some anomaly-value records) records)))))
