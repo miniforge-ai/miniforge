@@ -5,6 +5,20 @@
 Removes the four repository-wide `poly check` warnings discovered while
 validating the N7 grant contracts.
 
+## Layer
+
+Foundations — Polylith workspace composition and test-resource layout.
+
+## Depends on
+
+- #1697 (N7 grant issuance contract reconciliation) — merged
+
+## Strata Affected
+
+- Workspace composition — remove unused project dependencies and stale paths.
+- Test resources — expose config fixtures through a conventional test classpath.
+- Work planning — reconcile the active Polylith theme with the clean baseline.
+
 ## Motivation
 
 The N7 implementation workflow requires `poly check` to report zero errors and
