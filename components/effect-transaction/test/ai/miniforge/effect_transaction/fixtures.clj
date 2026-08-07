@@ -38,6 +38,15 @@
   {:pr/repo "miniforge-ai/miniforge"
    :pr/number 42})
 
+(def ^{:stratum 0} no-usage
+  "Caller usage is intentionally absent at the fenced commit boundary."
+  {})
+
+(defn ^{:stratum 0} claimed-usage
+  "Build an untrusted caller usage claim for fencing tests."
+  [count]
+  {:usage/count count})
+
 (defn ^{:stratum 0} tmp-dir
   "A fresh directory for one effect-transaction test."
   []

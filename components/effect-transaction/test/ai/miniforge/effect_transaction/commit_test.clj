@@ -51,6 +51,10 @@
 
 (def ^{:stratum 0} concurrency-timeout-ms fixture/concurrency-timeout-ms)
 
+(def ^{:stratum 0} no-usage fixture/no-usage)
+
+(def ^{:stratum 0} claimed-usage fixture/claimed-usage)
+
 ;------------------------------------------------------------------------------ Layer 1
 
 (deftest ^{:stratum 1} interrupted-effect-is-unknown-not-failed-test
@@ -58,7 +62,7 @@
   ;; a merge that actually landed is as wrong as claiming success.
   (let [dir (tmp-dir)
         {g :grant t :transaction} (merge-case! dir)
-        committed (fx/commit! dir t g {} now
+        committed (fx/commit! dir t g no-usage now
                               (partial throw-exception! "connection reset"))]
     (is (= :unknown-outcome (:effect/state committed)))
     (is (not= :failed (:effect/state committed))
@@ -71,7 +75,7 @@
   (let [dir (tmp-dir)]
     (testing "a definite success is :succeeded and carries the observation"
       (let [{g :grant t :transaction} (merge-case! dir)
-            done (fx/commit! dir t g {} now
+            done (fx/commit! dir t g no-usage now
                              (fn [] {:effect/outcome :succeeded
                                      :effect/observed {:merge/sha "abc123"}}))]
         (is (= :succeeded (:effect/state done)))
@@ -79,7 +83,7 @@
 
     (testing "a definite failure is :failed — the effect fn knows it did not happen"
       (let [{g :grant t :transaction} (merge-case! dir)
-            done (fx/commit! dir t g {} now
+            done (fx/commit! dir t g no-usage now
                              (fn [] {:effect/outcome :failed
                                      :effect/failure "PR already closed"}))]
         (is (= :failed (:effect/state done)))
@@ -87,13 +91,13 @@
 
     (testing "an unreadable report is unknown, not success"
       (let [{g :grant t :transaction} (merge-case! dir)
-            done (fx/commit! dir t g {} now (fn [] {:whatever true}))]
+            done (fx/commit! dir t g no-usage now (fn [] {:whatever true}))]
         (is (= :unknown-outcome (:effect/state done))
             "an effect fn that answered in a shape we cannot read told us nothing")))
 
     (testing "a nil report is unknown, not success"
       (let [{g :grant t :transaction} (merge-case! dir)
-            done (fx/commit! dir t g {} now (constantly nil))]
+            done (fx/commit! dir t g no-usage now (constantly nil))]
         (is (= :unknown-outcome (:effect/state done)))))))
 
 (deftest ^{:stratum 1} commit-rechecks-the-grant-test
@@ -104,7 +108,7 @@
           {g :grant t :transaction} (merge-case! dir)
           revoked (grant/revoke g :breach/cost-exceeded now)
           fired (atom false)
-          done (fx/commit! dir t revoked {} now
+          done (fx/commit! dir t revoked no-usage now
                            (partial record-success! fired))]
       (is (= :failed (:effect/state done)))
       (is (not @fired) "the effect MUST NOT fire when the re-check refuses")
@@ -114,7 +118,7 @@
     (let [dir (tmp-dir)
           {g :grant t :transaction} (merge-case! dir)
           fired (atom false)
-          done (fx/commit! dir t g {} much-later
+          done (fx/commit! dir t g no-usage much-later
                            (partial record-success! fired))]
       (is (= :failed (:effect/state done)))
       (is (not @fired))))
@@ -123,7 +127,7 @@
     (let [dir (tmp-dir)
           {g :grant t :transaction} (merge-case! dir)
           fired (atom false)
-          done (fx/commit! dir t g {:usage/count 99} now
+          done (fx/commit! dir t g (claimed-usage 99) now
                            (partial record-success! fired))]
       (is (= :succeeded (:effect/state done)))
       (is @fired)))
@@ -133,7 +137,7 @@
           {g :grant t :transaction}
           (merge-case! dir {:constraints {:constraint/max-count 0}})
           fired (atom false)
-          done (fx/commit! dir t g {:usage/count 0} now
+          done (fx/commit! dir t g (claimed-usage 0) now
                            (partial record-success! fired))]
       (is (= :failed (:effect/state done)))
       (is (not @fired))))
@@ -146,7 +150,7 @@
     (let [dir (tmp-dir)
           {t :transaction} (merge-case! dir)
           fired (atom false)
-          result (fx/commit! dir t nil {} now
+          result (fx/commit! dir t nil no-usage now
                              (partial record-success! fired))]
       (is (anomaly/anomaly? result))
       (is (not @fired))
@@ -165,8 +169,8 @@
       (let [{g :grant t :transaction} (merge-case! dir)
             calls (atom 0)
             effect! (partial count-success! calls)
-            first-result (fx/commit! dir t g {} now effect!)
-            replay-result (fx/commit! dir t g {} now effect!)]
+            first-result (fx/commit! dir t g no-usage now effect!)
+            replay-result (fx/commit! dir t g no-usage now effect!)]
         (is (= :succeeded (:effect/state first-result)))
         (is (anomaly/anomaly? replay-result))
         (is (= 1 @calls))))
@@ -174,7 +178,7 @@
     (testing "caller state cannot replace the durable proposal state"
       (let [{g :grant t :transaction} (merge-case! dir)
             forged (assoc t :effect/state :succeeded)
-            done (fx/commit! dir forged g {} now succeed!)]
+            done (fx/commit! dir forged g no-usage now succeed!)]
         (is (= :succeeded (:effect/state done)))))))
 
 (deftest ^{:stratum 1} proposal-preserves-preallocated-id-without-replacement-test
@@ -197,7 +201,7 @@
     (testing "a different grant is refused, even a valid and broader one"
       (let [other (merge-grant {:constraints {}})
             fired (atom false)
-            result (fx/commit! dir t other {} now
+            result (fx/commit! dir t other no-usage now
                                (partial record-success! fired))]
         (is (anomaly/anomaly? result))
         (is (= :conflict (:anomaly/type result)))
@@ -207,13 +211,13 @@
       (let [deploy-grant (merge-grant {:effect-class :effect/deploy})
             mismatched (propose-merge! dir deploy-grant)
             fired (atom false)
-            result (fx/commit! dir mismatched deploy-grant {} now
+            result (fx/commit! dir mismatched deploy-grant no-usage now
                                (partial record-success! fired))]
         (is (anomaly/anomaly? result))
         (is (not @fired) "a merge proposal must not be authorized by a deploy grant")))
 
     (testing "the recorded grant still commits"
-      (let [done (fx/commit! dir t recorded {} now succeed!)]
+      (let [done (fx/commit! dir t recorded no-usage now succeed!)]
         (is (= :succeeded (:effect/state done)))))))
 
 (deftest ^{:stratum 1} concurrent-commit-invokes-the-effect-once-test
@@ -223,11 +227,11 @@
         entered (promise)
         release (promise)
         first-result (future
-                       (fx/commit! dir t g {} now
+                       (fx/commit! dir t g no-usage now
                                    (partial block-and-count-success!
                                             calls entered release)))]
     (is (= true (deref entered concurrency-timeout-ms :timeout)))
-    (let [second-result (fx/commit! dir t g {} now
+    (let [second-result (fx/commit! dir t g no-usage now
                                     (partial count-success! calls))]
       (deliver release true)
       (is (= :succeeded
@@ -239,7 +243,7 @@
   (let [dir (tmp-dir)
         {g :grant t :transaction} (merge-case! dir)]
     (is (thrown? AssertionError
-                 (fx/commit! dir t g {} now
+                 (fx/commit! dir t g no-usage now
                              (fn [] (throw (AssertionError.))))))
     (is (= :committing
            (:effect/state (fx/read-record dir (:effect/id t)))))))
@@ -263,7 +267,7 @@
           {g :grant t :transaction} (merge-case! dir)
           other-effect-grant (assoc-in g [:grant/scope :effect/id] (random-uuid))
           fired (atom false)
-          result (fx/commit! dir t other-effect-grant {} now
+          result (fx/commit! dir t other-effect-grant no-usage now
                              (partial record-success! fired))]
       (is (= :failed (:effect/state result)))
       (is (not @fired)))))
