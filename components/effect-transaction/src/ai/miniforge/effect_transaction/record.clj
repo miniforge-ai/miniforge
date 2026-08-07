@@ -25,7 +25,8 @@
    [malli.core :as m]
    [malli.error :as me])
   (:import
-   [java.time Instant]))
+   [java.time Instant]
+   [java.util Date]))
 
 ;------------------------------------------------------------------------------ Layer 0
 
@@ -57,17 +58,21 @@
                        message
                        data))
 
-;------------------------------------------------------------------------------ Layer 1
+(defn- ^{:stratum 0} normalize-instant
+  [value]
+  (if (instance? Date value)
+    (.toInstant ^Date value)
+    value))
 
-(defn ^{:stratum 1} not-found
-  "Return a conflict for a transaction absent from the durable store."
-  [id]
-  (wrong-state (msg/t :record/not-found) {:effect/id id}))
+(def ^{:stratum 0} not-found store/not-found)
+
+;------------------------------------------------------------------------------ Layer 1
 
 (defn ^{:stratum 1} advance!
   "Compare-and-set `changes` against the exact durable value of `t`."
   [dir t changes ^Instant now]
-  (let [t' (assoc (merge t changes) :effect/updated-at now)]
+  (let [t' (assoc (merge t changes)
+                  :effect/updated-at (normalize-instant now))]
     (if (valid? t')
       (store/transition! dir t t')
       (invalid (msg/t :record/change-invalid) t'))))
@@ -82,14 +87,15 @@
                           {})
      (propose! dir opts (Instant/now))))
   ([dir {:keys [effect-id effect-class grant-id envelope-id proposal]} ^Instant now]
-   (let [t {:effect/id (if (some? effect-id) effect-id (random-uuid))
+   (let [at (normalize-instant now)
+         t {:effect/id (if (some? effect-id) effect-id (random-uuid))
             :effect/class effect-class
             :effect/grant-id grant-id
             :effect/envelope-id envelope-id
             :effect/proposal (if proposal proposal {})
             :effect/state :proposed
-            :effect/at now
-            :effect/updated-at now}]
+            :effect/at at
+            :effect/updated-at at}]
      (if (valid? t)
        (store/create! dir t)
        (invalid (msg/t :record/input-invalid) t)))))

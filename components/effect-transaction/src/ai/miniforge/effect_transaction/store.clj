@@ -26,6 +26,14 @@
 
 (def ^{:stratum 0} record-file persistence/record-file)
 
+(defn ^{:stratum 0} not-found
+  "Return a conflict for a transaction absent from the durable store."
+  [id]
+  (anomaly/sub-anomaly :conflict
+                       :anomalies.effect-transaction/not-found
+                       (msg/t :record/not-found)
+                       {:effect/id id}))
+
 (defn- ^{:stratum 0} transition-conflict
   [expected current]
   (anomaly/sub-anomaly :conflict
@@ -57,6 +65,7 @@
   (let [current (persistence/read-record dir (:effect/id expected))]
     (cond
       (anomaly/anomaly? current) current
+      (nil? current) (not-found (:effect/id expected))
       (not= expected current) (transition-conflict expected current)
       :else (persistence/replace! dir replacement))))
 

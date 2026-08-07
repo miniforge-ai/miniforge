@@ -57,6 +57,19 @@
     (spit (store/record-file dir id) "{:effect/id" :encoding "UTF-8")
     (is (anomaly/anomaly? (fx/read-record dir id)))))
 
+(deftest ^{:stratum 1} proposal-normalizes-schema-valid-date-test
+  (let [dir (tmp-dir)
+        id (random-uuid)
+        t (fx/propose! dir {:effect-id id
+                            :effect-class :effect/merge
+                            :grant-id (random-uuid)
+                            :envelope-id (random-uuid)}
+                       (Date/from now))
+        committing (assoc t :effect/state :committing)]
+    (is (= id (:effect/id t)))
+    (is (instance? Instant (:effect/at t)))
+    (is (= committing (store/transition! dir t committing)))))
+
 ;------------------------------------------------------------------------------ Layer 2
 
 (deftest ^{:stratum 2} schema-is-closed-test
@@ -108,7 +121,13 @@
     (testing "a stale expected value cannot replace the durable record"
       (let [result (store/transition! dir t (assoc t :effect/state :succeeded))]
         (is (anomaly/anomaly? result))
-        (is (= :committing (:effect/state (fx/read-record dir (:effect/id t)))))))))
+        (is (= :committing (:effect/state (fx/read-record dir (:effect/id t)))))))
+    (testing "a missing durable value is reported as not found"
+      (let [missing (record)
+            result (store/transition! dir missing
+                                      (assoc missing :effect/state :committing))]
+        (is (= :anomalies.effect-transaction/not-found
+               (:anomaly/subtype result)))))))
 
 (deftest ^{:stratum 2} both-inst-types-round-trip-test
   ;; The schema says `inst?`, and `inst?` admits java.util.Date as well
