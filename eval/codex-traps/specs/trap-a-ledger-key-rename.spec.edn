@@ -1,0 +1,25 @@
+{:spec/title "Rename read-ledger's ambiguous :skipped key to :torn-lines"
+
+ :spec/description
+ "The codex-gap ledger reader (components/codex-gap/src/ai/miniforge/
+  codex_gap/ledger.clj, read-ledger) returns {:entries [...] :skipped n}.
+  The :skipped key is ambiguous — skipped what? It counts torn/unparseable
+  ledger lines tolerated during streaming reads. Rename the key to
+  :torn-lines everywhere the read-ledger result shape is produced or
+  consumed, so the name says what it counts."
+
+ :spec/intent {:type :refactor
+               :scope ["components/codex-gap"
+                       "any repo-wide consumer of the read-ledger result shape"]}
+
+ :spec/constraints
+ ["Rename only the read-ledger result key (:skipped -> :torn-lines); do
+   not change ledger entry keys or the on-disk format"
+  "Every producer and consumer of the read-ledger result shape must be
+   updated consistently"
+  "All existing tests must pass"]
+
+ :spec/acceptance-criteria
+ ["read-ledger returns {:entries [...] :torn-lines n}"
+  "No consumer of the read-ledger result still reads :skipped"
+  "Tests pass"]}
