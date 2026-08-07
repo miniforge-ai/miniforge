@@ -72,27 +72,28 @@
   "Machine-readable registry/browser audit summary."
   audit/audit-summary)
 
-;------------------------------------------------------------------------------ Layer 1
-
 ;; Derived views
-(def ^{:stratum 1} browser-handled-events
+(defn ^{:stratum 0} browser-handled-events-for
   "Event types currently handled in `handleWorkflowEvent` in app.js.
-   All strings confirmed correct — no mismatches."
-  (if (anomaly/anomaly? event-type-registry)
-    event-type-registry
-    (->> event-type-registry
+   All strings confirmed correct — no mismatches. Returns an upstream
+   registry anomaly unchanged."
+  [registry]
+  (if (anomaly/anomaly? registry)
+    registry
+    (->> registry
          (filter :browser?)
          (mapv :json-string))))
 
 ;; => ["workflow/started" "workflow/phase-started" "workflow/phase-completed"
 ;;     "workflow/completed" "workflow/failed" "agent/chunk"]
-(def ^{:stratum 1} browser-unhandled-events
+(defn ^{:stratum 0} browser-unhandled-events-for
   "Event types emitted server-side that the browser switch silently ignores.
    These are the gap items for Tasks 1–7. Returns the registry anomaly
    when the backing resource cannot be loaded."
-  (if (anomaly/anomaly? event-type-registry)
-    event-type-registry
-    (->> event-type-registry
+  [registry]
+  (if (anomaly/anomaly? registry)
+    registry
+    (->> registry
          (remove :browser?)
          (mapv :json-string))))
 
@@ -109,21 +110,33 @@
 ;;   cp-agent-state-changed     → "control-plane/agent-state-changed" (prefix cp → control-plane)
 ;;   cp-decision-created        → "control-plane/decision-created"  (prefix cp → control-plane)
 ;;   cp-decision-resolved       → "control-plane/decision-resolved" (prefix cp → control-plane)
-(def ^{:stratum 1} naming-asymmetries
+(defn ^{:stratum 0} naming-asymmetries-for
   "13 constructors whose function name does not predict the namespace portion
    of the serialised event-type string.  A developer reading only
    `interface/events.clj` would guess the wrong browser case string.
 
    Format: [constructor → json-string (note)]. Returns the registry
    anomaly when the backing resource cannot be loaded."
-  (if (anomaly/anomaly? event-type-registry)
-    event-type-registry
-    (->> event-type-registry
+  [registry]
+  (if (anomaly/anomaly? registry)
+    registry
+    (->> registry
          (filter :asymmetry?)
          (mapv (fn [{:keys [constructor json-string asymmetry-note]}]
                  {:constructor    constructor
                   :json-string    json-string
                   :asymmetry-note asymmetry-note})))))
+
+;------------------------------------------------------------------------------ Layer 1
+
+(def ^{:stratum 1} browser-handled-events
+  (browser-handled-events-for event-type-registry))
+
+(def ^{:stratum 1} browser-unhandled-events
+  (browser-unhandled-events-for event-type-registry))
+
+(def ^{:stratum 1} naming-asymmetries
+  (naming-asymmetries-for event-type-registry))
 
 ;------------------------------------------------------------------------------ Rich Comment
 (comment

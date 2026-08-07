@@ -29,10 +29,17 @@
 
 ;------------------------------------------------------------------------------ Layer 1
 
-(def ^{:stratum 1} event-type-registry
+(defn ^{:stratum 1} load-event-type-registry
+  "Load the registry resource, returning a :not-found anomaly when absent."
+  []
   (if-let [resource (io/resource registry-resource-path)]
     (-> resource slurp edn/read-string)
     (anomaly/anomaly
      :not-found
      "Event type registry resource not found"
      {:resource-path registry-resource-path})))
+
+;------------------------------------------------------------------------------ Layer 2
+
+(def ^{:stratum 2} event-type-registry
+  (load-event-type-registry))

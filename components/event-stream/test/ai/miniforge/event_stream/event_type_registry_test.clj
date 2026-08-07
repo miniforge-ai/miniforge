@@ -18,8 +18,12 @@
 (ns ai.miniforge.event-stream.event-type-registry-test
   "Tests for event type registry integrity and derived views."
   (:require
+   [clojure.java.io :as io]
    [clojure.test :refer [deftest testing is]]
-   [ai.miniforge.event-stream.event-type-registry :as registry]))
+   [ai.miniforge.anomaly.interface :as anomaly]
+   [ai.miniforge.event-stream.event-type-registry :as registry]
+   [ai.miniforge.event-stream.event-type-registry.audit :as audit]
+   [ai.miniforge.event-stream.event-type-registry.data :as data]))
 
 ;------------------------------------------------------------------------------ Layer 0
 
@@ -124,3 +128,16 @@
 
   (testing "no string mismatches reported"
     (is (empty? (:string-mismatches registry/audit-summary)))))
+
+(deftest ^{:stratum 0} missing-registry-resource-propagates-as-anomaly-test
+  (let [missing-registry (with-redefs [io/resource (constantly nil)]
+                           (data/load-event-type-registry))]
+    (is (anomaly/anomaly? missing-registry))
+    (is (= :not-found (:anomaly/type missing-registry)))
+    (is (= missing-registry (audit/audit-summary-for missing-registry)))
+    (is (= missing-registry
+           (registry/browser-handled-events-for missing-registry)))
+    (is (= missing-registry
+           (registry/browser-unhandled-events-for missing-registry)))
+    (is (= missing-registry
+           (registry/naming-asymmetries-for missing-registry)))))
