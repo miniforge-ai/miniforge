@@ -111,9 +111,11 @@ contracts that make autonomous workflows credible to platform and security teams
  :evidence/signature string}        ; OPTIONAL
 ```
 
-The compliance keys here and the required set in §7.1 are one list. A key
-required by §7.1 that does not appear in this structure is a defect in this
-spec, not a choice for implementations.
+§7.1 defines the **required** compliance keys; this structure additionally
+shows the optional ones (`:compliance/retention-policy`,
+`:compliance/auditor-notes`). Every key §7.1 marks required MUST appear here —
+a required key missing from this structure is a defect in this spec, not a
+choice for implementations.
 
 ### 2.2 Intent Evidence
 
@@ -974,8 +976,9 @@ Evidence bundles MUST include:
 ### 7.2 Sensitive Data Handling
 
 **N3 §8 owns the redaction contract.** Evidence bundles inherit it rather than
-defining a second one: the excluded-value set of N3 §8.1, the marker of §8.2,
-and the truncation rules of §8.3 apply unchanged to bundle content.
+defining a second one: the excluded-value set of N3 §8.1, the marker of N3
+§8.2, and the truncation rules of N3 §8.3 apply unchanged to bundle content.
+(N6 has its own §8.2 and §8.3, so these references are qualified throughout.)
 
 In particular the marker is `"[REDACTED]"`, exactly as on the stream. An
 earlier revision of this section specified `[REDACTED:<type>]`; that variant is
@@ -1050,6 +1053,8 @@ Whatever surface presents a bundle MUST be able to show:
 - Gate executions with their resolved pack versions and hashes (§2.13)
 - Outcome
 - Seal status: whether `:evidence/content-hash` verifies (§2.14)
+
+### 8.2 Seal and Waiver Presentation
 
 Seal status is not decoration. A presented bundle whose hash does not verify
 MUST be shown as tampered rather than rendered as ordinary evidence, on every
