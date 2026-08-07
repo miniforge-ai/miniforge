@@ -18,14 +18,14 @@
 (ns ai.miniforge.pr-lifecycle.fix-loop-test
   "Unit tests for fix loop context building and prompt generation.
 
-   Tests fix context creation, prompt building for each failure type,
-   and resolve-comment-thread skip logic. Does NOT test actual
-   generation or git operations."
+   Tests fix context creation, prompt building for each failure type, and
+   conversation follow-up routing. Does not execute generation or git operations."
   (:require
    [clojure.test :refer [deftest testing is]]
    [clojure.string :as str]
    [ai.miniforge.dag-executor.interface :as dag]
-   [ai.miniforge.pr-lifecycle.fix-loop :as fix]))
+   [ai.miniforge.pr-lifecycle.fix-loop :as fix]
+   [ai.miniforge.pr-lifecycle.github-conversation :as conversation]))
 
 ;------------------------------------------------------------------------------ Layer 0
 
@@ -90,7 +90,7 @@
       (is (str/includes? prompt "Fix issues"))
       (is (str/includes? prompt "something broke")))))
 
-;------------------------------------------------------------------------------ Resolve Comment Thread (Skip Logic)
+;------------------------------------------------------------------------------ Conversation Follow-up
 (deftest ^{:stratum 0} resolve-comment-thread-skips-without-metadata-test
   (testing "Skips resolution when comment-id is missing"
     (let [ctx {:fix/comment-id nil :fix/parent-pr-number 123}
@@ -98,13 +98,18 @@
       (is (dag/ok? result))
       (is (true? (:skipped (:data result)))))))
 
-(deftest ^{:stratum 0} resolve-comment-thread-skips-when-disabled-test
-  (testing "Skips resolution when auto-resolve is false"
-    (let [ctx {:fix/comment-id 789 :fix/parent-pr-number 123}
-          result (fix/resolve-comment-thread "/tmp" ctx 456 nil
-                                              :auto-resolve false)]
-      (is (dag/ok? result))
-      (is (true? (:skipped (:data result)))))))
+(deftest ^{:stratum 0} resolve-comment-thread-replies-when-resolution-disabled-test
+  (testing "Posts the fix link while leaving resolution disabled"
+    (let [call (atom nil)]
+      (with-redefs [conversation/link-fix-pr-to-comment
+                    (fn [& args]
+                      (reset! call args)
+                      (dag/ok {:reply-posted true :resolved false}))]
+        (let [ctx {:fix/comment-id 789 :fix/parent-pr-number 123}
+              result (fix/resolve-comment-thread "/tmp" ctx 456 nil
+                                                  :auto-resolve false)]
+          (is (dag/ok? result))
+          (is (= [:auto-resolve false] (take-last 2 @call))))))))
 
 ;------------------------------------------------------------------------------ Layer 1
 
@@ -155,7 +160,7 @@
       (is (= prev (:fix/previous-fixes ctx))))))
 
 (deftest ^{:stratum 1} create-fix-context-comment-metadata-test
-  (testing "Comment metadata for conversation resolution"
+  (testing "Comment metadata for conversation follow-up"
     (let [failure {:type :review-changes
                    :summary "1 change"
                    :comment-id 456
@@ -163,3 +168,26 @@
           ctx (fix/create-fix-context test-task test-pr-info failure)]
       (is (= 456 (:fix/comment-id ctx)))
       (is (= 100 (:fix/parent-pr-number ctx))))))
+
+(deftest ^{:stratum 1} run-fix-loop-replies-when-resolution-disabled-test
+  (testing "Successful fixes still post the review reply in reply-only mode"
+    (let [follow-up-call (atom nil)
+          failure {:type :review-changes
+                   :summary "1 requested change"
+                   :comment-id 456
+                   :parent-pr-number 123}]
+      (with-redefs [fix/generate-fix
+                    (fn [& _] {:success true :artifact {} :metrics {}})
+                    fix/apply-fix-to-worktree (fn [& _] (dag/ok {}))
+                    fix/commit-fix (fn [& _] (dag/ok {:commit-sha "abc123"}))
+                    fix/resolve-comment-thread
+                    (fn [& args]
+                      (reset! follow-up-call args)
+                      (dag/ok {:reply-posted true :resolved false}))]
+        (let [result (fix/run-fix-loop
+                      test-task test-pr-info failure (fn [& _]) {}
+                      :worktree-path "/tmp"
+                      :auto-resolve-comments false)]
+          (is (:success? result))
+          (is (= [:auto-resolve false]
+                 (take-last 2 @follow-up-call))))))))

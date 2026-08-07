@@ -22,7 +22,6 @@
    for resolving conversation threads and posting replies to comments."
   (:require
    [ai.miniforge.dag-executor.interface :as dag]
-   [ai.miniforge.logging.interface :as log]
    [babashka.process :as process]
    [cheshire.core :as json]
    [clojure.string :as str]))
@@ -186,20 +185,6 @@
 
 ;------------------------------------------------------------------------------ Layer 2
 
-(defn ^{:stratum 2} graphql-mutation
-  "Execute a GraphQL mutation via gh CLI.
-
-   Arguments:
-   - mutation: GraphQL mutation string
-   - worktree-path: Path to git worktree
-
-   Options:
-   - :variables - Map of GraphQL variables
-
-   Returns DAG result with parsed JSON response"
-  [mutation worktree-path & {:keys [variables]}]
-  (graphql-query mutation worktree-path :variables variables))
-
 ;; GitHub API operations
 (defn ^{:stratum 2} get-thread-id
   "Get GraphQL thread ID from a comment ID.
@@ -317,26 +302,25 @@
             (dag/err :json-parse-error (.getMessage e))))
         result))))
 
-;------------------------------------------------------------------------------ Layer 3
-
-(defn ^{:stratum 3} resolve-conversation
+(defn ^{:stratum 2} resolve-conversation
   "Mark a conversation thread as resolved via GraphQL.
 
    Arguments:
    - worktree-path: Path to git worktree
    - thread-id: GraphQL thread ID (starts with 'PRRT_' or 'RT_')
 
-   Returns DAG result with resolution status or error"
+  Returns DAG result with resolution status or error"
   [worktree-path thread-id]
-  (let [mutation (str "mutation {
-  resolveReviewThread(input: {threadId: \"" thread-id "\"}) {
+  (let [mutation "mutation($threadId:ID!) {
+  resolveReviewThread(input: {threadId: $threadId}) {
     thread {
       id
       isResolved
     }
   }
-}")
-        result (graphql-mutation mutation worktree-path)]
+}"
+        result (graphql-query mutation worktree-path
+                              :variables {:threadId thread-id})]
     (if (dag/ok? result)
       (let [thread (get-in (:data result) [:data :resolveReviewThread :thread])
             is-resolved (:isResolved thread)]
@@ -347,135 +331,6 @@
                    "Thread resolution returned false"
                    {:thread-id thread-id :thread thread})))
       result)))
-
-;------------------------------------------------------------------------------ Layer 4
-
-;; High-level conversation operations
-(defn ^{:stratum 4} link-fix-pr-to-comment
-  "Link a fix PR to a review comment and resolve the conversation.
-
-   This is the main entry point for conversation resolution after
-   creating a fix PR. It:
-   1. Posts a reply linking to the fix PR
-   2. Resolves the conversation thread (if configured)
-
-   Arguments:
-   - worktree-path: Path to git worktree
-   - pr-number: Original PR number (where comment was made)
-   - comment-id: Comment ID to reply to
-   - fix-pr-number: Fix PR number to link
-   - logger: Optional logger instance
-
-   Options:
-   - :auto-resolve - Whether to resolve conversation (default true)
-   - :message-template - Custom message template (default: 'Fixed in PR #{fix-pr-number}')
-
-   Returns DAG result with success status and actions taken"
-  [worktree-path pr-number comment-id fix-pr-number logger
-   & {:keys [auto-resolve message-template]
-      :or {auto-resolve true
-           message-template "Fixed in PR #{fix-pr-number}"}}]
-  (when logger
-    (log/info logger :pr-lifecycle :github/linking-fix-pr
-              {:message "Linking fix PR to comment"
-               :data {:pr-number pr-number
-                      :comment-id comment-id
-                      :fix-pr-number fix-pr-number}}))
-
-  (let [;; Build reply message
-        message (str/replace message-template "#{fix-pr-number}" (str "#" fix-pr-number))
-
-        ;; Step 1: Post reply
-        reply-result (reply-to-comment worktree-path pr-number comment-id message)]
-
-    (if (dag/err? reply-result)
-      ;; Reply failed - log warning but don't fail completely
-      (do
-        (when logger
-          (log/warn logger :pr-lifecycle :github/reply-failed
-                    {:message "Failed to post reply to comment"
-                     :data {:error (:error reply-result)
-                            :pr-number pr-number
-                            :comment-id comment-id}}))
-        (dag/err :reply-failed
-                 (:error reply-result)
-                 {:pr-number pr-number
-                  :comment-id comment-id
-                  :fix-pr-number fix-pr-number}))
-
-      ;; Reply succeeded
-      (do
-        (when logger
-          (log/info logger :pr-lifecycle :github/reply-posted
-                    {:message "Posted reply to comment"
-                     :data {:reply-url (:url (:data reply-result))}}))
-
-        ;; Step 2: Resolve conversation (if enabled)
-        (if-not auto-resolve
-          (dag/ok {:reply-posted true
-                   :resolved false
-                   :reply-url (:url (:data reply-result))})
-
-          ;; Try to resolve
-          (let [;; First, get thread ID from comment ID
-                thread-result (get-thread-id worktree-path pr-number comment-id)]
-
-            (if (dag/err? thread-result)
-              ;; Can't get thread ID - log warning but return success for reply
-              (do
-                (when logger
-                  (log/warn logger :pr-lifecycle :github/thread-id-failed
-                            {:message "Could not get thread ID for resolution"
-                             :data {:error (:error thread-result)
-                                    :comment-id comment-id}}))
-                (dag/ok {:reply-posted true
-                         :resolved false
-                         :resolution-error (:error thread-result)
-                         :reply-url (:url (:data reply-result))}))
-
-              ;; Got thread ID - try to resolve
-              (let [thread-id (:thread-id (:data thread-result))
-                    already-resolved (:is-resolved (:data thread-result))]
-
-                (if already-resolved
-                  ;; Already resolved
-                  (do
-                    (when logger
-                      (log/info logger :pr-lifecycle :github/already-resolved
-                                {:message "Thread already resolved"
-                                 :data {:thread-id thread-id}}))
-                    (dag/ok {:reply-posted true
-                             :resolved true
-                             :already-resolved true
-                             :thread-id thread-id
-                             :reply-url (:url (:data reply-result))}))
-
-                  ;; Try to resolve
-                  (let [resolve-result (resolve-conversation worktree-path thread-id)]
-                    (if (dag/ok? resolve-result)
-                      (do
-                        (when logger
-                          (log/info logger :pr-lifecycle :github/conversation-resolved
-                                    {:message "Conversation resolved successfully"
-                                     :data {:thread-id thread-id
-                                            :pr-number pr-number}}))
-                        (dag/ok {:reply-posted true
-                                 :resolved true
-                                 :thread-id thread-id
-                                 :reply-url (:url (:data reply-result))}))
-
-                      ;; Resolution failed - log warning but return success for reply
-                      (do
-                        (when logger
-                          (log/warn logger :pr-lifecycle :github/resolution-failed
-                                    {:message "Failed to resolve conversation"
-                                     :data {:error (:error resolve-result)
-                                            :thread-id thread-id}}))
-                        (dag/ok {:reply-posted true
-                                 :resolved false
-                                 :resolution-error (:error resolve-result)
-                                 :thread-id thread-id
-                                 :reply-url (:url (:data reply-result))})))))))))))))
 
 ;------------------------------------------------------------------------------ Rich Comment
 (comment
@@ -490,18 +345,5 @@
   ;; Resolve a conversation
   (resolve-conversation "/path/to/repo" "PRRT_kwDO...")
   ; => {:success true :data {:thread-id "PRRT_..." :resolved true}}
-
-  ;; High-level: link fix PR and resolve
-  (link-fix-pr-to-comment "/path/to/repo" 148 2780310737 150 nil)
-  ; => {:success true :data {:reply-posted true :resolved true :thread-id "PRRT_..." ...}}
-
-  ;; With custom message
-  (link-fix-pr-to-comment "/path/to/repo" 148 2780310737 150 nil
-                          :message-template "Addressed in PR #{fix-pr-number}")
-
-  ;; Disable auto-resolution
-  (link-fix-pr-to-comment "/path/to/repo" 148 2780310737 150 nil
-                          :auto-resolve false)
-  ; => {:success true :data {:reply-posted true :resolved false ...}}
 
   :leave-this-here)
