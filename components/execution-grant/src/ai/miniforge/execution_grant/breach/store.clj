@@ -24,22 +24,20 @@
    [ai.miniforge.anomaly.interface :as anomaly]
    [ai.miniforge.execution-grant.messages :as msg]
    [ai.miniforge.execution-grant.schema :as schema]
+   [ai.miniforge.execution-grant.temporal :as temporal]
    [clojure.edn :as edn]
    [clojure.java.io :as io]
    [malli.core :as m])
   (:import
    [java.io File]
    [java.nio.file FileAlreadyExistsException Files]
-   [java.time Instant]
-   [java.util Date]))
+   [java.time Instant]))
 
 ;------------------------------------------------------------------------------ Layer 0
 
 (defn- ^{:stratum 0} ->iso
   ^String [value]
-  (if (instance? Instant value)
-    (.toString ^Instant value)
-    (.toString (.toInstant ^Date value))))
+  (.toString (temporal/->instant value)))
 
 (defn- ^{:stratum 0} breach-file?
   [^File file]

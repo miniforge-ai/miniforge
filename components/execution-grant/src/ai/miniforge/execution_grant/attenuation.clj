@@ -28,11 +28,10 @@
    Every check states the violation it found rather than returning a
    bare false: `delegate` reports which axis was widened, so a refused
    delegation is diagnosable."
-  (:require
+   (:require
    [ai.miniforge.execution-grant.messages :as msg]
-   [ai.miniforge.execution-grant.schema :as schema])
-  (:import
-   [java.time Instant]))
+   [ai.miniforge.execution-grant.schema :as schema]
+   [ai.miniforge.execution-grant.temporal :as temporal]))
 
 ;------------------------------------------------------------------------------ Layer 0
 
@@ -57,9 +56,9 @@
    outlasts the pass it was cut from is authority created out of
    nothing."
   [parent child]
-  (let [^Instant p (:grant/expires-at parent)
-        ^Instant c (:grant/expires-at child)]
-    (or (nil? p) (nil? c) (.isAfter c p))))
+  (let [parent-expiry (temporal/->instant (:grant/expires-at parent))
+        child-expiry (temporal/->instant (:grant/expires-at child))]
+    (.isAfter child-expiry parent-expiry)))
 
 (defn- ^{:stratum 0} violation
   "Describe one axis on which a child grant widens its parent."
