@@ -1,0 +1,16 @@
+;; Title: Miniforge.ai
+;; Author: Christopher Lester (christopher@miniforge.ai)
+;; Copyright 2025-2026 Christopher Lester. Licensed under Apache 2.0.
+
+{:gate/system
+ {:decide/policy-rule-violated "policy rule violated"
+  :decide/missing-artifact "gates configured but no artifact was produced"
+  :decide/check-failed "check failed"
+  :decide/gate-failed "gate {gate} failed: {message}"
+  :decide/breach "{axis}: {observed} exceeds {limit}"
+  :decide/grant-absent "no grant covers this effect"
+  :decide/grant-inactive "grant is not active"
+  :decide/grant-inactive-revoked "grant is not active (revoked: {reason})"
+  :decide/grant-scope-mismatch "Effect is outside the grant scope"
+  :decide/grant-exceeded-no-detail "grant exceeded; no breach detail supplied"
+  :decide/unrecognized-grant-outcome "unrecognized grant outcome: {outcome}"}}

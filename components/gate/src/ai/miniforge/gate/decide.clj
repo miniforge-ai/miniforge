@@ -24,14 +24,17 @@
    pass."
   (:require
    [ai.miniforge.decision-envelope.interface :as env]
-   [ai.miniforge.gate.messages :as msg]))
+   [ai.miniforge.gate.grant :as grant]
+   [ai.miniforge.gate.messages :as msg]
+   [ai.miniforge.gate.reason :as reason]))
 
 ;------------------------------------------------------------------------------ Layer 0
 
-;; Translation helpers
 (defn- ^{:stratum 0} violation-detail
   [v]
-  (str (or (:message v) (:current v) "policy rule violated")))
+  (str (or (:message v)
+           (:current v)
+           (msg/system-t :decide/policy-rule-violated))))
 
 (defn- ^{:stratum 0} rule-id
   [v]
@@ -40,49 +43,24 @@
 (defn ^{:stratum 0} missing-artifact-reason
   "The nil-artifact-fails-the-gate discipline as a reason (wired by 1d)."
   []
-  {:reason/code :reason/missing-artifact
-   :reason/detail "gates configured but no artifact was produced"})
+  (reason/create :reason/missing-artifact
+                 (msg/system-t :decide/missing-artifact)))
 
 (defn ^{:stratum 0} allowed?
   "True when the envelope's decision is not :deny."
   [envelope]
   (not= :deny (:envelope/decision envelope)))
 
-;; Grant translation (Ariadne 2b)
-(defn- ^{:stratum 0} breach-detail
-  "Render one breach. `axis` is printed defensively rather than
-   `name`-d: this translator takes plain data, and a malformed entry
-   must still produce a deny reason instead of throwing on its way to
-   describing one."
-  [{:constraint/keys [axis limit observed]}]
-  (str (if (keyword? axis) (name axis) (pr-str axis))
-       ": " observed " exceeds " limit))
+(defn- ^{:stratum 0} mechanical-failure-reason
+  [result]
+  (let [gate (name (get result :gate :unknown))
+        error (first (:errors result))
+        detail (or (:message error) (msg/system-t :decide/check-failed))]
+    (reason/create :reason/gate-check-failed
+                   (msg/system-t :decide/gate-failed
+                                 {:gate gate :message detail}))))
 
 ;------------------------------------------------------------------------------ Layer 1
-
-(defn ^{:stratum 1} gates->envelope
-  "Phase-level envelope from a `check-gates` result (Ariadne 1d): ONE
-   envelope per gated transition. Policy-gate results already carry an
-   envelope — their reasons and obligations merge in; a mechanical gate
-   failure contributes a :reason/gate-check-failed; a nil artifact with
-   gates configured contributes :reason/missing-artifact. Pins come
-   from the first policy envelope present (nil pins otherwise)."
-  [{:keys [results]} artifact-nil?]
-  (let [gate-envs (keep :envelope results)
-        mech-failures (remove :envelope (remove :passed? results))
-        pins (or (:envelope/pins (first gate-envs))
-                 {:pins/pack-revision nil :pins/rule-ids [] :pins/event-watermark nil})]
-    (env/envelope
-     (concat (mapcat :envelope/reasons gate-envs)
-             (map (fn [r]
-                    {:reason/code :reason/gate-check-failed
-                     :reason/detail (str "gate " (name (get r :gate :unknown))
-                                         " failed: "
-                                         (or (:message (first (:errors r))) "check failed"))})
-                  mech-failures)
-             (when artifact-nil? [(missing-artifact-reason)]))
-     (mapcat :envelope/obligations gate-envs)
-     pins)))
 
 ;; Reason/obligation translation
 (defn- ^{:stratum 1} unknown->reason
@@ -105,45 +83,26 @@
    :obligation/rule-id (rule-id v)
    :obligation/detail (violation-detail v)})
 
-(defn ^{:stratum 1} grant->reasons
-  "Translate an `execution-grant/authorize` result into envelope
-   reasons. `nil` means no grant was required — phase gating is not an
-   effect — and yields no reasons, which is what keeps every existing
-   `decide` caller behaving exactly as it does today.
-
-   Every non-authorized outcome is deny-class. `:inactive` reports as
-   `:reason/grant-absent` rather than a code of its own: a revoked or
-   expired grant is precisely the case of 'no ACTIVE grant covers this
-   effect', and the detail says which."
-  [result]
-  (case (:grant/outcome result)
-    nil []
-    :authorized []
-    :absent [{:reason/code :reason/grant-absent
-              :reason/detail "no grant covers this effect"}]
-    :inactive [{:reason/code :reason/grant-absent
-                :reason/detail (str "grant is not active"
-                                    (when-let [r (:grant/revocation-reason result)]
-                                      (str " (revoked: " (name r) ")")))}]
-    :scope-mismatch [{:reason/code :reason/grant-scope-mismatch
-                      :reason/detail (msg/t :decide/grant-scope-mismatch)}]
-    ;; An :exceeded outcome ALWAYS yields at least one deny reason. If
-    ;; the breach detail is missing or empty, mapping over it would
-    ;; produce zero reasons — and zero reasons is an ALLOW. The outcome
-    ;; is the authority here; the detail is only description.
-    :exceeded (let [breaches (:constraint/breaches result)]
-                (if (seq breaches)
-                  (mapv (fn [b]
-                          {:reason/code :reason/grant-exceeded
-                           :reason/detail (breach-detail b)})
-                        breaches)
-                  [{:reason/code :reason/grant-exceeded
-                    :reason/detail "grant exceeded; no breach detail supplied"}]))
-    ;; An outcome this translator does not know is an outcome nobody
-    ;; decided the meaning of — deny rather than drop it silently.
-    [{:reason/code :reason/grant-absent
-      :reason/detail (str "unrecognized grant outcome: "
-                          (pr-str (:grant/outcome result)))}]))
+(defn ^{:stratum 1} gates->envelope
+  "Phase-level envelope from a `check-gates` result (Ariadne 1d): ONE
+   envelope per gated transition. Policy-gate results already carry an
+   envelope — their reasons and obligations merge in; a mechanical gate
+   failure contributes a :reason/gate-check-failed; a nil artifact with
+   gates configured contributes :reason/missing-artifact. Pins come
+   from the first policy envelope present (nil pins otherwise)."
+  [{:keys [results]} artifact-nil?]
+  (let [gate-envs (keep :envelope results)
+        mech-failures (remove :envelope (remove :passed? results))
+        pins (or (:envelope/pins (first gate-envs))
+                 {:pins/pack-revision nil
+                  :pins/rule-ids []
+                  :pins/event-watermark nil})]
+    (env/envelope
+     (concat (mapcat :envelope/reasons gate-envs)
+             (map mechanical-failure-reason mech-failures)
+             (when artifact-nil? [(missing-artifact-reason)]))
+     (mapcat :envelope/obligations gate-envs)
+     pins)))
 
 ;------------------------------------------------------------------------------ Layer 2
 
@@ -169,7 +128,7 @@
    (env/envelope
     (concat (map blocking->reason blocking)
             (map unknown->reason unknown)
-            (grant->reasons grant-result))
+            (grant/reasons grant-result))
     (concat (map (partial obligation :obligation/approval-required) require-approval)
             (map (partial obligation :obligation/warn-recorded) warnings)
             (map (partial obligation :obligation/audit-recorded) audits))

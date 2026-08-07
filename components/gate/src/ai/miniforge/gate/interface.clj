@@ -29,6 +29,7 @@
      (repair-gate :lint artifact errors ctx)"
   (:require
    [ai.miniforge.gate.decide :as decide]
+   [ai.miniforge.gate.grant :as grant]
    ;; Require implementations for side effects
    [ai.miniforge.gate.syntax]
    [ai.miniforge.gate.lint]
@@ -138,7 +139,7 @@
 (def ^{:stratum 0} grant->reasons
   "Translate an `execution-grant/authorize` result into envelope
    reasons; nil (no grant required) yields none."
-  decide/grant->reasons)
+  grant/reasons)
 
 ;------------------------------------------------------------------------------ Layer 1
 

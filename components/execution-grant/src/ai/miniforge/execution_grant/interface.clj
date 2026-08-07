@@ -19,11 +19,12 @@
   "Public API for the execution-grant component (Ariadne step 2a):
    bounded authority to perform an irreversible effect.
 
-   `decide()` and effect-transaction both consult grants. Production
-   call sites still await the runtime issuer before they can remove
-   their explicit unenforced-authority marker. This component owns the
-   object and its rules: issuance, attenuated delegation, revocation as
-   a state, scope and ceiling authorization, and liveness over lineage."
+   Decision gating consumes authorization results, and
+   effect-transaction rechecks grants at commit. Production call sites
+   still await the runtime issuer before they can remove their explicit
+   unenforced-authority marker. This component owns the object and its
+   rules: issuance, attenuated delegation, revocation as a state, scope
+   and ceiling authorization, and liveness over lineage."
   (:require
    [ai.miniforge.execution-grant.attenuation :as attenuation]
    [ai.miniforge.execution-grant.breach :as breach]

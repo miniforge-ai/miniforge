@@ -40,7 +40,7 @@
     :reason/unknown-severity
     :reason/missing-artifact
     :reason/gate-check-failed
-    ;; A ceiling that denies only sometimes is not a ceiling. Both grant
+    ;; A ceiling that denies only sometimes is not a ceiling. Grant
     ;; reasons are deny-class, so an effect over budget or lacking
     ;; authority cannot be downgraded to an obligation and proceed.
     :reason/grant-exceeded

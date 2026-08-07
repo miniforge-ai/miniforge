@@ -63,9 +63,6 @@
   :policy-pack/compile-error
   "Policy pack compilation failed: {message}"
 
-  :decide/grant-scope-mismatch
-  "Effect is outside the grant scope"
-
   :opsv/instrumentation-description "Validates required OPSV signals"
   :opsv/instrumentation-failed "Required instrumentation is unavailable or unreliable"
   :opsv/instrumentation-remediation "Configure and verify every required signal before execution"
