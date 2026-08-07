@@ -23,7 +23,7 @@
   (:require
    [ai.miniforge.dag-executor.interface :as dag]
    [ai.miniforge.pr-lifecycle.events :as events]
-   [ai.miniforge.pr-lifecycle.github :as github]
+   [ai.miniforge.pr-lifecycle.github-conversation :as conversation]
    [ai.miniforge.pr-lifecycle.triage :as triage]
    [ai.miniforge.loop.interface :as loop]
    [ai.miniforge.logging.interface :as log]
@@ -259,7 +259,7 @@
                             :comment-id comment-id
                             :fix-pr fix-pr-number}}))
 
-        (let [result (github/link-fix-pr-to-comment
+        (let [result (conversation/link-fix-pr-to-comment
                       worktree-path parent-pr-number comment-id fix-pr-number logger
                       :auto-resolve auto-resolve)]
           (when (dag/ok? result)
