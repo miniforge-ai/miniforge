@@ -22,39 +22,47 @@
 
 ;------------------------------------------------------------------------------ Layer 0
 
-(defn ^{:stratum 0} evaluate
-  "Run enabled checks and return every blocking reason."
+(defn- ^{:stratum 0} enabled-checks
   [{:keys [check-ci check-review check-branch check-threads]}
    worktree-path pr-number policy]
-  (let [ci-check (when (:require-ci-green? policy)
-                   (check-ci worktree-path pr-number))
-        review-check (when (:require-approvals? policy)
-                       (check-review worktree-path pr-number
-                                     (:required-approvals policy)))
-        branch-check (when (:require-branch-up-to-date? policy)
-                       (check-branch worktree-path pr-number))
-        thread-check (when (:require-no-unresolved-threads? policy)
-                       (check-threads worktree-path pr-number))
-        checks {:ci ci-check
-                :review review-check
-                :branch branch-check
-                :threads thread-check}
-        blocking (cond-> []
-                   (and ci-check (not (:ci-green? (:data ci-check))))
-                   (conj :ci-not-green)
+  {:ci (when (:require-ci-green? policy)
+         (check-ci worktree-path pr-number))
+   :review (when (:require-approvals? policy)
+             (check-review worktree-path pr-number
+                           (:required-approvals policy)))
+   :branch (when (:require-branch-up-to-date? policy)
+             (check-branch worktree-path pr-number))
+   :threads (when (:require-no-unresolved-threads? policy)
+              (check-threads worktree-path pr-number))})
 
-                   (and review-check (not (:approved? (:data review-check))))
-                   (conj :not-approved)
+(defn- ^{:stratum 0} blocking-reasons
+  [{:keys [ci review branch threads]}]
+  (cond-> []
+    (and ci (not (:ci-green? (:data ci))))
+    (conj :ci-not-green)
 
-                   (and branch-check (not (:up-to-date? (:data branch-check))))
-                   (conj :branch-not-up-to-date)
+    (and review (not (:approved? (:data review))))
+    (conj :not-approved)
 
-                   (and thread-check (dag/err? thread-check))
-                   (conj :thread-status-unavailable)
+    (dag/err? branch)
+    (conj :branch-status-unavailable)
 
-                   (and (dag/ok? thread-check)
-                        (:has-unresolved? (:data thread-check)))
-                   (conj :unresolved-threads))]
+    (and (dag/ok? branch) (not (:up-to-date? (:data branch))))
+    (conj :branch-not-up-to-date)
+
+    (dag/err? threads)
+    (conj :thread-status-unavailable)
+
+    (and (dag/ok? threads) (:has-unresolved? (:data threads)))
+    (conj :unresolved-threads)))
+
+;------------------------------------------------------------------------------ Layer 1
+
+(defn ^{:stratum 1} evaluate
+  "Run enabled checks and return every blocking reason."
+  [operations worktree-path pr-number policy]
+  (let [checks (enabled-checks operations worktree-path pr-number policy)
+        blocking (blocking-reasons checks)]
     {:ready? (empty? blocking)
      :checks checks
      :blocking blocking}))
