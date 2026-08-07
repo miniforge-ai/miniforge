@@ -21,63 +21,37 @@
    [ai.miniforge.dag-executor.interface :as dag]
    [ai.miniforge.logging.interface :as log]
    [ai.miniforge.pr-lifecycle.github :as github]
+   [ai.miniforge.pr-lifecycle.github-conversation-resolution :as resolution]
    [clojure.string :as str]))
 
 ;------------------------------------------------------------------------------ Layer 0
 
-(defn- ^{:stratum 0} reply-outcome
-  "Build the shared successful-reply result shape."
-  [reply-result resolved? details]
-  (dag/ok (merge {:reply-posted true :resolved resolved?
-                  :reply-url (:url (:data reply-result))}
-                 details)))
+(defn- ^{:stratum 0} reply-failure-result
+  [pr-number comment-id fix-pr-number reply-result logger]
+  (when logger
+    (log/warn logger :pr-lifecycle :github/reply-failed
+              {:message "Failed to post reply to comment"
+               :data {:error (:error reply-result) :pr-number pr-number
+                      :comment-id comment-id}}))
+  (dag/err :reply-failed
+           (get-in reply-result [:error :message]
+                   "Failed to post reply to comment")
+           {:pr-number pr-number :comment-id comment-id
+            :fix-pr-number fix-pr-number
+            :cause (:error reply-result)}))
+
+(defn- ^{:stratum 0} continue-after-reply
+  [worktree-path pr-number comment-id reply-result auto-resolve logger]
+  (when logger
+    (log/info logger :pr-lifecycle :github/reply-posted
+              {:message "Posted reply to comment"
+               :data {:reply-url (:url (:data reply-result))}}))
+  (resolution/resolve-after-reply worktree-path pr-number comment-id
+                                  reply-result auto-resolve logger))
 
 ;------------------------------------------------------------------------------ Layer 1
 
-(defn- ^{:stratum 1} resolve-after-reply
-  "Resolve a replied-to thread when requested, preserving reply success."
-  [worktree-path pr-number comment-id reply-result auto-resolve logger]
-  (if-not auto-resolve
-    (reply-outcome reply-result false {})
-    (let [thread-result (github/get-thread-id worktree-path pr-number comment-id)]
-      (cond
-        (dag/err? thread-result)
-        (do
-          (when logger
-            (log/warn logger :pr-lifecycle :github/thread-id-failed
-                      {:message "Could not get thread ID for resolution"
-                       :data {:error (:error thread-result) :comment-id comment-id}}))
-          (reply-outcome reply-result false {:resolution-error (:error thread-result)}))
-
-        (:is-resolved (:data thread-result))
-        (let [thread-id (:thread-id (:data thread-result))]
-          (when logger
-            (log/info logger :pr-lifecycle :github/already-resolved
-                      {:message "Thread already resolved"
-                       :data {:thread-id thread-id}}))
-          (reply-outcome reply-result true {:already-resolved true :thread-id thread-id}))
-
-        :else
-        (let [thread-id (:thread-id (:data thread-result))
-              result (github/resolve-conversation worktree-path thread-id)]
-          (if (dag/ok? result)
-            (do
-              (when logger
-                (log/info logger :pr-lifecycle :github/conversation-resolved
-                          {:message "Conversation resolved successfully"
-                           :data {:thread-id thread-id :pr-number pr-number}}))
-              (reply-outcome reply-result true {:thread-id thread-id}))
-            (do
-              (when logger
-                (log/warn logger :pr-lifecycle :github/resolution-failed
-                          {:message "Failed to resolve conversation"
-                           :data {:error (:error result) :thread-id thread-id}}))
-              (reply-outcome reply-result false {:resolution-error (:error result)
-                                                 :thread-id thread-id}))))))))
-
-;------------------------------------------------------------------------------ Layer 2
-
-(defn ^{:stratum 2} link-fix-pr-to-comment
+(defn ^{:stratum 1} link-fix-pr-to-comment
   "Reply with a fix PR link and optionally resolve the review thread."
   [worktree-path pr-number comment-id fix-pr-number logger
    & {:keys [auto-resolve message-template]
@@ -86,28 +60,13 @@
   (when logger
     (log/info logger :pr-lifecycle :github/linking-fix-pr
               {:message "Linking fix PR to comment"
-               :data {:pr-number pr-number :comment-id comment-id :fix-pr-number fix-pr-number}}))
+               :data {:pr-number pr-number :comment-id comment-id
+                      :fix-pr-number fix-pr-number}}))
   (let [message (str/replace message-template "#{fix-pr-number}"
                              (str "#" fix-pr-number))
         reply-result (github/reply-to-comment worktree-path pr-number
                                               comment-id message)]
     (if (dag/err? reply-result)
-      (do
-        (when logger
-          (log/warn logger :pr-lifecycle :github/reply-failed
-                    {:message "Failed to post reply to comment"
-                     :data {:error (:error reply-result) :pr-number pr-number
-                            :comment-id comment-id}}))
-        (dag/err :reply-failed
-                 (get-in reply-result [:error :message]
-                         "Failed to post reply to comment")
-                 {:pr-number pr-number :comment-id comment-id
-                  :fix-pr-number fix-pr-number
-                  :cause (:error reply-result)}))
-      (do
-        (when logger
-          (log/info logger :pr-lifecycle :github/reply-posted
-                    {:message "Posted reply to comment"
-                     :data {:reply-url (:url (:data reply-result))}}))
-        (resolve-after-reply worktree-path pr-number comment-id
-                             reply-result auto-resolve logger)))))
+      (reply-failure-result pr-number comment-id fix-pr-number reply-result logger)
+      (continue-after-reply worktree-path pr-number comment-id reply-result
+                            auto-resolve logger))))
