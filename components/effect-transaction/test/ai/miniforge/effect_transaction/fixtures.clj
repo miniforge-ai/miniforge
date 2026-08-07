@@ -41,6 +41,12 @@
   []
   (str (.toFile (Files/createTempDirectory "fx-test" (into-array FileAttribute [])))))
 
+(defn ^{:stratum 0} record-success!
+  "Record that a test effect fired and report definite success."
+  [fired]
+  (reset! fired true)
+  {:effect/outcome :succeeded})
+
 ;------------------------------------------------------------------------------ Layer 1
 
 (defn ^{:stratum 1} merge-grant
