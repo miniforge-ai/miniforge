@@ -37,10 +37,10 @@
 ;------------------------------------------------------------------------------ Layer 1
 
 (deftest ^{:stratum 1} reconcile-reads-the-world-not-the-log-test
-  (let [dir (tmp-dir)
-        g (merge-grant)]
+  (let [dir (tmp-dir)]
     (testing "the observation comes from the probe, and a match is recorded"
-      (let [t (propose-merge! dir g)
+      (let [g (merge-grant)
+            t (propose-merge! dir g)
             unknown (fx/commit! dir t g {} now (fn [] (throw (ex-info "boom" {}))))
             settled (fx/reconcile! dir unknown
                                    (fn [_] {:effect/observed {:pr/state "MERGED"
@@ -52,7 +52,8 @@
         (is (true? (:effect/matched? settled)))))
 
     (testing "a MISMATCH is recorded, not smoothed over"
-      (let [t (propose-merge! dir g)
+      (let [g (merge-grant)
+            t (propose-merge! dir g)
             unknown (fx/commit! dir t g {} now (fn [] (throw (ex-info "boom" {}))))
             settled (fx/reconcile! dir unknown
                                    (fn [_] {:effect/observed {:pr/state "CLOSED"}
@@ -63,7 +64,8 @@
             "finding out includes finding out you were wrong")))
 
     (testing "a probe that throws leaves the record unresolved for a later attempt"
-      (let [t (propose-merge! dir g)
+      (let [g (merge-grant)
+            t (propose-merge! dir g)
             unknown (fx/commit! dir t g {} now (fn [] (throw (ex-info "boom" {}))))
             result (fx/reconcile! dir unknown (fn [_] (throw (ex-info "network" {}))) later)]
         (is (anomaly/anomaly? result))
@@ -71,7 +73,8 @@
             "marking :reconciled here would assert we found out when we did not")))
 
     (testing "a probe answering in an unreadable shape also leaves it unresolved"
-      (let [t (propose-merge! dir g)
+      (let [g (merge-grant)
+            t (propose-merge! dir g)
             unknown (fx/commit! dir t g {} now (fn [] (throw (ex-info "boom" {}))))
             result (fx/reconcile! dir unknown (constantly {:something :else}) later)]
         (is (anomaly/anomaly? result))
@@ -81,7 +84,8 @@
       ;; The probe returns caller-shaped data, so any in-band sentinel is
       ;; a value it could legitimately carry. Wrapping the answer instead
       ;; of probing it for a marker is what keeps that from colliding.
-      (let [t (propose-merge! dir g)
+      (let [g (merge-grant)
+            t (propose-merge! dir g)
             unknown (fx/commit! dir t g {} now (fn [] (throw (ex-info "boom" {}))))
             settled (fx/reconcile! dir unknown
                                    (constantly {:effect/observed {:threw "not an error"}
@@ -92,7 +96,8 @@
         (is (true? (:effect/matched? settled)))))
 
     (testing "an answer with no :effect/matched? records a mismatch, not a match"
-      (let [t (propose-merge! dir g)
+      (let [g (merge-grant)
+            t (propose-merge! dir g)
             unknown (fx/commit! dir t g {} now (fn [] (throw (ex-info "boom" {}))))
             settled (fx/reconcile! dir unknown
                                    (constantly {:effect/observed {:pr/state "MERGED"}})
@@ -102,7 +107,8 @@
             "an unflagged disagreement is worse than a flagged one")))
 
     (testing "an already-settled record is not reconcilable"
-      (let [t (propose-merge! dir g)
+      (let [g (merge-grant)
+            t (propose-merge! dir g)
             done (fx/commit! dir t g {} now (fn [] {:effect/outcome :succeeded}))]
         (is (anomaly/anomaly?
              (fx/reconcile! dir done (constantly {:effect/observed :x}) later)))))))
@@ -131,10 +137,13 @@
   ;; true nor useful here. A wrong lifecycle position is a :conflict; a
   ;; probe that did not answer is :unavailable — transient, ask again.
   (let [dir (tmp-dir)
-        g (merge-grant)
-        settled (fx/commit! dir (propose-merge! dir g) g {} now
+        settled-grant (merge-grant)
+        unknown-grant (merge-grant)
+        settled (fx/commit! dir (propose-merge! dir settled-grant)
+                            settled-grant {} now
                             (fn [] {:effect/outcome :succeeded}))
-        unknown (fx/commit! dir (propose-merge! dir g) g {} now
+        unknown (fx/commit! dir (propose-merge! dir unknown-grant)
+                            unknown-grant {} now
                             (fn [] (throw (ex-info "boom" {}))))]
     (testing "reconciling a settled record is a :conflict, not a permission error"
       (is (= :conflict (:anomaly/type
