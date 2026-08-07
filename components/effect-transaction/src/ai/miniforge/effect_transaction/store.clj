@@ -26,6 +26,13 @@
 
 (def ^{:stratum 0} record-file persistence/record-file)
 
+(defn- ^{:stratum 0} invalid-id
+  [id]
+  (anomaly/sub-anomaly :invalid-input
+                       :anomalies.effect-transaction/invalid
+                       (msg/t :record/input-invalid)
+                       {:effect/id id}))
+
 (defn ^{:stratum 0} not-found
   "Return a conflict for a transaction absent from the durable store."
   [id]
@@ -57,17 +64,20 @@
   [dir record]
   (persistence/create! dir record))
 
-(defn ^{:stratum 0} read-record
-  "Read one record by id, nil when absent, or an anomaly on corruption."
-  [dir id]
-  (persistence/read-record dir id))
-
 (defn ^{:stratum 0} list-records
   "Read every complete transaction record under `dir`."
   [dir]
   (persistence/list-records dir))
 
 ;------------------------------------------------------------------------------ Layer 1
+
+(defn ^{:stratum 1} read-record
+  "Read one record by UUID, nil when absent, or an anomaly on invalid input
+   or corruption."
+  [dir id]
+  (if (uuid? id)
+    (persistence/read-record dir id)
+    (invalid-id id)))
 
 (defn- ^{:stratum 1} transition-under-lock
   [dir expected replacement]
