@@ -15,7 +15,6 @@
 ;; WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 ;; See the License for the specific language governing permissions and
 ;; limitations under the License.
-
 (ns ai.miniforge.dag-executor.executor
   "Pluggable task execution backends.
 
@@ -41,34 +40,43 @@
    [ai.miniforge.dag-executor.protocols.impl.kubernetes :as k8s]
    [ai.miniforge.dag-executor.protocols.impl.worktree :as worktree]))
 
+;------------------------------------------------------------------------------ Layer 0
+
 ;; ============================================================================
 ;; Protocol Re-exports
 ;; ============================================================================
-
-(def TaskExecutor
+(def ^{:stratum 0} TaskExecutor
   "Protocol for task execution backends."
   proto/TaskExecutor)
 
-(def executor-type proto/executor-type)
-(def available? proto/available?)
-(def acquire-environment! proto/acquire-environment!)
-(def execute! proto/execute!)
-(def copy-to! proto/copy-to!)
-(def copy-from! proto/copy-from!)
-(def release-environment! proto/release-environment!)
-(def environment-status proto/environment-status)
-(def persist-workspace! proto/persist-workspace!)
-(def restore-workspace! proto/restore-workspace!)
+(def ^{:stratum 0} executor-type proto/executor-type)
 
-(def create-environment-record
+(def ^{:stratum 0} available? proto/available?)
+
+(def ^{:stratum 0} acquire-environment! proto/acquire-environment!)
+
+(def ^{:stratum 0} execute! proto/execute!)
+
+(def ^{:stratum 0} copy-to! proto/copy-to!)
+
+(def ^{:stratum 0} copy-from! proto/copy-from!)
+
+(def ^{:stratum 0} release-environment! proto/release-environment!)
+
+(def ^{:stratum 0} environment-status proto/environment-status)
+
+(def ^{:stratum 0} persist-workspace! proto/persist-workspace!)
+
+(def ^{:stratum 0} restore-workspace! proto/restore-workspace!)
+
+(def ^{:stratum 0} create-environment-record
   "Create an environment record."
   proto/create-environment-record)
 
 ;; ============================================================================
 ;; Factory Re-exports
 ;; ============================================================================
-
-(def create-docker-executor
+(def ^{:stratum 0} create-docker-executor
   "Create a Docker-backed OCI-CLI executor.
 
    Config:
@@ -77,7 +85,7 @@
    - :docker-path - Path to docker binary (legacy alias for :executable)"
   oci-cli/create-docker-executor)
 
-(def create-oci-cli-executor
+(def ^{:stratum 0} create-oci-cli-executor
   "Create an OCI-CLI executor for the runtime kind named on the config.
 
    Config:
@@ -88,7 +96,7 @@
    - :network - network to attach to"
   oci-cli/create-oci-cli-executor)
 
-(def create-kubernetes-executor
+(def ^{:stratum 0} create-kubernetes-executor
   "Create a Kubernetes executor.
 
    Config:
@@ -97,7 +105,7 @@
    - :kubectl-path - Path to kubectl binary"
   k8s/create-kubernetes-executor)
 
-(def create-worktree-executor
+(def ^{:stratum 0} create-worktree-executor
   "Create a worktree-based executor (fallback).
 
    Config:
@@ -112,13 +120,12 @@
 ;; ============================================================================
 ;; OCI Image Management
 ;; ============================================================================
-
-(def task-runner-images
+(def ^{:stratum 0} task-runner-images
   "Pre-defined task runner images that can be built from bundled Dockerfiles.
    Keys: :minimal (Alpine), :clojure (full tooling)"
   oci-cli/task-runner-images)
 
-(def image-exists?
+(def ^{:stratum 0} image-exists?
   "Check if a container image exists locally.
    (image-exists? descriptor image-name) -> boolean
 
@@ -128,18 +135,18 @@
    sites that pass nil)."
   oci-cli/image-exists?)
 
-(def build-image!
+(def ^{:stratum 0} build-image!
   "Build a container image from a Dockerfile resource.
    (build-image! descriptor image-name dockerfile-resource-path) -> Result"
   oci-cli/build-image!)
 
-(def ensure-image!
+(def ^{:stratum 0} ensure-image!
   "Ensure a task runner image exists, building if necessary.
    (ensure-image! descriptor :minimal) -> Result
    (ensure-image! descriptor :clojure :force? true) -> Result"
   oci-cli/ensure-image!)
 
-(def ensure-all-images!
+(def ^{:stratum 0} ensure-all-images!
   "Ensure all task runner images are available.
    (ensure-all-images! descriptor) -> {:minimal Result :clojure Result}
    (ensure-all-images! descriptor :force? true) -> rebuilds all"
@@ -148,12 +155,13 @@
 ;; ============================================================================
 ;; Executor Selection
 ;; ============================================================================
-
-(def executor-priority
+(def ^{:stratum 0} executor-priority
   "Preferred executor order. First available wins."
   [:kubernetes :docker :worktree])
 
-(defn select-executor
+;------------------------------------------------------------------------------ Layer 1
+
+(defn ^{:stratum 1} select-executor
   "Select the best available executor from a registry.
 
    Arguments:
@@ -173,7 +181,7 @@
                          (:available? (:data r)))))
          first)))
 
-(defn create-executor-registry
+(defn ^{:stratum 1} create-executor-registry
   "Create a registry of available executors.
 
    Arguments:
@@ -195,7 +203,7 @@
     true
     (assoc :worktree (create-worktree-executor (get config :worktree {})))))
 
-(defn prepare-runtime-executor!
+(defn ^{:stratum 1} prepare-runtime-executor!
   "Create an OCI-CLI executor on the selected container runtime, with the
    required task runner image ensured to exist.
 
@@ -246,25 +254,10 @@
                       :image-result nil
                       :runtime summary}))))))
 
-(defn prepare-docker-executor!
-  "Create a Docker executor with images ensured to exist.
-
-   Docker-explicit variant of `prepare-runtime-executor!`, kept for callers
-   that specifically want Docker. Product paths should prefer
-   `prepare-runtime-executor!`, which selects the host runtime (Podman
-   first). Unlike the pre-selector behavior, this fails when Docker is
-   unavailable instead of deferring the failure to first use.
-
-   Arguments/return as `prepare-runtime-executor!`; also accepts
-   {:docker-path - path to docker binary (legacy alias for :executable)}."
-  [config]
-  (prepare-runtime-executor! (assoc config :runtime-kind :docker)))
-
 ;; ============================================================================
 ;; High-level Helpers
 ;; ============================================================================
-
-(defn with-environment
+(defn ^{:stratum 1} with-environment
   "Execute a function within an acquired environment.
 
    Automatically acquires and releases the environment.
@@ -286,7 +279,7 @@
           (finally
             (release-environment! executor (:environment-id env))))))))
 
-(defn capture-provenance
+(defn ^{:stratum 1} capture-provenance
   "Build a provenance record from a task execution result.
 
    Arguments:
@@ -324,36 +317,7 @@
      :provenance/stderr-summary   (subs (or stderr "") 0 (min 500 (count (or stderr ""))))
      :provenance/environment-id   (str (or environment-id ""))}))
 
-(defn with-provenance
-  "Wraps `with-environment`, capturing a provenance record after task execution.
-
-   Behaves identically to `with-environment` but records timing, exit code, and
-   stdout/stderr from the final execute! call made inside f.
-
-   f receives [env-record prov-atom] where prov-atom is an atom the caller may
-   populate with the raw execute! result data.  After f returns, provenance is
-   captured from @prov-atom and attached to the return value.
-
-   Arguments:
-   - executor: TaskExecutor instance
-   - task-id: Task UUID (also used as the provenance task-id)
-   - config: Environment config (same as with-environment)
-   - f: Function (fn [env prov-atom] ...) to execute
-        The function should reset! prov-atom with a map containing at minimum:
-          :commands-executed, :started-at, :completed-at, :exit-code,
-          :stdout, :stderr  (all optional; missing keys default gracefully)
-
-   Returns {:result <value returned by f> :provenance <provenance-record>}
-   or an error result if environment acquisition fails."
-  [executor task-id config f]
-  (let [prov-atom (atom {})
-        inner-result (with-environment executor task-id config
-                       (fn [env] (f env prov-atom)))]
-    {:result     inner-result
-     :provenance (capture-provenance task-id executor @prov-atom)}))
-
-
-(defn clone-and-checkout!
+(defn ^{:stratum 1} clone-and-checkout!
   "Clone a repository and checkout a branch in the environment.
 
    Arguments:
@@ -383,10 +347,53 @@
           checkout-result))
       clone-result)))
 
+;------------------------------------------------------------------------------ Layer 2
+
+(defn ^{:stratum 2} prepare-docker-executor!
+  "Create a Docker executor with images ensured to exist.
+
+   Docker-explicit variant of `prepare-runtime-executor!`, kept for callers
+   that specifically want Docker. Product paths should prefer
+   `prepare-runtime-executor!`, which selects the host runtime (Podman
+   first). Unlike the pre-selector behavior, this fails when Docker is
+   unavailable instead of deferring the failure to first use.
+
+   Arguments/return as `prepare-runtime-executor!`; also accepts
+   {:docker-path - path to docker binary (legacy alias for :executable)}."
+  [config]
+  (prepare-runtime-executor! (assoc config :runtime-kind :docker)))
+
+(defn ^{:stratum 2} with-provenance
+  "Wraps `with-environment`, capturing a provenance record after task execution.
+
+   Behaves identically to `with-environment` but records timing, exit code, and
+   stdout/stderr from the final execute! call made inside f.
+
+   f receives [env-record prov-atom] where prov-atom is an atom the caller may
+   populate with the raw execute! result data.  After f returns, provenance is
+   captured from @prov-atom and attached to the return value.
+
+   Arguments:
+   - executor: TaskExecutor instance
+   - task-id: Task UUID (also used as the provenance task-id)
+   - config: Environment config (same as with-environment)
+   - f: Function (fn [env prov-atom] ...) to execute
+        The function should reset! prov-atom with a map containing at minimum:
+          :commands-executed, :started-at, :completed-at, :exit-code,
+          :stdout, :stderr  (all optional; missing keys default gracefully)
+
+   Returns {:result <value returned by f> :provenance <provenance-record>}
+   or an error result if environment acquisition fails."
+  [executor task-id config f]
+  (let [prov-atom (atom {})
+        inner-result (with-environment executor task-id config
+                       (fn [env] (f env prov-atom)))]
+    {:result     inner-result
+     :provenance (capture-provenance task-id executor @prov-atom)}))
+
 ;; ============================================================================
 ;; Rich Comment
 ;; ============================================================================
-
 (comment
   ;; -------------------------------------------------------------------------
   ;; Image Management (prep step for Docker executor)
