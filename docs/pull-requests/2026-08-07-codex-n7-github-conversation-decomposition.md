@@ -26,13 +26,13 @@ provider namespace before N7 merge enforcement adds provider readback.
 - `github.clj` drops from five strata to at most three.
 - Repeated successful reply maps use one `reply-outcome` factory.
 - Provider transport and conversation orchestration remain separate concerns.
-- PR budget: 305 / 600 reportable lines; every commit is at most 200.
+- PR budget: 327 / 600 reportable lines; every commit is at most 200.
 - Kondo, Polylith, stratum lint, and the standards baseline are clean.
 
 ## Verification
 
 - PR-lifecycle component passes in all three project compositions.
-- Conversation behavior: 4 tests / 9 assertions.
+- Conversation behavior: 6 tests / 18 assertions.
 - Pre-commit smoke: 339 tests / 1,285 assertions.
 - GraalVM/Babashka compatibility: 8 tests / 606 assertions.
 

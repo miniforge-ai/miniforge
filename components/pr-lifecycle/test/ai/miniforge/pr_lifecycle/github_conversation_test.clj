@@ -56,6 +56,17 @@
               :reply-url "https://github.test/reply/1"}
              (:data result))))))
 
+(deftest ^{:stratum 1} link-preserves-reply-when-thread-lookup-fails-test
+  (let [failure (dag/err :thread-not-found "review thread was not found")]
+    (with-redefs [github/reply-to-comment (fn [& _] (reply-success))
+                  github/get-thread-id (fn [& _] failure)]
+      (let [result (conversation/link-fix-pr-to-comment "/repo" 42 7 99 nil)]
+        (is (dag/ok? result))
+        (is (true? (get-in result [:data :reply-posted])))
+        (is (false? (get-in result [:data :resolved])))
+        (is (= (:error failure)
+               (get-in result [:data :resolution-error])))))))
+
 (deftest ^{:stratum 1} link-resolves-an-open-thread-test
   (let [reply-message (atom nil)]
     (with-redefs [github/reply-to-comment
@@ -84,3 +95,16 @@
     (let [result (conversation/link-fix-pr-to-comment "/repo" 42 7 99 nil)]
       (is (true? (get-in result [:data :resolved])))
       (is (true? (get-in result [:data :already-resolved]))))))
+
+(deftest ^{:stratum 1} link-preserves-reply-when-resolution-fails-test
+  (let [failure (dag/err :resolution-failed "review thread was not resolved")]
+    (with-redefs [github/reply-to-comment (fn [& _] (reply-success))
+                  github/get-thread-id (fn [& _] (thread-success false))
+                  github/resolve-conversation (fn [& _] failure)]
+      (let [result (conversation/link-fix-pr-to-comment "/repo" 42 7 99 nil)]
+        (is (dag/ok? result))
+        (is (true? (get-in result [:data :reply-posted])))
+        (is (false? (get-in result [:data :resolved])))
+        (is (= "PRRT_test" (get-in result [:data :thread-id])))
+        (is (= (:error failure)
+               (get-in result [:data :resolution-error])))))))
