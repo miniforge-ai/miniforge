@@ -1,0 +1,3 @@
+# Live experiment output — the runner appends one line per run. The harness
+# is tracked; its results are local run state, like policy-fidelity/results/.
+runs.edn

@@ -1,0 +1,23 @@
+{:spec/title "Capture PR-size check output as a workflow artifact"
+
+ :spec/description
+ "The PR size budget check (.github/workflows/pr-size.yml, step 'Check
+  PR size budget', which runs `bb pr-budget`) prints a per-file size
+  breakdown that is useful when a PR is rejected, but it is only visible
+  in the live job log. Capture the step's full output to a pr-size.log
+  file and upload it as a workflow artifact, following the same
+  log-artifact pattern ci.yml already uses for its test jobs, so authors
+  of oversized PRs can download the breakdown."
+
+ :spec/intent {:type :chore
+               :scope [".github/workflows/pr-size.yml"]}
+
+ :spec/constraints
+ ["Only modify .github/workflows/pr-size.yml"
+  "The check must behave exactly as before for passing and failing PRs"
+  "Upload the log even when the check fails"]
+
+ :spec/acceptance-criteria
+ ["pr-size.log contains the full output of bb pr-budget"
+  "The log is uploaded as an artifact on both pass and fail"
+  "An oversized PR still fails the check"]}

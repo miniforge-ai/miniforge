@@ -1,0 +1,29 @@
+{:spec/title "Add ensure-fleet-config! to pr-sync"
+
+ :spec/description
+ "pr-sync reads the fleet config from ~/.miniforge/config.edn
+  (components/pr-sync/src/ai/miniforge/pr_sync/core.clj,
+  load-fleet-config) and falls back to an empty default when the file is
+  absent, but nothing ever materializes the file, so first-run users
+  have no config to edit and tooling that expects the file to exist
+  breaks. Add an ensure-fleet-config! function to pr-sync: if the config
+  file does not exist, create it (including parent directories) with the
+  default {:fleet {:repos []}} content; if it exists, leave it untouched.
+  Return the config path. Expose it via the component interface."
+
+ :spec/intent {:type :feature
+               :scope ["components/pr-sync"]}
+
+ :spec/constraints
+ ["Implement in components/pr-sync only"
+  "Must be safe when other pr-sync operations (add-repo!, remove-repo!)
+   run concurrently in another process"
+  "An existing config file must never be overwritten or truncated"
+  "Add tests"]
+
+ :spec/acceptance-criteria
+ ["ensure-fleet-config! creates the file with the default content when
+   absent and returns the path"
+  "An existing file's content is preserved byte-for-byte"
+  "Exposed via ai.miniforge.pr-sync.interface"
+  "Tests pass"]}
