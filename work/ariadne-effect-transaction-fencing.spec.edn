@@ -1,0 +1,57 @@
+;; =============================================================================
+;; Spec: Ariadne effect-transaction identity and commit fencing
+;; =============================================================================
+
+{:spec/title "Fence each grant to one durable effect transaction"
+
+ :spec/description
+ "Close the replay and concurrency gap before granted effects go live. A
+  max-count ceiling does not make a grant one-use when callers can repeatedly
+  report :usage/count 1. The runtime must preallocate an effect ID, bind that ID
+  into grant scope, and persist the same ID in the durable proposal.
+
+  Proposal creation is create-only. Commit authorization derives the effect ID
+  and operation count from the persisted transaction rather than caller data.
+  Commit atomically claims the current durable :proposed record before invoking
+  the effect; a stale map, duplicate process, or replay cannot claim it again.
+  A crash after the claim leaves :committing for reconciliation, preserving the
+  existing honest-outcome contract."
+
+ :spec/intent
+ {:type :bugfix
+  :scope ["components/effect-transaction/**"]}
+
+ :spec/constraints
+ ["The runtime preallocates the effect ID before grant issuance and proposal persistence"
+  "Proposal creation never replaces an existing transaction"
+  "Authorization scope comes from the durable transaction, including :effect/id"
+  "Authorization derives :usage/count 1 instead of trusting a caller-supplied count"
+  "Only one process may claim a proposed transaction for commit"
+  "A failed claim invokes no external effect"
+  "A claimed transaction remains reconcilable after process death"
+  "Store coordination is encapsulated below effect orchestration"
+  "Test records and authority contexts use shared constructors"
+  "Stratified design permits at most three layers per implementation namespace"]
+
+ :spec/acceptance-criteria
+ ["propose! persists a caller-preallocated :effect/id"
+  "A duplicate :effect/id is refused without replacing the first proposal"
+  "Commit authorization scope contains the persisted :effect/id"
+  "Caller-supplied :effect/id and :usage/count cannot alter authorization context"
+  "A grant bound to another effect transaction is refused before invocation"
+  "Two concurrent commits of one proposed transaction invoke the effect at most once"
+  "Replaying a stale :proposed value after commit invokes no effect"
+  "A crash after commit claim leaves a reconcilable :committing record"
+  "poly check reports 0 errors and 0 warnings"
+  "full bb test is green"]
+
+ :spec/priority
+ {:tier :high
+  :axes #{:correctness :policy-enforcement :governance-credibility}
+  :theme :ariadne-grants
+  :rationale "Without transaction identity and an atomic commit claim, a scoped grant can be replayed or raced into repeated effects."
+  :blocks ["ariadne-merge-grant-enforcement.spec.edn"
+           "ariadne-deploy-grant-enforcement.spec.edn"]
+  :blocked-by []}
+
+ :spec/workflow-type :canonical-sdlc}

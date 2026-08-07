@@ -1,102 +1,89 @@
 ;; =============================================================================
-;; Spec: Ariadne step 2f — grant issuance, the missing link
+;; Spec: Ariadne step 2f — runtime issuance for irreversible effects
 ;; =============================================================================
-;;
-;; Normative refs: docs/architecture/rfc-ariadne-adoption.md (adoption
-;; step 2); Ariadne §13.5 (ExecutionGrant lifecycle). This spec exists
-;; because the step-2 wave planned in #1574 specified the grant OBJECT
-;; (2a), CHECKING grants (2b), transacted effects (2c), migrating call
-;; sites (2d), and REVOKING grants (2e) — and never specified who
-;; ISSUES one. That omission is a planning gap, not a discovery.
 
-{:spec/title "Ariadne step 2f: grant issuance - who may authorize an irreversible effect, and on what basis"
+{:spec/title "Issue narrow runtime-owned grants for irreversible effects"
 
  :spec/description
- "Specify and build the path that puts an ExecutionGrant into
-  existence in production.
+ "Build the production issuance service that turns a runtime-attested canonical
+  effect request into a short-lived ExecutionGrant. Its closed input carries
+  the active workflow-run identity, preallocated effect transaction ID, exact
+  target scope, and an allow-class effect-specific preflight basis. The workflow
+  runtime is the principal; agents may propose inputs but cannot mint or alter
+  authority. Issuance occurs before the durable proposal and grant-aware
+  decision are recorded.
 
-  WHY THIS BLOCKS 2d's SECOND HALF. `execution-grant` (2a) has
-  `issue`, `delegate`, and `revoke`. Nothing in components/ or bases/
-  calls any of them — verified: the only consumers of
-  `execution-grant.interface` are effect-transaction's own namespaces.
-  So 2d's acceptance criterion 'merge-pr! with no active :effect/merge
-  grant denies and fires no gh command' would, if landed as written,
-  deny EVERY merge and EVERY deploy permanently. Miniforge merges its
-  own PRs many times a day; that is not a migration, it is an outage.
+  This slice defines and validates the issuance service and its basis record in
+  execution-grant. The separate merge and deployment enforcement specs own the
+  runtime call sites that construct the basis after merge readiness or after
+  deployment policy checks and provider dry-run. This keeps policy mechanics
+  independent from application orchestration without leaving the production
+  integration implicit.
 
-  2d part 1 therefore migrated the call sites onto the transaction
-  coordinator WITHOUT grant enforcement — honest outcomes now,
-  authority when there is authority to check. This spec supplies it.
+  Workflow-start issuance is rejected because it creates a broad, long-lived
+  authority object; phase-entry issuance is rejected because the exact effect
+  target and preflight result may not yet be known.
 
-  GROUP 1: The issuance decision
-  What is the basis for issuing? Candidate inputs, to be settled by
-  this spec rather than assumed:
-    * the Spec/workflow-run the effect serves (scope)
-    * the phase or FSM position that legitimizes it
-    * the operator or automation that stands behind it (principal)
-    * the ceilings — from where? `budget->constraints` (2b) maps
-      today's scattered budget keys, but SOMETHING must choose the
-      numbers per effect rather than inheriting a role default.
+  Issuance uses one explicit policy catalog keyed by effect class. Merge grants
+  last 15 minutes and deploy grants last 30 minutes because deployment includes
+  provider dry-run and rollback preparation. Both bind one preallocated effect
+  transaction, carry :constraint/max-count 1, and set :grant/delegable? false.
+  These are effect-policy decisions, not role defaults; absent constraint axes
+  remain explicitly unbounded.
 
-  GROUP 2: Where issuance happens
-  Options, with the tradeoff each carries:
-    * at workflow start — one grant per run, broad scope, long TTL;
-      simple, but a long-lived broad grant is the thing grants exist
-      to avoid.
-    * at phase entry — narrower, still automatic.
-    * at the decide() call that authorizes the effect — narrowest and
-      most defensible, but requires the issuer to know the effect's
-      shape before the effect is proposed.
-  This spec MUST pick one and say why; leaving it open is how the
-  ambient authority that Ariadne removes comes back in under a new
-  name.
+  Merge scope binds the effect transaction, workflow run, repository, and PR
+  number. Deploy scope binds the effect transaction, workflow run, kustomize
+  directory, Kubernetes context, namespace, and deployment name. A nil
+  Kubernetes context is an explicit binding to the configured default context,
+  not a wildcard. The issuer refuses incomplete scope rather than broadening
+  it. It checks the revocation-for-cause eligibility predicate before calling
+  execution-grant/issue.
 
-  GROUP 3: Delegation to inner orchestrators
-  2a built `delegate` with attenuation precisely for the nested-agent
-  case (T3 contradiction 6: 'stop restraining, start fencing'). Nothing
-  exercises it. This spec should say whether a spawned agent receives a
-  delegated grant and who cuts it.
+  No inner agent receives a delegated merge or deploy grant in this slice.
+  Agents propose work but never invoke these irreversible effects; the runtime
+  retains authority and commits them. Delegating authority that a child does
+  not exercise would enlarge the blast radius without enabling behavior."
 
-  GROUP 4: The eligibility hook
-  2e's breach history exposes 'may this principal be granted this
-  effect class at this ceiling'. Issuance is its only intended call
-  site. Wire it here.
-
-  GROUP 5: Then, and only then, 2d part 2
-  With an issuer live, the call sites can require a grant and the
-  deferred acceptance criteria from 2d become testable:
-    * merge-pr! with no active grant denies and fires no gh command
-    * kustomize-apply! with no active grant denies and runs no kubectl"
-
- :spec/intent {:type :feature
-               :scope ["components/execution-grant/"
-                       "components/workflow/src/ai/miniforge/workflow/"
-                       "specs/normative/"]}
+ :spec/intent
+ {:type :feature
+  :scope ["components/execution-grant/**"]}
 
  :spec/constraints
- ["This spec MUST choose an issuance site and record the rejected alternatives - an open question here re-creates ambient authority under a new name"
-  "Issuance is runtime-only; no agent-supplied path may produce a grant (the 2a rule)"
-  "Ceilings come from an explicit decision per effect class, not from a role default inherited by accident"
-  "Consult 2e's eligibility predicate before issuing"
-  "Do not widen 2d part 1's migration; this spec adds authority, it does not re-open honesty"]
+ ["Only deterministic runtime code may call the production issuer"
+  "Issuance requires a validated allow-class effect-specific basis record"
+  "The grant principal is the workflow-run runtime identity"
+  "The issuer must know the complete effect scope before minting a grant"
+  "Merge policy is a 15-minute non-delegable one-transaction grant"
+  "Deploy policy is a 30-minute non-delegable one-transaction grant"
+  "Ceilings come from one effect-policy catalog, never an implicit role default"
+  "Eligibility is checked before execution-grant/issue"
+  "Callers cannot supply expiry, ceilings, or delegation state"
+  "Issuer input and output are validated at the public component boundary"
+  "Policy and grant fixture maps are constructed once and reused in tests"
+  "Stratified design permits at most three layers per implementation namespace"]
 
  :spec/acceptance-criteria
- ["A production code path calls execution-grant/issue - grep for the interface returns callers outside effect-transaction"
-  "An issued grant's scope names the workflow-run or PR it authorizes, not the whole repo"
-  "An issued grant's TTL is bounded and justified in the spec text"
-  "A principal with a disqualifying breach history is refused issuance"
-  "A spawned inner agent receives a DELEGATED grant, attenuated from its parent, or the spec states why it does not"
-  "merge-pr! with no active :effect/merge grant denies and fires no gh command"
-  "kustomize-apply! with no active :effect/deploy grant denies and runs no kubectl command"
-  "full bb test green"]
+ ["The production issuer calls execution-grant/issue"
+  "Issuance refuses an absent or deny-class preflight result"
+  "A merge grant binds effect transaction, workflow run, repository, and PR number"
+  "A deploy grant binds effect transaction, workflow run, kustomize directory, Kubernetes context, namespace, and deployment name"
+  "Issuance refuses a request missing any required scope binding"
+  "Merge grants expire 15 minutes after issuance"
+  "Deploy grants expire 30 minutes after issuance"
+  "Merge and deploy grants carry :constraint/max-count 1"
+  "Merge and deploy grants carry :grant/delegable? false"
+  "A principal with disqualifying breach history is refused issuance"
+  "Malformed public issuer input returns a schema failure before persistence"
+  "poly check reports 0 errors and 0 warnings"
+  "full bb test is green"]
 
  :spec/priority
  {:tier :high
   :axes #{:correctness :policy-enforcement :governance-credibility}
   :theme :ariadne-grants
-  :rationale "Without an issuer the grant machinery is inert; with one, 2d part 2 and 2e's eligibility hook both become reachable. High rather than blocker because 2d part 1 already delivered the honesty half."
-  :blocks []
-  :blocked-by ["ariadne-revocation-for-cause.spec.edn"
-               "ariadne-grant-scope-enforcement.spec.edn"]}
+  :rationale "Without runtime-owned issuance, grant enforcement either remains bypassed or denies every irreversible effect."
+  :blocks ["ariadne-merge-grant-enforcement.spec.edn"
+           "ariadne-deploy-grant-enforcement.spec.edn"]
+  :blocked-by []}
 
  :spec/workflow-type :canonical-sdlc}
