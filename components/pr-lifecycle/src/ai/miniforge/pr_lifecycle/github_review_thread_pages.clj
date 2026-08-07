@@ -74,7 +74,7 @@
   [unresolved-count nodes]
   (let [page-count (count (remove :isResolved nodes))
         total (+ unresolved-count page-count)]
-    #:page{:done? false :state total}))
+    [false total nil]))
 
 (defn- ^{:stratum 0} finish-unresolved
   [unresolved-count]
@@ -82,16 +82,11 @@
     (dag/ok {:has-unresolved? has-unresolved?
              :unresolved-count unresolved-count})))
 
-(defn- ^{:stratum 0} select-root
-  [root-id state nodes]
-  (let [matching-thread (some #(when (= root-id
-                                       (get-in % [:comments :nodes 0 :databaseId]))
-                                 %)
-                              nodes)
-        found? (some? matching-thread)]
-    #:page{:done? found?
-           :state state
-           :value matching-thread}))
+(defn- ^{:stratum 0} matching-root
+  [root-id nodes]
+  (first (filter #(= root-id
+                     (get-in % [:comments :nodes 0 :databaseId]))
+                 nodes)))
 
 (defn- ^{:stratum 0} finish-missing-root
   [comment-id pr-number _]
@@ -100,6 +95,12 @@
            {:comment-id comment-id :pr-number pr-number}))
 
 ;------------------------------------------------------------------------------ Layer 1
+
+(defn- ^{:stratum 1} select-root
+  [root-id state nodes]
+  (let [matching-thread (matching-root root-id nodes)
+        found? (some? matching-thread)]
+    [found? state matching-thread]))
 
 (defn ^{:stratum 1} unresolved-pagination
   "Describe full review-thread pagination without embedding behavior anonymously."
@@ -156,12 +157,11 @@
        [page-result (read-page graphql-query worktree-path owner repo pr-number
                                cursor query valid-page?)]
         (let [threads (:data page-result)
-              selection (select-page state (:nodes threads))
+              [done? next-state value] (select-page state (:nodes threads))
               page-info (:pageInfo threads)
-              next-cursor (:endCursor page-info)
-              next-state (:page/state selection)]
+              next-cursor (:endCursor page-info)]
           (cond
-            (:page/done? selection) (dag/ok (:page/value selection))
+            done? (dag/ok value)
             (not (:hasNextPage page-info)) (finish next-state)
             (not (valid-next-cursor? next-cursor seen-cursors))
             (dag/err :invalid-pagination
