@@ -2,6 +2,8 @@
  :deps {ai.miniforge/anomaly {:local/root "../anomaly"}
         ai.miniforge/config {:local/root "../config"}
         ai.miniforge/effect-transaction {:local/root "../effect-transaction"}
+        ai.miniforge/execution-grant {:local/root "../execution-grant"}
+        ai.miniforge/gate {:local/root "../gate"}
         ai.miniforge/dag-executor {:local/root "../dag-executor"}
         ai.miniforge/fsm {:local/root "../fsm"}
         ai.miniforge/messages {:local/root "../messages"}

@@ -26,3 +26,8 @@
   "Look up a PR lifecycle message by key, with optional param substitution."
   (messages/create-translator "config/pr-lifecycle/messages/en-US.edn"
                               :pr-lifecycle/messages))
+
+(def ^{:stratum 0} system-t
+  "Look up developer-facing PR lifecycle prose by key."
+  (messages/create-translator "config/pr-lifecycle/messages/system.edn"
+                              :pr-lifecycle/system))
