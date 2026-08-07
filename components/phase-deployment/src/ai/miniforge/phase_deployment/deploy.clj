@@ -16,43 +16,21 @@
 ;; See the License for the specific language governing permissions and
 ;; limitations under the License.
 (ns ai.miniforge.phase-deployment.deploy
-  "Deploy phase interceptor."
-  (:require [ai.miniforge.logging.interface :as log]
+  "Thin deploy phase interceptor over provider application flow."
+  (:require [ai.miniforge.anomaly.interface :as anomaly]
+            [ai.miniforge.logging.interface :as log]
             [ai.miniforge.phase-deployment.defaults :as defaults]
-            [ai.miniforge.phase-deployment.deploy-provider :as provider]
+            [ai.miniforge.phase-deployment.deploy-config :as config]
+            [ai.miniforge.phase-deployment.deploy-flow :as flow]
             [ai.miniforge.phase-deployment.deploy-result :as result]
-            [ai.miniforge.phase-deployment.messages :as msg]
-            [ai.miniforge.phase-deployment.shell :as shell]
-            [ai.miniforge.phase.interface :as phase]
-            [ai.miniforge.schema.interface :as schema]))
+            [ai.miniforge.phase-deployment.messages :as msg]))
 
 ;------------------------------------------------------------------------------ Layer 0
 
-;; Defaults + schemas
 (def ^{:stratum 0} default-config
   "Deploy phase defaults loaded from EDN."
   (defaults/phase-defaults :deploy))
 
-(def ^{:stratum 0} DeployRunConfig
-  [:map
-   [:phase-config map?]
-   [:kustomize-dir :string]
-   [:namespace :string]
-   [:app-label :string]
-   [:deployment-name :string]
-   [:context {:optional true} [:maybe :string]]])
-
-(def ^{:stratum 0} RollbackInfo
-  [:map
-   [:revision {:optional true} [:maybe :string]]
-   [:image {:optional true} [:maybe :string]]
-   [:replicas {:optional true} [:maybe int?]]])
-
-(defn- ^{:stratum 0} validate!
-  [result-schema value]
-  (schema/validate-anomaly result-schema value))
-
-;; Shared helpers
 (defn- ^{:stratum 0} get-logger
   "Resolve logger from ctx, creating a default if absent."
   [ctx]
@@ -68,11 +46,6 @@
       (assoc-in [:phase :started-at] start-time)
       (assoc-in [:phase :result] result-map)))
 
-(defn- ^{:stratum 0} merged-phase-config
-  [ctx phase-kw]
-  (phase/merge-with-defaults
-   (assoc (or (get-in ctx [:phase-config]) {}) :phase phase-kw)))
-
 (defn ^{:stratum 0} leave-deploy
   "Post-deploy: record final metrics."
   [ctx]
@@ -80,70 +53,14 @@
     ctx
     (assoc-in ctx [:phase :status] :failed)))
 
-(defn- ^{:stratum 0} deployment-outcome
-  [config rollback-info applied]
-  (let [rendered-yaml (:rendered-yaml applied)]
-    (if (schema/failed? applied)
-      {:deploy/status :failed
-       :deploy/stage :apply
-       :deploy/rollback-info rollback-info
-       :deploy/rendered-yaml rendered-yaml
-       :deploy/failure (or (:error applied)
-                           (get-in applied [:apply-result :stderr]))}
-      (let [observation (provider/observe! config)
-            observed (:provider/observed observation)]
-        {:deploy/status (if (:provider/matched? observation)
-                          :success
-                          :failed)
-         :deploy/stage :observe
-         :deploy/rollback-info rollback-info
-         :deploy/rendered-yaml rendered-yaml
-         :deploy/pod-state (:deployment/pods observed)
-         :deploy/failure (:deployment/failure observed)}))))
-
 ;------------------------------------------------------------------------------ Layer 1
 
-(defn- ^{:stratum 1} resolve-deploy-config
-  [ctx]
-  (let [phase-config  (merged-phase-config ctx :deploy)
-        input         (or (get-in ctx [:execution/input]) {})
-        prev-outputs  (or (get-in ctx [:execution/phase-results :provision :result :outputs]) {})
-        app-label     (get input :app-label
-                           (get phase-config :app-label "ixi"))
-        deploy-config {:phase-config    phase-config
-                       :kustomize-dir   (or (get input :kustomize-dir)
-                                            (get phase-config :kustomize-dir))
-                       :namespace       (get input :namespace
-                                             (get phase-config :namespace "default"))
-                       :context         (or (get input :context)
-                                            (get phase-config :context)
-                                            (get prev-outputs :gke_context))
-                       :app-label       app-label
-                       :deployment-name (get input :deployment-name
-                                             (get phase-config :deployment-name app-label))}]
-    (validate! DeployRunConfig deploy-config)))
-
-(defn- ^{:stratum 1} capture-current-state
-  "Capture current deployment state for rollback evidence."
-  [deployment-name namespace context]
-  (let [result (shell/kubectl! "get"
-                               :namespace namespace
-                               :context context
-                               :output "json"
-                               :extra-args ["deployment" deployment-name])]
-    (when (schema/succeeded? result)
-      (validate!
-       RollbackInfo
-       {:revision (get-in result [:parsed :metadata :annotations "deployment.kubernetes.io/revision"])
-        :image    (get-in result [:parsed :spec :template :spec :containers 0 :image])
-        :replicas (get-in result [:parsed :status :readyReplicas])}))))
-
 (defn- ^{:stratum 1} invalid-config-result
-  [ctx start-time ex]
+  [ctx start-time error]
   (failed-enter ctx start-time
                 {:status :error
                  :error  (msg/t :deploy/invalid-config
-                                {:error (ex-message ex)})}))
+                                {:error error})}))
 
 (defn ^{:stratum 1} error-deploy
   "Handle deploy phase errors."
@@ -162,25 +79,20 @@
 
 ;------------------------------------------------------------------------------ Layer 2
 
-;; Phase interceptors + registration
 (defn ^{:stratum 2} enter-deploy
-  "Execute deployment: build manifests, apply them, and wait for rollout."
+  "Resolve one target and execute its deployment application flow."
   [ctx]
   (let [start-time (System/currentTimeMillis)
         logger     (get-logger ctx)]
     (try
-      (let [config            (resolve-deploy-config ctx)
-            rollback-info     (capture-current-state (:deployment-name config)
-                                                    (:namespace config)
-                                                    (:context config))
-            applied           (shell/kustomize-apply! (:kustomize-dir config)
-                                                      :namespace (:namespace config)
-                                                      :context (:context config))]
-        (result/store-deployment ctx start-time logger config
-                                 (deployment-outcome config rollback-info
-                                                     applied)))
+      (let [deploy-config (config/resolve-config ctx)]
+        (if (anomaly/anomaly? deploy-config)
+          (invalid-config-result ctx start-time
+                                 (:anomaly/message deploy-config))
+          (result/store-deployment ctx start-time logger deploy-config
+                                   (flow/execute! deploy-config))))
       (catch clojure.lang.ExceptionInfo ex
-        (invalid-config-result ctx start-time ex)))))
+        (invalid-config-result ctx start-time (ex-message ex))))))
 
 ;------------------------------------------------------------------------------ Rich Comment
 (comment
