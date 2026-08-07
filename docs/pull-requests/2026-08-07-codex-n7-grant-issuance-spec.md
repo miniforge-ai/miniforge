@@ -41,10 +41,14 @@ repeat completed work or produce oversized, poorly layered changes.
 
 ## Testing Plan
 
-- Run the repository work-queue renderer and spec validation tasks.
-- Run Markdown formatting and applicable pre-commit checks.
-- Review the complete diff adversarially against specification, PR-layering,
-  and work-spec-authoring standards.
+- `bb work:queue` regenerated the active queue; all four changed active specs
+  parse, contain every required field, and reference a known theme.
+- Every commit passed `bb pre-commit`, including changed-file kondo at zero
+  errors and warnings, formatting, smoke tests, and GraalVM checks.
+- `bb test:poly` passed the full five-project suite in 6 minutes 13 seconds.
+- `bb pr-budget` reports 362 of 600 reportable lines.
+- The complete diff was reviewed adversarially against specification,
+  PR-layering, function/component design, and work-spec-authoring standards.
 
 ## Deployment Plan
 
@@ -63,4 +67,4 @@ it does not change runtime behavior.
 - [x] Issuance decisions are explicit and testable
 - [x] Merge and deployment enforcement are independently reviewable
 - [x] Work queue is regenerated
-- [ ] Repository checks and adversarial review pass
+- [x] Repository checks and adversarial review pass
