@@ -109,8 +109,9 @@ Defines:
 - Workflow chaining: typed outputs, input binding, cross-boundary provenance
 - **Workflow tier:** `:best-effort` / `:standard` / `:critical` with tier-dependent SLO targets (§9.1)
 - **Node capability extensions:** Idempotency keys, success predicates, compensation protocol (§13.6)
-- **Canonical workflow status vocabulary (§2.2):** `:queued :running :paused :blocked
-  :completed :failed :cancelled`; `:pending` and `:executing` withdrawn as synonyms
+- **Canonical workflow status vocabulary (§2.2):**
+  `:queued :running :paused :blocked :completed :failed :cancelled`;
+  `:pending` and `:executing` withdrawn as synonyms
 - **Terminality (§2.2, §8.1):** terminal states never reactivate; re-running is a new run
 - **Resume protocol (§8.2–§8.4):** spec-hash comparison, run-identity preservation,
   three staleness conditions replacing "too much time has passed"

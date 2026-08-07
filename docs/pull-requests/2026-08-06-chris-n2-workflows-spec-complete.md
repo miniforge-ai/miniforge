@@ -48,10 +48,11 @@ said how much time is too much.
 
 ### Lifecycle vocabulary (§2.2, §2.3)
 
-§2.2 is now the canonical set — `:queued :running :paused :blocked :completed
-:failed :cancelled` — and explicitly names `:pending` and `:executing` as
-withdrawn synonyms, so a reader hitting either in code knows it is a defect
-rather than a variant. Every other surface is stated to project onto this set.
+§2.2 is now the canonical set:
+`:queued :running :paused :blocked :completed :failed :cancelled`.
+It explicitly names `:pending` and `:executing` as withdrawn synonyms, so a
+reader hitting either in code knows it is a defect rather than a variant.
+Every other surface is stated to project onto this set.
 
 §2.3's transition diagram extended for `:paused` and `:blocked`, both
 non-terminal, with the distinction stated: `:paused` is cleared by an operator,
@@ -111,15 +112,17 @@ old values:
 
 ### SPEC_INDEX
 
-N2 entry updated; index bumped to 0.14.0-draft. This branch predates the N6 PR,
-so its index still shows 0.12.0 as the prior entry; if N6 lands first the
-version-history block will conflict and I will resolve it on rebase.
+N2 entry updated; index bumped to 0.14.0-draft. This branch was rebased onto
+main after N6 merged, and the expected SPEC_INDEX conflict was resolved by
+keeping both entries: 0.14.0 (N2) above 0.13.0 (N6), so the sequence is
+contiguous.
 
 ## Testing Plan
 
 Specification change; no runtime code touched.
 
-- `markdownlint` clean on all three changed files.
+- `markdownlint` clean on all five changed files (N2, N2-delta, N5,
+  SPEC_INDEX, this PR doc).
 - Code blocks verified brace-balanced.
 - No duplicate section numbers; top-level sections ascending 1–16.
 - Internal `§N.N` references resolved; the one apparent miss is a cross-spec
