@@ -47,7 +47,8 @@
 (def ^{:stratum 0} ^:private second-task-id
   "A distinct id for the task that follows a drifted one. Reusing `task-id`
    would let a stale branch or directory from the first task explain the
-   refusal, which is the wrong reason for that assertion to pass."
+   second acquire's behaviour, which is the wrong reason for that assertion
+   to pass."
   "ef567890-0000-0000-0000-000000000000")
 
 (defn- ^{:stratum 0} guarded-executor

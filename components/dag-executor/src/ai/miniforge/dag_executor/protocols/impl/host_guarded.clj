@@ -26,12 +26,18 @@
    host. This wrapper snapshots the shared state at acquire, re-reads it at
    release, and reports the difference.
 
-   Detection, not prevention — see `host-git-guard`. What makes it
-   fail-closed rather than advisory is the verdict: once a run is observed
-   to have drifted a checkout, every later acquire against that checkout is
-   refused for the life of the process. That is the 2026-08-06 failure mode
-   directly: the damage was invisible, and the branches cut from the
-   corrupted checkout afterwards inherited it.
+   Detection, not prevention — see `host-git-guard`. Drift fails the
+   release that observed it, warns on stderr, and leaves a verdict against
+   the checkout that every later acquire warns about again. It does not
+   refuse those later acquires: in `:local` mode a refused acquire is read
+   further up as `no environment was configured` and the run proceeds
+   against the host with no sandbox at all, which is worse than the drift.
+   `host-guarded.lifecycle/acquire!` carries the detail.
+
+   The verdict exists because the 2026-08-06 damage was invisible and the
+   branches cut from the corrupted checkout afterwards inherited it. A
+   checkout that has drifted keeps saying so until an operator repairs it
+   and clears the verdict.
 
    The acquire and release policy, and the state it needs, live in
    `host-guarded.lifecycle`."
