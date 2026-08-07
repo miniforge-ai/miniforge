@@ -24,7 +24,8 @@
    [clojure.test :refer [deftest testing is are]]
    [ai.miniforge.dag-executor.interface :as dag]
    [ai.miniforge.pr-lifecycle.conflict-resolution :as conflict-resolution]
-   [ai.miniforge.pr-lifecycle.merge :as merge]))
+   [ai.miniforge.pr-lifecycle.merge :as merge]
+   [ai.miniforge.pr-lifecycle.merge-readiness :as readiness]))
 
 ;------------------------------------------------------------------------------ Layer 0
 
@@ -125,6 +126,21 @@
         (is (false? (:ready? result)))
         (is (some #{:unresolved-threads} (:blocking result)))))))
 
+(deftest ^{:stratum 0} evaluate-merge-readiness-thread-readback-fails-closed-test
+  (testing "Unavailable provider thread state blocks merge"
+    (with-redefs [merge/check-ci-status
+                  (fn [_ _] (dag/ok {:ci-green? true}))
+                  merge/check-review-status
+                  (fn [_ _ _] (dag/ok {:approved? true}))
+                  merge/check-branch-status
+                  (fn [_ _] (dag/ok {:up-to-date? true}))
+                  merge/check-unresolved-threads
+                  (fn [_ _] (dag/err :graphql-error "provider unavailable"))]
+      (let [result (merge/evaluate-merge-readiness
+                    "/tmp" 123 merge/default-merge-policy)]
+        (is (false? (:ready? result)))
+        (is (some #{:thread-status-unavailable} (:blocking result)))))))
+
 (deftest ^{:stratum 0} evaluate-merge-readiness-multiple-blockers-test
   (testing "Multiple blocking conditions are all reported"
     (with-redefs [merge/check-ci-status
@@ -159,8 +175,8 @@
   ;; means auto-merge was ENABLED. Until GitHub reports a merge, claiming
   ;; {:merged? true} is a claim the code cannot substantiate.
   (testing "auto-merge enabled, GitHub still OPEN"
-    (with-redefs [merge/evaluate-merge-readiness
-                  (fn [_ _ _] {:ready? true :checks {} :blocking []})
+    (with-redefs [readiness/evaluate
+                  (fn [_ _ _ _] {:ready? true :checks {} :blocking []})
                   merge/merge-pr!
                   (fn [_ _ & _] (dag/ok {:merged? true :method :squash}))
                   merge/run-gh-command
@@ -177,8 +193,8 @@
 
 (deftest ^{:stratum 0} attempt-merge-observed-merge-publishes-githubs-sha-test
   (testing "GitHub reports MERGED"
-    (with-redefs [merge/evaluate-merge-readiness
-                  (fn [_ _ _] {:ready? true :checks {} :blocking []})
+    (with-redefs [readiness/evaluate
+                  (fn [_ _ _ _] {:ready? true :checks {} :blocking []})
                   merge/merge-pr!
                   (fn [_ _ & _] (dag/ok {:merged? true :method :squash}))
                   merge/run-gh-command
@@ -197,8 +213,8 @@
 
 (deftest ^{:stratum 0} attempt-merge-not-ready-no-rebase-test
   (testing "Merge blocked without auto-rebase yields error"
-    (with-redefs [merge/evaluate-merge-readiness
-                  (fn [_ _ _] {:ready? false
+    (with-redefs [readiness/evaluate
+                  (fn [_ _ _ _] {:ready? false
                                 :checks {}
                                 :blocking [:ci-not-green]})]
       (let [policy (assoc merge/default-merge-policy :auto-rebase-on-stale? false)
@@ -264,8 +280,8 @@
           fake-success (dag/ok {:resolved? true :iterations 1
                                 :pushed-sha "fake-sha"
                                 :pr-branch "feat/x"})]
-      (with-redefs [merge/evaluate-merge-readiness
-                    (fn [_ _ _] conflicting-readiness)
+      (with-redefs [readiness/evaluate
+                    (fn [_ _ _ _] conflicting-readiness)
                     conflict-resolution/resolve-pr-conflicts!
                     (fn [_]
                       (reset! resolver-called? true)
@@ -296,8 +312,8 @@
             and attempt-merge falls through to the existing
             rebase / not-ready logic. With auto-rebase off, ends
             up as :not-ready."
-    (with-redefs [merge/evaluate-merge-readiness
-                  (fn [_ _ _] conflicting-readiness)]
+    (with-redefs [readiness/evaluate
+                  (fn [_ _ _ _] conflicting-readiness)]
       (let [policy (assoc merge/default-merge-policy
                           :auto-rebase-on-stale? false)
             context {:dag-id (random-uuid) :run-id (random-uuid)
@@ -323,8 +339,8 @@
     (let [terminal-anomaly {:anomaly/category :anomalies/dag-multi-parent-unresolvable
                             :anomaly/message  "Merge conflict could not be auto-resolved"
                             :resolution/reason :budget-exhausted}]
-      (with-redefs [merge/evaluate-merge-readiness
-                    (fn [_ _ _] conflicting-readiness)
+      (with-redefs [readiness/evaluate
+                    (fn [_ _ _ _] conflicting-readiness)
                     conflict-resolution/resolve-pr-conflicts!
                     (fn [_] terminal-anomaly)
                     merge/run-gh-command
@@ -357,8 +373,8 @@
             (e.g. for a PR known to need human attention) without
             removing the wiring globally."
     (let [resolver-called? (atom false)]
-      (with-redefs [merge/evaluate-merge-readiness
-                    (fn [_ _ _] conflicting-readiness)
+      (with-redefs [readiness/evaluate
+                    (fn [_ _ _ _] conflicting-readiness)
                     conflict-resolution/resolve-pr-conflicts!
                     (fn [_]
                       (reset! resolver-called? true)

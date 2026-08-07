@@ -23,6 +23,7 @@
   (:require
    [ai.miniforge.anomaly.interface :as anomaly]
    [ai.miniforge.dag-executor.interface :as dag]
+   [ai.miniforge.pr-lifecycle.github :as github]
    [ai.miniforge.pr-lifecycle.merge-orchestration :as orchestration]
    [ai.miniforge.pr-lifecycle.merge-readiness :as readiness]
    [ai.miniforge.response.interface :as response]
@@ -93,10 +94,9 @@
       (dag/err :gh-exception (.getMessage e)))))
 
 (defn ^{:stratum 0} check-unresolved-threads
-  "Check if PR has unresolved comment threads."
-  [_worktree-path _pr-number]
-  (dag/ok {:has-unresolved? false
-           :note "Thread resolution check requires GitHub API"}))
+  "Read GitHub's review-thread state for one pull request."
+  [worktree-path pr-number]
+  (github/unresolved-review-threads worktree-path pr-number))
 
 ;; Conflict-resolution dispatch (Stage 3d, spec §6.4)
 (defn- ^{:stratum 0} parse-gh-json
