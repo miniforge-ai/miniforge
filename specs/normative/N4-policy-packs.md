@@ -2092,7 +2092,9 @@ contract the code already satisfies:
   `:custom-fn`. Per `policy-pack/compiler/resolve-detector`, a `:custom` rule
   with no `:custom-fn` binds to `:semantic`, the LLM-as-judge mechanism. The
   rules therefore do compile and do run; what they do not do is call
-  `verify-signature`, which has no caller outside its own component.
+  `verify-signature`. That fn has no caller anywhere in the workspace and is
+  not among the names `policy-pack.interface.registry` exports, so no code
+  outside the component can reach it at all.
 
   A model judging whether a pack looks signed is not a signature check.
   `:trust/require-signature` in particular asserts a cryptographic property
