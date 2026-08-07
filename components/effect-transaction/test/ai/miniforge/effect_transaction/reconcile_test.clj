@@ -113,17 +113,18 @@
   ;; reconciliation exists for.
   (let [dir (tmp-dir)
         g (merge-grant)
-        t (propose-merge! dir g)
-        ;; simulate the crash: the record reached :committing and nothing
-        ;; ever wrote an outcome
-        crashed (assoc t :effect/state :committing)
-        settled (fx/reconcile! dir crashed
-                               (fn [_] {:effect/observed {:pr/state "OPEN"}
-                                        :effect/matched? false})
-                               later)]
-    (is (contains? fx/reconcilable-states :committing))
-    (is (= :reconciled (:effect/state settled)))
-    (is (false? (:effect/matched? settled)))))
+        t (propose-merge! dir g)]
+    (is (thrown? AssertionError
+                 (fx/commit! dir t g {} now
+                             (fn [] (throw (AssertionError.))))))
+    (let [crashed (fx/read-record dir (:effect/id t))
+          settled (fx/reconcile! dir crashed
+                                 (fn [_] {:effect/observed {:pr/state "OPEN"}
+                                          :effect/matched? false})
+                                 later)]
+      (is (contains? fx/reconcilable-states :committing))
+      (is (= :reconciled (:effect/state settled)))
+      (is (false? (:effect/matched? settled))))))
 
 (deftest ^{:stratum 1} refusal-anomalies-route-correctly-test
   ;; :unauthorized would say "you lack permission", which is neither
