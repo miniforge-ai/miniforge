@@ -64,8 +64,6 @@
     (.toInstant ^Date value)
     value))
 
-(def ^{:stratum 0} not-found store/not-found)
-
 ;------------------------------------------------------------------------------ Layer 1
 
 (defn ^{:stratum 1} advance!
