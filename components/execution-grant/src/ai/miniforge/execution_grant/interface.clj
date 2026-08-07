@@ -144,5 +144,5 @@
 
 (def ^{:stratum 0} revoke-for-cause!
   "Revoke a grant AND record the breach that caused it, or return the
-   persistence anomaly without revoking."
+   recording anomaly without revoking."
   revocation/revoke-for-cause!)

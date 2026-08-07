@@ -51,7 +51,7 @@
 (defn ^{:stratum 1} revoke-for-cause!
   "Persist the breach, then revoke its grant with the matching cause.
 
-   A persistence failure returns its anomaly unchanged and leaves the
+   A recording failure returns its anomaly unchanged and leaves the
    grant live; callers never receive an apparently complete revocation
    with its governing evidence missing."
   [dir grant observation ^Instant now]
