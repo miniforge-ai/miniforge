@@ -20,8 +20,10 @@
 ;;
 ;; Usage: bb eval/codex-traps/run-trap.bb <baseline|treated> <trap-a|trap-b|trap-c> <rep>
 ;;
-;; Runs inside a bench sandbox. Sequential use only. Reads the codex
-;; directory from MINIFORGE_CODEX_PATH; there is no default.
+;; Runs only inside a bench sandbox provisioned by `bb bench:provision`;
+;; see `isolation-anomaly`. Sequential use only. Reads MINIFORGE_CODEX_PATH
+;; (required by the treated arm, no default) and MINIFORGE_BENCH_SOURCE
+;; (optional; the checkout the sandbox was cloned from).
 ;;
 ;; No `ns` form: the runsheet names this file `run-trap.bb`, and clj-kondo
 ;; requires a namespace to match its file name character for character.
@@ -49,6 +51,16 @@
   "treated")
 
 (def ^{:stratum 0} codex-path-env "MINIFORGE_CODEX_PATH")
+
+(def ^{:stratum 0} bench-source-env
+  "Launching checkout, optional. Set, `bb bench:verify` also compares
+   git common dirs; unset, it judges the sandbox alone."
+  "MINIFORGE_BENCH_SOURCE")
+
+(def ^{:stratum 0} mirror-dir-name
+  "Throwaway bare mirror the sandbox's origin must point at. Must match
+   `bench/mirror-dir-name`, which is what `bb bench:provision` creates."
+  "origin.git")
 
 (def ^{:stratum 0} trap->spec
   {"trap-a" "trap-a-ledger-key-rename.spec.edn"
@@ -123,19 +135,100 @@
 ;; Composes Layer 0.
 
 (defn ^{:stratum 1} sandbox-paths
-  "Where this script sits inside the sandbox's working clone."
+  "Layout `bb bench:provision` creates: this script sits at
+   `<root>/repo/eval/codex-traps/run-trap.bb`, beside `<root>/origin.git`."
   [script-file]
-  (let [eval-dir (ancestor script-file 1)]
+  (let [eval-dir (ancestor script-file 1)
+        root (ancestor script-file 4)]
     {:eval-dir eval-dir
      :repo (ancestor script-file 3)
+     :root root
+     :mirror (str (fs/path root mirror-dir-name))
      :detector (str (fs/path eval-dir "detect.bb"))
      :specs (str (fs/path eval-dir "specs"))
      :runs (str (fs/path eval-dir "runs.edn"))}))
+
+(defn ^{:stratum 1} isolation-anomaly
+  "nil when this sandbox is safe to run a bench in; an anomaly otherwise.
+
+   Both conditions are required. `bb bench:verify` rejects a sandbox
+   sharing a git common dir with another checkout; the mirror check
+   rejects one whose origin could still reach a real remote — which
+   bench:verify cannot see, and which a tracked harness run from an
+   ordinary checkout would otherwise pass. Anything undeterminable is a
+   refusal."
+  [{:keys [repo mirror]}]
+  ;; bb runs from the launching checkout when MINIFORGE_BENCH_SOURCE names
+  ;; one, so a sandbox pinned before `bench:verify` existed is still
+  ;; gated; the dirs judged are arguments, not the working directory.
+  (let [source (some-> (System/getenv bench-source-env) str/trim not-empty)
+        verify (try
+                 (apply p/shell {:dir (or source repo) :continue true
+                                 :out :string :err :string}
+                        (concat ["bb" "bench:verify" repo] (when source [source])))
+                 (catch Exception e {:exit refused-exit :err (.getMessage e)}))
+        origin (git-out repo "remote" "get-url" "origin")]
+    (cond
+      (not (fs/exists? (fs/path repo "bb.edn")))
+      (anomaly :invalid-input "sandbox root has no bb.edn — path resolution is wrong"
+               {:repo repo})
+
+      (not (zero? (:exit verify)))
+      (anomaly :fault "bb bench:verify rejected this sandbox"
+               {:repo repo :exit (:exit verify)
+                :out (str/trim (str (:out verify)))
+                :err (str/trim (str (:err verify)))})
+
+      (nil? origin)
+      (anomaly :fault "sandbox has no readable origin remote" {:repo repo})
+
+      (not (fs/directory? mirror))
+      (anomaly :fault "no throwaway mirror beside the sandbox — provision it with bb bench:provision"
+               {:expected mirror})
+
+      (not (and (fs/directory? origin)
+                (= (str (fs/canonicalize origin)) (str (fs/canonicalize mirror)))))
+      (anomaly :fault "sandbox origin is not its own throwaway mirror — a completed run could push for real"
+               {:origin origin :expected mirror})
+
+      (not= "true" (git-out origin "rev-parse" "--is-bare-repository"))
+      (anomaly :fault "sandbox origin mirror is not a bare repository" {:origin origin})
+
+      :else nil)))
 
 (defn ^{:stratum 1} codex-path
   "Codex directory the treated arm consults, or nil when unset."
   []
   (some-> (System/getenv codex-path-env) str/trim not-empty))
+
+(defn ^{:stratum 1} codex-path-anomaly
+  "nil when `arm` has the codex it needs; an anomaly otherwise. No
+   default: an absent codex would run a second baseline under a treated
+   label and silently halve the matrix."
+  [arm path]
+  (cond
+    (not= arm treated-arm) nil
+
+    (nil? path)
+    (anomaly :invalid-input
+             (str "the treated arm needs " codex-path-env " set to the codex directory")
+             {:arm arm :env codex-path-env})
+
+    (not (fs/directory? path))
+    (anomaly :invalid-input
+             (str codex-path-env " does not point at a directory")
+             {:arm arm :env codex-path-env :path path})
+
+    :else nil))
+
+(defn ^{:stratum 1} spec-anomaly
+  "nil when the spec master for `trap` is present; an anomaly otherwise.
+   The runner moves a failed spec into work/failed/ and `git reset`
+   cannot restore an untracked copy, so runs copy from the master."
+  [{:keys [specs]} trap]
+  (let [master (fs/path specs (trap->spec trap))]
+    (when-not (fs/exists? master)
+      (anomaly :not-found "spec master missing from the harness" {:master (str master)}))))
 
 (defn ^{:stratum 1} reset-anomaly
   "Return the sandbox to its pinned tracked state, or an anomaly. A tree
@@ -235,6 +328,11 @@
       codex (codex-path)]
   (when-not (and (#{baseline-arm treated-arm} arm) (trap->spec trap) rep)
     (println usage)
+    (System/exit refused-exit))
+  (when-let [refusal (or (isolation-anomaly paths)
+                         (codex-path-anomaly arm codex)
+                         (spec-anomaly paths trap))]
+    (report-refusal! refusal)
     (System/exit refused-exit))
   (let [inputs (arm-inputs arm)
         before (snapshot (:repo paths) inputs)

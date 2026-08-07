@@ -98,9 +98,68 @@ Small N gives direction, not significance.
    after push, which is AFTER every trap site — trap detection reads
    the task worktree, unaffected. Terminal-status comparisons therefore
    exclude the release phase.
+   SUPERSEDED by AMENDMENT 2026-08-06 (b): the redirect procedure this
+   item describes rewrote the launching checkout. Its consequence for
+   the release phase is unchanged and still holds.
 5. Runner: run-trap.bb (re-copies spec master; detects over the run's
    new ~/.miniforge/worktrees/task-* dirs — pooled, attributed by
    before/after diff; strongest verdict recorded).
 6. SHAKEOUT (uncounted, codex OFF): one run per trap to confirm the
    task completes and the trap site is reachable. Counted matrix only
    after all three shake out.
+
+## AMENDMENT 2026-08-06 (b) — sandbox provisioning; harness into the repo
+
+Logged before the first counted run. No counted run has executed; the
+only rows in `runs.edn` are the uncounted trap-b and trap-a shakeouts,
+both baseline arm, both produced under the defective sandbox below.
+
+1. SANDBOX DEFECT. The bench repo was a linked `git worktree` of the
+   live checkout. A linked worktree owns HEAD, the index and the working
+   tree, while `.git/config` and every other ref live in the shared
+   common dir. So step 4's `git remote set-url origin <mirror>` rewrote
+   the LIVE checkout's origin, and the bench's `git fetch origin main`
+   force-updated the LIVE checkout's `refs/remotes/origin/main` backwards
+   to the mirror's stale head. Both silent. Fixed generically in
+   miniforge PR #1685; see `DOGFOODING.md` §Bench Runs.
+
+2. PROVISIONING (replaces step 4's redirect). Never `git worktree add`:
+
+   ```bash
+   bb bench:provision /path/to/launching/checkout <pin-sha> main
+   ```
+
+   This clones to `~/.miniforge/bench/repo`, inits the bare mirror
+   `~/.miniforge/bench/origin.git`, pushes the pin to it, and redirects
+   only the clone's origin. It re-reads the launching checkout's
+   `remote.origin.url` afterwards and fails the provision if it moved.
+   `MINIFORGE_BENCH_ROOT` overrides the root.
+
+3. RUNNER GATE. `run-trap.bb` refuses to start unless both
+   `bb bench:verify <repo> [$MINIFORGE_BENCH_SOURCE]` exits 0 and the
+   sandbox's `origin` is the bare mirror beside it. The second condition
+   exists because the harness is now tracked: without it, running
+   `run-trap.bb` from an ordinary checkout would pass the first and then
+   `git reset --hard` that checkout. A refusal exits 2 and touches
+   nothing. Anything the guard cannot determine is a refusal.
+
+4. PIN AND `MINIFORGE_BENCH_SOURCE`. The gate shells to `bb bench:verify`,
+   which does not exist at the pre-registered pin `bade0222fa6`. Set
+   `MINIFORGE_BENCH_SOURCE` to the launching checkout and the gate runs
+   the task from there instead of from the sandbox, so the pin stays as
+   pre-registered. Unset, the gate refuses on that pin. The pin itself is
+   unchanged.
+
+5. CODEX PATH. `run-trap.bb` carried a hardcoded personal path. It reads
+   `MINIFORGE_CODEX_PATH` with no default, and the treated arm refuses to
+   start when it is unset or is not a directory — an absent codex would
+   have run a second baseline under a treated label.
+
+6. HARNESS COMMITTED. `eval/codex-traps/` was untracked and existed only
+   inside the bench. `RUNSHEET.md`, `run-trap.bb`, `detect.bb` and
+   `specs/` are now tracked in miniforge; `runs.edn` is gitignored, since
+   it is appended experiment output rather than instrument. `detect.bb`
+   gained the license header, an `ns` form, layer headings and stratum
+   metadata; every detector expression is byte-identical to the frozen
+   version, and the pristine-tree self-test still reads `:not-reached`
+   three times.
