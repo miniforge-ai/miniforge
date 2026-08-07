@@ -20,7 +20,7 @@
   (:require [ai.miniforge.logging.interface :as log]
             [ai.miniforge.phase-deployment.defaults :as defaults]
             [ai.miniforge.phase-deployment.deploy-provider :as provider]
-            [ai.miniforge.phase-deployment.evidence :as evidence]
+            [ai.miniforge.phase-deployment.deploy-result :as result]
             [ai.miniforge.phase-deployment.messages :as msg]
             [ai.miniforge.phase-deployment.shell :as shell]
             [ai.miniforge.phase.interface :as phase]
@@ -73,25 +73,33 @@
   (phase/merge-with-defaults
    (assoc (or (get-in ctx [:phase-config]) {}) :phase phase-kw)))
 
-(defn- ^{:stratum 0} rollout-metrics
-  [start-time pod-state]
-  {:duration-ms (- (System/currentTimeMillis) start-time)
-   :pod-count   (:pod-count pod-state)
-   :ready-count (:ready-count pod-state)})
-
-(defn- ^{:stratum 0} add-deploy-evidence
-  [ctx rollback-evidence manifest-evidence image-evidence]
-  (cond-> ctx
-    rollback-evidence (evidence/add-evidence-to-ctx rollback-evidence)
-    true (evidence/add-evidence-to-ctx manifest-evidence)
-    true (evidence/add-evidence-to-ctx image-evidence)))
-
 (defn ^{:stratum 0} leave-deploy
   "Post-deploy: record final metrics."
   [ctx]
   (if (= :completed (get-in ctx [:phase :status]))
     ctx
     (assoc-in ctx [:phase :status] :failed)))
+
+(defn- ^{:stratum 0} deployment-outcome
+  [config rollback-info applied]
+  (let [rendered-yaml (:rendered-yaml applied)]
+    (if (schema/failed? applied)
+      {:deploy/status :failed
+       :deploy/stage :apply
+       :deploy/rollback-info rollback-info
+       :deploy/rendered-yaml rendered-yaml
+       :deploy/failure (or (:error applied)
+                           (get-in applied [:apply-result :stderr]))}
+      (let [observation (provider/observe! config)
+            observed (:provider/observed observation)]
+        {:deploy/status (if (:provider/matched? observation)
+                          :success
+                          :failed)
+         :deploy/stage :observe
+         :deploy/rollback-info rollback-info
+         :deploy/rendered-yaml rendered-yaml
+         :deploy/pod-state (:deployment/pods observed)
+         :deploy/failure (:deployment/failure observed)}))))
 
 ;------------------------------------------------------------------------------ Layer 1
 
@@ -130,50 +138,6 @@
         :image    (get-in result [:parsed :spec :template :spec :containers 0 :image])
         :replicas (get-in result [:parsed :status :readyReplicas])}))))
 
-(defn- ^{:stratum 1} store-apply-failure
-  [ctx start-time logger result]
-  (log/error logger :deploy :deploy/apply-failed
-             {:data {:error (:error result)
-                     :build-stderr (get-in result [:build-result :stderr])
-                     :apply-stderr (get-in result [:apply-result :stderr])}})
-  (failed-enter ctx start-time
-                {:status  :error
-                 :error   (or (get result :error)
-                              (get-in result [:apply-result :stderr]))
-                 :metrics {:duration-ms (- (System/currentTimeMillis) start-time)}}))
-
-(defn- ^{:stratum 1} store-rollout-failure
-  [ctx start-time logger failure rollback-evidence manifest-evidence image-evidence]
-  (log/error logger :deploy :deploy/rollout-failed
-             {:data {:stderr failure}})
-  (-> (failed-enter ctx start-time
-                    {:status  :rollout-failed
-                     :error   failure
-                     :metrics {:duration-ms (- (System/currentTimeMillis) start-time)}})
-      (add-deploy-evidence rollback-evidence manifest-evidence image-evidence)))
-
-(defn- ^{:stratum 1} store-successful-deploy
-  [ctx start-time config rollback-evidence manifest-evidence image-evidence image-digests pod-state logger]
-  (let [metrics (rollout-metrics start-time pod-state)]
-    (log/info logger :deploy :deploy/complete
-              {:data metrics})
-    (-> ctx
-        (assoc-in [:phase :name] :deploy)
-        (assoc-in [:phase :gates] (get-in config [:phase-config :gates]))
-        (assoc-in [:phase :budget] (get-in config [:phase-config :budget]))
-        (assoc-in [:phase :started-at] start-time)
-        (assoc-in [:phase :status] :completed)
-        (assoc-in [:phase :result]
-                  {:status   :success
-                   :output   {:pod-state pod-state
-                              :images    image-digests}
-                   :artifact {:content   pod-state
-                              :type      :deployment-state
-                              :app-label (:app-label config)
-                              :namespace (:namespace config)}
-                   :metrics  metrics})
-        (add-deploy-evidence rollback-evidence manifest-evidence image-evidence))))
-
 (defn- ^{:stratum 1} invalid-config-result
   [ctx start-time ex]
   (failed-enter ctx start-time
@@ -209,48 +173,12 @@
             rollback-info     (capture-current-state (:deployment-name config)
                                                     (:namespace config)
                                                     (:context config))
-            rollback-evidence (when rollback-info
-                                (evidence/create-evidence
-                                 :evidence/rollback-info
-                                 rollback-info
-                                 {:deployment (:deployment-name config)
-                                  :namespace (:namespace config)}))
-            result            (shell/kustomize-apply! (:kustomize-dir config)
+            applied           (shell/kustomize-apply! (:kustomize-dir config)
                                                       :namespace (:namespace config)
                                                       :context (:context config))]
-        (if (schema/failed? result)
-          (store-apply-failure ctx start-time logger result)
-          (let [rendered-yaml     (:rendered-yaml result)
-                manifest-evidence (evidence/create-evidence
-                                   :evidence/rendered-manifests
-                                   rendered-yaml
-                                   {:kustomize-dir (:kustomize-dir config)})
-                image-digests     (evidence/extract-image-digests rendered-yaml)
-                image-evidence    (evidence/create-evidence
-                                   :evidence/image-digests
-                                   image-digests)]
-            (log/info logger :deploy :deploy/applied
-                      {:data {:image-count (count image-digests)}})
-            (let [observation (provider/observe! config)
-                  observed (:provider/observed observation)
-                  pod-state (:deployment/pods observed)]
-              (if-not (:provider/matched? observation)
-                (store-rollout-failure ctx
-                                       start-time
-                                       logger
-                                       (:deployment/failure observed)
-                                       rollback-evidence
-                                       manifest-evidence
-                                       image-evidence)
-                (store-successful-deploy ctx
-                                         start-time
-                                         config
-                                         rollback-evidence
-                                         manifest-evidence
-                                         image-evidence
-                                         image-digests
-                                         pod-state
-                                         logger))))))
+        (result/store-deployment ctx start-time logger config
+                                 (deployment-outcome config rollback-info
+                                                     applied)))
       (catch clojure.lang.ExceptionInfo ex
         (invalid-config-result ctx start-time ex)))))
 
