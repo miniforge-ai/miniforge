@@ -19,37 +19,16 @@
   "Commit authorization and effect execution for durable proposals."
   (:require
    [ai.miniforge.anomaly.interface :as anomaly]
+   [ai.miniforge.effect-transaction.authorization :as authorization]
    [ai.miniforge.effect-transaction.call :as call]
    [ai.miniforge.effect-transaction.messages :as msg]
    [ai.miniforge.effect-transaction.record :as record]
+   [ai.miniforge.effect-transaction.store :as store]
    [ai.miniforge.execution-grant.interface :as grant])
   (:import
    [java.time Instant]))
 
 ;------------------------------------------------------------------------------ Layer 0
-
-(defn- ^{:stratum 0} authorization-context
-  "Attach the durable proposal as the effect scope being authorized."
-  [t usage]
-  (assoc usage :effect/scope (:effect/proposal t)))
-
-(defn- ^{:stratum 0} grant-conflict
-  "Return a conflict when a grant is not the authority named by `t`."
-  [t grant-record]
-  (cond
-    (not= (:effect/grant-id t) (:grant/id grant-record))
-    (record/wrong-state (msg/t :grant/id-mismatch)
-                      {:effect/id (:effect/id t)
-                       :effect/grant-id (:effect/grant-id t)
-                       :grant/id (:grant/id grant-record)})
-
-    (not= (:effect/class t) (:grant/effect-class grant-record))
-    (record/wrong-state (msg/t :grant/effect-class-mismatch)
-                      {:effect/id (:effect/id t)
-                       :effect/class (:effect/class t)
-                       :grant/effect-class (:grant/effect-class grant-record)})
-
-    :else nil))
 
 (defn- ^{:stratum 0} execute!
   "Persist the authority result, then perform and record the effect."
@@ -75,31 +54,38 @@
 
 (defn- ^{:stratum 1} authorized-commit!
   "Authorize the durable proposal, then execute or record refusal."
-  [dir t grant-record usage ^Instant now effect-fn]
-  (let [context (authorization-context t usage)
-        auth (grant/authorize grant-record context now)]
-    (if (grant/authorized? auth)
-      (execute! dir t :granted now effect-fn)
-      (deny! dir t auth now))))
+  [dir t grant-record ^Instant now effect-fn]
+  (let [auth (authorization/evaluate t grant-record now)]
+    (cond
+      (anomaly/anomaly? auth) auth
+      (grant/authorized? auth) (execute! dir t :granted now effect-fn)
+      :else (deny! dir t auth now))))
 
 ;------------------------------------------------------------------------------ Layer 2
 
 (defn ^{:stratum 2} commit!
   "Commit a proposed effect under its recorded grant.
 
-   The durable proposal, not caller usage, supplies authorization scope.
+   The durable proposal, not caller usage, supplies authorization scope and
+   the one-operation usage count.
    Exceptions from the effect become `:unknown-outcome`; JVM Errors
    propagate after the `:committing` record is durable."
-  [dir t grant-record usage ^Instant now effect-fn]
-  (cond
-    (not= :proposed (:effect/state t))
-    (record/wrong-state (msg/t :commit/not-proposed)
-                      {:effect/id (:effect/id t)
-                       :effect/state (:effect/state t)})
+  [dir candidate grant-record _usage ^Instant now effect-fn]
+  (let [id (:effect/id candidate)
+        t (store/read-record dir id)]
+    (cond
+      (anomaly/anomaly? t) t
 
-    (= :authority/unenforced grant-record)
-    (execute! dir t :unenforced now effect-fn)
+      (nil? t)
+      (store/not-found id)
 
-    :else
-    (or (grant-conflict t grant-record)
-        (authorized-commit! dir t grant-record usage now effect-fn))))
+      (not= :proposed (:effect/state t))
+      (record/wrong-state (msg/t :commit/not-proposed)
+                          {:effect/id (:effect/id t)
+                           :effect/state (:effect/state t)})
+
+      (= :authority/unenforced grant-record)
+      (execute! dir t :unenforced now effect-fn)
+
+      :else
+      (authorized-commit! dir t grant-record now effect-fn))))
