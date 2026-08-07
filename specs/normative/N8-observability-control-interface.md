@@ -6,7 +6,7 @@
 
 # N8 — Observability Control Interface
 
-**Version:** 0.3.0-draft
+**Version:** 0.4.0-draft
 **Date:** 2026-03-08
 **Status:** Draft
 **Conformance:** MUST
@@ -512,52 +512,67 @@ Annotations MUST emit events per N3:
 
 ## 5. Privacy and Redaction
 
-### 5.1 Privacy Levels
+**N3 owns redaction and retention.** N3 §8 defines what may never be emitted,
+the `"[REDACTED]"` marker, truncation, and the three field classes; N3 §4.3
+defines the four retention classes and their minimums. This section defines
+only what is specific to *listeners* — which principal sees which class — and
+MUST NOT restate or vary those contracts.
 
-Event payloads MUST support configurable privacy levels:
+Earlier revisions of this section carried a parallel model: privacy levels
+`metadata-only | redacted | full`, a `:redaction/patterns` regex table, a
+`:redaction/field-rules` vocabulary of `:include | :redact | :exclude`, and a
+`:retention/policies` schema with its own day counts. All are withdrawn. Four
+overlapping vocabularies for two concerns meant an operator configuring
+redaction here had no way to know whether N3 §8's MUST NOT still applied — it
+does, unconditionally, and it is not configurable.
 
-| Level          | Content Included                              |
-| -------------- | --------------------------------------------- |
-| `metadata-only`| Event envelope only, no prompt/response content|
-| `redacted`     | Content with sensitive patterns removed       |
-| `full`         | Complete content (encrypted at rest)          |
+### 5.1 Per-Listener Content Visibility
 
-### 5.2 Redaction Requirements
+What a listener receives is determined by N3 §8.4's field classes and the
+principal's RBAC role (§2.3):
 
-Implementations MUST provide redaction hooks at emission time:
+| Field class | Delivered to |
+|-------------|--------------|
+| `:public` | Every attached listener |
+| `:payload` | Listeners that have not set `include-payloads=false` (N3 §5.3.4) |
+| `:restricted` | Only principals whose RBAC role permits that class |
 
-```clojure
-{:redaction/patterns
- [{:pattern regex                     ; Pattern to match
-   :replacement string                ; Replacement text
-   :applies-to [keyword ...]}]        ; Event fields to scan
+`:restricted` suppression is **per-recipient at delivery**, not per-event at
+emission (N3 §8.4): two listeners on one stream may be entitled to different
+views of the same event.
 
- :redaction/field-rules
- {:prompt-content keyword             ; :include | :redact | :exclude
-  :response-content keyword
-  :tool-args keyword
-  :tool-results keyword}
+A deployment MAY configure a listener type's default — for instance that
+`:fleet` listeners default to `include-payloads=false`. It MUST NOT configure
+away N3 §8.1: no configuration, listener type, or RBAC role causes a
+never-emitted value to be emitted, because that value was never in the event
+(N3 §8.1 redacts at construction).
 
- :redaction/custom-fn function}       ; Custom redaction function
-```
+### 5.2 Redaction Configuration
 
-### 5.3 Retention Policies
+Redaction patterns are **configuration, not code**. Per
+`standards/miniforge/foundations/config-as-data` (dewey 007), the pattern set
+lives in an EDN resource with a schema; implementations MUST NOT accept a
+function as a configuration value.
 
-Implementations MUST support configurable retention:
+An earlier revision specified `:redaction/custom-fn function`. That is
+withdrawn — a function in a config map cannot be serialized, diffed, reviewed,
+or audited, which defeats the purpose of a redaction policy an auditor needs to
+inspect.
 
-```clojure
-{:retention/policies
- [{:event-types [keyword ...]         ; Which events this applies to
-   :privacy-level keyword             ; Which privacy level
-   :retention-days int                ; Days to retain
-   :archive-after-days int            ; Days before archiving
-   :delete-after-days int}]           ; Days before deletion
+Where a deployment needs a detection rule beyond N3 §8.1's set, it adds a
+pattern to that configuration. Implementations MUST apply deployment patterns
+in addition to N3 §8.1's excluded set, never instead of it.
 
- :retention/compliance
- {:audit-events-min-days int          ; Minimum for audit events
-  :control-actions-min-days int       ; Minimum for control actions
-  :evidence-bundles-min-days int}}    ; Minimum for evidence
-```
+### 5.3 Retention
+
+Listener-visible events take the retention class N3 §4.3.1 assigns their event
+type. This spec adds one constraint:
+
+`control-action/requested`, `control-action/executed`, and
+`control-action/approval-required` are `:audit` class (N3 §6). A deployment MAY
+retain them longer than the one-year floor; it MUST NOT retain them for less.
+A control action is the record of a human overriding the machine, and it is the
+first thing an audit asks for.
 
 ---
 
@@ -761,63 +776,31 @@ The TUI MUST provide:
 
 ### 10.1 Additional Event Types
 
-OCI adds these event types to N3:
+OCI's listener and control-action event types are defined by **N3 §3.15**,
+which owns every event wire contract (standard 020). They are listed here for
+navigation only; their schemas are not reproduced.
 
-#### listener/attached
+| Event type | Defined in |
+|------------|------------|
+| `listener/attached` | N3 §3.15 |
+| `listener/detached` | N3 §3.15 |
+| `listener/overflow` | N3 §3.15 |
+| `control-action/requested` | N3 §3.15 |
+| `control-action/executed` | N3 §3.15 |
+| `control-action/approval-required` | N3 §3.15 |
+| `annotation/created` | N3 §3.15 |
 
-```clojure
-{:event/type :listener/attached
- :listener/id uuid
- :listener/type keyword
- :listener/capability keyword
- :workflow/id uuid
- :message "Listener attached: {type} with {capability} capability"}
-```
+Two properties of that family matter to implementers of this spec:
 
-#### listener/detached
+- These events take an **inherited scope** (N3 §2.3): `listener/*` takes the
+  scope of the stream it annotates, and `control-action/*` and
+  `annotation/created` take the scope of their target. Each carries
+  `:scope/type` naming which scope it resolved to. An earlier revision of this
+  section reproduced these schemas with a fixed `:workflow/id`, which made them
+  unusable on the five non-workflow scopes N3 §5.3.1 now streams.
+- `control-action/*` is `:audit` retention class (§5.3).
 
-```clojure
-{:event/type :listener/detached
- :listener/id uuid
- :workflow/id uuid
- :listener/reason keyword             ; :disconnect | :timeout | :revoked
- :message "Listener detached: {reason}"}
-```
-
-#### control-action/requested
-
-```clojure
-{:event/type :control-action/requested
- :action/id uuid
- :action/type keyword
- :action/target {...}
- :action/requester {...}
- :workflow/id uuid
- :message "Control action requested: {type}"}
-```
-
-#### control-action/executed
-
-```clojure
-{:event/type :control-action/executed
- :action/id uuid
- :action/type keyword
- :action/result {:status keyword :error {...}}
- :workflow/id uuid
- :message "Control action executed: {type} - {status}"}
-```
-
-#### control-action/approval-required
-
-```clojure
-{:event/type :control-action/approval-required
- :action/id uuid
- :action/type keyword
- :approval/required-approvers int
- :approval/timeout-at inst
- :workflow/id uuid
- :message "Approval required for {type}: {required} approvers needed"}
-```
+The remaining event types below are specific to this spec and are defined here.
 
 #### checkpoint/reached
 
@@ -930,6 +913,65 @@ Conformance tests MUST verify:
 2. Privacy levels control content inclusion
 3. Retention policies are enforced
 
+### 12.4 Conformance Requirements
+
+Requirement IDs are stable identifiers for the normative statements of this
+spec. IDs are never reused; a withdrawn requirement is marked withdrawn, not
+deleted.
+
+#### Capability model
+
+| ID | Level | Requirement |
+|----|-------|-------------|
+| N8.CAP.1 | MUST | Enforce the three capability levels of §2 — OBSERVE, ADVISE, CONTROL. |
+| N8.CAP.2 | MUST NOT | Let an OBSERVE listener emit an annotation or request a control action (§2). |
+| N8.CAP.3 | MUST NOT | Let an ADVISE listener request a control action (§2). |
+| N8.CAP.4 | MUST | Resolve every listener to a principal and RBAC role (§2.3). |
+| N8.CAP.5 | MUST | Reject a declared capability the principal's role does not permit, with HTTP 403 (§2.3, N3 §5.3.3). |
+
+#### Control actions
+
+| ID | Level | Requirement |
+|----|-------|-------------|
+| N8.CTL.1 | MUST | Emit `control-action/requested` and `control-action/executed` per N3 §3.15 for every action. |
+| N8.CTL.2 | MUST | Require approval for High and Critical actions where configured (§3). |
+| N8.CTL.3 | MUST | Record every control action in the evidence bundle (N6 §2.1, §11). |
+| N8.CTL.4 | MUST NOT | Modify workflow state when an action fails (§12.2). |
+| N8.CTL.5 | MUST | Carry `:scope/type` and the matching scope key on every control-action event (N3 §2.3). |
+| N8.CTL.6 | MUST | Treat control-action events as `:audit` retention class (§5.3, N3 §4.3.1). |
+
+#### Privacy
+
+| ID | Level | Requirement |
+|----|-------|-------------|
+| N8.PRV.1 | MUST | Deliver fields by N3 §8.4's class and the principal's role (§5.1). |
+| N8.PRV.2 | MUST | Suppress `:restricted` fields per-recipient at delivery, not per-event at emission (§5.1). |
+| N8.PRV.3 | MUST NOT | Allow any configuration, listener type, or role to cause a N3 §8.1 excluded value to be emitted (§5.1). |
+| N8.PRV.4 | MUST | Hold redaction patterns as EDN configuration with a schema (§5.2, dewey 007). |
+| N8.PRV.5 | MUST NOT | Accept a function as a redaction configuration value (§5.2). |
+| N8.PRV.6 | MUST | Apply deployment patterns in addition to N3 §8.1's excluded set, never instead of it (§5.2). |
+
+### 12.5 Test Obligations
+
+A conformance suite MUST cover, at minimum:
+
+1. **Capability enforcement** — an OBSERVE listener's annotation attempt and a
+   ADVISE listener's control-action attempt are both rejected
+   (N8.CAP.2, N8.CAP.3).
+2. **Non-workflow scope** — a listener attached to a pack or repository stream
+   receives `listener/attached` carrying that scope's key, not `:workflow/id`
+   (N8.CTL.5, N3 §2.3).
+3. **Per-recipient suppression** — two listeners with different roles on one
+   stream receive the same event with different `:restricted` fields present
+   (N8.PRV.2).
+4. **Redaction is not configurable away** — no combination of listener type,
+   role, and deployment configuration causes a N3 §8.1 value to appear
+   (N8.PRV.3).
+5. **Config shape** — the redaction configuration round-trips through EDN and
+   is rejected if it carries a function (N8.PRV.4, N8.PRV.5).
+6. **Audit retention** — control-action events survive the one-year floor and
+   are not expired by a shorter deployment policy (N8.CTL.6).
+
 ---
 
 ## 13. Minimal Compliant Implementation (MCI)
@@ -940,7 +982,7 @@ A minimal compliant OCI implementation MUST:
 2. Support at least: pause, resume, cancel control actions
 3. Emit all required event types (§10.1)
 4. Record control actions in evidence bundles
-5. Support metadata-only privacy level
+5. Deliver `:public` fields to every listener and honor `include-payloads=false` (§5.1)
 6. Provide CLI commands for listener attachment
 
 A minimal compliant implementation MAY defer:
@@ -950,6 +992,41 @@ A minimal compliant implementation MAY defer:
 - OTel export
 - Enterprise multi-tenancy
 - Pattern detection
+
+---
+
+## Annex A — Implementation Conformance Status (informative)
+
+This annex is **informative**. It records where the miniforge implementation
+diverges from the contract above, as of 2026-08-06. It is not a relaxation of
+any requirement in §0–§14.
+
+### A.1 Implemented
+
+- **Listener capability and filtering.** `event-stream/listeners.clj`
+  implements listener registration, capability checks, and `include-payloads`
+  filtering (N8.CAP.1–N8.CAP.3, N8.PRV.1 partially).
+- **Control action evidence.** `evidence-bundle/collector.clj` records
+  control actions (N8.CTL.3).
+
+### A.2 Specified, Not Implemented
+
+- **Redaction (§5.2).** No redaction configuration exists anywhere in the
+  tree — the only match for "redaction" is a test in `progress-detector`. N3
+  §8's excluded-value set is therefore unenforced on this surface, as it is on
+  the evidence surface (N6 Annex A). This is the same gap seen from three
+  specs now, which is a signal about where implementation effort should go
+  (N8.PRV.3–N8.PRV.6).
+- **Per-recipient `:restricted` suppression (§5.1).** Filtering is
+  per-subscription, not per-recipient by role (N8.PRV.2).
+- **Inherited scope on listener events (§10.1).** Listener events carry
+  `:workflow/id`; `:scope/type` is not emitted, so the five non-workflow
+  scopes of N3 §2.3 cannot be observed (N8.CTL.5).
+
+### A.3 Structural
+
+- **Audit retention (§5.3)** is unenforced — there is no retention floor for
+  control-action events (N8.CTL.6).
 
 ---
 
@@ -967,6 +1044,21 @@ A minimal compliant implementation MAY defer:
 ---
 
 **Version History:**
+
+- 0.4.0-draft (2026-08-06): Spec-completion pass. §5 carried a parallel model
+  for concerns N3 owns — privacy levels `metadata-only | redacted | full`, a
+  `:redaction/patterns` regex table, a `:redaction/field-rules` vocabulary, and
+  a `:retention/policies` schema with its own day counts. All withdrawn: N3 §8
+  owns redaction and N3 §4.3 owns retention, and four overlapping vocabularies
+  meant an operator configuring redaction here could not tell whether N3 §8.1's
+  MUST NOT still applied. §5 now defines only what is listener-specific — which
+  principal sees which field class. `:redaction/custom-fn function` withdrawn
+  as a config-as-data violation (dewey 007): a function in a config map cannot
+  be serialized, diffed, or audited. §10.1 reproduced N3 §3.15's event schemas
+  with a fixed `:workflow/id`, which made them unusable on the five
+  non-workflow scopes N3 §5.3.1 streams; now a reference table. §12.4–§12.5
+  conformance requirement IDs and test obligations. Annex A records
+  implementation divergence.
 
 - 0.3.0-draft (2026-04-23): Control-action surface extensions — Checkpoint Control
   (§3.1.5: request/approve/reject) for governed pause-points in Workflow Packs and
