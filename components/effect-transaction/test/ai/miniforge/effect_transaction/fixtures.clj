@@ -32,42 +32,89 @@
 
 (def ^{:stratum 0} much-later (Instant/parse "2026-08-02T00:00:00Z"))
 
+(def ^{:stratum 0} concurrency-timeout-ms 5000)
+
 (def ^{:stratum 0} merge-proposal
   {:pr/repo "miniforge-ai/miniforge"
    :pr/number 42})
+
+(def ^{:stratum 0} no-usage
+  "Caller usage is intentionally absent at the fenced commit boundary."
+  {})
+
+(defn ^{:stratum 0} claimed-usage
+  "Build an untrusted caller usage claim for fencing tests."
+  [count]
+  {:usage/count count})
 
 (defn ^{:stratum 0} tmp-dir
   "A fresh directory for one effect-transaction test."
   []
   (str (.toFile (Files/createTempDirectory "fx-test" (into-array FileAttribute [])))))
 
-(defn ^{:stratum 0} record-success!
+(defn ^{:stratum 0} succeed!
+  []
+  {:effect/outcome :succeeded})
+
+(defn ^{:stratum 0} throw-exception!
+  [message]
+  (throw (ex-info message {})))
+
+;------------------------------------------------------------------------------ Layer 1
+
+(defn ^{:stratum 1} record-success!
   "Record that a test effect fired and report definite success."
   [fired]
   (reset! fired true)
-  {:effect/outcome :succeeded})
+  (succeed!))
 
-;------------------------------------------------------------------------------ Layer 1
+(defn ^{:stratum 1} count-success!
+  [calls]
+  (swap! calls inc)
+  (succeed!))
+
+(defn ^{:stratum 1} block-and-count-success!
+  [calls entered release]
+  (swap! calls inc)
+  (deliver entered true)
+  @release
+  (succeed!))
 
 (defn ^{:stratum 1} merge-grant
   "A merge grant matching the canonical test proposal."
   ([] (merge-grant {}))
   ([overrides]
-   (grant/issue (merge {:principal "agent:implementer"
-                        :effect-class :effect/merge
-                        :scope merge-proposal
-                        :constraints {:constraint/max-count 5}
-                        :delegable? false
-                        :expires-at later}
-                       overrides)
-                now)))
+   (let [effect-id (get overrides :effect-id (random-uuid))
+         scope (assoc (get overrides :scope merge-proposal)
+                      :effect/id effect-id)
+         grant-overrides (dissoc overrides :effect-id :scope)]
+     (grant/issue (merge {:principal "agent:implementer"
+                          :effect-class :effect/merge
+                          :scope scope
+                          :constraints {:constraint/max-count 1}
+                          :delegable? false
+                          :expires-at later}
+                         grant-overrides)
+                  now))))
 
 (defn ^{:stratum 1} propose-merge!
   "Persist the effect that `merge-grant` authorizes."
-  [dir g]
-  (fx/propose! dir
-               {:effect-class :effect/merge
-                :grant-id (:grant/id g)
-                :envelope-id (random-uuid)
-                :proposal merge-proposal}
-               now))
+  ([dir g] (propose-merge! dir g merge-proposal))
+  ([dir g proposal]
+   (fx/propose! dir
+                {:effect-id (get-in g [:grant/scope :effect/id])
+                 :effect-class :effect/merge
+                 :grant-id (:grant/id g)
+                 :envelope-id (random-uuid)
+                 :proposal proposal}
+                now)))
+
+;------------------------------------------------------------------------------ Layer 2
+
+(defn ^{:stratum 2} merge-case!
+  "Create one grant and its exactly bound durable proposal."
+  ([dir] (merge-case! dir {}))
+  ([dir grant-overrides]
+   (let [g (merge-grant grant-overrides)]
+     {:grant g
+      :transaction (propose-merge! dir g)})))

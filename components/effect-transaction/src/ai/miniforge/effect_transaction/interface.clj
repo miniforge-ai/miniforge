@@ -45,7 +45,7 @@
   schema/EffectTransaction)
 
 (def ^{:stratum 0} read-record
-  "Read one persisted record by id, nil, or a storage anomaly."
+  "Read one persisted record by UUID, nil, or an input/storage anomaly."
   store/read-record)
 
 (def ^{:stratum 0} list-records
@@ -61,9 +61,10 @@
   core/propose!)
 
 (def ^{:stratum 0} commit!
-  "Re-check the grant, mark :committing, run the effect, record what it
-   reported. An Exception is :unknown-outcome, never :failed; a JVM Error
-   propagates after the durable claim."
+  "Reload the durable proposal, authorize its scope and one-operation count,
+   atomically mark :committing, run the effect, and record what it reported.
+   Caller usage is ignored. An Exception is :unknown-outcome, never :failed;
+   a JVM Error propagates after the durable claim."
   core/commit!)
 
 (def ^{:stratum 0} reconcile!
