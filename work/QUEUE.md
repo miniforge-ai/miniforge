@@ -108,18 +108,16 @@ Step 2 of the ratified Ariadne adoption order: authority stops being
 
 | tier | r | theme | spec | axes |
 |---|---|---|---|---|
-| high | ● | ariadne-grants | `ariadne-effect-transaction-fencing.spec.edn` — Fence each grant to one durable effect transaction | correctness+policyenforcement+governancecredibility |
 | high | ● | ariadne-grants | `ariadne-grant-issuance.spec.edn` — Issue narrow runtime-owned grants for irreversible effects | correctness+policyenforcement+governancecredibility |
 | high | ○ | ariadne-grants | `ariadne-deploy-grant-enforcement.spec.edn` — Require granted, transacted Kubernetes deployments | correctness+observation+governancecredibility |
 | high | ○ | ariadne-grants | `ariadne-merge-grant-enforcement.spec.edn` — Require granted, transacted PR merges | correctness+observation+governancecredibility |
 
 ## Theme — Polylith compliance (`polylith-compliance`, status: in-flight)
 
-`poly check` currently reports 13 structural errors + 9 warnings.
-   Pre-commit's structural gate rejects commits because of them, which
-   blocks every dogfood run's release phase. Get to a clean workspace
-   and keep it clean by wiring the gate into CI and workflow-dep
-   ordering.
+Keep `poly check` at zero errors and warnings so structural drift cannot
+   weaken release signal. The remaining active work is TUI optional-phase
+   loading: raw test errors and project summaries must agree without adding
+   unnecessary project dependencies.
 
 | tier | r | theme | spec | axes |
 |---|---|---|---|---|
