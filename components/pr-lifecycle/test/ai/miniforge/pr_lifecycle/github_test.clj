@@ -130,6 +130,45 @@
       (is (dag/err? result))
       (is (= :invalid-pagination (get-in result [:error :code]))))))
 
+(deftest ^{:stratum 1} get-thread-id-follows-reply-root-and-paginates
+  (let [requests (atom [])
+        thread (fn [id root-id resolved?]
+                 {:id id
+                  :isResolved resolved?
+                  :comments {:nodes [{:databaseId root-id}]}})
+        pages [(review-thread-page [(thread "other" 1 true)] true "next-page")
+               (review-thread-page [(thread "target" 10 false)] false nil)]]
+    (with-redefs [github/run-gh-command
+                  (fn [args _]
+                    (if (= ["git" "config" "--get" "remote.origin.url"] args)
+                      (dag/ok {:output "git@github.com:miniforge-ai/miniforge.git"})
+                      (dag/ok {:output (json/generate-string
+                                        {:id 99 :in_reply_to_id 10})})))
+                  github/graphql-query
+                  (fn [_ _ & {:keys [variables]}]
+                    (let [index (count @requests)]
+                      (swap! requests conj variables)
+                      (nth pages index)))]
+      (let [result (github/get-thread-id "/repo" 1704 99)]
+        (is (= {:thread-id "target" :is-resolved false} (:data result)))
+        (is (= [nil "next-page"] (mapv :cursor @requests)))))))
+
+(deftest ^{:stratum 1} get-thread-id-uses-original-comment-id
+  (with-redefs [github/run-gh-command
+                (fn [args _]
+                  (if (= "git" (first args))
+                    (dag/ok {:output "git@github.com:miniforge-ai/miniforge.git"})
+                    (dag/ok {:output (json/generate-string
+                                      {:id 10 :in_reply_to_id nil})})))
+                github/graphql-query
+                (fn [& _]
+                  (review-thread-page
+                   [{:id "target" :isResolved true
+                     :comments {:nodes [{:databaseId 10}]}}]
+                   false nil))]
+    (is (= {:thread-id "target" :is-resolved true}
+           (:data (github/get-thread-id "/repo" 1704 10))))))
+
 (deftest ^{:stratum 1} post-review-uses-create-review-endpoint-via-stdin
   (testing "post-review! shells out to the right gh api endpoint with --input -"
     (let [calls (atom [])
