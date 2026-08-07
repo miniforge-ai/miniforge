@@ -7,7 +7,7 @@
 # miniforge Specification Index
 
 **Version:** 0.13.0-draft
-**Date:** 2026-08-05
+**Date:** 2026-08-06
 **Status:** Living specification during OSS development
 
 ---
@@ -221,7 +221,7 @@ Defines:
 - **Conformance requirement IDs** (`N6.EB.*`, `N6.PR.*`, `N6.EL.*`, `N6.GE.*`, `N6.SD.*`,
   `N6.PS.*`) and test obligations (§9.4–§9.5)
 - **Annex A (informative):** implementation conformance status
-- Compliance metadata: sensitive data handling, audit requirements (SOCII/FedRAMP)
+- Compliance metadata: sensitive data handling, audit requirements (SOC 2/FedRAMP)
 - **Reliability evidence:** SLI measurements, failure class, workflow tier, degradation mode in outcome (§2.6)
 - **Evaluation artifacts:** Golden set and eval-run-result artifact types (§3.1.1)
 

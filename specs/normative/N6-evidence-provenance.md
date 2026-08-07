@@ -102,7 +102,7 @@ contracts that make autonomous workflows credible to platform and security teams
  :compliance/auditor-notes string   ; OPTIONAL
 
  ;; Seal (§2.14)
- :evidence/event-links {...}        ; REQUIRED: see §2.12
+ :evidence/event-links [...]        ; REQUIRED: one per scope, see §2.12
  :evidence/content-hash string      ; REQUIRED: SHA-256 over the sealed bundle
  :evidence/sealed-at inst           ; REQUIRED
  :evidence/signature string}        ; OPTIONAL
@@ -541,7 +541,9 @@ and template.
 
 ### 2.12 Event Stream Linkage
 
-§5.1 requires a bundle to link to the event stream. This is that link:
+§5.1 requires a bundle to link to the event stream. `:evidence/event-links` is
+a **vector** of links, one per scope covered — never a single map, because a
+bundle may span scopes. Each element:
 
 ```clojure
 {:event-links/scope-type keyword   ; REQUIRED: N3 §2.3 scope — usually :workflow
@@ -552,8 +554,8 @@ and template.
 ```
 
 A sequence range is only meaningful within one N3 scope, because N3 §2.2
-sequences per scope. A bundle covering work that spans scopes MUST record one
-link per scope rather than a single range.
+sequences per scope. A bundle covering work in a single scope carries a
+one-element vector; one spanning scopes carries one element per scope.
 
 Implementations MUST NOT expire an event inside a sealed bundle's range while
 the bundle is retained. N3 §4.3.2 forbids expiring from the middle of a
@@ -994,6 +996,15 @@ A bundle MUST NOT be sealed (§2.14) until scanning and redaction have completed
 Sealing a bundle and redacting afterwards would either break the seal or leave
 the secret inside a record that claims to be tamper-evident.
 
+### 7.3 Audit Trail Requirements
+
+For SOC 2 / FedRAMP compliance, implementations MUST:
+
+1. **Record all evidence bundle accesses** - Who, when, why
+2. **Prevent tampering** - Immutable storage, content hashing
+3. **Support export** - Evidence bundles exportable for auditors
+4. **Maintain chain of custody** - From intent to outcome
+
 ### 7.4 Retention
 
 `:compliance/retention-policy` is optional on a bundle; a retention _floor_ is
@@ -1015,15 +1026,6 @@ Two constraints follow from the rest of this spec:
 Deleting a bundle before its floor is a compliance failure, not a storage
 optimization. Where regulation requires erasure of specific content, that is
 handled by redaction at seal time (§7.2), not by destroying the record.
-
-### 7.3 Audit Trail Requirements
-
-For SOC 2 / FedRAMP compliance, implementations MUST:
-
-1. **Record all evidence bundle accesses** - Who, when, why
-2. **Prevent tampering** - Immutable storage, content hashing
-3. **Support export** - Evidence bundles exportable for auditors
-4. **Maintain chain of custody** - From intent to outcome
 
 ---
 
