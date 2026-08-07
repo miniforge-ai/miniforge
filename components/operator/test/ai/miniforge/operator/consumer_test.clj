@@ -29,6 +29,7 @@
    [ai.miniforge.operator.intervention :as intervention]
    [clojure.edn :as edn]
    [clojure.java.io :as io]
+   [clojure.string :as str]
    [clojure.test :refer [deftest is testing]])
   (:import
    [java.nio.channels FileChannel]
@@ -484,7 +485,7 @@
           (is (= 1 (count @applied)))
           (is (= intervention-id (:intervention/id (first @applied)))))))))
 
-(deftest ^{:stratum 4} a_rejection_never_applies
+(deftest ^{:stratum 4} a-rejection-never-applies
   (testing "reject transitions and records the reason without applying"
     (let [events-dir (temp-events-dir)
           stream (memory-stream)

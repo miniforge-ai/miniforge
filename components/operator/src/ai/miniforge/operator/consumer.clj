@@ -493,7 +493,14 @@
 
                (= intervention-decision-event-type (:event/type raw))
                (let [event (revive-request-event raw)]
-                 (if-not (uuid? (:intervention/id event))
+                 ;; The SAME typed identity set the request path
+                 ;; demands, not just the intervention id: a
+                 ;; `:workflow/id` that survived tag-stripping as a
+                 ;; string would fall through `stream-for` to the
+                 ;; default stream, and the transition would be
+                 ;; published — and applied — against the wrong
+                 ;; destination.
+                 (if-not (valid-request-identities? event)
                    (do (publish-anomaly!
                         stream file-name
                         (anomaly/anomaly
