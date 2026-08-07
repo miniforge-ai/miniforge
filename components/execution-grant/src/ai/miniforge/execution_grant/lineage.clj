@@ -26,8 +26,8 @@
    Every unresolvable condition here fails CLOSED. An ancestor we cannot
    read is not an ancestor we may assume is fine — that assumption is
    the fail-open bug this architecture exists to make unrepresentable."
-  (:import
-   [java.time Instant]))
+  (:require
+   [ai.miniforge.execution-grant.temporal :as temporal]))
 
 ;------------------------------------------------------------------------------ Layer 0
 
@@ -46,10 +46,11 @@
 
 (defn ^{:stratum 0} expired?
   "True when `grant` has passed its expiry as of `now`."
-  [grant ^Instant now]
-  (let [^Instant expires (:grant/expires-at grant)]
+  [grant now]
+  (let [expires (:grant/expires-at grant)]
     (or (nil? expires)
-        (.isAfter now expires))))
+        (.isAfter (temporal/->instant now)
+                  (temporal/->instant expires)))))
 
 ;------------------------------------------------------------------------------ Layer 1
 

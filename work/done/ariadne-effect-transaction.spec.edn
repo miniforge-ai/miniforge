@@ -118,7 +118,8 @@
   :axes #{:correctness :observation :governance-credibility}
   :theme :ariadne-grants
   :rationale "The call-site migration in 2d has nothing to migrate onto until the coordinator exists."
-  :blocks ["ariadne-granted-effect-call-sites.spec.edn"]
+  :blocks ["ariadne-merge-grant-enforcement.spec.edn"
+           "ariadne-deploy-grant-enforcement.spec.edn"]
   :blocked-by ["ariadne-grant-constraints-decide.spec.edn"]}
 
  :spec/workflow-type :canonical-sdlc}

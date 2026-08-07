@@ -23,7 +23,7 @@
   (:require
    [ai.miniforge.dag-executor.interface :as dag]
    [ai.miniforge.pr-lifecycle.events :as events]
-   [ai.miniforge.pr-lifecycle.github :as github]
+   [ai.miniforge.pr-lifecycle.github-conversation :as conversation]
    [ai.miniforge.pr-lifecycle.triage :as triage]
    [ai.miniforge.loop.interface :as loop]
    [ai.miniforge.logging.interface :as log]
@@ -230,9 +230,9 @@
             (dag/err :push-failed (:error push-result))))
         (dag/err :commit-failed (:error stage-result))))))
 
-;; Conversation resolution
+;; Conversation follow-up
 (defn ^{:stratum 0} resolve-comment-thread
-  "Resolve a conversation thread after creating a fix PR.
+  "Reply with a fix PR link and optionally resolve the conversation thread.
 
    Arguments:
    - worktree-path: Path to git worktree
@@ -241,25 +241,25 @@
    - logger: Logger instance
 
    Options:
-   - :auto-resolve - Whether to resolve conversation (default true)
+   - :auto-resolve - Whether to resolve after replying (default true)
 
-   Returns DAG result with resolution status"
+   Returns DAG result with reply and resolution status"
   [worktree-path fix-context fix-pr-number logger & {:keys [auto-resolve]
                                                       :or {auto-resolve true}}]
   (let [comment-id (:fix/comment-id fix-context)
         parent-pr-number (:fix/parent-pr-number fix-context)]
 
-    ;; Only attempt resolution if we have the necessary metadata
-    (if (and comment-id parent-pr-number auto-resolve)
+    (if (and comment-id parent-pr-number)
       (do
         (when logger
           (log/info logger :pr-lifecycle :fix/resolving-conversation
-                    {:message "Resolving conversation thread"
+                    {:message "Linking fix PR to review comment"
                      :data {:parent-pr parent-pr-number
                             :comment-id comment-id
-                            :fix-pr fix-pr-number}}))
+                            :fix-pr fix-pr-number
+                            :auto-resolve auto-resolve}}))
 
-        (let [result (github/link-fix-pr-to-comment
+        (let [result (conversation/link-fix-pr-to-comment
                       worktree-path parent-pr-number comment-id fix-pr-number logger
                       :auto-resolve auto-resolve)]
           (when (dag/ok? result)
@@ -270,13 +270,12 @@
                                 :reply-url (:reply-url (:data result))}})))
           result))
 
-      ;; No comment metadata - skip resolution
+      ;; No comment metadata - skip the entire conversation follow-up.
       (do
         (when (and logger (or comment-id parent-pr-number))
           (log/debug logger :pr-lifecycle :fix/skipping-resolution
-                     {:message "Skipping conversation resolution"
+                     {:message "Skipping fix PR conversation follow-up"
                       :data {:reason (cond
-                                       (not auto-resolve) "auto-resolve disabled"
                                        (not comment-id) "no comment-id"
                                        (not parent-pr-number) "no parent-pr-number")}}))
         (dag/ok {:skipped true :reason "missing-metadata"})))))
@@ -374,17 +373,16 @@
                                           :attempt attempt
                                           :commit-sha (:commit-sha (:data commit-result))}}))
 
-                      ;; Try to resolve conversation thread (non-blocking)
-                      (when (and auto-resolve-comments
-                                 (:fix/comment-id fix-context))
+                      ;; Link the fix reply and optionally resolve (non-blocking).
+                      (when (:fix/comment-id fix-context)
                         (try
                           (resolve-comment-thread worktree-path fix-context pr-id logger
                                                   :auto-resolve auto-resolve-comments)
                           (catch Exception e
-                            ;; Log error but don't fail the fix loop
+                            ;; Unexpected follow-up failures do not fail the fix loop.
                             (when logger
                               (log/warn logger :pr-lifecycle :fix-loop/resolution-error
-                                        {:message "Failed to resolve conversation (non-fatal)"
+                                        {:message "Conversation follow-up failed (non-fatal)"
                                          :data {:error (.getMessage e)}})))))
 
                       ;; Publish fix-pushed event

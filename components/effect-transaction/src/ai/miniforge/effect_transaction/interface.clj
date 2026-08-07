@@ -44,17 +44,12 @@
   "Closed Malli schema for a transaction record."
   schema/EffectTransaction)
 
-(def ^{:stratum 0} write!
-  "Persist a record atomically. Throws if the write cannot complete —
-   a caller MUST treat that as 'do not attempt the effect'."
-  store/write!)
-
 (def ^{:stratum 0} read-record
-  "Read one persisted record by id, or nil."
+  "Read one persisted record by UUID, nil, or an input/storage anomaly."
   store/read-record)
 
 (def ^{:stratum 0} list-records
-  "Every persisted record under a directory."
+  "Every persisted record under a directory, or a storage anomaly."
   store/list-records)
 
 (def ^{:stratum 0} valid?
@@ -62,16 +57,17 @@
   core/valid?)
 
 (def ^{:stratum 0} propose!
-  "Record the intent durably, BEFORE the effect happens. Refuses a
-   missing store dir rather than writing to the process CWD."
+  "Create a durable proposal without replacing an existing effect ID."
   core/propose!)
 
 (def ^{:stratum 0} commit!
-  "Re-check the grant, mark :committing, run the effect, record what it
-   reported. A throw is :unknown-outcome, never :failed."
+  "Reload the durable proposal, authorize its scope and one-operation count,
+   atomically mark :committing, run the effect, and record what it reported.
+   Caller usage is ignored. An Exception is :unknown-outcome, never :failed;
+   a JVM Error propagates after the durable claim."
   core/commit!)
 
 (def ^{:stratum 0} reconcile!
-  "Ask the external system what actually happened and record the answer,
-   mismatch included."
+  "Reload a durable unsettled record, ask the external system what happened,
+   and record the answer, mismatch included."
   core/reconcile!)

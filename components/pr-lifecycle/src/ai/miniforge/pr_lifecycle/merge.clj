@@ -23,16 +23,13 @@
   (:require
    [ai.miniforge.anomaly.interface :as anomaly]
    [ai.miniforge.dag-executor.interface :as dag]
-   [ai.miniforge.pr-lifecycle.conflict-resolution :as conflict-resolution]
-   [ai.miniforge.pr-lifecycle.merge-transaction :as merge-transaction]
-   [ai.miniforge.pr-lifecycle.events :as events]
-   [ai.miniforge.logging.interface :as log]
+   [ai.miniforge.pr-lifecycle.github :as github]
+   [ai.miniforge.pr-lifecycle.merge-orchestration :as orchestration]
+   [ai.miniforge.pr-lifecycle.merge-readiness :as readiness]
    [ai.miniforge.response.interface :as response]
    [babashka.process :as process]
    [cheshire.core :as json]
-   [clojure.string :as str])
-  (:import
-   [java.time Instant]))
+   [clojure.string :as str]))
 
 ;------------------------------------------------------------------------------ Layer 0
 
@@ -96,13 +93,9 @@
     (catch Exception e
       (dag/err :gh-exception (.getMessage e)))))
 
-(defn ^{:stratum 0} check-unresolved-threads
-  "Check if PR has unresolved comment threads."
-  [_worktree-path _pr-number]
-  ;; gh doesn't have a direct way to check this
-  ;; Would need GitHub API for accurate count
-  (dag/ok {:has-unresolved? false
-           :note "Thread resolution check requires GitHub API"}))
+(defn- ^{:stratum 0} read-unresolved-threads
+  [worktree-path pr-number]
+  (github/unresolved-review-threads worktree-path pr-number))
 
 ;; Conflict-resolution dispatch (Stage 3d, spec §6.4)
 (defn- ^{:stratum 0} parse-gh-json
@@ -121,13 +114,23 @@
 (defn ^{:stratum 1} check-ci-status
   "Check if CI is green for a PR."
   [worktree-path pr-number]
-  (let [result (run-gh-command
-                ["gh" "pr" "checks" (str pr-number) "--fail-on-error"]
-                worktree-path)]
-    (if (dag/ok? result)
-      (dag/ok {:ci-green? true})
-      (dag/ok {:ci-green? false
-               :error (:error result)}))))
+  (dag/when-let-ok
+   [result (run-gh-command
+            ["gh" "pr" "checks" (str pr-number) "--json" "bucket"]
+            worktree-path)]
+    (let [checks (parse-gh-json (:output (:data result)))]
+      (if (and (sequential? checks) (every? #(string? (:bucket %)) checks))
+        (dag/ok {:ci-green? (boolean
+                             (and (seq checks)
+                                  (every? #{"pass" "skipping"}
+                                          (map :bucket checks))))})
+        (dag/err :invalid-ci-status-response
+                 "GitHub returned incomplete CI check state")))))
+
+(defn ^{:stratum 1} check-unresolved-threads
+  "Read GitHub's review-thread state for one pull request."
+  [worktree-path pr-number]
+  (read-unresolved-threads worktree-path pr-number))
 
 (defn ^{:stratum 1} check-review-status
   "Check if PR has required approvals."
@@ -250,6 +253,17 @@
               (dag/err :push-failed (:error push-result))))
           (dag/err :rebase-failed (:error rebase-result)))))))
 
+(defn ^{:stratum 1} fetch-pr-branch
+  "Read the PR head branch from GitHub."
+  [worktree-path pr-number]
+  (dag/when-let-ok
+   [result (run-gh-command
+            ["gh" "pr" "view" (str pr-number) "--json" "headRefName"]
+            worktree-path)]
+      (if-let [branch (:headRefName (parse-gh-json (:output (:data result))))]
+        (dag/ok {:branch branch})
+        (dag/err :branch-not-found "Could not determine PR branch"))))
+
 (defn- ^{:stratum 1} pr-info-from-gh
   "Fetch the fields conflict-resolution/resolve-pr-conflicts! needs
    from `gh pr view`: PR number, branch (headRefName), base
@@ -341,218 +355,26 @@
 ;------------------------------------------------------------------------------ Layer 2
 
 (defn ^{:stratum 2} evaluate-merge-readiness
-  "Evaluate if a PR is ready to merge according to policy.
-
-   Arguments:
-   - worktree-path: Path to git worktree
-   - pr-number: PR number
-   - policy: Merge policy map
-
-   Returns {:ready? bool :checks {...} :blocking [...]}."
+  "Evaluate every enabled merge policy check."
   [worktree-path pr-number policy]
-  (let [ci-check (when (:require-ci-green? policy)
-                   (check-ci-status worktree-path pr-number))
-        review-check (when (:require-approvals? policy)
-                       (check-review-status worktree-path pr-number
-                                            (:required-approvals policy)))
-        branch-check (when (:require-branch-up-to-date? policy)
-                       (check-branch-status worktree-path pr-number))
-        thread-check (when (:require-no-unresolved-threads? policy)
-                       (check-unresolved-threads worktree-path pr-number))
+  (readiness/evaluate
+   {:check-ci check-ci-status :check-review check-review-status
+    :check-branch check-branch-status :check-threads check-unresolved-threads}
+   worktree-path pr-number policy))
 
-        checks {:ci ci-check
-                :review review-check
-                :branch branch-check
-                :threads thread-check}
-
-        blocking (cond-> []
-                   (and ci-check (not (:ci-green? (:data ci-check))))
-                   (conj :ci-not-green)
-
-                   (and review-check (not (:approved? (:data review-check))))
-                   (conj :not-approved)
-
-                   (and branch-check (not (:up-to-date? (:data branch-check))))
-                   (conj :branch-not-up-to-date)
-
-                   (and thread-check (:has-unresolved? (:data thread-check)))
-                   (conj :unresolved-threads))]
-
-    {:ready? (empty? blocking)
-     :checks checks
-     :blocking blocking}))
-
-(defn- ^{:stratum 2} attempt-conflict-resolution!
-  "Spec §6.4 dispatch: when `branch-check` raw output classifies as
-   :conflicting AND policy enables auto-resolve AND context carries
-   `:resolve-fn`, run conflict-resolution/resolve-pr-conflicts! and
-   return its outcome (normalized into dag/ok or dag/err — see
-   normalize-resolution-outcome). Otherwise return nil so the
-   caller falls back to the existing rebase/not-ready path.
-
-   The resolve-fn comes from context (workflow side injects
-   workflow.merge-resolution/resolve-conflict! at lifecycle ctor
-   time) so pr-lifecycle stays free of a workflow dependency."
-  [worktree-path pr-number policy context branch-raw]
-  (let [resolve-fn (:resolve-fn context)
-        state      (conflict-resolution/classify-merge-state branch-raw)]
-    (when (and (= :conflicting state)
-               (:auto-resolve-conflicts? policy)
-               resolve-fn)
-      (let [pr-r (pr-info-from-gh worktree-path pr-number)]
-        (if (dag/err? pr-r)
-          pr-r
-          (normalize-resolution-outcome
-           (conflict-resolution/resolve-pr-conflicts!
-            {:worktree-path worktree-path
-             :pr            (:data pr-r)
-             :resolve-fn    resolve-fn
-             :context       context})))))))
-
-;------------------------------------------------------------------------------ Layer 3
-
-(defn ^{:stratum 3} attempt-merge
-  "Attempt to merge a PR, handling common failure cases.
-
-   Arguments:
-   - worktree-path: Path to git worktree
-   - pr-number: PR number
-   - policy: Merge policy
-   - context: Context with :dag/id :run/id :task/id :pr/id :event-bus :logger
-
-   Returns result with merge status and events."
+(defn ^{:stratum 2} attempt-merge
+  "Attempt a governed merge or the configured branch repair."
   [worktree-path pr-number policy context]
-  (let [logger (:logger context)
-        event-bus (:event-bus context)
-        {:keys [dag-id run-id task-id pr-id]} context]
-
-    (when logger
-      (log/info logger :pr-lifecycle :merge/attempting
-                {:message "Attempting PR merge"
-                 :data {:pr-number pr-number}}))
-
-    ;; First check if ready
-    (let [readiness (evaluate-merge-readiness worktree-path pr-number policy)]
-      (if (:ready? readiness)
-        ;; Ready to merge - attempt it
-        ;; Transacted (Ariadne 2d): the intent is recorded BEFORE any gh
-        ;; command, enabling auto-merge is recorded as a request accepted
-        ;; rather than a merge performed, and the merged event fires only
-        ;; against a merge GitHub actually reports — carrying GitHub's
-        ;; mergeCommit, never a SHA read from the local worktree.
-        (let [now (Instant/now)
-              run-gh (fn [args]
-                       (let [r (run-gh-command args worktree-path)]
-                         {:ok? (dag/ok? r) :output (:output (:data r))}))
-              enable! (fn []
-                        (let [r (merge-pr! worktree-path pr-number :policy policy)]
-                          {:ok? (dag/ok? r) :error (:error r)}))
-              ;; The method is known from policy; the proposal must record
-              ;; what was actually requested, not nil.
-              proposed (merge-transaction/propose!
-                        (assoc context :merge/method (:method policy))
-                        pr-number (:pr/repo context) now)
-              settled (merge-transaction/commit! context proposed pr-number
-                                                 now enable! run-gh)
-              merge-sha (merge-transaction/substantiated-sha settled)]
-          (cond
-            (= :failed (:effect/state settled))
-            (dag/err :merge-failed
-                     "Merge command failed"
-                     {:gh-error (:effect/failure settled)})
-
-            merge-sha
-            (do
-              ;; Publish merged event with the PR's labels so downstream
-              ;; watchers (label-actions M2) can match without re-querying
-              ;; GitHub. Label fetch is best-effort — missing labels
-              ;; default to #{}, never block the merge event.
-              (when event-bus
-                (events/publish! event-bus
-                                 (events/merged dag-id run-id task-id pr-id
-                                                merge-sha
-                                                (fetch-pr-labels! worktree-path pr-number))
-                                 logger))
-              (when logger
-                (log/info logger :pr-lifecycle :merge/success
-                          {:message "PR merged successfully"
-                           :data {:pr-number pr-number :merge/sha merge-sha}}))
-              (dag/ok {:merged? true
-                       :method (:method policy)
-                       :merge/sha merge-sha
-                       :effect/id (:effect/id settled)}))
-
-            :else
-            ;; Auto-merge is enabled and GitHub has not reported a merge.
-            ;; Saying {:merged? true} here is the specific lie this
-            ;; change removes; the record stays reconcilable and a later
-            ;; pass asks again.
-            (do
-              (when logger
-                (log/info logger :pr-lifecycle :merge/auto-merge-pending
-                          {:message "Auto-merge enabled; merge not yet observed"
-                           :data {:pr-number pr-number
-                                  :effect/state (:effect/state settled)}}))
-              (dag/ok {:merged? false
-                       :auto-merge/enabled? true
-                       :method (:method policy)
-                       :effect/id (:effect/id settled)}))))
-
-        ;; Not ready — branch-not-up-to-date may mean either
-        ;; CONFLICTING (Stage 3 §6.4 hook engages) or BEHIND (auto-
-        ;; rebase). Attempt conflict-resolution first; only if it
-        ;; declines (state isn't :conflicting, or policy/resolver
-        ;; absent) fall through to the rebase path.
-        (let [branch-raw (get-in (:branch (:checks readiness))
-                                 [:data :raw])
-              cr-result  (when (contains? (set (:blocking readiness))
-                                          :branch-not-up-to-date)
-                           (attempt-conflict-resolution!
-                            worktree-path pr-number policy context
-                            branch-raw))]
-          (cond
-            ;; conflict-resolution engaged — return its outcome
-            ;; (success, dag/err, or terminal anomaly) directly. The
-            ;; lifecycle's outer loop re-evaluates merge readiness
-            ;; on the next cycle once GitHub re-classifies the PR.
-            (some? cr-result)
-            cr-result
-
-            (and (contains? (set (:blocking readiness)) :branch-not-up-to-date)
-                 (:auto-rebase-on-stale? policy))
-          ;; Try to rebase
-          (do
-            (when logger
-              (log/info logger :pr-lifecycle :merge/rebasing
-                        {:message "PR is stale, attempting rebase"}))
-            (let [branch-result (run-gh-command
-                                 ["gh" "pr" "view" (str pr-number) "--json" "headRefName"]
-                                 worktree-path)
-                  branch (when (dag/ok? branch-result)
-                           ;; Parse branch name from JSON
-                           (second (re-find #"\"headRefName\":\"([^\"]+)\""
-                                            (:output (:data branch-result)))))]
-              (if branch
-                (let [rebase-result (rebase-pr! worktree-path branch)]
-                  (if (dag/ok? rebase-result)
-                    ;; Rebase succeeded - CI will run again, then we can merge
-                    (do
-                      (when event-bus
-                        (events/publish! event-bus
-                                         (events/rebase-needed dag-id run-id task-id pr-id
-                                                               (:new-sha (:data rebase-result)))
-                                         logger))
-                      (dag/ok {:merged? false
-                               :rebased? true
-                               :new-sha (:new-sha (:data rebase-result))}))
-                    rebase-result))
-                (dag/err :branch-not-found "Could not determine PR branch"))))
-
-            :else
-            ;; Can't merge and won't auto-rebase
-            (dag/err :not-ready
-                     "PR is not ready to merge"
-                     {:blocking (:blocking readiness)})))))))
+  (orchestration/attempt-merge
+   {:evaluate-readiness
+    (partial readiness/evaluate
+             {:check-ci check-ci-status :check-review check-review-status
+              :check-branch check-branch-status
+              :check-threads check-unresolved-threads})
+    :run-gh run-gh-command :merge-pr merge-pr!
+    :fetch-labels fetch-pr-labels! :fetch-branch fetch-pr-branch
+    :rebase-pr rebase-pr! :pr-info pr-info-from-gh :normalize-resolution normalize-resolution-outcome}
+   worktree-path pr-number policy context))
 
 ;------------------------------------------------------------------------------ Rich Comment
 (comment
@@ -571,15 +393,5 @@
 
   ;; Rebase a PR
   (rebase-pr! "/path/to/repo" "feat/my-feature")
-
-  ;; Full merge attempt with event handling
-  (attempt-merge "/path/to/repo" 123
-                 default-merge-policy
-                 {:dag-id (random-uuid)
-                  :run-id (random-uuid)
-                  :task-id (random-uuid)
-                  :pr-id 123
-                  :logger nil
-                  :event-bus nil})
 
   :leave-this-here)

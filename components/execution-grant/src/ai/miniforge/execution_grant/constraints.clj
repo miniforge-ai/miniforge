@@ -34,6 +34,7 @@
    Everything fails CLOSED. A nil grant, an inactive grant, and an
    unresolvable ancestry all deny; absence is not silence (§13.7)."
   (:require
+   [ai.miniforge.execution-grant.attenuation :as attenuation]
    [ai.miniforge.execution-grant.lineage :as lineage]))
 
 ;------------------------------------------------------------------------------ Layer 0
@@ -70,6 +71,19 @@
   "True when `authorize` returned `:authorized`."
   [result]
   (= :authorized (:grant/outcome result)))
+
+(defn- ^{:stratum 0} effect-within-grant-scope?
+  "True when `effect-scope` carries every binding the grant requires.
+   The existing attenuation relation is the authority: an effect may
+   add narrower bindings, but may not drop or change a grant binding.
+   An empty grant scope is deliberately unbounded; every non-empty
+   scope requires a map so malformed effect data denies, not throws."
+  [grant effect-scope]
+  (let [grant-scope (:grant/scope grant)]
+    (and (map? grant-scope)
+         (or (empty? grant-scope)
+             (and (map? effect-scope)
+                  (not (attenuation/scope-widened? grant-scope effect-scope)))))))
 
 ;------------------------------------------------------------------------------ Layer 1
 
@@ -129,6 +143,9 @@
       :grant/revocation-reason r}                    - revoked, expired,
                                                        or unverifiable
                                                        ancestry
+     {:grant/outcome :scope-mismatch :grant/id id
+      :grant/scope required :effect/scope actual}    - effect is outside
+                                                       the grant scope
      {:grant/outcome :exceeded :grant/id id
       :constraint/breaches [...]}                    - over a ceiling
 
@@ -143,12 +160,19 @@
      (let [active? (if lookup
                      (lineage/active? grant now lookup)
                      (lineage/active? grant now))
+           effect-scope (:effect/scope usage)
            over (when active? (breaches grant usage))]
        (cond
          (not active?)
          {:grant/outcome :inactive
           :grant/id (:grant/id grant)
           :grant/revocation-reason (:grant/revocation-reason grant)}
+
+         (not (effect-within-grant-scope? grant effect-scope))
+         {:grant/outcome :scope-mismatch
+          :grant/id (:grant/id grant)
+          :grant/scope (:grant/scope grant)
+          :effect/scope effect-scope}
 
          (seq over)
          {:grant/outcome :exceeded

@@ -51,11 +51,11 @@
 
   GROUP 4: Eligibility hook (narrow)
   Expose a single predicate — 'may this principal be granted this
-  effect class at this ceiling' — that consults breach history. Wire
-  it into grant ISSUANCE only. Model-selection routing (the
-  `:policy-first routing` line in the RFC's mapping table) is step-3/4
-  work and is explicitly NOT wired here; this spec provides the input
-  it will eventually call, nothing more.
+  effect class at this ceiling' — that consults breach history. Reserve
+  it for grant issuance; wiring the future issuer belongs to the
+  issuance spec. Model-selection routing (the `:policy-first routing`
+  line in the RFC's mapping table) is step-3/4 work and is explicitly
+  NOT wired here.
 
   SCOPE HONESTY. There is exactly one circuit breaker in the tree
   (`connector-retry/circuit_breaker.clj` — states :closed/:open/
@@ -75,7 +75,7 @@
  ["Revocation is transitive over lineage - revoking a parent ends descendants"
   "Prevented breaches and detected-after-the-fact breaches are DISTINGUISHABLE in the record"
   "Breach history is append-only - a breach is never edited or deleted"
-  "The eligibility predicate is wired into grant issuance ONLY, not into model routing"
+  "The eligibility predicate is exposed for grant issuance, not wired into model routing"
   "Do not extend or revive components/connector-retry's circuit breaker for this"
   "Stratified design, max 3 layers per file"]
 
@@ -86,7 +86,6 @@
   "Breach history survives process restart"
   "Breach history is append-only - a test proves an existing breach record cannot be mutated"
   "The eligibility predicate refuses a ceiling above what the principal's breach history permits"
-  "Issuing a grant consults the eligibility predicate; a test proves a breaching principal cannot immediately re-obtain the same ceiling"
   "full bb test green"]
 
  :spec/priority

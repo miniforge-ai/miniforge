@@ -25,7 +25,8 @@
    [malli.core :as m]
    [malli.error :as me])
   (:import
-   [java.time Instant]))
+   [java.time Instant]
+   [java.util Date]))
 
 ;------------------------------------------------------------------------------ Layer 0
 
@@ -33,6 +34,12 @@
   "True when `t` satisfies the closed EffectTransaction schema."
   [t]
   (m/validate schema/EffectTransaction t))
+
+(defn ^{:stratum 0} lifecycle-position
+  "Identify a transaction and its current lifecycle state."
+  [t]
+  {:effect/id (:effect/id t)
+   :effect/state (:effect/state t)})
 
 (defn- ^{:stratum 0} invalid
   [message t]
@@ -57,15 +64,24 @@
                        message
                        data))
 
+(defn- ^{:stratum 0} normalize-instant
+  [value]
+  (if (instance? Date value)
+    (.toInstant ^Date value)
+    value))
+
 ;------------------------------------------------------------------------------ Layer 1
 
 (defn ^{:stratum 1} advance!
-  "Apply `changes` to `t`, validate, and persist the new record atomically."
+  "Compare-and-set `changes` against the exact durable value of `t`."
   [dir t changes ^Instant now]
-  (let [t' (assoc (merge t changes) :effect/updated-at now)]
-    (if (valid? t')
-      (do (store/write! dir t') t')
-      (invalid (msg/t :record/change-invalid) t'))))
+  (if (not= (:effect/id t) (get changes :effect/id (:effect/id t)))
+    (store/identity-conflict t changes)
+    (let [t' (assoc (merge t changes)
+                    :effect/updated-at (normalize-instant now))]
+      (if (valid? t')
+        (store/transition! dir t t')
+        (invalid (msg/t :record/change-invalid) t')))))
 
 (defn ^{:stratum 1} propose!
   "Record an irreversible effect durably before anything happens."
@@ -76,15 +92,16 @@
                           (msg/t :proposal/no-store)
                           {})
      (propose! dir opts (Instant/now))))
-  ([dir {:keys [effect-class grant-id envelope-id proposal]} ^Instant now]
-   (let [t {:effect/id (random-uuid)
+  ([dir {:keys [effect-id effect-class grant-id envelope-id proposal]} ^Instant now]
+   (let [at (normalize-instant now)
+         t {:effect/id (if (some? effect-id) effect-id (random-uuid))
             :effect/class effect-class
             :effect/grant-id grant-id
             :effect/envelope-id envelope-id
             :effect/proposal (if proposal proposal {})
             :effect/state :proposed
-            :effect/at now
-            :effect/updated-at now}]
+            :effect/at at
+            :effect/updated-at at}]
      (if (valid? t)
-       (do (store/write! dir t) t)
+       (store/create! dir t)
        (invalid (msg/t :record/input-invalid) t)))))

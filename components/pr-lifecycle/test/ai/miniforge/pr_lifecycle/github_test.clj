@@ -16,7 +16,7 @@
 ;; See the License for the specific language governing permissions and
 ;; limitations under the License.
 (ns ai.miniforge.pr-lifecycle.github-test
-  "Tests for the github.clj batched-review posting (N13 §2.2)."
+  "Tests for GitHub provider readback and batched-review posting."
   (:require [babashka.process :as process]
             [cheshire.core :as json]
             [clojure.string :as str]
@@ -56,9 +56,134 @@
 (def ^{:stratum 0} ^:private flat-shape
   [{:path "src/baz.clj" :line 1 :body "flat-shape body"}])
 
+(def ^{:stratum 0} ^:private github-origin-result
+  (dag/ok {:output "git@github.com:miniforge-ai/miniforge.git"}))
+
+(defn- ^{:stratum 0} review-thread-node
+  [id root-id resolved?]
+  {:id id
+   :isResolved resolved?
+   :comments {:nodes [{:databaseId root-id}]}})
+
+(defn- ^{:stratum 0} review-thread-page
+  "Build one GraphQL response page without duplicating provider maps."
+  [nodes has-next? end-cursor]
+  (dag/ok
+   {:data
+    {:repository
+     {:pullRequest
+      {:reviewThreads
+       {:nodes nodes
+        :pageInfo {:hasNextPage has-next?
+                   :endCursor end-cursor}}}}}}))
+
+(deftest ^{:stratum 0} invalid-remote-error-redacts-credentials
+  (with-redefs [github/run-gh-command
+                (fn [_ _]
+                  (dag/ok {:output "https://secret-token@other.example/repo.git"}))]
+    (let [result (github/unresolved-review-threads "/repo" 1704)]
+      (is (dag/err? result))
+      (is (not (str/includes? (get-in result [:error :message])
+                              "secret-token"))))))
+
 ;------------------------------------------------------------------------------ Layer 1
 
+(deftest ^{:stratum 1} unresolved-review-threads-rejects-incomplete-readback
+  (with-redefs [github/run-gh-command
+                (fn [_ _] github-origin-result)
+                github/graphql-query
+                (fn [& _]
+                  (dag/ok {:data {:repository {:pullRequest nil}}}))]
+    (let [result (github/unresolved-review-threads "/repo" 1703)]
+      (is (dag/err? result))
+      (is (= :invalid-review-thread-response (get-in result [:error :code]))))))
+
+(deftest ^{:stratum 1} unresolved-review-threads-propagates-provider-failure
+  (let [failure (dag/err :graphql-error "provider unavailable")]
+    (with-redefs [github/run-gh-command
+                  (fn [_ _] github-origin-result)
+                  github/graphql-query (fn [& _] failure)]
+      (is (= failure (github/unresolved-review-threads "/repo" 1703))))))
+
 ;; ── tests ────────────────────────────────────────────────────────────
+(deftest ^{:stratum 1} unresolved-review-threads-paginates
+  (let [requests (atom [])
+        pages [(review-thread-page [{:id "resolved" :isResolved true}]
+                                   true "next-page")
+               (review-thread-page [{:id "open" :isResolved false}]
+                                   false nil)]]
+    (with-redefs [github/run-gh-command
+                  (fn [_ _]
+                    (dag/ok {:output "ssh://git@github.com:443/acme/repo.with-dots.git/"}))
+                  github/graphql-query
+                  (fn [_ _ & {:keys [variables]}]
+                    (let [index (count @requests)]
+                      (swap! requests conj variables)
+                      (nth pages index)))]
+      (let [result (github/unresolved-review-threads "/repo" 1703)]
+        (is (dag/ok? result))
+        (is (= {:has-unresolved? true :unresolved-count 1}
+               (:data result)))
+        (is (= [nil "next-page"] (mapv :cursor @requests)))
+        (is (= {:owner "acme" :repo "repo.with-dots" :pr 1703}
+               (first @requests)))))))
+
+(deftest ^{:stratum 1} unresolved-review-threads-rejects-missing-page-cursor
+  (with-redefs [github/run-gh-command
+                (fn [_ _] github-origin-result)
+                github/graphql-query
+                (fn [& _]
+                  (review-thread-page [] true nil))]
+    (let [result (github/unresolved-review-threads "/repo" 1703)]
+      (is (dag/err? result))
+      (is (= :invalid-pagination (get-in result [:error :code]))))))
+
+(deftest ^{:stratum 1} unresolved-review-threads-rejects-repeated-page-cursor
+  (with-redefs [github/run-gh-command
+                (fn [_ _] github-origin-result)
+                github/graphql-query
+                (fn [& _]
+                  (review-thread-page [] true "same-page"))]
+    (let [result (github/unresolved-review-threads "/repo" 1703)]
+      (is (dag/err? result))
+      (is (= :invalid-pagination (get-in result [:error :code]))))))
+
+(deftest ^{:stratum 1} get-thread-id-follows-reply-root-and-paginates
+  (let [requests (atom [])
+        pages [(review-thread-page
+                [(review-thread-node "other" 1 true)] true "next-page")
+               (review-thread-page
+                [(review-thread-node "target" 10 false)] false nil)]]
+    (with-redefs [github/run-gh-command
+                  (fn [args _]
+                  (if (= ["git" "config" "--get" "remote.origin.url"] args)
+                      github-origin-result
+                      (dag/ok {:output (json/generate-string
+                                        {:id 99 :in_reply_to_id 10})})))
+                  github/graphql-query
+                  (fn [_ _ & {:keys [variables]}]
+                    (let [index (count @requests)]
+                      (swap! requests conj variables)
+                      (nth pages index)))]
+      (let [result (github/get-thread-id "/repo" 1704 99)]
+        (is (= {:thread-id "target" :is-resolved false} (:data result)))
+        (is (= [nil "next-page"] (mapv :cursor @requests)))))))
+
+(deftest ^{:stratum 1} get-thread-id-uses-original-comment-id
+  (with-redefs [github/run-gh-command
+                (fn [args _]
+                  (if (= "git" (first args))
+                    github-origin-result
+                    (dag/ok {:output (json/generate-string
+                                      {:id 10 :in_reply_to_id nil})})))
+                github/graphql-query
+                (fn [& _]
+                  (review-thread-page
+                   [(review-thread-node "target" 10 true)]
+                   false nil))]
+    (is (= {:thread-id "target" :is-resolved true}
+           (:data (github/get-thread-id "/repo" 1704 10))))))
+
 (deftest ^{:stratum 1} post-review-uses-create-review-endpoint-via-stdin
   (testing "post-review! shells out to the right gh api endpoint with --input -"
     (let [calls (atom [])

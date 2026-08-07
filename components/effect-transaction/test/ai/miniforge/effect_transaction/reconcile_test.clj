@@ -20,7 +20,7 @@
    [ai.miniforge.anomaly.interface :as anomaly]
    [ai.miniforge.effect-transaction.fixtures :as fixture]
    [ai.miniforge.effect-transaction.interface :as fx]
-   [clojure.test :refer [deftest is testing]]))
+   [clojure.test :refer [deftest is]]))
 
 ;------------------------------------------------------------------------------ Layer 0
 
@@ -30,115 +30,146 @@
 
 (def ^{:stratum 0} tmp-dir fixture/tmp-dir)
 
-(def ^{:stratum 0} merge-grant fixture/merge-grant)
+(def ^{:stratum 0} merge-case! fixture/merge-case!)
 
-(def ^{:stratum 0} propose-merge! fixture/propose-merge!)
+(def ^{:stratum 0} succeed! fixture/succeed!)
+
+(def ^{:stratum 0} no-usage fixture/no-usage)
+
+(def ^{:stratum 0} probe-answer fixture/probe-answer)
+
+(def ^{:stratum 0} throw-exception! fixture/throw-exception!)
 
 ;------------------------------------------------------------------------------ Layer 1
 
-(deftest ^{:stratum 1} reconcile-reads-the-world-not-the-log-test
+(defn- ^{:stratum 1} unknown-case!
+  [dir]
+  (let [{g :grant t :transaction} (merge-case! dir)]
+    {:transaction t
+     :unknown (fx/commit! dir t g no-usage now
+                          (partial throw-exception! "boom"))}))
+
+(deftest ^{:stratum 1} durable-settlement-overrides-stale-candidate-test
   (let [dir (tmp-dir)
-        g (merge-grant)]
-    (testing "the observation comes from the probe, and a match is recorded"
-      (let [t (propose-merge! dir g)
-            unknown (fx/commit! dir t g {} now (fn [] (throw (ex-info "boom" {}))))
-            settled (fx/reconcile! dir unknown
-                                   (fn [_] {:effect/observed {:pr/state "MERGED"
-                                                              :merge/sha "real-sha"}
-                                            :effect/matched? true})
-                                   later)]
-        (is (= :reconciled (:effect/state settled)))
-        (is (= "real-sha" (get-in settled [:effect/observed :merge/sha])))
-        (is (true? (:effect/matched? settled)))))
+        {g :grant t :transaction} (merge-case! dir)
+        done (fx/commit! dir t g no-usage now succeed!)
+        stale (assoc done :effect/state :unknown-outcome)
+        probes (atom 0)
+        result (fx/reconcile! dir stale (fn [_] (swap! probes inc)) later)]
+    (is (= :conflict (:anomaly/type result)))
+    (is (zero? @probes))))
 
-    (testing "a MISMATCH is recorded, not smoothed over"
-      (let [t (propose-merge! dir g)
-            unknown (fx/commit! dir t g {} now (fn [] (throw (ex-info "boom" {}))))
-            settled (fx/reconcile! dir unknown
-                                   (fn [_] {:effect/observed {:pr/state "CLOSED"}
-                                            :effect/matched? false})
-                                   later)]
-        (is (= :reconciled (:effect/state settled)))
-        (is (false? (:effect/matched? settled))
-            "finding out includes finding out you were wrong")))
+(deftest ^{:stratum 1} missing-durable-record-does-not-probe-test
+  (let [dir (tmp-dir)
+        probes (atom 0)
+        result (fx/reconcile! dir {:effect/id (random-uuid)}
+                              (fn [_] (swap! probes inc)) later)]
+    (is (= :conflict (:anomaly/type result)))
+    (is (zero? @probes))))
 
-    (testing "a probe that throws leaves the record unresolved for a later attempt"
-      (let [t (propose-merge! dir g)
-            unknown (fx/commit! dir t g {} now (fn [] (throw (ex-info "boom" {}))))
-            result (fx/reconcile! dir unknown (fn [_] (throw (ex-info "network" {}))) later)]
-        (is (anomaly/anomaly? result))
-        (is (= :unknown-outcome (:effect/state (fx/read-record dir (:effect/id t))))
-            "marking :reconciled here would assert we found out when we did not")))
-
-    (testing "a probe answering in an unreadable shape also leaves it unresolved"
-      (let [t (propose-merge! dir g)
-            unknown (fx/commit! dir t g {} now (fn [] (throw (ex-info "boom" {}))))
-            result (fx/reconcile! dir unknown (constantly {:something :else}) later)]
-        (is (anomaly/anomaly? result))
-        (is (= :unknown-outcome (:effect/state (fx/read-record dir (:effect/id t)))))))
-
-    (testing "a probe answer carrying the internal marker key is still honoured"
-      ;; The probe returns caller-shaped data, so any in-band sentinel is
-      ;; a value it could legitimately carry. Wrapping the answer instead
-      ;; of probing it for a marker is what keeps that from colliding.
-      (let [t (propose-merge! dir g)
-            unknown (fx/commit! dir t g {} now (fn [] (throw (ex-info "boom" {}))))
-            settled (fx/reconcile! dir unknown
-                                   (constantly {:effect/observed {:threw "not an error"}
-                                                :threw "nor is this"
-                                                :effect/matched? true})
-                                   later)]
-        (is (= :reconciled (:effect/state settled)))
-        (is (true? (:effect/matched? settled)))))
-
-    (testing "an answer with no :effect/matched? records a mismatch, not a match"
-      (let [t (propose-merge! dir g)
-            unknown (fx/commit! dir t g {} now (fn [] (throw (ex-info "boom" {}))))
-            settled (fx/reconcile! dir unknown
-                                   (constantly {:effect/observed {:pr/state "MERGED"}})
-                                   later)]
-        (is (= :reconciled (:effect/state settled)))
-        (is (false? (:effect/matched? settled))
-            "an unflagged disagreement is worse than a flagged one")))
-
-    (testing "an already-settled record is not reconcilable"
-      (let [t (propose-merge! dir g)
-            done (fx/commit! dir t g {} now (fn [] {:effect/outcome :succeeded}))]
-        (is (anomaly/anomaly?
-             (fx/reconcile! dir done (constantly {:effect/observed :x}) later)))))))
+(deftest ^{:stratum 1} invalid-candidate-id-does-not-probe-test
+  (let [probes (atom 0)
+        result (fx/reconcile! (tmp-dir) {:effect/id "../outside-store"}
+                              (fn [_] (swap! probes inc)) later)]
+    (is (= :invalid-input (:anomaly/type result)))
+    (is (zero? @probes))))
 
 (deftest ^{:stratum 1} committing-is-reconcilable-after-a-restart-test
   ;; A process that died mid-effect leaves the record at :committing.
   ;; That is not failure and not success — it is exactly the case
   ;; reconciliation exists for.
   (let [dir (tmp-dir)
-        g (merge-grant)
-        t (propose-merge! dir g)
-        ;; simulate the crash: the record reached :committing and nothing
-        ;; ever wrote an outcome
-        crashed (assoc t :effect/state :committing)
-        settled (fx/reconcile! dir crashed
-                               (fn [_] {:effect/observed {:pr/state "OPEN"}
-                                        :effect/matched? false})
-                               later)]
-    (is (contains? fx/reconcilable-states :committing))
-    (is (= :reconciled (:effect/state settled)))
-    (is (false? (:effect/matched? settled)))))
+        {g :grant t :transaction} (merge-case! dir)]
+    (is (thrown? AssertionError
+                 (fx/commit! dir t g no-usage now
+                             (fn [] (throw (AssertionError.))))))
+    (let [crashed (fx/read-record dir (:effect/id t))
+          settled (fx/reconcile! dir crashed
+                                 (fn [_] (probe-answer {:pr/state "OPEN"} false))
+                                 later)]
+      (is (contains? fx/reconcilable-states :committing))
+      (is (= :reconciled (:effect/state settled)))
+      (is (false? (:effect/matched? settled))))))
 
-(deftest ^{:stratum 1} refusal-anomalies-route-correctly-test
-  ;; :unauthorized would say "you lack permission", which is neither
-  ;; true nor useful here. A wrong lifecycle position is a :conflict; a
-  ;; probe that did not answer is :unavailable — transient, ask again.
+(deftest ^{:stratum 1} settled-record-reconciliation-is-conflict-test
+  ;; A settled lifecycle position conflicts with the request; it is not an
+  ;; authorization failure.
   (let [dir (tmp-dir)
-        g (merge-grant)
-        settled (fx/commit! dir (propose-merge! dir g) g {} now
-                            (fn [] {:effect/outcome :succeeded}))
-        unknown (fx/commit! dir (propose-merge! dir g) g {} now
-                            (fn [] (throw (ex-info "boom" {}))))]
-    (testing "reconciling a settled record is a :conflict, not a permission error"
-      (is (= :conflict (:anomaly/type
-                        (fx/reconcile! dir settled (constantly {:effect/observed :x}) later)))))
-    (testing "a probe that did not answer is :unavailable, and carries the cause"
-      (let [a (fx/reconcile! dir unknown (fn [_] (throw (ex-info "network down" {}))) later)]
-        (is (= :unavailable (:anomaly/type a)))
-        (is (= "network down" (get-in a [:anomaly/data :probe/error])))))))
+        {settled-grant :grant settled-t :transaction} (merge-case! dir)
+        settled (fx/commit! dir settled-t settled-grant no-usage now succeed!)
+        result (fx/reconcile! dir settled
+                              (constantly (probe-answer :unused true))
+                              later)]
+    (is (= :conflict (:anomaly/type result)))))
+
+;------------------------------------------------------------------------------ Layer 2
+
+(deftest ^{:stratum 2} reconciliation-records-probe-match-test
+  (let [dir (tmp-dir)
+        {unknown :unknown} (unknown-case! dir)
+        settled (fx/reconcile! dir unknown
+                               (fn [_] (probe-answer {:pr/state "MERGED"
+                                                      :merge/sha "real-sha"}
+                                                     true))
+                               later)]
+    (is (= :reconciled (:effect/state settled)))
+    (is (= "real-sha" (get-in settled [:effect/observed :merge/sha])))
+    (is (true? (:effect/matched? settled)))))
+
+(deftest ^{:stratum 2} reconciliation-records-probe-mismatch-test
+  (let [dir (tmp-dir)
+        {unknown :unknown} (unknown-case! dir)
+        settled (fx/reconcile! dir unknown
+                               (fn [_] (probe-answer {:pr/state "CLOSED"} false))
+                               later)]
+    (is (= :reconciled (:effect/state settled)))
+    (is (false? (:effect/matched? settled))
+        "finding out includes finding out the proposal mismatched")))
+
+(deftest ^{:stratum 2} throwing-probe-leaves-record-unresolved-test
+  (let [dir (tmp-dir)
+        {t :transaction unknown :unknown} (unknown-case! dir)
+        result (fx/reconcile! dir unknown
+                              (fn [_] (throw-exception! "network"))
+                              later)]
+    (is (anomaly/anomaly? result))
+    (is (= :unknown-outcome (:effect/state (fx/read-record dir (:effect/id t))))
+        "without an answer, reconciliation must not claim knowledge")))
+
+(deftest ^{:stratum 2} unreadable-probe-answer-leaves-record-unresolved-test
+  (let [dir (tmp-dir)
+        {t :transaction unknown :unknown} (unknown-case! dir)
+        result (fx/reconcile! dir unknown (constantly {:something :else}) later)]
+    (is (anomaly/anomaly? result))
+    (is (= :unknown-outcome (:effect/state (fx/read-record dir (:effect/id t)))))))
+
+(deftest ^{:stratum 2} probe-answer-may-carry-in-band-marker-test
+  ;; Probe data is caller-shaped, so internal status must never use an in-band
+  ;; sentinel that can collide with a legitimate answer.
+  (let [dir (tmp-dir)
+        {unknown :unknown} (unknown-case! dir)
+        answer (assoc (probe-answer {:threw "not an error"} true)
+                      :threw "nor is this")
+        settled (fx/reconcile! dir unknown (constantly answer) later)]
+    (is (= :reconciled (:effect/state settled)))
+    (is (true? (:effect/matched? settled)))))
+
+(deftest ^{:stratum 2} absent-match-flag-records-mismatch-test
+  (let [dir (tmp-dir)
+        {unknown :unknown} (unknown-case! dir)
+        settled (fx/reconcile! dir unknown
+                               (constantly {:effect/observed {:pr/state "MERGED"}})
+                               later)]
+    (is (= :reconciled (:effect/state settled)))
+    (is (false? (:effect/matched? settled))
+        "an unflagged disagreement is not evidence of a match")))
+
+(deftest ^{:stratum 2} unanswered-probe-is-unavailable-test
+  ;; A silent external system is transient; callers must be able to retry.
+  (let [dir (tmp-dir)
+        {unknown :unknown} (unknown-case! dir)
+        result (fx/reconcile! dir unknown
+                              (fn [_] (throw-exception! "network down"))
+                              later)]
+    (is (= :unavailable (:anomaly/type result)))
+    (is (= "network down" (get-in result [:anomaly/data :probe/error])))))

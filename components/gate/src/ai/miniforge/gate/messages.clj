@@ -26,3 +26,8 @@
   "Look up a gate message by key, with optional param substitution."
   (messages/create-translator "config/gate/messages/en-US.edn"
                               :gate/messages))
+
+(def ^{:stratum 0} system-t
+  "Look up developer-facing gate prose by key."
+  (messages/create-translator "config/gate/messages/system.edn"
+                              :gate/system))
