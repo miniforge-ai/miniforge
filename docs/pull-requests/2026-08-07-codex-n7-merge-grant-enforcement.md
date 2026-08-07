@@ -26,6 +26,7 @@ Merge transactions were durable but still committed through
 - Recheck the grant from durable proposal scope at commit time.
 - Separate authority, transaction, outcome, and orchestration namespaces.
 - Deny absent, expired, or mismatched grants without a merge command.
+- Preserve provider-exception diagnostics without claiming auto-merge succeeded.
 
 ## Testing Plan
 

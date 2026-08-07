@@ -130,6 +130,22 @@
       (is (true? (get-in result [:data :auto-merge/enabled?])))
       (is (nil? (get-in result [:data :merge/sha]))))))
 
+(deftest ^{:stratum 1} uncertain-merge-does-not-claim-auto-merge-test
+  (with-redefs [readiness/evaluate ready-result
+                merge/read-repository repository-result
+                merge/merge-pr!
+                (fn [_ _ & _] (throw (ex-info "provider disconnected" {})))]
+    (let [result (merge/attempt-merge "/tmp" 123
+                                     merge/default-merge-policy
+                                     (merge-context))]
+      (is (dag/err? result))
+      (is (= :merge-outcome-unknown (get-in result [:error :code])))
+      (is (= :unknown-outcome
+             (get-in result [:error :data :effect/state])))
+      (is (= "provider disconnected"
+             (get-in result [:error :data :effect/failure])))
+      (is (nil? (get-in result [:data :auto-merge/enabled?]))))))
+
 ;------------------------------------------------------------------------------ Layer 2
 
 (deftest ^{:stratum 2} denied-authority-never-invokes-merge-test

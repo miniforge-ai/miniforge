@@ -34,6 +34,8 @@
   "Merge authority changed before commit"
   :merge/command-failed
   "Merge command failed"
+  :merge/outcome-unknown
+  "The merge outcome is unknown"
   :merge/not-ready
   "PR is not ready to merge"
   :controller/lifecycle-starting

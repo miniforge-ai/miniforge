@@ -57,6 +57,14 @@
            :method (:method policy)
            :effect/id (:effect/id settled)}))
 
+(defn- ^{:stratum 0} uncertain-result
+  [settled]
+  (dag/err :merge-outcome-unknown
+           (messages/t :merge/outcome-unknown)
+           {:effect/id (:effect/id settled)
+            :effect/state (:effect/state settled)
+            :effect/failure (:effect/failure settled)}))
+
 ;------------------------------------------------------------------------------ Layer 1
 
 (defn ^{:stratum 1} settlement-result
@@ -72,6 +80,9 @@
       merge-sha
       (merged-result operations worktree-path pr-number
                      policy context settled merge-sha)
+
+      (:effect/failure settled)
+      (uncertain-result settled)
 
       :else
       (pending-result pr-number policy context settled))))
