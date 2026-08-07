@@ -71,11 +71,15 @@
 (defn ^{:stratum 1} advance!
   "Compare-and-set `changes` against the exact durable value of `t`."
   [dir t changes ^Instant now]
-  (let [t' (assoc (merge t changes)
-                  :effect/updated-at (normalize-instant now))]
-    (if (valid? t')
-      (store/transition! dir t t')
-      (invalid (msg/t :record/change-invalid) t'))))
+  (if (not= (:effect/id t) (get changes :effect/id (:effect/id t)))
+    (wrong-state (msg/t :record/id-immutable)
+                 {:effect/id (:effect/id t)
+                  :effect/requested-id (:effect/id changes)})
+    (let [t' (assoc (merge t changes)
+                    :effect/updated-at (normalize-instant now))]
+      (if (valid? t')
+        (store/transition! dir t t')
+        (invalid (msg/t :record/change-invalid) t')))))
 
 (defn ^{:stratum 1} propose!
   "Record an irreversible effect durably before anything happens."

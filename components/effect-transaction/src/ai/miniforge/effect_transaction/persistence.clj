@@ -120,11 +120,25 @@
       (finally
         (.delete tmp)))))
 
-(defn- ^{:stratum 1} attempt-locked-call
-  [^FileChannel channel id thunk]
-  (if-let [lock (.tryLock channel)]
-    (call-with-lock lock thunk)
-    (lock-conflict id)))
+(defn- ^{:stratum 1} open-channel
+  [^File file options]
+  (try
+    (io/make-parents file)
+    (FileChannel/open (.toPath file) options)
+    (catch Exception ex
+      (write-failure file ex))))
+
+(defn- ^{:stratum 1} attempt-lock
+  [^FileChannel channel ^File file id]
+  (try
+    (or (.tryLock channel) (lock-conflict id))
+    (catch Exception ex
+      ;; Babashka does not expose OverlappingFileLockException as a
+      ;; resolvable class, so keep this JVM/BB-compatible boundary check.
+      (if (= "java.nio.channels.OverlappingFileLockException"
+             (.getName (class ex)))
+        (lock-conflict id)
+        (write-failure file ex)))))
 
 ;------------------------------------------------------------------------------ Layer 2
 
@@ -141,18 +155,15 @@
   (let [^File file (lock-file dir id)
         options (into-array StandardOpenOption
                             [StandardOpenOption/CREATE
-                             StandardOpenOption/WRITE])]
-    (try
-      (io/make-parents file)
-      (with-open [^FileChannel channel (FileChannel/open (.toPath file) options)]
-        (attempt-locked-call channel id thunk))
-      (catch Exception ex
-        ;; Babashka does not expose OverlappingFileLockException as a
-        ;; resolvable class, so keep this JVM/BB-compatible boundary check.
-        (if (= "java.nio.channels.OverlappingFileLockException"
-               (.getName (class ex)))
-          (lock-conflict id)
-          (write-failure file ex))))))
+                             StandardOpenOption/WRITE])
+        opened (open-channel file options)]
+    (if (anomaly/anomaly? opened)
+      opened
+      (with-open [^FileChannel channel opened]
+        (let [lock (attempt-lock channel file id)]
+          (if (anomaly/anomaly? lock)
+            lock
+            (call-with-lock lock thunk)))))))
 
 (defn ^{:stratum 2} read-record
   [dir id]

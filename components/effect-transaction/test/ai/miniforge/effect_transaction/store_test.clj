@@ -22,6 +22,8 @@
   (:require
    [ai.miniforge.anomaly.interface :as anomaly]
    [ai.miniforge.effect-transaction.interface :as fx]
+   [ai.miniforge.effect-transaction.persistence :as persistence]
+   [ai.miniforge.effect-transaction.record :as effect-record]
    [ai.miniforge.effect-transaction.store :as store]
    [clojure.test :refer [deftest is testing]])
   (:import
@@ -56,6 +58,15 @@
         id (random-uuid)]
     (spit (store/record-file dir id) "{:effect/id" :encoding "UTF-8")
     (is (anomaly/anomaly? (fx/read-record dir id)))))
+
+(deftest ^{:stratum 1} lock-does-not-reclassify-application-errors-test
+  (let [dir (tmp-dir)
+        id (random-uuid)]
+    (is (thrown? clojure.lang.ExceptionInfo
+                 (persistence/with-record-lock
+                  dir id #(throw (ex-info "application failure" {})))))
+    (is (= :released
+           (persistence/with-record-lock dir id (constantly :released))))))
 
 (deftest ^{:stratum 1} proposal-normalizes-schema-valid-date-test
   (let [dir (tmp-dir)
@@ -127,7 +138,15 @@
             result (store/transition! dir missing
                                       (assoc missing :effect/state :committing))]
         (is (= :anomalies.effect-transaction/not-found
-               (:anomaly/subtype result)))))))
+               (:anomaly/subtype result)))))
+    (testing "a lifecycle change cannot replace the durable identity"
+      (let [other-id (random-uuid)
+            result (effect-record/advance! dir committing
+                                           {:effect/id other-id}
+                                           now)]
+        (is (anomaly/anomaly? result))
+        (is (= committing (fx/read-record dir (:effect/id t))))
+        (is (nil? (fx/read-record dir other-id)))))))
 
 (deftest ^{:stratum 2} both-inst-types-round-trip-test
   ;; The schema says `inst?`, and `inst?` admits java.util.Date as well

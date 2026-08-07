@@ -49,7 +49,7 @@
   store/read-record)
 
 (def ^{:stratum 0} list-records
-  "Every persisted record under a directory."
+  "Every persisted record under a directory, or a storage anomaly."
   store/list-records)
 
 (def ^{:stratum 0} valid?

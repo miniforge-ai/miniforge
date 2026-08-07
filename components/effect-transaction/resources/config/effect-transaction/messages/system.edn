@@ -7,6 +7,7 @@
   :grant/effect-class-mismatch "Grant effect class does not match the proposed effect"
   :grant/recheck-failed "Grant re-check failed at commit: {outcome}"
   :record/change-invalid "EffectTransaction change failed validation"
+  :record/id-immutable "EffectTransaction identity cannot change during a lifecycle transition"
   :record/input-invalid "EffectTransaction inputs failed validation"
   :record/not-found "EffectTransaction does not exist in the durable store"
   :record/transition-conflict "EffectTransaction changed before its durable transition could be claimed"
