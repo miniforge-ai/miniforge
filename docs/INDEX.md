@@ -36,6 +36,8 @@
   effects for miniforge
 - **[Ariadne architecture](architecture/ariadne/tenancy-ownership-access.md)** -- The portable tenancy / ownership /
   access architecture itself; versioned and tagged (`ariadne/v*`)
+- **[RFC: Environment provenance at the workbench boundary](architecture/rfc-workbench-environment-provenance.md)** --
+  Pinning the environment a minibench arm ran in, and gating unisolated arms at the resolved-run boundary
 - **[Knowledge Component](design/knowledge-component.md)** -- Symbol resolution, trust model, caching
 - **[Policy Pack Taxonomy](design/policy-pack-taxonomy.md)** -- Pack classification, lifecycle, governance
 - **[Compliance Scanner](design/compliance-scanner.md)** -- Scan, classify, plan, execute
