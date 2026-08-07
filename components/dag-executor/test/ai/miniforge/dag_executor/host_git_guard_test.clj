@@ -211,3 +211,24 @@
     (is (= "git@github.com:o/r.git" (sut/redact-credentials "git@github.com:o/r.git"))))
   (testing "given a plain url → unchanged"
     (is (= host-origin-url (sut/redact-credentials host-origin-url)))))
+
+(deftest ^{:stratum 1} a-config-value-blanked-mid-run-is-drift-test
+  (testing "given a remote URL set to the empty string → drift, not silently absent"
+    (let [host   (fixtures/init-host-repo! (fixtures/temp-dir!))
+          parent (fixtures/temp-dir!)
+          linked (str (File. parent "task-worktree"))]
+      (try
+        (fixtures/git! host "worktree" "add" "--quiet" "--detach" linked)
+        (let [before (snapshot! host)
+              _      (fixtures/git! linked "config" "remote.origin.url" "")
+              report (sut/drift before (snapshot! host))]
+          (is (false? (:clean? report))
+              "an explicitly empty value is a real state; folding it into absent would hide the blanking")
+          (is (= [{:config-key "remote.origin.url"
+                   :before     [host-origin-url]
+                   :after      [""]}]
+                 (:redirect-drift report))))
+        (finally
+          (fixtures/git! host "worktree" "remove" "--force" linked)
+          (fixtures/delete-tree! parent)
+          (fixtures/delete-tree! host))))))

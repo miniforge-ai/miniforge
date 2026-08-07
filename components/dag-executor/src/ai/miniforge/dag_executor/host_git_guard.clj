@@ -111,34 +111,29 @@
                      {:ref ref :before was :after is})))))
        vec))
 
-;; git plumbing reads against the shared common dir
-;;
-;; Every read below is issued with `-C repo-path`. Config reads and ref
-;; reads both resolve to the common dir, so pointing at the host checkout
-;; and pointing at one of its linked worktrees observe the same state —
-;; which is exactly the sharing this namespace exists to police.
-(defn- ^{:stratum 0} git
-  "Run git in `repo-path` and return the raw shell map. A git that cannot
-   be launched at all comes back as a non-zero exit rather than a throw, so
-   callers stay total."
-  [repo-path & args]
-  (try
-    (apply shell/sh "git" "-C" (str repo-path) args)
-    (catch Exception e
-      {:exit 1 :out "" :err (.getMessage e)})))
-
 (defn- ^{:stratum 0} parse-fields
-  "Split `sep`-delimited two-field lines into `[key value]` pairs. Blank
-   lines and lines missing the second field are dropped — a partial line
-   carries no comparable value and inventing one would fabricate drift.
+  "Split `sep`-delimited two-field lines into `[key value]` pairs.
+
+   An empty value is kept, not dropped: a config key explicitly set to the
+   empty string is a real state, and folding it into \"absent\" would let
+   a run that blanked a remote URL compare equal to one that never had it.
+   Only a line with no separator at all is dropped, which is how git prints
+   a valueless key — there is nothing there to compare.
+
+   `text` is deliberately NOT trimmed as a whole. `git config --get-regexp`
+   prints an empty value as the key plus a trailing separator, so trimming
+   the last line would turn the one case this cares about back into a line
+   with no separator. Per-field trimming stays, which is what keeps a CRLF
+   line ending out of the value.
+
    The split limit is 2, so a value containing the separator survives
    whole."
   [text sep]
-  (->> (str/split-lines (str/trim (or text "")))
+  (->> (str/split-lines (or text ""))
        (remove str/blank?)
        (keep (fn [line]
                (let [[k v] (str/split line (re-pattern sep) 2)]
-                 (when (and k v (seq (str/trim k)) (seq (str/trim v)))
+                 (when (and k v (seq (str/trim k)))
                    [(str/trim k) (str/trim v)]))))))
 
 (defn ^{:stratum 0} changed-redirect-config
@@ -161,6 +156,31 @@
                  (when (not= was is)
                    {:config-key k :before (vec was) :after (vec is)}))))
        vec))
+
+;; git plumbing reads against the shared common dir
+;;
+;; Every read below is issued with `-C repo-path`. Config reads and ref
+;; reads both resolve to the common dir, so pointing at the host checkout
+;; and pointing at one of its linked worktrees observe the same state —
+;; which is exactly the sharing this namespace exists to police.
+(defn- ^{:stratum 0} git
+  "Run git in `repo-path` and return the raw shell map. A git that cannot
+   be launched at all comes back as a non-zero exit rather than a throw, so
+   callers stay total.
+
+   An interrupt restores the thread's interrupt flag before returning, so a
+   cancellation still propagates to whatever is waiting on this thread;
+   swallowing it here, as a bare `catch Exception` would, strands a
+   shutdown. It reports the same failing exit as any other launch failure —
+   the cancellation travels on the flag, not in this map."
+  [repo-path & args]
+  (try
+    (apply shell/sh "git" "-C" (str repo-path) args)
+    (catch InterruptedException e
+      (.interrupt (Thread/currentThread))
+      {:exit 1 :out "" :err (.getMessage e)})
+    (catch Exception e
+      {:exit 1 :out "" :err (.getMessage e)})))
 
 ;------------------------------------------------------------------------------ Layer 1
 
@@ -269,7 +289,7 @@
    `:fast-forward? nil`.
 
    Whether a dirty report should fail a run is the caller's policy, not
-   this namespace's; see `protocols.impl.host-guarded`."
+   this namespace's."
   [before after]
   (letfn [(rewind [repo-path {:keys [before after] :as move}]
             (let [ff (fast-forward? repo-path before after)]
