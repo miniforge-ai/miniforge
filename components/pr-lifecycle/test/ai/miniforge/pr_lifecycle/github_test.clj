@@ -85,6 +85,15 @@
                   github/graphql-query (fn [& _] failure)]
       (is (= failure (github/unresolved-review-threads "/repo" 1703))))))
 
+(deftest ^{:stratum 0} invalid-remote-error-redacts-credentials
+  (with-redefs [github/run-gh-command
+                (fn [_ _]
+                  (dag/ok {:output "https://secret-token@other.example/repo.git"}))]
+    (let [result (github/unresolved-review-threads "/repo" 1704)]
+      (is (dag/err? result))
+      (is (not (str/includes? (get-in result [:error :message])
+                              "secret-token"))))))
+
 ;------------------------------------------------------------------------------ Layer 1
 
 ;; ── tests ────────────────────────────────────────────────────────────
@@ -96,7 +105,7 @@
                                    false nil)]]
     (with-redefs [github/run-gh-command
                   (fn [_ _]
-                    (dag/ok {:output "https://github.com/acme/repo.with-dots.git"}))
+                    (dag/ok {:output "ssh://git@github.com:443/acme/repo.with-dots.git/"}))
                   github/graphql-query
                   (fn [_ _ & {:keys [variables]}]
                     (let [index (count @requests)]

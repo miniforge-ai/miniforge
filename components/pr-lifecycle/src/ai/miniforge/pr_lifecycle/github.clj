@@ -209,15 +209,15 @@
                 worktree-path)]
     (if (dag/err? result)
       result
-      (let [remote-url (str/trim (or (:output (:data result)) ""))
-            parts (re-find #"github\.com[:/]([^/]+)/([^/]+)$" remote-url)
+      (let [remote-url (str/trim (get (:data result) :output ""))
+            parts (re-find #"github\.com(?::\d+)?[:/]([^/]+)/([^/]+)/?$" remote-url)
             owner (nth parts 1 nil)
             repo (some-> (nth parts 2 nil)
                          (str/replace #"\.git$" ""))]
         (if (and owner (seq repo))
           (dag/ok {:owner owner :repo repo})
           (dag/err :invalid-remote
-                   (str "Could not parse owner/repo from remote URL: " remote-url)))))))
+                   "Could not parse GitHub owner/repository from origin remote"))))))
 
 (defn- ^{:stratum 1} review-comment-root-id
   "Resolve a review reply to its thread's root REST comment ID."
