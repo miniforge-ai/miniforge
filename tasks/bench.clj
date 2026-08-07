@@ -41,6 +41,11 @@
   "Working clone the bench runs in, under the bench root."
   "repo")
 
+(def ^{:stratum 0} mirror-dir-name
+  "Bare mirror the bench's origin points at, under the bench root. Exists
+   so a completed run's push lands here instead of on GitHub."
+  "origin.git")
+
 (def ^{:stratum 0} default-bench-root
   "Bench sandbox root. Sits beside the other miniforge run state so a
    bench survives reboots for post-mortem — the same rationale as the
@@ -48,7 +53,39 @@
   (or (System/getenv "MINIFORGE_BENCH_ROOT")
       (str (System/getProperty "user.home") "/.miniforge/bench")))
 
-;; Composes the Layer 0 constants and the `bench-git` plumbing.
+(defn ^{:stratum 0} anomaly
+  "Anomaly-shaped failure value (std 005 §Anomaly shape). Local because
+   the bb task classpath carries `bb-utils` only, not the
+   `ai.miniforge.anomaly` component."
+  [type message data]
+  {:anomaly/type type
+   :anomaly/message message
+   :anomaly/data data
+   :anomaly/at (java.time.Instant/now)})
+
+(defn ^{:stratum 0} anomaly?
+  [x]
+  (boolean (and (map? x) (contains? x :anomaly/type))))
+
+(defn ^{:stratum 0} qualified-branch-ref
+  "Normalize `branch` to exactly one `refs/heads/` prefix, or nil when
+   nothing but prefixes remain.
+
+   Git DWIMs an unqualified push destination, so a destination already
+   carrying a partial `heads/...` prefix expands to `refs/heads/heads/...`
+   — which then makes `git ls-remote origin main` resolve ambiguously
+   against the real `refs/heads/main`. Every refspec this namespace builds
+   goes through here. Only leading `refs/` and `heads/` segments are
+   stripped; `feature/heads-up` keeps its interior intact."
+  [branch]
+  (let [stripped (loop [s (str/trim (str branch))]
+                   (cond
+                     (str/starts-with? s "refs/") (recur (subs s (count "refs/")))
+                     (str/starts-with? s "heads/") (recur (subs s (count "heads/")))
+                     :else s))]
+    (when-not (str/blank? stripped)
+      (str "refs/heads/" stripped))))
+
 (defn ^{:stratum 0} isolation-report
   "Whether `bench-dir` can safely own its own remotes and refs.
 
@@ -70,8 +107,80 @@
 
 ;------------------------------------------------------------------------------ Layer 1
 
-;; Composes Layer 1. Absolute CLI boundary (std 005) — the only layer that
-;; prints and exits.
+;; Composes Layer 0.
+(defn ^{:stratum 1} provision!
+  "Provision a bench sandbox under `:root` from the checkout at `:source`.
+
+   Clones `:source` to `<root>/repo` at `:ref`, creates the throwaway bare
+   mirror `<root>/origin.git`, pushes the pinned commit to it as a fully
+   qualified `refs/heads/<branch>`, and points only the clone's origin at
+   the mirror. Seeding by explicit push rather than by mirroring every ref
+   also stops junk refs in the source propagating into the bench.
+
+   The launching checkout is read from and never written to: its
+   `remote.origin.url` is captured before the work and re-checked after,
+   and a mismatch fails the provision.
+
+   Refuses outright when `<root>/repo` exists — a bench in flight keeps
+   its worktrees and task branches there, so removing a previous bench is
+   the operator's call, not a flag on this function.
+
+   Returns the provisioning report, or an anomaly."
+  [{:keys [source root ref branch]
+    :or {root default-bench-root ref "HEAD" branch "main"}}]
+  (let [source (git/absolute-path "." source)
+        repo-dir (str (File. (str root) repo-dir-name))
+        mirror-dir (str (File. (str root) mirror-dir-name))
+        origin-before (git/remote-url source "origin")
+        target-ref (qualified-branch-ref branch)]
+    (cond
+      (nil? target-ref)
+      (anomaly :invalid-input "branch name is empty once ref prefixes are stripped"
+               {:branch branch})
+
+      (.exists (File. repo-dir))
+      (anomaly :conflict "bench repo already exists; remove it to re-provision"
+               {:repo-dir repo-dir})
+
+      (nil? (git/git-dirs source))
+      (anomaly :invalid-input "bench source is not a git checkout" {:source source})
+
+      :else
+      (do
+        (.mkdirs (File. (str root)))
+        (let [steps [[:clone (git/git "." "clone" "--quiet" "--no-checkout" source repo-dir)]
+                     [:checkout (git/git repo-dir "checkout" "--quiet" "--detach" ref)]
+                     [:init-mirror (git/git "." "init" "--quiet" "--bare" mirror-dir)]
+                     [:seed-mirror (git/git repo-dir "push" "--quiet" mirror-dir
+                                            (str "HEAD:" target-ref))]
+                     [:mirror-head (git/git mirror-dir "symbolic-ref" "HEAD" target-ref)]
+                     [:redirect-origin (git/git repo-dir "remote" "set-url" "origin" mirror-dir)]]
+              failed (first (remove #(zero? (:exit (second %))) steps))
+              origin-after (git/remote-url source "origin")
+              report (isolation-report repo-dir source)]
+          (cond
+            failed
+            (anomaly :fault (str "bench provisioning failed at " (name (first failed)))
+                     {:step (first failed)
+                      :exit (:exit (second failed))
+                      :err (str/trim (str (:err (second failed))))})
+
+            (not= origin-before origin-after)
+            (anomaly :fault "bench provisioning mutated the launching checkout's origin"
+                     {:before origin-before :after origin-after})
+
+            (not (:isolated? report))
+            (anomaly :fault "bench repo is not isolated from the launching checkout" report)
+
+            :else
+            (assoc report
+                   :repo-dir repo-dir
+                   :mirror-dir mirror-dir
+                   :target-ref target-ref
+                   :source-origin origin-after
+                   :bench-origin (git/remote-url repo-dir "origin"))))))))
+
+;; Absolute CLI boundary (std 005) — the only fns that print and exit.
 (defn ^{:stratum 1} verify
   "Fail-closed guard for a bench runner. Exits non-zero unless the bench
    repo owns its own config and refs.
@@ -95,3 +204,26 @@
           (println "❌ shares a git common dir with" (:source-dir report)))
         (println "   provision the bench as a clone of the launching checkout instead")
         (System/exit 1)))))
+
+;------------------------------------------------------------------------------ Layer 2
+
+;; Composes Layer 1.
+(defn ^{:stratum 2} provision
+  "Provision an isolated bench sandbox.
+   Usage: bb bench:provision [source-dir] [ref] [branch]"
+  [& args]
+  (let [[source ref branch] (map #(some-> % str/trim not-empty) args)
+        report (provision! (cond-> {:source (or source ".")}
+                             ref (assoc :ref ref)
+                             branch (assoc :branch branch)))]
+    (if (anomaly? report)
+      (do
+        (println "❌" (:anomaly/message report))
+        (println "  " (pr-str (:anomaly/data report)))
+        (System/exit 1))
+      (do
+        (println "✅ bench provisioned")
+        (println "  repo:" (:repo-dir report))
+        (println "  mirror:" (:mirror-dir report))
+        (println "  bench origin:" (:bench-origin report))
+        (println "  launching checkout origin (unchanged):" (:source-origin report))))))
