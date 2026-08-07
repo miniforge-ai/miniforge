@@ -15,13 +15,18 @@
 ;; WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 ;; See the License for the specific language governing permissions and
 ;; limitations under the License.
-
-(ns ai.miniforge.phase-deployment.interface
-  "Deployment phases pack. Requiring this namespace registers :provision,
-   :deploy, and :validate phase interceptors on the canonical phase registry
-   (see :phase component). Also surfaces the deploy-time messages, policies,
-   and evidence helpers used by workflows that include this component."
+(ns ai.miniforge.phase-deployment.deploy-registration
+  "Phase registry composition for the deployment application flow."
   (:require
-   [ai.miniforge.phase-deployment.deploy-registration]
-   [ai.miniforge.phase-deployment.provision]
-   [ai.miniforge.phase-deployment.validate]))
+   [ai.miniforge.phase-deployment.deploy :as deploy]
+   [ai.miniforge.phase.interface :as phase]))
+
+;------------------------------------------------------------------------------ Layer 0
+
+(defmethod ^{:stratum 0} phase/get-phase-interceptor-method :deploy
+  [_]
+  {:name :deploy
+   :enter deploy/enter-deploy
+   :leave deploy/leave-deploy
+   :error deploy/error-deploy
+   :config deploy/default-config})
