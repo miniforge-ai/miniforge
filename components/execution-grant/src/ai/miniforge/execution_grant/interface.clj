@@ -21,10 +21,11 @@
 
    Decision gating consumes authorization results, and
    effect-transaction rechecks grants at commit. Production call sites
-   still await the runtime issuer before they can remove their explicit
-   unenforced-authority marker. This component owns the object and its
-   rules: issuance, attenuated delegation, revocation as a state, scope
-   and ceiling authorization, and liveness over lineage."
+   still await integration with the runtime issuer before they can
+   remove their explicit unenforced-authority marker. This component
+   owns the object and its rules: issuance, attenuated delegation,
+   revocation as a state, scope and ceiling authorization, and liveness
+   over lineage."
   (:require
    [ai.miniforge.anomaly.interface :as anomaly]
    [ai.miniforge.execution-grant.attenuation :as attenuation]
