@@ -28,7 +28,7 @@ provider namespace before N7 merge enforcement adds provider readback.
   concern per named function.
 - Repeated successful reply maps use one `reply-outcome` factory.
 - Provider transport and conversation orchestration remain separate concerns.
-- PR budget: 363 / 600 reportable lines; every commit is at most 200.
+- PR budget: 362 / 600 reportable lines; every commit is at most 200.
 - Kondo, Polylith, stratum lint, and the standards baseline are clean.
 
 ## Verification

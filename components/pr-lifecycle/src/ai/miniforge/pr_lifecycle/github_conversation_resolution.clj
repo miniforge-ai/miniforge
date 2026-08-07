@@ -30,23 +30,25 @@
                   :reply-url (:url (:data reply-result))}
                  details)))
 
+(defn- ^{:stratum 0} log-event
+  [logger log-fn event message data]
+  (when logger
+    (log-fn logger :pr-lifecycle event {:message message :data data})))
+
 ;------------------------------------------------------------------------------ Layer 1
 
 (defn- ^{:stratum 1} thread-lookup-failure-outcome
   [reply-result thread-result comment-id logger]
-  (when logger
-    (log/warn logger :pr-lifecycle :github/thread-id-failed
-              {:message "Could not get thread ID for resolution"
-               :data {:error (:error thread-result) :comment-id comment-id}}))
+  (log-event logger log/warn :github/thread-id-failed
+             "Could not get thread ID for resolution"
+             {:error (:error thread-result) :comment-id comment-id})
   (reply-outcome reply-result false
                  {:resolution-error (:error thread-result)}))
 
 (defn- ^{:stratum 1} already-resolved-outcome
   [reply-result thread-id logger]
-  (when logger
-    (log/info logger :pr-lifecycle :github/already-resolved
-              {:message "Thread already resolved"
-               :data {:thread-id thread-id}}))
+  (log-event logger log/info :github/already-resolved
+             "Thread already resolved" {:thread-id thread-id})
   (reply-outcome reply-result true
                  {:already-resolved true :thread-id thread-id}))
 
@@ -55,16 +57,14 @@
   (let [result (github/resolve-conversation worktree-path thread-id)]
     (if (dag/ok? result)
       (do
-        (when logger
-          (log/info logger :pr-lifecycle :github/conversation-resolved
-                    {:message "Conversation resolved successfully"
-                     :data {:thread-id thread-id :pr-number pr-number}}))
+        (log-event logger log/info :github/conversation-resolved
+                   "Conversation resolved successfully"
+                   {:thread-id thread-id :pr-number pr-number})
         (reply-outcome reply-result true {:thread-id thread-id}))
       (do
-        (when logger
-          (log/warn logger :pr-lifecycle :github/resolution-failed
-                    {:message "Failed to resolve conversation"
-                     :data {:error (:error result) :thread-id thread-id}}))
+        (log-event logger log/warn :github/resolution-failed
+                   "Failed to resolve conversation"
+                   {:error (:error result) :thread-id thread-id})
         (reply-outcome reply-result false
                        {:resolution-error (:error result)
                         :thread-id thread-id})))))
