@@ -147,6 +147,7 @@
    :supervision/tool-use-evaluated :internal
    :supervisory/intervention-requested :confidential
    :supervisory/intervention-state-changed :confidential
+   :supervisory/intervention-decision :confidential
    :operator/intervention-anomaly :confidential
    ;; Automation-edge upserts mirror the same operator-attention shape as
    ;; the other supervisory snapshots; default `:internal` matches the
@@ -803,6 +804,29 @@
     [:intervention/requested-at inst?]
     [:intervention/updated-at inst?]
     [:message string?]]))
+
+(def ^{:stratum 2} InterventionDecision
+  "Schema for `:supervisory/intervention-decision` — the operator's
+   verdict on an intervention parked at `:pending-human`.
+
+   Deliberately thin. The consumer holds the parked intervention and is
+   the authority on its type, target, and requester; a decision that
+   restated those fields would invite a client to contradict them. It
+   carries only the id being decided, the verdict, who decided, and an
+   optional reason recorded on a rejection."
+  (with-identity
+   [:map
+    [:event/type [:= :supervisory/intervention-decision]]
+    [:event/id uuid?]
+    [:event/timestamp inst?]
+    [:event/version string?]
+    [:event/sequence-number int?]
+    [:workflow/id {:optional true} [:maybe uuid?]]
+    [:intervention/id uuid?]
+    [:intervention/decision [:enum :approve :reject]]
+    [:intervention/decided-by string?]
+    [:intervention/reason {:optional true} string?]
+    [:message {:optional true} string?]]))
 
 (def ^{:stratum 2} InterventionStateChanged
   "Schema for supervisory/intervention-state-changed event."
