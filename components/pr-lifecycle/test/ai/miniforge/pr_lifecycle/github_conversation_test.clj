@@ -39,7 +39,9 @@
       (let [result (conversation/link-fix-pr-to-comment
                     "/repo" 42 7 99 nil)]
         (is (dag/err? result))
-        (is (= :reply-failed (get-in result [:error :code])))))))
+        (is (= :reply-failed (get-in result [:error :code])))
+        (is (string? (get-in result [:error :message])))
+        (is (= (:error failure) (get-in result [:error :data :cause])))))))
 
 ;------------------------------------------------------------------------------ Layer 1
 

@@ -99,9 +99,11 @@
                      :data {:error (:error reply-result) :pr-number pr-number
                             :comment-id comment-id}}))
         (dag/err :reply-failed
-                 (:error reply-result)
+                 (get-in reply-result [:error :message]
+                         "Failed to post reply to comment")
                  {:pr-number pr-number :comment-id comment-id
-                  :fix-pr-number fix-pr-number}))
+                  :fix-pr-number fix-pr-number
+                  :cause (:error reply-result)}))
       (do
         (when logger
           (log/info logger :pr-lifecycle :github/reply-posted

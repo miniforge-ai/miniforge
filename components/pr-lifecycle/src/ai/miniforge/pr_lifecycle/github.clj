@@ -185,20 +185,6 @@
 
 ;------------------------------------------------------------------------------ Layer 2
 
-(defn ^{:stratum 2} graphql-mutation
-  "Execute a GraphQL mutation via gh CLI.
-
-   Arguments:
-   - mutation: GraphQL mutation string
-   - worktree-path: Path to git worktree
-
-   Options:
-   - :variables - Map of GraphQL variables
-
-   Returns DAG result with parsed JSON response"
-  [mutation worktree-path & {:keys [variables]}]
-  (graphql-query mutation worktree-path :variables variables))
-
 ;; GitHub API operations
 (defn ^{:stratum 2} get-thread-id
   "Get GraphQL thread ID from a comment ID.
