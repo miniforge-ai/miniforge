@@ -37,6 +37,8 @@
 
 (def ^{:stratum 0} propose-merge! fixture/propose-merge!)
 
+(def ^{:stratum 0} record-success! fixture/record-success!)
+
 ;------------------------------------------------------------------------------ Layer 1
 
 (deftest ^{:stratum 1} interrupted-effect-is-unknown-not-failed-test
@@ -94,7 +96,7 @@
           revoked (grant/revoke g :breach/cost-exceeded now)
           fired (atom false)
           done (fx/commit! dir t revoked {} now
-                           (fn [] (reset! fired true) {:effect/outcome :succeeded}))]
+                           (partial record-success! fired))]
       (is (= :failed (:effect/state done)))
       (is (not @fired) "the effect MUST NOT fire when the re-check refuses")
       (is (re-find #"inactive" (:effect/failure done)))))
@@ -105,7 +107,7 @@
           t (propose-merge! dir g)
           fired (atom false)
           done (fx/commit! dir t g {} much-later
-                           (fn [] (reset! fired true) {:effect/outcome :succeeded}))]
+                           (partial record-success! fired))]
       (is (= :failed (:effect/state done)))
       (is (not @fired))))
 
@@ -115,7 +117,7 @@
           t (propose-merge! dir g)
           fired (atom false)
           done (fx/commit! dir t g {:usage/count 99} now
-                           (fn [] (reset! fired true) {:effect/outcome :succeeded}))]
+                           (partial record-success! fired))]
       (is (= :failed (:effect/state done)))
       (is (not @fired))))
 
@@ -129,7 +131,7 @@
           t (propose-merge! dir g)
           fired (atom false)
           result (fx/commit! dir t nil {} now
-                             (fn [] (reset! fired true) {:effect/outcome :succeeded}))]
+                             (partial record-success! fired))]
       (is (anomaly/anomaly? result))
       (is (not @fired))
       (is (= :proposed (:effect/state (fx/read-record dir (:effect/id t))))
@@ -152,7 +154,7 @@
       (let [t (assoc (propose-merge! dir g) :effect/state state)
             fired (atom false)
             result (fx/commit! dir t g {} now
-                               (fn [] (reset! fired true) {:effect/outcome :succeeded}))]
+                               (partial record-success! fired))]
         (is (anomaly/anomaly? result) (str "commit from " state " must refuse"))
         (is (= :conflict (:anomaly/type result)) (str state))
         (is (not @fired)
@@ -174,7 +176,7 @@
       (let [other (merge-grant {:constraints {}})
             fired (atom false)
             result (fx/commit! dir t other {} now
-                               (fn [] (reset! fired true) {:effect/outcome :succeeded}))]
+                               (partial record-success! fired))]
         (is (anomaly/anomaly? result))
         (is (= :conflict (:anomaly/type result)))
         (is (not @fired) "substituting a broader grant must not fire the effect")))
@@ -190,10 +192,23 @@
             mismatched (assoc t :effect/grant-id (:grant/id deploy-grant))
             fired (atom false)
             result (fx/commit! dir mismatched deploy-grant {} now
-                               (fn [] (reset! fired true) {:effect/outcome :succeeded}))]
+                               (partial record-success! fired))]
         (is (anomaly/anomaly? result))
         (is (not @fired) "a merge proposal must not be authorized by a deploy grant")))
 
     (testing "the recorded grant still commits"
       (let [done (fx/commit! dir t recorded {} now (fn [] {:effect/outcome :succeeded}))]
         (is (= :succeeded (:effect/state done)))))))
+
+(deftest ^{:stratum 1} commit-enforces-grant-scope-test
+  (testing "durable proposal scope overrides a caller-supplied scope"
+    (let [dir (tmp-dir)
+          g (merge-grant {:scope (assoc fixture/merge-proposal :pr/number 43)})
+          t (propose-merge! dir g)
+          fired (atom false)
+          usage {:effect/scope (:grant/scope g)}
+          result (fx/commit! dir t g usage now
+                             (partial record-success! fired))]
+      (is (= :failed (:effect/state result)))
+      (is (re-find #"scope-mismatch" (:effect/failure result)))
+      (is (not @fired)))))

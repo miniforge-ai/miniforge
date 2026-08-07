@@ -6,7 +6,7 @@
 
 # N10 — Governed Tool Execution
 
-**Version:** 0.3.0-draft
+**Version:** 0.3.1-draft
 **Date:** 2026-08-06
 **Status:** Draft
 **Conformance:** MUST
@@ -56,6 +56,9 @@ rechecked at commit, and the runtime decision that allowed it:
  :evidence/grant-id uuid
  :evidence/envelope-id uuid}
 ```
+
+At commit, the durable proposed effect MUST satisfy the grant's recorded scope.
+A parallel caller-supplied scope MUST NOT override the durable proposal.
 
 ### 1.2 What This Specification Defines
 
@@ -1067,6 +1070,8 @@ Audit Ledger (N3 events + N6 evidence bundles)
 
 **Version History:**
 
+- 0.3.1-draft (2026-08-06): Required commit-time ExecutionGrant scope
+  enforcement against the durable effect proposal
 - 0.3.0-draft (2026-08-06): Applied the accepted Ariadne adoption profile;
   DecisionEnvelope, ExecutionGrant, and EffectTransaction supersede the
   parallel intent/OIR/capability execution objects

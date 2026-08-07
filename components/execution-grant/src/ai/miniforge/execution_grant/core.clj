@@ -66,13 +66,13 @@
   "Build a grant map from caller-supplied bounds plus runtime-owned
    identity. `:grant/id` and `:grant/issued-at` are minted here and
    never accepted from a caller; a fresh grant is never born revoked."
-  [{:keys [principal effect-class scope constraints parent-id delegable? expires-at]}
+  [{:keys [principal effect-class parent-id delegable? expires-at] :as opts}
    ^Instant now]
   {:grant/id (random-uuid)
    :grant/principal principal
    :grant/effect-class effect-class
-   :grant/scope (or scope {})
-   :grant/constraints (or constraints {})
+   :grant/scope (get opts :scope {})
+   :grant/constraints (get opts :constraints {})
    :grant/parent-id parent-id
    :grant/delegable? (boolean delegable?)
    :grant/issued-at now

@@ -46,6 +46,7 @@
    ;; Ariadne 2b — authority, not policy: the action may be legal and
    ;; still be beyond what this principal was granted.
    :reason/grant-exceeded
+   :reason/grant-scope-mismatch
    :reason/grant-absent])
 
 (def ^{:stratum 0} obligation-types
