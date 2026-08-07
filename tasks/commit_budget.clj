@@ -32,6 +32,8 @@
      and per-function commentary don't represent review effort and
      shouldn't push a small change over budget.
 
+   Merge commits are skipped outright — see `check-commit-budget!`.
+
    Default: 200 lines. Override via env var
    `MINIFORGE_COMMIT_BUDGET_OVERRIDE=\"<rationale>\"` (the rationale is
    echoed to stdout so the override is auditable in CI logs)."
@@ -125,6 +127,24 @@
   (some-> (System/getenv "MINIFORGE_COMMIT_BUDGET_OVERRIDE")
           str/trim
           not-empty))
+
+(defn ^{:stratum 0} merge-in-progress?
+  "True when git is part-way through a merge, i.e. `MERGE_HEAD`
+   resolves.
+
+   Asks git instead of probing `.git/MERGE_HEAD` as a path: in a linked
+   worktree `.git` is a *file* pointing at `…/.git/worktrees/<name>`,
+   where the merge state actually lives, so the literal path finds
+   nothing. Nearly all work in this repo happens in worktrees, so the
+   path check would be wrong in the common case.
+
+   Answers for whichever repository git itself would act on — the
+   `GIT_DIR` the pre-commit hook exports when there is one, discovery
+   from the working directory otherwise. That is the same repository
+   `staged-diff` reads, which is what makes the two agree."
+  []
+  (zero? (:exit (p/sh {:out :string :err :string}
+                      "git" "rev-parse" "-q" "--verify" "MERGE_HEAD"))))
 
 ;; report (composes Layer 1)
 (defn ^{:stratum 0} print-report!
@@ -263,55 +283,70 @@
    `bb pre-commit` `:depends` chain (a `(System/exit 0)` here would
    terminate the JVM before lint/fmt/test got to run).
 
+   - Mid-merge, returns before reading the index at all. A merge
+     commit's staged diff carries every line arriving from the
+     merged-in branch, which the merging author did not write and which
+     was already budgeted on the PR that introduced it; its size is not
+     a reviewability signal about this commit. `bb pr-budget` still
+     covers the whole PR diff in CI. Without this, a routine `git merge
+     github/main` forces `MINIFORGE_COMMIT_BUDGET_OVERRIDE`, which
+     trains people to reach for the override and dilutes it for the
+     cases it exists for. Returning ahead of `staged-diff` rather than
+     as a `cond` branch below it is what makes the skip total: the diff
+     of a large merge is neither fetched nor parsed, and `staged-diff`
+     failing closed on a git error can't block a merge this gate has
+     already declined to judge.
    - With no staged content, returns silently (lets git itself emit
      the 'nothing to commit' message).
    - With `MINIFORGE_COMMIT_BUDGET_OVERRIDE` set, succeeds and echoes
      the rationale.
    - Otherwise prints a per-file breakdown and the verdict."
   [budget]
-  (let [entries    (staged-diff)
-        annotated  (reportable-changes entries)
-        total      (total-lines annotated)
-        rationale  (override-rationale)]
-    (cond
-      (empty? entries)
-      nil   ; truly silent — let git handle the 'nothing to commit' messaging
+  (if (merge-in-progress?)
+    (println "📏 commit-budget: skipped (merge in progress) — incoming lines were budgeted on their own PRs; bb pr-budget covers the full PR diff in CI.")
+    (let [entries    (staged-diff)
+          annotated  (reportable-changes entries)
+          total      (total-lines annotated)
+          rationale  (override-rationale)]
+      (cond
+        (empty? entries)
+        nil   ; truly silent — let git handle the 'nothing to commit' messaging
 
-      rationale
-      (do (println (format "📏 commit-budget: OVERRIDDEN (%d reportable lines)" total))
-          (println (str "  rationale: " rationale))
-          (when (> total budget)
-            (println (format "  WARNING: %d > %d — budget intentionally bypassed."
-                             total budget)))
-          (print-report! annotated total))
+        rationale
+        (do (println (format "📏 commit-budget: OVERRIDDEN (%d reportable lines)" total))
+            (println (str "  rationale: " rationale))
+            (when (> total budget)
+              (println (format "  WARNING: %d > %d — budget intentionally bypassed."
+                               total budget)))
+            (print-report! annotated total))
 
-      (<= total budget)
-      (println (format "📏 commit-budget: %d / %d lines OK" total budget))
+        (<= total budget)
+        (println (format "📏 commit-budget: %d / %d lines OK" total budget))
 
-      :else
-      (do (println "")
-          (println "════════════════════════════════════════════════════════════════")
-          (println (format "❌ COMMIT BUDGET EXCEEDED: %d > %d lines" total budget))
-          (println "════════════════════════════════════════════════════════════════")
-          (println "")
-          (print-report! annotated total)
-          (println "")
-          (println "Why this exists:")
-          (println "  Reviewer defect-detection drops sharply past ~200 LOC.")
-          (println "  Slicing a large change into a stack of small commits keeps")
-          (println "  each one reviewable; the agent that merges first is still on")
-          (println "  the way to the same destination.")
-          (println "")
-          (println "How to proceed:")
-          (println "  • Slice the work: stage only the files for the first PR,")
-          (println "    commit, then continue with the next slice.")
-          (println "  • Genuine exception (lockfile rev, generated migration):")
-          (println "    MINIFORGE_COMMIT_BUDGET_OVERRIDE='<rationale>' git commit ...")
-          (println "    The rationale is echoed at commit time and in CI logs.")
-          (println "    (It is not written into the commit message itself —")
-          (println "     repeat it in your -m '...' if you want it in the trail.)")
-          (println "")
-          (System/exit 1)))))
+        :else
+        (do (println "")
+            (println "════════════════════════════════════════════════════════════════")
+            (println (format "❌ COMMIT BUDGET EXCEEDED: %d > %d lines" total budget))
+            (println "════════════════════════════════════════════════════════════════")
+            (println "")
+            (print-report! annotated total)
+            (println "")
+            (println "Why this exists:")
+            (println "  Reviewer defect-detection drops sharply past ~200 LOC.")
+            (println "  Slicing a large change into a stack of small commits keeps")
+            (println "  each one reviewable; the agent that merges first is still on")
+            (println "  the way to the same destination.")
+            (println "")
+            (println "How to proceed:")
+            (println "  • Slice the work: stage only the files for the first PR,")
+            (println "    commit, then continue with the next slice.")
+            (println "  • Genuine exception (lockfile rev, generated migration):")
+            (println "    MINIFORGE_COMMIT_BUDGET_OVERRIDE='<rationale>' git commit ...")
+            (println "    The rationale is echoed at commit time and in CI logs.")
+            (println "    (It is not written into the commit message itself —")
+            (println "     repeat it in your -m '...' if you want it in the trail.)")
+            (println "")
+            (System/exit 1))))))
 
 ;------------------------------------------------------------------------------ Layer 5
 

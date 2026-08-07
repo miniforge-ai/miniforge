@@ -52,8 +52,12 @@
   "ai.miniforge.workflow.phase-transitions-test"
   "ai.miniforge.phase.interface-test"
   ;; Pins the commit-budget gate's path-exclusion set (which staged
-  ;; files count toward the 200-line ceiling). The gate itself runs in
-  ;; this same pre-commit chain — a drifted exclusion regex should fail
-  ;; here, not by silently blocking (or waving through) commits. Pure
-  ;; regex assertions, no subprocess, sub-second.
+  ;; files count toward the 200-line ceiling) and its merge-commit
+  ;; skip. The gate itself runs in this same pre-commit chain — a
+  ;; drifted exclusion regex, or a lost merge skip, should fail here
+  ;; rather than by silently blocking (or waving through) commits.
+  ;; Mostly regex assertions; the merge case builds a throwaway git
+  ;; repo under java.io.tmpdir (hermetic — its own config scopes, no
+  ;; hooks, deleted after) because the detection it pins only
+  ;; reproduces against real merge state.
   "commit-budget-test"]}

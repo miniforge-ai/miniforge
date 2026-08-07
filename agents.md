@@ -126,6 +126,17 @@ Two related, previously-missing gates, added 2026-07-26:
   human number, two orders of magnitude below the ~10-12k raw lines
   where Copilot's own review actually broke down (below). Treat 600 as
   calibrated-not-fixed, the same as the commit-level 200.
+- **Merge commits are exempt from `bb commit-budget`** (added
+  2026-08-07). A merge's staged diff carries every line arriving from
+  the merged-in branch, which the merging author did not write and
+  which was already budgeted on the PR that introduced it — a routine
+  `git merge github/main` to pick up an unrelated merged PR was failing
+  the gate on 491 lines of someone else's reviewed code. Requiring
+  `MINIFORGE_COMMIT_BUDGET_OVERRIDE` for that trains people to reach
+  for the override and dilutes its signal for the cases it exists for.
+  `bb pr-budget` still covers the whole PR diff in CI, and is not
+  affected: it diffs merge-base..head, so content the branch merged in
+  from the base is already excluded.
 - **Adversarial self-review before every push**, not just for PRs that
   trip the size gate. Read the actual diff like a skeptical reviewer,
   not the tool's own "this should be safe" framing.
