@@ -57,7 +57,9 @@
    [ai.miniforge.dag-executor.host-git-guard.messages :as msg]
    [ai.miniforge.dag-executor.result :as result]
    [clojure.java.shell :as shell]
-   [clojure.string :as str]))
+   [clojure.string :as str])
+  (:import
+   [java.io File]))
 
 ;------------------------------------------------------------------------------ Layer 0
 
@@ -176,6 +178,33 @@
       0 true
       1 false
       nil)))
+
+(defn ^{:stratum 1} common-dir
+  "Absolute path of the git common dir `repo-path` resolves to.
+
+   A checkout and every linked worktree of it share one common dir, so
+   this is the identity of the state this namespace watches — two paths
+   that resolve to the same common dir are the same checkout as far as
+   config and refs are concerned.
+
+   `--git-common-dir` may answer relatively, so the result is resolved
+   against `repo-path` and then canonicalized: `.` segments and symlinks
+   have to collapse, or one checkout named two ways would look like two."
+  [repo-path]
+  (let [r    (git repo-path "rev-parse" "--git-common-dir")
+        path (str/trim (get r :out ""))]
+    (if-not (and (zero? (long (get r :exit 1))) (seq path))
+      (result/err :host-git-snapshot-failed
+                  (msg/t :snapshot/common-dir-failed)
+                  {:repo-path repo-path :stderr (get r :err "")})
+      (let [f (File. path)]
+        (try
+          (result/ok (.getCanonicalPath
+                      (if (.isAbsolute f) f (File. (str repo-path) path))))
+          (catch java.io.IOException e
+            (result/err :host-git-snapshot-failed
+                        (msg/t :snapshot/common-dir-failed)
+                        {:repo-path repo-path :stderr (.getMessage e)})))))))
 
 (defn ^{:stratum 1} redirect-config
   "Map of redirect-config key to the vector of values it carries.

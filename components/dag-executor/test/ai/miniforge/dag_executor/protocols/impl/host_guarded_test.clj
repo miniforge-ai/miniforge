@@ -120,32 +120,59 @@
             (is (result/err? released))
             (is (= 1 (count @warnings))
                 "drift is announced as well as returned, because callers discard the result")
-            (is (result/err? (acquire! exec host second-task-id))
-                "the checkout is condemned: a later task will not be handed a worktree of it")
-            (is (not (.exists (worktree-dir-for base second-task-id)))
-                "the refusal short-circuits before the delegate provisions anything")))
+            (let [retry (acquire! exec host second-task-id)]
+              (is (result/ok? retry)
+                  "a condemned checkout still hands out worktrees: refusing degrades a
+                   local run to no sandbox at all, which is worse")
+              (is (= 2 (count @warnings))
+                  "but every later acquire against it warns again")
+              (proto/release-environment! exec (:environment-id (result/unwrap-or retry nil))))))
         (finally
           (sut/reset-guard-state!)
           (fixtures/delete-tree! base)
           (fixtures/delete-tree! host))))))
 
 (deftest ^{:stratum 2} reset-guard-state-clears-a-condemned-checkout-test
-  (testing "given a repaired checkout → resetting lets acquisition resume"
+  (testing "given a repaired checkout → resetting stops the warning and releases clean"
     (let [host (fixtures/init-host-repo! (fixtures/temp-dir!))
           base (fixtures/temp-dir!)
           exec (guarded-executor base)]
       (try
         (binding [lifecycle/*warn-fn* (fn [_])]
           (let [env-id (:environment-id (result/unwrap-or (acquire! exec host) nil))]
-            (fixtures/git! (str base "/task-" (subs task-id 0 8))
+            (fixtures/git! (worktree-dir-for base task-id)
                            "remote" "set-url" "origin" fixtures/redirected-origin-url)
             (proto/release-environment! exec env-id)
-            (is (result/err? (acquire! exec host)))
             (fixtures/git! host "remote" "set-url" "origin" fixtures/host-origin-url)
             (sut/reset-guard-state!)
-            (let [retried (acquire! exec host)]
+            (let [retried  (acquire! exec host)
+                  env-id'  (:environment-id (result/unwrap-or retried nil))]
               (is (result/ok? retried))
-              (proto/release-environment! exec (:environment-id (result/unwrap-or retried nil))))))
+              (is (result/ok? (proto/release-environment! exec env-id'))
+                  "with the verdict cleared and the checkout repaired, a run releases clean"))))
+        (finally
+          (sut/reset-guard-state!)
+          (fixtures/delete-tree! base)
+          (fixtures/delete-tree! host))))))
+
+(deftest ^{:stratum 2} a-verdict-follows-the-checkout-not-the-path-spelling-test
+  (testing "given a second acquire naming the same checkout differently → still warned"
+    (let [host     (fixtures/init-host-repo! (fixtures/temp-dir!))
+          base     (fixtures/temp-dir!)
+          exec     (guarded-executor base)
+          warnings (atom [])]
+      (try
+        (binding [lifecycle/*warn-fn* #(swap! warnings conj %)]
+          (let [env-id (:environment-id (result/unwrap-or (acquire! exec host) nil))]
+            (fixtures/git! (worktree-dir-for base task-id)
+                           "remote" "set-url" "origin" fixtures/redirected-origin-url)
+            (proto/release-environment! exec env-id)
+            (is (= 1 (count @warnings)))
+            (let [spelled-differently (str host "/./")
+                  retry  (acquire! exec spelled-differently second-task-id)]
+              (is (= 2 (count @warnings))
+                  "the verdict is keyed on the git common dir, not the string the caller passed")
+              (proto/release-environment! exec (:environment-id (result/unwrap-or retry nil))))))
         (finally
           (sut/reset-guard-state!)
           (fixtures/delete-tree! base)

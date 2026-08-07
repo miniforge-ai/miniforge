@@ -67,43 +67,60 @@
    `git worktree add` will write to."
   ".")
 
-(defn ^{:stratum 0} ^:private drift-message
-  "Name the drift by its worse half. A repointed remote outranks a moved
-   ref: it changes where every subsequent push and fetch goes, and it is
-   how a GitHub token ends up persisted in the host's config."
-  [report]
-  (if (seq (:remote-url-drift report))
-    (msg/t :drift/remote-url-changed)
-    (msg/t :drift/remote-ref-rewound)))
+(defn ^{:stratum 0} ^:private canonical-checkout
+  "The absolute path of the git common dir `repo-path` resolves to, or the
+   path itself when git cannot answer.
+
+   Verdicts are keyed on this rather than the caller's spelling. `\".\"`,
+   an absolute path, and any linked worktree of the same checkout all name
+   one shared common dir; keying on the raw string would let a verdict
+   earned under one spelling miss an acquire made under another."
+  [repo-path]
+  (let [r (guard/common-dir repo-path)]
+    (if (result/ok? r)
+      (result/unwrap-or r (str repo-path))
+      (str repo-path))))
 
 ;------------------------------------------------------------------------------ Layer 1
 
 ;; Guarded lifecycle steps
 (defn ^{:stratum 1} acquire!
-  "Refuse the acquisition outright when this checkout already has a drift
-   verdict; otherwise snapshot it, delegate, and park the snapshot.
+  "Snapshot the checkout, delegate, and park the snapshot against the
+   environment id so `release!` has a before side to compare.
 
-   A snapshot that cannot be read fails the acquisition rather than
-   proceeding unwatched. That costs nothing in practice: the reads are
-   `git config` and `git for-each-ref` against the same path
-   `git worktree add` is about to be handed, so a path where they fail is a
-   path where the delegate was going to fail anyway."
+   A checkout an earlier run drifted is warned about, loudly and on every
+   acquire, but **not refused**. Refusing would be worse than useless in
+   `:local` mode: `workflow.runner-environment/build-env-record` collapses
+   any non-ok acquire to nil, and `workflow.runner/acquire-environment`
+   then runs the pipeline with the caller's original opts — no executor and
+   no worktree path — which is the state that namespace's own comment
+   describes as what \"let a caller that drove run-pipeline without a
+   sandbox leak a real commit into the live worktree\". Turning a refusal
+   into a run against the host is the opposite of the intent. Making a
+   refusal actually stop the run needs `build-env-record` to tell \"no
+   executor configured\" from \"acquire failed\", which is a change in
+   another component; see the PR doc's follow-ups.
+
+   A snapshot that cannot be read does fail the acquisition, since it
+   propagates through the same collapse and the reads are `git config` and
+   `git for-each-ref` against the same path `git worktree add` is about to
+   be handed — a path where they fail is a path where the delegate was
+   going to fail anyway."
   [delegate task-id env-config]
-  (let [repo-path (get env-config :repo-path default-repo-path)]
-    (if-let [verdict (get @drift-verdicts (str repo-path))]
-      (result/err :host-git-drift
-                  (msg/t :guard/host-drifted-before-acquire)
-                  verdict)
-      (-> (guard/snapshot repo-path)
-          (result/and-then
-           (fn [before]
-             (let [acquired (proto/acquire-environment! delegate task-id env-config)]
-               (when (result/ok? acquired)
-                 (swap! acquired-environments
-                        assoc
-                        (:environment-id (result/unwrap-or acquired nil))
-                        before))
-               acquired)))))))
+  (let [repo-path (get env-config :repo-path default-repo-path)
+        checkout  (canonical-checkout repo-path)]
+    (when-let [verdict (get @drift-verdicts checkout)]
+      (*warn-fn* (str (msg/t :guard/host-drifted-before-acquire) " "
+                      (pr-str verdict))))
+    (-> (guard/snapshot repo-path)
+        (result/and-then
+         (fn [before]
+           (let [acquired (proto/acquire-environment! delegate task-id env-config)
+                 env-id   (:environment-id (result/unwrap-or acquired nil))]
+             (when (and (result/ok? acquired) env-id)
+               (swap! acquired-environments assoc env-id
+                      (assoc before :checkout checkout)))
+             acquired))))))
 
 (defn ^{:stratum 1} release!
   "Release through the delegate, then compare the checkout against the
@@ -111,28 +128,41 @@
 
    The delegate runs first and unconditionally: a drifted host is a reason
    to fail the run, never a reason to strand a worktree on disk. On drift
-   the verdict is recorded so later acquisitions against this checkout are
-   refused, the warning goes to stderr for the callers that discard results,
-   and the drift is returned in place of the release result."
+   the verdict is recorded against the checkout, the warning goes to stderr
+   for the callers that discard results, and the drift is returned in place
+   of the release result.
+
+   A post-release snapshot that cannot be read is treated the same way. It
+   means the checkout became unreadable during the run, so whether it
+   drifted is unknown — recording a verdict and warning is the fail-closed
+   reading, and letting the error through silently would wave through the
+   one case where the guard cannot see.
+
+   The environment id carries no run identity beyond itself, so a report
+   names the checkout, not the culprit: with tasks running in parallel
+   against one checkout, any host mutation between an acquire and its
+   release is attributed to whichever run released next."
   [delegate environment-id]
-  (let [before   (get @acquired-environments environment-id)
-        released (proto/release-environment! delegate environment-id)]
-    (swap! acquired-environments dissoc environment-id)
-    (if-not before
-      released
-      (-> (guard/snapshot (:repo-path before))
-          (result/and-then
-           (fn [after]
-             (let [report (guard/drift before after)]
-               (if (:clean? report)
-                 released
-                 (do
-                   (swap! drift-verdicts assoc (:repo-path before) report)
-                   (*warn-fn* (str (msg/t :guard/host-drifted-during-run) " "
-                                   (pr-str report)))
-                   (result/err :host-git-drift
-                               (drift-message report)
-                               report))))))))))
+  (letfn [(condemn [checkout report message]
+            (swap! drift-verdicts assoc checkout report)
+            (*warn-fn* (str message " " (pr-str report)))
+            (result/err :host-git-drift message report))]
+    (let [before   (get @acquired-environments environment-id)
+          released (proto/release-environment! delegate environment-id)]
+      (swap! acquired-environments dissoc environment-id)
+      (if-not before
+        released
+        (let [checkout (:checkout before)
+              after    (guard/snapshot (:repo-path before))]
+          (if-not (result/ok? after)
+            (condemn checkout
+                     {:repo-path (:repo-path before) :snapshot-failed? true}
+                     (msg/t :guard/post-release-snapshot-failed))
+            (let [report (guard/drift before (result/unwrap-or after nil))]
+              (if (:clean? report)
+                released
+                (condemn checkout report
+                         (msg/t :guard/host-drifted-during-run))))))))))
 
 (defn ^{:stratum 1} reset-state!
   "Drop every parked snapshot and drift verdict.
