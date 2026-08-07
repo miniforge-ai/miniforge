@@ -3,7 +3,19 @@
 ;; Copyright 2025-2026 Christopher Lester. Licensed under Apache 2.0.
 
 {:execution-grant/messages
- {:breach/invalid "Breach record failed validation"
+ {:grant/input-invalid "ExecutionGrant inputs failed validation"
+  :grant/parent-invalid "Cannot delegate from a value that is not a valid ExecutionGrant"
+  :grant/parent-not-delegable "Parent grant is not delegable"
+  :grant/parent-inactive "Parent grant is revoked or expired"
+  :grant/delegated-invalid "Delegated ExecutionGrant inputs failed validation"
+  :grant/delegation-widened "Delegated grant is broader than its parent"
+  :grant/revoke-invalid "Cannot revoke a value that is not a valid ExecutionGrant"
+  :grant/revocation-invalid "Revocation produced an invalid ExecutionGrant"
+  :attenuation/effect-class "A delegated grant cannot change effect class"
+  :attenuation/scope "Child scope drops or changes a binding the parent set"
+  :attenuation/expiry "Child expiry outlives the parent's"
+  :attenuation/ceiling "Child raises a ceiling above the parent, or drops a bound the parent set"
+  :breach/invalid "Breach record failed validation"
   :breach/read-failed "Breach history record could not be read"
   :breach/write-failed "Breach history record could not be persisted"
   :breach/id-conflict "Breach history already contains this breach id"}}
