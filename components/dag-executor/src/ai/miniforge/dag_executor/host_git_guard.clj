@@ -78,23 +78,6 @@
    it cannot occur in a ref name or a SHA, so splitting on it is total."
   (str (char 0x1F)))
 
-(defn ^{:stratum 0} changed-redirect-config
-  "Redirect-config keys whose value differs between two snapshots.
-
-   A key present in only one of the two counts: adding a remote or an
-   `insteadOf` rewrite mid-run is as much a redirect as editing one, and
-   removing the remote a push is about to target is a silent failure
-   waiting to happen."
-  [before after]
-  (->> (into (set (keys before)) (keys after))
-       sort
-       (keep (fn [k]
-               (let [was (get before k)
-                     is  (get after k)]
-                 (when (not= was is)
-                   {:config-key k :before was :after is}))))
-       vec))
-
 (defn ^{:stratum 0} moved-remote-refs
   "Remote-tracking refs present in BOTH snapshots whose SHA differs.
 
@@ -127,48 +110,42 @@
     (catch Exception e
       {:exit 1 :out "" :err (.getMessage e)})))
 
-(defn- ^{:stratum 0} parse-pairs
-  "Parse `sep`-delimited two-field lines into a map. Blank lines and lines
-   missing the second field are dropped — a partial line carries no
-   comparable value and inventing one would fabricate drift."
+(defn- ^{:stratum 0} parse-fields
+  "Split `sep`-delimited two-field lines into `[key value]` pairs. Blank
+   lines and lines missing the second field are dropped — a partial line
+   carries no comparable value and inventing one would fabricate drift.
+   The split limit is 2, so a value containing the separator survives
+   whole."
   [text sep]
   (->> (str/split-lines (str/trim (or text "")))
        (remove str/blank?)
-       (reduce (fn [acc line]
-                 (let [[k v] (str/split line (re-pattern sep) 2)]
-                   (if (and k v (seq (str/trim k)) (seq (str/trim v)))
-                     (assoc acc (str/trim k) (str/trim v))
-                     acc)))
-               {})))
+       (keep (fn [line]
+               (let [[k v] (str/split line (re-pattern sep) 2)]
+                 (when (and k v (seq (str/trim k)) (seq (str/trim v)))
+                   [(str/trim k) (str/trim v)]))))))
+
+(defn ^{:stratum 0} changed-redirect-config
+  "Redirect-config keys whose values differ between two snapshots.
+
+   A key present in only one of the two counts: adding a remote or an
+   `insteadOf` rewrite mid-run is as much a redirect as editing one, and
+   removing the remote a push is about to target is a silent failure
+   waiting to happen.
+
+   Values are vectors because git config is multi-valued — a second
+   `remote.origin.url` line is legal, and `git remote get-url` resolves to
+   the first, so comparing only one value would miss a rewrite of it."
+  [before after]
+  (->> (into (set (keys before)) (keys after))
+       sort
+       (keep (fn [k]
+               (let [was (get before k)
+                     is  (get after k)]
+                 (when (not= was is)
+                   {:config-key k :before (vec was) :after (vec is)}))))
+       vec))
 
 ;------------------------------------------------------------------------------ Layer 1
-
-(defn ^{:stratum 1} redirect-config
-  "Map of redirect-config key to its value.
-
-   `git config --get-regexp` exits 1 when nothing matches, which is a valid
-   state (a repo with no remotes), not a failure — it is reported as an
-   empty map. Any other non-zero exit is a genuine read failure."
-  [repo-path]
-  (let [r (git repo-path "config" "--get-regexp" redirect-config-pattern)]
-    (case (long (get r :exit 1))
-      0 (result/ok (parse-pairs (get r :out "") " "))
-      1 (result/ok {})
-      (result/err :host-git-snapshot-failed
-                  (msg/t :snapshot/remote-urls-failed)
-                  {:repo-path repo-path :stderr (get r :err "")}))))
-
-(defn ^{:stratum 1} remote-tracking-refs
-  "Map of remote-tracking ref name to the SHA it points at."
-  [repo-path]
-  (let [r (git repo-path "for-each-ref"
-               (str "--format=%(refname)" field-separator "%(objectname)")
-               remote-ref-namespace)]
-    (if (zero? (long (get r :exit 1)))
-      (result/ok (parse-pairs (get r :out "") field-separator))
-      (result/err :host-git-snapshot-failed
-                  (msg/t :snapshot/remote-refs-failed)
-                  {:repo-path repo-path :stderr (get r :err "")}))))
 
 (defn ^{:stratum 1} fast-forward?
   "True when `after` contains `before` in its history — the ref moved
@@ -185,24 +162,44 @@
       1 false
       nil)))
 
-;------------------------------------------------------------------------------ Layer 2
+(defn ^{:stratum 1} redirect-config
+  "Map of redirect-config key to the vector of values it carries.
 
-;; Snapshot capture and drift report
-(defn ^{:stratum 2} snapshot
-  "Capture the host checkout's redirect config and remote-tracking refs.
-
-   Returns result/ok with `{:repo-path :redirects :remote-refs}` — the
-   value `drift` compares against — or result/err when either read failed."
+   `git config --get-regexp` exits 1 when nothing matches, which is a valid
+   state (a repo with no remotes) and reported as an empty map. Any other
+   non-zero exit is a genuine read failure. Exit 1 is also what a path that
+   is not a repository returns, so this half alone cannot tell those apart
+   — `remote-tracking-refs` is what makes a non-repository fail closed."
   [repo-path]
-  (-> (redirect-config repo-path)
-      (result/and-then
-       (fn [redirects]
-         (-> (remote-tracking-refs repo-path)
-             (result/map-ok
-              (fn [refs]
-                {:repo-path   (str repo-path)
-                 :redirects  redirects
-                 :remote-refs refs})))))))
+  (let [r (git repo-path "config" "--get-regexp" redirect-config-pattern)]
+    (case (long (get r :exit 1))
+      0 (result/ok
+         ;; Accumulated into vectors, not a plain map: git config is
+         ;; multi-valued, and collapsing to the last value would hide a
+         ;; rewrite of the first — the one `git remote get-url` resolves to.
+         (reduce (fn [acc [k v]] (update acc k (fnil conj []) v))
+                 {}
+                 (parse-fields (get r :out "") " ")))
+      1 (result/ok {})
+      (result/err :host-git-snapshot-failed
+                  (msg/t :snapshot/remote-urls-failed)
+                  {:repo-path repo-path :stderr (get r :err "")}))))
+
+(defn ^{:stratum 1} remote-tracking-refs
+  "Map of remote-tracking ref name to the SHA it points at."
+  [repo-path]
+  (let [r (git repo-path "for-each-ref"
+               (str "--format=%(refname)" field-separator "%(objectname)")
+               remote-ref-namespace)]
+    (if (zero? (long (get r :exit 1)))
+      ;; A ref name appears once per `for-each-ref` line, so a plain map is
+      ;; the whole story here.
+      (result/ok (into {} (parse-fields (get r :out "") field-separator)))
+      (result/err :host-git-snapshot-failed
+                  (msg/t :snapshot/remote-refs-failed)
+                  {:repo-path repo-path :stderr (get r :err "")}))))
+
+;------------------------------------------------------------------------------ Layer 2
 
 (defn ^{:stratum 2} drift
   "Compare two snapshots of the same checkout and report what a task run
@@ -211,14 +208,17 @@
    Reports; does not judge. `:clean?` tracks the redirect config alone —
    it is true when every remote URL and `insteadOf` rewrite came through
    the run unchanged. `:redirect-drift` carries the before and after
-   values.
+   values, credentials stripped.
 
    `:ref-rewinds` lists remote-tracking refs that moved to a commit not
    descended from where they started, and deliberately does **not** feed
-   `:clean?`; see the namespace docstring for why an ordinary fetch
-   produces one. It is context for a redirect that did happen, not a
-   verdict of its own. A ref whose ancestry probe could not be answered is
-   listed with `:fast-forward? nil`.
+   `:clean?`. Such a move is indistinguishable from an ordinary `git fetch`
+   after upstream force-pushed: the default refspec forces every
+   opportunistic update, and miniforge force-pushes its own task branches,
+   so a stacked DAG run produces one as a matter of course. It is context
+   for a redirect that did happen, not a verdict of its own. A ref whose
+   ancestry probe could not be answered is listed with
+   `:fast-forward? nil`.
 
    Whether a dirty report should fail a run is the caller's policy, not
    this namespace's; see `protocols.impl.host-guarded`."
@@ -238,10 +238,27 @@
                                             (get after :remote-refs))
                          (keep (partial rewind repo-path))
                          vec)]
-      {:clean?           (empty? redirects)
-       :repo-path        repo-path
-       :redirect-drift   redirects
-       :ref-rewinds      rewinds})))
+      {:clean?         (empty? redirects)
+       :repo-path      repo-path
+       :redirect-drift redirects
+       :ref-rewinds    rewinds})))
+
+;; Snapshot capture and drift report
+(defn ^{:stratum 2} snapshot
+  "Capture the host checkout's redirect config and remote-tracking refs.
+
+   Returns result/ok with `{:repo-path :redirects :remote-refs}` — the
+   value `drift` compares against — or result/err when either read failed."
+  [repo-path]
+  (-> (redirect-config repo-path)
+      (result/and-then
+       (fn [redirects]
+         (-> (remote-tracking-refs repo-path)
+             (result/map-ok
+              (fn [refs]
+                {:repo-path   (str repo-path)
+                 :redirects   redirects
+                 :remote-refs refs})))))))
 
 ;------------------------------------------------------------------------------ Rich Comment
 (comment
@@ -252,8 +269,6 @@
   ;=> {:clean? true :repo-path "/path/to/checkout"
   ;    :redirect-drift [] :ref-rewinds []}
 
-  ;; A fetch that advanced origin/main stays clean; a force-update
-  ;; backwards comes back as :host-git-drift with the ref and both SHAs.
   (fast-forward? "/path/to/checkout" "HEAD~3" "HEAD")
   ;=> true
 

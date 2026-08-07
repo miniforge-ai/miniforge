@@ -59,20 +59,28 @@
 ;; Pure-comparison tests
 (deftest ^{:stratum 1} changed-redirect-config-reports-every-kind-of-edit-test
   (testing "given identical config → nothing changed"
-    (is (= [] (sut/changed-redirect-config {"remote.origin.url" host-origin-url}
-                                       {"remote.origin.url" host-origin-url}))))
+    (is (= [] (sut/changed-redirect-config {"remote.origin.url" [host-origin-url]}
+                                           {"remote.origin.url" [host-origin-url]}))))
   (testing "given a redirected url → the key with both values"
     (is (= [{:config-key "remote.origin.url"
-             :before     host-origin-url
-             :after      redirected-origin-url}]
-           (sut/changed-redirect-config {"remote.origin.url" host-origin-url}
-                                    {"remote.origin.url" redirected-origin-url}))))
-  (testing "given a remote added mid-run → reported, with no before value"
-    (is (= [{:config-key "remote.mirror.url" :before nil :after redirected-origin-url}]
-           (sut/changed-redirect-config {} {"remote.mirror.url" redirected-origin-url}))))
-  (testing "given a remote removed mid-run → reported, with no after value"
-    (is (= [{:config-key "remote.origin.url" :before host-origin-url :after nil}]
-           (sut/changed-redirect-config {"remote.origin.url" host-origin-url} {})))))
+             :before     [host-origin-url]
+             :after      [redirected-origin-url]}]
+           (sut/changed-redirect-config {"remote.origin.url" [host-origin-url]}
+                                        {"remote.origin.url" [redirected-origin-url]}))))
+  (testing "given a remote added mid-run → reported, with an empty before"
+    (is (= [{:config-key "remote.mirror.url" :before [] :after [redirected-origin-url]}]
+           (sut/changed-redirect-config {} {"remote.mirror.url" [redirected-origin-url]}))))
+  (testing "given a remote removed mid-run → reported, with an empty after"
+    (is (= [{:config-key "remote.origin.url" :before [host-origin-url] :after []}]
+           (sut/changed-redirect-config {"remote.origin.url" [host-origin-url]} {}))))
+  (testing "given a multi-valued key whose FIRST value was rewritten → reported"
+    (is (= [{:config-key "remote.origin.url"
+             :before     [host-origin-url "https://example.invalid/second.git"]
+             :after      [redirected-origin-url "https://example.invalid/second.git"]}]
+           (sut/changed-redirect-config
+            {"remote.origin.url" [host-origin-url "https://example.invalid/second.git"]}
+            {"remote.origin.url" [redirected-origin-url "https://example.invalid/second.git"]}))
+        "git remote get-url resolves to the first value, so collapsing to the last would miss this")))
 
 (deftest ^{:stratum 1} moved-remote-refs-ignores-refs-only-one-side-has-test
   (testing "given a ref at a new sha → reported with both shas"
@@ -89,7 +97,7 @@
     (let [host (fixtures/init-host-repo! (fixtures/temp-dir!))]
       (try
         (let [snap (snapshot! host)]
-          (is (= host-origin-url (get-in snap [:redirects "remote.origin.url"])))
+          (is (= [host-origin-url] (get-in snap [:redirects "remote.origin.url"])))
           (is (= (fixtures/sha-at host "HEAD~1") (get-in snap [:remote-refs tracked-ref]))))
         (finally (fixtures/delete-tree! host))))))
 
@@ -104,12 +112,12 @@
               _      (fixtures/git! linked "remote" "set-url" "origin" redirected-origin-url)
               after  (snapshot! host)
               report (sut/drift before after)]
-          (is (= redirected-origin-url (get-in after [:redirects "remote.origin.url"]))
+          (is (= [redirected-origin-url] (get-in after [:redirects "remote.origin.url"]))
               "the leak is real: set-url inside the worktree rewrote the host")
           (is (false? (:clean? report)))
           (is (= [{:config-key "remote.origin.url"
-                   :before     host-origin-url
-                   :after      redirected-origin-url}]
+                   :before     [host-origin-url]
+                   :after      [redirected-origin-url]}]
                  (:redirect-drift report))))
         (finally
           (fixtures/git! host "worktree" "remove" "--force" linked)
