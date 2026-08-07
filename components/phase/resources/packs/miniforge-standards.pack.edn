@@ -1,4 +1,4 @@
-#:pack{:created-at #inst "2026-08-06T04:52:28.349-00:00",
+#:pack{:created-at #inst "2026-08-07T05:11:35.408-00:00",
        :version "2026.08",
        :rules
        [#:rule{:title
@@ -685,7 +685,7 @@
                "Engineering standard (715): Pre-commit hook discipline and bypass constraints"}
         #:rule{:title "Python + Poetry rules",
                :agent-behavior
-               "- Structure packages as stratified components — `interface.py` surface,\n- Use Poetry and `pyproject.toml`; add console scripts for CLIs under\n- Source layout: `src/<package>/`; never implicit namespace packages.",
+               "- Structure packages as stratified components — `interface.py` surface, explicit state, and labeled strata.\n- Use Poetry and `pyproject.toml`; declare CLI console scripts under `[tool.poetry.scripts]`.\n- Use `src/<package>/` layout; never implicit namespace packages.\n- Pin Python `^3.12`, separate runtime and development dependencies, commit `poetry.lock`, and run `poetry install --frozen` in CI.",
                :enforcement
                {:action :audit,
                 :message "Standard: Python + Poetry rules"},
@@ -1273,7 +1273,7 @@
                     :std/pre-commit-discipline
                     :std/tests-with-code]}],
        :trust-level :trusted,
-       :updated-at #inst "2026-08-06T04:52:28.349-00:00",
+       :updated-at #inst "2026-08-07T05:11:35.408-00:00",
        :author "miniforge.ai",
        :taxonomy-ref
        #:taxonomy{:id :miniforge/dewey, :min-version "1.0.0"},

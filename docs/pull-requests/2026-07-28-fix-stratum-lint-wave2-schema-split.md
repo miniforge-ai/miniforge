@@ -1,6 +1,6 @@
 <!--
   Title: Miniforge.ai
-  Author: Christopher Lester (christopher.ai)
+  Author: Christopher Lester (christopher@miniforge.ai)
   Copyright 2025-2026 Christopher Lester. Licensed under Apache 2.0.
 -->
 # fix(schema): split core.clj and logging.clj to clear the 3-layer stratum budget (SL003, Wave 2)
