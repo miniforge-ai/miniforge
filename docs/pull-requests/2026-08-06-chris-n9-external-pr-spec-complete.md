@@ -25,9 +25,11 @@ N3 §7.4 states the opposite: because the product is pre-release, dual-emission
 is not required and implementations cut over. As written, N9 obliged
 implementations to carry compatibility machinery no consumer needs.
 
-**An undefined binary.** The MCI and CLI sections invoked `mf fleet prs` in
-five places. N5 §2.1 defines the command as `miniforge <namespace> <command>`
-and defines no `mf` alias anywhere.
+**The binary name disagreed between specs — and N5 was the wrong one.** N9
+invoked `mf fleet prs`; N5 §2.1 documented `miniforge <namespace> <command>`.
+The shipped binary is `mf`: `bb install:cli` installs it to `~/.local/bin/mf`,
+and CI and the release workflow invoke it by that name. N9 was correct, so this
+PR amends N5 §2.1 to document the real binary and sweeps N5's own examples.
 
 **No requirement IDs.**
 
@@ -42,7 +44,8 @@ and defines no `mf` alias anywhere.
   purpose, scope, and retention class.
 - **§14** aligned with N3 §7, with the withdrawn parallel-support requirement
   named so a reader meeting it in an older copy knows it is gone.
-- **`mf` → `miniforge`** in all five places.
+- **N5 §2.1** corrected to `mf`, with a note that `miniforge` MAY exist as an
+  alias, and N5's command examples swept to match.
 - **§17–§18** requirement IDs (`N9.WI.*`, `N9.EV.*`, `N9.AT.*`, `N9.AS.*`,
   `N9.EB.*`) and seven test obligations. The tier requirements are the ones
   worth having IDs for — N9.AT.2 (no heuristic auto-escalation) and N9.AT.3
@@ -65,7 +68,7 @@ Specification change; no runtime code touched.
 
 - `markdownlint` clean on all three changed files.
 - Code blocks brace-balanced; no duplicate section numbers.
-- Verified zero remaining `mf` invocations.
+- Verified N9's `mf` invocations are intact and N5's examples now agree with them.
 - Heading levels corrected after the appended sections initially skipped h3.
 
 ## Deployment Plan
@@ -91,6 +94,7 @@ Documentation only. Merges to `main` with no runtime effect.
 - [x] Spec reviewed against current state before editing
 - [x] Duplicated contracts replaced by references (020)
 - [x] Backward-compat requirement removed — product is pre-release
+- [x] Binary name verified against `bb.edn` and CI before changing either spec
 - [x] Annex A marked informative
 - [x] No spec content extracted from implementation code (020)
 - [x] Copyright header present (810)

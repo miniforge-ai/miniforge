@@ -576,7 +576,7 @@ N5 §2.2 `fleet` namespace MUST be extended with:
 
 ```bash
 # PR monitoring
-miniforge fleet prs [flags]                  # List PR Work Items across repos
+mf fleet prs [flags]                  # List PR Work Items across repos
   --repo REPO                         # Filter by repo
   --author AUTHOR                     # Filter by author
   --readiness STATE                   # Filter by readiness state
@@ -584,13 +584,13 @@ miniforge fleet prs [flags]                  # List PR Work Items across repos
   --policy OUTCOME                    # Filter by policy outcome
   --json                              # Output as JSON
 
-miniforge fleet pr REPO#NUMBER [flags]       # Show PR Work Item detail
+mf fleet pr REPO#NUMBER [flags]       # Show PR Work Item detail
   --evidence                          # Include evidence artifact pointers
   --json                              # Output as JSON
 
 # Train management (if trains enabled)
-miniforge fleet trains [flags]               # List active trains
-miniforge fleet train TRAIN_ID [flags]       # Show train detail and membership
+mf fleet trains [flags]               # List active trains
+mf fleet train TRAIN_ID [flags]       # Show train detail and membership
 ```
 
 ### 12.2 TUI Extensions
@@ -742,7 +742,7 @@ A minimal compliant N9 implementation MUST:
 4. Evaluate at least one policy pack against external PR diffs (§8)
 5. Produce evidence artifacts per N6 (§9)
 6. Support Tier 0 and Tier 1 automation (§10)
-7. Provide CLI command `miniforge fleet prs` for listing PR Work Items (§12)
+7. Provide CLI command `mf fleet prs` for listing PR Work Items (§12)
 8. Audit-log all provider write actions (§11)
 
 A minimal compliant implementation MAY defer:
@@ -898,8 +898,10 @@ diverges from the contract above, as of 2026-08-06.
   reference table. §14 required breaking changes to "be supported in parallel
   for at least one deprecation cycle", contradicting N3 §7.4, which states that
   because the product is pre-release implementations cut over rather than
-  dual-emit — withdrawn. The MCI and CLI sections invoked a binary named `mf`,
-  which N5 §2.1 does not define; corrected to `miniforge` in all five places.
+  dual-emit — withdrawn. N5 §2.1 documented the command as `miniforge` while the shipped binary is
+  `mf` (installed to `~/.local/bin/mf` by `bb install:cli`, and invoked as `mf`
+  by CI and the release workflow). N9's use of `mf` was correct; N5 §2.1 is
+  amended here to document the real binary name.
   §17–§18 conformance requirement IDs and test obligations. Annex A records
   implementation divergence.
 

@@ -310,7 +310,8 @@ Defines:
   N3 §2.3 generalizes to six scopes; §7.2 reproduced N3 §3.16's schemas
 - **Versioning aligned with N3 §7** (§14) — the required parallel deprecation cycle is
   withdrawn; pre-release implementations cut over
-- **Binary name corrected** — `mf` appeared in five places and N5 §2.1 defines no such command
+- **Binary name reconciled** — N5 §2.1 documented `miniforge` while the shipped binary is `mf`;
+  N9 was correct and N5 is amended
 - **Conformance requirement IDs** (`N9.WI.*`, `N9.EV.*`, `N9.AT.*`, `N9.AS.*`, `N9.EB.*`)
   and test obligations (§17–§18)
 - **Annex A (informative):** implementation conformance status
@@ -595,8 +596,10 @@ Normative specs are enforced by:
 - **0.16.0-draft** (2026-08-06) - N9 spec-completion pass. **N9**: §7.1 restated a PR-only scope
   rule superseded by N3 §2.3's six-scope table, and §7.2 reproduced N3 §3.16's event schemas —
   both now reference N3. §14 required breaking changes to be "supported in parallel for at least
-  one deprecation cycle", contradicting N3 §7.4's pre-release cut-over stance; withdrawn. The MCI
-  and CLI sections invoked a binary named `mf` in five places, which N5 §2.1 does not define.
+  one deprecation cycle", contradicting N3 §7.4's pre-release cut-over stance; withdrawn. N5 §2.1
+  documented the command as `miniforge` while the shipped binary is `mf` (`bb install:cli` →
+  `~/.local/bin/mf`, and CI invokes it by that name); N9 was correct and N5 §2.1 is amended, with
+  its own examples swept to match.
   Conformance requirement IDs and test obligations (§17–§18). Annex A records that none of N9's
   six event types is emitted, so the `:pr/id` scope has no producer.
   Per-spec bumps: N9 0.2→0.3
