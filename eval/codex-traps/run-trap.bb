@@ -102,9 +102,12 @@
     (println "        " (pr-str (:anomaly/data refusal)))))
 
 (defn ^{:stratum 0} ancestor
-  "The `n`th parent directory of `path`, canonicalized."
+  "The `n`th parent directory of `path`, canonicalized, or the
+   filesystem root when `path` is shallower than that. Total, so a
+   harness copied somewhere unexpected refuses rather than crashing."
   [path n]
-  (str (nth (iterate fs/parent (fs/canonicalize path)) n)))
+  (->> (iterate fs/parent (fs/canonicalize path))
+       (take-while some?) (take (inc n)) last str))
 
 (defn ^{:stratum 0} list-dirs
   [d]
@@ -138,12 +141,9 @@
   "Layout `bb bench:provision` creates: this script sits at
    `<root>/repo/eval/codex-traps/run-trap.bb`, beside `<root>/origin.git`."
   [script-file]
-  (let [eval-dir (ancestor script-file 1)
-        root (ancestor script-file 4)]
-    {:eval-dir eval-dir
-     :repo (ancestor script-file 3)
-     :root root
-     :mirror (str (fs/path root mirror-dir-name))
+  (let [eval-dir (ancestor script-file 1)]
+    {:repo (ancestor script-file 3)
+     :mirror (str (fs/path (ancestor script-file 4) mirror-dir-name))
      :detector (str (fs/path eval-dir "detect.bb"))
      :specs (str (fs/path eval-dir "specs"))
      :runs (str (fs/path eval-dir "runs.edn"))}))
