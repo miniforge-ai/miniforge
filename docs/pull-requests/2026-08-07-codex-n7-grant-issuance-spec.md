@@ -31,6 +31,8 @@ repeat completed work or produce oversized, poorly layered changes.
   policy, scope, lifetime, ceiling, and delegation decisions.
 - Replaced the combined merge/deploy contract with one component-scoped spec
   per effect path.
+- Added a prerequisite transaction-fencing contract after adversarial review
+  showed that max-count alone cannot prevent replay or concurrent double commit.
 - Required shared policy/fixture constructors, public boundary validation,
   small named functions, namespace decomposition, and three-layer stratified
   design in the implementation contracts.

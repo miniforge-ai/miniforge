@@ -35,7 +35,7 @@
  :spec/acceptance-criteria
  ["A merge without an active :effect/merge grant fires no gh merge command"
   "A mismatched or expired merge grant fires no gh merge command"
-  "A valid merge records grant and DecisionEnvelope identifiers before gh invocation"
+  "A valid merge records effect, grant, and DecisionEnvelope identifiers before gh invocation"
   "Enabling auto-merge leaves the effect in :committing until reconciliation"
   "The merged event is published only after reconcile! observes a GitHub merge"
   "The published merge SHA equals GitHub's reconciled mergeCommit"
@@ -49,6 +49,7 @@
   :theme :ariadne-grants
   :rationale "Merge remains an ambient-authority escape hatch until the delivered transaction requires its grant."
   :blocks []
-  :blocked-by ["ariadne-grant-issuance.spec.edn"]}
+  :blocked-by ["ariadne-grant-issuance.spec.edn"
+               "ariadne-effect-transaction-fencing.spec.edn"]}
 
  :spec/workflow-type :canonical-sdlc}

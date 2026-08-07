@@ -38,7 +38,7 @@
   "check-resource-count is evaluated before the real apply"
   "check-gke-node-limit is evaluated before the real apply"
   "The durable deploy proposal contains the provider dry-run diff"
-  "A valid deploy records grant and DecisionEnvelope identifiers before mutation"
+  "A valid deploy records effect, grant, and DecisionEnvelope identifiers before mutation"
   ":evidence/rollback-info remains in context after a failed apply"
   "Reconciliation records the provider-observed deployment outcome"
   "poly check reports 0 errors and 0 warnings"
@@ -50,6 +50,7 @@
   :theme :ariadne-grants
   :rationale "Deployment remains an ambient-authority escape hatch until mutation is proposed, granted, committed, and reconciled."
   :blocks []
-  :blocked-by ["ariadne-grant-issuance.spec.edn"]}
+  :blocked-by ["ariadne-grant-issuance.spec.edn"
+               "ariadne-effect-transaction-fencing.spec.edn"]}
 
  :spec/workflow-type :canonical-sdlc}

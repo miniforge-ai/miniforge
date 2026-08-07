@@ -5,26 +5,33 @@
 {:spec/title "Issue narrow runtime-owned grants for irreversible effects"
 
  :spec/description
- "Build the production issuance path that turns an approved effect proposal
-  into a short-lived ExecutionGrant. The deterministic runtime mints the grant
-  after the proposal identifies the exact target and before the effect is
-  committed. Workflow-start issuance is rejected because it creates a broad,
-  long-lived authority object; phase-entry issuance is rejected because the
-  exact effect target may not yet be known.
+ "Build the production issuance path that turns a runtime-approved canonical
+  effect request into a short-lived ExecutionGrant. The basis is the active
+  workflow-run identity plus an effect-specific preflight result: merge
+  readiness for a PR, or deployment policy checks and provider dry-run for a
+  deploy. The workflow runtime is the principal; agents may propose inputs but
+  cannot mint or alter authority. Issuance occurs after the runtime preallocates
+  the effect transaction ID and knows the exact target, but before the durable
+  proposal and grant-aware decision are recorded.
+
+  Workflow-start issuance is rejected because it creates a broad, long-lived
+  authority object; phase-entry issuance is rejected because the exact effect
+  target and preflight result may not yet be known.
 
   Issuance uses one explicit policy catalog keyed by effect class. Merge grants
   last 15 minutes and deploy grants last 30 minutes because deployment includes
-  provider dry-run and rollback preparation. Both carry
-  :constraint/max-count 1 and :grant/delegable? false. These are effect-policy
-  decisions, not role defaults; absent constraint axes remain explicitly
-  unbounded.
+  provider dry-run and rollback preparation. Both bind one preallocated effect
+  transaction, carry :constraint/max-count 1, and set :grant/delegable? false.
+  These are effect-policy decisions, not role defaults; absent constraint axes
+  remain explicitly unbounded.
 
-  Merge scope binds the workflow run, repository, and PR number. Deploy scope
-  binds the workflow run, kustomize directory, Kubernetes context, namespace,
-  and deployment name. A nil Kubernetes context is an explicit binding to the
-  configured default context, not a wildcard. The issuer refuses incomplete
-  scope rather than broadening it. It checks the revocation-for-cause
-  eligibility predicate before calling execution-grant/issue.
+  Merge scope binds the effect transaction, workflow run, repository, and PR
+  number. Deploy scope binds the effect transaction, workflow run, kustomize
+  directory, Kubernetes context, namespace, and deployment name. A nil
+  Kubernetes context is an explicit binding to the configured default context,
+  not a wildcard. The issuer refuses incomplete scope rather than broadening
+  it. It checks the revocation-for-cause eligibility predicate before calling
+  execution-grant/issue.
 
   No inner agent receives a delegated merge or deploy grant in this slice.
   Agents propose work but never invoke these irreversible effects; the runtime
@@ -37,9 +44,11 @@
 
  :spec/constraints
  ["Only deterministic runtime code may call the production issuer"
+  "Issuance requires an effect-specific allow-class preflight result"
+  "The grant principal is the workflow-run runtime identity"
   "The issuer must know the complete effect scope before minting a grant"
-  "Merge policy is a 15-minute non-delegable one-use grant"
-  "Deploy policy is a 30-minute non-delegable one-use grant"
+  "Merge policy is a 15-minute non-delegable one-transaction grant"
+  "Deploy policy is a 30-minute non-delegable one-transaction grant"
   "Ceilings come from one effect-policy catalog, never an implicit role default"
   "Eligibility is checked before execution-grant/issue"
   "Callers cannot supply expiry, ceilings, or delegation state"
@@ -48,9 +57,10 @@
   "Stratified design permits at most three layers per implementation namespace"]
 
  :spec/acceptance-criteria
- ["A production runtime path calls execution-grant/issue"
-  "A merge grant binds workflow run, repository, and PR number"
-  "A deploy grant binds workflow run, kustomize directory, Kubernetes context, namespace, and deployment name"
+ ["The production issuer calls execution-grant/issue"
+  "Issuance refuses an absent or deny-class preflight result"
+  "A merge grant binds effect transaction, workflow run, repository, and PR number"
+  "A deploy grant binds effect transaction, workflow run, kustomize directory, Kubernetes context, namespace, and deployment name"
   "Issuance refuses a request missing any required scope binding"
   "Merge grants expire 15 minutes after issuance"
   "Deploy grants expire 30 minutes after issuance"
