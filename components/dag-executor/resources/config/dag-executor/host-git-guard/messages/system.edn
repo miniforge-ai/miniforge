@@ -1,15 +1,16 @@
 {:dag-executor.host-git-guard/system
  {;; snapshot — `git config --get-regexp` could not be read
   :snapshot/remote-urls-failed
-  "Could not read remote URLs from the host checkout"
+  "Could not read redirect config from the host checkout"
 
   ;; snapshot — `git for-each-ref refs/remotes/` could not be read
   :snapshot/remote-refs-failed
   "Could not read remote-tracking refs from the host checkout"
 
-  ;; drift — a remote URL differs between the before and after snapshots
+  ;; drift — a remote URL or insteadOf rewrite differs between the before
+  ;; and after snapshots
   :drift/remote-url-changed
-  "A task run changed the host checkout's remote URL"
+  "A task run changed where the host checkout pushes and fetches"
 
   ;; drift — a remote-tracking ref moved to a commit that is not a
   ;; descendant of where it started; reported as context, never on its own
@@ -26,4 +27,4 @@
 
   ;; guarded executor — the post-release check found drift
   :guard/host-drifted-during-run
-  "A task run mutated the host checkout's git state"}}
+  "A task run changed where the host checkout pushes and fetches"}}

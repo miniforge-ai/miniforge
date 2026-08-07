@@ -57,22 +57,22 @@
 ;------------------------------------------------------------------------------ Layer 1
 
 ;; Pure-comparison tests
-(deftest ^{:stratum 1} changed-remote-urls-reports-every-kind-of-edit-test
-  (testing "given identical url maps → nothing changed"
-    (is (= [] (sut/changed-remote-urls {"remote.origin.url" host-origin-url}
+(deftest ^{:stratum 1} changed-redirect-config-reports-every-kind-of-edit-test
+  (testing "given identical config → nothing changed"
+    (is (= [] (sut/changed-redirect-config {"remote.origin.url" host-origin-url}
                                        {"remote.origin.url" host-origin-url}))))
   (testing "given a redirected url → the key with both values"
     (is (= [{:config-key "remote.origin.url"
              :before     host-origin-url
              :after      redirected-origin-url}]
-           (sut/changed-remote-urls {"remote.origin.url" host-origin-url}
+           (sut/changed-redirect-config {"remote.origin.url" host-origin-url}
                                     {"remote.origin.url" redirected-origin-url}))))
   (testing "given a remote added mid-run → reported, with no before value"
     (is (= [{:config-key "remote.mirror.url" :before nil :after redirected-origin-url}]
-           (sut/changed-remote-urls {} {"remote.mirror.url" redirected-origin-url}))))
+           (sut/changed-redirect-config {} {"remote.mirror.url" redirected-origin-url}))))
   (testing "given a remote removed mid-run → reported, with no after value"
     (is (= [{:config-key "remote.origin.url" :before host-origin-url :after nil}]
-           (sut/changed-remote-urls {"remote.origin.url" host-origin-url} {})))))
+           (sut/changed-redirect-config {"remote.origin.url" host-origin-url} {})))))
 
 (deftest ^{:stratum 1} moved-remote-refs-ignores-refs-only-one-side-has-test
   (testing "given a ref at a new sha → reported with both shas"
@@ -84,12 +84,12 @@
     (is (= [] (sut/moved-remote-refs {} {tracked-ref "aaa"})))))
 
 ;; Real-git integration
-(deftest ^{:stratum 1} snapshot-captures-remote-urls-and-tracking-refs-test
+(deftest ^{:stratum 1} snapshot-captures-redirect-config-and-tracking-refs-test
   (testing "given a checkout with an origin → both halves of the snapshot are populated"
     (let [host (fixtures/init-host-repo! (fixtures/temp-dir!))]
       (try
         (let [snap (snapshot! host)]
-          (is (= host-origin-url (get-in snap [:remote-urls "remote.origin.url"])))
+          (is (= host-origin-url (get-in snap [:redirects "remote.origin.url"])))
           (is (= (fixtures/sha-at host "HEAD~1") (get-in snap [:remote-refs tracked-ref]))))
         (finally (fixtures/delete-tree! host))))))
 
@@ -104,13 +104,13 @@
               _      (fixtures/git! linked "remote" "set-url" "origin" redirected-origin-url)
               after  (snapshot! host)
               report (sut/drift before after)]
-          (is (= redirected-origin-url (get-in after [:remote-urls "remote.origin.url"]))
+          (is (= redirected-origin-url (get-in after [:redirects "remote.origin.url"]))
               "the leak is real: set-url inside the worktree rewrote the host")
           (is (false? (:clean? report)))
           (is (= [{:config-key "remote.origin.url"
                    :before     host-origin-url
                    :after      redirected-origin-url}]
-                 (:remote-url-drift report))))
+                 (:redirect-drift report))))
         (finally
           (fixtures/git! host "worktree" "remove" "--force" linked)
           (fixtures/delete-tree! parent)
@@ -157,7 +157,7 @@
               rewind  (first (:ref-rewinds report))]
           (is (true? (:clean? report))
               "a rewind alone does not condemn: an upstream force-push produces one")
-          (is (= [] (:remote-url-drift report)))
+          (is (= [] (:redirect-drift report)))
           (is (= tracked-ref (:ref rewind)))
           (is (= rewound (:after rewind)))
           (is (false? (:fast-forward? rewind))))
@@ -172,3 +172,24 @@
               report (sut/drift before (snapshot! host))]
           (is (true? (:clean? report))))
         (finally (fixtures/delete-tree! host))))))
+
+(deftest ^{:stratum 1} an-insteadof-rewrite-added-mid-run-is-drift-test
+  (testing "given url.<base>.insteadOf set inside a task worktree → drift, though no remote.* key moved"
+    (let [host   (fixtures/init-host-repo! (fixtures/temp-dir!))
+          parent (fixtures/temp-dir!)
+          linked (str (File. parent "task-worktree"))]
+      (try
+        (fixtures/git! host "worktree" "add" "--quiet" "--detach" linked)
+        (let [before (snapshot! host)
+              _      (fixtures/git! linked "config"
+                                    "url.https://example.invalid/redirect/.insteadOf"
+                                    "https://example.invalid/")
+              report (sut/drift before (snapshot! host))]
+          (is (false? (:clean? report))
+              "insteadOf rewrites every URL git resolves; it redirects the host without touching remote.*")
+          (is (= ["url.https://example.invalid/redirect/.insteadof"]
+                 (mapv :config-key (:redirect-drift report)))))
+        (finally
+          (fixtures/git! host "worktree" "remove" "--force" linked)
+          (fixtures/delete-tree! parent)
+          (fixtures/delete-tree! host))))))
