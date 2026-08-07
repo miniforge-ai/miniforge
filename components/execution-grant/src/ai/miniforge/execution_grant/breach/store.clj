@@ -96,12 +96,15 @@
 
 (defn- ^{:stratum 1} breach-files
   [^File dir]
-  (cond
-    (not (.exists dir)) []
-    (not (.isDirectory dir)) (read-failure dir nil)
-    :else (if-let [files (.listFiles dir)]
-            (filterv breach-file? files)
-            (read-failure dir nil))))
+  (try
+    (cond
+      (not (.exists dir)) []
+      (not (.isDirectory dir)) (read-failure dir nil)
+      :else (if-let [files (.listFiles dir)]
+              (filterv breach-file? files)
+              (read-failure dir nil)))
+    (catch Exception ex
+      (read-failure dir ex))))
 
 (defn- ^{:stratum 1} read-record
   [^File file]
