@@ -22,6 +22,20 @@
   "Attempting to merge PR"
   :controller/merged
   "PR merged successfully"
+  :merge/repository-unavailable
+  "Could not identify the pull request repository"
+  :merge/authority-unavailable
+  "Could not establish merge authority"
+  :merge/authority-denied
+  "Merge authority was denied"
+  :merge/proposal-failed
+  "Could not record the governed merge proposal"
+  :merge/commit-refused
+  "Merge authority changed before commit"
+  :merge/command-failed
+  "Merge command failed"
+  :merge/not-ready
+  "PR is not ready to merge"
   :controller/lifecycle-starting
   "Starting PR lifecycle"
   :controller/pr-creation-failed

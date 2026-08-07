@@ -1,5 +1,15 @@
 {:pr-lifecycle/system
  {;; WorklistEntry schema validation failure (operator tooling, not user UI)
+  :merge/success
+  "PR merged successfully"
+  :merge/auto-merge-pending
+  "Auto-merge enabled; merge not yet observed"
+  :merge/rebasing
+  "PR is stale, attempting rebase"
+  :merge/attempting
+  "Attempting PR merge"
+
+  ;; WorklistEntry schema validation failure (operator tooling, not user UI)
   :worklist/validation-failed
   "WorklistEntry schema validation failed"
 

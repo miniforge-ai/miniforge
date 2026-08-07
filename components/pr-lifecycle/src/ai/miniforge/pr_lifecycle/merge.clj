@@ -26,6 +26,7 @@
    [ai.miniforge.pr-lifecycle.github :as github]
    [ai.miniforge.pr-lifecycle.merge-orchestration :as orchestration]
    [ai.miniforge.pr-lifecycle.merge-readiness :as readiness]
+   [ai.miniforge.pr-lifecycle.messages :as messages]
    [ai.miniforge.response.interface :as response]
    [babashka.process :as process]
    [cheshire.core :as json]
@@ -97,6 +98,11 @@
   [worktree-path pr-number]
   (github/unresolved-review-threads worktree-path pr-number))
 
+(defn- ^{:stratum 0} repository-name?
+  [value]
+  (and (string? value)
+       (re-matches #"[^/\s]+/[^/\s]+" value)))
+
 ;; Conflict-resolution dispatch (Stage 3d, spec §6.4)
 (defn- ^{:stratum 0} parse-gh-json
   "Parse `gh --json` output as JSON via Cheshire. Returns the parsed
@@ -159,6 +165,20 @@
         (dag/ok {:up-to-date? clean?
                  :raw output}))
       result)))
+
+(defn ^{:stratum 1} read-repository
+  "Read the exact GitHub owner/repository bound to the worktree."
+  [worktree-path]
+  (dag/when-let-ok
+   [result (run-gh-command
+            ["gh" "repo" "view" "--json" "nameWithOwner"
+             "--jq" ".nameWithOwner"]
+            worktree-path)]
+    (let [repo (:output (:data result))]
+      (if (repository-name? repo)
+        (dag/ok {:pr/repo repo})
+        (dag/err :repository-unavailable
+                 (messages/t :merge/repository-unavailable))))))
 
 ;; Merge execution
 (defn ^{:stratum 1} merge-pr!
@@ -371,7 +391,7 @@
              {:check-ci check-ci-status :check-review check-review-status
               :check-branch check-branch-status
               :check-threads check-unresolved-threads})
-    :run-gh run-gh-command :merge-pr merge-pr!
+    :run-gh run-gh-command :merge-pr merge-pr! :read-repository read-repository
     :fetch-labels fetch-pr-labels! :fetch-branch fetch-pr-branch
     :rebase-pr rebase-pr! :pr-info pr-info-from-gh :normalize-resolution normalize-resolution-outcome}
    worktree-path pr-number policy context))
