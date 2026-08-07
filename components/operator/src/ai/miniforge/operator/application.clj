@@ -68,6 +68,7 @@
    re-evaluation by finding a PolicyEvaluation in the materialized
    entity table that was not there before the publish."
   (:require
+   [ai.miniforge.anomaly.interface :as anomaly]
    [ai.miniforge.operator.application.core :as core]
    [ai.miniforge.operator.application.verbs :as verbs]
    [ai.miniforge.operator.intervention :as intervention]
@@ -124,13 +125,16 @@
    process consumer to publish lifecycle events through this workflow's
    sequence counter."
   [workflow-id handles]
-  (when-not (and (map? handles)
-                 (instance? clojure.lang.Atom (:control-state handles)))
-    (throw (ex-info (messages/t :application/invalid-control-state)
-                    {:workflow-id workflow-id
-                     :control-state (:control-state handles)})))
-  (swap! live-runners assoc (str workflow-id) handles)
-  nil)
+  (if-not (and (map? handles)
+               (instance? clojure.lang.Atom (:control-state handles)))
+    (anomaly/anomaly
+     :invalid-input
+     (messages/t :application/invalid-control-state)
+     {:workflow-id workflow-id
+      :control-state (:control-state handles)})
+    (do
+      (swap! live-runners assoc (str workflow-id) handles)
+      nil)))
 
 (defn ^{:stratum 1} register-degradation-manager!
   "Register the process-scoped degradation manager used by safe-mode
@@ -157,12 +161,15 @@
   ;; also admits keywords / maps / sets, which would register silently
   ;; and only surface later as `:resume-not-dispatched` — reject the
   ;; misconfiguration here, where the message names it.
-  (when-not (or (nil? handles)
-                (and (map? handles) (fn? (:launch! handles))))
-    (throw (ex-info (messages/t :application/invalid-resume-launcher)
-                    {:launch! (:launch! handles)})))
-  (reset! process-resume-launcher handles)
-  nil)
+  (if-not (or (nil? handles)
+              (and (map? handles) (fn? (:launch! handles))))
+    (anomaly/anomaly
+     :invalid-input
+     (messages/t :application/invalid-resume-launcher)
+     {:launch! (:launch! handles)})
+    (do
+      (reset! process-resume-launcher handles)
+      nil)))
 
 (defn ^{:stratum 1} register-policy-evaluator!
   "Register the process-scoped PR policy evaluator used by
@@ -181,11 +188,14 @@
   ;; `fn?`, not `ifn?` — see register-resume-launcher!. A keyword or map
   ;; is not an evaluator; reject it at registration, not as a confusing
   ;; `:invalid-policy-evaluation` on the first re-evaluate.
-  (when-not (or (nil? evaluate) (fn? evaluate))
-    (throw (ex-info (messages/t :application/invalid-policy-evaluator)
-                    {:evaluator evaluate})))
-  (reset! process-policy-evaluator evaluate)
-  nil)
+  (if-not (or (nil? evaluate) (fn? evaluate))
+    (anomaly/anomaly
+     :invalid-input
+     (messages/t :application/invalid-policy-evaluator)
+     {:evaluator evaluate})
+    (do
+      (reset! process-policy-evaluator evaluate)
+      nil)))
 
 (defn ^{:stratum 1} deregister-runner!
   "Remove `workflow-id` from the live-runner registry. Idempotent."
