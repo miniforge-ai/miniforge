@@ -20,8 +20,15 @@
    files count toward the commit-size budget and which are treated
    as bulk data. The gate runs on every commit; a silent widening
    (real code stops counting) or narrowing (fixture data starts
-   blocking commits) of the exclusion set should fail here first."
-  (:require [clojure.test :refer [deftest is testing]]))
+   blocking commits) of the exclusion set should fail here first.
+
+   Also pins the merge-commit skip: mid-merge the staged diff carries
+   the merged-in branch's lines, which are not the merging author's
+   change and were budgeted on their own PRs."
+  (:require [babashka.process :as p]
+            [clojure.java.io :as io]
+            [clojure.string :as str]
+            [clojure.test :refer [deftest is testing]]))
 
 (load-file "tasks/commit_budget.clj")
 
@@ -31,7 +38,123 @@
 
 (def ^{:stratum 0} file-reportable-count (resolve 'commit-budget/file-reportable-count))
 
+(def ^{:stratum 0} merge-in-progress? (resolve 'commit-budget/merge-in-progress?))
+
+(def ^{:stratum 0} staged-diff (resolve 'commit-budget/staged-diff))
+
+(def ^{:stratum 0} check-commit-budget! (resolve 'commit-budget/check-commit-budget!))
+
+(def ^{:stratum 0} default-budget @(resolve 'commit-budget/default-budget))
+
+(def ^{:stratum 0} ^:private merged-in-entry
+  "A staged file the size of a branch merged in from main — the shape
+   that made a routine `git merge github/main` reach for
+   MINIFORGE_COMMIT_BUDGET_OVERRIDE (491 reportable lines, all from
+   `components/execution-grant/**`, on 2026-08-07)."
+  {:path    "components/execution-grant/src/grant.clj"
+   :added   (repeat 500 "(def incoming 1)")
+   :deleted []})
+
+(def ^{:stratum 0} ^:private headroom-budget
+  "A budget `merged-in-entry` cannot exceed. Passed instead of
+   `default-budget` so that losing the merge skip surfaces as a failed
+   assertion rather than as the gate's own `System/exit 1`, which would
+   end the smoke run mid-suite and take every later namespace's result
+   with it."
+  10000)
+
+(def ^{:stratum 0} ^:private in-budget-entry
+  "One small staged file — the ordinary, non-merge commit."
+  {:path    "components/codex/src/core.clj"
+   :added   ["(def a 1)" "(def b 2)"]
+   :deleted []})
+
+(defn ^{:stratum 0} ^:private delete-tree!
+  "Recursively delete `f`. Depth-first via `file-seq` reversed, so
+   children go before their parents."
+  [f]
+  (doseq [child (reverse (file-seq (io/file f)))]
+    (.delete child)))
+
+(defn ^{:stratum 0} ^:private hermetic-git-env
+  "The process environment with every `GIT_*` variable dropped, then the
+   scratch repo's own config scopes and commit identity put back.
+
+   Dropping them is what makes the scratch repo actually separate. This
+   test runs inside the pre-commit hook, and git exports `GIT_DIR` and
+   `GIT_INDEX_FILE` to its hooks — inherited, those aim the fixture's
+   commands at the real repository no matter what `:dir` says (`git
+   add` fails with \"this operation must be run in a work tree\"; a
+   command that didn't fail would be operating on the live checkout).
+   Clearing the whole prefix also takes the developer's
+   `GIT_CONFIG_*`, and pointing both config scopes at an empty file
+   keeps their `core.hooksPath`, `commit.gpgsign` and `user.*` out. It
+   is a real empty file rather than /dev/null so this holds on Windows
+   too."
+  [empty-config]
+  (let [cfg (str empty-config)]
+    (->> (System/getenv)
+         (remove (fn [[k _]] (str/starts-with? k "GIT_")))
+         (into {})
+         (merge {"GIT_CONFIG_GLOBAL"   cfg
+                 "GIT_CONFIG_SYSTEM"   cfg
+                 "GIT_AUTHOR_NAME"     "budget-test"
+                 "GIT_AUTHOR_EMAIL"    "budget-test@example.invalid"
+                 "GIT_COMMITTER_NAME"  "budget-test"
+                 "GIT_COMMITTER_EMAIL" "budget-test@example.invalid"}))))
+
+(def ^{:stratum 0} ^:private merge-probe
+  "A bb program that prints `merge-in-progress?` for its own working
+   directory. `pr-str` on the path so a Windows path's backslashes
+   survive as a Clojure string literal."
+  (format "(load-file %s) (print (commit-budget/merge-in-progress?))"
+          (pr-str (.getAbsolutePath (io/file "tasks/commit_budget.clj")))))
+
 ;------------------------------------------------------------------------------ Layer 1
+
+(defn ^{:stratum 1} ^:private git!
+  "Run git in `dir` under `hermetic-git-env` and return the result.
+   Throws on a non-zero exit — a fixture that has quietly stopped
+   building what the test claims should say so, not leave the
+   assertions running against nothing."
+  [dir empty-config & args]
+  (let [{:keys [exit err] :as res}
+        (apply p/sh {:dir dir :out :string :err :string
+                     :env (hermetic-git-env empty-config)}
+               "git" args)]
+    (when-not (zero? exit)
+      (throw (ex-info "git fixture command failed"
+                      {:args args :dir (str dir) :exit exit :err err})))
+    res))
+
+(defn ^{:stratum 1} ^:private merge-in-progress-at?
+  "Run the production `merge-in-progress?` with `dir` as its working
+   directory, in its own process under `hermetic-git-env`.
+
+   A subprocess rather than a direct call because the function answers
+   for the git context of the process it runs in — which is the point,
+   and which in-process would be this test runner's, i.e. the real
+   repository under the pre-commit hook. Going out to a process is also
+   the only way to exercise the zero-arity form the hook actually
+   calls, instead of a dir-taking variant that would exist only here."
+  [dir empty-config]
+  (let [{:keys [out err exit]}
+        (p/sh {:dir dir :out :string :err :string
+               :env (hermetic-git-env empty-config)}
+              "bb" "-e" merge-probe)]
+    (when-not (zero? exit)
+      (throw (ex-info "merge probe failed"
+                      {:dir (str dir) :exit exit :err err})))
+    (= "true" (str/trim out))))
+
+(defn ^{:stratum 1} ^:private gate-output
+  "Stdout from one `check-commit-budget!` run over a stubbed merge state
+   and staged diff, so the gate's decision can be read without a real
+   repo or index."
+  [merging? entries budget]
+  (with-redefs-fn {merge-in-progress? (constantly merging?)
+                   staged-diff        (constantly entries)}
+    #(with-out-str (check-commit-budget! budget))))
 
 (deftest ^{:stratum 1} resource-data-files-excluded-test
   (testing "data extensions under resources/ and messages/, nested or top-level"
@@ -93,3 +216,61 @@
                {:path    "components/codex/src/note.md"
                 :added   ["# Note 001" "generated body line"]
                 :deleted []})))))
+
+;------------------------------------------------------------------------------ Layer 2
+
+;; Integration scenario — the one test here that touches the filesystem
+;; and spawns git, because MERGE_HEAD detection only reproduces against
+;; real merge state. Confined to its own scratch repo under
+;; java.io.tmpdir and deleted afterwards; it never reads or writes the
+;; checkout it runs from.
+(deftest ^{:stratum 2} merge-detected-in-linked-worktree-test
+  (testing "a merge left in progress is detected, and only in the worktree doing it"
+    (let [tmp  (.toFile (java.nio.file.Files/createTempDirectory
+                         "commit-budget-merge"
+                         (into-array java.nio.file.attribute.FileAttribute [])))
+          cfg  (io/file tmp "gitconfig")
+          repo (io/file tmp "repo")
+          ;; The merge happens in a LINKED worktree, where `.git` is a
+          ;; file and MERGE_HEAD lives under `.git/worktrees/<name>/`.
+          ;; A detector that stats `.git/MERGE_HEAD` passes in the main
+          ;; checkout and fails here — and here is where this repo works.
+          wt   (io/file tmp "wt")]
+      (try
+        (spit cfg "")
+        (.mkdirs repo)
+        (git! repo cfg "init" "-q" "-b" "main" ".")
+        (spit (io/file repo "base.txt") "base\n")
+        (git! repo cfg "add" "-A")
+        (git! repo cfg "commit" "-qm" "base")
+        (git! repo cfg "branch" "feature")
+        (spit (io/file repo "from-main.txt") "main\n")
+        (git! repo cfg "add" "-A")
+        (git! repo cfg "commit" "-qm" "main work")
+        (git! repo cfg "worktree" "add" "-q" (str wt) "feature")
+        (spit (io/file wt "from-feature.txt") "feature\n")
+        (git! wt cfg "add" "-A")
+        (git! wt cfg "commit" "-qm" "feature work")
+        ;; --no-commit is the non-conflicting way to leave MERGE_HEAD
+        ;; set; a conflicted merge reaches the same state by a noisier
+        ;; route. Both are how `git commit` — and so this gate — ends up
+        ;; running mid-merge at all: a clean auto-committed merge fires
+        ;; `pre-merge-commit`, not `pre-commit`.
+        (git! wt cfg "merge" "--no-commit" "--no-ff" "main")
+        (is (true? (merge-in-progress-at? wt cfg)))
+        (is (false? (merge-in-progress-at? repo cfg)))
+        (finally (delete-tree! tmp))))))
+
+(deftest ^{:stratum 2} merge-skips-the-budget-test
+  (testing "mid-merge the gate skips without weighing the staged diff at all"
+    (let [out (gate-output true [merged-in-entry] headroom-budget)]
+      (is (str/includes? out "skipped (merge in progress)"))
+      (is (not (str/includes? out "lines OK"))))))
+
+(deftest ^{:stratum 2} non-merge-commit-still-budgeted-test
+  (testing "outside a merge the gate still reports against the budget"
+    (let [out (gate-output false [in-budget-entry] default-budget)]
+      (is (str/includes? out (format "%d / %d lines OK"
+                                     (count (:added in-budget-entry))
+                                     default-budget)))
+      (is (not (str/includes? out "skipped"))))))
