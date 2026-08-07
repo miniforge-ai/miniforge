@@ -103,7 +103,8 @@ contracts that make autonomous workflows credible to platform and security teams
 
  ;; Seal (§2.14)
  :evidence/event-links [...]        ; REQUIRED: one per scope, see §2.12
- :evidence/content-hash string      ; REQUIRED: SHA-256 over the sealed bundle
+ :evidence/content-hash string      ; REQUIRED: SHA-256 over the canonical form,
+                                   ;   excluding this key and :evidence/signature (§2.14)
  :evidence/sealed-at inst           ; REQUIRED
  :evidence/signature string}        ; OPTIONAL
 ```
