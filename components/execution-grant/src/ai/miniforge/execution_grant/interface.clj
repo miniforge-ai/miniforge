@@ -29,6 +29,7 @@
    [ai.miniforge.execution-grant.attenuation :as attenuation]
    [ai.miniforge.execution-grant.breach :as breach]
    [ai.miniforge.execution-grant.eligibility :as eligibility]
+   [ai.miniforge.execution-grant.revocation :as revocation]
    [ai.miniforge.execution-grant.constraints :as constraints]
    [ai.miniforge.execution-grant.core :as core]
    [ai.miniforge.execution-grant.lineage :as lineage]
@@ -123,12 +124,13 @@
   schema/detections)
 
 (def ^{:stratum 0} record-breach!
-  "Append one breach to the history. One file per breach, never
-   rewritten — append-only by construction."
+  "Append one breach to the history, or return an anomaly. One file per
+   breach, never rewritten — append-only by construction."
   breach/record!)
 
 (def ^{:stratum 0} breach-history
-  "Every recorded breach, optionally narrowed to one principal."
+  "Every recorded breach, optionally narrowed to one principal. Returns
+   an anomaly rather than treating unreadable history as empty."
   breach/history)
 
 (def ^{:stratum 0} permitted-ceiling
@@ -141,5 +143,6 @@
   eligibility/eligible?)
 
 (def ^{:stratum 0} revoke-for-cause!
-  "Revoke a grant AND record the breach that caused it."
-  eligibility/revoke-for-cause!)
+  "Revoke a grant AND record the breach that caused it, or return the
+   persistence anomaly without revoking."
+  revocation/revoke-for-cause!)
