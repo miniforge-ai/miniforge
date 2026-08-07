@@ -21,7 +21,7 @@
    [ai.miniforge.effect-transaction.fixtures :as fixture]
    [ai.miniforge.effect-transaction.interface :as fx]
    [ai.miniforge.execution-grant.interface :as grant]
-   [clojure.test :refer [deftest is testing]]))
+   [clojure.test :refer [deftest is]]))
 
 ;------------------------------------------------------------------------------ Layer 0
 
@@ -68,37 +68,40 @@
     (is (not= :failed (:effect/state committed))
         "a throw means we do not know, not that it did not happen")
     (is (= "connection reset" (:effect/failure committed)))
-    (testing "and the unknown state is durable, so a restart can find it"
-      (is (= :unknown-outcome (:effect/state (fx/read-record dir (:effect/id t))))))))
+    (is (= :unknown-outcome
+           (:effect/state (fx/read-record dir (:effect/id t))))
+        "the unknown state is durable for a fresh reader")))
 
-(deftest ^{:stratum 1} definite-outcomes-are-recorded-as-such-test
-  (let [dir (tmp-dir)]
-    (testing "a definite success is :succeeded and carries the observation"
-      (let [{g :grant t :transaction} (merge-case! dir)
-            done (fx/commit! dir t g no-usage now
-                             (fn [] {:effect/outcome :succeeded
-                                     :effect/observed {:merge/sha "abc123"}}))]
-        (is (= :succeeded (:effect/state done)))
-        (is (= {:merge/sha "abc123"} (:effect/observed done)))))
+(deftest ^{:stratum 1} definite-success-records-observation-test
+  (let [dir (tmp-dir)
+        {g :grant t :transaction} (merge-case! dir)
+        done (fx/commit! dir t g no-usage now
+                         (fn [] {:effect/outcome :succeeded
+                                 :effect/observed {:merge/sha "abc123"}}))]
+    (is (= :succeeded (:effect/state done)))
+    (is (= {:merge/sha "abc123"} (:effect/observed done)))))
 
-    (testing "a definite failure is :failed — the effect fn knows it did not happen"
-      (let [{g :grant t :transaction} (merge-case! dir)
-            done (fx/commit! dir t g no-usage now
-                             (fn [] {:effect/outcome :failed
-                                     :effect/failure "PR already closed"}))]
-        (is (= :failed (:effect/state done)))
-        (is (= "PR already closed" (:effect/failure done)))))
+(deftest ^{:stratum 1} definite-failure-records-reason-test
+  (let [dir (tmp-dir)
+        {g :grant t :transaction} (merge-case! dir)
+        done (fx/commit! dir t g no-usage now
+                         (fn [] {:effect/outcome :failed
+                                 :effect/failure "PR already closed"}))]
+    (is (= :failed (:effect/state done)))
+    (is (= "PR already closed" (:effect/failure done)))))
 
-    (testing "an unreadable report is unknown, not success"
-      (let [{g :grant t :transaction} (merge-case! dir)
-            done (fx/commit! dir t g no-usage now (fn [] {:whatever true}))]
-        (is (= :unknown-outcome (:effect/state done))
-            "an effect fn that answered in a shape we cannot read told us nothing")))
+(deftest ^{:stratum 1} unreadable-effect-report-is-unknown-test
+  (let [dir (tmp-dir)
+        {g :grant t :transaction} (merge-case! dir)
+        done (fx/commit! dir t g no-usage now (fn [] {:whatever true}))]
+    (is (= :unknown-outcome (:effect/state done))
+        "an unreadable report supplies no outcome knowledge")))
 
-    (testing "a nil report is unknown, not success"
-      (let [{g :grant t :transaction} (merge-case! dir)
-            done (fx/commit! dir t g no-usage now (constantly nil))]
-        (is (= :unknown-outcome (:effect/state done)))))))
+(deftest ^{:stratum 1} nil-effect-report-is-unknown-test
+  (let [dir (tmp-dir)
+        {g :grant t :transaction} (merge-case! dir)
+        done (fx/commit! dir t g no-usage now (constantly nil))]
+    (is (= :unknown-outcome (:effect/state done)))))
 
 (deftest ^{:stratum 1} revoked-grant-recheck-denies-effect-test
   ;; A constraint checked only at decide time is a check against stale state.
@@ -187,34 +190,35 @@
     (is (anomaly/anomaly? duplicate))
     (is (= original (fx/read-record dir id)))))
 
-(deftest ^{:stratum 1} commit-must-use-the-grant-the-proposal-named-test
+(deftest ^{:stratum 1} substituted-broader-grant-is-refused-test
   ;; The re-check is only worth anything if it re-checks the SAME grant.
   ;; Otherwise: propose under a narrow grant, commit under a broad one,
   ;; and the durable record attests to authority that was never used.
   (let [dir (tmp-dir)
-        {recorded :grant t :transaction} (merge-case! dir)]
+        {t :transaction} (merge-case! dir)
+        other (merge-grant {:constraints {}})
+        fired (atom false)
+        result (fx/commit! dir t other no-usage now
+                           (partial record-success! fired))]
+    (is (anomaly/anomaly? result))
+    (is (= :conflict (:anomaly/type result)))
+    (is (not @fired) "substituting a broader grant must not fire the effect")))
 
-    (testing "a different grant is refused, even a valid and broader one"
-      (let [other (merge-grant {:constraints {}})
-            fired (atom false)
-            result (fx/commit! dir t other no-usage now
-                               (partial record-success! fired))]
-        (is (anomaly/anomaly? result))
-        (is (= :conflict (:anomaly/type result)))
-        (is (not @fired) "substituting a broader grant must not fire the effect")))
+(deftest ^{:stratum 1} different-effect-class-grant-is-refused-test
+  (let [dir (tmp-dir)
+        deploy-grant (merge-grant {:effect-class :effect/deploy})
+        mismatched (propose-merge! dir deploy-grant)
+        fired (atom false)
+        result (fx/commit! dir mismatched deploy-grant no-usage now
+                           (partial record-success! fired))]
+    (is (anomaly/anomaly? result))
+    (is (not @fired) "a merge proposal must not use a deploy grant")))
 
-    (testing "a grant for a different effect class is refused"
-      (let [deploy-grant (merge-grant {:effect-class :effect/deploy})
-            mismatched (propose-merge! dir deploy-grant)
-            fired (atom false)
-            result (fx/commit! dir mismatched deploy-grant no-usage now
-                               (partial record-success! fired))]
-        (is (anomaly/anomaly? result))
-        (is (not @fired) "a merge proposal must not be authorized by a deploy grant")))
-
-    (testing "the recorded grant still commits"
-      (let [done (fx/commit! dir t recorded no-usage now succeed!)]
-        (is (= :succeeded (:effect/state done)))))))
+(deftest ^{:stratum 1} proposal-recorded-grant-commits-test
+  (let [dir (tmp-dir)
+        {g :grant t :transaction} (merge-case! dir)
+        done (fx/commit! dir t g no-usage now succeed!)]
+    (is (= :succeeded (:effect/state done)))))
 
 (deftest ^{:stratum 1} concurrent-commit-invokes-the-effect-once-test
   (let [dir (tmp-dir)
@@ -244,26 +248,25 @@
     (is (= :committing
            (:effect/state (fx/read-record dir (:effect/id t)))))))
 
-(deftest ^{:stratum 1} commit-enforces-grant-scope-test
-  (testing "durable proposal scope overrides a caller-supplied scope"
-    (let [dir (tmp-dir)
-          {g :grant t :transaction}
-          (merge-case! dir {:scope (assoc fixture/merge-proposal :pr/number 43)})
-          forged (assoc t :effect/proposal (:grant/scope g))
-          fired (atom false)
-          usage {:effect/scope (:grant/scope g)}
-          result (fx/commit! dir forged g usage now
-                             (partial record-success! fired))]
-      (is (= :failed (:effect/state result)))
-      (is (re-find #"scope-mismatch" (:effect/failure result)))
-      (is (not @fired))))
+(deftest ^{:stratum 1} durable-scope-overrides-caller-context-test
+  (let [dir (tmp-dir)
+        {g :grant t :transaction}
+        (merge-case! dir {:scope (assoc fixture/merge-proposal :pr/number 43)})
+        forged (assoc t :effect/proposal (:grant/scope g))
+        fired (atom false)
+        usage {:effect/scope (:grant/scope g)}
+        result (fx/commit! dir forged g usage now
+                           (partial record-success! fired))]
+    (is (= :failed (:effect/state result)))
+    (is (re-find #"scope-mismatch" (:effect/failure result)))
+    (is (not @fired))))
 
-  (testing "a grant bound to another durable effect ID is refused"
-    (let [dir (tmp-dir)
-          {g :grant t :transaction} (merge-case! dir)
-          other-effect-grant (assoc-in g [:grant/scope :effect/id] (random-uuid))
-          fired (atom false)
-          result (fx/commit! dir t other-effect-grant no-usage now
-                             (partial record-success! fired))]
-      (is (= :failed (:effect/state result)))
-      (is (not @fired)))))
+(deftest ^{:stratum 1} grant-bound-to-another-effect-is-refused-test
+  (let [dir (tmp-dir)
+        {g :grant t :transaction} (merge-case! dir)
+        other-effect-grant (assoc-in g [:grant/scope :effect/id] (random-uuid))
+        fired (atom false)
+        result (fx/commit! dir t other-effect-grant no-usage now
+                           (partial record-success! fired))]
+    (is (= :failed (:effect/state result)))
+    (is (not @fired))))
