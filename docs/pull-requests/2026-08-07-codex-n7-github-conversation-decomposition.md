@@ -26,7 +26,7 @@ provider namespace before N7 merge enforcement adds provider readback.
 - `github.clj` drops from five strata to at most three.
 - Repeated successful reply maps use one `reply-outcome` factory.
 - Provider transport and conversation orchestration remain separate concerns.
-- PR budget: 327 / 600 reportable lines; every commit is at most 200.
+- PR budget: 340 / 600 reportable lines; every commit is at most 200.
 - Kondo, Polylith, stratum lint, and the standards baseline are clean.
 
 ## Verification

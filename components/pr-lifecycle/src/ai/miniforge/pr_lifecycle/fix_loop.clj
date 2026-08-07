@@ -230,9 +230,9 @@
             (dag/err :push-failed (:error push-result))))
         (dag/err :commit-failed (:error stage-result))))))
 
-;; Conversation resolution
+;; Conversation follow-up
 (defn ^{:stratum 0} resolve-comment-thread
-  "Resolve a conversation thread after creating a fix PR.
+  "Reply with a fix PR link and optionally resolve the conversation thread.
 
    Arguments:
    - worktree-path: Path to git worktree
@@ -241,23 +241,24 @@
    - logger: Logger instance
 
    Options:
-   - :auto-resolve - Whether to resolve conversation (default true)
+   - :auto-resolve - Whether to resolve after replying (default true)
 
-   Returns DAG result with resolution status"
+   Returns DAG result with reply and resolution status"
   [worktree-path fix-context fix-pr-number logger & {:keys [auto-resolve]
                                                       :or {auto-resolve true}}]
   (let [comment-id (:fix/comment-id fix-context)
         parent-pr-number (:fix/parent-pr-number fix-context)]
 
-    ;; Only attempt resolution if we have the necessary metadata
+    ;; Conversation follow-up requires the original comment coordinates.
     (if (and comment-id parent-pr-number)
       (do
         (when logger
           (log/info logger :pr-lifecycle :fix/resolving-conversation
-                    {:message "Resolving conversation thread"
+                    {:message "Linking fix PR to review comment"
                      :data {:parent-pr parent-pr-number
                             :comment-id comment-id
-                            :fix-pr fix-pr-number}}))
+                            :fix-pr fix-pr-number
+                            :auto-resolve auto-resolve}}))
 
         (let [result (conversation/link-fix-pr-to-comment
                       worktree-path parent-pr-number comment-id fix-pr-number logger
@@ -270,11 +271,11 @@
                                 :reply-url (:reply-url (:data result))}})))
           result))
 
-      ;; No comment metadata - skip resolution
+      ;; No comment metadata - skip the entire conversation follow-up.
       (do
         (when (and logger (or comment-id parent-pr-number))
           (log/debug logger :pr-lifecycle :fix/skipping-resolution
-                     {:message "Skipping conversation resolution"
+                     {:message "Skipping fix PR conversation follow-up"
                       :data {:reason (cond
                                        (not comment-id) "no comment-id"
                                        (not parent-pr-number) "no parent-pr-number")}}))
