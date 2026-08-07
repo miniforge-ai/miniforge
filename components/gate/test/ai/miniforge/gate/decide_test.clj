@@ -137,10 +137,12 @@
                                                      :constraint/observed 6}]})]
         (is (= :deny (:envelope/decision e)))))
 
-    (testing "an inactive outcome with a non-keyword revocation reason still denies"
-      (let [e (decide/decide clean pins {:grant/outcome :inactive
-                                         :grant/revocation-reason nil})]
-        (is (= :deny (:envelope/decision e)))))))
+    (testing "an inactive outcome with malformed revocation data still denies"
+      (doseq [revocation-reason [42 {:malformed true}]]
+        (let [e (decide/decide clean pins
+                               {:grant/outcome :inactive
+                                :grant/revocation-reason revocation-reason})]
+          (is (= :deny (:envelope/decision e)) (pr-str revocation-reason)))))))
 
 ;------------------------------------------------------------------------------ Layer 2
 
