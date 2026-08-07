@@ -36,6 +36,10 @@
 
 (def ^{:stratum 0} compute-digest revision/compute-digest)
 
+(def ^{:stratum 0} create-zettel lifecycle/create-zettel)
+
+(def ^{:stratum 0} update-zettel lifecycle/update-zettel)
+
 (defn ^{:stratum 0} ->iso
   "Convert an Instant or Date to its ISO-8601 wire representation."
   ^String [v]
@@ -188,14 +192,6 @@
                             :link/rationale (:rationale link)})
                          (:links frontmatter)))))))))
 
-(defn ^{:stratum 1} stamp-revision
-  "Attach the current content digest and deterministic revision id."
-  [zettel]
-  (let [digest (compute-digest zettel)]
-    (assoc zettel
-           :zettel/digest digest
-           :zettel/revision-id (revision-id-from-digest digest))))
-
 ;------------------------------------------------------------------------------ Layer 2
 
 (defn ^{:stratum 2} zettel->markdown
@@ -206,40 +202,3 @@
        "---\n\n"
        "# " (:zettel/title zettel) "\n\n"
        (:zettel/content zettel)))
-
-(defn ^{:stratum 2} create-zettel
-  "Create a zettel and stamp its initial untrusted revision."
-  [uid title content type
-   & {:keys [dewey tags links source author
-             fleet/shareable fleet/share-scope privacy/classification
-             fleet/oss-version]
-      :or {author "user"}}]
-  (let [now (Date.)
-        zettel (cond-> {:zettel/id (random-uuid) :zettel/uid uid
-                         :zettel/title title :zettel/content content
-                         :zettel/type type :zettel/created now
-                         :zettel/author author :zettel/trust-level :untrusted}
-                 dewey (assoc :zettel/dewey dewey)
-                 (seq tags) (assoc :zettel/tags (vec tags))
-                 (seq links) (assoc :zettel/links (vec links))
-                 source (assoc :zettel/source source)
-                 (some? shareable) (assoc :fleet/shareable shareable)
-                 share-scope (assoc :fleet/share-scope share-scope)
-                 classification (assoc :privacy/classification classification)
-                 oss-version (assoc :fleet/oss-version oss-version))]
-    (stamp-revision zettel)))
-
-(defn ^{:stratum 2} update-zettel
-  "Update a zettel while preserving or resetting trust by revision."
-  [zettel changes]
-  (let [old-rev (:zettel/revision-id zettel)
-        old-trust (:zettel/trust-level zettel)
-        sanitised (apply dissoc changes revision/derived-fields)
-        merged (-> zettel (merge sanitised) (assoc :zettel/modified (Date.)))
-        stamped (stamp-revision merged)
-        new-rev (:zettel/revision-id stamped)
-        next-trust (cond
-                     (and (some? old-rev) (not= old-rev new-rev)) :untrusted
-                     (some? old-trust) old-trust
-                     :else :untrusted)]
-    (assoc stamped :zettel/trust-level next-trust)))
