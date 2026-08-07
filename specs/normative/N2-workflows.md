@@ -95,7 +95,7 @@ deterministically onto the lifecycle projection above.
 
 **Terminal states** are `:completed`, `:failed`, and `:cancelled`. They MUST NOT
 transition back to an active state. Re-running work that reached a terminal
-state MUST produce a new workflow run with a new `:workflow/id` (§8.3).
+state MUST produce a new workflow run with a new `:workflow/id` (§8.1).
 
 ### 2.3 State Transition Diagram
 

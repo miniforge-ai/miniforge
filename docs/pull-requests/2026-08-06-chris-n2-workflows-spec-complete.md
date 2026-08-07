@@ -39,7 +39,8 @@ workflow definition are compatible" with no mechanism, while
 N2-delta-phase-checkpoint-and-resume §9 and N3 §3.21 define the spec-hash
 comparison and its event. §8 never said resume must preserve run identity.
 §8.3 gated resume on "Too much time has passed (state may be stale)" — a
-MUST NOT no implementation can apply consistently.
+prohibition no implementation can apply consistently, because the spec never
+said how much time is too much.
 
 **No requirement IDs**, so nothing in N2 was traceable to a test.
 
