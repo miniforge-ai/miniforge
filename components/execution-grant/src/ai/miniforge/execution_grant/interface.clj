@@ -153,11 +153,6 @@
   "May this principal be granted this effect class at these ceilings?"
   eligibility/eligible?)
 
-(def ^{:stratum 0} revoke-for-cause!
-  "Revoke a grant AND record the breach that caused it, or return the
-   recording anomaly without revoking."
-  revocation/revoke-for-cause!)
-
 ;------------------------------------------------------------------------------ Layer 1
 
 (defn ^{:stratum 1} record-breach!
@@ -167,6 +162,17 @@
   (if (valid-input? schema/Breach breach-record)
     (breach/record! dir breach-record)
     (invalid-breach breach-record)))
+
+(defn ^{:stratum 1} revoke-for-cause!
+  "Revoke a grant AND record the breach that caused it, or return an
+   input or recording anomaly without revoking."
+  [dir grant observation now]
+  (let [arguments [grant observation now]]
+    (if (valid-input? schema/RevokeForCauseArguments arguments)
+      (revocation/revoke-for-cause! dir grant observation now)
+      (invalid :breach/revocation-invalid
+               schema/RevokeForCauseArguments
+               arguments))))
 
 (defn ^{:stratum 1} issue
   "Issue a root grant; id and issued-at are runtime-owned. Invalid

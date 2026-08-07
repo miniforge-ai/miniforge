@@ -157,6 +157,15 @@
    [:delegable? {:optional true} :boolean]
    [:expires-at inst?]])
 
+(def ^{:stratum 1} BreachObservation
+  "Boundary input describing a constraint breach before the runtime
+   adds grant identity and the observation instant."
+  [:map {:closed true}
+   [:axis (into [:enum] constraint-axes)]
+   [:limit number?]
+   [:observed number?]
+   [:detection (into [:enum] detections)]])
+
 (def ^{:stratum 1} RevocationArguments
   "Revocation reason plus the runtime-owned revocation instant."
   [:tuple (into [:enum] revocation-reasons) inst?])
@@ -170,3 +179,7 @@
 (def ^{:stratum 2} DelegationArguments
   "Delegation options plus the runtime-owned issuance instant."
   [:tuple DelegationOptions inst?])
+
+(def ^{:stratum 2} RevokeForCauseArguments
+  "Grant, observation, and runtime-owned instant for for-cause revocation."
+  [:tuple ExecutionGrant BreachObservation inst?])

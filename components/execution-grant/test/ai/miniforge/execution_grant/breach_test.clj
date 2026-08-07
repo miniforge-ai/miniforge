@@ -89,6 +89,15 @@
 
 ;------------------------------------------------------------------------------ Layer 2
 
+(deftest ^{:stratum 2} malformed-revocation-does-not-record-test
+  (let [dir (tmp-dir)
+        malformed-observation (dissoc (breach-observation) :axis)]
+    (is (anomaly/anomaly?
+         (grant/revoke-for-cause! dir (spend-grant)
+                                  malformed-observation now)))
+    (is (empty? (grant/breach-history dir))
+        "invalid observations cannot create nil.edn evidence")))
+
 (deftest ^{:stratum 2} a-reused-breach-id-cannot-overwrite-history-test
   ;; Append-only must be enforced by the filesystem, not asserted in a
   ;; docstring. A reused id silently replacing an earlier breach is the
