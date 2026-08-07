@@ -18,10 +18,12 @@
 (ns ai.miniforge.effect-transaction.reconcile
   "Settle unknown effect outcomes by asking the external system."
   (:require
+   [ai.miniforge.anomaly.interface :as anomaly]
    [ai.miniforge.effect-transaction.call :as call]
    [ai.miniforge.effect-transaction.messages :as msg]
    [ai.miniforge.effect-transaction.record :as record]
-   [ai.miniforge.effect-transaction.schema :as schema])
+   [ai.miniforge.effect-transaction.schema :as schema]
+   [ai.miniforge.effect-transaction.store :as store])
   (:import
    [java.time Instant]))
 
@@ -51,9 +53,18 @@
 
 (defn ^{:stratum 2} reconcile!
   "Ask the world to settle a committing or unknown-outcome record."
-  [dir t probe-fn ^Instant now]
-  (if-not (contains? schema/reconcilable-states (:effect/state t))
-    (record/wrong-state (msg/t :reconcile/not-reconcilable)
-                        {:effect/id (:effect/id t)
-                         :effect/state (:effect/state t)})
-    (probe! dir t probe-fn now)))
+  [dir candidate probe-fn ^Instant now]
+  (let [id (:effect/id candidate)
+        t (store/read-record dir id)]
+    (cond
+      (anomaly/anomaly? t) t
+
+      (nil? t)
+      (store/not-found id)
+
+      (not (contains? schema/reconcilable-states (:effect/state t)))
+      (record/wrong-state (msg/t :reconcile/not-reconcilable)
+                          (record/lifecycle-position t))
+
+      :else
+      (probe! dir t probe-fn now))))

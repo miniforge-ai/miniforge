@@ -35,6 +35,12 @@
   [t]
   (m/validate schema/EffectTransaction t))
 
+(defn ^{:stratum 0} lifecycle-position
+  "Identify a transaction and its current lifecycle state."
+  [t]
+  {:effect/id (:effect/id t)
+   :effect/state (:effect/state t)})
+
 (defn- ^{:stratum 0} invalid
   [message t]
   (anomaly/sub-anomaly :invalid-input

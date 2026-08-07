@@ -68,6 +68,6 @@
   core/commit!)
 
 (def ^{:stratum 0} reconcile!
-  "Ask the external system what actually happened and record the answer,
-   mismatch included."
+  "Reload a durable unsettled record, ask the external system what happened,
+   and record the answer, mismatch included."
   core/reconcile!)
