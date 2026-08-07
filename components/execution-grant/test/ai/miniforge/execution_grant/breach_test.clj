@@ -114,10 +114,11 @@
     (is (= [now now] (mapv :breach/at (grant/breach-history dir "agent:x")))
         "a Date normalizes to the same instant on the way out"))
   (testing "an unsupported timestamp is data and never corrupts history"
-    (is (= :invalid-input
-           (:anomaly/type
-            (grant/record-breach! (tmp-dir)
-                                  (breach-record {:breach/at "nope"})))))))
+    (doseq [unsupported ["nope" (java.util.GregorianCalendar.)]]
+      (is (= :invalid-input
+             (:anomaly/type
+              (grant/record-breach! (tmp-dir)
+                                    (breach-record {:breach/at unsupported}))))))))
 
 (deftest ^{:stratum 2} storage-failures-are-returned-as-data-test
   (let [dir (tmp-dir)
