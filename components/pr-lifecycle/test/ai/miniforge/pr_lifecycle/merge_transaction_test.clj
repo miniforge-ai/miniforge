@@ -60,13 +60,6 @@
 
 ;------------------------------------------------------------------------------ Layer 1
 
-(defn ^{:stratum 1} pending-merge
-  []
-  (let [c (ctx)
-        t (mt/propose! c 42 "miniforge-ai/miniforge" now)]
-    {:context c
-     :pending (mt/commit! c t 42 now (ok-enable) (gh-returning open-json))}))
-
 (deftest ^{:stratum 1} parse-pr-view-test
   (is (= {:pr/state "MERGED" :merge/sha "squash-sha-on-base"}
          (mt/parse-pr-view merged-json)))
@@ -126,17 +119,25 @@
       (is (= (:effect/id t)
              (:effect/id (fx/read-record (:effect-store-dir c) (:effect/id t))))))))
 
+;; Strata are per-file: the imported commit boundary does not add a local layer.
+(defn- ^{:stratum 1} pending-merge!
+  []
+  (let [c (ctx)
+        t (mt/propose! c 42 "miniforge-ai/miniforge" now)]
+    {:context c
+     :pending (mt/commit! c t 42 now (ok-enable) (gh-returning open-json))}))
+
 ;------------------------------------------------------------------------------ Layer 2
 
 (deftest ^{:stratum 2} reconcile-settles-a-later-merge-test
   (testing "asking again after GitHub finishes settles it with the real SHA"
-    (let [{:keys [context pending]} (pending-merge)]
+    (let [{:keys [context pending]} (pending-merge!)]
       (is (nil? (mt/substantiated-sha pending)))
       (let [settled (mt/reconcile! context pending 42 later (gh-returning merged-json))]
         (is (= :reconciled (:effect/state settled)))
         (is (= "squash-sha-on-base" (mt/substantiated-sha settled))))))
   (testing "a PR that closed unmerged reconciles as a mismatch, not a merge"
-    (let [{:keys [context pending]} (pending-merge)
+    (let [{:keys [context pending]} (pending-merge!)
           settled (mt/reconcile! context pending 42 later
                                  (gh-returning "{\"state\":\"CLOSED\",\"mergeCommit\":null}"))]
       (is (= :reconciled (:effect/state settled)))

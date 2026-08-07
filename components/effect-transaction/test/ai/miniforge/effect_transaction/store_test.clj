@@ -147,6 +147,14 @@
                                       (assoc missing :effect/state :committing))]
         (is (= :anomalies.effect-transaction/not-found
                (:anomaly/subtype result)))))
+    (testing "the store itself refuses to write under a replacement identity"
+      (let [other-id (random-uuid)
+            result (store/transition! dir committing
+                                      (assoc committing :effect/id other-id))]
+        (is (= :anomalies.effect-transaction/wrong-state
+               (:anomaly/subtype result)))
+        (is (= committing (fx/read-record dir (:effect/id t))))
+        (is (nil? (fx/read-record dir other-id)))))
     (testing "a lifecycle change cannot replace the durable identity"
       (let [other-id (random-uuid)
             result (effect-record/advance! dir committing

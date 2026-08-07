@@ -43,6 +43,15 @@
                         :effect/expected-state (:effect/state expected)
                         :effect/current-state (:effect/state current)}))
 
+(defn ^{:stratum 0} identity-conflict
+  "Return a conflict when a transition attempts to replace record identity."
+  [expected replacement]
+  (anomaly/sub-anomaly :conflict
+                       :anomalies.effect-transaction/wrong-state
+                       (msg/t :record/id-immutable)
+                       {:effect/id (:effect/id expected)
+                        :effect/requested-id (:effect/id replacement)}))
+
 (defn ^{:stratum 0} create!
   "Publish one complete proposal without replacing an existing effect ID."
   [dir record]
@@ -74,6 +83,8 @@
 (defn ^{:stratum 2} transition!
   "Replace `expected` only when it is still the exact durable record."
   [dir expected replacement]
-  (let [id (:effect/id expected)]
-    (persistence/with-record-lock
-     dir id (partial transition-under-lock dir expected replacement))))
+  (if (not= (:effect/id expected) (:effect/id replacement))
+    (identity-conflict expected replacement)
+    (let [id (:effect/id expected)]
+      (persistence/with-record-lock
+       dir id (partial transition-under-lock dir expected replacement)))))

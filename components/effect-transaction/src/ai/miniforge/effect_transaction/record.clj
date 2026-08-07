@@ -72,9 +72,7 @@
   "Compare-and-set `changes` against the exact durable value of `t`."
   [dir t changes ^Instant now]
   (if (not= (:effect/id t) (get changes :effect/id (:effect/id t)))
-    (wrong-state (msg/t :record/id-immutable)
-                 {:effect/id (:effect/id t)
-                  :effect/requested-id (:effect/id changes)})
+    (store/identity-conflict t changes)
     (let [t' (assoc (merge t changes)
                     :effect/updated-at (normalize-instant now))]
       (if (valid? t')
