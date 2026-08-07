@@ -8,7 +8,13 @@
   :grant/recheck-failed "Grant re-check failed at commit: {outcome}"
   :record/change-invalid "EffectTransaction change failed validation"
   :record/input-invalid "EffectTransaction inputs failed validation"
+  :record/not-found "EffectTransaction does not exist in the durable store"
+  :record/transition-conflict "EffectTransaction changed before its durable transition could be claimed"
   :proposal/no-store "propose! requires :dir — refusing to write records to the process working directory"
+  :proposal/id-conflict "EffectTransaction identity is already durable and cannot be replaced"
+  :store/read-failed "EffectTransaction durable record could not be read"
+  :store/write-failed "EffectTransaction durable record could not be written"
+  :store/lock-conflict "EffectTransaction durable record is being changed by another process"
   :commit/not-proposed "Only a :proposed record may be committed"
   :reconcile/not-reconcilable "Only :committing or :unknown-outcome records are reconcilable"
   :reconcile/no-answer "Reconciliation probe did not answer; record stays unresolved"}}
