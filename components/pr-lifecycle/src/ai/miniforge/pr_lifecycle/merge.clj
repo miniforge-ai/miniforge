@@ -93,8 +93,7 @@
     (catch Exception e
       (dag/err :gh-exception (.getMessage e)))))
 
-(defn ^{:stratum 0} check-unresolved-threads
-  "Read GitHub's review-thread state for one pull request."
+(defn- ^{:stratum 0} read-unresolved-threads
   [worktree-path pr-number]
   (github/unresolved-review-threads worktree-path pr-number))
 
@@ -115,13 +114,23 @@
 (defn ^{:stratum 1} check-ci-status
   "Check if CI is green for a PR."
   [worktree-path pr-number]
-  (let [result (run-gh-command
-                ["gh" "pr" "checks" (str pr-number) "--fail-on-error"]
-                worktree-path)]
-    (if (dag/ok? result)
-      (dag/ok {:ci-green? true})
-      (dag/ok {:ci-green? false
-               :error (:error result)}))))
+  (dag/when-let-ok
+   [result (run-gh-command
+            ["gh" "pr" "checks" (str pr-number) "--json" "bucket"]
+            worktree-path)]
+    (let [checks (parse-gh-json (:output (:data result)))]
+      (if (and (sequential? checks) (every? #(string? (:bucket %)) checks))
+        (dag/ok {:ci-green? (boolean
+                             (and (seq checks)
+                                  (every? #{"pass" "skipping"}
+                                          (map :bucket checks))))})
+        (dag/err :invalid-ci-status-response
+                 "GitHub returned incomplete CI check state")))))
+
+(defn ^{:stratum 1} check-unresolved-threads
+  "Read GitHub's review-thread state for one pull request."
+  [worktree-path pr-number]
+  (read-unresolved-threads worktree-path pr-number))
 
 (defn ^{:stratum 1} check-review-status
   "Check if PR has required approvals."

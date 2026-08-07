@@ -38,10 +38,16 @@
 (defn- ^{:stratum 0} blocking-reasons
   [{:keys [ci review branch threads]}]
   (cond-> []
-    (and ci (not (:ci-green? (:data ci))))
+    (dag/err? ci)
+    (conj :ci-status-unavailable)
+
+    (and (dag/ok? ci) (not (:ci-green? (:data ci))))
     (conj :ci-not-green)
 
-    (and review (not (:approved? (:data review))))
+    (dag/err? review)
+    (conj :review-status-unavailable)
+
+    (and (dag/ok? review) (not (:approved? (:data review))))
     (conj :not-approved)
 
     (dag/err? branch)

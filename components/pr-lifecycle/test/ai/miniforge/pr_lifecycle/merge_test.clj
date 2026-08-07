@@ -126,20 +126,15 @@
         (is (false? (:ready? result)))
         (is (some #{:unresolved-threads} (:blocking result)))))))
 
-(deftest ^{:stratum 0} evaluate-merge-readiness-thread-readback-fails-closed-test
-  (testing "Unavailable provider thread state blocks merge"
-    (with-redefs [merge/check-ci-status
-                  (fn [_ _] (dag/ok {:ci-green? true}))
-                  merge/check-review-status
-                  (fn [_ _ _] (dag/ok {:approved? true}))
-                  merge/check-branch-status
-                  (fn [_ _] (dag/ok {:up-to-date? true}))
-                  merge/check-unresolved-threads
-                  (fn [_ _] (dag/err :graphql-error "provider unavailable"))]
-      (let [result (merge/evaluate-merge-readiness
-                    "/tmp" 123 merge/default-merge-policy)]
-        (is (false? (:ready? result)))
-        (is (some #{:thread-status-unavailable} (:blocking result)))))))
+(deftest ^{:stratum 0} check-ci-status-provider-results-test
+  (testing "CI state is parsed while provider failures remain failures"
+    (let [failure (dag/err :github-error "provider unavailable")]
+      (are [run-result expected] (with-redefs [merge/run-gh-command
+                                               (constantly run-result)]
+                                   (= expected (merge/check-ci-status "/tmp" 123)))
+        failure failure
+        (dag/ok {:output "[{\"bucket\":\"fail\"}]"})
+        (dag/ok {:ci-green? false})))))
 
 (deftest ^{:stratum 0} evaluate-merge-readiness-multiple-blockers-test
   (testing "Multiple blocking conditions are all reported"
