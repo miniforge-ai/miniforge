@@ -110,7 +110,7 @@ is why the bench runner falls back to the surviving task branch. So:
   already computes.
 - The adapter reads it at projection and re-verifies whatever is still
   observable. An attestation on its own is a claim; re-verification is
-  what catches drift, such as a remote repointed mid-experiment.
+  what catches drift — a remote that was repointed mid-experiment, say.
 - A missing attestation yields `kind "unknown"` and `isolated false`.
   Absence is not innocence.
 
