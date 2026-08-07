@@ -16,7 +16,7 @@
 ;; See the License for the specific language governing permissions and
 ;; limitations under the License.
 (ns ai.miniforge.pr-lifecycle.merge-readiness
-  "Pure composition of provider-backed merge-readiness checks."
+  "Composition and classification of provider-backed merge-readiness checks."
   (:require
    [ai.miniforge.dag-executor.interface :as dag]))
 

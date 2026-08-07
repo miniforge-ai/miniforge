@@ -151,8 +151,8 @@
                :data {:pr-number pr-number}}))
   (let [readiness-result ((:evaluate-readiness operations)
                           worktree-path pr-number policy)
-        stale? (contains? (set (:blocking readiness-result))
-                          :branch-not-up-to-date)]
+        stale? (some #{:branch-not-up-to-date}
+                     (:blocking readiness-result))]
     (if (:ready? readiness-result)
       (let [now (Instant/now)
             settled (transact! operations worktree-path pr-number
