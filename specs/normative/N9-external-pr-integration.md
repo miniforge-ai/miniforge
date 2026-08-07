@@ -6,7 +6,7 @@
 
 # N9 — External PR Integration
 
-**Version:** 0.2.0-draft
+**Version:** 0.3.0-draft
 **Date:** 2026-02-07
 **Status:** Draft
 **Conformance:** MUST
@@ -374,123 +374,38 @@ event envelope (N3 §2) with standard required fields.
 
 ### 7.1 Scope Key
 
-Because external PR events are not associated with a Miniforge workflow, the
-`:workflow/id` field in the N3 envelope MUST be handled as follows:
+External PR events are **PR Work Item scoped** per N3 §2.3, keyed by `:pr/id`.
+N3 §2.3's scope table is authoritative; this section states only what is
+specific to N9:
 
-- For Miniforge-originated PRs: `:workflow/id` MUST reference the originating workflow
-- For external PRs: `:workflow/id` MAY be nil. Events MUST instead include
-  `:pr/id` (the PR Work Item id) as a correlation key.
+- A Miniforge-originated PR's lifecycle events (N3 §3.10) are Workflow-scoped
+  and carry `:pr/id` as a cross-reference. They are not part of this family.
+- An external PR's events carry a nil `:workflow/id` and are sequenced per PR
+  Work Item.
+- Per N3 §5.1, delivery is strictly by scope: a subscription on a PR Work Item
+  receives that item's events, and a cross-reference key confers no membership.
+  A consumer wanting both a workflow and its PR subscribes to both.
 
-Implementations MUST support subscribing to events by `:pr/id` in addition to
-`:workflow/id`.
+### 7.2 Event Families
 
-### 7.2 Provider Ingestion Events
+N9's event types are defined by **N3 §3.16**, which owns every event wire
+contract (standard 020). They are listed here for navigation; their schemas are
+not reproduced, so they cannot drift from the stream contract.
 
-#### provider/event-received
+| Event type | Purpose |
+|------------|---------|
+| `provider/event-received` | A provider event was received and normalized |
+| `pr.readiness/changed` | Computed readiness state changed (§2.2) |
+| `pr.risk/changed` | Computed risk level changed (§5) |
+| `pr.policy/changed` | Policy outcome changed (§8) |
+| `pr.state/changed` | Provider-reported PR state changed |
+| `train/changed` | Train membership or order changed (§13) |
 
-Emitted when a provider event is received and normalized.
+All six are PR Work Item scoped (§7.1) and `:durable` retention class
+(N3 §6), except `train/changed`, which is keyed by `:train/id` and carries
+member `:pr/id`s.
 
-```clojure
-{:event/type :provider/event-received
- :event/id uuid
- :event/timestamp inst
- :event/version "1.0.0"
- :event/sequence-number long
-
- :pr/id uuid                          ; PR Work Item id (if PR-scoped)
- :provider/type keyword               ; :github, :gitlab
- :provider/event-type keyword         ; Canonical type that was mapped
- :provider/repo string                ; "org/name"
- :provider/pr-number long             ; OPTIONAL
- :provider/head-sha string            ; OPTIONAL
- :provider/dedupe-key string          ; For idempotency
-
- :message "Provider event received: {type} for {repo}#{pr-number}"}
-```
-
-### 7.3 PR State Events
-
-These events are emitted when PR Work Item derived state changes. They are
-**derived-state-change events** — they fire when computation produces a new
-value, not on every provider event.
-
-#### pr.readiness/changed
-
-```clojure
-{:event/type :pr.readiness/changed
- :pr/id uuid
- :pr/repo string
- :pr/number long
-
- :readiness/previous-state keyword
- :readiness/new-state keyword
- :readiness/blockers [...]            ; Current blockers
-
- :message "PR {repo}#{number} readiness: {previous} → {new}"}
-```
-
-#### pr.risk/changed
-
-```clojure
-{:event/type :pr.risk/changed
- :pr/id uuid
- :pr/repo string
- :pr/number long
-
- :risk/previous-level keyword
- :risk/new-level keyword
- :risk/factors [...]
- :risk/evidence-id uuid               ; N6 artifact id
-
- :message "PR {repo}#{number} risk: {previous} → {new}"}
-```
-
-#### pr.policy/changed
-
-```clojure
-{:event/type :pr.policy/changed
- :pr/id uuid
- :pr/repo string
- :pr/number long
-
- :policy/previous-overall keyword
- :policy/new-overall keyword
- :policy/results [...]
- :policy/evidence-id uuid             ; N6 artifact id
-
- :message "PR {repo}#{number} policy: {previous} → {new}"}
-```
-
-#### pr.state/changed
-
-```clojure
-{:event/type :pr.state/changed
- :pr/id uuid
- :pr/repo string
- :pr/number long
-
- :pr/previous-state keyword           ; :open, :closed, :merged
- :pr/new-state keyword
- :pr/head-sha string
-
- :message "PR {repo}#{number} state: {previous} → {new}"}
-```
-
-### 7.4 Train Events
-
-#### train/changed
-
-```clojure
-{:event/type :train/changed
- :train/id uuid
- :train/members [uuid ...]            ; Ordered PR Work Item ids
- :train/change-type keyword           ; :member-added, :member-removed,
-                                      ; :order-changed, :member-merged
-
- :message "Train {id}: {change-type}"}
-```
-
-### 7.5 Event Ordering
+### 7.3 Event Ordering
 
 - Provider ingestion events MUST be idempotent per `:provider/dedupe-key`.
 - Derived-state-change events MUST only fire when computed state actually changes.
@@ -661,7 +576,7 @@ N5 §2.2 `fleet` namespace MUST be extended with:
 
 ```bash
 # PR monitoring
-mf fleet prs [flags]                  # List PR Work Items across repos
+miniforge fleet prs [flags]                  # List PR Work Items across repos
   --repo REPO                         # Filter by repo
   --author AUTHOR                     # Filter by author
   --readiness STATE                   # Filter by readiness state
@@ -669,13 +584,13 @@ mf fleet prs [flags]                  # List PR Work Items across repos
   --policy OUTCOME                    # Filter by policy outcome
   --json                              # Output as JSON
 
-mf fleet pr REPO#NUMBER [flags]       # Show PR Work Item detail
+miniforge fleet pr REPO#NUMBER [flags]       # Show PR Work Item detail
   --evidence                          # Include evidence artifact pointers
   --json                              # Output as JSON
 
 # Train management (if trains enabled)
-mf fleet trains [flags]               # List active trains
-mf fleet train TRAIN_ID [flags]       # Show train detail and membership
+miniforge fleet trains [flags]               # List active trains
+miniforge fleet train TRAIN_ID [flags]       # Show train detail and membership
 ```
 
 ### 12.2 TUI Extensions
@@ -803,9 +718,17 @@ dependencies without explicit declaration.
 ## 14. Versioning
 
 - PR Work Item schema, N9 event types, and API extensions MUST be versioned.
-- Breaking changes MUST increment a major version and MUST be supported in
-  parallel for at least one deprecation cycle.
+- N9's event types are versioned per N3 §7, which classifies changes and defines
+  consumer obligations. A breaking payload change is a major bump of that event
+  type, with `:event/type` held stable (N3 §7.4).
 - Version is tracked in the N3 event envelope `:event/version` field.
+
+An earlier revision required breaking changes to "be supported in parallel for
+at least one deprecation cycle". That is withdrawn: N3 §7.4 states that because
+the product is pre-release, dual-emission of old and new payload shapes is not
+required and implementations cut over. Requiring a deprecation cycle here would
+have obliged N9 implementations to carry compatibility machinery that no
+consumer needs and that N3 explicitly declines to mandate.
 
 ---
 
@@ -819,7 +742,7 @@ A minimal compliant N9 implementation MUST:
 4. Evaluate at least one policy pack against external PR diffs (§8)
 5. Produce evidence artifacts per N6 (§9)
 6. Support Tier 0 and Tier 1 automation (§10)
-7. Provide CLI command `mf fleet prs` for listing PR Work Items (§12)
+7. Provide CLI command `miniforge fleet prs` for listing PR Work Items (§12)
 8. Audit-log all provider write actions (§11)
 
 A minimal compliant implementation MAY defer:
@@ -854,7 +777,79 @@ A common pattern that preserves adoption while capturing value:
 
 ---
 
-## 17. References
+## 17. Conformance Requirements
+
+Requirement IDs are stable identifiers for the normative statements of this
+spec. IDs are never reused; a withdrawn requirement is marked withdrawn.
+
+### PR Work Item and readiness
+
+| ID | Level | Requirement |
+|----|-------|-------------|
+| N9.WI.1 | MUST | Represent every tracked PR as a PR Work Item per §2.1. |
+| N9.WI.2 | MUST | Compute `:pr/readiness` deterministically from available signals (§2.2). |
+| N9.WI.3 | MUST | Use only the readiness states of §2.2.1 and blocker shapes of §2.2.2. |
+
+### Ingestion and events
+
+| ID | Level | Requirement |
+|----|-------|-------------|
+| N9.EV.1 | MUST | Scope external PR events to the PR Work Item per N3 §2.3 (§7.1). |
+| N9.EV.2 | MUST | Emit only the event types of §7.2, with schemas per N3 §3.16. |
+| N9.EV.3 | MUST | Make provider ingestion idempotent per `:provider/dedupe-key` (§7.3). |
+| N9.EV.4 | MUST NOT | Emit a derived-state-change event when the computed state did not change (§7.3). |
+| N9.EV.5 | MUST | Version event payloads per N3 §7, cutting over rather than dual-emitting (§14). |
+
+### Automation tiers
+
+| ID | Level | Requirement |
+|----|-------|-------------|
+| N9.AT.1 | MUST | Configure tier per repo; default SHOULD be Tier 1 (§10.2). |
+| N9.AT.2 | MUST NOT | Auto-escalate tier by heuristic — escalation requires explicit configuration (§10.3). |
+| N9.AT.3 | MUST NOT | Approve, request changes, or merge at Tier 2 or below (§10.1). |
+| N9.AT.4 | MUST | Enforce a per-repo allowlist of permitted actions at Tier 3 (§10.2). |
+| N9.AT.5 | MUST | Audit-log every provider write action at Tier 1 and above (§11.1). |
+
+### Audit and security
+
+| ID | Level | Requirement |
+|----|-------|-------------|
+| N9.AS.1 | MUST | Record `:action/reason` on every logged provider write (§11.1). |
+| N9.AS.2 | MUST | Store provider credentials encrypted at rest and support rotation without downtime (§11.2). |
+| N9.AS.3 | MUST | Minimize token scopes to those the configured tier requires (§11.2). |
+| N9.AS.4 | MUST | Redact secrets before persistence, per N3 §8 as inherited by N6 §7.2 (§11.3). |
+
+### Evidence
+
+| ID | Level | Requirement |
+|----|-------|-------------|
+| N9.EB.1 | MUST | Produce evidence with the N6 schema; define no separate evidence model (§9). |
+| N9.EB.2 | MUST | Produce a new artifact per update; never mutate an existing one (§9.1). |
+| N9.EB.3 | MUST | Reference evidence artifacts from policy and risk results rather than inlining content (§9.2). |
+
+## 18. Test Obligations
+
+A conformance suite MUST cover, at minimum:
+
+1. **Idempotent ingestion** — replaying a provider event with the same
+   `:provider/dedupe-key` produces no duplicate state change (N9.EV.3).
+2. **Derived-state quiet** — recomputing readiness with unchanged inputs emits
+   no `pr.readiness/changed` (N9.EV.4).
+3. **Scope isolation** — an external PR's events are retrievable by `:pr/id`
+   with a nil `:workflow/id`, and do not appear on any workflow subscription
+   (N9.EV.1).
+4. **Tier ceiling** — a Tier 2 deployment refuses approve, request-changes, and
+   merge, and the refusal is audited (N9.AT.3, N9.AT.5).
+5. **No auto-escalation** — no sequence of PR events raises the configured tier
+   (N9.AT.2).
+6. **Audit completeness** — every provider write in a run has a log entry
+   carrying `:action/reason` (N9.AS.1).
+7. **Artifact immutability** — a PR updated twice yields two artifacts, and the
+   first is byte-identical to its original (N9.EB.2).
+
+---
+
+## 19. References
 
 - **N1**: Core Architecture & Concepts — new concepts land here
 - **N3**: Event Stream & Observability — event envelope and PR lifecycle events
@@ -867,7 +862,46 @@ A common pattern that preserves adoption while capturing value:
 
 ---
 
+## Annex A — Implementation Conformance Status (informative)
+
+This annex is **informative**. It records where the miniforge implementation
+diverges from the contract above, as of 2026-08-06.
+
+### A.1 Specified, Not Implemented
+
+- **The N9 event family (§7.2).** None of `provider/event-received`,
+  `pr.readiness/changed`, `pr.risk/changed`, `pr.policy/changed`,
+  `pr.state/changed`, or `train/changed` is emitted (N3 Annex A records the
+  same). External PR state is therefore not observable on the event stream
+  (N9.EV.2).
+- **PR Work Item scoping (§7.1).** With no N9 events emitted, the `:pr/id`
+  scope of N3 §2.3 has no producer (N9.EV.1).
+
+### A.2 Structural
+
+- **`pr-lifecycle` runs a separate in-process bus** rather than the N3 stream
+  (recorded in N3 Annex A). §7 assumes a single stream, so PR events that do
+  exist are neither sequenced nor replayable per N3 §2.2.
+- **Secret redaction (§11.3)** depends on N3 §8, which has no implementation —
+  the fourth spec to record that gap (N9.AS.4).
+
+---
+
+---
+
 **Version History:**
+
+- 0.3.0-draft (2026-08-06): Spec-completion pass. §7.1 restated a PR-only
+  version of the scope rule that N3 §2.3 now generalizes to six scopes; it now
+  references N3 and states only what is N9-specific, including that delivery is
+  strictly by scope (N3 §5.1). §7.2 reproduced N3 §3.16's event schemas; now a
+  reference table. §14 required breaking changes to "be supported in parallel
+  for at least one deprecation cycle", contradicting N3 §7.4, which states that
+  because the product is pre-release implementations cut over rather than
+  dual-emit — withdrawn. The MCI and CLI sections invoked a binary named `mf`,
+  which N5 §2.1 does not define; corrected to `miniforge` in all five places.
+  §17–§18 conformance requirement IDs and test obligations. Annex A records
+  implementation divergence.
 
 - 0.2.0-draft (2026-04-23): External-PR artifact amendment — `:pr-context-pack`
   added to §9.1 with the obligation that ingestion emits the artifact on PR
