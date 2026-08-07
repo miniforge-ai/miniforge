@@ -29,6 +29,7 @@
    finding a PolicyEvaluation in the materialized entity table that was
    not there before the publish."
   (:require
+   [ai.miniforge.anomaly.interface :as anomaly]
    [ai.miniforge.event-stream.interface :as es]
    [ai.miniforge.operator.application :as application]
    [ai.miniforge.operator.consumer :as consumer]
@@ -162,10 +163,9 @@
 (deftest ^{:stratum 0} register-runner-rejects-invalid-control-state
   (testing "runner wiring fails early instead of becoming an application error"
     (doseq [handles [{} {:control-state :not-an-atom} :not-a-map]]
-      (is (thrown-with-msg?
-           clojure.lang.ExceptionInfo
-           #"requires an atom :control-state"
-           (application/register-runner! (random-uuid) handles))))))
+      (let [result (application/register-runner! (random-uuid) handles)]
+        (is (anomaly/anomaly? result))
+        (is (= :invalid-input (:anomaly/type result)))))))
 
 (deftest ^{:stratum 0} resume-launcher-registration-rejects-unusable-handles
   (testing "wiring fails early instead of becoming an application error"
@@ -173,10 +173,9 @@
     ;; let them register and fail later; they must be rejected here.
     (doseq [handles [{} {:launch! "not-a-fn"} :not-a-map
                      {:launch! :a-keyword} {:launch! {:not "a fn"}}]]
-      (is (thrown-with-msg?
-           clojure.lang.ExceptionInfo
-           #"requires a :launch! function"
-           (application/register-resume-launcher! handles))))))
+      (let [result (application/register-resume-launcher! handles)]
+        (is (anomaly/anomaly? result))
+        (is (= :invalid-input (:anomaly/type result)))))))
 
 (def ^{:stratum 0} ^:const golden-pr-target-id
   "PR target the re-evaluation tests score."
@@ -194,11 +193,10 @@
   ;; string, keyword, and map are all NOT `fn?` (keyword/map are `ifn?`,
   ;; which the old check wrongly accepted).
   (doseq [bad ["not-a-fn" :a-keyword {:not "a fn"}]]
-    (is (thrown-with-msg?
-         clojure.lang.ExceptionInfo
-         #"requires a function"
-         (application/register-policy-evaluator! bad))
-        (str "bad evaluator " (pr-str bad)))))
+    (let [result (application/register-policy-evaluator! bad)]
+      (is (anomaly/anomaly? result)
+          (str "bad evaluator " (pr-str bad)))
+      (is (= :invalid-input (:anomaly/type result))))))
 
 (deftest ^{:stratum 0} ownership-filter-does-not-hide-invalid-request-types
   (is (true? (application/live-intervention-target?
