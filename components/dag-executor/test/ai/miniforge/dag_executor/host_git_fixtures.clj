@@ -80,6 +80,52 @@
   [dir rev]
   (str/trim (:out (git! dir "rev-parse" rev))))
 
+(defn ^{:stratum 1} init-upstream-and-host!
+  "A bare upstream, a working clone that publishes to it, and a host
+   checkout that tracks it — enough to drive a real `git fetch`.
+
+   Returns `{:upstream :work :host}`. The host tracks `main` and
+   `feature`; `force-push-feature!` then rewrites `feature` upstream, which
+   is what a stacked miniforge DAG run produces every time a parent task's
+   branch is re-pushed with `--force-with-lease`."
+  [root]
+  (let [upstream (str (File. (str root) "upstream.git"))
+        work     (str (File. (str root) "work"))
+        host     (str (File. (str root) "host"))]
+    (git! root "init" "--quiet" "--bare" "upstream.git")
+    (git! root "init" "--quiet" "-b" "main" "work")
+    (git! work "config" "user.email" "guard-test@example.invalid")
+    (git! work "config" "user.name" "Guard Test")
+    (git! work "config" "commit.gpgsign" "false")
+    (spit (str (File. work "seed.txt")) "seed\n")
+    (git! work "add" "seed.txt")
+    (git! work "commit" "--quiet" "-m" "seed")
+    (git! work "remote" "add" "origin" upstream)
+    (git! work "push" "--quiet" "origin" "main")
+    (git! work "checkout" "--quiet" "-b" "feature")
+    (git! work "commit" "--quiet" "--allow-empty" "-m" "feature work")
+    (git! work "push" "--quiet" "origin" "feature")
+    (git! root "clone" "--quiet" "upstream.git" "host")
+    {:upstream upstream :work work :host host}))
+
+(defn ^{:stratum 1} advance-feature!
+  "Add a commit to `feature` upstream — the fast-forward case."
+  [{:keys [work]}]
+  (git! work "commit" "--quiet" "--allow-empty" "-m" "more feature work")
+  (git! work "push" "--quiet" "origin" "feature"))
+
+(defn ^{:stratum 1} force-push-feature!
+  "Rewrite `feature` upstream so a following fetch is a forced update.
+
+   Drops the tip and builds a different commit in its place, rather than
+   amending — an amend of an empty commit needs `--allow-empty` again and
+   fails quietly without it, leaving the branch unmoved and the test
+   passing for no reason."
+  [{:keys [work]}]
+  (git! work "reset" "--quiet" "--hard" "HEAD~1")
+  (git! work "commit" "--quiet" "--allow-empty" "-m" "feature work, rewritten")
+  (git! work "push" "--quiet" "--force" "origin" "feature"))
+
 ;------------------------------------------------------------------------------ Layer 2
 
 (defn ^{:stratum 2} init-host-repo!

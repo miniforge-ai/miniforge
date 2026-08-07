@@ -116,19 +116,38 @@
           (fixtures/delete-tree! parent)
           (fixtures/delete-tree! host))))))
 
-(deftest ^{:stratum 1} a-tracking-ref-that-fast-forwards-is-not-drift-test
-  (testing "given a fetch advancing origin/main → clean, so normal runs still pass"
-    (let [host (fixtures/init-host-repo! (fixtures/temp-dir!))]
+(deftest ^{:stratum 1} a-real-fetch-that-fast-forwards-is-clean-test
+  (testing "given a real fetch advancing origin/feature → clean, nothing reported"
+    (let [root  (fixtures/temp-dir!)
+          repos (fixtures/init-upstream-and-host! root)
+          host  (:host repos)]
       (try
         (let [before (snapshot! host)
-              _      (fixtures/git! host "update-ref" tracked-ref (fixtures/sha-at host "HEAD"))
+              _      (fixtures/advance-feature! repos)
+              _      (fixtures/git! host "fetch" "--quiet" "origin")
               report (sut/drift before (snapshot! host))]
           (is (true? (:clean? report)))
           (is (= [] (:ref-rewinds report))))
-        (finally (fixtures/delete-tree! host))))))
+        (finally (fixtures/delete-tree! root))))))
 
-(deftest ^{:stratum 1} a-tracking-ref-forced-backwards-is-drift-test
-  (testing "given origin/main force-updated to an earlier commit → drift, with both shas"
+(deftest ^{:stratum 1} a-real-fetch-after-an-upstream-force-push-is-clean-test
+  (testing "given upstream force-pushed and the host fetched → clean, so a stacked DAG run passes"
+    (let [root  (fixtures/temp-dir!)
+          repos (fixtures/init-upstream-and-host! root)
+          host  (:host repos)]
+      (try
+        (let [before (snapshot! host)
+              _      (fixtures/force-push-feature! repos)
+              _      (fixtures/git! host "fetch" "--quiet" "origin")
+              report (sut/drift before (snapshot! host))]
+          (is (true? (:clean? report))
+              "miniforge force-pushes its own task branches; enforcing here would fail ordinary runs")
+          (is (= ["refs/remotes/origin/feature"] (mapv :ref (:ref-rewinds report)))
+              "the forced update is still reported, as context for a redirect that did happen"))
+        (finally (fixtures/delete-tree! root))))))
+
+(deftest ^{:stratum 1} a-tracking-ref-moved-off-its-history-is-context-not-a-verdict-test
+  (testing "given origin/main moved to an earlier commit → reported, but still clean"
     (let [host (fixtures/init-host-repo! (fixtures/temp-dir!))]
       (try
         (let [before  (snapshot! host)
@@ -136,7 +155,8 @@
               _       (fixtures/git! host "update-ref" tracked-ref rewound)
               report  (sut/drift before (snapshot! host))
               rewind  (first (:ref-rewinds report))]
-          (is (false? (:clean? report)))
+          (is (true? (:clean? report))
+              "a rewind alone does not condemn: an upstream force-push produces one")
           (is (= [] (:remote-url-drift report)))
           (is (= tracked-ref (:ref rewind)))
           (is (= rewound (:after rewind)))

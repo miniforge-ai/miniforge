@@ -12,12 +12,11 @@
   "A task run changed the host checkout's remote URL"
 
   ;; drift — a remote-tracking ref moved to a commit that is not a
-  ;; descendant of where it started (rewound or diverged)
+  ;; descendant of where it started; reported as context, never on its own
   :drift/remote-ref-rewound
-  "A task run moved the host checkout's remote-tracking ref off its own history"
+  "A remote-tracking ref moved off its own history"
 
-  ;; drift — the ancestry probe itself failed, so containment is unknown;
-  ;; treated as drift because the guard is fail-closed
+  ;; drift — the ancestry probe itself failed, so containment is unknown
   :drift/ancestry-unknown
   "Could not determine whether a remote-tracking ref moved forward"
 

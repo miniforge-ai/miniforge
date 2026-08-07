@@ -34,12 +34,19 @@
      does should repoint a remote. The release path's HTTPS-token fallback
      does `set-url` then restores; a run that dies in between leaves a
      token in the host's config, and that shows up here as drift.
-   - A remote-tracking ref may fast-forward but never move off its own
-     history. A plain `git fetch` advancing `origin/main` is normal and
-     stays clean; the incident's backwards force-update does not.
+   Remote-tracking refs are reported alongside, but are not part of the
+   verdict. A moved ref that is not a fast-forward looks identical whether
+   a task rewound it or upstream force-pushed and an ordinary `git fetch`
+   followed: the default refspec is `+refs/heads/*:refs/remotes/origin/*`,
+   and the `+` forces every opportunistic update. Miniforge force-pushes
+   its own task branches, so a stacked DAG run produces one as a matter of
+   course, and enforcing on it would fail ordinary runs. Telling a local
+   rewrite from an upstream one needs the remote's own answer
+   (`git ls-remote`), which this does not ask for.
 
-   Refs appearing or disappearing are not drift — `fetch.prune` legitimately
-   removes a remote-tracking ref when its upstream branch is deleted.
+   Refs appearing or disappearing are not reported at all — `fetch.prune`
+   legitimately retires a remote-tracking ref when its upstream branch is
+   deleted.
 
    This detects; it does not prevent. Only a sandbox that does not share a
    common dir (a clone rather than a linked worktree) prevents."
@@ -197,16 +204,16 @@
   "Compare two snapshots of the same checkout and report what a task run
    changed that it had no business changing.
 
-   Reports; does not judge. `:clean?` is true when the run left remote URLs
-   byte-identical and every remote-tracking ref still on its own history.
-   `:remote-url-drift` and `:ref-rewinds` carry the before and after values
-   either way — enough for an operator to see which remote was repointed
-   and which ref was moved, without re-deriving it from the reflog.
+   Reports; does not judge. `:clean?` tracks the remote URLs alone — it is
+   true when every one came through the run unchanged. `:remote-url-drift`
+   carries the before and after values.
 
-   A ref whose ancestry probe could not be answered is reported as a
-   rewind with `:fast-forward? nil` — the guard fails closed on an unknown,
-   since the alternative is to wave through exactly the mutation it exists
-   to catch.
+   `:ref-rewinds` lists remote-tracking refs that moved to a commit not
+   descended from where they started, and deliberately does **not** feed
+   `:clean?`; see the namespace docstring for why an ordinary fetch
+   produces one. It is context for a redirect that did happen, not a
+   verdict of its own. A ref whose ancestry probe could not be answered is
+   listed with `:fast-forward? nil`.
 
    Whether a dirty report should fail a run is the caller's policy, not
    this namespace's; see `protocols.impl.host-guarded`."
@@ -226,7 +233,7 @@
                                             (get after :remote-refs))
                          (keep (partial rewind repo-path))
                          vec)]
-      {:clean?           (and (empty? urls) (empty? rewinds))
+      {:clean?           (empty? urls)
        :repo-path        repo-path
        :remote-url-drift urls
        :ref-rewinds      rewinds})))
