@@ -27,19 +27,29 @@
    `refs/remotes/origin/main` backwards; branches cut afterwards were based
    on a stale commit and pushed to the mirror instead of GitHub.
 
-   Two invariants are watched, chosen because they are the ones a task run
-   has no legitimate reason to break:
+   Remote URLs, and the `url.<base>.insteadOf` rewrites that override
+   them, must be identical across a run. Nothing a task legitimately does
+   repoints where the host pushes and fetches. The release path's
+   HTTPS-token fallback does `set-url` then restores; a run that dies in
+   between leaves a token in the host's config, and that shows up here.
+   Remote-tracking refs are reported alongside, but are not part of the
+   verdict. A moved ref that is not a fast-forward looks identical whether
+   a task rewound it or upstream force-pushed and an ordinary `git fetch`
+   followed: the default refspec is `+refs/heads/*:refs/remotes/origin/*`,
+   and the `+` forces every opportunistic update. Miniforge force-pushes
+   its own task branches, so a stacked DAG run produces one as a matter of
+   course, and enforcing on it would fail ordinary runs. Telling a local
+   rewrite from an upstream one needs the remote's own answer
+   (`git ls-remote`), which this does not ask for.
 
-   - Remote URLs are immutable for the duration of a run. Nothing a task
-     does should repoint a remote. The release path's HTTPS-token fallback
-     does `set-url` then restores; a run that dies in between leaves a
-     token in the host's config, and that shows up here as drift.
-   - A remote-tracking ref may fast-forward but never move off its own
-     history. A plain `git fetch` advancing `origin/main` is normal and
-     stays clean; the incident's backwards force-update does not.
+   Refs appearing or disappearing are not reported at all — `fetch.prune`
+   legitimately retires a remote-tracking ref when its upstream branch is
+   deleted.
 
-   Refs appearing or disappearing are not drift — `fetch.prune` legitimately
-   removes a remote-tracking ref when its upstream branch is deleted.
+   Credentials are stripped from a URL as it is read, so no snapshot and
+   no report ever holds one. The likeliest drift is exactly the
+   token-bearing URL above, and a guard that published it while reporting
+   it would be its own leak.
 
    This detects; it does not prevent. Only a sandbox that does not share a
    common dir (a clone rather than a linked worktree) prevents."
@@ -52,11 +62,16 @@
 ;------------------------------------------------------------------------------ Layer 0
 
 ;; Snapshot shape and pure comparison
-(def ^{:stratum 0} remote-url-config-pattern
-  "Matches `remote.<name>.url` and `remote.<name>.pushurl`. Anchored on
-   `url$` rather than `\\.url$` so pushurl — which carries the same
-   redirect power and none of the visibility — is not missed."
-  "^remote\\..*url$")
+(def ^{:stratum 0} redirect-config-pattern
+  "Config keys that decide where the host pushes and fetches.
+
+   `remote\\..*url` is anchored on `url$` rather than `\\.url$` so `pushurl`
+   — same redirect power, less visibility — is not missed.
+   `url\\..*insteadof` covers `url.<base>.insteadOf` and `pushInsteadOf`,
+   which rewrite every URL git resolves and would otherwise redirect the
+   host without touching any `remote.*` key at all. `--get-regexp`
+   lowercases the key, so the pattern is written lowercase."
+  "^(remote\\..*url|url\\..*insteadof)$")
 
 (def ^{:stratum 0} remote-ref-namespace
   "Ref namespace holding remote-tracking refs. `refs/remotes/origin/main`
@@ -68,21 +83,15 @@
    it cannot occur in a ref name or a SHA, so splitting on it is total."
   (str (char 0x1F)))
 
-(defn ^{:stratum 0} changed-remote-urls
-  "Remote-URL keys whose value differs between two snapshots' url maps.
+(defn ^{:stratum 0} redact-credentials
+  "Replace the userinfo in a URL that carries one.
 
-   A key present in only one of the two counts: adding a remote mid-run is
-   as much a redirect as editing one, and removing the remote a push is
-   about to target is a silent failure waiting to happen."
-  [before after]
-  (->> (into (set (keys before)) (keys after))
-       sort
-       (keep (fn [k]
-               (let [was (get before k)
-                     is  (get after k)]
-                 (when (not= was is)
-                   {:config-key k :before was :after is}))))
-       vec))
+   Matches only `scheme://user:secret@host`, so an scp-style SSH remote
+   keeps its literal `git@` — that is a username, not a secret, and losing
+   it would make a report harder to read for no gain. The token-bearing
+   HTTPS URL the release path writes is exactly the matched shape."
+  [value]
+  (str/replace (str value) #"://[^/@]*@" "://***@"))
 
 (defn ^{:stratum 0} moved-remote-refs
   "Remote-tracking refs present in BOTH snapshots whose SHA differs.
@@ -116,48 +125,42 @@
     (catch Exception e
       {:exit 1 :out "" :err (.getMessage e)})))
 
-(defn- ^{:stratum 0} parse-pairs
-  "Parse `sep`-delimited two-field lines into a map. Blank lines and lines
-   missing the second field are dropped — a partial line carries no
-   comparable value and inventing one would fabricate drift."
+(defn- ^{:stratum 0} parse-fields
+  "Split `sep`-delimited two-field lines into `[key value]` pairs. Blank
+   lines and lines missing the second field are dropped — a partial line
+   carries no comparable value and inventing one would fabricate drift.
+   The split limit is 2, so a value containing the separator survives
+   whole."
   [text sep]
   (->> (str/split-lines (str/trim (or text "")))
        (remove str/blank?)
-       (reduce (fn [acc line]
-                 (let [[k v] (str/split line (re-pattern sep) 2)]
-                   (if (and k v (seq (str/trim k)) (seq (str/trim v)))
-                     (assoc acc (str/trim k) (str/trim v))
-                     acc)))
-               {})))
+       (keep (fn [line]
+               (let [[k v] (str/split line (re-pattern sep) 2)]
+                 (when (and k v (seq (str/trim k)) (seq (str/trim v)))
+                   [(str/trim k) (str/trim v)]))))))
+
+(defn ^{:stratum 0} changed-redirect-config
+  "Redirect-config keys whose values differ between two snapshots.
+
+   A key present in only one of the two counts: adding a remote or an
+   `insteadOf` rewrite mid-run is as much a redirect as editing one, and
+   removing the remote a push is about to target is a silent failure
+   waiting to happen.
+
+   Values are vectors because git config is multi-valued — a second
+   `remote.origin.url` line is legal, and `git remote get-url` resolves to
+   the first, so comparing only one value would miss a rewrite of it."
+  [before after]
+  (->> (into (set (keys before)) (keys after))
+       sort
+       (keep (fn [k]
+               (let [was (get before k)
+                     is  (get after k)]
+                 (when (not= was is)
+                   {:config-key k :before (vec was) :after (vec is)}))))
+       vec))
 
 ;------------------------------------------------------------------------------ Layer 1
-
-(defn ^{:stratum 1} remote-urls
-  "Map of `remote.<name>.url` config key to its value.
-
-   `git config --get-regexp` exits 1 when nothing matches, which is a valid
-   state (a repo with no remotes), not a failure — it is reported as an
-   empty map. Any other non-zero exit is a genuine read failure."
-  [repo-path]
-  (let [r (git repo-path "config" "--get-regexp" remote-url-config-pattern)]
-    (case (long (get r :exit 1))
-      0 (result/ok (parse-pairs (get r :out "") " "))
-      1 (result/ok {})
-      (result/err :host-git-snapshot-failed
-                  (msg/t :snapshot/remote-urls-failed)
-                  {:repo-path repo-path :stderr (get r :err "")}))))
-
-(defn ^{:stratum 1} remote-tracking-refs
-  "Map of remote-tracking ref name to the SHA it points at."
-  [repo-path]
-  (let [r (git repo-path "for-each-ref"
-               (str "--format=%(refname)" field-separator "%(objectname)")
-               remote-ref-namespace)]
-    (if (zero? (long (get r :exit 1)))
-      (result/ok (parse-pairs (get r :out "") field-separator))
-      (result/err :host-git-snapshot-failed
-                  (msg/t :snapshot/remote-refs-failed)
-                  {:repo-path repo-path :stderr (get r :err "")}))))
 
 (defn ^{:stratum 1} fast-forward?
   "True when `after` contains `before` in its history — the ref moved
@@ -174,39 +177,67 @@
       1 false
       nil)))
 
-;------------------------------------------------------------------------------ Layer 2
+(defn ^{:stratum 1} redirect-config
+  "Map of redirect-config key to the vector of values it carries.
 
-;; Snapshot capture and drift report
-(defn ^{:stratum 2} snapshot
-  "Capture the host checkout's remote URLs and remote-tracking refs.
-
-   Returns result/ok with `{:repo-path :remote-urls :remote-refs}` — the
-   value `drift` compares against — or result/err when either read failed."
+   `git config --get-regexp` exits 1 when nothing matches, which is a valid
+   state (a repo with no remotes) and reported as an empty map. Any other
+   non-zero exit is a genuine read failure. Exit 1 is also what a path that
+   is not a repository returns, so this half alone cannot tell those apart
+   — `remote-tracking-refs` is what makes a non-repository fail closed."
   [repo-path]
-  (-> (remote-urls repo-path)
-      (result/and-then
-       (fn [urls]
-         (-> (remote-tracking-refs repo-path)
-             (result/map-ok
-              (fn [refs]
-                {:repo-path   (str repo-path)
-                 :remote-urls urls
-                 :remote-refs refs})))))))
+  (let [r (git repo-path "config" "--get-regexp" redirect-config-pattern)]
+    (case (long (get r :exit 1))
+      0 (result/ok
+         ;; Accumulated into vectors, not a plain map: git config is
+         ;; multi-valued, and collapsing to the last value would hide a
+         ;; rewrite of the first — the one `git remote get-url` resolves to.
+         ;;
+         ;; Redacted on the way in rather than at report time: snapshots
+         ;; are parked in a process-lifetime atom by the guarded executor,
+         ;; so a token that entered one would outlive the run that made it.
+         (reduce (fn [acc [k v]] (update acc k (fnil conj []) (redact-credentials v)))
+                 {}
+                 (parse-fields (get r :out "") " ")))
+      1 (result/ok {})
+      (result/err :host-git-snapshot-failed
+                  (msg/t :snapshot/remote-urls-failed)
+                  {:repo-path repo-path :stderr (get r :err "")}))))
+
+(defn ^{:stratum 1} remote-tracking-refs
+  "Map of remote-tracking ref name to the SHA it points at."
+  [repo-path]
+  (let [r (git repo-path "for-each-ref"
+               (str "--format=%(refname)" field-separator "%(objectname)")
+               remote-ref-namespace)]
+    (if (zero? (long (get r :exit 1)))
+      ;; A ref name appears once per `for-each-ref` line, so a plain map is
+      ;; the whole story here.
+      (result/ok (into {} (parse-fields (get r :out "") field-separator)))
+      (result/err :host-git-snapshot-failed
+                  (msg/t :snapshot/remote-refs-failed)
+                  {:repo-path repo-path :stderr (get r :err "")}))))
+
+;------------------------------------------------------------------------------ Layer 2
 
 (defn ^{:stratum 2} drift
   "Compare two snapshots of the same checkout and report what a task run
    changed that it had no business changing.
 
-   Reports; does not judge. `:clean?` is true when the run left remote URLs
-   byte-identical and every remote-tracking ref still on its own history.
-   `:remote-url-drift` and `:ref-rewinds` carry the before and after values
-   either way — enough for an operator to see which remote was repointed
-   and which ref was moved, without re-deriving it from the reflog.
+   Reports; does not judge. `:clean?` tracks the redirect config alone —
+   it is true when every remote URL and `insteadOf` rewrite came through
+   the run unchanged. `:redirect-drift` carries the before and after
+   values, credentials stripped.
 
-   A ref whose ancestry probe could not be answered is reported as a
-   rewind with `:fast-forward? nil` — the guard fails closed on an unknown,
-   since the alternative is to wave through exactly the mutation it exists
-   to catch.
+   `:ref-rewinds` lists remote-tracking refs that moved to a commit not
+   descended from where they started, and deliberately does **not** feed
+   `:clean?`. Such a move is indistinguishable from an ordinary `git fetch`
+   after upstream force-pushed: the default refspec forces every
+   opportunistic update, and miniforge force-pushes its own task branches,
+   so a stacked DAG run produces one as a matter of course. It is context
+   for a redirect that did happen, not a verdict of its own. A ref whose
+   ancestry probe could not be answered is listed with
+   `:fast-forward? nil`.
 
    Whether a dirty report should fail a run is the caller's policy, not
    this namespace's; see `protocols.impl.host-guarded`."
@@ -220,16 +251,33 @@
                                  (msg/t :drift/ancestry-unknown)
                                  (msg/t :drift/remote-ref-rewound))))))]
     (let [repo-path (get before :repo-path)
-          urls      (changed-remote-urls (get before :remote-urls)
-                                         (get after :remote-urls))
+          redirects (changed-redirect-config (get before :redirects)
+                                             (get after :redirects))
           rewinds   (->> (moved-remote-refs (get before :remote-refs)
                                             (get after :remote-refs))
                          (keep (partial rewind repo-path))
                          vec)]
-      {:clean?           (and (empty? urls) (empty? rewinds))
-       :repo-path        repo-path
-       :remote-url-drift urls
-       :ref-rewinds      rewinds})))
+      {:clean?         (empty? redirects)
+       :repo-path      repo-path
+       :redirect-drift redirects
+       :ref-rewinds    rewinds})))
+
+;; Snapshot capture and drift report
+(defn ^{:stratum 2} snapshot
+  "Capture the host checkout's redirect config and remote-tracking refs.
+
+   Returns result/ok with `{:repo-path :redirects :remote-refs}` — the
+   value `drift` compares against — or result/err when either read failed."
+  [repo-path]
+  (-> (redirect-config repo-path)
+      (result/and-then
+       (fn [redirects]
+         (-> (remote-tracking-refs repo-path)
+             (result/map-ok
+              (fn [refs]
+                {:repo-path   (str repo-path)
+                 :redirects   redirects
+                 :remote-refs refs})))))))
 
 ;------------------------------------------------------------------------------ Rich Comment
 (comment
@@ -238,10 +286,8 @@
   ;; ... a task run happens in a linked worktree of that checkout ...
   (drift before (result/unwrap-or (snapshot "/path/to/checkout") nil))
   ;=> {:clean? true :repo-path "/path/to/checkout"
-  ;    :remote-url-drift [] :ref-rewinds []}
+  ;    :redirect-drift [] :ref-rewinds []}
 
-  ;; A fetch that advanced origin/main stays clean; a force-update
-  ;; backwards comes back as :host-git-drift with the ref and both SHAs.
   (fast-forward? "/path/to/checkout" "HEAD~3" "HEAD")
   ;=> true
 
