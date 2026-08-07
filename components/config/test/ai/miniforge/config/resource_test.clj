@@ -28,7 +28,7 @@
 
 (def ^{:stratum 0} ^:private a-missing-resource "config/does-not-exist-xyz.edn")
 
-;; Test fixtures (under test/resource_test_fixtures/, on the test classpath).
+;; Test fixtures (under test-resources/resource_test_fixtures/).
 ;; The malformed fixture uses a .txt extension so the EDN linter does not
 ;; reject its deliberately invalid content; the loader reads by path, not
 ;; extension.

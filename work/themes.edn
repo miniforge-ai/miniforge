@@ -60,11 +60,10 @@
  {:theme/id :polylith-compliance
   :theme/title "Polylith compliance"
   :theme/description
-  "`poly check` currently reports 13 structural errors + 9 warnings.
-   Pre-commit's structural gate rejects commits because of them, which
-   blocks every dogfood run's release phase. Get to a clean workspace
-   and keep it clean by wiring the gate into CI and workflow-dep
-   ordering."
+  "Keep `poly check` at zero errors and warnings so structural drift cannot
+   weaken release signal. The remaining active work is TUI optional-phase
+   loading: raw test errors and project summaries must agree without adding
+   unnecessary project dependencies."
   :theme/informative-spec nil
   :theme/normative-refs
   [{:doc "specs/normative/N1-architecture.md" :section "§4 Polylith conventions"

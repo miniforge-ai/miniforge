@@ -21,8 +21,8 @@
   "Missing optional phase namespaces are reported as skipped or unavailable without failing unrelated TUI tests"
   "Real load errors inside present phase namespaces still fail loudly"
   "The project test summary reports failure when raw test output contains clojure.test failures or errors"
- "Regression tests cover optional namespace absence and present-namespace load failure"
- "Dogfood verification no longer reports the TUI classpath error as a pre-existing warning"]
+  "Regression tests cover optional namespace absence and present-namespace load failure"
+  "Dogfood verification no longer reports the TUI classpath error as a pre-existing warning"]
 
  :spec/priority
  {:tier :high
