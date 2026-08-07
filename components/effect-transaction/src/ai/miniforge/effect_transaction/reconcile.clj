@@ -52,7 +52,8 @@
 ;------------------------------------------------------------------------------ Layer 2
 
 (defn ^{:stratum 2} reconcile!
-  "Ask the world to settle a committing or unknown-outcome record."
+  "Reload a durable transaction and, when it remains unsettled, ask the world
+   to settle its committing or unknown outcome."
   [dir candidate probe-fn ^Instant now]
   (let [id (:effect/id candidate)
         t (store/read-record dir id)]

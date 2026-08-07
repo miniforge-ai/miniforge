@@ -56,7 +56,7 @@
         stale (assoc done :effect/state :unknown-outcome)
         probes (atom 0)
         result (fx/reconcile! dir stale (fn [_] (swap! probes inc)) later)]
-    (is (anomaly/anomaly? result))
+    (is (= :conflict (:anomaly/type result)))
     (is (zero? @probes))))
 
 (deftest ^{:stratum 1} missing-durable-record-does-not-probe-test
