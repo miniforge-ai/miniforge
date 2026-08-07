@@ -21,7 +21,8 @@ merge application flow before N7 authority enforcement is added.
   from the provider namespace into focused orchestration functions.
 - Preserve observed-merge SHA handling, auto-merge pending behavior, event
   publication, and terminal conflict anomalies.
-- Centralize repeated readiness fixtures in the merge tests.
+- Add focused readiness-classification behavior locks without repeating
+  provider fixtures.
 
 ## Standards review
 
@@ -31,14 +32,15 @@ merge application flow before N7 authority enforcement is added.
   ladders.
 - Capability maps remain declarative injection boundaries; repeated provider
   response and test-fixture maps are centralized.
-- PR budget: 593 / 600 reportable lines; every commit is at most 200.
+- PR budget: 490 / 600 reportable lines; every commit is at most 200.
 - Kondo, Polylith, stratum lint, and the changed-code standards baseline are
   clean.
 
 ## Verification
 
 - PR-lifecycle component passes in all three project compositions.
-- Merge behavior: 20 tests / 56 assertions.
+- Merge behavior: 19 tests / 54 assertions.
+- Readiness classification: 1 test / 4 assertions.
 - GitHub provider behavior: 16 tests / 48 assertions.
 - Pre-commit smoke: 339 tests / 1,285 assertions.
 - GraalVM/Babashka compatibility: 8 tests / 606 assertions.
