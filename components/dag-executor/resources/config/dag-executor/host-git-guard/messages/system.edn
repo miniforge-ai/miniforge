@@ -3,6 +3,10 @@
   :snapshot/remote-urls-failed
   "Could not read redirect config from the host checkout"
 
+  ;; snapshot — `git rev-parse --git-common-dir` could not be read
+  :snapshot/common-dir-failed
+  "Could not resolve the git common dir of the host checkout"
+
   ;; snapshot — `git for-each-ref refs/remotes/` could not be read
   :snapshot/remote-refs-failed
   "Could not read remote-tracking refs from the host checkout"
@@ -21,10 +25,15 @@
   :drift/ancestry-unknown
   "Could not determine whether a remote-tracking ref moved forward"
 
-  ;; guarded executor — the pre-acquire baseline check rejected the run
+  ;; guarded executor — acquiring against a checkout an earlier run drifted
   :guard/host-drifted-before-acquire
-  "Refusing to acquire a task worktree: the host checkout's git state already drifted"
+  "Acquiring a task worktree of a checkout an earlier run already drifted"
 
   ;; guarded executor — the post-release check found drift
   :guard/host-drifted-during-run
-  "A task run changed where the host checkout pushes and fetches"}}
+  "A task run changed where the host checkout pushes and fetches"
+
+  ;; guarded executor — the post-release snapshot could not be read, so
+  ;; whether the run drifted the checkout is unknown
+  :guard/post-release-snapshot-failed
+  "Could not re-read the host checkout after a task run; drift is unknown"}}

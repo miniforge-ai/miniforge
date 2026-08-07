@@ -30,10 +30,12 @@
    - protocols/executor.clj - Protocol definition
    - protocols/impl/runtime/oci_cli.clj - OCI-CLI implementation (Docker / Podman)
    - protocols/impl/kubernetes.clj - Kubernetes implementation
-   - protocols/impl/worktree.clj - Worktree fallback implementation"
+   - protocols/impl/worktree.clj - Worktree fallback implementation
+   - protocols/impl/host_guarded.clj - Host-git invariant wrapper"
   (:require
    [ai.miniforge.dag-executor.result :as result]
    [ai.miniforge.dag-executor.protocols.executor :as proto]
+   [ai.miniforge.dag-executor.protocols.impl.host-guarded :as host-guarded]
    [ai.miniforge.dag-executor.protocols.impl.runtime.descriptor :as descriptor]
    [ai.miniforge.dag-executor.protocols.impl.runtime.oci-cli :as oci-cli]
    [ai.miniforge.dag-executor.protocols.impl.runtime.selector :as selector]
@@ -190,7 +192,13 @@
       :docker {:image string :network string ...}
       :worktree {:base-path string :max-concurrent int ...}}
 
-   Returns map of executor-type -> executor instance."
+   Returns map of executor-type -> executor instance.
+
+   The worktree entry is wrapped in the host-git guard. Its environments
+   are linked worktrees of the host checkout and share that checkout's
+   config and refs, so a task run reaches the host through `git config`,
+   `git remote set-url`, and `git fetch`. Kubernetes and OCI environments
+   have their own git dir and need no wrapper."
   [config]
   (cond-> {}
     (:kubernetes config)
@@ -201,7 +209,9 @@
 
     ;; Worktree is always available as fallback
     true
-    (assoc :worktree (create-worktree-executor (get config :worktree {})))))
+    (assoc :worktree
+           (host-guarded/guard-host-git
+            (create-worktree-executor (get config :worktree {}))))))
 
 (defn ^{:stratum 1} prepare-runtime-executor!
   "Create an OCI-CLI executor on the selected container runtime, with the
