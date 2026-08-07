@@ -1,0 +1,55 @@
+;; =============================================================================
+;; Spec: Ariadne step 2d — enforce grants on Kubernetes deploy
+;; =============================================================================
+
+{:spec/title "Require granted, transacted Kubernetes deployments"
+
+ :spec/description
+ "Finish the deployment half of Ariadne step 2d. Replace the direct
+  kustomize-apply! path with a durable effect proposal, a narrowly scoped
+  :effect/deploy grant, an allow-class DecisionEnvelope, commit-time authority
+  recheck, and provider reconciliation.
+
+  Reuse check-resource-count and check-gke-node-limit as policy inputs rather
+  than duplicating deployment checks. Render the provider dry-run into the
+  proposal before mutation. Preserve rollback evidence on failed and successful
+  apply paths so partial mutations remain recoverable. Decompose the current
+  nested deploy phase into provider, domain-decision, and application-flow
+  namespaces before adding enforcement."
+
+ :spec/intent
+ {:type :feature
+  :scope ["components/phase-deployment/**"]}
+
+ :spec/constraints
+ ["No kubectl mutation runs without an active matching grant and allow-class envelope"
+  "The durable proposal is the authority recheck input at commit"
+  "Existing deployment policy checks are reused rather than reimplemented"
+  "The dry-run output is durable before the real apply begins"
+  "Rollback evidence survives every apply outcome"
+  "Provider operations, domain decisions, and phase orchestration remain separate"
+  "Repeated proposal, grant, and envelope maps use shared test factories"
+  "Functions must express one decision or orchestration step without nested control pyramids"
+  "Stratified design permits at most three layers per implementation namespace"]
+
+ :spec/acceptance-criteria
+ ["A deploy without an active :effect/deploy grant runs no kubectl mutation"
+  "A mismatched or expired deploy grant runs no kubectl mutation"
+  "check-resource-count is evaluated before the real apply"
+  "check-gke-node-limit is evaluated before the real apply"
+  "The durable deploy proposal contains the provider dry-run diff"
+  "A valid deploy records grant and DecisionEnvelope identifiers before mutation"
+  ":evidence/rollback-info remains in context after a failed apply"
+  "Reconciliation records the provider-observed deployment outcome"
+  "poly check reports 0 errors and 0 warnings"
+  "full bb test is green"]
+
+ :spec/priority
+ {:tier :high
+  :axes #{:correctness :observation :governance-credibility}
+  :theme :ariadne-grants
+  :rationale "Deployment remains an ambient-authority escape hatch until mutation is proposed, granted, committed, and reconciled."
+  :blocks []
+  :blocked-by ["ariadne-grant-issuance.spec.edn"]}
+
+ :spec/workflow-type :canonical-sdlc}
