@@ -22,6 +22,7 @@
    for resolving conversation threads and posting replies to comments."
   (:require
    [ai.miniforge.dag-executor.interface :as dag]
+   [ai.miniforge.pr-lifecycle.github-review-threads :as review-threads]
    [babashka.process :as process]
    [cheshire.core :as json]
    [clojure.string :as str]))
@@ -185,68 +186,11 @@
 
 ;------------------------------------------------------------------------------ Layer 2
 
-;; GitHub API operations
 (defn ^{:stratum 2} get-thread-id
-  "Get GraphQL thread ID from a comment ID.
-
-   GitHub review comments have both a REST API comment ID and a
-   GraphQL thread ID. This function fetches the thread ID needed
-   for resolving conversations.
-
-   Arguments:
-   - worktree-path: Path to git worktree
-   - pr-number: Pull request number
-   - comment-id: REST API comment ID (integer)
-
-   Returns DAG result with :thread-id or error"
+  "Resolve a REST review comment or reply to its GraphQL review thread."
   [worktree-path pr-number comment-id]
-  (let [;; First get repo owner/name from git remote
-        remote-result (run-gh-command ["git" "config" "--get" "remote.origin.url"] worktree-path)]
-    (if (dag/err? remote-result)
-      remote-result
-      (let [remote-url (str/trim (:output (:data remote-result)))
-            ;; Parse owner/repo from URL (supports both SSH and HTTPS)
-            ;; git@github.com:owner/repo.git or https://github.com/owner/repo.git
-            parts (re-find #"github\.com[:/]([^/]+)/([^/.]+)" remote-url)
-            owner (nth parts 1 nil)
-            repo (nth parts 2 nil)]
-        (if-not (and owner repo)
-          (dag/err :invalid-remote
-                   (str "Could not parse owner/repo from remote URL: " remote-url))
-          (let [query (str "query {
-  repository(owner: \"" owner "\", name: \"" repo "\") {
-    pullRequest(number: " pr-number ") {
-      reviewThreads(first: 100) {
-        nodes {
-          id
-          isResolved
-          comments(first: 10) {
-            nodes {
-              databaseId
-            }
-          }
-        }
-      }
-    }
-  }
-}")
-                result (graphql-query query worktree-path)]
-            (if (dag/ok? result)
-              (let [threads (get-in (:data result) [:data :repository :pullRequest :reviewThreads :nodes])
-                    ;; Find thread containing our comment ID
-                    matching-thread (some (fn [thread]
-                                            (when (some #(= (:databaseId %) comment-id)
-                                                        (get-in thread [:comments :nodes]))
-                                              thread))
-                                          threads)]
-                (if matching-thread
-                  (dag/ok {:thread-id (:id matching-thread)
-                           :is-resolved (:isResolved matching-thread)})
-                  (dag/err :thread-not-found
-                           "Could not find thread containing comment ID"
-                           {:comment-id comment-id
-                            :pr-number pr-number})))
-              result)))))))
+  (review-threads/get-thread-id run-gh-command graphql-query
+                                worktree-path pr-number comment-id))
 
 (defn ^{:stratum 2} post-review!
   "Post a single PR review batching multiple inline comments.
@@ -332,11 +276,16 @@
                    {:thread-id thread-id :thread thread})))
       result)))
 
+(defn ^{:stratum 2} unresolved-review-threads
+  "Read all provider pages and summarize unresolved review threads."
+  [worktree-path pr-number]
+  (review-threads/unresolved-review-threads
+   run-gh-command graphql-query worktree-path pr-number))
+
 ;------------------------------------------------------------------------------ Rich Comment
 (comment
-  ;; Get thread ID from comment
+  ;; Resolve a review comment to its thread.
   (get-thread-id "/path/to/repo" 148 2780310737)
-  ; => {:success true :data {:thread-id "PRRT_..." :is-resolved false ...}}
 
   ;; Reply to a comment
   (reply-to-comment "/path/to/repo" 148 2780310737 "Fixed in PR #150")
