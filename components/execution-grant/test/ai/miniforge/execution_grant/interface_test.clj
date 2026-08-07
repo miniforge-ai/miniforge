@@ -22,7 +22,8 @@
    [clojure.test :refer [deftest is testing]]
    [malli.core :as m])
   (:import
-   [java.time Instant]))
+   [java.time Instant]
+   [java.util Date]))
 
 ;------------------------------------------------------------------------------ Layer 0
 
@@ -43,6 +44,18 @@
 ;------------------------------------------------------------------------------ Layer 1
 
 (def ^{:stratum 1} pr-scope (assoc repo-scope :pr/number 42))
+
+(defn ^{:stratum 1} child-request
+  "A bounded merge delegation request, varied by `overrides`."
+  ([] (child-request {}))
+  ([overrides]
+   (merge {:principal "agent:implementer"
+           :scope repo-scope
+           :constraints {:constraint/max-cost-usd 2.0
+                         :constraint/max-tokens 1000
+                         :constraint/max-count 1}
+           :expires-at later}
+          overrides)))
 
 (defn ^{:stratum 1} root
   "A delegable root merge grant, bounded on every axis."
@@ -87,158 +100,125 @@
     (is (anomaly/anomaly? (root {:expires-at nil}))))
   (testing "explicit nil bounds are refused rather than silently broadened"
     (is (anomaly/anomaly? (root {:scope nil})))
-    (is (anomaly/anomaly? (root {:constraints nil})))))
+    (is (anomaly/anomaly? (root {:constraints nil}))))
+  (testing "all public mutation inputs are validated at the component boundary"
+    (let [parent (root)]
+      (is (anomaly/anomaly?
+           (grant/delegate parent (child-request) "not-an-instant")))
+      (is (anomaly/anomaly?
+           (grant/delegate parent (child-request {:delegable? "yes"}) now)))
+      (is (anomaly/anomaly? (grant/revoke parent :revocation/unknown now))))))
+
+(deftest ^{:stratum 2} both-inst-types-govern-time-test
+  (let [parent (root {:expires-at (Date/from much-later)})
+        child (grant/delegate
+               parent
+               (child-request {:expires-at (Date/from later)})
+               (Date/from now))]
+    (is (grant/valid? parent))
+    (is (grant/valid? child))
+    (is (grant/active? parent (Date/from now)))
+    (is (not (grant/active? parent (Date/from (.plusSeconds much-later 1)))))
+    (is (grant/valid?
+         (grant/revoke parent :revocation/operator (Date/from now))))))
 
 (deftest ^{:stratum 2} delegation-attenuates-test
   (let [parent (root)]
     (testing "a narrower child is issued and names its parent"
-      (let [child (grant/delegate parent
-                                  {:principal "agent:implementer"
-                                   :scope pr-scope
-                                   :constraints {:constraint/max-cost-usd 2.0
-                                                 :constraint/max-tokens 1000
-                                                 :constraint/max-count 1}
-                                   :expires-at later}
-                                  now)]
+      (let [child (grant/delegate parent (child-request {:scope pr-scope}) now)]
         (is (grant/valid? child))
         (is (= (:grant/id parent) (:grant/parent-id child)))
         (is (grant/attenuates? parent child))))
 
     (testing "raising a ceiling is refused, naming the axis"
-      (let [refused (grant/delegate parent
-                                    {:principal "agent:x"
-                                     :scope repo-scope
-                                     :constraints {:constraint/max-cost-usd 999.0}
-                                     :expires-at later}
-                                    now)]
+      (let [refused (grant/delegate
+                     parent
+                     (child-request {:constraints {:constraint/max-cost-usd 999.0}})
+                     now)]
         (is (anomaly/anomaly? refused))
         (is (some #(= :constraint/max-cost-usd (:attenuation/axis %))
                   (get-in refused [:anomaly/data :attenuation/violations])))))
 
     (testing "OMITTING a ceiling the parent set is refused — absent means unbounded"
-      (let [refused (grant/delegate parent
-                                    {:principal "agent:x"
-                                     :scope repo-scope
-                                     :constraints {:constraint/max-cost-usd 1.0}
-                                     :expires-at later}
-                                    now)]
+      (let [refused (grant/delegate
+                     parent
+                     (child-request {:constraints {:constraint/max-cost-usd 1.0}})
+                     now)]
         (is (anomaly/anomaly? refused)
             "a child that drops max-tokens would inherit an unlimited budget by omission")))
 
     (testing "widening scope is refused"
       (is (anomaly/anomaly?
-           (grant/delegate parent
-                           {:principal "agent:x"
-                            :scope {}
-                            :constraints (:grant/constraints parent)
-                            :expires-at later}
-                           now))))
+           (grant/delegate
+            parent
+            (child-request {:scope {}
+                            :constraints (:grant/constraints parent)})
+            now))))
 
     (testing "outliving the parent is refused"
       (is (anomaly/anomaly?
-           (grant/delegate parent
-                           {:principal "agent:x"
-                            :scope repo-scope
-                            :constraints (:grant/constraints parent)
-                            :expires-at (Instant/parse "2026-12-01T00:00:00Z")}
-                           now))))
+           (grant/delegate
+            parent
+            (child-request
+             {:constraints (:grant/constraints parent)
+              :expires-at (Instant/parse "2026-12-01T00:00:00Z")})
+            now))))
 
     (testing "a child cannot change effect class — it inherits the parent's"
-      (let [child (grant/delegate parent
-                                  {:principal "agent:x"
-                                   :effect-class :effect/deploy
-                                   :scope repo-scope
-                                   :constraints (:grant/constraints parent)
-                                   :expires-at later}
-                                  now)]
+      (let [child (grant/delegate
+                   parent
+                   (child-request {:effect-class :effect/deploy
+                                   :constraints (:grant/constraints parent)})
+                   now)]
         (is (= :effect/merge (:grant/effect-class child)))))))
 
 (deftest ^{:stratum 2} scope-narrowing-has-no-sentinel-hole-test
   (testing "a scope value equal to a presence sentinel cannot smuggle a dropped key"
     ;; Scope values are `any?`, so any sentinel default is a value some
-    ;; scope may legitimately hold. Presence must be tested with
-    ;; `contains?`, or a child could drop exactly this key undetected.
+    ;; scope may legitimately hold. Scope projection must preserve key
+    ;; membership, or a child could drop exactly this key undetected.
     (let [sentinel :ai.miniforge.execution-grant.attenuation/absent
           parent (root {:scope (assoc repo-scope :marker sentinel)})]
       (is (anomaly/anomaly?
-           (grant/delegate parent
-                           {:principal "agent:x"
-                            :scope repo-scope
-                            :constraints (:grant/constraints parent)
-                            :expires-at later}
-                           now))
+           (grant/delegate parent (child-request) now))
           "dropping a key whose value equals the sentinel is still a widening")))
 
   (testing "a key bound to nil must still be carried by the child"
     (let [scope-with-nil (assoc repo-scope :branch nil)
           parent (root {:scope scope-with-nil})]
       (is (anomaly/anomaly?
-           (grant/delegate parent
-                           {:principal "agent:x"
-                            :scope repo-scope
-                            :constraints (:grant/constraints parent)
-                            :expires-at later}
-                           now))
+           (grant/delegate parent (child-request) now))
           "an absent key is not the same as a key bound to nil")
       (is (grant/valid?
-           (grant/delegate parent
-                           {:principal "agent:x"
-                            :scope scope-with-nil
-                            :constraints (:grant/constraints parent)
-                            :expires-at later}
-                           now))
+           (grant/delegate parent (child-request {:scope scope-with-nil}) now))
           "carrying the nil binding is a legal narrowing"))))
 
 (deftest ^{:stratum 2} anomaly-types-are-routable-test
   (testing "a malformed parent is :invalid-input, not :unauthorized"
-    (let [a (grant/delegate {:not "a grant"}
-                            {:principal "agent:x" :expires-at later}
-                            now)]
+    (let [a (grant/delegate {:not "a grant"} (child-request) now)]
       (is (anomaly/anomaly? a))
       (is (= :invalid-input (:anomaly/type a))
           "bad caller data and denied authority must route apart")))
 
   (testing "a refused delegation from a valid parent is :unauthorized"
-    (let [a (grant/delegate (root {:delegable? false})
-                            {:principal "agent:x"
-                             :scope repo-scope
-                             :constraints {:constraint/max-cost-usd 1.0
-                                           :constraint/max-tokens 10
-                                           :constraint/max-count 1}
-                             :expires-at later}
-                            now)]
+    (let [a (grant/delegate (root {:delegable? false}) (child-request) now)]
       (is (= :unauthorized (:anomaly/type a))))))
 
 (deftest ^{:stratum 2} delegation-structural-refusals-test
   (testing "a non-delegable parent cannot be delegated from"
     (let [parent (root {:delegable? false})]
       (is (anomaly/anomaly?
-           (grant/delegate parent
-                           {:principal "agent:x"
-                            :scope repo-scope
-                            :constraints (:grant/constraints parent)
-                            :expires-at later}
-                           now)))))
+           (grant/delegate parent (child-request) now)))))
 
   (testing "an already-revoked parent cannot be delegated from"
     (let [parent (grant/revoke (root) :breach/cost-exceeded now)]
       (is (anomaly/anomaly?
-           (grant/delegate parent
-                           {:principal "agent:x"
-                            :scope repo-scope
-                            :constraints (:grant/constraints parent)
-                            :expires-at later}
-                           now)))))
+           (grant/delegate parent (child-request) now)))))
 
   (testing "an expired parent cannot be delegated from"
     (let [parent (root {:expires-at later})]
       (is (anomaly/anomaly?
-           (grant/delegate parent
-                           {:principal "agent:x"
-                            :scope repo-scope
-                            :constraints (:grant/constraints parent)
-                            :expires-at later}
-                           much-later))))))
+           (grant/delegate parent (child-request) much-later))))))
 
 (deftest ^{:stratum 2} revocation-preserves-the-record-test
   (let [g (root)
@@ -256,14 +236,7 @@
 
 (deftest ^{:stratum 2} active-walks-lineage-test
   (let [parent (root)
-        child (grant/delegate parent
-                              {:principal "agent:implementer"
-                               :scope pr-scope
-                               :constraints {:constraint/max-cost-usd 2.0
-                                             :constraint/max-tokens 1000
-                                             :constraint/max-count 1}
-                               :expires-at later}
-                              now)]
+        child (grant/delegate parent (child-request {:scope pr-scope}) now)]
     (testing "both live: the child is active"
       (is (grant/active? child now (lookup-of parent child))))
 
