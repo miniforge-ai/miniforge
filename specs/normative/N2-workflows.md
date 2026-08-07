@@ -79,10 +79,16 @@ projects onto it and MUST NOT introduce a synonym:
 - N5's CLI filters, the TUI, and the API report these values.
 - N1 §2's Workflow entity derives `:workflow/status` from this projection.
 
-`:queued` is the name; `:pending` and `:executing` are **withdrawn synonyms**.
-Earlier revisions of this section used `:pending`, and N5 §2.3.2 documented
-`:executing`. Three spellings of two states meant a filter written against one
-spec silently matched nothing produced by another.
+`:pending` and `:executing` are **withdrawn synonyms**, and they map onto
+different canonical states:
+
+| Withdrawn | Canonical | Where it came from |
+|-----------|-----------|--------------------|
+| `:pending` | `:queued` | earlier revisions of this section |
+| `:executing` | `:running` | N5 §2.3.2's CLI filter and the implementation |
+
+Three spellings of two states meant a filter written against one spec silently
+matched nothing produced by another.
 
 `:paused` and `:blocked` were previously absent here while N8 defined a pause
 control action and the supervisory projection reported both. A state an
