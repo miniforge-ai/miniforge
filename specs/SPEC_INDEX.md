@@ -6,6 +6,7 @@
 
 # miniforge Specification Index
 
+**Version:** 0.17.0-draft
 **Version:** 0.16.0-draft
 **Date:** 2026-08-09
 **Status:** Living specification during OSS development
@@ -338,6 +339,11 @@ Defines:
 - Audit integration: full event stream (N3) and evidence bundle (N6) linkage
 - **Tool operational semantics:** Timeout, retry, circuit-breaker, concurrency, fallback (§3.4–§3.5)
 - **Tool response validation:** Schema validation and injection sanitization at capsule boundary (§7.4)
+- **Audit events reframed (§12.1):** none of the fifteen types is registered in N3 §6, so the
+  table is informative; adding a row is an N3 amendment first
+- **Evidence type gated on N6 (§12.2):** `:governed-execution` is not an N6 §3.1.1 artifact type
+- **Annex A (informative):** implementation conformance status — §10's ten safety invariants
+  have no enforcement point
 
 ---
 
@@ -593,6 +599,15 @@ Normative specs are enforced by:
 
 ## Version History
 
+- **0.17.0-draft** (2026-08-06) - N10 spec-completion pass. **N10**: §12.1 required governed
+  execution to emit events to N3 directly above a note saying implementations MUST NOT emit them,
+  since none of the fifteen types is registered in N3 §6 — a requirement satisfiable in neither
+  direction. The table is now informative and the conformant path is correlation identifiers on
+  registered types, with N3 §6.1 amendment as the route to emitting any of them. §12.2's
+  `:governed-execution` evidence shape is not an N6 §3.1.1 artifact type and is gated on
+  registering it there. Annex A records that §10's ten safety invariants — including SI-10's
+  five-second revocation bound — have no enforcement point, because no capsule, postcondition, or
+  crown-jewel component exists. Per-spec bumps: N10 0.3.1→0.4.0
 - **0.16.0-draft** (2026-08-06) - N9 spec-completion pass. **N9**: §7.1 restated a PR-only scope
   rule superseded by N3 §2.3's six-scope table, and §7.2 reproduced N3 §3.16's event schemas —
   both now reference N3. §14 required breaking changes to be "supported in parallel for at least
