@@ -1119,7 +1119,7 @@ withdrawn requirement is marked withdrawn, not deleted.
 | ID | Level | Requirement |
 |----|-------|-------------|
 | N6.EB.1 | MUST | Create a bundle at workflow completion, including for failed and cancelled workflows (§5.1). |
-| N6.EB.2 | MUST | Include every §7.1 compliance key, as listed in §2.1 (§2.1, §7.1). |
+| N6.EB.2 | MUST | Include every compliance key §7.1 marks required (§2.1, §7.1). |
 | N6.EB.3 | MUST | Seal the bundle at creation: set `:evidence/sealed-at` and `:evidence/content-hash` (§2.14). |
 | N6.EB.4 | MUST | Compute the seal hash over a canonical serialization, excluding hash and signature (§2.14). |
 | N6.EB.5 | MUST NOT | Modify a bundle after sealing, including to add auditor notes (§2.14). |
