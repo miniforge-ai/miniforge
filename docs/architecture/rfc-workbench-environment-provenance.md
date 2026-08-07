@@ -7,7 +7,10 @@
 # RFC: Environment provenance at the workbench boundary
 
 **Status:** Proposed (2026-08-06). Written against `workbench-contract`
-at `3196b5f` and the two miniforge product adapters as built.
+at `3196b5f` and the two miniforge product adapters as built. The three
+questions it opened were resolved from source on 2026-08-07 — see
+"Questions resolved from source"; nothing is left pending for a reader
+to answer.
 
 A minibench experiment is only readable if its arms differ along the
 declared axes and nothing else. The workbench contract pins the
@@ -180,9 +183,10 @@ unschematized blob, and the point of this is to be gateable.
 
 ## Adoption order
 
-1. `RunEnvironment` and the snapshot field in `workbench-contract` — Rust
-   type plus the Clojure and Swift bindings — released as a tagged
-   version. Nothing consumes it yet; purely additive.
+1. `RunEnvironment` and the snapshot field in `workbench-contract` — the
+   Rust type plus the Clojure binding — released as a tagged version.
+   Nothing consumes it yet; purely additive. (There is no Swift binding
+   to update: `bindings/swift/` holds a README and nothing else.)
 2. `bb bench:provision` writes the attestation. Reuses
    `bench/isolation-report`, already shipped in PR #1685.
 3. Both adapters read, re-verify, and populate `:environment`. Still no
@@ -195,18 +199,70 @@ Steps 1-3 are non-breaking. Step 4 is the breaking one and should land
 alone, so the release that invalidates existing benches is the only
 thing in it.
 
-## Open questions
+## Questions resolved from source
 
-1. **Container runs.** Does a run executed through the OCI runtime path
-   need a different `kind` verdict, or does the container boundary make
-   `isolated` trivially true? Unverified — it needs someone who knows
-   that path to answer, and it may already isolate everything this cares
-   about.
-2. **Overrides.** Should the gate be overridable by a pre-registered
-   amendment? The bench methodology's own rule is that amendments after
-   the first counted run are logged, not edited, so an override that
-   writes itself into the snapshot would match. Left open deliberately —
-   it belongs to whoever owns the bench methodology, not to the contract.
-3. **Thesium.** `workbench-contract` is consumed by Thesium as well.
-   Confirm no product surface there breaks on an added optional field
-   before tagging.
+Three questions were open when this RFC was first written. All three are
+answerable from the code, and were.
+
+### Container runs are isolated, but not trivially
+
+`clone-and-checkout!` (`dag-executor/executor.clj:330`) runs
+`git clone <repo-url> .` *inside* the environment via `execute!`. On the
+OCI executor that is inside the container, so the container's repository
+is a fresh clone with its own `.git` — its config and refs are its own.
+
+The qualifier is host mounts: a container whose workdir is bind-mounted
+from the host is back to sharing. That question is already answered by
+existing code. `plan-security/scan-plan` reports a host runtime-socket
+mount as `:hard-stop` and any host mount outside the allowlist as
+`:review`. So `kind "container"` yields `isolated true` when the workdir
+is not covered by a host mount, and the plan-security scan is what
+decides it. No new mechanism, and step 3's adapter work reads a verdict
+that already exists.
+
+An incidental defect surfaced while answering this, and belongs in its
+own issue rather than here: `infer-repo-url`
+(`cli/workflow_runner/sandbox.clj:63`) falls back to the launching
+directory's `git remote get-url origin` and hands that to
+`clone-and-checkout!` to execute *inside* the container. When origin is a
+local path — precisely what the 2026-08-06 incident produced — the
+container is told to clone a host path that does not exist inside it.
+
+### Overrides follow the house pattern, and go one better
+
+The pattern already exists twice: `MINIFORGE_COMMIT_BUDGET_OVERRIDE`
+(`tasks/commit_budget.clj:125`) and `MINIFORGE_PR_BUDGET_OVERRIDE`
+(`tasks/pr_budget.clj:60`). Both allow the override, both require a
+rationale string, and both echo that rationale so it lands in the log or
+the PR trail. That is the same discipline the bench runsheet states for
+itself — amendments after the first counted run are logged, not edited.
+
+So: overridable, by that pattern, with one improvement. The two
+precedents put the rationale in a log, which is separable from the thing
+it excuses. This one writes itself into the snapshot:
+
+```clojure
+[:override {:optional true} [:map {:closed false}
+                             [:rationale :string]
+                             [:at :string]]]
+```
+
+A snapshot admitted over a failed environment check carries the reason
+for the rest of its life, and any comparison that includes it can see
+that. Costs nothing, and it is strictly harder to lose than a log line.
+
+### Nothing in Thesium breaks
+
+Verified rather than assumed, on four points:
+
+- **Rust.** No `deny_unknown_fields` anywhere in `crates/`. Optional
+  fields already use `Option` with `skip_serializing_if`. Adding one more
+  is compatible in both directions.
+- **Swift.** There is no Swift binding — `bindings/swift/` holds a README
+  and nothing else. Nothing to break.
+- **Clojure consumers.** All Thesium consumption goes through
+  `workbench-adapter-kit`, which validates with `bv/valid?` and
+  `bv/validate!` against the contract's own `schema/WorkbenchSnapshot`.
+  No consumer re-declares the map and none sets `:closed true`.
+- **Signatures.** Nothing in-tree verifies a snapshot signature, so an
+  added field cannot invalidate a digest check that does not exist.
