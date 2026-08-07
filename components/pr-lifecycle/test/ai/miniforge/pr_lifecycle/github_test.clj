@@ -120,6 +120,16 @@
       (is (dag/err? result))
       (is (= :invalid-pagination (get-in result [:error :code]))))))
 
+(deftest ^{:stratum 1} unresolved-review-threads-rejects-repeated-page-cursor
+  (with-redefs [github/run-gh-command
+                (fn [_ _] (dag/ok {:output "git@github.com:miniforge-ai/miniforge.git"}))
+                github/graphql-query
+                (fn [& _]
+                  (review-thread-page [] true "same-page"))]
+    (let [result (github/unresolved-review-threads "/repo" 1703)]
+      (is (dag/err? result))
+      (is (= :invalid-pagination (get-in result [:error :code]))))))
+
 (deftest ^{:stratum 1} post-review-uses-create-review-endpoint-via-stdin
   (testing "post-review! shells out to the right gh api endpoint with --input -"
     (let [calls (atom [])

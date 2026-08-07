@@ -373,6 +373,7 @@
       repository-result
       (let [{:keys [owner repo]} (:data repository-result)]
         (loop [cursor nil
+               seen-cursors #{}
                unresolved-count 0]
           (let [variables (cond-> {:owner owner :repo repo :pr pr-number}
                             cursor (assoc :cursor cursor))
@@ -391,10 +392,13 @@
                     (if (:hasNextPage page-info)
                       (let [next-cursor (:endCursor page-info)]
                         (if (or (not (string? next-cursor))
-                                (str/blank? next-cursor))
+                                (str/blank? next-cursor)
+                                (contains? seen-cursors next-cursor))
                           (dag/err :invalid-pagination
-                                   "GitHub review thread page omitted its next cursor")
-                          (recur next-cursor total)))
+                                   "GitHub returned an invalid review thread cursor")
+                          (recur next-cursor
+                                 (conj seen-cursors next-cursor)
+                                 total)))
                       (dag/ok {:has-unresolved? (pos? total)
                                :unresolved-count total}))))))))))))
 
