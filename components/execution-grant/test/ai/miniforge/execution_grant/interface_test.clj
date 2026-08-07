@@ -156,8 +156,8 @@
 (deftest ^{:stratum 2} scope-narrowing-has-no-sentinel-hole-test
   (testing "a scope value equal to a presence sentinel cannot smuggle a dropped key"
     ;; Scope values are `any?`, so any sentinel default is a value some
-    ;; scope may legitimately hold. Presence must be tested with
-    ;; `contains?`, or a child could drop exactly this key undetected.
+    ;; scope may legitimately hold. Scope projection must preserve key
+    ;; membership, or a child could drop exactly this key undetected.
     (let [sentinel :ai.miniforge.execution-grant.attenuation/absent
           parent (root {:scope (assoc repo-scope :marker sentinel)})]
       (is (anomaly/anomaly?

@@ -120,9 +120,10 @@
         effect-class (:grant/effect-class parent)
         child-opts (assoc opts :parent-id parent-id :effect-class effect-class)
         child (assemble child-opts now)
-        widened (when (valid? child) (attenuation/violations parent child))]
+        valid-child? (valid? child)
+        widened (when valid-child? (attenuation/violations parent child))]
     (cond
-      (not (valid? child))
+      (not valid-child?)
       (invalid :grant/delegated-invalid child)
 
       (seq widened)
