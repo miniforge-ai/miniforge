@@ -15,11 +15,11 @@
 ;; WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 ;; See the License for the specific language governing permissions and
 ;; limitations under the License.
-
 (ns ai.miniforge.phase-deployment.deploy
   "Deploy phase interceptor."
   (:require [ai.miniforge.logging.interface :as log]
             [ai.miniforge.phase-deployment.defaults :as defaults]
+            [ai.miniforge.phase-deployment.deploy-provider :as provider]
             [ai.miniforge.phase-deployment.evidence :as evidence]
             [ai.miniforge.phase-deployment.messages :as msg]
             [ai.miniforge.phase-deployment.shell :as shell]
@@ -27,13 +27,13 @@
             [ai.miniforge.schema.interface :as schema]))
 
 ;------------------------------------------------------------------------------ Layer 0
-;; Defaults + schemas
 
-(def default-config
+;; Defaults + schemas
+(def ^{:stratum 0} default-config
   "Deploy phase defaults loaded from EDN."
   (defaults/phase-defaults :deploy))
 
-(def DeployRunConfig
+(def ^{:stratum 0} DeployRunConfig
   [:map
    [:phase-config map?]
    [:kustomize-dir :string]
@@ -42,39 +42,24 @@
    [:deployment-name :string]
    [:context {:optional true} [:maybe :string]]])
 
-(def RollbackInfo
+(def ^{:stratum 0} RollbackInfo
   [:map
    [:revision {:optional true} [:maybe :string]]
    [:image {:optional true} [:maybe :string]]
    [:replicas {:optional true} [:maybe int?]]])
 
-(def PodSummary
-  [:map
-   [:name {:optional true} [:maybe :string]]
-   [:phase {:optional true} [:maybe :string]]
-   [:ready? :boolean]
-   [:images [:vector :string]]])
-
-(def PodState
-  [:map
-   [:pod-count nat-int?]
-   [:ready-count nat-int?]
-   [:pods [:vector PodSummary]]])
-
-(defn- validate!
+(defn- ^{:stratum 0} validate!
   [result-schema value]
-  (schema/validate result-schema value))
+  (schema/validate-anomaly result-schema value))
 
-;------------------------------------------------------------------------------ Layer 1
 ;; Shared helpers
-
-(defn- get-logger
+(defn- ^{:stratum 0} get-logger
   "Resolve logger from ctx, creating a default if absent."
   [ctx]
   (or (get-in ctx [:execution/logger])
       (log/create-logger {:min-level :info :output :human})))
 
-(defn- failed-enter
+(defn- ^{:stratum 0} failed-enter
   "Build a :failed phase context for enter-time failures."
   [ctx start-time result-map]
   (-> ctx
@@ -83,12 +68,34 @@
       (assoc-in [:phase :started-at] start-time)
       (assoc-in [:phase :result] result-map)))
 
-(defn- merged-phase-config
+(defn- ^{:stratum 0} merged-phase-config
   [ctx phase-kw]
   (phase/merge-with-defaults
    (assoc (or (get-in ctx [:phase-config]) {}) :phase phase-kw)))
 
-(defn- resolve-deploy-config
+(defn- ^{:stratum 0} rollout-metrics
+  [start-time pod-state]
+  {:duration-ms (- (System/currentTimeMillis) start-time)
+   :pod-count   (:pod-count pod-state)
+   :ready-count (:ready-count pod-state)})
+
+(defn- ^{:stratum 0} add-deploy-evidence
+  [ctx rollback-evidence manifest-evidence image-evidence]
+  (cond-> ctx
+    rollback-evidence (evidence/add-evidence-to-ctx rollback-evidence)
+    true (evidence/add-evidence-to-ctx manifest-evidence)
+    true (evidence/add-evidence-to-ctx image-evidence)))
+
+(defn ^{:stratum 0} leave-deploy
+  "Post-deploy: record final metrics."
+  [ctx]
+  (if (= :completed (get-in ctx [:phase :status]))
+    ctx
+    (assoc-in ctx [:phase :status] :failed)))
+
+;------------------------------------------------------------------------------ Layer 1
+
+(defn- ^{:stratum 1} resolve-deploy-config
   [ctx]
   (let [phase-config  (merged-phase-config ctx :deploy)
         input         (or (get-in ctx [:execution/input]) {})
@@ -108,27 +115,7 @@
                                              (get phase-config :deployment-name app-label))}]
     (validate! DeployRunConfig deploy-config)))
 
-(defn- pod-ready?
-  [pod]
-  (every? :ready (get-in pod [:status :containerStatuses] [])))
-
-(defn- pod-summary
-  [pod]
-  {:name   (get-in pod [:metadata :name])
-   :phase  (get-in pod [:status :phase])
-   :ready? (pod-ready? pod)
-   :images (into [] (map :image) (get-in pod [:spec :containers] []))})
-
-(defn- build-pod-state
-  [pods]
-  (let [summaries (into [] (map pod-summary) pods)]
-    (validate!
-     PodState
-     {:pod-count   (count summaries)
-      :ready-count (count (filter :ready? summaries))
-      :pods        summaries})))
-
-(defn- capture-current-state
+(defn- ^{:stratum 1} capture-current-state
   "Capture current deployment state for rollback evidence."
   [deployment-name namespace context]
   (let [result (shell/kubectl! "get"
@@ -143,29 +130,7 @@
         :image    (get-in result [:parsed :spec :template :spec :containers 0 :image])
         :replicas (get-in result [:parsed :status :readyReplicas])}))))
 
-(defn- capture-pod-state
-  "Capture post-deploy pod state for evidence and gate checking."
-  [app-label namespace context]
-  (let [result (shell/kubectl-get-pods! (str "app=" app-label)
-                                        :namespace namespace
-                                        :context context)]
-    (when (schema/succeeded? result)
-      (build-pod-state (get-in result [:parsed :items] [])))))
-
-(defn- rollout-metrics
-  [start-time pod-state]
-  {:duration-ms (- (System/currentTimeMillis) start-time)
-   :pod-count   (:pod-count pod-state)
-   :ready-count (:ready-count pod-state)})
-
-(defn- add-deploy-evidence
-  [ctx rollback-evidence manifest-evidence image-evidence]
-  (cond-> ctx
-    rollback-evidence (evidence/add-evidence-to-ctx rollback-evidence)
-    true (evidence/add-evidence-to-ctx manifest-evidence)
-    true (evidence/add-evidence-to-ctx image-evidence)))
-
-(defn- store-apply-failure
+(defn- ^{:stratum 1} store-apply-failure
   [ctx start-time logger result]
   (log/error logger :deploy :deploy/apply-failed
              {:data {:error (:error result)
@@ -177,18 +142,17 @@
                               (get-in result [:apply-result :stderr]))
                  :metrics {:duration-ms (- (System/currentTimeMillis) start-time)}}))
 
-(defn- store-rollout-failure
-  [ctx start-time logger rollout-result manifest-evidence image-evidence]
+(defn- ^{:stratum 1} store-rollout-failure
+  [ctx start-time logger failure rollback-evidence manifest-evidence image-evidence]
   (log/error logger :deploy :deploy/rollout-failed
-             {:data {:stderr (:stderr rollout-result)}})
+             {:data {:stderr failure}})
   (-> (failed-enter ctx start-time
                     {:status  :rollout-failed
-                     :error   (:stderr rollout-result)
+                     :error   failure
                      :metrics {:duration-ms (- (System/currentTimeMillis) start-time)}})
-      (evidence/add-evidence-to-ctx manifest-evidence)
-      (evidence/add-evidence-to-ctx image-evidence)))
+      (add-deploy-evidence rollback-evidence manifest-evidence image-evidence)))
 
-(defn- store-successful-deploy
+(defn- ^{:stratum 1} store-successful-deploy
   [ctx start-time config rollback-evidence manifest-evidence image-evidence image-digests pod-state logger]
   (let [metrics (rollout-metrics start-time pod-state)]
     (log/info logger :deploy :deploy/complete
@@ -210,17 +174,32 @@
                    :metrics  metrics})
         (add-deploy-evidence rollback-evidence manifest-evidence image-evidence))))
 
-(defn- invalid-config-result
+(defn- ^{:stratum 1} invalid-config-result
   [ctx start-time ex]
   (failed-enter ctx start-time
                 {:status :error
                  :error  (msg/t :deploy/invalid-config
                                 {:error (ex-message ex)})}))
 
-;------------------------------------------------------------------------------ Layer 2
-;; Phase interceptors + registration
+(defn ^{:stratum 1} error-deploy
+  "Handle deploy phase errors."
+  [ctx ex]
+  (let [logger (get-logger ctx)]
+    (log/error logger :deploy :deploy/error
+               {:data {:message (ex-message ex)
+                       :data    (ex-data ex)}})
+    (-> ctx
+        (assoc-in [:phase :status] :failed)
+        (update :execution/errors (fnil conj [])
+                {:type    :deploy-error
+                 :phase   :deploy
+                 :message (ex-message ex)
+                 :data    (ex-data ex)}))))
 
-(defn enter-deploy
+;------------------------------------------------------------------------------ Layer 2
+
+;; Phase interceptors + registration
+(defn ^{:stratum 2} enter-deploy
   "Execute deployment: build manifests, apply them, and wait for rollout."
   [ctx]
   (let [start-time (System/currentTimeMillis)
@@ -252,20 +231,15 @@
                                    image-digests)]
             (log/info logger :deploy :deploy/applied
                       {:data {:image-count (count image-digests)}})
-            (let [rollout-result (shell/kubectl-rollout-status!
-                                  (str "deployment/" (:deployment-name config))
-                                  :namespace (:namespace config)
-                                  :context (:context config)
-                                  :timeout-s 300)
-                  pod-state      (or (capture-pod-state (:app-label config)
-                                                        (:namespace config)
-                                                        (:context config))
-                                     (build-pod-state []))]
-              (if (schema/failed? rollout-result)
+            (let [observation (provider/observe! config)
+                  observed (:provider/observed observation)
+                  pod-state (:deployment/pods observed)]
+              (if-not (:provider/matched? observation)
                 (store-rollout-failure ctx
                                        start-time
                                        logger
-                                       rollout-result
+                                       (:deployment/failure observed)
+                                       rollback-evidence
                                        manifest-evidence
                                        image-evidence)
                 (store-successful-deploy ctx
@@ -279,38 +253,6 @@
                                          logger))))))
       (catch clojure.lang.ExceptionInfo ex
         (invalid-config-result ctx start-time ex)))))
-
-(defn leave-deploy
-  "Post-deploy: record final metrics."
-  [ctx]
-  (if (= :completed (get-in ctx [:phase :status]))
-    ctx
-    (assoc-in ctx [:phase :status] :failed)))
-
-(defn error-deploy
-  "Handle deploy phase errors."
-  [ctx ex]
-  (let [logger (get-logger ctx)]
-    (log/error logger :deploy :deploy/error
-               {:data {:message (ex-message ex)
-                       :data    (ex-data ex)}})
-    (-> ctx
-        (assoc-in [:phase :status] :failed)
-        (update :execution/errors (fnil conj [])
-                {:type    :deploy-error
-                 :phase   :deploy
-                 :message (ex-message ex)
-                 :data    (ex-data ex)}))))
-
-;; Registration
-
-(defmethod phase/get-phase-interceptor-method :deploy
-  [_]
-  {:name   :deploy
-   :enter  enter-deploy
-   :leave  leave-deploy
-   :error  error-deploy
-   :config default-config})
 
 ;------------------------------------------------------------------------------ Rich Comment
 (comment
