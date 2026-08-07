@@ -122,18 +122,18 @@
 (deftest ^{:stratum 2} storage-failures-are-returned-as-data-test
   (let [dir (tmp-dir)
         blocking-file (io/file dir "not-a-directory")
-        grant (spend-grant)]
+        g (spend-grant)]
     (spit blocking-file "occupied" :encoding "UTF-8")
     (is (= :fault
            (:anomaly/type
             (grant/record-breach! blocking-file (breach-record)))))
     (is (anomaly/anomaly?
-         (grant/revoke-for-cause! blocking-file grant
+         (grant/revoke-for-cause! blocking-file g
                                   (breach-observation) later)))
     (is (anomaly/anomaly? (grant/breach-history blocking-file)))
     (is (false? (grant/eligible? blocking-file "agent:x" :effect/spend
                                 {:constraint/max-cost-usd 1.0})))
-    (is (grant/active? grant later))))
+    (is (grant/active? g later))))
 
 (deftest ^{:stratum 2} revoke-for-cause-ends-the-grant-and-remembers-test
   (let [dir (tmp-dir)
