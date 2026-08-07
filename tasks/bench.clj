@@ -27,7 +27,8 @@
    checkout. See DOGFOODING.md §Bench Runs for the 2026-08-06 incident
    that shape produced.
 
-   Per std 005 only the Layer 2 bb-task entry point prints and exits."
+   Per std 005 only the bb-task entry points — `verify` and `provision` —
+   print and exit; everything below them returns an anomaly as data."
   (:require
    [bench-git :as git]
    [clojure.string :as str])
@@ -138,9 +139,9 @@
       (anomaly :invalid-input "branch name is empty once ref prefixes are stripped"
                {:branch branch})
 
-      (.exists (File. repo-dir))
-      (anomaly :conflict "bench repo already exists; remove it to re-provision"
-               {:repo-dir repo-dir})
+      (some #(.exists (File. ^String %)) [repo-dir mirror-dir])
+      (anomaly :conflict "bench root already populated; remove it to re-provision"
+               {:repo-dir repo-dir :mirror-dir mirror-dir})
 
       (nil? (git/git-dirs source))
       (anomaly :invalid-input "bench source is not a git checkout" {:source source})
@@ -148,14 +149,22 @@
       :else
       (do
         (.mkdirs (File. (str root)))
-        (let [steps [[:clone (git/git "." "clone" "--quiet" "--no-checkout" source repo-dir)]
-                     [:checkout (git/git repo-dir "checkout" "--quiet" "--detach" ref)]
-                     [:init-mirror (git/git "." "init" "--quiet" "--bare" mirror-dir)]
-                     [:seed-mirror (git/git repo-dir "push" "--quiet" mirror-dir
-                                            (str "HEAD:" target-ref))]
-                     [:mirror-head (git/git mirror-dir "symbolic-ref" "HEAD" target-ref)]
-                     [:redirect-origin (git/git repo-dir "remote" "set-url" "origin" mirror-dir)]]
-              failed (first (remove #(zero? (:exit (second %))) steps))
+        ;; Thunks, not results: a vector of `(git ...)` calls would run every
+        ;; step before anything inspected an exit code, so a failed clone
+        ;; would still init a mirror and leave partial state behind.
+        (let [steps [[:clone #(git/git "." "clone" "--quiet" "--no-checkout" source repo-dir)]
+                     [:checkout #(git/git repo-dir "checkout" "--quiet" "--detach" ref)]
+                     [:init-mirror #(git/git "." "init" "--quiet" "--bare" mirror-dir)]
+                     [:seed-mirror #(git/git repo-dir "push" "--quiet" mirror-dir
+                                             (str "HEAD:" target-ref))]
+                     [:mirror-head #(git/git mirror-dir "symbolic-ref" "HEAD" target-ref)]
+                     [:redirect-origin #(git/git repo-dir "remote" "set-url" "origin" mirror-dir)]]
+              failed (reduce (fn [_ [step run-step!]]
+                               (let [r (run-step!)]
+                                 (when-not (zero? (:exit r))
+                                   (reduced [step r]))))
+                             nil
+                             steps)
               origin-after (git/remote-url source "origin")
               report (isolation-report repo-dir source)]
           (cond

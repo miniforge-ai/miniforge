@@ -129,6 +129,22 @@
           (delete-tree! root)
           (delete-tree! source))))))
 
+(deftest ^{:stratum 2} provision-stops-at-the-first-failed-step-test
+  (testing "a failed step leaves no mirror behind for a later step to inherit"
+    (let [root (temp-dir)
+          source (init-launching-repo! (temp-dir))
+          bench-root (str (File. root "bench"))]
+      (try
+        (let [result (sut/provision! {:source source
+                                      :root bench-root
+                                      :ref "no-such-ref"})]
+          (is (= :checkout (get-in result [:anomaly/data :step])))
+          (is (not (.exists (File. (str (File. bench-root "origin.git")))))
+              "steps after the failure must not have run"))
+        (finally
+          (delete-tree! root)
+          (delete-tree! source))))))
+
 (deftest ^{:stratum 2} linked-worktree-is-reported-unisolated-test
   (testing "the shape the 2026-08-06 bench actually had is rejected"
     (let [source (init-launching-repo! (temp-dir))

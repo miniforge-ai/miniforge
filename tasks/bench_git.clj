@@ -43,10 +43,17 @@
   "Canonical absolute path of `path`, resolved against `dir` when it is
    relative. `git rev-parse --git-common-dir` returns a bare `.git` for
    the primary worktree and an absolute path for linked ones, so both
-   shapes have to normalize before they can be compared."
+   shapes have to normalize before they can be compared.
+
+   `getCanonicalPath` resolves symlinks and so can throw on IO or security
+   failures; the uncanonicalized absolute path is a usable fallback and
+   keeps this fn total."
   [dir path]
-  (let [f (File. (str path))]
-    (.getCanonicalPath (if (.isAbsolute f) f (File. (str dir) (str path))))))
+  (let [f (File. (str path))
+        resolved (if (.isAbsolute f) f (File. (str dir) (str path)))]
+    (try
+      (.getCanonicalPath resolved)
+      (catch Exception _ (.getAbsolutePath resolved)))))
 
 ;------------------------------------------------------------------------------ Layer 1
 
