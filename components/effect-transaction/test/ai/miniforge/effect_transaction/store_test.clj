@@ -186,3 +186,18 @@
     (is (= original (store/create! dir original)))
     (is (anomaly/anomaly? (store/create! dir replacement)))
     (is (= original (fx/read-record dir (:effect/id original))))))
+
+(deftest ^{:stratum 2} lifecycle-writes-propagate-store-anomalies-test
+  (let [dir (tmp-dir)
+        write-failure (anomaly/anomaly :unavailable "disk unavailable" {})]
+    (with-redefs [store/create! (fn [& _] write-failure)
+                  store/transition! (fn [& _] write-failure)]
+      (is (= write-failure
+             (effect-record/propose!
+              dir
+              {:effect-class :effect/merge
+               :grant-id (random-uuid)
+               :envelope-id (random-uuid)}
+              now)))
+      (is (= write-failure
+             (effect-record/advance! dir (record) {:effect/state :committing} now))))))
