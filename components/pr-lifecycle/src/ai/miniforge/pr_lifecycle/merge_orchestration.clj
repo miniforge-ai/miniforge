@@ -22,54 +22,13 @@
    [ai.miniforge.logging.interface :as log]
    [ai.miniforge.pr-lifecycle.conflict-resolution :as conflict-resolution]
    [ai.miniforge.pr-lifecycle.events :as events]
-   [ai.miniforge.pr-lifecycle.merge-transaction :as transaction])
+   [ai.miniforge.pr-lifecycle.merge-governed :as governed]
+   [ai.miniforge.pr-lifecycle.merge-outcome :as outcome]
+   [ai.miniforge.pr-lifecycle.messages :as messages])
   (:import
    [java.time Instant]))
 
 ;------------------------------------------------------------------------------ Layer 0
-
-(defn- ^{:stratum 0} provider-command
-  [operations worktree-path args]
-  (let [result ((:run-gh operations) args worktree-path)]
-    {:ok? (dag/ok? result)
-     :output (:output (:data result))}))
-
-(defn- ^{:stratum 0} enable-merge
-  [operations worktree-path pr-number policy]
-  (let [result ((:merge-pr operations)
-                worktree-path pr-number :policy policy)]
-    {:ok? (dag/ok? result) :error (:error result)}))
-
-(defn- ^{:stratum 0} merged-result
-  [operations worktree-path pr-number policy context settled merge-sha]
-  (let [logger (:logger context)
-        {:keys [dag-id run-id task-id pr-id event-bus]} context]
-    (when event-bus
-      (events/publish! event-bus
-                       (events/merged
-                        dag-id run-id task-id pr-id merge-sha
-                        ((:fetch-labels operations) worktree-path pr-number))
-                       logger))
-    (when logger
-      (log/info logger :pr-lifecycle :merge/success
-                {:message "PR merged successfully"
-                 :data {:pr-number pr-number :merge/sha merge-sha}}))
-    (dag/ok {:merged? true
-             :method (:method policy)
-             :merge/sha merge-sha
-             :effect/id (:effect/id settled)})))
-
-(defn- ^{:stratum 0} pending-result
-  [pr-number policy context settled]
-  (when-let [logger (:logger context)]
-    (log/info logger :pr-lifecycle :merge/auto-merge-pending
-              {:message "Auto-merge enabled; merge not yet observed"
-               :data {:pr-number pr-number
-                      :effect/state (:effect/state settled)}}))
-  (dag/ok {:merged? false
-           :auto-merge/enabled? true
-           :method (:method policy)
-           :effect/id (:effect/id settled)}))
 
 (defn- ^{:stratum 0} completed-rebase
   [context new-sha]
@@ -99,41 +58,25 @@
            :resolve-fn resolve-fn
            :context context}))))))
 
+(defn- ^{:stratum 0} merge-ready!
+  [operations worktree-path pr-number policy context]
+  (dag/when-let-ok
+   [repository-result ((:read-repository operations) worktree-path)
+    transaction-result (governed/transact!
+                        operations worktree-path pr-number
+                        (:pr/repo (:data repository-result))
+                        policy context (Instant/now))]
+    (outcome/settlement-result operations worktree-path pr-number policy context
+                               (:data transaction-result))))
+
 ;------------------------------------------------------------------------------ Layer 1
-
-(defn- ^{:stratum 1} transact!
-  "Record merge intent, enable auto-merge, and reconcile the immediate state."
-  [operations worktree-path pr-number policy context ^Instant now]
-  (let [run-gh (partial provider-command operations worktree-path)
-        enable! (partial enable-merge operations worktree-path pr-number policy)
-        proposed (transaction/propose!
-                  (assoc context :merge/method (:method policy))
-                  pr-number (:pr/repo context) now)]
-    (transaction/commit! context proposed pr-number now enable! run-gh)))
-
-(defn- ^{:stratum 1} settlement-result
-  "Translate one transaction state without overstating a pending merge."
-  [operations worktree-path pr-number policy context settled]
-  (let [merge-sha (transaction/substantiated-sha settled)]
-    (cond
-      (= :failed (:effect/state settled))
-      (dag/err :merge-failed
-               "Merge command failed"
-               {:gh-error (:effect/failure settled)})
-
-      merge-sha
-      (merged-result operations worktree-path pr-number
-                     policy context settled merge-sha)
-
-      :else
-      (pending-result pr-number policy context settled))))
 
 (defn- ^{:stratum 1} rebase-stale!
   "Rebase one stale PR and publish the new head when successful."
   [operations worktree-path pr-number context]
   (when-let [logger (:logger context)]
     (log/info logger :pr-lifecycle :merge/rebasing
-              {:message "PR is stale, attempting rebase"}))
+              {:message (messages/system-t :merge/rebasing)}))
   (dag/when-let-ok
    [branch-result ((:fetch-branch operations) worktree-path pr-number)
     result ((:rebase-pr operations)
@@ -147,18 +90,14 @@
   [operations worktree-path pr-number policy context]
   (when-let [logger (:logger context)]
     (log/info logger :pr-lifecycle :merge/attempting
-              {:message "Attempting PR merge"
+              {:message (messages/system-t :merge/attempting)
                :data {:pr-number pr-number}}))
   (let [readiness-result ((:evaluate-readiness operations)
                           worktree-path pr-number policy)
         stale? (some #{:branch-not-up-to-date}
                      (:blocking readiness-result))]
     (if (:ready? readiness-result)
-      (let [now (Instant/now)
-            settled (transact! operations worktree-path pr-number
-                                 policy context now)]
-        (settlement-result operations worktree-path pr-number
-                           policy context settled))
+      (merge-ready! operations worktree-path pr-number policy context)
       (let [branch-raw (get-in (:checks readiness-result) [:branch :data :raw])
             conflict-result (when stale?
                               (attempt-conflict-resolution!
@@ -173,5 +112,5 @@
 
           :else
           (dag/err :not-ready
-                   "PR is not ready to merge"
+                   (messages/t :merge/not-ready)
                    {:blocking (:blocking readiness-result)}))))))
