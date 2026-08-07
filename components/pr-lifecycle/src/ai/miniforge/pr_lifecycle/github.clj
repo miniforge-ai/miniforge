@@ -64,6 +64,32 @@
    Renders as nothing in PR Markdown."
   "<!-- miniforge:policy-eval -->")
 
+(def ^{:stratum 0} ^:private review-threads-query
+  "Paginated provider readback for pull-request review threads."
+  "query($owner:String!,$repo:String!,$pr:Int!,$cursor:String) {
+  repository(owner:$owner, name:$repo) {
+    pullRequest(number:$pr) {
+      reviewThreads(first:100, after:$cursor) {
+        nodes { id isResolved }
+        pageInfo { hasNextPage endCursor }
+      }
+    }
+  }
+}")
+
+(defn- ^{:stratum 0} valid-review-thread-page?
+  "True when GitHub returned the complete page shape needed to decide."
+  [threads]
+  (let [nodes (:nodes threads)
+        page-info (:pageInfo threads)]
+    (and (map? threads)
+         (vector? nodes)
+         (every? #(and (string? (:id %))
+                       (boolean? (:isResolved %)))
+                 nodes)
+         (map? page-info)
+         (boolean? (:hasNextPage page-info)))))
+
 (defn- ^{:stratum 0} run-gh-with-stdin
   "Run a `gh` command piping `stdin-body` over stdin. Returns the
    same DAG-shaped result as `run-gh-command`. Used for `gh api ...
@@ -148,6 +174,24 @@
           (dag/err :json-parse-error (.getMessage e))))
       result)))
 
+(defn- ^{:stratum 1} repository-coordinates
+  "Read the GitHub owner and repository name from the origin remote."
+  [worktree-path]
+  (let [result (run-gh-command
+                ["git" "config" "--get" "remote.origin.url"]
+                worktree-path)]
+    (if (dag/err? result)
+      result
+      (let [remote-url (str/trim (or (:output (:data result)) ""))
+            parts (re-find #"github\.com[:/]([^/]+)/([^/]+)$" remote-url)
+            owner (nth parts 1 nil)
+            repo (some-> (nth parts 2 nil)
+                         (str/replace #"\.git$" ""))]
+        (if (and owner (seq repo))
+          (dag/ok {:owner owner :repo repo})
+          (dag/err :invalid-remote
+                   (str "Could not parse owner/repo from remote URL: " remote-url)))))))
+
 (defn ^{:stratum 1} reply-to-comment
   "Post a reply to a review comment thread.
 
@@ -198,22 +242,13 @@
    - pr-number: Pull request number
    - comment-id: REST API comment ID (integer)
 
-   Returns DAG result with :thread-id or error"
+  Returns DAG result with :thread-id or error"
   [worktree-path pr-number comment-id]
-  (let [;; First get repo owner/name from git remote
-        remote-result (run-gh-command ["git" "config" "--get" "remote.origin.url"] worktree-path)]
-    (if (dag/err? remote-result)
-      remote-result
-      (let [remote-url (str/trim (:output (:data remote-result)))
-            ;; Parse owner/repo from URL (supports both SSH and HTTPS)
-            ;; git@github.com:owner/repo.git or https://github.com/owner/repo.git
-            parts (re-find #"github\.com[:/]([^/]+)/([^/.]+)" remote-url)
-            owner (nth parts 1 nil)
-            repo (nth parts 2 nil)]
-        (if-not (and owner repo)
-          (dag/err :invalid-remote
-                   (str "Could not parse owner/repo from remote URL: " remote-url))
-          (let [query (str "query {
+  (let [repository-result (repository-coordinates worktree-path)]
+    (if (dag/err? repository-result)
+      repository-result
+      (let [{:keys [owner repo]} (:data repository-result)
+            query (str "query {
   repository(owner: \"" owner "\", name: \"" repo "\") {
     pullRequest(number: " pr-number ") {
       reviewThreads(first: 100) {
@@ -230,23 +265,21 @@
     }
   }
 }")
-                result (graphql-query query worktree-path)]
-            (if (dag/ok? result)
-              (let [threads (get-in (:data result) [:data :repository :pullRequest :reviewThreads :nodes])
-                    ;; Find thread containing our comment ID
-                    matching-thread (some (fn [thread]
-                                            (when (some #(= (:databaseId %) comment-id)
-                                                        (get-in thread [:comments :nodes]))
-                                              thread))
-                                          threads)]
-                (if matching-thread
-                  (dag/ok {:thread-id (:id matching-thread)
-                           :is-resolved (:isResolved matching-thread)})
-                  (dag/err :thread-not-found
-                           "Could not find thread containing comment ID"
-                           {:comment-id comment-id
-                            :pr-number pr-number})))
-              result)))))))
+            result (graphql-query query worktree-path)]
+        (if (dag/ok? result)
+          (let [threads (get-in (:data result) [:data :repository :pullRequest :reviewThreads :nodes])
+                matching-thread (some (fn [thread]
+                                        (when (some #(= (:databaseId %) comment-id)
+                                                    (get-in thread [:comments :nodes]))
+                                          thread))
+                                      threads)]
+            (if matching-thread
+              (dag/ok {:thread-id (:id matching-thread)
+                       :is-resolved (:isResolved matching-thread)})
+              (dag/err :thread-not-found
+                       "Could not find thread containing comment ID"
+                       {:comment-id comment-id :pr-number pr-number})))
+          result)))))
 
 (defn ^{:stratum 2} post-review!
   "Post a single PR review batching multiple inline comments.
@@ -331,6 +364,39 @@
                    "Thread resolution returned false"
                    {:thread-id thread-id :thread thread})))
       result)))
+
+(defn ^{:stratum 2} unresolved-review-threads
+  "Read every review-thread page and report whether any thread is unresolved."
+  [worktree-path pr-number]
+  (let [repository-result (repository-coordinates worktree-path)]
+    (if (dag/err? repository-result)
+      repository-result
+      (let [{:keys [owner repo]} (:data repository-result)]
+        (loop [cursor nil
+               unresolved-count 0]
+          (let [variables (cond-> {:owner owner :repo repo :pr pr-number}
+                            cursor (assoc :cursor cursor))
+                result (graphql-query review-threads-query worktree-path
+                                      :variables variables)]
+            (if (dag/err? result)
+              result
+              (let [threads (get-in (:data result)
+                                    [:data :repository :pullRequest :reviewThreads])
+                    page-info (:pageInfo threads)]
+                (if-not (valid-review-thread-page? threads)
+                  (dag/err :invalid-review-thread-response
+                           "GitHub returned incomplete review thread state")
+                  (let [total (+ unresolved-count
+                                 (count (remove :isResolved (:nodes threads))))]
+                    (if (:hasNextPage page-info)
+                      (let [next-cursor (:endCursor page-info)]
+                        (if (or (not (string? next-cursor))
+                                (str/blank? next-cursor))
+                          (dag/err :invalid-pagination
+                                   "GitHub review thread page omitted its next cursor")
+                          (recur next-cursor total)))
+                      (dag/ok {:has-unresolved? (pos? total)
+                               :unresolved-count total}))))))))))))
 
 ;------------------------------------------------------------------------------ Rich Comment
 (comment

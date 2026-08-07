@@ -16,7 +16,7 @@
 ;; See the License for the specific language governing permissions and
 ;; limitations under the License.
 (ns ai.miniforge.pr-lifecycle.github-test
-  "Tests for the github.clj batched-review posting (N13 §2.2)."
+  "Tests for GitHub provider readback and batched-review posting."
   (:require [babashka.process :as process]
             [cheshire.core :as json]
             [clojure.string :as str]
@@ -56,9 +56,70 @@
 (def ^{:stratum 0} ^:private flat-shape
   [{:path "src/baz.clj" :line 1 :body "flat-shape body"}])
 
+(defn- ^{:stratum 0} review-thread-page
+  "Build one GraphQL response page without duplicating provider maps."
+  [nodes has-next? end-cursor]
+  (dag/ok
+   {:data
+    {:repository
+     {:pullRequest
+      {:reviewThreads
+       {:nodes nodes
+        :pageInfo {:hasNextPage has-next?
+                   :endCursor end-cursor}}}}}}))
+
+(deftest ^{:stratum 0} unresolved-review-threads-rejects-incomplete-readback
+  (with-redefs [github/run-gh-command
+                (fn [_ _] (dag/ok {:output "git@github.com:miniforge-ai/miniforge.git"}))
+                github/graphql-query
+                (fn [& _]
+                  (dag/ok {:data {:repository {:pullRequest nil}}}))]
+    (let [result (github/unresolved-review-threads "/repo" 1703)]
+      (is (dag/err? result))
+      (is (= :invalid-review-thread-response (get-in result [:error :code]))))))
+
+(deftest ^{:stratum 0} unresolved-review-threads-propagates-provider-failure
+  (let [failure (dag/err :graphql-error "provider unavailable")]
+    (with-redefs [github/run-gh-command
+                  (fn [_ _] (dag/ok {:output "git@github.com:miniforge-ai/miniforge.git"}))
+                  github/graphql-query (fn [& _] failure)]
+      (is (= failure (github/unresolved-review-threads "/repo" 1703))))))
+
 ;------------------------------------------------------------------------------ Layer 1
 
 ;; ── tests ────────────────────────────────────────────────────────────
+(deftest ^{:stratum 1} unresolved-review-threads-paginates
+  (let [requests (atom [])
+        pages [(review-thread-page [{:id "resolved" :isResolved true}]
+                                   true "next-page")
+               (review-thread-page [{:id "open" :isResolved false}]
+                                   false nil)]]
+    (with-redefs [github/run-gh-command
+                  (fn [_ _]
+                    (dag/ok {:output "https://github.com/acme/repo.with-dots.git"}))
+                  github/graphql-query
+                  (fn [_ _ & {:keys [variables]}]
+                    (let [index (count @requests)]
+                      (swap! requests conj variables)
+                      (nth pages index)))]
+      (let [result (github/unresolved-review-threads "/repo" 1703)]
+        (is (dag/ok? result))
+        (is (= {:has-unresolved? true :unresolved-count 1}
+               (:data result)))
+        (is (= [nil "next-page"] (mapv :cursor @requests)))
+        (is (= {:owner "acme" :repo "repo.with-dots" :pr 1703}
+               (first @requests)))))))
+
+(deftest ^{:stratum 1} unresolved-review-threads-rejects-missing-page-cursor
+  (with-redefs [github/run-gh-command
+                (fn [_ _] (dag/ok {:output "git@github.com:miniforge-ai/miniforge.git"}))
+                github/graphql-query
+                (fn [& _]
+                  (review-thread-page [] true nil))]
+    (let [result (github/unresolved-review-threads "/repo" 1703)]
+      (is (dag/err? result))
+      (is (= :invalid-pagination (get-in result [:error :code]))))))
+
 (deftest ^{:stratum 1} post-review-uses-create-review-endpoint-via-stdin
   (testing "post-review! shells out to the right gh api endpoint with --input -"
     (let [calls (atom [])
