@@ -46,22 +46,19 @@
 
 (def ^{:stratum 0} default-budget @(resolve 'commit-budget/default-budget))
 
-(def ^{:stratum 0} ^:private merged-in-entry
-  "A staged file the size of a branch merged in from main — the shape
-   that made a routine `git merge github/main` reach for
-   MINIFORGE_COMMIT_BUDGET_OVERRIDE (491 reportable lines, all from
-   `components/execution-grant/**`, on 2026-08-07)."
-  {:path    "components/execution-grant/src/grant.clj"
-   :added   (repeat 500 "(def incoming 1)")
-   :deleted []})
+(defn ^{:stratum 0} ^:private unread-staged-diff
+  "A `staged-diff` stand-in that fails if anything calls it.
 
-(def ^{:stratum 0} ^:private headroom-budget
-  "A budget `merged-in-entry` cannot exceed. Passed instead of
-   `default-budget` so that losing the merge skip surfaces as a failed
-   assertion rather than as the gate's own `System/exit 1`, which would
-   end the smoke run mid-suite and take every later namespace's result
-   with it."
-  10000)
+   Mid-merge the gate has to return before reading the index at all,
+   not merely ignore what it read: a large merge's diff should never be
+   fetched or parsed, and `staged-diff` failing closed on a git error
+   must not be able to block a merge the gate already declined to
+   judge. Throwing also means a lost merge skip surfaces here as this
+   error rather than as the gate's own `System/exit 1`, which would end
+   the smoke run mid-suite and take every later namespace's result with
+   it."
+  []
+  (throw (ex-info "staged-diff called while a merge was in progress" {})))
 
 (def ^{:stratum 0} ^:private in-budget-entry
   "One small staged file — the ordinary, non-merge commit."
@@ -149,11 +146,11 @@
 
 (defn ^{:stratum 1} ^:private gate-output
   "Stdout from one `check-commit-budget!` run over a stubbed merge state
-   and staged diff, so the gate's decision can be read without a real
+   and `staged-diff`, so the gate's decision can be read without a real
    repo or index."
-  [merging? entries budget]
+  [merging? staged-diff-fn budget]
   (with-redefs-fn {merge-in-progress? (constantly merging?)
-                   staged-diff        (constantly entries)}
+                   staged-diff        staged-diff-fn}
     #(with-out-str (check-commit-budget! budget))))
 
 (deftest ^{:stratum 1} resource-data-files-excluded-test
@@ -262,14 +259,14 @@
         (finally (delete-tree! tmp))))))
 
 (deftest ^{:stratum 2} merge-skips-the-budget-test
-  (testing "mid-merge the gate skips without weighing the staged diff at all"
-    (let [out (gate-output true [merged-in-entry] headroom-budget)]
+  (testing "mid-merge the gate skips without reading the index at all"
+    (let [out (gate-output true unread-staged-diff default-budget)]
       (is (str/includes? out "skipped (merge in progress)"))
       (is (not (str/includes? out "lines OK"))))))
 
 (deftest ^{:stratum 2} non-merge-commit-still-budgeted-test
   (testing "outside a merge the gate still reports against the budget"
-    (let [out (gate-output false [in-budget-entry] default-budget)]
+    (let [out (gate-output false (constantly [in-budget-entry]) default-budget)]
       (is (str/includes? out (format "%d / %d lines OK"
                                      (count (:added in-budget-entry))
                                      default-budget)))

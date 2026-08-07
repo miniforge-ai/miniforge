@@ -41,9 +41,12 @@ operator-facing description in `agents.md`.
   work in this repo happens in worktrees. Takes no arguments: it answers
   for whatever repository git itself would act on, which under the hook is
   the exported `GIT_DIR` and is the same repository `staged-diff` reads.
-- `check-commit-budget!`: a merge in progress is the first branch of the
-  decision `cond`, ahead of the override and size branches, so no override
-  is needed and none is consumed.
+- `check-commit-budget!`: returns on a merge in progress *before* calling
+  `staged-diff`, ahead of the override and size branches, so no override is
+  needed and none is consumed. Returning ahead of the diff rather than as a
+  `cond` branch below it is what makes the skip total — a large merge's
+  diff is neither fetched nor parsed, and `staged-diff` failing closed on a
+  git error cannot block a merge the gate has already declined to judge.
 - `agents.md`: records the exemption and that `pr-budget` is unaffected.
 - `resources/precommit-smoke-tests.edn`: the entry's comment claimed "no
   subprocess"; the merge test spawns git, so the comment now says so.
@@ -84,15 +87,16 @@ deliberately stale base it appears.
 ## Testing Plan
 
 - `commit-budget-test` — 9 tests, 38 assertions, green.
-- Mutation-checked both new tests rather than trusting green:
+- Mutation-checked the new tests rather than trusting green:
   - Replacing `git rev-parse` with a `.git/MERGE_HEAD` stat fails
     `merge-detected-in-linked-worktree-test`.
-  - Deleting the merge branch from the `cond` fails
-    `merge-skips-the-budget-test`.
-  - Both fail as named assertions and the suite still completes. An earlier
-    draft passed `default-budget` to the second test, which made the
-    regression exit the test JVM mid-run and take every later namespace's
-    result with it; it now passes a budget the fixture cannot exceed.
+  - Demoting the skip to a `cond` branch below `staged-diff` fails
+    `merge-skips-the-budget-test`, whose `staged-diff` stub throws if
+    anything calls it mid-merge.
+  - Both surface as a named failure or error and the suite still completes.
+    An earlier draft asserted only on output with a stubbed-but-callable
+    diff; losing the skip then exited the test JVM mid-run and took every
+    later namespace's result with it.
 - Run under a simulated hook environment (`GIT_DIR` and `GIT_INDEX_FILE`
   exported) as well as a clean one. The first draft passed clean and failed
   under the hook: the fixture's git commands inherited `GIT_DIR` and aimed
