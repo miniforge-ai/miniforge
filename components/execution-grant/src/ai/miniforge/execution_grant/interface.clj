@@ -21,10 +21,11 @@
 
    Decision gating consumes authorization results, and
    effect-transaction rechecks grants at commit. Production call sites
-   still await the runtime issuer before they can remove their explicit
-   unenforced-authority marker. This component owns the object and its
-   rules: issuance, attenuated delegation, revocation as a state, scope
-   and ceiling authorization, and liveness over lineage."
+   still await integration with the runtime issuer before they can
+   remove their explicit unenforced-authority marker. This component
+   owns the object and its rules: issuance, attenuated delegation,
+   revocation as a state, scope and ceiling authorization, and liveness
+   over lineage."
   (:require
    [ai.miniforge.anomaly.interface :as anomaly]
    [ai.miniforge.execution-grant.attenuation :as attenuation]
@@ -32,10 +33,14 @@
    [ai.miniforge.execution-grant.constraints :as constraints]
    [ai.miniforge.execution-grant.core :as core]
    [ai.miniforge.execution-grant.eligibility :as eligibility]
+   [ai.miniforge.execution-grant.issuance :as issuance]
+   [ai.miniforge.execution-grant.issuance.policy :as issuance-policy]
+   [ai.miniforge.execution-grant.issuance.schema :as issuance-schema]
    [ai.miniforge.execution-grant.lineage :as lineage]
    [ai.miniforge.execution-grant.messages :as msg]
    [ai.miniforge.execution-grant.revocation :as revocation]
    [ai.miniforge.execution-grant.schema :as schema]
+   [ai.miniforge.execution-grant.temporal :as temporal]
    [malli.core :as m]
    [malli.error :as me])
   (:import
@@ -153,6 +158,19 @@
   "May this principal be granted this effect class at these ceilings?"
   eligibility/eligible?)
 
+(def ^{:stratum 0} issuance-policies
+  "Runtime-owned policy catalog for irreversible-effect grant issuance."
+  issuance-policy/policies)
+
+(defn- ^{:stratum 0} invalid-output
+  "Return a fault when the runtime issuer violates its output contract."
+  [value]
+  (anomaly/sub-anomaly
+   :fault
+   :anomalies.execution-grant/invalid
+   (msg/t :issuance/output-invalid)
+   {:explain (me/humanize (m/explain schema/ExecutionGrant value))}))
+
 ;------------------------------------------------------------------------------ Layer 1
 
 (defn ^{:stratum 1} record-breach!
@@ -212,3 +230,26 @@
        (invalid :grant/revocation-invalid schema/RevocationArguments arguments)
 
        :else (core/revoke grant reason now)))))
+
+;------------------------------------------------------------------------------ Layer 2
+
+(defn ^{:stratum 2} issue-for-effect
+  "Issue narrow authority from a runtime-attested canonical effect request.
+
+   This is the production issuer. Call it only after the runtime knows
+   the active workflow run, preallocated effect id, exact target, and
+   effect-specific preflight result. Callers cannot set principal,
+   expiry, constraints, or delegation state; policy derives them all."
+  ([breach-dir request]
+   (issue-for-effect breach-dir request (Instant/now)))
+  ([breach-dir request now]
+   (let [arguments [request now]]
+     (if-not (valid-input? issuance-schema/Arguments arguments)
+       (invalid :issuance/input-invalid issuance-schema/Arguments arguments)
+       (let [options (issuance/prepare breach-dir request now)]
+         (if (anomaly/anomaly? options)
+           options
+           (let [grant (issue options (temporal/->instant now))]
+             (if (valid? grant)
+               grant
+               (invalid-output grant)))))))))
