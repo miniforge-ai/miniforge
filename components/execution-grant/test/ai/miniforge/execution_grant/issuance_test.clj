@@ -124,6 +124,16 @@
     (is (= :invalid-input
            (:anomaly/type (issue (dissoc deploy-request field)))))))
 
+(deftest ^{:stratum 2} issuer-refuses-effectively-empty-scope-test
+  (doseq [[request field] [[merge-request :pr/repo]
+                           [deploy-request :kustomize-dir]
+                           [deploy-request :context]
+                           [deploy-request :default-context]
+                           [deploy-request :namespace]
+                           [deploy-request :deployment-name]]]
+    (is (= :invalid-input
+           (:anomaly/type (issue (assoc request field " ")))))))
+
 (deftest ^{:stratum 2} merge-policy-is-exact-and-runtime-owned-test
   (let [g (issue merge-request)]
     (is (grant/valid? g))

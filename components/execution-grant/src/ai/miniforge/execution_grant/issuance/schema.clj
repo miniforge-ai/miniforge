@@ -16,13 +16,15 @@
 ;; See the License for the specific language governing permissions and
 ;; limitations under the License.
 (ns ai.miniforge.execution-grant.issuance.schema
-  "Closed runtime inputs for irreversible-effect grant issuance.")
+  "Closed runtime inputs for irreversible-effect grant issuance."
+  (:require
+   [clojure.string :as str]))
 
 ;------------------------------------------------------------------------------ Layer 0
 
 (def ^{:stratum 0} NonBlankString
   "A scope binding that cannot silently collapse to an empty value."
-  [:string {:min 1}])
+  [:and :string [:fn (complement str/blank?)]])
 
 (defn- ^{:stratum 0} request-schema
   "Build one closed request without duplicating authority or basis fields."
