@@ -10,8 +10,8 @@
  :spec/description
  "Close an authority gap before production grant issuance is enabled.
 
-  ExecutionGrant records carry :grant/scope but authorize currently
-  checks only liveness and numeric ceilings. A grant for one PR can therefore
+  ExecutionGrant records carry :grant/scope but authorization currently checks
+  only liveness and numeric ceilings. A grant for one PR can therefore
   authorize another. Authorization must compare the proposed effect with the
   grant's scope using the same containment rule used for delegation. A
   non-empty grant scope with absent or mismatched effect scope fails closed.
