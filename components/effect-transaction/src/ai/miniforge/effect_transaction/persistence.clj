@@ -147,6 +147,8 @@
       (with-open [^FileChannel channel (FileChannel/open (.toPath file) options)]
         (attempt-locked-call channel id thunk))
       (catch Exception ex
+        ;; Babashka does not expose OverlappingFileLockException as a
+        ;; resolvable class, so keep this JVM/BB-compatible boundary check.
         (if (= "java.nio.channels.OverlappingFileLockException"
                (.getName (class ex)))
           (lock-conflict id)
