@@ -30,7 +30,7 @@ PR-lifecycle provider API.
 - Each changed namespace has at most three strata and each function has one
   primary responsibility.
 - Shared response builders remove repeated provider maps from the tests.
-- PR budget: 391 / 600 reportable lines; every commit is at most 200.
+- PR budget: 389 / 600 reportable lines; every commit is at most 200.
 - Kondo, Polylith, stratum lint, and the changed-code standards baseline are
   clean.
 
