@@ -373,17 +373,16 @@
                                           :attempt attempt
                                           :commit-sha (:commit-sha (:data commit-result))}}))
 
-                      ;; Try to resolve conversation thread (non-blocking)
-                      (when (and auto-resolve-comments
-                                 (:fix/comment-id fix-context))
+                      ;; Link the fix reply and optionally resolve (non-blocking).
+                      (when (:fix/comment-id fix-context)
                         (try
                           (resolve-comment-thread worktree-path fix-context pr-id logger
                                                   :auto-resolve auto-resolve-comments)
                           (catch Exception e
-                            ;; Log error but don't fail the fix loop
+                            ;; Unexpected follow-up failures do not fail the fix loop.
                             (when logger
                               (log/warn logger :pr-lifecycle :fix-loop/resolution-error
-                                        {:message "Failed to resolve conversation (non-fatal)"
+                                        {:message "Conversation follow-up failed (non-fatal)"
                                          :data {:error (.getMessage e)}})))))
 
                       ;; Publish fix-pushed event
