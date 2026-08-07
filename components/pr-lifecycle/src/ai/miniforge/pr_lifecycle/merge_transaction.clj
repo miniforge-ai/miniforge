@@ -137,21 +137,19 @@
 
    `enable!` performs the gh merge call and returns `{:ok? bool}`;
    `run-gh` answers the follow-up probe. Both injected."
-  ([context t pr-number ^Instant now enable! run-gh]
-   (commit! context t :authority/unenforced pr-number now enable! run-gh))
-  ([context t grant-record pr-number ^Instant now enable! run-gh]
-   (fx/commit! (store-dir context) t grant-record {} now
-               (fn []
-                 (let [{:keys [ok? error]} (enable!)]
-                   (if-not ok?
-                     {:effect/outcome :failed :effect/failure (str error)}
-                     (if-let [answer (probe run-gh pr-number)]
-                       (if (:effect/matched? answer)
-                         {:effect/outcome :succeeded
-                          :effect/observed (:effect/observed answer)}
-                         {:effect/outcome :accepted
-                          :effect/observed (:effect/observed answer)})
-                       {:effect/outcome :accepted})))))))
+  [context t grant-record pr-number ^Instant now enable! run-gh]
+  (fx/commit! (store-dir context) t grant-record {} now
+              (fn []
+                (let [{:keys [ok? error]} (enable!)]
+                  (if-not ok?
+                    {:effect/outcome :failed :effect/failure (str error)}
+                    (if-let [answer (probe run-gh pr-number)]
+                      (if (:effect/matched? answer)
+                        {:effect/outcome :succeeded
+                         :effect/observed (:effect/observed answer)}
+                        {:effect/outcome :accepted
+                         :effect/observed (:effect/observed answer)})
+                      {:effect/outcome :accepted}))))))
 
 (defn ^{:stratum 2} reconcile!
   "Ask GitHub again about a record whose outcome is still unknown.
