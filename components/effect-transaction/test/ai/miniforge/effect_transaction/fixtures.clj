@@ -47,6 +47,12 @@
   [count]
   {:usage/count count})
 
+(defn ^{:stratum 0} probe-answer
+  "Build the external observation returned by a reconciliation probe."
+  [observed matched?]
+  {:effect/observed observed
+   :effect/matched? matched?})
+
 (defn ^{:stratum 0} tmp-dir
   "A fresh directory for one effect-transaction test."
   []

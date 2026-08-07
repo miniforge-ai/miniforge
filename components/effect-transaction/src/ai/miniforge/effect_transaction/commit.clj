@@ -81,8 +81,7 @@
 
       (not= :proposed (:effect/state t))
       (record/wrong-state (msg/t :commit/not-proposed)
-                          {:effect/id (:effect/id t)
-                           :effect/state (:effect/state t)})
+                          (record/lifecycle-position t))
 
       (= :authority/unenforced grant-record)
       (execute! dir t :unenforced now effect-fn)
