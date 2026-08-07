@@ -22,6 +22,7 @@
    for resolving conversation threads and posting replies to comments."
   (:require
    [ai.miniforge.dag-executor.interface :as dag]
+   [ai.miniforge.pr-lifecycle.github-review-threads :as review-threads]
    [babashka.process :as process]
    [cheshire.core :as json]
    [clojure.string :as str]))
@@ -63,52 +64,6 @@
    under a personal access token, so we tag the body instead).
    Renders as nothing in PR Markdown."
   "<!-- miniforge:policy-eval -->")
-
-(def ^{:stratum 0} ^:private review-threads-query
-  "Paginated provider readback for pull-request review threads."
-  "query($owner:String!,$repo:String!,$pr:Int!,$cursor:String) {
-  repository(owner:$owner, name:$repo) {
-    pullRequest(number:$pr) {
-      reviewThreads(first:100, after:$cursor) {
-        nodes { id isResolved }
-        pageInfo { hasNextPage endCursor }
-      }
-    }
-  }
-}")
-
-(def ^{:stratum 0} ^:private review-thread-roots-query
-  "Paginated review-thread roots used to locate a REST review comment."
-  "query($owner:String!,$repo:String!,$pr:Int!,$cursor:String) {
-  repository(owner:$owner, name:$repo) {
-    pullRequest(number:$pr) {
-      reviewThreads(first:100, after:$cursor) {
-        nodes { id isResolved comments(first:1) { nodes { databaseId } } }
-        pageInfo { hasNextPage endCursor }
-      }
-    }
-  }
-}")
-
-(defn- ^{:stratum 0} valid-review-thread-page?
-  "True when GitHub returned the complete page shape needed to decide."
-  [threads]
-  (let [nodes (:nodes threads)
-        page-info (:pageInfo threads)]
-    (and (map? threads)
-         (vector? nodes)
-         (every? #(and (string? (:id %))
-                       (boolean? (:isResolved %)))
-                 nodes)
-         (map? page-info)
-         (boolean? (:hasNextPage page-info)))))
-
-(defn- ^{:stratum 0} valid-next-cursor?
-  "True when pagination can advance without repeating a page."
-  [cursor seen-cursors]
-  (and (string? cursor)
-       (not (str/blank? cursor))
-       (not (contains? seen-cursors cursor))))
 
 (defn- ^{:stratum 0} run-gh-with-stdin
   "Run a `gh` command piping `stdin-body` over stdin. Returns the
@@ -164,13 +119,6 @@
 
 ;------------------------------------------------------------------------------ Layer 1
 
-(defn- ^{:stratum 1} valid-review-thread-root-page?
-  "True when every thread exposes its integer root comment ID."
-  [threads]
-  (and (valid-review-thread-page? threads)
-       (every? #(integer? (get-in % [:comments :nodes 0 :databaseId]))
-               (:nodes threads))))
-
 (defn ^{:stratum 1} graphql-query
   "Execute a GraphQL query via gh CLI.
 
@@ -200,45 +148,6 @@
         (catch Exception e
           (dag/err :json-parse-error (.getMessage e))))
       result)))
-
-(defn- ^{:stratum 1} repository-coordinates
-  "Read the GitHub owner and repository name from the origin remote."
-  [worktree-path]
-  (let [result (run-gh-command
-                ["git" "config" "--get" "remote.origin.url"]
-                worktree-path)]
-    (if (dag/err? result)
-      result
-      (let [remote-url (str/trim (get (:data result) :output ""))
-            parts (re-find #"github\.com(?::\d+)?[:/]([^/]+)/([^/]+)/?$" remote-url)
-            owner (nth parts 1 nil)
-            repo (some-> (nth parts 2 nil)
-                         (str/replace #"\.git$" ""))]
-        (if (and owner (seq repo))
-          (dag/ok {:owner owner :repo repo})
-          (dag/err :invalid-remote
-                   "Could not parse GitHub owner/repository from origin remote"))))))
-
-(defn- ^{:stratum 1} review-comment-root-id
-  "Resolve a review reply to its thread's root REST comment ID."
-  [worktree-path owner repo comment-id]
-  (let [result (run-gh-command
-                ["gh" "api" (str "repos/" owner "/" repo
-                                  "/pulls/comments/" comment-id)]
-                worktree-path)]
-    (if (dag/err? result)
-      result
-      (try
-        (let [comment (json/parse-string (get (:data result) :output "") true)
-              root-id (if-some [reply-to-id (:in_reply_to_id comment)]
-                        reply-to-id
-                        (:id comment))]
-          (if (integer? root-id)
-            (dag/ok root-id)
-            (dag/err :invalid-review-comment-response
-                     "GitHub returned a review comment without an integer ID")))
-        (catch Exception e
-          (dag/err :json-parse-error (.getMessage e)))))))
 
 (defn ^{:stratum 1} reply-to-comment
   "Post a reply to a review comment thread.
@@ -277,63 +186,11 @@
 
 ;------------------------------------------------------------------------------ Layer 2
 
-;; GitHub API operations
 (defn ^{:stratum 2} get-thread-id
-  "Get GraphQL thread ID from a comment ID.
-
-   GitHub review comments have both a REST API comment ID and a
-   GraphQL thread ID. This function fetches the thread ID needed
-   for resolving conversations.
-
-   Arguments:
-   - worktree-path: Path to git worktree
-   - pr-number: Pull request number
-   - comment-id: REST API comment ID (integer)
-
-  Returns DAG result with :thread-id or error"
+  "Resolve a REST review comment or reply to its GraphQL review thread."
   [worktree-path pr-number comment-id]
-  (let [repository-result (repository-coordinates worktree-path)]
-    (if (dag/err? repository-result)
-      repository-result
-      (let [{:keys [owner repo]} (:data repository-result)
-            root-result (review-comment-root-id worktree-path owner repo comment-id)]
-        (if (dag/err? root-result)
-          root-result
-          (loop [cursor nil
-                 seen-cursors #{}]
-            (let [variables (cond-> {:owner owner :repo repo :pr pr-number}
-                              cursor (assoc :cursor cursor))
-                  result (graphql-query review-thread-roots-query worktree-path
-                                        :variables variables)]
-              (if (dag/err? result)
-                result
-                (let [threads (get-in (:data result)
-                                      [:data :repository :pullRequest :reviewThreads])
-                      matching-thread
-                      (some #(when (= (:data root-result)
-                                      (get-in % [:comments :nodes 0 :databaseId]))
-                               %)
-                            (:nodes threads))]
-                  (cond
-                    (not (valid-review-thread-root-page? threads))
-                    (dag/err :invalid-review-thread-response
-                             "GitHub returned incomplete review thread state")
-
-                    matching-thread
-                    (dag/ok {:thread-id (:id matching-thread)
-                             :is-resolved (:isResolved matching-thread)})
-
-                    (:hasNextPage (:pageInfo threads))
-                    (let [next-cursor (:endCursor (:pageInfo threads))]
-                      (if-not (valid-next-cursor? next-cursor seen-cursors)
-                        (dag/err :invalid-pagination
-                                 "GitHub returned an invalid review thread cursor")
-                        (recur next-cursor (conj seen-cursors next-cursor))))
-
-                    :else
-                    (dag/err :thread-not-found
-                             "Could not find thread containing comment ID"
-                             {:comment-id comment-id :pr-number pr-number})))))))))))
+  (review-threads/get-thread-id run-gh-command graphql-query
+                                worktree-path pr-number comment-id))
 
 (defn ^{:stratum 2} post-review!
   "Post a single PR review batching multiple inline comments.
@@ -420,45 +277,15 @@
       result)))
 
 (defn ^{:stratum 2} unresolved-review-threads
-  "Read every review-thread page and report whether any thread is unresolved."
+  "Read all provider pages and summarize unresolved review threads."
   [worktree-path pr-number]
-  (let [repository-result (repository-coordinates worktree-path)]
-    (if (dag/err? repository-result)
-      repository-result
-      (let [{:keys [owner repo]} (:data repository-result)]
-        (loop [cursor nil
-               seen-cursors #{}
-               unresolved-count 0]
-          (let [variables (cond-> {:owner owner :repo repo :pr pr-number}
-                            cursor (assoc :cursor cursor))
-                result (graphql-query review-threads-query worktree-path
-                                      :variables variables)]
-            (if (dag/err? result)
-              result
-              (let [threads (get-in (:data result)
-                                    [:data :repository :pullRequest :reviewThreads])
-                    page-info (:pageInfo threads)]
-                (if-not (valid-review-thread-page? threads)
-                  (dag/err :invalid-review-thread-response
-                           "GitHub returned incomplete review thread state")
-                  (let [total (+ unresolved-count
-                                 (count (remove :isResolved (:nodes threads))))]
-                    (if (:hasNextPage page-info)
-                      (let [next-cursor (:endCursor page-info)]
-                        (if-not (valid-next-cursor? next-cursor seen-cursors)
-                          (dag/err :invalid-pagination
-                                   "GitHub returned an invalid review thread cursor")
-                          (recur next-cursor
-                                 (conj seen-cursors next-cursor)
-                                 total)))
-                      (dag/ok {:has-unresolved? (pos? total)
-                               :unresolved-count total}))))))))))))
+  (review-threads/unresolved-review-threads
+   run-gh-command graphql-query worktree-path pr-number))
 
 ;------------------------------------------------------------------------------ Rich Comment
 (comment
-  ;; Get thread ID from comment
+  ;; Resolve a review comment to its thread.
   (get-thread-id "/path/to/repo" 148 2780310737)
-  ; => {:success true :data {:thread-id "PRRT_..." :is-resolved false ...}}
 
   ;; Reply to a comment
   (reply-to-comment "/path/to/repo" 148 2780310737 "Fixed in PR #150")
