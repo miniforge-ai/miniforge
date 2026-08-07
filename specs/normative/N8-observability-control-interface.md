@@ -7,7 +7,7 @@
 # N8 — Observability Control Interface
 
 **Version:** 0.4.0-draft
-**Date:** 2026-03-08
+**Date:** 2026-08-06
 **Status:** Draft
 **Conformance:** MUST
 
@@ -909,9 +909,13 @@ Conformance tests MUST verify:
 
 Conformance tests MUST verify:
 
-1. Redaction patterns are applied before emission
-2. Privacy levels control content inclusion
-3. Retention policies are enforced
+1. N3 §8.1's excluded values never appear, under any combination of listener
+   type, RBAC role, and deployment configuration (§5.1)
+2. Field delivery follows N3 §8.4's classes and the principal's role, with
+   `:restricted` suppressed per-recipient rather than per-event (§5.1)
+3. Deployment redaction patterns apply in addition to N3 §8.1's set, and the
+   configuration is EDN carrying no function (§5.2)
+4. Control-action events survive the `:audit` one-year floor (§5.3)
 
 ### 12.4 Conformance Requirements
 
