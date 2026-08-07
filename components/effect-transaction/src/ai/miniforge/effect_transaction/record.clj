@@ -59,12 +59,17 @@
 
 ;------------------------------------------------------------------------------ Layer 1
 
+(defn ^{:stratum 1} not-found
+  "Return a conflict for a transaction absent from the durable store."
+  [id]
+  (wrong-state (msg/t :record/not-found) {:effect/id id}))
+
 (defn ^{:stratum 1} advance!
-  "Apply `changes` to `t`, validate, and persist the new record atomically."
+  "Compare-and-set `changes` against the exact durable value of `t`."
   [dir t changes ^Instant now]
   (let [t' (assoc (merge t changes) :effect/updated-at now)]
     (if (valid? t')
-      (do (store/write! dir t') t')
+      (store/transition! dir t t')
       (invalid (msg/t :record/change-invalid) t'))))
 
 (defn ^{:stratum 1} propose!
@@ -76,8 +81,8 @@
                           (msg/t :proposal/no-store)
                           {})
      (propose! dir opts (Instant/now))))
-  ([dir {:keys [effect-class grant-id envelope-id proposal]} ^Instant now]
-   (let [t {:effect/id (random-uuid)
+  ([dir {:keys [effect-id effect-class grant-id envelope-id proposal]} ^Instant now]
+   (let [t {:effect/id (if (some? effect-id) effect-id (random-uuid))
             :effect/class effect-class
             :effect/grant-id grant-id
             :effect/envelope-id envelope-id
@@ -86,5 +91,5 @@
             :effect/at now
             :effect/updated-at now}]
      (if (valid? t)
-       (do (store/write! dir t) t)
+       (store/create! dir t)
        (invalid (msg/t :record/input-invalid) t)))))

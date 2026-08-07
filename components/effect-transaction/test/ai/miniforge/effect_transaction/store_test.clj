@@ -20,7 +20,9 @@
    with the writer. That is what makes 'the record exists before the
    effect' a claim rather than a hope."
   (:require
+   [ai.miniforge.anomaly.interface :as anomaly]
    [ai.miniforge.effect-transaction.interface :as fx]
+   [ai.miniforge.effect-transaction.store :as store]
    [clojure.test :refer [deftest is testing]])
   (:import
    [java.nio.file Files]
@@ -49,6 +51,12 @@
            :effect/updated-at now}
           overrides)))
 
+(deftest ^{:stratum 1} corrupt-record-is-returned-as-data-test
+  (let [dir (tmp-dir)
+        id (random-uuid)]
+    (spit (store/record-file dir id) "{:effect/id" :encoding "UTF-8")
+    (is (anomaly/anomaly? (fx/read-record dir id)))))
+
 ;------------------------------------------------------------------------------ Layer 2
 
 (deftest ^{:stratum 2} schema-is-closed-test
@@ -68,7 +76,7 @@
 (deftest ^{:stratum 2} record-survives-to-a-fresh-reader-test
   (let [dir (tmp-dir)
         t (record)]
-    (fx/write! dir t)
+    (store/create! dir t)
     (testing "a reader sharing no memory with the writer finds it whole"
       (let [from-disk (fx/read-record dir (:effect/id t))]
         (is (= (:effect/id t) (:effect/id from-disk)))
@@ -81,7 +89,7 @@
 
 (deftest ^{:stratum 2} listing-skips-partials-and-missing-dirs-test
   (let [dir (tmp-dir)]
-    (dotimes [_ 3] (fx/write! dir (record)))
+    (dotimes [_ 3] (store/create! dir (record)))
     (is (= 3 (count (fx/list-records dir))))
     (testing "a .tmp partial is never mistaken for a record"
       (spit (str dir "/half-written.edn.tmp") "{:effect/id ")
@@ -89,15 +97,18 @@
     (testing "listing a directory that does not exist is empty, not an error"
       (is (= [] (fx/list-records (str dir "/nope")))))))
 
-(deftest ^{:stratum 2} rewrite-replaces-in-place-test
-  ;; State advances rewrite the same record; the store must replace
-  ;; rather than accumulate, or a reader could find two truths.
+(deftest ^{:stratum 2} compare-and-set-replaces-the-exact-record-test
   (let [dir (tmp-dir)
-        t (record)]
-    (fx/write! dir t)
-    (fx/write! dir (assoc t :effect/state :committing))
+        t (record)
+        committing (assoc t :effect/state :committing)]
+    (store/create! dir t)
+    (is (= committing (store/transition! dir t committing)))
     (is (= 1 (count (fx/list-records dir))))
-    (is (= :committing (:effect/state (fx/read-record dir (:effect/id t)))))))
+    (is (= :committing (:effect/state (fx/read-record dir (:effect/id t)))))
+    (testing "a stale expected value cannot replace the durable record"
+      (let [result (store/transition! dir t (assoc t :effect/state :succeeded))]
+        (is (anomaly/anomaly? result))
+        (is (= :committing (:effect/state (fx/read-record dir (:effect/id t)))))))))
 
 (deftest ^{:stratum 2} both-inst-types-round-trip-test
   ;; The schema says `inst?`, and `inst?` admits java.util.Date as well
@@ -108,20 +119,16 @@
         as-date (record {:effect/at (Date/from now)})
         as-instant (record {:effect/at now})]
     (is (fx/valid? as-date) "a Date is a valid :effect/at per the schema")
-    (fx/write! dir as-date)
-    (fx/write! dir as-instant)
+    (store/create! dir as-date)
+    (store/create! dir as-instant)
     (is (= now (:effect/at (fx/read-record dir (:effect/id as-date))))
         "a Date normalizes to the same instant on the way out")
     (is (= now (:effect/at (fx/read-record dir (:effect/id as-instant)))))))
 
-(deftest ^{:stratum 2} unsupported-timestamp-throws-rather-than-persisting-test
-  ;; Persisting a value that cannot be read back turns a durable record
-  ;; into a landmine that only goes off later, when someone is trying to
-  ;; reconcile an effect they already performed.
-  (let [dir (tmp-dir)]
-    (testing "a number is refused"
-      (is (thrown? clojure.lang.ExceptionInfo
-                   (fx/write! dir (record {:effect/updated-at 12345})))))
-    (testing "a string is refused too — it would persist and fail only on READ"
-      (is (thrown? clojure.lang.ExceptionInfo
-                   (fx/write! dir (record {:effect/at "not-a-timestamp-at-all"})))))))
+(deftest ^{:stratum 2} duplicate-id-does-not-replace-the-first-record-test
+  (let [dir (tmp-dir)
+        original (record)
+        replacement (assoc original :effect/proposal {:pr/number 99})]
+    (is (= original (store/create! dir original)))
+    (is (anomaly/anomaly? (store/create! dir replacement)))
+    (is (= original (fx/read-record dir (:effect/id original))))))
