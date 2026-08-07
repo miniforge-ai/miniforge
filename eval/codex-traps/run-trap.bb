@@ -352,12 +352,14 @@
             (report-refusal! run)
             (System/exit refused-exit))
         after (snapshot (:repo paths) inputs)
-        new-wts (vec (remove (:worktrees before) (:worktrees after)))
-        new-brs (vec (remove (:branches before) (:branches after)))
+        ;; Sorted: runs.edn is append-only, so a row has to diff cleanly
+        ;; against the next one rather than vary with set iteration order.
+        new-wts (vec (sort (remove (:worktrees before) (:worktrees after))))
+        new-brs (vec (sort (remove (:branches before) (:branches after))))
         record (merge {:arm arm :trap trap :rep rep
                        :started (:started run) :ended (:ended run) :exit (:exit run)
                        :workflow-ids (mapv #(str/replace (fs/file-name %) #"\.edn$" "")
-                                           (remove (:events before) (:events after)))
+                                           (sort (remove (:events before) (:events after))))
                        :worktrees new-wts
                        :task-branches new-brs}
                       (run-verdict paths trap new-wts new-brs))]
