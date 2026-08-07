@@ -247,13 +247,13 @@
 (defn ^{:stratum 1} fetch-pr-branch
   "Read the PR head branch from GitHub."
   [worktree-path pr-number]
-  (let [result (run-gh-command
-                ["gh" "pr" "view" (str pr-number) "--json" "headRefName"] worktree-path)]
-    (if (dag/err? result)
-      result
+  (dag/when-let-ok
+   [result (run-gh-command
+            ["gh" "pr" "view" (str pr-number) "--json" "headRefName"]
+            worktree-path)]
       (if-let [branch (:headRefName (parse-gh-json (:output (:data result))))]
         (dag/ok {:branch branch})
-        (dag/err :branch-not-found "Could not determine PR branch")))))
+        (dag/err :branch-not-found "Could not determine PR branch"))))
 
 (defn- ^{:stratum 1} pr-info-from-gh
   "Fetch the fields conflict-resolution/resolve-pr-conflicts! needs
@@ -357,8 +357,11 @@
   "Attempt a governed merge or the configured branch repair."
   [worktree-path pr-number policy context]
   (orchestration/attempt-merge
-   {:check-ci check-ci-status :check-review check-review-status
-    :check-branch check-branch-status :check-threads check-unresolved-threads
+   {:evaluate-readiness
+    (partial readiness/evaluate
+             {:check-ci check-ci-status :check-review check-review-status
+              :check-branch check-branch-status
+              :check-threads check-unresolved-threads})
     :run-gh run-gh-command :merge-pr merge-pr!
     :fetch-labels fetch-pr-labels! :fetch-branch fetch-pr-branch
     :rebase-pr rebase-pr! :pr-info pr-info-from-gh :normalize-resolution normalize-resolution-outcome}
