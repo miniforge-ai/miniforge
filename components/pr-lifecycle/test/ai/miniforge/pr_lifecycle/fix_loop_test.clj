@@ -25,7 +25,8 @@
    [clojure.test :refer [deftest testing is]]
    [clojure.string :as str]
    [ai.miniforge.dag-executor.interface :as dag]
-   [ai.miniforge.pr-lifecycle.fix-loop :as fix]))
+   [ai.miniforge.pr-lifecycle.fix-loop :as fix]
+   [ai.miniforge.pr-lifecycle.github-conversation :as conversation]))
 
 ;------------------------------------------------------------------------------ Layer 0
 
@@ -98,13 +99,18 @@
       (is (dag/ok? result))
       (is (true? (:skipped (:data result)))))))
 
-(deftest ^{:stratum 0} resolve-comment-thread-skips-when-disabled-test
-  (testing "Skips resolution when auto-resolve is false"
-    (let [ctx {:fix/comment-id 789 :fix/parent-pr-number 123}
-          result (fix/resolve-comment-thread "/tmp" ctx 456 nil
-                                              :auto-resolve false)]
-      (is (dag/ok? result))
-      (is (true? (:skipped (:data result)))))))
+(deftest ^{:stratum 0} resolve-comment-thread-replies-when-resolution-disabled-test
+  (testing "Posts the fix link while leaving resolution disabled"
+    (let [call (atom nil)]
+      (with-redefs [conversation/link-fix-pr-to-comment
+                    (fn [& args]
+                      (reset! call args)
+                      (dag/ok {:reply-posted true :resolved false}))]
+        (let [ctx {:fix/comment-id 789 :fix/parent-pr-number 123}
+              result (fix/resolve-comment-thread "/tmp" ctx 456 nil
+                                                  :auto-resolve false)]
+          (is (dag/ok? result))
+          (is (= [:auto-resolve false] (take-last 2 @call))))))))
 
 ;------------------------------------------------------------------------------ Layer 1
 

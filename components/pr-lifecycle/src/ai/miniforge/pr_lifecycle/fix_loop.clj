@@ -250,7 +250,7 @@
         parent-pr-number (:fix/parent-pr-number fix-context)]
 
     ;; Only attempt resolution if we have the necessary metadata
-    (if (and comment-id parent-pr-number auto-resolve)
+    (if (and comment-id parent-pr-number)
       (do
         (when logger
           (log/info logger :pr-lifecycle :fix/resolving-conversation
@@ -276,7 +276,6 @@
           (log/debug logger :pr-lifecycle :fix/skipping-resolution
                      {:message "Skipping conversation resolution"
                       :data {:reason (cond
-                                       (not auto-resolve) "auto-resolve disabled"
                                        (not comment-id) "no comment-id"
                                        (not parent-pr-number) "no parent-pr-number")}}))
         (dag/ok {:skipped true :reason "missing-metadata"})))))

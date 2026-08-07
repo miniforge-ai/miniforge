@@ -323,17 +323,18 @@
    - worktree-path: Path to git worktree
    - thread-id: GraphQL thread ID (starts with 'PRRT_' or 'RT_')
 
-   Returns DAG result with resolution status or error"
+  Returns DAG result with resolution status or error"
   [worktree-path thread-id]
-  (let [mutation (str "mutation {
-  resolveReviewThread(input: {threadId: \"" thread-id "\"}) {
+  (let [mutation "mutation($threadId:ID!) {
+  resolveReviewThread(input: {threadId: $threadId}) {
     thread {
       id
       isResolved
     }
   }
-}")
-        result (graphql-query mutation worktree-path)]
+}"
+        result (graphql-query mutation worktree-path
+                              :variables {:threadId thread-id})]
     (if (dag/ok? result)
       (let [thread (get-in (:data result) [:data :resolveReviewThread :thread])
             is-resolved (:isResolved thread)]
