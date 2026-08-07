@@ -25,42 +25,52 @@
 
 ;------------------------------------------------------------------------------ Layer 0
 
-(defn- ^{:stratum 0} repository-coordinates
+(defn- ^{:stratum 0} parse-repository-coordinates
+  [output]
+  (let [remote-url (str/trim output)
+        parts (re-find #"github\.com(?::\d+)?[:/]([^/]+)/([^/]+)/?$" remote-url)
+        owner (nth parts 1 nil)
+        repo (some-> (nth parts 2 nil) (str/replace #"\.git$" ""))]
+    (if (and owner (seq repo))
+      (dag/ok {:owner owner :repo repo})
+      (dag/err :invalid-remote
+               "Could not parse GitHub owner/repository from origin remote"))))
+
+(defn- ^{:stratum 0} parse-review-comment-root-id
+  [output]
+  (try
+    (let [comment (json/parse-string output true)
+          root-id (if-some [reply-to-id (:in_reply_to_id comment)]
+                    reply-to-id
+                    (:id comment))]
+      (if (integer? root-id)
+        (dag/ok root-id)
+        (dag/err :invalid-review-comment-response
+                 "GitHub returned a review comment without an integer ID")))
+    (catch Exception e
+      (dag/err :json-parse-error (.getMessage e)))))
+
+;------------------------------------------------------------------------------ Layer 1
+
+(defn- ^{:stratum 1} repository-coordinates
   [run-command worktree-path]
   (dag/when-let-ok
    [result (run-command
             ["git" "config" "--get" "remote.origin.url"] worktree-path)]
-    (let [remote-url (str/trim (get (:data result) :output ""))
-          parts (re-find #"github\.com(?::\d+)?[:/]([^/]+)/([^/]+)/?$" remote-url)
-          owner (nth parts 1 nil)
-          repo (some-> (nth parts 2 nil) (str/replace #"\.git$" ""))]
-      (if (and owner (seq repo))
-        (dag/ok {:owner owner :repo repo})
-        (dag/err :invalid-remote
-                 "Could not parse GitHub owner/repository from origin remote")))))
+    (parse-repository-coordinates (get (:data result) :output ""))))
 
-(defn- ^{:stratum 0} review-comment-root-id
+(defn- ^{:stratum 1} review-comment-root-id
   [run-command worktree-path owner repo comment-id]
   (dag/when-let-ok
    [result (run-command
             ["gh" "api" (str "repos/" owner "/" repo
                               "/pulls/comments/" comment-id)]
             worktree-path)]
-    (try
-      (let [comment (json/parse-string (get (:data result) :output "") true)
-            root-id (if-some [reply-to-id (:in_reply_to_id comment)]
-                      reply-to-id
-                      (:id comment))]
-        (if (integer? root-id)
-          (dag/ok root-id)
-          (dag/err :invalid-review-comment-response
-                   "GitHub returned a review comment without an integer ID")))
-      (catch Exception e
-        (dag/err :json-parse-error (.getMessage e))))))
+    (parse-review-comment-root-id (get (:data result) :output ""))))
 
-;------------------------------------------------------------------------------ Layer 1
+;------------------------------------------------------------------------------ Layer 2
 
-(defn ^{:stratum 1} get-thread-id
+(defn ^{:stratum 2} get-thread-id
   "Resolve a REST review comment or reply to its GraphQL review thread."
   [run-command graphql-query worktree-path pr-number comment-id]
   (dag/when-let-ok
@@ -83,7 +93,7 @@
       (dag/ok {:thread-id (:id thread)
                :is-resolved (:isResolved thread)}))))
 
-(defn ^{:stratum 1} unresolved-review-threads
+(defn ^{:stratum 2} unresolved-review-threads
   "Read all provider pages and summarize unresolved review threads."
   [run-command graphql-query worktree-path pr-number]
   (dag/when-let-ok
