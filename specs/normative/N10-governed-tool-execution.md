@@ -6,7 +6,7 @@
 
 # N10 — Governed Tool Execution
 
-**Version:** 0.3.1-draft
+**Version:** 0.4.0-draft
 **Date:** 2026-08-06
 **Status:** Draft
 **Conformance:** MUST
@@ -841,20 +841,31 @@ Validation and environment adapters (§5.3) register through the tool registry:
 
 ## 12. Audit Integration
 
-### 12.1 Required Audit Events
+### 12.1 Audit Events
 
-All governed execution operations MUST emit events to the event stream (N3) and
-produce evidence for evidence bundles (N6).
+All governed execution operations MUST be observable on the event stream (N3)
+and MUST produce evidence for evidence bundles (N6).
 
-> **Ariadne profile:** Rows whose event, trigger, or data depends on Intent,
-> Operational IR, Capability, or Capability Broker are informative legacy
-> placeholders, despite this section's heading. Implementations MUST NOT emit
-> them as unregistered N3 event types. Conformant domain events correlate the
-> DecisionEnvelope, ExecutionGrant, and EffectTransaction identifiers; a new
-> lifecycle event type requires an N3 registry amendment.
+**None of the event types in the table below is registered in N3 §6.** Under
+N3 §6 an implementation MUST NOT emit an unregistered `:event/type`, so the
+table cannot be read as a list of events to emit. It is retained as an
+informative record of the intended observation points, and this section states
+the conformant path explicitly:
 
-| Event | Trigger | Data |
-|-------|---------|------|
+- Governed execution is observed today through the DecisionEnvelope,
+  ExecutionGrant, and EffectTransaction identifiers carried on registered
+  event types, correlated per §12.2.
+- Adding any row below to the emitted surface is an **N3 amendment first**: the
+  type must appear in N3 §6's registry, with a schema in N3 §3 and an emission
+  point in N3 §4.1, before an implementation emits it (N3 §6.1).
+
+The previous framing — "MUST emit events" immediately above a note saying
+implementations MUST NOT emit them — could not be satisfied either way.
+
+_Informative. Not an emission list; see above._
+
+| Event (unregistered) | Trigger | Data |
+|----------------------|---------|------|
 | `:intent/created` | Agent expresses intent | Intent structure |
 | `:intent/compiled` | OIR generated from intent | OIR structure |
 | `:verification/started` | Verification pipeline begins | OIR ID, verifiers |
@@ -873,7 +884,14 @@ produce evidence for evidence bundles (N6).
 
 ### 12.2 Evidence Bundle Integration
 
-Governed execution produces a sub-bundle within the workflow's evidence bundle:
+Governed execution contributes a record to the workflow's evidence bundle. The
+shape below is not yet an N6 artifact type: N6 §3.1.1 enumerates artifact
+types, and `:governed-execution` is absent from it. Registering it there is a
+prerequisite to producing it, on the same principle as §12.1 — N6 owns the
+evidence schema, so a new evidence type is an N6 amendment first.
+
+Redaction of any credential-bearing field follows N3 §8 as inherited by N6
+§7.2; this spec does not define a separate redaction rule.
 
 ```clojure
 {:evidence/type            :governed-execution
@@ -1044,6 +1062,42 @@ Audit Ledger (N3 events + N6 evidence bundles)
 
 ---
 
+## Annex A — Implementation Conformance Status (informative)
+
+This annex is **informative**. It records where the miniforge implementation
+diverges from the contract above, as of 2026-08-06.
+
+### A.1 Implemented
+
+- **ExecutionGrant** — `components/execution-grant` exists and carries the
+  grant identity §12.2 correlates on.
+
+### A.2 Specified, Not Implemented
+
+- **Execution capsules (§7).** No capsule component exists. SI-8 (no execution
+  beyond capability TTL), SI-9 (no credential persistence beyond capsule
+  lifetime), and SI-10 (revocation terminates execution within 5 seconds) have
+  no enforcement point, and SI-10 is the invariant most likely to be assumed
+  true by an operator.
+- **Crown jewel protection (§8).** No component.
+- **Postcondition monitoring (§9).** No component, so `:postcondition/*`
+  observation points have neither an emitter nor a registered event type.
+- **Audit event types (§12.1).** None of the fifteen types is registered in
+  N3 §6, so none may be emitted. Governed execution is currently observable
+  only through correlation identifiers on other event types.
+- **`:governed-execution` evidence (§12.2).** Not an N6 §3.1.1 artifact type,
+  so it cannot be produced conformantly.
+
+### A.3 Structural
+
+- **Safety invariants are unenforced.** §10 requires violation of any invariant
+  to halt execution immediately. With no capsule, no postcondition monitor, and
+  no crown-jewel component, SI-1 through SI-10 are stated but not checked
+  anywhere. This is the widest gap in the spec set: the invariants read as
+  guarantees and are currently assertions.
+
+---
+
 ## 17. Glossary
 
 - **Action Class** — Risk category (A-E) assigned to a tool verb by the tool
@@ -1069,6 +1123,18 @@ Audit Ledger (N3 events + N6 evidence bundles)
 ---
 
 **Version History:**
+
+- 0.4.0-draft (2026-08-06): Spec-completion pass. §12.1 said governed execution
+  MUST emit events to N3 directly above a note saying implementations MUST NOT
+  emit them, because none of the fifteen types is registered in N3 §6 — a
+  requirement satisfiable in neither direction. Reframed: the table is
+  informative, the conformant path is correlation identifiers on registered
+  types, and adding a row is an N3 amendment first (N3 §6.1). §12.2's
+  `:governed-execution` evidence shape is likewise not an N6 §3.1.1 artifact
+  type; registering it there is a prerequisite to producing it. Redaction
+  pointed at N3 §8 rather than left implicit. Annex A records that §10's ten
+  safety invariants have no enforcement point — no capsule, postcondition, or
+  crown-jewel component exists.
 
 - 0.3.1-draft (2026-08-06): Required commit-time ExecutionGrant scope
   enforcement against the durable effect proposal
