@@ -1,0 +1,455 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Your House, Their Clubhouse, and the Passes — miniforge.ai</title>
+  <meta name="description" content="The tenancy, ownership, and rights architecture explained simply: houses, clubhouses, passes, and the moving-box promise.">
+  <link rel="canonical" href="https://miniforge.ai/architectures/eli9-your-house-their-clubhouse">
+  <link rel="icon" href="/assets/favicon.svg" type="image/svg+xml">
+</head>
+<body>
+<div style="max-width:640px;margin:0 auto 28px;font-family:Menlo,Consolas,monospace;font-size:12px;letter-spacing:.08em">
+<a href="/architectures" style="color:#ff5e1a;text-decoration:none">&larr; MINIFORGE.AI // DRAWING REGISTER</a>
+</div>
+
+<style>
+:root { --bg:#faf9f6; --ink:#26221c; --sub:#6a635a; --accent:#ff5e1a; --card:#ffffff; --line:#e0dcd4; }
+@media (prefers-color-scheme: dark) { :root { --bg:#1c1a17; --ink:#ece8e0; --sub:#a49c90; --card:#26231e; --line:#3a362f; } }
+:root[data-theme="dark"] { --bg:#1c1a17; --ink:#ece8e0; --sub:#a49c90; --card:#26231e; --line:#3a362f; }
+:root[data-theme="light"] { --bg:#faf9f6; --ink:#26221c; --sub:#6a635a; --card:#ffffff; --line:#e0dcd4; }
+body { background:var(--bg); color:var(--ink); font-family:Georgia, 'Times New Roman', serif; margin:0; padding:40px 20px 80px; line-height:1.65; }
+h1 { font-family:Helvetica, Arial, sans-serif; color:var(--accent); font-size:34px; text-align:center; max-width:700px; margin:0 auto 8px; text-wrap:balance; }
+h2 { font-family:Helvetica, Arial, sans-serif; color:var(--accent); font-size:23px; max-width:640px; margin:44px auto 8px; }
+p, blockquote { max-width:640px; margin:14px auto; font-size:17px; }
+p.li { margin:8px auto; padding-left:1.2em; }
+em { color:var(--sub); }
+blockquote { border-left:4px solid var(--accent); padding:10px 20px; background:var(--card); border-radius:0 8px 8px 0; font-size:18px; }
+code { font-family:Menlo, Consolas, monospace; font-size:.85em; background:rgba(30,95,150,.12); padding:1px 5px; border-radius:4px; }
+hr { border:none; border-top:1px solid var(--line); max-width:640px; margin:40px auto; }
+.fig { max-width:960px; margin:26px auto; background:#ffffff; border:1px solid var(--line); border-radius:10px; padding:10px; overflow-x:auto; }
+.fig svg { display:block; min-width:760px; width:100%; height:auto; }
+.twrap { max-width:860px; margin:20px auto; overflow-x:auto; background:#ffffff; border:1px solid var(--line); border-radius:8px; }
+table { border-collapse:collapse; width:100%; font-family:Helvetica, Arial, sans-serif; font-size:13.5px; color:#26221c; }
+th, td { text-align:left; padding:8px 12px; border-bottom:1px solid #e8e4dc; }
+th { background:#f0eee8; }
+</style>
+<h1>Your House, Their Clubhouse, and the Passes</h1>
+<p><em>The tenancy, ownership, and rights architecture (<code>../tenancy-ownership-access.md</code> §1–§10, §12), explained simply — in the same world as The Robot Helpers and the Sticker Rules. Same house, same doorkeeper, same stickers; this story is about whose things are whose. Together the two stories are the simplicity invariant: if a future change to the architecture cannot be told in the story, the change is suspect. Grown-up translation table at the end.</em></p>
+<hr>
+<h2>Everyone has a house</h2>
+<p>You remember the house with the robot helpers and the boring doorkeeper. Now zoom out: <strong>everyone has a house of their own.</strong> Everything you have lives in your house — your drawings, your report cards, your skills notebook. That is what "yours" <em>means</em> here: <strong>every single thing lives in exactly one house.</strong> First rule; it never bends.</p>
+<p>Clubs have buildings too. The soccer club's clubhouse holds the club's own things — the rulebook, the bulletin board, the game plans. A clubhouse isn't fancier than a house; it's just a house that a club owns.</p>
+<p>And every door everywhere — your house, the clubhouse, the coach's office, the library desk, the gate to the practice field — has a <strong>doorkeeper</strong> standing at it. Here's the doorkeepers' secret, and it's the whole trick of this world: they're robots too, but a special kind — <strong>no ears, just a pass slot.</strong> You can hand a doorkeeper a pass. You cannot talk to one. Nobody has ever talked a doorkeeper into anything, because nobody has ever talked <em>to</em> a doorkeeper at all.</p>
+<h2>Joining a club prints passes. It never moves houses.</h2>
+<p>Nobody walks through anyone else's door without a <strong>pass</strong>. You've seen passes already — the robots carry them. A pass always says four things: <em>who</em> it's for, <em>which door or shelf</em> it opens, <em>why it exists</em>, and <em>when it expires</em>. If the why goes away, the pass dies with it.</p>
+<p>So what is "joining the soccer club"? The club prints <strong>you</strong> a member pass — it opens the practice field, the bulletin board room, and the bin of club balls. Sometimes the club pays for everything: club balls, club uniforms. You use them there, through your pass. They never come home as yours.</p>
+<p>And then you <em>play</em>. Here's the part that matters: <strong>the season is a thing you do together, on the field.</strong> The coach sees your corner kicks because the coach was standing right there coaching them — not because anyone opened a door into your house. Playing together is its own shared place, and everyone in it sees what happens in it. Nobody needs a pass into anybody's house to play on a team.</p>
+<p>Now bring <strong>your own ball</strong> to practice. The moment you toss it onto the field, you've minted a little pass without saying a word: <em>the team may use my ball — during practice.</em> Practice ends, the ball goes home with you. It was never the club's, not even a little, no matter how many teammates kicked it. <strong>Used-by-everyone never means owned-by-the-club.</strong> And if you'd rather not bring it tomorrow, you just… don't. That's the whole revocation.</p>
+<p>Notice what never happened in any of this: your house did not get picked up and craned into the clubhouse. Nothing of yours moved anywhere, and nobody got a pass into your house at all. Joining a club is <strong>printing passes, never moving houses</strong> — and that's why leaving will be easy later. A thing that never moved in never has to move out.</p>
+<p></p><div class="fig"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 900 540" font-family="Helvetica, Arial, sans-serif">
+  <defs>
+    <marker id="fig1-aB" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="8" markerHeight="8" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="#3a76b8"/></marker>
+    <marker id="fig1-aG" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="8" markerHeight="8" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="#4a9a4a"/></marker>
+  </defs>
+  <rect width="900" height="540" fill="#ffffff"/>
+  <text x="450" y="40" text-anchor="middle" font-size="24" font-weight="bold" fill="#1e5f96">Everyone has a house. Joining prints passes — it never moves houses.</text>
+
+  <!-- Alice's house -->
+  <path d="M60,160 L150,110 L240,160 Z" fill="#d5e8d4" stroke="#82b366" stroke-width="2.5"/>
+  <rect x="78" y="160" width="144" height="120" fill="#d5e8d4" stroke="#82b366" stroke-width="2.5"/>
+  <rect x="130" y="222" width="38" height="58" rx="3" fill="#82b366"/>
+  <circle cx="160" cy="252" r="4" fill="#d5e8d4"/>
+  <rect x="92" y="176" width="52" height="34" rx="3" fill="#ffffff" stroke="#82b366" stroke-width="1.5"/>
+  <text x="118" y="190" text-anchor="middle" font-size="8" fill="#3a6a34">skills</text>
+  <text x="118" y="201" text-anchor="middle" font-size="8" fill="#3a6a34">notebook</text>
+  <rect x="156" y="176" width="52" height="34" rx="3" fill="#ffffff" stroke="#82b366" stroke-width="1.5"/>
+  <text x="182" y="190" text-anchor="middle" font-size="8" fill="#3a6a34">soccer</text>
+  <text x="182" y="201" text-anchor="middle" font-size="8" fill="#3a6a34">shelf</text>
+  <text x="150" y="304" text-anchor="middle" font-size="14" font-weight="bold" fill="#3a6a34">ALICE'S HOUSE</text>
+  <text x="150" y="322" text-anchor="middle" font-size="11.5" fill="#3a6a34">everything of hers lives here —</text>
+  <text x="150" y="337" text-anchor="middle" font-size="11.5" fill="#3a6a34">exactly one house per thing</text>
+
+  <!-- clubhouse -->
+  <path d="M660,160 L770,104 L880,160 Z" fill="#dae8fc" stroke="#6c8ebf" stroke-width="2.5"/>
+  <rect x="678" y="160" width="184" height="120" fill="#dae8fc" stroke="#6c8ebf" stroke-width="2.5"/>
+  <rect x="748" y="222" width="42" height="58" rx="3" fill="#6c8ebf"/>
+  <rect x="692" y="176" width="64" height="34" rx="3" fill="#ffffff" stroke="#6c8ebf" stroke-width="1.5"/>
+  <text x="724" y="190" text-anchor="middle" font-size="8" fill="#274b73">rulebook ·</text>
+  <text x="724" y="201" text-anchor="middle" font-size="8" fill="#274b73">game plans</text>
+  <rect x="766" y="176" width="64" height="34" rx="3" fill="#ffffff" stroke="#6c8ebf" stroke-width="1.5"/>
+  <text x="798" y="190" text-anchor="middle" font-size="8" fill="#274b73">bulletin</text>
+  <text x="798" y="201" text-anchor="middle" font-size="8" fill="#274b73">board</text>
+  <text x="770" y="304" text-anchor="middle" font-size="14" font-weight="bold" fill="#274b73">THE CLUBHOUSE</text>
+  <text x="770" y="322" text-anchor="middle" font-size="11.5" fill="#274b73">just a house a club owns —</text>
+  <text x="770" y="337" text-anchor="middle" font-size="11.5" fill="#274b73">the club's stuff lives here</text>
+
+  <!-- doorkeeper between -->
+  <circle cx="450" cy="96" r="15" fill="#f5f5f5" stroke="#8a8a82" stroke-width="2"/>
+  <rect x="436" y="78" width="28" height="10" rx="3" fill="#8a8a82"/>
+  <line x1="444" y1="98" x2="456" y2="98" stroke="#232323" stroke-width="2"/>
+  <text x="450" y="130" text-anchor="middle" font-size="10.5" fill="#555">a doorkeeper at every door:</text>
+  <text x="450" y="143" text-anchor="middle" font-size="10.5" fill="#555">no ears, just a pass slot</text>
+
+  <!-- pass 1: club -> alice -->
+  <rect x="300" y="168" width="300" height="86" rx="8" fill="#dae8fc" stroke="#6c8ebf" stroke-width="2.5"/>
+  <text x="316" y="190" font-size="13" font-weight="bold" fill="#274b73">MEMBER PASS</text>
+  <text x="316" y="208" font-size="11" fill="#333">for: Alice · opens: field + club balls + bulletin room</text>
+  <text x="316" y="224" font-size="11" fill="#333">why: joined the club · until: torn up</text>
+  <text x="316" y="244" font-size="10" font-style="italic" fill="#555">printed by the club</text>
+  <path d="M676,214 L604,214" stroke="#3a76b8" stroke-width="2.5" marker-end="url(#fig1-aB)"/>
+  <path d="M298,214 L246,214" stroke="#3a76b8" stroke-width="2.5" marker-end="url(#fig1-aB)"/>
+
+  <!-- alice's ball at practice -->
+  <rect x="300" y="280" width="300" height="100" rx="8" fill="#d5e8d4" stroke="#82b366" stroke-width="2.5"/>
+  <circle cx="330" cy="306" r="12" fill="#ffffff" stroke="#3a6a34" stroke-width="2"/>
+  <path d="M324,300 L336,312 M336,300 L324,312" stroke="#3a6a34" stroke-width="1"/>
+  <text x="350" y="302" font-size="13" font-weight="bold" fill="#3a6a34">ALICE'S BALL, AT PRACTICE</text>
+  <text x="316" y="326" font-size="11" fill="#333">tossing it onto the field mints the pass:</text>
+  <text x="316" y="342" font-size="11" fill="#333">the team may use it — during practice.</text>
+  <text x="316" y="358" font-size="11" fill="#333">practice ends → it goes home with her.</text>
+  <text x="316" y="374" font-size="10" font-style="italic" fill="#555">used-by-everyone never means owned-by-the-club</text>
+  <path d="M246,330 L298,330" stroke="#4a9a4a" stroke-width="2.5" marker-end="url(#fig1-aG)"/>
+  <path d="M604,330 L676,330" stroke="#4a9a4a" stroke-width="2.5" marker-end="url(#fig1-aG)"/>
+  <text x="640" y="320" text-anchor="middle" font-size="10" fill="#4a9a4a">to the field</text>
+
+  <!-- crossed-out craning -->
+  <rect x="60" y="380" width="190" height="130" rx="8" fill="#fcfcfa" stroke="#b8b8b0" stroke-width="1.5"/>
+  <path d="M110,448 L145,430 L180,448 Z" fill="#dae8fc" stroke="#6c8ebf" stroke-width="1.5"/>
+  <rect x="118" y="448" width="54" height="40" fill="#dae8fc" stroke="#6c8ebf" stroke-width="1.5"/>
+  <path d="M128,466 L145,457 L162,466 Z" fill="#d5e8d4" stroke="#82b366" stroke-width="1.5"/>
+  <rect x="132" y="466" width="26" height="20" fill="#d5e8d4" stroke="#82b366" stroke-width="1.5"/>
+  <line x1="70" y1="392" x2="240" y2="500" stroke="#c0392b" stroke-width="4.5"/>
+  <line x1="240" y1="392" x2="70" y2="500" stroke="#c0392b" stroke-width="4.5"/>
+  <text x="155" y="527" text-anchor="middle" font-size="11.5" font-weight="bold" fill="#c0392b">a house inside the clubhouse: never</text>
+
+  <!-- robots note -->
+  <rect x="640" y="380" width="240" height="130" rx="8" fill="#fffde7" stroke="#c8b900" stroke-width="1.5"/>
+  <text x="656" y="404" font-size="13" font-weight="bold" fill="#4a4a20">whose robot? doesn't matter</text>
+  <text x="656" y="424" font-size="11.5" fill="#4a4a20">yours, the club's, rented — robots</text>
+  <text x="656" y="440" font-size="11.5" fill="#4a4a20">own nothing and work on passes</text>
+  <text x="656" y="456" font-size="11.5" fill="#4a4a20">lent to them. Whose robot did the</text>
+  <text x="656" y="472" font-size="11.5" fill="#4a4a20">work never decides whose stuff</text>
+  <text x="656" y="488" font-size="11.5" fill="#4a4a20">the work is. Passes decide.</text>
+
+  <rect x="280" y="420" width="340" height="66" rx="8" fill="#fffde7" stroke="#c8b900" stroke-width="1.5"/>
+  <text x="450" y="446" text-anchor="middle" font-size="13.5" fill="#4a4a20">Joining prints passes, never moves houses.</text>
+  <text x="450" y="468" text-anchor="middle" font-size="13.5" font-weight="bold" fill="#4a4a20">A thing that never moved in never has to move out.</text>
+</svg>
+</div><p></p>
+<p>One small thing about you and your keys: you might have a front door key, a spare at grandma's, a new one after you lost the old one. Keys prove it's <em>you</em> at the door. Losing a key, or adding one, never changes whose house it is.</p>
+<p>And the robots? Robots work everywhere in this world — your robots, the club's robots, even a robot you rent for an afternoon. Here's the thing that surprises grown-ups: <strong>it never matters who owns the robot.</strong> Robots own nothing and hold nothing of their own — a robot working for you works on passes lent from yours (smaller ones, and only if yours say "lending allowed" — you know this from the robot story). Whose robot did the work never decides whose stuff the work is. The passes and the slips decide.</p>
+<h2>Whose paper is it?</h2>
+<p>Whose is a paper? <strong>It belongs to the place where it was made</strong> — copies may travel later, but belonging doesn't:</p>
+<p class="li">The game plans and the coach's notes get written at the coach's desk, in the coach's office. Club papers, belonging to the club. And notice a detail: <strong>your member pass doesn't open the coach's office.</strong> Being in the club never meant every club door — the office door has a doorkeeper like every other, and it won't take your member pass. "But I'm on the team!" lands on nothing, because doorkeepers have no ears.</p>
+<p class="li">Your drawings and projects get made at your house. Yours.</p>
+<p>Nobody stands sorting paper by paper. <strong>Where it was made decides.</strong> That's the whole rule, so there's never an argument about any single paper.</p>
+<p>When the forward game plan is <em>finished</em>, the coach walks out and hands the forwards their copies. That's the club <strong>choosing</strong> to share a club paper: the copy was made <em>for you</em>, so your copy comes home to your house — wearing the club's sticker — "team eyes only" — which rides wherever the copy goes (glue law). The original never left the coach's desk. And the coach's notes? Those may never be handed out at all — some club papers no member ever sees. (Years from now the coach might give their old notebook to their kid who's becoming a coach. That's the owner giving the <em>thing itself</em> away — always the owner's to do, and nobody else's.)</p>
+<p>But here is the most important rule in the whole story:</p>
+<blockquote><strong>What you learned is always yours.</strong></blockquote>
+<p>You got better at soccer <em>at the club</em>, with <em>club drills</em>, on <em>club fields</em>. Doesn't matter. "I can bend a corner kick" goes in the skills notebook in <strong>your</strong> house, forever. The club keeps its drill sheets; you keep your feet. When you're twenty and trying out somewhere new, that notebook is what you bring — that's what a skills notebook is <em>for</em>.</p>
+<p>One catch, and it's fair: if what you learned includes a club secret — the special play nobody else knows — the secret's sticker rides along in your notebook (glue law, from the robot story). The skill is yours to keep; the secret detail is still the club's to unlock. Yours to have, theirs to gate.</p>
+<p>And when the coach asks for a season report about you? The report is about you, for your growing up — so it lives in <strong>your</strong> house. The coach gets a <strong>reading pass</strong> to that one report, through the season. A pass to read it — never a hand to carry it off. Season ends, pass dies, report stays.</p>
+<p></p><div class="fig"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 900 560" font-family="Helvetica, Arial, sans-serif">
+  <defs>
+    <marker id="fig2-aB" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="8" markerHeight="8" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="#3a76b8"/></marker>
+    <marker id="fig2-aG" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="8" markerHeight="8" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="#4a9a4a"/></marker>
+  </defs>
+  <rect width="900" height="560" fill="#ffffff"/>
+  <text x="450" y="40" text-anchor="middle" font-size="24" font-weight="bold" fill="#1e5f96">Where it was made decides — and what you learned is always yours</text>
+
+  <!-- coach's office -->
+  <rect x="40" y="80" width="210" height="120" rx="8" fill="#dae8fc" stroke="#6c8ebf" stroke-width="2.5"/>
+  <text x="145" y="104" text-anchor="middle" font-size="13" font-weight="bold" fill="#274b73">THE COACH'S OFFICE</text>
+  <rect x="58" y="116" width="120" height="40" rx="3" fill="#ffffff" stroke="#6c8ebf" stroke-width="1.5"/>
+  <text x="118" y="132" text-anchor="middle" font-size="8.5" fill="#274b73">game plans · season notes</text>
+  <text x="118" y="146" text-anchor="middle" font-size="8.5" fill="#274b73">MADE at this desk</text>
+  <rect x="192" y="116" width="42" height="60" rx="3" fill="#6c8ebf"/>
+  <circle cx="226" cy="146" r="3.5" fill="#dae8fc"/>
+  <rect x="200" y="130" width="14" height="16" rx="2" fill="#f8cecc" stroke="#b85450" stroke-width="1.5"/>
+  <text x="118" y="174" text-anchor="middle" font-size="10" font-weight="bold" fill="#c0392b">your member pass does</text>
+  <text x="118" y="188" text-anchor="middle" font-size="10" font-weight="bold" fill="#c0392b">NOT open this door</text>
+
+  <!-- handed copy -->
+  <path d="M250,140 L306,140" stroke="#3a76b8" stroke-width="2.5" marker-end="url(#fig2-aB)"/>
+  <text x="278" y="128" text-anchor="middle" font-size="10" fill="#3a76b8">when it's</text>
+  <text x="278" y="158" text-anchor="middle" font-size="10" fill="#3a76b8">FINISHED</text>
+  <rect x="310" y="86" width="190" height="118" rx="8" fill="#fcfcfa" stroke="#b8b8b0" stroke-width="1.5"/>
+  <text x="405" y="108" text-anchor="middle" font-size="12" font-weight="bold" fill="#232323">the coach hands out copies</text>
+  <rect x="330" y="118" width="80" height="52" rx="4" fill="#ffffff" stroke="#8a8a82" stroke-width="1.5"/>
+  <text x="370" y="136" text-anchor="middle" font-size="8.5" fill="#333">forward</text>
+  <text x="370" y="148" text-anchor="middle" font-size="8.5" fill="#333">game plan</text>
+  <circle cx="344" cy="128" r="9" fill="#dae8fc" stroke="#6c8ebf" stroke-width="1.5"/>
+  <text x="344" y="131" text-anchor="middle" font-size="5.5" fill="#274b73">team</text>
+  <text x="424" y="136" font-size="9.5" fill="#555">your copy → your</text>
+  <text x="424" y="149" font-size="9.5" fill="#555">house, wearing the</text>
+  <text x="424" y="162" font-size="9.5" fill="#555">club's sticker</text>
+  <text x="405" y="182" text-anchor="middle" font-size="9.5" font-style="italic" fill="#555">the original never left the desk ·</text>
+  <text x="405" y="195" text-anchor="middle" font-size="9.5" font-style="italic" fill="#555">the notes are never handed out</text>
+
+  <!-- made at home -->
+  <rect x="40" y="234" width="210" height="76" rx="8" fill="#d5e8d4" stroke="#82b366" stroke-width="2.5"/>
+  <text x="145" y="260" text-anchor="middle" font-size="13" font-weight="bold" fill="#3a6a34">MADE AT YOUR HOUSE</text>
+  <text x="145" y="282" text-anchor="middle" font-size="11" fill="#3a6a34">your drawings · your projects</text>
+  <path d="M250,272 L306,272" stroke="#4a9a4a" stroke-width="2.5" marker-end="url(#fig2-aG)"/>
+  <rect x="310" y="240" width="190" height="64" rx="8" fill="#d5e8d4" stroke="#82b366" stroke-width="2"/>
+  <text x="405" y="266" text-anchor="middle" font-size="13" font-weight="bold" fill="#3a6a34">your house</text>
+  <text x="405" y="286" text-anchor="middle" font-size="11" fill="#3a6a34">yours, forever</text>
+
+  <rect x="130" y="330" width="290" height="40" rx="8" fill="#fffde7" stroke="#c8b900" stroke-width="1.5"/>
+  <text x="275" y="349" text-anchor="middle" font-size="12.5" fill="#4a4a20">nobody sorts paper by paper —</text>
+  <text x="275" y="364" text-anchor="middle" font-size="12.5" font-weight="bold" fill="#4a4a20">where it was MADE decides</text>
+
+  <!-- right: the learning rule -->
+  <rect x="520" y="80" width="350" height="290" rx="10" fill="#fcfcfa" stroke="#b8b8b0" stroke-width="1.5"/>
+  <text x="695" y="108" text-anchor="middle" font-size="16" font-weight="bold" fill="#3a6a34">the most important rule</text>
+
+  <text x="545" y="140" font-size="12.5" fill="#333">learned at the club, on club fields,</text>
+  <text x="545" y="156" font-size="12.5" fill="#333">with club drills…</text>
+  <circle cx="620" cy="196" r="16" fill="#fce5cd" stroke="#b8860b" stroke-width="2"/>
+  <path d="M610,220 Q620,230 630,220" stroke="#232323" stroke-width="2" fill="none"/>
+  <circle cx="660" cy="210" r="10" fill="#ffffff" stroke="#232323" stroke-width="2"/>
+  <text x="700" y="205" font-size="11" fill="#555">⚽ corner kick, bent!</text>
+
+  <path d="M660,240 L660,272" stroke="#4a9a4a" stroke-width="2.5" marker-end="url(#fig2-aG)"/>
+
+  <rect x="545" y="272" width="230" height="88" rx="6" fill="#d5e8d4" stroke="#82b366" stroke-width="2.5"/>
+  <text x="660" y="292" text-anchor="middle" font-size="12" font-weight="bold" fill="#3a6a34">SKILLS NOTEBOOK — in YOUR house</text>
+  <text x="557" y="314" font-size="11.5" fill="#333">✓ bend a corner kick</text>
+  <rect x="700" y="302" width="60" height="18" rx="9" fill="#f8cecc" stroke="#b85450" stroke-width="1.5"/>
+  <text x="730" y="315" text-anchor="middle" font-size="8.5" fill="#7a3230">club secret</text>
+  <text x="557" y="336" font-size="10.5" font-style="italic" fill="#555">the special play's sticker rides along —</text>
+  <text x="557" y="350" font-size="10.5" font-style="italic" fill="#555">yours to have, theirs to gate</text>
+
+  <text x="800" y="300" font-size="11" fill="#3a6a34" font-weight="bold">the club keeps</text>
+  <text x="800" y="315" font-size="11" fill="#3a6a34" font-weight="bold">its drill sheets;</text>
+  <text x="800" y="330" font-size="11" fill="#3a6a34" font-weight="bold">you keep</text>
+  <text x="800" y="345" font-size="11" fill="#3a6a34" font-weight="bold">your feet</text>
+
+  <!-- bottom: commissioned report -->
+  <rect x="40" y="400" width="830" height="120" rx="10" fill="#fcfcfa" stroke="#b8b8b0" stroke-width="1.5"/>
+  <text x="60" y="428" font-size="15" font-weight="bold" fill="#232323">The coach asks for a season report about you</text>
+  <rect x="60" y="442" width="150" height="62" rx="6" fill="#d5e8d4" stroke="#82b366" stroke-width="2.5"/>
+  <text x="135" y="466" text-anchor="middle" font-size="12" font-weight="bold" fill="#3a6a34">the report</text>
+  <text x="135" y="484" text-anchor="middle" font-size="11" fill="#3a6a34">lives in YOUR house</text>
+  <rect x="260" y="442" width="150" height="62" rx="6" fill="#e1d5e7" stroke="#9673a6" stroke-width="2"/>
+  <text x="335" y="464" text-anchor="middle" font-size="11" font-weight="bold" fill="#4a355c">READING PASS</text>
+  <text x="335" y="480" text-anchor="middle" font-size="9" fill="#4a355c">for: Coach · opens: this report</text>
+  <text x="335" y="494" text-anchor="middle" font-size="9" fill="#4a355c">why: fall season · until: it ends</text>
+  <text x="335" y="518" text-anchor="middle" font-size="11" fill="#4a355c">the coach gets a READING PASS</text>
+  <text x="460" y="462" font-size="12.5" fill="#333">a pass to read it —</text>
+  <text x="460" y="480" font-size="12.5" font-weight="bold" fill="#333">never a hand to carry it off.</text>
+  <text x="460" y="500" font-size="11.5" font-style="italic" fill="#555">season ends → the pass dies by itself → the report stays on your shelf.</text>
+</svg>
+</div><p></p>
+<h2>The doorkeeper's four questions</h2>
+<p>At every door, every time, the doorkeeper asks four questions. Each question is its own question — on purpose, so no answer can be stretched to cover another:</p>
+<p class="li"><strong>"Who are you?"</strong> Show a key. Keys prove it's you; they decide nothing else.</p>
+<p class="li"><strong>"Show the pass for THIS door."</strong> Owner of the house? That's the deepest pass there is. Member pass, reading pass, library card — each opens exactly what it names. No pass, no entry, however nice you are.</p>
+<p class="li"><strong>"What do the thing's own stickers say?"</strong> Even inside a door your pass opens, each paper votes for itself — where it may go, what it may be used for. (This question is the whole robot story.)</p>
+<p class="li"><strong>"Tokens, for the big machines?"</strong> The fancy helpers cost tokens to run. No tokens, no new machine time.</p>
+<p>And the token rule has a hard edge worth saying twice: <strong>tokens buy machine time, never your own house.</strong> Running out of tokens can stop new jobs. It can never, ever bolt your own front door against you. Your stuff doesn't rent itself back to you.</p>
+<p></p><div class="fig"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 900 500" font-family="Helvetica, Arial, sans-serif">
+  <defs>
+    <marker id="fig3-aG" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="8" markerHeight="8" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="#4a9a4a"/></marker>
+  </defs>
+  <rect width="900" height="500" fill="#ffffff"/>
+  <text x="450" y="40" text-anchor="middle" font-size="24" font-weight="bold" fill="#1e5f96">Four questions at every door — none does another's job</text>
+
+  <!-- booth template x4 -->
+  <!-- booth 1 -->
+  <rect x="40" y="90" width="190" height="230" rx="10" fill="#f5f5f5" stroke="#8a8a82" stroke-width="2.5"/>
+  <rect x="40" y="90" width="190" height="44" rx="10" fill="#8a8a82"/>
+  <text x="135" y="118" text-anchor="middle" font-size="15" font-weight="bold" fill="#ffffff">1 · WHO ARE YOU?</text>
+  <rect x="88" y="160" width="94" height="50" rx="8" fill="#fff2cc" stroke="#d6b656" stroke-width="2"/>
+  <circle cx="112" cy="185" r="10" fill="none" stroke="#8a6d1a" stroke-width="2.5"/>
+  <rect x="122" y="182" width="34" height="6" rx="3" fill="#8a6d1a"/>
+  <text x="135" y="238" text-anchor="middle" font-size="12" fill="#555">show a key</text>
+  <text x="135" y="266" text-anchor="middle" font-size="11" font-style="italic" fill="#555">keys prove it's you;</text>
+  <text x="135" y="282" text-anchor="middle" font-size="11" font-style="italic" fill="#555">they decide nothing else</text>
+
+  <!-- booth 2 -->
+  <rect x="260" y="90" width="190" height="230" rx="10" fill="#f0e8f4" stroke="#9673a6" stroke-width="2.5"/>
+  <rect x="260" y="90" width="190" height="44" rx="10" fill="#9673a6"/>
+  <text x="355" y="118" text-anchor="middle" font-size="15" font-weight="bold" fill="#ffffff">2 · SHOW THE PASS</text>
+  <rect x="308" y="164" width="94" height="44" rx="6" fill="#e1d5e7" stroke="#9673a6" stroke-width="2"/>
+  <text x="355" y="182" text-anchor="middle" font-size="10" font-weight="bold" fill="#4a355c">PASS</text>
+  <text x="355" y="198" text-anchor="middle" font-size="8.5" fill="#4a355c">who · door · why · until</text>
+  <text x="355" y="238" text-anchor="middle" font-size="12" fill="#4a355c">owner · member pass ·</text>
+  <text x="355" y="254" text-anchor="middle" font-size="12" fill="#4a355c">reading pass · library card</text>
+  <text x="355" y="282" text-anchor="middle" font-size="11" font-style="italic" fill="#555">no pass, no entry —</text>
+  <text x="355" y="298" text-anchor="middle" font-size="11" font-style="italic" fill="#555">however nice you are</text>
+
+  <!-- booth 3 -->
+  <rect x="480" y="90" width="190" height="230" rx="10" fill="#fbeeee" stroke="#b85450" stroke-width="2.5"/>
+  <rect x="480" y="90" width="190" height="44" rx="10" fill="#b85450"/>
+  <text x="575" y="111" text-anchor="middle" font-size="14" font-weight="bold" fill="#ffffff">3 · WHAT DO ITS OWN</text>
+  <text x="575" y="127" text-anchor="middle" font-size="14" font-weight="bold" fill="#ffffff">STICKERS SAY?</text>
+  <rect x="536" y="158" width="78" height="56" rx="5" fill="#ffffff" stroke="#8a8a82" stroke-width="2"/>
+  <circle cx="552" cy="172" r="11" fill="#f8cecc" stroke="#b85450" stroke-width="2"/>
+  <circle cx="578" cy="172" r="11" fill="#dae8fc" stroke="#6c8ebf" stroke-width="1.5"/>
+  <text x="575" y="240" text-anchor="middle" font-size="12" fill="#7a3230">the paper itself votes</text>
+  <text x="575" y="268" text-anchor="middle" font-size="11" font-style="italic" fill="#555">this booth is the whole</text>
+  <text x="575" y="284" text-anchor="middle" font-size="11" font-style="italic" fill="#555">robot story</text>
+
+  <!-- booth 4 -->
+  <rect x="700" y="90" width="190" height="230" rx="10" fill="#fdf3e6" stroke="#d79b00" stroke-width="2.5"/>
+  <rect x="700" y="90" width="190" height="44" rx="10" fill="#d79b00"/>
+  <text x="795" y="118" text-anchor="middle" font-size="15" font-weight="bold" fill="#ffffff">4 · GOT TOKENS?</text>
+  <circle cx="770" cy="180" r="16" fill="#ffe6cc" stroke="#d79b00" stroke-width="2.5"/>
+  <text x="770" y="186" text-anchor="middle" font-size="14" font-weight="bold" fill="#8a5a00">T</text>
+  <circle cx="806" cy="180" r="16" fill="#ffe6cc" stroke="#d79b00" stroke-width="2.5"/>
+  <text x="806" y="186" text-anchor="middle" font-size="14" font-weight="bold" fill="#8a5a00">T</text>
+  <text x="795" y="238" text-anchor="middle" font-size="12" fill="#8a5a00">the arcade machines —</text>
+  <text x="795" y="254" text-anchor="middle" font-size="12" fill="#8a5a00">fancy helpers cost tokens</text>
+  <text x="795" y="282" text-anchor="middle" font-size="11" font-style="italic" fill="#555">no tokens →</text>
+  <text x="795" y="298" text-anchor="middle" font-size="11" font-style="italic" fill="#555">no NEW games</text>
+
+  <path d="M232,205 L256,205" stroke="#4a9a4a" stroke-width="2.5" marker-end="url(#fig3-aG)"/>
+  <path d="M452,205 L476,205" stroke="#4a9a4a" stroke-width="2.5" marker-end="url(#fig3-aG)"/>
+  <path d="M672,205 L696,205" stroke="#4a9a4a" stroke-width="2.5" marker-end="url(#fig3-aG)"/>
+
+  <text x="450" y="356" text-anchor="middle" font-size="13.5" fill="#555">each booth knows ONLY its own question — and none of them have ears: passes in, decisions out, no talking</text>
+
+  <rect x="120" y="386" width="660" height="84" rx="10" fill="#fffde7" stroke="#c8b900" stroke-width="2"/>
+  <text x="450" y="416" text-anchor="middle" font-size="17" font-weight="bold" fill="#4a4a20">Tokens buy machine time — never your own toy box.</text>
+  <text x="450" y="440" text-anchor="middle" font-size="14" fill="#4a4a20">Running out of tokens can stop new games. It can never bolt the front door of the house</text>
+  <text x="450" y="458" text-anchor="middle" font-size="14" fill="#4a4a20">you already own. Your stuff doesn't rent itself back to you.</text>
+</svg>
+</div><p></p>
+<h2>Borrowed things</h2>
+<p>The library book on your shelf is <em>in</em> your house — but it isn't <em>yours</em>. Holding a thing was never the same as owning it.</p>
+<p>Your <strong>library card is a pass with a date on it</strong>: you to the library, until June. Through it you may read the book, learn from it, write a book report. When the card expires, the book goes home to its shelf — every page. You never got to photocopy it, so there's nothing to sneak.</p>
+<p>But your <strong>book report is yours.</strong> That's what lending a book <em>means</em>: read, learn, make something of your own. The report stays in your house; the book goes back. (If the library had a special rule — "no quoting page 12" — that sticker rides on your report. Glue law, as always.)</p>
+<p>And the comic you found on the street? It's <em>somebody's</em>. You don't know whose, and "I found it" doesn't make it yours. Read it today, fine; copy it into your own zine, no — not unless a grown-up checks and writes down that it's really free to use. Not knowing the owner makes you <em>more</em> careful, not less.</p>
+<h2>Mary's hall pass</h2>
+<p>A pass is a deal in both directions — and the rules ride on the pass. Mary got a hall pass at school: <em>bathroom, and back.</em> But the school store was right there, and candy bars are candy bars. So instead of going back to class she went to the store, bought one, and ate the whole thing before strolling back — half a class later.</p>
+<p>Here's the thing: <strong>no doorkeeper could have stopped her.</strong> Her pass was real. The hallway was allowed. Every door she passed did exactly its job. She got caught anyway — at turn-in. The logbook had the store door's stamp and the times, and stamps and times don't lie. Gates stop what they can. <strong>Logbooks catch the rest.</strong></p>
+<p>And then two things happened, and only the first one is the usual one. The pass was done — fine, it was done anyway. But also: <strong>no hall passes for Mary for the rest of the semester.</strong> Breaking a pass's rules doesn't just end that pass. It changes whether you get the <em>next</em> one.</p>
+<p>The library plays the same game with bigger stakes. Keep the book past your card's date and the library does exactly the thing you agreed to when they handed you the card: a fine, and no new borrowing until it's paid. Nobody's surprised — the deal was on the card the whole time. Sometimes the consequence of breaking a deal is more than a torn-up pass, and you signed up for it on the day you took the pass.</p>
+<h2>Sneaky Bob</h2>
+<p>Sneaky Bob has boxes he'd rather not keep at his own house — if anyone ever comes asking, he wants them found at <em>yours</em>. So he gets clever.</p>
+<p>First he tries fake envelopes: official-looking stamps that say "this belongs at Alice's house." The doorkeeper doesn't even look up. An envelope means something only when a doorkeeper's <em>own</em> stamp is on it, and stamps happen at doors, when a pass is shown. Bob has no pass to your house. There is no envelope he can bring that substitutes for one.</p>
+<p>So he tries the porch. Every house has one open spot on purpose — the delivery porch, where people can leave things for you. At three in the morning, Bob dumps his boxes there. But here's the porch rule: <strong>nothing becomes yours just because it showed up.</strong> Things on the porch are marked <em>delivered — not accepted</em>, and the doorkeeper's logbook records exactly when each one arrived and who left it (or that no pass was shown at all). You take a thing inside, or you don't. Sweep it off the porch, and it was never yours for a single minute.</p>
+<p>And the frame-up itself? It dies at the <strong>logbook</strong>. Every single thing inside your house has a line in the doorkeeper's own handwriting: who brought it, through which door, with which pass. Bob can't write in the logbook. Nobody can — it's the doorkeeper's hand or nothing. So when the police come asking, they don't read piles; they read logbooks. The logbook is the end of Sneaky Bob.</p>
+<p>Notice this is the library rule's mirror: holding a thing was never the same as owning it — and being <em>handed</em> a thing was never the same as answering for it.</p>
+<h2>Goodbyes, and the moving-box promise</h2>
+<p>Watch how many different goodbyes turn out to be the same small thing — <strong>a pass gets torn up:</strong></p>
+<p class="li">Leaving the club? Your member pass — torn. The club balls stay in their bin.</p>
+<p class="li">Season over? The field goes quiet; the coach's reading pass dies on its own; the report stays on your shelf. Your ball is already home — it always was.</p>
+<p class="li">Robot retired? Its lent passes — torn. It owned nothing, so nothing is stranded.</p>
+<p class="li">Library card expired? The book walks home to its shelf; your report doesn't move.</p>
+<p>No boxes, no arguments, nothing carried anywhere. Nobody ever <em>held</em> anyone else's things — only passes to visit them. Tear the pass and the visit is over; every house still holds exactly what it always held.</p>
+<p>And the last rule, the one this whole story protects:</p>
+<blockquote><strong>Any day you like, you can pack your own house into moving boxes and go. There is no switch, anywhere, that bolts your own door against you.</strong></blockquote><p>Not a club rule, not fine print, nothing — on purpose. If such a switch existed, every club would demand it be flipped, and then it wouldn't be your house anymore. And packing is simple, because the first rule did all the work: club papers were never in your house. Borrowed books walk home. Stickers with locks travel still locked. There is nothing in your boxes that belongs to anyone else — which is exactly why no one gets a say about your boxes.</p>
+<p></p><div class="fig"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 900 560" font-family="Helvetica, Arial, sans-serif">
+  <rect width="900" height="560" fill="#ffffff"/>
+  <text x="450" y="40" text-anchor="middle" font-size="24" font-weight="bold" fill="#1e5f96">Every goodbye is a torn pass — and the moving-box promise</text>
+
+  <!-- big torn pass icon -->
+  <g transform="translate(450,110)">
+    <path d="M-70,-28 L-6,-28 L-14,-14 L-4,0 L-12,14 L-6,28 L-70,28 Z" fill="#e1d5e7" stroke="#9673a6" stroke-width="2.5" transform="rotate(-4)"/>
+    <path d="M70,-28 L2,-28 L-6,-14 L4,0 L-4,14 L2,28 L70,28 Z" fill="#e1d5e7" stroke="#9673a6" stroke-width="2.5" transform="rotate(5) translate(14,2)"/>
+    <text x="-40" y="6" text-anchor="middle" font-size="10" fill="#4a355c" transform="rotate(-4)">PA</text>
+    <text x="52" y="6" text-anchor="middle" font-size="10" fill="#4a355c" transform="rotate(5)">SS</text>
+  </g>
+  <text x="450" y="172" text-anchor="middle" font-size="13" font-weight="bold" fill="#555">the same small motion, every goodbye</text>
+
+  <!-- four goodbye rows -->
+  <g>
+    <rect x="60" y="200" width="180" height="52" rx="8" fill="#fcfcfa" stroke="#b8b8b0" stroke-width="1.5"/>
+    <text x="150" y="222" text-anchor="middle" font-size="13.5" font-weight="bold" fill="#232323">leaving the club</text>
+    <text x="150" y="240" text-anchor="middle" font-size="10.5" fill="#555">the member pass</text>
+    <rect x="270" y="212" width="56" height="30" rx="4" fill="#e1d5e7" stroke="#9673a6" stroke-width="1.5"/>
+    <line x1="266" y1="208" x2="330" y2="246" stroke="#c0392b" stroke-width="3.5"/>
+    <line x1="330" y1="208" x2="266" y2="246" stroke="#c0392b" stroke-width="3.5"/>
+    <text x="360" y="231" font-size="11.5" fill="#555">club keeps club papers · your house untouched · your skills notebook rides along</text>
+  </g>
+  <g>
+    <rect x="60" y="268" width="180" height="52" rx="8" fill="#fcfcfa" stroke="#b8b8b0" stroke-width="1.5"/>
+    <text x="150" y="290" text-anchor="middle" font-size="13.5" font-weight="bold" fill="#232323">season over</text>
+    <text x="150" y="308" text-anchor="middle" font-size="10.5" fill="#555">reading pass dies by itself</text>
+    <rect x="270" y="280" width="56" height="30" rx="4" fill="#e1d5e7" stroke="#9673a6" stroke-width="1.5"/>
+    <line x1="266" y1="276" x2="330" y2="314" stroke="#c0392b" stroke-width="3.5"/>
+    <line x1="330" y1="276" x2="266" y2="314" stroke="#c0392b" stroke-width="3.5"/>
+    <text x="360" y="299" font-size="11.5" fill="#555">the coach's reading pass expires — the report stays on your shelf</text>
+  </g>
+  <g>
+    <rect x="60" y="336" width="180" height="52" rx="8" fill="#fcfcfa" stroke="#b8b8b0" stroke-width="1.5"/>
+    <text x="150" y="358" text-anchor="middle" font-size="13.5" font-weight="bold" fill="#232323">robot retired</text>
+    <text x="150" y="376" text-anchor="middle" font-size="10.5" fill="#555">its lent passes</text>
+    <rect x="270" y="348" width="56" height="30" rx="4" fill="#e1d5e7" stroke="#9673a6" stroke-width="1.5"/>
+    <line x1="266" y1="344" x2="330" y2="382" stroke="#c0392b" stroke-width="3.5"/>
+    <line x1="330" y1="344" x2="266" y2="382" stroke="#c0392b" stroke-width="3.5"/>
+    <text x="360" y="367" font-size="11.5" fill="#555">it owned nothing, so nothing is stranded — every act still signed in the logbook</text>
+  </g>
+  <g>
+    <rect x="60" y="404" width="180" height="52" rx="8" fill="#fcfcfa" stroke="#b8b8b0" stroke-width="1.5"/>
+    <text x="150" y="426" text-anchor="middle" font-size="13.5" font-weight="bold" fill="#232323">library card expires</text>
+    <text x="150" y="444" text-anchor="middle" font-size="10.5" fill="#555">a pass with a date</text>
+    <rect x="270" y="416" width="56" height="30" rx="4" fill="#e1d5e7" stroke="#9673a6" stroke-width="1.5"/>
+    <line x1="266" y1="412" x2="330" y2="450" stroke="#c0392b" stroke-width="3.5"/>
+    <line x1="330" y1="412" x2="266" y2="450" stroke="#c0392b" stroke-width="3.5"/>
+    <text x="360" y="435" font-size="11.5" fill="#555">the book walks home to its shelf — your book report doesn't move</text>
+  </g>
+
+  <text x="450" y="480" text-anchor="middle" font-size="13" font-style="italic" fill="#555">no boxes, no arguments — nobody ever held anyone else's things, only passes to visit them</text>
+
+  <!-- moving box promise -->
+  <g transform="translate(84,500)">
+    <rect x="0" y="6" width="44" height="30" fill="#f6e0b5" stroke="#b8860b" stroke-width="2"/>
+    <path d="M0,6 L10,-4 L54,-4 L44,6 Z" fill="#fce5cd" stroke="#b8860b" stroke-width="2"/>
+    <line x1="22" y1="6" x2="22" y2="36" stroke="#b8860b" stroke-width="1.5"/>
+  </g>
+  <rect x="150" y="494" width="690" height="52" rx="10" fill="#d5e8d4" stroke="#82b366" stroke-width="2.5"/>
+  <text x="495" y="516" text-anchor="middle" font-size="15" font-weight="bold" fill="#3a6a34">Any day: pack your own house into boxes and go. No switch bolts your own door.</text>
+  <text x="495" y="537" text-anchor="middle" font-size="13" fill="#3a6a34">club papers were never in your house · borrowed books walk home · locked stickers travel locked</text>
+</svg>
+</div><p></p>
+<hr>
+<h2>The same story in grown-up words</h2>
+<div class="twrap"><table>
+<tr><th>In the story</th><th>In the architecture</th></tr>
+<tr><td>your house</td><td>a personal tenant — a person IS a tenant; every record has exactly one owner (A1, A2)</td></tr>
+<tr><td>the clubhouse</td><td>an organizational tenant — structurally the same, owned by a club</td></tr>
+<tr><td>a pass (who · which door · why · until)</td><td>a relation/grant — scoped, expiring, lineage-bearing; membership is a relation, never containment (A3)</td></tr>
+<tr><td>the season, played together on the field</td><td>an engagement object — a shared process; org roles see engagement things, never the inside of your house</td></tr>
+<tr><td>bringing your ball to practice</td><td>an owner-granted, activity-scoped grant — implicit, auto-expiring; use never transfers ownership</td></tr>
+<tr><td>the club pays for everything</td><td>org-owned assets, used through membership; they never become yours</td></tr>
+<tr><td>"the why goes away, the pass dies"</td><td>grant lineage — authorization requires a still-valid basis</td></tr>
+<tr><td>keys</td><td>credentials authenticating a principal; <code>#controller</code> relations bind them to the tenant</td></tr>
+<tr><td>whose robot never matters</td><td>agents are tenant-less principals; outputs follow ownership rules, not robot ownership</td></tr>
+<tr><td>papers live where they're made</td><td>creation-context provenance — the creating context stamps the owner</td></tr>
+<tr><td>the coach's office your pass doesn't open</td><td>org-interior workspaces and records — membership never means all-access</td></tr>
+<tr><td>being handed the finished game plan</td><td>an org sharing its asset: your copy carries the club's clause ("team eyes only")</td></tr>
+<tr><td>the coach's notes, never handed out</td><td>org-internal records members never see</td></tr>
+<tr><td>nobody sorts paper by paper</td><td>no per-record adjudication on the normal path</td></tr>
+<tr><td>"what you learned is always yours"</td><td>the IP boundary: claims and profile are personal-owned, always — the resume norm</td></tr>
+<tr><td>the secret's sticker rides along</td><td>inherited disclosure clauses gate details without changing ownership</td></tr>
+<tr><td>the coach's reading pass</td><td><code>#commissioner</code> / <code>#viewer</code> relations — commissioning grants visibility, not ownership</td></tr>
+<tr><td>the four questions</td><td>the four layers: authentication, authorization, disclosure & processing, entitlement</td></tr>
+<tr><td>a doorkeeper at every door</td><td>every boundary crossing is a policy decision point</td></tr>
+<tr><td>Sneaky Bob's fake envelopes</td><td>forged ownership/provenance fails runtime attestation — labels are stamped only at authorized doors</td></tr>
+<tr><td>the delivery porch</td><td>push-capable intake is quarantine: custody-pending until the owner (or the owner's standing rule) accepts — delivery is not acceptance</td></tr>
+<tr><td>the doorkeeper's logbook</td><td>every record carries its runtime-written creating context (principal, channel, revision) — the audit trail attributes the act, not mere possession</td></tr>
+<tr><td>Mary's candy-bar detour</td><td>grants are purpose-bound; adherence that can't be gated in the moment is audited via receipts and the provenance log</td></tr>
+<tr><td>no hall passes this semester</td><td>breach degrades the grantor's future granting policy for that grantee — not just the instance</td></tr>
+<tr><td>the fine that was on the card all along</td><td>pre-agreed remedies ride the grant's terms; for non-resident authorities the system supplies attested evidence, not enforcement</td></tr>
+<tr><td>gates stop what they can; logbooks catch the rest</td><td>prevention at decision points + detection at reconciliation — both required</td></tr>
+<tr><td>doorkeepers have no ears</td><td>the policy runtime accepts only typed inputs (passes, slips, stickers) — no natural-language surface, so injection has nothing to grab</td></tr>
+<tr><td>tokens never bolt your door</td><td>entitlement gates compute, never data</td></tr>
+<tr><td>the library card with a date</td><td>a license as a relation object, time-boxed — access routes through it</td></tr>
+<tr><td>the book goes home; the report stays</td><td>expiry quarantines/purges licensed payloads; term-driven derivation keeps your analytics</td></tr>
+<tr><td>"no quoting page 12" rides the report</td><td>license clauses ride derived work — <code>PolicyTransform</code> is the only legitimate way off</td></tr>
+<tr><td>the street comic</td><td>third-party-unknown intake — public is not public domain; upgrades are recorded human determinations</td></tr>
+<tr><td>every goodbye is a torn pass</td><td>one revocation mechanism: cut the relation; runtime enforcement completes it</td></tr>
+<tr><td>the moving-box promise</td><td>the takeaway export — always available, hard policy, no configuration surface</td></tr>
+<tr><td>what's not in the boxes</td><td>ownership filter, then rights filter, then exportability — clean by construction</td></tr>
+</table></div>
+<p>And the two stories snap together without a seam: houses and passes say <em>whose things are whose and who may visit</em>; slips and stickers say <em>how anything gets done without trusting the persuadable part</em>. The doorkeeper is the same doorkeeper. That's the entire architecture.</p>
+
+<div style="max-width:640px;margin:40px auto 0;font-family:Menlo,Consolas,monospace;font-size:12px;letter-spacing:.08em">
+<a href="/architectures" style="color:#ff5e1a;text-decoration:none">&larr; BACK TO THE DRAWING REGISTER</a>
+</div>
+</body>
+</html>

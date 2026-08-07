@@ -45,8 +45,13 @@
                                           "evaluation"
                                           "evidence-bundle"
                                           "failure-classifier"
+                                          "governance-provenance"
                                           "knowledge-pack"
                                           "observer" "orchestrator"
+                                          ;; Deterministic staging MCI adapter, consumed by the
+                                          ;; project integration suite rather than a runtime base.
+                                          "opsv-adapter-simulated"
+                                          "phase-opsv"
                                           "phase-software-factory"
                                           "phase-deployment"
                                           "policy"
@@ -67,6 +72,7 @@
                                           "workflow-compliance-scanner"
                                           "workflow-deployment"
                                           "workflow-financial-etl"
+                                          "workflow-opsv"
                                           "workflow-software-factory"]}
             "miniforge-tui"  {:alias "tui"
                               ;; miniforge-tui is being replaced by miniforge-console; the
@@ -75,7 +81,9 @@
                               :necessary ["boundary"
                                           "evidence-bundle"
                                           "observer" "orchestrator"
+                                          "opsv"
                                           "phase"
+                                          "phase-opsv"
                                           "phase-software-factory"
                                           "policy"
                                           "repo-dag"
@@ -98,4 +106,5 @@
                                           "bb-generate-icon"
                                           "bb-platform"
                                           "bb-r2"
+                                          "bb-task-classpath"
                                           "bb-test-runner"]}}}

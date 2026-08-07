@@ -200,6 +200,20 @@
   (when (and body (not (str/blank? body)))
     (str header body "\n\n")))
 
+(defn- ^{:stratum 0} usable-worktree-path?
+  "True when `v` is a non-blank string.
+
+   `:worktree-path` is contractually a String: `workspace/core.clj`, the
+   single blessed execution-workdir resolver, only reads a context path
+   that satisfies `string?`. Callers that hand over a
+   `java.nio.file.Path` — what `babashka.fs` returns — reached
+   `clojure.string/blank?` here and died on its `CharSequence` cast, so a
+   wrong-typed path crashed validation instead of failing it. Anything
+   non-string is unusable, and falls through to the normal
+   `:missing-worktree-path` branch."
+  [v]
+  (and (string? v) (not (str/blank? v))))
+
 (defn- ^{:stratum 0} pr-body-needs-update?
   "True when the post-create PR body should be overwritten."
   [release-meta]
@@ -285,13 +299,13 @@
     ;; A blank :worktree-path is NOT present — babashka.process treats
     ;; :dir "" as the current working directory, which would run host git/gh
     ;; against whatever repo the process happens to sit in.
-    (and (not (str/blank? (:worktree-path state)))
+    (and (usable-worktree-path? (:worktree-path state))
          (nil? (:executor state))
          (nil? (:environment-id state)))
     (assoc state :host-mode? true)
 
     ;; Sandbox-mode guards — same order/messages as before
-    (str/blank? (:worktree-path state))
+    (not (usable-worktree-path? (:worktree-path state)))
     (fail state :missing-worktree-path (msg/t :exec/missing-worktree-path))
 
     (not (:executor state))

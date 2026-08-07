@@ -15,7 +15,6 @@
 ;; WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 ;; See the License for the specific language governing permissions and
 ;; limitations under the License.
-
 (ns ai.miniforge.phase.registry
   "Phase interceptor registry using multimethods.
 
@@ -27,16 +26,83 @@
   (:require [malli.core :as m]))
 
 ;------------------------------------------------------------------------------ Layer 0
-;; Schemas
 
-(def Budget
+;; Schemas
+(def ^{:stratum 0} Budget
   "Budget configuration schema"
   [:map
    [:tokens {:optional true} pos-int?]
    [:iterations {:optional true} pos-int?]
    [:time-seconds {:optional true} pos-int?]])
 
-(def PhaseConfig
+(def ^{:stratum 0} Interceptor
+  "Interceptor schema (Pedestal-style)"
+  [:map
+   [:name keyword?]
+   [:enter {:optional true} fn?]
+   [:leave {:optional true} fn?]
+   [:error {:optional true} fn?]])
+
+;; Defaults registry (atom for extensibility)
+(defonce ^{:stratum 0} defaults-registry (atom {}))
+
+(def ^{:stratum 0} policy-gates
+  "Governance gates a phase-config override must never drop from the phase-type
+   default. A workflow's per-phase `:gates` may add or trim mechanical gates
+   (syntax, lint, coverage, …) freely, but silently losing policy enforcement is
+   the one merge outcome a governance system cannot allow: the shallow
+   `(merge defaults config)` let a workflow that declared `:gates [...]` at
+   verify/review replace the default vector wholesale, dropping
+   `:policy-verify`/`:policy-review` with no signal (e.g. quick-fix-v2's verify).
+   `merge-with-defaults` re-adds any of these the default enforced but the
+   override omitted. Extend this set when a new governance gate ships.
+
+   :codex-consultation is governance, not mechanics: it asserts delivery
+   provenance for the codex warning surface, and the canonical-sdlc v2
+   implement `:gates` override was silently dropping it — exactly the
+   footgun this set exists to close."
+  #{:policy-verify :policy-review :policy-pack :codex-consultation})
+
+;; Phase status predicates
+;;
+;; Accept either a bare keyword (:completed, :failed, etc.) or a map with
+;; a status key (:status, :execution/status, :step/status, :chain/status).
+(def ^{:stratum 0} already-done-statuses
+  "Statuses indicating work is already complete — neutral outcome."
+  #{:already-satisfied :already-implemented})
+
+(def ^{:stratum 0} status-keys
+  "Keys to try when extracting status from a map, in priority order."
+  [:status :execution/status :step/status :chain/status])
+
+(def ^{:stratum 0} ^:private inner-failure-statuses
+  #{:error :failed :failure})
+
+(defn- ^{:stratum 0} result-status
+  [m]
+  (get-in m [:result :status]))
+
+(defn ^{:stratum 0} determine-phase-status
+  "Determine phase status from agent result status, iteration count, and budget.
+
+   Arguments:
+   - agent-status: The :status from the agent result (:success, :error, etc.)
+   - iterations: Current iteration count
+   - max-iterations: Maximum allowed iterations
+
+   Returns: :completed, :retrying, or :failed"
+  [agent-status iterations max-iterations]
+  (cond
+    (= :success agent-status) :completed
+    (and (= :error agent-status)
+         (< iterations max-iterations)) :retrying
+    (= :error agent-status) :failed
+    (not= :success agent-status) :failed
+    :else :completed))
+
+;------------------------------------------------------------------------------ Layer 1
+
+(def ^{:stratum 1} PhaseConfig
   "Phase configuration schema"
   [:map
    [:phase keyword?]
@@ -50,21 +116,8 @@
    [:model-hint {:optional true} keyword?]
    [:require-model {:optional true} keyword?]])
 
-(def Interceptor
-  "Interceptor schema (Pedestal-style)"
-  [:map
-   [:name keyword?]
-   [:enter {:optional true} fn?]
-   [:leave {:optional true} fn?]
-   [:error {:optional true} fn?]])
-
-;; Defaults registry (atom for extensibility)
-(defonce defaults-registry (atom {}))
-
-;------------------------------------------------------------------------------ Layer 1
 ;; Multimethod registry
-
-(defmulti get-phase-interceptor
+(defmulti ^{:stratum 1} get-phase-interceptor
   "Get interceptor for a phase configuration.
 
    Dispatches on :phase keyword.
@@ -76,17 +129,15 @@
      Interceptor map with :name, :enter, :leave, :error"
   :phase)
 
-(defmethod get-phase-interceptor :default
+(defmethod ^{:stratum 1} get-phase-interceptor :default
   [{:keys [phase]}]
   (throw (ex-info (str "Unknown phase type: " phase
                        ". Available: " (keys @defaults-registry))
                   {:phase phase
                    :available (keys @defaults-registry)})))
 
-;------------------------------------------------------------------------------ Layer 2
 ;; Registry management
-
-(defn register-phase-defaults!
+(defn ^{:stratum 1} register-phase-defaults!
   "Register default configuration for a phase type.
 
    Arguments:
@@ -95,7 +146,7 @@
   [phase-kw defaults]
   (swap! defaults-registry assoc phase-kw defaults))
 
-(defn phase-defaults
+(defn ^{:stratum 1} phase-defaults
   "Get default configuration for a phase type.
 
    Arguments:
@@ -106,7 +157,7 @@
   [phase-kw]
   (get @defaults-registry phase-kw))
 
-(defn list-phases
+(defn ^{:stratum 1} list-phases
   "List all registered phase types.
 
    Returns:
@@ -114,19 +165,7 @@
   []
   (set (keys @defaults-registry)))
 
-(def policy-gates
-  "Governance gates a phase-config override must never drop from the phase-type
-   default. A workflow's per-phase `:gates` may add or trim mechanical gates
-   (syntax, lint, coverage, …) freely, but silently losing policy enforcement is
-   the one merge outcome a governance system cannot allow: the shallow
-   `(merge defaults config)` let a workflow that declared `:gates [...]` at
-   verify/review replace the default vector wholesale, dropping
-   `:policy-verify`/`:policy-review` with no signal (e.g. quick-fix-v2's verify).
-   `merge-with-defaults` re-adds any of these the default enforced but the
-   override omitted. Extend this set when a new governance gate ships."
-  #{:policy-verify :policy-review :policy-pack})
-
-(defn merge-gates
+(defn ^{:stratum 1} merge-gates
   "Merge an override `:gates` vector over the phase-type default's. The result is
    the override's gates in declared order, followed by any policy gate (see
    `policy-gates`) the default enforced that the override dropped — so an
@@ -139,7 +178,24 @@
                               default-gates)]
     (into (vec override-gates) preserved)))
 
-(defn merge-with-defaults
+(defn ^{:stratum 1} valid-interceptor?
+  "Check if interceptor is valid against schema."
+  [interceptor]
+  (m/validate Interceptor interceptor))
+
+(defn- ^{:stratum 1} outer-status
+  [m]
+  (when m (some m status-keys)))
+
+(defn- ^{:stratum 1} failure-status
+  [m]
+  (let [status (result-status m)]
+    (when (contains? inner-failure-statuses status)
+      :failed)))
+
+;------------------------------------------------------------------------------ Layer 2
+
+(defn ^{:stratum 2} merge-with-defaults
   "Merge user config with phase defaults.
 
    Shallow-merges `config` over the phase-type defaults, with one exception for
@@ -161,53 +217,19 @@
       (assoc merged :gates (merge-gates (:gates defaults) (:gates config)))
       merged)))
 
-(defn valid-config?
+(defn ^{:stratum 2} valid-config?
   "Check if phase config is valid against schema."
   [config]
   (m/validate PhaseConfig config))
 
-(defn valid-interceptor?
-  "Check if interceptor is valid against schema."
-  [interceptor]
-  (m/validate Interceptor interceptor))
-
-;------------------------------------------------------------------------------ Layer 3
-;; Phase status predicates
-;;
-;; Accept either a bare keyword (:completed, :failed, etc.) or a map with
-;; a status key (:status, :execution/status, :step/status, :chain/status).
-
-(def already-done-statuses
-  "Statuses indicating work is already complete — neutral outcome."
-  #{:already-satisfied :already-implemented})
-
-(def status-keys
-  "Keys to try when extracting status from a map, in priority order."
-  [:status :execution/status :step/status :chain/status])
-
-(def ^:private inner-failure-statuses
-  #{:error :failed :failure})
-
-(defn- result-status
-  [m]
-  (get-in m [:result :status]))
-
-(defn- outer-status
-  [m]
-  (when m (some m status-keys)))
-
-(defn- failure-status
-  [m]
-  (let [status (result-status m)]
-    (when (contains? inner-failure-statuses status)
-      :failed)))
-
-(defn- completed-with-inner-failure?
+(defn- ^{:stratum 2} completed-with-inner-failure?
   [m]
   (and (= :completed (outer-status m))
        (failure-status m)))
 
-(defn extract-status
+;------------------------------------------------------------------------------ Layer 3
+
+(defn ^{:stratum 3} extract-status
   "Extract a normalized phase status keyword from a map.
 
    Inner agent failures take precedence over an outer interceptor status of
@@ -218,19 +240,21 @@
       :failed
       status)))
 
-(defn succeeded?
+;------------------------------------------------------------------------------ Layer 4
+
+(defn ^{:stratum 4} succeeded?
   "Check if a result map indicates success.
    Looks for :status, :execution/status, :step/status, or :chain/status."
   [m]
   (= :completed (extract-status m)))
 
-(defn already-done?
+(defn ^{:stratum 4} already-done?
   "Check if a result map indicates work was already complete.
    This is a neutral outcome — not a failure."
   [m]
   (contains? already-done-statuses (extract-status m)))
 
-(defn succeeded-or-done?
+(defn ^{:stratum 4} succeeded-or-done?
   "Check if a result map indicates success or already-done (neutral).
    Use this for event emission and outcome reporting."
   [m]
@@ -238,33 +262,15 @@
     (or (= :completed s)
         (contains? already-done-statuses s))))
 
-(defn failed?
+(defn ^{:stratum 4} failed?
   "Check if a result map indicates failure."
   [m]
   (= :failed (extract-status m)))
 
-(defn retrying?
+(defn ^{:stratum 4} retrying?
   "Check if a result map indicates retry."
   [m]
   (= :retrying (extract-status m)))
-
-(defn determine-phase-status
-  "Determine phase status from agent result status, iteration count, and budget.
-
-   Arguments:
-   - agent-status: The :status from the agent result (:success, :error, etc.)
-   - iterations: Current iteration count
-   - max-iterations: Maximum allowed iterations
-
-   Returns: :completed, :retrying, or :failed"
-  [agent-status iterations max-iterations]
-  (cond
-    (= :success agent-status) :completed
-    (and (= :error agent-status)
-         (< iterations max-iterations)) :retrying
-    (= :error agent-status) :failed
-    (not= :success agent-status) :failed
-    :else :completed))
 
 ;------------------------------------------------------------------------------ Rich Comment
 (comment

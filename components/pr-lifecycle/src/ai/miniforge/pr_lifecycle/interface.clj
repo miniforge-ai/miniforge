@@ -39,6 +39,7 @@
    [ai.miniforge.pr-lifecycle.review-monitor :as review]
    [ai.miniforge.pr-lifecycle.fix-loop :as fix]
    [ai.miniforge.pr-lifecycle.github :as github]
+   [ai.miniforge.pr-lifecycle.github-conversation :as conversation]
    [ai.miniforge.pr-lifecycle.listener-registry :as listener-registry]
    [ai.miniforge.pr-lifecycle.policy-eval-responder :as policy-eval-responder]
    [ai.miniforge.pr-lifecycle.resume-dispatcher :as resume-dispatcher]
@@ -365,7 +366,7 @@
    Example:
      (link-fix-pr-to-comment \"/path/to/repo\" 148 2780310737 150 logger)
      ; => {:success true :data {:reply-posted true :resolved true :thread-id \"PRRT_...\"}}"
-  github/link-fix-pr-to-comment)
+  conversation/link-fix-pr-to-comment)
 
 (def ^{:stratum 0} git-head-sha
   "Return the full HEAD SHA of `worktree-path`, or nil. Convenience

@@ -25,6 +25,8 @@
    [ai.miniforge.anomaly.interface :as anomaly]
    [ai.miniforge.phase.interface :as phase]
    [ai.miniforge.phase-software-factory.messages :as messages]
+   [ai.miniforge.phase-software-factory.codex-pin :as codex-pin]
+   [ai.miniforge.phase-software-factory.gap-wiring :as gap-wiring]
    [ai.miniforge.phase-software-factory.phase-config :as phase-config]
    [ai.miniforge.phase-software-factory.phase-handoff :as phase-handoff]
    [ai.miniforge.phase-software-factory.knowledge-helpers :as kb-helpers]
@@ -331,6 +333,11 @@
         {:keys [formatted manifest]} (kb-helpers/inject-with-manifest
                                        (:knowledge-store ctx) :reviewer (get input :tags []))
         artifact (resolve-implement-artifact implement-phase-result ctx)
+        ;; Thesium Codex push delivery for the reviewer (SPEC §7.3): rendered
+        ;; landings as a prompt section — the quality-signals board, because a
+        ;; reviewer IS a quality signal deciding whether to trust itself.
+        codex-outcome (codex-pin/landings-outcome :review (get-in ctx [:execution/logger]))
+        codex-landings (:text codex-outcome)
         behavior-addendum (phase/load-and-filter-behaviors
                             :review {:task {:task/intent (:intent input)}})
         task (cond-> {:task/id (random-uuid)
@@ -352,9 +359,12 @@
                formatted
                (assoc :task/knowledge-context formatted)
                behavior-addendum
-               (assoc :task/behavior-addendum behavior-addendum))]
+               (assoc :task/behavior-addendum behavior-addendum)
+               codex-landings
+               (assoc :task/codex-landings codex-landings))]
     {:task task
-     :rules-manifest manifest}))
+     :rules-manifest manifest
+     :codex-outcome codex-outcome}))
 
 (defn ^{:stratum 2} leave-review
   "Post-processing for review phase.
@@ -376,6 +386,9 @@
    The cycle count persists at [:execution :review-warning-only-cycles]
    across phase re-entries, like fingerprints."
   [ctx]
+  ;; Gap-instrument miss recording (T2 s3): best-effort, opt-in, and it
+  ;; must never change the outcome it measures.
+  (gap-wiring/record-phase-misses! ctx :review)
   (let [end-time    (System/currentTimeMillis)
         duration-ms (- end-time (get-in ctx [:phase :started-at]))
         result      (get-in ctx [:phase :result])
@@ -442,7 +455,7 @@
         _ (phase/emit-phase-started! ctx :review)
         reviewer-agent (agent/create-reviewer
                         (select-keys ctx [:llm-backend]))
-        {:keys [task rules-manifest]} (build-review-task ctx)
+        {:keys [task rules-manifest codex-outcome]} (build-review-task ctx)
         on-chunk (create-streaming-callback ctx :review)
         agent-ctx (cond-> ctx on-chunk (assoc :on-chunk on-chunk))
 
@@ -455,7 +468,16 @@
                    (response/failure e)))
 
         ;; Emit agent-completed telemetry event
-        _ (phase/emit-agent-completed! agent-ctx :review :reviewer result)]
+        _ (phase/emit-agent-completed! agent-ctx :review :reviewer result)
+
+        ;; SPEC §7.4.3 consultation provenance, prompt-section flavor. The
+        ;; reviewer session surfaces no reads log, so :pin-read? is nil
+        ;; (unknown). Attached before enter-context stores the result so
+        ;; gates and the gap ledger can see it.
+        result (if (map? (:output result))
+                 (assoc-in result [:output :codex/consultation]
+                           (codex-pin/consultation-summary codex-outcome nil))
+                 result)]
 
     (-> (phase/enter-context ctx :review :reviewer gates budget start-time result)
         (assoc-in [:phase :rules-manifest] rules-manifest))))

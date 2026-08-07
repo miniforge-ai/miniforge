@@ -218,25 +218,38 @@
 
 ;; Violation classification tests
 (deftest ^{:stratum 0} violation-classification-test
-  (testing "Filters blocking violations"
+  (testing "Exhaustive classification groups every action"
     (let [violations [{:rule {:rule/enforcement {:action :hard-halt}}}
-                      {:rule {:rule/enforcement {:action :warn}}}]]
-      (is (= 1 (count (detection/blocking-violations violations))))))
+                      {:rule {:rule/enforcement {:action :require-approval}}}
+                      {:rule {:rule/enforcement {:action :warn}}}
+                      {:rule {:rule/enforcement {:action :audit}}}]
+          {:keys [blocking require-approval warnings audits unknown]}
+          (detection/classify-violations violations)]
+      (is (= 1 (count blocking)))
+      (is (= 1 (count require-approval)))
+      (is (= 1 (count warnings)))
+      (is (= 1 (count audits)))
+      (is (empty? unknown))))
 
-  (testing "Filters approval-required violations"
-    (let [violations [{:rule {:rule/enforcement {:action :require-approval}}}
-                      {:rule {:rule/enforcement {:action :warn}}}]]
-      (is (= 1 (count (detection/approval-required-violations violations))))))
+  (testing "An off-vocabulary action lands in :unknown, never dropped"
+    (let [{:keys [unknown blocking]}
+          (detection/classify-violations
+           [{:rule {:rule/enforcement {:action :block}}}])]
+      (is (empty? blocking))
+      (is (= 1 (count unknown)))
+      (is (= :unknown-enforcement (:classify/problem (first unknown))))))
 
-  (testing "Filters warning violations"
-    (let [violations [{:rule {:rule/enforcement {:action :warn}}}
-                      {:rule {:rule/enforcement {:action :hard-halt}}}]]
-      (is (= 1 (count (detection/warning-violations violations))))))
+  (testing "An off-scale severity lands in :unknown"
+    (let [{:keys [unknown]}
+          (detection/classify-violations
+           [{:rule {:rule/severity :wobbly
+                    :rule/enforcement {:action :warn}}}])]
+      (is (= 1 (count unknown)))
+      (is (= :unknown-severity (:classify/problem (first unknown))))))
 
-  (testing "Filters audit violations"
-    (let [violations [{:rule {:rule/enforcement {:action :audit}}}
-                      {:rule {:rule/enforcement {:action :warn}}}]]
-      (is (= 1 (count (detection/audit-violations violations)))))))
+  (testing "A missing action lands in :unknown"
+    (let [{:keys [unknown]} (detection/classify-violations [{:rule {}}])]
+      (is (= 1 (count unknown))))))
 
 (deftest ^{:stratum 0} violation-conversion-test
   (testing "Converts violation to error"

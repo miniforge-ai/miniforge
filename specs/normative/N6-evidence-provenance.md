@@ -6,10 +6,16 @@
 
 # N6 — Evidence & Provenance Standard
 
-**Version:** 0.6.0-draft
-**Date:** 2026-03-08
+**Version:** 0.8.0-draft
+**Date:** 2026-08-06
 **Status:** Draft
 **Conformance:** MUST
+
+_v0.8.0 supplies the sealing mechanism behind the immutability the spec already
+claimed (§2.14), the event-stream linkage schema (§2.12), gate-execution
+evidence per N4 §5.5 (§2.13), retention (§7.4), and conformance requirement IDs
+(§9.4–§9.5); and inherits N3 §8's redaction contract rather than defining a
+second marker._
 
 ---
 
@@ -29,7 +35,7 @@ contracts that make autonomous workflows credible to platform and security teams
 2. **Semantic validation** - Declared intent MUST be verifiable against actual behavior
 3. **Immutable records** - Evidence bundles MUST NOT be modified after creation
 4. **Queryable history** - Users MUST be able to query "What was the intent for this artifact?"
-5. **Compliance-ready** - Evidence format MUST support SOCII, FedRAMP audit requirements
+5. **Compliance-ready** - Evidence format MUST support SOC 2 and FedRAMP audit requirements
 
 ---
 
@@ -85,11 +91,31 @@ contracts that make autonomous workflows credible to platform and security teams
  ;; Outcome
  :evidence/outcome {...}
 
+ ;; Gate Evidence (N4 §5.5)
+ :evidence/gate-executions [...]    ; REQUIRED when any gate ran; see §2.13
+
  ;; Compliance Metadata
+ :compliance/created-at inst        ; REQUIRED
+ :compliance/sensitive-data boolean ; REQUIRED
+ :compliance/pii-handling keyword   ; REQUIRED: :none, :redacted, :encrypted
+ :compliance/retention-policy keyword ; OPTIONAL: see §7.4
  :compliance/auditor-notes string   ; OPTIONAL
- :compliance/sensitive-data boolean
- :compliance/pii-handling keyword}  ; :none, :redacted, :encrypted
+
+ ;; Event Stream Linkage (§2.12)
+ :evidence/event-links [...]        ; REQUIRED: one per scope
+
+ ;; Seal (§2.14)
+ :evidence/content-hash string      ; REQUIRED: SHA-256 over the canonical form,
+                                   ;   excluding this key and :evidence/signature (§2.14)
+ :evidence/sealed-at inst           ; REQUIRED
+ :evidence/signature string}        ; OPTIONAL
 ```
+
+§7.1 defines the **required** compliance keys; this structure additionally
+shows the optional ones (`:compliance/retention-policy`,
+`:compliance/auditor-notes`). Every key §7.1 marks required MUST appear here —
+a required key missing from this structure is a defect in this spec, not a
+choice for implementations.
 
 ### 2.2 Intent Evidence
 
@@ -323,14 +349,34 @@ For tasks reaching `:merged` terminal state:
 
 For Operational Policy Synthesis workflows (see N7), evidence bundles MUST include:
 
+The workflow MUST allocate the evidence bundle identifier before emitting its
+first OPSV event and accumulate material in a run-scoped assembly record. At
+terminal disposition it MUST publish one immutable bundle whose identifier is
+the preallocated value. Finalization MUST preserve references to every event,
+artifact, execution grant, and governed effect accumulated during the run.
+
 ```clojure
 {:evidence/opsv
  {:opsv/experiment-pack-hash string   ; Content hash of Experiment Pack used
   :opsv/experiment-pack-id string
+  :opsv/experiment-pack-artifact-id uuid ; Content-addressed pack artifact
   :opsv/environment-fingerprint       ; Cluster, node pool, image digests, config
   {:cluster string
    :node-pools [string ...]
-   :image-digests {...}}
+   :image-digests {...}
+   :config-hash string}
+
+  :opsv/event-refs [uuid ...]          ; Complete N3 event identifier set
+  :opsv/artifact-refs [uuid ...]       ; Complete referenced artifact set
+  :opsv/grant-refs [uuid ...]          ; Complete Ariadne ExecutionGrant identifier set
+
+  :opsv/risk-score
+  {:score double                      ; [0.0, 1.0]
+   :level keyword                     ; :low, :medium, :high, :critical
+   :factors [{:factor keyword
+              :input any
+              :contribution double
+              :rationale string}]}
 
   :opsv/convergence-iterations long   ; Number of convergence iterations
   :opsv/policy-proposals              ; Proposed operational policies
@@ -342,16 +388,31 @@ For Operational Policy Synthesis workflows (see N7), evidence bundles MUST inclu
 
   :opsv/verification
   {:passed? boolean
-   :criteria-evaluation [...]         ; Per-criterion results
+   :criteria-evaluation
+   [{:criterion/id string
+     :criterion/passed? boolean
+     :criterion/observed any
+     :criterion/expected any
+     :criterion/reason-code keyword}]
    :confidence keyword
    :caveats [string ...]}
 
   :opsv/actuation
-  {:mode keyword                      ; :recommend-only, :pr-only, :apply-allowed
+  {:requested-actuation-mode keyword  ; :recommend-only, :pr-only, :apply-allowed
+   :effective-actuation-mode keyword  ; :none, :recommend-only, :pr-only, :apply-allowed
+   :governed-effects                   ; One correlated Ariadne transaction per effect
+   [{:evidence/effect-id uuid
+     :evidence/grant-id uuid
+     :evidence/envelope-id uuid}]
    :pr-refs [string ...]              ; PR URLs if PR_ONLY
-   :apply-refs [string ...]}          ; Applied resource refs if APPLY_ALLOWED
+   :apply-refs [string ...]           ; Applied resource refs if APPLY_ALLOWED
+   :postcondition-artifact-refs [uuid ...]
+   :rollback {:status keyword         ; :not-required, :not-triggered, :succeeded, :failed
+              :artifact-refs [uuid ...]}}
 
-  :opsv/metric-snapshots [uuid ...]}} ; Links to :opsv-metric-snapshot artifacts
+  :opsv/metric-query-artifact-refs [uuid ...]
+  :opsv/metric-snapshot-artifact-refs [uuid ...]
+  :opsv/diff-artifact-refs [uuid ...]}}
 ```
 
 ### 2.9 Control Action Evidence (N8)
@@ -482,6 +543,95 @@ When a pack renders a report, the output MUST be a Report Artifact:
 
 Report Artifacts enable provenance tracing from rendered output back to input data
 and template.
+
+### 2.12 Event Stream Linkage
+
+§5.1 requires a bundle to link to the event stream. `:evidence/event-links` is
+a **vector** of links, one per scope covered — never a single map, because a
+bundle may span scopes. Each element:
+
+```clojure
+{:event-links/scope-type keyword   ; REQUIRED: N3 §2.3 scope — usually :workflow
+ :event-links/scope-id any         ; REQUIRED: the scope key's value
+ :event-links/from-sequence long   ; REQUIRED: first event covered, inclusive
+ :event-links/to-sequence long     ; REQUIRED: last event covered, inclusive
+ :event-links/event-count long}    ; REQUIRED: events in range at seal time
+```
+
+A sequence range is only meaningful within one N3 scope, because N3 §2.2
+sequences per scope. A bundle covering work in a single scope carries a
+one-element vector; one spanning scopes carries one element per scope.
+
+Implementations MUST NOT expire an event inside a sealed bundle's range while
+the bundle is retained. N3 §4.3.2 forbids expiring from the middle of a
+sequence; a bundle whose cited events have been collected cannot be replayed,
+which defeats the audit trail it exists to provide.
+
+### 2.13 Gate Execution Evidence
+
+N4 §5.5 requires that a gate result be reproducible from its evidence. For each
+gate execution the bundle MUST record:
+
+```clojure
+{:gate-execution/gate-id keyword
+ :gate-execution/phase keyword
+ :gate-execution/outcome keyword          ; :passed | :failed | :waived
+ :gate-execution/binding {...}            ; the gate binding per N4 §5.4
+ :gate-execution/packs
+ [{:pack/id string
+   :pack/version string                   ; REQUIRED: exact resolved version
+   :pack/content-hash string}]            ; REQUIRED: the bytes that ran
+ :gate-execution/violations [...]         ; REQUIRED: all of them, including waived
+ :gate-execution/waivers
+ [{:waiver/id uuid
+   :waiver/evaluation-id uuid
+   :waiver/violations [keyword]
+   :waiver/actor string
+   :waiver/reason string
+   :waiver/timestamp inst}]}
+```
+
+Three rules follow from N4 §5.5 and are restated because they are the ones
+implementations get wrong:
+
+1. A **version range** is not a resolved version. Recording `"^2.0"` does not
+   satisfy this section; recording `"2.1.3"` does.
+2. Waived violations stay in `:gate-execution/violations`. A waiver records
+   that a violation was accepted, never that it was absent.
+3. A waiver with no `:waiver/reason` is not a waiver (N4 §6.3.1). A bundle
+   carrying one is invalid, not merely incomplete.
+
+### 2.14 Bundle Sealing and Integrity
+
+§1.1 principle 3 requires bundles to be immutable and §9.1 requires
+implementations to verify it. This section supplies the mechanism; without one,
+"immutable" is an assertion an auditor cannot check.
+
+**Sealing.** At creation, after all evidence is assembled and after scanning and
+redaction (§7.2), implementations MUST:
+
+1. Set `:compliance/created-at` and `:evidence/sealed-at`.
+2. Compute a SHA-256 over the canonical serialization of the bundle with
+   `:evidence/content-hash` and `:evidence/signature` absent, and store it in
+   `:evidence/content-hash`.
+3. Optionally sign that hash and store the signature in
+   `:evidence/signature`.
+
+**Canonical serialization.** The hash MUST be computed over a canonical form:
+map keys sorted, no insignificant whitespace, and a stable representation for
+each scalar type. Without a canonical form two readers hash the same bundle to
+different values and the check is worthless.
+
+**Verification.** `validate-bundle` (§8.3) MUST recompute the hash and compare.
+A bundle whose recomputed hash differs from `:evidence/content-hash` MUST be
+reported as tampered — not repaired, not re-sealed.
+
+**After sealing** a bundle MUST NOT be modified. Corrections are made by
+issuing a new bundle that references the prior one; implementations MUST NOT
+edit a sealed bundle in place, including to add auditor notes. Storage SHOULD
+enforce this (write-once or equivalent) rather than relying on callers.
+
+An unsealed bundle MUST NOT be exported (§8.3) or presented as evidence.
 
 ---
 
@@ -825,54 +975,91 @@ Evidence bundles MUST include:
 
 ### 7.2 Sensitive Data Handling
 
-Implementations MUST:
+**N3 §8 owns the redaction contract.** Evidence bundles inherit it rather than
+defining a second one: the excluded-value set of N3 §8.1, the marker of N3
+§8.2, and the truncation rules of N3 §8.3 apply unchanged to bundle content.
+(N6 has its own §8.2 and §8.3, so these references are qualified throughout.)
 
-1. **Scan artifacts for sensitive data** - Before storing
-2. **Detect patterns**:
-   - AWS access keys (20-char uppercase alphanumeric)
-   - Passwords in plaintext
-   - SSNs, credit cards
-3. **Redact or flag** - Replace with `[REDACTED:<type>]` or mark bundle as sensitive
-4. **Record in metadata** - Set `compliance/sensitive-data` flag
+In particular the marker is `"[REDACTED]"`, exactly as on the stream. An
+earlier revision of this section specified `[REDACTED:<type>]`; that variant is
+withdrawn. Two markers for one concept means an auditor grepping for redactions
+finds some of them, and a redaction an auditor cannot find is not a redaction.
+
+Beyond inheriting N3 §8, implementations MUST:
+
+1. **Scan artifacts before storing.** Detection is a bundle-side obligation
+   because an artifact may carry a secret that never crossed the event stream.
+2. **Detect, at minimum**: cloud provider access keys, plaintext passwords and
+   connection strings carrying a secret, private keys, SSNs, and payment card
+   numbers.
+3. **Redact, then flag.** Redaction is not optional when a secret is found —
+   §8.1 of N3 is a MUST NOT, not a preference. Marking the bundle sensitive
+   records that a secret was present; it does not license storing it.
+4. **Record in metadata.** Set `:compliance/sensitive-data` and, where
+   redaction occurred, `:compliance/pii-handling :redacted`.
+
+A bundle MUST NOT be sealed (§2.14) until scanning and redaction have completed.
+Sealing a bundle and redacting afterwards would either break the seal or leave
+the secret inside a record that claims to be tamper-evident.
 
 ### 7.3 Audit Trail Requirements
 
-For SOCII/FedRAMP compliance, implementations MUST:
+For SOC 2 / FedRAMP compliance, implementations MUST:
 
 1. **Record all evidence bundle accesses** - Who, when, why
 2. **Prevent tampering** - Immutable storage, content hashing
 3. **Support export** - Evidence bundles exportable for auditors
 4. **Maintain chain of custody** - From intent to outcome
 
+### 7.4 Retention
+
+`:compliance/retention-policy` is optional on a bundle; a retention _floor_ is
+not optional on an implementation.
+
+An evidence bundle is the durable record of a workflow, so it inherits the
+`:audit` class of N3 §4.3.1: **minimum one year**, or the deployment's stated
+policy if longer. Implementations MUST document their actual retention.
+
+Two constraints follow from the rest of this spec:
+
+- A bundle MUST NOT outlive the events it cites (§2.12) — or rather, the events
+  MUST NOT be expired first. Retention of a bundle is a floor on the retention
+  of its event range.
+- Artifacts referenced by a retained bundle MUST be retained with it. A bundle
+  whose artifact references dangle fails §9.1's validity check and cannot
+  satisfy §7.3's chain of custody.
+
+Deleting a bundle before its floor is a compliance failure, not a storage
+optimization. Where regulation requires erasure of specific content, that is
+handled by redaction at seal time (§7.2), not by destroying the record.
+
 ---
 
 ## 8. Evidence Bundle Presentation
 
-### 8.1 CLI Evidence View
+**N5 owns the interface surface.** The CLI command, the TUI view, and their
+key bindings are specified in N5 §2.3.5 and N5 §3.2.3; this section states what
+those surfaces MUST be able to show, not how they look. Restating N5's command
+taxonomy here would create a second source of truth that drifts.
 
-Implementations MUST provide CLI command:
+### 8.1 Minimum Presented Content
 
-```bash
-miniforge evidence show <workflow-id>
-```
+Whatever surface presents a bundle MUST be able to show:
 
-Displaying (at minimum):
-
-- Intent summary
-- Artifacts per phase
-- Policy validation results
+- Intent summary — type, description, constraints
+- Artifacts per phase, with provenance navigable from each (§4.1.1)
+- Policy validation results, including waived violations marked as waived
 - Semantic validation results
+- Gate executions with their resolved pack versions and hashes (§2.13)
 - Outcome
+- Seal status: whether `:evidence/content-hash` verifies (§2.14)
 
-### 8.2 TUI Evidence Browser
+### 8.2 Seal and Waiver Presentation
 
-Implementations MUST provide TUI view with:
-
-1. **Intent panel** - Type, description, constraints
-2. **Phase tree** - Expandable phases with artifacts
-3. **Validation results** - Policy checks, semantic validation
-4. **Artifact viewer** - View artifact content (with syntax highlighting)
-5. **Provenance trace** - Navigate artifact chain
+Seal status is not decoration. A presented bundle whose hash does not verify
+MUST be shown as tampered rather than rendered as ordinary evidence, on every
+surface. Per N5 §6.2 the same applies to waived gates: never rendered as
+passing.
 
 ### 8.3 Programmatic Access
 
@@ -920,6 +1107,93 @@ Conformance tests MUST verify:
 2. **No false positives** - Valid workflows pass validation
 3. **Terraform parsing accuracy** - Correctly categorizes all change types
 4. **Kubernetes parsing accuracy** - Correctly detects resource changes
+
+### 9.4 Conformance Requirements
+
+Requirement IDs are stable identifiers for the normative statements of this
+spec, so a conformance suite can cite what it tests. IDs are never reused; a
+withdrawn requirement is marked withdrawn, not deleted.
+
+#### Bundle structure and sealing
+
+| ID | Level | Requirement |
+|----|-------|-------------|
+| N6.EB.1 | MUST | Create a bundle at workflow completion, including for failed and cancelled workflows (§5.1). |
+| N6.EB.2 | MUST | Include every compliance key §7.1 marks required (§2.1, §7.1). |
+| N6.EB.3 | MUST | Seal the bundle at creation: set `:evidence/sealed-at` and `:evidence/content-hash` (§2.14). |
+| N6.EB.4 | MUST | Compute the seal hash over a canonical serialization, excluding hash and signature (§2.14). |
+| N6.EB.5 | MUST NOT | Modify a bundle after sealing, including to add auditor notes (§2.14). |
+| N6.EB.6 | MUST | Report a bundle whose recomputed hash differs as tampered, never repair or re-seal it (§2.14, §9.1). |
+| N6.EB.7 | MUST NOT | Export or present an unsealed bundle as evidence (§2.14, §8.3). |
+| N6.EB.8 | MUST | Seal only after scanning and redaction have completed (§7.2). |
+
+#### Provenance
+
+| ID | Level | Requirement |
+|----|-------|-------------|
+| N6.PR.1 | MUST | Link every artifact to its originating workflow and intent (§1.1, §3.2). |
+| N6.PR.2 | MUST | Record content hashes for all artifacts and verify them on read (§3.1, §9.1). |
+| N6.PR.3 | MUST | Support the query operations of §4.1 and the API of §4.2. |
+| N6.PR.4 | MUST | Keep artifact references resolvable for as long as the bundle is retained (§7.4). |
+
+#### Event linkage
+
+| ID | Level | Requirement |
+|----|-------|-------------|
+| N6.EL.1 | MUST | Record `:evidence/event-links` with an N3 scope type, scope id, and sequence range (§2.12). |
+| N6.EL.2 | MUST | Record one link per scope when the work spans scopes (§2.12). |
+| N6.EL.3 | MUST NOT | Expire an event inside a retained bundle's cited range (§2.12, N3 §4.3.2). |
+
+#### Gate evidence
+
+| ID | Level | Requirement |
+|----|-------|-------------|
+| N6.GE.1 | MUST | Record the gate binding and resolved rule set for every gate execution (§2.13, N4 §5.5). |
+| N6.GE.2 | MUST | Record each pack's exact resolved version — a range does not satisfy this (§2.13). |
+| N6.GE.3 | MUST | Record each pack's content hash (§2.13). |
+| N6.GE.4 | MUST | Retain waived violations in the violations list, marked waived (§2.13). |
+| N6.GE.5 | MUST | Reject a waiver with no `:waiver/reason` as invalid (§2.13, N4 §6.3.1). |
+
+#### Sensitive data and retention
+
+| ID | Level | Requirement |
+|----|-------|-------------|
+| N6.SD.1 | MUST | Apply N3 §8's excluded-value set, marker, and truncation rules to bundle content (§7.2). |
+| N6.SD.2 | MUST | Use the marker `"[REDACTED]"` (§7.2). |
+| N6.SD.3 | MUST | Scan artifacts before storing, independently of the event stream (§7.2). |
+| N6.SD.4 | MUST | Redact on detection; flagging alone does not satisfy N3 §8.1 (§7.2). |
+| N6.SD.5 | MUST | Retain bundles for at least the `:audit` floor of N3 §4.3.1 (§7.4). |
+
+#### Presentation
+
+| ID | Level | Requirement |
+|----|-------|-------------|
+| N6.PS.1 | MUST | Be able to present every item in §8.1 on whichever surface renders a bundle. |
+| N6.PS.2 | MUST | Show a bundle whose seal does not verify as tampered (§8.1). |
+| N6.PS.3 | MUST NOT | Render a waived gate as passing (§8.1, N5 §6.2). |
+
+### 9.5 Test Obligations
+
+A conformance suite MUST cover, at minimum:
+
+1. **Seal round-trip** — a sealed bundle verifies; the same bundle
+   re-serialized in a different key order still verifies (N6.EB.4).
+2. **Tamper detection** — mutating any field of a sealed bundle causes
+   verification to fail and the bundle to be reported tampered, not repaired
+   (N6.EB.5, N6.EB.6).
+3. **Failure and cancellation** — a failed workflow and a cancelled workflow
+   each produce a sealed bundle (N6.EB.1).
+4. **Gate reproducibility** — the recorded pack versions and hashes are
+   sufficient to re-resolve and re-run the gate and obtain the same outcome
+   (N6.GE.1–N6.GE.3).
+5. **Waiver visibility** — a waived violation appears in the violations list
+   marked waived, and no surface renders its gate as passing (N6.GE.4,
+   N6.PS.3).
+6. **Redaction** — a workflow whose artifact contains a secret produces a
+   bundle with `"[REDACTED]"` and no occurrence of the secret, and the bundle
+   seals only after that substitution (N6.SD.2, N6.SD.4, N6.EB.8).
+7. **Event-link integrity** — every sequence in a bundle's cited range is
+   retrievable for as long as the bundle is retained (N6.EL.3).
 
 ---
 
@@ -1074,7 +1348,12 @@ Fleet-wide evidence will enable:
 - RFC 2119: Key words for use in RFCs to Indicate Requirement Levels
 - N2 (Workflow Execution): Workflows produce evidence bundles
 - N3 (Event Stream): Evidence bundles link to event streams via sequence ranges
-- N4 (Policy Packs): Policy check results stored in evidence
+- N3 §2.3 (scopes) and §4.3 (retention) constrain §2.12 and §7.4; N3 §8 owns the
+  redaction contract inherited by §7.2
+- N4 (Policy Packs): Policy check results stored in evidence; §5.5 imposes the
+  gate-evidence obligations of §2.13; §6.3.1 defines the waiver
+- N5 (CLI/TUI/API): §2.3.5 and §3.2.3 own the surfaces that present bundles (§8)
+- N5-delta-supervisory-control-plane §3.1: Waiver shape recorded in §2.13
 - N7 (Operational Policy Synthesis): OPSV evidence requirements (§2.8)
 - N8 (Observability Control Interface): Control action and annotation evidence (§2.9)
 - N9 (External PR Integration): External PR evidence artifacts (§2.10, §3.1.1)
@@ -1082,8 +1361,72 @@ Fleet-wide evidence will enable:
 
 ---
 
+## Annex A — Implementation Conformance Status (informative)
+
+This annex is **informative**. It records where the miniforge implementation
+diverges from the contract above, as of 2026-08-06. It is not a relaxation of
+any requirement in §1–§13.
+
+### A.1 Partially Implemented
+
+- **Bundle hash (§2.14).** `evidence-bundle/collector.clj:619` already sets
+  `:evidence/content-hash` over the assembled bundle. Until this revision the
+  field was not in the spec at all, so the implementation had invented it. What
+  is missing is the rest of the mechanism: no canonical serialization is
+  specified or implemented, so two readers can hash the same bundle
+  differently; there is no `:evidence/sealed-at`; and `validate-bundle` does not
+  recompute and compare (N6.EB.3, N6.EB.4, N6.EB.6).
+
+### A.2 Specified, Not Implemented
+
+- **Redaction (§7.2).** `evidence-bundle/scanner.clj` detects email addresses,
+  SSNs, and AWS access keys and records findings, but performs no redaction —
+  the string `[REDACTED]` appears nowhere in the component. N3 §8.1 is a
+  MUST NOT on emission, so detect-and-flag leaves the secret in the bundle
+  (N6.SD.4). The detection set is also narrower than §7.2 requires: no private
+  keys, no connection strings, no payment card numbers.
+- **Gate execution evidence (§2.13).** No waiver, gate binding, or resolved
+  pack version is recorded anywhere in the component. All five N6.GE
+  requirements are unmet, which means no gate result in the system is currently
+  reproducible from its evidence as N4 §5.5 requires.
+- **Event stream linkage (§2.12).** No `:evidence/event-links`. §5.1 has always
+  required linking to the event stream; nothing implements it.
+- **Retention (§7.4).** No retention floor is enforced for bundles or their
+  artifacts.
+
+### A.3 Structural
+
+- **Immutability is unenforced.** Nothing prevents a sealed bundle from being
+  modified in place; §2.14's write-once expectation has no storage-level
+  backing (N6.EB.5).
+
 **Version History:**
 
+- 0.8.0-draft (2026-08-06): Spec-completion pass.
+  **New normative sections:** bundle sealing and integrity (§2.14) — the spec
+  asserted immutability in §1.1, §7.3, and §9.1 without ever saying how a
+  reader verifies it; event stream linkage schema (§2.12), scope-aware per N3
+  §2.3; gate execution evidence (§2.13) discharging the four obligations N4
+  §5.5 places on this spec — binding, resolved versions, content hashes,
+  waivers — none of which the bundle previously recorded; retention (§7.4);
+  conformance requirement IDs and test obligations (§9.4–§9.5).
+  **Contract fixes:** §7.2 specified the marker `[REDACTED:<type>]` against N3
+  §8.2's `[REDACTED]` — withdrawn in favour of inheriting N3 §8 whole, since two
+  markers means an auditor grepping for redactions finds only some of them;
+  §7.2 also permitted "redact **or** flag" where N3 §8.1 is a MUST NOT;
+  §2.1's compliance keys and §7.1's required set disagreed in both directions
+  and are now one list; §8.1–§8.2 restated N5's CLI and TUI contracts and now
+  reference them, stating only what a surface MUST be able to show; SOCII →
+  SOC 2.
+  Annex A records implementation divergence.
+- 0.7.2-draft (2026-08-06): Replaced stale OPSV capability references with
+  Ariadne effect, execution-grant, and decision-envelope correlation
+- 0.7.1-draft (2026-08-05): Added aggregate OPSV event, artifact, and capability
+  reference fields required by the immutable-finalization contract in §2.8
+- 0.7.0-draft (2026-08-04): OPSV evidence now records preallocated bundle
+  correlation, content-addressed inputs, explainable risk, per-criterion
+  verification, requested/effective actuation, correlated N10 effects,
+  postconditions, rollback, and diff/metric artifacts
 - 0.6.0-draft (2026-04-23): External-PR artifact amendment — `:pr-context-pack`
   artifact type registered in §3.1.1 with full content schema. PR Context Packs are
   the normalized PR snapshot that reviewer, meta, and governance workflow packs

@@ -805,12 +805,26 @@
       (assoc :gate/id gate-id)
       (cond-> duration-ms (assoc :gate/duration-ms duration-ms))))
 
-(defn ^{:stratum 2} gate-failed [stream workflow-id gate-id & [violations {:keys [failure/class]}]]
+(defn ^{:stratum 2} gate-failed [stream workflow-id gate-id & [violations {:keys [failure/class envelope-id]}]]
   (-> (create-envelope stream :gate/failed workflow-id
                        (str "Gate " (name gate-id) " failed"))
       (assoc :gate/id gate-id)
       (cond-> violations (assoc :gate/violations violations)
-              class (assoc :failure/class class))))
+              class (assoc :failure/class class)
+              envelope-id (assoc :envelope/id envelope-id))))
+
+(defn ^{:stratum 2} phase-decision
+  "One event per gated phase transition carrying the DecisionEnvelope
+   (Ariadne 1d): the event-stream copy of the one truth artifact. The
+   envelope is runtime-minted; this event references it whole so replay
+   and the console see exactly what the gate core decided."
+  [stream workflow-id phase envelope]
+  (-> (create-envelope stream :gate/decision workflow-id
+                       (str "Phase " (name (or phase :unknown)) " decision: "
+                            (name (:envelope/decision envelope))))
+      (assoc :gate/phase phase
+             :envelope/id (:envelope/id envelope)
+             :gate/decision-envelope envelope)))
 
 (defn ^{:stratum 2} gate-rule-applied
   "Per-rule policy evidence event: records that policy `rule-id` was evaluated
@@ -829,7 +843,8 @@
              :rule/status   status)
       (cond-> (:severity extra)    (assoc :rule/severity (:severity extra))
               (:enforcement extra) (assoc :rule/enforcement (:enforcement extra))
-              (:violation extra)   (assoc :rule/violation (:violation extra)))))
+              (:violation extra)   (assoc :rule/violation (:violation extra))
+              (:envelope-id extra) (assoc :envelope/id (:envelope-id extra)))))
 
 ;; Tool lifecycle events
 (defn ^{:stratum 2} tool-invoked [stream workflow-id agent-id tool-id & [params-summary]]

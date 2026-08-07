@@ -1,6 +1,7 @@
 # Evidence Bundle Component
 
-The evidence-bundle component provides comprehensive audit trails for autonomous workflow execution, implementing the N6 Evidence & Provenance Standard.
+The evidence-bundle component provides comprehensive audit trails for autonomous workflow execution, implementing the N6
+Evidence & Provenance Standard.
 
 ## Purpose
 
@@ -16,7 +17,7 @@ Evidence bundles make autonomous workflows **credible** by providing:
 
 The component follows the established protocol extraction pattern:
 
-```
+```text
 evidence-bundle/
 ├── src/ai/miniforge/evidence_bundle/
 │   ├── interface.clj                          # Public API
@@ -104,12 +105,12 @@ Protocol for semantic intent validation:
 ### Automatic Evidence Collection
 
 ```clojure
-(require '[ai.miniforge.evidence-bundle.workflow-integration :as integration]
+(require '[ai.miniforge.evidence-bundle.workflow-integration-factory :as integration-factory]
          '[ai.miniforge.workflow.interface :as workflow])
 
 ;; Attach evidence collector to workflow
 (def wf (-> (workflow/create-workflow)
-            (integration/create-and-attach-evidence-collector artifact-store)
+            (integration-factory/create-and-attach-evidence-collector artifact-store)
             (workflow/start spec context)))
 
 ;; Evidence bundle created automatically on workflow completion

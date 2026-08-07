@@ -210,8 +210,11 @@
   loading/load-all-packs)
 
 (def ^{:stratum 0} write-pack-to-file
-  "Serialize a PackManifest to an EDN file via pprint. (write-pack-to-file pack
-   file-path) returns {:success? bool :error string-or-nil}."
+  "Serialize a PackManifest to an EDN file via pprint, with its timestamps
+   normalized to ISO-8601 strings so the file reads back; a timestamp that is
+   neither an Instant nor a Date is refused and nothing is written.
+   (write-pack-to-file pack file-path) returns {:success? bool :error
+   string-or-nil} — nil on success."
   loading/write-pack-to-file)
 
 (def ^{:stratum 0} detect-violation
@@ -261,20 +264,10 @@
    result maps, one per artifact."
   checking/check-artifacts)
 
-(def ^{:stratum 0} blocking-violations
-  "Filter check-rules violations to those whose rule enforces :hard-halt.
-   Returns a lazy seq of the matching violation entries."
-  checking/blocking-violations)
-
-(def ^{:stratum 0} approval-required-violations
-  "Filter check-rules violations to those whose rule enforces
-   :require-approval. Returns a lazy seq of the matching violation entries."
-  checking/approval-required-violations)
-
-(def ^{:stratum 0} warning-violations
-  "Filter check-rules violations to those whose rule enforces :warn. Returns a
-   lazy seq of the matching violation entries."
-  checking/warning-violations)
+(def ^{:stratum 0} classify-violations
+  "Exhaustive violation classification: {:blocking :require-approval
+   :warnings :audits :unknown}; no default-pass branch."
+  checking/classify-violations)
 
 (def ^{:stratum 0} violation->error
   "Convert a check-rules violation entry into a gate error map

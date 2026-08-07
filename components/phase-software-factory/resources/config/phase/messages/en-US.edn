@@ -2,6 +2,9 @@
  {;; Defaults
   :default/task-description "implement changes"
 
+  ;; Thesium Codex blackboard pin (SPEC §7.4)
+  :codex/consultation-skipped-warn "WARN: codex consultation skipped for {phase} — {anomaly}: {reason}"
+
   ;; Implementation phase
   :implement/agent-error           "Agent returned error status"
   :implement/exhausted-retries     "Implementation failed after exhausting retry budget"

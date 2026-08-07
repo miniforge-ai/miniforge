@@ -30,12 +30,20 @@
    (Wave 2), not a labeling problem."
   (:require
    [ai.miniforge.anomaly.interface :as anomaly]
+   [ai.miniforge.messages.interface :as messages]
+   [ai.miniforge.policy-pack.canonical-edn :as canonical-edn]
    [ai.miniforge.policy-pack.crypto :as crypto]
    [ai.miniforge.policy-pack.schema :as schema]
+   [ai.miniforge.policy-pack.trust-roots :as trust-roots]
+   [ai.miniforge.policy-pack.trust-roots-config :as trust-roots-config]
    [ai.miniforge.response.interface :as response]
    [clojure.string :as str]))
 
 ;------------------------------------------------------------------------------ Layer 0
+
+(def ^{:stratum 0} ^:private t
+  (messages/create-translator "config/policy-pack/messages/system.edn"
+                              :policy-pack/system))
 
 ;; Protocol definition
 (defprotocol ^{:stratum 0} PolicyPackRegistry
@@ -89,8 +97,12 @@
      Returns {:valid? bool :errors [...]}.")
 
   (verify-signature [this pack]
-    "Verify pack signature (paid feature).
-     Returns {:verified? bool :signer string :timestamp inst}.")
+    "Verify pack signature against the configured trust roots (N4 §8.2).
+     Returns {:verified? bool :reason string}, plus :signer and :timestamp
+     when the pack carries a signature — an unsigned pack has neither, and
+     reporting a signer for one would imply something signed it. :signer is
+     the identifier the pack CLAIMS; it is verified only when :verified? is
+     true.")
 
   ;; Composition
   (resolve-pack [this pack-id]
@@ -134,6 +146,17 @@
       (boolean (re-matches (re-pattern regex-pattern) path))
       (catch Exception _
         false))))
+
+(defn ^{:stratum 0} decode-signature
+  "Base64 pack signature to bytes; nil when the field is not a string or not
+   base64. A pack reaching verification has not necessarily been through
+   schema validation, so the type check belongs here."
+  [sig-str]
+  (when (string? sig-str)
+    (try
+      (.decode (java.util.Base64/getDecoder) ^String sig-str)
+      (catch IllegalArgumentException _
+        nil))))
 
 (defn ^{:stratum 0} dedupe-by-id
   "Remove duplicate rules, keeping the last occurrence (later pack wins)."
@@ -196,8 +219,9 @@
 
 ;------------------------------------------------------------------------------ Layer 3
 
-;; In-memory registry implementation
-(defrecord ^{:stratum 3} InMemoryPackRegistry [state]
+;; In-memory registry implementation. `trust-roots` (N4 §8.2.1) sits outside
+;; `state` because it is fixed configuration, not state a caller mutates.
+(defrecord ^{:stratum 3} InMemoryPackRegistry [state trust-roots]
   PolicyPackRegistry
 
   (register-pack [_this pack]
@@ -295,18 +319,29 @@
     (schema/validate-pack pack))
 
   (verify-signature [_this pack]
-    (if-let [sig-str (:pack/signature pack)]
-      (let [decoder       (java.util.Base64/getDecoder)
-            content-bytes (crypto/pack-signable-bytes pack)
-            sig-bytes     (.decode decoder ^String sig-str)
-            pub-key-str   (:pack/signed-by pack)
-            pub-bytes     (when pub-key-str (.decode decoder ^String pub-key-str))
-            result        (crypto/verify-ed25519 content-bytes sig-bytes pub-bytes)]
-        (assoc result
-               :signer    pub-key-str
-               :timestamp (:pack/signed-at pack)))
-      {:verified? false
-       :reason "Pack is not signed"}))
+    ;; N4 §8.2: the key comes from the trust roots, resolved by the
+    ;; identifier the pack names — never from the pack itself.
+    (let [key-id  (:pack/signed-by pack)
+          sig-str (:pack/signature pack)
+          claimed {:signer key-id :timestamp (:pack/signed-at pack)}]
+      (cond
+        (nil? sig-str)
+        {:verified? false :reason (t :verify/unsigned)}
+
+        (not (and (string? key-id) (seq key-id)))
+        (assoc claimed :verified? false :reason (t :verify/missing-key-id))
+
+        :else
+        (if-let [pub-bytes (trust-roots/resolve-key trust-roots key-id)]
+          (if-let [sig-bytes (decode-signature sig-str)]
+            (merge claimed
+                   (crypto/verify-ed25519 (canonical-edn/pack-signable-bytes pack)
+                                          sig-bytes
+                                          pub-bytes))
+            (assoc claimed :verified? false
+                   :reason (t :crypto/undecodable-signature)))
+          (assoc claimed :verified? false
+                 :reason (t :verify/untrusted-key-id))))))
 
   (resolve-pack [this pack-id]
     (when-let [pack (get-pack this pack-id)]
@@ -341,15 +376,21 @@
   "Create an in-memory policy pack registry.
 
    Options:
-   - :logger - Logger instance for structured logging
+   - :logger      - Logger instance for structured logging
+   - :trust-roots - Trusted-publisher store for signature verification
+                    (see policy-pack.trust-roots). Defaults to the
+                    configured store, which ships empty — with nothing
+                    configured, no signed pack verifies.
 
    Example:
      (create-registry)
      (create-registry {:logger my-logger})"
   ([]
    (create-registry {}))
-  ([_opts]
-   (->InMemoryPackRegistry (atom {:packs {}}))))
+  ([opts]
+   (->InMemoryPackRegistry (atom {:packs {}})
+                           (or (:trust-roots opts)
+                               (trust-roots-config/load-trust-roots)))))
 
 ;------------------------------------------------------------------------------ Rich Comment
 (comment

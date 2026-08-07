@@ -18,16 +18,27 @@
 (ns ai.miniforge.policy-pack.schema-test
   "Unit tests for policy-pack Malli schemas, validation helpers, and result helpers.
 
+   Split across the same three namespaces schema.clj itself split into
+   (Wave 2, SL003): `schema-types` (enums + component schemas), `schema-
+   validation` (generic valid?/validate/explain + result helpers), and
+   `schema` (Rule/PackManifest + their valid-*?/validate-* wrappers).
+
    Covers:
-   - Layer 0: Enum definitions and base type schemas
-   - Layer 1: Rule component schemas (applicability, detection, enforcement, example)
-   - Layer 2: Rule and PackManifest schemas
-   - Validation helpers (valid?, validate, explain)
-   - Convenience wrappers (valid-rule?, validate-rule, valid-pack?, validate-pack)
-   - Result helpers (succeeded?, success, failure, failure-with-errors)"
+   - Enum definitions and base type schemas (schema-types, aliased `types`)
+   - Rule component schemas: applicability, detection, enforcement, example
+     (schema-types, aliased `types`)
+   - Rule and PackManifest schemas (schema, aliased `sut`)
+   - Validation helpers: valid?, validate, explain (schema-validation,
+     aliased `sv`)
+   - Convenience wrappers: valid-rule?, validate-rule, valid-pack?,
+     validate-pack (schema, aliased `sut`)
+   - Result helpers: succeeded?, success, failure, failure-with-errors
+     (schema-validation, aliased `sv`)"
   (:require
    [clojure.test :refer [deftest testing is are]]
-   [ai.miniforge.policy-pack.schema :as sut]))
+   [ai.miniforge.policy-pack.schema :as sut]
+   [ai.miniforge.policy-pack.schema-types :as types]
+   [ai.miniforge.policy-pack.schema-validation :as sv]))
 
 ;------------------------------------------------------------------------------ Layer 0
 
@@ -36,35 +47,35 @@
 ;; ============================================================================
 (deftest ^{:stratum 0} rule-severities-test
   (testing "rule-severities is the canonical five-keyword scale, descending"
-    (is (= [:critical :high :medium :low :info] sut/rule-severities))
-    (is (= 5 (count sut/rule-severities)))))
+    (is (= [:critical :high :medium :low :info] types/rule-severities))
+    (is (= 5 (count types/rule-severities)))))
 
 (deftest ^{:stratum 0} enforcement-actions-test
   (testing "enforcement-actions ordered from strictest to most lenient"
-    (is (= [:hard-halt :require-approval :warn :audit] sut/enforcement-actions))
-    (is (= 4 (count sut/enforcement-actions)))))
+    (is (= [:hard-halt :require-approval :warn :audit] types/enforcement-actions))
+    (is (= 4 (count types/enforcement-actions)))))
 
 (deftest ^{:stratum 0} detection-types-test
   (testing "detection-types has seven detection mechanisms"
     (is (= [:plan-output :diff-analysis :state-comparison :content-scan :ast-analysis :custom :capability]
-           sut/detection-types))
-    (is (= 7 (count sut/detection-types)))))
+           types/detection-types))
+    (is (= 7 (count types/detection-types)))))
 
 (deftest ^{:stratum 0} task-types-test
   (testing "task-types has five task operations"
-    (is (= [:create :import :modify :delete :migrate] sut/task-types))
-    (is (= 5 (count sut/task-types)))))
+    (is (= [:create :import :modify :delete :migrate] types/task-types))
+    (is (= 5 (count types/task-types)))))
 
 (deftest ^{:stratum 0} repo-types-test
   (testing "repo-types has five repository types"
     (is (= [:terraform-module :terraform-live :kubernetes :argocd :application]
-           sut/repo-types))
-    (is (= 5 (count sut/repo-types)))))
+           types/repo-types))
+    (is (= 5 (count types/repo-types)))))
 
 (deftest ^{:stratum 0} approver-types-test
   (testing "approver-types has three approver kinds"
-    (is (= [:human :senior-engineer :security] sut/approver-types))
-    (is (= 3 (count sut/approver-types)))))
+    (is (= [:human :senior-engineer :security] types/approver-types))
+    (is (= 3 (count types/approver-types)))))
 
 ;; ============================================================================
 ;; Enum schema validation tests
@@ -72,85 +83,85 @@
 (deftest ^{:stratum 0} rule-severity-schema-test
   (testing "valid severity keywords pass"
     (doseq [sev [:critical :high :medium :low :info]]
-      (is (sut/valid? sut/RuleSeverity sev)
+      (is (sv/valid? types/RuleSeverity sev)
           (str sev " should be valid"))))
 
   (testing "invalid values rejected — incl. the legacy :major/:minor"
-    (are [v] (not (sut/valid? sut/RuleSeverity v))
+    (are [v] (not (sv/valid? types/RuleSeverity v))
       :warning :error :major :minor "critical" nil 42)))
 
 (deftest ^{:stratum 0} rule-enforcement-schema-test
   (testing "valid enforcement actions pass"
     (doseq [action [:hard-halt :require-approval :warn :audit]]
-      (is (sut/valid? sut/RuleEnforcement action))))
+      (is (sv/valid? types/RuleEnforcement action))))
 
   (testing "invalid enforcement actions rejected"
-    (are [v] (not (sut/valid? sut/RuleEnforcement v))
+    (are [v] (not (sv/valid? types/RuleEnforcement v))
       :block :allow :skip "hard-halt" nil)))
 
 (deftest ^{:stratum 0} detection-type-schema-test
   (testing "valid detection types pass"
     (doseq [dt [:plan-output :diff-analysis :state-comparison :content-scan :ast-analysis :custom]]
-      (is (sut/valid? sut/DetectionType dt))))
+      (is (sv/valid? types/DetectionType dt))))
 
   (testing "invalid detection types rejected"
-    (is (not (sut/valid? sut/DetectionType :regex)))
-    (is (not (sut/valid? sut/DetectionType "custom")))))
+    (is (not (sv/valid? types/DetectionType :regex)))
+    (is (not (sv/valid? types/DetectionType "custom")))))
 
 (deftest ^{:stratum 0} task-type-schema-test
   (testing "valid task types pass"
     (doseq [tt [:create :import :modify :delete :migrate]]
-      (is (sut/valid? sut/TaskType tt))))
+      (is (sv/valid? types/TaskType tt))))
 
   (testing "invalid task types rejected"
-    (is (not (sut/valid? sut/TaskType :update)))
-    (is (not (sut/valid? sut/TaskType :read)))))
+    (is (not (sv/valid? types/TaskType :update)))
+    (is (not (sv/valid? types/TaskType :read)))))
 
 (deftest ^{:stratum 0} repo-type-schema-test
   (testing "valid repo types pass"
     (doseq [rt [:terraform-module :terraform-live :kubernetes :argocd :application]]
-      (is (sut/valid? sut/RepoType rt))))
+      (is (sv/valid? types/RepoType rt))))
 
   (testing "invalid repo types rejected"
-    (is (not (sut/valid? sut/RepoType :github)))
-    (is (not (sut/valid? sut/RepoType :docker)))))
+    (is (not (sv/valid? types/RepoType :github)))
+    (is (not (sv/valid? types/RepoType :docker)))))
 
 (deftest ^{:stratum 0} approver-type-schema-test
   (testing "valid approver types pass"
     (doseq [at [:human :senior-engineer :security]]
-      (is (sut/valid? sut/ApproverType at))))
+      (is (sv/valid? types/ApproverType at))))
 
   (testing "invalid approver types rejected"
-    (is (not (sut/valid? sut/ApproverType :bot)))
-    (is (not (sut/valid? sut/ApproverType :manager)))))
+    (is (not (sv/valid? types/ApproverType :bot)))
+    (is (not (sv/valid? types/ApproverType :manager)))))
 
 (deftest ^{:stratum 0} trust-level-schema-test
   (testing "valid trust levels pass"
     (doseq [tl [:tainted :untrusted :trusted]]
-      (is (sut/valid? sut/TrustLevel tl))))
+      (is (sv/valid? types/TrustLevel tl))))
 
   (testing "invalid trust levels rejected"
-    (is (not (sut/valid? sut/TrustLevel :verified)))
-    (is (not (sut/valid? sut/TrustLevel :unknown)))))
+    (is (not (sv/valid? types/TrustLevel :verified)))
+    (is (not (sv/valid? types/TrustLevel :unknown)))))
 
 (deftest ^{:stratum 0} authority-channel-schema-test
   (testing "valid authority channels pass"
-    (is (sut/valid? sut/AuthorityChannel :authority/instruction))
-    (is (sut/valid? sut/AuthorityChannel :authority/data)))
+    (is (sv/valid? types/AuthorityChannel :authority/instruction))
+    (is (sv/valid? types/AuthorityChannel :authority/data)))
 
   (testing "invalid authority channels rejected"
-    (is (not (sut/valid? sut/AuthorityChannel :authority/reference)))
-    (is (not (sut/valid? sut/AuthorityChannel :instruction)))))
+    (is (not (sv/valid? types/AuthorityChannel :authority/reference)))
+    (is (not (sv/valid? types/AuthorityChannel :instruction)))))
 
 ;; ============================================================================
 ;; Component schema tests
 ;; ============================================================================
 (deftest ^{:stratum 0} rule-applicability-schema-test
   (testing "empty map is valid (all fields optional)"
-    (is (sut/valid? sut/RuleApplicability {})))
+    (is (sv/valid? types/RuleApplicability {})))
 
   (testing "full applicability map is valid"
-    (is (sut/valid? sut/RuleApplicability
+    (is (sv/valid? types/RuleApplicability
                     {:task-types #{:create :modify}
                      :file-globs ["**/*.tf"]
                      :resource-patterns ["aws_s3_bucket.*"]
@@ -158,96 +169,96 @@
                      :phases #{:plan :implement}})))
 
   (testing "task-types must be a set of TaskType"
-    (is (not (sut/valid? sut/RuleApplicability {:task-types #{:unknown}}))))
+    (is (not (sv/valid? types/RuleApplicability {:task-types #{:unknown}}))))
 
   (testing "file-globs must be a vector of strings"
-    (is (not (sut/valid? sut/RuleApplicability {:file-globs [42]}))))
+    (is (not (sv/valid? types/RuleApplicability {:file-globs [42]}))))
 
   (testing "resource-patterns accepts strings and regex patterns"
-    (is (sut/valid? sut/RuleApplicability {:resource-patterns ["pattern"]}))
-    (is (sut/valid? sut/RuleApplicability {:resource-patterns [#"regex"]})))
+    (is (sv/valid? types/RuleApplicability {:resource-patterns ["pattern"]}))
+    (is (sv/valid? types/RuleApplicability {:resource-patterns [#"regex"]})))
 
   (testing "phases must be a set of keywords"
-    (is (sut/valid? sut/RuleApplicability {:phases #{:plan :review :implement}}))))
+    (is (sv/valid? types/RuleApplicability {:phases #{:plan :review :implement}}))))
 
 (deftest ^{:stratum 0} rule-detection-schema-test
   (testing "minimal detection: type only"
-    (is (sut/valid? sut/RuleDetection {:type :custom})))
+    (is (sv/valid? types/RuleDetection {:type :custom})))
 
   (testing "detection with string pattern"
-    (is (sut/valid? sut/RuleDetection {:type :diff-analysis
+    (is (sv/valid? types/RuleDetection {:type :diff-analysis
                                        :pattern "^-\\s*import"})))
 
   (testing "detection with regex pattern"
-    (is (sut/valid? sut/RuleDetection {:type :content-scan
+    (is (sv/valid? types/RuleDetection {:type :content-scan
                                        :pattern #"secret.*key"})))
 
   (testing "detection with multiple patterns"
-    (is (sut/valid? sut/RuleDetection {:type :content-scan
+    (is (sv/valid? types/RuleDetection {:type :content-scan
                                        :patterns ["pattern-a" #"pattern-b"]})))
 
   (testing "detection with context-lines"
-    (is (sut/valid? sut/RuleDetection {:type :diff-analysis
+    (is (sv/valid? types/RuleDetection {:type :diff-analysis
                                        :context-lines 3})))
 
   (testing "detection with custom-fn symbol"
-    (is (sut/valid? sut/RuleDetection {:type :custom
+    (is (sv/valid? types/RuleDetection {:type :custom
                                        :custom-fn 'my.ns/detect-fn})))
 
   (testing "detection with capability keyword"
-    (is (sut/valid? sut/RuleDetection {:type :capability
+    (is (sv/valid? types/RuleDetection {:type :capability
                                        :capability :lint})))
 
   (testing "type is required"
-    (is (not (sut/valid? sut/RuleDetection {}))))
+    (is (not (sv/valid? types/RuleDetection {}))))
 
   (testing "context-lines must be positive integer"
-    (is (not (sut/valid? sut/RuleDetection {:type :custom :context-lines 0})))
-    (is (not (sut/valid? sut/RuleDetection {:type :custom :context-lines -1})))))
+    (is (not (sv/valid? types/RuleDetection {:type :custom :context-lines 0})))
+    (is (not (sv/valid? types/RuleDetection {:type :custom :context-lines -1})))))
 
 (deftest ^{:stratum 0} rule-enforcement-config-schema-test
   (testing "minimal enforcement: action + message"
-    (is (sut/valid? sut/RuleEnforcementConfig
+    (is (sv/valid? types/RuleEnforcementConfig
                     {:action :hard-halt :message "Stop!"})))
 
   (testing "enforcement with remediation"
-    (is (sut/valid? sut/RuleEnforcementConfig
+    (is (sv/valid? types/RuleEnforcementConfig
                     {:action :warn
                      :message "Warning"
                      :remediation "Fix by doing X"})))
 
   (testing "enforcement with approvers"
-    (is (sut/valid? sut/RuleEnforcementConfig
+    (is (sv/valid? types/RuleEnforcementConfig
                     {:action :require-approval
                      :message "Needs approval"
                      :approvers [:human :security]})))
 
   (testing "action is required"
-    (is (not (sut/valid? sut/RuleEnforcementConfig {:message "oops"}))))
+    (is (not (sv/valid? types/RuleEnforcementConfig {:message "oops"}))))
 
   (testing "message is required"
-    (is (not (sut/valid? sut/RuleEnforcementConfig {:action :audit})))))
+    (is (not (sv/valid? types/RuleEnforcementConfig {:action :audit})))))
 
 (deftest ^{:stratum 0} rule-example-schema-test
   (testing "valid example with all fields"
-    (is (sut/valid? sut/RuleExample
+    (is (sv/valid? types/RuleExample
                     {:description "Test case"
                      :input "some code"
                      :expected :pass
                      :explanation "It passes because..."})))
 
   (testing "minimal example (no explanation)"
-    (is (sut/valid? sut/RuleExample
+    (is (sv/valid? types/RuleExample
                     {:description "Test" :input "code" :expected :fail})))
 
   (testing "expected must be :pass or :fail"
-    (is (not (sut/valid? sut/RuleExample
+    (is (not (sv/valid? types/RuleExample
                          {:description "Test" :input "code" :expected :error}))))
 
   (testing "description, input, expected are required"
-    (is (not (sut/valid? sut/RuleExample {:input "code" :expected :pass})))
-    (is (not (sut/valid? sut/RuleExample {:description "x" :expected :pass})))
-    (is (not (sut/valid? sut/RuleExample {:description "x" :input "y"})))))
+    (is (not (sv/valid? types/RuleExample {:input "code" :expected :pass})))
+    (is (not (sv/valid? types/RuleExample {:description "x" :expected :pass})))
+    (is (not (sv/valid? types/RuleExample {:description "x" :input "y"})))))
 
 ;; ============================================================================
 ;; Rule schema tests
@@ -283,31 +294,31 @@
 ;; ============================================================================
 (deftest ^{:stratum 0} valid?-test
   (testing "returns true for valid data"
-    (is (true? (sut/valid? sut/RuleSeverity :critical))))
+    (is (true? (sv/valid? types/RuleSeverity :critical))))
 
   (testing "returns false for invalid data"
-    (is (false? (sut/valid? sut/RuleSeverity :nope)))))
+    (is (false? (sv/valid? types/RuleSeverity :nope)))))
 
 (deftest ^{:stratum 0} validate-test
   (testing "returns {:valid? true :errors nil} for valid data"
-    (let [result (sut/validate sut/RuleSeverity :critical)]
+    (let [result (sv/validate types/RuleSeverity :critical)]
       (is (true? (:valid? result)))
       (is (nil? (:errors result)))))
 
   (testing "returns {:valid? false :errors ...} for invalid data"
-    (let [result (sut/validate sut/RuleSeverity :nope)]
+    (let [result (sv/validate types/RuleSeverity :nope)]
       (is (false? (:valid? result)))
       (is (some? (:errors result))))))
 
 (deftest ^{:stratum 0} explain-test
   (testing "returns nil for valid data"
-    (is (nil? (sut/explain sut/RuleSeverity :critical))))
+    (is (nil? (sv/explain types/RuleSeverity :critical))))
 
   (testing "returns humanized errors for invalid data"
-    (is (some? (sut/explain sut/RuleSeverity :nope))))
+    (is (some? (sv/explain types/RuleSeverity :nope))))
 
   (testing "returns meaningful errors for wrong rule id type"
-    (let [errors (sut/explain sut/Rule {:rule/id "not-a-keyword"})]
+    (let [errors (sv/explain sut/Rule {:rule/id "not-a-keyword"})]
       (is (some? errors)))))
 
 ;; ============================================================================
@@ -315,26 +326,26 @@
 ;; ============================================================================
 (deftest ^{:stratum 0} succeeded?-test
   (testing "returns true for success result"
-    (is (true? (sut/succeeded? {:success? true}))))
+    (is (true? (sv/succeeded? {:success? true}))))
 
   (testing "returns false for failure result"
-    (is (false? (sut/succeeded? {:success? false}))))
+    (is (false? (sv/succeeded? {:success? false}))))
 
   (testing "returns false for missing :success? key"
-    (is (false? (sut/succeeded? {}))))
+    (is (false? (sv/succeeded? {}))))
 
   (testing "returns false for nil"
-    (is (false? (sut/succeeded? nil)))))
+    (is (false? (sv/succeeded? nil)))))
 
 (deftest ^{:stratum 0} success-test
   (testing "creates success result with key, value, and extras"
-    (let [result (sut/success :pack {:pack/id "test"} {:errors nil})]
+    (let [result (sv/success :pack {:pack/id "test"} {:errors nil})]
       (is (true? (:success? result)))
       (is (= {:pack/id "test"} (:pack result)))
       (is (nil? (:errors result)))))
 
   (testing "extras are merged into result"
-    (let [result (sut/success :rule {:id 1} {:warnings ["w1"] :count 5})]
+    (let [result (sv/success :rule {:id 1} {:warnings ["w1"] :count 5})]
       (is (true? (:success? result)))
       (is (= {:id 1} (:rule result)))
       (is (= ["w1"] (:warnings result)))
@@ -342,23 +353,23 @@
 
 (deftest ^{:stratum 0} failure-test
   (testing "creates failure result with error message"
-    (let [result (sut/failure :data "something broke")]
+    (let [result (sv/failure :data "something broke")]
       (is (false? (:success? result)))
       (is (= "something broke" (:error result)))))
 
   (testing "first arg (_key) is ignored"
-    (let [result (sut/failure :ignored "msg")]
+    (let [result (sv/failure :ignored "msg")]
       (is (false? (:success? result)))
       (is (nil? (:ignored result))))))
 
 (deftest ^{:stratum 0} failure-with-errors-test
   (testing "creates failure result with error list"
-    (let [result (sut/failure-with-errors :pack ["err1" "err2"])]
+    (let [result (sv/failure-with-errors :pack ["err1" "err2"])]
       (is (false? (:success? result)))
       (is (= ["err1" "err2"] (:errors result)))))
 
   (testing "first arg (_key) is ignored"
-    (let [result (sut/failure-with-errors :ignored ["e"])]
+    (let [result (sv/failure-with-errors :ignored ["e"])]
       (is (false? (:success? result)))
       (is (nil? (:ignored result))))))
 

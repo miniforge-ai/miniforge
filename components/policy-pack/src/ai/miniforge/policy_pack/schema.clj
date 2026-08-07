@@ -16,279 +16,36 @@
 ;; See the License for the specific language governing permissions and
 ;; limitations under the License.
 (ns ai.miniforge.policy-pack.schema
-  "Malli schemas for policy packs and rules.
+  "Malli schemas for the top-level policy-pack artifacts: an individual
+   Rule and the PackManifest that collects them, plus their validators.
 
-   Layer 0: Enums and base types (severities, enforcement-actions,
-     detection-types, task/repo/approver-types, DetectionMode,
-     RemediationStrategy/Type, ExcludeContext, RuleExample, PackCategory,
-     PackDependency, TrustLevel, AuthorityChannel, TaxonomyRef), generic
-     malli valid?/validate/explain and success/failure result helpers
-   Layer 1: RuleEnforcement, DetectionType, TaskType, RepoType, ApproverType,
-     RuleRemediation, PackOverride (each composes Layer 0 enums/types)
-   Layer 2: RuleApplicability, RuleDetection, RuleEnforcementConfig (compose
-     Layer 1 schemas)
-   Layer 3: Rule (composes RuleApplicability/RuleDetection/
-     RuleEnforcementConfig)
-   Layer 4: PackManifest (composes Rule), valid-rule?, validate-rule
-   Layer 5: valid-pack?, validate-pack (over PackManifest)
+   Was over the rule 210 budget at 6 real layers (Wave 2, SL003); split into
+   three namespaces along the real composition chain:
+   - `schema-types.clj` — base enums and the component schemas
+     (RuleApplicability, RuleDetection, RuleEnforcementConfig, etc.) Rule is
+     built from
+   - `schema-validation.clj` — generic Malli valid?/validate/explain plus the
+     {:success? ...} result-map helpers
+   - `schema.clj` (this file) — Rule and PackManifest themselves, and their
+     valid-*?/validate-* wrappers
 
-   6 real strata — over the rule 210 budget of 3; a genuine namespace split
-   (Wave 2), not a labeling problem.
+   Layer 0: Rule (composes schema-types/RuleApplicability,
+     .../RuleDetection, .../RuleRemediation, .../RuleExample,
+     .../RuleEnforcementConfig, .../RuleSeverity — all external, no
+     same-file dependents)
+   Layer 1: PackManifest (composes Rule), valid-rule?, validate-rule (each
+     over Rule + schema-validation, external)
+   Layer 2: valid-pack?, validate-pack (over PackManifest + schema-validation)
 
    Based on policy-pack.spec"
   (:require
-   [ai.miniforge.schema.interface :as shared]
-   [malli.core :as m]
-   [malli.error :as me]))
+   [ai.miniforge.policy-pack.schema-types :as schema-types]
+   [ai.miniforge.policy-pack.schema-validation :as schema-validation]))
 
 ;------------------------------------------------------------------------------ Layer 0
 
-;; Enums and base types
-(def ^{:stratum 0} rule-severities
-  "Rule severity levels, ordered from most to least severe. Aliases the shared
-   canonical `schema/severities` — a rule's severity is the same axis as a
-   runtime violation's, so one scale (see schema.core)."
-  shared/severities)
-
-(def ^{:stratum 0} RuleSeverity
-  "Schema for rule severity enum — the shared canonical `schema/Severity`."
-  shared/Severity)
-
-(def ^{:stratum 0} enforcement-actions
-  "Enforcement actions, ordered from strictest to most lenient."
-  [:hard-halt :require-approval :warn :audit])
-
-(def ^{:stratum 0} detection-types
-  "Types of violation detection."
-  [:plan-output :diff-analysis :state-comparison :content-scan :ast-analysis :custom :capability])
-
-(def ^{:stratum 0} task-types
-  "Task types that rules can apply to."
-  [:create :import :modify :delete :migrate])
-
-(def ^{:stratum 0} repo-types
-  "Repository types for rule applicability."
-  [:terraform-module :terraform-live :kubernetes :argocd :application])
-
-(def ^{:stratum 0} approver-types
-  "Types of approvers for require-approval enforcement."
-  [:human :senior-engineer :security])
-
-;; Detection and Remediation schemas (for pack-driven compliance scanning)
-(def ^{:stratum 0} DetectionMode
-  "Detection mode: :positive means a match IS a violation,
-   :negative means absence of a match IS a violation."
-  [:enum :positive :negative])
-
-(def ^{:stratum 0} RemediationStrategy
-  "How a violation should be remediated."
-  [:enum :mechanical :semantic :manual])
-
-(def ^{:stratum 0} RemediationType
-  "Type of mechanical remediation."
-  [:enum :regex-replace :prepend :append])
-
-(def ^{:stratum 0} ExcludeContext
-  "Context rule that excludes a violation from auto-fixing."
-  [:map
-   [:path-contains {:optional true} string?]
-   [:current-contains {:optional true} [:or string? [:vector string?]]]])
-
-(def ^{:stratum 0} RuleExample
-  "Schema for rule test examples.
-
-   Examples serve as both documentation and test cases."
-  [:map
-   [:description string?]
-   [:input string?]
-   [:expected [:enum :pass :fail]]
-   [:explanation {:optional true} string?]])
-
-(def ^{:stratum 0} PackCategory
-  "Schema for a category within a pack."
-  [:map
-   [:category/id string?]
-   [:category/name string?]
-   [:category/rules [:vector keyword?]]])
-
-(def ^{:stratum 0} PackDependency
-  "Schema for pack extension/dependency."
-  [:map
-   [:pack-id string?]
-   [:version-constraint {:optional true} string?]])
-
-(def ^{:stratum 0} TrustLevel
-  "Schema for pack trust levels (N1 §2.10.2).
-   - :tainted   - Flagged by scanners; MUST NOT be used for instruction
-   - :untrusted - Repo-derived or external; data-only unless promoted
-   - :trusted   - Platform-validated and/or user-promoted"
-  [:enum :tainted :untrusted :trusted])
-
-(def ^{:stratum 0} AuthorityChannel
-  "Schema for pack authority channels (N1 §2.10.2).
-   - :authority/instruction - May shape agent plans (requires :trusted)
-   - :authority/data        - Reference material only (any trust level)"
-  [:enum :authority/instruction :authority/data])
-
-(def ^{:stratum 0} TaxonomyRef
-  "Schema for a taxonomy reference within a pack manifest.
-   Packs declare which taxonomy they target and the minimum version required."
-  [:map
-   [:taxonomy/id keyword?]
-   [:taxonomy/min-version string?]])
-
-;; Validation helpers
-(defn ^{:stratum 0} valid?
-  "Check if value validates against schema."
-  [schema value]
-  (m/validate schema value))
-
-(defn ^{:stratum 0} validate
-  "Validate value against schema.
-   Returns {:valid? bool :errors map-or-nil}."
-  [schema value]
-  (if (m/validate schema value)
-    {:valid? true :errors nil}
-    {:valid? false
-     :errors (me/humanize (m/explain schema value))}))
-
-(defn ^{:stratum 0} explain
-  "Return human-readable explanation of validation errors, or nil if valid."
-  [schema value]
-  (when-let [explanation (m/explain schema value)]
-    (me/humanize explanation)))
-
-;; Result helpers (used by loader.clj)
-(defn ^{:stratum 0} succeeded?
-  "Check if a result map indicates success."
-  [result]
-  (boolean (:success? result)))
-
-(defn ^{:stratum 0} success
-  "Create a success result.
-   (success :pack pack {:errors nil}) => {:success? true :pack pack :errors nil}"
-  [key value extras]
-  (merge {:success? true key value} extras))
-
-(defn ^{:stratum 0} failure
-  "Create a failure result.
-   (failure :data \"error msg\") => {:success? false :error \"error msg\"}"
-  [_key message]
-  {:success? false :error message})
-
-(defn ^{:stratum 0} failure-with-errors
-  "Create a failure result with error list.
-   (failure-with-errors :pack [...]) => {:success? false :errors [...]}"
-  [_key errors]
-  {:success? false :errors errors})
-
-;------------------------------------------------------------------------------ Layer 1
-
-(def ^{:stratum 1} RuleEnforcement
-  "Schema for enforcement action enum."
-  (into [:enum] enforcement-actions))
-
-(def ^{:stratum 1} DetectionType
-  "Schema for detection type enum."
-  (into [:enum] detection-types))
-
-(def ^{:stratum 1} TaskType
-  "Schema for task type enum."
-  (into [:enum] task-types))
-
-(def ^{:stratum 1} RepoType
-  "Schema for repository type enum."
-  (into [:enum] repo-types))
-
-(def ^{:stratum 1} ApproverType
-  "Schema for approver type enum."
-  (into [:enum] approver-types))
-
-(def ^{:stratum 1} RuleRemediation
-  "Remediation config for a rule — how to fix violations mechanically."
-  [:map
-   [:strategy RemediationStrategy]
-   [:type {:optional true} RemediationType]
-   [:replacement {:optional true} string?]
-   [:template {:optional true} string?]
-   [:auto-fixable-default {:optional true} boolean?]
-   [:exclude-contexts {:optional true} [:vector ExcludeContext]]])
-
-(def ^{:stratum 1} PackOverride
-  "Schema for an overlay pack rule override.
-   Only :rule/severity and :rule/enabled? are overridable per N4 spec."
-  [:map
-   [:rule/id keyword?]
-   [:rule/severity {:optional true} RuleSeverity]
-   [:rule/enabled? {:optional true} boolean?]])
-
-;------------------------------------------------------------------------------ Layer 2
-
-;; Rule component schemas
-(def ^{:stratum 2} RuleApplicability
-  "Schema for when a rule applies.
-
-   All fields are optional - if omitted, rule applies to all matching contexts."
-  [:map
-   [:task-types {:optional true} [:set TaskType]]
-   [:file-globs {:optional true} [:vector string?]]
-   [:resource-patterns {:optional true} [:vector [:or string? [:fn {:error/message "should be a regex pattern"} #(instance? java.util.regex.Pattern %)]]]]
-   [:repo-types {:optional true} [:set RepoType]]
-   [:phases {:optional true} [:set keyword?]]])
-
-(def ^{:stratum 2} RuleDetection
-  "Schema for how to detect violations.
-
-   Required:
-   - :type - Detection mechanism
-
-   Optional:
-   - :pattern - Single regex pattern
-   - :patterns - Multiple regex patterns
-   - :context-lines - Lines of context to include
-   - :custom-fn - Symbol for custom detection function
-   - :capability - Keyword naming a registered mechanical-check capability
-     (used with :type :capability; resolved via the capability registry)
-   - :mode - :positive (default; a match is a violation) or :negative
-     (the ABSENCE of a match is a violation, e.g. a required header)
-   - :multiline? - when true, match patterns against the whole content instead
-     of line-by-line (for patterns that span lines)
-   - :detector-config - a data map of policy parameters for a :custom detector
-     (e.g. an approved-values list), so the policy stays data instead of being
-     baked into a regex. The detector reads it via :policy-pack/rule in context.
-   - :email-pattern - secondary regex (e.g. a copyright-header email check)"
-  [:map
-   [:type DetectionType]
-   [:pattern {:optional true} [:or string? [:fn {:error/message "should be a regex pattern"} #(instance? java.util.regex.Pattern %)]]]
-   [:patterns {:optional true} [:vector [:or string? [:fn {:error/message "should be a regex pattern"} #(instance? java.util.regex.Pattern %)]]]]
-   [:context-lines {:optional true} pos-int?]
-   [:custom-fn {:optional true} symbol?]
-   [:capability {:optional true} keyword?]
-   [:mode {:optional true} DetectionMode]
-   [:multiline? {:optional true} boolean?]
-   [:detector-config {:optional true} [:map-of keyword? any?]]
-   [:email-pattern {:optional true} string?]])
-
-(def ^{:stratum 2} RuleEnforcementConfig
-  "Schema for what happens when a rule is violated.
-
-   Required:
-   - :action - The enforcement action to take
-   - :message - Human-readable violation message
-
-   Optional:
-   - :remediation - Suggested fix
-   - :approvers - Required approvers for :require-approval action"
-  [:map
-   [:action RuleEnforcement]
-   [:message string?]
-   [:remediation {:optional true} string?]
-   [:approvers {:optional true} [:vector ApproverType]]])
-
-;------------------------------------------------------------------------------ Layer 3
-
 ;; Rule and Pack schemas
-(def ^{:stratum 3} Rule
+(def ^{:stratum 0} Rule
   "Schema for an individual policy rule.
 
    Rules define:
@@ -301,14 +58,14 @@
    [:rule/id keyword?]
    [:rule/title string?]
    [:rule/description string?]
-   [:rule/severity RuleSeverity]
+   [:rule/severity schema-types/RuleSeverity]
    [:rule/category string?]
 
    ;; When does this rule apply?
-   [:rule/applies-to RuleApplicability]
+   [:rule/applies-to schema-types/RuleApplicability]
 
    ;; How to detect violations
-   [:rule/detection RuleDetection]
+   [:rule/detection schema-types/RuleDetection]
 
    ;; Agent guidance (critical for correct interpretation)
    [:rule/agent-behavior {:optional true} string?]
@@ -325,13 +82,13 @@
    [:rule/always-inject? {:optional true} boolean?]
 
    ;; What happens when violated
-   [:rule/enforcement RuleEnforcementConfig]
+   [:rule/enforcement schema-types/RuleEnforcementConfig]
 
    ;; Remediation config (pack-driven compliance scanning)
-   [:rule/remediation {:optional true} RuleRemediation]
+   [:rule/remediation {:optional true} schema-types/RuleRemediation]
 
    ;; Examples (for documentation and testing)
-   [:rule/examples {:optional true} [:vector RuleExample]]
+   [:rule/examples {:optional true} [:vector schema-types/RuleExample]]
 
    ;; Prompt template for LLM-based semantic repair (pack-bundled).
    [:rule/repair-prompt-template {:optional true} string?]
@@ -344,9 +101,9 @@
    [:rule/author {:optional true} string?]
    [:rule/references {:optional true} [:vector string?]]])
 
-;------------------------------------------------------------------------------ Layer 4
+;------------------------------------------------------------------------------ Layer 1
 
-(def ^{:stratum 4} PackManifest
+(def ^{:stratum 1} PackManifest
   "Schema for a policy pack manifest.
 
    Packs are versioned collections of rules that can be:
@@ -371,17 +128,21 @@
    [:pack/homepage {:optional true} string?]
    [:pack/repository {:optional true} string?]
 
-   ;; Signing (paid feature)
+   ;; Signing (N4 §8.1). :pack/signature is base64 Ed25519 over the pack's
+   ;; canonical serialization (§8.1.1). :pack/signed-by is a key IDENTIFIER
+   ;; — a key id or fingerprint the verifier resolves through its configured
+   ;; trust roots (§8.2.1) — never the public key itself, which would let a
+   ;; pack nominate the key that verifies it.
    [:pack/signature {:optional true} string?]
    [:pack/signed-by {:optional true} string?]
    [:pack/signed-at {:optional true} inst?]
 
    ;; Trust and authority (N1 §2.10.2)
-   [:pack/trust-level {:optional true} TrustLevel]
-   [:pack/authority {:optional true} AuthorityChannel]
+   [:pack/trust-level {:optional true} schema-types/TrustLevel]
+   [:pack/authority {:optional true} schema-types/AuthorityChannel]
 
    ;; Taxonomy reference (N4 §2.1)
-   [:pack/taxonomy-ref {:optional true} TaxonomyRef]
+   [:pack/taxonomy-ref {:optional true} schema-types/TaxonomyRef]
 
    ;; Pack-bundled prompt templates (N4 §6).
    ;; Keys: :behavior-section, :knowledge-section, :repair-prompt
@@ -392,13 +153,13 @@
    [:pack/config-overrides {:optional true} [:map-of :keyword :map]]
 
    ;; Dependencies
-   [:pack/extends {:optional true} [:vector PackDependency]]
+   [:pack/extends {:optional true} [:vector schema-types/PackDependency]]
 
    ;; Rule overrides (overlay packs — N4 §2.5)
-   [:pack/overrides {:optional true} [:vector PackOverride]]
+   [:pack/overrides {:optional true} [:vector schema-types/PackOverride]]
 
    ;; Organization
-   [:pack/categories [:vector PackCategory]]
+   [:pack/categories [:vector schema-types/PackCategory]]
 
    ;; The actual rules
    [:pack/rules [:vector Rule]]
@@ -408,23 +169,23 @@
    [:pack/updated-at inst?]
    [:pack/changelog {:optional true} string?]])
 
-(defn ^{:stratum 4} valid-rule?
+(defn ^{:stratum 1} valid-rule?
   [value]
-  (valid? Rule value))
+  (schema-validation/valid? Rule value))
 
-(defn ^{:stratum 4} validate-rule
+(defn ^{:stratum 1} validate-rule
   [value]
-  (validate Rule value))
+  (schema-validation/validate Rule value))
 
-;------------------------------------------------------------------------------ Layer 5
+;------------------------------------------------------------------------------ Layer 2
 
-(defn ^{:stratum 5} valid-pack?
+(defn ^{:stratum 2} valid-pack?
   [value]
-  (valid? PackManifest value))
+  (schema-validation/valid? PackManifest value))
 
-(defn ^{:stratum 5} validate-pack
+(defn ^{:stratum 2} validate-pack
   [value]
-  (validate PackManifest value))
+  (schema-validation/validate PackManifest value))
 
 ;------------------------------------------------------------------------------ Rich Comment
 (comment
@@ -471,6 +232,6 @@
     :pack/updated-at (java.time.Instant/now)})
 
   ;; Get validation errors
-  (explain Rule {:rule/id "not-a-keyword"})
+  (schema-validation/explain Rule {:rule/id "not-a-keyword"})
 
   :leave-this-here)

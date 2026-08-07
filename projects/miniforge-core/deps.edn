@@ -6,10 +6,15 @@
         ai.miniforge/workflow {:local/root "../../components/workflow"}
         ai.miniforge/workflow-resume {:local/root "../../components/workflow-resume"}
         ai.miniforge/schema {:local/root "../../components/schema"}
+        ai.miniforge/policy-clause {:local/root "../../components/policy-clause"}
+        ai.miniforge/decision-envelope {:local/root "../../components/decision-envelope"}
+        ai.miniforge/execution-grant {:local/root "../../components/execution-grant"}
+        ai.miniforge/effect-transaction {:local/root "../../components/effect-transaction"}
         ai.miniforge/config {:local/root "../../components/config"}
         ai.miniforge/algorithms {:local/root "../../components/algorithms"}
         ai.miniforge/anomaly {:local/root "../../components/anomaly"}
         ai.miniforge/clock {:local/root "../../components/clock"}
+        ai.miniforge/codex {:local/root "../../components/codex"}
         ai.miniforge/coerce {:local/root "../../components/coerce"}
         ai.miniforge/content-hash {:local/root "../../components/content-hash"}
         ai.miniforge/logging {:local/root "../../components/logging"}
@@ -42,7 +47,7 @@
         ai.miniforge/supervisory-state {:local/root "../../components/supervisory-state"}
         ai.miniforge/automation-edge-correlator {:local/root "../../components/automation-edge-correlator"}
         ai.miniforge/self-healing {:local/root "../../components/self-healing"}
-ai.miniforge/messages {:local/root "../../components/messages"}
+        ai.miniforge/messages {:local/root "../../components/messages"}
         ai.miniforge/patterns {:local/root "../../components/patterns"}
         ai.miniforge/compliance-scanner {:local/root "../../components/compliance-scanner"}
         ai.miniforge/workflow-compliance-scanner {:local/root "../../components/workflow-compliance-scanner"}

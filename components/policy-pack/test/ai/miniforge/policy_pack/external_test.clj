@@ -19,7 +19,7 @@
   (:require
    [clojure.test :refer [deftest testing is]]
    [ai.miniforge.policy-pack.external :as external]
-   [ai.miniforge.policy-pack.core :as core]))
+   [ai.miniforge.policy-pack.builders :as builders]))
 
 ;------------------------------------------------------------------------------ Layer 0
 
@@ -52,11 +52,11 @@
 ;; ============================================================================
 (deftest ^{:stratum 0} evaluate-external-pr-read-only-test
   (testing "evaluation runs in read-only mode"
-    (let [pack (core/create-pack "test" "Test" "desc" "author"
-                                 :rules [(core/create-rule :no-todo "No TODOs" "desc"
+    (let [pack (builders/create-pack "test" "Test" "desc" "author"
+                                 :rules [(builders/create-rule :no-todo "No TODOs" "desc"
                                                            :low "800"
-                                                           (core/content-scan-detection "TODO")
-                                                           (core/warn-enforcement "Found TODO"))])
+                                                           (builders/content-scan-detection "TODO")
+                                                           (builders/warn-enforcement "Found TODO"))])
           result (external/evaluate-external-pr
                   pack
                   {:diff "diff --git a/test.py b/test.py\n--- a/test.py\n+++ b/test.py\n@@ -1 +1,2 @@\n+# TODO: fix this\n"})]
@@ -70,11 +70,11 @@
 ;; ============================================================================
 (deftest ^{:stratum 0} evaluation-summary-test
   (testing "summary groups by severity"
-    (let [pack (core/create-pack "test" "Test" "desc" "author"
-                                 :rules [(core/create-rule :no-todo "No TODOs" "desc"
+    (let [pack (builders/create-pack "test" "Test" "desc" "author"
+                                 :rules [(builders/create-rule :no-todo "No TODOs" "desc"
                                                            :low "800"
-                                                           (core/content-scan-detection "TODO")
-                                                           (core/warn-enforcement "Found TODO"))])
+                                                           (builders/content-scan-detection "TODO")
+                                                           (builders/warn-enforcement "Found TODO"))])
           result (external/evaluate-external-pr
                   pack
                   {:diff "diff --git a/test.py b/test.py\n--- a/test.py\n+++ b/test.py\n@@ -1 +1,2 @@\n+# TODO: fix\n"})]
@@ -90,7 +90,7 @@
 ;; ============================================================================
 (deftest ^{:stratum 0} report-structure-test
   (testing "report has all required keys"
-    (let [pack (core/create-pack "test" "Test" "desc" "author")
+    (let [pack (builders/create-pack "test" "Test" "desc" "author")
           result (external/evaluate-external-pr pack {:diff ""})]
       (is (boolean? (:evaluation/passed? result)))
       (is (vector? (:evaluation/violations result)))
@@ -99,7 +99,7 @@
       (is (vector? (:evaluation/packs-applied result)))))
 
   (testing "no diff yields no violations"
-    (let [pack (core/create-pack "test" "Test" "desc" "author")
+    (let [pack (builders/create-pack "test" "Test" "desc" "author")
           result (external/evaluate-external-pr pack {:diff ""})]
       (is (true? (:evaluation/passed? result)))
       (is (empty? (:evaluation/violations result)))

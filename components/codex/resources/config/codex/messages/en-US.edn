@@ -1,0 +1,32 @@
+{:codex/messages
+ {;; consider() response rendering (SPEC §7.5, §7.6)
+  :render/situation-line       "situation: {id} — {title}"
+  :render/landings-header      "landings (strategic first — read top-down):"
+  :render/landing-line         "- [{horizon}] {id} — {title}  (confidence: {confidence})"
+  :render/resolution-tag       "resolution"
+  :render/unknown-horizon      "?"
+  :render/escalation-line      "    ESCALATION: {scars} — the cost landed above this problem's horizon"
+  :render/scar-line            "    scar: {id} ({date}, cost: {cost}{cost-horizon})"
+  :render/scar-cost-horizon    ", cost-horizon: {value}"
+  :render/unanchored-line      "    unanchored — reasoned, not survived"
+  :render/open-line            "    open: {text}"
+  :render/coverage-line        "coverage: {landing-count} landings, {unanchored-count} unanchored, newest scar {newest-scar-date}, horizon mix {horizon-mix}"
+  :render/no-newest-scar       "none"
+  :render/no-strategic-coverage "NO STRATEGIC COVERAGE: every landing is tactical/operational. The codex has nothing strategic-horizon for this situation — that absence is a gap in the codex, not evidence the situation carries no strategic risk."
+
+  ;; anomaly rendering — an unmatched situation is an answer, not an empty list
+  :render/anomaly-line         "codex anomaly: {anomaly}"
+  :render/available-header     "available situations:"
+  :render/ambiguous-header     "ambiguous between:"
+  :render/situation-item       "- {id} — {title}"
+
+  ;; anomaly reasons
+  :anomaly/no-nodes-dir        "no nodes/ directory under {dir}"
+  :anomaly/read-failed         "failed reading a node under {dir}: {error}"
+  :anomaly/access-denied       "access denied under {dir}: {error}"
+  :anomaly/unmatched           "no situation matches '{text}'"
+  :anomaly/ambiguous           "'{text}' matches {count} situations"
+  :anomaly/unconfigured        "no codex_path argument and MINIFORGE_CODEX_PATH is unset — cannot consult a codex that has no location"
+
+  ;; blackboard pin (SPEC §7.4)
+  :pin/header                  "<!-- Pinned at phase start (Codex SPEC T1 §7.4): the Thesium Codex consultation for this phase's situation. Per-run artifact — read it before acting. -->"}}

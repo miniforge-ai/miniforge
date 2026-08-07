@@ -26,6 +26,8 @@
    [ai.miniforge.phase.interface :as phase]
    [ai.miniforge.phase-software-factory.messages :as messages]
    [ai.miniforge.phase-software-factory.phase-config :as phase-config]
+   [ai.miniforge.phase-software-factory.codex-pin :as codex-pin]
+   [ai.miniforge.phase-software-factory.gap-wiring :as gap-wiring]
    [ai.miniforge.phase-software-factory.knowledge-helpers :as kb-helpers]
    [ai.miniforge.agent.interface :as agent]
    [ai.miniforge.agent.interface.protocols.messaging :as messaging]
@@ -280,6 +282,18 @@
                :code/file-actions (mapv :action files)
                :code/file-count (count files))))))
 
+(defn ^{:stratum 0} preserve-consultation
+  "Carry :codex/consultation from the full phase result onto the
+   lightweight success result. The gap instrument (T2 s3.2) and the gap
+   report read consultation provenance from the durable phase record;
+   replacing the result wholesale at leave destroyed it, leaving
+   successful DAG-task implements with no evidence delivery happened.
+   Public for tests."
+  [lightweight result]
+  (if-let [consultation (get-in result [:output :codex/consultation])]
+    (assoc-in lightweight [:output :codex/consultation] consultation)
+    lightweight))
+
 (defn- ^{:stratum 0} ensure-valid-metrics
   "Phase-input boundary validation for the agent result's `:metrics`. The
    response builders guarantee non-nil numeric `:tokens`/`:duration-ms`, but a
@@ -462,6 +476,17 @@
         pack-ctx (or (get-in ctx [:execution/pack-context])
                      (build-context-pack worktree-path files-in-scope))
         existing-files (resolve-existing-files ctx pack-ctx worktree-path files-in-scope)
+        ;; Thesium Codex blackboard pin (SPEC §7.4): pinned FIRST so the
+        ;; worries render before the content they apply to. Retry iterations
+        ;; reuse :execution/cached-files which already contains the previous
+        ;; pin — drop it so the fresh consultation replaces it instead of
+        ;; rendering twice.
+        codex-outcome (codex-pin/pin-outcome :implement (get-in ctx [:execution/logger]))
+        existing-files (vec (remove #(= codex-pin/pin-path (:path %))
+                                    (or existing-files [])))
+        existing-files (if-let [pin (:entry codex-outcome)]
+                         (into [pin] existing-files)
+                         existing-files)
         behavior-addendum (phase/load-guidance-addendum
                             :implement {:task {:task/intent (:intent input)}})
         review-feedback (resolve-review-feedback ctx)
@@ -494,13 +519,17 @@
                        :prior-error    (or last-error (messages/t :implement/prior-error-default))
                        :instruction    (messages/t :implement/retry-instruction)}))]
     {:task task
-     :rules-manifest manifest}))
+     :rules-manifest manifest
+     :codex-outcome codex-outcome}))
 
 (defn ^{:stratum 3} leave-implement
   "Post-processing for implementation phase.
 
    Records metrics, captures code artifacts."
   [ctx]
+  ;; Gap-instrument miss recording (T2 s3): best-effort, opt-in, and it
+  ;; must never change the outcome it measures.
+  (gap-wiring/record-phase-misses! ctx :implement)
   (let [start-time (get-in ctx [:phase :started-at])
         end-time (System/currentTimeMillis)
         duration-ms (if start-time (- end-time start-time) 0)
@@ -669,7 +698,8 @@
 
             ;; On success: store lightweight result — code is in the environment, not here
             (= :completed phase-status)
-            (-> (assoc-in [:phase :result] (phase/success env-id summary))
+            (-> (assoc-in [:phase :result]
+                          (preserve-consultation (phase/success env-id summary) result))
                 (assoc-in [:phase :artifact]
                           (cond-> (lightweight-curated-artifact curated-artifact)
                             degraded-handoff?
@@ -714,7 +744,7 @@
         logger (or (get-in ctx [:execution/logger])
                    (log/create-logger {:min-level :info :output :human}))
         implementer-agent (agent/create-implementer {:logger logger})
-        {:keys [task rules-manifest]} (build-implement-task ctx)
+        {:keys [task rules-manifest codex-outcome]} (build-implement-task ctx)
         ;; Cache loaded files and context pack for subsequent retries
         ctx (cond-> ctx
               (not (get-in ctx [:execution/cached-files]))
@@ -885,7 +915,17 @@
                  ;; something non-success (shouldn't happen outside no-files;
                  ;; defensive fallback).
                  :else
-                 curator-result)]
+                 curator-result)
+        ;; SPEC §7.4.3: mark the result with consultation provenance BEFORE
+        ;; enter-context stores it — gates run between enter and leave and
+        ;; read [:result :output]. Reads come from the agent result's
+        ;; :context-reads (host-mode sessions); curator-result branches drop
+        ;; that key, so read it off impl-result directly.
+        result (if (map? (:output result))
+                 (assoc-in result [:output :codex/consultation]
+                           (codex-pin/consultation-summary
+                             codex-outcome (:context-reads impl-result)))
+                 result)]
     (-> (phase/enter-context ctx :implement :implementer gates budget start-time result)
         (assoc-in [:phase :rules-manifest] rules-manifest)
         (assoc-in [:phase :watchdog-state]

@@ -15,18 +15,17 @@
 ;; WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 ;; See the License for the specific language governing permissions and
 ;; limitations under the License.
-
 (ns ai.miniforge.evidence-bundle.protocols.impl.semantic-validator
   "Implementation functions for SemanticValidator protocol.
    Validates that implementation matches declared intent."
   (:require
-   [ai.miniforge.evidence-bundle.schema :as schema]
+   [ai.miniforge.evidence-bundle.schema.domain :as domain]
    [clojure.string :as str]))
 
 ;------------------------------------------------------------------------------ Layer 0
-;; Terraform Plan Analysis
 
-(defn parse-terraform-change-line
+;; Terraform Plan Analysis
+(defn ^{:stratum 0} parse-terraform-change-line
   "Parse a single Terraform plan line for resource changes.
    Returns {:type :create|:update|:destroy|:recreate|:import}"
   [line]
@@ -49,7 +48,33 @@
     :else
     nil))
 
-(defn analyze-terraform-plan-impl
+;; Kubernetes Manifest Analysis
+(defn ^{:stratum 0} analyze-kubernetes-manifest-impl
+  "Analyze Kubernetes manifest for resource changes.
+   Returns {:creates N :updates N :destroys N}"
+  [manifest-artifact]
+  ;; Simplified implementation - count resources in manifest
+  (let [content (or (:artifact/content manifest-artifact) "")
+        ;; Count 'kind:' declarations as resources
+        resources (count (re-seq #"(?m)^kind:" content))]
+    {:creates resources
+     :updates 0
+     :destroys 0}))
+
+;; Semantic Validation Rules
+(defn ^{:stratum 0} check-rule
+  "Check if actual count matches rule.
+   Rule can be: 0 (must be zero), :pos (must be positive), :any (any value)"
+  [rule-value actual-count]
+  (case rule-value
+    0 (= 0 actual-count)
+    :pos (> actual-count 0)
+    :any true
+    (= rule-value actual-count)))
+
+;------------------------------------------------------------------------------ Layer 1
+
+(defn ^{:stratum 1} analyze-terraform-plan-impl
   "Analyze Terraform plan artifact for resource changes.
    Returns {:creates N :updates N :destroys N}"
   [plan-artifact]
@@ -68,40 +93,14 @@
      :updates updates
      :destroys (+ destroys recreate-destroys)}))
 
-;------------------------------------------------------------------------------ Layer 1
-;; Kubernetes Manifest Analysis
-
-(defn analyze-kubernetes-manifest-impl
-  "Analyze Kubernetes manifest for resource changes.
-   Returns {:creates N :updates N :destroys N}"
-  [manifest-artifact]
-  ;; Simplified implementation - count resources in manifest
-  (let [content (or (:artifact/content manifest-artifact) "")
-        ;; Count 'kind:' declarations as resources
-        resources (count (re-seq #"(?m)^kind:" content))]
-    {:creates resources
-     :updates 0
-     :destroys 0}))
-
 ;------------------------------------------------------------------------------ Layer 2
-;; Semantic Validation Rules
 
-(defn check-rule
-  "Check if actual count matches rule.
-   Rule can be: 0 (must be zero), :pos (must be positive), :any (any value)"
-  [rule-value actual-count]
-  (case rule-value
-    0 (= 0 actual-count)
-    :pos (> actual-count 0)
-    :any true
-    (= rule-value actual-count)))
-
-(defn validate-intent-impl
+(defn ^{:stratum 2} validate-intent-impl
   "Validate implementation matches declared intent.
    Returns {:passed? bool :violations [...]}"
   [intent implementation-artifacts]
   (let [intent-type (:intent/type intent)
-        rules (get schema/semantic-validation-rules intent-type)
+        rules (get domain/semantic-validation-rules intent-type)
         violations (atom [])
 
         ;; Analyze all artifacts to count changes

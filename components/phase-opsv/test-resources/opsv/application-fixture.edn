@@ -1,0 +1,76 @@
+{:experiment-pack
+ {:experiment-pack/id "catalog-staging"
+  :experiment-pack/version "1.0.0"
+  :experiment-pack/targets
+  {:services ["catalog"] :environments ["staging"]}
+  :experiment-pack/workload
+  {:profile :step-load :mix [] :warmup-seconds 30 :cooldown-seconds 30}
+  :experiment-pack/success-criteria
+  {:criteria [{:criterion/id "cpu-utilization" :criterion/expected 0.7}
+              {:criterion/id "backlog-per-replica"
+               :criterion/expected 100.0}]}
+  :experiment-pack/guardrails
+  {:blast-radius
+   {:replica-delta 2 :node-delta 1 :namespaces ["catalog"]}
+   :abort-thresholds
+   {:error-budget-burn 2.0 :saturation 0.9 :tail-latency 500.0}}
+  :experiment-pack/convergence
+  {:parameters {:load-step 50}
+   :iteration-limit 3
+   :confidence-threshold 0.9
+   :minimum-measurement-window-seconds 60
+   :required-repetitions 2}
+  :experiment-pack/actuation-intent :pr-only
+  :experiment-pack/required-instrumentation [:cpu :backlog]}
+
+ :gate-results
+ [{:gate/id :instrumentation :gate/passed? true :gate/type :opsv}
+  {:gate/id :environment :gate/passed? true :gate/type :opsv}
+  {:gate/id :blast-radius :gate/passed? true :gate/type :opsv}
+  {:gate/id :abort :gate/passed? true :gate/type :opsv}
+  {:gate/id :actuation :gate/passed? true :gate/type :opsv}
+  {:gate/id :evidence-completeness :gate/passed? true :gate/type :opsv}]
+
+ :opsv/candidate-drivers [{:driver :cpu} {:driver :backlog}]
+
+ :opsv/ramp-result
+ {:environment-fingerprint
+  {:cluster "staging-1"
+   :node-pools ["general"]
+   :image-digests {"catalog" "sha256:abc"}
+   :config-hash "config-1"}
+  :steps
+  [{:step/id "1"
+   :step/intended-load {:requests-per-second 50}
+   :step/observed-load {:requests-per-second 50}
+   :step/observations
+   {"cpu-utilization" 0.8 "backlog-per-replica" 120.0}
+   :step/metrics
+   {:slo-passed? false
+    :headroom? false
+    :guardrail-abort? false
+    :confidence 0.7
+    :measurement-window-seconds 60
+    :repetitions 2
+    :hpa-target-utilization 65
+    :min-replicas 2
+    :max-replicas 8
+    :keda-backlog-target 100
+    :cpu-request-millicores 250}}
+  {:step/id "2"
+   :step/intended-load {:requests-per-second 100}
+   :step/observed-load {:requests-per-second 100}
+   :step/observations
+   {"cpu-utilization" 0.65 "backlog-per-replica" 80.0}
+   :step/metrics
+   {:slo-passed? true
+    :headroom? true
+    :guardrail-abort? false
+    :confidence 0.8
+    :measurement-window-seconds 60
+    :repetitions 2
+    :hpa-target-utilization 65
+    :min-replicas 2
+    :max-replicas 8
+    :keda-backlog-target 100
+    :cpu-request-millicores 250}}]}}

@@ -20,29 +20,16 @@
 
    Classification is pack-driven: uses :auto-fixable-default and
    :exclude-contexts metadata enriched onto violations during scan.
+   Exclusion-context matching lives in `classify-exclusion` (rule 210: a
+   fourth real layer here is the signal to split it).
 
-   Layer 0: Context exclusion matching
-   Layer 1: Top-level classify-violations entry point"
-  (:require [ai.miniforge.compliance-scanner.messages :as msg]
-            [clojure.string :as str]))
+   Layer 0: Semantic-strategy predicate
+   Layer 1: Single-violation classification
+   Layer 2: Top-level classify-violations entry point"
+  (:require [ai.miniforge.compliance-scanner.classify-exclusion :as exclusion]
+            [ai.miniforge.compliance-scanner.messages :as msg]))
 
 ;------------------------------------------------------------------------------ Layer 0
-
-;; Context exclusion matching
-(defn- ^{:stratum 0} has-path-exclusion?
-  "Return true if the violation's file path matches a :path-contains exclusion."
-  [violation ctx-rule]
-  (when-let [p (get ctx-rule :path-contains)]
-    (str/includes? (get violation :file "") p)))
-
-(defn- ^{:stratum 0} has-content-exclusion?
-  "Return true if the violation's :current text matches a :current-contains exclusion."
-  [violation ctx-rule]
-  (when-let [cs (get ctx-rule :current-contains)]
-    (let [current (get violation :current "")]
-      (if (vector? cs)
-        (boolean (some #(str/includes? current %) cs))
-        (str/includes? current cs)))))
 
 (defn- ^{:stratum 0} semantic-strategy?
   "Return true if the violation has a :semantic remediation strategy."
@@ -52,23 +39,14 @@
 
 ;------------------------------------------------------------------------------ Layer 1
 
-(defn- ^{:stratum 1} matches-exclude-context?
-  "Return true if a violation matches an exclusion context rule.
-   Exclusion contexts are declared in MDC remediation config."
-  [violation ctx-rule]
-  (or (has-path-exclusion? violation ctx-rule)
-      (has-content-exclusion? violation ctx-rule)))
-
-;------------------------------------------------------------------------------ Layer 2
-
-(defn- ^{:stratum 2} classify-one
+(defn- ^{:stratum 1} classify-one
   "Classify a single violation using pack-enriched metadata.
    Uses :auto-fixable-default and :exclude-contexts from the pack rule.
    Violations with :semantic remediation strategy are always not auto-fixable."
   [violation]
   (let [auto-default (get violation :auto-fixable-default true)
         excludes     (get violation :exclude-contexts [])
-        excluded?    (boolean (some #(matches-exclude-context? violation %) excludes))
+        excluded?    (boolean (some #(exclusion/matches-exclude-context? violation %) excludes))
         semantic?    (semantic-strategy? violation)]
     (assoc violation
            :auto-fixable? (and auto-default (not excluded?) (not semantic?))
@@ -79,10 +57,10 @@
                             :else        (str (get violation :rule/title "Manual review")
                                               " — manual review required")))))
 
-;------------------------------------------------------------------------------ Layer 3
+;------------------------------------------------------------------------------ Layer 2
 
 ;; Top-level entry point
-(defn ^{:stratum 3} classify-violations
+(defn ^{:stratum 2} classify-violations
   "Add :auto-fixable? and :rationale to each violation.
    Returns updated violation list."
   [violations]

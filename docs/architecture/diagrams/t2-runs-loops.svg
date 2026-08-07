@@ -88,7 +88,7 @@
   <text class="m" x="1208" y="142">per-rule :rule/enforcement — hard-halt · require-approval · warn · audit</text>
   <text class="s" x="1208" y="162">COMPILED packs (policy-pack/compiler) drive gates wired fail-closed at every</text>
   <text class="s" x="1208" y="176">transition (as-built); evidence bundles carry provenance + semantic intent</text>
-  <text class="s" x="1208" y="196" font-style="italic">known gap: today's deployment gate fails OPEN on vocabulary mismatch — T3 #4</text>
+  <text class="s" x="1208" y="196" font-style="italic">fail-open RESOLVED (Ariadne step 1, #1555–#1558): unknown vocabulary now denies — T3 #4</text>
   <rect class="gv" x="1196" y="236" width="688" height="90" rx="8"/>
   <text class="h" x="1208" y="258">trust model</text>
   <text class="m" x="1208" y="278">:authority/data vs :authority/instruction · levels: tainted · untrusted · trusted</text>

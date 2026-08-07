@@ -15,7 +15,6 @@
 ;; WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 ;; See the License for the specific language governing permissions and
 ;; limitations under the License.
-
 (ns ai.miniforge.agent.implementer
   "Implementer agent implementation.
    Generates code from plans and task descriptions."
@@ -42,15 +41,263 @@
    [malli.core :as m]))
 
 ;------------------------------------------------------------------------------ Layer 0
-;; Implementer-specific schemas
 
-(def CodeFile
+;; Implementer-specific schemas
+(def ^{:stratum 0} CodeFile
   [:map
    [:path [:string {:min 1}]]
    [:content [:string {:min 0}]]
    [:action [:enum :create :modify :delete]]])
 
-(def CodeArtifact
+(def ^{:stratum 0} implementer-system-prompt
+  "System prompt for the implementer agent.
+   Loaded from EDN resource for configurability."
+  (delay (prompts/load-prompt :implementer)))
+
+(def ^{:stratum 0} ^:private implementer-prompt-data
+  "Full prompt data map for the implementer agent."
+  (delay (prompts/load-prompt-data :implementer)))
+
+;; Extension → language mapping (loaded from config)
+(def ^{:stratum 0} ^:private impl-config-path "config/repo-index/implementer.edn")
+
+(def ^{:stratum 0} ^:private current-head-ref
+  "Git ref for the currently acquired promoted workspace."
+  "HEAD")
+
+;; Validation
+(defn- ^{:stratum 0} find-blank-creates
+  "Find :create files with blank content."
+  [files]
+  (filter (fn [f] (and (= :create (:action f)) (str/blank? (:content f)))) files))
+
+(defn- ^{:stratum 0} find-duplicate-paths
+  "Find file paths that appear more than once."
+  [files]
+  (->> (map :path files)
+       frequencies
+       (filter #(> (val %) 1))))
+
+;; Language detection
+(defn- ^{:stratum 0} extract-extension
+  "Extract file extension from a path."
+  [path]
+  (last (re-find #"\.(\w+)$" path)))
+
+;; Prompt formatting
+(defn ^{:stratum 0} format-repo-map
+  "Format a repo map for inclusion in the user prompt."
+  [repo-map-text]
+  (when (and repo-map-text (not (str/blank? repo-map-text)))
+    (str "\n\n## " (messages/t :prompt/repo-map-section-title) "\n\n"
+         (messages/t :prompt/repo-map-header)
+         "\n\n" repo-map-text)))
+
+(defn- ^{:stratum 0} format-file-block
+  "Format a single file as a markdown code block."
+  [{:keys [path content truncated?]}]
+  (str "\n### " path
+       (when truncated? " (truncated)")
+       "\n```\n" content "\n```"))
+
+;; Task → text conversion
+(defn- ^{:stratum 0} format-plan-section
+  "Format the plan as a markdown section."
+  [plan]
+  (str "\n\n## " (messages/t :prompt/plan-header) "\n\n"
+       (if (string? plan) plan (pr-str plan))))
+
+(defn- ^{:stratum 0} format-intent-section
+  "Format the intent as a markdown section."
+  [intent]
+  (str "\n\n## " (messages/t :prompt/intent-header) "\n\n"
+       (pr-str intent)))
+
+(defn- ^{:stratum 0} format-review-section
+  "Format review feedback as a markdown section."
+  [review-feedback]
+  (str "\n\n## " (messages/t :prompt/review-feedback-header) "\n\n"
+       (messages/t :prompt/review-feedback-intro) "\n\n"
+       (if (string? review-feedback) review-feedback (pr-str review-feedback))))
+
+(defn- ^{:stratum 0} phase-handoff-findings
+  [phase-handoff]
+  (get-in phase-handoff [:frame/body :repair/findings]))
+
+(defn- ^{:stratum 0} format-phase-handoff-detail
+  [label-key value]
+  (when value
+    (let [label (messages/t label-key)]
+      (messages/t :prompt/phase-handoff-detail-line
+                  {:label label
+                   :value value}))))
+
+(defn- ^{:stratum 0} finding-location
+  [{:finding/keys [file line]}]
+  (cond
+    (and file line)
+    (messages/t :prompt/phase-handoff-location-value {:file file :line line})
+    file
+    file))
+
+(defn- ^{:stratum 0} format-verify-section
+  "Format verify failures as a markdown section."
+  [verify-failures]
+  (str "\n\n## " (messages/t :prompt/test-failures-header) "\n\n"
+       (messages/t :prompt/test-failures-intro) "\n\n"
+       (if-let [test-results (:test-results verify-failures)]
+         (str (messages/t :prompt/test-results-label) "\n" (pr-str test-results))
+         (str (messages/t :prompt/verify-details-label) "\n" (pr-str verify-failures)))
+       (when-let [test-output (:test-output verify-failures)]
+         (str "\n\n" (messages/t :prompt/test-output-label) "\n" test-output))))
+
+(defn- ^{:stratum 0} format-prior-attempts-section
+  "Format prior attempt context as a prominent warning section."
+  [{:keys [attempt-number prior-error instruction]}]
+  (str "\n\n## ⚠️ RETRY — Attempt " attempt-number "\n\n"
+       "**Previous attempt failed:** " prior-error "\n\n"
+       "**" instruction "**\n"))
+
+;; Response parsing
+(defn- ^{:stratum 0} try-parse-edn-block
+  "Try to extract an EDN map from a fenced code block."
+  [text]
+  (when-let [match (re-find #"```(?:clojure|edn)?\s*\n([\s\S]*?)\n```" text)]
+    (let [parsed (edn/read-string (second match))]
+      (when (map? parsed) parsed))))
+
+(defn- ^{:stratum 0} try-parse-raw-edn
+  "Try to parse the entire text as EDN, returning a map or nil."
+  [text]
+  (try
+    (let [r (edn/read-string text)]
+      (when (map? r) r))
+    (catch Exception _ nil)))
+
+(defn- ^{:stratum 0} try-parse-inline-status
+  "Scan for an inline {:status :already-implemented ...} EDN map."
+  [text]
+  (when-let [match (re-find #"\{:status\s+:already-implemented[^}]*\}" text)]
+    (edn/read-string match)))
+
+(defn- ^{:stratum 0} extract-path-from-context
+  "Try to extract a file path from text immediately preceding a code block.
+   Looks for common patterns like '### path/to/file.clj' or '**path/to/file.clj**'
+   or 'File: path/to/file.clj' in the preceding lines."
+  [text block-start]
+  (let [preceding (subs text 0 block-start)
+        ;; Take last 3 lines before the code block
+        lines (take-last 3 (str/split-lines preceding))]
+    (some (fn [line]
+            (or
+             (second (re-find patterns/md-heading-file-path line))
+             (second (re-find patterns/md-delimited-file-path line))
+             (second (re-find patterns/md-label-file-path line))))
+          lines)))
+
+(defn- ^{:stratum 0} deduplicate-files
+  "Deduplicate file entries by path, keeping last occurrence."
+  [files]
+  (let [seen (atom #{})
+        deduped (reduce (fn [acc f]
+                          (if (contains? @seen (:path f))
+                            acc
+                            (do (swap! seen conj (:path f))
+                                (conj acc f))))
+                        []
+                        (reverse files))]
+    (vec (reverse deduped))))
+
+(defn- ^{:stratum 0} build-already-implemented-response
+  "Build the response map for an already-implemented task."
+  [parsed tokens cost-usd]
+  {:status :already-implemented
+   :output {:code/id (random-uuid)
+            :code/files []
+            :code/summary (:summary parsed)
+            :code/language nil
+            :code/tests-needed? false
+            :code/created-at (java.util.Date.)}
+   :summary (:summary parsed)
+   :metrics {:tokens tokens
+             :cost-usd cost-usd
+             :files-created 0
+             :skipped-reason :already-implemented}})
+
+(defn- ^{:stratum 0} repair-attempt?
+  "Return true when the implementer is handling prior review or verify feedback."
+  [input]
+  (or (:task/review-feedback input)
+      (:task/verify-failures input)))
+
+(defn- ^{:stratum 0} unverified-already-implemented-response
+  "Reject an :already-implemented claim when there is no artifact evidence on a repair attempt."
+  [input tokens]
+  (response/error
+   (messages/t :error/unverified-already-implemented)
+   {:tokens tokens
+    :data {:code :implementer/unverified-already-implemented
+           :review-feedback? (boolean (:task/review-feedback input))
+           :verify-failures? (boolean (:task/verify-failures input))}}))
+
+(defn- ^{:stratum 0} count-files-by-action
+  "Count files matching a given action in an artifact."
+  [action files]
+  (count (filter #(= action (:action %)) files)))
+
+(defn- ^{:stratum 0} code-artifact?
+  "True when the structured artifact is a code artifact payload."
+  [artifact]
+  (and (map? artifact)
+       (contains? artifact :code/files)))
+
+(def ^{:stratum 0} ^:private session-checkpoint-filename ".miniforge/session-id")
+
+(def ^{:stratum 0} ^:private implementer-disallowed-tools
+  "Native read/search tools the implementer MUST NOT call — forces it onto the
+   MCP context cache (context_read/context_grep/context_glob), the same
+   mechanism the planner and tester use. The cache is read-through +
+   write-through (a miss reads from source-root, caches the content, records
+   the miss), so context_read serves any file, not just the pre-populated set,
+   and re-reads within the session hit.
+
+   Write/Edit/MultiEdit stay allowed (the implementer's whole job) and so does
+   Bash — the implementer may legitimately need a shell for build/git steps.
+   That leaves a `cat`/`rg`-via-Bash cache-bypass open; if dogfood shows the
+   implementer evading the cache through the shell, add \"Bash\" here (the
+   planner disallows it for exactly that reason)."
+  ["Read" "Grep" "Glob" "LS" "Agent"])
+
+(defn- ^{:stratum 0} normalized-artifact-source
+  "Return a keyword artifact source for telemetry, defaulting malformed values to :none."
+  [normalized]
+  (let [source (get normalized :artifact-source)]
+    (if (keyword? source) source :none)))
+
+(defn ^{:stratum 0} code-summary
+  [artifact]
+  {:id (:code/id artifact)
+   :file-count (count (:code/files artifact))
+   :actions (frequencies (map :action (:code/files artifact)))
+   :language (:code/language artifact)
+   :tests-needed? (:code/tests-needed? artifact)
+   :dependencies-added (count (:code/dependencies-added artifact []))})
+
+(defn ^{:stratum 0} files-by-action
+  [artifact]
+  (group-by :action (:code/files artifact)))
+
+(defn ^{:stratum 0} total-lines
+  [artifact]
+  (->> (:code/files artifact)
+       (remove #(= :delete (:action %)))
+       (map :content)
+       (map #(count (str/split-lines %)))
+       (reduce + 0)))
+
+;------------------------------------------------------------------------------ Layer 1
+
+(def ^{:stratum 1} CodeArtifact
   [:map
    [:code/id uuid?]
    [:code/files [:vector CodeFile]]
@@ -60,47 +307,202 @@
    [:code/summary {:optional true} [:string {:min 1}]]
    [:code/created-at {:optional true} inst?]])
 
-(def implementer-system-prompt
-  "System prompt for the implementer agent.
-   Loaded from EDN resource for configurability."
-  (delay (prompts/load-prompt :implementer)))
-
-(def ^:private implementer-prompt-data
-  "Full prompt data map for the implementer agent."
-  (delay (prompts/load-prompt-data :implementer)))
-
-;------------------------------------------------------------------------------ Layer 0
-;; Extension → language mapping (loaded from config)
-
-(def ^:private impl-config-path "config/repo-index/implementer.edn")
-
-(def ^:private current-head-ref
-  "Git ref for the currently acquired promoted workspace."
-  "HEAD")
-
-(defn- load-ext->language []
+(defn- ^{:stratum 1} load-ext->language []
   (if-let [res (io/resource impl-config-path)]
     (get-in (edn/read-string (slurp res)) [:repo-index/implementer :extension->language] {})
     {}))
 
-(def ^:private ext->language (delay (load-ext->language)))
-
-;------------------------------------------------------------------------------ Layer 1
-;; Validation
-
-(defn- find-blank-creates
-  "Find :create files with blank content."
+(defn ^{:stratum 1} format-existing-files
+  "Format existing file contents for inclusion in the user prompt."
   [files]
-  (filter (fn [f] (and (= :create (:action f)) (str/blank? (:content f)))) files))
+  (when (seq files)
+    (str "\n\n## " (messages/t :prompt/existing-files-section-title) "\n\n"
+         (messages/t :prompt/existing-files-header) "\n"
+         (->> files (map format-file-block) (str/join "\n")))))
 
-(defn- find-duplicate-paths
-  "Find file paths that appear more than once."
-  [files]
-  (->> (map :path files)
-       frequencies
-       (filter #(> (val %) 1))))
+(defn- ^{:stratum 1} format-phase-handoff-finding
+  [{:finding/keys [summary group-id severity suggestion] :as finding}]
+  (let [location (finding-location finding)
+        detail-lines (keep identity
+                           [(format-phase-handoff-detail
+                             :prompt/phase-handoff-group-label group-id)
+                            (format-phase-handoff-detail
+                             :prompt/phase-handoff-severity-label severity)
+                            (format-phase-handoff-detail
+                             :prompt/phase-handoff-location-label location)
+                            (format-phase-handoff-detail
+                             :prompt/phase-handoff-suggestion-label suggestion)])
+        summary-line (messages/t :prompt/phase-handoff-finding-line
+                                 {:summary summary})]
+    (str summary-line
+         (when (seq detail-lines)
+           (str "\n" (str/join "\n" detail-lines))))))
 
-(defn validate-code-artifact
+(defn ^{:stratum 1} parse-code-response
+  "Parse the LLM response to extract code artifact.
+   Handles EDN in code blocks, plain EDN, and inline EDN maps.
+   Returns nil if no parseable map is found."
+  [response-content]
+  (try
+    (when-let [parsed (or (try-parse-edn-block response-content)
+                          (try-parse-raw-edn response-content)
+                          (try-parse-inline-status response-content))]
+      (when (map? parsed) parsed))
+    (catch Exception _
+      nil)))
+
+(defn ^{:stratum 1} extract-code-blocks
+  "Extract code blocks from markdown response and convert to file list.
+   Tries to detect file paths from markdown headings before each block.
+
+   Pathless blocks are not repo artifacts. Treating them as generated
+   filenames lets narrative snippets pass implement, verify, and review
+   without producing a releasable diff."
+  [response-content]
+  (let [pattern patterns/md-code-block
+        matcher (re-matcher pattern response-content)]
+    (loop [results [] idx 0]
+      (if (.find matcher)
+        (let [content (.group matcher 2)
+              block-start (.start matcher)
+              path (extract-path-from-context response-content block-start)]
+          (if path
+            (recur (conj results {:path path
+                                  :content (str/trim content)
+                                  :action :create})
+                   (inc idx))
+            nil))
+        (when (seq results) results)))))
+
+;; Artifact repair
+(defn- ^{:stratum 1} repair-placeholder-content
+  "Build minimal non-empty placeholder content for an otherwise blank file."
+  [path]
+  (let [comment-prefix (case (some-> path extract-extension str/lower-case)
+                         "clj" ";;"
+                         "cljc" ";;"
+                         "cljs" ";;"
+                         "edn" ";;"
+                         "js" "//"
+                         "ts" "//"
+                         "java" "//"
+                         "go" "//"
+                         "rs" "//"
+                         "swift" "//"
+                         "py" "#"
+                         "rb" "#"
+                         "sh" "#"
+                         "yml" "#"
+                         "yaml" "#"
+                         "toml" "#"
+                         nil)]
+    (if comment-prefix
+      (str comment-prefix " TODO: replace generated placeholder for " path "\n")
+      (str "TODO: replace generated placeholder for " path "\n"))))
+
+(defn- ^{:stratum 1} build-effective-system-prompt
+  "Append behavior addendum to the base system prompt."
+  [input]
+  (str @implementer-system-prompt
+       (get input :task/behavior-addendum "")))
+
+(defn- ^{:stratum 1} metadata-only-submit?
+  "True when MCP submit produced metadata but no file payload."
+  [artifact-source structured-artifact]
+  (and (= :mcp artifact-source)
+       (map? structured-artifact)
+       (not (code-artifact? structured-artifact))))
+
+(defn- ^{:stratum 1} log-implementer-rejection
+  "Emit a structured :implementer/response-rejected event when the
+   implementer can't build a success response from the LLM turn.
+   Surfaces WHY each iteration failed so the next dogfood reads the
+   reject pattern (parse-failed, unverified-already-implemented,
+   etc.) inline instead of forcing a deep-dive through the trace.
+
+   Two reject paths today; both wrap response/error. The reject
+   reason is a keyword the caller picks before invoking — keeps
+   the event taxonomy stable as new reject paths get added.
+
+   `input` is read for :repair-attempt? — that's the strongest
+   signal for distinguishing 'agent stalled mid-narration' from
+   'agent retried after rejection and still didn't ship.'"
+  [logger reason input artifact-source content tools]
+  (when logger
+    (log/warn logger :implementer :implementer/response-rejected
+              {:data {:reject/reason reason
+                      :artifact-source artifact-source
+                      :tools-called tools
+                      :content-length (count (or content ""))
+                      :repair-attempt? (boolean (repair-attempt? input))}})))
+
+(defn- ^{:stratum 1} read-session-checkpoint
+  "Read the Claude session UUID from the worktree's runtime directory.
+
+   Returns nil on any failure (missing file, permission error, garbage
+   content). Iter 24 receipt: the previous path (`.miniforge-session-id`
+   at the worktree root) got committed into git and every fresh worktree
+   inherited a stale UUID — passing `--resume <stale>` to Claude CLI
+   caused the session to die in ~5s with no output. Path is now under
+   `.miniforge/`, which is gitignored, and readers tolerate anything."
+  [working-dir]
+  (when working-dir
+    (try
+      (let [f (io/file working-dir session-checkpoint-filename)]
+        (when (.exists f)
+          (let [s (str/trim (slurp f))]
+            (when-not (str/blank? s) s))))
+      (catch Exception _ nil))))
+
+(defn- ^{:stratum 1} write-session-checkpoint! [working-dir session-id]
+  (when (and working-dir session-id)
+    (let [f (io/file working-dir session-checkpoint-filename)]
+      (io/make-parents f)
+      (spit f session-id))))
+
+(defn- ^{:stratum 1} base-ref-candidates
+  "Return candidate refs for computing the promoted task diff."
+  [context]
+  (let [base-sha (get-in context [:execution/environment-metadata :base-sha])
+        base-branch (or (get-in context [:execution/environment-metadata :base-branch])
+                        (get-in context [:execution/opts :branch])
+                        (get-in context [:execution/input :branch]))
+        resume-workspace (get-in context [:execution/opts :resume-workspace])
+        original-commit (get-in context [:execution/input :context :git-commit])
+        original-branch (get-in context [:execution/input :context :git-branch])
+        original-refs (concat (when (and original-commit
+                                         (not (str/blank? original-commit)))
+                                [original-commit])
+                              (when (and original-branch
+                                         (not (str/blank? original-branch)))
+                                [(str "refs/remotes/origin/" original-branch)
+                                 (str "origin/" original-branch)
+                                 (str "refs/heads/" original-branch)]))
+        resume-ranges (when resume-workspace
+                        (map #(str % "..." current-head-ref) original-refs))]
+    (into []
+          (distinct)
+          (cond-> (vec resume-ranges)
+            (and base-sha (not (str/blank? base-sha)))
+            (conj base-sha)
+
+            (and base-branch (not (str/blank? base-branch)))
+            (into [(str "refs/remotes/origin/" base-branch)
+                   (str "origin/" base-branch)
+                   (str "refs/heads/" base-branch)])))))
+
+(defn- ^{:stratum 1} submission-retry-prompt
+  "Submission-only retry prompt: re-feed the task + the prior (prose) output
+   and ask the implementer to deliver the actual file writes now."
+  [task-text prior-content]
+  (prompts/render-template (get @implementer-prompt-data :prompt/submission-retry-template)
+                           {:task-text task-text :prior-content prior-content}))
+
+;------------------------------------------------------------------------------ Layer 2
+
+(def ^{:stratum 2} ^:private ext->language (delay (load-ext->language)))
+
+(defn ^{:stratum 2} validate-code-artifact
   [artifact]
   (if-not (m/validate CodeArtifact artifact)
     (schema/invalid (schema/explain CodeArtifact artifact)
@@ -119,15 +521,89 @@
         :else
         (schema/valid)))))
 
-;------------------------------------------------------------------------------ Layer 1
-;; Language detection
+(defn- ^{:stratum 2} format-phase-handoff-findings
+  [findings]
+  (if (seq findings)
+    (str/join "\n" (map format-phase-handoff-finding findings))
+    (messages/t :prompt/phase-handoff-no-findings)))
 
-(defn- extract-extension
-  "Extract file extension from a path."
-  [path]
-  (last (re-find #"\.(\w+)$" path)))
+(defn- ^{:stratum 2} ensure-required-fields
+  "Ensure a file entry has content and action, filling blank creates with a placeholder.
+  Drops entries with no path."
+  [f]
+  (when (:path f)
+    (let [file (cond-> f
+                 (nil? (:content f)) (assoc :content "")
+                 (not (:action f))   (assoc :action :create))]
+      (cond-> file
+        (and (= :create (:action file))
+             (str/blank? (:content file)))
+        (assoc :content (repair-placeholder-content (:path file)))))))
 
-(defn extract-language
+;; LLM invocation helpers
+(defn- ^{:stratum 2} build-user-prompt
+  "Build the user prompt for the implementer."
+  [task-text input]
+  (str (messages/t :prompt/implement-task-prefix) "\n\n"
+       task-text
+       (format-repo-map (:task/repo-map input))
+       (format-existing-files (:task/existing-files input))
+       "\n\n" (messages/t :prompt/output-instruction)
+       "\n\n" (messages/t :prompt/already-impl-instruction) "\n"
+       (messages/t :prompt/already-impl-template)))
+
+(defn- ^{:stratum 2} code-from-blocks
+  "Build a code artifact map from extracted markdown code blocks."
+  [content]
+  (when-let [files (extract-code-blocks content)]
+    {:code/id (random-uuid)
+     :code/files files
+     :code/tests-needed? true
+     :code/summary "Implementation from code blocks"
+     :code/created-at (java.util.Date.)}))
+
+(defn- ^{:stratum 2} invoke-implementer-session
+  "Session body for the implementer: cache files, build mcp-opts, call LLM."
+  [session llm-client user-prompt effective-system-prompt config context on-chunk
+   existing-files working-dir]
+  (when (seq existing-files)
+    (let [files-map (into {} (map (fn [f] [(:path f) (:content f)])
+                                  existing-files))]
+      (artifact-session/write-context-cache-for-session! session files-map)))
+  (artifact-session/write-cursor-permissions-for-session! session implementer-disallowed-tools)
+  (let [budget-usd (budget/resolve-cost-budget-usd :implementer config context)
+        max-turns (get @implementer-prompt-data :prompt/max-turns 10)
+        resume-id (read-session-checkpoint working-dir)
+        mcp-opts (cond-> (artifact-session/session->mcp-opts session budget-usd max-turns)
+                   true        (assoc :disallowed-tools implementer-disallowed-tools)
+                   working-dir (assoc :workdir working-dir)
+                   resume-id   (assoc :resume resume-id))
+        result (if on-chunk
+                 (llm/chat-stream llm-client user-prompt on-chunk
+                                  (merge {:system effective-system-prompt} mcp-opts))
+                 (llm/chat llm-client user-prompt
+                           (merge {:system effective-system-prompt} mcp-opts)))]
+    (when-let [new-session-id (:session-id result)]
+      (write-session-checkpoint! working-dir new-session-id))
+    result))
+
+(defn- ^{:stratum 2} collect-promoted-artifact
+  "Collect code files from the current promoted worktree/container state."
+  [context session-mode working-dir]
+  (let [base-refs (base-ref-candidates context)]
+    (if (= :capsule session-mode)
+      (when-let [exec! (:execution/execute-fn context)]
+        (file-artifacts/collect-worktree-files-via-executor
+         exec!
+         (:execution/executor context)
+         (:execution/environment-id context)
+         working-dir
+         base-refs))
+      (file-artifacts/collect-worktree-files working-dir base-refs))))
+
+;------------------------------------------------------------------------------ Layer 3
+
+(defn ^{:stratum 3} extract-language
   "Extract the programming language from file paths or context."
   [files context]
   (let [extensions (->> files
@@ -139,124 +615,44 @@
     (or (:language context)
         (get @ext->language most-common most-common))))
 
-;------------------------------------------------------------------------------ Layer 1
-;; Prompt formatting
-
-(defn format-repo-map
-  "Format a repo map for inclusion in the user prompt."
-  [repo-map-text]
-  (when (and repo-map-text (not (str/blank? repo-map-text)))
-    (str "\n\n## " (messages/t :prompt/repo-map-section-title) "\n\n"
-         (messages/t :prompt/repo-map-header)
-         "\n\n" repo-map-text)))
-
-(defn- format-file-block
-  "Format a single file as a markdown code block."
-  [{:keys [path content truncated?]}]
-  (str "\n### " path
-       (when truncated? " (truncated)")
-       "\n```\n" content "\n```"))
-
-(defn format-existing-files
-  "Format existing file contents for inclusion in the user prompt."
-  [files]
-  (when (seq files)
-    (str "\n\n## " (messages/t :prompt/existing-files-section-title) "\n\n"
-         (messages/t :prompt/existing-files-header) "\n"
-         (->> files (map format-file-block) (str/join "\n")))))
-
-;------------------------------------------------------------------------------ Layer 1
-;; Task → text conversion
-
-(defn- format-plan-section
-  "Format the plan as a markdown section."
-  [plan]
-  (str "\n\n## " (messages/t :prompt/plan-header) "\n\n"
-       (if (string? plan) plan (pr-str plan))))
-
-(defn- format-intent-section
-  "Format the intent as a markdown section."
-  [intent]
-  (str "\n\n## " (messages/t :prompt/intent-header) "\n\n"
-       (pr-str intent)))
-
-(defn- format-review-section
-  "Format review feedback as a markdown section."
-  [review-feedback]
-  (str "\n\n## " (messages/t :prompt/review-feedback-header) "\n\n"
-       (messages/t :prompt/review-feedback-intro) "\n\n"
-       (if (string? review-feedback) review-feedback (pr-str review-feedback))))
-
-(defn- phase-handoff-findings
-  [phase-handoff]
-  (get-in phase-handoff [:frame/body :repair/findings]))
-
-(defn- format-phase-handoff-detail
-  [label-key value]
-  (when value
-    (let [label (messages/t label-key)]
-      (messages/t :prompt/phase-handoff-detail-line
-                  {:label label
-                   :value value}))))
-
-(defn- finding-location
-  [{:finding/keys [file line]}]
-  (cond
-    (and file line)
-    (messages/t :prompt/phase-handoff-location-value {:file file :line line})
-    file
-    file))
-
-(defn- format-phase-handoff-finding
-  [{:finding/keys [summary group-id severity suggestion] :as finding}]
-  (let [location (finding-location finding)
-        detail-lines (keep identity
-                           [(format-phase-handoff-detail
-                             :prompt/phase-handoff-group-label group-id)
-                            (format-phase-handoff-detail
-                             :prompt/phase-handoff-severity-label severity)
-                            (format-phase-handoff-detail
-                             :prompt/phase-handoff-location-label location)
-                            (format-phase-handoff-detail
-                             :prompt/phase-handoff-suggestion-label suggestion)])
-        summary-line (messages/t :prompt/phase-handoff-finding-line
-                                 {:summary summary})]
-    (str summary-line
-         (when (seq detail-lines)
-           (str "\n" (str/join "\n" detail-lines))))))
-
-(defn- format-phase-handoff-findings
-  [findings]
-  (if (seq findings)
-    (str/join "\n" (map format-phase-handoff-finding findings))
-    (messages/t :prompt/phase-handoff-no-findings)))
-
-(defn- format-phase-handoff-section
+(defn- ^{:stratum 3} format-phase-handoff-section
   "Format a structured phase handoff as a prominent repair section."
   [phase-handoff]
   (str "\n\n## " (messages/t :prompt/phase-handoff-header) "\n\n"
        (messages/t :prompt/phase-handoff-intro) "\n\n"
        (format-phase-handoff-findings (phase-handoff-findings phase-handoff))))
 
-(defn- format-verify-section
-  "Format verify failures as a markdown section."
-  [verify-failures]
-  (str "\n\n## " (messages/t :prompt/test-failures-header) "\n\n"
-       (messages/t :prompt/test-failures-intro) "\n\n"
-       (if-let [test-results (:test-results verify-failures)]
-         (str (messages/t :prompt/test-results-label) "\n" (pr-str test-results))
-         (str (messages/t :prompt/verify-details-label) "\n" (pr-str verify-failures)))
-       (when-let [test-output (:test-output verify-failures)]
-         (str "\n\n" (messages/t :prompt/test-output-label) "\n" test-output))))
+(defn ^{:stratum 3} repair-code-artifact
+  "Attempt to repair a code artifact based on validation errors."
+  [artifact errors _context]
+  (let [repaired (-> artifact
+                     (update :code/id #(or % (random-uuid)))
+                     (update :code/files #(or % []))
+                     (update :code/files #(filterv some? (map ensure-required-fields %)))
+                     (update :code/files deduplicate-files))]
+    {:status :success
+     :output repaired
+     :repairs-made (when (not= artifact repaired)
+                     {:original-errors errors})}))
 
-(defn- format-prior-attempts-section
-  "Format prior attempt context as a prominent warning section."
-  [{:keys [attempt-number prior-error instruction]}]
-  (str "\n\n## ⚠️ RETRY — Attempt " attempt-number "\n\n"
-       "**Previous attempt failed:** " prior-error "\n\n"
-       "**" instruction "**\n"))
+(defn- ^{:stratum 3} collect-session-artifact
+  "Collect a file artifact from the promoted or written working tree."
+  [context session-mode working-dir pre-session-snapshot]
+  (or (collect-promoted-artifact context session-mode working-dir)
+      (if (= :capsule session-mode)
+        (when-let [exec! (:execution/execute-fn context)]
+          (file-artifacts/collect-written-files-via-executor
+           pre-session-snapshot
+           exec!
+           (:execution/executor context)
+           (:execution/environment-id context)
+           working-dir))
+        (file-artifacts/collect-written-files pre-session-snapshot
+                                              working-dir))))
 
-(defn task->text
+;------------------------------------------------------------------------------ Layer 4
+
+(defn ^{:stratum 4} task->text
   "Convert a task to text for the LLM.
    Includes plan and intent when available for richer context."
   [task]
@@ -289,206 +685,7 @@
                     (pr-str task)))
     :else (str task)))
 
-;------------------------------------------------------------------------------ Layer 1
-;; Response parsing
-
-(defn- try-parse-edn-block
-  "Try to extract an EDN map from a fenced code block."
-  [text]
-  (when-let [match (re-find #"```(?:clojure|edn)?\s*\n([\s\S]*?)\n```" text)]
-    (let [parsed (edn/read-string (second match))]
-      (when (map? parsed) parsed))))
-
-(defn- try-parse-raw-edn
-  "Try to parse the entire text as EDN, returning a map or nil."
-  [text]
-  (try
-    (let [r (edn/read-string text)]
-      (when (map? r) r))
-    (catch Exception _ nil)))
-
-(defn- try-parse-inline-status
-  "Scan for an inline {:status :already-implemented ...} EDN map."
-  [text]
-  (when-let [match (re-find #"\{:status\s+:already-implemented[^}]*\}" text)]
-    (edn/read-string match)))
-
-(defn parse-code-response
-  "Parse the LLM response to extract code artifact.
-   Handles EDN in code blocks, plain EDN, and inline EDN maps.
-   Returns nil if no parseable map is found."
-  [response-content]
-  (try
-    (when-let [parsed (or (try-parse-edn-block response-content)
-                          (try-parse-raw-edn response-content)
-                          (try-parse-inline-status response-content))]
-      (when (map? parsed) parsed))
-    (catch Exception _
-      nil)))
-
-(defn- extract-path-from-context
-  "Try to extract a file path from text immediately preceding a code block.
-   Looks for common patterns like '### path/to/file.clj' or '**path/to/file.clj**'
-   or 'File: path/to/file.clj' in the preceding lines."
-  [text block-start]
-  (let [preceding (subs text 0 block-start)
-        ;; Take last 3 lines before the code block
-        lines (take-last 3 (str/split-lines preceding))]
-    (some (fn [line]
-            (or
-             (second (re-find patterns/md-heading-file-path line))
-             (second (re-find patterns/md-delimited-file-path line))
-             (second (re-find patterns/md-label-file-path line))))
-          lines)))
-
-(defn extract-code-blocks
-  "Extract code blocks from markdown response and convert to file list.
-   Tries to detect file paths from markdown headings before each block.
-
-   Pathless blocks are not repo artifacts. Treating them as generated
-   filenames lets narrative snippets pass implement, verify, and review
-   without producing a releasable diff."
-  [response-content]
-  (let [pattern patterns/md-code-block
-        matcher (re-matcher pattern response-content)]
-    (loop [results [] idx 0]
-      (if (.find matcher)
-        (let [content (.group matcher 2)
-              block-start (.start matcher)
-              path (extract-path-from-context response-content block-start)]
-          (if path
-            (recur (conj results {:path path
-                                  :content (str/trim content)
-                                  :action :create})
-                   (inc idx))
-            nil))
-        (when (seq results) results)))))
-
-;------------------------------------------------------------------------------ Layer 1
-;; Artifact repair
-
-(defn- repair-placeholder-content
-  "Build minimal non-empty placeholder content for an otherwise blank file."
-  [path]
-  (let [comment-prefix (case (some-> path extract-extension str/lower-case)
-                         "clj" ";;"
-                         "cljc" ";;"
-                         "cljs" ";;"
-                         "edn" ";;"
-                         "js" "//"
-                         "ts" "//"
-                         "java" "//"
-                         "go" "//"
-                         "rs" "//"
-                         "swift" "//"
-                         "py" "#"
-                         "rb" "#"
-                         "sh" "#"
-                         "yml" "#"
-                         "yaml" "#"
-                         "toml" "#"
-                         nil)]
-    (if comment-prefix
-      (str comment-prefix " TODO: replace generated placeholder for " path "\n")
-      (str "TODO: replace generated placeholder for " path "\n"))))
-
-(defn- ensure-required-fields
-  "Ensure a file entry has content and action, filling blank creates with a placeholder.
-  Drops entries with no path."
-  [f]
-  (when (:path f)
-    (let [file (cond-> f
-                 (nil? (:content f)) (assoc :content "")
-                 (not (:action f))   (assoc :action :create))]
-      (cond-> file
-        (and (= :create (:action file))
-             (str/blank? (:content file)))
-        (assoc :content (repair-placeholder-content (:path file)))))))
-
-(defn- deduplicate-files
-  "Deduplicate file entries by path, keeping last occurrence."
-  [files]
-  (let [seen (atom #{})
-        deduped (reduce (fn [acc f]
-                          (if (contains? @seen (:path f))
-                            acc
-                            (do (swap! seen conj (:path f))
-                                (conj acc f))))
-                        []
-                        (reverse files))]
-    (vec (reverse deduped))))
-
-(defn repair-code-artifact
-  "Attempt to repair a code artifact based on validation errors."
-  [artifact errors _context]
-  (let [repaired (-> artifact
-                     (update :code/id #(or % (random-uuid)))
-                     (update :code/files #(or % []))
-                     (update :code/files #(filterv some? (map ensure-required-fields %)))
-                     (update :code/files deduplicate-files))]
-    {:status :success
-     :output repaired
-     :repairs-made (when (not= artifact repaired)
-                     {:original-errors errors})}))
-
-;------------------------------------------------------------------------------ Layer 2
-;; LLM invocation helpers
-
-(defn- build-user-prompt
-  "Build the user prompt for the implementer."
-  [task-text input]
-  (str (messages/t :prompt/implement-task-prefix) "\n\n"
-       task-text
-       (format-repo-map (:task/repo-map input))
-       (format-existing-files (:task/existing-files input))
-       "\n\n" (messages/t :prompt/output-instruction)
-       "\n\n" (messages/t :prompt/already-impl-instruction) "\n"
-       (messages/t :prompt/already-impl-template)))
-
-(defn- build-effective-system-prompt
-  "Append behavior addendum to the base system prompt."
-  [input]
-  (str @implementer-system-prompt
-       (get input :task/behavior-addendum "")))
-
-(defn- build-already-implemented-response
-  "Build the response map for an already-implemented task."
-  [parsed tokens cost-usd]
-  {:status :already-implemented
-   :output {:code/id (random-uuid)
-            :code/files []
-            :code/summary (:summary parsed)
-            :code/language nil
-            :code/tests-needed? false
-            :code/created-at (java.util.Date.)}
-   :summary (:summary parsed)
-   :metrics {:tokens tokens
-             :cost-usd cost-usd
-             :files-created 0
-             :skipped-reason :already-implemented}})
-
-(defn- repair-attempt?
-  "Return true when the implementer is handling prior review or verify feedback."
-  [input]
-  (or (:task/review-feedback input)
-      (:task/verify-failures input)))
-
-(defn- unverified-already-implemented-response
-  "Reject an :already-implemented claim when there is no artifact evidence on a repair attempt."
-  [input tokens]
-  (response/error
-   (messages/t :error/unverified-already-implemented)
-   {:tokens tokens
-    :data {:code :implementer/unverified-already-implemented
-           :review-feedback? (boolean (:task/review-feedback input))
-           :verify-failures? (boolean (:task/verify-failures input))}}))
-
-(defn- count-files-by-action
-  "Count files matching a given action in an artifact."
-  [action files]
-  (count (filter #(= action (:action %)) files)))
-
-(defn- build-code-response
+(defn- ^{:stratum 4} build-code-response
   "Build the success response for a parsed code artifact."
   [code context tokens cost-usd]
   (let [code-with-meta (-> code
@@ -505,53 +702,27 @@
                                  :tokens tokens
                                  :cost-usd cost-usd}})))
 
-(defn- code-artifact?
-  "True when the structured artifact is a code artifact payload."
-  [artifact]
-  (and (map? artifact)
-       (contains? artifact :code/files)))
+(defn- ^{:stratum 4} normalize-implementer-result
+  "Re-normalize a session's raw channels into the implementer result shape,
+   re-collecting the file artifact from what was written this turn. Used by the
+   submission-recovery turn (the main turn normalizes inline so it can also
+   surface the file artifact for its fallback log)."
+  [{:keys [llm-result artifact worktree-artifacts pre-session-snapshot session-mode]}
+   context working-dir]
+  (let [file-artifact (collect-session-artifact context session-mode working-dir
+                                                pre-session-snapshot)]
+    (result-boundary/normalize-llm-result
+     {:role :implement
+      :response llm-result
+      :worktree-artifacts worktree-artifacts
+      :artifact artifact
+      :fallback-artifact file-artifact
+      :parse-response parse-code-response
+      :derive-artifact code-from-blocks})))
 
-(defn- metadata-only-submit?
-  "True when MCP submit produced metadata but no file payload."
-  [artifact-source structured-artifact]
-  (and (= :mcp artifact-source)
-       (map? structured-artifact)
-       (not (code-artifact? structured-artifact))))
+;------------------------------------------------------------------------------ Layer 5
 
-(defn- code-from-blocks
-  "Build a code artifact map from extracted markdown code blocks."
-  [content]
-  (when-let [files (extract-code-blocks content)]
-    {:code/id (random-uuid)
-     :code/files files
-     :code/tests-needed? true
-     :code/summary "Implementation from code blocks"
-     :code/created-at (java.util.Date.)}))
-
-(defn- log-implementer-rejection
-  "Emit a structured :implementer/response-rejected event when the
-   implementer can't build a success response from the LLM turn.
-   Surfaces WHY each iteration failed so the next dogfood reads the
-   reject pattern (parse-failed, unverified-already-implemented,
-   etc.) inline instead of forcing a deep-dive through the trace.
-
-   Two reject paths today; both wrap response/error. The reject
-   reason is a keyword the caller picks before invoking — keeps
-   the event taxonomy stable as new reject paths get added.
-
-   `input` is read for :repair-attempt? — that's the strongest
-   signal for distinguishing 'agent stalled mid-narration' from
-   'agent retried after rejection and still didn't ship.'"
-  [logger reason input artifact-source content tools]
-  (when logger
-    (log/warn logger :implementer :implementer/response-rejected
-              {:data {:reject/reason reason
-                      :artifact-source artifact-source
-                      :tools-called tools
-                      :content-length (count (or content ""))
-                      :repair-attempt? (boolean (repair-attempt? input))}})))
-
-(defn- process-llm-response
+(defn- ^{:stratum 5} process-llm-response
   "Normalize structured implementer outputs from any submission channel:
    worktree metadata, MCP artifact, file fallback, or parseable stdout.
 
@@ -617,158 +788,7 @@
                                        artifact-source
                                        (assoc :artifact-source artifact-source))})))))))
 
-(def ^:private session-checkpoint-filename ".miniforge/session-id")
-
-(defn- read-session-checkpoint
-  "Read the Claude session UUID from the worktree's runtime directory.
-
-   Returns nil on any failure (missing file, permission error, garbage
-   content). Iter 24 receipt: the previous path (`.miniforge-session-id`
-   at the worktree root) got committed into git and every fresh worktree
-   inherited a stale UUID — passing `--resume <stale>` to Claude CLI
-   caused the session to die in ~5s with no output. Path is now under
-   `.miniforge/`, which is gitignored, and readers tolerate anything."
-  [working-dir]
-  (when working-dir
-    (try
-      (let [f (io/file working-dir session-checkpoint-filename)]
-        (when (.exists f)
-          (let [s (str/trim (slurp f))]
-            (when-not (str/blank? s) s))))
-      (catch Exception _ nil))))
-
-(defn- write-session-checkpoint! [working-dir session-id]
-  (when (and working-dir session-id)
-    (let [f (io/file working-dir session-checkpoint-filename)]
-      (io/make-parents f)
-      (spit f session-id))))
-
-(def ^:private implementer-disallowed-tools
-  "Native read/search tools the implementer MUST NOT call — forces it onto the
-   MCP context cache (context_read/context_grep/context_glob), the same
-   mechanism the planner and tester use. The cache is read-through +
-   write-through (a miss reads from source-root, caches the content, records
-   the miss), so context_read serves any file, not just the pre-populated set,
-   and re-reads within the session hit.
-
-   Write/Edit/MultiEdit stay allowed (the implementer's whole job) and so does
-   Bash — the implementer may legitimately need a shell for build/git steps.
-   That leaves a `cat`/`rg`-via-Bash cache-bypass open; if dogfood shows the
-   implementer evading the cache through the shell, add \"Bash\" here (the
-   planner disallows it for exactly that reason)."
-  ["Read" "Grep" "Glob" "LS" "Agent"])
-
-(defn- invoke-implementer-session
-  "Session body for the implementer: cache files, build mcp-opts, call LLM."
-  [session llm-client user-prompt effective-system-prompt config context on-chunk
-   existing-files working-dir]
-  (when (seq existing-files)
-    (let [files-map (into {} (map (fn [f] [(:path f) (:content f)])
-                                  existing-files))]
-      (artifact-session/write-context-cache-for-session! session files-map)))
-  (artifact-session/write-cursor-permissions-for-session! session implementer-disallowed-tools)
-  (let [budget-usd (budget/resolve-cost-budget-usd :implementer config context)
-        max-turns (get @implementer-prompt-data :prompt/max-turns 10)
-        resume-id (read-session-checkpoint working-dir)
-        mcp-opts (cond-> (artifact-session/session->mcp-opts session budget-usd max-turns)
-                   true        (assoc :disallowed-tools implementer-disallowed-tools)
-                   working-dir (assoc :workdir working-dir)
-                   resume-id   (assoc :resume resume-id))
-        result (if on-chunk
-                 (llm/chat-stream llm-client user-prompt on-chunk
-                                  (merge {:system effective-system-prompt} mcp-opts))
-                 (llm/chat llm-client user-prompt
-                           (merge {:system effective-system-prompt} mcp-opts)))]
-    (when-let [new-session-id (:session-id result)]
-      (write-session-checkpoint! working-dir new-session-id))
-    result))
-
-(defn- base-ref-candidates
-  "Return candidate refs for computing the promoted task diff."
-  [context]
-  (let [base-sha (get-in context [:execution/environment-metadata :base-sha])
-        base-branch (or (get-in context [:execution/environment-metadata :base-branch])
-                        (get-in context [:execution/opts :branch])
-                        (get-in context [:execution/input :branch]))
-        resume-workspace (get-in context [:execution/opts :resume-workspace])
-        original-commit (get-in context [:execution/input :context :git-commit])
-        original-branch (get-in context [:execution/input :context :git-branch])
-        original-refs (concat (when (and original-commit
-                                         (not (str/blank? original-commit)))
-                                [original-commit])
-                              (when (and original-branch
-                                         (not (str/blank? original-branch)))
-                                [(str "refs/remotes/origin/" original-branch)
-                                 (str "origin/" original-branch)
-                                 (str "refs/heads/" original-branch)]))
-        resume-ranges (when resume-workspace
-                        (map #(str % "..." current-head-ref) original-refs))]
-    (into []
-          (distinct)
-          (cond-> (vec resume-ranges)
-            (and base-sha (not (str/blank? base-sha)))
-            (conj base-sha)
-
-            (and base-branch (not (str/blank? base-branch)))
-            (into [(str "refs/remotes/origin/" base-branch)
-                   (str "origin/" base-branch)
-                   (str "refs/heads/" base-branch)])))))
-
-(defn- collect-promoted-artifact
-  "Collect code files from the current promoted worktree/container state."
-  [context session-mode working-dir]
-  (let [base-refs (base-ref-candidates context)]
-    (if (= :capsule session-mode)
-      (when-let [exec! (:execution/execute-fn context)]
-        (file-artifacts/collect-worktree-files-via-executor
-         exec!
-         (:execution/executor context)
-         (:execution/environment-id context)
-         working-dir
-         base-refs))
-      (file-artifacts/collect-worktree-files working-dir base-refs))))
-
-(defn- collect-session-artifact
-  "Collect a file artifact from the promoted or written working tree."
-  [context session-mode working-dir pre-session-snapshot]
-  (or (collect-promoted-artifact context session-mode working-dir)
-      (if (= :capsule session-mode)
-        (when-let [exec! (:execution/execute-fn context)]
-          (file-artifacts/collect-written-files-via-executor
-           pre-session-snapshot
-           exec!
-           (:execution/executor context)
-           (:execution/environment-id context)
-           working-dir))
-        (file-artifacts/collect-written-files pre-session-snapshot
-                                              working-dir))))
-
-(defn- submission-retry-prompt
-  "Submission-only retry prompt: re-feed the task + the prior (prose) output
-   and ask the implementer to deliver the actual file writes now."
-  [task-text prior-content]
-  (prompts/render-template (get @implementer-prompt-data :prompt/submission-retry-template)
-                           {:task-text task-text :prior-content prior-content}))
-
-(defn- normalize-implementer-result
-  "Re-normalize a session's raw channels into the implementer result shape,
-   re-collecting the file artifact from what was written this turn. Used by the
-   submission-recovery turn (the main turn normalizes inline so it can also
-   surface the file artifact for its fallback log)."
-  [{:keys [llm-result artifact worktree-artifacts pre-session-snapshot session-mode]}
-   context working-dir]
-  (let [file-artifact (collect-session-artifact context session-mode working-dir
-                                                pre-session-snapshot)]
-    (result-boundary/normalize-llm-result
-     {:role :implement
-      :response llm-result
-      :worktree-artifacts worktree-artifacts
-      :artifact artifact
-      :fallback-artifact file-artifact
-      :parse-response parse-code-response
-      :derive-artifact code-from-blocks})))
-
-(defn- recover-implementer-submission
+(defn- ^{:stratum 5} recover-implementer-submission
   "When the main turn produced usable analysis but NO artifact, run one short
    submission-only retry that asks the implementer to write the files now, then
    re-normalize. Returns the recovered normalized map, or nil when recovery
@@ -802,19 +822,15 @@
               (:derived-artifact recovered))
       recovered)))
 
-(defn- normalized-artifact-source
-  "Return a keyword artifact source for telemetry, defaulting malformed values to :none."
-  [normalized]
-  (let [source (get normalized :artifact-source)]
-    (if (keyword? source) source :none)))
+;------------------------------------------------------------------------------ Layer 6
 
-(defn- invoke-with-llm
+(defn- ^{:stratum 6} invoke-with-llm
   "Invoke the implementer via the LLM backend."
   [llm-client user-prompt effective-system-prompt config context on-chunk logger
    existing-files input]
   (let [working-dir (workspace/resolve-execution-workdir context "implement")
         {:keys [llm-result artifact worktree-artifacts context-misses
-                pre-session-snapshot session-mode]}
+                context-reads pre-session-snapshot session-mode]}
         (artifact-session/with-session context
           #(invoke-implementer-session % llm-client user-prompt effective-system-prompt
                                        config context on-chunk existing-files working-dir))
@@ -888,18 +904,26 @@
       ;; planner-convergence dogfood showed Claude stalling AFTER a
       ;; successful stream of edits; the old path discarded a real
       ;; artifact because the LLM response was classified as failure.
-      (if (result-boundary/usable-content? final)
-        (process-llm-response final context logger input)
-        ;; LLM call failed, no artifact (even after recovery) — preserve the
-        ;; full llm-error shape into :data so the phase-completed event carries
-        ;; :type / :stderr / :stdout / :timeout / :exit-code for post-mortem.
-        (result-boundary/error-response final
-                                        (messages/t :error/llm-failed))))))
+      (let [result (if (result-boundary/usable-content? final)
+                     (process-llm-response final context logger input)
+                     ;; LLM call failed, no artifact (even after recovery) —
+                     ;; preserve the full llm-error shape into :data so the
+                     ;; phase-completed event carries :type / :stderr /
+                     ;; :stdout / :timeout / :exit-code for post-mortem.
+                     (result-boundary/error-response final
+                                                     (messages/t :error/llm-failed)))]
+        ;; Session channel: which files the agent actually read (Codex SPEC
+        ;; §7.4.2). The phase layer turns this into consultation provenance.
+        ;; some?, not seq: an EMPTY reads log is "known: nothing was read",
+        ;; which is a different fact from "no log surfaced" (capsule mode) —
+        ;; dropping it would turn a real unread into unknown downstream.
+        (cond-> result
+          (some? context-reads) (assoc :context-reads context-reads))))))
 
-;------------------------------------------------------------------------------ Layer 2
+;------------------------------------------------------------------------------ Layer 7
+
 ;; Public API
-
-(defn create-implementer
+(defn ^{:stratum 7} create-implementer
   "Create an Implementer agent with optional configuration overrides.
 
    Options:
@@ -938,27 +962,6 @@
       :validate-fn validate-code-artifact
 
       :repair-fn repair-code-artifact})))
-
-(defn code-summary
-  [artifact]
-  {:id (:code/id artifact)
-   :file-count (count (:code/files artifact))
-   :actions (frequencies (map :action (:code/files artifact)))
-   :language (:code/language artifact)
-   :tests-needed? (:code/tests-needed? artifact)
-   :dependencies-added (count (:code/dependencies-added artifact []))})
-
-(defn files-by-action
-  [artifact]
-  (group-by :action (:code/files artifact)))
-
-(defn total-lines
-  [artifact]
-  (->> (:code/files artifact)
-       (remove #(= :delete (:action %)))
-       (map :content)
-       (map #(count (str/split-lines %)))
-       (reduce + 0)))
 
 ;------------------------------------------------------------------------------ Rich Comment
 (comment

@@ -1,3 +1,7 @@
+;; Title: Miniforge.ai
+;; Author: Christopher Lester (christopher@miniforge.ai)
+;; Copyright 2025-2026 Christopher Lester. Licensed under Apache 2.0.
+
 {:gate/messages
  {;; Review-approved gate — verdict not approved (carries the decision read)
   :review/not-approved
@@ -57,4 +61,23 @@
 
   ;; Policy-pack gate — pack compilation failed before evaluation.
   :policy-pack/compile-error
-  "Policy pack compilation failed: {message}"}}
+  "Policy pack compilation failed: {message}"
+
+  :opsv/instrumentation-description "Validates required OPSV signals"
+  :opsv/instrumentation-failed "Required instrumentation is unavailable or unreliable"
+  :opsv/instrumentation-remediation "Configure and verify every required signal before execution"
+  :opsv/environment-description "Validates OPSV environment and time-window policy"
+  :opsv/environment-failed "The target environment is not authorized for this run"
+  :opsv/environment-remediation "Select an allowed environment and time window, with explicit production approval"
+  :opsv/blast-radius-description "Validates OPSV blast-radius limits"
+  :opsv/blast-radius-failed "The proposed blast radius exceeds policy"
+  :opsv/blast-radius-remediation "Reduce replica, node, or namespace scope to the configured limits"
+  :opsv/abort-description "Validates OPSV abort thresholds"
+  :opsv/abort-failed "Required abort thresholds are not configured"
+  :opsv/abort-remediation "Define error-budget burn, saturation, and tail-latency thresholds"
+  :opsv/actuation-description "Validates OPSV actuation authorization"
+  :opsv/actuation-failed "APPLY_ALLOWED is not authorized for every target service"
+  :opsv/actuation-remediation "Enable apply explicitly and allowlist every target service"
+  :opsv/evidence-completeness-description "Validates OPSV evidence completeness"
+  :opsv/evidence-completeness-failed "Required OPSV actuation evidence is incomplete"
+  :opsv/evidence-completeness-remediation "Attach the pack hash, environment fingerprint, and metric snapshots"}}

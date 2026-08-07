@@ -15,7 +15,6 @@
 ;; WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 ;; See the License for the specific language governing permissions and
 ;; limitations under the License.
-
 (ns ai.miniforge.agent.reviewer.prompts-test
   "Tests for `ai.miniforge.agent.reviewer.prompts` — extracted from
    `ai.miniforge.agent.reviewer-test` as part of the PR-E decomposition.
@@ -28,9 +27,10 @@
    [ai.miniforge.agent.prompts :as prompts]
    [ai.miniforge.agent.reviewer.prompts :as reviewer-prompts]))
 
-;------------------------------------------------------------------------------ format-artifact-for-review
+;------------------------------------------------------------------------------ Layer 0
 
-(deftest format-artifact-for-review-test
+;------------------------------------------------------------------------------ format-artifact-for-review
+(deftest ^{:stratum 0} format-artifact-for-review-test
   (testing "CodeArtifact with :code/files renders each file as a markdown block"
     (let [out (reviewer-prompts/format-artifact-for-review
                 {:code/files [{:path "src/a.clj" :content "(def x 1)" :action :create}
@@ -52,8 +52,7 @@
     (is (= "{:k 1}" (reviewer-prompts/format-artifact-for-review {:k 1})))))
 
 ;------------------------------------------------------------------------------ format-artifact-manifest (N12 §5 shed path)
-
-(deftest format-artifact-manifest-test
+(deftest ^{:stratum 0} format-artifact-manifest-test
   (testing "CodeArtifact renders each file as path + action + size, omitting the body"
     (let [out (reviewer-prompts/format-artifact-manifest
                 {:code/files [{:path "src/a.clj" :content "(def x 1)" :action :create}
@@ -76,14 +75,13 @@
     (is (= "{:k 1}" (reviewer-prompts/format-artifact-manifest {:k 1})))))
 
 ;------------------------------------------------------------------------------ build-review-prompt — manifest artifact formatter
-
-(deftest render-template-preserves-raw-prompt-content-test
+(deftest ^{:stratum 0} render-template-preserves-raw-prompt-content-test
   (testing "Selmer prompt rendering does not HTML-escape code, diffs, markdown, or EDN"
     (is (= "Review <src/a.clj> && {:ok? true}"
            (prompts/render-template "Review {{content}}"
                                     {:content "<src/a.clj> && {:ok? true}"})))))
 
-(deftest build-review-prompt-manifest-arity-test
+(deftest ^{:stratum 0} build-review-prompt-manifest-arity-test
   (let [input {:task/title "T"
                :task/scope ["src"]
                :task/artifact {:code/files [{:path "src/a.clj"
@@ -102,8 +100,7 @@
         (is (not (re-find #"\(def x 1\)" prompt)))))))
 
 ;------------------------------------------------------------------------------ build-review-prompt — section rendering
-
-(deftest build-review-prompt-renders-scope-section-test
+(deftest ^{:stratum 0} build-review-prompt-renders-scope-section-test
   (testing "Scope section appears with bulleted paths when scope is resolved"
     (let [prompt (reviewer-prompts/build-review-prompt
                    {:task/title "Test"
@@ -124,7 +121,7 @@
                     :task/intent "free-form prose"
                     :task/artifact {:code/files []}})))))
 
-(deftest build-review-prompt-omits-empty-sections-test
+(deftest ^{:stratum 0} build-review-prompt-omits-empty-sections-test
   (let [prompt (reviewer-prompts/build-review-prompt
                  {:task/title ""
                   :task/description ""
@@ -157,7 +154,7 @@
       (is (not (re-find #"## Intent"      prompt)))
       (is (not (re-find #"## Constraints" prompt))))))
 
-(deftest build-review-prompt-includes-tests-section-test
+(deftest ^{:stratum 0} build-review-prompt-includes-tests-section-test
   (let [prompt (reviewer-prompts/build-review-prompt
                  {:task/title "T"
                   :task/scope ["src"]
@@ -165,3 +162,24 @@
                   :task/tests "all 12 tests passed"})]
     (is (re-find #"## Test Results" prompt))
     (is (re-find #"all 12 tests passed" prompt))))
+
+(deftest ^{:stratum 0} build-review-prompt-renders-codex-landings-before-code
+  (let [prompt (reviewer-prompts/build-review-prompt
+                 {:task/title "t"
+                  :task/description "d"
+                  :task/scope ["src"]
+                  :task/artifact {:code/files []}
+                  :task/codex-landings "situation: quality-signal-might-be-lying\ncoverage: 4 landings"})]
+    (is (re-find #"## Codex — worth attending to before you review" prompt))
+    (is (re-find #"quality-signal-might-be-lying" prompt))
+    (is (< (.indexOf ^String prompt "## Codex")
+           (.indexOf ^String prompt "## Code to Review"))
+        "worries render before the content they apply to")))
+
+(deftest ^{:stratum 0} build-review-prompt-omits-codex-section-when-absent
+  (let [prompt (reviewer-prompts/build-review-prompt
+                 {:task/title "t"
+                  :task/description "d"
+                  :task/scope ["src"]
+                  :task/artifact {:code/files []}})]
+    (is (not (re-find #"## Codex" prompt)))))

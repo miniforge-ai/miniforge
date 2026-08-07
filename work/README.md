@@ -33,7 +33,7 @@ DAG task definitions for parallel execution:
 - **Design specifications** -> `specs/informative/`
 - **Normative requirements** -> `specs/normative/`
 - **PR documentation** -> `docs/prs/` or `docs/pull-requests/`
-- **Completed specs** -> `work/archive/done/`
+- **Completed specs** -> `work/done/`
 
 ## Lifecycle
 
@@ -43,7 +43,7 @@ work/                    # Active work inputs
        |
 [Miniforge executes work]
        |
-work/archive/done/       # Completed work archived
+work/done/               # Completed work archived
   |-- my-feature.spec.edn
 ```
 
@@ -51,12 +51,13 @@ work/archive/done/       # Completed work archived
 
 Specs are archived into subdirectories when they are no longer active:
 
-- `archive/done/` -- Work completed and merged
+- `done/` -- Work completed and merged
 - `archive/stale/` -- Specs with outdated assumptions, tech stack, or framing
 
 ## Current Specs
 
 ### Ready to Run
+
 | Spec | Description | Priority |
 |------|-------------|----------|
 | `finish-event-telemetry.spec.edn` | Wire phase events in verify/review/release | High |
@@ -73,7 +74,9 @@ Specs are archived into subdirectories when they are no longer active:
 | `workflow-redesign-use-case-targeted.spec.edn` | Use-case specific workflow definitions | Low |
 
 ### Reliability Nines Series (rn-*)
+
 16 interconnected specs for reliability engineering:
+
 | Spec | Description |
 |------|-------------|
 | `rn-00-reliability-nines-dag.edn` | DAG orchestration for the series |
@@ -81,8 +84,9 @@ Specs are archived into subdirectories when they are no longer active:
 
 ### Normative Spec Gap Coverage (n0X-*)
 
-Specs created 2026-04-13 to close identified gaps between work specs and
-normative spec requirements (see `docs/progress-review-2026-04-13.md`):
+The gap-coverage initiative originated in the historical
+`docs/progress-review-2026-04-13.md` snapshot. The live inventory below tracks
+subsequent normative-contract changes:
 
 | Spec | Normative | Description | Priority |
 |------|-----------|-------------|----------|
@@ -93,8 +97,12 @@ normative spec requirements (see `docs/progress-review-2026-04-13.md`):
 | `n05-http-api-decision` | N5 | Resolve winsock vs HTTP/SSE, implement API layer | Medium |
 | `n06-sensitive-data-scanning` | N6 | Credential/PII scanning in evidence bundles | High |
 | `n06-compliance-metadata` | N6 | Data classification, retention, regulatory tags | Medium |
-| `n07-opsv-workflow` | N7 | OPSV skeleton — DISCOVER phase + experiment packs | Low |
-| `n07-opsv-converge-verify-actuate` | N7 | OPSV remaining phases (requires n07-opsv-workflow) | Low |
+| `n07-opsv-contracts` | N7 | Canonical OPSV domain values and validation | Blocker |
+| `n07-opsv-domain-policy` | N7 | Pure risk, convergence, verification, and authority decisions | Blocker |
+| `n07-opsv-workflow` | N7 | Seven-phase workflow and deterministic HPA/KEDA MCI | Blocker |
+| `n07-opsv-governed-actuation` | N7 | Governed PR, Kubernetes apply, and rollback effects | High |
+| `n07-opsv-cli-tui-drift` | N7 | Canonical commands, TUI drill-down, and drift | High |
+| `n07-opsv-agent-budgets` | N7 | Agent-budget dogfood after the staging MCI | High |
 | `n08-oci-governance` | N8 | RBAC, listener capabilities, control actions, audit | Medium |
 | `n08-privacy-retention` | N8 | Privacy levels, listener budgets, retention (requires n08-oci-governance) | Medium |
 | `n08-otel-trace-context` | N8 | OpenTelemetry alignment, W3C Trace Context | Low |
@@ -106,6 +114,7 @@ normative spec requirements (see `docs/progress-review-2026-04-13.md`):
 | `oss-integration-test-coverage` | OSS | 6 high-priority integration tests (TEST_OPPORTUNITIES.md) | High |
 
 ### Not Started
+
 | Spec | Description |
 |------|-------------|
 | `gitlab-support.spec.edn` | Git provider abstraction + GitLab adapter |
@@ -122,7 +131,7 @@ bb miniforge run work/finish-event-telemetry.spec.edn
 ### Archive completed work
 
 ```bash
-git mv work/completed-feature.spec.edn work/archive/done/
+git mv work/completed-feature.spec.edn work/done/
 ```
 
 ---

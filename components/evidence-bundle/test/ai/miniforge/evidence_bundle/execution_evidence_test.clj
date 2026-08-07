@@ -15,7 +15,6 @@
 ;; WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 ;; See the License for the specific language governing permissions and
 ;; limitations under the License.
-
 (ns ai.miniforge.evidence-bundle.execution-evidence-test
   "Tests for N11 section 9.1 execution evidence collection.
 
@@ -31,15 +30,17 @@
 
 ;; Private fn accessor for evidence_bundle.clj
 (require 'ai.miniforge.evidence-bundle.protocols.impl.evidence-bundle)
-(def ^:private extract-evidence-impl
+
+;------------------------------------------------------------------------------ Layer 0
+
+(def ^{:stratum 0} ^:private extract-evidence-impl
   (var-get (ns-resolve 'ai.miniforge.evidence-bundle.protocols.impl.evidence-bundle
                        'extract-execution-evidence)))
 
 ;; ============================================================================
 ;; collector/collect-execution-evidence — pure data extraction
 ;; ============================================================================
-
-(deftest collect-evidence-all-fields-present-test
+(deftest ^{:stratum 0} collect-evidence-all-fields-present-test
   (testing "extracts all five evidence fields when present"
     (let [started  (java.time.Instant/parse "2026-04-09T10:00:00Z")
           finished (java.time.Instant/parse "2026-04-09T10:05:00Z")
@@ -56,17 +57,17 @@
       (is (= finished (:evidence/task-finished-at result)))
       (is (= "sha256:abc123" (:evidence/image-digest result))))))
 
-(deftest collect-evidence-empty-output-test
+(deftest ^{:stratum 0} collect-evidence-empty-output-test
   (testing "returns empty map when :execution/output is absent"
     (let [result (collector/collect-execution-evidence {})]
       (is (= {} result)))))
 
-(deftest collect-evidence-nil-output-test
+(deftest ^{:stratum 0} collect-evidence-nil-output-test
   (testing "returns empty map when :execution/output is nil"
     (let [result (collector/collect-execution-evidence {:execution/output nil})]
       (is (= {} result)))))
 
-(deftest collect-evidence-partial-fields-test
+(deftest ^{:stratum 0} collect-evidence-partial-fields-test
   (testing "extracts only present fields, skips absent ones"
     (let [state {:execution/output
                  {:evidence/execution-mode :local
@@ -80,7 +81,7 @@
       (is (not (contains? result :evidence/task-finished-at)))
       (is (not (contains? result :evidence/image-digest))))))
 
-(deftest collect-evidence-image-digest-only-test
+(deftest ^{:stratum 0} collect-evidence-image-digest-only-test
   (testing "extracts image-digest alone when other fields absent"
     (let [state {:execution/output {:evidence/image-digest "sha256:deadbeef"}}
           result (collector/collect-execution-evidence state)]
@@ -88,35 +89,9 @@
       (is (not (contains? result :evidence/execution-mode))))))
 
 ;; ============================================================================
-;; evidence_bundle/extract-execution-evidence (private) — same contract
-;; ============================================================================
-
-(deftest extract-impl-all-fields-test
-  (testing "private extract-execution-evidence mirrors collector behavior"
-    (let [started  (java.time.Instant/parse "2026-04-09T12:00:00Z")
-          finished (java.time.Instant/parse "2026-04-09T12:01:00Z")
-          state {:execution/output
-                 {:evidence/execution-mode   :governed
-                  :evidence/runtime-class    :docker
-                  :evidence/task-started-at  started
-                  :evidence/task-finished-at finished
-                  :evidence/image-digest     "sha256:fff000"}}
-          result (extract-evidence-impl state)]
-      (is (= :governed (:evidence/execution-mode result)))
-      (is (= :docker (:evidence/runtime-class result)))
-      (is (= started (:evidence/task-started-at result)))
-      (is (= finished (:evidence/task-finished-at result)))
-      (is (= "sha256:fff000" (:evidence/image-digest result))))))
-
-(deftest extract-impl-empty-state-test
-  (testing "private fn returns empty map for empty state"
-    (is (= {} (extract-evidence-impl {})))))
-
-;; ============================================================================
 ;; runner/extract-output — evidence field enrichment
 ;; ============================================================================
-
-(deftest extract-output-includes-evidence-fields-test
+(deftest ^{:stratum 0} extract-output-includes-evidence-fields-test
   (testing "extract-output populates evidence fields in :execution/output"
     (let [started (java.time.Instant/parse "2026-04-09T08:00:00Z")
           ctx {:execution/artifacts []
@@ -133,7 +108,7 @@
           "finished-at should be populated by extract-output")
       (is (inst? (:evidence/task-finished-at output))))))
 
-(deftest extract-output-governed-mode-with-executor-test
+(deftest ^{:stratum 0} extract-output-governed-mode-with-executor-test
   (testing "extract-output captures runtime-class from executor"
     (with-redefs [dag-exec/executor-type (constantly :docker)]
       (let [ctx {:execution/artifacts []
@@ -147,7 +122,7 @@
         (is (= :governed (:evidence/execution-mode output)))
         (is (= :docker (:evidence/runtime-class output)))))))
 
-(deftest extract-output-no-executor-nil-runtime-class-test
+(deftest ^{:stratum 0} extract-output-no-executor-nil-runtime-class-test
   (testing "runtime-class is nil when no executor in context"
     (let [ctx {:execution/artifacts []
                :execution/phase-results {}
@@ -157,7 +132,7 @@
           output (:execution/output (runner/extract-output ctx))]
       (is (nil? (:evidence/runtime-class output))))))
 
-(deftest extract-output-image-digest-from-metadata-test
+(deftest ^{:stratum 0} extract-output-image-digest-from-metadata-test
   (testing "extract-output includes image-digest from environment metadata"
     (let [ctx {:execution/artifacts []
                :execution/phase-results {}
@@ -168,7 +143,7 @@
           output (:execution/output (runner/extract-output ctx))]
       (is (= "sha256:abc123" (:evidence/image-digest output))))))
 
-(deftest extract-output-no-image-digest-when-absent-test
+(deftest ^{:stratum 0} extract-output-no-image-digest-when-absent-test
   (testing "extract-output omits :evidence/image-digest when not in metadata"
     (let [ctx {:execution/artifacts []
                :execution/phase-results {}
@@ -178,7 +153,7 @@
           output (:execution/output (runner/extract-output ctx))]
       (is (not (contains? output :evidence/image-digest))))))
 
-(deftest extract-output-executor-type-exception-caught-test
+(deftest ^{:stratum 0} extract-output-executor-type-exception-caught-test
   (testing "extract-output catches exception from executor-type gracefully"
     (with-redefs [dag-exec/executor-type
                   (fn [_] (throw (ex-info "executor disposed" {})))]
@@ -191,7 +166,7 @@
             output (:execution/output (runner/extract-output ctx))]
         (is (nil? (:evidence/runtime-class output)))))))
 
-(deftest extract-output-defaults-execution-mode-to-local-test
+(deftest ^{:stratum 0} extract-output-defaults-execution-mode-to-local-test
   (testing "execution-mode defaults to :local when :execution/mode absent"
     (let [ctx {:execution/artifacts []
                :execution/phase-results {}
@@ -199,6 +174,32 @@
                :execution/status :completed}
           output (:execution/output (runner/extract-output ctx))]
       (is (= :local (:evidence/execution-mode output))))))
+
+;------------------------------------------------------------------------------ Layer 1
+
+;; ============================================================================
+;; evidence_bundle/extract-execution-evidence (private) — same contract
+;; ============================================================================
+(deftest ^{:stratum 1} extract-impl-all-fields-test
+  (testing "private extract-execution-evidence mirrors collector behavior"
+    (let [started  (java.time.Instant/parse "2026-04-09T12:00:00Z")
+          finished (java.time.Instant/parse "2026-04-09T12:01:00Z")
+          state {:execution/output
+                 {:evidence/execution-mode   :governed
+                  :evidence/runtime-class    :docker
+                  :evidence/task-started-at  started
+                  :evidence/task-finished-at finished
+                  :evidence/image-digest     "sha256:fff000"}}
+          result (extract-evidence-impl state)]
+      (is (= :governed (:evidence/execution-mode result)))
+      (is (= :docker (:evidence/runtime-class result)))
+      (is (= started (:evidence/task-started-at result)))
+      (is (= finished (:evidence/task-finished-at result)))
+      (is (= "sha256:fff000" (:evidence/image-digest result))))))
+
+(deftest ^{:stratum 1} extract-impl-empty-state-test
+  (testing "private fn returns empty map for empty state"
+    (is (= {} (extract-evidence-impl {})))))
 
 ;------------------------------------------------------------------------------ Rich Comment
 (comment

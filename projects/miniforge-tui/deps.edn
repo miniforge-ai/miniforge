@@ -11,11 +11,18 @@
         ai.miniforge/automation-edge-correlator {:local/root "../../components/automation-edge-correlator"}
         ;; Core domain components needed by CLI
         ai.miniforge/schema {:local/root "../../components/schema"}
+        ai.miniforge/policy-clause {:local/root "../../components/policy-clause"}
+        ai.miniforge/decision-envelope {:local/root "../../components/decision-envelope"}
+        ai.miniforge/execution-grant {:local/root "../../components/execution-grant"}
+        ai.miniforge/effect-transaction {:local/root "../../components/effect-transaction"}
         ai.miniforge/algorithms {:local/root "../../components/algorithms"}
         ai.miniforge/anomaly {:local/root "../../components/anomaly"}
         ai.miniforge/clock {:local/root "../../components/clock"}
+        ai.miniforge/codex {:local/root "../../components/codex"}
+        ai.miniforge/codex-gap {:local/root "../../components/codex-gap"}
         ai.miniforge/coerce {:local/root "../../components/coerce"}
         ai.miniforge/content-hash {:local/root "../../components/content-hash"}
+        ai.miniforge/opsv {:local/root "../../components/opsv"}
         ai.miniforge/logging {:local/root "../../components/logging"}
         ai.miniforge/config {:local/root "../../components/config"}
         ai.miniforge/response {:local/root "../../components/response"}
@@ -27,6 +34,7 @@
         ai.miniforge/workflow-chain-software-factory {:local/root "../../components/workflow-chain-software-factory"}
         ai.miniforge/workflow-software-factory {:local/root "../../components/workflow-software-factory"}
         ai.miniforge/workflow-financial-etl {:local/root "../../components/workflow-financial-etl"}
+        ai.miniforge/phase-opsv {:local/root "../../components/phase-opsv"}
         ai.miniforge/phase-software-factory {:local/root "../../components/phase-software-factory"}
         ai.miniforge/llm {:local/root "../../components/llm"}
         ai.miniforge/tool {:local/root "../../components/tool"}

@@ -1,0 +1,47 @@
+# Fires an `architecture-updated` repository_dispatch at
+# miniforge-ai/miniforge-website whenever architecture content
+# (diagrams, ELI9 explainers) changes on main. The website's
+# sync-content.yml then pulls the canonical files and redeploys.
+# The website also runs a daily cron backstop, so a failed dispatch
+# delays the sync rather than losing it.
+#
+# Uses the write-scoped website-sync GitHub App (installed on
+# miniforge-website only); credentials are the org secrets
+# CI_BOT_WRITE_APPID / CI_BOT_WRITE_PEM.
+
+name: Notify website
+
+on:
+  push:
+    branches:
+      - main
+    paths:
+      - "docs/architecture/**"
+  workflow_dispatch:
+
+permissions: {}
+
+jobs:
+  dispatch:
+    name: Dispatch to miniforge-website
+    runs-on: ubuntu-latest
+    steps:
+      - name: Generate website token
+        id: app-token
+        uses: actions/create-github-app-token@d72941d797fd3113feb6b93fd0dec494b13a2547 # v1
+        with:
+          app-id: ${{ secrets.CI_BOT_WRITE_APPID }}
+          private-key: ${{ secrets.CI_BOT_WRITE_PEM }}
+          owner: miniforge-ai
+          repositories: miniforge-website
+
+      - uses: peter-evans/repository-dispatch@ff45666b9427631e3450c54a1bcbee4d9ff4d7c0 # v3
+        with:
+          token: ${{ steps.app-token.outputs.token }}
+          repository: miniforge-ai/miniforge-website
+          event-type: architecture-updated
+          client-payload: |
+            {
+              "source": "${{ github.repository }}",
+              "sha": "${{ github.sha }}"
+            }

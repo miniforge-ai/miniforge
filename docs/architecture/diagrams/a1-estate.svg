@@ -84,8 +84,8 @@
   <rect class="grpG" x="330" y="266" width="300" height="150" rx="8"/>
   <text class="h" x="342" y="288">Governance / gates (~85%)</text>
   <text class="m" x="342" y="308">policy · policy-pack · policy-calibration</text>
-  <text class="m" x="342" y="324">gate · gate-classification</text>
-  <text class="m" x="342" y="340">evidence-bundle (provenance chains)</text>
+  <text class="m" x="342" y="324">policy-clause · decision-envelope · gate</text>
+  <text class="m" x="342" y="340">gate-classification · evidence-bundle</text>
   <text class="m" x="342" y="356">compliance-scanner · evaluation</text>
   <text class="m" x="342" y="372">heuristic · improvement · self-healing</text>
   <text class="s" x="342" y="398">failure-classifier · anomaly · diagnosis</text>

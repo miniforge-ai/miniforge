@@ -6,6 +6,12 @@
 
 # N7 — Operational Policy Synthesis With Verification
 
+**Version:** 0.2.1-draft
+**Date:** 2026-08-06
+**Status:** Complete
+**Conformance:** MUST
+**Class:** Extension spec (N7+)
+
 ## 0. Status and scope
 
 ### 0.1 Purpose
@@ -15,23 +21,27 @@ This specification defines the normative requirements for **Operational Policy S
 performance bottlenecks via governed experiments, synthesizes operational policies, verifies
 them against explicit acceptance criteria, and emits fixes as auditable artifacts.
 
-### 0.2 Relationship to N1–N6
+### 0.2 Relationship to core and later extensions
 
 OPSV is an extension of existing Miniforge normative contracts:
 
 - **N1**: introduces new *concepts* (Experiment Pack, Operational Policy, Actuation Mode,
           Verification) as specializations of Workflow/Policy Pack/Artifact/Evidence.
-          Now landed in N1 §2.11–§2.14 and §12 (glossary).
-- **N2**: defines a new workflow family (`opsv.*`) and convergence loops as instances of the
-          validate→feedback→repair→re-validate pattern.
+          Now landed in N1 §2.11–§2.14 and §13 (glossary).
+- **N2**: supplies the phase lifecycle, gate, and bounded-loop contracts that the `opsv.*`
+          workflow family specializes in this specification.
 - **N3**: adds required event types for experiments and verification.
-          Now landed in N3 §3.13 (OPSV Events).
+          Now landed in N3 §3.14 (OPSV Events).
 - **N4**: defines new gates and policy-pack controls for experiment governance, safety, and actuation.
           Now landed in N4 §5.1.5 (OPSV Gates Pack).
 - **N5**: defines Fleet Mode command surfaces and navigation primitives for experiments and policy diffs.
           Now landed in N5 §2.3.3 (OPSV Commands) and §3.2.6 (OPSV Drill-Down View).
 - **N6**: defines evidence bundle requirements for experiment provenance, reproducibility, and
           verification artifacts. Now landed in N6 §2.8 (OPSV Evidence) and §3.1.1 (artifact types).
+- **N8**: supplies emergency-stop and safe-mode behavior for active OPSV runs (§3.1.4, §3.4).
+- **N10/Ariadne**: govern PR creation and direct apply as external effects using
+  DecisionEnvelopes, ExecutionGrants, EffectTransactions, rollback verification,
+  postconditions, audit events, and evidence.
 
 ### 0.3 Non-goals
 
@@ -74,15 +84,19 @@ Experiment Packs SHALL be hash-addressed and recorded in the event stream and ev
 **Verification** is the process of executing an Experiment Pack (or a verification subset) against a candidate Operational
  Policy and producing an evidence bundle showing whether success criteria are satisfied.
 
-### 1.4 Actuation Mode
+### 1.4 Requested Actuation Mode
 
-OPSV MUST support these actuation modes:
+OPSV MUST support these requested actuation modes:
 
-- **RECOMMEND_ONLY**: produce policy proposals and evidence; no changes are emitted.
-- **PR_ONLY**: produce changes as PRs (or patch sets) against declared repos.
-- **APPLY_ALLOWED**: apply changes directly only when explicitly permitted by policy packs and gates.
+- **RECOMMEND_ONLY** (`:recommend-only`): produce policy proposals and evidence; no changes are emitted.
+- **PR_ONLY** (`:pr-only`): produce changes as PRs (or patch sets) against declared repos.
+- **APPLY_ALLOWED** (`:apply-allowed`): request direct apply eligibility; it does not grant execution authority.
 
 `APPLY_ALLOWED` MUST be disabled by default.
+
+A requested mode is intent, not permission. The effective actuation decision MUST be
+derived under §5.4. PR creation and direct apply remain governed N10 effects and require
+valid authority at execution time.
 
 ## 2. System model
 
@@ -108,6 +122,7 @@ An OPSV run MUST produce:
 - **Evidence Bundle** per N6, including:
   - Experiment Pack hash and content
   - environment fingerprint (cluster, node pool, image digests, config)
+  - normalized risk score and explainable factor records
   - metric queries and snapshots used for conclusions
   - artifacts emitted and diffs
 - **Remediation Artifacts** depending on actuation mode (none, PRs, or applied changes)
@@ -187,64 +202,68 @@ CONVERGE MUST be expressed as a bounded loop with:
 
 ### 4.1 Experiment Pack schema (normative fields)
 
-An Experiment Pack MUST include:
+An Experiment Pack MUST use the N1 §2.12 namespaced top-level keys:
 
-- `id`: stable identifier
-- `version`: semantic version or monotonic revision
-- `targets`:
-  - `services`: selectors (repo and/or runtime)
-  - `environments`: selectors (cluster/namespace)
-- `workload`:
-  - `profile`: step/ramp/spike definitions
-  - `mix`: request classes and weights (if applicable)
-  - `warmup_seconds`, `cooldown_seconds`
-- `success_criteria`:
-  - latency thresholds (p95/p99) and measurement window
-  - error rate threshold and window
-  - stability criteria (max oscillation, max pod churn)
-  - optional cost ceiling or resource ceiling
-- `guardrails`:
-  - abort triggers with thresholds (error budget burn, saturation, tail latency)
-  - blast radius limits (max replicas delta, max node delta, namespaces)
-  - time windows
-- `convergence`:
-  - search space definition (candidate signals, thresholds, min/max)
-  - iteration limits and stop conditions
-- `actuation_intent`: one of `RECOMMEND_ONLY | PR_ONLY | APPLY_ALLOWED`
-- `required_instrumentation`: list of metrics/traces/log signals that MUST be present
+```clojure
+{:experiment-pack/id string
+ :experiment-pack/version string
+ :experiment-pack/targets {:services [...] :environments [...]}
+ :experiment-pack/workload
+ {:profile keyword
+  :mix [...]
+  :warmup-seconds long
+  :cooldown-seconds long}
+ :experiment-pack/success-criteria {...}
+ :experiment-pack/guardrails {...}
+ :experiment-pack/convergence {...}
+ :experiment-pack/actuation-intent keyword
+ :experiment-pack/required-instrumentation [...]}
+```
+
+Success criteria MUST cover latency/error windows and stability, with optional
+cost/resource ceilings. Guardrails MUST cover abort thresholds, blast radius,
+and time windows. Convergence MUST define the search space, iteration limit,
+and stop conditions. Actuation intent MUST be `:recommend-only`, `:pr-only`, or
+`:apply-allowed`.
 
 ### 4.2 Operational Policy Proposal schema (normative fields)
 
-A proposal MUST include:
+A proposal MUST use the N1 §2.11 namespaced top-level keys:
 
-- `policy_id`, `policy_version`
-- `target_services`, `target_envs`
-- `scaling`:
-  - chosen driver(s)
-  - thresholds and behaviors
-  - min/max bounds
-- `resources`:
-  - requests/limits recommendation or settings
-- `guardrails` (if emitted)
-- `verification_summary`: pass/fail plus confidence score and known caveats
-- `rollback_plan`: explicit rollback action
-- `evidence_refs`: pointers to evidence bundle elements per N6
+```clojure
+{:operational-policy/id string
+ :operational-policy/version string
+ :operational-policy/target-services [string ...]
+ :operational-policy/target-envs [string ...]
+ :operational-policy/scaling {...}
+ :operational-policy/resources {...}
+ :operational-policy/guardrails {...}
+ :operational-policy/verification-summary
+ {:passed? boolean :confidence keyword :caveats [string ...]}
+ :operational-policy/rollback-plan {...}
+ :operational-policy/evidence-refs [uuid ...]}
+```
+
+Scaling MUST include chosen drivers, thresholds, behaviors, and min/max bounds.
+Resources MUST contain requests/limits recommendations or settings. The rollback
+plan MUST identify a concrete N10-governed rollback action.
 
 ### 4.3 Event stream additions (N3 extension)
 
 OPSV SHALL emit these event types with required minimal payloads:
 
-- `opsv.experiment_planned` (pack hash, targets, risk score)
-- `opsv.experiment_started` (pack hash, environment fingerprint)
-- `opsv.load_step` (step id, intended load, observed load)
-- `opsv.guardrail_abort` (trigger, threshold, observed, rollback action)
-- `opsv.convergence_iteration` (iteration id, params, observed metrics summary)
-- `opsv.policy_proposed` (policy hash, diff refs, confidence)
-- `opsv.verification_result` (pass/fail, criteria evaluation)
-- `opsv.actuation_emitted` (PR refs or apply refs)
-- `opsv.drift_detected` (signal, deviation, suggested re-run)
+- `:opsv.experiment/planned` (Experiment Pack hash, targets, risk score)
+- `:opsv.experiment/started` (Experiment Pack hash, environment fingerprint)
+- `:opsv/load-step` (step id, intended load, observed load)
+- `:opsv.guardrail/abort` (trigger, threshold, observed, rollback action)
+- `:opsv.convergence/iteration` (iteration id, params, observed metrics summary)
+- `:opsv.policy/proposed` (policy hash, diff artifact refs, confidence)
+- `:opsv.verification/result` (pass/fail, criteria evaluation, confidence, caveats)
+- `:opsv.actuation/emitted` (requested/effective mode and correlated N10 effect records)
+- `:opsv.drift/detected` (signal, deviation, suggested re-run)
 
-All events MUST link to the corresponding evidence bundle id per N6.
+Every event MUST include `:opsv/evidence-bundle-id` for the preallocated OPSV
+evidence bundle per N6 §2.8.
 
 ## 5. Governance and safety (N4 extension)
 
@@ -259,6 +278,11 @@ OPSV MUST compute a risk score for each run using at least:
 
 Risk score MUST determine required gates and approvals.
 
+The risk result MUST contain a normalized score in `[0.0, 1.0]`, a level in
+`:low`, `:medium`, `:high`, or `:critical`, and explainable factor records containing
+the input, contribution, and rationale. Policy packs map score/level thresholds
+to approvals; implementations MUST NOT hide approval selection in an opaque model.
+
 ### 5.2 Gates
 
 Policy packs SHALL define gates for:
@@ -267,7 +291,7 @@ Policy packs SHALL define gates for:
 - **Environment Gate**: targets are allowed and within time windows.
 - **Blast Radius Gate**: max changes bounded.
 - **Abort Gate**: abort triggers configured.
-- **Actuation Gate**: PR-only vs apply allowed; apply requires explicit allowlist.
+- **Actuation Gate**: requested vs effective mode; apply requires an explicit allowlist.
 - **Evidence Completeness Gate**: evidence bundle contains required fields before actuation.
 
 If any gate fails, OPSV MUST produce remediation guidance as machine-readable output and human-readable summary.
@@ -277,6 +301,27 @@ If any gate fails, OPSV MUST produce remediation guidance as machine-readable ou
 - `APPLY_ALLOWED` MUST be disabled by default.
 - Production targets MUST require explicit allowlisting in policy packs.
 - All OPSV runs MUST support a global emergency stop.
+
+An N8 emergency stop or safe-mode entry MUST prevent new OPSV effects, abort
+active experiments at the next safe boundary, revoke their mutation grants,
+invoke verified rollback through the separately authorized recovery path, and
+record the disposition in N3/N6. Safe mode MUST set effective actuation to
+`:none` per N8's A0 posture.
+
+### 5.4 Effective actuation decision
+
+Before any external mutation, OPSV MUST compute an effective actuation decision
+from the requested mode, verification result, N4 gate results, N8 safe-mode
+state, and current Ariadne ExecutionGrant. The decision MAY reduce autonomy but MUST NOT
+promote beyond the requested mode.
+
+- `:none` emits only disposition evidence and is required when N8 forbids execution.
+- `:recommend-only` never produces an external mutation.
+- `:pr-only` requires a matching active grant for the PR-creation effect.
+- `:apply-allowed` requires successful verification, all gates, a valid scoped
+  ExecutionGrant at execution time, a verified rollback, and configured postconditions.
+
+The decision and every authority/effect reference MUST be recorded in N6 evidence.
 
 ## 6. Verification requirements
 
@@ -296,7 +341,9 @@ Verification MUST evaluate each success criterion and produce:
 - overall pass/fail
 - confidence/caveat fields (e.g., variance high, dependency noise)
 
-Verification failure MUST block actuation unless a policy pack explicitly allows “force apply” with elevated approval gates.
+Verification failure MUST block direct apply and MUST NOT be overridden by a
+policy pack. `PR_ONLY` MAY emit a failed candidate for review only when the PR
+is marked ineligible for merge and includes the failed criteria and evidence.
 
 ## 7. Emission and remediation
 
@@ -315,15 +362,18 @@ All changes MUST be emitted as artifacts with provenance per N6:
 
 - at least one PR per target repo or a coordinated patch set
 - included evidence bundle link/reference and rollback instructions in PR body
+- Ariadne grant, decision-envelope, and effect-transaction references for the provider mutation
 
 ### 7.3 Apply emission (optional, gated)
 
-`APPLY_ALLOWED` MAY apply changes directly only when all gates pass and the policy pack
- allows it; apply actions MUST be recorded as artifacts and events.
+`APPLY_ALLOWED` MAY apply changes directly only when §5.4 succeeds. Apply actions
+MUST execute as N10-governed effects with verified rollback and postcondition
+monitoring. A failed postcondition MUST trigger the declared rollback and record
+both the apply and rollback outcomes as artifacts, events, and evidence.
 
 ## 8. CLI/TUI extensions (N5 extension)
 
-Miniforge SHOULD add commands under `fleet` (exact naming may be refined, but contracts MUST exist):
+Miniforge MUST implement the canonical N5 §2.3.3 commands under `fleet`:
 
 - `fleet opsv plan …` → generate Experiment Packs and risk/gate status
 - `fleet opsv run …` → execute and converge
@@ -340,8 +390,23 @@ Fleet → Service → OPSV Runs → (Experiment Pack, Events, Evidence, Policy D
 A minimal compliant OPSV implementation MUST:
 
 - support staging-only operation
+- execute all seven §3.1 phases through the shared N2 workflow lifecycle
 - discover at least two candidate scaling drivers (e.g., CPU and a backlog/concurrency proxy if available)
 - run step/ramp experiments with abort guardrails
 - synthesize an HPA/KEDA-compatible policy proposal
-- produce verification pass/fail and evidence bundle
-- emit PRs with provenance
+- produce explainable risk and per-criterion verification results
+- emit the §4.3 events and a complete N6 §2.8 evidence bundle
+- emit PRs as N10-governed actions with provenance
+- default effective actuation to `:recommend-only`
+- honor N8 emergency stop and record rollback/disposition evidence
+
+---
+
+**Version History:**
+
+- 0.2.1-draft (2026-08-06): Replaced stale N10 intent/OIR/capability
+  correlation with the adopted Ariadne DecisionEnvelope, ExecutionGrant, and
+  EffectTransaction contracts
+- 0.2.0-draft (2026-08-04): Reconciled canonical schemas, events, evidence,
+  requested/effective actuation, verification blocking, N8 safe mode, and N10 effects
+- 0.1.0-draft (2026-02-01): Initial OPSV extension specification

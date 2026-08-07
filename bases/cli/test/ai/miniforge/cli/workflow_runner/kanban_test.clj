@@ -21,7 +21,8 @@
    [clojure.test :refer [deftest testing is use-fixtures]]
    [clojure.string :as str]
    [babashka.fs :as fs]
-   [ai.miniforge.cli.workflow-runner :as sut]))
+   [ai.miniforge.cli.workflow-runner.lifecycle :as lifecycle]
+   [ai.miniforge.cli.workflow-runner.spec-kanban :as kanban]))
 
 ;------------------------------------------------------------------------------ Layer 0
 
@@ -41,7 +42,7 @@
 (deftest ^{:stratum 0} move-spec-to-in-progress-non-work-spec-test
   (testing "non-work spec provenance is returned unchanged"
     (let [provenance {:source-file "/tmp/not-a-work-spec.edn"}]
-      (is (= provenance (sut/move-spec-to-in-progress! provenance))))))
+      (is (= provenance (kanban/move-spec-to-in-progress! provenance))))))
 
 ;; ============================================================================
 ;; failure-message
@@ -50,20 +51,20 @@
   (testing "uses first error entry when errors exist"
     (let [result {:execution/errors [{:type :gate-failed :message "lint failed"}]
                   :execution/status :failed}
-          msg (#'sut/failure-message result)]
+          msg (#'lifecycle/failure-message result)]
       (is (str/includes? msg "lint failed")))))
 
 (deftest ^{:stratum 0} failure-message-without-errors-test
   (testing "includes execution status when no errors"
     (let [result {:execution/errors []
                   :execution/status :failed}
-          msg (#'sut/failure-message result)]
+          msg (#'lifecycle/failure-message result)]
       (is (str/includes? msg "failed")))))
 
 (deftest ^{:stratum 0} failure-message-nil-errors-test
   (testing "handles nil errors gracefully"
     (let [result {:execution/status :timeout}
-          msg (#'sut/failure-message result)]
+          msg (#'lifecycle/failure-message result)]
       (is (str/includes? msg "timeout")))))
 
 ;------------------------------------------------------------------------------ Layer 1
@@ -81,10 +82,10 @@
   "Redirect kanban dirs and work-spec? predicate to use the temp test dir."
   [& body]
   `(let [prefix# (str *test-dir* "/work/")]
-     (with-redefs [sut/work-dirs {:in-progress (str *test-dir* "/work/in-progress")
+     (with-redefs [kanban/work-dirs {:in-progress (str *test-dir* "/work/in-progress")
                                   :done (str *test-dir* "/work/done")
                                   :failed (str *test-dir* "/work/failed")}
-                   sut/work-spec? (fn [provenance#]
+                   kanban/work-spec? (fn [provenance#]
                                     (when-let [src# (:source-file provenance#)]
                                       (str/starts-with? (str src#) prefix#)))]
        ~@body)))
@@ -99,7 +100,7 @@
     (let [spec-path (create-work-spec! "test.spec.edn")
           provenance {:source-file spec-path}]
       (with-test-kanban
-        (let [updated (sut/move-spec-to-in-progress! provenance)]
+        (let [updated (kanban/move-spec-to-in-progress! provenance)]
           (is (= (str *test-dir* "/work/in-progress/test.spec.edn")
                  (:source-file updated)))
           (is (fs/exists? (:source-file updated)))
@@ -110,9 +111,9 @@
     (let [spec-path (create-work-spec! "lifecycle.spec.edn")
           provenance {:source-file spec-path}]
       (with-test-kanban
-        (let [updated (sut/move-spec-to-in-progress! provenance)]
+        (let [updated (kanban/move-spec-to-in-progress! provenance)]
           ;; Simulate successful completion
-          (sut/move-spec-on-completion! updated {:execution/status :completed})
+          (kanban/move-spec-on-completion! updated {:execution/status :completed})
           (is (fs/exists? (str *test-dir* "/work/done/lifecycle.spec.edn")))
           (is (not (fs/exists? (:source-file updated)))))))))
 
@@ -121,8 +122,8 @@
     (let [spec-path (create-work-spec! "broken.spec.edn")
           provenance {:source-file spec-path}]
       (with-test-kanban
-        (let [updated (sut/move-spec-to-in-progress! provenance)]
-          (sut/move-spec-on-completion! updated {:execution/status :failed})
+        (let [updated (kanban/move-spec-to-in-progress! provenance)]
+          (kanban/move-spec-on-completion! updated {:execution/status :failed})
           (is (fs/exists? (str *test-dir* "/work/failed/broken.spec.edn")))
           (is (not (fs/exists? (:source-file updated)))))))))
 

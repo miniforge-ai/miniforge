@@ -252,6 +252,10 @@ Findings outside the scope are out-of-scope — report them in
 
 {{constraints|safe}}
 
+{% endif %}{% if has_codex %}## Codex — worth attending to before you review
+
+{{codex_landings|safe}}
+
 {% endif %}## Code to Review
 
 {{artifact_text|safe}}{% if has_tests %}

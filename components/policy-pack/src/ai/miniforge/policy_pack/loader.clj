@@ -35,13 +35,17 @@
    - Tainted content is isolated from instruction authority"
   (:require
    [ai.miniforge.policy-pack.schema :as schema]
+   [ai.miniforge.policy-pack.schema-validation :as schema-validation]
    [ai.miniforge.policy-pack.rules.pack-dependency-validation :as dep-validation]
    [ai.miniforge.knowledge.interface :as knowledge]
    [clojure.java.io :as io]
    [clojure.edn :as edn]
    [clojure.pprint :as pprint]
    [clojure.set]
-   [clojure.string :as str]))
+   [clojure.string :as str])
+  (:import
+   [java.time Instant]
+   [java.util Date]))
 
 ;------------------------------------------------------------------------------ Layer 0
 
@@ -69,20 +73,64 @@
   (try
     (let [content (slurp file)
           data (edn/read-string content)]
-      (schema/success :data data {:error nil}))
+      (schema-validation/success :data data {:error nil}))
     (catch Exception e
-      (schema/failure :data (.getMessage e)))))
+      (schema-validation/failure :data (.getMessage e)))))
+
+;; Timestamp wire form
+(defn ^{:stratum 0} map-instant-keys
+  "Apply `f` to every timestamp key PRESENT in `pack`. Those keys cross
+   the disk boundary as ISO-8601 strings, parsed back on read.
+
+   Presence, not non-nil-ness: an absent `:pack/signed-at` is legitimately
+   optional, but a key explicitly holding nil is a bad timestamp and goes
+   to `f` like any other. A missing required one stays missing so the
+   schema reports it, rather than being invented here."
+  [pack f]
+  (reduce (fn [acc k]
+            (if (contains? acc k)
+              (assoc acc k (f (get acc k)))
+              acc))
+          pack
+          [:pack/created-at :pack/updated-at :pack/signed-at]))
+
+(defn ^{:stratum 0} ->iso
+  "Timestamp -> ISO-8601 string, by actual type rather than by print form.
+
+   `inst?` admits BOTH `java.time.Instant` and `java.util.Date`, and
+   `pprint` renders them differently: a Date prints as `#inst` and reads
+   back, an Instant prints as `#object[...]` and makes the whole file
+   unreadable by `edn/read-string`. `builders/make-pack` stamps an
+   Instant, so the unreadable form is the default one.
+
+   Both are normalized; anything else throws, strings included — one that
+   does not parse would persist fine and fail only on the way back out.
+   Same defect class as effect-transaction's store and zettel frontmatter."
+  ^String [v]
+  (cond
+    (instance? Instant v) (.toString ^Instant v)
+    (instance? Date v) (.toString (.toInstant ^Date v))
+    :else (throw (ex-info "policy pack timestamp is not a supported instant type"
+                          {:value v :type (some-> v class .getName)}))))
 
 (defn ^{:stratum 0} ensure-instant
-  "Convert various timestamp representations to Instant."
+  "Wire timestamp -> Instant, or nil when the value is not a readable one.
+
+   Returns nil rather than the old fail-soft `Instant/now`. A pack whose
+   created-at cannot be read is corrupt, and stamping the current time
+   hides that at the moment it should surface — the pack loads clean,
+   dated today, and nothing downstream can tell. nil fails the schema's
+   `inst?` on the next step, so the corruption surfaces through the
+   loader's own `{:success? false :errors [...]}` channel: one entry in
+   `load-all-packs`' `:failed`, not an exception aborting the rest."
   [value]
   (cond
-    (inst? value) value
+    (instance? Instant value) value
+    (instance? Date value) (.toInstant ^Date value)
     (string? value) (try
-                      (java.time.Instant/parse value)
-                      (catch Exception _
-                        (java.time.Instant/now)))
-    :else (java.time.Instant/now)))
+                      (Instant/parse value)
+                      (catch Exception _ nil))
+    :else nil))
 
 (defn ^{:stratum 0} normalize-rule
   "Normalize a rule, ensuring required fields and types."
@@ -185,25 +233,6 @@
       {:max-depth max-depth
        :check-trust? check-trust?}))))
 
-;; Pack writing
-(defn ^{:stratum 0} write-pack-to-file
-  "Write a pack manifest to a single EDN file.
-
-   Arguments:
-   - pack - PackManifest
-   - file-path - Output file path
-
-   Returns:
-   - {:success? bool :error string}"
-  [pack file-path]
-  (try
-    (let [content (with-out-str
-                    (pprint/pprint pack))]
-      (spit file-path content)
-      {:success? true :error nil})
-    (catch Exception e
-      (schema/failure nil (.getMessage e)))))
-
 ;; Trust validation (N1 §2.10.2)
 (defn ^{:stratum 0} pack->trust-ref
   "Convert a pack manifest to a trust reference for validation."
@@ -222,12 +251,35 @@
   (-> pack
       (update :pack/rules #(mapv normalize-rule (or % [])))
       (update :pack/categories #(or % []))
-      (update :pack/created-at ensure-instant)
-      (update :pack/updated-at ensure-instant)
+      (map-instant-keys ensure-instant)
       ;; Default trust metadata
       (update :pack/trust-level #(or % :untrusted))
       (update :pack/authority #(or % :authority/data))
       (update :pack/dependencies #(or % []))))
+
+;; Pack writing
+(defn ^{:stratum 1} write-pack-to-file
+  "Write a pack manifest to a single EDN file.
+
+   Timestamps are normalized to ISO-8601 strings first: written raw, the
+   file cannot be read back at all. An unsupported timestamp is refused —
+   `->iso` throws, nothing is written, and the caller gets
+   `{:success? false}` instead of a file that fails only on load.
+
+   Arguments:
+   - pack - PackManifest
+   - file-path - Output file path
+
+   Returns:
+   - {:success? bool :error string-or-nil} — :error is nil on success"
+  [pack file-path]
+  (try
+    (let [content (with-out-str
+                    (pprint/pprint (map-instant-keys pack ->iso)))]
+      (spit file-path content)
+      {:success? true :error nil})
+    (catch Exception e
+      (schema-validation/failure nil (.getMessage e)))))
 
 ;; Directory structure loader
 (defn ^{:stratum 1} load-rule-file
@@ -235,8 +287,8 @@
   [file]
   (let [{:keys [success? data error]} (safe-read-edn file)]
     (if success?
-      (schema/success :rule (normalize-rule data) {:error nil})
-      (schema/failure :rule error))))
+      (schema-validation/success :rule (normalize-rule data) {:error nil})
+      (schema-validation/failure :rule error))))
 
 (defn- ^{:stratum 1} compose-resolved-pack
   "Merge inherited + overlay rules, apply overrides, inherit taxonomy ref."
@@ -248,7 +300,7 @@
         final-tax-ref  (or (:pack/taxonomy-ref overlay-pack) base-tax-ref)
         resolved-pack  (cond-> (assoc overlay-pack :pack/rules final-rules)
                          final-tax-ref (assoc :pack/taxonomy-ref final-tax-ref))]
-    (schema/success :pack resolved-pack {})))
+    (schema-validation/success :pack resolved-pack {})))
 
 (defn ^{:stratum 1} discover-packs
   "Discover all packs in a directory.
@@ -352,10 +404,10 @@
           (let [pack (normalize-pack data)
                 {:keys [valid? errors]} (schema/validate-pack pack)]
             (if valid?
-              (schema/success :pack pack {:errors nil})
-              (schema/failure-with-errors :pack errors)))
-          (schema/failure-with-errors :pack [{:file file-path :error error}])))
-      (schema/failure-with-errors :pack [{:file file-path :error "File not found"}]))))
+              (schema-validation/success :pack pack {:errors nil})
+              (schema-validation/failure-with-errors :pack errors)))
+          (schema-validation/failure-with-errors :pack [{:file file-path :error error}])))
+      (schema-validation/failure-with-errors :pack [{:file file-path :error "File not found"}]))))
 
 (defn ^{:stratum 2} load-pack-from-directory
   "Load a policy pack from a directory structure.
@@ -389,23 +441,23 @@
 
     (cond
       (not (.exists dir))
-      (schema/failure-with-errors :pack [{:dir dir-path :error "Directory not found"}])
+      (schema-validation/failure-with-errors :pack [{:dir dir-path :error "Directory not found"}])
 
       (not (.exists manifest-file))
-      (schema/failure-with-errors :pack [{:file "pack.edn" :error "Manifest not found in directory"}])
+      (schema-validation/failure-with-errors :pack [{:file "pack.edn" :error "Manifest not found in directory"}])
 
       :else
       (let [{:keys [success? data error]} (safe-read-edn manifest-file)]
         (if-not success?
-          (schema/failure-with-errors :pack [{:file "pack.edn" :error error}])
+          (schema-validation/failure-with-errors :pack [{:file "pack.edn" :error error}])
 
           ;; Load rules from rules/ directory if it exists
           (let [rule-files (when (.exists rules-dir)
                              (find-rule-files rules-dir))
                 rule-results (mapv load-rule-file rule-files)
-                successful-rules (keep :rule (filter schema/succeeded? rule-results))
+                successful-rules (keep :rule (filter schema-validation/succeeded? rule-results))
                 rule-errors (keep (fn [r]
-                                    (when-not (schema/succeeded? r)
+                                    (when-not (schema-validation/succeeded? r)
                                       {:error (:error r)}))
                                   rule-results)
 
@@ -423,8 +475,8 @@
                 {:keys [valid? errors]} (schema/validate-pack pack)]
 
             (if valid?
-              (schema/success :pack pack {:errors (when (seq rule-errors) rule-errors)})
-              (schema/failure-with-errors :pack (concat errors rule-errors)))))))))
+              (schema-validation/success :pack pack {:errors (when (seq rule-errors) rule-errors)})
+              (schema-validation/failure-with-errors :pack (concat errors rule-errors)))))))))
 
 (defn ^{:stratum 2} resolve-overlay
   "Resolve an overlay pack by merging inherited rules from base packs.
@@ -448,12 +500,12 @@
         missing    (find-missing-base-packs extends base-packs)]
 
     (if (seq missing)
-      (schema/failure-with-errors :pack (vec missing))
+      (schema-validation/failure-with-errors :pack (vec missing))
 
       (let [tax-errors (validate-taxonomy-refs (filterv some? base-packs) overlay-pack)]
 
         (if (seq tax-errors)
-          (schema/failure-with-errors :pack tax-errors)
+          (schema-validation/failure-with-errors :pack tax-errors)
 
           (let [inherited-rules  (vec (mapcat :pack/rules (filterv some? base-packs)))
                 inherited-ids    (set (map :rule/id inherited-rules))
@@ -461,7 +513,7 @@
                 collision-errors (validate-no-rule-id-collisions inherited-ids overlay-rules)]
 
             (if (seq collision-errors)
-              (schema/failure-with-errors :pack collision-errors)
+              (schema-validation/failure-with-errors :pack collision-errors)
               (compose-resolved-pack overlay-pack base-packs
                                      inherited-rules overlay-rules))))))))
 
@@ -488,7 +540,7 @@
   (let [file (io/file path)]
     (cond
       (not (.exists file))
-      (schema/failure-with-errors :pack [{:path path :error "Path not found"}])
+      (schema-validation/failure-with-errors :pack [{:path path :error "Path not found"}])
 
       (.isFile file)
       (load-pack-from-file path)
@@ -497,7 +549,7 @@
       (load-pack-from-directory path)
 
       :else
-      (schema/failure-with-errors :pack [{:path path :error "Unknown path type"}]))))
+      (schema-validation/failure-with-errors :pack [{:path path :error "Unknown path type"}]))))
 
 ;------------------------------------------------------------------------------ Layer 4
 
@@ -527,9 +579,9 @@
          results (map (fn [{:keys [path]}]
                         (assoc (load-pack path) :path path))
                       discovered)
-         loaded-packs (vec (keep :pack (filter schema/succeeded? results)))
+         loaded-packs (vec (keep :pack (filter schema-validation/succeeded? results)))
          failed (vec (map #(select-keys % [:path :errors])
-                         (remove schema/succeeded? results)))
+                         (remove schema-validation/succeeded? results)))
 
          ;; Run dependency validation if requested
          dep-validation-result (when (and validate-deps? (seq loaded-packs))
@@ -565,7 +617,7 @@
   (let [load-result (load-pack path)
         skip-trust? (:skip-trust-validation? options false)]
 
-    (if-not (schema/succeeded? load-result)
+    (if-not (schema-validation/succeeded? load-result)
       load-result  ; Return load errors immediately
 
       ;; Apply overrides if provided

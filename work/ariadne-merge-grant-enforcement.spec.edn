@@ -1,0 +1,55 @@
+;; =============================================================================
+;; Spec: Ariadne step 2d — enforce grants on PR merge
+;; =============================================================================
+
+{:spec/title "Require granted, transacted PR merges"
+
+ :spec/description
+ "Finish the PR-merge half of Ariadne step 2d. The existing merge transaction
+  already records a durable proposal and reconciles GitHub state, but it still
+  commits with :authority/unenforced. At the effect-decision seam, request a
+  narrowly scoped :effect/merge grant, evaluate it with the decision kernel,
+  and commit using the resulting grant and DecisionEnvelope identifiers.
+
+  Preserve the honesty behavior already delivered: enabling auto-merge is a
+  committing state, not a merged claim, and the merge SHA comes from GitHub
+  reconciliation rather than local HEAD. Decompose the current nested merge
+  flow into named domain decisions and application steps before adding grant
+  enforcement. The require-no-unresolved-threads policy must use provider
+  readback instead of its current always-clear stub."
+
+ :spec/intent
+ {:type :feature
+  :scope ["components/pr-lifecycle/**"]}
+
+ :spec/constraints
+ ["No GitHub merge command runs without an active matching grant and allow-class envelope"
+  "The durable proposal is the authority recheck input at commit"
+  "Enabling auto-merge is not reported as a completed merge"
+  "Published merge SHAs come from GitHub reconciliation, never local HEAD"
+  "Provider reads, domain decisions, and effect orchestration remain separate"
+  "Repeated proposal, grant, and envelope maps use shared test factories"
+  "Functions must express one decision or orchestration step without nested control pyramids"
+  "Stratified design permits at most three layers per implementation namespace"]
+
+ :spec/acceptance-criteria
+ ["A merge without an active :effect/merge grant fires no gh merge command"
+  "A mismatched or expired merge grant fires no gh merge command"
+  "A valid merge records effect, grant, and DecisionEnvelope identifiers before gh invocation"
+  "Enabling auto-merge leaves the effect in :committing until reconciliation"
+  "The merged event is published only after reconcile! observes a GitHub merge"
+  "The published merge SHA equals GitHub's reconciled mergeCommit"
+  "The unresolved-thread policy denies a merge when GitHub reports an unresolved thread"
+  "poly check reports 0 errors and 0 warnings"
+  "full bb test is green"]
+
+ :spec/priority
+ {:tier :high
+  :axes #{:correctness :observation :governance-credibility}
+  :theme :ariadne-grants
+  :rationale "Merge remains an ambient-authority escape hatch until the delivered transaction requires its grant."
+  :blocks []
+  :blocked-by ["ariadne-grant-issuance.spec.edn"
+               "ariadne-effect-transaction-fencing.spec.edn"]}
+
+ :spec/workflow-type :canonical-sdlc}

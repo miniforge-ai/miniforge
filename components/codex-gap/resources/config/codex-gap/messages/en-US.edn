@@ -1,0 +1,14 @@
+{:codex-gap/messages
+ {;; gap report rendering (T2 §4) — a VECTOR, never a scalar rollup
+  :report/header            "Codex gap report — {entry-count} misses across {run-count} run(s){skipped}"
+  :report/skipped-suffix    ", {n} unreadable ledger line(s) skipped"
+  :report/coverage          "coverage: {covered} of {total} misses carried a situation; consultation-match-rate: not instrumented"
+  :report/routing           "routing: {misrouted} of {attributed} attributed misses landed on problems the entered board cannot reach"
+  :report/anchoring         "anchoring: {problems} problems, {unanchored} unanchored, {speculative} speculative"
+  :report/anchoring-unavailable "anchoring: codex unavailable at report time"
+  :report/delivery          "delivery: {undelivered} undelivered; pin reads — {read} read, {unread} unread, {unknown} unknown"
+  :report/attention         "attention: {unheeded} misses matched a landing that was in front of the consumer"
+  :report/learning          "learning: not instrumented; {open} open harvest candidates (uncovered + queued)"
+  :report/review-queue      "review queue: {count} unresolved attribution(s) — excluded from every rate above"
+  :report/bucket-members    "  {bucket}: {ids}"
+  :report/no-members        "  (none)"}}

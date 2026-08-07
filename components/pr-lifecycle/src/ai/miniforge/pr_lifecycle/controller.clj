@@ -419,7 +419,17 @@
             (log/info logger :pr-lifecycle :controller/merged
                       {:message (messages/t :controller/merged)
                        :data {:pr-id (:pr/id pr)}})))
-        (add-history! controller :merge-blocked {:reason (:error merge-result)}))
+        (if (:auto-merge/enabled? (:data merge-result))
+          ;; Auto-merge is enabled and GitHub has not reported a merge
+          ;; yet. That is PENDING, not blocked — nothing is wrong and
+          ;; nothing needs an operator; the transaction record stays
+          ;; reconcilable and a later pass asks GitHub again.
+          (do
+            (update-status! controller :merge-pending)
+            (add-history! controller :merge-pending
+                          {:pr-id (:pr/id pr)
+                           :effect/id (:effect/id (:data merge-result))}))
+          (add-history! controller :merge-blocked {:reason (:error merge-result)})))
       merge-result)))
 
 ;------------------------------------------------------------------------------ Layer 4
@@ -615,11 +625,23 @@
                 (let [merge-result (attempt-merge! controller)]
                   (if (and (dag/ok? merge-result) (:merged? (:data merge-result)))
                     {:status :merged}
-                    (if (:rebased? (:data merge-result))
+                    (cond
+                      (:rebased? (:data merge-result))
                       ;; Rebased - need to wait for CI again
                       (do
                         (start-ci-monitoring! controller)
                         (recur))
+
+                      ;; Auto-merge accepted, merge not yet observed.
+                      ;; Reporting this as :blocked would tell the
+                      ;; operator something is wrong when nothing is —
+                      ;; the merge is in GitHub's hands and the record
+                      ;; is reconcilable.
+                      (:auto-merge/enabled? (:data merge-result))
+                      {:status :merge-pending
+                       :effect/id (:effect/id (:data merge-result))}
+
+                      :else
                       {:status :blocked :reason :merge-blocked})))
 
                 :changes-requested

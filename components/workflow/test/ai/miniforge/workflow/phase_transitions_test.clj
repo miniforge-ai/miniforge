@@ -15,7 +15,6 @@
 ;; WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 ;; See the License for the specific language governing permissions and
 ;; limitations under the License.
-
 (ns ai.miniforge.workflow.phase-transitions-test
   "Comprehensive coverage of the phase-transition decision + actuator
    surface — the seam where the runner picks an FSM event from a
@@ -37,6 +36,8 @@
    ;; loaded for its eager guard/action registration (infra-retry guards)
    [ai.miniforge.workflow.standard-guards-and-actions]))
 
+;------------------------------------------------------------------------------ Layer 0
+
 ;; Phase 4b removed `exec/redirect-target` and the
 ;; `determine-phase-event-failure-with-redirect-target` test (which
 ;; pinned the per-target `workflow.redirect/redirect-to-X` event
@@ -47,35 +48,33 @@
 ;; reads the verdict instead. See
 ;; `determine-phase-event-verdict-failure-emits-map-event` below
 ;; for the superseding assertion.
-
 ;; -------------------------------------------------------------------------- determine-phase-event
 ;;
 ;; Branches in priority order. Test in priority order so a regression
 ;; that swaps two adjacent branches surfaces clearly.
-
-(deftest determine-phase-event-retrying-wins-over-success
+(deftest ^{:stratum 0} determine-phase-event-retrying-wins-over-success
   (testing "retrying status produces :phase/retry"
     (is (= :phase/retry
            (exec/determine-phase-event {} {:status :retrying})))))
 
-(deftest determine-phase-event-already-done
+(deftest ^{:stratum 0} determine-phase-event-already-done
   (testing ":already-implemented and :already-satisfied both produce :phase/already-done"
     (is (= :phase/already-done
            (exec/determine-phase-event {} {:status :already-implemented})))
     (is (= :phase/already-done
            (exec/determine-phase-event {} {:status :already-satisfied})))))
 
-(deftest determine-phase-event-success
+(deftest ^{:stratum 0} determine-phase-event-success
   (testing "a :completed result with no transition request produces :phase/succeed"
     (is (= :phase/succeed
            (exec/determine-phase-event {} {:status :completed})))))
 
-(deftest determine-phase-event-failure-without-redirect-target
+(deftest ^{:stratum 0} determine-phase-event-failure-without-redirect-target
   (testing "a failed result with NO redirect target produces :phase/fail"
     (is (= :phase/fail
            (exec/determine-phase-event {} {:status :failed})))))
 
-(deftest determine-phase-event-verdict-failure-emits-map-event
+(deftest ^{:stratum 0} determine-phase-event-verdict-failure-emits-map-event
   (testing "Phase 4a (superseding the deleted :phase/terminal-fail
             workaround): a failed phase that attached a `:phase/verdict`
             produces a MAP event `{:type :phase/fail :phase/verdict v}`
@@ -100,7 +99,7 @@
       (is (= {:type :phase/fail :phase/verdict :verify/timeout}
              (exec/determine-phase-event {} (shape :verify/timeout)))))))
 
-(deftest determine-phase-event-catchall-defaults-to-succeed
+(deftest ^{:stratum 0} determine-phase-event-catchall-defaults-to-succeed
   (testing "an unrecognised status falls through to :phase/succeed (catch-all branch)"
     ;; This branch is the safety net for results whose status doesn't
     ;; match any of the predicates. Pin it explicitly — silent change
@@ -116,14 +115,91 @@
 ;; Three branches: redirect-cycle limit hit, valid state-changing transition,
 ;; invalid no-op transition. Each tested with a real compiled execution
 ;; machine so the FSM behaviour matches production.
-
-(defn- minimal-workflow []
+(defn- ^{:stratum 0} minimal-workflow []
   {:workflow/id      :transitions-test
    :workflow/version "1.0.0"
    :workflow/pipeline [{:phase :plan}
                        {:phase :implement}]})
 
-(defn- ctx-at-plan-active
+(defn- ^{:stratum 0} always-fail
+  "Stub for the transition-to-failed-fn parameter — flags the ctx as
+   :failed via a sentinel key the assertions check for."
+  [ctx]
+  (assoc ctx :execution/status :failed
+             :test/transition-to-failed-called? true))
+
+;; -------------------------------------------------------------------------- max-redirects guard semantics
+(deftest ^{:stratum 0} max-redirects-is-finite-and-positive
+  ;; This is the safety constant that prevents an infinite redirect loop.
+  ;; Keep it numeric-pinned so a refactor to `nil` or a string doesn't
+  ;; silently disable the guard.
+  (is (pos-int? exec/max-redirects)
+      "max-redirects must be a positive integer")
+  (is (<= exec/max-redirects 100)
+      "max-redirects must stay small enough that an unhappy loop ends fast"))
+
+;; -------------------------------------------------------------------------- infra-retry (Fable §2.4 PR-B)
+;;
+;; A transient infrastructure verdict retries the SAME phase against a
+;; dedicated infra budget — not the redirect/work budget — then terminates
+;; once the budget is spent. Driven through the real compiled execution
+;; machine so the guarded-array behaviour matches production.
+(defn- ^{:stratum 0} guarded-phase-machine
+  "Compile a single guarded-phase (implement) workflow and park the FSM at it."
+  []
+  (let [m (workflow-fsm/compile-execution-machine
+           {:workflow/id :infra-retry-test
+            :workflow/version "1.0.0"
+            :workflow/pipeline [{:phase :implement}]})]
+    {:machine m
+     :state (->> (workflow-fsm/initialize-execution m)
+                 (workflow-fsm/start-execution m))}))
+
+;; -------------------------------------------------------------------------- apply-gate-validation (fail-closed)
+;;
+;; Gates validate the canonical phase :output ([:result :output]). When gates
+;; are configured they MUST run even if that output is absent — skipping on a
+;; nil artifact would let a phase bypass validation (fail-open). The gate
+;; runner turns a nil artifact into a failed gate result.
+(deftest ^{:stratum 0} apply-gate-validation-fails-closed-on-missing-output
+  (testing "gates configured + no canonical :output → phase fails (not skipped)"
+    (let [out (exec/apply-gate-validation {:config {:gates [:review-approved]}}
+                                          {:result {}} {})]
+      (is (= :failed (:phase/status out)))
+      ;; The gate actually RAN on the nil artifact and emitted an error — proof
+      ;; the fail-closed branch engaged rather than the old fail-open skip
+      ;; (which returned the phase-result untouched, no :phase/gate-errors).
+      (is (seq (:phase/gate-errors out)))))
+  (testing "gates configured + approved verdict → pass attaches ONLY the
+            :allow decision envelope (Ariadne 1d); nothing else changes"
+    (let [pr  {:result {:output {:review/decision :approved}}}
+          out (exec/apply-gate-validation {:config {:gates [:review-approved]}} pr {})]
+      (is (= pr (dissoc out :phase/decision-envelope)) "unchanged on pass, envelope aside")
+      (is (= :allow (get-in out [:phase/decision-envelope :envelope/decision])))
+      (is (not (contains? out :phase/status)))
+      (is (not (contains? out :phase/gate-errors)))))
+  (testing "no gates configured → unchanged (nothing to validate)"
+    (let [pr {:result {}}]
+      (is (= pr (exec/apply-gate-validation {:config {:gates []}} pr {}))))))
+
+(defn- ^{:stratum 0} policy-rule
+  []
+  {:rule/id          :test/forbidden
+   :rule/enabled?    true
+   :rule/severity    :critical
+   :rule/applies-to  {:phases #{:review}}
+   :rule/detection   {:type :content-scan :pattern "FORBIDDEN"}
+   :rule/enforcement {:action :hard-halt :message "Forbidden content"}})
+
+(defn- ^{:stratum 0} implement-code-artifact
+  []
+  {:code/files [{:path "src/core.clj"
+                 :content "(def x \"FORBIDDEN\")"
+                 :action :modify}]})
+
+;------------------------------------------------------------------------------ Layer 1
+
+(defn- ^{:stratum 1} ctx-at-plan-active
   "Build a minimal execution context whose FSM is parked at plan-active
    so transitions have somewhere meaningful to go."
   []
@@ -139,108 +215,7 @@
                                 :succeeded? true
                                 :response-chain []}}))
 
-(defn- always-fail
-  "Stub for the transition-to-failed-fn parameter — flags the ctx as
-   :failed via a sentinel key the assertions check for."
-  [ctx]
-  (assoc ctx :execution/status :failed
-             :test/transition-to-failed-called? true))
-
-;; Phase 4b removed `apply-phase-transition-redirect-over-budget-
-;; transitions-to-failed`. The runner's parallel `is-redirect?` check
-;; that the test pinned was deleted — the FSM's
-;; `:budget/redirects-spent?` guard on the guarded `:phase/fail` array
-;; enforces the same `max-redirects` ceiling, and the verdict-routes
-;; integration tests in fsm_test.clj exercise it end-to-end with the
-;; real compiled machine.
-
-(deftest apply-phase-transition-state-changing-event-returns-next-ctx
-  (testing "a valid event that moves the FSM forward returns the advanced ctx (no failure routing)"
-    (let [ctx (ctx-at-plan-active)
-          prior-state (:execution/fsm-state ctx)
-          out (exec/apply-phase-transition ctx :phase/succeed [] identity always-fail)]
-      (is (nil? (:test/transition-to-failed-called? out))
-          "happy-path transition must NOT call transition-to-failed-fn")
-      (is (not= prior-state (:execution/fsm-state out))
-          ":execution/fsm-state must move forward"))))
-
-(deftest apply-phase-transition-retry-event-tolerates-no-state-change
-  (testing ":phase/retry is the one event allowed to leave the FSM at the same state"
-    ;; The current FSM doesn't define :phase/retry transitions at every
-    ;; state. apply-phase-transition specially allows :phase/retry to
-    ;; pass through even when the state doesn't change — without this,
-    ;; the retry path would be misclassified as an invalid transition
-    ;; and flip the workflow to :failed.
-    (let [ctx (ctx-at-plan-active)
-          prior-state (:execution/fsm-state ctx)
-          out (exec/apply-phase-transition ctx :phase/retry [] identity always-fail)]
-      (is (nil? (:test/transition-to-failed-called? out))
-          ":phase/retry must NEVER route to transition-to-failed-fn even if state is unchanged")
-      (is (= prior-state (:execution/fsm-state out))
-          ":phase/retry preserves the FSM state (no spurious advance)"))))
-
-(deftest apply-phase-transition-invalid-event-without-state-change-fails-loud
-  (testing "an undefined event that doesn't move the FSM is recognised as invalid"
-    (let [ctx (ctx-at-plan-active)
-          out (exec/apply-phase-transition ctx :phase/no-such-event [] identity always-fail)]
-      (is (true? (:test/transition-to-failed-called? out))
-          "undefined event with no state change MUST route through transition-to-failed-fn — silently swallowing the event was the regression we're guarding")
-      (is (some #(= :invalid-transition (:type %)) (:execution/errors out))
-          ":invalid-transition error must land in :execution/errors"))))
-
-;; -------------------------------------------------------------------------- max-redirects guard semantics
-
-(deftest max-redirects-is-finite-and-positive
-  ;; This is the safety constant that prevents an infinite redirect loop.
-  ;; Keep it numeric-pinned so a refactor to `nil` or a string doesn't
-  ;; silently disable the guard.
-  (is (pos-int? exec/max-redirects)
-      "max-redirects must be a positive integer")
-  (is (<= exec/max-redirects 100)
-      "max-redirects must stay small enough that an unhappy loop ends fast"))
-
-;; -------------------------------------------------------------------------- end-to-end determine→apply
-
-;; Phase 4b removed `determine-then-apply-redirect-chain-fails-at-max-budget`.
-;; The runner's parallel max-budget check is gone; the same end-to-end
-;; assertion (over-budget redirect → terminal :failed) now lives in
-;; fsm_test.clj's per-phase verdict-routes integration tests, where it
-;; runs against the real compiled FSM with the guarded `:phase/fail`
-;; array's `:budget/redirects-spent?` guard doing the work.
-
-(deftest determine-then-apply-success-path-advances-fsm
-  (testing "running determine then apply on a clean success result advances the FSM"
-    (let [result {:status :completed}
-          event (exec/determine-phase-event {} result)
-          ctx (ctx-at-plan-active)
-          prior-state (:execution/fsm-state ctx)
-          out (exec/apply-phase-transition ctx event [] identity always-fail)]
-      (is (= :phase/succeed event)
-          "sanity: determine-phase-event picks :phase/succeed on :completed")
-      (is (nil? (:test/transition-to-failed-called? out))
-          "happy path must not flag the ctx as failed")
-      (is (not= prior-state (:execution/fsm-state out))
-          "happy path must move the FSM forward"))))
-
-;; -------------------------------------------------------------------------- infra-retry (Fable §2.4 PR-B)
-;;
-;; A transient infrastructure verdict retries the SAME phase against a
-;; dedicated infra budget — not the redirect/work budget — then terminates
-;; once the budget is spent. Driven through the real compiled execution
-;; machine so the guarded-array behaviour matches production.
-
-(defn- guarded-phase-machine
-  "Compile a single guarded-phase (implement) workflow and park the FSM at it."
-  []
-  (let [m (workflow-fsm/compile-execution-machine
-           {:workflow/id :infra-retry-test
-            :workflow/version "1.0.0"
-            :workflow/pipeline [{:phase :implement}]})]
-    {:machine m
-     :state (->> (workflow-fsm/initialize-execution m)
-                 (workflow-fsm/start-execution m))}))
-
-(deftest infra-verdict-retries-same-phase-then-terminates
+(deftest ^{:stratum 1} infra-verdict-retries-same-phase-then-terminates
   (testing "infra verdict retries the same phase up to the infra budget, then
             terminates — and never touches the redirect/work budget"
     ;; The budget is EDN-owned (:max-infra-retries) — derive the loop from
@@ -262,7 +237,7 @@
         (is (= :failed (:_state spent))
             "infra budget exhausted (>= max-infra-retries) → terminal :failed")))))
 
-(deftest non-infra-verdict-does-not-consume-infra-budget
+(deftest ^{:stratum 1} non-infra-verdict-does-not-consume-infra-budget
   (testing "a work-terminal verdict goes straight to :failed without retrying"
     (let [{:keys [machine state]} (guarded-phase-machine)
           out (fsm/transition machine state
@@ -270,61 +245,85 @@
       (is (= :failed (:_state out)) "terminal work verdict → :failed immediately")
       (is (= 0 (get out :infra-retry-count 0)) "no infra retry consumed"))))
 
-;; -------------------------------------------------------------------------- apply-gate-validation (fail-closed)
-;;
-;; Gates validate the canonical phase :output ([:result :output]). When gates
-;; are configured they MUST run even if that output is absent — skipping on a
-;; nil artifact would let a phase bypass validation (fail-open). The gate
-;; runner turns a nil artifact into a failed gate result.
-
-(deftest apply-gate-validation-fails-closed-on-missing-output
-  (testing "gates configured + no canonical :output → phase fails (not skipped)"
-    (let [out (exec/apply-gate-validation {:config {:gates [:review-approved]}}
-                                          {:result {}} {})]
-      (is (= :failed (:phase/status out)))
-      ;; The gate actually RAN on the nil artifact and emitted an error — proof
-      ;; the fail-closed branch engaged rather than the old fail-open skip
-      ;; (which returned the phase-result untouched, no :phase/gate-errors).
-      (is (seq (:phase/gate-errors out)))))
-  (testing "gates configured + approved verdict → phase-result returned UNCHANGED
-            (apply-gate-validation adds nothing when gates pass)"
-    (let [pr  {:result {:output {:review/decision :approved}}}
-          out (exec/apply-gate-validation {:config {:gates [:review-approved]}} pr {})]
-      (is (= pr out) "unchanged on pass")
-      (is (not (contains? out :phase/status)))
-      (is (not (contains? out :phase/gate-errors)))))
-  (testing "no gates configured → unchanged (nothing to validate)"
-    (let [pr {:result {}}]
-      (is (= pr (exec/apply-gate-validation {:config {:gates []}} pr {}))))))
-
-(defn- policy-rule
-  []
-  {:rule/id          :test/forbidden
-   :rule/enabled?    true
-   :rule/severity    :critical
-   :rule/applies-to  {:phases #{:review}}
-   :rule/detection   {:type :content-scan :pattern "FORBIDDEN"}
-   :rule/enforcement {:action :hard-halt :message "Forbidden content"}})
-
-(defn- policy-pack
+(defn- ^{:stratum 1} policy-pack
   []
   {:pack/id    "test-pack"
    :pack/name  "Test Pack"
    :pack/rules [(policy-rule)]})
 
-(defn- implement-code-artifact
-  []
-  {:code/files [{:path "src/core.clj"
-                 :content "(def x \"FORBIDDEN\")"
-                 :action :modify}]})
+;------------------------------------------------------------------------------ Layer 2
 
-(defn- policy-review-context
+;; Phase 4b removed `apply-phase-transition-redirect-over-budget-
+;; transitions-to-failed`. The runner's parallel `is-redirect?` check
+;; that the test pinned was deleted — the FSM's
+;; `:budget/redirects-spent?` guard on the guarded `:phase/fail` array
+;; enforces the same `max-redirects` ceiling, and the verdict-routes
+;; integration tests in fsm_test.clj exercise it end-to-end with the
+;; real compiled machine.
+(deftest ^{:stratum 2} apply-phase-transition-state-changing-event-returns-next-ctx
+  (testing "a valid event that moves the FSM forward returns the advanced ctx (no failure routing)"
+    (let [ctx (ctx-at-plan-active)
+          prior-state (:execution/fsm-state ctx)
+          out (exec/apply-phase-transition ctx :phase/succeed [] identity always-fail)]
+      (is (nil? (:test/transition-to-failed-called? out))
+          "happy-path transition must NOT call transition-to-failed-fn")
+      (is (not= prior-state (:execution/fsm-state out))
+          ":execution/fsm-state must move forward"))))
+
+(deftest ^{:stratum 2} apply-phase-transition-retry-event-tolerates-no-state-change
+  (testing ":phase/retry is the one event allowed to leave the FSM at the same state"
+    ;; The current FSM doesn't define :phase/retry transitions at every
+    ;; state. apply-phase-transition specially allows :phase/retry to
+    ;; pass through even when the state doesn't change — without this,
+    ;; the retry path would be misclassified as an invalid transition
+    ;; and flip the workflow to :failed.
+    (let [ctx (ctx-at-plan-active)
+          prior-state (:execution/fsm-state ctx)
+          out (exec/apply-phase-transition ctx :phase/retry [] identity always-fail)]
+      (is (nil? (:test/transition-to-failed-called? out))
+          ":phase/retry must NEVER route to transition-to-failed-fn even if state is unchanged")
+      (is (= prior-state (:execution/fsm-state out))
+          ":phase/retry preserves the FSM state (no spurious advance)"))))
+
+(deftest ^{:stratum 2} apply-phase-transition-invalid-event-without-state-change-fails-loud
+  (testing "an undefined event that doesn't move the FSM is recognised as invalid"
+    (let [ctx (ctx-at-plan-active)
+          out (exec/apply-phase-transition ctx :phase/no-such-event [] identity always-fail)]
+      (is (true? (:test/transition-to-failed-called? out))
+          "undefined event with no state change MUST route through transition-to-failed-fn — silently swallowing the event was the regression we're guarding")
+      (is (some #(= :invalid-transition (:type %)) (:execution/errors out))
+          ":invalid-transition error must land in :execution/errors"))))
+
+;; -------------------------------------------------------------------------- end-to-end determine→apply
+;; Phase 4b removed `determine-then-apply-redirect-chain-fails-at-max-budget`.
+;; The runner's parallel max-budget check is gone; the same end-to-end
+;; assertion (over-budget redirect → terminal :failed) now lives in
+;; fsm_test.clj's per-phase verdict-routes integration tests, where it
+;; runs against the real compiled FSM with the guarded `:phase/fail`
+;; array's `:budget/redirects-spent?` guard doing the work.
+(deftest ^{:stratum 2} determine-then-apply-success-path-advances-fsm
+  (testing "running determine then apply on a clean success result advances the FSM"
+    (let [result {:status :completed}
+          event (exec/determine-phase-event {} result)
+          ctx (ctx-at-plan-active)
+          prior-state (:execution/fsm-state ctx)
+          out (exec/apply-phase-transition ctx event [] identity always-fail)]
+      (is (= :phase/succeed event)
+          "sanity: determine-phase-event picks :phase/succeed on :completed")
+      (is (nil? (:test/transition-to-failed-called? out))
+          "happy path must not flag the ctx as failed")
+      (is (not= prior-state (:execution/fsm-state out))
+          "happy path must move the FSM forward"))))
+
+(defn- ^{:stratum 2} policy-review-context
   []
   {:policy-packs [(policy-pack)]
    :execution/phase-results
    {:implement {:artifact (implement-code-artifact)}}})
 
-(deftest apply-gate-validation-policy-review-uses-implement-artifact
+;------------------------------------------------------------------------------ Layer 3
+
+(deftest ^{:stratum 3} apply-gate-validation-policy-review-uses-implement-artifact
   (testing "policy-review runs through the normal gate path against implemented code"
     (let [phase-result {:result {:output {:review/decision :approved}}}
           out          (exec/apply-gate-validation
@@ -332,4 +331,8 @@
                         phase-result
                         (policy-review-context))]
       (is (= :failed (:phase/status out)))
-      (is (= :policy-review (get-in out [:phase/gate-errors 0 :gate]))))))
+      (is (= :deny (get-in out [:phase/decision-envelope :envelope/decision])))
+      ;; gate-errors are now a projection of the envelope's reasons: the
+      ;; hard-halt rule arrives as a precise rule-violation, not a bare gate id
+      (is (= :reason/rule-violation (get-in out [:phase/gate-errors 0 :reason/code])))
+      (is (= :test/forbidden (get-in out [:phase/gate-errors 0 :reason/rule-id]))))))

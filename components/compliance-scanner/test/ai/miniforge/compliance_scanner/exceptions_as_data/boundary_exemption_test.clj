@@ -19,50 +19,51 @@
   "Boundary-namespace exemption: throws in cli/web/http/mcp/etc. are skipped."
   (:require
    [clojure.test :refer [deftest is testing]]
-   [ai.miniforge.compliance-scanner.exceptions-as-data :as exc]))
+   [ai.miniforge.compliance-scanner.exceptions-as-data :as exc]
+   [ai.miniforge.compliance-scanner.exceptions-as-data-classify :as classify]))
 
 ;------------------------------------------------------------------------------ Layer 0
 
 (deftest ^{:stratum 0} cli-namespace-is-boundary
   (testing "*.cli.* and *-main namespaces are boundaries"
-    (is (true?  (exc/boundary-namespace? 'ai.miniforge.cli.main)))
-    (is (true?  (exc/boundary-namespace? 'ai.miniforge.cli.commands.scan)))
-    (is (true?  (exc/boundary-namespace? 'ai.miniforge.foo.bar-main)))))
+    (is (true?  (classify/boundary-namespace? 'ai.miniforge.cli.main)))
+    (is (true?  (classify/boundary-namespace? 'ai.miniforge.cli.commands.scan)))
+    (is (true?  (classify/boundary-namespace? 'ai.miniforge.foo.bar-main)))))
 
 (deftest ^{:stratum 0} http-and-web-namespaces-are-boundaries
   (testing "explicit `http` and `web` segments are boundaries"
-    (is (true? (exc/boundary-namespace? 'ai.miniforge.foo.http.handlers)))
-    (is (true? (exc/boundary-namespace? 'ai.miniforge.web.handlers))))
+    (is (true? (classify/boundary-namespace? 'ai.miniforge.foo.http.handlers)))
+    (is (true? (classify/boundary-namespace? 'ai.miniforge.web.handlers))))
 
   (testing "component names that merely contain `http` are NOT boundaries"
     ;; bb-data-plane-http is a component name, not a `.http.` boundary
     ;; — its core/impl namespaces still need to return anomalies internally.
-    (is (false? (exc/boundary-namespace? 'ai.miniforge.bb-data-plane-http.core)))))
+    (is (false? (classify/boundary-namespace? 'ai.miniforge.bb-data-plane-http.core)))))
 
 (deftest ^{:stratum 0} mcp-listener-consumer-and-boundary-namespaces
   (testing "the explicit boundary segments are detected"
-    (is (true? (exc/boundary-namespace? 'ai.miniforge.mcp.bridge)))
-    (is (true? (exc/boundary-namespace? 'ai.miniforge.kafka.consumer)))
-    (is (true? (exc/boundary-namespace? 'ai.miniforge.events.listener)))
-    (is (true? (exc/boundary-namespace? 'ai.miniforge.events.listeners)))
-    (is (true? (exc/boundary-namespace? 'ai.miniforge.foo.boundary.in)))))
+    (is (true? (classify/boundary-namespace? 'ai.miniforge.mcp.bridge)))
+    (is (true? (classify/boundary-namespace? 'ai.miniforge.kafka.consumer)))
+    (is (true? (classify/boundary-namespace? 'ai.miniforge.events.listener)))
+    (is (true? (classify/boundary-namespace? 'ai.miniforge.events.listeners)))
+    (is (true? (classify/boundary-namespace? 'ai.miniforge.foo.boundary.in)))))
 
 (deftest ^{:stratum 0} dashed-mcp-base-is-boundary
   (testing "the MCP context-server base is an external protocol boundary"
-    (is (true? (exc/boundary-namespace? 'ai.miniforge.mcp-context-server.tools)))
-    (is (true? (exc/boundary-namespace? 'ai.miniforge.mcp-context-server.server)))))
+    (is (true? (classify/boundary-namespace? 'ai.miniforge.mcp-context-server.tools)))
+    (is (true? (classify/boundary-namespace? 'ai.miniforge.mcp-context-server.server)))))
 
 (deftest ^{:stratum 0} response-anomaly-bridge-is-boundary
   (testing "the canonical thrown-anomaly bridge is an explicit boundary"
-    (is (true? (exc/boundary-namespace? 'ai.miniforge.response.anomaly)))
-    (is (false? (exc/boundary-namespace? 'ai.miniforge.response.translate)))))
+    (is (true? (classify/boundary-namespace? 'ai.miniforge.response.anomaly)))
+    (is (false? (classify/boundary-namespace? 'ai.miniforge.response.translate)))))
 
 (deftest ^{:stratum 0} core-namespaces-are-not-boundaries
   (testing "ordinary component core namespaces are not boundaries"
-    (is (false? (exc/boundary-namespace? 'ai.miniforge.agent.planner)))
-    (is (false? (exc/boundary-namespace? 'ai.miniforge.workflow.runner)))
-    (is (false? (exc/boundary-namespace? 'ai.miniforge.config.user)))
-    (is (false? (exc/boundary-namespace? 'ai.miniforge.some-mcp-ish.core)))))
+    (is (false? (classify/boundary-namespace? 'ai.miniforge.agent.planner)))
+    (is (false? (classify/boundary-namespace? 'ai.miniforge.workflow.runner)))
+    (is (false? (classify/boundary-namespace? 'ai.miniforge.config.user)))
+    (is (false? (classify/boundary-namespace? 'ai.miniforge.some-mcp-ish.core)))))
 
 (deftest ^{:stratum 0} boundary-files-yield-zero-violations
   (testing "throws inside a CLI namespace produce no violations"

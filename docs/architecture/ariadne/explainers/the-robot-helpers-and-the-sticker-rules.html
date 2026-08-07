@@ -1,0 +1,429 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>The Robot Helpers and the Sticker Rules — miniforge.ai</title>
+  <meta name="description" content="Miniforge's agent policy and routing architecture, explained simply: slips, stickers, doorkeepers, and picking helpers.">
+  <link rel="canonical" href="https://miniforge.ai/architectures/eli9-robot-helpers-sticker-rules">
+  <link rel="icon" href="/assets/favicon.svg" type="image/svg+xml">
+</head>
+<body>
+<div style="max-width:640px;margin:0 auto 28px;font-family:Menlo,Consolas,monospace;font-size:12px;letter-spacing:.08em">
+<a href="/architectures" style="color:#ff5e1a;text-decoration:none">&larr; MINIFORGE.AI // DRAWING REGISTER</a>
+</div>
+
+<style>
+:root { --bg:#faf9f6; --ink:#26221c; --sub:#6a635a; --accent:#ff5e1a; --card:#ffffff; --line:#e0dcd4; }
+@media (prefers-color-scheme: dark) { :root { --bg:#1c1a17; --ink:#ece8e0; --sub:#a49c90; --card:#26231e; --line:#3a362f; } }
+:root[data-theme="dark"] { --bg:#1c1a17; --ink:#ece8e0; --sub:#a49c90; --card:#26231e; --line:#3a362f; }
+:root[data-theme="light"] { --bg:#faf9f6; --ink:#26221c; --sub:#6a635a; --card:#ffffff; --line:#e0dcd4; }
+body { background:var(--bg); color:var(--ink); font-family:Georgia, 'Times New Roman', serif; margin:0; padding:40px 20px 80px; line-height:1.65; }
+h1 { font-family:Helvetica, Arial, sans-serif; color:var(--accent); font-size:34px; text-align:center; max-width:700px; margin:0 auto 8px; text-wrap:balance; }
+h2 { font-family:Helvetica, Arial, sans-serif; color:var(--accent); font-size:23px; max-width:640px; margin:44px auto 8px; }
+p, blockquote { max-width:640px; margin:14px auto; font-size:17px; }
+p.li { margin:8px auto; padding-left:1.2em; }
+em { color:var(--sub); }
+blockquote { border-left:4px solid var(--accent); padding:10px 20px; background:var(--card); border-radius:0 8px 8px 0; font-size:18px; }
+code { font-family:Menlo, Consolas, monospace; font-size:.85em; background:rgba(30,95,150,.12); padding:1px 5px; border-radius:4px; }
+hr { border:none; border-top:1px solid var(--line); max-width:640px; margin:40px auto; }
+.fig { max-width:960px; margin:26px auto; background:#ffffff; border:1px solid var(--line); border-radius:10px; padding:10px; overflow-x:auto; }
+.fig svg { display:block; min-width:760px; width:100%; height:auto; }
+.twrap { max-width:860px; margin:20px auto; overflow-x:auto; background:#ffffff; border:1px solid var(--line); border-radius:8px; }
+table { border-collapse:collapse; width:100%; font-family:Helvetica, Arial, sans-serif; font-size:13.5px; color:#26221c; }
+th, td { text-align:left; padding:8px 12px; border-bottom:1px solid #e8e4dc; }
+th { background:#f0eee8; }
+</style>
+<h1>The Robot Helpers and the Sticker Rules</h1>
+<p><em>The agent policy and routing architecture (<code>../tenancy-ownership-access.md</code> §11, §13), explained the way Feynman would insist on: if you can't say it simply, you don't understand it yet. Companion to Your House, Their Clubhouse, and the Passes, which covers whose things are whose. Grown-up translation table at the end.</em></p>
+<hr>
+<h2>The robots never open doors</h2>
+<p>Your house has robot helpers. They are very smart — and very gullible. Anyone who slips a note into a robot's ear can talk it into wanting almost anything. That's not the robot being bad; it's just how robots are.</p>
+<p>So we made one house rule that fixes everything else:</p>
+<blockquote><strong>Robots never open doors. Robots write request slips.</strong></blockquote>
+<p>When a robot wants to do something — send a letter, spend a dollar, show your drawing to a neighbor — it writes exactly what it wants on a slip and puts the slip in a mailbox. A very careful, very boring doorkeeper reads every slip. The doorkeeper is a robot too — but a robot with <strong>no ears</strong>. There is nowhere to whisper into. You can hand it a slip, a pass, a sticker: things, never words. It cannot be talked into anything, because it cannot be talked to at all. It only follows rules.</p>
+<p>The smart one proposes. The boring one decides. That's the whole trick, and everything else is details.</p>
+<p></p><div class="fig"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 900 520" font-family="Helvetica, Arial, sans-serif">
+  <defs>
+    <marker id="fig1-a" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="8" markerHeight="8" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="#3a76b8"/></marker>
+    <marker id="fig1-ar" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="8" markerHeight="8" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="#c0392b"/></marker>
+  </defs>
+  <rect width="900" height="520" fill="#ffffff"/>
+  <text x="450" y="42" text-anchor="middle" font-size="24" font-weight="bold" fill="#1e5f96">Robots never open doors. Robots write slips.</text>
+
+  <!-- robot -->
+  <line x1="150" y1="120" x2="150" y2="102" stroke="#d6b656" stroke-width="3"/>
+  <circle cx="150" cy="96" r="7" fill="#d79b00"/>
+  <rect x="110" y="120" width="80" height="64" rx="14" fill="#fff2cc" stroke="#d6b656" stroke-width="2.5"/>
+  <circle cx="136" cy="146" r="7" fill="#232323"/>
+  <circle cx="164" cy="146" r="7" fill="#232323"/>
+  <path d="M134,166 Q150,176 166,166" stroke="#232323" stroke-width="2.5" fill="none"/>
+  <rect x="118" y="192" width="64" height="52" rx="10" fill="#fff2cc" stroke="#d6b656" stroke-width="2.5"/>
+  <text x="150" y="276" text-anchor="middle" font-size="16" font-weight="bold" fill="#8a6d1a">the robot</text>
+  <text x="150" y="296" text-anchor="middle" font-size="13" fill="#8a6d1a">very smart, very gullible</text>
+
+  <!-- whisper note -->
+  <path d="M60,120 Q40,150 62,178" stroke="#c0392b" stroke-width="2" fill="none" stroke-dasharray="5 4" marker-end="url(#fig1-ar)"/>
+  <text x="52" y="106" font-size="13" fill="#c0392b">someone whispers</text>
+  <text x="52" y="122" font-size="13" fill="#c0392b">a sneaky note…</text>
+
+  <!-- slip -->
+  <rect x="255" y="140" width="170" height="110" rx="8" fill="#ffffff" stroke="#8a8a82" stroke-width="2" transform="rotate(-3 340 195)"/>
+  <text x="340" y="170" text-anchor="middle" font-size="15" font-weight="bold" fill="#232323" transform="rotate(-3 340 195)">REQUEST SLIP</text>
+  <text x="340" y="196" text-anchor="middle" font-size="14" fill="#333" transform="rotate(-3 340 195)">mail my drawing</text>
+  <text x="340" y="216" text-anchor="middle" font-size="14" fill="#333" transform="rotate(-3 340 195)">to Grandma</text>
+  <path d="M196,190 L250,190" stroke="#3a76b8" stroke-width="2.5" marker-end="url(#fig1-a)"/>
+  <text x="223" y="180" text-anchor="middle" font-size="13" fill="#3a76b8">writes</text>
+
+  <!-- mailbox -->
+  <rect x="470" y="150" width="90" height="66" rx="14" fill="#dae8fc" stroke="#6c8ebf" stroke-width="2.5"/>
+  <rect x="500" y="172" width="46" height="8" rx="4" fill="#6c8ebf"/>
+  <rect x="505" y="216" width="14" height="52" fill="#6c8ebf"/>
+  <text x="515" y="292" text-anchor="middle" font-size="14" fill="#3a5a80">the mailbox</text>
+  <path d="M432,195 L466,187" stroke="#3a76b8" stroke-width="2.5" marker-end="url(#fig1-a)"/>
+
+  <!-- doorkeeper -->
+  <rect x="620" y="122" width="76" height="24" rx="6" fill="#8a8a82"/>
+  <circle cx="658" cy="164" r="24" fill="#f5f5f5" stroke="#8a8a82" stroke-width="2.5"/>
+  <circle cx="649" cy="160" r="3.5" fill="#232323"/>
+  <circle cx="667" cy="160" r="3.5" fill="#232323"/>
+  <line x1="649" y1="175" x2="667" y2="175" stroke="#232323" stroke-width="2.5"/>
+  <rect x="626" y="190" width="64" height="70" rx="10" fill="#f5f5f5" stroke="#8a8a82" stroke-width="2.5"/>
+  <rect x="700" y="196" width="58" height="72" rx="5" fill="#fffde7" stroke="#c8b900" stroke-width="2"/>
+  <text x="729" y="216" text-anchor="middle" font-size="11" fill="#4a4a20">RULES</text>
+  <line x1="708" y1="228" x2="750" y2="228" stroke="#c8b900" stroke-width="2"/>
+  <line x1="708" y1="242" x2="750" y2="242" stroke="#c8b900" stroke-width="2"/>
+  <line x1="708" y1="256" x2="750" y2="256" stroke="#c8b900" stroke-width="2"/>
+  <text x="658" y="292" text-anchor="middle" font-size="16" font-weight="bold" fill="#555">the doorkeeper</text>
+  <text x="658" y="312" text-anchor="middle" font-size="13" fill="#555">a robot with NO EARS — just</text>
+  <text x="658" y="328" text-anchor="middle" font-size="13" fill="#555">a pass slot. things, never words.</text>
+  <path d="M562,190 L616,190" stroke="#3a76b8" stroke-width="2.5" marker-end="url(#fig1-a)"/>
+  <text x="589" y="180" text-anchor="middle" font-size="13" fill="#3a76b8">reads</text>
+
+  <!-- door -->
+  <rect x="800" y="120" width="70" height="150" rx="8" fill="#d5e8d4" stroke="#82b366" stroke-width="3"/>
+  <circle cx="856" cy="196" r="6" fill="#82b366"/>
+  <text x="835" y="310" text-anchor="middle" font-size="14" fill="#3a6a34">the door</text>
+  <path d="M760,200 L796,196" stroke="#3a76b8" stroke-width="2.5" marker-end="url(#fig1-a)"/>
+  <text x="726" y="292" font-size="13" fill="#4a9a4a">opens only if</text>
+  <text x="726" y="308" font-size="13" fill="#4a9a4a">the rules say yes</text>
+
+  <!-- forbidden direct path -->
+  <path d="M150,340 C400,420 680,410 862,282" stroke="#c0392b" stroke-width="2.5" fill="none" stroke-dasharray="8 6" marker-end="url(#fig1-ar)"/>
+  <line x1="470" y1="360" x2="520" y2="410" stroke="#c0392b" stroke-width="5"/>
+  <line x1="520" y1="360" x2="470" y2="410" stroke="#c0392b" stroke-width="5"/>
+  <text x="495" y="444" text-anchor="middle" font-size="16" font-weight="bold" fill="#c0392b">a robot touching a door directly: never happens</text>
+
+  <rect x="120" y="466" width="660" height="40" rx="8" fill="#fffde7" stroke="#c8b900" stroke-width="1.5"/>
+  <text x="450" y="492" text-anchor="middle" font-size="16" fill="#4a4a20">The smart one proposes. The boring one decides. That's the whole trick.</text>
+</svg>
+</div><p></p>
+<h2>Everything has stickers</h2>
+<p>Every piece of information in the house wears <strong>stickers</strong>. A sticker says three things:</p>
+<p class="li"><strong>Who put it there.</strong> Mom, the library, grandma's cookbook company. The sticker remembers its owner forever.</p>
+<p class="li"><strong>Where this may go.</strong> Stays in your room; stays in the house; may go to school; may go anywhere.</p>
+<p class="li"><strong>What it may be used for.</strong> Homework yes, showing off no.</p>
+<p>Two sticker laws:</p>
+<p><strong>Glue law.</strong> If you glue two papers together — or copy a bit of one onto the other, or write a summary of them — the new paper gets <strong>all the stickers from both</strong>. You cannot lose a sticker by rewriting the words. A summary of a secret is still a secret.</p>
+<p><strong>Peel law.</strong> Nobody can peel a sticker except the one who put it on — and even they must peel it the way they promised in advance: maybe "ask me and I'll say yes or no," maybe "it comes off by itself next summer," maybe "never." The library's sticker doesn't come off because Mom says so, and Mom's doesn't come off because the library says so. Every sticker's owner has to be okay with it, every time.</p>
+<p>There is one honest exception: some sticker-owners approve a special <strong>machine</strong> — like a photocopier that blurs out faces. If a paper goes through <em>that exact machine</em>, certain stickers come off, and the machine signs its name saying it did the job properly. The robot is never allowed to say "I blurred it, trust me." Only the machine's signature counts.</p>
+<p>And one more thing about stickers — the sneakiest trap in the whole house, closed by the simplest rule: what if a whispered note talks a robot into <em>drawing</em> a sticker? A fake "may go anywhere," inked right on the paper? Nothing happens, because <strong>robots never touch stickers at all.</strong> Every paper travels in a clear <strong>envelope</strong>, and stickers live on the envelope — and only doorkeepers seal, open, or stamp envelopes. When a robot makes a new paper, the doorkeeper envelopes it and stamps on the stickers from everything the robot had been reading — the glue law is the doorkeeper's job, not the robot's. So a sticker a robot draws is just a <em>picture</em> of a sticker, on the paper, inside the envelope. The doorkeeper reads envelopes. It has never once read a picture.</p>
+<p></p><div class="fig"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 900 560" font-family="Helvetica, Arial, sans-serif">
+  <defs>
+    <marker id="fig2-a" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="8" markerHeight="8" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="#3a76b8"/></marker>
+  </defs>
+  <rect width="900" height="560" fill="#ffffff"/>
+  <text x="450" y="42" text-anchor="middle" font-size="24" font-weight="bold" fill="#1e5f96">Everything wears stickers — and stickers never lie</text>
+
+  <!-- GLUE LAW -->
+  <text x="60" y="86" font-size="18" font-weight="bold" fill="#232323">The glue law</text>
+
+  <rect x="60" y="100" width="150" height="120" rx="6" fill="#ffffff" stroke="#8a8a82" stroke-width="2"/>
+  <line x1="76" y1="130" x2="194" y2="130" stroke="#c8c8c0" stroke-width="2"/>
+  <line x1="76" y1="150" x2="194" y2="150" stroke="#c8c8c0" stroke-width="2"/>
+  <line x1="76" y1="170" x2="160" y2="170" stroke="#c8c8c0" stroke-width="2"/>
+  <circle cx="90" cy="112" r="16" fill="#dae8fc" stroke="#6c8ebf" stroke-width="2"/>
+  <text x="90" y="117" text-anchor="middle" font-size="11" font-weight="bold" fill="#274b73">MOM</text>
+  <text x="135" y="210" text-anchor="middle" font-size="12" fill="#555">"stays in the house"</text>
+
+  <text x="240" y="168" font-size="30" font-weight="bold" fill="#555">+</text>
+
+  <rect x="280" y="100" width="150" height="120" rx="6" fill="#ffffff" stroke="#8a8a82" stroke-width="2"/>
+  <line x1="296" y1="130" x2="414" y2="130" stroke="#c8c8c0" stroke-width="2"/>
+  <line x1="296" y1="150" x2="414" y2="150" stroke="#c8c8c0" stroke-width="2"/>
+  <line x1="296" y1="170" x2="380" y2="170" stroke="#c8c8c0" stroke-width="2"/>
+  <circle cx="310" cy="112" r="16" fill="#ffe6cc" stroke="#d79b00" stroke-width="2"/>
+  <text x="310" y="117" text-anchor="middle" font-size="9" font-weight="bold" fill="#8a5a00">LIBR.</text>
+  <text x="355" y="210" text-anchor="middle" font-size="12" fill="#555">"back by June"</text>
+
+  <path d="M446,160 L492,160" stroke="#3a76b8" stroke-width="3" marker-end="url(#fig2-a)"/>
+  <text x="469" y="148" text-anchor="middle" font-size="13" fill="#3a76b8">glue, copy,</text>
+  <text x="469" y="184" text-anchor="middle" font-size="13" fill="#3a76b8">or summarize</text>
+
+  <rect x="510" y="92" width="180" height="136" rx="6" fill="#fffdf5" stroke="#8a8a82" stroke-width="2.5"/>
+  <line x1="528" y1="130" x2="672" y2="130" stroke="#c8c8c0" stroke-width="2"/>
+  <line x1="528" y1="150" x2="672" y2="150" stroke="#c8c8c0" stroke-width="2"/>
+  <line x1="528" y1="170" x2="672" y2="170" stroke="#c8c8c0" stroke-width="2"/>
+  <line x1="528" y1="190" x2="620" y2="190" stroke="#c8c8c0" stroke-width="2"/>
+  <circle cx="544" cy="108" r="16" fill="#dae8fc" stroke="#6c8ebf" stroke-width="2"/>
+  <text x="544" y="113" text-anchor="middle" font-size="11" font-weight="bold" fill="#274b73">MOM</text>
+  <circle cx="584" cy="108" r="16" fill="#ffe6cc" stroke="#d79b00" stroke-width="2"/>
+  <text x="584" y="113" text-anchor="middle" font-size="9" font-weight="bold" fill="#8a5a00">LIBR.</text>
+  <text x="600" y="244" text-anchor="middle" font-size="13" font-weight="bold" fill="#333">the new paper wears BOTH</text>
+  <text x="600" y="262" text-anchor="middle" font-size="12" fill="#555">a summary of a secret is still a secret</text>
+
+  <!-- PEEL LAW -->
+  <text x="60" y="316" font-size="18" font-weight="bold" fill="#232323">The peel law</text>
+  <rect x="60" y="330" width="360" height="120" rx="8" fill="#fcfcfa" stroke="#b8b8b0" stroke-width="1.5"/>
+  <circle cx="110" cy="372" r="20" fill="#ffe6cc" stroke="#d79b00" stroke-width="2"/>
+  <text x="110" y="377" text-anchor="middle" font-size="10" font-weight="bold" fill="#8a5a00">LIBR.</text>
+  <text x="150" y="360" font-size="13" fill="#333">only the LIBRARY peels the library sticker —</text>
+  <text x="150" y="378" font-size="13" fill="#333">and only the way it promised in advance:</text>
+  <text x="150" y="398" font-size="13" fill="#8a5a00" font-weight="bold">"ask me" · "off by itself in June" · "never"</text>
+  <text x="150" y="426" font-size="12.5" fill="#c0392b" font-weight="bold">Mom can't peel it. You can't peel it. Every</text>
+  <text x="150" y="442" font-size="12.5" fill="#c0392b" font-weight="bold">sticker's owner must be okay — every time.</text>
+
+  <!-- BLUR MACHINE -->
+  <text x="470" y="316" font-size="18" font-weight="bold" fill="#232323">The one honest exception: the approved machine</text>
+  <rect x="470" y="330" width="410" height="120" rx="8" fill="#fcfcfa" stroke="#b8b8b0" stroke-width="1.5"/>
+  <rect x="490" y="356" width="60" height="70" rx="4" fill="#ffffff" stroke="#8a8a82" stroke-width="2"/>
+  <circle cx="504" cy="368" r="10" fill="#dae8fc" stroke="#6c8ebf" stroke-width="1.5"/>
+  <circle cx="528" cy="368" r="10" fill="#f8cecc" stroke="#b85450" stroke-width="1.5"/>
+  <path d="M556,390 L588,390" stroke="#3a76b8" stroke-width="2.5" marker-end="url(#fig2-a)"/>
+  <rect x="592" y="352" width="96" height="78" rx="10" fill="#e1d5e7" stroke="#9673a6" stroke-width="2.5"/>
+  <text x="640" y="384" text-anchor="middle" font-size="13" font-weight="bold" fill="#4a355c">BLUR-O-</text>
+  <text x="640" y="402" text-anchor="middle" font-size="13" font-weight="bold" fill="#4a355c">MATIC</text>
+  <path d="M692,390 L724,390" stroke="#3a76b8" stroke-width="2.5" marker-end="url(#fig2-a)"/>
+  <rect x="728" y="356" width="60" height="70" rx="4" fill="#ffffff" stroke="#8a8a82" stroke-width="2"/>
+  <circle cx="742" cy="368" r="10" fill="#dae8fc" stroke="#6c8ebf" stroke-width="1.5"/>
+  <circle cx="800" cy="416" r="22" fill="#d5e8d4" stroke="#82b366" stroke-width="2.5"/>
+  <text x="800" y="412" text-anchor="middle" font-size="9" fill="#3a6a34">SIGNED</text>
+  <text x="800" y="424" text-anchor="middle" font-size="12" font-weight="bold" fill="#3a6a34">✓</text>
+  <text x="676" y="446" text-anchor="middle" font-size="12" fill="#555">the sticker's owner approved THIS machine; it signs its work</text>
+
+  <rect x="60" y="478" width="820" height="60" rx="8" fill="#fffde7" stroke="#c8b900" stroke-width="1.5"/>
+  <text x="450" y="503" text-anchor="middle" font-size="15" fill="#4a4a20">The robot is never allowed to say "I blurred it, trust me."</text>
+  <text x="450" y="524" text-anchor="middle" font-size="15" font-weight="bold" fill="#4a4a20">Only the machine's signature counts.</text>
+</svg>
+</div><p></p>
+<h2>The doorkeeper asks three questions</h2>
+<p>For every slip, the doorkeeper checks three separate things — and all three have to pass:</p>
+<p class="li"><strong>"Do you have a hall pass for this door?"</strong> You gave each robot its own pass. A pass names what the robot may do, expires on its own, and remembers <em>why</em> it exists — so if the reason goes away, the pass dies with it. A robot can lend a smaller pass to a helper robot, but only if its own pass says "lending allowed," and the lent pass can never be bigger than the original.</p>
+<p class="li"><strong>"Do all the stickers allow where this is going?"</strong> Every sticker on everything mentioned in the slip gets a vote. One "stays in the house" sticker means it stays in the house — even if nine other stickers say fine.</p>
+<p class="li"><strong>"How big a deal is this?"</strong> Looking at something is small. Writing a draft is small. Mailing a letter, spending money, deleting things — those can't be undone, so they're big. Big deals need a grown-up to say yes first. And the grown-up gets shown <em>exactly</em> what will go out the door — never the robot's own summary of it.</p>
+<p>The doorkeeper then writes a <strong>receipt</strong>: yes or no, and the reasons. If the answer was no, the receipt says which question failed. Nobody argues with the doorkeeper by being clever; you argue by showing a better hall pass or a peeled sticker.</p>
+<p>One more doorkeeper habit, and it matters: passes are checked <strong>at the moment the door opens</strong>, not when the robot got in line. If you took a robot's pass away while it was standing in line, it still gets stopped at the door. "But I was already in line!" doesn't work on the boring doorkeeper.</p>
+<p></p><div class="fig"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 900 560" font-family="Helvetica, Arial, sans-serif">
+  <defs>
+    <marker id="fig3-a" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="8" markerHeight="8" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="#3a76b8"/></marker>
+    <marker id="fig3-ao" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="8" markerHeight="8" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="#d79b00"/></marker>
+    <marker id="fig3-ar" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="8" markerHeight="8" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="#c0392b"/></marker>
+  </defs>
+  <rect width="900" height="560" fill="#ffffff"/>
+  <text x="450" y="42" text-anchor="middle" font-size="24" font-weight="bold" fill="#1e5f96">The doorkeeper asks three questions — all three must pass</text>
+
+  <!-- Q1 hall pass -->
+  <rect x="50" y="76" width="255" height="180" rx="10" fill="#e1d5e7" stroke="#9673a6" stroke-width="2"/>
+  <text x="66" y="102" font-size="16" font-weight="bold" fill="#4a355c">1 · "Got a hall pass?"</text>
+  <rect x="70" y="116" width="216" height="110" rx="8" fill="#ffffff" stroke="#9673a6" stroke-width="1.5"/>
+  <text x="82" y="138" font-size="13" font-weight="bold" fill="#4a355c">HALL PASS — robot-a</text>
+  <text x="82" y="158" font-size="12" fill="#333">may: mail letters to family</text>
+  <text x="82" y="176" font-size="12" fill="#333">because: alice said so (tue)</text>
+  <text x="82" y="194" font-size="12" fill="#333">expires: bedtime</text>
+  <text x="82" y="212" font-size="12" fill="#c0392b" font-weight="bold">lending: not allowed</text>
+  <text x="66" y="246" font-size="11.5" fill="#4a355c">if the "because" goes away, the pass dies too</text>
+
+  <!-- Q2 stickers -->
+  <rect x="322" y="76" width="255" height="180" rx="10" fill="#f8cecc" stroke="#b85450" stroke-width="2"/>
+  <text x="338" y="102" font-size="16" font-weight="bold" fill="#7a3230">2 · "Stickers all okay?"</text>
+  <rect x="342" y="116" width="90" height="70" rx="5" fill="#ffffff" stroke="#8a8a82" stroke-width="1.5"/>
+  <circle cx="358" cy="130" r="11" fill="#dae8fc" stroke="#6c8ebf" stroke-width="1.5"/>
+  <circle cx="384" cy="130" r="11" fill="#d5e8d4" stroke="#82b366" stroke-width="1.5"/>
+  <circle cx="410" cy="130" r="11" fill="#f8cecc" stroke="#b85450" stroke-width="2"/>
+  <text x="410" y="134" text-anchor="middle" font-size="8" fill="#7a3230">house</text>
+  <text x="338" y="212" font-size="12.5" fill="#333">every sticker gets a vote.</text>
+  <text x="338" y="230" font-size="12.5" font-weight="bold" fill="#7a3230">one "stays home" vote wins,</text>
+  <text x="338" y="246" font-size="12.5" font-weight="bold" fill="#7a3230">even against nine yeses.</text>
+  <text x="452" y="140" font-size="12" fill="#555">← the slip wants</text>
+  <text x="452" y="156" font-size="12" fill="#555">to mail THIS</text>
+
+  <!-- Q3 how big -->
+  <rect x="594" y="76" width="255" height="180" rx="10" fill="#ffe6cc" stroke="#d79b00" stroke-width="2"/>
+  <text x="610" y="102" font-size="16" font-weight="bold" fill="#8a5a00">3 · "How big a deal?"</text>
+  <rect x="612" y="116" width="100" height="26" rx="13" fill="#d5e8d4" stroke="#82b366" stroke-width="1.5"/><text x="662" y="134" text-anchor="middle" font-size="12" fill="#3a6a34">just looking</text>
+  <rect x="612" y="150" width="100" height="26" rx="13" fill="#d5e8d4" stroke="#82b366" stroke-width="1.5"/><text x="662" y="168" text-anchor="middle" font-size="12" fill="#3a6a34">drafting</text>
+  <rect x="612" y="184" width="130" height="26" rx="13" fill="#f8cecc" stroke="#b85450" stroke-width="2"/><text x="677" y="202" text-anchor="middle" font-size="12" font-weight="bold" fill="#7a3230">mailing · spending</text>
+  <rect x="612" y="218" width="130" height="26" rx="13" fill="#f8cecc" stroke="#b85450" stroke-width="2"/><text x="677" y="236" text-anchor="middle" font-size="12" font-weight="bold" fill="#7a3230">deleting — no undo!</text>
+  <text x="756" y="204" font-size="20" fill="#c0392b">→</text>
+  <text x="782" y="196" font-size="12" fill="#7a3230">needs a</text>
+  <text x="782" y="212" font-size="12" font-weight="bold" fill="#7a3230">grown-up</text>
+
+  <!-- grown-up approval -->
+  <rect x="50" y="290" width="400" height="130" rx="10" fill="#fcfcfa" stroke="#b8b8b0" stroke-width="1.5"/>
+  <text x="66" y="316" font-size="16" font-weight="bold" fill="#232323">Big deals: the grown-up sees the real thing</text>
+  <circle cx="100" cy="360" r="18" fill="#d5e8d4" stroke="#82b366" stroke-width="2"/>
+  <rect x="84" y="382" width="32" height="26" rx="8" fill="#d5e8d4" stroke="#82b366" stroke-width="2"/>
+  <rect x="140" y="340" width="120" height="66" rx="4" fill="#ffffff" stroke="#8a8a82" stroke-width="1.5"/>
+  <text x="200" y="362" text-anchor="middle" font-size="11" fill="#333">the ACTUAL letter,</text>
+  <text x="200" y="378" text-anchor="middle" font-size="11" fill="#333">word for word —</text>
+  <text x="200" y="394" text-anchor="middle" font-size="11" font-weight="bold" fill="#c0392b">never the robot's summary</text>
+  <text x="280" y="366" font-size="12.5" fill="#333">…and only a grown-up</text>
+  <text x="280" y="382" font-size="12.5" fill="#333">who's ALLOWED to read</text>
+  <text x="280" y="398" font-size="12.5" fill="#333">it may approve it</text>
+
+  <!-- receipt -->
+  <rect x="470" y="290" width="180" height="130" rx="6" fill="#fffde7" stroke="#c8b900" stroke-width="2"/>
+  <text x="560" y="314" text-anchor="middle" font-size="14" font-weight="bold" fill="#4a4a20">RECEIPT</text>
+  <text x="560" y="338" text-anchor="middle" font-size="13" fill="#c0392b" font-weight="bold">NO.</text>
+  <text x="560" y="360" text-anchor="middle" font-size="12" fill="#333">question 2 failed:</text>
+  <text x="560" y="376" text-anchor="middle" font-size="12" fill="#333">"stays home" sticker</text>
+  <text x="560" y="400" text-anchor="middle" font-size="11" font-style="italic" fill="#555">every decision gets one</text>
+
+  <!-- line check -->
+  <rect x="670" y="290" width="180" height="130" rx="10" fill="#fcfcfa" stroke="#b8b8b0" stroke-width="1.5"/>
+  <text x="760" y="314" text-anchor="middle" font-size="14" font-weight="bold" fill="#232323">checked at the door</text>
+  <text x="760" y="336" text-anchor="middle" font-size="12" fill="#333">pass taken away while</text>
+  <text x="760" y="352" text-anchor="middle" font-size="12" fill="#333">the robot stood in line?</text>
+  <text x="760" y="372" text-anchor="middle" font-size="12" font-weight="bold" fill="#c0392b">still stopped.</text>
+  <text x="760" y="394" text-anchor="middle" font-size="11.5" font-style="italic" fill="#555">"but I was already in</text>
+  <text x="760" y="408" text-anchor="middle" font-size="11.5" font-style="italic" fill="#555">line!" never works</text>
+
+  <rect x="50" y="452" width="800" height="60" rx="8" fill="#fffde7" stroke="#c8b900" stroke-width="1.5"/>
+  <text x="450" y="477" text-anchor="middle" font-size="15" fill="#4a4a20">You don't argue with the doorkeeper by being clever.</text>
+  <text x="450" y="498" text-anchor="middle" font-size="15" font-weight="bold" fill="#4a4a20">You argue by showing a better hall pass, or a properly peeled sticker.</text>
+</svg>
+</div><p></p>
+<h2>Picking which helper does the job</h2>
+<p>Some jobs get sent out to helpers outside the house — some helpers are fast, some are cheap, some are brilliant, and some <em>blab everything they hear</em> or keep copies of what you show them.</p>
+<p>Here is the rule that makes routing safe, and it works like order of operations in math:</p>
+<blockquote><strong>First cross off everyone the stickers forbid. Only then pick the best of who's left.</strong></blockquote><p>A paper with a "stays in the house" sticker can never go to the neighbor kid — even if he's the smartest helper on the street, even if he's free, even if he's standing right there. He was crossed off before the contest started. The contest — fastest? cheapest? smartest? — only ever happens between helpers the stickers already allow.</p>
+<p>And if your chosen helper is sick today, you don't just grab the next name on the list. You <strong>re-do the crossing-off</strong> for the new helper. "The good one was busy" has never once made it okay to hand a secret to a blabbermouth.</p>
+<p>One more thing the crossing-off knows: <strong>it remembers.</strong> A helper who broke a promise last month — kept a copy they swore not to keep, took twice as long as the slip allowed — gets crossed off for a while too, before the contest, like everyone else the rules forbid. Being fast and brilliant buys nothing back until the penalty box empties.</p>
+<p></p><div class="fig"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 900 560" font-family="Helvetica, Arial, sans-serif">
+  <defs>
+    <marker id="fig4-a" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="8" markerHeight="8" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="#3a76b8"/></marker>
+    <marker id="fig4-ao" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="8" markerHeight="8" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="#d79b00"/></marker>
+  </defs>
+  <rect width="900" height="560" fill="#ffffff"/>
+  <text x="450" y="40" text-anchor="middle" font-size="24" font-weight="bold" fill="#1e5f96">Picking a helper: cross off first, THEN pick the best</text>
+
+  <!-- the package -->
+  <rect x="40" y="80" width="130" height="90" rx="6" fill="#ffffff" stroke="#8a8a82" stroke-width="2"/>
+  <circle cx="62" cy="98" r="13" fill="#f8cecc" stroke="#b85450" stroke-width="2"/>
+  <text x="62" y="102" text-anchor="middle" font-size="8" fill="#7a3230">house</text>
+  <circle cx="92" cy="98" r="13" fill="#dae8fc" stroke="#6c8ebf" stroke-width="1.5"/>
+  <text x="105" y="146" text-anchor="middle" font-size="12" fill="#333">the job + its</text>
+  <text x="105" y="162" text-anchor="middle" font-size="12" fill="#333">stickers</text>
+
+  <!-- STEP 1 -->
+  <rect x="200" y="70" width="670" height="220" rx="10" fill="#fcfcfa" stroke="#b8b8b0" stroke-width="1.5"/>
+  <text x="216" y="96" font-size="16" font-weight="bold" fill="#c0392b">STEP 1 — the stickers cross helpers off. No contest yet.</text>
+
+  <!-- helpers -->
+  <g>
+    <circle cx="270" cy="150" r="26" fill="#d5e8d4" stroke="#82b366" stroke-width="2.5"/>
+    <text x="270" y="146" text-anchor="middle" font-size="11" font-weight="bold" fill="#3a6a34">ZIP</text>
+    <text x="270" y="160" text-anchor="middle" font-size="9" fill="#3a6a34">fast</text>
+    <text x="270" y="200" text-anchor="middle" font-size="11" fill="#555">keeps nothing</text>
+  </g>
+  <g>
+    <circle cx="390" cy="150" r="26" fill="#d5e8d4" stroke="#82b366" stroke-width="2.5"/>
+    <text x="390" y="146" text-anchor="middle" font-size="11" font-weight="bold" fill="#3a6a34">PENNY</text>
+    <text x="390" y="160" text-anchor="middle" font-size="9" fill="#3a6a34">cheap</text>
+    <text x="390" y="200" text-anchor="middle" font-size="11" fill="#555">keeps nothing</text>
+  </g>
+  <g>
+    <circle cx="510" cy="150" r="26" fill="#d5e8d4" stroke="#82b366" stroke-width="2.5"/>
+    <text x="510" y="146" text-anchor="middle" font-size="11" font-weight="bold" fill="#3a6a34">SAGE</text>
+    <text x="510" y="160" text-anchor="middle" font-size="9" fill="#3a6a34">genius</text>
+    <text x="510" y="200" text-anchor="middle" font-size="11" fill="#555">keeps nothing</text>
+  </g>
+  <g>
+    <circle cx="640" cy="150" r="26" fill="#f5f5f5" stroke="#8a8a82" stroke-width="2"/>
+    <text x="640" y="146" text-anchor="middle" font-size="11" font-weight="bold" fill="#555">GABBY</text>
+    <text x="640" y="160" text-anchor="middle" font-size="9" fill="#555">genius!</text>
+    <text x="640" y="200" text-anchor="middle" font-size="11" font-weight="bold" fill="#c0392b">blabs everything</text>
+    <line x1="614" y1="124" x2="666" y2="176" stroke="#c0392b" stroke-width="5"/>
+    <line x1="666" y1="124" x2="614" y2="176" stroke="#c0392b" stroke-width="5"/>
+  </g>
+  <g>
+    <circle cx="780" cy="150" r="26" fill="#f5f5f5" stroke="#8a8a82" stroke-width="2"/>
+    <text x="780" y="146" text-anchor="middle" font-size="11" font-weight="bold" fill="#555">XEROXA</text>
+    <text x="780" y="160" text-anchor="middle" font-size="9" fill="#555">free!</text>
+    <text x="780" y="200" text-anchor="middle" font-size="11" font-weight="bold" fill="#c0392b">keeps copies</text>
+    <line x1="754" y1="124" x2="806" y2="176" stroke="#c0392b" stroke-width="5"/>
+    <line x1="806" y1="124" x2="754" y2="176" stroke="#c0392b" stroke-width="5"/>
+  </g>
+  <text x="216" y="248" font-size="13" fill="#7a3230" font-weight="bold">the "stays in the house" sticker crossed off Gabby and Xeroxa BEFORE anyone</text>
+  <text x="216" y="266" font-size="13" fill="#7a3230" font-weight="bold">compared smartness or price. Genius and free never entered into it.</text>
+
+  <path class="e" d="M170,125 L196,125" stroke="#3a76b8" stroke-width="2.5" marker-end="url(#fig4-a)" fill="none"/>
+
+  <!-- STEP 2 -->
+  <rect x="200" y="316" width="440" height="150" rx="10" fill="#fcfcfa" stroke="#b8b8b0" stroke-width="1.5"/>
+  <text x="216" y="342" font-size="16" font-weight="bold" fill="#3a6a34">STEP 2 — NOW the contest, among who's left</text>
+  <circle cx="270" cy="400" r="24" fill="#d5e8d4" stroke="#82b366" stroke-width="2.5"/>
+  <text x="270" y="405" text-anchor="middle" font-size="10" font-weight="bold" fill="#3a6a34">ZIP</text>
+  <circle cx="350" cy="400" r="24" fill="#d5e8d4" stroke="#82b366" stroke-width="2.5"/>
+  <text x="350" y="405" text-anchor="middle" font-size="10" font-weight="bold" fill="#3a6a34">PENNY</text>
+  <circle cx="430" cy="400" r="24" fill="#d5e8d4" stroke="#82b366" stroke-width="3.5"/>
+  <text x="430" y="405" text-anchor="middle" font-size="10" font-weight="bold" fill="#3a6a34">SAGE</text>
+  <circle cx="430" cy="366" r="12" fill="#fff2cc" stroke="#d6b656" stroke-width="2"/>
+  <text x="430" y="371" text-anchor="middle" font-size="11">★</text>
+  <text x="480" y="396" font-size="12.5" fill="#333">best of the ALLOWED:</text>
+  <text x="480" y="412" font-size="12.5" fill="#333">smartest wins today</text>
+  <text x="216" y="448" font-size="12" font-style="italic" fill="#555">fastest? cheapest? smartest? — a fair fight, because everyone here is safe</text>
+
+  <!-- fallback -->
+  <rect x="660" y="316" width="210" height="150" rx="10" fill="#ffe6cc" stroke="#d79b00" stroke-width="2"/>
+  <text x="765" y="342" text-anchor="middle" font-size="15" font-weight="bold" fill="#8a5a00">Sage is sick today?</text>
+  <circle cx="710" cy="386" r="20" fill="#d5e8d4" stroke="#82b366" stroke-width="2"/>
+  <rect x="700" y="376" width="20" height="8" rx="4" fill="#c0392b"/>
+  <text x="740" y="382" font-size="12" fill="#333">don't just grab</text>
+  <text x="740" y="398" font-size="12" fill="#333">the next name —</text>
+  <text x="765" y="426" text-anchor="middle" font-size="13" font-weight="bold" fill="#c0392b">RE-DO the crossing-off</text>
+  <text x="765" y="444" text-anchor="middle" font-size="11" font-style="italic" fill="#8a5a00">"the good one was busy" never</text>
+  <text x="765" y="458" text-anchor="middle" font-size="11" font-style="italic" fill="#8a5a00">makes the blabbermouth okay</text>
+  <path d="M765,316 C765,300 700,296 660,292" stroke="#d79b00" stroke-width="2.5" fill="none" stroke-dasharray="6 4" marker-end="url(#fig4-ao)"/>
+
+  <rect x="40" y="492" width="830" height="50" rx="8" fill="#fffde7" stroke="#c8b900" stroke-width="1.5"/>
+  <text x="455" y="523" text-anchor="middle" font-size="15" font-weight="bold" fill="#4a4a20">Choosing the best model only ever happens among the models the rules already allowed.</text>
+</svg>
+</div><p></p>
+<h2>The blackboard</h2>
+<p>The robots share a big blackboard where they leave notes for each other. Stickers ride on <strong>each note</strong> — not on the blackboard.</p>
+<p>So if robot A pins up a note made from secret stuff, and robot B never reads that note, robot B's work stays unstickered. B can still use the fast outside helper for its own public job. Only the robots that actually <em>read</em> the secret note carry its stickers forward. The blackboard is furniture, not glue.</p>
+<hr>
+<h2>The same story in grown-up words</h2>
+<div class="twrap"><table>
+<tr><th>In the story</th><th>In the architecture</th></tr>
+<tr><td>the gullible robot</td><td>the model / agent — persuadable by any injected text</td></tr>
+<tr><td>the request slip</td><td><code>ProposedTransaction</code> — the model proposes, never executes</td></tr>
+<tr><td>the boring doorkeeper</td><td>the deterministic runtime — <code>decide(…)</code></td></tr>
+<tr><td>the doorkeeper's missing ears</td><td>the runtime accepts only typed inputs (proposals, grants, clauses) — no natural-language surface for injection to grab</td></tr>
+<tr><td>stickers live on the envelope, never the paper</td><td>the label plane is runtime-maintained metadata — model output is payload only; output clauses are computed from actual inputs, never declared</td></tr>
+<tr><td>a drawn sticker is just a picture</td><td>in-band "labels" are content; forgery is unrepresentable, and transform receipts are runtime-attested</td></tr>
+<tr><td>a sticker</td><td><code>PolicyClause</code> — authority + destination constraints + purpose + operations</td></tr>
+<tr><td>who put the sticker on</td><td>the clause's authority (a tenant, a licensor, a contract)</td></tr>
+<tr><td>the glue law</td><td>clause union on derivation — labels survive rewriting</td></tr>
+<tr><td>the peel law</td><td>relaxation modes — every affected authority must authorize, its declared way</td></tr>
+<tr><td>the blur machine + signature</td><td><code>PolicyTransform</code> — an authority-approved transform run by a trusted capability version, with attestation</td></tr>
+<tr><td>the hall pass</td><td><code>ExecutionGrant</code> / <code>Delegation</code> — scoped, expiring, lineage-bearing</td></tr>
+<tr><td>"lending allowed"</td><td><code>:delegable?</code> — a separate authority from holding</td></tr>
+<tr><td>the three questions</td><td>the three planes: authority, information flow, effect</td></tr>
+<tr><td>big deals need a grown-up</td><td>effect classes; irreversible/high-impact effects require human approval</td></tr>
+<tr><td>shown exactly what goes out</td><td>approval binds to the rendered payload's hash — and the approver must be allowed to see it</td></tr>
+<tr><td>the receipt</td><td><code>DecisionEnvelope</code> — allowed?, reason codes, obligations, revision pins</td></tr>
+<tr><td>checked when the door opens</td><td>commit-time recheck under the freshness contract</td></tr>
+<tr><td>cross off, then contest</td><td>policy-first routing: eligibility filter before quality/latency/cost ranking</td></tr>
+<tr><td>re-do the crossing-off</td><td>fallback re-runs eligibility, never just ranking</td></tr>
+<tr><td>the crossing-off remembers</td><td>breach history is an eligibility input — revocations for cause drop a binding from the candidate set before ranking</td></tr>
+<tr><td>stickers on notes, not the blackboard</td><td>scoped taint: artifact-level labels; the blackboard is a container, not a flow</td></tr>
+</table></div>
+<p>The one-sentence version, suitable for saying out loud:</p>
+<blockquote><strong>Models propose. Deterministic authority, information-flow, and effect-control systems decide and execute — and choosing the best model only ever happens among the models the rules already allowed.</strong></blockquote>
+<div style="max-width:640px;margin:40px auto 0;font-family:Menlo,Consolas,monospace;font-size:12px;letter-spacing:.08em">
+<a href="/architectures" style="color:#ff5e1a;text-decoration:none">&larr; BACK TO THE DRAWING REGISTER</a>
+</div>
+</body>
+</html>

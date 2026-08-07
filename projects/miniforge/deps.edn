@@ -8,17 +8,28 @@
         ai.miniforge/workflow-software-factory {:local/root "../../components/workflow-software-factory"}
         ai.miniforge/workflow-financial-etl {:local/root "../../components/workflow-financial-etl"}
         ai.miniforge/phase-software-factory {:local/root "../../components/phase-software-factory"}
+        ai.miniforge/phase-opsv {:local/root "../../components/phase-opsv"}
+        ai.miniforge/opsv-adapter-simulated {:local/root "../../components/opsv-adapter-simulated"}
+        ai.miniforge/workflow-opsv {:local/root "../../components/workflow-opsv"}
         ;; Deployment pack: Pulumi/Kustomize orchestration with policy gates and evidence
         ai.miniforge/phase-deployment {:local/root "../../components/phase-deployment"}
         ai.miniforge/workflow-deployment {:local/root "../../components/workflow-deployment"}
         ai.miniforge/workflow-chain-deployment {:local/root "../../components/workflow-chain-deployment"}
         ai.miniforge/schema {:local/root "../../components/schema"}
+        ai.miniforge/policy-clause {:local/root "../../components/policy-clause"}
+        ai.miniforge/decision-envelope {:local/root "../../components/decision-envelope"}
+        ai.miniforge/execution-grant {:local/root "../../components/execution-grant"}
+        ai.miniforge/effect-transaction {:local/root "../../components/effect-transaction"}
         ai.miniforge/config {:local/root "../../components/config"}
         ai.miniforge/algorithms {:local/root "../../components/algorithms"}
         ai.miniforge/anomaly {:local/root "../../components/anomaly"}
         ai.miniforge/clock {:local/root "../../components/clock"}
+        ai.miniforge/codex {:local/root "../../components/codex"}
+        ai.miniforge/codex-gap {:local/root "../../components/codex-gap"}
         ai.miniforge/coerce {:local/root "../../components/coerce"}
         ai.miniforge/content-hash {:local/root "../../components/content-hash"}
+        ;; Foundation for the N7 implementation DAG.
+        ai.miniforge/opsv {:local/root "../../components/opsv"}
         ai.miniforge/logging {:local/root "../../components/logging"}
         ai.miniforge/llm {:local/root "../../components/llm"}
         ai.miniforge/tool {:local/root "../../components/tool"}
@@ -93,6 +104,7 @@
         ai.miniforge/connector-retry {:local/root "../../components/connector-retry"}
         ai.miniforge/repo-analyzer {:local/root "../../components/repo-analyzer"}
         ai.miniforge/repo-index {:local/root "../../components/repo-index"}
+        ai.miniforge/governance-provenance {:local/root "../../components/governance-provenance"}
         ;; Adapter for Claude Code control plane integration
         ai.miniforge/adapter-claude-code {:local/root "../../components/adapter-claude-code"}
         ;; DAG primitives (shared types for dag-executor)

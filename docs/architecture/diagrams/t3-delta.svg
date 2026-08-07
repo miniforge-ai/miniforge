@@ -16,7 +16,7 @@
   <rect width="1920" height="1060" fill="#ffffff"/>
   <rect class="band" x="0" y="0" width="1920" height="44"/>
   <text class="bandT" x="20" y="29">Miniforge Target — T3. Built-vs-Unbuilt Delta &amp; Contradiction Register</text>
-  <text class="bandS" x="1900" y="28" text-anchor="end">the honesty panel — self-reported completion, ground-truth status, and the nine recorded contradictions the rethink must resolve</text>
+  <text class="bandS" x="1900" y="28" text-anchor="end">the honesty panel — self-reported completion, ground-truth status, and the nine recorded contradictions (Ariadne step 1 resolved two, half-resolved two)</text>
 
   <!-- SPEC BARS -->
   <rect class="zone" x="20" y="62" width="480" height="620" rx="6"/>
@@ -45,7 +45,7 @@
   <text class="t" x="48" y="596">Tenancy is essentially ABSENT as a first-class construct:</text>
   <text class="t" x="48" y="612">no tenant/org entity anywhere; Fleet has org-wide limits +</text>
   <text class="t" x="48" y="628">pack visibility only; multi-operator explicitly deferred.</text>
-  <text class="t" x="48" y="644">The tenancy-ownership-access v1.5 adoption starts from zero.</text>
+  <text class="t" x="48" y="644">Ariadne: RFC Accepted; step 1 built; tenants (step 3) still from zero.</text>
 
   <!-- STATUS BOARD -->
   <rect class="zone" x="520" y="62" width="640" height="620" rx="6"/>
@@ -53,7 +53,7 @@
   <rect class="built" x="536" y="100" width="600" height="160" rx="8"/>
   <text class="h" x="548" y="122">BUILT — works, dogfoods</text>
   <text class="m" x="548" y="142">SDLC engine: workflow FSM · DAG executor · phases · agents · llm</text>
-  <text class="m" x="548" y="158">governance: policy-pack · gates · evidence-bundle · event-stream</text>
+  <text class="m" x="548" y="158">governance: policy-clause · decision-envelope · decide() · policy-pack · gates · evidence-bundle · event-stream</text>
   <text class="m" x="548" y="174">pr-lifecycle · pr-train · release-executor · self-healing</text>
   <text class="m" x="548" y="190">console core: 729 Rust tests · adapters · state store · TUI + Swift</text>
   <text class="m" x="548" y="206">contracts/ Transit goldens · Data Foundry connectors + cursors</text>
@@ -81,22 +81,22 @@
 
   <!-- CONTRADICTIONS -->
   <rect class="zone" x="1180" y="62" width="720" height="620" rx="6"/>
-  <text class="zoneT" x="1196" y="84">CONTRADICTION REGISTER — nine on record</text>
-  <rect class="risk" x="1196" y="100" width="688" height="56" rx="6"/>
-  <text class="num" x="1208" y="120">1 · two derivers of supervisory truth</text>
-  <text class="s" x="1208" y="138">Clojure supervisory-state is "the single emitter" — but N5-delta-3 requires Rust to derive DecisionCard/AttentionItem locally. Both can't hold.</text>
-  <rect class="risk" x="1196" y="162" width="688" height="56" rx="6"/>
-  <text class="num" x="1208" y="182">2 · entity contract is convention, not contract</text>
-  <text class="s" x="1208" y="200">Rust supervisory-entities is a hand-written mirror: no schema-version; serde silently drops unknown fields — the silent-downgrade class.</text>
+  <text class="zoneT" x="1196" y="84">CONTRADICTION REGISTER — nine on record; status after Ariadne step 1 (#1555–#1559)</text>
+  <rect class="part" x="1196" y="100" width="688" height="56" rx="6"/>
+  <text class="num" x="1208" y="120">1 · two derivers of supervisory truth — HALF-RESOLVED (step 1e)</text>
+  <text class="s" x="1208" y="138">One truth artifact exists (:gate/decision envelope, contract v2) — Rust still mints attention locally until it consumes v2.</text>
+  <rect class="part" x="1196" y="162" width="688" height="56" rx="6"/>
+  <text class="num" x="1208" y="182">2 · entity contract is convention, not contract — HALF-RESOLVED (step 1e)</text>
+  <text class="s" x="1208" y="200">Producer enforced: schema-version 2, corpus covers every emitted key, drift fails a test. Rust mirror still drops four keys.</text>
   <rect class="risk" x="1196" y="224" width="688" height="56" rx="6"/>
   <text class="num" x="1208" y="244">3 · "Rust does NOT manage agents" vs bare-agent launch</text>
   <text class="s" x="1208" y="262">N5-delta-2 §2A.5 vs delta-3 §2.2 — resolved by amendment, but the base text still contradicts unless read together.</text>
-  <rect class="risk" x="1196" y="286" width="688" height="56" rx="6"/>
-  <text class="num" x="1208" y="306">4 · governance fails OPEN</text>
-  <text class="s" x="1208" y="324">gate passes non-critical violations (vocab mismatch + severity-less scans); unknown gates and empty packs degrade to pass.</text>
-  <rect class="risk" x="1196" y="348" width="688" height="56" rx="6"/>
-  <text class="num" x="1208" y="368">5 · three severity vocabularies, none enforced</text>
-  <text class="s" x="1208" y="386">packs (:critical/:major/:minor/:info) vs supervisory (:info…:critical) vs deployment (:critical…:low) — no single source of truth.</text>
+  <rect class="built" x="1196" y="286" width="688" height="56" rx="6"/>
+  <text class="num" x="1208" y="306">4 · governance fails OPEN — RESOLVED (steps 1c/1d)</text>
+  <text class="s" x="1208" y="324">Exhaustive classification, no default-pass branch: unknown enforcement/severity DENIES; nil artifact and :require-approval deny.</text>
+  <rect class="built" x="1196" y="348" width="688" height="56" rx="6"/>
+  <text class="num" x="1208" y="368">5 · three severity vocabularies, none enforced — RESOLVED (step 1a)</text>
+  <text class="s" x="1208" y="386">policy-clause is the one definition site; duplicates are pass-throughs; unknown values anomaly; axis crossings in one place.</text>
   <rect class="risk" x="1196" y="410" width="688" height="56" rx="6"/>
   <text class="num" x="1208" y="430">6 · two orchestrators, nested</text>
   <text class="s" x="1208" y="448">N1 assumes a "dumb" LLM fed context-packs; Claude Code IS an orchestrator — restraining the inner one via prose is the worst design point.</text>
@@ -113,8 +113,8 @@
   <!-- bottom -->
   <rect class="note" x="20" y="702" width="1880" height="86" rx="6"/>
   <text class="h" x="36" y="726">Why this panel exists</text>
-  <text class="t" x="36" y="748">The tenancy/policy adoption (the rethink) starts HERE: contradictions 1, 2, 4, and 5 are exactly the class of problem the clause-label / decision-envelope /</text>
-  <text class="t" x="36" y="766">attested-contract machinery from tenancy-ownership-access v1.5 resolves — and the tenancy note (left) says the ownership layer starts from a blank page.</text>
+  <text class="t" x="36" y="748">The adoption started here and step 1 landed (RFC Accepted #1553; wave #1555–#1559): 4 and 5 are resolved in code, 1 and 2 are producer-half resolved pending the</text>
+  <text class="t" x="36" y="766">miniforge-control v2 consume. Contradictions 6/7/9 wait on step 2 (grants + transacted effects); the ownership layer (step 3) still starts from a blank page.</text>
   <text class="s" x="36" y="782" font-style="italic">sources: Critical Review and Miniforge Gaps · miniforge-design-review-2026-06-10 · miniforge-control-design-review-2026-06-10 · miniforge-governance-audit-2026-07-05 · ROADMAP</text>
 
   <rect class="zone" x="20" y="808" width="1880" height="66" rx="6"/>

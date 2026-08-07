@@ -16,10 +16,13 @@
 ;; See the License for the specific language governing permissions and
 ;; limitations under the License.
 (ns ai.miniforge.compliance-scanner.execute-test
-  "Unit tests for execute/patch-file-content — the pure file-patching logic."
+  "Unit tests for execute-patch/patch-file-content (pure file-patching
+   logic) and execute-pr-doc/build-pr-doc, build-pr-body (PR doc
+   generation)."
   (:require [clojure.test   :refer [deftest testing is]]
             [clojure.string :as str]
-            [ai.miniforge.compliance-scanner.execute :as execute]))
+            [ai.miniforge.compliance-scanner.execute-patch :as patch]
+            [ai.miniforge.compliance-scanner.execute-pr-doc :as pr-doc]))
 
 ;------------------------------------------------------------------------------ Layer 0
 
@@ -55,7 +58,7 @@
     (let [content "original content\n"
           v       {:rule/id :std/clojure :line 1 :current "original content"
                    :suggested nil :auto-fixable? false}
-          patched (execute/patch-file-content content [v])]
+          patched (patch/patch-file-content content [v])]
       (is (= content patched)
           "Content should be unchanged when suggested is nil and not copyright"))))
 
@@ -68,19 +71,19 @@
                     :current       "(or (:state check) \"\")"
                     :suggested     "(get check :state \"\")"
                     :auto-fixable? true}
-          patched  (execute/patch-file-content content [v])]
+          patched  (patch/patch-file-content content [v])]
       (is (= "  (let [state (keyword (str/lower-case (get check :state \"\")))]\n" patched)
           "Only the matched (or ...) form should be replaced, preserving surrounding code"))))
 
 (deftest ^{:stratum 0} empty-violations-returns-content-unchanged-test
   (testing "patch-file-content with empty violations returns content unchanged"
     (let [content "some content\n"]
-      (is (= content (execute/patch-file-content content []))))))
+      (is (= content (patch/patch-file-content content []))))))
 
 ;------------------------------------------------------------------------------ PR doc generation
 (deftest ^{:stratum 0} build-pr-doc-contains-attribution-yaml
   (testing "PR doc includes YAML attribution block with rule metadata"
-    (let [build-pr-doc #'execute/build-pr-doc
+    (let [build-pr-doc #'pr-doc/build-pr-doc
           doc (build-pr-doc "fix/compliance-210-clojure-map-access" "210"
                             "Clojure Map Access"
                             ["components/foo/src/core.clj"]
@@ -100,7 +103,7 @@
 
 (deftest ^{:stratum 0} build-pr-body-contains-attribution-yaml
   (testing "PR body includes YAML attribution block"
-    (let [build-pr-body #'execute/build-pr-body
+    (let [build-pr-body #'pr-doc/build-pr-body
           body (build-pr-body "210" "Clojure Map Access" 5 3
                               "docs/pull-requests/2026-04-07-fix-210-clojure-map-access.md")]
       (is (str/includes? body "generated-by: miniforge-compliance-scanner"))
@@ -115,7 +118,7 @@
 (deftest ^{:stratum 1} line-replacement-applies-on-correct-line-test
   (testing "patch-file-content replaces :current with :suggested on the correct line"
     (let [content  "line1\nline2\n(or (:timeout m) 5000)\nline4\n"
-          patched  (execute/patch-file-content content [clojure-violation])]
+          patched  (patch/patch-file-content content [clojure-violation])]
       (is (str/includes? patched "(get m :timeout 5000)")
           "Should contain the suggested replacement")
       (is (not (str/includes? patched "(or (:timeout m) 5000)"))
@@ -124,7 +127,7 @@
 (deftest ^{:stratum 1} line-replacement-only-modifies-target-line-test
   (testing "patch-file-content leaves other lines untouched"
     (let [content  "line1\nline2\n(or (:timeout m) 5000)\nline4\n"
-          patched  (execute/patch-file-content content [clojure-violation])
+          patched  (patch/patch-file-content content [clojure-violation])
           lines    (str/split-lines patched)]
       (is (= "line1" (get lines 0)) "Line 1 unchanged")
       (is (= "line2" (get lines 1)) "Line 2 unchanged")
@@ -134,7 +137,7 @@
   (testing "patch-file-content preserves trailing newline"
     (let [content "(or (:timeout m) 5000)\n"
           v       (assoc clojure-violation :line 1)
-          patched (execute/patch-file-content content [v])]
+          patched (patch/patch-file-content content [v])]
       (is (str/ends-with? patched "\n")
           "Trailing newline should be preserved"))))
 
@@ -142,21 +145,21 @@
   (testing "patch-file-content preserves absence of trailing newline"
     (let [content "(or (:timeout m) 5000)"
           v       (assoc clojure-violation :line 1)
-          patched (execute/patch-file-content content [v])]
+          patched (patch/patch-file-content content [v])]
       (is (not (str/ends-with? patched "\n"))
           "No trailing newline should not be added"))))
 
 (deftest ^{:stratum 1} multiple-violations-same-file-applied-test
   (testing "patch-file-content applies multiple violations to the same file"
     (let [content  "line1\n1.2.3\n(or (:timeout m) 5000)\nline4\n"
-          patched  (execute/patch-file-content content [clojure-violation datever-violation])]
+          patched  (patch/patch-file-content content [clojure-violation datever-violation])]
       (is (str/includes? patched "1.2.3.0")    "DateVer fix applied")
       (is (str/includes? patched "(get m :timeout 5000)") "Clojure map access fix applied"))))
 
 (deftest ^{:stratum 1} copyright-header-prepended-test
   (testing "patch-file-content prepends copyright header for missing-header violations"
     (let [content "# My Doc\n\nSome content.\n"
-          patched (execute/patch-file-content content [copyright-violation])]
+          patched (patch/patch-file-content content [copyright-violation])]
       (is (str/starts-with? patched "<!--")
           "Patched content should start with HTML comment")
       (is (str/includes? patched "Christopher Lester")
@@ -168,7 +171,7 @@
   (testing "copyright prepend does not shift line indices for line-replacement violations"
     (let [content  "(or (:timeout m) 5000)\nline2\n"
           v-clj    (assoc clojure-violation :line 1)
-          patched  (execute/patch-file-content content [v-clj copyright-violation])]
+          patched  (patch/patch-file-content content [v-clj copyright-violation])]
       (is (str/includes? patched "(get m :timeout 5000)")
           "Clojure fix should still be applied")
       (is (str/starts-with? patched "<!--")

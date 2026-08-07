@@ -60,6 +60,13 @@
    :requires ([lint])
    :task (lint/stratum-staged)}
 
+  check:bb-classpaths
+  {:doc  "Load-check entry namespaces of every bb.edn task declaring :extra-paths + :requires (catches classpath drift; load only, no task execution)"
+   :requires ([ai.miniforge.bb-task-classpath.interface :as task-classpath])
+   :task (let [exit (task-classpath/check-all! {})]
+           (when-not (zero? exit)
+             (System/exit exit)))}
+
   fmt:md
   {:doc  "Format staged Markdown files (lint --fix)"
    :requires ([fmt])
@@ -81,7 +88,7 @@
    :task (commit-budget/run nil)}
 
   pr-budget
-  {:doc  "CI-only: reject a whole PR's merge-base..head diff over 200 lines, same exclusions as commit-budget. Reads PR_BASE_SHA/PR_HEAD_SHA/PR_BODY from the environment. Override via a `MINIFORGE_PR_BUDGET_OVERRIDE: reason` line in the PR description."
+  {:doc  "CI-only: reject a whole PR's merge-base..head diff over 600 reportable lines, using the same exclusions as commit-budget. Reads PR_BASE_SHA/PR_HEAD_SHA/PR_BODY from the environment. Override via a `MINIFORGE_PR_BUDGET_OVERRIDE: reason` line in the PR description."
    :requires ([pr-budget])
    :task (pr-budget/run nil)}
 
@@ -513,10 +520,13 @@
 
   extract:artifact
   {:doc "Extract files from a code artifact EDN file and write them to disk"
-   :extra-paths ["components/evidence-bundle/src"]
-   :requires ([ai.miniforge.evidence-bundle.extraction :as extraction])
+   :extra-paths ["components/evidence-bundle/src"
+                 "components/response/src"
+                 "components/messages/src"]
+   :extra-deps {slingshot/slingshot {:mvn/version "0.12.2"}}
+   :requires ([ai.miniforge.evidence-bundle.extraction-bulk :as extraction-bulk])
    :task (if-let [artifact-file (first *command-line-args*)]
-           (let [result (extraction/extract-artifact-from-file artifact-file)]
+           (let [result (extraction-bulk/extract-artifact-from-file artifact-file)]
              (doseq [r (:results result)]
                (if (:success r)
                  (println (case (:action r)
@@ -542,6 +552,16 @@
   ;; Dogfooding - Miniforge working on itself
   ;; ──────────────────────────────────────────────────────────────────────────
 
+  bench:provision
+  {:doc "Provision an isolated bench sandbox (usage: bb bench:provision [source-dir] [ref] [branch])"
+   :requires ([bench])
+   :task (apply bench/provision *command-line-args*)}
+
+  bench:verify
+  {:doc "Fail-closed check that a bench sandbox owns its own remotes and refs (usage: bb bench:verify [bench-repo-dir] [source-dir])"
+   :requires ([bench])
+   :task (apply bench/verify *command-line-args*)}
+
   dogfood:check
   {:doc "Check dogfooding prerequisites"
    :requires ([dogfood])
@@ -566,10 +586,42 @@
   ;; MCP Context Server
   ;; ──────────────────────────────────────────────────────────────────────────
 
+  codex-gap-report
+  {:doc "Render the Codex gap report (T2 §4) from run ledgers. Usage: bb codex-gap-report [checkpoint-root]; codex from MINIFORGE_CODEX_PATH"
+   :extra-paths ["components/codex-gap/src"
+                 "components/codex-gap/resources"
+                 "components/codex/src"
+                 "components/codex/resources"
+                 "components/codex-gap/src"
+                 "components/codex-gap/resources"
+                 "components/messages/src"
+                 "components/messages/resources"]
+   :requires ([ai.miniforge.codex-gap.interface :as codex-gap]
+              [babashka.fs :as fs])
+   :task (let [root (or (first *command-line-args*)
+                        (str (fs/path (System/getProperty "user.home")
+                                      ".miniforge" "checkpoints")))
+               dirs (when (fs/directory? root)
+                      (sort (filter fs/directory? (fs/list-dir root))))
+               reads (map (fn [d] (codex-gap/read-ledger (str d))) dirs)
+               entries (vec (mapcat :entries reads))
+               skipped (reduce + 0 (keep :skipped reads))
+               anchoring (some-> (System/getenv "MINIFORGE_CODEX_PATH")
+                                 codex-gap/codex-anchoring-stats)]
+           (println (codex-gap/render-report
+                     (codex-gap/build-report
+                      entries {:skipped skipped
+                               :run-count (count (filter (fn [r] (seq (:entries r))) reads))
+                               :anchoring anchoring}))))}
+
   mcp-context-server
   {:doc     "Run MCP context server (JSON-RPC 2.0 over stdin/stdout)"
    :extra-paths ["bases/mcp-context-server/src"
                  "bases/mcp-context-server/resources"
+                 "components/codex/src"
+                 "components/codex/resources"
+                 "components/codex-gap/src"
+                 "components/codex-gap/resources"
                  "components/messages/src"
                  "components/messages/resources"]
    :extra-deps {cheshire/cheshire {:mvn/version "5.13.0"}}
@@ -590,6 +642,10 @@
                  "components/messages/resources"
                  "components/config/src"
                  "components/config/resources"]
+   ;; response → anomaly requires slingshot; config → governance requires
+   ;; aero (both caught by check:bb-classpaths)
+   :extra-deps {slingshot/slingshot {:mvn/version "0.12.2"}
+                aero/aero {:mvn/version "1.1.6"}}
    :requires ([ai.miniforge.lsp-mcp-bridge.main :as bridge])
    :task    (bridge/-main)}
 
@@ -603,6 +659,8 @@
                  "components/messages/resources"
                  "components/config/src"
                  "components/config/resources"]
+   ;; response → anomaly requires slingshot (caught by check:bb-classpaths)
+   :extra-deps {slingshot/slingshot {:mvn/version "0.12.2"}}
    :requires ([ai.miniforge.lsp-mcp-bridge.tasks :as tasks])
    :task    (tasks/status)}
 
@@ -616,6 +674,8 @@
                  "components/messages/resources"
                  "components/config/src"
                  "components/config/resources"]
+   ;; response → anomaly requires slingshot (caught by check:bb-classpaths)
+   :extra-deps {slingshot/slingshot {:mvn/version "0.12.2"}}
    :requires ([ai.miniforge.lsp-mcp-bridge.tasks :as tasks])
    :task    (tasks/install *command-line-args*)}
 
@@ -629,6 +689,8 @@
                  "components/messages/resources"
                  "components/config/src"
                  "components/config/resources"]
+   ;; response → anomaly requires slingshot (caught by check:bb-classpaths)
+   :extra-deps {slingshot/slingshot {:mvn/version "0.12.2"}}
    :requires ([ai.miniforge.lsp-mcp-bridge.tasks :as tasks])
    :task    (tasks/setup *command-line-args*)}
 
@@ -683,6 +745,10 @@
                  "components/event-stream/src"
                  "components/event-stream/resources"
                  "components/supervisory-state/src"
+                 "components/policy-clause/src"
+                 "components/decision-envelope/src"
+                 "components/effect-transaction/src"
+                 "components/execution-grant/src"
                  "components/automation-edge-correlator/src"
                  "components/workflow-resume/src"
                  "components/workflow-resume/resources"
@@ -717,6 +783,10 @@
                  "components/context-pack/resources"
                  "bases/mcp-context-server/src"
                  "bases/mcp-context-server/resources"
+                 "components/codex/src"
+                 "components/codex/resources"
+                 "components/codex-gap/src"
+                 "components/codex-gap/resources"
                  "components/phase-software-factory/src"
                  "components/phase-software-factory/resources"
                  "components/compliance-scanner/src"

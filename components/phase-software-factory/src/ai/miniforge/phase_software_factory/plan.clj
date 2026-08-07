@@ -23,6 +23,8 @@
    Default gates: [:plan-complete]"
   (:require [ai.miniforge.phase.interface :as phase]
             [ai.miniforge.phase-software-factory.phase-config :as phase-config]
+            [ai.miniforge.phase-software-factory.codex-pin :as codex-pin]
+            [ai.miniforge.phase-software-factory.gap-wiring :as gap-wiring]
             [ai.miniforge.phase-software-factory.knowledge-helpers :as kb-helpers]
             [ai.miniforge.phase-software-factory.phase-terminal :as phase-terminal]
             [ai.miniforge.agent.interface :as agent]
@@ -112,7 +114,13 @@
 
    Returns {:task task-map :rules-manifest manifest-or-nil}."
   [input explore-result knowledge-store]
-  (let [existing-files (:exploration/files explore-result)
+  (let [exploration-files (:exploration/files explore-result)
+        ;; Thesium Codex blackboard pin (SPEC §7.4): pinned FIRST so the
+        ;; worries render before the content they apply to.
+        codex-outcome (codex-pin/pin-outcome :plan nil)
+        existing-files (if-let [pin (:entry codex-outcome)]
+                         (into [pin] (or exploration-files []))
+                         exploration-files)
         {:keys [formatted manifest]} (kb-helpers/inject-with-manifest
                                        knowledge-store :planner (get input :tags []))
         behavior-addendum (phase/load-guidance-addendum
@@ -130,7 +138,8 @@
                behavior-addendum
                (assoc :task/behavior-addendum behavior-addendum))]
     {:task task
-     :rules-manifest manifest}))
+     :rules-manifest manifest
+     :codex-outcome codex-outcome}))
 
 (defn ^{:stratum 0} create-streaming-callback
   "Create a streaming callback for agent output, if event-stream is available."
@@ -142,6 +151,9 @@
 
    Records metrics and updates execution state."
   [ctx]
+  ;; Gap-instrument miss recording (T2 s3): best-effort, opt-in, and it
+  ;; must never change the outcome it measures.
+  (gap-wiring/record-phase-misses! ctx :plan)
   (let [start-time (get-in ctx [:phase :started-at])
         end-time (System/currentTimeMillis)
         duration-ms (- end-time start-time)
@@ -197,23 +209,29 @@
    Returns {:result agent-result :rules-manifest manifest-or-nil}."
   [ctx input]
   (let [explore-result (get-in ctx [:execution/phase-results :explore :result :output])
-        {:keys [task rules-manifest]} (build-planner-task input explore-result (:knowledge-store ctx))
+        {:keys [task rules-manifest codex-outcome]} (build-planner-task input explore-result (:knowledge-store ctx))
         on-chunk (create-streaming-callback ctx)
         agent-ctx (cond-> ctx on-chunk (assoc :on-chunk on-chunk))
         planner-agent (agent/create-planner {})]
-    {:result (validate-dag-readiness
-              (try
-                (agent/invoke planner-agent task agent-ctx)
-                (catch Exception e
-                  ;; Preserve the spent-token count from the agent's failure
-                  ;; anomaly (planner tags ex-data with :tokens) into the
-                  ;; failure result's :metrics, so leave-plan still merges the
-                  ;; real cost into :execution/metrics instead of reporting $0.
-                  (let [ed   (ex-data e)
-                        toks (get ed :tokens 0)]
-                    (response/failure e {:data ed
-                                         :tokens toks
-                                         :metrics {:tokens toks}})))))
+    {:result (let [r (validate-dag-readiness
+                       (try
+                         (agent/invoke planner-agent task agent-ctx)
+                         (catch Exception e
+                           ;; Preserve the spent-token count from the agent's failure
+                           ;; anomaly (planner tags ex-data with :tokens) into the
+                           ;; failure result's :metrics, so leave-plan still merges the
+                           ;; real cost into :execution/metrics instead of reporting $0.
+                           (let [ed   (ex-data e)
+                                 toks (get ed :tokens 0)]
+                             (response/failure e {:data ed
+                                                  :tokens toks
+                                                  :metrics {:tokens toks}})))))]
+               ;; SPEC §7.4.3 consultation provenance. The planner session does
+               ;; not surface :context-reads yet, so :pin-read? is nil (unknown).
+               (if (map? (:output r))
+                 (assoc-in r [:output :codex/consultation]
+                           (codex-pin/consultation-summary codex-outcome nil))
+                 r))
      :rules-manifest rules-manifest}))
 
 ;------------------------------------------------------------------------------ Layer 2

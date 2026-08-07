@@ -15,7 +15,7 @@
    Layer 2: Composite schemas (WorkflowRun, PolicyEvaluation, PolicyViolation,
             AttentionItem, Waiver, EvidenceBundle)"
   (:require
-   [ai.miniforge.schema.core :as core]))
+   [ai.miniforge.schema.vocab :as vocab]))
 
 ;------------------------------------------------------------------------------ Layer 0
 
@@ -27,7 +27,10 @@
   [:style :security :testing :documentation :architecture :process :budget])
 
 (def ^{:stratum 0} violation-severities
-  [:info :low :medium :high :critical])
+  "Pass-through to the canonical severity scale (policy-clause via vocab).
+   Enum use only — the canonical most-to-least order replaces the reversed
+   copy that used to live here."
+  vocab/severities)
 
 (def ^{:stratum 0} attention-source-types
   [:workflow :policy :agent :system :human])
@@ -35,9 +38,9 @@
 ;------------------------------------------------------------------------------ Layer 1
 
 (def ^{:stratum 1} supervisory-registry
-  "Malli registry extending core registry with supervisory types."
+  "Malli registry extending the base registry with supervisory types."
   (merge
-   core/registry
+   vocab/registry
    {;; Evaluation types
     :eval/id            :id/uuid
     :eval/result        (into [:enum] eval-results)

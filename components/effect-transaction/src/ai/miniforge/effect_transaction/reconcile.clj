@@ -1,0 +1,71 @@
+;; Title: Miniforge.ai
+;; Subtitle: An agentic SDLC / fleet-control platform
+;; Author: Christopher Lester
+;; Line: Founder, Miniforge.ai (project)
+;; Copyright 2025-2026 Christopher Lester (christopher@miniforge.ai)
+;;
+;; Licensed under the Apache License, Version 2.0 (the "License");
+;; you may not use this file except in compliance with the License.
+;; You may obtain a copy of the License at
+;;
+;;     http://www.apache.org/licenses/LICENSE-2.0
+;;
+;; Unless required by applicable law or agreed to in writing, software
+;; distributed under the License is distributed on an "AS IS" BASIS,
+;; WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+;; See the License for the specific language governing permissions and
+;; limitations under the License.
+(ns ai.miniforge.effect-transaction.reconcile
+  "Settle unknown effect outcomes by asking the external system."
+  (:require
+   [ai.miniforge.anomaly.interface :as anomaly]
+   [ai.miniforge.effect-transaction.call :as call]
+   [ai.miniforge.effect-transaction.messages :as msg]
+   [ai.miniforge.effect-transaction.record :as record]
+   [ai.miniforge.effect-transaction.schema :as schema]
+   [ai.miniforge.effect-transaction.store :as store])
+  (:import
+   [java.time Instant]))
+
+;------------------------------------------------------------------------------ Layer 0
+
+(defn- ^{:stratum 0} record-answer!
+  "Persist the external system's answer to a reconciliation probe."
+  [dir t answer ^Instant now]
+  (record/advance! dir t
+                   {:effect/state :reconciled
+                    :effect/observed (:effect/observed answer)
+                    :effect/matched? (boolean (:effect/matched? answer))}
+                   now))
+
+;------------------------------------------------------------------------------ Layer 1
+
+(defn- ^{:stratum 1} probe!
+  "Probe the external system and preserve an unresolved record on silence."
+  [dir t probe-fn ^Instant now]
+  (let [called (call/result (partial probe-fn t))]
+    (if (call/probe-answered? called)
+      (record-answer! dir t (:call/report called) now)
+      (record/unresolved (msg/t :reconcile/no-answer)
+                         (call/probe-error-data t called)))))
+
+;------------------------------------------------------------------------------ Layer 2
+
+(defn ^{:stratum 2} reconcile!
+  "Reload a durable transaction and, when it remains unsettled, ask the world
+   to settle its committing or unknown outcome."
+  [dir candidate probe-fn ^Instant now]
+  (let [id (:effect/id candidate)
+        t (store/read-record dir id)]
+    (cond
+      (anomaly/anomaly? t) t
+
+      (nil? t)
+      (store/not-found id)
+
+      (not (contains? schema/reconcilable-states (:effect/state t)))
+      (record/wrong-state (msg/t :reconcile/not-reconcilable)
+                          (record/lifecycle-position t))
+
+      :else
+      (probe! dir t probe-fn now))))

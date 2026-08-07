@@ -19,25 +19,26 @@
   "Tests for multi-detection scanning, category selectors, and incremental mode."
   (:require
    [clojure.test :refer [deftest testing is]]
-   [ai.miniforge.compliance-scanner.scan]))
+   [ai.miniforge.compliance-scanner.scan-diff-plan]
+   [ai.miniforge.compliance-scanner.scan-rule-selector]))
 
 ;------------------------------------------------------------------------------ Layer 0
 
 ;; Access private functions via var for unit testing
 (def ^{:stratum 0} ^:private category-matches?
-  (var-get #'ai.miniforge.compliance-scanner.scan/category-matches?))
+  (var-get #'ai.miniforge.compliance-scanner.scan-rule-selector/category-matches?))
 
 (def ^{:stratum 0} ^:private rule-matches-selector?
-  (var-get #'ai.miniforge.compliance-scanner.scan/rule-matches-selector?))
+  (var-get #'ai.miniforge.compliance-scanner.scan-rule-selector/rule-matches-selector?))
 
 (def ^{:stratum 0} ^:private category-dewey-ranges
-  (var-get #'ai.miniforge.compliance-scanner.scan/category-dewey-ranges))
+  (var-get #'ai.miniforge.compliance-scanner.scan-rule-selector/category-dewey-ranges))
 
 ;; ============================================================================
 ;; Diff rule scanning
 ;; ============================================================================
 (def ^{:stratum 0} ^:private scan-diff-rule
-  (var-get #'ai.miniforge.compliance-scanner.scan/scan-diff-rule))
+  (var-get #'ai.miniforge.compliance-scanner.scan-diff-plan/scan-diff-rule))
 
 ;------------------------------------------------------------------------------ Layer 1
 

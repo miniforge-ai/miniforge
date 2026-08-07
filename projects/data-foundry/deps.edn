@@ -32,6 +32,7 @@
         ai.miniforge/coerce                    {:local/root "../../components/coerce"}
         ai.miniforge/config                    {:local/root "../../components/config"}
         ai.miniforge/content-hash              {:local/root "../../components/content-hash"}
+        ai.miniforge/cursor-store              {:local/root "../../components/cursor-store"}
         ai.miniforge/dag-executor              {:local/root "../../components/dag-executor"}
         ai.miniforge/dag-primitives            {:local/root "../../components/dag-primitives"}
         ai.miniforge/data-quality              {:local/root "../../components/data-quality"}
@@ -42,7 +43,8 @@
         ai.miniforge/phase                     {:local/root "../../components/phase"}
         ai.miniforge/policy-pack               {:local/root "../../components/policy-pack"}
         ai.miniforge/response                  {:local/root "../../components/response"}
-        ai.miniforge/schema                    {:local/root "../../components/schema"}}
+        ai.miniforge/schema                    {:local/root "../../components/schema"}
+        ai.miniforge/policy-clause             {:local/root "../../components/policy-clause"}}
 
  :aliases
  {:test {:extra-paths ["../../bases/etl/test"

@@ -26,6 +26,7 @@
    [ai.miniforge.event-stream.interface.control-state :as control-state]
    [ai.miniforge.event-stream.interface.events :as events]
    [ai.miniforge.event-stream.interface.listeners :as listeners]
+   [ai.miniforge.event-stream.interface.opsv :as opsv]
    [ai.miniforge.event-stream.interface.stream :as stream]
    [ai.miniforge.event-stream.digest :as digest]
    [ai.miniforge.event-stream.heartbeat :as heartbeat]
@@ -200,6 +201,42 @@
 
 ;; ────────────────────────────────────────────────────────────────────────────
 ;; Event constructors
+(def ^{:stratum 0} experiment-planned
+  "Construct an N3 :opsv.experiment/planned event."
+  opsv/experiment-planned)
+
+(def ^{:stratum 0} experiment-started
+  "Construct an N3 :opsv.experiment/started event."
+  opsv/experiment-started)
+
+(def ^{:stratum 0} load-step
+  "Construct an N3 :opsv/load-step event."
+  opsv/load-step)
+
+(def ^{:stratum 0} guardrail-abort
+  "Construct an N3 :opsv.guardrail/abort event."
+  opsv/guardrail-abort)
+
+(def ^{:stratum 0} convergence-iteration
+  "Construct an N3 :opsv.convergence/iteration event."
+  opsv/convergence-iteration)
+
+(def ^{:stratum 0} policy-proposed
+  "Construct an N3 :opsv.policy/proposed event."
+  opsv/policy-proposed)
+
+(def ^{:stratum 0} verification-result
+  "Construct an N3 :opsv.verification/result event."
+  opsv/verification-result)
+
+(def ^{:stratum 0} actuation-emitted
+  "Construct an N3 :opsv.actuation/emitted event."
+  opsv/actuation-emitted)
+
+(def ^{:stratum 0} drift-detected
+  "Construct an N3 :opsv.drift/detected event."
+  opsv/drift-detected)
+
 (def ^{:stratum 0} workflow-started
   "Build and return a :workflow/started event envelope map. Multi-arity
    for the legacy 2/3-arg call shape; the opts arity may carry
@@ -317,6 +354,10 @@
    violations become :gate/violations and optional :failure/class is
    carried through."
   events/gate-failed)
+
+(def ^{:stratum 0} phase-decision
+  "One event per gated phase transition carrying the DecisionEnvelope."
+  events/phase-decision)
 
 (def ^{:stratum 0} gate-rule-applied
   "Build and return a :gate/rule-applied event envelope map: per-rule

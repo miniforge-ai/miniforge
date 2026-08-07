@@ -1,0 +1,79 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 900 560" font-family="Helvetica, Arial, sans-serif">
+  <defs>
+    <marker id="a" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="8" markerHeight="8" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="#3a76b8"/></marker>
+    <marker id="ao" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="8" markerHeight="8" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="#d79b00"/></marker>
+    <marker id="ar" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="8" markerHeight="8" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="#c0392b"/></marker>
+  </defs>
+  <rect width="900" height="560" fill="#ffffff"/>
+  <text x="450" y="42" text-anchor="middle" font-size="24" font-weight="bold" fill="#1e5f96">The doorkeeper asks three questions — all three must pass</text>
+
+  <!-- Q1 hall pass -->
+  <rect x="50" y="76" width="255" height="180" rx="10" fill="#e1d5e7" stroke="#9673a6" stroke-width="2"/>
+  <text x="66" y="102" font-size="16" font-weight="bold" fill="#4a355c">1 · "Got a hall pass?"</text>
+  <rect x="70" y="116" width="216" height="110" rx="8" fill="#ffffff" stroke="#9673a6" stroke-width="1.5"/>
+  <text x="82" y="138" font-size="13" font-weight="bold" fill="#4a355c">HALL PASS — robot-a</text>
+  <text x="82" y="158" font-size="12" fill="#333">may: mail letters to family</text>
+  <text x="82" y="176" font-size="12" fill="#333">because: alice said so (tue)</text>
+  <text x="82" y="194" font-size="12" fill="#333">expires: bedtime</text>
+  <text x="82" y="212" font-size="12" fill="#c0392b" font-weight="bold">lending: not allowed</text>
+  <text x="66" y="246" font-size="11.5" fill="#4a355c">if the "because" goes away, the pass dies too</text>
+
+  <!-- Q2 stickers -->
+  <rect x="322" y="76" width="255" height="180" rx="10" fill="#f8cecc" stroke="#b85450" stroke-width="2"/>
+  <text x="338" y="102" font-size="16" font-weight="bold" fill="#7a3230">2 · "Stickers all okay?"</text>
+  <rect x="342" y="116" width="90" height="70" rx="5" fill="#ffffff" stroke="#8a8a82" stroke-width="1.5"/>
+  <circle cx="358" cy="130" r="11" fill="#dae8fc" stroke="#6c8ebf" stroke-width="1.5"/>
+  <circle cx="384" cy="130" r="11" fill="#d5e8d4" stroke="#82b366" stroke-width="1.5"/>
+  <circle cx="410" cy="130" r="11" fill="#f8cecc" stroke="#b85450" stroke-width="2"/>
+  <text x="410" y="134" text-anchor="middle" font-size="8" fill="#7a3230">house</text>
+  <text x="338" y="212" font-size="12.5" fill="#333">every sticker gets a vote.</text>
+  <text x="338" y="230" font-size="12.5" font-weight="bold" fill="#7a3230">one "stays home" vote wins,</text>
+  <text x="338" y="246" font-size="12.5" font-weight="bold" fill="#7a3230">even against nine yeses.</text>
+  <text x="452" y="140" font-size="12" fill="#555">← the slip wants</text>
+  <text x="452" y="156" font-size="12" fill="#555">to mail THIS</text>
+
+  <!-- Q3 how big -->
+  <rect x="594" y="76" width="255" height="180" rx="10" fill="#ffe6cc" stroke="#d79b00" stroke-width="2"/>
+  <text x="610" y="102" font-size="16" font-weight="bold" fill="#8a5a00">3 · "How big a deal?"</text>
+  <rect x="612" y="116" width="100" height="26" rx="13" fill="#d5e8d4" stroke="#82b366" stroke-width="1.5"/><text x="662" y="134" text-anchor="middle" font-size="12" fill="#3a6a34">just looking</text>
+  <rect x="612" y="150" width="100" height="26" rx="13" fill="#d5e8d4" stroke="#82b366" stroke-width="1.5"/><text x="662" y="168" text-anchor="middle" font-size="12" fill="#3a6a34">drafting</text>
+  <rect x="612" y="184" width="130" height="26" rx="13" fill="#f8cecc" stroke="#b85450" stroke-width="2"/><text x="677" y="202" text-anchor="middle" font-size="12" font-weight="bold" fill="#7a3230">mailing · spending</text>
+  <rect x="612" y="218" width="130" height="26" rx="13" fill="#f8cecc" stroke="#b85450" stroke-width="2"/><text x="677" y="236" text-anchor="middle" font-size="12" font-weight="bold" fill="#7a3230">deleting — no undo!</text>
+  <text x="756" y="204" font-size="20" fill="#c0392b">→</text>
+  <text x="782" y="196" font-size="12" fill="#7a3230">needs a</text>
+  <text x="782" y="212" font-size="12" font-weight="bold" fill="#7a3230">grown-up</text>
+
+  <!-- grown-up approval -->
+  <rect x="50" y="290" width="400" height="130" rx="10" fill="#fcfcfa" stroke="#b8b8b0" stroke-width="1.5"/>
+  <text x="66" y="316" font-size="16" font-weight="bold" fill="#232323">Big deals: the grown-up sees the real thing</text>
+  <circle cx="100" cy="360" r="18" fill="#d5e8d4" stroke="#82b366" stroke-width="2"/>
+  <rect x="84" y="382" width="32" height="26" rx="8" fill="#d5e8d4" stroke="#82b366" stroke-width="2"/>
+  <rect x="140" y="340" width="120" height="66" rx="4" fill="#ffffff" stroke="#8a8a82" stroke-width="1.5"/>
+  <text x="200" y="362" text-anchor="middle" font-size="11" fill="#333">the ACTUAL letter,</text>
+  <text x="200" y="378" text-anchor="middle" font-size="11" fill="#333">word for word —</text>
+  <text x="200" y="394" text-anchor="middle" font-size="11" font-weight="bold" fill="#c0392b">never the robot's summary</text>
+  <text x="280" y="366" font-size="12.5" fill="#333">…and only a grown-up</text>
+  <text x="280" y="382" font-size="12.5" fill="#333">who's ALLOWED to read</text>
+  <text x="280" y="398" font-size="12.5" fill="#333">it may approve it</text>
+
+  <!-- receipt -->
+  <rect x="470" y="290" width="180" height="130" rx="6" fill="#fffde7" stroke="#c8b900" stroke-width="2"/>
+  <text x="560" y="314" text-anchor="middle" font-size="14" font-weight="bold" fill="#4a4a20">RECEIPT</text>
+  <text x="560" y="338" text-anchor="middle" font-size="13" fill="#c0392b" font-weight="bold">NO.</text>
+  <text x="560" y="360" text-anchor="middle" font-size="12" fill="#333">question 2 failed:</text>
+  <text x="560" y="376" text-anchor="middle" font-size="12" fill="#333">"stays home" sticker</text>
+  <text x="560" y="400" text-anchor="middle" font-size="11" font-style="italic" fill="#555">every decision gets one</text>
+
+  <!-- line check -->
+  <rect x="670" y="290" width="180" height="130" rx="10" fill="#fcfcfa" stroke="#b8b8b0" stroke-width="1.5"/>
+  <text x="760" y="314" text-anchor="middle" font-size="14" font-weight="bold" fill="#232323">checked at the door</text>
+  <text x="760" y="336" text-anchor="middle" font-size="12" fill="#333">pass taken away while</text>
+  <text x="760" y="352" text-anchor="middle" font-size="12" fill="#333">the robot stood in line?</text>
+  <text x="760" y="372" text-anchor="middle" font-size="12" font-weight="bold" fill="#c0392b">still stopped.</text>
+  <text x="760" y="394" text-anchor="middle" font-size="11.5" font-style="italic" fill="#555">"but I was already in</text>
+  <text x="760" y="408" text-anchor="middle" font-size="11.5" font-style="italic" fill="#555">line!" never works</text>
+
+  <rect x="50" y="452" width="800" height="60" rx="8" fill="#fffde7" stroke="#c8b900" stroke-width="1.5"/>
+  <text x="450" y="477" text-anchor="middle" font-size="15" fill="#4a4a20">You don't argue with the doorkeeper by being clever.</text>
+  <text x="450" y="498" text-anchor="middle" font-size="15" font-weight="bold" fill="#4a4a20">You argue by showing a better hall pass, or a properly peeled sticker.</text>
+</svg>

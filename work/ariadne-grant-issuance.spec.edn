@@ -1,0 +1,89 @@
+;; =============================================================================
+;; Spec: Ariadne step 2f — runtime issuance for irreversible effects
+;; =============================================================================
+
+{:spec/title "Issue narrow runtime-owned grants for irreversible effects"
+
+ :spec/description
+ "Build the production issuance service that turns a runtime-attested canonical
+  effect request into a short-lived ExecutionGrant. Its closed input carries
+  the active workflow-run identity, preallocated effect transaction ID, exact
+  target scope, and an allow-class effect-specific preflight basis. The workflow
+  runtime is the principal; agents may propose inputs but cannot mint or alter
+  authority. Issuance occurs before the durable proposal and grant-aware
+  decision are recorded.
+
+  This slice defines and validates the issuance service and its basis record in
+  execution-grant. The separate merge and deployment enforcement specs own the
+  runtime call sites that construct the basis after merge readiness or after
+  deployment policy checks and provider dry-run. This keeps policy mechanics
+  independent from application orchestration without leaving the production
+  integration implicit.
+
+  Workflow-start issuance is rejected because it creates a broad, long-lived
+  authority object; phase-entry issuance is rejected because the exact effect
+  target and preflight result may not yet be known.
+
+  Issuance uses one explicit policy catalog keyed by effect class. Merge grants
+  last 15 minutes and deploy grants last 30 minutes because deployment includes
+  provider dry-run and rollback preparation. Both bind one preallocated effect
+  transaction, carry :constraint/max-count 1, and set :grant/delegable? false.
+  These are effect-policy decisions, not role defaults; absent constraint axes
+  remain explicitly unbounded.
+
+  Merge scope binds the effect transaction, workflow run, repository, and PR
+  number. Deploy scope binds the effect transaction, workflow run, kustomize
+  directory, Kubernetes context, namespace, and deployment name. A nil
+  Kubernetes context is an explicit binding to the configured default context,
+  not a wildcard. The issuer refuses incomplete scope rather than broadening
+  it. It checks the revocation-for-cause eligibility predicate before calling
+  execution-grant/issue.
+
+  No inner agent receives a delegated merge or deploy grant in this slice.
+  Agents propose work but never invoke these irreversible effects; the runtime
+  retains authority and commits them. Delegating authority that a child does
+  not exercise would enlarge the blast radius without enabling behavior."
+
+ :spec/intent
+ {:type :feature
+  :scope ["components/execution-grant/**"]}
+
+ :spec/constraints
+ ["Only deterministic runtime code may call the production issuer"
+  "Issuance requires a validated allow-class effect-specific basis record"
+  "The grant principal is the workflow-run runtime identity"
+  "The issuer must know the complete effect scope before minting a grant"
+  "Merge policy is a 15-minute non-delegable one-transaction grant"
+  "Deploy policy is a 30-minute non-delegable one-transaction grant"
+  "Ceilings come from one effect-policy catalog, never an implicit role default"
+  "Eligibility is checked before execution-grant/issue"
+  "Callers cannot supply expiry, ceilings, or delegation state"
+  "Issuer input and output are validated at the public component boundary"
+  "Policy and grant fixture maps are constructed once and reused in tests"
+  "Stratified design permits at most three layers per implementation namespace"]
+
+ :spec/acceptance-criteria
+ ["The production issuer calls execution-grant/issue"
+  "Issuance refuses an absent or deny-class preflight result"
+  "A merge grant binds effect transaction, workflow run, repository, and PR number"
+  "A deploy grant binds effect transaction, workflow run, kustomize directory, Kubernetes context, namespace, and deployment name"
+  "Issuance refuses a request missing any required scope binding"
+  "Merge grants expire 15 minutes after issuance"
+  "Deploy grants expire 30 minutes after issuance"
+  "Merge and deploy grants carry :constraint/max-count 1"
+  "Merge and deploy grants carry :grant/delegable? false"
+  "A principal with disqualifying breach history is refused issuance"
+  "Malformed public issuer input returns a schema failure before persistence"
+  "poly check reports 0 errors and 0 warnings"
+  "full bb test is green"]
+
+ :spec/priority
+ {:tier :high
+  :axes #{:correctness :policy-enforcement :governance-credibility}
+  :theme :ariadne-grants
+  :rationale "Without runtime-owned issuance, grant enforcement either remains bypassed or denies every irreversible effect."
+  :blocks ["ariadne-merge-grant-enforcement.spec.edn"
+           "ariadne-deploy-grant-enforcement.spec.edn"]
+  :blocked-by []}
+
+ :spec/workflow-type :canonical-sdlc}

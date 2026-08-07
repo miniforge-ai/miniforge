@@ -1,0 +1,9 @@
+{:phase-opsv/system
+ {:adapter/missing "The OPSV workflow requires an adapter implementing OPSVAdapter."
+  :adapter/invalid-result "The OPSV adapter returned an invalid result shape."
+  :adapter/empty-ramp "The OPSV adapter returned no guarded ramp observations."
+  :adapter/missing-fingerprint "The OPSV adapter returned no environment fingerprint."
+  :evidence/assembly-mismatch "The OPSV evidence identifier has no matching workflow assembly."
+  :evidence/accumulation-failed "The OPSV event reference could not be added to evidence."
+  :event/invalid "The projected OPSV event does not satisfy its N3 schema."
+  :event/publication-failed "The OPSV event stream rejected a domain event."}}

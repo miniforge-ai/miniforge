@@ -22,7 +22,12 @@
    [clojure.test :refer [deftest is testing]]
    [slingshot.slingshot :refer [try+]]
    [ai.miniforge.llm.interface :as llm]
-   [ai.miniforge.cli.workflow-runner :as sut]))
+   [ai.miniforge.cli.workflow-runner :as sut]
+   [ai.miniforge.cli.workflow-runner.paths :as paths]
+   [ai.miniforge.cli.workflow-runner.preflight :as preflight]
+   [ai.miniforge.cli.workflow-runner.preflight-probe :as probe]
+   [ai.miniforge.cli.workflow-runner.process :as process]
+   [ai.miniforge.cli.workflow-runner.provenance :as provenance]))
 
 ;------------------------------------------------------------------------------ Layer 0
 
@@ -38,7 +43,7 @@
 (deftest ^{:stratum 0} await-stream-waits-for-reader-completion-test
   (testing "stream join waits for a completed reader instead of dropping late output"
     (let [started-at (System/currentTimeMillis)
-          result (#'sut/await-stream (future
+          result (#'process/await-stream (future
                                        (Thread/sleep 1100)
                                        "late-output"))
           elapsed-ms (- (System/currentTimeMillis) started-at)]
@@ -48,7 +53,7 @@
 (deftest ^{:stratum 0} print-runtime-provenance-includes-startup-warnings-test
   (testing "startup provenance prints upstream and source checkout warnings"
     (let [output (with-out-str
-                   (#'sut/print-runtime-provenance!
+                   (#'provenance/print-runtime-provenance!
                     false
                     {:source-root "/tmp/source-root"
                      :worktree-path "/tmp/runtime-worktree"
@@ -68,9 +73,9 @@
     (let [llm-client (llm/mock-client {:output "{\"ok\":true}"})
           preflight-client (atom nil)
           output (with-out-str
-                   (with-redefs-fn {#'sut/resolve-cli-command-path (fn [_] "/Users/chris/.local/bin/claude")
-                                    #'sut/read-cli-version (fn [_] {:success true :version "2.1.126"})
-                                    #'sut/run-claude-backend-preflight (fn [cmd-path workdir]
+                   (with-redefs-fn {#'paths/resolve-cli-command-path (fn [_] "/Users/chris/.local/bin/claude")
+                                    #'probe/read-cli-version (fn [_] {:success true :version "2.1.126"})
+                                    #'probe/run-claude-backend-preflight (fn [cmd-path workdir]
                                                                          (is (= "/Users/chris/.local/bin/claude" cmd-path))
                                                                          (is (= "/tmp/runtime-worktree" workdir))
                                                                          {:success true :content "{\"ok\":true}" :exit-code 0})
@@ -80,7 +85,7 @@
                                     #'llm/complete (fn [_client _request]
                                                      (is false "Claude preflight should use the direct CLI probe path"))}
                      (fn []
-                       (#'sut/run-backend-preflight!
+                       (#'preflight/run-backend-preflight!
                         false
                         llm-client
                         {:worktree-path "/tmp/runtime-worktree"}))))]
@@ -93,15 +98,15 @@
   (testing "backend preflight carries the resolved path and version when the probe fails"
     (let [llm-client (llm/mock-client {:output "{\"ok\":true}"})]
       (try+
-        (with-redefs-fn {#'sut/resolve-cli-command-path (fn [_] "/opt/homebrew/bin/claude")
-                         #'sut/read-cli-version (fn [_] {:success true :version "2.1.89"})
-                         #'sut/run-claude-backend-preflight (fn [_cmd-path _workdir]
+        (with-redefs-fn {#'paths/resolve-cli-command-path (fn [_] "/opt/homebrew/bin/claude")
+                         #'probe/read-cli-version (fn [_] {:success true :version "2.1.89"})
+                         #'probe/run-claude-backend-preflight (fn [_cmd-path _workdir]
                                                               {:success false
                                                                :error {:type "backend_preflight_timeout"
                                                                        :message "Process timed out after 10000ms"}
                                                                :exit-code -1})}
           (fn []
-            (#'sut/run-backend-preflight!
+            (#'preflight/run-backend-preflight!
              true
              llm-client
              {:worktree-path "/tmp/runtime-worktree"})))
@@ -117,14 +122,14 @@
   (testing "Claude preflight accepts success envelopes whose result field contains the canonical payload"
     (let [llm-client (llm/mock-client {:output "{\"ok\":true}"})
           output (with-out-str
-                   (with-redefs-fn {#'sut/resolve-cli-command-path (fn [_] "/opt/homebrew/bin/claude")
-                                    #'sut/read-cli-version (fn [_] {:success true :version "2.1.118 (Claude Code)"})
-                                    #'sut/run-cli-command (fn [_cmd _timeout-ms & _]
+                   (with-redefs-fn {#'paths/resolve-cli-command-path (fn [_] "/opt/homebrew/bin/claude")
+                                    #'probe/read-cli-version (fn [_] {:success true :version "2.1.118 (Claude Code)"})
+                                    #'process/run-cli-command (fn [_cmd _timeout-ms & _]
                                                             {:out "{\"type\":\"result\",\"subtype\":\"success\",\"result\":\"{\\\"ok\\\":true}\"}"
                                                              :err ""
                                                              :exit 0})}
                      (fn []
-                       (#'sut/run-backend-preflight!
+                       (#'preflight/run-backend-preflight!
                         false
                         llm-client
                         {:worktree-path "/tmp/runtime-worktree"}))))]
@@ -136,14 +141,14 @@
   (testing "Claude preflight rejects wrapped payloads when the outer result envelope is not successful"
     (let [llm-client (llm/mock-client {:output "{\"ok\":true}"})]
       (try+
-        (with-redefs-fn {#'sut/resolve-cli-command-path (fn [_] "/opt/homebrew/bin/claude")
-                         #'sut/read-cli-version (fn [_] {:success true :version "2.1.118 (Claude Code)"})
-                         #'sut/run-cli-command (fn [_cmd _timeout-ms & _]
+        (with-redefs-fn {#'paths/resolve-cli-command-path (fn [_] "/opt/homebrew/bin/claude")
+                         #'probe/read-cli-version (fn [_] {:success true :version "2.1.118 (Claude Code)"})
+                         #'process/run-cli-command (fn [_cmd _timeout-ms & _]
                                                  {:out "{\"type\":\"result\",\"subtype\":\"error\",\"is_error\":true,\"result\":\"{\\\"ok\\\":true}\"}"
                                                   :err ""
                                                   :exit 0})}
           (fn []
-            (#'sut/run-backend-preflight!
+            (#'preflight/run-backend-preflight!
              false
              llm-client
              {:worktree-path "/tmp/runtime-worktree"})))
@@ -161,9 +166,9 @@
           seen-timeout (atom nil)
           seen-workdir (atom nil)
           output (with-out-str
-                   (with-redefs-fn {#'sut/resolve-cli-command-path (fn [_] "/Users/chris/.local/bin/codex")
-                                    #'sut/read-cli-version (fn [_] {:success true :version "1.2.3"})
-                                    #'sut/run-cli-command (fn [cmd timeout-ms & {:keys [workdir]}]
+                   (with-redefs-fn {#'paths/resolve-cli-command-path (fn [_] "/Users/chris/.local/bin/codex")
+                                    #'probe/read-cli-version (fn [_] {:success true :version "1.2.3"})
+                                    #'process/run-cli-command (fn [cmd timeout-ms & {:keys [workdir]}]
                                                             (reset! seen-cmd cmd)
                                                             (reset! seen-timeout timeout-ms)
                                                             (reset! seen-workdir workdir)
@@ -171,7 +176,7 @@
                                                              :err ""
                                                              :exit 0})}
                      (fn []
-                       (#'sut/run-backend-preflight!
+                       (#'preflight/run-backend-preflight!
                         false
                         llm-client
                         {:worktree-path "/tmp/runtime-worktree"}))))]
@@ -188,14 +193,14 @@
 
 (deftest ^{:stratum 1} run-cli-command-captures-short-lived-process-output-test
   (testing "probe helper captures stdout, stderr, and exit code for short-lived commands"
-    (let [result (#'sut/run-cli-command [(shell-path) "-lc" "printf ok; printf warn >&2"] 5000)]
+    (let [result (#'process/run-cli-command [(shell-path) "-lc" "printf ok; printf warn >&2"] 5000)]
       (is (= "ok" (:out result)))
       (is (= "warn" (:err result)))
       (is (= 0 (:exit result))))))
 
 (deftest ^{:stratum 1} run-cli-command-times-out-fast-test
   (testing "probe helper returns a timeout result instead of hanging the caller"
-    (let [result (#'sut/run-cli-command [(shell-path) "-lc" "sleep 1"] 10)]
+    (let [result (#'process/run-cli-command [(shell-path) "-lc" "sleep 1"] 10)]
       (is (= -1 (:exit result)))
       (is (= 10 (:timeout-ms result)))
       (is (str/includes? (:err result) "10")))))

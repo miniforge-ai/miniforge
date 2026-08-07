@@ -15,7 +15,6 @@
 ;; WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 ;; See the License for the specific language governing permissions and
 ;; limitations under the License.
-
 (ns ai.miniforge.workflow.dag-resilience-execution-test
   "Tests for DAG execution pausing on rate limits and plan->dag-tasks dependency handling."
   (:require
@@ -29,21 +28,19 @@
    [java.time Instant]))
 
 ;------------------------------------------------------------------------------ Layer 0
-;; Test fixtures
 
-(defn ok-result [task-id]
+;; Test fixtures
+(defn ^{:stratum 0} ok-result [task-id]
   (dag/ok {:task-id task-id :status :implemented}))
 
-(defn rate-limit-err [message]
+(defn ^{:stratum 0} rate-limit-err [message]
   (dag/err :task-execution-failed message {:task-id :test}))
 
-(defn generic-err [message]
+(defn ^{:stratum 0} generic-err [message]
   (dag/err :task-execution-failed message {:task-id :test}))
 
-;------------------------------------------------------------------------------ Layer 4
 ;; DAG orchestrator integration — pause on rate limit
-
-(deftest test-dag-execution-pauses-on-rate-limit
+(deftest ^{:stratum 0} test-dag-execution-pauses-on-rate-limit
   (testing "DAG execution returns paused result when all tasks hit rate limits"
     (let [fixed-now (Instant/parse "2026-05-09T17:00:00Z")
           [logger _] (log/collecting-logger)
@@ -75,7 +72,7 @@
             (is (string? (:pause-reason result)))
             (is (= [] (:completed-task-ids result)))))))))
 
-(deftest test-dag-execution-partial-rate-limit
+(deftest ^{:stratum 0} test-dag-execution-partial-rate-limit
   (testing "DAG pauses when some tasks succeed and others hit rate limits"
     (let [[logger _] (log/collecting-logger)
           task-a (random-uuid)
@@ -114,7 +111,7 @@
           (is (contains? #{task-a task-b}
                          (first (:completed-task-ids result)))))))))
 
-(deftest test-dag-execution-pre-completed-ids
+(deftest ^{:stratum 0} test-dag-execution-pre-completed-ids
   (testing "DAG skips tasks in pre-completed-ids set"
     (let [[logger _] (log/collecting-logger)
           task-a (random-uuid)
@@ -146,7 +143,6 @@
           ;; Both count as completed (1 pre-completed + 1 executed)
           (is (= 2 (:tasks-completed result))))))))
 
-;------------------------------------------------------------------------------ Layer 5
 ;; Regression: phantom dependency detection and unreached task reporting
 ;;
 ;; Bug: Planner generates dependency UUIDs referencing non-existent tasks.
@@ -154,8 +150,7 @@
 ;; and never fail (nothing actually failed). The loop exits on
 ;; (empty? ready-tasks) and silently drops them — reporting success
 ;; with 0 failures despite tasks never running.
-
-(deftest test-plan->dag-tasks-drops-phantom-deps
+(deftest ^{:stratum 0} test-plan->dag-tasks-drops-phantom-deps
   (testing "dependencies referencing non-existent task IDs are dropped"
     (let [task-a (random-uuid)
           task-b (random-uuid)
@@ -176,7 +171,7 @@
           ;; Task A has no deps
           (is (empty? (:task/deps (first dag-tasks)))))))))
 
-(deftest test-plan->dag-tasks-drops-string-phantom-deps
+(deftest ^{:stratum 0} test-plan->dag-tasks-drops-string-phantom-deps
   (testing "string UUID dependencies to non-existent tasks are also dropped"
     (let [task-a (random-uuid)
           task-b (random-uuid)
@@ -195,7 +190,7 @@
           ;; task-a string should resolve; phantom string should be dropped
           (is (= #{task-a} (:task/deps (second dag-tasks)))))))))
 
-(deftest test-plan->dag-tasks-all-deps-valid
+(deftest ^{:stratum 0} test-plan->dag-tasks-all-deps-valid
   (testing "valid dependencies are preserved unchanged"
     (let [task-a (random-uuid)
           task-b (random-uuid)
@@ -214,7 +209,7 @@
           task-c-dag (first (filter #(= task-c (:task/id %)) dag-tasks))]
       (is (= #{task-a task-b} (:task/deps task-c-dag))))))
 
-(deftest test-plan->dag-tasks-keyword-task-ids
+(deftest ^{:stratum 0} test-plan->dag-tasks-keyword-task-ids
   (testing "keyword task IDs are preserved and dependencies resolve against them"
     (let [plan {:plan/id (random-uuid)
                 :plan/tasks [{:task/id :task-a
@@ -231,7 +226,7 @@
       ;; Dependency resolved correctly
       (is (= #{id-a} (:task/deps (second dag-tasks)))))))
 
-(deftest test-plan->dag-tasks-keyword-deps-resolve
+(deftest ^{:stratum 0} test-plan->dag-tasks-keyword-deps-resolve
   (testing "keyword dependencies resolve to the correct normalized task IDs"
     (let [plan {:plan/id (random-uuid)
                 :plan/tasks [{:task/id :alpha
@@ -248,7 +243,7 @@
           gamma-task (first (filter #(= "Gamma" (:task/description %)) dag-tasks))]
       (is (= #{(ids "Alpha") (ids "Beta")} (:task/deps gamma-task))))))
 
-(deftest test-plan->dag-tasks-mixed-id-types
+(deftest ^{:stratum 0} test-plan->dag-tasks-mixed-id-types
   (testing "plan with mixed UUID and keyword IDs preserves both consistently"
     (let [uuid-id (random-uuid)
           plan {:plan/id (random-uuid)
@@ -266,7 +261,7 @@
       ;; Dependency on UUID task resolves
       (is (= #{uuid-id} (:task/deps (second dag-tasks)))))))
 
-(deftest test-plan->dag-tasks-string-non-uuid-ids
+(deftest ^{:stratum 0} test-plan->dag-tasks-string-non-uuid-ids
   (testing "non-UUID string task IDs are preserved and dependencies resolve against them"
     (let [plan {:plan/id (random-uuid)
                 :plan/tasks [{:task/id "build-fixtures"
@@ -282,7 +277,7 @@
       (is (= "run-tests" id-test))
       (is (= #{id-build} (:task/deps (second dag-tasks)))))))
 
-(deftest test-phantom-deps-caused-stuck-tasks-before-fix
+(deftest ^{:stratum 0} test-phantom-deps-caused-stuck-tasks-before-fix
   (testing "regression: phantom deps no longer cause silently stuck tasks"
     (let [[logger _] (log/collecting-logger)
           task-a (random-uuid)
@@ -322,7 +317,7 @@
           (is (= 0 (:tasks-failed result)))
           (is (= #{task-a task-b task-c} @executed-tasks)))))))
 
-(deftest test-unreached-tasks-reported-in-result
+(deftest ^{:stratum 0} test-unreached-tasks-reported-in-result
   (testing "tasks stuck due to failed deps are reported as unreached"
     (let [[logger _] (log/collecting-logger)
           task-a (random-uuid)
@@ -361,7 +356,7 @@
           ;; No tasks unreached — all accounted for via propagation
           (is (= 0 (or (:tasks-unreached result) 0))))))))
 
-(deftest test-all-tasks-accounted-for
+(deftest ^{:stratum 0} test-all-tasks-accounted-for
   (testing "completed + failed + unreached = total (no silent data loss)"
     (let [[logger _] (log/collecting-logger)
           task-ids (repeatedly 6 random-uuid)
@@ -404,7 +399,7 @@
           (is (= total accounted)
               "Every task must be accounted for — no silent drops"))))))
 
-(deftest test-sub-workflow-strips-release-phase
+(deftest ^{:stratum 0} test-sub-workflow-strips-release-phase
   (testing "sub-workflow pipeline excludes :explore, :plan, and :release phases"
     (let [task-def {:task/id (random-uuid)
                     :task/description "Test task"}
@@ -430,10 +425,20 @@
           phase-names (mapv :phase (:workflow/pipeline sub-wf))]
       (is (= [:implement :release :done] phase-names)))))
 
-(deftest test-task-sub-opts-inherits-parent-quiet-setting
+(deftest ^{:stratum 0} test-task-sub-opts-inherits-parent-quiet-setting
   (testing "DAG sub-workflows inherit parent quiet=false so nested agent output stays visible"
     (let [opts (#'dag-orch/task-sub-opts {:execution/opts {:quiet false}})]
       (is (false? (:quiet opts)))))
   (testing "DAG sub-workflows still honor explicit quiet=true from parent opts"
     (let [opts (#'dag-orch/task-sub-opts {:execution/opts {:quiet true}})]
       (is (true? (:quiet opts))))))
+
+(deftest ^{:stratum 0} test-task-sub-opts-inherits-parent-checkpoint-root
+  (testing "DAG sub-workflows checkpoint under the parent's root so one run
+            is one tree (gap-ledger aggregation, bench arm partitioning)"
+    (let [opts (#'dag-orch/task-sub-opts
+                {:execution/checkpoint-root "/tmp/ckpt-root"})]
+      (is (= "/tmp/ckpt-root" (:checkpoint/root opts)))))
+  (testing "no parent root -> key absent, child resolves its own default"
+    (let [opts (#'dag-orch/task-sub-opts {})]
+      (is (not (contains? opts :checkpoint/root))))))

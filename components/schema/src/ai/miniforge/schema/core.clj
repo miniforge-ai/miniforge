@@ -16,126 +16,26 @@
 ;; See the License for the specific language governing permissions and
 ;; limitations under the License.
 (ns ai.miniforge.schema.core
-  "Core domain schemas for miniforge.
-   Layer 0: Base enum vocabularies, severities, and normalize-severity
-   Layer 1: severity-order and the shared malli registry
-   Layer 2: compare-severity/Severity and standalone composite schemas
-            (Agent, TaskConstraints, TaskResult, Metrics, MetaAgentConfig, ...)
-   Layer 3: more-severe and top-level composites depending on Layer 2
+  "Core domain composite schemas for miniforge. Enum vocabularies, severity
+   helpers, and the shared malli registry live in `vocab.clj` (split out
+   under SL003, Wave 2) — this file only holds the `:map` composites built
+   on top of that registry.
+   Layer 0: Standalone composites depending only on `vocab/registry`
+            (Agent, TaskConstraints, TaskResult, ArtifactOrigin,
+            WorkflowBudget, Metrics, MetaAgentConfig, MetaAgentHealthCheck)
+   Layer 1: Top-level composites depending on Layer 0
             (Task, Artifact, Workflow, MetaCoordinatorState)"
   (:require
+   [ai.miniforge.schema.vocab :as vocab]
    [malli.core :as m]))
 
 ;------------------------------------------------------------------------------ Layer 0
 
-;; Base enum vocabularies and severity helpers
-(def ^{:stratum 0} agent-roles
-  [:planner :architect :implementer :tester :reviewer :sre :security :release :historian :operator])
-
-(def ^{:stratum 0} meta-agent-roles
-  "Meta-agent roles for workflow monitoring and control."
-  [:progress-monitor :test-quality :conflict-detector :resource-manager :evidence-collector])
-
-(def ^{:stratum 0} task-types
-  [:plan :design :implement :test :review :deploy])
-
-(def ^{:stratum 0} task-statuses
-  [:pending :running :completed :failed :blocked])
-
-(def ^{:stratum 0} artifact-types
-  [:spec :plan :adr :code :test :review :manifest :image :telemetry :incident])
-
-(def ^{:stratum 0} workflow-phases
-  [:plan :design :implement :verify :review :release :observe])
-
-(def ^{:stratum 0} workflow-statuses
-  [:pending :running :paused :completed :failed :cancelled])
-
-(def ^{:stratum 0} severities
-  "Canonical severity levels, most to least severe. The single source of truth
-   for how-bad-is-it across the codebase: rule severity (policy-pack), runtime
-   violation/attention severity (supervisory, evidence-bundle), and any display
-   or rollup. A violation's severity is the severity of the rule it violates, so
-   one scale — not a per-producer vocabulary. Legacy `:major`/`:minor` map to
-   `:high`/`:low` via `normalize-severity`."
-  [:critical :high :medium :low :info])
-
-(defn ^{:stratum 0} normalize-severity
-  "Coerce a legacy severity keyword to the canonical enum: `:major` → `:high`,
-   `:minor` → `:low`; every canonical value (and anything else) is returned
-   unchanged. Lets a producer or reader tolerate a pre-migration value."
-  [severity]
-  (case severity
-    :major :high
-    :minor :low
-    severity))
-
-;------------------------------------------------------------------------------ Layer 1
-
-(def ^{:stratum 1} severity-order
-  "Rank per severity, 0 = most severe. Derived from `severities` so the order
-   table cannot drift from the enum."
-  (zipmap severities (range)))
-
-(def ^{:stratum 1} registry
-  "Malli registry for base schema types."
-  {;; Identifiers
-   :id/uuid        uuid?
-   :id/string      [:string {:min 1}]
-
-   ;; Agent types
-   :agent/id       :id/uuid
-   :agent/role     (into [:enum] agent-roles)
-   :agent/capability keyword?
-
-   ;; Meta-agent types
-   :meta-agent/id  keyword?
-   :meta-agent/role (into [:enum] meta-agent-roles)
-   :meta-agent/status [:enum :healthy :warning :halt]
-   :meta-agent/priority [:enum :high :medium :low]
-
-   ;; Task types
-   :task/id        :id/uuid
-   :task/type      (into [:enum] task-types)
-   :task/status    (into [:enum] task-statuses)
-
-   ;; Artifact types
-   :artifact/id    :id/uuid
-   :artifact/type  (into [:enum] artifact-types)
-   :artifact/version [:string {:min 1}]
-
-   ;; Workflow types
-   :workflow/id    :id/uuid
-   :workflow/phase (into [:enum] workflow-phases)
-   :workflow/status (into [:enum] workflow-statuses)
-
-   ;; Severity (canonical, shared across policy + supervisory + display)
-   :severity (into [:enum] severities)
-
-   ;; Common types
-   :common/timestamp inst?
-   :common/non-neg-int [:int {:min 0}]
-   :common/pos-number [:double {:min 0.0}]})
-
-;------------------------------------------------------------------------------ Layer 2
-
-(defn ^{:stratum 2} compare-severity
-  "Compare two severities. Negative when `a` is more severe than `b`, positive
-   when less, 0 when equal. Unknown severities sort last."
-  [a b]
-  (- (get severity-order a 99)
-     (get severity-order b 99)))
-
-(def ^{:stratum 2} Severity
-  "Malli enum for a canonical severity level (see `severities`). Reuses the
-   `:severity` registry entry so there is one constructed enum, not two copies."
-  (:severity registry))
-
 ;; Composite schemas
-(def ^{:stratum 2} Agent
+(def ^{:stratum 0} Agent
   "Schema for an AI agent.
    Agents are pure functions: (context, task) -> (artifacts, decisions, signals)"
-  [:map {:registry registry}
+  [:map {:registry vocab/registry}
    [:agent/id :agent/id]
    [:agent/role :agent/role]
    [:agent/capabilities {:optional true} [:set :agent/capability]]
@@ -150,9 +50,9 @@
        [:tokens {:optional true} :common/non-neg-int]
        [:cost-usd {:optional true} :common/pos-number]]]]]])
 
-(def ^{:stratum 2} TaskConstraints
+(def ^{:stratum 0} TaskConstraints
   "Schema for task execution constraints."
-  [:map {:registry registry}
+  [:map {:registry vocab/registry}
    [:budget {:optional true}
     [:map
      [:tokens {:optional true} :common/non-neg-int]
@@ -162,9 +62,9 @@
    [:policies {:optional true} [:vector keyword?]]
    [:max-iterations {:optional true} :common/non-neg-int]])
 
-(def ^{:stratum 2} TaskResult
+(def ^{:stratum 0} TaskResult
   "Schema for task execution result."
-  [:map {:registry registry}
+  [:map {:registry vocab/registry}
    [:outcome [:enum :success :failure :escalated]]
    [:error {:optional true} :id/string]
    [:signals {:optional true} [:vector keyword?]]
@@ -175,35 +75,35 @@
      [:cost-usd {:optional true} :common/pos-number]
      [:iterations {:optional true} :common/non-neg-int]]]])
 
-(def ^{:stratum 2} ArtifactOrigin
+(def ^{:stratum 0} ArtifactOrigin
   "Schema for artifact provenance origin."
-  [:map {:registry registry}
+  [:map {:registry vocab/registry}
    [:intent-id {:optional true} :id/uuid]
    [:agent-id {:optional true} :agent/id]
    [:task-id {:optional true} :task/id]])
 
-(def ^{:stratum 2} WorkflowBudget
+(def ^{:stratum 0} WorkflowBudget
   "Schema for workflow budget allocation."
-  [:map {:registry registry}
+  [:map {:registry vocab/registry}
    [:tokens {:optional true} :common/non-neg-int]
    [:cost-usd {:optional true} :common/pos-number]
    [:duration-ms {:optional true} :common/non-neg-int]])
 
-(def ^{:stratum 2} Metrics
+(def ^{:stratum 0} Metrics
   "Schema for an agent/phase result's `:metrics` map. `:tokens` and
    `:duration-ms` are REQUIRED and non-nil — they are consumed by cost and
    accumulation arithmetic, so a missing or nil value is a boundary violation
    (it throws a message-less NPE downstream). `:non-neg-int` already rejects a
    present nil; making the keys required also rejects an absent one."
-  [:map {:registry registry}
+  [:map {:registry vocab/registry}
    [:tokens :common/non-neg-int]
    [:duration-ms :common/non-neg-int]
    [:cost-usd {:optional true} :common/pos-number]
    [:iterations {:optional true} :common/non-neg-int]])
 
-(def ^{:stratum 2} MetaAgentConfig
+(def ^{:stratum 0} MetaAgentConfig
   "Schema for meta-agent configuration."
-  [:map {:registry registry}
+  [:map {:registry vocab/registry}
    [:id :meta-agent/id]
    [:name :id/string]
    [:can-halt? boolean?]
@@ -211,25 +111,20 @@
    [:priority :meta-agent/priority]
    [:enabled? boolean?]])
 
-(def ^{:stratum 2} MetaAgentHealthCheck
+(def ^{:stratum 0} MetaAgentHealthCheck
   "Schema for meta-agent health check result."
-  [:map {:registry registry}
+  [:map {:registry vocab/registry}
    [:status :meta-agent/status]
    [:agent/id :meta-agent/id]
    [:message :id/string]
    [:data {:optional true} [:map-of keyword? any?]]
    [:checked-at :common/timestamp]])
 
-;------------------------------------------------------------------------------ Layer 3
+;------------------------------------------------------------------------------ Layer 1
 
-(defn ^{:stratum 3} more-severe
-  "Return the more severe of two severities."
-  [a b]
-  (if (neg? (compare-severity a b)) a b))
-
-(def ^{:stratum 3} Task
+(def ^{:stratum 1} Task
   "Schema for a unit of work assigned to an agent."
-  [:map {:registry registry}
+  [:map {:registry vocab/registry}
    [:task/id :task/id]
    [:task/type :task/type]
    [:task/status :task/status]
@@ -241,9 +136,9 @@
    [:task/constraints {:optional true} TaskConstraints]
    [:task/result {:optional true} TaskResult]])
 
-(def ^{:stratum 3} Artifact
+(def ^{:stratum 1} Artifact
   "Schema for a versioned work product with provenance."
-  [:map {:registry registry}
+  [:map {:registry vocab/registry}
    [:artifact/id :artifact/id]
    [:artifact/type :artifact/type]
    [:artifact/version :artifact/version]
@@ -254,9 +149,9 @@
    [:artifact/metadata {:optional true} [:map-of keyword? any?]]
    [:artifact/created-at {:optional true} :common/timestamp]])
 
-(def ^{:stratum 3} Workflow
+(def ^{:stratum 1} Workflow
   "Schema for an outer loop SDLC delivery instance."
-  [:map {:registry registry}
+  [:map {:registry vocab/registry}
    [:workflow/id :workflow/id]
    [:workflow/name {:optional true} :id/string]
    [:workflow/status :workflow/status]
@@ -278,9 +173,9 @@
       [:enabled? {:optional true} boolean?]
       [:config {:optional true} [:map-of keyword? any?]]]]]])
 
-(def ^{:stratum 3} MetaCoordinatorState
+(def ^{:stratum 1} MetaCoordinatorState
   "Schema for meta-agent coordinator state."
-  [:map {:registry registry}
+  [:map {:registry vocab/registry}
    [:status :meta-agent/status]
    [:checks [:vector MetaAgentHealthCheck]]
    [:halt-reason {:optional true} :id/string]

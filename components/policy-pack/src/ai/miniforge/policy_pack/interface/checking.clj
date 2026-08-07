@@ -18,6 +18,7 @@
 (ns ai.miniforge.policy-pack.interface.checking
   "Detection and artifact-checking helpers."
   (:require
+   [ai.miniforge.policy-pack.applicability :as applicability]
    [ai.miniforge.policy-pack.compiler :as compiler]
    [ai.miniforge.policy-pack.core :as core]
    [ai.miniforge.policy-pack.detection :as detection]))
@@ -65,27 +66,17 @@
   "Filter rules to those enabled and applicable to a context (by file globs,
    task type, and phase). (filter-applicable-rules rules context) returns a
    vector of applicable rules."
-  core/filter-applicable-rules)
+  applicability/filter-applicable-rules)
 
 (def ^{:stratum 0} rule-applies-to-phase?
   "Predicate. (rule-applies-to-phase? rule phase) returns true when the rule
    has no :phases constraint or its constraint contains phase."
-  core/rule-applies-to-phase?)
+  applicability/rule-applies-to-phase?)
 
-(def ^{:stratum 0} blocking-violations
-  "Filter check-rules violations to those whose rule enforces :hard-halt.
-   Returns a lazy seq of the matching violation entries."
-  detection/blocking-violations)
-
-(def ^{:stratum 0} approval-required-violations
-  "Filter check-rules violations to those whose rule enforces
-   :require-approval. Returns a lazy seq of the matching violation entries."
-  detection/approval-required-violations)
-
-(def ^{:stratum 0} warning-violations
-  "Filter check-rules violations to those whose rule enforces :warn. Returns a
-   lazy seq of the matching violation entries."
-  detection/warning-violations)
+(def ^{:stratum 0} classify-violations
+  "Exhaustive violation classification: {:blocking :require-approval
+   :warnings :audits :unknown}; no default-pass branch."
+  detection/classify-violations)
 
 (def ^{:stratum 0} violation->error
   "Convert a check-rules violation entry into a gate error map

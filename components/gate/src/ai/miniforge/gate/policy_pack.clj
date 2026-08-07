@@ -63,6 +63,8 @@
    [ai.miniforge.gate.messages :as msg]
    [ai.miniforge.gate.registry :as registry]
    [ai.miniforge.llm.interface :as llm]
+   [ai.miniforge.decision-envelope.interface]
+   [ai.miniforge.gate.decide :as decide]
    [ai.miniforge.policy-pack.interface :as policy-pack]
    [ai.miniforge.semantic-analyzer.interface :as semantic]
    [clojure.edn :as edn]
@@ -185,11 +187,6 @@
    only produce a non-blocking finding."
   #{:hard-halt :require-approval})
 
-(defn- ^{:stratum 0} audit-violations
-  [violations]
-  (filter #(= :audit (get-in % [:rule :rule/enforcement :action]))
-          violations))
-
 (defn- ^{:stratum 0} violation-summary
   "Non-sensitive summary of a violation for an evidence event. Drops :matches
    — which can carry source lines or secret material (e.g. a no-secrets rule's
@@ -206,7 +203,7 @@
    run carries no event stream. Fail-safe: evidence emission must never break
    enforcement, so a publish error is swallowed (the gate verdict still
    stands)."
-  [ctx phase classified]
+  [ctx phase classified envelope-id]
   (when-let [stream (:event-stream ctx)]
     (try
       (let [wid (:workflow/id ctx)]
@@ -216,7 +213,8 @@
            (event-stream/gate-rule-applied stream wid phase rule-id status
                                            {:severity    severity
                                             :enforcement enforcement
-                                            :violation   violation}))))
+                                            :violation   violation
+                                            :envelope-id envelope-id}))))
       (catch Exception _ nil))))
 
 (defn ^{:stratum 0} repair-policy-pack
@@ -228,6 +226,15 @@
    :artifact artifact
    :errors   errors
    :message  (msg/t :policy-pack/repair-required)})
+
+(defn- ^{:stratum 0} pack-pins
+  "Revision pins for the envelope: the pack ids+versions evaluated."
+  [packs]
+  {:pins/pack-revision (clojure.string/join ","
+                        (map #(str (name (or (:pack/id %) :unknown)) "@"
+                                   (or (:pack/version %) "?")) packs))
+   :pins/rule-ids (vec (keep :rule/id (mapcat :pack/rules packs)))
+   :pins/event-watermark nil})
 
 ;------------------------------------------------------------------------------ Layer 1
 
@@ -471,15 +478,15 @@
                              (phase-compiled-rules compile-results phase)
                              artifact
                              context))
-            blocking   (policy-pack/blocking-violations violations)
-            approvals  (policy-pack/approval-required-violations violations)
-            warnings   (policy-pack/warning-violations violations)
-            audits     (audit-violations violations)]
-        {:passed?          (empty? blocking)
+            classified (policy-pack/classify-violations violations)
+            {:keys [blocking require-approval warnings audits unknown]} classified
+            envelope   (decide/decide classified (pack-pins packs))]
+        {:passed?          (decide/allowed? envelope)
          :compiled?        true
+         :envelope         envelope
          :violations       violations
-         :blocking         (mapv policy-pack/violation->error blocking)
-         :require-approval (mapv policy-pack/violation->error approvals)
+         :blocking         (mapv policy-pack/violation->error (concat blocking unknown))
+         :require-approval (mapv policy-pack/violation->error require-approval)
          :warnings         (mapv policy-pack/violation->warning warnings)
          :audits           (mapv policy-pack/violation->warning audits)}))))
 
@@ -491,10 +498,13 @@
 
    Selects the enabled rules whose `:applies-to {:phases}` includes `phase`
    (via compiled check phase filtering), runs their executable checks, and
-   maps the result to a gate result:
-     :errors   — blocking (`:hard-halt`) violations as gate errors
-     :warnings — require-approval / warn / audit violations (record-only here)
-     :passed?  — true iff no blocking violations
+   maps the result to a gate result (Ariadne 1c):
+     :errors   — blocking (`:hard-halt`), unknown-enforcement/severity, and
+                 require-approval violations (approval DENIES until a
+                 workflow clears it)
+     :warnings — warn / audit violations (recorded as envelope obligations)
+     :envelope — the DecisionEnvelope from decide()
+     :passed?  — (decide/allowed? envelope)
 
    When no pack is available, passes with a no-packs warning (no regression on
    repos without a standards pack)."
@@ -509,12 +519,14 @@
         (when (:compiled? result)
           (emit-rule-evidence! ctx phase
                                (classify-rules packs phase artifact context
-                                               (:violations result))))
-        {:passed?  (:passed? result)
-         :errors   (vec (:blocking result))
-         :warnings (vec (concat (:require-approval result)
-                                (:warnings result)
-                                (:audits result)))}))))
+                                               (:violations result))
+                               (get-in result [:envelope :envelope/id])))
+        (cond-> {:passed?  (:passed? result)
+                 :errors   (vec (concat (:blocking result)
+                                        (:require-approval result)))
+                 :warnings (vec (concat (:warnings result)
+                                        (:audits result)))}
+          (:envelope result) (assoc :envelope (:envelope result)))))))
 
 ;------------------------------------------------------------------------------ Layer 7
 

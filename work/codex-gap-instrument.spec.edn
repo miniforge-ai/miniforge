@@ -1,0 +1,191 @@
+;; =============================================================================
+;; Spec: Codex Gap Instrument — miss ledger, bucket attribution, gap report
+;; =============================================================================
+;;
+;; Normative source: Thesium Codex SPEC T2 (zk: 80 projects/80.5 Thesium
+;; Codex/SPEC-GAP.md). This file scopes the miniforge implementation.
+;;
+;; Premise (T2 §1): the IDEAL codex's value is established by construction —
+;; an oracle asking the load-bearing question at the moment of maximum
+;; overconfidence prevents the failure class by definition. What needs
+;; MEASUREMENT is the gap between ideal and actual, decomposed into the
+;; leaks that make the construction argument fail in practice:
+;;
+;;   coverage → routing → anchoring → delivery → attention → learning
+;;
+;; The instrument: every observed failure in an orchestrated run becomes a
+;; MISS LEDGER entry, classified at the FIRST leaking rung (first leak
+;; wins, later rungs unmeasurable for that event):
+;;
+;;   :uncovered   codex lacks the situation/problem      → harvest
+;;   :misrouted   problem exists, board doesn't reach it → peg admission
+;;   :undelivered consultation skipped/absent            → delivery plumbing
+;;   :unheeded    warning was in front of the consumer   → delivery form /
+;;                                                         landing actionability
+;;   :novel       outside what landings claim            → harvest candidate
+;;
+;; The report is a VECTOR (T2 §4), never a scalar, and every bucket count
+;; links to its member misses — the report IS the improvement agenda.
+;; An improvement PR citing the ledger names the bucket it drains (T2 §6.2).
+;;
+;; Already in place and REUSED, not rebuilt:
+;;   - :codex/consultation on [:result :output] for implement/plan (#1630)
+;;   - :context-reads on agent results (#1624/#1630)
+;;   - codex component: load-graph / consider / reachability (#1620/#1623)
+;;   - similarity matching pattern (zk validate.py §6.3 note) to port for
+;;     attribution
+;;
+;; Deliberately OUT of scope for this spec (follow-on wave):
+;;   - the seeded-trap bench (T2 §5) — separate spec once the ledger lands
+;;   - post-merge miss sources (T2 §7.1) — in-run signals only here
+;;   - judge-based attribution (T2 §7.3) — similarity + review queue only
+;;
+;; Implementation-survey resolutions (2026-08-03, integration survey):
+;;   - STORAGE: standalone `codex-gap-ledger.edn` under the run's checkpoint
+;;     dir (<checkpoint-root>/<execution-id>/), append-only, one pr-str'd
+;;     entry per line. Evidence-bundle REJECTED: it is a terminal,
+;;     whole-workflow, closed-schema artifact with zero runtime writers
+;;     today; attaching per-phase records would be net-new surface in a
+;;     compliance component and drags artifact-store into the phase-leave
+;;     path. If a compliance tie-in is wanted later, the terminal-state
+;;     collector can slurp the finished ledger.
+;;   - codex-gap takes the resolved checkpoint dir as a PARAMETER; the
+;;     phase wiring reads :execution/checkpoint-root + :execution/id off
+;;     ctx (avoids a codex-gap -> workflow dependency cycle).
+;;   - consultation-summary widens to carry :situation (the entered
+;;     situation string) so the ledger needs no re-derivation; review gains
+;;     a consultation attach via a status-returning landings-text variant —
+;;     without it every review miss is structurally stuck at :undelivered.
+;;   - review signals: prefer the map-shaped [:result :output :review/issues]
+;;     (severity/file/description) filtered to :blocking; fall back to the
+;;     string vector :review/blocking-issues (gate-only and parse-failure
+;;     paths populate only the strings).
+;;   - gate failures: read [:phase :phase/status] (namespaced; the bare
+;;     :status is clobbered at leave) and [:phase :phase/gate-errors]
+;;     (decision-envelope Reason maps); mechanical attribution keys on
+;;     [:reason/code :reason/rule-id].
+;;   - implement terminal typing via phase-terminal/derive-termination-reason
+;;     (pure fn over result + [:phase :watchdog-state]).
+;;   - [:phase :error] shapes are inconsistent (one sub-anomaly record, two
+;;     hand-rolled maps) — the ledger WRITER normalizes on :anomaly/category.
+;;   - similarity corpus is landing :title + :open items (landing-view
+;;     carries no :forces); :pin-read? tri-state preserved verbatim — nil is
+;;     unknown, and collapsing it to false would manufacture :unheeded.
+
+{:spec/title "Codex gap instrument: miss ledger, bucket attribution, gap report"
+ :spec/description
+ "Record every in-run failure signal (review blocking issues, gate
+  failures, terminal phase anomalies) as a miss-ledger entry carrying the
+  phase's codex consultation provenance; classify each entry into the T2
+  §3.3 buckets via mechanical + similarity attribution against the codex
+  graph; aggregate ledger + codex into the T2 §4 gap vector with per-bucket
+  miss lists, producible on demand without re-running workflows."
+
+ :spec/intent {:type   :feature
+               :scope  ["components/codex/src"
+                        "components/phase-software-factory/src"
+                        "tasks"]}
+
+ :spec/constraints
+ ["Ledger entries are DATA appended at phase leave; recording must never fail a phase (best-effort, logged)"
+  "Ledger storage is gitignored runtime state under the run checkpoint dir — never git-tracked, never evidence-bundle (see preamble resolution)"
+  "Classification order is normative: first leaking rung wins (T2 §3.3); a later rung must never be blamed when an earlier one leaked"
+  "Non-mechanical attributions carry :attribution/method and :attribution/confidence; below-threshold entries land in a review queue, never silently in a bucket"
+  "The gap report is a vector with per-bucket member lists. Per-rung rates ARE components of that vector and always ship beside their member lists; what is prohibited is any SINGLE cross-bucket rollup (one codex-health number) — that is the scalar T2 §4.1 bans, same rationale as T1 §7.5"
+  "Codex graph access goes through ai.miniforge.codex.interface only — no new parsing"
+  "All new prose through message catalogs; anomalies as data; no new Throwable/blanket-Exception catches"
+  "One canonical location per ledger entry — writers normalize, readers do not"]
+
+ :spec/workflow-type :canonical-sdlc
+ :workflow/version "2.0.0"
+
+ :tasks
+
+ ;; ── Task 1 ──────────────────────────────────────────────────────────────────
+ [{:task/id    :codex-gap-ledger
+   :task/title "codex-gap component: miss entry, bucket classifier, ledger store"
+   :task/phase :implement
+   :task/description
+   "New component codex-gap.
+
+    (record-miss! store entry) — append an entry:
+      {:miss/id uuid, :miss/at inst, :miss/run-id .., :miss/phase kw,
+       :miss/signal {:type :review-blocking|:gate-failure|:terminal-anomaly
+                     :payload <the finding/error map, verbatim>}
+       :miss/situation string-or-nil
+       :miss/consultation <the :codex/consultation map or nil>}
+
+    (classify entry codex-graph) — T2 §3.3, first leak wins:
+      1. no situation matched or problem class absent      -> :uncovered
+      2. problem present, unreachable from the situation   -> :misrouted
+         (reachability via codex interface, NOT reimplemented)
+      3. consultation :skipped, or consultation nil/absent while the
+         phase HAS a mapped situation                       -> :undelivered
+         (nil at this rung can only mean the delivery plumbing did not
+         run: a missing situation already classified :uncovered at rung 1;
+         the ledger records go-forward runs only, no back-classification
+         of pre-instrument history)
+      4. failure attributes to a delivered landing         -> :unheeded
+      5. otherwise                                          -> :novel
+    Returns {:bucket kw :attribution {:problem id-or-nil :method
+    :mechanical|:similarity :confidence double}}.
+
+    Attribution: mechanical for typed gate failures (declared mapping
+    [:reason/code :reason/rule-id] -> problem id, data not code);
+    similarity (normalized text vs landing :title + :open items, port of
+    the zk admit §6.3 matcher) for review findings; entries under the
+    confidence threshold get :bucket :review-queue instead of a real
+    bucket. :review-queue is NOT a rung bucket: it is a holding state for
+    unresolved attribution — queued entries are excluded from every rate
+    until resolved, and the queue size is itself a slot in the gap vector
+    (an unresolved-attribution backlog is a gap too). Reachability =
+    membership in (consider ...) :landings — the public interface, no new
+    exports.
+
+    Storage (resolved, see preamble): append-only codex-gap-ledger.edn
+    under the run's checkpoint dir, one pr-str'd entry per line, dir
+    passed in as a parameter. Reader -> seq of entries.
+
+    Tests: classifier bucket ordering (a miss that is BOTH unmatched and
+    undelivered classifies :uncovered); mechanical vs similarity paths;
+    below-threshold -> review queue; ledger round-trip. Fixtures: real
+    generated codex fixture nodes (existing test-resources), real
+    phase-result shapes."}
+
+  ;; ── Task 2 ────────────────────────────────────────────────────────────────
+  {:task/id    :phase-wiring
+   :task/title "Record misses at phase leave for implement/plan/review"
+   :task/phase :implement
+   :task/description
+   "leave-implement / leave-plan / leave-review: when the phase carries
+    failure signals — review findings from [:result :output :review/issues]
+    filtered to :blocking (falling back to the :review/blocking-issues
+    string vector), gate failures from [:phase :phase/status] +
+    [:phase :phase/gate-errors] (the namespaced keys; bare :status is
+    clobbered at leave), and terminal anomalies from [:phase :error]
+    normalized on :anomaly/category — append ledger entries via codex-gap,
+    carrying the phase's :codex/consultation and entered situation.
+    Best-effort: recording failures log and continue — a ledger write must
+    never change phase outcome.
+
+    Note the known trap from #1630: gates run between enter and leave, and
+    the consultation lives on [:result :output] — read it from there, not
+    from ctx re-derivation."}
+
+  ;; ── Task 3 ────────────────────────────────────────────────────────────────
+  {:task/id    :gap-report
+   :task/title "Gap report: ledger + codex -> T2 §4 vector, bb task"
+   :task/phase :implement
+   :task/description
+   "(gap-report ledger-entries codex-dir) -> the T2 §4 vector:
+      {:coverage {:consultation-match-rate .. :unmatched [..]
+                  :covered-miss-rate ..}
+       :routing {:misrouted-rate .. :misses [..]}
+       :anchoring <the T1 validate/coverage stats via codex interface>
+       :delivery {:undelivered n :pin-read-distribution {..}}
+       :attention {:unheeded-rate .. :misses [..]}
+       :learning {:median-latency-days .. :open [..]}
+       :review-queue [..]}
+    Every rate accompanied by its member miss list (T2 §4.2). Renderer to
+    text through a message catalog; `bb codex-gap-report` task over a runs
+    directory. No scalar rollup anywhere."}]}

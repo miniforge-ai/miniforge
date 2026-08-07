@@ -30,7 +30,9 @@
 ;------------------------------------------------------------------------------ Layer 0
 
 (defn- ^{:stratum 0} new-registry []
-  (registry/->InMemoryPackRegistry (atom {:packs {}})))
+  ;; Empty trust roots: none of these paths verify a signature, and an
+  ;; empty store keeps the fixture off the operator's configured one.
+  (registry/->InMemoryPackRegistry (atom {:packs {}}) {}))
 
 ;------------------------------------------------------------------------------ Layer 1
 
