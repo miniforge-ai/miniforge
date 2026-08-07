@@ -155,6 +155,15 @@
     (is (not @fired))
     (is (= :proposed (:effect/state (fx/read-record dir (:effect/id t)))))))
 
+(deftest ^{:stratum 1} missing-effect-id-is-invalid-input-test
+  (let [dir (tmp-dir)
+        fired (atom false)
+        result (fx/commit! dir {} :authority/unenforced no-usage now
+                           (partial record-success! fired))]
+    (is (= :invalid-input (:anomaly/type result)))
+    (is (not @fired))
+    (is (empty? (fx/list-records dir)))))
+
 (deftest ^{:stratum 1} falsey-proposals-retain-empty-default-test
   (let [dir (tmp-dir)]
     (doseq [proposal [nil false]]

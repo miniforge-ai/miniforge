@@ -35,7 +35,8 @@
   [t]
   (m/validate schema/EffectTransaction t))
 
-(defn- ^{:stratum 0} invalid
+(defn ^{:stratum 0} invalid
+  "Return the canonical schema-validation anomaly for effect input."
   [message t]
   (anomaly/sub-anomaly :invalid-input
                        :anomalies.effect-transaction/invalid

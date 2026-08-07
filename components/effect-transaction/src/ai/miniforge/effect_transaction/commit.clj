@@ -71,21 +71,23 @@
    Exceptions from the effect become `:unknown-outcome`; JVM Errors
    propagate after the `:committing` record is durable."
   [dir candidate grant-record _usage ^Instant now effect-fn]
-  (let [id (:effect/id candidate)
-        t (store/read-record dir id)]
-    (cond
-      (anomaly/anomaly? t) t
+  (let [id (:effect/id candidate)]
+    (if (nil? id)
+      (record/invalid (msg/t :record/input-invalid) candidate)
+      (let [t (store/read-record dir id)]
+        (cond
+          (anomaly/anomaly? t) t
 
-      (nil? t)
-      (store/not-found id)
+          (nil? t)
+          (store/not-found id)
 
-      (not= :proposed (:effect/state t))
-      (record/wrong-state (msg/t :commit/not-proposed)
-                          {:effect/id (:effect/id t)
-                           :effect/state (:effect/state t)})
+          (not= :proposed (:effect/state t))
+          (record/wrong-state (msg/t :commit/not-proposed)
+                              {:effect/id (:effect/id t)
+                               :effect/state (:effect/state t)})
 
-      (= :authority/unenforced grant-record)
-      (execute! dir t :unenforced now effect-fn)
+          (= :authority/unenforced grant-record)
+          (execute! dir t :unenforced now effect-fn)
 
-      :else
-      (authorized-commit! dir t grant-record now effect-fn))))
+          :else
+          (authorized-commit! dir t grant-record now effect-fn))))))
