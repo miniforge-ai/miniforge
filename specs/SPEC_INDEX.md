@@ -6,8 +6,8 @@
 
 # miniforge Specification Index
 
-**Version:** 0.12.0-draft
-**Date:** 2026-08-05
+**Version:** 0.13.0-draft
+**Date:** 2026-08-06
 **Status:** Living specification during OSS development
 
 ---
@@ -211,7 +211,17 @@ Defines:
 - Semantic intent validation rules with Terraform/Kubernetes specifics
 - Queryable provenance API: trace artifact chains, find intent mismatches
 - Pack Run evidence: pack identity, capabilities, connector actions, metrics snapshots, report artifacts
-- Compliance metadata: sensitive data handling, audit requirements (SOCII/FedRAMP)
+- **Bundle sealing and integrity (§2.14):** canonical-serialization hash, seal-at-creation,
+  tamper reporting — the mechanism behind the immutability the spec already asserted
+- **Event stream linkage (§2.12):** scope-aware sequence ranges per N3 §2.3
+- **Gate execution evidence (§2.13):** binding, exact resolved pack versions, content hashes,
+  waivers — discharging the obligations N4 §5.5 places on this spec
+- **Retention (§7.4):** `:audit` floor per N3 §4.3.1; bundles outlive neither their events nor artifacts
+- **Redaction inherited from N3 §8** rather than a second `[REDACTED:<type>]` marker (§7.2)
+- **Conformance requirement IDs** (`N6.EB.*`, `N6.PR.*`, `N6.EL.*`, `N6.GE.*`, `N6.SD.*`,
+  `N6.PS.*`) and test obligations (§9.4–§9.5)
+- **Annex A (informative):** implementation conformance status
+- Compliance metadata: sensitive data handling, audit requirements (SOC 2/FedRAMP)
 - **Reliability evidence:** SLI measurements, failure class, workflow tier, degradation mode in outcome (§2.6)
 - **Evaluation artifacts:** Golden set and eval-run-result artifact types (§3.1.1)
 
@@ -556,6 +566,15 @@ Normative specs are enforced by:
 
 ## Version History
 
+- **0.13.0-draft** (2026-08-06) - N6 spec-completion pass. **N6**: bundle sealing and integrity
+  (§2.14) — the spec asserted immutability in three places without a mechanism a reader could
+  check; event stream linkage schema (§2.12); gate execution evidence (§2.13) discharging the four
+  obligations N4 §5.5 places on N6, none of which the bundle recorded; retention (§7.4);
+  conformance requirement IDs and test obligations (§9.4–§9.5). Contract fixes: §7.2's
+  `[REDACTED:<type>]` marker against N3 §8.2's `[REDACTED]`, and its "redact **or** flag" against
+  N3 §8.1's MUST NOT; §2.1 and §7.1 compliance keys disagreeing in both directions; §8.1–§8.2
+  restating N5's CLI/TUI contracts. Annex A records implementation divergence — notably that the
+  scanner detects secrets but never redacts them. Per-spec bumps: N6 0.7.2→0.8.0
 - **0.12.0-draft** (2026-08-05) - N5 spec-completion pass. **N5**: localization contract (§9)
   applying dewey 050 to the console surface — the spec defining the largest prose surface in the
   system had none; CLI output contract with stdout/stderr separation, an exit-code taxonomy that

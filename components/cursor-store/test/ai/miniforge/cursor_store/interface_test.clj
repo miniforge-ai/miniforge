@@ -59,6 +59,12 @@
       (is (:success? result))
       (is (= {} (:cursors result))))))
 
+(deftest ^{:stratum 1} save-cursors-first-run-without-cursors-test
+  (testing "Returns an empty persisted map when no cursor file exists yet"
+    (let [result (sut/save-cursors logger (tmp-pipeline-path) {})]
+      (is (:success? result))
+      (is (= {} (:cursors result))))))
+
 ;; ---------------------------------------------------------------------------
 ;; round-trip
 (deftest ^{:stratum 1} round-trip-test
