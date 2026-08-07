@@ -15,17 +15,15 @@
 ;; WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 ;; See the License for the specific language governing permissions and
 ;; limitations under the License.
-(ns ai.miniforge.execution-grant.breach
-  "Breach-history API for execution grants."
+(ns ai.miniforge.execution-grant.messages
+  "Developer-facing messages for the execution-grant component."
   (:require
-   [ai.miniforge.execution-grant.breach.store :as store]))
+   [ai.miniforge.messages.interface :as messages]))
 
 ;------------------------------------------------------------------------------ Layer 0
 
-(def ^{:stratum 0} history
-  "Every recorded breach, optionally narrowed to one principal."
-  store/history)
-
-(def ^{:stratum 0} record!
-  "Append one breach without replacing an existing breach id."
-  store/record!)
+(def ^{:stratum 0} t
+  "Translate an execution-grant system message."
+  (messages/create-translator
+   "config/execution-grant/messages/system.edn"
+   :execution-grant/messages))

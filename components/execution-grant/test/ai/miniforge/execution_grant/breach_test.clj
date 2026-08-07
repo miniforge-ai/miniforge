@@ -17,7 +17,9 @@
 ;; limitations under the License.
 (ns ai.miniforge.execution-grant.breach-test
   (:require
+   [ai.miniforge.anomaly.interface :as anomaly]
    [ai.miniforge.execution-grant.interface :as grant]
+   [clojure.java.io :as io]
    [clojure.test :refer [deftest is testing]])
   (:import
    [java.nio.file Files]
@@ -32,12 +34,21 @@
 
 (def ^{:stratum 0} much-later (Instant/parse "2026-08-02T00:00:00Z"))
 
-(defn ^{:stratum 0} tmp-dir []
+(defn- ^{:stratum 0} tmp-dir []
   (str (.toFile (Files/createTempDirectory "breach" (into-array FileAttribute [])))))
+
+(defn- ^{:stratum 0} breach-observation
+  ([] (breach-observation {}))
+  ([overrides]
+   (merge {:axis :constraint/max-cost-usd
+           :limit 5.0
+           :observed 9.0
+           :detection :detected}
+          overrides)))
 
 ;------------------------------------------------------------------------------ Layer 1
 
-(defn ^{:stratum 1} spend-grant
+(defn- ^{:stratum 1} spend-grant
   ([] (spend-grant {}))
   ([overrides]
    (grant/issue (merge {:principal "agent:implementer"
@@ -49,17 +60,10 @@
                        overrides)
                 now)))
 
-(deftest ^{:stratum 1} malformed-breach-is-refused-test
-  (let [dir (tmp-dir)]
-    (is (thrown? clojure.lang.ExceptionInfo
-                 (grant/record-breach! dir {:breach/id (random-uuid)})))))
-
-(deftest ^{:stratum 1} a-reused-breach-id-cannot-overwrite-history-test
-  ;; Append-only must be enforced by the filesystem, not asserted in a
-  ;; docstring. A reused id silently replacing an earlier breach is the
-  ;; exact edit this record exists to make impossible.
-  (let [dir (tmp-dir)
-        b {:breach/id (random-uuid)
+(defn- ^{:stratum 1} breach-record
+  ([] (breach-record {}))
+  ([overrides]
+   (merge {:breach/id (random-uuid)
            :breach/principal "agent:x"
            :breach/grant-id (random-uuid)
            :breach/effect-class :effect/spend
@@ -67,52 +71,76 @@
            :breach/limit 5.0
            :breach/observed 9.0
            :breach/detection :detected
-           :breach/at now}]
+           :breach/at now}
+          overrides)))
+
+(deftest ^{:stratum 1} malformed-breach-is-refused-test
+  (let [dir (tmp-dir)]
+    (is (anomaly/anomaly?
+         (grant/record-breach! dir {:breach/id (random-uuid)})))))
+
+(deftest ^{:stratum 1} unreadable-history-fails-eligibility-closed-test
+  (doseq [body ["{}" "{"]]
+    (let [dir (tmp-dir)]
+      (spit (io/file dir "corrupt.edn") body :encoding "UTF-8")
+      (is (anomaly/anomaly? (grant/breach-history dir)))
+      (is (false? (grant/eligible? dir "agent:x" :effect/spend
+                                  {:constraint/max-cost-usd 1.0}))))))
+
+;------------------------------------------------------------------------------ Layer 2
+
+(deftest ^{:stratum 2} a-reused-breach-id-cannot-overwrite-history-test
+  ;; Append-only must be enforced by the filesystem, not asserted in a
+  ;; docstring. A reused id silently replacing an earlier breach is the
+  ;; exact edit this record exists to make impossible.
+  (let [dir (tmp-dir)
+        b (breach-record)]
     (grant/record-breach! dir b)
-    (is (thrown? java.nio.file.FileAlreadyExistsException
-                 (grant/record-breach! dir (assoc b :breach/observed 1.0))))
+    (is (= :conflict
+           (:anomaly/type
+            (grant/record-breach! dir (assoc b :breach/observed 1.0)))))
     (testing "the original survives untouched"
       (is (= 9.0 (:breach/observed (first (grant/breach-history dir "agent:x"))))))))
 
-(deftest ^{:stratum 1} both-inst-types-round-trip-test
+(deftest ^{:stratum 2} both-inst-types-round-trip-test
   ;; inst? admits java.util.Date as well as Instant, so a breach the
   ;; schema ACCEPTS can arrive holding either. A Date's .toString is not
   ;; ISO-8601 and would corrupt the history at the moment of recording.
   (let [dir (tmp-dir)
-        base {:breach/principal "agent:x"
-              :breach/grant-id (random-uuid)
-              :breach/effect-class :effect/spend
-              :breach/axis :constraint/max-cost-usd
-              :breach/limit 5.0 :breach/observed 9.0
-              :breach/detection :detected}
-        as-date (assoc base :breach/id (random-uuid)
-                       :breach/at (java.util.Date/from now))
-        as-instant (assoc base :breach/id (random-uuid) :breach/at now)]
+        as-date (breach-record {:breach/at (java.util.Date/from now)})
+        as-instant (breach-record)]
     (grant/record-breach! dir as-date)
     (grant/record-breach! dir as-instant)
     (is (= [now now] (mapv :breach/at (grant/breach-history dir "agent:x")))
         "a Date normalizes to the same instant on the way out"))
-  (testing "an unsupported timestamp throws rather than corrupting the history"
-    (is (thrown? clojure.lang.ExceptionInfo
-                 (grant/record-breach! (tmp-dir)
-                                       {:breach/id (random-uuid)
-                                        :breach/principal "p"
-                                        :breach/grant-id (random-uuid)
-                                        :breach/effect-class :effect/spend
-                                        :breach/axis :constraint/max-cost-usd
-                                        :breach/limit 1.0 :breach/observed 2.0
-                                        :breach/detection :detected
-                                        :breach/at "nope"})))))
+  (testing "an unsupported timestamp is data and never corrupts history"
+    (doseq [unsupported ["nope" (java.util.GregorianCalendar.)]]
+      (is (= :invalid-input
+             (:anomaly/type
+              (grant/record-breach! (tmp-dir)
+                                    (breach-record {:breach/at unsupported}))))))))
 
-;------------------------------------------------------------------------------ Layer 2
+(deftest ^{:stratum 2} storage-failures-are-returned-as-data-test
+  (let [dir (tmp-dir)
+        blocking-file (io/file dir "not-a-directory")
+        g (spend-grant)]
+    (spit blocking-file "occupied" :encoding "UTF-8")
+    (is (= :fault
+           (:anomaly/type
+            (grant/record-breach! blocking-file (breach-record)))))
+    (is (anomaly/anomaly?
+         (grant/revoke-for-cause! blocking-file g
+                                  (breach-observation) later)))
+    (is (anomaly/anomaly? (grant/breach-history blocking-file)))
+    (is (false? (grant/eligible? blocking-file "agent:x" :effect/spend
+                                {:constraint/max-cost-usd 1.0})))
+    (is (grant/active? g later))))
 
 (deftest ^{:stratum 2} revoke-for-cause-ends-the-grant-and-remembers-test
   (let [dir (tmp-dir)
         g (spend-grant)
         revoked (grant/revoke-for-cause! dir g
-                                         {:axis :constraint/max-cost-usd
-                                          :limit 5.0 :observed 9.0
-                                          :detection :detected}
+                                         (breach-observation)
                                          later)]
     (testing "the grant carries the cause"
       (is (grant/revoked? revoked))
@@ -131,11 +159,10 @@
   ;; it PREVENTED is claiming a gate it does not have.
   (let [dir (tmp-dir)]
     (grant/revoke-for-cause! dir (spend-grant)
-                             {:axis :constraint/max-cost-usd :limit 5.0
-                              :observed 6.0 :detection :prevented} later)
+                             (breach-observation {:observed 6.0
+                                                  :detection :prevented}) later)
     (grant/revoke-for-cause! dir (spend-grant {:principal "agent:other"})
-                             {:axis :constraint/max-cost-usd :limit 5.0
-                              :observed 7.0 :detection :detected} later)
+                             (breach-observation {:observed 7.0}) later)
     (let [all (grant/breach-history dir)]
       (is (= #{:prevented :detected} (set (map :breach/detection all)))))))
 
@@ -143,11 +170,9 @@
   (let [dir (tmp-dir)]
     (dotimes [_ 3]
       (grant/revoke-for-cause! dir (spend-grant)
-                               {:axis :constraint/max-cost-usd :limit 5.0
-                                :observed 6.0 :detection :detected} later))
+                               (breach-observation {:observed 6.0}) later))
     (grant/revoke-for-cause! dir (spend-grant {:principal "agent:other"})
-                             {:axis :constraint/max-cost-usd :limit 5.0
-                              :observed 6.0 :detection :detected} later)
+                             (breach-observation {:observed 6.0}) later)
     (testing "every breach is kept — later ones never overwrite earlier"
       (is (= 4 (count (grant/breach-history dir)))))
     (testing "history narrows by principal"
@@ -163,8 +188,7 @@
     (testing "with no history, anything is eligible"
       (is (grant/eligible? dir p :effect/spend {:constraint/max-cost-usd 100.0})))
     (grant/revoke-for-cause! dir (spend-grant)
-                             {:axis :constraint/max-cost-usd :limit 5.0
-                              :observed 9.0 :detection :detected} later)
+                             (breach-observation) later)
     (testing "the breached ceiling is refused, and so is anything above it"
       (is (not (grant/eligible? dir p :effect/spend {:constraint/max-cost-usd 5.0})))
       (is (not (grant/eligible? dir p :effect/spend {:constraint/max-cost-usd 50.0}))))
