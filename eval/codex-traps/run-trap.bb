@@ -113,8 +113,8 @@
 (defn ^{:stratum 0} local-dir
   "Canonical path of `path` when it names a directory, resolved against
    `dir` when relative, else nil. Git resolves a relative remote against
-   the repo, not the process's cwd, so a raw string comparison would
-   judge a different directory than git will push to."
+   the repo, not the process's cwd, so a raw comparison judges the wrong
+   directory."
   [dir path]
   (try
     (let [f (java.io.File. (str path))
@@ -137,9 +137,8 @@
 
 (defn ^{:stratum 0} detect
   "Verdict map from the frozen detector for `trap` over `dir`. Total: a
-   detector that exits non-zero, says nothing, or prints something
-   unreadable yields :detector-error rather than throwing away the
-   record of a run that has already cost hours."
+   detector that exits non-zero, says nothing, or prints garbage yields
+   :detector-error rather than discarding an hours-old run's record."
   [detector repo trap dir]
   (let [{:keys [exit out]} (p/shell {:dir repo :out :string :err :string
                                      :continue true}
@@ -171,9 +170,8 @@
   "nil when this sandbox is safe to run a bench in; an anomaly otherwise.
    `bb bench:verify` rejects one sharing a git common dir with another
    checkout; the mirror check rejects one whose origin could still reach
-   a real remote, which bench:verify cannot see and which a tracked
-   harness run from an ordinary checkout would pass. Anything
-   undeterminable is a refusal."
+   a real remote — invisible to bench:verify, and passed by a tracked
+   harness run from an ordinary checkout. Undeterminable means refuse."
   [{:keys [repo mirror]}]
   ;; bb runs from the launching checkout when MINIFORGE_BENCH_SOURCE names
   ;; one, so a sandbox pinned before `bench:verify` existed is still
@@ -234,13 +232,23 @@
     :else nil))
 
 (defn ^{:stratum 1} spec-anomaly
-  "The workflow runner moves a failed spec into work/failed/ and
-   `git reset` cannot restore an untracked copy, so runs copy from the
-   master and it has to be there."
+  "`copy-anomaly`'s condition, checked before anything is touched."
   [{:keys [specs]} trap]
   (let [master (fs/path specs (trap->spec trap))]
     (when-not (fs/exists? master)
       (anomaly :not-found "spec master missing from the harness" {:master (str master)}))))
+
+(defn ^{:stratum 1} copy-anomaly
+  "The runner moves a failed spec into work/failed/ and `git reset`
+   cannot restore an untracked copy, so every run re-copies the master."
+  [specs repo spec-name]
+  (try
+    (fs/copy (fs/path specs spec-name) (fs/path repo "work" spec-name)
+             {:replace-existing true})
+    nil
+    (catch Exception e
+      (anomaly :fault "could not stage the spec master"
+               {:spec spec-name :err (.getMessage e)}))))
 
 (defn ^{:stratum 1} reset-anomaly
   "A tree still carrying the last run's edits makes this run's verdict
@@ -310,15 +318,12 @@
   [{:keys [repo specs]} {:keys [arm trap codex home]}]
   (let [spec-name (trap->spec trap)
         started (str (java.time.Instant/now))]
-    (if-let [failure (reset-anomaly repo)]
+    (if-let [failure (or (reset-anomaly repo) (copy-anomaly specs repo spec-name))]
       failure
-      (do
-        (fs/copy (fs/path specs spec-name) (fs/path repo "work" spec-name)
-                 {:replace-existing true})
-        {:exit (:exit (p/shell {:dir repo :env (run-env arm codex home) :continue true}
-                               "bb" "dogfood" (str "work/" spec-name)))
-         :started started
-         :ended (str (java.time.Instant/now))}))))
+      {:exit (:exit (p/shell {:dir repo :env (run-env arm codex home) :continue true}
+                             "bb" "dogfood" (str "work/" spec-name)))
+       :started started
+       :ended (str (java.time.Instant/now))})))
 
 (defn ^{:stratum 2} run-verdict
   "Strongest verdict across everything the run produced, with the
@@ -363,6 +368,12 @@
                        :worktrees new-wts
                        :task-branches new-brs}
                       (run-verdict paths trap new-wts new-brs))]
-    (spit (:runs paths) (str (pr-str record) "\n") :append true)
+    ;; stdout first: the run has already been paid for, so a full disk
+    ;; must not take its only record with it.
     (println "TRAP-RUN-RECORDED" (pr-str record))
+    (try (spit (:runs paths) (str (pr-str record) "\n") :append true)
+         (catch Exception e
+           (binding [*out* *err*]
+             (println "runs.edn append failed, stdout row is the only copy:"
+                      (.getMessage e)))))
     (System/exit (:exit run))))
