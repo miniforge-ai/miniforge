@@ -65,6 +65,8 @@
   "Command failed with exit code {exit-code}"
   :shell/execution-failed
   "Execution failed: {error}"
+  :shell/unknown-command-failure
+  "Unknown command failure"
   :shell/kustomize-build-failed
   "kustomize build failed: {error}"
   :shell/kubectl-apply-failed

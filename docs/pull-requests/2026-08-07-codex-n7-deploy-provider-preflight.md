@@ -30,6 +30,7 @@ Kubernetes provider adapter.
 - Resolve a context-free target to kubectl's configured current context once.
 - Expose separate render, server-dry-run, and apply-rendered provider calls.
 - Pass identical rendered manifest bytes to dry-run and real apply.
+- Preserve structured command diagnostics when a shell returns blank stderr.
 - Preserve the existing combined apply operation until enforcement replaces it.
 
 ## Testing Plan

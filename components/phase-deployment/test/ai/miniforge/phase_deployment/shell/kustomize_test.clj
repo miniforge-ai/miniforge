@@ -26,6 +26,10 @@
 
 (def ^{:stratum 0} manifest-bytes "apiVersion: apps/v1\nkind: Deployment\n")
 
+(defn ^{:stratum 0} blank-stderr-failure
+  [message]
+  (schema/failure :stdout message {:stderr ""}))
+
 (defn ^{:stratum 0} recording-shell
   [calls]
   (fn [command args & {:as options}]
@@ -54,3 +58,19 @@
         (is (= ["apply" "-f" "-" "--namespace" "production"
                 "--context" "cluster-1"]
                (:args apply-call)))))))
+
+(deftest ^{:stratum 1} blank-stderr-retains-command-error-test
+  (testing "build failures retain the structured command error"
+    (let [result (with-redefs [kustomize/kustomize-build!
+                               (fn [& _] (blank-stderr-failure "build broke"))]
+                   (kustomize/kustomize-apply! "/deployment"))]
+      (is (schema/failed? result))
+      (is (re-find #"build broke" (:error result)))))
+  (testing "apply failures retain the structured command error"
+    (let [result (with-redefs [kustomize/kustomize-build!
+                               (fn [& _] (schema/success :stdout manifest-bytes))
+                               exec/sh-with-timeout
+                               (fn [& _] (blank-stderr-failure "apply broke"))]
+                   (kustomize/kustomize-apply! "/deployment"))]
+      (is (schema/failed? result))
+      (is (= "apply broke" (:error result))))))

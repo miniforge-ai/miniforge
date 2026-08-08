@@ -20,7 +20,8 @@
   (:require [ai.miniforge.phase-deployment.messages :as msg]
             [ai.miniforge.phase-deployment.shell.exec :as exec]
             [ai.miniforge.phase-deployment.shell.timeouts :as timeouts]
-            [ai.miniforge.schema.interface :as schema]))
+            [ai.miniforge.schema.interface :as schema]
+            [clojure.string :as str]))
 
 ;------------------------------------------------------------------------------ Layer 0
 
@@ -50,6 +51,14 @@
                           :timeout-ms (get timeouts/timeouts
                                            :kustomize-apply-ms 120000))))
 
+(defn- ^{:stratum 0} failure-detail
+  [command-result]
+  (let [error (:error command-result)]
+    (or (not-empty (:stderr command-result))
+        (when-not (and (string? error) (str/blank? error)) error)
+        (not-empty (get-in command-result [:anomaly :anomaly/message]))
+        (msg/t :shell/unknown-command-failure))))
+
 ;------------------------------------------------------------------------------ Layer 1
 
 (defn ^{:stratum 1} kustomize-apply!
@@ -60,7 +69,7 @@
        KustomizeApplyResult
        (schema/failure :rendered-yaml
                        (msg/t :shell/kustomize-build-failed
-                              {:error (get build-result :stderr "")})
+                              {:error (failure-detail build-result)})
                        {:build-result build-result
                         :apply-result nil}))
       (let [rendered-yaml (:stdout build-result)
@@ -80,9 +89,7 @@
           (schema/validate-anomaly
            KustomizeApplyResult
            (schema/failure :rendered-yaml
-                           (get apply-result
-                                :stderr
-                                (msg/t :shell/kubectl-apply-failed))
+                           (failure-detail apply-result)
                            {:build-result build-result
                             :apply-result apply-result})))))))
 
