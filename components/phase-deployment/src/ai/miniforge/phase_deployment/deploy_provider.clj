@@ -16,8 +16,9 @@
 ;; See the License for the specific language governing permissions and
 ;; limitations under the License.
 (ns ai.miniforge.phase-deployment.deploy-provider
-  "Kubernetes reads, dry-run, mutation, and reconciliation probes."
+  "Kubernetes reads, mutation, and reconciliation probes."
   (:require
+   [ai.miniforge.anomaly.interface :as anomaly]
    [ai.miniforge.phase-deployment.shell :as shell]
    [ai.miniforge.schema.interface :as schema]))
 
@@ -29,16 +30,11 @@
    [:image {:optional true} [:maybe :string]]
    [:replicas {:optional true} [:maybe int?]]])
 
-(defn- ^{:stratum 0} pod-ready?
-  [pod]
-  (every? :ready (get-in pod [:status :containerStatuses] [])))
-
 (defn ^{:stratum 0} apply!
   "Build and apply one Kustomize target through the shell adapter."
   [{:keys [kustomize-dir namespace context]}]
   (shell/kustomize-apply! kustomize-dir
-                          :namespace namespace
-                          :context context))
+                          :namespace namespace :context context))
 
 (def ^{:stratum 0} PodState
   [:map
@@ -51,6 +47,21 @@
       [:phase {:optional true} [:maybe :string]]
       [:ready? :boolean]
       [:images [:vector :string]]]]]])
+
+(defn- ^{:stratum 0} observation-failure
+  [rollout pods]
+  (cond
+    (schema/failed? rollout) (:stderr rollout)
+    (anomaly/anomaly? pods) (:anomaly/message pods)
+    :else nil))
+
+(defn- ^{:stratum 0} pod-summary
+  [pod]
+  (let [statuses (get-in pod [:status :containerStatuses] [])]
+    {:name (get-in pod [:metadata :name])
+     :phase (get-in pod [:status :phase])
+     :ready? (boolean (and (seq statuses) (every? :ready statuses)))
+     :images (mapv :image (get-in pod [:spec :containers] []))}))
 
 ;------------------------------------------------------------------------------ Layer 1
 
@@ -73,13 +84,7 @@
 
 (defn ^{:stratum 1} pod-state
   [pods]
-  (let [summaries (mapv (fn [pod]
-                          {:name (get-in pod [:metadata :name])
-                           :phase (get-in pod [:status :phase])
-                           :ready? (pod-ready? pod)
-                           :images (mapv :image
-                                         (get-in pod [:spec :containers] []))})
-                        pods)]
+  (let [summaries (mapv pod-summary pods)]
     (schema/validate-anomaly
      PodState
      {:pod-count (count summaries)
@@ -99,11 +104,11 @@
         pods (shell/kubectl-get-pods! (str "app=" app-label)
                                       :namespace namespace
                                       :context context)
+        pod-state (pod-state (get-in pods [:parsed :items] []))
+        failure (observation-failure rollout pod-state)
         observed {:deployment/name deployment-name
-                  :deployment/ready? (schema/succeeded? rollout)
-                  :deployment/pods (pod-state
-                                    (get-in pods [:parsed :items] []))
-                  :deployment/failure (when (schema/failed? rollout)
-                                        (:stderr rollout))}]
+                  :deployment/ready? (nil? failure)
+                  :deployment/pods pod-state
+                  :deployment/failure failure}]
     {:provider/observed observed
      :provider/matched? (:deployment/ready? observed)}))

@@ -30,18 +30,11 @@
 (defn- ^{:stratum 0} merged-phase-config
   [ctx]
   (phase/merge-with-defaults
-   (assoc (or (:phase-config ctx) {}) :phase :deploy)))
+   (assoc (get ctx :phase-config {}) :phase :deploy)))
 
 (defn- ^{:stratum 0} provision-outputs
   [ctx]
-  (or (get-in ctx [:execution/phase-results :provision :result :outputs]) {}))
-
-(defn ^{:stratum 0} policy-input
-  "The prior provider preview consumed by the established deploy checks."
-  [ctx]
-  (or (get-in ctx [:execution/phase-results
-                   :provision :result :artifact :content])
-      {:steps []}))
+  (get-in ctx [:execution/phase-results :provision :result :outputs] {}))
 
 ;------------------------------------------------------------------------------ Layer 1
 
@@ -52,23 +45,19 @@
    [:namespace NonBlankString]
    [:app-label NonBlankString]
    [:deployment-name NonBlankString]
-   [:context NonBlankString]
-   [:default-context NonBlankString]])
+   [:context {:optional true} [:maybe NonBlankString]]])
 
 ;------------------------------------------------------------------------------ Layer 2
 
 (defn ^{:stratum 2} resolve-config
-  "Resolve one closed deployment target, including an explicit Kube context."
+  "Resolve one deployment target without changing optional context semantics."
   [ctx]
   (let [phase-config (merged-phase-config ctx)
-        input (or (:execution/input ctx) {})
+        input (get ctx :execution/input {})
         outputs (provision-outputs ctx)
         requested-context (or (:context input)
                               (:context phase-config)
                               (:gke_context outputs))
-        default-context (or (:default-context input)
-                            (:default-context phase-config)
-                            requested-context)
         app-label (get input :app-label
                        (get phase-config :app-label "ixi"))]
     (schema/validate-anomaly
@@ -78,8 +67,7 @@
                          (:kustomize-dir phase-config))
       :namespace (get input :namespace
                       (get phase-config :namespace "default"))
-      :context (or requested-context default-context)
-      :default-context default-context
+      :context requested-context
       :app-label app-label
       :deployment-name (get input :deployment-name
                             (get phase-config :deployment-name app-label))})))

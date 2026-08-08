@@ -34,8 +34,11 @@
       (is (= "/cfg" (:kustomize-dir resolved)))
       (is (= "prod" (:namespace resolved)))
       (is (= "ctx-1" (:context resolved)))
-      (is (= "ctx-1" (:default-context resolved)))
-      (is (= "cfg-app" (:deployment-name resolved))))))
+      (is (= "cfg-app" (:deployment-name resolved)))))
+  (testing "deploy config preserves a context-free current-cluster target"
+    (let [resolved (config/resolve-config
+                    {:phase-config {:kustomize-dir "/cfg"}})]
+      (is (nil? (:context resolved))))))
 
 (deftest ^{:stratum 0} build-pod-state-test
   (testing "pod state summaries preserve readiness and image details"
@@ -52,4 +55,6 @@
       (is (= 1 (:ready-count pod-state)))
       (is (= ["svc:v1" "sidecar:v1"]
              (get-in pod-state [:pods 0 :images])))
-      (is (false? (get-in pod-state [:pods 1 :ready?]))))))
+      (is (false? (get-in pod-state [:pods 1 :ready?])))))
+  (testing "a pod without container status is not ready"
+    (is (false? (get-in (provider/pod-state [{}]) [:pods 0 :ready?])))))
