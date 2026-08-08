@@ -49,9 +49,10 @@
       [:images [:vector :string]]]]]])
 
 (defn- ^{:stratum 0} observation-failure
-  [rollout pods]
+  [rollout pod-result pods]
   (cond
-    (schema/failed? rollout) (:stderr rollout)
+    (schema/failed? rollout) (get rollout :stderr (get rollout :error))
+    (schema/failed? pod-result) (get pod-result :stderr (get pod-result :error))
     (anomaly/anomaly? pods) (:anomaly/message pods)
     :else nil))
 
@@ -105,7 +106,7 @@
                                       :namespace namespace
                                       :context context)
         pod-state (pod-state (get-in pods [:parsed :items] []))
-        failure (observation-failure rollout pod-state)
+        failure (observation-failure rollout pods pod-state)
         observed {:deployment/name deployment-name
                   :deployment/ready? (nil? failure)
                   :deployment/pods pod-state

@@ -21,6 +21,7 @@
    [ai.miniforge.phase-deployment.deploy :as deploy]
    [ai.miniforge.phase-deployment.deploy-flow :as flow]
    [ai.miniforge.phase-deployment.deploy-provider :as provider]
+   [ai.miniforge.phase-deployment.shell :as shell]
    [ai.miniforge.schema.interface :as schema]
    [clojure.test :refer [deftest is]]))
 
@@ -63,6 +64,14 @@
                 (constantly (schema/validate-anomaly [:map [:valid? true?]] {}))
                 provider/apply! #(throw (ex-info "apply must not run" %))]
     (is (= :capture (:deploy/stage (flow/execute! (deployment-config)))))))
+
+(deftest ^{:stratum 1} unavailable-pod-observation-does-not-match-test
+  (with-redefs [shell/kubectl-rollout-status! (constantly
+                                               (schema/success :stdout "ready"))
+                shell/kubectl-get-pods! (constantly
+                                         (schema/failure :parsed "unavailable"))]
+    (is (false? (:provider/matched?
+                 (provider/observe! (deployment-config)))))))
 
 ;------------------------------------------------------------------------------ Layer 2
 
