@@ -22,6 +22,6 @@
    (see :phase component). Also surfaces the deploy-time messages, policies,
    and evidence helpers used by workflows that include this component."
   (:require
-   [ai.miniforge.phase-deployment.deploy-registration]
+   [ai.miniforge.phase-deployment.deploy]
    [ai.miniforge.phase-deployment.provision]
    [ai.miniforge.phase-deployment.validate]))

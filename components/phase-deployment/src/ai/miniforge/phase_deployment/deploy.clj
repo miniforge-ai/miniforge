@@ -23,7 +23,8 @@
             [ai.miniforge.phase-deployment.deploy-config :as config]
             [ai.miniforge.phase-deployment.deploy-flow :as flow]
             [ai.miniforge.phase-deployment.deploy-result :as result]
-            [ai.miniforge.phase-deployment.messages :as msg]))
+            [ai.miniforge.phase-deployment.messages :as msg]
+            [ai.miniforge.phase.interface :as phase]))
 
 ;------------------------------------------------------------------------------ Layer 0
 
@@ -37,14 +38,15 @@
   (or (get-in ctx [:execution/logger])
       (log/create-logger {:min-level :info :output :human})))
 
-(defn- ^{:stratum 0} failed-enter
-  "Build a :failed phase context for enter-time failures."
-  [ctx start-time result-map]
+(defn- ^{:stratum 0} invalid-config-result
+  [ctx start-time error]
   (-> ctx
       (assoc-in [:phase :name] :deploy)
       (assoc-in [:phase :status] :failed)
       (assoc-in [:phase :started-at] start-time)
-      (assoc-in [:phase :result] result-map)))
+      (assoc-in [:phase :result]
+                {:status :error
+                 :error (msg/t :deploy/invalid-config {:error error})})))
 
 (defn ^{:stratum 0} leave-deploy
   "Post-deploy: record final metrics."
@@ -54,13 +56,6 @@
     (assoc-in ctx [:phase :status] :failed)))
 
 ;------------------------------------------------------------------------------ Layer 1
-
-(defn- ^{:stratum 1} invalid-config-result
-  [ctx start-time error]
-  (failed-enter ctx start-time
-                {:status :error
-                 :error  (msg/t :deploy/invalid-config
-                                {:error error})}))
 
 (defn ^{:stratum 1} error-deploy
   "Handle deploy phase errors."
@@ -77,9 +72,7 @@
                  :message (ex-message ex)
                  :data    (ex-data ex)}))))
 
-;------------------------------------------------------------------------------ Layer 2
-
-(defn ^{:stratum 2} enter-deploy
+(defn ^{:stratum 1} enter-deploy
   "Resolve one target and execute its deployment application flow."
   [ctx]
   (let [start-time (System/currentTimeMillis)
@@ -93,6 +86,16 @@
                                    (flow/execute! deploy-config))))
       (catch clojure.lang.ExceptionInfo ex
         (invalid-config-result ctx start-time (ex-message ex))))))
+
+;------------------------------------------------------------------------------ Layer 2
+
+(defmethod ^{:stratum 2} phase/get-phase-interceptor-method :deploy
+  [_]
+  {:name :deploy
+   :enter enter-deploy
+   :leave leave-deploy
+   :error error-deploy
+   :config default-config})
 
 ;------------------------------------------------------------------------------ Rich Comment
 (comment
