@@ -75,3 +75,11 @@
 (deftest ^{:stratum 0} absent-current-context-fails-closed-test
   (with-redefs [shell/kubectl! (fn [& _] (schema/success :stdout "\n"))]
     (is (schema/failed? (provider/target! {:context nil})))))
+
+(deftest ^{:stratum 0} current-context-shell-failure-keeps-target-contract-test
+  (let [kubectl-result (schema/failure :stdout "kubectl unavailable")]
+    (with-redefs [shell/kubectl! (fn [& _] kubectl-result)]
+      (let [result (provider/target! {:context nil})]
+        (is (schema/failed? result))
+        (is (contains? result :target))
+        (is (= kubectl-result (:kubectl-result result)))))))

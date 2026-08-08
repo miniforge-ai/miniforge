@@ -84,7 +84,18 @@
      :ready? (boolean (and (seq statuses) (every? :ready statuses)))
      :images (mapv :image (get-in pod [:spec :containers] []))}))
 
-(defn ^{:stratum 0} target!
+(defn- ^{:stratum 0} target-failure
+  [kubectl-result]
+  (schema/failure
+   :target
+   (or (not-empty (:stderr kubectl-result))
+       (:error kubectl-result)
+       (msg/t :deploy/context-unavailable))
+   {:kubectl-result kubectl-result}))
+
+;------------------------------------------------------------------------------ Layer 1
+
+(defn ^{:stratum 1} target!
   "Resolve a context-free target to kubectl's configured current context."
   [{:keys [context] :as deploy-config}]
   (if context
@@ -92,13 +103,11 @@
     (let [result (shell/kubectl! "config" :extra-args ["current-context"])
           current-context (some-> (:stdout result) str/trim not-empty)]
       (cond
-        (schema/failed? result) result
+        (schema/failed? result) (target-failure result)
         (nil? current-context) (schema/failure
                                 :target (msg/t :deploy/context-unavailable))
         :else (schema/success :target
                               (assoc deploy-config :context current-context))))))
-
-;------------------------------------------------------------------------------ Layer 1
 
 (defn ^{:stratum 1} rollback-info!
   "Read the pre-effect deployment state used to recover a partial mutation."
