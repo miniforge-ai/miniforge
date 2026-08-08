@@ -24,13 +24,15 @@ pre-apply rollback evidence even though the same evidence survived success.
 
 ## Changes in Detail
 
-- Resolve one validated target map, including an explicit Kubernetes context.
+- Resolve one validated target map while retaining context-free current-cluster
+  operation.
 - Isolate rollback reads, apply, rollout observation, and pod summaries in the
   provider namespace.
 - Express apply and observation as a small data pipeline.
 - Project deployment outcomes and evidence in one result namespace.
-- Move phase-registry composition out of the application namespace.
-- Preserve rollback, rendered-manifest, and image evidence on rollout failure.
+- Preserve rollback, rendered-manifest, and image evidence on deployment
+  failure.
+- Preserve apply/rollout telemetry events and failure result statuses.
 - Keep the public phase registration and successful result shape stable.
 
 ## Testing Plan
@@ -41,7 +43,7 @@ pre-apply rollback evidence even though the same evidence survived success.
 - Polylith structure check reports zero errors and warnings.
 - Pre-commit smoke and GraalVM/Babashka compatibility suites are green for
   every commit.
-- PR budget is 570 of 600 reportable lines.
+- PR budget is below 600 reportable lines.
 
 ## Deployment Plan
 
@@ -55,7 +57,7 @@ after #1711.
 
 ## Checklist
 
-- [x] Provider, application, result, and composition concerns are separate.
+- [x] Provider, application, and result concerns are separate.
 - [x] Every changed implementation namespace has at most three strata.
 - [x] Rollback evidence survives failed rollout observation.
 - [x] Repeated target and outcome maps are centralized.

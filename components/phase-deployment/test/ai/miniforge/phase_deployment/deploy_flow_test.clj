@@ -17,19 +17,21 @@
 ;; limitations under the License.
 (ns ai.miniforge.phase-deployment.deploy-flow-test
   (:require
+   [ai.miniforge.logging.interface :as log]
    [ai.miniforge.phase-deployment.deploy :as deploy]
    [ai.miniforge.phase-deployment.deploy-flow :as flow]
    [ai.miniforge.phase-deployment.deploy-provider :as provider]
+   [ai.miniforge.schema.interface :as schema]
    [clojure.test :refer [deftest is]]))
 
 ;------------------------------------------------------------------------------ Layer 0
 
-(def ^{:stratum 0} deploy-config
+(defn ^{:stratum 0} deployment-config
+  []
   {:phase-config {}
    :kustomize-dir "/deploy"
    :namespace "production"
    :context "cluster-1"
-   :default-context "cluster-1"
    :app-label "api"
    :deployment-name "api"})
 
@@ -38,26 +40,44 @@
 
 ;------------------------------------------------------------------------------ Layer 1
 
+(defn ^{:stratum 1} rollout-failure
+  []
+  {:deploy/status :failed
+   :deploy/stage :observe
+   :deploy/rollback-info rollback-info
+   :deploy/rendered-yaml "image: api:v8"
+   :deploy/failure "rollout timed out"})
+
 (deftest ^{:stratum 1} apply-failure-preserves-rollback-test
   (with-redefs [provider/rollback-info! (constantly rollback-info)
-                provider/apply! (constantly {:success? false
-                                             :error "apply refused"})]
-    (let [deployment (flow/execute! deploy-config)]
+                provider/apply! (constantly
+                                 (schema/failure :rendered-yaml
+                                                 "apply refused"))]
+    (let [deployment (flow/execute! (deployment-config))]
       (is (= :failed (:deploy/status deployment)))
       (is (= :apply (:deploy/stage deployment)))
       (is (= rollback-info (:deploy/rollback-info deployment))))))
 
-(deftest ^{:stratum 1} phase-failure-retains-rollback-evidence-test
-  (with-redefs [flow/execute!
-                (constantly {:deploy/status :failed
-                             :deploy/stage :observe
-                             :deploy/rollback-info rollback-info
-                             :deploy/rendered-yaml "image: api:v8"
-                             :deploy/failure "rollout timed out"})]
-    (let [ctx (deploy/enter-deploy
-               {:execution/input (select-keys deploy-config
-                                              [:kustomize-dir :namespace
-                                               :context :app-label])})
+(deftest ^{:stratum 1} invalid-rollback-stops-apply-test
+  (with-redefs [provider/rollback-info!
+                (constantly (schema/validate-anomaly [:map [:valid? true?]] {}))
+                provider/apply! #(throw (ex-info "apply must not run" %))]
+    (is (= :capture (:deploy/stage (flow/execute! (deployment-config)))))))
+
+;------------------------------------------------------------------------------ Layer 2
+
+(deftest ^{:stratum 2} phase-failure-retains-rollback-evidence-test
+  (let [[logger entries] (log/collecting-logger)]
+    (with-redefs [flow/execute!
+                  (constantly (rollout-failure))]
+      (let [ctx (deploy/enter-deploy
+                 {:execution/logger logger
+                  :execution/input (select-keys (deployment-config)
+                                                [:kustomize-dir :namespace
+                                                 :context :app-label])})
           evidence-types (mapv :evidence/type (:execution/evidence ctx))]
-      (is (= :failed (get-in ctx [:phase :status])))
-      (is (some #{:evidence/rollback-info} evidence-types)))))
+        (is (= :failed (get-in ctx [:phase :status])))
+        (is (= :rollout-failed (get-in ctx [:phase :result :status])))
+        (is (= [:deploy/applied :deploy/rollout-failed]
+               (mapv :log/event @entries)))
+        (is (some #{:evidence/rollback-info} evidence-types))))))

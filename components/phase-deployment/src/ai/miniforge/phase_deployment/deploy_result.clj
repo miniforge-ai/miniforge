@@ -35,7 +35,7 @@
   [deploy-config deployment]
   (let [rollback-info (:deploy/rollback-info deployment)
         rendered (:deploy/rendered-yaml deployment)
-        images (when rendered (evidence/extract-image-digests rendered))]
+        images (:deploy/images deployment)]
     (cond-> []
       rollback-info
       (conj (evidence/create-evidence
@@ -53,25 +53,23 @@
   [ctx items]
   (reduce evidence/add-evidence-to-ctx ctx items))
 
-;------------------------------------------------------------------------------ Layer 1
+(def ^{:stratum 0 :private true} failure-details
+  {:capture {:event :deploy/rollback-capture-failed :status :error}
+   :apply {:event :deploy/apply-failed :status :error}
+   :observe {:event :deploy/rollout-failed :status :rollout-failed}})
 
-(defn- ^{:stratum 1} store-failure
-  [ctx start-time logger deploy-config deployment]
-  (log/error logger :deploy :deploy/apply-failed
-             {:data {:stage (:deploy/stage deployment)
-                     :error (:deploy/failure deployment)}})
-  (-> (phase-context
-       ctx start-time :failed
-       {:status (:deploy/status deployment)
-        :error (:deploy/failure deployment)
-        :stage (:deploy/stage deployment)
-        :metrics {:duration-ms (- (System/currentTimeMillis) start-time)}})
-      (add-evidence (evidence-items deploy-config deployment))))
+(defn- ^{:stratum 0} log-applied
+  [logger deployment]
+  (when (= :observe (:deploy/stage deployment))
+    (log/info logger :deploy :deploy/applied
+              {:data {:image-count (count (:deploy/images deployment))}})))
+
+;------------------------------------------------------------------------------ Layer 1
 
 (defn- ^{:stratum 1} store-success
   [ctx start-time logger deploy-config deployment]
   (let [pod-state (:deploy/pod-state deployment)
-        images (evidence/extract-image-digests (:deploy/rendered-yaml deployment))
+        images (:deploy/images deployment)
         metrics {:duration-ms (- (System/currentTimeMillis) start-time)
                  :pod-count (:pod-count pod-state)
                  :ready-count (:ready-count pod-state)}]
@@ -85,16 +83,34 @@
                      :app-label (:app-label deploy-config)
                      :namespace (:namespace deploy-config)}
           :metrics metrics})
-        (assoc-in [:phase :gates]
-                  (get-in deploy-config [:phase-config :gates]))
-        (assoc-in [:phase :budget]
-                  (get-in deploy-config [:phase-config :budget]))
+        (assoc-in [:phase :gates] (get-in deploy-config [:phase-config :gates]))
+        (assoc-in [:phase :budget] (get-in deploy-config [:phase-config :budget]))
+        (add-evidence (evidence-items deploy-config deployment)))))
+
+(defn- ^{:stratum 1} store-failure
+  [ctx start-time logger deploy-config deployment]
+  (let [{:keys [event status]}
+        (get failure-details (:deploy/stage deployment)
+             (get failure-details :apply))]
+    (log/error logger :deploy event
+               {:data {:stage (:deploy/stage deployment)
+                       :error (:deploy/failure deployment)}})
+    (-> (phase-context
+         ctx start-time :failed
+         {:status status
+          :error (:deploy/failure deployment)
+          :stage (:deploy/stage deployment)
+          :metrics {:duration-ms (- (System/currentTimeMillis) start-time)}})
         (add-evidence (evidence-items deploy-config deployment)))))
 
 ;------------------------------------------------------------------------------ Layer 2
 
 (defn ^{:stratum 2} store-deployment
   [ctx start-time logger deploy-config deployment]
-  (if (= :success (:deploy/status deployment))
-    (store-success ctx start-time logger deploy-config deployment)
-    (store-failure ctx start-time logger deploy-config deployment)))
+  (let [images (some-> (:deploy/rendered-yaml deployment)
+                       evidence/extract-image-digests)
+        deployment (assoc deployment :deploy/images images)]
+    (log-applied logger deployment)
+    (if (= :success (:deploy/status deployment))
+      (store-success ctx start-time logger deploy-config deployment)
+      (store-failure ctx start-time logger deploy-config deployment))))

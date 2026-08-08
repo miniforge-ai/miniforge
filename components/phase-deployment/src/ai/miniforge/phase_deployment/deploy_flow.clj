@@ -18,6 +18,7 @@
 (ns ai.miniforge.phase-deployment.deploy-flow
   "Application flow for deployment provider operations."
   (:require
+   [ai.miniforge.anomaly.interface :as anomaly]
    [ai.miniforge.phase-deployment.deploy-provider :as provider]
    [ai.miniforge.schema.interface :as schema]))
 
@@ -32,29 +33,31 @@
 
 ;------------------------------------------------------------------------------ Layer 1
 
-(defn- ^{:stratum 1} observation-outcome
-  [rollback-info rendered-yaml observation]
-  (let [observed (:provider/observed observation)
-        data {:deploy/rendered-yaml rendered-yaml
-              :deploy/pod-state (:deployment/pods observed)}]
-    (if (:provider/matched? observation)
-      (outcome :success :observe rollback-info data)
-      (outcome :failed :observe rollback-info
-               (assoc data :deploy/failure
-                      (:deployment/failure observed))))))
+(defn- ^{:stratum 1} apply-outcome!
+  [deploy-config rollback-info]
+  (let [applied (provider/apply! deploy-config)
+        rendered-yaml (:rendered-yaml applied)]
+    (if (schema/failed? applied)
+      (outcome :failed :apply rollback-info
+               {:deploy/rendered-yaml rendered-yaml
+                :deploy/failure (:error applied)})
+      (let [observation (provider/observe! deploy-config)
+            observed (:provider/observed observation)
+            matched? (:provider/matched? observation)
+            data (cond-> {:deploy/rendered-yaml rendered-yaml
+                          :deploy/pod-state (:deployment/pods observed)}
+                   (not matched?)
+                   (assoc :deploy/failure (:deployment/failure observed)))]
+        (outcome (if matched? :success :failed)
+                 :observe rollback-info data)))))
 
 ;------------------------------------------------------------------------------ Layer 2
 
 (defn ^{:stratum 2} execute!
   "Capture rollback state, apply, and translate provider observation."
   [deploy-config]
-  (let [rollback-info (provider/rollback-info! deploy-config)
-        applied (provider/apply! deploy-config)
-        rendered-yaml (:rendered-yaml applied)]
-    (if (schema/failed? applied)
-      (outcome :failed :apply rollback-info
-               {:deploy/rendered-yaml rendered-yaml
-                :deploy/failure (or (:error applied)
-                                    (get-in applied [:apply-result :stderr]))})
-      (observation-outcome rollback-info rendered-yaml
-                           (provider/observe! deploy-config)))))
+  (let [rollback-info (provider/rollback-info! deploy-config)]
+    (if (anomaly/anomaly? rollback-info)
+      (outcome :failed :capture nil
+               {:deploy/failure (:anomaly/message rollback-info)})
+      (apply-outcome! deploy-config rollback-info))))
