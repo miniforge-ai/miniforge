@@ -9,8 +9,8 @@
 ## Overview
 
 Separates deployment target resolution, Kubernetes provider operations,
-application flow, phase-result projection, and phase registration before N7
-adds grant and effect-transaction enforcement.
+application flow, and phase-result projection before N7 adds grant and
+effect-transaction enforcement.
 
 ## Motivation
 
@@ -48,7 +48,9 @@ pre-apply rollback evidence even though the same evidence survived success.
 ## Deployment Plan
 
 No migration is required. The runtime behavior and phase contract remain
-stable; this PR creates the reviewable seams consumed by the next N7 PR.
+compatible. Failure handling is deliberately stricter when rollback or pod
+observation is malformed or unavailable. This PR creates the reviewable seams
+consumed by the next N7 PR.
 
 ## Related Issues/PRs
 
