@@ -15,7 +15,6 @@
 ;; WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 ;; See the License for the specific language governing permissions and
 ;; limitations under the License.
-
 (ns ai.miniforge.phase-deployment.shell
   "Public deployment shell API.
 
@@ -28,22 +27,31 @@
             [ai.miniforge.phase-deployment.shell.pulumi :as pulumi]))
 
 ;------------------------------------------------------------------------------ Layer 0
+
 ;; Public API
+(def ^{:stratum 0} sh-with-timeout exec/sh-with-timeout)
 
-(def sh-with-timeout exec/sh-with-timeout)
-(def classify-error exec/classify-error)
+(def ^{:stratum 0} classify-error exec/classify-error)
 
-(def pulumi! pulumi/pulumi!)
-(def pulumi-preview! pulumi/pulumi-preview!)
-(def pulumi-up! pulumi/pulumi-up!)
-(def pulumi-outputs! pulumi/pulumi-outputs!)
+(def ^{:stratum 0} pulumi! pulumi/pulumi!)
 
-(def kubectl! kubectl/kubectl!)
-(def kubectl-rollout-status! kubectl/kubectl-rollout-status!)
-(def kubectl-get-pods! kubectl/kubectl-get-pods!)
+(def ^{:stratum 0} pulumi-preview! pulumi/pulumi-preview!)
 
-(def kustomize-build! kustomize/kustomize-build!)
-(def kustomize-apply! kustomize/kustomize-apply!)
+(def ^{:stratum 0} pulumi-up! pulumi/pulumi-up!)
+
+(def ^{:stratum 0} pulumi-outputs! pulumi/pulumi-outputs!)
+
+(def ^{:stratum 0} kubectl! kubectl/kubectl!)
+
+(def ^{:stratum 0} kubectl-rollout-status! kubectl/kubectl-rollout-status!)
+
+(def ^{:stratum 0} kubectl-get-pods! kubectl/kubectl-get-pods!)
+
+(def ^{:stratum 0} kustomize-build! kustomize/kustomize-build!)
+
+(def ^{:stratum 0} kubectl-apply! kustomize/kubectl-apply!)
+
+(def ^{:stratum 0} kustomize-apply! kustomize/kustomize-apply!)
 
 ;------------------------------------------------------------------------------ Rich Comment
 (comment

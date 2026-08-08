@@ -18,6 +18,8 @@
 (ns ai.miniforge.phase-deployment.deploy-test
   (:require [ai.miniforge.phase-deployment.deploy-config :as config]
             [ai.miniforge.phase-deployment.deploy-provider :as provider]
+            [ai.miniforge.phase-deployment.shell :as shell]
+            [ai.miniforge.schema.interface :as schema]
             [clojure.test :refer [deftest is testing]]))
 
 ;------------------------------------------------------------------------------ Layer 0
@@ -58,3 +60,18 @@
       (is (= ["svc:v1" "sidecar:v1"]
              (get-in pod-state [:pods 0 :images])))
       (is (every? false? (mapv :ready? (subvec (:pods pod-state) 1)))))))
+
+(deftest ^{:stratum 0} context-free-target-is-bound-once-test
+  (let [calls (atom 0)]
+    (with-redefs [shell/kubectl!
+                  (fn [& _]
+                    (swap! calls inc)
+                    (schema/success :stdout "configured-cluster\n"))]
+      (let [resolved (:target (provider/target!
+                               {:context nil :namespace "production"}))]
+        (is (= "configured-cluster" (:context resolved)))
+        (is (= 1 @calls))))))
+
+(deftest ^{:stratum 0} absent-current-context-fails-closed-test
+  (with-redefs [shell/kubectl! (fn [& _] (schema/success :stdout "\n"))]
+    (is (schema/failed? (provider/target! {:context nil})))))
