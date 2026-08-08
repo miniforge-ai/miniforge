@@ -38,6 +38,7 @@
   (testing "deploy config preserves a context-free current-cluster target"
     (let [resolved (config/resolve-config
                     {:phase-config {:kustomize-dir "/cfg"}})]
+      (is (= "default" (:namespace resolved)))
       (is (nil? (:context resolved))))))
 
 (deftest ^{:stratum 0} build-pod-state-test
@@ -50,11 +51,10 @@
                       {:metadata {:name "api-2"}
                        :status {:phase "Pending"
                                 :containerStatuses [{:ready false}]}
-                       :spec {:containers [{:image "svc:v2"}]}}])]
-      (is (= 2 (:pod-count pod-state)))
+                       :spec {:containers [{:image "svc:v2"}]}}
+                      {}])]
+      (is (= 3 (:pod-count pod-state)))
       (is (= 1 (:ready-count pod-state)))
       (is (= ["svc:v1" "sidecar:v1"]
              (get-in pod-state [:pods 0 :images])))
-      (is (false? (get-in pod-state [:pods 1 :ready?])))))
-  (testing "a pod without container status is not ready"
-    (is (false? (get-in (provider/pod-state [{}]) [:pods 0 :ready?])))))
+      (is (every? false? (mapv :ready? (subvec (:pods pod-state) 1)))))))

@@ -26,8 +26,7 @@
 
 (defn- ^{:stratum 0} outcome
   [status stage rollback-info data]
-  (merge {:deploy/status status
-          :deploy/stage stage
+  (merge {:deploy/status status :deploy/stage stage
           :deploy/rollback-info rollback-info}
          data))
 
@@ -36,7 +35,8 @@
 (defn- ^{:stratum 1} apply-outcome!
   [deploy-config rollback-info]
   (let [applied (provider/apply! deploy-config)
-        rendered-yaml (:rendered-yaml applied)]
+        rendered-yaml (or (:rendered-yaml applied)
+                          (get-in applied [:build-result :stdout]))]
     (if (schema/failed? applied)
       (outcome :failed :apply rollback-info
                {:deploy/rendered-yaml rendered-yaml
@@ -47,8 +47,7 @@
             base-data {:deploy/rendered-yaml rendered-yaml
                        :deploy/pod-state (:deployment/pods observed)}
             data (if matched? base-data
-                     (assoc base-data :deploy/failure
-                            (:deployment/failure observed)))]
+                     (assoc base-data :deploy/failure (:deployment/failure observed)))]
         (outcome (if matched? :success :failed)
                  :observe rollback-info data)))))
 
@@ -59,6 +58,5 @@
   [deploy-config]
   (let [rollback-info (provider/rollback-info! deploy-config)]
     (if (anomaly/anomaly? rollback-info)
-      (outcome :failed :capture nil
-               {:deploy/failure (:anomaly/message rollback-info)})
+      (outcome :failed :capture nil {:deploy/failure (:anomaly/message rollback-info)})
       (apply-outcome! deploy-config rollback-info))))

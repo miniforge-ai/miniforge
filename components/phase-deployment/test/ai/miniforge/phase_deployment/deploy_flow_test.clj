@@ -36,8 +36,10 @@
    :app-label "api"
    :deployment-name "api"})
 
-(def ^{:stratum 0} rollback-info
-  {:revision "7" :image "api:v7" :replicas 3})
+(def ^{:stratum 0} rollback-info {:revision "7" :image "api:v7" :replicas 3})
+
+(def ^{:stratum 0} apply-failure
+  (schema/failure :rendered-yaml "apply refused" {:build-result {:stdout "image: api:v8"}}))
 
 ;------------------------------------------------------------------------------ Layer 1
 
@@ -51,25 +53,21 @@
 
 (deftest ^{:stratum 1} apply-failure-preserves-rollback-test
   (with-redefs [provider/rollback-info! (constantly rollback-info)
-                provider/apply! (constantly
-                                 (schema/failure :rendered-yaml
-                                                 "apply refused"))]
+                provider/apply! (constantly apply-failure)]
     (let [deployment (flow/execute! (deployment-config))]
       (is (= :failed (:deploy/status deployment)))
       (is (= :apply (:deploy/stage deployment)))
+      (is (= "image: api:v8" (:deploy/rendered-yaml deployment)))
       (is (= rollback-info (:deploy/rollback-info deployment))))))
 
 (deftest ^{:stratum 1} invalid-rollback-stops-apply-test
-  (with-redefs [provider/rollback-info!
-                (constantly (schema/validate-anomaly [:map [:valid? true?]] {}))
+  (with-redefs [provider/rollback-info! (constantly (schema/validate-anomaly [:map [:valid? true?]] {}))
                 provider/apply! #(throw (ex-info "apply must not run" %))]
     (is (= :capture (:deploy/stage (flow/execute! (deployment-config)))))))
 
 (deftest ^{:stratum 1} unavailable-pod-observation-does-not-match-test
-  (with-redefs [shell/kubectl-rollout-status! (constantly
-                                               (schema/success :stdout "ready"))
-                shell/kubectl-get-pods! (constantly
-                                         (schema/failure :parsed "unavailable"))]
+  (with-redefs [shell/kubectl-rollout-status! (constantly (schema/success :stdout "ready"))
+                shell/kubectl-get-pods! (constantly (schema/failure :parsed "unavailable"))]
     (is (false? (:provider/matched?
                  (provider/observe! (deployment-config)))))))
 

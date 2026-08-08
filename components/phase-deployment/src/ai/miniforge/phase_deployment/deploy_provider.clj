@@ -49,11 +49,12 @@
       [:images [:vector :string]]]]]])
 
 (defn- ^{:stratum 0} observation-failure
-  [rollout pod-result pods]
+  [rollout-result pod-result pod-state]
   (cond
-    (schema/failed? rollout) (get rollout :stderr (get rollout :error))
+    (schema/failed? rollout-result)
+    (get rollout-result :stderr (get rollout-result :error))
     (schema/failed? pod-result) (get pod-result :stderr (get pod-result :error))
-    (anomaly/anomaly? pods) (:anomaly/message pods)
+    (anomaly/anomaly? pod-state) (:anomaly/message pod-state)
     :else nil))
 
 (defn- ^{:stratum 0} pod-summary
