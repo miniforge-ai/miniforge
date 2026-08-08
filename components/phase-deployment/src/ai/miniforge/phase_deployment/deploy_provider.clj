@@ -104,8 +104,7 @@
           current-context (some-> (:stdout result) str/trim not-empty)]
       (cond
         (schema/failed? result) (target-failure result)
-        (nil? current-context) (schema/failure
-                                :target (msg/t :deploy/context-unavailable))
+        (nil? current-context) (target-failure result)
         :else (schema/success :target
                               (assoc deploy-config :context current-context))))))
 
