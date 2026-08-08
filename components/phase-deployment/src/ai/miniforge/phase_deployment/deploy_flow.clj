@@ -47,7 +47,7 @@
             base-data {:deploy/rendered-yaml rendered-yaml
                        :deploy/pod-state (:deployment/pods observed)}
             data (if matched? base-data
-                     (assoc base-data :deploy/failure (:deployment/failure observed)))]
+                     (assoc base-data :deploy/failure (get observed :deployment/failure)))]
         (outcome (if matched? :success :failed)
                  :observe rollback-info data)))))
 
