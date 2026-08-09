@@ -86,6 +86,9 @@
 
 (defn ^{:stratum 2} run-cli-command
   [cmd timeout-ms & {:keys [workdir stdin]}]
+  (when (and (some? stdin) (not (string? stdin)))
+    (throw (ex-info "run-cli-command :stdin must be a string"
+                    {:stdin-type (type stdin)})))
   (let [^Process process (start-cli-process cmd workdir)
         in-future (stream-writer (.getOutputStream process) stdin)
         out-future (stream-reader (.getInputStream process))
