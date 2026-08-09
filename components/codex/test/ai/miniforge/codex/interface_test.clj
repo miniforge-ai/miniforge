@@ -67,7 +67,28 @@
       (is (= 1 (:unanchored-count coverage)))   ; contract-drift-is-silent
       (is (true? (:no-strategic-coverage? coverage)))
       (is (= {"operational" 6 "tactical" 1} (:horizon-mix coverage)))
-      (is (= "2026-06-07" (:newest-scar-date coverage))))))
+      (is (= "2026-06-07" (:newest-scar-date coverage))))
+    (testing "coverage confesses the §4.4 trigger has no data yet (§7.7)"
+      (is (= :untriggerable (:retirement coverage))))))
+
+(deftest ^{:stratum 1} consider-carries-the-per-peg-telemetry-basis
+  (let [{:keys [pegs]} (codex/consider fixture-dir "process-stuck-or-slow")]
+    (testing "every discriminator on the board is a presented peg (§7.7)"
+      (is (= ["already-failed-silently" "consuming-an-earlier-steps-output"
+              "is-there-progress-at-all" "reports-activity-while-stuck"
+              "started-in-the-intended-environment"]
+             (mapv :id pegs))))
+    (testing "each answer carries the landing set that follows it — exposes edges included (§4.4.1 routing relevance)"
+      (is (= {"yes" ["fail-closed-by-default" "infra-vs-domain-failure"]
+              "no" ["chained-work-identity" "contract-drift-is-silent"
+                    "environment-isolation" "liveness-detection"]}
+             (:answers (first (filter #(= "already-failed-silently" (:id %))
+                                      pegs))))))
+    (testing "a leaf peg's branches are single landings"
+      (is (= {"no" ["environment-isolation"] "yes" ["liveness-detection"]}
+             (:answers (first (filter #(= "started-in-the-intended-environment"
+                                          (:id %))
+                                      pegs))))))))
 
 (deftest ^{:stratum 1} landings-are-horizon-ordered
   (let [{:keys [landings]} (codex/consider fixture-dir "process-stuck-or-slow")

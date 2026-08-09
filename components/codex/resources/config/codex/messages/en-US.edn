@@ -10,7 +10,7 @@
   :render/scar-cost-horizon    ", cost-horizon: {value}"
   :render/unanchored-line      "    unanchored — reasoned, not survived"
   :render/open-line            "    open: {text}"
-  :render/coverage-line        "coverage: {landing-count} landings, {unanchored-count} unanchored, newest scar {newest-scar-date}, horizon mix {horizon-mix}"
+  :render/coverage-line        "coverage: {landing-count} landings, {unanchored-count} unanchored, newest scar {newest-scar-date}, horizon mix {horizon-mix}, retirement: {retirement}"
   :render/no-newest-scar       "none"
   :render/no-strategic-coverage "NO STRATEGIC COVERAGE: every landing is tactical/operational. The codex has nothing strategic-horizon for this situation — that absence is a gap in the codex, not evidence the situation carries no strategic risk."
 
