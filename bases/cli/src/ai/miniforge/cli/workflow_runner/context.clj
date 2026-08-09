@@ -16,15 +16,15 @@
 ;; See the License for the specific language governing permissions and
 ;; limitations under the License.
 (ns ai.miniforge.cli.workflow-runner.context
-  "Workflow input resolution and runtime context creation."
+  "Workflow input resolution and runtime context creation. Git checkout
+   state lives in `ai.miniforge.cli.workflow-runner.context-git`."
   (:require
    [clojure.edn :as edn]
-   [clojure.java.shell :as shell]
-   [clojure.string :as str]
    [babashka.fs :as fs]
    [cheshire.core :as json]
    [ai.miniforge.cli.config :as config]
    [ai.miniforge.cli.worktree :as worktree]
+   [ai.miniforge.cli.workflow-runner.context-git :as git]
    [ai.miniforge.cli.workflow-runner.display :as display]
    [ai.miniforge.event-stream.interface :as es]
    [ai.miniforge.llm.interface :as llm]
@@ -57,12 +57,6 @@
         (response/throw-anomaly! :anomalies/fault
                                 (str "Failed to parse input JSON: " (ex-message e))
                                 {:input s})))))
-
-(defn- ^{:stratum 0} resolve-git-field
-  [dir & args]
-  (let [{:keys [exit out]} (apply shell/sh (concat ["git"] args [:dir dir]))]
-    (when (zero? exit)
-      (some-> out str/trim not-empty))))
 
 (defn- ^{:stratum 0} execution-worktree-path
   [execution-opts]
@@ -141,45 +135,10 @@
     input (read-input-file input)
     :else {}))
 
-(defn- ^{:stratum 1} resolve-git-bool
-  [dir & args]
-  (boolean (apply resolve-git-field dir args)))
-
-(defn ^{:stratum 1} get-git-info
-  ([] (get-git-info nil))
-  ([start-path]
-   (try
-     (when-let [root (worktree/worktree-root start-path)]
-       (let [branch (resolve-git-field root "rev-parse" "--abbrev-ref" "HEAD")
-             commit (resolve-git-field root "rev-parse" "--short" "HEAD")]
-         (when (and branch commit)
-           {:git-branch branch
-            :git-commit commit})))
-     (catch Exception _ nil))))
-
-;------------------------------------------------------------------------------ Layer 2
-
-(defn ^{:stratum 2} get-git-state
-  ([] (get-git-state nil))
-  ([start-path]
-   (try
-     (when-let [root (worktree/worktree-root start-path)]
-       (let [branch (resolve-git-field root "rev-parse" "--abbrev-ref" "HEAD")
-             commit (resolve-git-field root "rev-parse" "--short" "HEAD")
-             upstream (resolve-git-field root "rev-parse" "--abbrev-ref" "--symbolic-full-name" "@{upstream}")
-             dirty? (resolve-git-bool root "status" "--porcelain")]
-         (when (and branch commit)
-           {:git-branch branch
-            :git-commit commit
-            :git-upstream upstream
-            :git-dirty? dirty?
-            :git-detached? (= "HEAD" branch)})))
-     (catch Exception _ nil))))
-
 ;; Context decoration
-(defn ^{:stratum 2} decorate-spec-with-runtime-context [spec {:keys [iteration parent-task-id] :or {iteration 1}}]
+(defn ^{:stratum 1} decorate-spec-with-runtime-context [spec {:keys [iteration parent-task-id] :or {iteration 1}}]
   (let [cwd (or (worktree/worktree-root) (str (fs/cwd)))
-        git-info (get-git-info cwd)
+        git-info (git/get-git-info cwd)
         files-in-scope (get-files-in-scope (:spec/intent spec))]
     (assoc spec
            :spec/context
@@ -194,10 +153,8 @@
                     :iteration iteration}
              parent-task-id (assoc :parent-task-id parent-task-id)))))
 
-;------------------------------------------------------------------------------ Layer 3
-
 ;; Workflow context assembly
-(defn ^{:stratum 3} create-workflow-context [{:keys [callbacks artifact-store event-stream workflow-id
+(defn ^{:stratum 1} create-workflow-context [{:keys [callbacks artifact-store event-stream workflow-id
                                        workflow-type workflow-version llm-client quiet
                                        spec-title control-state skip-lifecycle-events
                                        execution-opts source-dir
@@ -205,7 +162,7 @@
   (let [on-chunk (es/create-streaming-callback event-stream workflow-id :agent
                                                {:print? (not quiet) :quiet? quiet})
         source-root (source-root-path source-dir)
-        git-info (get-git-state source-root)
+        git-info (git/get-git-state source-root)
         worktree-path (or (execution-worktree-path execution-opts)
                           (worktree/worktree-root)
                           (System/getProperty "user.dir"))]
