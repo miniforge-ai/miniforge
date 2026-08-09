@@ -534,7 +534,7 @@ principal's RBAC role (§2.3):
 | Field class | Delivered to |
 |-------------|--------------|
 | `:public` | Every attached listener |
-| `:payload` | Listeners that have not set `include-payloads=false` (N3 §5.3.4) |
+| `:payload` | Listeners whose `:include-payloads?` is true (§2.1); on the wire this is N3 §5.3.4's `include-payloads` query parameter |
 | `:restricted` | Only principals whose RBAC role permits that class |
 
 `:restricted` suppression is **per-recipient at delivery**, not per-event at
@@ -542,7 +542,7 @@ emission (N3 §8.4): two listeners on one stream may be entitled to different
 views of the same event.
 
 A deployment MAY configure a listener type's default — for instance that
-`:fleet` listeners default to `include-payloads=false`. It MUST NOT configure
+`:fleet` listeners default to `:include-payloads? false`. It MUST NOT configure
 away N3 §8.1: no configuration, listener type, or RBAC role causes a
 never-emitted value to be emitted, because that value was never in the event
 (N3 §8.1 redacts at construction).
@@ -986,7 +986,7 @@ A minimal compliant OCI implementation MUST:
 2. Support at least: pause, resume, cancel control actions
 3. Emit all required event types (§10.1)
 4. Record control actions in evidence bundles
-5. Deliver `:public` fields to every listener and honor `include-payloads=false` (§5.1)
+5. Deliver `:public` fields to every listener and honor `:include-payloads?` (§5.1)
 6. Provide CLI commands for listener attachment
 
 A minimal compliant implementation MAY defer:

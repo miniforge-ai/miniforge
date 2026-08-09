@@ -273,7 +273,6 @@ Defines:
 - Listener capability model: OBSERVE, ADVISE, CONTROL levels with RBAC
 - Control action surface: pause, resume, rollback, quarantine, approve, emergency-stop
 - Advisory annotation system: non-blocking recommendations and warnings
-- Privacy and redaction: metadata-only, redacted, full privacy levels
 - OpenTelemetry interoperability: GenAI span mapping, OTLP export
 - Cost and volume controls: sampling rules, aggregation boundaries
 - Fleet and enterprise extensions: multi-tenancy, pattern detection
