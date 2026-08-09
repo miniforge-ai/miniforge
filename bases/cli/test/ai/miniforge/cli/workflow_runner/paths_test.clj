@@ -31,8 +31,6 @@
    delimiter here: `;` on POSIX, `:` on Windows."
   (if (= ";" File/pathSeparator) ":" ";"))
 
-(def ^{:stratum 0} ^:private executable-permissions "rwxr-xr-x")
-
 (defn- ^{:stratum 0} join-path-entries
   [entries]
   (str/join File/pathSeparator entries))
@@ -41,18 +39,15 @@
   [dir]
   (str (fs/relativize (fs/cwd) dir)))
 
-;------------------------------------------------------------------------------ Layer 1
+(defn- ^{:stratum 0} mark-executable!
+  "POSIX permission bits do not exist on Windows, where `File/setExecutable`
+   is the only way to set the bit this test's subject reads."
+  [path]
+  (if (fs/windows?)
+    (.setExecutable ^java.io.File (fs/file path) true)
+    (fs/set-posix-file-permissions path "rwxr-xr-x")))
 
-(defn- ^{:stratum 1} temp-executable
-  "Creates an executable file with a name no real PATH lookup can resolve, so
-   `fs/which` misses and the PATH scan fallback is the code path under test."
-  []
-  (let [dir (fs/create-temp-dir {:prefix "mf-paths-"})
-        cmd (str "mf-fake-cli-" (random-uuid))
-        exe (fs/path dir cmd)]
-    (spit (fs/file exe) "#!/bin/sh\nexit 0\n")
-    (fs/set-posix-file-permissions exe executable-permissions)
-    {:dir (str dir) :cmd cmd}))
+;------------------------------------------------------------------------------ Layer 1
 
 (deftest ^{:stratum 1} test-path-splitting-honours-the-platform-separator
   (testing "given a PATH joined with the platform separator → one entry per element"
@@ -65,14 +60,29 @@
   (testing "given an unset PATH → the empty entry, never a nil deref"
     (is (= [""] (#'sut/split-path-entries nil)))))
 
+(defn- ^{:stratum 1} temp-executable
+  "Creates an empty executable file with a name no real PATH lookup can
+   resolve, so `fs/which` misses and the PATH scan fallback is the code path
+   under test. The file is never run — only its executable bit is read."
+  []
+  (let [dir (fs/create-temp-dir {:prefix "mf-paths-"})
+        cmd (str "mf-fake-cli-" (random-uuid))
+        exe (fs/path dir cmd)]
+    (spit (fs/file exe) "")
+    (mark-executable! exe)
+    {:dir (str dir) :cmd cmd}))
+
 ;------------------------------------------------------------------------------ Layer 2
 
 (deftest ^{:stratum 2} test-path-scan-fallback-returns-an-absolute-path
   (testing "given a relative PATH entry → the resolved command path is absolute"
-    (let [{:keys [dir cmd]} (temp-executable)
-          resolved (with-redefs-fn {#'sut/path-entries (fn [] [(relative-entry dir)])}
-                     (fn [] (sut/resolve-cli-command-path cmd)))]
-      (is (some? resolved))
-      (is (fs/absolute? resolved))
-      (is (= (str (fs/canonicalize (fs/path dir cmd)))
-             (str (fs/canonicalize resolved)))))))
+    (let [{:keys [dir cmd]} (temp-executable)]
+      (try
+        (let [resolved (with-redefs-fn {#'sut/path-entries (fn [] [(relative-entry dir)])}
+                         (fn [] (sut/resolve-cli-command-path cmd)))]
+          (is (some? resolved))
+          (is (fs/absolute? resolved))
+          (is (= (str (fs/canonicalize (fs/path dir cmd)))
+                 (str (fs/canonicalize resolved)))))
+        (finally
+          (fs/delete-tree dir))))))

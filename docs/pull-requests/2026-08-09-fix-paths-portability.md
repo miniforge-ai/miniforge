@@ -53,6 +53,10 @@ Run: `clojure -M:dev:test` over `paths-test` and `preflight-test`.
 pre-existing unrelated failure on main (the codex generic-path
 assertion, being fixed separately).
 
+The temp fixture sets the executable bit through `File/setExecutable` on
+Windows and POSIX permission bits elsewhere, and deletes its temp dir in
+a `finally` (both raised in review).
+
 Regression check: reverting the absolutize fix makes
 `test-path-scan-fallback-returns-an-absolute-path` fail as expected.
 The separator test cannot fail on a POSIX runner — `File/pathSeparator`
