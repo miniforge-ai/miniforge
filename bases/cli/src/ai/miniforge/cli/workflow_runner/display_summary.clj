@@ -53,7 +53,8 @@
   - Events directory pointer
   - '--output edn' hint
 
-  All user-facing strings go through messages/t."
+  Localizable text goes through messages/t; structural characters
+  (separators, newlines, bullets) are emitted directly."
   ([result] (format-compact-summary result nil))
   ([result _workflow-id]
    (str/join "\n" (compact-summary-lines result))))
