@@ -18,10 +18,9 @@
 (ns ai.miniforge.buzzword-bingo.interface
   "Public API for the buzzword-bingo component.
 
-   Counts marketing, corporate and generated-prose tells in a document
-   so a caller can judge whether prose is worth keeping or should be
-   written again. Host-independent throughout: the same code backs JVM
-   tools, the Babashka CLI and the Node build."
+   Today: prepares a document for counting by blanking the regions that
+   are not authored prose. The counter that consumes it arrives with
+   the term catalog."
   (:require
    [ai.miniforge.buzzword-bingo.segment :as segment]))
 
