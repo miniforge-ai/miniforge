@@ -887,8 +887,6 @@ diverges from the contract above, as of 2026-08-06.
 
 ---
 
----
-
 **Version History:**
 
 - 0.3.0-draft (2026-08-06): Spec-completion pass. §7.1 restated a PR-only
