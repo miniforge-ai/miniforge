@@ -884,14 +884,22 @@ _Informative. Not an emission list; see above._
 
 ### 12.2 Evidence Bundle Integration
 
-Governed execution contributes a record to the workflow's evidence bundle. The
-shape below is not yet an N6 artifact type: N6 §3.1.1 enumerates artifact
-types, and `:governed-execution` is absent from it. Registering it there is a
-prerequisite to producing it, on the same principle as §12.1 — N6 owns the
-evidence schema, so a new evidence type is an N6 amendment first.
+Governed execution MUST be recorded in the workflow's evidence bundle. What it
+records today is the correlation set — `:effect-id`, `:grant-id`,
+`:envelope-id` — carried on the evidence N6 already defines, which is what
+makes a governed execution traceable from its bundle.
+
+The richer artifact below is **not yet producible**. N6 §3.1.1 enumerates
+artifact types and `:governed-execution` is absent from it, so emitting it
+would be non-conformant. Registering it in N6 §3.1.1 is a prerequisite, on the
+same principle as §12.1: N6 owns the evidence schema, so a new artifact type is
+an N6 amendment first. The shape is retained as the proposed content of that
+amendment, not as a requirement of this spec.
 
 Redaction of any credential-bearing field follows N3 §8 as inherited by N6
 §7.2; this spec does not define a separate redaction rule.
+
+_Proposed N6 §3.1.1 artifact type. Not emittable until registered there._
 
 ```clojure
 {:evidence/type            :governed-execution
