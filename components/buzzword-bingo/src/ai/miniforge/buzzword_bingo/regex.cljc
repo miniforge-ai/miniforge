@@ -55,9 +55,14 @@
            acc)))
 
      :cljs
+     ;; Cloned rather than reused so enumeration cannot leave lastIndex set on
+     ;; a caller's pattern; the clone keeps the original flags, since dropping
+     ;; them would make the same pattern behave differently from the JVM.
      ;; A zero-width match leaves lastIndex where it was, so advance it by hand
      ;; or .exec never terminates.
-     (let [re (js/RegExp. (.-source pattern) "g")]
+     (let [flags (.-flags pattern)
+           re    (js/RegExp. (.-source pattern)
+                             (if (str/includes? flags "g") flags (str flags "g")))]
        (loop [acc []]
          (if-let [m (.exec re s)]
            (let [text (aget m 0)]
