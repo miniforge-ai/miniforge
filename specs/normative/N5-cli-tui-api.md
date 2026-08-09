@@ -65,17 +65,17 @@ Implementations MUST provide these namespaces:
 
 | Namespace  | Purpose                       | Example Commands                                           |
 | ---------- | ----------------------------- | ---------------------------------------------------------- |
-| `init`     | Initialize miniforge          | `miniforge init`                                           |
-| `workflow` | Workflow execution            | `miniforge workflow execute`, `miniforge workflow status`  |
-| `fleet`    | Local fleet management        | `miniforge fleet watch`, `miniforge fleet list`            |
-| `policy`   | Policy pack management        | `miniforge policy list`, `miniforge policy install`        |
-| `evidence` | Evidence bundle access        | `miniforge evidence show`, `miniforge evidence export`     |
-| `artifact` | Artifact queries              | `miniforge artifact provenance`, `miniforge artifact list` |
-| `etl`      | Repository → pack ETL         | `miniforge etl repo`, `miniforge etl report`               |
-| `pack`     | Pack inspection and promotion | `miniforge pack list`, `miniforge pack promote`            |
-| `listener` | Listener attach/detach (N8)   | `miniforge listener list`, `miniforge listener attach`     |
-| `agent`    | Agent control actions (N8)    | `miniforge agent quarantine`, `miniforge agent budget`     |
-| `gate`     | Gate control actions (N8)     | `miniforge gate approve`, `miniforge gate override`        |
+| `init`     | Initialize miniforge          | `mf init`                                           |
+| `workflow` | Workflow execution            | `mf workflow execute`, `mf workflow status`  |
+| `fleet`    | Local fleet management        | `mf fleet watch`, `mf fleet list`            |
+| `policy`   | Policy pack management        | `mf policy list`, `mf policy install`        |
+| `evidence` | Evidence bundle access        | `mf evidence show`, `mf evidence export`     |
+| `artifact` | Artifact queries              | `mf artifact provenance`, `mf artifact list` |
+| `etl`      | Repository → pack ETL         | `mf etl repo`, `mf etl report`               |
+| `pack`     | Pack inspection and promotion | `mf pack list`, `mf pack promote`            |
+| `listener` | Listener attach/detach (N8)   | `mf listener list`, `mf listener attach`     |
+| `agent`    | Agent control actions (N8)    | `mf agent quarantine`, `mf agent budget`     |
+| `gate`     | Gate control actions (N8)     | `mf gate approve`, `mf gate override`        |
 
 ### 2.3 Command Specifications
 
@@ -1448,7 +1448,7 @@ Precedence MUST be uniform. A setting that reads its flag but ignores its
 environment variable, or vice versa, is non-conformant — an operator cannot
 reason about configuration that resolves differently per setting.
 
-`miniforge config show` SHOULD render the effective configuration and, for each
+`mf config show` SHOULD render the effective configuration and, for each
 setting, which layer supplied it. Debugging a wrong value otherwise requires
 guessing.
 
@@ -1517,7 +1517,7 @@ usable by a script.
   document on stdout. A command that streams MUST emit newline-delimited JSON,
   one document per line.
 - Whether a given invocation streams MUST be determined by the command and its
-  flags alone, and MUST be stated in `--help`. `miniforge workflow status --json`
+  flags alone, and MUST be stated in `--help`. `mf workflow status --json`
   emits one document; adding `--follow` makes it stream. Both are predictable
   from the command line, which is what a consumer needs — it chooses its parser
   before it sees output. What MUST NOT happen is the same command line
@@ -1761,7 +1761,7 @@ caller needs byte-stable output.
 
 - **CLI**: `--help` text, error messages, and progress lines are prose.
   Command and flag names are not, and MUST NOT be localized — a script that
-  runs `miniforge workflow execute` MUST work under any locale.
+  runs `mf workflow execute` MUST work under any locale.
 - **TUI**: column headings, status labels, footer hints, and prompt text are
   prose. Key bindings are not: `j`/`k`/`q` are dispatch, and MUST NOT be
   rebound by locale (§3.3).

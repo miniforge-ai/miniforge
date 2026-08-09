@@ -7,7 +7,7 @@
 # N9 — External PR Integration
 
 **Version:** 0.3.0-draft
-**Date:** 2026-02-07
+**Date:** 2026-08-06
 **Status:** Draft
 **Conformance:** MUST
 
