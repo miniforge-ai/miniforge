@@ -1,0 +1,135 @@
+;; Buzzword Bingo lexicon — the terms the scanner counts.
+;;
+;; Entries are data, not prose: `:entry/term` is the literal being
+;; matched and `:entry/label` names a pattern that has no single literal
+;; form. Neither is display copy, so neither belongs in a message
+;; catalog. Anything the tool says *about* a hit is localized.
+;;
+;; Fields
+;;   :entry/term     literal to match, lowercase, spaces match any whitespace run
+;;   :entry/pattern  raw pattern source, for entries with no single literal form
+;;   :entry/label    name of a :entry/pattern entry, shown where a term would be
+;;   :entry/category key into :lexicon/categories, supplies the default weight
+;;   :entry/weight   per-entry override, for terms that are worse than their category
+;;   :entry/stem?    also match the s/es/d/ed/ing/ly inflections of the last word
+;;
+;; Patterns are matched against lowercase text with non-prose regions
+;; already blanked, and must avoid inline modifiers — see the regex
+;; namespace for why.
+
+{:lexicon/version "2026-08-09"
+
+ :lexicon/categories
+ {:marketing {:category/weight 3}
+  :ai-tell   {:category/weight 3}
+  :corporate {:category/weight 2}
+  :hedge     {:category/weight 1}
+  :filler    {:category/weight 1}}
+
+ :lexicon/entries
+ [;; ---------------------------------------------------------------- marketing
+  ;; Selling adjectives. A claim about how good the thing is, in place
+  ;; of a statement of what it does.
+  {:entry/term "comprehensive"    :entry/category :marketing}
+  {:entry/term "robust"           :entry/category :marketing}
+  {:entry/term "powerful"         :entry/category :marketing}
+  {:entry/term "seamless"         :entry/category :marketing :entry/stem? true}
+  {:entry/term "elegant"          :entry/category :marketing :entry/stem? true}
+  {:entry/term "surgical"         :entry/category :marketing}
+  {:entry/term "load-bearing"     :entry/category :marketing}
+  {:entry/term "the real deal"    :entry/category :marketing}
+  {:entry/term "cutting-edge"     :entry/category :marketing}
+  {:entry/term "state-of-the-art" :entry/category :marketing}
+  {:entry/term "best-in-class"    :entry/category :marketing}
+  {:entry/term "world-class"      :entry/category :marketing}
+  {:entry/term "industry-leading" :entry/category :marketing}
+  {:entry/term "game-changing"    :entry/category :marketing}
+  {:entry/term "game changer"     :entry/category :marketing}
+  {:entry/term "revolutionary"    :entry/category :marketing}
+  {:entry/term "next-generation"  :entry/category :marketing}
+  {:entry/term "enterprise-grade" :entry/category :marketing}
+  {:entry/term "battle-tested"    :entry/category :marketing}
+  {:entry/term "blazing fast"     :entry/category :marketing}
+  {:entry/term "blazingly fast"   :entry/category :marketing}
+  {:entry/term "lightning fast"   :entry/category :marketing}
+  {:entry/term "rock-solid"       :entry/category :marketing}
+  {:entry/term "turnkey"          :entry/category :marketing}
+  {:entry/term "unparalleled"     :entry/category :marketing}
+  {:entry/term "unmatched"        :entry/category :marketing}
+  {:entry/term "first-class"      :entry/category :marketing}
+  {:entry/term "delightful"       :entry/category :marketing}
+  {:entry/term "effortless"       :entry/category :marketing :entry/stem? true}
+  {:entry/term "frictionless"     :entry/category :marketing}
+  {:entry/term "supercharge"      :entry/category :marketing :entry/stem? true}
+  {:entry/term "transformative"   :entry/category :marketing}
+
+  ;; ------------------------------------------------------------------ ai-tell
+  ;; Register that marks generated text. Weighted above the category
+  ;; default where the word is close to a fingerprint on its own.
+  {:entry/term "delve"                 :entry/category :ai-tell :entry/weight 5 :entry/stem? true}
+  {:entry/term "tapestry"              :entry/category :ai-tell :entry/weight 5}
+  {:entry/term "a testament to"        :entry/category :ai-tell :entry/weight 5}
+  {:entry/term "ever-evolving"         :entry/category :ai-tell :entry/weight 5}
+  {:entry/term "in the realm of"       :entry/category :ai-tell :entry/weight 4}
+  {:entry/term "navigate the complexities" :entry/category :ai-tell :entry/weight 4}
+  {:entry/term "harness the power"     :entry/category :ai-tell :entry/weight 4}
+  {:entry/term "unlock the potential"  :entry/category :ai-tell :entry/weight 4}
+  {:entry/term "paves the way"         :entry/category :ai-tell}
+  {:entry/term "sheds light on"        :entry/category :ai-tell}
+  {:entry/term "fast-paced"            :entry/category :ai-tell}
+  {:entry/term "multifaceted"          :entry/category :ai-tell}
+  {:entry/term "myriad"                :entry/category :ai-tell}
+  {:entry/term "plethora"              :entry/category :ai-tell}
+  {:entry/term "nuanced"               :entry/category :ai-tell}
+  {:entry/term "intricate"             :entry/category :ai-tell}
+  {:entry/term "meticulous"            :entry/category :ai-tell :entry/stem? true}
+  {:entry/term "pivotal"               :entry/category :ai-tell}
+  {:entry/term "quintessential"        :entry/category :ai-tell}
+  {:entry/term "cornerstone"           :entry/category :ai-tell}
+  {:entry/term "hallmark"              :entry/category :ai-tell}
+  {:entry/term "underscore"            :entry/category :ai-tell :entry/stem? true}
+  {:entry/term "bolster"               :entry/category :ai-tell :entry/stem? true}
+  {:entry/term "garner"                :entry/category :ai-tell :entry/stem? true}
+  {:entry/term "spearhead"             :entry/category :ai-tell :entry/stem? true}
+  {:entry/term "showcase"              :entry/category :ai-tell :entry/stem? true}
+  {:entry/term "empower"               :entry/category :ai-tell :entry/stem? true}
+  {:entry/term "it's important to note" :entry/category :ai-tell}
+  {:entry/term "it's worth noting"     :entry/category :ai-tell}
+  {:entry/term "in conclusion"         :entry/category :ai-tell}
+  {:entry/term "at the end of the day" :entry/category :ai-tell}
+  {:entry/term "that being said"       :entry/category :ai-tell}
+
+  ;; ---------------------------------------------------------------- corporate
+  {:entry/term "synergy"           :entry/category :corporate :entry/stem? true}
+  {:entry/term "leverage"          :entry/category :corporate :entry/stem? true}
+  {:entry/term "holistic"          :entry/category :corporate}
+  {:entry/term "paradigm"          :entry/category :corporate}
+  {:entry/term "low-hanging fruit" :entry/category :corporate}
+  {:entry/term "move the needle"   :entry/category :corporate}
+  {:entry/term "circle back"       :entry/category :corporate}
+  {:entry/term "deep dive"         :entry/category :corporate}
+  {:entry/term "north star"        :entry/category :corporate}
+  {:entry/term "force multiplier"  :entry/category :corporate}
+  {:entry/term "mission-critical"  :entry/category :corporate}
+  {:entry/term "thought leadership" :entry/category :corporate}
+  {:entry/term "actionable insights" :entry/category :corporate}
+  {:entry/term "table stakes"      :entry/category :corporate}
+  {:entry/term "operationalize"    :entry/category :corporate :entry/stem? true}
+  {:entry/term "incentivize"       :entry/category :corporate :entry/stem? true}
+
+  ;; -------------------------------------------------------------------- hedge
+  {:entry/term "arguably"          :entry/category :hedge}
+  {:entry/term "essentially"       :entry/category :hedge}
+  {:entry/term "fundamentally"     :entry/category :hedge}
+  {:entry/term "in many ways"      :entry/category :hedge}
+  {:entry/term "to some extent"    :entry/category :hedge}
+  {:entry/term "generally speaking" :entry/category :hedge}
+
+  ;; ------------------------------------------------------------------- filler
+  {:entry/term "very"              :entry/category :filler}
+  {:entry/term "really"            :entry/category :filler}
+  {:entry/term "actually"          :entry/category :filler}
+  {:entry/term "truly"             :entry/category :filler}
+  {:entry/term "literally"         :entry/category :filler}
+  {:entry/term "incredibly"        :entry/category :filler}
+  {:entry/term "extremely"         :entry/category :filler}]}
