@@ -6,7 +6,7 @@
 
 # miniforge Specification Index
 
-**Version:** 0.13.0-draft
+**Version:** 0.14.0-draft
 **Date:** 2026-08-06
 **Status:** Living specification during OSS development
 
@@ -109,6 +109,15 @@ Defines:
 - Workflow chaining: typed outputs, input binding, cross-boundary provenance
 - **Workflow tier:** `:best-effort` / `:standard` / `:critical` with tier-dependent SLO targets (§9.1)
 - **Node capability extensions:** Idempotency keys, success predicates, compensation protocol (§13.6)
+- **Canonical workflow status vocabulary (§2.2):**
+  `:queued :running :paused :blocked :completed :failed :cancelled`;
+  `:pending` and `:executing` withdrawn as synonyms
+- **Terminality (§2.2, §8.1):** terminal states never reactivate; re-running is a new run
+- **Resume protocol (§8.2–§8.4):** spec-hash comparison, run-identity preservation,
+  three staleness conditions replacing "too much time has passed"
+- **Conformance requirement IDs** (`N2.LC.*`, `N2.PH.*`, `N2.GT.*`, `N2.RS.*`)
+  and test obligations (§10.4–§10.5)
+- **Annex A (informative):** implementation conformance status
 
 ### N3 — Event Stream & Observability Contract ✅
 
@@ -566,6 +575,18 @@ Normative specs are enforced by:
 
 ## Version History
 
+- **0.14.0-draft** (2026-08-06) - N2 spec-completion pass. **N2**: the workflow status
+  vocabulary was spelled three ways — N2 said `:pending`, N5-delta-supervisory §3.2 said
+  `:queued`, and N5 §2.3.2's CLI filter plus the implementation said `:executing`, so a filter
+  written against one spec matched nothing produced by another. §2.2 is now canonical and names
+  the synonyms withdrawn; `:paused` and `:blocked` added, having been absent from the authority
+  while N8 defined a pause action and the supervisory projection reported both. Terminality made
+  explicit and §8.1's "user cancelled and wants to restart" resume case withdrawn as contradicting
+  it. Resume protocol completed: spec-hash comparison, N3 §3.21 emissions, run-identity
+  preservation, and §8.4's three staleness conditions replacing an unenforceable time bound.
+  Conformance requirement IDs and test obligations (§10.4–§10.5). Annex A records divergence,
+  including that no checkpoint or resume event is emitted anywhere.
+  Per-spec bumps: N2 0.5→0.6
 - **0.13.0-draft** (2026-08-06) - N6 spec-completion pass. **N6**: bundle sealing and integrity
   (§2.14) — the spec asserted immutability in three places without a mechanism a reader could
   check; event stream linkage schema (§2.12); gate execution evidence (§2.13) discharging the four

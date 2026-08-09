@@ -6,8 +6,8 @@
 
 # N2 — Workflow Execution Model
 
-**Version:** 0.5.0-draft
-**Date:** 2026-04-22
+**Version:** 0.6.0-draft
+**Date:** 2026-08-06
 **Status:** Draft
 **Conformance:** MUST
 
@@ -63,31 +63,69 @@ The execution machine MUST project at least these workflow lifecycle states:
 
 ```clojure
 :workflow/status
-  :pending      ; Workflow created, not yet started
-  :running      ; Workflow running (in some phase or supervisory wait state)
+  :queued       ; Accepted, not yet started
+  :running      ; Actively executing a phase or supervisory wait state
+  :paused       ; Suspended by human intervention (N8 control action)
+  :blocked      ; Cannot proceed — unmet dependency or gate failure
   :completed    ; Workflow completed successfully
-  :failed       ; Workflow failed (gate failure, agent error)
-  :cancelled    ; Workflow cancelled by user
+  :failed       ; Terminal failure (gate failure, agent error)
+  :cancelled    ; Cancelled by human or agent
 ```
+
+This is the **canonical workflow status vocabulary**. Every other surface
+projects onto it and MUST NOT introduce a synonym:
+
+- N5-delta-supervisory-control-plane §3.2's `:workflow-run/status` is this set.
+- N5's CLI filters, the TUI, and the API report these values.
+- N1 §2's Workflow entity derives `:workflow/status` from this projection.
+
+`:pending` and `:executing` are **withdrawn synonyms**, and they map onto
+different canonical states:
+
+| Withdrawn | Canonical | Where it came from |
+|-----------|-----------|--------------------|
+| `:pending` | `:queued` | earlier revisions of this section |
+| `:executing` | `:running` | N5 §2.3.2's CLI filter and the implementation |
+
+Three spellings of two states meant a filter written against one spec silently
+matched nothing produced by another.
+
+`:paused` and `:blocked` were previously absent here while N8 defined a pause
+control action and the supervisory projection reported both. A state an
+operator can put a workflow into MUST exist in the authority that defines the
+lifecycle.
 
 The machine MAY use more specific internal state identifiers such as `:phase/plan`,
 `:phase/verify`, `:awaiting-operator`, or `:releasing`, but those states MUST map
 deterministically onto the lifecycle projection above.
 
+**Terminal states** are `:completed`, `:failed`, and `:cancelled`. They MUST NOT
+transition back to an active state. Re-running work that reached a terminal
+state MUST produce a new workflow run with a new `:workflow/id` (§8.1).
+
 ### 2.3 State Transition Diagram
 
 ```text
-pending ──[start]──► running ──[complete machine]──► completed
-                        │
-                        │ [terminal failure]
-                        ▼
-                      failed
-                        ▲
-                        │
-                  [cancel action]
-                        │
-                    cancelled
+queued ──[start]──► running ──[complete machine]──► completed
+                      │  ▲
+        [pause]───────┤  │
+                      ▼  │
+                   paused┘
+                      │  ▲
+     [dependency or ──┤  │
+      gate blocks]    ▼  │
+                  blocked┘
+                      │
+                      │ [terminal failure]
+                      ▼
+                    failed
+
+  running | paused | blocked ──[cancel action]──► cancelled
 ```
+
+`:paused` and `:blocked` are non-terminal: both return to `:running`. The
+difference is who clears them — `:paused` by an operator resuming, `:blocked`
+by the blocking condition being satisfied.
 
 Within `:running`, the execution machine MAY move through workflow-defined states,
 including phase states, retry states, review or release states, and temporary
@@ -103,7 +141,21 @@ Implementations MUST emit these events (see N3):
 3. **workflow/phase-completed** - When each phase completes
 4. **workflow/completed** - When entire workflow succeeds
 5. **workflow/failed** - When workflow fails
-6. **workflow/cancelled** - When user cancels workflow
+6. **workflow/cancelled** - When the workflow is cancelled
+
+Implementations MUST also emit the checkpoint and resume family of N3 §3.21 —
+`workflow/checkpoint-written`, `workflow/checkpoint-write-failed`,
+`workflow/machine-snapshot-written`,
+`workflow/machine-snapshot-write-failed`, `workflow/resumed`, and
+`workflow/spec-hash-mismatch` — at the points N2-delta-phase-checkpoint-and-resume
+§9 defines. §8 of this spec depends on those writes having happened; a resume
+protocol whose checkpoint writes are unobservable cannot be audited when it
+fails.
+
+A transition into `:paused` or `:blocked` MUST be observable. Where the
+transition results from an N8 control action, the `control-action/executed`
+event of N3 §3.15 carries it; where it results from a gate or dependency, the
+corresponding `gate/failed` or task event does.
 
 ---
 
@@ -985,21 +1037,42 @@ If phase skipped, implementations MUST emit:
 
 ### 8.1 Resume Requirements
 
-Implementations MUST support resuming workflows from an authoritative machine snapshot if:
+Implementations MUST support resuming a workflow from an authoritative machine
+snapshot when the run has not reached a terminal state (§2.2) — that is, when
+it is `:running`, `:paused`, or `:blocked` and execution was interrupted:
 
-- Workflow failed due to transient error (LLM timeout, network issue)
-- User cancelled workflow and wants to restart
 - Process crashed and was restarted
+- Transient error interrupted execution (LLM timeout, network issue)
+- The run was paused by an operator and is being resumed
+
+Resume continues an existing run. It MUST NOT be used to reactivate a terminal
+run: `:completed`, `:failed`, and `:cancelled` never return to an active state
+(§2.2). Re-running that work is a **new** workflow run with a new
+`:workflow/id`, which MAY seed itself from the prior run's artifacts.
+
+An earlier revision listed "user cancelled workflow and wants to restart" as a
+resume case. That is withdrawn — it contradicted terminality here and in
+N5-delta-supervisory-control-plane §3.2, and it would have made a cancelled
+workflow's evidence bundle (N6) describe a run that later continued.
 
 ### 8.2 Resume Protocol
 
 To resume workflow:
 
 1. **Load the most recent machine snapshot** from persistent storage
-2. **Verify the snapshot and workflow definition** are compatible
+2. **Verify the snapshot and workflow definition are compatible** by comparing
+   the recorded spec hash against the current spec. On mismatch, emit
+   `workflow/spec-hash-mismatch` (N3 §3.21) and apply
+   N2-delta-phase-checkpoint-and-resume §4's disposition
 3. **Restore machine state, machine context, and completed phase artifacts**
 4. **Rebuild derived projections** such as `:workflow/status` and `:workflow/current-phase`
 5. **Resume execution** by dispatching the next legal machine event
+6. **Emit `workflow/resumed`** (N3 §3.21) recording the state and phase resumed
+   from and the phases skipped as already complete
+
+The resumed run continues the original run's identity and event sequence:
+`:workflow/id` is unchanged, sequence numbers do not reset, and
+`workflow/started` MUST NOT be re-emitted (N3 §3.21).
 
 ```clojure
 ;; Resume workflow
@@ -1011,9 +1084,30 @@ To resume workflow:
 
 Implementations MUST NOT resume if:
 
-- Workflow already completed
-- Machine snapshot or workflow state is corrupted
-- Too much time has passed (state may be stale)
+- The run is in a terminal state — `:completed`, `:failed`, or `:cancelled` (§2.2)
+- The machine snapshot fails its integrity check, or the workflow state is
+  otherwise unreadable
+- The snapshot is **stale** per §8.4
+
+### 8.4 Snapshot Staleness
+
+"Too much time has passed" is not a contract an implementation can apply
+consistently, so this section replaces it.
+
+A snapshot is stale when any of the following holds:
+
+1. Its age exceeds the deployment's configured resume window. Implementations
+   MUST make this window configurable and MUST document the default.
+2. The workflow spec hash has changed and
+   N2-delta-phase-checkpoint-and-resume §4 dispositions the mismatch as
+   non-resumable.
+3. External state the snapshot depends on can no longer be reached — a
+   worktree, a container, or a checked-out revision that no longer exists.
+
+Staleness is a refusal, not a silent restart. An implementation that declines
+to resume MUST report which of the three conditions applied, and MUST leave the
+run in its existing non-terminal state rather than marking it failed on the
+operator's behalf.
 
 ---
 
@@ -1131,6 +1225,77 @@ Implementations MUST correctly detect:
 1. **Intent violations** - `:import` with creates flagged
 2. **No false positives** - Valid workflows pass validation
 3. **Accurate categorization** - Terraform/K8s changes correctly parsed
+
+### 10.4 Conformance Requirements
+
+Requirement IDs are stable identifiers for the normative statements of this
+spec, so a conformance suite can cite what it tests. IDs are never reused; a
+withdrawn requirement is marked withdrawn, not deleted.
+
+#### Lifecycle and machine authority
+
+| ID | Level | Requirement |
+|----|-------|-------------|
+| N2.LC.1 | MUST | Execute each run against exactly one compiled execution machine (§2.1). |
+| N2.LC.2 | MUST NOT | Split authority between a lifecycle FSM and ad hoc phase-index or redirect logic (§2.1). |
+| N2.LC.3 | MUST | Derive `:workflow/status` and `:workflow/current-phase` as projections, never as independent state (§2.1). |
+| N2.LC.4 | MUST | Project exactly the status vocabulary of §2.2, introducing no synonym. |
+| N2.LC.5 | MUST | Map every internal machine state deterministically onto that projection (§2.2). |
+| N2.LC.6 | MUST NOT | Transition a terminal run back to an active state (§2.2, §8.1). |
+| N2.LC.7 | MUST | Emit the lifecycle events of §2.4 and the checkpoint/resume family of N3 §3.21. |
+
+#### Phase execution and inner loop
+
+| ID | Level | Requirement |
+|----|-------|-------------|
+| N2.PH.1 | MUST | Execute phases in the order the compiled graph defines (§3, §4). |
+| N2.PH.2 | MUST | Pass context between phases per the handoff contract (§4). |
+| N2.PH.3 | MUST NOT | Complete a phase without validation (§5). |
+| N2.PH.4 | MUST | Terminate the inner loop at the retry budget and escalate rather than loop (§5). |
+| N2.PH.5 | MUST | Record the typed phase outcome on the event stream per N3 §3.1. |
+
+#### Gates
+
+| ID | Level | Requirement |
+|----|-------|-------------|
+| N2.GT.1 | MUST | Block phase completion on gate failure (§6). |
+| N2.GT.2 | MUST | Emit `gate/started` and exactly one of `gate/passed` / `gate/failed` per execution (N3 §3.9, N4 §5.5). |
+| N2.GT.3 | MUST | Record gate execution evidence sufficient to reproduce the result (N6 §2.13, N4 §5.5). |
+
+#### Resumption
+
+| ID | Level | Requirement |
+|----|-------|-------------|
+| N2.RS.1 | MUST | Resume a non-terminal interrupted run from its authoritative snapshot (§8.1). |
+| N2.RS.2 | MUST NOT | Resume a terminal run; re-running produces a new `:workflow/id` (§8.1, §8.3). |
+| N2.RS.3 | MUST | Compare the spec hash on resume and emit `workflow/spec-hash-mismatch` on divergence (§8.2). |
+| N2.RS.4 | MUST | Preserve run identity on resume — same `:workflow/id`, no sequence reset, no re-emitted `workflow/started` (§8.2). |
+| N2.RS.5 | MUST | Emit `workflow/resumed` recording resumed-from state, phase, and skipped phases (§8.2). |
+| N2.RS.6 | MUST | Refuse a stale snapshot per §8.4, reporting which condition applied and leaving the run's state unchanged. |
+
+### 10.5 Test Obligations
+
+A conformance suite MUST cover, at minimum:
+
+1. **Status vocabulary** — every status a run can reach is a member of §2.2's
+   set; no surface emits `:pending` or `:executing` (N2.LC.4).
+2. **Terminality** — resume is refused for each of `:completed`, `:failed`, and
+   `:cancelled`, and re-running produces a distinct `:workflow/id`
+   (N2.LC.6, N2.RS.2).
+3. **Pause round-trip** — a paused run reports `:paused`, the transition is
+   observable on the event stream, and resuming returns it to `:running`
+   (N2.LC.4, N2.LC.7).
+4. **Resume identity** — a crashed-and-resumed run has one `workflow/started`,
+   a monotonic unbroken sequence, and a `workflow/resumed` naming the skipped
+   phases (N2.RS.4, N2.RS.5).
+5. **Spec drift** — resuming against a changed spec emits
+   `workflow/spec-hash-mismatch` and applies the delta's disposition
+   (N2.RS.3).
+6. **Staleness refusal** — each of §8.4's three conditions produces a refusal
+   that names the condition and leaves the run non-terminal (N2.RS.6).
+7. **Projection consistency** — `:workflow/status` derived from the machine
+   matches the supervisory projection for the same run at every transition
+   (N2.LC.3, N2.LC.5).
 
 ---
 
@@ -1576,14 +1741,78 @@ PR train orchestration will enable:
 - RFC 2119: Key words for use in RFCs to Indicate Requirement Levels
 - N1 (Architecture): Defines core concepts (workflow, phase, agent, gate)
 - N3 (Event Stream): Defines phase lifecycle events
-- N4 (Policy Packs): Defines policy validation gates
-- N6 (Evidence & Provenance): Defines evidence bundle generation
-- N4 (Policy Packs): Capability enforcement via policy rules
+- N4 (Policy Packs): Defines policy validation gates; capability enforcement via
+  policy rules; §5.5 gate evidence obligations
+- N6 (Evidence & Provenance): Defines evidence bundle generation; §2.13 records
+  gate executions
+- N2-delta-phase-checkpoint-and-resume: checkpoint and resume protocol (§8)
+- N3 §3.21: checkpoint and resume event family emitted by §8
+- N5-delta-supervisory-control-plane §3.2: supervisory projection of §2.2's
+  status vocabulary
+- N8 (Observability Control Interface): pause, resume, and cancel control actions
 
 ---
 
+## Annex A — Implementation Conformance Status (informative)
+
+This annex is **informative**. It records where the miniforge implementation
+diverges from the contract above, as of 2026-08-06. It is not a relaxation of
+any requirement in §1–§16.
+
+### A.1 Status Vocabulary Divergence
+
+The implementation emits `:workflow/status :executing`, which is not a member
+of §2.2's set and never was a member of N5-delta-supervisory §3.2's either. It
+also uses `:pending`, now a withdrawn synonym for `:queued`. Both need renaming
+to the canonical vocabulary (N2.LC.4), and N5 §2.3.2's documented CLI filter
+values need the same correction.
+
+`:paused` and `:blocked` do appear in the tree, so the richer vocabulary is
+partly implemented already — the gap is naming, not capability.
+
+### A.2 Specified, Not Implemented
+
+- **Checkpoint and resume events (§2.4, §8.2).** None of
+  `workflow/checkpoint-written`, `workflow/checkpoint-write-failed`,
+  `workflow/machine-snapshot-written`,
+  `workflow/machine-snapshot-write-failed`, `workflow/resumed`, or
+  `workflow/spec-hash-mismatch` is emitted anywhere. §8's resume protocol is
+  therefore unobservable, and a failed resume cannot be audited
+  (N2.LC.7, N2.RS.3, N2.RS.5).
+- **Spec-hash comparison on resume (§8.2 step 2).** No implementation.
+- **Staleness refusal (§8.4).** No resume window, no staleness check, no
+  refusal reporting (N2.RS.6).
+
+### A.3 Structural
+
+- **Terminality is unenforced.** Nothing prevents a resume attempt against a
+  terminal run (N2.LC.6, N2.RS.2).
+
 **Version History:**
 
+- 0.6.0-draft (2026-08-06): Spec-completion pass.
+  **Lifecycle vocabulary unified (§2.2).** Three spellings were in use: N2 said
+  `:pending`, N5-delta-supervisory §3.2 said `:queued`, and N5 §2.3.2's CLI
+  filter plus the implementation said `:executing`. §2.2 is now the canonical
+  set — `:queued :running :paused :blocked :completed :failed :cancelled` — and
+  names `:pending` and `:executing` as withdrawn synonyms. `:paused` and
+  `:blocked` were absent from the authority while N8 defined a pause action and
+  the supervisory projection reported both.
+  **Terminality made explicit (§2.2, §8).** Terminal states never reactivate;
+  re-running produces a new `:workflow/id`. §8.1's "user cancelled and wants to
+  restart" resume case is withdrawn — it contradicted terminality here and in
+  N5-delta-supervisory §3.2, and would have left a cancelled run's evidence
+  bundle describing a run that later continued.
+  **Resume protocol completed (§8.2–§8.4).** Spec-hash comparison and the
+  `workflow/spec-hash-mismatch`, `workflow/resumed` emissions wired to N3 §3.21
+  and N2-delta §9; run identity preserved across resume; §8.3's unenforceable
+  "too much time has passed" replaced by §8.4's three staleness conditions,
+  with refusal required to name the condition and leave the run's state
+  unchanged.
+  **§2.4** extended with the checkpoint/resume event family and the requirement
+  that pause and block transitions be observable.
+  **§10.4–§10.5** conformance requirement IDs and test obligations.
+  Annex A records implementation divergence.
 - 0.5.0-draft (2026-03-08): Reliability Nines amendments — Workflow tier field in spec
   schema (§9.1), Capability contract extensions: idempotency key, success predicates,
   compensation protocol, max-retries (§13.6.1, §13.6.4, §13.6.5)

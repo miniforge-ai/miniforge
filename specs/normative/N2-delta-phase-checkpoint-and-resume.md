@@ -123,8 +123,9 @@ file containing at least:
 - `:workflow/last-checkpoint-at` — ISO-8601 timestamp
 - `:workflow/backend` — string identifying the LLM backend in use
   (`claude`, `codex`, `openai`, etc.)
-- `:workflow/status` — one of `:running`, `:completed`, `:failed`,
-  `:cancelled`, `:paused`
+- `:workflow/status` — a member of N2 §2.2's canonical vocabulary
+  (`:queued`, `:running`, `:paused`, `:blocked`, `:completed`, `:failed`,
+  `:cancelled`)
 
 The manifest MUST be updated atomically after each successful phase
 checkpoint or machine snapshot write.
