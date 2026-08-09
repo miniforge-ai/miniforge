@@ -77,28 +77,33 @@
   "The pin attempt for `phase`, fully described:
    {:entry {:path :content}-or-nil
     :status :pinned | :unconfigured | :unmapped | :skipped
-    :anomaly keyword-or-nil}
+    :anomaly keyword-or-nil
+    :pegs [..]-or-nil}
    :unconfigured (no MINIFORGE_CODEX_PATH) and :unmapped (phase not in
    phase->situation) mean the capability is off — no noise. :skipped means a
    CONFIGURED codex failed to answer, which always warns: through the logger
    when one is given, else stderr — a nil logger must not turn the failure
-   silent (plan has no logger)."
+   silent (plan has no logger). :pegs is the consultation's §7.7 telemetry
+   basis; it rides the outcome, never the existing-files entry."
   ([phase logger] (pin-outcome phase logger (configured-codex-dir)))
   ([phase logger codex-dir]
    (let [situation (get phase->situation phase)]
      (cond
        (nil? codex-dir)
-       {:entry nil :status :unconfigured :anomaly nil :situation situation}
+       {:entry nil :status :unconfigured :anomaly nil :situation situation
+        :pegs nil}
 
        (nil? situation)
-       {:entry nil :status :unmapped :anomaly nil :situation nil}
+       {:entry nil :status :unmapped :anomaly nil :situation nil :pegs nil}
 
        :else
        (let [entry (codex/pin-entry codex-dir situation pin-path)]
          (if-let [anomaly (:codex/anomaly entry)]
            (do (warn-skip! phase logger anomaly (:codex/reason entry))
-               {:entry nil :status :skipped :anomaly anomaly :situation situation})
-           {:entry entry :status :pinned :anomaly nil :situation situation}))))))
+               {:entry nil :status :skipped :anomaly anomaly :situation situation
+                :pegs nil})
+           {:entry (select-keys entry [:path :content]) :status :pinned
+            :anomaly nil :situation situation :pegs (:pegs entry)}))))))
 
 (defn ^{:stratum 1} landings-outcome
   "Prompt-section delivery outcome for phases with no existing-files
@@ -111,18 +116,20 @@
    (let [situation (get phase->situation phase)]
      (cond
        (nil? codex-dir)
-       {:text nil :status :unconfigured :anomaly nil :situation situation}
+       {:text nil :status :unconfigured :anomaly nil :situation situation
+        :pegs nil}
 
        (nil? situation)
-       {:text nil :status :unmapped :anomaly nil :situation nil}
+       {:text nil :status :unmapped :anomaly nil :situation nil :pegs nil}
 
        :else
        (let [resp (codex/consider codex-dir situation)]
          (if-let [anomaly (:codex/anomaly resp)]
            (do (warn-skip! phase logger anomaly (:codex/reason resp))
-               {:text nil :status :skipped :anomaly anomaly :situation situation})
+               {:text nil :status :skipped :anomaly anomaly :situation situation
+                :pegs nil})
            {:text (codex/render-response resp) :status :pinned :anomaly nil
-            :situation situation}))))))
+            :situation situation :pegs (:pegs resp)}))))))
 
 (defn ^{:stratum 1} consultation-summary
   "The SPEC §7.4.3 distinct-object marker: a proposal from an agent that
@@ -130,12 +137,26 @@
    `context-reads` is the session's recorded context_read log (§7.4.2), or
    nil when the session did not surface one — then :pin-read? is nil
    (unknown), not false; absence of the record is not evidence of absence
-   of the read."
+   of the read.
+
+   :pegs is the §7.7 per-peg record: one row per peg the consultation
+   presented — {:id peg-id
+                :answer nil
+                :landings {answer [landing-ids-that-follow]}}.
+   :answer is nil because push delivery has no answer-capture channel yet;
+   the peg went unanswered, and §7.7 says record exactly that. The
+   :landings map keeps every branch's landing set so routing relevance
+   (both branches reaching the same problem set, §4.4.1) stays computable
+   from the record alone. nil (not []) when nothing was presented."
   [outcome context-reads]
   {:pinned?   (= :pinned (:status outcome))
    :status    (:status outcome)
    :anomaly   (:anomaly outcome)
    :situation (:situation outcome)
+   :pegs      (when-let [pegs (seq (:pegs outcome))]
+                (mapv (fn [{:keys [id answers]}]
+                        {:id id :answer nil :landings answers})
+                      pegs))
    :pin-read? (when (some? context-reads)
                 (boolean (some #(= pin-path (:path %)) context-reads)))})
 

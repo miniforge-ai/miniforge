@@ -118,6 +118,29 @@
         (is (= "quality-signal-might-be-lying"
                (:miss/situation (first entries))))))))
 
+(deftest ^{:stratum 1} per-peg-telemetry-accrues-on-recorded-misses
+  ;; SPEC §7.7: the consultation summary the phase attached (shape pinned
+  ;; by codex-pin-test) carries :pegs; recording lifts them onto the
+  ;; entry's :miss/pegs — the ledger the retirement trigger reads.
+  (testing "pegs from the phase's consultation land on the ledger entry"
+    (let [dir (temp-root)
+          pegs [{:id "peg-a" :answer nil
+                 :landings {"yes" ["p1"] "no" ["p2"]}}]
+          ctx (run-ctx dir "run-p"
+                       :phase {:result
+                               {:output
+                                {:review/blocking-issues ["boom"]
+                                 :codex/consultation
+                                 {:pinned? true :status :pinned :anomaly nil
+                                  :situation "quality-signal-might-be-lying"
+                                  :pegs pegs :pin-read? nil}}}})]
+      (gap-wiring/record-phase-misses! ctx :review "/nonexistent/codex")
+      (let [{:keys [entries]} (gap/read-ledger (str dir "/run-p"))]
+        (is (= 1 (count entries)))
+        (is (= pegs (:miss/pegs (first entries))))
+        (is (nil? (get-in (first entries) [:miss/consultation :pegs]))
+            "writer-normalized: pegs live at :miss/pegs only")))))
+
 (deftest ^{:stratum 1} ledger-write-failure-warns-through-the-context-logger
   ;; The workflow runner normalizes :execution/logger at context creation
   ;; (workflow.context), so this warn path is live in production runs —
