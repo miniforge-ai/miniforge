@@ -24,7 +24,8 @@
    `ai.miniforge.cli.workflow-runner.sandbox-clone-target`.
 
    Stratification (intra-namespace):
-   Layer 0 — `sandbox-release-fn`, `prepare-sandbox` (no in-ns deps).
+   Layer 0 — `sandbox-release-fn`, the `infer-branch` / `infer-repo-url`
+             re-exports, `prepare-sandbox` (no in-ns deps).
    Layer 1 — `setup-sandbox-context` (composes Layer 0)."
   (:require
    [ai.miniforge.cli.runtime-env :as runtime-env]
