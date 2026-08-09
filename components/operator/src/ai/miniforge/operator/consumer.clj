@@ -411,7 +411,25 @@
               ;; the operator's decision arrives in a later pass.
               gated))))))
 
-(defn- ^{:stratum 2} route-decision!
+(defn- ^{:stratum 2} decision-anomaly!
+  "Publish one decision-path rejection and report its outcome.
+
+   The three ways a decision can be refused — no such parked
+   intervention, an unrecognized verdict, a lifecycle transition the
+   state machine rejects — differ only in what they say. Everything
+   else (the anomaly kind, the id carried on the data map, the
+   `[:anomaly id]` the pass counts) is identical, so it lives here
+   once."
+  [operator-stream file-name intervention-id message extra]
+  (publish-anomaly! operator-stream file-name
+                    (anomaly/anomaly :invalid-input
+                                     message
+                                     (assoc extra :intervention/id intervention-id)))
+  [:anomaly intervention-id])
+
+;------------------------------------------------------------------------------ Layer 3
+
+(defn- ^{:stratum 3} route-decision!
   "Apply an operator verdict to a parked intervention.
 
    `pending` is the consumer's record of what it left at
@@ -422,28 +440,20 @@
 
    Returns `[outcome intervention-id]` where outcome is `:decided` or
    `:anomaly`."
-  [operator-stream destination apply! event file-name pending]
+  [operator-stream stream-for apply! event file-name pending]
   (let [intervention-id (:intervention/id event)
         decision (:intervention/decision event)
-        parked (get pending intervention-id)]
+        parked (get pending intervention-id)
+        refuse! (partial decision-anomaly! operator-stream file-name intervention-id)]
     (cond
       (nil? parked)
-      (do (publish-anomaly!
-           operator-stream file-name
-           (anomaly/anomaly :invalid-input
-                            (messages/t :consumer/unknown-decision-target
-                                        {:id (str intervention-id)})
-                            {:intervention/id intervention-id}))
-          [:anomaly intervention-id])
+      (refuse! (messages/t :consumer/unknown-decision-target
+                           {:id (str intervention-id)})
+               {})
 
       (not (contains? #{:approve :reject} decision))
-      (do (publish-anomaly!
-           operator-stream file-name
-           (anomaly/anomaly :invalid-input
-                            (messages/t :consumer/invalid-decision
-                                        {:decision (str decision)})
-                            {:intervention/id intervention-id}))
-          [:anomaly intervention-id])
+      (refuse! (messages/t :consumer/invalid-decision {:decision (str decision)})
+               {})
 
       :else
       (let [result (if (= :approve decision)
@@ -451,14 +461,16 @@
                      (intervention/reject parked (:intervention/reason event)))
             decided (:intervention result)]
         (if-not (transition-succeeded? result)
-          (do (publish-anomaly!
-               operator-stream file-name
-               (anomaly/anomaly :invalid-input
-                                (:message result)
-                                {:error (:error result)
-                                 :intervention/id intervention-id}))
-              [:anomaly intervention-id])
-          (do
+          (refuse! (:message result) {:error (:error result)})
+          ;; Route off the PARKED intervention, never the decision
+          ;; event. A decision is deliberately thin — id, verdict,
+          ;; decider — so it carries no `:intervention/type` or
+          ;; `:intervention/target-id`, and `stream-for` reads exactly
+          ;; those. Handed the event, it returns nil for every decision
+          ;; and the transition lands on the operator stream instead of
+          ;; the workflow's registered one. The parked record is the
+          ;; thing being decided and holds both fields.
+          (let [destination (or (stream-for parked) operator-stream)]
             (publish-state-changed! destination decided)
             ;; Same rule as the request path: application runs only on
             ;; an approved transition, and never on a rejection.
@@ -466,10 +478,10 @@
               (apply! destination decided))
             [:decided intervention-id]))))))
 
-;------------------------------------------------------------------------------ Layer 3
+;------------------------------------------------------------------------------ Layer 4
 
 ;; Consumption pass
-(defn- ^{:stratum 3} consume-operator-dir!
+(defn- ^{:stratum 4} consume-operator-dir!
   [operator-dir stream apply! accept? stream-for]
   (let [cursor (read-cursor operator-dir)
         files (->> (list-event-files operator-dir)
@@ -510,7 +522,7 @@
                        (update remembered-file :anomalies inc))
                    (let [[outcome intervention-id]
                          (route-decision! stream
-                                          (or (stream-for event) stream)
+                                          stream-for
                                           apply!
                                           event
                                           file-name
@@ -569,9 +581,9 @@
       (write-cursor! operator-dir (:cursor result)))
     (dissoc result :cursor)))
 
-;------------------------------------------------------------------------------ Layer 4
+;------------------------------------------------------------------------------ Layer 5
 
-(defn ^{:stratum 4} consume-pass!
+(defn ^{:stratum 5} consume-pass!
   "Run one consumption pass over `{events-dir}/operator/`.
 
    Options:
@@ -640,9 +652,9 @@
             empty-pass-result
             (throw e)))))))
 
-;------------------------------------------------------------------------------ Layer 5
+;------------------------------------------------------------------------------ Layer 6
 
-(defn ^{:stratum 5} start!
+(defn ^{:stratum 6} start!
   "Start a background poller running [[consume-pass!]] on a fixed
    delay. Options are those of [[consume-pass!]] plus :interval-ms
    (default 1000). Returns a handle for [[stop!]].

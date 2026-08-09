@@ -422,6 +422,49 @@
           (is (= 1 (count @applied)))
           (is (= intervention-id (:intervention/id (first @applied)))))))))
 
+(deftest ^{:stratum 0} a-decision-routes-to-the-workflows-registered-stream
+  (testing "the verdict lands where the run lives, not on the operator stream"
+    ;; The router reads `:intervention/type` and
+    ;; `:intervention/target-id`. A decision event carries neither — it
+    ;; is deliberately thin — so routing off the EVENT returns nil for
+    ;; every decision and silently falls back to the operator stream.
+    ;; Routing off the parked intervention is what makes this pass.
+    (let [events-dir (support/temp-events-dir)
+          operator-stream (support/memory-stream)
+          workflow-stream (support/memory-stream)
+          intervention-id (random-uuid)
+          applied (atom [])
+          ;; Mirror the production router: workflow-targeted only, and
+          ;; keyed off fields a decision event does not carry.
+          stream-for (fn [event]
+                       (when (= :workflow (:intervention/target-type event))
+                         workflow-stream))]
+      (support/stage-operator-file!
+       events-dir "req.transit.json"
+       (es/serialize-event (support/meta-agent-request intervention-id)))
+      (consumer/consume-pass! {:events-dir events-dir
+                               :stream operator-stream
+                               :stream-for stream-for
+                               :apply! (fn [dest i] (swap! applied conj [dest i]))})
+      (support/stage-operator-file!
+       events-dir "decide.transit.json"
+       (es/serialize-event (support/decision-event intervention-id :approve)))
+      (consumer/consume-pass! {:events-dir events-dir
+                               :stream operator-stream
+                               :stream-for stream-for
+                               :apply! (fn [dest i] (swap! applied conj [dest i]))})
+
+      (is (= [:pending-human :approved]
+             (mapv :intervention/state
+                   (support/events-of-type
+                    workflow-stream :supervisory/intervention-state-changed)))
+          "both transitions belong on the workflow's own stream")
+      (is (empty? (support/events-of-type
+                   operator-stream :supervisory/intervention-state-changed))
+          "nothing should land on the operator stream")
+      (is (= [workflow-stream] (mapv first @applied))
+          "and the application must run against the workflow's stream"))))
+
 (deftest ^{:stratum 0} a-rejection-never-applies
   (testing "reject transitions and records the reason without applying"
     (let [events-dir (support/temp-events-dir)
