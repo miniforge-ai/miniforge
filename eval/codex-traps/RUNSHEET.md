@@ -71,7 +71,7 @@ Small N gives direction, not significance.
 ## Status
 
 1. 2026-08-06: design drafted. NOT yet binding — spec authoring,
-   detector freeze, and shakeout (one uncounted run per trap spec to
+   detector freeze, and a test run (one uncounted run per trap spec to
    confirm the task completes and the trap site is reachable) come
    first, in that order.
 
@@ -79,7 +79,7 @@ Small N gives direction, not significance.
 
 (one line per run, appended by the runner wrapper)
 
-## Concretized 2026-08-06 (pre-shakeout; binding at first counted run)
+## Concretized 2026-08-06 (pre-test-run; binding at first counted run)
 
 1. Pin: bade0222fa61669a96c31a7e99a87ccbfcdf56d5 (same as baseline
    matrix chunks 2-3).
@@ -104,14 +104,14 @@ Small N gives direction, not significance.
 5. Runner: run-trap.bb (re-copies spec master; detects over the run's
    new ~/.miniforge/worktrees/task-* dirs — pooled, attributed by
    before/after diff; strongest verdict recorded).
-6. SHAKEOUT (uncounted, codex OFF): one run per trap to confirm the
+6. TEST RUNS (uncounted, codex OFF): one run per trap to confirm the
    task completes and the trap site is reachable. Counted matrix only
-   after all three shake out.
+   after all three test runs pass.
 
 ## AMENDMENT 2026-08-06 (b) — sandbox provisioning; harness into the repo
 
 Logged before the first counted run. No counted run has executed; the
-only rows in `runs.edn` are the uncounted trap-b and trap-a shakeouts,
+only rows in `runs.edn` are the uncounted trap-b and trap-a test runs,
 both baseline arm, both produced under the defective sandbox below.
 
 1. SANDBOX DEFECT. The bench repo was a linked `git worktree` of the
