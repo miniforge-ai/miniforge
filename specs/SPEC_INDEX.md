@@ -7,8 +7,7 @@
 # miniforge Specification Index
 
 **Version:** 0.15.0-draft
-**Version:** 0.14.0-draft
-**Date:** 2026-08-06
+**Date:** 2026-08-09
 **Status:** Living specification during OSS development
 
 ---
