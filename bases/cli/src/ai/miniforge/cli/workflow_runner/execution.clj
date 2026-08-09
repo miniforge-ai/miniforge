@@ -45,6 +45,19 @@
       (artifact/close-store artifact-store)
       (catch Exception _))))
 
+(defn- ^{:stratum 0} sandbox-failure-result
+  "Workflow result for a sandbox that never came up.
+
+   Speaks the same `:execution/*` vocabulary as the pipeline's own
+   results, so `phase/succeeded?`, `display/print-result` and
+   `lifecycle/publish-completion-event` classify and render it like any
+   other workflow failure instead of seeing a statusless map."
+  [sandbox-error]
+  (let [error (:error sandbox-error)]
+    {:execution/status :failed
+     :execution/errors [{:type :sandbox-setup-failed
+                         :message (or (:message error) (str error))}]}))
+
 (defn ^{:stratum 0} execute-workflow-pipeline [run-pipeline workflow input callbacks artifact-store event-stream]
   (-> callbacks
       (cond-> artifact-store (assoc :artifact-store artifact-store))
@@ -58,9 +71,7 @@
   (let [completed? (atom false)]
     (try+
       (if-let [sandbox-error (:sandbox-error context)]
-        (let [result {:success? false
-                      :errors [{:type :sandbox-setup-failed
-                                :message (str (:error sandbox-error))}]}]
+        (let [result (sandbox-failure-result sandbox-error)]
           (lifecycle/publish-completion-event event-stream workflow-id result)
           (reset! completed? true)
           (display/print-result result opts)
