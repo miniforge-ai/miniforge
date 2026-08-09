@@ -41,10 +41,10 @@
    aren't maps at all) fall back to their printed form. With no errors
    at all, report the execution status."
   [result]
-  (let [status (get result :execution/status :unknown)]
-    (if-let [first-error (first (:execution/errors result))]
-      (or (:message first-error) (str first-error))
-      (str "Workflow ended with status: " (name status)))))
+  (if-let [first-error (first (:execution/errors result))]
+    (or (:message first-error) (str first-error))
+    (str "Workflow ended with status: "
+         (name (get result :execution/status :unknown)))))
 
 (defn ^{:stratum 0} publish-failure-event!
   "Publish a workflow failure event, swallowing exceptions."
