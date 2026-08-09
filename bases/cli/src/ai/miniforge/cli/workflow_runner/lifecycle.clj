@@ -35,12 +35,15 @@
 
 (defn- ^{:stratum 0} failure-message
   "Build a meaningful failure message from a workflow result.
-   Falls back to execution status when no explicit errors exist."
+
+   Error entries are canonically maps carrying `:message`, so read that
+   rather than printing the whole entry; entries without one (or that
+   aren't maps at all) fall back to their printed form. With no errors
+   at all, report the execution status."
   [result]
-  (let [errors (:execution/errors result)
-        status (get result :execution/status :unknown)]
-    (if (seq errors)
-      (str (first errors))
+  (let [status (get result :execution/status :unknown)]
+    (if-let [first-error (first (:execution/errors result))]
+      (or (:message first-error) (str first-error))
       (str "Workflow ended with status: " (name status)))))
 
 (defn ^{:stratum 0} publish-failure-event!

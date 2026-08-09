@@ -48,11 +48,25 @@
 ;; failure-message
 ;; ============================================================================
 (deftest ^{:stratum 0} failure-message-with-errors-test
-  (testing "uses first error entry when errors exist"
+  (testing "reports the first error's :message, not the printed entry"
     (let [result {:execution/errors [{:type :gate-failed :message "lint failed"}]
                   :execution/status :failed}
           msg (#'lifecycle/failure-message result)]
-      (is (str/includes? msg "lint failed")))))
+      (is (= "lint failed" msg)))))
+
+(deftest ^{:stratum 0} failure-message-with-messageless-map-error-test
+  (testing "a map entry carrying no :message falls back to its printed form"
+    (let [result {:execution/errors [{:type :gate-failed}]
+                  :execution/status :failed}
+          msg (#'lifecycle/failure-message result)]
+      (is (= (str {:type :gate-failed}) msg)))))
+
+(deftest ^{:stratum 0} failure-message-with-non-map-error-test
+  (testing "a plain-string entry is used as-is"
+    (let [result {:execution/errors ["compile failed"]
+                  :execution/status :failed}
+          msg (#'lifecycle/failure-message result)]
+      (is (= "compile failed" msg)))))
 
 (deftest ^{:stratum 0} failure-message-without-errors-test
   (testing "includes execution status when no errors"
