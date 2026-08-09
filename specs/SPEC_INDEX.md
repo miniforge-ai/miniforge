@@ -6,8 +6,8 @@
 
 # miniforge Specification Index
 
-**Version:** 0.14.0-draft
-**Date:** 2026-08-06
+**Version:** 0.15.0-draft
+**Date:** 2026-08-09
 **Status:** Living specification during OSS development
 
 ---
@@ -272,12 +272,21 @@ Defines:
 - Listener capability model: OBSERVE, ADVISE, CONTROL levels with RBAC
 - Control action surface: pause, resume, rollback, quarantine, approve, emergency-stop
 - Advisory annotation system: non-blocking recommendations and warnings
-- Privacy and redaction: metadata-only, redacted, full privacy levels
 - OpenTelemetry interoperability: GenAI span mapping, OTLP export
 - Cost and volume controls: sampling rules, aggregation boundaries
 - Fleet and enterprise extensions: multi-tenancy, pattern detection
 - CLI/TUI extensions: listener commands, control palette, approval queue
 - **Safe-mode posture:** Triggers, behavior, exit protocol for system-wide autonomy demotion (§3.4)
+- **Redaction and retention deferred to N3** (§5) — the parallel privacy-level,
+  pattern-table, field-rule and retention-policy models are withdrawn
+- **Per-listener content visibility (§5.1):** N3 §8.4 field classes by RBAC role;
+  `:restricted` suppressed per-recipient at delivery
+- **Redaction patterns are EDN configuration**, never a function (§5.2, dewey 007)
+- **Event schemas referenced, not restated** (§10.1) — the reproduced copies carried a
+  fixed `:workflow/id` and were unusable on N3's five non-workflow scopes
+- **Conformance requirement IDs** (`N8.CAP.*`, `N8.CTL.*`, `N8.PRV.*`) and test
+  obligations (§12.4–§12.5)
+- **Annex A (informative):** implementation conformance status
 
 ### N9 — External PR Integration 🆕
 
@@ -575,6 +584,15 @@ Normative specs are enforced by:
 
 ## Version History
 
+- **0.15.0-draft** (2026-08-06) - N8 spec-completion pass. **N8**: §5 carried a parallel model for
+  concerns N3 owns — privacy levels, a regex pattern table, a field-rule vocabulary, and its own
+  retention schema — so an operator configuring redaction there could not tell whether N3 §8.1's
+  MUST NOT still applied. All withdrawn; §5 now defines only which principal sees which field
+  class. `:redaction/custom-fn function` withdrawn as a config-as-data violation (dewey 007).
+  §10.1 reproduced N3 §3.15's event schemas with a fixed `:workflow/id`, unusable on the five
+  non-workflow scopes N3 streams; now a reference table. Conformance requirement IDs and test
+  obligations (§12.4–§12.5). Annex A notes that no redaction configuration exists anywhere in the
+  tree — the third spec in a row to record that gap. Per-spec bumps: N8 0.3→0.4
 - **0.14.0-draft** (2026-08-06) - N2 spec-completion pass. **N2**: the workflow status
   vocabulary was spelled three ways — N2 said `:pending`, N5-delta-supervisory §3.2 said
   `:queued`, and N5 §2.3.2's CLI filter plus the implementation said `:executing`, so a filter
