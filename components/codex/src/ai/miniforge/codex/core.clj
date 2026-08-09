@@ -26,6 +26,7 @@
   (:require [ai.miniforge.codex.graph :as graph]
             [ai.miniforge.codex.messages :as msg]
             [ai.miniforge.codex.node :as node]
+            [ai.miniforge.codex.pegs :as pegs]
             [clojure.string :as str]))
 
 ;------------------------------------------------------------------------------ Layer 0
@@ -35,10 +36,16 @@
 
    Returns {:situation id
             :landings [...ordered strategic -> operational -> tactical]
+            :pegs [...id-sorted, each {:id :answers {answer [landing-ids]}}]
             :coverage {...}}
    or a {:codex/anomaly ...} map when the codex is unreadable, the situation
    matches nothing, or it matches ambiguously. Unmatched is an ANSWER, not
-   an empty list — silence about a missing match is false coverage."
+   an empty list — silence about a missing match is false coverage.
+
+   :pegs is the §7.7 telemetry basis: the discriminators this consultation
+   presents, with the landing set each answer routes to — what a recorded
+   consultation needs so the §4.4 retirement trigger has data to compute
+   over."
   [codex-dir situation-text]
   (when (str/blank? (str situation-text))
     (throw (IllegalArgumentException. "situation-text must be non-blank")))
@@ -67,7 +74,8 @@
 
           :else
           (let [situation (first matches)
-                landings (->> (graph/reachable-from nodes (:id situation))
+                reachable (graph/reachable-from nodes (:id situation))
+                landings (->> reachable
                               (keep nodes)
                               (filter #(#{"problem" "resolution"} (:type %)))
                               (map #(graph/landing-view nodes %))
@@ -77,4 +85,5 @@
             {:situation (:id situation)
              :situation-title (:title situation)
              :landings landings
+             :pegs (pegs/peg-views nodes reachable)
              :coverage (graph/coverage-of landings)}))))))

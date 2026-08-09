@@ -30,9 +30,10 @@
    succeed; the reverse cannot."
   {"strategic" 0 "operational" 1 "tactical" 2})
 
-(defn- ^{:stratum 0} as-edge-list
+(defn ^{:stratum 0} as-edge-list
   "A frontmatter edge field is either a parsed list or an inline string
-   (situations emit `routes-to: <id>`); normalise to a list of maps."
+   (situations emit `routes-to: <id>`); normalise to a list of maps.
+   Public: the peg views (ai.miniforge.codex.pegs) walk routes-to too."
   [v]
   (cond
     (string? v) [{:target v}]
@@ -52,7 +53,14 @@
 (defn ^{:stratum 0} coverage-of
   "The response's own coverage statement (§7.5): landing count, unanchored
    count, horizon mix, and age of the newest scar among the landings. A
-   response that reports only what is known creates false coverage."
+   response that reports only what is known creates false coverage.
+
+   :retirement is :untriggerable while it stays true that push delivery
+   captures no peg answers: consultations record which pegs were presented
+   (§7.7) but every one goes unanswered, so the §4.4.1 answer-distribution
+   entropy trigger has nothing to compute over and every peg is de facto
+   immortal. The value flips only when an answer-capture channel exists —
+   reporting the absence here is the §7.7 MUST."
   [landings]
   (let [problems (filter #(= "problem" (:type %)) landings)
         mix (frequencies (keep :horizon problems))]
@@ -60,7 +68,8 @@
      :unanchored-count (count (filter #(empty? (:scars %)) problems))
      :horizon-mix mix
      :no-strategic-coverage? (nil? (get mix "strategic"))
-     :newest-scar-date (some->> problems (mapcat :scars) (keep :date) sort last)}))
+     :newest-scar-date (some->> problems (mapcat :scars) (keep :date) sort last)
+     :retirement :untriggerable}))
 
 ;------------------------------------------------------------------------------ Layer 1
 
