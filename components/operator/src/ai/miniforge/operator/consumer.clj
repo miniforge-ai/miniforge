@@ -72,6 +72,15 @@
 (def ^{:stratum 0} ^:const intervention-requested-event-type
   :supervisory/intervention-requested)
 
+(def ^{:stratum 0} ^:const intervention-decision-event-type
+  "Operator verdict on an intervention parked at `:pending-human`.
+
+   The counterpart to `intervention-requested`: a delegated source
+   (`:meta-agent`, `:api`) proposes, a human decides. Without this the
+   approval gate is one-way — a delegated request parks forever and the
+   operator has no channel to answer it."
+  :supervisory/intervention-decision)
+
 (def ^{:stratum 0} ^:const state-changed-event-type
   :supervisory/intervention-state-changed)
 
@@ -104,9 +113,19 @@
 (def ^{:stratum 0} ^:private consumer-lock-file-name ".consumer.lock")
 
 (def ^{:stratum 0} ^:private empty-cursor
-  {:schema-version 1
+  {:schema-version 2
    :processed-intervention-ids #{}
-   :processed-files #{}})
+   :processed-files #{}
+   ;; Interventions this consumer parked at `:pending-human`, by id.
+   ;;
+   ;; A decision arrives in a LATER pass than the request, and the
+   ;; consumer holds no state between passes — so the intervention it
+   ;; must transition has to be recoverable from disk. Keeping it beside
+   ;; the cursor (rather than querying the accumulator) keeps the
+   ;; consumer a pure function of its own directory, and the entry
+   ;; leaves the moment a decision lands, so this cannot grow without
+   ;; bound.
+   :pending-interventions {}})
 
 (def ^{:stratum 0} ^:private empty-pass-result
   {:routed 0 :skipped 0 :anomalies 0})
@@ -154,6 +173,21 @@
 (defn- ^{:stratum 0} remember-intervention-id
   [acc intervention-id]
   (update acc :cursor update :processed-intervention-ids conj intervention-id))
+
+(defn- ^{:stratum 0} remember-parked
+  "Record an intervention left at `:pending-human` so a later pass can
+   act on the operator's decision. Any other terminal-for-now state
+   needs no record — it has already moved on."
+  [acc intervention]
+  (if (= :pending-human (:intervention/state intervention))
+    (update acc :cursor assoc-in
+            [:pending-interventions (:intervention/id intervention)]
+            intervention)
+    acc))
+
+(defn- ^{:stratum 0} forget-parked
+  [acc intervention-id]
+  (update acc :cursor update :pending-interventions dissoc intervention-id))
 
 (defn- ^{:stratum 0} remember-file
   [acc file-name]
@@ -313,10 +347,13 @@
     (if (.exists f)
       (try
         (let [parsed (edn/read-string (slurp f :encoding "UTF-8"))]
+          ;; A v1 cursor has no `:pending-interventions`; `merge` over
+          ;; `empty-cursor` supplies the empty map, so an upgrade in
+          ;; place neither crashes nor loses the processed sets.
           (merge empty-cursor
-                 (select-keys parsed [:schema-version
-                                      :processed-intervention-ids
-                                      :processed-files])))
+                 (select-keys parsed [:processed-intervention-ids
+                                      :processed-files
+                                      :pending-interventions])))
         (catch Exception _e empty-cursor))
       empty-cursor)))
 
@@ -369,12 +406,82 @@
               (publish-state-changed! destination gated)
               (when (and apply! (= :approved (:intervention/state gated)))
                 (apply! destination gated))
-              (:intervention/id created)))))))
+              ;; Returning the gated map, not just the id: a request
+              ;; parked at `:pending-human` has to be recoverable when
+              ;; the operator's decision arrives in a later pass.
+              gated))))))
+
+(defn- ^{:stratum 2} decision-anomaly!
+  "Publish one decision-path rejection and report its outcome.
+
+   The three ways a decision can be refused — no such parked
+   intervention, an unrecognized verdict, a lifecycle transition the
+   state machine rejects — differ only in what they say. Everything
+   else (the anomaly kind, the id carried on the data map, the
+   `[:anomaly id]` the pass counts) is identical, so it lives here
+   once."
+  [operator-stream file-name intervention-id message extra]
+  (publish-anomaly! operator-stream file-name
+                    (anomaly/anomaly :invalid-input
+                                     message
+                                     (assoc extra :intervention/id intervention-id)))
+  [:anomaly intervention-id])
 
 ;------------------------------------------------------------------------------ Layer 3
 
+(defn- ^{:stratum 3} route-decision!
+  "Apply an operator verdict to a parked intervention.
+
+   `pending` is the consumer's record of what it left at
+   `:pending-human`. An unknown id is an anomaly rather than a silent
+   skip: the operator clicked approve on something this consumer has no
+   memory of parking, and swallowing that would leave them believing a
+   write happened.
+
+   Returns `[outcome intervention-id]` where outcome is `:decided` or
+   `:anomaly`."
+  [operator-stream stream-for apply! event file-name pending]
+  (let [intervention-id (:intervention/id event)
+        decision (:intervention/decision event)
+        parked (get pending intervention-id)
+        refuse! (partial decision-anomaly! operator-stream file-name intervention-id)]
+    (cond
+      (nil? parked)
+      (refuse! (messages/t :consumer/unknown-decision-target
+                           {:id (str intervention-id)})
+               {})
+
+      (not (contains? #{:approve :reject} decision))
+      (refuse! (messages/t :consumer/invalid-decision {:decision (str decision)})
+               {})
+
+      :else
+      (let [result (if (= :approve decision)
+                     (intervention/approve parked)
+                     (intervention/reject parked (:intervention/reason event)))
+            decided (:intervention result)]
+        (if-not (transition-succeeded? result)
+          (refuse! (:message result) {:error (:error result)})
+          ;; Route off the PARKED intervention, never the decision
+          ;; event. A decision is deliberately thin — id, verdict,
+          ;; decider — so it carries no `:intervention/type` or
+          ;; `:intervention/target-id`, and `stream-for` reads exactly
+          ;; those. Handed the event, it returns nil for every decision
+          ;; and the transition lands on the operator stream instead of
+          ;; the workflow's registered one. The parked record is the
+          ;; thing being decided and holds both fields.
+          (let [destination (or (stream-for parked) operator-stream)]
+            (publish-state-changed! destination decided)
+            ;; Same rule as the request path: application runs only on
+            ;; an approved transition, and never on a rejection.
+            (when (and apply! (= :approved (:intervention/state decided)))
+              (apply! destination decided))
+            [:decided intervention-id]))))))
+
+;------------------------------------------------------------------------------ Layer 4
+
 ;; Consumption pass
-(defn- ^{:stratum 3} consume-operator-dir!
+(defn- ^{:stratum 4} consume-operator-dir!
   [operator-dir stream apply! accept? stream-for]
   (let [cursor (read-cursor operator-dir)
         files (->> (list-event-files operator-dir)
@@ -395,6 +502,36 @@
                                                   {:file file-name})
                                       {:source/file file-name}))
                    (update remembered-file :anomalies inc))
+
+               (= intervention-decision-event-type (:event/type raw))
+               (let [event (revive-request-event raw)]
+                 ;; The SAME typed identity set the request path
+                 ;; demands, not just the intervention id: a
+                 ;; `:workflow/id` that survived tag-stripping as a
+                 ;; string would fall through `stream-for` to the
+                 ;; default stream, and the transition would be
+                 ;; published — and applied — against the wrong
+                 ;; destination.
+                 (if-not (valid-request-identities? event)
+                   (do (publish-anomaly!
+                        stream file-name
+                        (anomaly/anomaly
+                         :invalid-input
+                         (messages/t :consumer/invalid-identity {:file file-name})
+                         {:source/file file-name}))
+                       (update remembered-file :anomalies inc))
+                   (let [[outcome intervention-id]
+                         (route-decision! stream
+                                          stream-for
+                                          apply!
+                                          event
+                                          file-name
+                                          (get-in acc [:cursor :pending-interventions]))]
+                     (if (= :decided outcome)
+                       (-> remembered-file
+                           (forget-parked intervention-id)
+                           (update :routed inc))
+                       (update remembered-file :anomalies inc)))))
 
                (not= intervention-requested-event-type (:event/type raw))
                (update remembered-file :skipped inc)
@@ -426,15 +563,17 @@
                    :else
                    (let [intervention-id (:intervention/id event)
                          destination (or (stream-for event) stream)
-                         routed-id (route-intervention! stream
-                                                        destination
-                                                        apply!
-                                                        event
-                                                        file-name)
+                         routed (route-intervention! stream
+                                                     destination
+                                                     apply!
+                                                     event
+                                                     file-name)
                          remembered (remember-intervention-id remembered-file
                                                               intervention-id)]
-                     (if routed-id
-                       (update remembered :routed inc)
+                     (if routed
+                       (-> remembered
+                           (remember-parked routed)
+                           (update :routed inc))
                        (update remembered :anomalies inc))))))))
          {:routed 0 :skipped 0 :anomalies 0 :cursor cursor}
          files)]
@@ -442,9 +581,9 @@
       (write-cursor! operator-dir (:cursor result)))
     (dissoc result :cursor)))
 
-;------------------------------------------------------------------------------ Layer 4
+;------------------------------------------------------------------------------ Layer 5
 
-(defn ^{:stratum 4} consume-pass!
+(defn ^{:stratum 5} consume-pass!
   "Run one consumption pass over `{events-dir}/operator/`.
 
    Options:
@@ -513,9 +652,9 @@
             empty-pass-result
             (throw e)))))))
 
-;------------------------------------------------------------------------------ Layer 5
+;------------------------------------------------------------------------------ Layer 6
 
-(defn ^{:stratum 5} start!
+(defn ^{:stratum 6} start!
   "Start a background poller running [[consume-pass!]] on a fixed
    delay. Options are those of [[consume-pass!]] plus :interval-ms
    (default 1000). Returns a handle for [[stop!]].

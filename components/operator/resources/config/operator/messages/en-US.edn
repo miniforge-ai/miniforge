@@ -40,6 +40,12 @@
   :consumer/invalid-identity
   "Operator event has invalid identity fields: {file}"
 
+  :consumer/unknown-decision-target
+  "Decision names an intervention this consumer never parked: {id}"
+
+  :consumer/invalid-decision
+  "Intervention decision must be :approve or :reject, got {decision}"
+
   ;; Intervention application (Phase D D-3)
   :application/application-error
   "Intervention application failed"

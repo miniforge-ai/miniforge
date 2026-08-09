@@ -56,6 +56,18 @@
   [stream event-type]
   (filterv #(= event-type (:event/type %)) (es/get-events stream)))
 
+(defn ^{:stratum 0} decision-event
+  "An operator verdict on a parked intervention (U-6 §8.2)."
+  [intervention-id decision]
+  {:event/type :supervisory/intervention-decision
+   :event/id (random-uuid)
+   :event/timestamp (java.util.Date.)
+   :event/version "1.0.0"
+   :event/sequence-number 0
+   :intervention/id intervention-id
+   :intervention/decision decision
+   :intervention/decided-by "operator@miniforge.ai"})
+
 (defn ^{:stratum 0} reject-every-request?
   [_event]
   false)
@@ -93,3 +105,11 @@
   (stage-operator-file! events-dir fixture-name
                         (slurp (io/file (golden-dir) fixture-name)
                                :encoding "UTF-8")))
+
+(defn ^{:stratum 2} meta-agent-request
+  "The golden pause request, re-sourced to `:meta-agent` so the approval
+   gate parks it instead of auto-approving (U-6 §8.2)."
+  [intervention-id]
+  (-> (es/read-event-file (io/file (golden-dir) "pause.transit.json"))
+      (assoc :intervention/id intervention-id
+             :intervention/request-source :meta-agent)))
