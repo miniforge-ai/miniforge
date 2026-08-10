@@ -98,6 +98,28 @@
     (instance? java.time.Instant x) 9
     :else 10))
 
+(defn- ^{:stratum 0} refuse-collapse!
+  "Throw when normalization merged two entries of a sorted container.
+
+   Compared under `=`, not under `canonical-compare`. Only instant
+   normalization can map two distinct values onto one — every other
+   branch of `->canonical` is injective — so a shortfall here is always
+   an `Instant`/`Date`/`#inst`-literal ambiguity and never the
+   comparator collapsing `1` and `1.0`, which predates this namespace's
+   instant handling and is left exactly as it was.
+
+   Checking the normalized values rather than which inputs got rewritten
+   is what catches a caller who already holds an `#inst` literal: that
+   key is not rewritten, so a guard keyed on rewriting would let it
+   silently overwrite an `Instant` for the same moment, or not, by
+   iteration order."
+  [what normalized]
+  (when-let [dup (some (fn [[v n]] (when (> n 1) v)) (frequencies normalized))]
+    (throw (IllegalArgumentException.
+            ;; pr-str, not str: a TaggedLiteral's toString is its identity
+            ;; hash — the very thing this namespace exists to keep out.
+            (str what " that normalize to one instant: " (pr-str dup))))))
+
 ;------------------------------------------------------------------------------ Layer 1
 
 (defn- ^{:stratum 1} inst->literal
@@ -170,8 +192,10 @@
    halves of `canonical-edn`'s contract: equal inputs give equal
    output, and distinct inputs do not silently converge.
 
-   Both checks are scoped to values normalization actually rewrote, so
-   the pre-existing collapse of distinct-but-comparator-equal entries
+   Both containers detect that through `refuse-collapse!`, which
+   compares the NORMALIZED values rather than which inputs were
+   rewritten — see its docstring for why the difference matters. The
+   pre-existing collapse of distinct-but-comparator-equal entries
    (`{1 :a 1.0 :b}`, `#{1 1.0}`) is left exactly as it was.
 
    One self-recursive walk, replacing the mutually-recursive
@@ -184,27 +208,14 @@
    map entry and a set are also collections."
   [x]
   (cond
-    (map? x)       (reduce-kv
-                    (fn [acc k v]
-                      (let [k' (if (inst? k) (inst->literal k) k)]
-                        (when (and (not (identical? k' k)) (contains? acc k'))
-                          ;; pr-str, not str: a TaggedLiteral's toString is
-                          ;; its identity hash — the very thing this
-                          ;; namespace exists to keep out of output.
-                          (throw (IllegalArgumentException.
-                                  (str "Map has two instant keys for one moment: "
-                                       (pr-str k')))))
-                        (assoc acc k' (->canonical v))))
-                    (sorted-map-by canonical-compare)
-                    x)
+    (map? x)       (let [entries (mapv (fn [[k v]]
+                                         [(if (inst? k) (inst->literal k) k)
+                                          (->canonical v)])
+                                       x)]
+                     (refuse-collapse! "Map has two keys" (mapv first entries))
+                     (into (sorted-map-by canonical-compare) entries))
     (set? x)       (let [normalized (mapv ->canonical x)]
-                     ;; (set normalized) uses `=`, not the comparator, so
-                     ;; only a normalization-induced collapse shrinks it —
-                     ;; `#{1 1.0}` stays two here and keeps its old
-                     ;; comparator-driven behavior below.
-                     (when (< (count (set normalized)) (count x))
-                       (throw (IllegalArgumentException.
-                               "Set has two instant elements for one moment")))
+                     (refuse-collapse! "Set has two elements" normalized)
                      (into (sorted-set-by canonical-compare) normalized))
     (map-entry? x) [(->canonical (key x)) (->canonical (val x))]
     (coll? x)      (mapv ->canonical x)

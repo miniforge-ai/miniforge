@@ -138,10 +138,20 @@
     (testing "an ambiguous map throws instead of dropping an entry"
       (doseq [m [(array-map now :a d :b) (array-map d :b now :a)]]
         (is (thrown-with-msg? IllegalArgumentException
-                              #"two instant keys for one moment"
+                              #"normalize to one instant"
                               (ch/content-hash m)))))
     (testing "one instant key is still fine, at either type"
-      (is (= (ch/canonical-edn {now :v}) (ch/canonical-edn {d :v}))))))
+      (is (= (ch/canonical-edn {now :v}) (ch/canonical-edn {d :v}))))
+    (testing "a caller's own #inst literal collides the same way, in either order"
+      ;; Copilot round 2. A pre-normalized key is never rewritten, so a
+      ;; guard keyed on rewriting saw nothing to check and let it
+      ;; overwrite an Instant for the same moment — or not, by iteration
+      ;; order. `refuse-collapse!` compares normalized values instead.
+      (let [lit (tagged-literal 'inst "2026-08-01T12:34:56.789-00:00")]
+        (doseq [m [(array-map lit :a now :b) (array-map now :b lit :a)]]
+          (is (thrown-with-msg? IllegalArgumentException
+                                #"normalize to one instant"
+                                (ch/content-hash m))))))))
 
 (deftest ^{:stratum 1} two-instant-set-elements-for-one-moment-are-refused
   ;; The same collapse as the map-key case, found by re-checking the
@@ -153,7 +163,7 @@
       (is (= 2 (count #{now d}))))
     (testing "an ambiguous set throws instead of collapsing onto one element"
       (is (thrown-with-msg? IllegalArgumentException
-                            #"two instant elements for one moment"
+                            #"normalize to one instant"
                             (ch/content-hash #{now d}))))
     (testing "a set with one instant is still fine, at either type"
       (is (= (ch/canonical-edn #{now}) (ch/canonical-edn #{d}))))

@@ -41,9 +41,13 @@
    through. Logically equal inputs produce identical output regardless
    of original insertion order.
 
-   Throws `IllegalArgumentException` on an `inst?` value that is
-   neither of those two types, rather than hashing it under a rendering
-   nothing has checked.
+   Throws `IllegalArgumentException` in two cases, rather than hashing
+   a value under a rendering nothing has checked or quietly losing one:
+
+   - an `inst?` value that is neither of those two types;
+   - a map or set holding two entries that denote the same moment —
+     say an `Instant` key and a `Date` key — since they are two entries
+     going in and one coming out.
 
    Example:
      (canonical-edn {:b 2 :a 1}) ;; => \"{:a 1, :b 2}\"
