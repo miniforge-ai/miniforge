@@ -2591,7 +2591,7 @@ IDs are never reused; a withdrawn requirement is marked withdrawn, not deleted.
 
 | ID | Level | Requirement |
 |----|-------|-------------|
-| N1.AR.1 | MUST | Keep the three layers of §3 distinct: control plane, agent layer, execution layer. |
+| N1.AR.1 | MUST | Keep the three layers of §3 distinct: control plane (§3.1), agent layer (§3.2), learning layer (§3.3). |
 | N1.AR.2 | MUST NOT | Let an agent-layer component depend on a control-plane component (§3). |
 | N1.AR.3 | MUST | Expose each Polylith component only through its `interface` namespace (§4). |
 | N1.AR.4 | MUST NOT | Reference another component's implementation namespace directly (§4). |
