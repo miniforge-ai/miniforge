@@ -6,8 +6,8 @@
 
 # N7 — Operational Policy Synthesis With Verification
 
-**Version:** 0.2.1-draft
-**Date:** 2026-08-06
+**Version:** 0.3.0-draft
+**Date:** 2026-08-10
 **Status:** Complete
 **Conformance:** MUST
 **Class:** Extension spec (N7+)
@@ -385,6 +385,36 @@ Miniforge MUST implement the canonical N5 §2.3.3 commands under `fleet`:
 The TUI SHALL provide drill-down:
 Fleet → Service → OPSV Runs → (Experiment Pack, Events, Evidence, Policy Diff, Verification)
 
+## 8.5 Conformance Requirements
+
+Requirement IDs are stable identifiers for this spec's normative statements.
+IDs are never reused; a withdrawn requirement is marked withdrawn.
+
+| ID | Level | Requirement |
+|----|-------|-------------|
+| N7.EX.1 | MUST | Record an environment fingerprint for every experiment run (§3, §4). |
+| N7.EX.2 | MUST | Abort on guardrail breach and execute the declared rollback (§5). |
+| N7.EX.3 | MUST | Bound convergence by the declared iteration and budget limits (§3). |
+| N7.EX.4 | MUST | Emit the §3.14 event family of N3 for every lifecycle transition. |
+| N7.VF.1 | MUST | Evaluate verification against pre-declared criteria, not criteria chosen after the run (§6). |
+| N7.VF.2 | MUST | Link every OPSV event and artifact to its evidence bundle per N6 (§4, §7.1). |
+| N7.AC.1 | MUST | Default to `PR_ONLY` actuation; `APPLY_ALLOWED` requires the §5.4 gate (§7.2, §7.3). |
+| N7.AC.2 | MUST | Execute apply actions as N10-governed effects with verified rollback (§7.3). |
+| N7.AC.3 | MUST | Record both apply and rollback outcomes as artifacts, events, and evidence on postcondition failure (§7.3). |
+| N7.AC.4 | MUST | Include the evidence bundle reference and rollback instructions in every emitted PR body (§7.2). |
+
+### 8.5.1 Test Obligations
+
+1. A guardrail breach aborts the experiment and the rollback runs, both observable
+   on the stream (N7.EX.2).
+2. A run's environment fingerprint is sufficient to detect drift on re-run
+   (N7.EX.1).
+3. `APPLY_ALLOWED` is refused when the §5.4 gate has not passed (N7.AC.1).
+4. A failed postcondition produces both outcomes in evidence, not just the
+   rollback (N7.AC.3).
+
+---
+
 ## 9. Minimal compliant implementation (MCI)
 
 A minimal compliant OPSV implementation MUST:
@@ -399,6 +429,41 @@ A minimal compliant OPSV implementation MUST:
 - emit PRs as N10-governed actions with provenance
 - default effective actuation to `:recommend-only`
 - honor N8 emergency stop and record rollback/disposition evidence
+
+---
+
+## Annex A — Implementation Conformance Status (informative)
+
+This annex is **informative**, recording implementation state as of 2026-08-10.
+
+### A.1 Implemented
+
+N7 is the best-served spec in the set on the dimension that has defeated the
+others: **its event family is both registered and emitted.** The nine
+`opsv.*` types of N3 §3.14 appear in N3's registry, and
+`event-stream/opsv.clj` emits them with tests in `phase-opsv` and
+`event-stream`. Every other extension spec reviewed in this pass declared event
+types that were never registered.
+
+`components/opsv` implements risk scoring, convergence, actuation, verification,
+and schema; `components/opsv-adapter-simulated` provides a simulated substrate.
+
+### A.2 Specified, Not Verified
+
+- **Guardrail abort and rollback (N7.EX.2).** `convergence.clj` references
+  guardrails, but nothing verifies that a breach triggers the declared rollback
+  end to end.
+- **Actuation gating (N7.AC.1).** `actuation.clj` exists; whether
+  `APPLY_ALLOWED` is refused absent the §5.4 gate is untested.
+- **Drift detection (§3).** No implementation — `opsv.drift/detected` is
+  registered in N3 §3.14 with no producer.
+
+### A.3 Structural
+
+§7.3 requires apply actions to execute as N10-governed effects with verified
+rollback and postcondition monitoring. N10 Annex A records that no
+postcondition-monitoring component exists, so this requirement currently
+depends on machinery that is not there.
 
 ---
 

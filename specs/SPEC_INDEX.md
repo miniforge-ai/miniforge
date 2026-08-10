@@ -6,7 +6,7 @@
 
 # miniforge Specification Index
 
-**Version:** 0.22.0-draft
+**Version:** 0.23.0-draft
 **Date:** 2026-08-10
 **Status:** Living specification during OSS development
 
@@ -610,6 +610,18 @@ Normative specs are enforced by:
 ---
 
 ## Version History
+
+- **0.23.0-draft** (2026-08-10) - N7 completion, and a fix to N14 from the previous pass.
+  **N7** was missed by the sweep entirely — it was surveyed and then not scheduled. Added
+  `N7.EX.*`, `N7.VF.*`, `N7.AC.*` requirement IDs, test obligations, and Annex A. N7 turns out to
+  be the best-served spec in the set on the dimension that defeated the others: its nine `opsv.*`
+  event types are both registered in N3 §3.14 and emitted by `event-stream/opsv.clj` with tests,
+  where every other extension spec reviewed declared types that were never registered. Its gap is
+  elsewhere — §7.3 requires apply actions to run as N10-governed effects with postcondition
+  monitoring, and N10 Annex A records that no such component exists.
+  **N14** carried two `## 11.` sections after the N12–N15 pass: the pre-existing "Conformance
+  staging" and the "Conformance Requirements" that pass appended. Renumbered to §14.
+  Per-spec bumps: N7 0.2.1→0.3.0, N14 0.2.0→0.2.1
 
 - **0.22.0-draft** (2026-08-10) - Delta-spec completion pass across all seven deltas. Metadata was
   carried three different ways — a core-style header block (N11-delta), a bulleted list under the
