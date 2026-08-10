@@ -6,8 +6,8 @@
 
 # N11 — Task Capsule Isolation
 
-**Version:** 0.2.0-draft
-**Date:** 2026-04-23
+**Version:** 0.3.0-draft
+**Date:** 2026-08-10
 **Status:** Draft
 **Conformance:** MUST
 **Amends:** N2-workflows §13.4, N10-governed-tool-execution §7
@@ -433,11 +433,18 @@ Secrets MUST be injected into the capsule at BOOTSTRAP time as:
 - Environment variables (`:scope :env`)
 - Files at a declared path (`:scope :file`)
 
-Secrets MUST NOT be:
+Secret **values** MUST NOT be:
 
 - Written into image layers
 - Present in any exported artifact
-- Logged or included in evidence records (only secret *names* and *scopes* are recorded)
+- Logged, emitted on the event stream, or included in evidence records
+
+The last of these is **N3 §8's contract**, inherited here rather than restated:
+N3 §8.1 forbids emitting a credential at all, §8.2 fixes the `"[REDACTED]"`
+marker, and N6 §7.2 applies both to bundles. This section adds only the
+capsule-specific rule that a secret's *name* and *scope* MAY be recorded — the
+prohibition above is on values, not on the fact that a secret was granted, so
+an auditor can see which secrets a capsule held without seeing any of them.
 
 Capsule teardown at DESTROY time MUST ensure:
 
@@ -467,7 +474,16 @@ for any task that requires them.
 
 ### 9.1 What Must be Recorded
 
-Each task capsule MUST produce an evidence record containing:
+Each task capsule MUST produce an evidence record. The keys below are **not
+yet N6 artifact fields** — N6 §3.1.1 enumerates artifact types and none carries
+this shape — so registering them there is a prerequisite to producing this
+record conformantly, on the same principle as N10 §12.2: N6 owns the evidence
+schema.
+
+Until then, capsule execution is recorded through the evidence N6 already
+defines, correlated by the workflow and task identifiers.
+
+*Proposed N6 artifact content. Not emittable until registered there.*
 
 ```clojure
 {:evidence/runtime-class    keyword?  ; :docker, :k8s, etc.
@@ -700,10 +716,15 @@ OSS callers MUST NOT assume cross-node capsule binding; only the per-substrate
 
 ## 11. Implementation Mapping
 
-This section maps the normative requirements above to the existing codebase and
-identifies the minimum change set.
+**This section is informative.** It maps the normative requirements above to
+the codebase as it stood when written and identifies a minimum change set. It
+carries no MUST/SHOULD of its own; where it appears to, §1–§10 govern.
 
-### 10.1 Immediate Gaps
+File and line citations below are a snapshot and rot as the tree moves — the
+`docker.clj` cited in §11.1 no longer exists at that path, for instance. Treat
+them as pointers to the shape of the change, not as current coordinates.
+
+### 11.1 Immediate Gaps
 
 | Gap | Location | Required Change |
 |-----|----------|-----------------|
@@ -715,7 +736,7 @@ identifies the minimum change set.
 | No execution mode concept | `runner.clj`, workflow spec | Add `:execution/mode #{:local :governed}` to workflow opts and runner |
 | No downgrade guard | `runner.clj:431–444` | After executor selection, check mode compatibility; fail if governed + worktree |
 
-### 10.2 `acquire-environment!` Bootstrap Extension
+### 11.2 `acquire-environment!` Bootstrap Extension
 
 The Docker executor's `acquire-environment!` currently accepts `:env`, `:workdir`,
 and `:resources`. The `:workspace` key from the runtime specification MUST be added:
@@ -731,7 +752,7 @@ and `:resources`. The `:workspace` key from the runtime specification MUST be ad
   )
 ```
 
-### 10.3 Runner Execution Mode Selection
+### 11.3 Runner Execution Mode Selection
 
 ```clojure
 (defn- acquire-execution-environment! [workflow-id {:keys [execution-mode repo-url commit] :as opts}]
@@ -749,7 +770,7 @@ and `:resources`. The `:workspace` key from the runtime specification MUST be ad
     ...))
 ```
 
-### 10.4 Phase Context Keys
+### 11.4 Phase Context Keys
 
 When a capsule environment is active, the phase context MUST carry:
 
@@ -764,7 +785,7 @@ When a capsule environment is active, the phase context MUST carry:
 The `:execution/capsule-exec-fn` key is new. Phase implementations that invoke the
 LLM client MUST use this exec-fn when present, instead of the default host exec-fn.
 
-### 10.5 What Does Not Need to Change
+### 11.5 What Does Not Need to Change
 
 The following are already conformant with this spec or are in the right direction:
 
@@ -826,6 +847,45 @@ host process) when no conformant capsule substrate is available.
 
 ---
 
+## Annex A — Implementation Conformance Status (informative)
+
+This annex is **informative**. It records where the miniforge implementation
+diverges from the contract above, as of 2026-08-10.
+
+### A.1 Implemented
+
+- **TaskExecutor protocol (§10).** `components/dag-executor` provides the
+  protocol and three implementations: `worktree.clj`, `host_guarded.clj`, and
+  `kubernetes.clj`.
+
+### A.2 Specified, Not Implemented
+
+- **Docker executor.** §11.1 cites `docker.clj` as an existing location to
+  change; no such file exists in the tree. Of the runtime classes §5 admits,
+  only worktree, host-guarded, and Kubernetes have an executor, so `:docker`
+  cannot be selected.
+- **Capsule evidence (§9.1).** The evidence keys — `:evidence/runtime-class`,
+  `:evidence/image-digest`, `:evidence/repo-commit`, and the rest — are not N6
+  artifact fields, so the record cannot be produced conformantly. Nothing
+  emits them.
+- **Artifact export gate (§9.2).** No check that `:required? true` artifacts
+  were exported before DESTROY, so `:export/missing-required-artifact` has no
+  producer.
+- **Network policy enforcement (§8.2).** The deny-by-default allow-list is
+  specified but not enforced by any executor.
+
+### A.3 Structural
+
+- **Secret teardown (§8.1)** — no verification that env vars and mounted
+  secret files are unreachable after termination. The requirement is stated
+  and unchecked, the same shape as N10 §10's safety invariants.
+- **`user.dir` prohibition (§9.3)** — §9.3 forbids agents resolving their
+  workspace from `System/getProperty "user.dir"` in governed mode. This is the
+  exact fallback behind the sandbox-leak defect observed in this repo, so the
+  prohibition is load-bearing and currently unenforced.
+
+---
+
 ## 14. References
 
 - **N2 §13.4** — Task execution isolation (amended by this spec)
@@ -847,6 +907,16 @@ host process) when no conformant capsule substrate is available.
 ---
 
 **Version History:**
+
+- 0.3.0-draft (2026-08-10): Spec-completion pass. §11's five subsections were
+  numbered §10.1–§10.5, colliding with the TaskExecutor protocol's own
+  subsections — renumbered to §11.x; the two inbound `N11 §10` references both
+  mean the protocol and are unaffected. §11 marked informative: it maps
+  requirements to file and line coordinates that rot, and the `docker.clj` it
+  cites no longer exists. §8.1's secret rules deferred to N3 §8, keeping only
+  the capsule-specific allowance that a secret's name and scope may be
+  recorded. §9.1's evidence keys are not N6 artifact fields and are now gated
+  on registering them there. Annex A records implementation divergence.
 
 - 0.2.0-draft (2026-04-23): TaskExecutor Protocol normative amendment — §10 hoists
   the TaskExecutor protocol from informative docs to normative, defining the
