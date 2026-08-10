@@ -162,16 +162,15 @@
 (deftest ^{:stratum 0} run-backend-preflight-exercises-generic-cli-success-path-test
   (testing "non-Claude CLI backends decode streamed CLI output and accept the canonical ok payload"
     (let [llm-client (llm/create-client {:backend :codex})
-          seen-cmd (atom nil)
-          seen-timeout (atom nil)
-          seen-workdir (atom nil)
+          seen (atom nil)
           output (with-out-str
                    (with-redefs-fn {#'paths/resolve-cli-command-path (fn [_] "/Users/chris/.local/bin/codex")
                                     #'probe/read-cli-version (fn [_] {:success true :version "1.2.3"})
-                                    #'process/run-cli-command (fn [cmd timeout-ms & {:keys [workdir]}]
-                                                            (reset! seen-cmd cmd)
-                                                            (reset! seen-timeout timeout-ms)
-                                                            (reset! seen-workdir workdir)
+                                    #'process/run-cli-command (fn [cmd timeout-ms & {:keys [workdir stdin]}]
+                                                            (reset! seen {:cmd cmd
+                                                                          :timeout-ms timeout-ms
+                                                                          :workdir workdir
+                                                                          :stdin stdin})
                                                             {:out "{\"type\":\"item.completed\",\"item\":{\"type\":\"agent_message\",\"text\":\"{\\\"ok\\\":true}\"}}\n{\"type\":\"turn.completed\",\"usage\":{\"input_tokens\":1,\"output_tokens\":1}}"
                                                              :err ""
                                                              :exit 0})}
@@ -179,15 +178,42 @@
                        (#'preflight/run-backend-preflight!
                         false
                         llm-client
-                        {:worktree-path "/tmp/runtime-worktree"}))))]
+                        {:worktree-path "/tmp/runtime-worktree"}))))
+          {:keys [cmd timeout-ms workdir stdin]} @seen]
       (is (str/includes? output "Backend: codex"))
       (is (str/includes? output "Backend Path: /Users/chris/.local/bin/codex"))
       (is (str/includes? output "Backend Version: 1.2.3"))
-      (is (= "/Users/chris/.local/bin/codex" (first @seen-cmd)))
-      (is (= ["exec" "--json"] (take 2 (rest @seen-cmd))))
-      (is (= "Reply with exactly {\"ok\":true}" (last @seen-cmd)))
-      (is (= 30000 @seen-timeout))
-      (is (= "/tmp/runtime-worktree" @seen-workdir)))))
+      (is (= "/Users/chris/.local/bin/codex" (first cmd)))
+      (is (= ["exec" "--json"] (take 2 (rest cmd))))
+      (is (= 30000 timeout-ms))
+      (is (= "/tmp/runtime-worktree" workdir))
+      (testing "codex takes its prompt on stdin, so argv ends in the `-` placeholder"
+        (is (= "-" (last cmd)))
+        (is (not-any? #{"Reply with exactly {\"ok\":true}"} cmd)))
+      (testing "and the probe actually pipes that prompt in"
+        (is (= "Reply with exactly {\"ok\":true}" stdin))))))
+
+(deftest ^{:stratum 0} run-backend-preflight-keeps-argv-backend-prompt-in-argv-test
+  (testing "a backend declaring :prompt-via :argv still carries the prompt as an argument, with no stdin"
+    (let [llm-client (llm/create-client {:backend :opencode})
+          seen (atom nil)
+          output (with-out-str
+                   (with-redefs-fn {#'paths/resolve-cli-command-path (fn [_] "/opt/homebrew/bin/opencode")
+                                    #'probe/read-cli-version (fn [_] {:success true :version "0.4.1"})
+                                    #'process/run-cli-command (fn [cmd _timeout-ms & {:keys [stdin]}]
+                                                            (reset! seen {:cmd cmd :stdin stdin})
+                                                            {:out "{\"ok\":true}"
+                                                             :err ""
+                                                             :exit 0})}
+                     (fn []
+                       (#'preflight/run-backend-preflight!
+                        false
+                        llm-client
+                        {:worktree-path "/tmp/runtime-worktree"}))))
+          {:keys [cmd stdin]} @seen]
+      (is (str/includes? output "Backend: opencode"))
+      (is (= ["/opt/homebrew/bin/opencode" "run" "Reply with exactly {\"ok\":true}"] cmd))
+      (is (nil? stdin)))))
 
 ;------------------------------------------------------------------------------ Layer 1
 
@@ -196,6 +222,19 @@
     (let [result (#'process/run-cli-command [(shell-path) "-lc" "printf ok; printf warn >&2"] 5000)]
       (is (= "ok" (:out result)))
       (is (= "warn" (:err result)))
+      (is (= 0 (:exit result))))))
+
+(deftest ^{:stratum 1} run-cli-command-pipes-stdin-to-the-child-test
+  (testing "the :stdin option reaches the subprocess"
+    (let [result (#'process/run-cli-command [(shell-path) "-lc" "cat"] 5000
+                                            :stdin "prompt-on-stdin")]
+      (is (= "prompt-on-stdin" (:out result)))
+      (is (= 0 (:exit result))))))
+
+(deftest ^{:stratum 1} run-cli-command-closes-stdin-without-input-test
+  (testing "omitting :stdin still closes the stream so a reading child sees EOF"
+    (let [result (#'process/run-cli-command [(shell-path) "-lc" "cat"] 5000)]
+      (is (= "" (:out result)))
       (is (= 0 (:exit result))))))
 
 (deftest ^{:stratum 1} run-cli-command-times-out-fast-test

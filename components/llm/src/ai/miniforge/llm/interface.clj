@@ -34,6 +34,25 @@
   "Available CLI backends."
   impl/backends)
 
+(defn ^{:stratum 0} backend-prompt-via
+  "Given a backend entry from `backends`, return how its CLI expects the
+   user prompt: `:argv` (prompt is an argument, supplied by the entry's
+   `:args-fn`) or `:stdin` (argv carries a placeholder such as codex's
+   `-` and the prompt must be piped to the process). A backend that
+   declares nothing gets `:argv`.
+
+   Callers building a backend command themselves must pass the result
+   into `:args-fn` as `:prompt-via` and honor it when starting the
+   process. Not doing so is how the CLI preflight probe came to send
+   codex an empty prompt: `codex-args` saw no `:prompt-via`, defaulted
+   to stdin, emitted the `-` placeholder, and the prompt went nowhere.
+
+   The impl's own `resolve-prompt-via` answers the same question for
+   the in-brick call path; `backend-prompt-via-matches-impl-test` pins
+   the two together."
+  [backend-config]
+  (get backend-config :prompt-via :argv))
+
 ;; Re-export protocol for public API
 (def ^{:stratum 0} LLMClient
   "Protocol clients implement for LLM interaction; the public extensibility
