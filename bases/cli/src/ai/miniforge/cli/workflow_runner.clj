@@ -119,7 +119,6 @@
             manifest-handle (lifecycle/start-workflow-manifest! workflow-id stream)]
         (try
           (let [result (execution/execute-workflow-pipeline run-pipeline workflow workflow-input callbacks-with-url artifact-store stream)]
-            (execution/close-artifact-store artifact-store)
             (lifecycle/mark-manifest-terminal!
              manifest-handle
              (if (phase/succeeded? result) :completed :failed))
@@ -142,6 +141,15 @@
               (cond-> result
                 (some? shutdown) (assoc :event-durability shutdown))))
           (finally
+            ;; Every exit path — completion or pipeline throw — must
+            ;; release the transit store opened above; the old
+            ;; success-branch-only close leaked it on the throw path.
+            ;; close-artifact-store is nil-safe and swallows close-time
+            ;; exceptions, so one unconditional call covers all exits.
+            ;; First in the finally: the manifest and progress cleanups
+            ;; below do IO and may themselves throw, which would skip
+            ;; any close placed after them.
+            (execution/close-artifact-store artifact-store)
             ;; If we got here without marking, the pipeline threw or was
             ;; otherwise aborted before the success branch ran. Classify
             ;; as :cancelled to mirror the existing event-stream
