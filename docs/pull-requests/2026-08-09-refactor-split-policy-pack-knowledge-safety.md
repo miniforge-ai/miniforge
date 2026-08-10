@@ -50,20 +50,38 @@ repo-wide) is one of this batch.
   (white-box, bypassing the pack/registration path) — updated to
   `detectors/check-trust-labels` etc. Pack-assembly tests
   (`ks/create-knowledge-safety-pack`) are untouched.
+- `projects/miniforge/test/ai/miniforge/governance/e2e_test.clj`: a
+  second, project-level caller of the same three moved detector fns
+  (`ks/check-trust-labels`, `ks/check-instruction-authority`,
+  `ks/check-pack-root`), missed by the original repo-wide grep because
+  it referenced them via the `ks` alias rather than the fully-qualified
+  namespace the grep pattern anchored on, and by `bb test`
+  (change-scope) because project-level integration tests aren't in its
+  affected-brick graph — caught by Copilot review, not local testing.
+  Updated to require `knowledge-safety.detectors` and call the moved
+  fns from there directly, same pattern as the component's own test.
 
 This is pure code motion aside from the one required visibility change
 and the test call-site updates above — no detection logic changed.
 
 ## Testing Plan
 
-- `stratum-lint` clean on all three touched files (exit 0, was SL003
-  exit 1 on the original).
+- `stratum-lint` clean on all three touched source files (exit 0, was
+  SL003 exit 1 on the original).
 - `bb test` (change-scope) green on the policy-pack component.
-- Confirmed via repo-wide grep that none of the moved symbols
-  (`violation`, `all-injection-patterns`, `first-violation-detector`,
-  `pack-id`, `pack-version`, `default-pack-roots`, and all five
-  detector fns) had any caller outside this component before moving
-  them, aside from the three test groups now updated.
+- Repo-wide grep for a fully-qualified reference to the moved symbols
+  found no external caller — **incomplete**: it missed the `ks`-aliased
+  calls in `projects/miniforge/test/.../governance/e2e_test.clj`
+  (Copilot review comment). Corrected by grepping for the *namespace*
+  itself (`ai\.miniforge\.policy-pack\.knowledge-safety\b`) regardless
+  of alias, which found exactly the one additional file, now fixed.
+- `governance.e2e-test` verified directly (not via `bb test:integration`,
+  which fails on an unrelated pre-existing issue — a missing
+  `opsv/application-fixture.edn` resource, confirmed absent on `main`
+  too, nothing to do with this change): `cd projects/miniforge &&
+  clojure -M -e "(require 'ai.miniforge.governance.e2e-test)
+  (clojure.test/run-tests 'ai.miniforge.governance.e2e-test)"` — 4
+  tests, 105 assertions, 0 failures.
 
 ## Deployment Plan
 
