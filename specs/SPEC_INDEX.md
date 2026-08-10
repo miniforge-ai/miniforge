@@ -6,8 +6,8 @@
 
 # miniforge Specification Index
 
-**Version:** 0.17.0-draft
-**Date:** 2026-08-09
+**Version:** 0.18.0-draft
+**Date:** 2026-08-10
 **Status:** Living specification during OSS development
 
 ---
@@ -91,6 +91,12 @@ Defines:
 - **Unified Autonomy Model:** A0-A5 levels with cross-spec mapping (§5.6)
 - **Trust Boundary Validation:** 5 named boundaries with architectural invariants (§5.7)
 - **Evaluation Pipeline:** Golden sets, replay mode, shadow mode, canary deployment (§3.3.3)
+- **Status vocabulary aligned with N2 §2.2** — §2's Workflow entity still carried the
+  superseded `:pending`-based set
+- **Conformance requirement IDs** for the domain model (`N1.DM.*`) and architecture
+  (`N1.AR.*`), the two families N1's own subject matter lacked, plus test obligations (§8.4–§8.5)
+- **Annex A (informative):** which architectural requirements have a static check — interface
+  boundaries and stratum direction do; layer direction and status conformance do not
 
 ### N2 — Workflow Execution Model ✅
 
@@ -597,6 +603,15 @@ Normative specs are enforced by:
 ---
 
 ## Version History
+
+- **0.18.0-draft** (2026-08-10) - N1 spec-completion pass. **N1**: §2's Workflow entity declared
+  `:workflow/status` with the vocabulary N2 §2.2 superseded — `:pending` rather than `:queued`, and
+  no `:paused`/`:blocked`. N1 was a consumer the N2 sweep missed. Added `N1.DM.*` and `N1.AR.*`
+  requirement IDs — the domain model and layering are N1's own subject and had no IDs, while six
+  families existed for capabilities later amendments added. Annex A separates the architectural
+  requirements that have a static check (`poly check` for interfaces, `bb lint:stratum` for stratum
+  direction) from those that do not (layer direction, status-vocabulary conformance) — the latter
+  being how `:executing` reached the implementation unchallenged. Per-spec bumps: N1 0.7→0.8
 
 - **0.17.0-draft** (2026-08-06) - N10 spec-completion pass. **N10**: §12.1 required governed
   execution to emit events to N3 directly above a note saying implementations MUST NOT emit them,
