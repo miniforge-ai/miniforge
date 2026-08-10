@@ -19,10 +19,12 @@
   "Terminal output formatting for workflow execution.
 
    The vocabularies live in sibling namespaces; this one is the single
-   entry point the rest of the workflow runner calls. Each var below is
-   the var from its owning namespace, so `with-redefs` here still
-   intercepts callers that go through this namespace. Docstrings and
-   arglists live with the implementations."
+   entry point the rest of the workflow runner calls. Each name below is
+   its own var, rooted in the implementation fn — not the owning
+   namespace's var. So `with-redefs` here intercepts every caller that
+   resolves through this namespace, while `with-redefs` on the owning
+   namespace's var does not reach those callers (and vice versa).
+   Docstrings and arglists live with the implementations."
   (:require
    [ai.miniforge.cli.workflow-runner.display-ansi :as ansi]
    [ai.miniforge.cli.workflow-runner.display-demo-line :as demo-line]

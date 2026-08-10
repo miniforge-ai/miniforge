@@ -36,7 +36,7 @@ namespace:
 | `print-error-header`, `print-namespace-resolution-help`, `print-babashka-fallback-help`, `print-general-debugging-help` | `display-error-help` |
 
 Those eighteen are exactly the vars referenced through the `display` alias
-anywhere in `bases/cli` — eleven source namespaces (`workflow-runner`, `chain`,
+anywhere in `bases/cli` — ten source namespaces (`workflow-runner`, `chain`,
 `context`, `dashboard`, `execution`, `lifecycle`, `listing`, `provenance`,
 `sandbox`, `setup`) plus `display_test.clj`, `display_output_test.clj` and
 `runner_control_wiring_test.clj`. Nothing else moves; no call site changes.
@@ -46,12 +46,19 @@ public surface; it reaches callers through `display-summary`.
 
 ### with-redefs
 
-A re-export `def` binds the same var object, and every caller resolves through
-the `display` alias, so `with-redefs [display/start-progress! …]` in
-`runner_control_wiring_test.clj` still intercepts calls made from
-`workflow_runner.clj`, `setup.clj` and `chain.clj`. No test redef target needed
-changing: the other redefs in `display_test.clj` target `messages/t` and
-`app-config/*`, which the moved code calls directly in its new home.
+`(def x other/x)` creates a **new** var whose root is the current value of
+`other/x`, not an alias to the same var: `identical?` over the two var objects
+for `colorize` returns `false`. What matters for the tests is which var a
+caller resolves: `workflow_runner.clj`, `setup.clj` and `chain.clj` all call
+`display/start-progress!`, so `with-redefs [display/start-progress! …]` in
+`runner_control_wiring_test.clj` still intercepts them. The converse does not
+hold — `with-redefs` on `display-progress/start-progress!` would not reach a
+caller going through this namespace. Verified at the REPL, and the wiring test
+passes unchanged.
+
+No test redef target needed changing: the other redefs in `display_test.clj`
+target `messages/t` and `app-config/*`, which the moved code calls directly in
+its new home.
 
 Docstrings are not duplicated onto the shim — they stay with the implementations,
 so there is no second copy to drift.
@@ -68,8 +75,8 @@ so there is no second copy to drift.
 
 ## Deployment Plan
 
-No behaviour change: every re-exported var is the same var object the callers
-were already invoking. Ships with the ordinary merge to `main`.
+No behaviour change: every re-exported var is rooted in the same implementation
+fn the callers were already invoking. Ships with the ordinary merge to `main`.
 
 ## Related Issues/PRs
 
