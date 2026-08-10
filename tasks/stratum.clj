@@ -58,7 +58,10 @@
    continues. Blocking is the default — every rule 210 violation gets
    real enforcement, not a decorative print — with an explicit opt-out
    for a team mid-way through clearing a backlog of pre-existing
-   over-budget files."
+   over-budget files. Not needed for merge commits: `lint/stratum-staged`
+   skips mid-merge entirely (same exemption as `bb commit-budget`), so
+   an over-budget file arriving from the merged-in branch never reaches
+   this check."
   "MINIFORGE_STRATUM_BUDGET_MODE")
 
 ;------------------------------------------------------------------------------ Layer 1
