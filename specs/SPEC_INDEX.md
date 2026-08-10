@@ -6,8 +6,8 @@
 
 # miniforge Specification Index
 
-**Version:** 0.18.0-draft
-**Date:** 2026-08-10
+**Version:** 0.19.0-draft
+**Date:** 2026-08-09
 **Status:** Living specification during OSS development
 
 ---
@@ -366,6 +366,13 @@ Defines:
 - Runtime specification, network, secret, resource, and evidence boundaries
 - TaskExecutor workspace persistence and phase continuity
 - OCI runtime abstraction through the indexed N11 runtime-adapter delta
+- **§11 renumbered** — its five subsections were numbered §10.1–§10.5, colliding with the
+  TaskExecutor protocol's own subsections
+- **§11 marked informative** — it maps requirements to file/line coordinates that rot; the
+  `docker.clj` it cites no longer exists
+- **Secrets deferred to N3 §8** (§8.1), keeping only the capsule-specific name/scope allowance
+- **§9.1 evidence gated on N6** — its keys are not N6 artifact fields
+- **Annex A (informative):** implementation conformance status
 
 ---
 
@@ -604,6 +611,16 @@ Normative specs are enforced by:
 
 ## Version History
 
+- **0.19.0-draft** (2026-08-10) - N11 spec-completion pass. **N11**: §11's five subsections were
+  numbered §10.1–§10.5, duplicating the TaskExecutor protocol's subsection numbers; renumbered,
+  and the two inbound `N11 §10` references both mean the protocol so are unaffected. §11 marked
+  informative — it maps requirements to file and line coordinates that rot, and the `docker.clj`
+  it cites no longer exists in the tree. §8.1's secret rules deferred to N3 §8. §9.1's evidence
+  keys are not N6 artifact fields and are now gated on registering them there, the same shape as
+  N10 §12.2. Annex A records that only three of the runtime classes §5 admits have an executor,
+  and that §9.3's prohibition on resolving the workspace from `user.dir` — the exact fallback
+  behind the sandbox-leak defect seen in this repo — is unenforced.
+  Per-spec bumps: N11 0.2→0.3
 - **0.18.0-draft** (2026-08-10) - N1 spec-completion pass. **N1**: §2's Workflow entity declared
   `:workflow/status` with the vocabulary N2 §2.2 superseded — `:pending` rather than `:queued`, and
   no `:paused`/`:blocked`. N1 was a consumer the N2 sweep missed. Added `N1.DM.*` and `N1.AR.*`
