@@ -16,17 +16,23 @@
 ;; See the License for the specific language governing permissions and
 ;; limitations under the License.
 (ns ai.miniforge.cli.workflow-runner.help.flags
-  "The `Options:` table inside a workflow-runner subcommand's `--help`
-   block, generated from the babashka.cli `:spec` the registry holds.
+  "The `--help`/`-h` flag every workflow-runner subcommand carries: what
+   it is, how a babashka.cli `:spec` gains it, and how it is stripped
+   back out to render the `Options:` table inside the `--help` block.
 
    Stratification:
-   Layer 0 — the keys reserved for the help flag itself.
-   Layer 1 — the `:spec` filter that strips them.
+   Layer 0 — the help flag itself: its spec and its reserved keys.
+   Layer 1 — adding it to a `:spec`, and the filter that strips it.
    Layer 2 — `flag-table` renders what survives the filter."
   (:require
    [babashka.cli :as cli]))
 
 ;------------------------------------------------------------------------------ Layer 0
+
+(def ^{:stratum 0} ^:private help-flag-spec
+  "The `--help`/`-h` boolean flag added to every workflow-runner
+   subcommand spec. Single definition keeps the alias consistent."
+  {:coerce :boolean :alias :h})
 
 (def ^{:stratum 0} help-flag-keys
   "Keys reserved for the help flag itself. Stripped from the usage
@@ -34,6 +40,11 @@
   #{:help})
 
 ;------------------------------------------------------------------------------ Layer 1
+
+(defn ^{:stratum 1} with-help-flag
+  "Return `spec` with the `--help`/`-h` boolean flag merged in. Idempotent."
+  [spec]
+  (assoc spec :help help-flag-spec))
 
 (defn- ^{:stratum 1} without-help-flag
   "Drop the help flag from a babashka.cli `:spec` map so it doesn't
