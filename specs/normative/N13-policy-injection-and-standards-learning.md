@@ -7,7 +7,7 @@
 # N13 — Policy Injection & Standards Learning
 
 **Version:** 0.2.0-draft
-**Date:** 2026-06-09
+**Date:** 2026-08-10
 **Status:** Draft
 **Conformance:** MUST / SHOULD (staged — see §11)
 

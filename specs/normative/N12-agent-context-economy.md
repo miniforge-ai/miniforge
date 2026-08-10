@@ -7,7 +7,7 @@
 # N12 — Agent Context Economy
 
 **Version:** 0.2.0-draft
-**Date:** 2026-06-07
+**Date:** 2026-08-10
 **Status:** Draft
 **Conformance:** MUST / SHOULD (staged — see §9)
 

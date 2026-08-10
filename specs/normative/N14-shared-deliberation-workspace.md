@@ -7,7 +7,7 @@
 # N14 — Shared Deliberation Workspace
 
 **Version:** 0.2.0-draft
-**Date:** 2026-07-22
+**Date:** 2026-08-10
 **Status:** Draft (Speculative — see §0.4)
 **Conformance:** MUST, scoped per §0.4
 **Class:** Extension spec (N7+)

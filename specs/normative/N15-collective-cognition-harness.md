@@ -7,7 +7,7 @@
 # N15 — Collective-Cognition Evaluation Harness
 
 **Version:** 0.2.0-draft
-**Date:** 2026-07-22
+**Date:** 2026-08-10
 **Status:** Draft
 **Conformance:** MUST (core protocol); workspace-conditional sections per §0.4
 **Class:** Extension spec (N7+)
