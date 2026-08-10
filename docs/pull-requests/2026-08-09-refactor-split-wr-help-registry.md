@@ -74,7 +74,7 @@ grep over `bases/`, `components/`, `projects/`).
 - `help_test.clj` + `help/registry_test.clj`: 13 tests, 76 assertions,
   0 failures, 0 errors. No `with-redefs` targets moved, so no test edits.
 - Pre-commit gate (342 tests / 1291 assertions smoke + GraalVM compat) passed on
-  both commits.
+  every commit in the branch.
 
 ## Deployment Plan
 

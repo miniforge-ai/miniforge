@@ -19,8 +19,10 @@
   "The babashka.cli `:spec` each workflow-runner subcommand accepts —
    one def per subcommand, every one carrying the `--help`/`-h` flag.
 
-   Pure data. `help/registry.clj` binds these to subcommand keys; the
-   flag vocabulary they are written in lives in `help/flags.clj`.
+   Each def is a literal spec map with the shared help flag merged in;
+   nothing here computes anything else. `help/registry.clj` binds them
+   to subcommand keys, and the flag vocabulary they are written in
+   lives in `help/flags.clj`.
 
    Stratification:
    Layer 0 — one flag spec per subcommand."
