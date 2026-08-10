@@ -6,7 +6,7 @@
 
 # miniforge Specification Index
 
-**Version:** 0.15.0-draft
+**Version:** 0.16.0-draft
 **Date:** 2026-08-09
 **Status:** Living specification during OSS development
 
@@ -306,6 +306,15 @@ Defines:
 - Multi-repo configuration: per-repo opt-in with org-level defaults
 - Fleet Mode disambiguation: N9 (SDLC governance) vs N7 (runtime policy synthesis)
 - CLI/TUI/API extensions: `fleet prs`, `fleet trains` commands and views
+- **Scope and event schemas deferred to N3** (§7) — §7.1 restated a PR-only scope rule that
+  N3 §2.3 generalizes to six scopes; §7.2 reproduced N3 §3.16's schemas
+- **Versioning aligned with N3 §7** (§14) — the required parallel deprecation cycle is
+  withdrawn; pre-release implementations cut over
+- **Binary name reconciled** — N5 §2.1 documented `miniforge` while the shipped binary is `mf`;
+  N9 was correct and N5 is amended
+- **Conformance requirement IDs** (`N9.WI.*`, `N9.EV.*`, `N9.AT.*`, `N9.AS.*`, `N9.EB.*`)
+  and test obligations (§17–§18)
+- **Annex A (informative):** implementation conformance status
 
 ### N10 — Governed Tool Execution 🆕
 
@@ -584,6 +593,16 @@ Normative specs are enforced by:
 
 ## Version History
 
+- **0.16.0-draft** (2026-08-06) - N9 spec-completion pass. **N9**: §7.1 restated a PR-only scope
+  rule superseded by N3 §2.3's six-scope table, and §7.2 reproduced N3 §3.16's event schemas —
+  both now reference N3. §14 required breaking changes to be "supported in parallel for at least
+  one deprecation cycle", contradicting N3 §7.4's pre-release cut-over stance; withdrawn. N5 §2.1
+  documented the command as `miniforge` while the shipped binary is `mf` (`bb install:cli` →
+  `~/.local/bin/mf`, and CI invokes it by that name); N9 was correct and N5 §2.1 is amended, with
+  its own examples swept to match.
+  Conformance requirement IDs and test obligations (§17–§18). Annex A records that none of N9's
+  six event types is emitted, so the `:pr/id` scope has no producer.
+  Per-spec bumps: N9 0.2→0.3
 - **0.15.0-draft** (2026-08-06) - N8 spec-completion pass. **N8**: §5 carried a parallel model for
   concerns N3 owns — privacy levels, a regex pattern table, a field-rule vocabulary, and its own
   retention schema — so an operator configuring redaction there could not tell whether N3 §8.1's

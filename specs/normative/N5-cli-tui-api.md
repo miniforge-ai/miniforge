@@ -45,10 +45,19 @@ The operations console (CLI/TUI/API) is the **window into the factory**, not the
 ### 2.1 Command Structure
 
 ```text
-miniforge <namespace> <command> [arguments] [flags]
+mf <namespace> <command> [arguments] [flags]
 ```
 
 All commands MUST follow this structure for consistency.
+
+**Binary name.** The installed executable is `mf` — `bb install:cli` places it
+at `~/.local/bin/mf`, and CI and the release workflow invoke it by that name.
+Implementations MAY additionally provide `miniforge` as an alias, but `mf` is
+the name the contract is written against and the one other specs cite.
+
+Earlier revisions of this section wrote `miniforge` as the command. That left
+N9 §15's `mf fleet prs` looking like a typo when it was in fact correct, and it
+is the spelling a user's shell has.
 
 ### 2.2 Core Namespaces
 
@@ -56,17 +65,17 @@ Implementations MUST provide these namespaces:
 
 | Namespace  | Purpose                       | Example Commands                                           |
 | ---------- | ----------------------------- | ---------------------------------------------------------- |
-| `init`     | Initialize miniforge          | `miniforge init`                                           |
-| `workflow` | Workflow execution            | `miniforge workflow execute`, `miniforge workflow status`  |
-| `fleet`    | Local fleet management        | `miniforge fleet watch`, `miniforge fleet list`            |
-| `policy`   | Policy pack management        | `miniforge policy list`, `miniforge policy install`        |
-| `evidence` | Evidence bundle access        | `miniforge evidence show`, `miniforge evidence export`     |
-| `artifact` | Artifact queries              | `miniforge artifact provenance`, `miniforge artifact list` |
-| `etl`      | Repository → pack ETL         | `miniforge etl repo`, `miniforge etl report`               |
-| `pack`     | Pack inspection and promotion | `miniforge pack list`, `miniforge pack promote`            |
-| `listener` | Listener attach/detach (N8)   | `miniforge listener list`, `miniforge listener attach`     |
-| `agent`    | Agent control actions (N8)    | `miniforge agent quarantine`, `miniforge agent budget`     |
-| `gate`     | Gate control actions (N8)     | `miniforge gate approve`, `miniforge gate override`        |
+| `init`     | Initialize miniforge          | `mf init`                                           |
+| `workflow` | Workflow execution            | `mf workflow execute`, `mf workflow status`  |
+| `fleet`    | Local fleet management        | `mf fleet watch`, `mf fleet list`            |
+| `policy`   | Policy pack management        | `mf policy list`, `mf policy install`        |
+| `evidence` | Evidence bundle access        | `mf evidence show`, `mf evidence export`     |
+| `artifact` | Artifact queries              | `mf artifact provenance`, `mf artifact list` |
+| `etl`      | Repository → pack ETL         | `mf etl repo`, `mf etl report`               |
+| `pack`     | Pack inspection and promotion | `mf pack list`, `mf pack promote`            |
+| `listener` | Listener attach/detach (N8)   | `mf listener list`, `mf listener attach`     |
+| `agent`    | Agent control actions (N8)    | `mf agent quarantine`, `mf agent budget`     |
+| `gate`     | Gate control actions (N8)     | `mf gate approve`, `mf gate override`        |
 
 ### 2.3 Command Specifications
 
@@ -76,7 +85,7 @@ Implementations MUST provide these namespaces:
 
 ```bash
 # Initialize miniforge (creates ~/.miniforge/)
-miniforge init [flags]
+mf init [flags]
 
 Flags:
   --config PATH       Path to config file (default: ~/.miniforge/config.edn)
@@ -94,7 +103,7 @@ Flags:
 **Example:**
 
 ```bash
-$ miniforge init --llm-api-key sk-ant-...
+$ mf init --llm-api-key sk-ant-...
 ✓ Created ~/.miniforge/
 ✓ Initialized event store
 ✓ Initialized artifact store
@@ -109,7 +118,7 @@ miniforge ready to use
 
 ```bash
 # Execute workflow from spec file
-miniforge workflow execute SPEC_FILE [flags]
+mf workflow execute SPEC_FILE [flags]
 
 Arguments:
   SPEC_FILE           Path to workflow spec (.edn or .json)
@@ -124,7 +133,7 @@ Returns:
   Workflow ID (UUID)
 
 # Show workflow status
-miniforge workflow status WORKFLOW_ID [flags]
+mf workflow status WORKFLOW_ID [flags]
 
 Flags:
   --follow, -f        Follow workflow progress (live updates)
@@ -132,7 +141,7 @@ Flags:
   --json              Output as JSON
 
 # List workflows
-miniforge workflow list [flags]
+mf workflow list [flags]
 
 Flags:
   --status STATUS     Filter by status — N2 §2.2 vocabulary
@@ -142,14 +151,14 @@ Flags:
   --json              Output as JSON
 
 # Show DAG kanban board (TUI)
-miniforge workflow kanban DAG_ID [flags]
+mf workflow kanban DAG_ID [flags]
 
 Flags:
   --refresh SECONDS   Refresh interval (default: 5)
   --json              Output task states as JSON (non-interactive)
 
 # Cancel workflow
-miniforge workflow cancel WORKFLOW_ID [flags]
+mf workflow cancel WORKFLOW_ID [flags]
 
 Flags:
   --reason REASON     Cancellation reason (recorded in evidence)
@@ -165,7 +174,7 @@ Flags:
 **Example:**
 
 ```bash
-$ miniforge workflow execute specs/rds-import.edn
+$ mf workflow execute specs/rds-import.edn
 Workflow started: abc123-def456-789...
 
 Watching progress (Ctrl+C to detach, workflow continues):
@@ -186,19 +195,19 @@ Watching progress (Ctrl+C to detach, workflow continues):
 
 ```bash
 # Watch fleet in TUI (operations console)
-miniforge fleet watch [flags]
+mf fleet watch [flags]
 
 Flags:
   --refresh SECONDS   Refresh interval (default: 15)
 
 # List active workflows
-miniforge fleet list [flags]
+mf fleet list [flags]
 
 Flags:
   --json              Output as JSON
 
 # Show fleet statistics
-miniforge fleet stats [flags]
+mf fleet stats [flags]
 
 Flags:
   --time-range RANGE  Time range (e.g., "24h", "7d", "30d")
@@ -209,12 +218,12 @@ Flags:
 
 ```bash
 # Operational policy synthesis
-miniforge fleet opsv plan SERVICE [flags]     # Generate Experiment Packs and risk/gate status
-miniforge fleet opsv run SERVICE [flags]      # Execute experiment and converge
-miniforge fleet opsv verify SERVICE [flags]   # Run verification suite
-miniforge fleet opsv propose SERVICE [flags]  # Emit policy proposals without actuation
-miniforge fleet opsv emit SERVICE [flags]     # PR-only emission
-miniforge fleet opsv apply SERVICE [flags]    # Gated apply (if enabled)
+mf fleet opsv plan SERVICE [flags]     # Generate Experiment Packs and risk/gate status
+mf fleet opsv run SERVICE [flags]      # Execute experiment and converge
+mf fleet opsv verify SERVICE [flags]   # Run verification suite
+mf fleet opsv propose SERVICE [flags]  # Emit policy proposals without actuation
+mf fleet opsv emit SERVICE [flags]     # PR-only emission
+mf fleet opsv apply SERVICE [flags]    # Gated apply (if enabled)
 ```
 
 ##### Listener and Control Commands (N8)
@@ -225,35 +234,35 @@ contract, not because they belong to `fleet`.
 
 ```bash
 # Listener management
-miniforge listener list                       # List active listeners
-miniforge listener attach WORKFLOW_ID         # Attach as OBSERVE listener
-miniforge listener advise WORKFLOW_ID         # Attach as ADVISE listener
-miniforge listener control WORKFLOW_ID        # Attach as CONTROL listener (requires auth)
+mf listener list                       # List active listeners
+mf listener attach WORKFLOW_ID         # Attach as OBSERVE listener
+mf listener advise WORKFLOW_ID         # Attach as ADVISE listener
+mf listener control WORKFLOW_ID        # Attach as CONTROL listener (requires auth)
 
 # Workflow control actions
-miniforge workflow pause WORKFLOW_ID          # Pause workflow execution
-miniforge workflow resume WORKFLOW_ID         # Resume paused workflow
-miniforge workflow retry WORKFLOW_ID          # Retry current phase
-miniforge workflow rollback WORKFLOW_ID       # Rollback to checkpoint
+mf workflow pause WORKFLOW_ID          # Pause workflow execution
+mf workflow resume WORKFLOW_ID         # Resume paused workflow
+mf workflow retry WORKFLOW_ID          # Retry current phase
+mf workflow rollback WORKFLOW_ID       # Rollback to checkpoint
 
 # Agent control actions
-miniforge agent quarantine AGENT_ID           # Quarantine agent
-miniforge agent budget AGENT_ID --tokens=N    # Adjust agent budget
+mf agent quarantine AGENT_ID           # Quarantine agent
+mf agent budget AGENT_ID --tokens=N    # Adjust agent budget
 
 # Gate control actions
-miniforge gate approve GATE_ID               # Approve pending gate
-miniforge gate override GATE_ID --reason=     # Override gate failure
+mf gate approve GATE_ID               # Approve pending gate
+mf gate override GATE_ID --reason=     # Override gate failure
 
 # Fleet control actions
-miniforge fleet emergency-stop                # Emergency stop all workflows
-miniforge fleet drain                         # Drain fleet (stop accepting, complete existing)
+mf fleet emergency-stop                # Emergency stop all workflows
+mf fleet drain                         # Drain fleet (stop accepting, complete existing)
 ```
 
 ##### External PR Commands (N9)
 
 ```bash
 # PR monitoring
-miniforge fleet prs [flags]                   # List PR Work Items across repos
+mf fleet prs [flags]                   # List PR Work Items across repos
   --repo REPO                                 # Filter by repo
   --author AUTHOR                             # Filter by author
   --readiness STATE                           # Filter by readiness state
@@ -261,13 +270,13 @@ miniforge fleet prs [flags]                   # List PR Work Items across repos
   --policy OUTCOME                            # Filter by policy outcome
   --json                                      # Output as JSON
 
-miniforge fleet pr REPO#NUMBER [flags]        # Show PR Work Item detail
+mf fleet pr REPO#NUMBER [flags]        # Show PR Work Item detail
   --evidence                                  # Include evidence artifact pointers
   --json                                      # Output as JSON
 
 # Train management (if trains enabled)
-miniforge fleet trains [flags]                # List active trains
-miniforge fleet train TRAIN_ID [flags]        # Show train detail and membership
+mf fleet trains [flags]                # List active trains
+mf fleet train TRAIN_ID [flags]        # Show train detail and membership
 ```
 
 **Requirements:**
@@ -299,14 +308,14 @@ miniforge fleet train TRAIN_ID [flags]        # Show train detail and membership
 
 ```bash
 # List installed policy packs
-miniforge policy list [flags]
+mf policy list [flags]
 
 Flags:
   --available         Show available packs from registry
   --json              Output as JSON
 
 # Install policy pack
-miniforge policy install PACK_ID[@VERSION] [flags]
+mf policy install PACK_ID[@VERSION] [flags]
 
 Arguments:
   PACK_ID             Policy pack ID (e.g., "terraform-aws")
@@ -317,20 +326,20 @@ Flags:
   --registry URL      Custom registry URL
 
 # Show policy pack details
-miniforge policy show PACK_ID [flags]
+mf policy show PACK_ID [flags]
 
 Flags:
   --rules             Show all rules in pack
   --json              Output as JSON
 
 # Update policy packs
-miniforge policy update [PACK_ID] [flags]
+mf policy update [PACK_ID] [flags]
 
 Flags:
   --all               Update all packs
 
 # Repair violations (manual trigger)
-miniforge policy repair WORKFLOW_ID [flags]
+mf policy repair WORKFLOW_ID [flags]
 
 Flags:
   --rule RULE_ID      Only repair specific rule violations
@@ -346,14 +355,14 @@ Flags:
 **Example:**
 
 ```bash
-$ miniforge policy install terraform-aws
+$ mf policy install terraform-aws
 Installing terraform-aws@1.2.3...
 ✓ Downloaded policy pack
 ✓ Validated schema
 ✓ Installed 15 rules
 terraform-aws@1.2.3 ready to use
 
-$ miniforge policy show terraform-aws
+$ mf policy show terraform-aws
 Policy Pack: terraform-aws (v1.2.3)
 Description: AWS-specific Terraform validations
 Author: miniforge.ai
@@ -372,7 +381,7 @@ Rules (15):
 
 ```bash
 # Show evidence bundle for workflow
-miniforge evidence show WORKFLOW_ID [flags]
+mf evidence show WORKFLOW_ID [flags]
 
 Flags:
   --phase PHASE       Show evidence for specific phase only
@@ -380,13 +389,13 @@ Flags:
   --verbose, -v       Show full details
 
 # Export evidence bundle
-miniforge evidence export WORKFLOW_ID OUTPUT_PATH [flags]
+mf evidence export WORKFLOW_ID OUTPUT_PATH [flags]
 
 Flags:
   --format FORMAT     Export format (edn, json, html)
 
 # List evidence bundles
-miniforge evidence list [flags]
+mf evidence list [flags]
 
 Flags:
   --time-range RANGE  Time range filter
@@ -394,7 +403,7 @@ Flags:
   --json              Output as JSON
 
 # Validate evidence bundle integrity
-miniforge evidence validate WORKFLOW_ID [flags]
+mf evidence validate WORKFLOW_ID [flags]
 ```
 
 **Requirements:**
@@ -407,7 +416,7 @@ miniforge evidence validate WORKFLOW_ID [flags]
 **Example:**
 
 ```bash
-$ miniforge evidence show abc123
+$ mf evidence show abc123
 
 Evidence Bundle: abc123-def456-789
 Workflow: rds-import
@@ -455,14 +464,14 @@ Outcome:
 
 ```bash
 # Show artifact provenance (trace back to intent)
-miniforge artifact provenance ARTIFACT_ID [flags]
+mf artifact provenance ARTIFACT_ID [flags]
 
 Flags:
   --format FORMAT     Output format (text, json, graph)
   --verbose, -v       Show full provenance chain
 
 # List artifacts for workflow
-miniforge artifact list WORKFLOW_ID [flags]
+mf artifact list WORKFLOW_ID [flags]
 
 Flags:
   --phase PHASE       Filter by phase
@@ -470,13 +479,13 @@ Flags:
   --json              Output as JSON
 
 # Show artifact content
-miniforge artifact show ARTIFACT_ID [flags]
+mf artifact show ARTIFACT_ID [flags]
 
 Flags:
   --format FORMAT     Force output format (auto-detect by default)
 
 # Search artifacts
-miniforge artifact search QUERY [flags]
+mf artifact search QUERY [flags]
 
 Flags:
   --type TYPE         Filter by type
@@ -494,7 +503,7 @@ Flags:
 **Example:**
 
 ```bash
-$ miniforge artifact provenance terraform-plan-def
+$ mf artifact provenance terraform-plan-def
 
 Artifact: terraform-plan-def
 Type: terraform-plan
@@ -526,7 +535,7 @@ Provenance:
     ✓ Policy Check: terraform-aws (0 violations)
     ✓ Semantic Intent: IMPORT matches (0 creates, 0 destroys)
 
-Full Evidence Bundle: miniforge evidence show abc123
+Full Evidence Bundle: mf evidence show abc123
 ```
 
 ---
@@ -537,7 +546,7 @@ Full Evidence Bundle: miniforge evidence show abc123
 
 ```bash
 # Generate packs from a local repository
-miniforge etl repo PATH [flags]
+mf etl repo PATH [flags]
 
 Arguments:
   PATH                Path to repository root
@@ -552,7 +561,7 @@ Flags:
   --dry-run            Show what would be processed without generating packs
 
 # Show latest ETL report
-miniforge etl report [flags]
+mf etl report [flags]
 
 Flags:
   --json               Output as JSON
@@ -573,7 +582,7 @@ Flags:
 
 ```bash
 # Search for packs across configured registry roots
-miniforge pack search QUERY [flags]
+mf pack search QUERY [flags]
 
 Flags:
   --type TYPE          Filter by pack type (feature|policy|agent-profile|workflow|index)
@@ -582,7 +591,7 @@ Flags:
   --json               Output as JSON
 
 # List installed packs
-miniforge pack list [flags]
+mf pack list [flags]
 
 Flags:
   --root DIR           Add an additional registry root
@@ -590,10 +599,10 @@ Flags:
   --json               Output as JSON
 
 # Show pack details (including provenance, hash, capabilities, entrypoints)
-miniforge pack show PACK_ID [flags]
+mf pack show PACK_ID [flags]
 
 # Install a pack from a registry root or local bundle
-miniforge pack install PACK_ID[@VERSION] [flags]
+mf pack install PACK_ID[@VERSION] [flags]
 
 Flags:
   --root DIR           Registry root to install from (or local path)
@@ -601,17 +610,17 @@ Flags:
   --dry-run            Show what would be installed without installing
 
 # Update an installed pack
-miniforge pack update PACK_ID [flags]
+mf pack update PACK_ID [flags]
 
 Flags:
   --to VERSION         Target version (default: latest)
   --accept-capabilities  Accept capability changes without interactive prompt
 
 # Remove an installed pack
-miniforge pack remove PACK_ID [flags]
+mf pack remove PACK_ID [flags]
 
 # Promote pack trust level (local OSS workflow)
-miniforge pack promote PACK_ID [flags]
+mf pack promote PACK_ID [flags]
 
 Flags:
   --to TRUST           Target trust level (trusted)
@@ -625,10 +634,10 @@ Policy Enforcement:
   (default: true).
 
 # Verify pack signature/hash
-miniforge pack verify PACK_ID [flags]
+mf pack verify PACK_ID [flags]
 
 # Run a Workflow Pack entrypoint
-miniforge pack run PACK_ID[@VERSION] [flags]
+mf pack run PACK_ID[@VERSION] [flags]
 
 Flags:
   --entry ENTRYPOINT   Entrypoint name (required if pack has multiple entrypoints)
@@ -639,7 +648,7 @@ Flags:
   --dry-run            Show what would be executed without running
 
 # Configure pack trust policies
-miniforge pack trust [flags]
+mf pack trust [flags]
 
 Flags:
   --allow-publisher PUB    Add publisher to allowlist
@@ -893,7 +902,7 @@ The TUI MUST provide:
 
 ```text
 ╭──────────────────────────────────────────────────────────────────────────────────────╮
-│ miniforge fleet PRs  [Repos: 12 | PRs: 34 | Merge-Ready: 8]   ⟳ 15s ago            │
+│ mf fleet PRs  [Repos: 12 | PRs: 34 | Merge-Ready: 8]   ⟳ 15s ago            │
 ├──────────────────────────────────────────────────────────────────────────────────────┤
 │ REPO            PR#   TITLE             READINESS       RISK   POLICY  RECOMMEND     │
 ├──────────────────────────────────────────────────────────────────────────────────────┤
@@ -989,7 +998,7 @@ j/k:nav  Enter:detail  O:open  Space:select  p:filter  C:chat  t:train  /:search
 
 ```text
 ╭─────────────────────────────────────────────────────────────────────────────╮
-│ miniforge pack browser  [Installed: 12 | Available: 47]         ⟳ 30s ago  │
+│ mf pack browser  [Installed: 12 | Available: 47]         ⟳ 30s ago  │
 ├─────────────────────────────────────────────────────────────────────────────┤
 │ PACK                   PUBLISHER       TYPE       VER    STATUS    TRUST    │
 ├─────────────────────────────────────────────────────────────────────────────┤
@@ -1439,7 +1448,7 @@ Precedence MUST be uniform. A setting that reads its flag but ignores its
 environment variable, or vice versa, is non-conformant — an operator cannot
 reason about configuration that resolves differently per setting.
 
-`miniforge config show` SHOULD render the effective configuration and, for each
+`mf config show` SHOULD render the effective configuration and, for each
 setting, which layer supplied it. Debugging a wrong value otherwise requires
 guessing.
 
@@ -1508,7 +1517,7 @@ usable by a script.
   document on stdout. A command that streams MUST emit newline-delimited JSON,
   one document per line.
 - Whether a given invocation streams MUST be determined by the command and its
-  flags alone, and MUST be stated in `--help`. `miniforge workflow status --json`
+  flags alone, and MUST be stated in `--help`. `mf workflow status --json`
   emits one document; adding `--follow` makes it stream. Both are predictable
   from the command line, which is what a consumer needs — it chooses its parser
   before it sees output. What MUST NOT happen is the same command line
@@ -1752,7 +1761,7 @@ caller needs byte-stable output.
 
 - **CLI**: `--help` text, error messages, and progress lines are prose.
   Command and flag names are not, and MUST NOT be localized — a script that
-  runs `miniforge workflow execute` MUST work under any locale.
+  runs `mf workflow execute` MUST work under any locale.
 - **TUI**: column headings, status labels, footer hints, and prompt text are
   prose. Key bindings are not: `j`/`k`/`q` are dispatch, and MUST NOT be
   rebound by locale (§3.3).
@@ -1780,10 +1789,10 @@ an interface that renders a raw key to a user.
 ```bash
 # Day 1: Install and initialize
 $ brew install miniforge
-$ miniforge init --llm-api-key sk-ant-...
+$ mf init --llm-api-key sk-ant-...
 
 # Run first workflow
-$ miniforge workflow execute examples/rds-import.edn
+$ mf workflow execute examples/rds-import.edn
 Workflow started: abc123
 Watching progress...
   ✓ Plan phase completed
@@ -1794,7 +1803,7 @@ Watching progress...
 Workflow completed! PR #234 created.
 
 # View evidence
-$ miniforge evidence show abc123
+$ mf evidence show abc123
 [Shows complete evidence bundle]
 ```
 
@@ -1802,19 +1811,19 @@ $ miniforge evidence show abc123
 
 ```bash
 # Check fleet status
-$ miniforge fleet list
+$ mf fleet list
 3 workflows active, 0 blocked, 12 completed today
 
 # Watch fleet in TUI
-$ miniforge fleet watch
+$ mf fleet watch
 [TUI shows real-time workflow progress]
 
 # Workflow fails, check why
-$ miniforge workflow status xyz789 --events
+$ mf workflow status xyz789 --events
 [Shows event stream with failure details]
 
 # Resume failed workflow
-$ miniforge workflow execute --resume xyz789
+$ mf workflow execute --resume xyz789
 ```
 
 ### 10.3 Power User
@@ -1829,13 +1838,13 @@ $ cat > my-workflow.edn <<EOF
 EOF
 
 # Execute with auto-merge
-$ miniforge workflow execute my-workflow.edn --auto-merge
+$ mf workflow execute my-workflow.edn --auto-merge
 
 # Query artifacts programmatically
-$ miniforge artifact list $(miniforge workflow list --json | jq -r '.[0].id') --json
+$ mf artifact list $(mf workflow list --json | jq -r '.[0].id') --json
 
 # Export evidence for compliance audit
-$ miniforge evidence export abc123 /tmp/audit-report.html --format html
+$ mf evidence export abc123 /tmp/audit-report.html --format html
 ```
 
 ---
