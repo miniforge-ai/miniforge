@@ -432,8 +432,6 @@ A minimal compliant OPSV implementation MUST:
 
 ---
 
----
-
 ## Annex A — Implementation Conformance Status (informative)
 
 This annex is **informative**, recording implementation state as of 2026-08-10.
