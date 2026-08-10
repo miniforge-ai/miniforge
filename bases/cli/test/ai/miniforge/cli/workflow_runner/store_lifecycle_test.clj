@@ -38,6 +38,7 @@
    [ai.miniforge.cli.workflow-runner.display :as display]
    [ai.miniforge.cli.workflow-runner.execution :as execution]
    [ai.miniforge.cli.workflow-runner.gc-hooks :as gc-hooks]
+   [ai.miniforge.cli.workflow-runner.lifecycle :as lifecycle]
    [ai.miniforge.cli.workflow-runner.setup :as setup]
    [clojure.test :refer [deftest is testing]]
    [slingshot.slingshot :refer [try+]]))
@@ -49,32 +50,35 @@
    as the pipeline fn, recording every store handed to
    `execution/close-artifact-store`. The `:dashboard-url` opt keeps the
    event stream nil, so the manifest and shutdown helpers no-op.
+   `extra-redefs` (var → fn) is merged over the base stubs.
    Returns {:result ... :closed [...]} on normal return,
    {:thrown ... :closed [...]} when the call throws."
-  [run-pipeline]
+  [run-pipeline & [extra-redefs]]
   (let [closed (atom [])
-        outcome (with-redefs [gc-hooks/run-gc-pass-best-effort! (fn [_repo-fn _gc-fn] nil)
-                              gc-hooks/enqueue-workflow-gc-best-effort! (fn [_enqueue-fn _wid] nil)
-                              setup/resolve-workflow-interface (fn []
-                                                                {:load-workflow (fn [_id _version] {})
-                                                                 :run-pipeline run-pipeline})
-                              setup/load-and-validate-workflow (fn [_load-fn _id _version] {})
-                              setup/create-phase-callbacks (fn [_quiet] {})
-                              context/resolve-input (fn [_opts] {})
-                              display/print-workflow-header (fn [_id _version _quiet] nil)
-                              display/print-result (fn [_result _opts] nil)
-                              execution/create-artifact-store (fn [_quiet] ::sentinel-store)
-                              execution/close-artifact-store (fn [store]
-                                                               (swap! closed conj store)
-                                                               nil)
-                              execution/execute-workflow-pipeline (fn [pipeline-fn _workflow _input _callbacks _store _stream]
-                                                                    (pipeline-fn))]
-                  (try+
-                    {:result (sut/run-workflow! "wf-store-lifecycle-test"
-                                                {:quiet true
-                                                 :dashboard-url "http://dashboard.invalid"})}
-                    (catch Object thrown
-                      {:thrown thrown})))]
+        base {#'gc-hooks/run-gc-pass-best-effort! (fn [_repo-fn _gc-fn] nil)
+              #'gc-hooks/enqueue-workflow-gc-best-effort! (fn [_enqueue-fn _wid] nil)
+              #'setup/resolve-workflow-interface (fn []
+                                                   {:load-workflow (fn [_id _version] {})
+                                                    :run-pipeline run-pipeline})
+              #'setup/load-and-validate-workflow (fn [_load-fn _id _version] {})
+              #'setup/create-phase-callbacks (fn [_quiet] {})
+              #'context/resolve-input (fn [_opts] {})
+              #'display/print-workflow-header (fn [_id _version _quiet] nil)
+              #'display/print-result (fn [_result _opts] nil)
+              #'execution/create-artifact-store (fn [_quiet] ::sentinel-store)
+              #'execution/close-artifact-store (fn [store]
+                                                 (swap! closed conj store)
+                                                 nil)
+              #'execution/execute-workflow-pipeline (fn [pipeline-fn _workflow _input _callbacks _store _stream]
+                                                      (pipeline-fn))}
+        outcome (with-redefs-fn (merge base extra-redefs)
+                  (fn []
+                    (try+
+                      {:result (sut/run-workflow! "wf-store-lifecycle-test"
+                                                  {:quiet true
+                                                   :dashboard-url "http://dashboard.invalid"})}
+                      (catch Object thrown
+                        {:thrown thrown}))))]
     (assoc outcome :closed @closed)))
 
 ;------------------------------------------------------------------------------ Layer 1
@@ -90,6 +94,20 @@
   (testing "a pipeline exception still releases the artifact store before rethrowing"
     (let [{:keys [result thrown closed]} (run-recording-closes
                                           (fn [] (throw (ex-info "pipeline exploded" {}))))]
+      (is (nil? result))
+      (is (some? thrown))
+      (is (= [::sentinel-store] closed)))))
+
+(deftest ^{:stratum 1} run-workflow!-closes-store-when-finally-cleanup-throws-test
+  (testing "a throwing manifest cleanup in the finally cannot skip the store close"
+    ;; Pins the ordering: the close sits at the top of the finally,
+    ;; before the manifest and progress cleanups, which do IO and may
+    ;; themselves throw. A close placed after them would be skipped here.
+    (let [{:keys [result thrown closed]} (run-recording-closes
+                                          (fn [] {:execution/status :completed})
+                                          {#'lifecycle/mark-manifest-terminal!
+                                           (fn [_handle _status]
+                                             (throw (ex-info "manifest IO exploded" {})))})]
       (is (nil? result))
       (is (some? thrown))
       (is (= [::sentinel-store] closed)))))

@@ -4,7 +4,7 @@
   Copyright 2025-2026 Christopher Lester. Licensed under Apache 2.0.
 -->
 
-# fix(cli): close the artifact store on every exit path of run-workflow
+# fix(cli): close the artifact store on every exit path of `run-workflow!`
 
 ## Overview
 
@@ -13,9 +13,9 @@
 on the normal-completion branch, so any pipeline throw leaked the store.
 
 This is the follow-up flagged in the "Callers — checked" section of
-`2026-08-09-fix-cli-artifact-store-leak-on-sandbox-failure.md`, which fixed
-the same leak shape in `execute-with-events` (the spec-driven path). The
-two entry points now use the same pattern.
+`2026-08-09-fix-cli-artifact-store-leak-on-sandbox-failure.md` (#1726),
+which fixed the same leak shape in `execute-with-events` (the spec-driven
+path). The two entry points now use the same pattern.
 
 ## Motivation
 
@@ -35,23 +35,26 @@ new test namespace. No component interfaces change.
 ## Changes in Detail
 
 - `run-workflow!`: the `(execution/close-artifact-store artifact-store)`
-  call moves from the pipeline-success branch into the `finally` block,
-  after `progress-cleanup` and before the GC enqueue. One unconditional
-  call rather than a per-branch duplicate: `close-artifact-store` is
-  nil-safe and swallows close-time exceptions, so a single call in
-  `finally` covers completion and the throw path without double-closing
-  or masking an in-flight exception. On the success path the close now
-  happens after `print-result` instead of before manifest marking;
-  nothing in between reads the store.
+  call moves from the pipeline-success branch to the top of the `finally`
+  block — first because the manifest and progress cleanups that follow do
+  IO and may themselves throw, which would skip a close placed after
+  them. One unconditional call rather than a per-branch duplicate:
+  `close-artifact-store` is nil-safe and swallows close-time exceptions,
+  so a single call in `finally` covers completion and the throw path
+  without double-closing or masking an in-flight exception. On the
+  success path the close now happens after `print-result` instead of
+  before manifest marking; nothing in between reads the store.
 - `bases/cli/test/ai/miniforge/cli/workflow_runner/store_lifecycle_test.clj`
   (new): drives the real `run-workflow!` with collaborators stubbed via
   `with-redefs`, recording every store handed to
   `execution/close-artifact-store` — the same recording approach as
-  `execution_test.clj`'s `execute-recording-closes` harness. Two tests:
+  `execution_test.clj`'s `execute-recording-closes` harness. Three tests:
   the success path closes the sentinel store exactly once; a throwing
-  pipeline still closes it before the rethrow propagates. A
-  `:dashboard-url` opt keeps the event stream nil so the manifest,
-  progress, and shutdown helpers take their documented nil no-op paths.
+  pipeline still closes it before the rethrow propagates; a throwing
+  manifest cleanup in the `finally` cannot skip the close (pins the
+  close-first ordering). A `:dashboard-url` opt keeps the event stream
+  nil so the manifest, progress, and shutdown helpers take their
+  documented nil no-op paths.
 
 ## Why a direct test of run-workflow! is possible now
 
@@ -88,7 +91,7 @@ sibling PR.
 
 ## Testing Plan
 
-- `clojure -M:dev:test` on the new namespace: 2 tests, 5 assertions,
+- `clojure -M:dev:test` on the new namespace: 3 tests, 8 assertions,
   green.
 - Mutation-checked rather than trusting green: reverting the source fix
   (close on the success branch only, as on main) fails
