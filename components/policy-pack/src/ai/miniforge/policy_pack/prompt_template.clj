@@ -19,7 +19,8 @@
   "Pack-bundled prompt template interpolation.
 
    Templates use {{variable}} syntax. Variables are replaced with values
-   from a context map. Unknown variables are left as-is.
+   from a context map. Unknown variables are replaced with an empty
+   string (see `interpolate`).
 
    Layer 0: interpolate, default-repair-prompt/behavior-section/knowledge-section
      (delays over `template-defaults/default-template`)
