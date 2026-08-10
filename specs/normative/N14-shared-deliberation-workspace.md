@@ -6,7 +6,7 @@
 
 # N14 — Shared Deliberation Workspace
 
-**Version:** 0.2.0-draft
+**Version:** 0.2.1-draft
 **Date:** 2026-08-10
 **Status:** Draft (Speculative — see §0.4)
 **Conformance:** MUST, scoped per §0.4
@@ -444,7 +444,7 @@ LLM-era results (blackboard-style shared workspaces, global-workspace event loop
 collaboration) inform the design but are not incorporated as contracts; the harness exists
 to test their claims under matched budgets before adoption.
 
-## 11. Conformance Requirements
+## 14. Conformance Requirements
 
 This spec is speculative (§0.4). These IDs bind an experimental implementation
 before the N15 gate; if that gate fails, the spec demotes to informative and
@@ -459,7 +459,7 @@ these requirements withdraw with it.
 | N14.WS.5 | MUST | Detect deadlock and terminate rather than stalling silently (§7). |
 | N14.WS.6 | MUST NOT | Emit an unregistered event type — §9.1's list requires an N3 §6.1 amendment first. |
 
-### 11.1 Test Obligations
+### 14.1 Test Obligations
 
 1. Replaying the transaction log reconstructs the graph exactly.
 2. A rejected transaction leaves the graph byte-identical to its prior state.
