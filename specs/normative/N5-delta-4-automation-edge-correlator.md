@@ -186,7 +186,7 @@ nil UUID or the DNS / URL / OID / X500 namespaces.
 
 Two observations of the same trigger event id MUST produce the same `:edge/id`. Replay of an
 event-stream prefix MUST NOT duplicate edges. Producers re-emitting an upsert with unchanged
-fields MUST produce byte-identical payloads (per N5-δ3 §3.6 shared contract).
+fields MUST produce byte-identical payloads (per N5-δ3 §3.7 shared contract).
 
 ### 2.4 Edge lifecycle — status state machine
 

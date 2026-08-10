@@ -58,7 +58,8 @@ that states no requirements.
   emitter per entity family), `N5D1.SV.7` (terminal states never reactivate),
   and `N5D4.AE.3` (the correlator must filter its own output out of its input,
   or it feeds itself).
-- **N5-delta-3 §3.6 → §3.7** for the Shared contract section.
+- **N5-delta-3 §3.6 → §3.7** for the Shared contract section, with
+  N5-delta-4's cross-reference updated to match.
 - **Version histories** added to all seven.
 
 ### N4-delta: recorded, not invented
@@ -79,10 +80,15 @@ and let N4 carry whatever is binding. SPEC_INDEX is authoritative on scope
 
 Specification change; no runtime code touched.
 
-- `markdownlint` clean on all eight changed files, except two pre-existing
-  MD040 fenced-block warnings in N5-delta-4 at lines 193 and 250. Verified
-  against the diff that both predate this change; left alone rather than
-  widening the diff.
+- `markdownlint` clean on all eight changed files. Two pre-existing MD040
+  fenced-block warnings in N5-delta-4 were initially left alone as
+  out-of-scope, but staging the file made them blocking — the pre-commit
+  hook's markdown formatter exits non-zero when a staged file carries an
+  unfixable warning, which failed the commit twice. Both fences are now
+  labelled `text`.
+- N5-delta-4's cross-reference to N5-δ3's shared contract updated to §3.7
+  after the renumbering. I had checked inbound references *within*
+  N5-delta-3 and not across the other deltas; review caught it.
 - No duplicate section numbers remain across any delta.
 - Verified both inbound `§3.6` references before renumbering.
 
