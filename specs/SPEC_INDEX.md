@@ -6,7 +6,7 @@
 
 # miniforge Specification Index
 
-**Version:** 0.19.0-draft
+**Version:** 0.21.0-draft
 **Date:** 2026-08-10
 **Status:** Living specification during OSS development
 
@@ -610,6 +610,18 @@ Normative specs are enforced by:
 ---
 
 ## Version History
+
+- **0.21.0-draft** (2026-08-10) - N12–N15 completion pass. Conformance requirement IDs and test
+  obligations added to all four (`N12.CE.*`, `N13.PI.*`, `N14.WS.*`, `N15.CH.*`), plus Annex A on
+  each. **N14 §9.1** declared ten `workspace/*` types as required N3 events and none is registered
+  in N3 §6, so under N3 §6.1 none may be emitted — the same pattern found in N8, N9, and N10. Since
+  §9.1 also makes the event stream the workspace log, the spec's central mechanism is blocked on
+  that registration; the list is retained as the proposed content of an N3 amendment rather than
+  added to N3's registry, because adding ten unimplemented types would misrepresent the stream's
+  surface to every consumer. N14 §9.2's four N6 exports are gated the same way. Annex A notes that
+  N15 is the one spec whose absence blocks another's disposition: its §8 gate G0 decides whether
+  N14 is kept or demoted, and it cannot run until the harness exists.
+  Per-spec bumps: N12 0.1→0.2, N13 0.1→0.2, N14 0.1→0.2, N15 0.1→0.2
 
 - **0.19.0-draft** (2026-08-10) - N11 spec-completion pass. **N11**: §11's five subsections were
   numbered §10.1–§10.5, duplicating the TaskExecutor protocol's subsection numbers; renumbered,
