@@ -63,6 +63,10 @@
    hashes; distinct data produces distinct hashes (with cryptographic
    probability).
 
+   Throws the same `IllegalArgumentException` cases `canonical-edn`
+   does — an unsupported `inst?` type, or a map/set whose entries would
+   collapse onto one instant — since it digests that same string.
+
    Example:
      (content-hash {:a 1 :b 2})
      ;; => \"c7e0...\" (64-char hex string)"

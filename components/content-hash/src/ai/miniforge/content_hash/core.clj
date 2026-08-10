@@ -135,13 +135,21 @@
    component exists to provide: hashing one evidence bundle twice gave
    two digests.
 
-   Anything else `inst?` might admit throws rather than being hashed
-   under a rendering nothing has checked — the same refusal the `->iso`
-   helpers in effect-transaction and policy-pack make. An
-   `IllegalArgumentException` rather than their `ex-info`: the branch is
-   an exhaustive match over the types `inst?` admits, so reaching it is
-   a programmer error, which is the guard rule 005 names — and this
-   component carries no dependencies, so `throw+` is not on the table."
+   Anything else throws rather than being hashed under a rendering
+   nothing has checked — the same refusal the `->iso` helpers in
+   effect-transaction and policy-pack make.
+
+   `inst?` is open, not a closed pair: it is satisfied by any
+   `clojure.core/Inst` implementation, and this namespace's own test
+   builds one to prove the refusal fires. So the two branches below
+   are exhaustive over the types actually SUPPORTED — the two the JDK
+   and Clojure's own readers produce — rather than over everything
+   `inst?` will say yes to. Reaching the third branch means a caller
+   handed a timestamp representation nobody here has a rendering for,
+   which is the programmer error rule 005 names, hence
+   `IllegalArgumentException` rather than the siblings' `ex-info`; this
+   component also carries no dependencies, so `throw+` is not on the
+   table."
   [v]
   (let [^Instant i (cond
                      (instance? Instant v) v
@@ -228,9 +236,14 @@
   "Return a deterministic EDN string for `x`.
 
    Maps are emitted with keys sorted under a stable comparator; sets are
-   sorted; sequential collections preserve order. The output is suitable as
-   input to a content hash because logically equal values produce identical
-   strings regardless of original insertion order."
+   sorted; sequential collections preserve order; instants render as
+   `#inst` literals. The output is suitable as input to a content hash
+   because logically equal values produce identical strings regardless
+   of original insertion order.
+
+   Throws `IllegalArgumentException` on an unsupported `inst?` type, and
+   on a map or set whose entries would collapse onto one instant — see
+   `inst->literal` and `refuse-collapse!`."
   [x]
   (pr-str (->canonical x)))
 
@@ -241,6 +254,8 @@
 
    Returns a lowercase 64-character hex string. Logically equal values
    (e.g. maps with identical keys/values regardless of insertion order)
-   produce identical hashes."
+   produce identical hashes.
+
+   Throws whatever `canonical-edn` throws — it is the same walk."
   [x]
   (sha256-hex (canonical-edn x)))
