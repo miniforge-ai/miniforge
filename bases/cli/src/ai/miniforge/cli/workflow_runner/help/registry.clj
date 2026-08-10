@@ -16,8 +16,10 @@
 ;; See the License for the specific language governing permissions and
 ;; limitations under the License.
 (ns ai.miniforge.cli.workflow-runner.help.registry
-  "Pure data registry of every workflow-runner CLI subcommand
-   (`workflow run/list/execute/status/cancel` and `chain run/list`).
+  "Registry of every workflow-runner CLI subcommand (`workflow
+   run/list/execute/status/cancel` and `chain run/list`). The
+   `subcommands` map is pure data; the rest of this namespace is
+   lookups and derivations over it.
 
    The registry is the single source of truth for:
    - the babashka.cli `:spec` (defined in `help/flag_specs.clj`) wired
