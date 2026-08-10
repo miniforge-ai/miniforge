@@ -31,7 +31,8 @@
   (:require
    [clojure.test :refer [deftest testing is are]]
    [clojure.string :as str]
-   [ai.miniforge.policy-pack.mdc-compiler :as sut]))
+   [ai.miniforge.policy-pack.mdc-compiler :as sut]
+   [ai.miniforge.policy-pack.mdc-compiler.frontmatter :as frontmatter]))
 
 ;------------------------------------------------------------------------------ Layer 0
 
@@ -43,30 +44,30 @@
 ;; ============================================================================
 (deftest ^{:stratum 0} split-frontmatter-test
   (testing "splits frontmatter and body at --- delimiters"
-    (let [result (sut/split-frontmatter "---\nkey: value\n---\nBody text")]
+    (let [result (frontmatter/split-frontmatter "---\nkey: value\n---\nBody text")]
       (is (= "key: value" (:frontmatter result)))
       (is (= "Body text" (:body result)))))
 
   (testing "handles missing frontmatter (no --- prefix)"
-    (let [result (sut/split-frontmatter "Just body text")]
+    (let [result (frontmatter/split-frontmatter "Just body text")]
       (is (= "" (:frontmatter result)))
       (is (= "Just body text" (:body result)))))
 
   (testing "handles missing closing ---"
-    (let [result (sut/split-frontmatter "---\nkey: value\nno closing")]
+    (let [result (frontmatter/split-frontmatter "---\nkey: value\nno closing")]
       (is (= "" (:frontmatter result)))))
 
   (testing "handles empty frontmatter"
-    (let [result (sut/split-frontmatter "---\n---\nBody only")]
+    (let [result (frontmatter/split-frontmatter "---\n---\nBody only")]
       (is (= "" (:frontmatter result)))
       (is (= "Body only" (:body result)))))
 
   (testing "handles empty content"
-    (let [result (sut/split-frontmatter "")]
+    (let [result (frontmatter/split-frontmatter "")]
       (is (= "" (:frontmatter result)))))
 
   (testing "handles nil content gracefully"
-    (let [result (sut/split-frontmatter nil)]
+    (let [result (frontmatter/split-frontmatter nil)]
       (is (= "" (:frontmatter result))))))
 
 ;; ============================================================================
