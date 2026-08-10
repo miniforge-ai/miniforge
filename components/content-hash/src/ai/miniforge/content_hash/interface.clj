@@ -15,7 +15,6 @@
 ;; WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 ;; See the License for the specific language governing permissions and
 ;; limitations under the License.
-
 (ns ai.miniforge.content-hash.interface
   "Public API for the content-hash component.
 
@@ -30,15 +29,25 @@
    [ai.miniforge.content-hash.core :as core]))
 
 ;------------------------------------------------------------------------------ Layer 0
-;; Canonical EDN
 
-(defn canonical-edn
+;; Canonical EDN
+(defn ^{:stratum 0} canonical-edn
   "Return a deterministic EDN string for `x`.
 
    Maps are serialized with keys sorted under a stable, type-aware
    comparator; sets are sorted; sequential collections preserve order;
-   scalars pass through. Logically equal inputs produce identical output
-   regardless of original insertion order.
+   instants render as `#inst` literals whether they arrive as a
+   `java.time.Instant` or a `java.util.Date`; other scalars pass
+   through. Logically equal inputs produce identical output regardless
+   of original insertion order.
+
+   Throws `IllegalArgumentException` in two cases, rather than hashing
+   a value under a rendering nothing has checked or quietly losing one:
+
+   - an `inst?` value that is neither of those two types;
+   - a map or set holding two entries that denote the same moment —
+     say an `Instant` key and a `Date` key — since they are two entries
+     going in and one coming out.
 
    Example:
      (canonical-edn {:b 2 :a 1}) ;; => \"{:a 1, :b 2}\"
@@ -46,15 +55,17 @@
   [x]
   (core/canonical-edn x))
 
-;------------------------------------------------------------------------------ Layer 1
 ;; SHA-256 content hash
-
-(defn content-hash
+(defn ^{:stratum 0} content-hash
   "Compute the SHA-256 hex digest of `x`'s canonical EDN.
 
    Returns a lowercase 64-character hex string. Equal data produces equal
    hashes; distinct data produces distinct hashes (with cryptographic
    probability).
+
+   Throws the same `IllegalArgumentException` cases `canonical-edn`
+   does — an unsupported `inst?` type, or a map/set whose entries would
+   collapse onto one instant — since it digests that same string.
 
    Example:
      (content-hash {:a 1 :b 2})
