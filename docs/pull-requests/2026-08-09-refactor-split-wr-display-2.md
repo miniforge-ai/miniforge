@@ -65,9 +65,10 @@ so there is no second copy to drift.
 
 ## Testing Plan
 
-- stratum-lint (pin `bef8657`) on `display.clj`: plain clean; `--fix` on a scratch
-  copy proposes only blank-line spacing between defs, which is adopted here, and
-  confirms **1 real stratum**.
+- stratum-lint (pin `bef8657`) on `display.clj`: plain clean, and `--fix` on a
+  scratch copy proposes **no changes**, confirming **1 real stratum**. (Its only
+  suggestion during drafting was blank-line spacing between the defs; that is
+  already adopted in the committed file, so the dry run is now a no-op.)
 - clj-kondo: 0 errors, 0 warnings.
 - `display-test` + `display-output-test` + `runner-control-wiring-test`: 79 tests,
   185 assertions, 0 failures, 0 errors.
