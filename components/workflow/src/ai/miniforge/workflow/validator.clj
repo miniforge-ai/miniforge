@@ -18,7 +18,7 @@
 
 (ns ai.miniforge.workflow.validator
   "Validation for workflow configurations.
-   Handles schema validation (Malli) and DAG validation (cycles, reachability)."
+   Handles schema validation (Malli) and DAG structure validation (reachability, entry phase, phase references)."
   (:require
    [clojure.java.io :as io]
    [clojure.edn :as edn]

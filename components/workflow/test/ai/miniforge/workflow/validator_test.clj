@@ -109,28 +109,6 @@
       (is (:valid? result) "Valid DAG should pass")
       (is (empty? (:errors result)) "Valid DAG should have no errors")))
 
-  ;; Note: We no longer check for cycles as they are valid for retry/rollback patterns
-  ;; This test is commented out
-  #_(testing "Cycle detection fails validation"
-      (let [config {:workflow/id :test
-                    :workflow/version "1.0.0"
-                    :workflow/type :test
-                    :workflow/phases
-                    [{:phase/id :a
-                      :phase/name "A"
-                      :phase/agent-type :planner
-                      :phase/on-success {:transition/target :b}}
-                     {:phase/id :b
-                      :phase/name "B"
-                      :phase/agent-type :implementer
-                      :phase/on-success {:transition/target :a}}]  ; Cycle: a -> b -> a
-                    :workflow/entry-phase :a
-                    :workflow/exit-phases [:b]}
-            result (validator/validate-dag config)]
-        (is (not (:valid? result)) "Cycle should fail validation")
-        (is (some #(re-find #"cycle" %) (:errors result))
-            "Should report cycle")))
-
   (testing "Non-existent phase reference fails validation"
     (let [config {:workflow/id :test
                   :workflow/version "1.0.0"
