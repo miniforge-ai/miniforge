@@ -433,7 +433,7 @@ Secrets MUST be injected into the capsule at BOOTSTRAP time as:
 - Environment variables (`:scope :env`)
 - Files at a declared path (`:scope :file`)
 
-Secrets MUST NOT be:
+Secret **values** MUST NOT be:
 
 - Written into image layers
 - Present in any exported artifact
@@ -442,9 +442,9 @@ Secrets MUST NOT be:
 The last of these is **N3 §8's contract**, inherited here rather than restated:
 N3 §8.1 forbids emitting a credential at all, §8.2 fixes the `"[REDACTED]"`
 marker, and N6 §7.2 applies both to bundles. This section adds only the
-capsule-specific rule that a secret's *name* and *scope* MAY be recorded so an
-auditor can see which secrets a capsule was granted without seeing their
-values.
+capsule-specific rule that a secret's *name* and *scope* MAY be recorded — the
+prohibition above is on values, not on the fact that a secret was granted, so
+an auditor can see which secrets a capsule held without seeing any of them.
 
 Capsule teardown at DESTROY time MUST ensure:
 
