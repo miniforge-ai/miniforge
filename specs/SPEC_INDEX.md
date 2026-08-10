@@ -6,7 +6,7 @@
 
 # miniforge Specification Index
 
-**Version:** 0.21.0-draft
+**Version:** 0.22.0-draft
 **Date:** 2026-08-10
 **Status:** Living specification during OSS development
 
@@ -611,6 +611,17 @@ Normative specs are enforced by:
 
 ## Version History
 
+- **0.22.0-draft** (2026-08-10) - Delta-spec completion pass across all seven deltas. Metadata was
+  carried three different ways — a core-style header block (N11-delta), a bulleted list under the
+  H1 (the four N5 deltas), and a `## Spec metadata` section (N2-delta, N4-delta) — and
+  N4-delta had no version anywhere. All normalized to the header form used by N1–N15, with Spec ID,
+  Amends and Related preserved. Conformance requirement IDs and test obligations added to the six
+  deltas carrying MUSTs: `N2D.CK.*`, `N5D1.SV.*`, `N5D2.SC.*`, `N5D3.OE.*`, `N5D4.AE.*`,
+  `N11D.RA.*`. N5-delta-3's second `§3.6` renumbered to `§3.7` — it duplicated the pack-management
+  producer's number, and both inbound references mean the producer. **N4-delta contains no RFC 2119
+  keyword at all** and so states no requirements; a Status subsection records that it is effectively
+  informative until its requirements are stated or it is reclassified, and names the two open
+  dispositions rather than choosing one.
 - **0.21.0-draft** (2026-08-10) - N12–N15 completion pass. Conformance requirement IDs and test
   obligations added to all four (`N12.CE.*`, `N13.PI.*`, `N14.WS.*`, `N15.CH.*`), plus Annex A on
   each. **N14 §9.1** declared ten `workspace/*` types as required N3 events and none is registered
