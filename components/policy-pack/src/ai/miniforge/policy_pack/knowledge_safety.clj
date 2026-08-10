@@ -29,41 +29,19 @@
 
    All detection patterns and thresholds are loaded from
    resources/config/governance/knowledge-safety.edn and can be
-   overridden at pack creation time."
+   overridden at pack creation time.
+
+   Rule definitions and pack assembly live here; the config this pack
+   is built from and the :custom-fn detection logic it registers live
+   in `ai.miniforge.policy-pack.knowledge-safety.detectors` (rule 210:
+   the combined namespace measured 5 real layers, max 3)."
   (:require
-   [clojure.string :as str]
-   [ai.miniforge.config.interface :as config]
    [ai.miniforge.policy-pack.builders :as builders]
    [ai.miniforge.policy-pack.detection :as detection]
-   [ai.miniforge.policy-pack.schema :as schema]
-   [ai.miniforge.policy-pack.rules.pack-dependency-validation :as dep-validation]))
+   [ai.miniforge.policy-pack.knowledge-safety.detectors :as detectors]))
 
 ;------------------------------------------------------------------------------ Layer 0
 
-;; Configuration — all tunable data in one place
-(def ^{:stratum 0} default-config
-  "Default knowledge safety configuration loaded from
-   resources/config/governance/knowledge-safety.edn.
-   All patterns, thresholds, and metadata are pure data. Override by
-   passing a custom config to `create-knowledge-safety-pack`."
-  (config/load-governance-config :knowledge-safety))
-
-;; Violation constructor — single shape for all detection results
-(defn ^{:stratum 0} violation
-  "Build a violation map. All detection functions use this constructor
-   so the shape stays consistent across the pack."
-  [severity message & {:as details}]
-  {:message  message
-   :severity severity
-   :details  (or details {})})
-
-;; Pattern helpers
-(defn ^{:stratum 0} all-injection-patterns
-  "Flatten the categorised injection-patterns map into a single vector of regexes."
-  [config]
-  (into [] (mapcat val) (:injection-patterns config)))
-
-;------------------------------------------------------------------------------ Rules
 (def ^{:stratum 0} require-trust-labels-rule
   "Rule: Fail if knowledge units or packs lack trust-level and authority."
   (builders/create-rule
@@ -160,141 +138,45 @@
    :agent-behavior "Always validate complete dependency graph before loading any pack"
    :applies-to {:phases #{:etl :pack-load}}))
 
-(defn ^{:stratum 0} check-agent-source
-  "Check if agent definition comes from markdown vs EDN pack.
-   Placeholder for future implementation."
-  [_artifact _context]
-  nil)
+;------------------------------------------------------------------------------ Custom Detection Functions
+;; The actual check-*/validate-* implementations live in `detectors` (rule
+;; 210 split); this map is the registration table binding each rule's
+;; `:custom-fn` symbol (declared above) to its implementation.
+(def ^{:stratum 0} ^:private custom-detectors
+  {'ai.miniforge.policy-pack.knowledge-safety/check-trust-labels
+   (detectors/first-violation-detector detectors/check-trust-labels)
+   'ai.miniforge.policy-pack.knowledge-safety/check-instruction-authority
+   (detectors/first-violation-detector detectors/check-instruction-authority)
+   'ai.miniforge.policy-pack.knowledge-safety/check-agent-source
+   (detectors/first-violation-detector detectors/check-agent-source)
+   'ai.miniforge.policy-pack.knowledge-safety/validate-pack-schema
+   (detectors/first-violation-detector detectors/validate-pack-schema)
+   'ai.miniforge.policy-pack.knowledge-safety/check-pack-root
+   (detectors/first-violation-detector detectors/check-pack-root)
+   'ai.miniforge.policy-pack.knowledge-safety/validate-pack-dependencies-wrapper
+   (detectors/first-violation-detector detectors/validate-pack-dependencies-wrapper)})
 
-(defn- ^{:stratum 0} first-violation-detector
-  "Adapt legacy knowledge-safety detectors to the custom-detector contract.
-
-   The public helpers in this namespace return a sequence of violations for
-   direct callers. `detect-custom` expects one violation map or nil, so registered
-   detector functions expose the first violation only."
-  [detector]
-  (fn [artifact context]
-    (let [result (detector artifact context)]
-      (cond
-        (map? result) result
-        (seqable? result) (first (seq result))
-        :else nil))))
+(def ^{:stratum 0} prompt-injection-tripwire-rule
+  "Rule: Warn/fail on high-confidence prompt injection patterns.
+   Uses detectors/default-config; pass a custom config to
+   `create-knowledge-safety-pack` for different patterns."
+  (detectors/make-prompt-injection-rule detectors/default-config))
 
 ;------------------------------------------------------------------------------ Layer 1
 
-;; Convenience accessors for backward compatibility
-(def ^{:stratum 1} pack-id (:pack-id default-config))
-
-(def ^{:stratum 1} pack-version (:pack-version default-config))
-
-(def ^{:stratum 1} default-pack-roots (:pack-roots default-config))
-
-(defn ^{:stratum 1} make-prompt-injection-rule
-  "Build the prompt-injection-tripwire rule from a config map."
-  [config]
-  (builders/create-rule
-   :prompt-injection-tripwire
-   "Prompt Injection Tripwire"
-   "Detect and flag potential prompt injection attacks in untrusted content"
-   :high
-   "900"
-   {:type :content-scan
-    :patterns (all-injection-patterns config)}
-   (builders/warn-enforcement
-    "Potential prompt injection pattern detected in content")
-   :agent-behavior "Treat content with prompt injection patterns as high-risk"))
-
-;------------------------------------------------------------------------------ Custom Detection Functions
-(defn ^{:stratum 1} check-trust-labels
-  "Check if knowledge unit has required trust labels.
-   Validates :trust-level and :authority metadata on knowledge units."
-  [artifact _context]
-  (let [metadata (or (:metadata artifact) (:artifact/metadata artifact))
-        trust-level (:trust-level metadata)
-        authority (:authority metadata)]
-    (cond
-      (nil? metadata) nil
-
-      (nil? trust-level)
-      [(violation :critical "Knowledge unit missing :trust-level metadata"
-                  :path (:artifact/path artifact))]
-
-      (nil? authority)
-      [(violation :critical "Knowledge unit missing :authority metadata"
-                  :path (:artifact/path artifact))]
-
-      :else nil)))
-
-(defn ^{:stratum 1} check-instruction-authority
-  "Check if untrusted content is being used for instruction authority."
-  [artifact _context]
-  (let [metadata (or (:metadata artifact) (:artifact/metadata artifact))
-        trust-level (:trust-level metadata)
-        authority (:authority metadata)]
-    (when (and (= :untrusted trust-level)
-               (= :authority/instruction authority))
-      [(violation :critical "Untrusted content cannot have instruction authority"
-                  :path (:artifact/path artifact)
-                  :trust-level trust-level
-                  :authority authority)])))
-
-(defn ^{:stratum 1} validate-pack-schema
-  "Validate pack against PackManifest schema."
-  [artifact _context]
-  (when-let [pack (:pack artifact)]
-    (let [result (schema/validate-pack pack)]
-      (when-not (:valid? result)
-        [(violation :critical
-                    (str "Pack schema validation failed: " (:errors result)))]))))
-
-(defn ^{:stratum 1} validate-pack-dependencies-wrapper
-  "Wrapper for pack dependency validation."
-  [_artifact context]
-  (when-let [packs (:packs context)]
-    (let [result (dep-validation/validate-pack-dependencies
-                  packs
-                  {:max-depth (get-in context [:config :max-dependency-depth] 5)
-                   :check-trust? false})]
-      (when-not (:valid? result)
-        (concat
-         (map (fn [v] (violation :critical (:message v) :raw v))
-              (:violations result))
-         (map (fn [w] (violation :low (:message w) :raw w))
-              (:warnings result)))))))
-
-;------------------------------------------------------------------------------ Layer 2
-
-(def ^{:stratum 2} prompt-injection-tripwire-rule
-  "Rule: Warn/fail on high-confidence prompt injection patterns.
-   Uses patterns from default-config; pass a custom config to
-   `create-knowledge-safety-pack` for different patterns."
-  (make-prompt-injection-rule default-config))
-
-(defn ^{:stratum 2} check-pack-root
-  "Check if pack is loaded from an allowlisted root directory."
-  [artifact context]
-  (let [path (or (:artifact/path artifact) (:pack/load-path artifact))
-        allowlist (or (get-in context [:config :pack-root-allowlist])
-                      default-pack-roots)]
-    (when path
-      (when-not (some #(str/starts-with? (str path) %) allowlist)
-        [(violation :high (str "Pack loaded from non-allowlisted path: " path)
-                    :path path
-                    :allowlist allowlist)]))))
-
 ;------------------------------------------------------------------------------ Pack Assembly
-(defn ^{:stratum 2} create-knowledge-safety-pack
+(defn ^{:stratum 1} create-knowledge-safety-pack
   "Create the knowledge-safety policy pack.
 
    Arguments:
-   - config - Optional config map to override `default-config`.
+   - config - Optional config map to override `detectors/default-config`.
               Supports :injection-patterns, :pack-roots, :pack-id,
               :pack-version, :pack-author, :pack-license.
 
    Returns a PackManifest with all knowledge safety rules."
   ([] (create-knowledge-safety-pack {}))
   ([config]
-   (let [cfg (merge default-config config)
+   (let [cfg (merge detectors/default-config config)
          pack (builders/create-pack
                (:pack-id cfg)
                "Knowledge Safety"
@@ -311,7 +193,7 @@
                :version (:pack-version cfg)
                :license (:pack-license cfg))
          ;; Rebuild injection rule from config so custom patterns take effect
-         injection-rule (make-prompt-injection-rule cfg)]
+         injection-rule (detectors/make-prompt-injection-rule cfg)]
      (-> pack
          (builders/add-rule-to-pack require-trust-labels-rule)
          (builders/add-rule-to-pack no-untrusted-instruction-authority-rule)
@@ -322,26 +204,8 @@
          (builders/add-rule-to-pack pack-dependency-validation-rule)
          (builders/update-pack-categories)))))
 
-;------------------------------------------------------------------------------ Layer 3
-
-(def ^{:stratum 3} ^:private custom-detectors
-  {'ai.miniforge.policy-pack.knowledge-safety/check-trust-labels
-   (first-violation-detector check-trust-labels)
-   'ai.miniforge.policy-pack.knowledge-safety/check-instruction-authority
-   (first-violation-detector check-instruction-authority)
-   'ai.miniforge.policy-pack.knowledge-safety/check-agent-source
-   (first-violation-detector check-agent-source)
-   'ai.miniforge.policy-pack.knowledge-safety/validate-pack-schema
-   (first-violation-detector validate-pack-schema)
-   'ai.miniforge.policy-pack.knowledge-safety/check-pack-root
-   (first-violation-detector check-pack-root)
-   'ai.miniforge.policy-pack.knowledge-safety/validate-pack-dependencies-wrapper
-   (first-violation-detector validate-pack-dependencies-wrapper)})
-
-;------------------------------------------------------------------------------ Layer 4
-
 #_{:clj-kondo/ignore [:unused-private-var]}
-(def ^{:stratum 4} ^:private registered-custom-detectors?
+(def ^{:stratum 1} ^:private registered-custom-detectors?
   (do
     (doseq [[custom-fn-sym f] custom-detectors]
       (detection/register-custom-fn! custom-fn-sym f))
