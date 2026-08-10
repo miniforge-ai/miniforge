@@ -60,4 +60,9 @@
   ;; repo under java.io.tmpdir (hermetic — its own config scopes, no
   ;; hooks, deleted after) because the detection it pins only
   ;; reproduces against real merge state.
-  "commit-budget-test"]}
+  "commit-budget-test"
+  ;; Pins the stratum-lint gate's merge-commit skip (same exemption,
+  ;; sharing commit-budget's merge detection) and that non-merge
+  ;; commits still dispatch to autofix. Pure with-redefs — no
+  ;; subprocess, no filesystem.
+  "lint-test"]}

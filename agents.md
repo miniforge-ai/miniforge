@@ -136,7 +136,14 @@ Two related, previously-missing gates, added 2026-07-26:
   for the override and dilutes its signal for the cases it exists for.
   `bb pr-budget` still covers the whole PR diff in CI, and is not
   affected: it diffs merge-base..head, so content the branch merged in
-  from the base is already excluded.
+  from the base is already excluded. The same exemption covers the
+  stratum-lint gate (`lint/stratum-staged`, added 2026-08-10, sharing
+  `commit-budget/merge-in-progress?`): a merge stages files from the
+  merged-in branch the merging author never touched, and a file
+  legitimately mid-way through its own namespace-split wave on main
+  (still SL003 there by design) was blocking unrelated merges,
+  forcing `MINIFORGE_STRATUM_BUDGET_MODE=warn`. Incoming files were
+  stratum-linted on their own PRs; CI lints the PR's own diff.
 - **Adversarial self-review before every push**, not just for PRs that
   trip the size gate. Read the actual diff like a skeptical reviewer,
   not the tool's own "this should be safe" framing.
