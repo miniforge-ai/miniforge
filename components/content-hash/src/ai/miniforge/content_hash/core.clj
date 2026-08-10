@@ -159,6 +159,15 @@
    key is left exactly as it was, so no existing map's ordering or
    rendering moves.
 
+   A map holding two instant keys for the same moment — one `Instant`,
+   one `Date` — is refused. They are two distinct keys to Clojure but
+   one key once normalized, so one entry would overwrite the other and
+   which one survived would follow the source map's iteration order:
+   `{i :a, d :b}` and `{d :b, i :a}` are `=`, and would hash
+   differently. Refusing keeps the guarantee in `canonical-edn`'s
+   docstring — equal inputs, equal output — rather than dropping an
+   entry quietly.
+
    One self-recursive walk, replacing the mutually-recursive
    `->canonical`/`canonicalize-map`/`canonicalize-coll` trio that
    referred to each other through a `declare`. Stratum-lint reports
@@ -169,11 +178,19 @@
    map entry and a set are also collections."
   [x]
   (cond
-    (map? x)       (into (sorted-map-by canonical-compare)
-                         (map (fn [[k v]]
-                                [(if (inst? k) (inst->literal k) k)
-                                 (->canonical v)]))
-                         x)
+    (map? x)       (reduce-kv
+                    (fn [acc k v]
+                      (let [k' (if (inst? k) (inst->literal k) k)]
+                        (when (and (not (identical? k' k)) (contains? acc k'))
+                          ;; pr-str, not str: a TaggedLiteral's toString is
+                          ;; its identity hash — the very thing this
+                          ;; namespace exists to keep out of output.
+                          (throw (IllegalArgumentException.
+                                  (str "Map has two instant keys for one moment: "
+                                       (pr-str k')))))
+                        (assoc acc k' (->canonical v))))
+                    (sorted-map-by canonical-compare)
+                    x)
     (set? x)       (into (sorted-set-by canonical-compare) (map ->canonical) x)
     (map-entry? x) [(->canonical (key x)) (->canonical (val x))]
     (coll? x)      (mapv ->canonical x)

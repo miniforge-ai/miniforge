@@ -118,6 +118,23 @@
       (testing label
         (is (= (Date/from now) (:at (edn/read-string (ch/canonical-edn {:at t})))))))))
 
+(deftest ^{:stratum 1} two-instant-keys-for-one-moment-are-refused
+  ;; Copilot caught this on #1744. Normalizing keys turns an Instant key
+  ;; and a Date key for the same moment into one key, so one entry
+  ;; overwrites the other and the survivor follows the source map's
+  ;; iteration order — two `=` maps hashing differently, which is the
+  ;; guarantee `canonical-edn` advertises. Refused rather than dropped.
+  (let [d (Date/from now)]
+    (testing "the two orderings really are one map, so silently collapsing would be a contract break"
+      (is (= (array-map now :a d :b) (array-map d :b now :a))))
+    (testing "an ambiguous map throws instead of dropping an entry"
+      (doseq [m [(array-map now :a d :b) (array-map d :b now :a)]]
+        (is (thrown-with-msg? IllegalArgumentException
+                              #"two instant keys for one moment"
+                              (ch/content-hash m)))))
+    (testing "one instant key is still fine, at either type"
+      (is (= (ch/canonical-edn {now :v}) (ch/canonical-edn {d :v}))))))
+
 (deftest ^{:stratum 1} instants-normalize-at-any-depth
   (testing "nested, in sequences, in sets, and as a map key"
     (is (= (ch/canonical-edn {:a {:b [now]}})
