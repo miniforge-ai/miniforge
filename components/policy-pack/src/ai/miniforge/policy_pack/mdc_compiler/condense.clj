@@ -33,7 +33,7 @@
 
 ;------------------------------------------------------------------------------ Layer 0
 
-(defn ^{:stratum 0} keep-whole-sentences
+(defn- ^{:stratum 0} keep-whole-sentences
   "Largest prefix of `text` made of whole sentences (split on `.!?` +
    whitespace) that fits within `target-length`, rejoined with single
    spaces. Falls back to a hard character cut ONLY when the first
