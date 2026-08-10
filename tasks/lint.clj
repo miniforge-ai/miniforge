@@ -19,6 +19,7 @@
   (:require
    [babashka.process :as p]
    [clojure.string :as str]
+   [commit-budget]
    [stratum]))
 
 ;------------------------------------------------------------------------------ Layer 0
@@ -98,16 +99,28 @@
    working-tree file, and re-staging it whole would silently include
    work-in-progress the developer deliberately left unstaged. Mechanics
    live in the `stratum` namespace (rule 210: this dispatcher plus that
-   namespace's own chain would be 4 real layers in one file)."
+   namespace's own chain would be 4 real layers in one file).
+
+   Mid-merge, returns before touching the index at all — the same
+   exemption `bb commit-budget` applies, via the same
+   `commit-budget/merge-in-progress?`. A merge commit's staged set
+   includes every file arriving from the merged-in branch, which the
+   merging author did not touch and which was already gated on the PR
+   that introduced it; a file legitimately mid-way through its own
+   namespace-split wave on main (SL003 there by design) must not block
+   an unrelated merge. Skipping before the file listing keeps the skip
+   total: no incoming file is read, autofixed, or re-staged."
   []
-  (let [files (->> (concat (staged-by-ext ".clj")
-                           (staged-by-ext ".cljc"))
-                   (remove (fn [f] (str/starts-with? f ".clj-kondo/"))))]
-    (if (seq files)
-      (let [dirty (unstaged-files)
-            unsafe (filter dirty files)
-            safe (remove dirty files)]
-        (println "🔍 Stratum-linting" (count files) "Clojure file(s)...")
-        (when (seq unsafe) (stratum/lint-only-and-fail! unsafe))
-        (when (seq safe) (stratum/autofix-and-restage! safe)))
-      (println "✓ No Clojure files to stratum-lint"))))
+  (if (commit-budget/merge-in-progress?)
+    (println "🔍 stratum-lint: skipped (merge in progress) — incoming files were gated on their own PRs.")
+    (let [files (->> (concat (staged-by-ext ".clj")
+                             (staged-by-ext ".cljc"))
+                     (remove (fn [f] (str/starts-with? f ".clj-kondo/"))))]
+      (if (seq files)
+        (let [dirty (unstaged-files)
+              unsafe (filter dirty files)
+              safe (remove dirty files)]
+          (println "🔍 Stratum-linting" (count files) "Clojure file(s)...")
+          (when (seq unsafe) (stratum/lint-only-and-fail! unsafe))
+          (when (seq safe) (stratum/autofix-and-restage! safe)))
+        (println "✓ No Clojure files to stratum-lint")))))

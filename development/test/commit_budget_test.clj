@@ -44,6 +44,8 @@
 
 (def ^{:stratum 0} check-commit-budget! (resolve 'commit-budget/check-commit-budget!))
 
+(def ^{:stratum 0} override-rationale (resolve 'commit-budget/override-rationale))
+
 (def ^{:stratum 0} default-budget @(resolve 'commit-budget/default-budget))
 
 (defn ^{:stratum 0} ^:private unread-staged-diff
@@ -145,12 +147,21 @@
     (= "true" (str/trim out))))
 
 (defn ^{:stratum 1} ^:private gate-output
-  "Stdout from one `check-commit-budget!` run over a stubbed merge state
-   and `staged-diff`, so the gate's decision can be read without a real
-   repo or index."
-  [merging? staged-diff-fn budget]
+  "Stdout from one `check-commit-budget!` run over a stubbed merge state,
+   `staged-diff`, and override rationale, so the gate's decision can be
+   read without a real repo or index.
+
+   `override-rationale` is stubbed to `rationale` (pass nil for the
+   non-overridden path) rather than left reading the process
+   environment: this test runs inside the pre-commit hook, where a
+   developer legitimately using
+   `MINIFORGE_COMMIT_BUDGET_OVERRIDE='<why>' git commit ...` would
+   otherwise flip every gate assertion onto the override branch and
+   fail the very commit the override was meant to let through."
+  [merging? staged-diff-fn budget rationale]
   (with-redefs-fn {merge-in-progress? (constantly merging?)
-                   staged-diff        staged-diff-fn}
+                   staged-diff        staged-diff-fn
+                   override-rationale (constantly rationale)}
     #(with-out-str (check-commit-budget! budget))))
 
 (deftest ^{:stratum 1} resource-data-files-excluded-test
@@ -260,14 +271,27 @@
 
 (deftest ^{:stratum 2} merge-skips-the-budget-test
   (testing "mid-merge the gate skips without reading the index at all"
-    (let [out (gate-output true unread-staged-diff default-budget)]
+    (let [out (gate-output true unread-staged-diff default-budget nil)]
       (is (str/includes? out "skipped (merge in progress)"))
       (is (not (str/includes? out "lines OK"))))))
 
 (deftest ^{:stratum 2} non-merge-commit-still-budgeted-test
   (testing "outside a merge the gate still reports against the budget"
-    (let [out (gate-output false (constantly [in-budget-entry]) default-budget)]
+    (let [out (gate-output false (constantly [in-budget-entry]) default-budget nil)]
       (is (str/includes? out (format "%d / %d lines OK"
                                      (count (:added in-budget-entry))
                                      default-budget)))
       (is (not (str/includes? out "skipped"))))))
+
+(deftest ^{:stratum 2} override-bypasses-budget-test
+  (testing "with a rationale set the gate reports OVERRIDDEN and echoes it"
+    (let [out (gate-output false (constantly [in-budget-entry]) default-budget
+                           "generated migration")]
+      (is (str/includes? out "OVERRIDDEN"))
+      (is (str/includes? out "rationale: generated migration"))
+      (is (not (str/includes? out "lines OK")))))
+  (testing "over budget, the override still passes but warns"
+    (let [out (gate-output false (constantly [in-budget-entry]) 1
+                           "generated migration")]
+      (is (str/includes? out "OVERRIDDEN"))
+      (is (str/includes? out "budget intentionally bypassed")))))
