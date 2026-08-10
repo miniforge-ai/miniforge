@@ -26,8 +26,8 @@
    `inst->literal`."
   (:import
    [java.time Instant ZoneOffset]
-   [java.time.format DateTimeFormatter]
-   [java.util Date]))
+   [java.time.format DateTimeFormatter DecimalStyle]
+   [java.util Date Locale]))
 
 ;------------------------------------------------------------------------------ Layer 0
 
@@ -39,9 +39,15 @@
    era, so 1 BC and 2 AD both print `0002` — two distinct instants
    collapsing to one digest, which is the defect this namespace exists
    to keep out. `uuuu` is the proleptic year and is identical for every
-   AD year."
-  (.withZone (DateTimeFormatter/ofPattern "uuuu-MM-dd'T'HH:mm:ss")
-             ZoneOffset/UTC))
+   AD year.
+
+   Locale and decimal style are pinned. `ofPattern` otherwise captures
+   `Locale/getDefault` at load time, and a locale whose numbering system
+   is not `latn` renders non-ASCII digits — which would make a content
+   hash depend on the machine that computed it."
+  (-> (DateTimeFormatter/ofPattern "uuuu-MM-dd'T'HH:mm:ss" Locale/ROOT)
+      (.withZone ZoneOffset/UTC)
+      (.withDecimalStyle DecimalStyle/STANDARD)))
 
 (defn- ^{:stratum 0} inst-fraction
   "Fractional-seconds digits for `nanos`.
@@ -56,12 +62,23 @@
 
    Six or nine digits only when finer precision is present:
    `Instant/now` carries microseconds on current JVMs, and truncating
-   them would let distinct instants collide."
+   them would let distinct instants collide.
+
+   `String/format` under `Locale/ROOT`, never `clojure.core/format`,
+   which uses the default locale: under a numbering system such as
+   `hi-IN-u-nu-deva` the padded digits come back Devanagari and the
+   digest changes with the machine. Demonstrated, not assumed —
+   `rendering-is-locale-independent` pins it."
   ^String [nanos]
   (cond
-    (zero? (rem nanos 1000000)) (format "%03d" (quot nanos 1000000))
-    (zero? (rem nanos 1000))    (format "%06d" (quot nanos 1000))
-    :else                       (format "%09d" nanos)))
+    (zero? (rem nanos 1000000))
+    (String/format Locale/ROOT "%03d" (object-array [(quot nanos 1000000)]))
+
+    (zero? (rem nanos 1000))
+    (String/format Locale/ROOT "%06d" (object-array [(quot nanos 1000)]))
+
+    :else
+    (String/format Locale/ROOT "%09d" (object-array [nanos]))))
 
 ;; SHA-256 digest
 (defn- ^{:stratum 0} sha256-hex

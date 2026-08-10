@@ -58,6 +58,25 @@
       (is (not= (ch/canonical-edn {:at bc}) (ch/canonical-edn {:at ad})))
       (is (not= (ch/content-hash {:at bc}) (ch/content-hash {:at ad}))))))
 
+(deftest ^{:stratum 0} rendering-is-locale-independent
+  ;; Copilot round 4. `clojure.core/format` and a bare
+  ;; `DateTimeFormatter/ofPattern` both take the default locale, so a
+  ;; numbering system other than `latn` rendered the padded fraction in
+  ;; its own digits — `.789` came back `.७८९` under hi-IN-u-nu-deva and
+  ;; the digest changed with the machine that computed it.
+  (let [deva (java.util.Locale/forLanguageTag "hi-IN-u-nu-deva")
+        orig (java.util.Locale/getDefault)
+        v    {:at (Instant/parse "2026-08-01T12:34:56.789Z")}
+        base (ch/canonical-edn v)]
+    (testing "a non-latn default locale changes neither the rendering nor the digest"
+      (try
+        (java.util.Locale/setDefault deva)
+        (is (= base (ch/canonical-edn v)))
+        (is (re-find #"\.789-00:00" (ch/canonical-edn v)))
+        (finally (java.util.Locale/setDefault orig))))
+    (testing "the locale really was restored, so later tests are unaffected"
+      (is (= orig (java.util.Locale/getDefault))))))
+
 (deftest ^{:stratum 0} comparator-equal-non-instants-keep-their-old-behavior
   ;; The refusals above must not widen into the pre-existing collapse of
   ;; keys that are distinct under `=` but equal under the comparator.
