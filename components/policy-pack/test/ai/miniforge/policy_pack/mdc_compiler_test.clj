@@ -32,6 +32,7 @@
    [clojure.test :refer [deftest testing is are]]
    [clojure.string :as str]
    [ai.miniforge.policy-pack.mdc-compiler :as sut]
+   [ai.miniforge.policy-pack.mdc-compiler.dewey :as dewey]
    [ai.miniforge.policy-pack.mdc-compiler.frontmatter :as frontmatter]))
 
 ;------------------------------------------------------------------------------ Layer 0
@@ -126,7 +127,7 @@
 (deftest ^{:stratum 0} dewey->category-id-test
   (testing "maps dewey codes to category IDs"
     (are [dewey expected]
-         (= expected (sut/dewey->category-id dewey))
+         (= expected (dewey/dewey->category-id dewey))
       "001" "foundations"
       "100" "tools"
       "210" "languages"
@@ -139,17 +140,17 @@
       "900" "meta"))
 
   (testing "unknown dewey returns 'other'"
-    (is (= "other" (sut/dewey->category-id "xyz")))
-    (is (= "other" (sut/dewey->category-id "")))))
+    (is (= "other" (dewey/dewey->category-id "xyz")))
+    (is (= "other" (dewey/dewey->category-id "")))))
 
 (deftest ^{:stratum 0} dewey->category-label-test
   (testing "maps dewey codes to human labels"
-    (is (= "Foundations & Core Principles" (sut/dewey->category-label "001")))
-    (is (= "Languages" (sut/dewey->category-label "210")))
-    (is (= "Workflows & Processes" (sut/dewey->category-label "715"))))
+    (is (= "Foundations & Core Principles" (dewey/dewey->category-label "001")))
+    (is (= "Languages" (dewey/dewey->category-label "210")))
+    (is (= "Workflows & Processes" (dewey/dewey->category-label "715"))))
 
   (testing "unknown dewey returns 'Other'"
-    (is (= "Other" (sut/dewey->category-label "xyz")))))
+    (is (= "Other" (dewey/dewey->category-label "xyz")))))
 
 ;; ============================================================================
 ;; Slug → rule ID tests
@@ -524,46 +525,46 @@
 
 (deftest ^{:stratum 1} dewey->phases-test
   (testing "foundations (0-99) → all phases"
-    (is (= all-phases (sut/dewey->phases "001")))
-    (is (= all-phases (sut/dewey->phases "000")))
-    (is (= all-phases (sut/dewey->phases "099"))))
+    (is (= all-phases (dewey/dewey->phases "001")))
+    (is (= all-phases (dewey/dewey->phases "000")))
+    (is (= all-phases (dewey/dewey->phases "099"))))
 
   (testing "tools (100-199) → implement + review"
-    (is (= #{:implement :review} (sut/dewey->phases "100"))))
+    (is (= #{:implement :review} (dewey/dewey->phases "100"))))
 
   (testing "languages (200-299) → implement + review"
-    (is (= #{:implement :review} (sut/dewey->phases "210"))))
+    (is (= #{:implement :review} (dewey/dewey->phases "210"))))
 
   (testing "frameworks (300-399) → plan + implement + review"
-    (is (= #{:plan :implement :review} (sut/dewey->phases "300"))))
+    (is (= #{:plan :implement :review} (dewey/dewey->phases "300"))))
 
   (testing "testing (400-499) → implement + verify"
-    (is (= #{:implement :verify} (sut/dewey->phases "400"))))
+    (is (= #{:implement :verify} (dewey/dewey->phases "400"))))
 
   (testing "operations (500-599) → implement + review"
-    (is (= #{:implement :review} (sut/dewey->phases "500"))))
+    (is (= #{:implement :review} (dewey/dewey->phases "500"))))
 
   (testing "documentation (600-699) → implement + review"
-    (is (= #{:implement :review} (sut/dewey->phases "600"))))
+    (is (= #{:implement :review} (dewey/dewey->phases "600"))))
 
   (testing "workflows (700-799) → all phases"
-    (is (= all-phases (sut/dewey->phases "715"))))
+    (is (= all-phases (dewey/dewey->phases "715"))))
 
   (testing "project (800-899) → implement + review"
-    (is (= #{:implement :review} (sut/dewey->phases "800"))))
+    (is (= #{:implement :review} (dewey/dewey->phases "800"))))
 
   (testing "meta (900-999) → empty set (never injected)"
-    (is (= #{} (sut/dewey->phases "900")))
-    (is (= #{} (sut/dewey->phases "999"))))
+    (is (= #{} (dewey/dewey->phases "900")))
+    (is (= #{} (dewey/dewey->phases "999"))))
 
   (testing "boundary values: end of one range, start of next"
-    (is (= all-phases (sut/dewey->phases "99")))
-    (is (= #{:implement :review} (sut/dewey->phases "100"))))
+    (is (= all-phases (dewey/dewey->phases "99")))
+    (is (= #{:implement :review} (dewey/dewey->phases "100"))))
 
   (testing "unparseable dewey falls back to default phases"
-    (is (= #{:implement :review} (sut/dewey->phases "xyz")))
-    (is (= #{:implement :review} (sut/dewey->phases "")))
-    (is (= #{:implement :review} (sut/dewey->phases nil)))))
+    (is (= #{:implement :review} (dewey/dewey->phases "xyz")))
+    (is (= #{:implement :review} (dewey/dewey->phases "")))
+    (is (= #{:implement :review} (dewey/dewey->phases nil)))))
 
 ;; ============================================================================
 ;; mdc->rule compilation tests
