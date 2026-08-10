@@ -24,41 +24,43 @@
 
    Designed to be called by the ETL task (bb standards:pack) at build time.
 
-   Slice 3/6 of a rule 210 split train (SL003: this namespace measured
+   Slice 4/6 of a rule 210 split train (SL003: this namespace measured
    9 real layers, max 3 — same approach as the dag-orchestrator split,
    miniforge#1485, and the workflow-runner split, miniforge#1662).
-   Slice 1 (miniforge#1729) moved the frontmatter scalar-value grammar
-   to `mdc-compiler.frontmatter-values`; slice 2 (miniforge#1732) moved
-   the frontmatter line-grammar to `mdc-compiler.frontmatter`. This
-   slice moves the text-condensation chain (whole-sentence truncation,
-   bullet detection, prose/bullet condensation) to
-   `mdc-compiler.condense` — the chain that was the real bottleneck:
-   `condense-to-length` alone accounted for 4 of the file's 7 real
-   layers. The file now measures 5 real layers; the surviving
-   critical path is the Dewey-range chain (`find-dewey-range` →
-   `dewey->phases`/`category-id`/`category-label` →
-   `build-categories`/`mdc->rule` → `compile-standards-pack`), which
-   the remaining slices (Dewey-range extraction, then rule-config
-   builders) target directly.
+   Slices 1-2 (miniforge#1729/#1732) moved the frontmatter grammar out;
+   slice 3 (miniforge#1733) moved the text-condensation chain out. This
+   slice moves the Dewey-range table and its lookups (`find-dewey-range`,
+   `dewey->phases`/`category-id`/`category-label`, the N4 taxonomy
+   export) to `mdc-compiler.dewey` — the chain that was the bottleneck
+   after slice 3. `export-canonical-taxonomy` is re-exported here as a
+   thin delegating var (not just moved) because
+   `ai.miniforge.policy-pack.interface` and this component's
+   `taxonomy_test.clj` reference `mdc-compiler/export-canonical-taxonomy`
+   directly — real external fan-in the original zero-fan-in check
+   (which only grepped the underscored file-path spelling, not the
+   hyphenated namespace symbol actually used in `:require` forms)
+   missed. The file now measures 4 real layers; the surviving critical
+   path runs through two independent branches feeding `mdc->rule` —
+   `build-remediation-config`'s rule-config chain and (after slice 5)
+   `extract-agent-behavior`'s chain — both must move before the parent
+   drops to budget.
 
    Layer 0: Parsing/config primitives — group-dotted-keys,
-     build-exclude-context, build-detection-config, dewey-ranges,
-     default-phases, slug->rule-id/title, agent-behavior
-     paragraph/section helpers, format-pack-version,
-     validate-no-duplicate-slugs, parse-mdc, condense-to-length
-   Layer 1: build-remediation-config, find-dewey-range,
-     export-canonical-taxonomy, extract-agent-behavior
-   Layer 2: dewey->phases/category-id/category-label
-   Layer 3: build-categories, mdc->rule
-   Layer 4: compile-standards-pack
+     build-exclude-context, build-detection-config, slug->rule-id/title,
+     agent-behavior paragraph/section helpers, format-pack-version,
+     validate-no-duplicate-slugs, parse-mdc, condense-to-length,
+     export-canonical-taxonomy, build-categories
+   Layer 1: build-remediation-config, extract-agent-behavior
+   Layer 2: mdc->rule
+   Layer 3: compile-standards-pack
 
    Related:
      work/designs/mdc-to-pack-field-mapping.edn — authoritative field mapping spec
      components/policy-pack/src/.../schema.clj  — Rule schema (target format)
      .standards/                                 — source .mdc files (input)"
   (:require
-   [ai.miniforge.coerce.interface :as coerce]
    [ai.miniforge.policy-pack.mdc-compiler.condense :as condense]
+   [ai.miniforge.policy-pack.mdc-compiler.dewey :as dewey]
    [ai.miniforge.policy-pack.mdc-compiler.frontmatter :as frontmatter]
    [ai.miniforge.policy-pack.schema-types :as schema-types]
    [ai.miniforge.policy-pack.schema-validation :as schema-validation]
@@ -118,28 +120,6 @@
   (set schema-types/enforcement-actions))
 
 ;; Field mapping transforms
-;; ── Dewey code → phases ─────────────────────────────────────────────────────
-;;
-;; This table lives ONLY in the compiler. After compilation, phases are plain
-;; keyword sets on the rule map. The runtime product never sees Dewey codes.
-(def ^{:stratum 0} ^:private dewey-ranges
-  "Dewey ranges with category metadata and applicable phase sets.
-   Each entry: {:lo <int> :hi <int> :id <string> :label <string> :phases <set>}"
-  [{:lo 0   :hi 99  :id "foundations"   :label "Foundations & Core Principles"     :phases #{:plan :implement :review :verify :release}}
-   {:lo 100 :hi 199 :id "tools"         :label "Development Environment & Tools"   :phases #{:implement :review}}
-   {:lo 200 :hi 299 :id "languages"     :label "Languages"                         :phases #{:implement :review}}
-   {:lo 300 :hi 399 :id "frameworks"    :label "Frameworks & Platforms"             :phases #{:plan :implement :review}}
-   {:lo 400 :hi 499 :id "testing"       :label "Testing & Quality"                 :phases #{:implement :verify}}
-   {:lo 500 :hi 599 :id "operations"    :label "Operations & Infrastructure"       :phases #{:implement :review}}
-   {:lo 600 :hi 699 :id "documentation" :label "Documentation"                     :phases #{:implement :review}}
-   {:lo 700 :hi 799 :id "workflows"     :label "Workflows & Processes"             :phases #{:plan :implement :review :verify :release}}
-   {:lo 800 :hi 899 :id "project"       :label "Project-Specific"                  :phases #{:implement :review}}
-   {:lo 900 :hi 999 :id "meta"          :label "Meta & Templates"                  :phases #{}}])
-
-(def ^{:stratum 0} ^:private default-phases
-  "Fallback phases when Dewey code is outside defined ranges or unparseable."
-  #{:implement :review})
-
 ;; ── Filename slug → rule ID ─────────────────────────────────────────────────
 (defn ^{:stratum 0} slug->rule-id
   "Convert an MDC filename to a namespaced rule ID keyword.
@@ -274,6 +254,51 @@
         (condense/condense-bullets lines target-length)
         (condense/condense-prose text target-length)))))
 
+;; Canonical taxonomy export — re-exported here (not just from `dewey`)
+;; because `ai.miniforge.policy-pack.interface` and
+;; `taxonomy_test.clj` require this namespace directly and reference
+;; `mdc-compiler/export-canonical-taxonomy` by name; moving the
+;; definition without this delegating var would be a public-API break
+;; disguised as an internal reorganization.
+(def ^{:stratum 0} export-canonical-taxonomy
+  "Export the compiler's dewey-ranges as a first-class Taxonomy artifact.
+
+   This bridges the compiler's internal category table to the N4 four-artifact
+   model. The exported taxonomy is the authoritative source of truth; the
+   bundled EDN resource at resources/taxonomies/miniforge-dewey-1.0.0.edn
+   should match this output.
+
+   Returns:
+   - A valid Taxonomy map per taxonomy/Taxonomy schema.
+
+   Delegates to ai.miniforge.policy-pack.mdc-compiler.dewey/export-canonical-taxonomy."
+  dewey/export-canonical-taxonomy)
+
+;; ── Category builder ────────────────────────────────────────────────────────
+(defn- ^{:stratum 0} build-categories
+  "Build PackCategory entries from compiled rules.
+
+   Groups rules by Dewey-range-derived category and produces
+   {:category/id :category/name :category/rules} entries.
+
+   Arguments:
+   - rules - Vector of compiled rule maps
+
+   Returns:
+   - Sorted vector of PackCategory maps."
+  [rules]
+  (let [by-cat (group-by (fn [rule]
+                           (dewey/dewey->category-id (:rule/category rule)))
+                         rules)]
+    (->> by-cat
+         (map (fn [[cat-id cat-rules]]
+                {:category/id    cat-id
+                 :category/name  (dewey/dewey->category-label
+                                  (:rule/category (first cat-rules)))
+                 :category/rules (mapv :rule/id cat-rules)}))
+         (sort-by :category/id)
+         vec)))
+
 ;------------------------------------------------------------------------------ Layer 1
 
 (defn- ^{:stratum 1} build-remediation-config
@@ -298,48 +323,6 @@
         (seq excludes)
         (assoc :exclude-contexts excludes)))))
 
-(defn- ^{:stratum 1} find-dewey-range
-  "Find the dewey-ranges entry for a given Dewey code string.
-   Returns the matching range map, or nil."
-  [dewey-str]
-  (when-let [code (coerce/safe-parse-int (str/trim (str dewey-str)))]
-    (some (fn [{:keys [lo hi] :as entry}]
-            (when (and (<= lo code) (<= code hi))
-              entry))
-          dewey-ranges)))
-
-;; Canonical taxonomy export
-(defn ^{:stratum 1} export-canonical-taxonomy
-  "Export the compiler's dewey-ranges as a first-class Taxonomy artifact.
-
-   This bridges the compiler's internal category table to the N4 four-artifact
-   model. The exported taxonomy is the authoritative source of truth; the
-   bundled EDN resource at resources/taxonomies/miniforge-dewey-1.0.0.edn
-   should match this output.
-
-   Returns:
-   - A valid Taxonomy map per taxonomy/Taxonomy schema."
-  []
-  {:taxonomy/id      :miniforge/dewey
-   :taxonomy/version "1.0.0"
-   :taxonomy/title   "Miniforge Dewey Taxonomy"
-   :taxonomy/description
-   "Dewey-decimal-inspired category tree for miniforge engineering standards.
-    Ten top-level ranges (000-999) covering foundations, tools, languages,
-    frameworks, testing, operations, documentation, workflows, project, and meta."
-   :taxonomy/categories
-   (mapv (fn [{:keys [lo id label]}]
-           {:category/id    (keyword "mf.cat" id)
-            :category/code  (format "%03d-%03d" lo (+ lo 99))
-            :category/title label
-            :category/order lo})
-         dewey-ranges)
-   :taxonomy/aliases
-   (mapv (fn [{:keys [id]}]
-           {:alias/name   (keyword id)
-            :alias/target (keyword "mf.cat" id)})
-         dewey-ranges)})
-
 (defn ^{:stratum 1} extract-agent-behavior
   "Extract a concise agent behavior directive from an MDC body.
 
@@ -363,74 +346,8 @@
 
 ;------------------------------------------------------------------------------ Layer 2
 
-(defn ^{:stratum 2} dewey->phases
-  "Map a Dewey code string to a set of applicable workflow phases.
-
-   Arguments:
-   - dewey-str - Dewey code string, e.g. \"001\", \"210\", \"900\"
-
-   Returns:
-   - Set of phase keywords, e.g. #{:plan :implement :review}"
-  [dewey-str]
-  (if-let [entry (find-dewey-range dewey-str)]
-    (:phases entry)
-    default-phases))
-
-(defn ^{:stratum 2} dewey->category-id
-  "Map a Dewey code to its category ID string.
-
-   Arguments:
-   - dewey-str - Dewey code string
-
-   Returns:
-   - Category ID string (e.g. \"foundations\", \"languages\"), or \"other\"."
-  [dewey-str]
-  (if-let [entry (find-dewey-range dewey-str)]
-    (:id entry)
-    "other"))
-
-(defn ^{:stratum 2} dewey->category-label
-  "Map a Dewey code to its human-readable category label.
-
-   Arguments:
-   - dewey-str - Dewey code string
-
-   Returns:
-   - Category label string, or \"Other\"."
-  [dewey-str]
-  (if-let [entry (find-dewey-range dewey-str)]
-    (:label entry)
-    "Other"))
-
-;------------------------------------------------------------------------------ Layer 3
-
-;; ── Category builder ────────────────────────────────────────────────────────
-(defn- ^{:stratum 3} build-categories
-  "Build PackCategory entries from compiled rules.
-
-   Groups rules by Dewey-range-derived category and produces
-   {:category/id :category/name :category/rules} entries.
-
-   Arguments:
-   - rules - Vector of compiled rule maps
-
-   Returns:
-   - Sorted vector of PackCategory maps."
-  [rules]
-  (let [by-cat (group-by (fn [rule]
-                           (dewey->category-id (:rule/category rule)))
-                         rules)]
-    (->> by-cat
-         (map (fn [[cat-id cat-rules]]
-                {:category/id    cat-id
-                 :category/name  (dewey->category-label
-                                  (:rule/category (first cat-rules)))
-                 :category/rules (mapv :rule/id cat-rules)}))
-         (sort-by :category/id)
-         vec)))
-
 ;; Rule compilation
-(defn ^{:stratum 3} mdc->rule
+(defn ^{:stratum 2} mdc->rule
   "Compile a single MDC file into a policy-pack rule map.
 
    Implements the field mapping from the design spec
@@ -458,7 +375,7 @@
           always-apply (true? (get fm "alwaysApply"))
 
           ;; ── Applicability ───────────────────────────────────────────────
-          phases       (dewey->phases dewey)
+          phases       (dewey/dewey->phases dewey)
           globs        (normalize-globs (get fm "globs"))
           applies-to   (cond-> {:phases phases}
                          (seq globs) (assoc :file-globs globs))
@@ -522,9 +439,9 @@
       (merge (schema-validation/failure :rule (.getMessage e))
              {:filename filename}))))
 
-;------------------------------------------------------------------------------ Layer 4
+;------------------------------------------------------------------------------ Layer 3
 
-(defn ^{:stratum 4} compile-standards-pack
+(defn ^{:stratum 3} compile-standards-pack
   "Compile all .mdc files from a standards directory into a pack manifest.
 
    Discovers all .mdc files recursively, compiles each via mdc->rule,
@@ -612,10 +529,10 @@
   ;;     :body "# Body here"}
 
   ;; ── Dewey → phases ──────────────────────────────────────────────────────
-  (dewey->phases "001")  ;; => #{:plan :implement :review :verify :release}
-  (dewey->phases "210")  ;; => #{:implement :review}
-  (dewey->phases "900")  ;; => #{}
-  (dewey->phases "xyz")  ;; => #{:implement :review}  (default fallback)
+  (dewey/dewey->phases "001")  ;; => #{:plan :implement :review :verify :release}
+  (dewey/dewey->phases "210")  ;; => #{:implement :review}
+  (dewey/dewey->phases "900")  ;; => #{}
+  (dewey/dewey->phases "xyz")  ;; => #{:implement :review}  (default fallback)
 
   ;; ── Slug → rule ID ──────────────────────────────────────────────────────
   (slug->rule-id "stratified-design.mdc")       ;; => :std/stratified-design
