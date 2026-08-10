@@ -79,7 +79,6 @@
         (let [result (execute-workflow-pipeline run-pipeline workflow workflow-input context artifact-store event-stream)]
           (lifecycle/publish-completion-event event-stream workflow-id result)
           (reset! completed? true)
-          (close-artifact-store artifact-store)
           (display/print-result result opts)
           result))
       (catch Object _
@@ -93,6 +92,10 @@
         (when-not @completed?
           (lifecycle/publish-failure-event! event-stream workflow-id :cancelled
                                             (messages/t :workflow-runner/cancelled)))
+        ;; Every exit path — completion, sandbox-setup failure, throw —
+        ;; must release the transit store the caller opened before
+        ;; sandbox setup; per-branch closes leaked it on the failure paths.
+        (close-artifact-store artifact-store)
         (when sandbox-cleanup
           (sandbox-cleanup)
           (when-not (:quiet opts)
