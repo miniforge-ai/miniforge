@@ -6,10 +6,12 @@
 
 # N5 Delta 4 — Automation Edge Correlator
 
+**Version:** 0.1.0-draft
+**Date:** 2026-05-17
+**Status:** Draft
+**Conformance:** MUST
+
 - **Spec ID:** `N5-delta-automation-edge-correlator-v1`
-- **Version:** `0.1.0-draft`
-- **Status:** Draft
-- **Date:** 2026-05-17
 - **Amends:** N5-delta-supervisory-control-plane-v1 (§3.1 v1 entities, §3.4 supervisory-state component)
 - **Amends:** N5-delta-evidence-artifact-task-decision-pack-v1 (entity set extended with `AutomationEdge`)
 - **Related:** N3 (event stream), N8 (observability control), N9 (external PR integration);
@@ -188,7 +190,7 @@ fields MUST produce byte-identical payloads (per N5-δ3 §3.6 shared contract).
 
 ### 2.4 Edge lifecycle — status state machine
 
-```
+```text
                            ┌─────────────┐
        trigger observed    │             │   handler workflow completes
        ────────────────►   │  :observed  │   ──────────────────────────►  :handled
@@ -245,7 +247,7 @@ the same event stream and emits `:supervisory/automation-edge-upserted` events p
 
 The component MUST follow the existing supervisory-state stratification convention:
 
-```
+```text
 components/automation-edge-correlator/
 ├── deps.edn
 ├── src/ai/miniforge/automation_edge_correlator/
@@ -594,3 +596,26 @@ The delta is satisfied when all boxes are checked.
    review comment). v1 emits separate edges keyed on trigger-event-id; the workflow appears
    as `:edge/handled-by-workflow-run-id` on each. Consumers MUST tolerate this multi-edge
    case.
+
+---
+
+## Conformance Requirements
+
+| ID | Level | Requirement |
+|----|-------|-------------|
+| N5D4.AE.1 | MUST | Emit `:supervisory/automation-edge-upserted` from the correlator and no other component (§3). |
+| N5D4.AE.2 | MUST NOT | Emit any other `:supervisory/*` snapshot type from the correlator (§3). |
+| N5D4.AE.3 | MUST | Filter its own emissions out of its input stream to avoid a feedback loop (§5). |
+| N5D4.AE.4 | MUST | Re-emit an edge for every edge reconstructed during replay (§6). |
+
+### Test Obligations
+
+1. The correlator's own output does not re-enter its input.
+2. Replay reconstructs the same edge set as the original run.
+
+---
+
+**Version History:**
+
+- 0.1.0-draft (2026-08-10): Spec-completion pass — metadata normalized to the header form; `N5D4.AE.*` conformance
+  requirement IDs and test obligations added.

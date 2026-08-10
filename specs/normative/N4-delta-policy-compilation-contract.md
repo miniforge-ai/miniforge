@@ -5,6 +5,11 @@
 -->
 # Normative Spec Extension: Policy Candidate Model and Pack Compilation Contract
 
+**Version:** 0.1.0-draft
+**Date:** 2026-08-10
+**Status:** Draft
+**Conformance:** See §Status below
+
 ## Purpose
 
 Define the OSS-stable contract for turning source policy material into reviewable, provenance-backed policy artifacts.
@@ -36,6 +41,28 @@ The stable boundary is the contract between source policy material and usable po
 - **Title:** Policy Candidate Model and Pack Compilation Contract
 - **Type:** Normative
 - **Scope:** Open-source policy origination substrate
+
+### Status: requirements unstated
+
+This spec sits in `specs/normative/` but contains **no RFC 2119 keyword** —
+not one MUST, SHALL, SHOULD, or MAY. Standard 020 requires normative specs to
+use them, and an implementation cannot conform to a document that states no
+requirements.
+
+Its content is a design description: it defines a candidate model, provenance
+fields, an approval lifecycle, and compilation guarantees in declarative prose.
+Turning that prose into requirements is a deliberate authoring act with real
+consequences for implementers, so it is not done here — inventing MUSTs on
+someone else's design would be worse than recording the gap.
+
+Until that happens this spec is **effectively informative**. Two dispositions
+are open, and one of them should be chosen rather than left implicit:
+
+1. State the requirements its content implies, keeping it in `normative/`.
+2. Reclassify it to `informative/` and let N4 carry whatever of it is binding.
+
+`specs/SPEC_INDEX.md` is authoritative on scope (020) and should record the
+choice.
 
 ## Description
 
@@ -287,3 +314,13 @@ The interesting claim is not that an LLM can turn docs into rules.
 
 The interesting claim is that miniforge policy becomes a compilable, provenance-backed artifact that can be derived from
 organizational reality and attached to repos through stable config and pack semantics.
+
+---
+
+**Version History:**
+
+- 0.1.0-draft (2026-08-10): Spec-completion pass — header metadata added — the spec previously carried no version
+  anywhere; a
+  Status subsection records that the document contains no RFC 2119 keyword
+  and is therefore effectively informative until its requirements are stated
+  or it is reclassified.

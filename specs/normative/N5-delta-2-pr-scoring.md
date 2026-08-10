@@ -6,10 +6,12 @@
 
 # N5 Delta 2 — PR Readiness / Risk / Policy Scoring
 
+**Version:** 0.1.0-draft
+**Date:** 2026-04-20
+**Status:** Draft
+**Conformance:** MUST
+
 - **Spec ID:** `N5-delta-pr-scoring-v1`
-- **Version:** `0.1.0-draft`
-- **Status:** Draft
-- **Date:** 2026-04-20
 - **Amends:** N5 — Interface Standard: CLI/TUI/API (§3.2.8 PR Fleet View, §3.2.9 PR Detail View)
 - **Amends:** N5-delta-supervisory-control-plane-v1 (§3.1 PrFleetEntry, §3.4 supervisory-state component)
 - **Related:** N3 (event stream), N4 (policy packs), N9 (external PR integration), `pr-train` readiness/risk
@@ -315,3 +317,26 @@ An implementation satisfies this delta when:
 - [ ] Absent-score and mixed-fleet scenarios render the §5.4 placeholder without errors
 - [ ] The `:pr/recommendation` derivation rules are documented alongside `pr-scoring` config so score inputs
       fully determine outputs
+
+---
+
+## Conformance Requirements
+
+| ID | Level | Requirement |
+|----|-------|-------------|
+| N5D2.SC.1 | MUST | Compute readiness and risk deterministically from recorded inputs (§2). |
+| N5D2.SC.2 | MUST NOT | Emit `:supervisory/*-upserted` from the scoring component; supervisory-state remains sole emitter (§4.1). |
+| N5D2.SC.3 | MUST | Surface score staleness rather than presenting a stale score as current (§4.1). |
+| N5D2.SC.4 | MUST | Render readiness, risk, and policy columns per N5 §3.2.8 using this delta's primitives (§5). |
+
+### Test Obligations
+
+1. Identical inputs produce identical scores across runs.
+2. No component other than supervisory-state emits a supervisory snapshot.
+
+---
+
+**Version History:**
+
+- 0.1.0-draft (2026-08-10): Spec-completion pass — metadata normalized to the header form; `N5D2.SC.*` conformance
+  requirement IDs and test obligations added.

@@ -6,10 +6,12 @@
 
 # N5 Delta 3 — Evidence, Artifact, Task, Decision, and Pack Entities + Pack Management
 
+**Version:** 0.2.0-draft
+**Date:** 2026-04-21
+**Status:** Draft
+**Conformance:** MUST
+
 - **Spec ID:** `N5-delta-evidence-artifact-task-decision-pack-v1`
-- **Version:** `0.2.0-draft`
-- **Status:** Draft
-- **Date:** 2026-04-21
 - **Amends:** N5 — Interface Standard: CLI/TUI/API (§3.2.3 Evidence Viewer, §3.2.4 Artifact Browser,
   §3.2.5 DAG Kanban, §3.2.7 Listener/Control Panel, §3.2.11 Pack Browser)
 - **Amends:** N5-delta-supervisory-control-plane-v1 (§3.1 v1 entities, §3.4 supervisory-state component)
@@ -358,7 +360,7 @@ a compiled pack under `:pack-compile/pack-id`. Compilation MUST be deterministic
 inputs MUST produce the same pack hash — and MUST preserve a provenance link from the output
 pack to the source documents.
 
-### 3.6 Shared contract
+### 3.7 Shared contract
 
 All five producers MUST respect the N5-δ1 §3.4 coalescing window (≤ 100 ms per entity) so high-
 frequency sources (especially `:task/state-changed` in wide DAGs) do not flood the event stream.
@@ -587,3 +589,29 @@ The per-entity block is fully satisfied when all five entities meet the checklis
       machine
 
 The delta is fully satisfied when §8.1 and §8.2 are both met.
+
+---
+
+## Conformance Requirements
+
+| ID | Level | Requirement |
+|----|-------|-------------|
+| N5D3.OE.1 | MUST | Materialize all five entities through supervisory-state, not their producing components (§3). |
+| N5D3.OE.2 | MUST | Respect the ≤ 100 ms coalescing window of N5-δ1 §3.4 for every producer (§3.7). |
+| N5D3.OE.3 | MUST | Emit each entity's `:supervisory/*-upserted` type per N3 §3.19.1 (§4). |
+| N5D3.OE.4 | MUST | Render requested capabilities and require explicit consent before publishing a pack-install intent (§5). |
+| N5D3.OE.5 | MUST | Recheck authorization in the installer component; UI confirmation is not the security boundary (§3.6). |
+
+### Test Obligations
+
+1. A wide DAG's `:task/state-changed` burst produces coalesced emissions, not one per event.
+2. An unauthorized promotion is rejected by the installer even when the UI permitted it.
+
+---
+
+**Version History:**
+
+- 0.2.0-draft (2026-08-10): Spec-completion pass — metadata normalized to the header form; the second `§3.6` (Shared
+  contract) renumbered to `§3.7` — it duplicated the pack-management
+  producer's number, and both inbound `§3.6` references mean the producer;
+  `N5D3.OE.*` conformance requirement IDs and test obligations added.
