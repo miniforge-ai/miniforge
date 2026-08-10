@@ -6,7 +6,7 @@
 
 # N12 — Agent Context Economy
 
-**Version:** 0.1.0-draft
+**Version:** 0.2.0-draft
 **Date:** 2026-06-07
 **Status:** Draft
 **Conformance:** MUST / SHOULD (staged — see §9)
@@ -292,3 +292,53 @@ bail-without-shedding when a query surface for those exact files already
 existed (§5, §6), and — looking forward — the absence of a referenceable
 codebook that would let intent and code arrive compact in the first place
 (§7).
+
+---
+
+## 11. Conformance Requirements
+
+Requirement IDs are stable identifiers for this spec's normative statements.
+Levels follow the per-section conformance annotations in §3–§8 and the staging
+in §9.
+
+| ID | Level | Requirement |
+|----|-------|-------------|
+| N12.CE.1 | MUST | Measure context size pre-flight before dispatching an agent (§3). |
+| N12.CE.2 | MUST | Detect overflow against the model's window rather than a fixed constant (§4). |
+| N12.CE.3 | MUST | Shed on the degradation ladder in the order §5 defines, never arbitrarily. |
+| N12.CE.4 | SHOULD | Pre-empt overflow rather than shedding reactively (§5). |
+| N12.CE.5 | MUST | Expose symbol handles for every shed target so the agent can re-fetch (§6). |
+| N12.CE.6 | SHOULD | Classify boundary compressibility before choosing what to shed (§8). |
+| N12.CE.7 | MUST NOT | Shed a boundary contract to make room for implementation detail (§5, §8). |
+
+### 11.1 Test Obligations
+
+1. A context exceeding the window is reduced by ladder order, and the result is
+   reproducible for the same input.
+2. Every shed element is retrievable through its symbol handle.
+3. A boundary contract survives shedding when implementation detail is present.
+
+---
+
+## Annex A — Implementation Conformance Status (informative)
+
+This annex is **informative**, recording implementation state as of 2026-08-10.
+
+### A.1 Specified, Not Implemented
+
+No `context-economy` component exists. Pre-flight measurement (N12.CE.1),
+overflow detection (N12.CE.2), and the degradation ladder (N12.CE.3) have no
+implementation, so context overflow is currently handled — if at all — by
+whatever each call site does.
+
+`components/context-pack` and the MCP context server carry adjacent machinery
+(context assembly, a context cache), which is the natural place for §3–§5 to
+land rather than a new component.
+
+---
+
+**Version History:**
+
+- 0.2.0-draft (2026-08-10): Spec-completion pass — conformance
+  requirement IDs, test obligations, and Annex A added.
+- 0.1.0-draft: Initial specification.

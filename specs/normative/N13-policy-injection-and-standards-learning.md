@@ -6,7 +6,7 @@
 
 # N13 — Policy Injection & Standards Learning
 
-**Version:** 0.1.0-draft
+**Version:** 0.2.0-draft
 **Date:** 2026-06-09
 **Status:** Draft
 **Conformance:** MUST / SHOULD (staged — see §11)
@@ -360,3 +360,50 @@ gateable/principle (§8) is a Stage-1 task.
 - When constructing maps, construction should be key→value; move value calculations into a `let` above the map so
   construction reads simply and intent is clear.
 - `requiring-resolve` is an anti-pattern. Use proper `require`s. Genuine use cases are unicorn-rare.
+
+---
+
+## 12. Conformance Requirements
+
+| ID | Level | Requirement |
+|----|-------|-------------|
+| N13.PI.1 | MUST | Record provenance for every injected rule — origin, tier, and version (§3). |
+| N13.PI.2 | MUST | Select guidance by the §4 algorithm, not by unbounded inclusion. |
+| N13.PI.3 | MUST | Record violations in the per-repo ledger with the rule id that fired (§5). |
+| N13.PI.4 | MUST NOT | Promote a rule cross-repo without meeting the §6 promotion criteria. |
+| N13.PI.5 | MUST | Distinguish gateable rules from principle rules and gate only the former (§8). |
+| N13.PI.6 | MUST NOT | Rely on the gate as the primary teaching mechanism — it is the safety net (§9). |
+
+### 12.1 Test Obligations
+
+1. An injected rule's provenance survives into the evidence for the run that used it.
+2. A principle rule never blocks a gate.
+3. Promotion requires the §6 criteria; a rule below threshold stays local.
+
+---
+
+## Annex A — Implementation Conformance Status (informative)
+
+This annex is **informative**, recording implementation state as of 2026-08-10.
+
+### A.1 Partially Implemented
+
+The standards corpus this spec learns from exists (`standards/miniforge` as a
+submodule) and policy packs are implemented per N4, so the two tiers of §2 have
+substrate. What is absent is the flywheel: no per-repo violation ledger (§5,
+N13.PI.3), no cross-repo promotion (§6, N13.PI.4), and no provenance recorded
+for injected rules (§3, N13.PI.1).
+
+### A.2 Structural
+
+Without the ledger, §9's "gate as safety net" framing describes the current
+state by default rather than by design — the gate is the only mechanism, since
+the teaching path it is meant to back up does not exist.
+
+---
+
+**Version History:**
+
+- 0.2.0-draft (2026-08-10): Spec-completion pass — conformance
+  requirement IDs, test obligations, and Annex A added.
+- 0.1.0-draft: Initial specification.

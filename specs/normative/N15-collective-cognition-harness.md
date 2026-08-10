@@ -6,7 +6,7 @@
 
 # N15 — Collective-Cognition Evaluation Harness
 
-**Version:** 0.1.0-draft
+**Version:** 0.2.0-draft
 **Date:** 2026-07-22
 **Status:** Draft
 **Conformance:** MUST (core protocol); workspace-conditional sections per §0.4
@@ -316,6 +316,48 @@ An MCI MUST:
 - enforce §5 comparability preconditions and replicate aggregation in `compare`
 - produce the §9 report including overhead fraction, ablation delta, and a G0 verdict
 - demonstrate absence-as-divergence with one induced crash run
+
+## 11. Conformance Requirements
+
+| ID | Level | Requirement |
+|----|-------|-------------|
+| N15.CH.1 | MUST | Register a hypothesis before running the condition that tests it (§2). |
+| N15.CH.2 | MUST | Match budgets across conditions so a result is not a spend artifact (§4). |
+| N15.CH.3 | MUST | Replicate to the §5 replication count before reporting an effect. |
+| N15.CH.4 | MUST | Record provenance sufficient to re-run a condition exactly (§5). |
+| N15.CH.5 | MUST | Score against the pre-registered metrics of §7, not metrics chosen after the fact. |
+| N15.CH.6 | MUST | Report a negative result with the same rigor as a positive one (§9). |
+
+### 11.1 Test Obligations
+
+1. A condition run twice from its recorded provenance produces the same
+   configuration.
+2. Budget parity between conditions is verifiable from the run record.
+3. A gate decision cites the pre-registered metric it was evaluated against.
+
+---
+
+---
+
+## Annex A — Implementation Conformance Status (informative)
+
+This annex is **informative**, recording implementation state as of 2026-08-10.
+
+### A.1 Specified, Not Implemented
+
+No harness component exists. The hypothesis registry (§2), budget protocol
+(§4), replication (§5), and scoring (§7) are unimplemented.
+
+`minibench` is the adjacent evaluation substrate in this workspace and is the
+natural host for §4's budget matching and §7's metrics rather than a new
+component.
+
+### A.2 Why This One Matters First
+
+N15 gates N14: §8's G0 decides whether the shared-deliberation workspace is
+kept or demoted. Until the harness exists, that gate cannot be run, so N14
+stays speculative indefinitely. Of the four specs in this group, N15 is the one
+whose absence blocks another spec's disposition.
 
 ---
 
