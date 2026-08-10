@@ -160,13 +160,19 @@
    rendering moves.
 
    A map holding two instant keys for the same moment — one `Instant`,
-   one `Date` — is refused. They are two distinct keys to Clojure but
-   one key once normalized, so one entry would overwrite the other and
-   which one survived would follow the source map's iteration order:
-   `{i :a, d :b}` and `{d :b, i :a}` are `=`, and would hash
-   differently. Refusing keeps the guarantee in `canonical-edn`'s
-   docstring — equal inputs, equal output — rather than dropping an
-   entry quietly.
+   one `Date` — is refused, and so is a set holding two such elements.
+   They are two distinct keys (or elements) to Clojure but one once
+   normalized, so one would quietly swallow the other. In a map, which
+   one survived would follow the source map's iteration order:
+   `{i :a, d :b}` and `{d :b, i :a}` are `=` and would hash
+   differently. In a set it is worse — `#{i d}` and `#{i}` are distinct
+   values that would produce the identical digest. Refusing keeps both
+   halves of `canonical-edn`'s contract: equal inputs give equal
+   output, and distinct inputs do not silently converge.
+
+   Both checks are scoped to values normalization actually rewrote, so
+   the pre-existing collapse of distinct-but-comparator-equal entries
+   (`{1 :a 1.0 :b}`, `#{1 1.0}`) is left exactly as it was.
 
    One self-recursive walk, replacing the mutually-recursive
    `->canonical`/`canonicalize-map`/`canonicalize-coll` trio that
@@ -191,7 +197,15 @@
                         (assoc acc k' (->canonical v))))
                     (sorted-map-by canonical-compare)
                     x)
-    (set? x)       (into (sorted-set-by canonical-compare) (map ->canonical) x)
+    (set? x)       (let [normalized (mapv ->canonical x)]
+                     ;; (set normalized) uses `=`, not the comparator, so
+                     ;; only a normalization-induced collapse shrinks it —
+                     ;; `#{1 1.0}` stays two here and keeps its old
+                     ;; comparator-driven behavior below.
+                     (when (< (count (set normalized)) (count x))
+                       (throw (IllegalArgumentException.
+                               "Set has two instant elements for one moment")))
+                     (into (sorted-set-by canonical-compare) normalized))
     (map-entry? x) [(->canonical (key x)) (->canonical (val x))]
     (coll? x)      (mapv ->canonical x)
     (inst? x)      (inst->literal x)

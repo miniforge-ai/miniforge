@@ -58,6 +58,14 @@
       (is (not= (ch/canonical-edn {:at bc}) (ch/canonical-edn {:at ad})))
       (is (not= (ch/content-hash {:at bc}) (ch/content-hash {:at ad}))))))
 
+(deftest ^{:stratum 0} comparator-equal-non-instants-keep-their-old-behavior
+  ;; The refusals above must not widen into the pre-existing collapse of
+  ;; keys that are distinct under `=` but equal under the comparator.
+  ;; That behavior predates this PR and is out of its scope.
+  (testing "1 and 1.0 still collapse silently rather than throwing"
+    (is (= 1 (count (edn/read-string (ch/canonical-edn #{1 1.0})))))
+    (is (string? (ch/canonical-edn {1 :a 1.0 :b})))))
+
 ;------------------------------------------------------------------------------ Layer 1
 
 (deftest ^{:stratum 1} both-inst-types-are-inst?
@@ -134,6 +142,23 @@
                               (ch/content-hash m)))))
     (testing "one instant key is still fine, at either type"
       (is (= (ch/canonical-edn {now :v}) (ch/canonical-edn {d :v}))))))
+
+(deftest ^{:stratum 1} two-instant-set-elements-for-one-moment-are-refused
+  ;; The same collapse as the map-key case, found by re-checking the
+  ;; other sorted container after fixing that one. Worse here: no
+  ;; insertion-order dependence, just a plain collision — `#{i d}` and
+  ;; `#{i}` are distinct values that produced the identical digest.
+  (let [d (Date/from now)]
+    (testing "the set really does hold two elements before normalization"
+      (is (= 2 (count #{now d}))))
+    (testing "an ambiguous set throws instead of collapsing onto one element"
+      (is (thrown-with-msg? IllegalArgumentException
+                            #"two instant elements for one moment"
+                            (ch/content-hash #{now d}))))
+    (testing "a set with one instant is still fine, at either type"
+      (is (= (ch/canonical-edn #{now}) (ch/canonical-edn #{d}))))
+    (testing "a vector keeps both — order is preserved, nothing is deduped"
+      (is (= 2 (count (edn/read-string (ch/canonical-edn [now d]))))))))
 
 (deftest ^{:stratum 1} instants-normalize-at-any-depth
   (testing "nested, in sequences, in sets, and as a map key"
