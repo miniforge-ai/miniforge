@@ -83,7 +83,18 @@
   ;; That behavior predates this PR and is out of its scope.
   (testing "1 and 1.0 still collapse silently rather than throwing"
     (is (= 1 (count (edn/read-string (ch/canonical-edn #{1 1.0})))))
-    (is (string? (ch/canonical-edn {1 :a 1.0 :b})))))
+    (is (string? (ch/canonical-edn {1 :a 1.0 :b}))))
+  (testing "a non-instant normalization collapse stays silent too"
+    ;; Copilot round 5. `mapv` renders a list and a vector of the same
+    ;; items to one vector, so instant normalization is NOT the only
+    ;; non-injective branch. A container whose comparator is
+    ;; inconsistent with `=` can hold both, and the guard used to throw
+    ;; on it — reporting "normalize to one instant: [1 2]", with no
+    ;; instant anywhere in sight.
+    (let [by-type (fn [a b] (compare (str (type a)) (str (type b))))
+          s       (sorted-set-by by-type [1 2] '(1 2))]
+      (is (= 2 (count s)))
+      (is (= [1 2] (first (edn/read-string (ch/canonical-edn s))))))))
 
 ;------------------------------------------------------------------------------ Layer 1
 

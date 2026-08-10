@@ -116,26 +116,31 @@
     :else 10))
 
 (defn- ^{:stratum 0} refuse-collapse!
-  "Throw when normalization merged two entries of a sorted container.
+  "Throw when instant normalization merged two entries of a container.
 
-   Compared under `=`, not under `canonical-compare`. Only instant
-   normalization can map two distinct values onto one — every other
-   branch of `->canonical` is injective — so a shortfall here is always
-   an `Instant`/`Date`/`#inst`-literal ambiguity and never the
-   comparator collapsing `1` and `1.0`, which predates this namespace's
-   instant handling and is left exactly as it was.
+   Only `#inst` literals are considered, and they are compared under
+   `=`. Narrowing to them is what keeps this from firing on a collision
+   this namespace did not cause: `mapv` renders a list and a vector of
+   the same items to one vector, so a container whose own comparator is
+   inconsistent with `=` — a `sorted-set-by` ordering `[1 2]` before
+   `(1 2)`, say — can hold two entries that normalize alike for reasons
+   that have nothing to do with timestamps. That collapsed silently
+   before this namespace handled instants and still does.
 
-   Checking the normalized values rather than which inputs got rewritten
-   is what catches a caller who already holds an `#inst` literal: that
-   key is not rewritten, so a guard keyed on rewriting would let it
-   silently overwrite an `Instant` for the same moment, or not, by
-   iteration order."
+   Checking normalized values rather than which inputs got rewritten is
+   what catches a caller who already holds an `#inst` literal: that key
+   is not rewritten, so a guard keyed on rewriting would let it silently
+   overwrite an `Instant` for the same moment, or not, by iteration
+   order. The literal test is inlined for the reason given on
+   `type-rank` — naming it would cost a layer on a file already over
+   the SL003 budget."
   [what normalized]
-  (when-let [dup (some (fn [[v n]] (when (> n 1) v)) (frequencies normalized))]
-    (throw (IllegalArgumentException.
-            ;; pr-str, not str: a TaggedLiteral's toString is its identity
-            ;; hash — the very thing this namespace exists to keep out.
-            (str what " that normalize to one instant: " (pr-str dup))))))
+  (let [insts (filterv #(and (tagged-literal? %) (= 'inst (:tag %))) normalized)]
+    (when-let [dup (some (fn [[v n]] (when (> n 1) v)) (frequencies insts))]
+      (throw (IllegalArgumentException.
+              ;; pr-str, not str: a TaggedLiteral's toString is its identity
+              ;; hash — the very thing this namespace exists to keep out.
+              (str what " that normalize to one instant: " (pr-str dup)))))))
 
 ;------------------------------------------------------------------------------ Layer 1
 
@@ -219,9 +224,10 @@
 
    Both containers detect that through `refuse-collapse!`, which
    compares the NORMALIZED values rather than which inputs were
-   rewritten — see its docstring for why the difference matters. The
-   pre-existing collapse of distinct-but-comparator-equal entries
-   (`{1 :a 1.0 :b}`, `#{1 1.0}`) is left exactly as it was.
+   rewritten, and looks only at `#inst` literals — see its docstring
+   for why each half matters. Every other collapse this walk can
+   produce is left exactly as it was, silent: the comparator equating
+   `1` and `1.0`, and `mapv` rendering a list and a vector alike.
 
    One self-recursive walk, replacing the mutually-recursive
    `->canonical`/`canonicalize-map`/`canonicalize-coll` trio that
