@@ -15,20 +15,74 @@
 ;; WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 ;; See the License for the specific language governing permissions and
 ;; limitations under the License.
-
 (ns ai.miniforge.content-hash.core
   "Implementation of content hashing primitives.
 
    Domain-free: no SDLC, workflow, or evidence schema is referenced here.
    Computes a canonical EDN serialization (with deterministically ordered map
-   keys) and a SHA-256 digest over that serialization.")
+   keys) and a SHA-256 digest over that serialization.
+
+   Instants are normalized by ACTUAL type before serialization — see
+   `inst->literal`."
+  (:import
+   [java.time Instant ZoneOffset]
+   [java.time.format DateTimeFormatter]
+   [java.util Date]))
 
 ;------------------------------------------------------------------------------ Layer 0
-;; Comparator
 
-(defn- type-rank
+;; Instants
+(def ^{:stratum 0} ^:private inst-seconds
+  "Whole-second half of an `#inst` literal, rendered in UTC.
+
+   `uuuu`, not `yyyy`. `yyyy` is year-of-era and renders without the
+   era, so 1 BC and 2 AD both print `0002` — two distinct instants
+   collapsing to one digest, which is the defect this namespace exists
+   to keep out. `uuuu` is the proleptic year and is identical for every
+   AD year."
+  (.withZone (DateTimeFormatter/ofPattern "uuuu-MM-dd'T'HH:mm:ss")
+             ZoneOffset/UTC))
+
+(defn- ^{:stratum 0} inst-fraction
+  "Fractional-seconds digits for `nanos`.
+
+   Three when the value is millisecond-aligned — the width
+   `java.util.Date` prints — so a Date renders byte-identically to what
+   it did before instants were normalized here and every hash computed
+   over one still holds. That holds across the Gregorian range, which
+   is every timestamp a caller will hold; `Date` renders pre-1582 dates
+   on the Julian calendar and omits the ISO `+` past year 9999, so it
+   disagrees with ISO-8601 there and those two hashes do move.
+
+   Six or nine digits only when finer precision is present:
+   `Instant/now` carries microseconds on current JVMs, and truncating
+   them would let distinct instants collide."
+  ^String [nanos]
+  (cond
+    (zero? (rem nanos 1000000)) (format "%03d" (quot nanos 1000000))
+    (zero? (rem nanos 1000))    (format "%06d" (quot nanos 1000))
+    :else                       (format "%09d" nanos)))
+
+;; SHA-256 digest
+(defn- ^{:stratum 0} sha256-hex
+  "Compute the SHA-256 digest of the given UTF-8 string and return it as a
+   lowercase hex string (64 characters)."
+  [s]
+  (let [digest (java.security.MessageDigest/getInstance "SHA-256")
+        bytes  (.digest digest (.getBytes ^String s "UTF-8"))]
+    (apply str (map #(format "%02x" %) bytes))))
+
+;; Comparator
+(defn- ^{:stratum 0} type-rank
   "Rank disparate map-key types so canonical EDN can sort heterogeneous keys
-   without throwing. Lower ranks sort first."
+   without throwing. Lower ranks sort first.
+
+   A normalized instant ranks where a raw Date used to, so a map keyed
+   by timestamps sorts exactly as it did before normalization. The raw
+   Date and Instant ranks stay as defense for direct comparator use;
+   `->canonical` no longer reaches them. The `#inst` test is inlined
+   rather than named so this stays a leaf — a named predicate would
+   push every layer above it up one, on a file already over budget."
   [x]
   (cond
     (nil? x) 0
@@ -40,10 +94,46 @@
     (symbol? x) 6
     (uuid? x) 7
     (instance? java.util.Date x) 8
+    (and (tagged-literal? x) (= 'inst (:tag x))) 8
     (instance? java.time.Instant x) 9
     :else 10))
 
-(defn- canonical-compare
+;------------------------------------------------------------------------------ Layer 1
+
+(defn- ^{:stratum 1} inst->literal
+  "An instant as an `#inst` tagged literal, dispatched on ACTUAL type.
+
+   `clojure.core/inst?` admits BOTH `java.time.Instant` and
+   `java.util.Date`, and `pr-str` — which renders the canonical EDN —
+   treats them as unrelated. A Date prints readable `#inst \"…\"`. An
+   Instant prints `#object[java.time.Instant 0x1f2e3d4c \"…\"]`, which
+   is not readable EDN and embeds the object's identity hash — so the
+   same instant rendered differently on every call, making
+   `content-hash` non-deterministic. That is the one property the
+   component exists to provide: hashing one evidence bundle twice gave
+   two digests.
+
+   Anything else `inst?` might admit throws rather than being hashed
+   under a rendering nothing has checked — the same refusal the `->iso`
+   helpers in effect-transaction and policy-pack make. An
+   `IllegalArgumentException` rather than their `ex-info`: the branch is
+   an exhaustive match over the types `inst?` admits, so reaching it is
+   a programmer error, which is the guard rule 005 names — and this
+   component carries no dependencies, so `throw+` is not on the table."
+  [v]
+  (let [^Instant i (cond
+                     (instance? Instant v) v
+                     (instance? Date v)    (.toInstant ^Date v)
+                     :else
+                     (throw (IllegalArgumentException.
+                             (str "Not a supported instant type: "
+                                  (some-> v class .getName)))))]
+    (tagged-literal 'inst (str (.format inst-seconds i)
+                               "."
+                               (inst-fraction (.getNano i))
+                               "-00:00"))))
+
+(defn- ^{:stratum 1} canonical-compare
   "Total-order comparator for canonical EDN. Same-type values use natural
    compare; cross-type values fall back to string representation comparison
    under a stable type rank."
@@ -57,45 +147,42 @@
         (catch Exception _
           (compare (pr-str a) (pr-str b)))))))
 
-;------------------------------------------------------------------------------ Layer 1
+;------------------------------------------------------------------------------ Layer 2
+
 ;; Canonical EDN
-
-(declare ->canonical)
-
-(defn- canonicalize-entry
-  "Canonicalize the value of a key/value pair, leaving the key unchanged."
-  [[k v]]
-  [k (->canonical v)])
-
-(defn- canonicalize-map
-  "Recursively canonicalize a map by sorting keys and canonicalizing values."
-  [m]
-  (into (sorted-map-by canonical-compare)
-        (map canonicalize-entry)
-        m))
-
-(defn- canonicalize-coll
-  "Recursively canonicalize a non-map collection by canonicalizing each
-   element. Order is preserved for sequential collections; sets are sorted
-   under the canonical comparator."
-  [c]
-  (cond
-    (set? c) (into (sorted-set-by canonical-compare)
-                   (map ->canonical)
-                   c)
-    (map-entry? c) [(->canonical (key c)) (->canonical (val c))]
-    :else (mapv ->canonical c)))
-
-(defn- ->canonical
+(defn- ^{:stratum 2} ->canonical
   "Walk a value into a canonical form: maps become sorted-maps, sets become
-   sorted-sets, sequential collections become vectors. Scalars pass through."
+   sorted-sets, sequential collections become vectors, instants become
+   `#inst` literals. Other scalars pass through.
+
+   Map keys are canonicalized only when they are instants; every other
+   key is left exactly as it was, so no existing map's ordering or
+   rendering moves.
+
+   One self-recursive walk, replacing the mutually-recursive
+   `->canonical`/`canonicalize-map`/`canonicalize-coll` trio that
+   referred to each other through a `declare`. Stratum-lint reports
+   that as SL007 — a reference cycle no layer ordering can express and
+   `--fix` cannot resolve, so the file was uncommittable while it
+   stood. Same tests in the same order, so behavior is unchanged;
+   `map-entry?` precedes `coll?`, and `set?` precedes both, because a
+   map entry and a set are also collections."
   [x]
   (cond
-    (map? x) (canonicalize-map x)
-    (coll? x) (canonicalize-coll x)
-    :else x))
+    (map? x)       (into (sorted-map-by canonical-compare)
+                         (map (fn [[k v]]
+                                [(if (inst? k) (inst->literal k) k)
+                                 (->canonical v)]))
+                         x)
+    (set? x)       (into (sorted-set-by canonical-compare) (map ->canonical) x)
+    (map-entry? x) [(->canonical (key x)) (->canonical (val x))]
+    (coll? x)      (mapv ->canonical x)
+    (inst? x)      (inst->literal x)
+    :else          x))
 
-(defn canonical-edn
+;------------------------------------------------------------------------------ Layer 3
+
+(defn ^{:stratum 3} canonical-edn
   "Return a deterministic EDN string for `x`.
 
    Maps are emitted with keys sorted under a stable comparator; sets are
@@ -105,18 +192,9 @@
   [x]
   (pr-str (->canonical x)))
 
-;------------------------------------------------------------------------------ Layer 2
-;; SHA-256 digest
+;------------------------------------------------------------------------------ Layer 4
 
-(defn- sha256-hex
-  "Compute the SHA-256 digest of the given UTF-8 string and return it as a
-   lowercase hex string (64 characters)."
-  [s]
-  (let [digest (java.security.MessageDigest/getInstance "SHA-256")
-        bytes  (.digest digest (.getBytes ^String s "UTF-8"))]
-    (apply str (map #(format "%02x" %) bytes))))
-
-(defn content-hash
+(defn ^{:stratum 4} content-hash
   "Compute the SHA-256 digest of the canonical EDN of `x`.
 
    Returns a lowercase 64-character hex string. Logically equal values
