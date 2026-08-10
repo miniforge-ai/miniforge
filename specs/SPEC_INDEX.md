@@ -6,7 +6,7 @@
 
 # miniforge Specification Index
 
-**Version:** 0.20.0-draft
+**Version:** 0.22.0-draft
 **Date:** 2026-08-10
 **Status:** Living specification during OSS development
 
@@ -611,7 +611,7 @@ Normative specs are enforced by:
 
 ## Version History
 
-- **0.20.0-draft** (2026-08-10) - Delta-spec completion pass across all seven deltas. Metadata was
+- **0.22.0-draft** (2026-08-10) - Delta-spec completion pass across all seven deltas. Metadata was
   carried three different ways — a core-style header block (N11-delta), a bulleted list under the
   H1 (the four N5 deltas), and a `## Spec metadata` section (N2-delta, N4-delta) — and
   N4-delta had no version anywhere. All normalized to the header form used by N1–N15, with Spec ID,
