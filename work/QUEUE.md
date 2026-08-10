@@ -108,9 +108,7 @@ Step 2 of the ratified Ariadne adoption order: authority stops being
 
 | tier | r | theme | spec | axes |
 |---|---|---|---|---|
-| high | ● | ariadne-grants | `ariadne-grant-issuance.spec.edn` — Issue narrow runtime-owned grants for irreversible effects | correctness+policyenforcement+governancecredibility |
-| high | ○ | ariadne-grants | `ariadne-deploy-grant-enforcement.spec.edn` — Require granted, transacted Kubernetes deployments | correctness+observation+governancecredibility |
-| high | ○ | ariadne-grants | `ariadne-merge-grant-enforcement.spec.edn` — Require granted, transacted PR merges | correctness+observation+governancecredibility |
+| high | ● | ariadne-grants | `ariadne-deploy-grant-enforcement.spec.edn` — Require granted, transacted Kubernetes deployments | correctness+observation+governancecredibility |
 
 ## Theme — Polylith compliance (`polylith-compliance`, status: in-flight)
 
