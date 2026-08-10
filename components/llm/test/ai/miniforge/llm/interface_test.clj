@@ -923,6 +923,26 @@
     (is (= :argv (:prompt-via (get impl/backends :opencode))))
     (is (= :argv (:prompt-via (get impl/backends :echo))))))
 
+(deftest ^{:stratum 0} backend-prompt-via-test
+  (testing "reads the declared delivery mode for callers building a backend command themselves"
+    (is (= :stdin (llm/backend-prompt-via (get llm/backends :codex))))
+    (is (= :argv (llm/backend-prompt-via (get llm/backends :opencode)))))
+
+  (testing "an undeclared mode falls back to argv"
+    (is (= :argv (llm/backend-prompt-via {:cmd "some-cli"})))))
+
+(deftest ^{:stratum 0} backend-prompt-via-matches-impl-test
+  (testing "the public accessor and the in-brick resolver cannot drift apart"
+    (let [resolve-prompt-via (var-get (ns-resolve 'ai.miniforge.llm.protocols.impl.llm-client
+                                                  'resolve-prompt-via))]
+      (doseq [[backend-key backend-config] impl/backends]
+        (is (= (resolve-prompt-via backend-config)
+               (llm/backend-prompt-via backend-config))
+            (str "prompt delivery disagrees for " backend-key)))
+      (is (= (resolve-prompt-via {:cmd "some-cli"})
+             (llm/backend-prompt-via {:cmd "some-cli"}))
+          "an undeclared mode must fall back the same way on both sides"))))
+
 ;; default-exec-fn / stream-exec-fn — :stdin opt is piped to the subprocess
 ;;
 ;; Use `cat` as the subprocess: stdin is echoed verbatim to stdout, so we

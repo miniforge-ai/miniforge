@@ -24,23 +24,27 @@
 
    Designed to be called by the ETL task (bb standards:pack) at build time.
 
-   Layer 0: Parsing/config primitives — strip-quotes, split-frontmatter,
+   Slice 1/6 of a rule 210 split train (SL003: this namespace measured
+   9 real layers, max 3 — same approach as the dag-orchestrator split,
+   miniforge#1485, and the workflow-runner split, miniforge#1662):
+   quote-stripping and the frontmatter scalar-value grammar moved to
+   `ai.miniforge.policy-pack.mdc-compiler.frontmatter-values`. This
+   file now measures 7 real layers; further slices land in subsequent
+   PRs until it's within budget.
+
+   Layer 0: Parsing/config primitives — split-frontmatter,
      group-dotted-keys, build-exclude-context, build-detection-config,
      dewey-ranges, default-phases, slug->rule-id/title, agent-behavior
-     paragraph/bullet helpers, format-pack-version, validate-no-duplicate-slugs
-   Layer 1: parse-inline-array, parse-list-item, build-remediation-config,
-     find-dewey-range, bullet-line?, condense-prose, export-canonical-taxonomy
-   Layer 2: parse-frontmatter-value, dewey->phases/category-id/category-label,
-     condense-bullets
-   Layer 3: parse-kv-line, condense-to-length, build-categories
-   Layer 4: process-frontmatter-line, extract-agent-behavior
-   Layer 5: parse-frontmatter
-   Layer 6: parse-mdc
-   Layer 7: mdc->rule
-   Layer 8: compile-standards-pack
-
-   9 real strata — over the rule 210 budget of 3; a genuine namespace
-   split (Wave 2), not a labeling problem.
+     paragraph/bullet helpers, format-pack-version, validate-no-duplicate-slugs,
+     parse-list-item, parse-kv-line
+   Layer 1: build-remediation-config, find-dewey-range, bullet-line?,
+     condense-prose, export-canonical-taxonomy, process-frontmatter-line
+   Layer 2: dewey->phases/category-id/category-label, condense-bullets,
+     parse-frontmatter
+   Layer 3: condense-to-length, build-categories, parse-mdc
+   Layer 4: extract-agent-behavior
+   Layer 5: mdc->rule
+   Layer 6: compile-standards-pack
 
    Related:
      work/designs/mdc-to-pack-field-mapping.edn — authoritative field mapping spec
@@ -48,6 +52,7 @@
      .standards/                                 — source .mdc files (input)"
   (:require
    [ai.miniforge.coerce.interface :as coerce]
+   [ai.miniforge.policy-pack.mdc-compiler.frontmatter-values :as frontmatter-values]
    [ai.miniforge.policy-pack.schema-types :as schema-types]
    [ai.miniforge.policy-pack.schema-validation :as schema-validation]
    [clojure.java.io :as io]
@@ -56,14 +61,6 @@
 ;------------------------------------------------------------------------------ Layer 0
 
 ;; MDC parsing — frontmatter and body extraction
-(defn- ^{:stratum 0} strip-quotes
-  "Strip surrounding single or double quotes from a string."
-  [s]
-  (cond
-    (and (str/starts-with? s "\"") (str/ends-with? s "\"")) (subs s 1 (dec (count s)))
-    (and (str/starts-with? s "'")  (str/ends-with? s "'"))  (subs s 1 (dec (count s)))
-    :else s))
-
 (defn ^{:stratum 0} split-frontmatter
   "Split MDC content into frontmatter string and body string.
 
@@ -295,30 +292,23 @@
             (str/join ", " (map first duplicates))
             ". Rule IDs must be unique across all subdirectories.")])))
 
-;------------------------------------------------------------------------------ Layer 1
-
-(defn- ^{:stratum 1} parse-inline-array
-  "Parse a JSON/YAML-style inline array string: [\"a\", \"b\", c].
-
-   Arguments:
-   - s - String starting with [ and ending with ]
-
-   Returns:
-   - Vector of parsed string items, or empty vector for empty array."
-  [s]
-  (let [inner (-> s
-                  (str/replace #"^\[" "")
-                  (str/replace #"\]$" "")
-                  str/trim)]
-    (if (str/blank? inner)
-      []
-      (->> (str/split inner #",")
-           (mapv (comp strip-quotes str/trim))))))
-
-(defn- ^{:stratum 1} parse-list-item
+(defn- ^{:stratum 0} parse-list-item
   "Parse a '- <value>' frontmatter list line to its string value."
   [trimmed]
-  (strip-quotes (str/trim (subs trimmed 2))))
+  (frontmatter-values/strip-quotes (str/trim (subs trimmed 2))))
+
+(defn- ^{:stratum 0} parse-kv-line
+  "Parse a 'key: value' frontmatter line.
+   Returns [new-current-key updated-acc]."
+  [trimmed acc]
+  (let [idx (str/index-of trimmed ":")
+        k   (str/trim (subs trimmed 0 idx))
+        v   (str/trim (subs trimmed (inc idx)))]
+    (if (str/blank? v)
+      [k (assoc acc k [])]
+      [nil (assoc acc k (frontmatter-values/parse-frontmatter-value v))])))
+
+;------------------------------------------------------------------------------ Layer 1
 
 (defn- ^{:stratum 1} build-remediation-config
   "Build :rule/remediation map from grouped frontmatter remediation block.
@@ -395,19 +385,22 @@
             :alias/target (keyword "mf.cat" id)})
          dewey-ranges)})
 
+(defn- ^{:stratum 1} process-frontmatter-line
+  "Process one frontmatter line. Returns [current-key acc]."
+  [trimmed current-key acc]
+  (cond
+    (str/blank? trimmed)
+    [current-key acc]
+
+    (and current-key (str/starts-with? trimmed "- "))
+    [current-key (update acc current-key (fnil conj []) (parse-list-item trimmed))]
+
+    (str/includes? trimmed ":")
+    (parse-kv-line trimmed acc)
+
+    :else [current-key acc]))
+
 ;------------------------------------------------------------------------------ Layer 2
-
-(defn- ^{:stratum 2} parse-frontmatter-value
-  "Parse a single YAML-like frontmatter value string into a Clojure value.
-
-   Handles: booleans, quoted strings, inline arrays, bare strings."
-  [raw]
-  (let [v (str/trim raw)]
-    (cond
-      (= v "true")               true
-      (= v "false")              false
-      (str/starts-with? v "[")   (parse-inline-array v)
-      :else                      (strip-quotes v))))
 
 (defn ^{:stratum 2} dewey->phases
   "Map a Dewey code string to a set of applicable workflow phases.
@@ -460,18 +453,29 @@
       result
       (keep-whole-sentences result target-length))))
 
-;------------------------------------------------------------------------------ Layer 3
+(defn- ^{:stratum 2} parse-frontmatter
+  "Parse YAML-like frontmatter text into a string-keyed map.
 
-(defn- ^{:stratum 3} parse-kv-line
-  "Parse a 'key: value' frontmatter line.
-   Returns [new-current-key updated-acc]."
-  [trimmed acc]
-  (let [idx (str/index-of trimmed ":")
-        k   (str/trim (subs trimmed 0 idx))
-        v   (str/trim (subs trimmed (inc idx)))]
-    (if (str/blank? v)
-      [k (assoc acc k [])]
-      [nil (assoc acc k (parse-frontmatter-value v))])))
+   Handles simple key: value pairs, inline arrays [a, b], and
+   multi-line list items (- value) under a key.
+
+   Arguments:
+   - frontmatter-str - Raw text between --- delimiters
+
+   Returns:
+   - Map of {string-key parsed-value}, or empty map."
+  [frontmatter-str]
+  (if (str/blank? frontmatter-str)
+    {}
+    (loop [[line & remaining] (str/split-lines frontmatter-str)
+           current-key nil
+           acc {}]
+      (if (nil? line)
+        acc
+        (let [[current-key' acc'] (process-frontmatter-line (str/trim line) current-key acc)]
+          (recur remaining current-key' acc'))))))
+
+;------------------------------------------------------------------------------ Layer 3
 
 (defn- ^{:stratum 3} condense-to-length
   "Condense text to approximately target-length characters.
@@ -511,22 +515,20 @@
          (sort-by :category/id)
          vec)))
 
+(defn ^{:stratum 3} parse-mdc
+  "Parse an MDC file into its structured components.
+
+   Arguments:
+   - content - Full .mdc file content string
+
+   Returns:
+   - {:frontmatter {string-key value} :body string}"
+  [content]
+  (let [{:keys [frontmatter body]} (split-frontmatter content)]
+    {:frontmatter (parse-frontmatter frontmatter)
+     :body        body}))
+
 ;------------------------------------------------------------------------------ Layer 4
-
-(defn- ^{:stratum 4} process-frontmatter-line
-  "Process one frontmatter line. Returns [current-key acc]."
-  [trimmed current-key acc]
-  (cond
-    (str/blank? trimmed)
-    [current-key acc]
-
-    (and current-key (str/starts-with? trimmed "- "))
-    [current-key (update acc current-key (fnil conj []) (parse-list-item trimmed))]
-
-    (str/includes? trimmed ":")
-    (parse-kv-line trimmed acc)
-
-    :else [current-key acc]))
 
 (defn ^{:stratum 4} extract-agent-behavior
   "Extract a concise agent behavior directive from an MDC body.
@@ -551,47 +553,8 @@
 
 ;------------------------------------------------------------------------------ Layer 5
 
-(defn- ^{:stratum 5} parse-frontmatter
-  "Parse YAML-like frontmatter text into a string-keyed map.
-
-   Handles simple key: value pairs, inline arrays [a, b], and
-   multi-line list items (- value) under a key.
-
-   Arguments:
-   - frontmatter-str - Raw text between --- delimiters
-
-   Returns:
-   - Map of {string-key parsed-value}, or empty map."
-  [frontmatter-str]
-  (if (str/blank? frontmatter-str)
-    {}
-    (loop [[line & remaining] (str/split-lines frontmatter-str)
-           current-key nil
-           acc {}]
-      (if (nil? line)
-        acc
-        (let [[current-key' acc'] (process-frontmatter-line (str/trim line) current-key acc)]
-          (recur remaining current-key' acc'))))))
-
-;------------------------------------------------------------------------------ Layer 6
-
-(defn ^{:stratum 6} parse-mdc
-  "Parse an MDC file into its structured components.
-
-   Arguments:
-   - content - Full .mdc file content string
-
-   Returns:
-   - {:frontmatter {string-key value} :body string}"
-  [content]
-  (let [{:keys [frontmatter body]} (split-frontmatter content)]
-    {:frontmatter (parse-frontmatter frontmatter)
-     :body        body}))
-
-;------------------------------------------------------------------------------ Layer 7
-
 ;; Rule compilation
-(defn ^{:stratum 7} mdc->rule
+(defn ^{:stratum 5} mdc->rule
   "Compile a single MDC file into a policy-pack rule map.
 
    Implements the field mapping from the design spec
@@ -683,9 +646,9 @@
       (merge (schema-validation/failure :rule (.getMessage e))
              {:filename filename}))))
 
-;------------------------------------------------------------------------------ Layer 8
+;------------------------------------------------------------------------------ Layer 6
 
-(defn ^{:stratum 8} compile-standards-pack
+(defn ^{:stratum 6} compile-standards-pack
   "Compile all .mdc files from a standards directory into a pack manifest.
 
    Discovers all .mdc files recursively, compiles each via mdc->rule,

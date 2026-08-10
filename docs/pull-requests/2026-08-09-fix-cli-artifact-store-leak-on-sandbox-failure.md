@@ -42,16 +42,20 @@ plus its (new) test namespace. No component interfaces change.
   swallows close-time exceptions, so a single call in `finally` covers
   completion, sandbox-setup failure, and the rethrow path without ever
   double-closing or masking an in-flight exception.
-- `bases/cli/test/ai/miniforge/cli/workflow_runner/execution_test.clj`
-  (new namespace — none existed for this file): an
-  `execute-recording-closes` harness runs `execute-with-events` with a
-  sentinel store, stubbing `artifact/close-store` to record what it
+- `bases/cli/test/ai/miniforge/cli/workflow_runner/execution_test.clj`:
+  an `execute-recording-closes` harness runs `execute-with-events` with
+  a sentinel store, stubbing `artifact/close-store` to record what it
   receives and silencing the lifecycle/display side effects. Three tests:
   sandbox-failure branch closes the store and reports
   `:sandbox-setup-failed` without invoking the pipeline; a throwing
   pipeline still closes the store before the rethrow propagates; the
   success path closes exactly once (guards against a duplicate close
-  reappearing alongside the `finally`).
+  reappearing alongside the `finally`). This branch created the
+  namespace, then #1723 landed its own `execution_test.clj` on main
+  (sandbox-failure result-shape tests) first; the merge keeps #1723's
+  tests verbatim and adds the store-lifecycle harness and tests beside
+  them, with assertions speaking #1723's `:execution/*` result
+  vocabulary.
 
 ## Callers — checked
 
@@ -75,10 +79,11 @@ task rather than widening this diff.
 - Exception handling (211): no new catches; the test uses slingshot
   `try+`/`catch Object` to observe the rethrow, matching sibling tests.
 - Test fixtures match the producer's shape
-  (feedback_test_fixtures_match_production_shape): the sandbox-error
-  context uses the same `{:sandbox-error {:error ...}}` shape
-  `setup-sandbox-context` produces and the same `:errors` vector shape
-  the branch itself constructs.
+  (feedback_test_fixtures_match_production_shape): the store-lifecycle
+  tests reuse #1723's `sandbox-error-context` fixture (a real
+  `dag/err`, the shape `setup-sandbox-context` stashes), the pipeline
+  stub returns an `:execution/status` result like the pipeline itself,
+  and assertions read `:execution/status` / `:execution/errors`.
 
 ## Testing Plan
 

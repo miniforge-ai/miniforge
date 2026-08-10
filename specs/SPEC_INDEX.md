@@ -6,8 +6,8 @@
 
 # miniforge Specification Index
 
-**Version:** 0.14.0-draft
-**Date:** 2026-08-06
+**Version:** 0.17.0-draft
+**Date:** 2026-08-09
 **Status:** Living specification during OSS development
 
 ---
@@ -272,12 +272,21 @@ Defines:
 - Listener capability model: OBSERVE, ADVISE, CONTROL levels with RBAC
 - Control action surface: pause, resume, rollback, quarantine, approve, emergency-stop
 - Advisory annotation system: non-blocking recommendations and warnings
-- Privacy and redaction: metadata-only, redacted, full privacy levels
 - OpenTelemetry interoperability: GenAI span mapping, OTLP export
 - Cost and volume controls: sampling rules, aggregation boundaries
 - Fleet and enterprise extensions: multi-tenancy, pattern detection
 - CLI/TUI extensions: listener commands, control palette, approval queue
 - **Safe-mode posture:** Triggers, behavior, exit protocol for system-wide autonomy demotion (§3.4)
+- **Redaction and retention deferred to N3** (§5) — the parallel privacy-level,
+  pattern-table, field-rule and retention-policy models are withdrawn
+- **Per-listener content visibility (§5.1):** N3 §8.4 field classes by RBAC role;
+  `:restricted` suppressed per-recipient at delivery
+- **Redaction patterns are EDN configuration**, never a function (§5.2, dewey 007)
+- **Event schemas referenced, not restated** (§10.1) — the reproduced copies carried a
+  fixed `:workflow/id` and were unusable on N3's five non-workflow scopes
+- **Conformance requirement IDs** (`N8.CAP.*`, `N8.CTL.*`, `N8.PRV.*`) and test
+  obligations (§12.4–§12.5)
+- **Annex A (informative):** implementation conformance status
 
 ### N9 — External PR Integration 🆕
 
@@ -297,6 +306,15 @@ Defines:
 - Multi-repo configuration: per-repo opt-in with org-level defaults
 - Fleet Mode disambiguation: N9 (SDLC governance) vs N7 (runtime policy synthesis)
 - CLI/TUI/API extensions: `fleet prs`, `fleet trains` commands and views
+- **Scope and event schemas deferred to N3** (§7) — §7.1 restated a PR-only scope rule that
+  N3 §2.3 generalizes to six scopes; §7.2 reproduced N3 §3.16's schemas
+- **Versioning aligned with N3 §7** (§14) — the required parallel deprecation cycle is
+  withdrawn; pre-release implementations cut over
+- **Binary name reconciled** — N5 §2.1 documented `miniforge` while the shipped binary is `mf`;
+  N9 was correct and N5 is amended
+- **Conformance requirement IDs** (`N9.WI.*`, `N9.EV.*`, `N9.AT.*`, `N9.AS.*`, `N9.EB.*`)
+  and test obligations (§17–§18)
+- **Annex A (informative):** implementation conformance status
 
 ### N10 — Governed Tool Execution 🆕
 
@@ -320,6 +338,11 @@ Defines:
 - Audit integration: full event stream (N3) and evidence bundle (N6) linkage
 - **Tool operational semantics:** Timeout, retry, circuit-breaker, concurrency, fallback (§3.4–§3.5)
 - **Tool response validation:** Schema validation and injection sanitization at capsule boundary (§7.4)
+- **Audit events reframed (§12.1):** none of the fifteen types is registered in N3 §6, so the
+  table is informative; adding a row is an N3 amendment first
+- **Evidence type gated on N6 (§12.2):** `:governed-execution` is not an N6 §3.1.1 artifact type
+- **Annex A (informative):** implementation conformance status — §10's ten safety invariants
+  have no enforcement point
 
 ---
 
@@ -575,6 +598,34 @@ Normative specs are enforced by:
 
 ## Version History
 
+- **0.17.0-draft** (2026-08-06) - N10 spec-completion pass. **N10**: §12.1 required governed
+  execution to emit events to N3 directly above a note saying implementations MUST NOT emit them,
+  since none of the fifteen types is registered in N3 §6 — a requirement satisfiable in neither
+  direction. The table is now informative and the conformant path is correlation identifiers on
+  registered types, with N3 §6.1 amendment as the route to emitting any of them. §12.2's
+  `:governed-execution` evidence shape is not an N6 §3.1.1 artifact type and is gated on
+  registering it there. Annex A records that §10's ten safety invariants — including SI-10's
+  five-second revocation bound — have no enforcement point, because no capsule, postcondition, or
+  crown-jewel component exists. Per-spec bumps: N10 0.3.1→0.4.0
+- **0.16.0-draft** (2026-08-06) - N9 spec-completion pass. **N9**: §7.1 restated a PR-only scope
+  rule superseded by N3 §2.3's six-scope table, and §7.2 reproduced N3 §3.16's event schemas —
+  both now reference N3. §14 required breaking changes to be "supported in parallel for at least
+  one deprecation cycle", contradicting N3 §7.4's pre-release cut-over stance; withdrawn. N5 §2.1
+  documented the command as `miniforge` while the shipped binary is `mf` (`bb install:cli` →
+  `~/.local/bin/mf`, and CI invokes it by that name); N9 was correct and N5 §2.1 is amended, with
+  its own examples swept to match.
+  Conformance requirement IDs and test obligations (§17–§18). Annex A records that none of N9's
+  six event types is emitted, so the `:pr/id` scope has no producer.
+  Per-spec bumps: N9 0.2→0.3
+- **0.15.0-draft** (2026-08-06) - N8 spec-completion pass. **N8**: §5 carried a parallel model for
+  concerns N3 owns — privacy levels, a regex pattern table, a field-rule vocabulary, and its own
+  retention schema — so an operator configuring redaction there could not tell whether N3 §8.1's
+  MUST NOT still applied. All withdrawn; §5 now defines only which principal sees which field
+  class. `:redaction/custom-fn function` withdrawn as a config-as-data violation (dewey 007).
+  §10.1 reproduced N3 §3.15's event schemas with a fixed `:workflow/id`, unusable on the five
+  non-workflow scopes N3 streams; now a reference table. Conformance requirement IDs and test
+  obligations (§12.4–§12.5). Annex A notes that no redaction configuration exists anywhere in the
+  tree — the third spec in a row to record that gap. Per-spec bumps: N8 0.3→0.4
 - **0.14.0-draft** (2026-08-06) - N2 spec-completion pass. **N2**: the workflow status
   vocabulary was spelled three ways — N2 said `:pending`, N5-delta-supervisory §3.2 said
   `:queued`, and N5 §2.3.2's CLI filter plus the implementation said `:executing`, so a filter
