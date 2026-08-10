@@ -20,8 +20,8 @@
    (`workflow run/list/execute/status/cancel` and `chain run/list`).
 
    The registry is the single source of truth for:
-   - the babashka.cli `:spec` (flag definitions) wired into the
-     `main.clj` dispatch table,
+   - the babashka.cli `:spec` (defined in `help/flag_specs.clj`) wired
+     into the `main.clj` dispatch table,
    - the per-subcommand `--help` usage block rendered by
      `ai.miniforge.cli.workflow-runner.help/usage-text`, and
    - the parent-level (`workflow --help` / `chain --help`) listing.
