@@ -20,7 +20,7 @@
 
    The vocabularies live in sibling namespaces; this one is the single
    entry point the rest of the workflow runner calls. Each name below is
-   its own var, rooted in the implementation fn — not the owning
+   its own var, rooted in the implementation value — not the owning
    namespace's var. So `with-redefs` here intercepts every caller that
    resolves through this namespace, while `with-redefs` on the owning
    namespace's var does not reach those callers (and vice versa).

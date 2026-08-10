@@ -75,8 +75,12 @@ so there is no second copy to drift.
 
 ## Deployment Plan
 
-No behaviour change: every re-exported var is rooted in the same implementation
-fn the callers were already invoking. Ships with the ordinary merge to `main`.
+No behaviour change. Callers previously invoked the implementations defined in
+`display.clj`; this PR re-roots each var at the extracted namespace's copy of
+that implementation. The copies were moved verbatim in #1724 and checked there
+against the originals over 152 paired inputs with no mismatches, so this is
+behavioural equivalence, not object identity. Ships with the ordinary merge to
+`main`.
 
 ## Related Issues/PRs
 
