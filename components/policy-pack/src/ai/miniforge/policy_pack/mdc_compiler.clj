@@ -24,28 +24,26 @@
 
    Designed to be called by the ETL task (bb standards:pack) at build time.
 
-   Slice 5/6 of a rule 210 split train (SL003: this namespace measured
-   9 real layers, max 3 — same approach as the dag-orchestrator split,
-   miniforge#1485, and the workflow-runner split, miniforge#1662).
-   Slices 1-2 (miniforge#1729/#1732) moved the frontmatter grammar out;
-   slice 3 (miniforge#1733) moved the text-condensation chain out;
-   slice 4 (miniforge#1740) moved the Dewey-range chain out. This slice
-   moves agent-behavior extraction (`extract-agent-behavior-section`,
-   `extract-first-paragraph`, `condense-to-length`,
-   `extract-agent-behavior`) to `mdc-compiler.agent-behavior`. The file
-   stays at 4 real layers — `mdc->rule` sits atop TWO independent
-   chains, and moving only one (this slice) still leaves the other
-   (`build-remediation-config`'s rule-config chain) setting the depth.
-   The final slice (rule-config builders) removes that last chain and
-   brings the file to budget.
+   Final slice (6/6) of a rule 210 split train (SL003: this namespace
+   originally measured 9 real layers, max 3 — same approach as the
+   dag-orchestrator split, miniforge#1485, and the workflow-runner
+   split, miniforge#1662). Slices 1-2 (miniforge#1729/#1732) moved the
+   frontmatter grammar out; slice 3 (miniforge#1733) moved the
+   text-condensation chain out; slice 4 (miniforge#1740) moved the
+   Dewey-range chain out; slice 5 (miniforge#1742) moved agent-behavior
+   extraction out. This slice moves the remaining rule-config builders
+   (`build-exclude-context`, `build-detection-config`,
+   `valid-enforcement-actions`, `build-remediation-config`) to
+   `mdc-compiler.rule-config` — the second of the two independent
+   chains feeding `mdc->rule`. With both chains moved, this namespace
+   is now within budget at 3 real layers.
 
    Layer 0: Parsing/config primitives — group-dotted-keys,
-     build-exclude-context, build-detection-config, slug->rule-id/title,
-     format-pack-version, validate-no-duplicate-slugs, parse-mdc,
-     export-canonical-taxonomy, build-categories
-   Layer 1: build-remediation-config
-   Layer 2: mdc->rule
-   Layer 3: compile-standards-pack
+     slug->rule-id/title, normalize-globs, format-pack-version,
+     validate-no-duplicate-slugs, parse-mdc, export-canonical-taxonomy,
+     build-categories
+   Layer 1: mdc->rule
+   Layer 2: compile-standards-pack
 
    Related:
      work/designs/mdc-to-pack-field-mapping.edn — authoritative field mapping spec
@@ -55,7 +53,7 @@
    [ai.miniforge.policy-pack.mdc-compiler.agent-behavior :as agent-behavior]
    [ai.miniforge.policy-pack.mdc-compiler.dewey :as dewey]
    [ai.miniforge.policy-pack.mdc-compiler.frontmatter :as frontmatter]
-   [ai.miniforge.policy-pack.schema-types :as schema-types]
+   [ai.miniforge.policy-pack.mdc-compiler.rule-config :as rule-config]
    [ai.miniforge.policy-pack.schema-validation :as schema-validation]
    [clojure.java.io :as io]
    [clojure.string :as str]))
@@ -77,40 +75,6 @@
        (assoc acc k v)))
    {}
    fm))
-
-(defn- ^{:stratum 0} build-exclude-context
-  "Convert path/current exclude lists from MDC remediation config into
-   ExcludeContext maps for the RuleRemediation schema."
-  [remediation-map]
-  (let [path-contains    (get remediation-map "excludePathContains")
-        current-contains (get remediation-map "excludeCurrentContains")]
-    (cond-> []
-      (seq path-contains)
-      (into (mapv (fn [p] {:path-contains p}) path-contains))
-
-      (seq current-contains)
-      (conj {:current-contains (vec current-contains)}))))
-
-(defn- ^{:stratum 0} build-detection-config
-  "Build :rule/detection map from grouped frontmatter detection block.
-   Returns {:type :content-scan ...} when detection config is present,
-   {:type :custom} otherwise."
-  [detection-map]
-  (if (and detection-map (get detection-map "pattern"))
-    (cond-> {:type    :content-scan
-             :pattern (get detection-map "pattern")
-             :mode    (keyword (get detection-map "mode" "positive"))}
-      (get detection-map "emailPattern")
-      (assoc :email-pattern (get detection-map "emailPattern")))
-    {:type :custom}))
-
-(def ^{:stratum 0} ^:private valid-enforcement-actions
-  "Enforcement actions a rule may opt into via frontmatter `enforcement.action`,
-   derived from the ONE canonical source (`schema-types/enforcement-actions`) so the
-   compiler can never accept an action the rule schema rejects. `:hard-halt`
-   makes a pack-derived gate BLOCK; the rest are non-blocking. An unrecognized
-   value falls back to the alwaysApply default — a typo can't produce garbage."
-  (set schema-types/enforcement-actions))
 
 ;; Field mapping transforms
 ;; ── Filename slug → rule ID ─────────────────────────────────────────────────
@@ -229,32 +193,8 @@
 
 ;------------------------------------------------------------------------------ Layer 1
 
-(defn- ^{:stratum 1} build-remediation-config
-  "Build :rule/remediation map from grouped frontmatter remediation block.
-   Returns nil if no remediation config is present."
-  [remediation-map]
-  (when (and remediation-map (get remediation-map "strategy"))
-    (let [excludes (build-exclude-context remediation-map)]
-      (cond-> {:strategy (keyword (get remediation-map "strategy"))}
-        (get remediation-map "type")
-        (assoc :type (keyword (get remediation-map "type")))
-
-        (get remediation-map "replacement")
-        (assoc :replacement (get remediation-map "replacement"))
-
-        (get remediation-map "template")
-        (assoc :template (get remediation-map "template"))
-
-        (some? (get remediation-map "autoFixable"))
-        (assoc :auto-fixable-default (boolean (get remediation-map "autoFixable")))
-
-        (seq excludes)
-        (assoc :exclude-contexts excludes)))))
-
-;------------------------------------------------------------------------------ Layer 2
-
 ;; Rule compilation
-(defn ^{:stratum 2} mdc->rule
+(defn ^{:stratum 1} mdc->rule
   "Compile a single MDC file into a policy-pack rule map.
 
    Implements the field mapping from the design spec
@@ -288,8 +228,8 @@
                          (seq globs) (assoc :file-globs globs))
 
           ;; ── Detection & remediation ─────────────────────────────────────
-          detection    (build-detection-config (get fm "detection"))
-          remediation  (build-remediation-config (get fm "remediation"))
+          detection    (rule-config/build-detection-config (get fm "detection"))
+          remediation  (rule-config/build-remediation-config (get fm "remediation"))
 
           ;; ── Content extraction ──────────────────────────────────────────
           body-trimmed    (when-not (str/blank? body) (str/trim body))
@@ -305,7 +245,7 @@
           fm-action      (some-> enforcement-fm (get "action") str str/trim
                                  not-empty keyword)
           action         (cond
-                           (contains? valid-enforcement-actions fm-action) fm-action
+                           (contains? rule-config/valid-enforcement-actions fm-action) fm-action
                            always-apply :warn
                            :else :audit)
           ;; A rule that opts into blocking is at least :high (canonical scale).
@@ -346,9 +286,9 @@
       (merge (schema-validation/failure :rule (.getMessage e))
              {:filename filename}))))
 
-;------------------------------------------------------------------------------ Layer 3
+;------------------------------------------------------------------------------ Layer 2
 
-(defn ^{:stratum 3} compile-standards-pack
+(defn ^{:stratum 2} compile-standards-pack
   "Compile all .mdc files from a standards directory into a pack manifest.
 
    Discovers all .mdc files recursively, compiles each via mdc->rule,
