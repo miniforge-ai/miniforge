@@ -87,12 +87,13 @@ task rather than widening this diff.
 
 ## Testing Plan
 
-- `clojure -M:dev:test` on the new namespace: 3 tests, 9 assertions,
-  green.
+- `clojure -M:dev:test` on the merged namespace (this branch's 3
+  store-lifecycle tests plus #1723's 5 result-shape tests): 8 tests,
+  20 assertions, green.
 - Mutation-checked rather than trusting green: deleting the `finally`
-  close fails all three tests (each asserts the recorded close vector),
-  confirming the tests bind to the release behavior, not incidental
-  output.
+  close fails all three store-lifecycle tests (each asserts the
+  recorded close vector), confirming they bind to the release behavior,
+  not incidental output.
 - `bb lint:clj` on both staged files: 0 errors, 0 warnings.
 - Pre-commit hook (commit budget, structure, lint, format, smoke tests)
   runs at commit time; full suite in CI.
