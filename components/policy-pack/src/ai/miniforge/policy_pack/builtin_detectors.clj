@@ -16,75 +16,25 @@
 ;; See the License for the specific language governing permissions and
 ;; limitations under the License.
 (ns ai.miniforge.policy-pack.builtin-detectors
-  "Built-in :custom detectors, registered at namespace load. These exist so a
-   rule's policy parameters stay DATA — read from the rule's
-   `:rule/detection :detector-config` — instead of being encoded in a regex.
-   The rule reaches the detector via `:policy-pack/rule` in context (threaded in
-   by `detection/run-resolved-custom`)."
+  "Built-in :custom detectors, registered at namespace load. Each detector's
+   own logic lives in its own sibling namespace under `builtin-detectors.*`
+   (rule 210: registering more than one detector's worth of layers in this
+   file would exceed the 3-layer budget); this namespace only wires the
+   registration symbol — the one `pack.edn` `:custom-fn` data refers to — to
+   the sibling's implementation. The rule reaches the detector via
+   `:policy-pack/rule` in context (threaded in by
+   `detection/run-resolved-custom`)."
   (:require
-   [ai.miniforge.policy-pack.detection :as detection]))
+   [ai.miniforge.policy-pack.detection :as detection]
+   [ai.miniforge.policy-pack.builtin-detectors.approved-instance-types :as approved-instance-types]))
 
 ;------------------------------------------------------------------------------ Layer 0
 
-;; Approved EC2 instance types
-(def ^{:stratum 0} ^:private default-approved-instance-families
-  "Fallback approved EC2 instance-type families, used only when a rule supplies
-   no :approved-families in its :detector-config."
-  ["t3" "t4g" "m5" "m6i" "c5" "c6i" "r5" "r6i"])
-
-(defn- ^{:stratum 0} instance-type-literals
-  "String literals assigned to instance_type in Terraform content, e.g.
-   `instance_type = \"t3.micro\"` -> \"t3.micro\". The capture is `*`, not `+`, so
-   an empty literal (`instance_type = \"\"`) is captured (and later flagged as a
-   non-family) rather than ignored. Variable references (`instance_type = var.x`)
-   carry no literal and are not evaluated here — the same limitation the prior
-   regex had."
-  [content]
-  (map second (re-seq #"instance_type\s*=\s*\"([^\"]*)\"" (str content))))
-
-(defn- ^{:stratum 0} approved?
-  "True when `literal` has a `family.size` shape whose family is approved. A
-   dotless/placeholder literal (\"t3\", \"\") has no family and is never approved
-   — matching the prior regex, which required a `family.` prefix."
-  [approved-set literal]
-  (boolean (when-let [[_ fam] (re-matches #"([^.]+)\..+" literal)]
-             (contains? approved-set fam))))
-
-;------------------------------------------------------------------------------ Layer 1
-
-(defn- ^{:stratum 1} approved-families
-  "The approved-family set for this rule. A configured `:approved-families` must
-   be a sequential collection of strings; anything else is a misconfigured pack
-   and throws (surfaced as a :custom-error by `run-resolved-custom`) rather than
-   silently coercing — e.g. a bare string would `set` into a char-set."
-  [context]
-  (let [configured (get-in context [:policy-pack/rule :rule/detection :detector-config :approved-families])]
-    (when (and configured (not (and (sequential? configured) (every? string? configured))))
-      (throw (ex-info "approved-families must be a sequential collection of strings"
-                      {:approved-families configured})))
-    (set (or configured default-approved-instance-families))))
-
-;------------------------------------------------------------------------------ Layer 2
-
-(defn ^{:stratum 2} check-approved-instance-types
-  "Flag EC2 `instance_type` literals whose family is not approved. The approved
-   families come from the rule's `:detector-config :approved-families` (data),
-   falling back to `default-approved-instance-families`."
-  [artifact context]
-  (let [approved  (approved-families context)
-        offenders (remove #(approved? approved %)
-                          (instance-type-literals (:artifact/content artifact)))]
-    (when (seq offenders)
-      {:matches  (vec offenders)
-       :message  (get-in context [:policy-pack/rule :rule/enforcement :message])})))
-
-;------------------------------------------------------------------------------ Layer 3
-
 ;; Registration (load-time side effect — see ns docstring)
-(defn- ^{:stratum 3} register!
+(defn- ^{:stratum 0} register!
   []
   (detection/register-custom-fn!
    'ai.miniforge.policy-pack.builtin-detectors/check-approved-instance-types
-   check-approved-instance-types))
+   approved-instance-types/check-approved-instance-types))
 
 (register!)
