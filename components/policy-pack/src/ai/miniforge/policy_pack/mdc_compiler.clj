@@ -24,30 +24,33 @@
 
    Designed to be called by the ETL task (bb standards:pack) at build time.
 
-   Slice 2/6 of a rule 210 split train (SL003: this namespace measured
+   Slice 3/6 of a rule 210 split train (SL003: this namespace measured
    9 real layers, max 3 — same approach as the dag-orchestrator split,
    miniforge#1485, and the workflow-runner split, miniforge#1662).
    Slice 1 (miniforge#1729) moved the frontmatter scalar-value grammar
-   to `mdc-compiler.frontmatter-values`; this slice moves the
-   remaining frontmatter line-grammar (splitting, key/value and list
-   parsing) to `mdc-compiler.frontmatter`. The file still measures 7
-   real layers — the frontmatter chain was never the sole bottleneck;
-   the surviving critical path is now condense-to-length →
-   extract-agent-behavior → mdc->rule → compile-standards-pack, which
-   the next slices target directly.
+   to `mdc-compiler.frontmatter-values`; slice 2 (miniforge#1732) moved
+   the frontmatter line-grammar to `mdc-compiler.frontmatter`. This
+   slice moves the text-condensation chain (whole-sentence truncation,
+   bullet detection, prose/bullet condensation) to
+   `mdc-compiler.condense` — the chain that was the real bottleneck:
+   `condense-to-length` alone accounted for 4 of the file's 7 real
+   layers. The file now measures 5 real layers; the surviving
+   critical path is the Dewey-range chain (`find-dewey-range` →
+   `dewey->phases`/`category-id`/`category-label` →
+   `build-categories`/`mdc->rule` → `compile-standards-pack`), which
+   the remaining slices (Dewey-range extraction, then rule-config
+   builders) target directly.
 
    Layer 0: Parsing/config primitives — group-dotted-keys,
      build-exclude-context, build-detection-config, dewey-ranges,
      default-phases, slug->rule-id/title, agent-behavior
-     paragraph/bullet helpers, format-pack-version,
-     validate-no-duplicate-slugs, parse-mdc
-   Layer 1: build-remediation-config, find-dewey-range, bullet-line?,
-     condense-prose, export-canonical-taxonomy
-   Layer 2: dewey->phases/category-id/category-label, condense-bullets
-   Layer 3: condense-to-length, build-categories
-   Layer 4: extract-agent-behavior
-   Layer 5: mdc->rule
-   Layer 6: compile-standards-pack
+     paragraph/section helpers, format-pack-version,
+     validate-no-duplicate-slugs, parse-mdc, condense-to-length
+   Layer 1: build-remediation-config, find-dewey-range,
+     export-canonical-taxonomy, extract-agent-behavior
+   Layer 2: dewey->phases/category-id/category-label
+   Layer 3: build-categories, mdc->rule
+   Layer 4: compile-standards-pack
 
    Related:
      work/designs/mdc-to-pack-field-mapping.edn — authoritative field mapping spec
@@ -55,6 +58,7 @@
      .standards/                                 — source .mdc files (input)"
   (:require
    [ai.miniforge.coerce.interface :as coerce]
+   [ai.miniforge.policy-pack.mdc-compiler.condense :as condense]
    [ai.miniforge.policy-pack.mdc-compiler.frontmatter :as frontmatter]
    [ai.miniforge.policy-pack.schema-types :as schema-types]
    [ai.miniforge.policy-pack.schema-validation :as schema-validation]
@@ -214,33 +218,6 @@
     (when-not (str/blank? content)
       content)))
 
-(def ^{:stratum 0} ^:private bullet-line-pattern
-  "Markdown list-item line: leading whitespace, then either `-` / `*`
-   or a numbered prefix like `1.` / `42.`, then a space. Numbered
-   prefixes are recognized so MDC authors can write `1. … 2. …` lists
-   in `## Agent behavior` sections without the compiler silently
-   falling through to prose-mode condensation and truncating
-   mid-sentence (regression observed on the dewey-211
-   `clojure-exception-handling` rule, copilot review on
-   miniforge#765)."
-  #"^\s*(?:[-*]|\d+\.)\s+.*")
-
-(defn- ^{:stratum 0} keep-whole-sentences
-  "Largest prefix of `text` made of whole sentences (split on `.!?` +
-   whitespace) that fits within `target-length`, rejoined with single
-   spaces. Falls back to a hard character cut ONLY when the first
-   sentence alone already overflows — so a normal directive never ends
-   mid-word."
-  [text target-length]
-  (let [condensed (reduce (fn [acc s]
-                            (let [candidate (if (str/blank? acc) s (str acc " " s))]
-                              (if (> (count candidate) target-length) (reduced acc) candidate)))
-                          ""
-                          (str/split text #"(?<=[.!?])\s+"))]
-    (if (str/blank? condensed)
-      (subs text 0 (min (count text) target-length))
-      condensed)))
-
 ;; ── Globs normalization ─────────────────────────────────────────────────────
 (defn- ^{:stratum 0} normalize-globs
   "Normalize the globs frontmatter value to a vector of strings.
@@ -284,6 +261,19 @@
     {:frontmatter (frontmatter/parse-frontmatter frontmatter)
      :body        body}))
 
+(defn- ^{:stratum 0} condense-to-length
+  "Condense text to approximately target-length characters.
+   Bullet lists (including numbered): keeps first 3 bullets.
+   Prose: keeps complete sentences."
+  [text target-length]
+  (if (<= (count text) target-length)
+    text
+    (let [lines   (str/split-lines text)
+          bullets (filterv condense/bullet-line? lines)]
+      (if (>= (count bullets) 2)
+        (condense/condense-bullets lines target-length)
+        (condense/condense-prose text target-length)))))
+
 ;------------------------------------------------------------------------------ Layer 1
 
 (defn- ^{:stratum 1} build-remediation-config
@@ -318,17 +308,6 @@
               entry))
           dewey-ranges)))
 
-(defn- ^{:stratum 1} bullet-line?
-  "True when `line` is a markdown list-item — `-`/`*` bullet OR
-   numbered prefix."
-  [line]
-  (boolean (re-matches bullet-line-pattern line)))
-
-(defn- ^{:stratum 1} condense-prose
-  "Keep complete sentences up to target-length, falling back to hard truncation."
-  [text target-length]
-  (keep-whole-sentences (str/replace text #"\n+" " ") target-length))
-
 ;; Canonical taxonomy export
 (defn ^{:stratum 1} export-canonical-taxonomy
   "Export the compiler's dewey-ranges as a first-class Taxonomy artifact.
@@ -360,6 +339,27 @@
            {:alias/name   (keyword id)
             :alias/target (keyword "mf.cat" id)})
          dewey-ranges)})
+
+(defn ^{:stratum 1} extract-agent-behavior
+  "Extract a concise agent behavior directive from an MDC body.
+
+   Priority 1: If the body contains a '## Agent behavior' section,
+               extract and condense its content.
+   Priority 2: If no such section, use the first non-heading paragraph.
+
+   Result is condensed to ~500 chars for prompt injection.
+
+   Arguments:
+   - body - MDC body text (everything after frontmatter)
+
+   Returns:
+   - Behavior string, or nil if no meaningful content."
+  [body]
+  (when-not (str/blank? body)
+    (let [section (extract-agent-behavior-section body)
+          content (or section (extract-first-paragraph body))]
+      (when content
+        (condense-to-length content behavior-condensation-target)))))
 
 ;------------------------------------------------------------------------------ Layer 2
 
@@ -402,32 +402,7 @@
     (:label entry)
     "Other"))
 
-(defn- ^{:stratum 2} condense-bullets
-  "Keep the first 3 bullets. If the joined result exceeds target-length,
-   trim to whole sentences so the directive never ends mid-word (a raw
-   char cut here once shipped a truncated `named-constants` directive
-   ending \"The on\" — copilot review on miniforge#1302)."
-  [lines target-length]
-  (let [bullets (filterv bullet-line? lines)
-        result  (str/trim (str/join "\n" (take 3 bullets)))]
-    (if (<= (count result) target-length)
-      result
-      (keep-whole-sentences result target-length))))
-
 ;------------------------------------------------------------------------------ Layer 3
-
-(defn- ^{:stratum 3} condense-to-length
-  "Condense text to approximately target-length characters.
-   Bullet lists (including numbered): keeps first 3 bullets.
-   Prose: keeps complete sentences."
-  [text target-length]
-  (if (<= (count text) target-length)
-    text
-    (let [lines   (str/split-lines text)
-          bullets (filterv bullet-line? lines)]
-      (if (>= (count bullets) 2)
-        (condense-bullets lines target-length)
-        (condense-prose text target-length)))))
 
 ;; ── Category builder ────────────────────────────────────────────────────────
 (defn- ^{:stratum 3} build-categories
@@ -454,33 +429,8 @@
          (sort-by :category/id)
          vec)))
 
-;------------------------------------------------------------------------------ Layer 4
-
-(defn ^{:stratum 4} extract-agent-behavior
-  "Extract a concise agent behavior directive from an MDC body.
-
-   Priority 1: If the body contains a '## Agent behavior' section,
-               extract and condense its content.
-   Priority 2: If no such section, use the first non-heading paragraph.
-
-   Result is condensed to ~500 chars for prompt injection.
-
-   Arguments:
-   - body - MDC body text (everything after frontmatter)
-
-   Returns:
-   - Behavior string, or nil if no meaningful content."
-  [body]
-  (when-not (str/blank? body)
-    (let [section (extract-agent-behavior-section body)
-          content (or section (extract-first-paragraph body))]
-      (when content
-        (condense-to-length content behavior-condensation-target)))))
-
-;------------------------------------------------------------------------------ Layer 5
-
 ;; Rule compilation
-(defn ^{:stratum 5} mdc->rule
+(defn ^{:stratum 3} mdc->rule
   "Compile a single MDC file into a policy-pack rule map.
 
    Implements the field mapping from the design spec
@@ -572,9 +522,9 @@
       (merge (schema-validation/failure :rule (.getMessage e))
              {:filename filename}))))
 
-;------------------------------------------------------------------------------ Layer 6
+;------------------------------------------------------------------------------ Layer 4
 
-(defn ^{:stratum 6} compile-standards-pack
+(defn ^{:stratum 4} compile-standards-pack
   "Compile all .mdc files from a standards directory into a pack manifest.
 
    Discovers all .mdc files recursively, compiles each via mdc->rule,
