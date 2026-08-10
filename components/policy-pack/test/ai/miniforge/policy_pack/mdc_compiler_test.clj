@@ -126,8 +126,8 @@
 ;; ============================================================================
 (deftest ^{:stratum 0} dewey->category-id-test
   (testing "maps dewey codes to category IDs"
-    (are [dewey expected]
-         (= expected (dewey/dewey->category-id dewey))
+    (are [dewey-code expected]
+         (= expected (dewey/dewey->category-id dewey-code))
       "001" "foundations"
       "100" "tools"
       "210" "languages"

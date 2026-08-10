@@ -260,7 +260,19 @@
 ;; `mdc-compiler/export-canonical-taxonomy` by name; moving the
 ;; definition without this delegating var would be a public-API break
 ;; disguised as an internal reorganization.
-(def ^{:stratum 0} export-canonical-taxonomy dewey/export-canonical-taxonomy)
+(def ^{:stratum 0} export-canonical-taxonomy
+  "Export the compiler's dewey-ranges as a first-class Taxonomy artifact.
+
+   This bridges the compiler's internal category table to the N4 four-artifact
+   model. The exported taxonomy is the authoritative source of truth; the
+   bundled EDN resource at resources/taxonomies/miniforge-dewey-1.0.0.edn
+   should match this output.
+
+   Returns:
+   - A valid Taxonomy map per taxonomy/Taxonomy schema.
+
+   Delegates to ai.miniforge.policy-pack.mdc-compiler.dewey/export-canonical-taxonomy."
+  dewey/export-canonical-taxonomy)
 
 ;; ── Category builder ────────────────────────────────────────────────────────
 (defn- ^{:stratum 0} build-categories
