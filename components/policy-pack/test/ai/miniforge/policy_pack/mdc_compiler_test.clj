@@ -32,6 +32,7 @@
    [clojure.test :refer [deftest testing is are]]
    [clojure.string :as str]
    [ai.miniforge.policy-pack.mdc-compiler :as sut]
+   [ai.miniforge.policy-pack.mdc-compiler.agent-behavior :as agent-behavior]
    [ai.miniforge.policy-pack.mdc-compiler.dewey :as dewey]
    [ai.miniforge.policy-pack.mdc-compiler.frontmatter :as frontmatter]))
 
@@ -175,34 +176,34 @@
   (testing "priority 1: extracts ## Agent behavior section"
     (let [body "# Title\n\nIntro.\n\n## Agent behavior\n\n- Do this first.\n- Then do that.\n\n## Next section"]
       (is (= "- Do this first.\n- Then do that."
-             (sut/extract-agent-behavior body)))))
+             (agent-behavior/extract-agent-behavior body)))))
 
   (testing "priority 2: falls back to first non-heading paragraph"
     (let [body "# Title\n\nFirst paragraph used as fallback.\n\nSecond paragraph ignored."]
       (is (= "First paragraph used as fallback."
-             (sut/extract-agent-behavior body)))))
+             (agent-behavior/extract-agent-behavior body)))))
 
   (testing "returns nil for nil body"
-    (is (nil? (sut/extract-agent-behavior nil))))
+    (is (nil? (agent-behavior/extract-agent-behavior nil))))
 
   (testing "returns nil for blank body"
-    (is (nil? (sut/extract-agent-behavior ""))))
+    (is (nil? (agent-behavior/extract-agent-behavior ""))))
 
   (testing "returns nil for whitespace-only body"
-    (is (nil? (sut/extract-agent-behavior "   \n  "))))
+    (is (nil? (agent-behavior/extract-agent-behavior "   \n  "))))
 
   (testing "returns nil for body with only headings"
-    (is (nil? (sut/extract-agent-behavior "# Heading only\n## Sub heading"))))
+    (is (nil? (agent-behavior/extract-agent-behavior "# Heading only\n## Sub heading"))))
 
   (testing "condenses long behavior sections to ~500 chars"
     (let [long-body (str "## Agent behavior\n\n"
                          (str/join ". " (repeat 100 "Do something important"))
                          ".")]
-      (is (<= (count (sut/extract-agent-behavior long-body)) 510))))  ;; allow small slack
+      (is (<= (count (agent-behavior/extract-agent-behavior long-body)) 510))))  ;; allow small slack
 
   (testing "preserves bullet lists when condensing"
     (let [body "## Agent behavior\n\n- First bullet.\n- Second bullet.\n- Third bullet.\n- Fourth bullet."
-          result (sut/extract-agent-behavior body)]
+          result (agent-behavior/extract-agent-behavior body)]
       ;; Should preserve first 3 bullets when condensing
       (is (str/includes? result "First bullet"))
       (is (str/includes? result "Second bullet"))
@@ -219,7 +220,7 @@
                     "3. Third numbered step that should survive.\n"
                     "4. Fourth numbered step.\n"
                     "5. Fifth numbered step.")
-          result (sut/extract-agent-behavior body)]
+          result (agent-behavior/extract-agent-behavior body)]
       (is (str/includes? result "First numbered step")
           "first numbered item must be preserved")
       (is (str/includes? result "Second numbered step")
@@ -240,7 +241,7 @@
                             "target so the trimming path is exercised."))
           body (str "## Agent behavior\n\n"
                     (str/join "\n" (map step (range 1 6))))
-          result (str/trim (sut/extract-agent-behavior body))]
+          result (str/trim (agent-behavior/extract-agent-behavior body))]
       (is (> (count (str/join "\n" (map step (range 1 4)))) 500)
           "fixture must actually overflow, else the trim branch isn't tested")
       (is (<= (count result) 510) "still condensed to ~500 chars")

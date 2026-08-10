@@ -24,33 +24,26 @@
 
    Designed to be called by the ETL task (bb standards:pack) at build time.
 
-   Slice 4/6 of a rule 210 split train (SL003: this namespace measured
+   Slice 5/6 of a rule 210 split train (SL003: this namespace measured
    9 real layers, max 3 — same approach as the dag-orchestrator split,
    miniforge#1485, and the workflow-runner split, miniforge#1662).
    Slices 1-2 (miniforge#1729/#1732) moved the frontmatter grammar out;
-   slice 3 (miniforge#1733) moved the text-condensation chain out. This
-   slice moves the Dewey-range table and its lookups (`find-dewey-range`,
-   `dewey->phases`/`category-id`/`category-label`, the N4 taxonomy
-   export) to `mdc-compiler.dewey` — the chain that was the bottleneck
-   after slice 3. `export-canonical-taxonomy` is re-exported here as a
-   thin delegating var (not just moved) because
-   `ai.miniforge.policy-pack.interface` and this component's
-   `taxonomy_test.clj` reference `mdc-compiler/export-canonical-taxonomy`
-   directly — real external fan-in the original zero-fan-in check
-   (which only grepped the underscored file-path spelling, not the
-   hyphenated namespace symbol actually used in `:require` forms)
-   missed. The file now measures 4 real layers; the surviving critical
-   path runs through two independent branches feeding `mdc->rule` —
-   `build-remediation-config`'s rule-config chain and (after slice 5)
-   `extract-agent-behavior`'s chain — both must move before the parent
-   drops to budget.
+   slice 3 (miniforge#1733) moved the text-condensation chain out;
+   slice 4 (miniforge#1740) moved the Dewey-range chain out. This slice
+   moves agent-behavior extraction (`extract-agent-behavior-section`,
+   `extract-first-paragraph`, `condense-to-length`,
+   `extract-agent-behavior`) to `mdc-compiler.agent-behavior`. The file
+   stays at 4 real layers — `mdc->rule` sits atop TWO independent
+   chains, and moving only one (this slice) still leaves the other
+   (`build-remediation-config`'s rule-config chain) setting the depth.
+   The final slice (rule-config builders) removes that last chain and
+   brings the file to budget.
 
    Layer 0: Parsing/config primitives — group-dotted-keys,
      build-exclude-context, build-detection-config, slug->rule-id/title,
-     agent-behavior paragraph/section helpers, format-pack-version,
-     validate-no-duplicate-slugs, parse-mdc, condense-to-length,
+     format-pack-version, validate-no-duplicate-slugs, parse-mdc,
      export-canonical-taxonomy, build-categories
-   Layer 1: build-remediation-config, extract-agent-behavior
+   Layer 1: build-remediation-config
    Layer 2: mdc->rule
    Layer 3: compile-standards-pack
 
@@ -59,7 +52,7 @@
      components/policy-pack/src/.../schema.clj  — Rule schema (target format)
      .standards/                                 — source .mdc files (input)"
   (:require
-   [ai.miniforge.policy-pack.mdc-compiler.condense :as condense]
+   [ai.miniforge.policy-pack.mdc-compiler.agent-behavior :as agent-behavior]
    [ai.miniforge.policy-pack.mdc-compiler.dewey :as dewey]
    [ai.miniforge.policy-pack.mdc-compiler.frontmatter :as frontmatter]
    [ai.miniforge.policy-pack.schema-types :as schema-types]
@@ -146,58 +139,6 @@
        (map str/capitalize)
        (str/join " ")))
 
-;; ── Agent behavior extraction ───────────────────────────────────────────────
-(def ^{:stratum 0} ^:private behavior-condensation-target 500)
-
-(defn- ^{:stratum 0} extract-agent-behavior-section
-  "Extract content from a \"## Agent behavior\" section in the MDC body.
-
-   Scans for a heading matching /^## Agent behavior/i, extracts everything
-   from that heading to the next ## heading or end-of-file, strips the
-   heading line itself.
-
-   Returns the section content string, or nil if no such heading exists."
-  [body]
-  (let [lines (str/split-lines body)
-        heading-idx (first
-                     (keep-indexed
-                      (fn [i line]
-                        (when (re-matches #"(?i)^##\s+Agent\s+behavior\s*$"
-                                          (str/trim line))
-                          i))
-                      lines))]
-    (when heading-idx
-      (let [after-heading (drop (inc heading-idx) lines)
-            section-lines (take-while
-                           (fn [line]
-                             (not (re-matches #"^##\s+.*" (str/trim line))))
-                           after-heading)
-            content (str/trim (str/join "\n" section-lines))]
-        (when-not (str/blank? content)
-          content)))))
-
-(defn- ^{:stratum 0} extract-first-paragraph
-  "Extract the first non-heading paragraph from the MDC body.
-
-   Skips any leading # headings and blank lines, then takes text
-   until the next blank line.
-
-   Returns the paragraph string, or nil."
-  [body]
-  (let [lines (str/split-lines body)
-        content-lines (drop-while
-                       (fn [line]
-                         (let [trimmed (str/trim line)]
-                           (or (str/blank? trimmed)
-                               (str/starts-with? trimmed "#"))))
-                       lines)
-        paragraph-lines (take-while
-                         (fn [line] (not (str/blank? (str/trim line))))
-                         content-lines)
-        content (str/trim (str/join "\n" paragraph-lines))]
-    (when-not (str/blank? content)
-      content)))
-
 ;; ── Globs normalization ─────────────────────────────────────────────────────
 (defn- ^{:stratum 0} normalize-globs
   "Normalize the globs frontmatter value to a vector of strings.
@@ -240,19 +181,6 @@
   (let [{:keys [frontmatter body]} (frontmatter/split-frontmatter content)]
     {:frontmatter (frontmatter/parse-frontmatter frontmatter)
      :body        body}))
-
-(defn- ^{:stratum 0} condense-to-length
-  "Condense text to approximately target-length characters.
-   Bullet lists (including numbered): keeps first 3 bullets.
-   Prose: keeps complete sentences."
-  [text target-length]
-  (if (<= (count text) target-length)
-    text
-    (let [lines   (str/split-lines text)
-          bullets (filterv condense/bullet-line? lines)]
-      (if (>= (count bullets) 2)
-        (condense/condense-bullets lines target-length)
-        (condense/condense-prose text target-length)))))
 
 ;; Canonical taxonomy export — re-exported here (not just from `dewey`)
 ;; because `ai.miniforge.policy-pack.interface` and
@@ -323,27 +251,6 @@
         (seq excludes)
         (assoc :exclude-contexts excludes)))))
 
-(defn ^{:stratum 1} extract-agent-behavior
-  "Extract a concise agent behavior directive from an MDC body.
-
-   Priority 1: If the body contains a '## Agent behavior' section,
-               extract and condense its content.
-   Priority 2: If no such section, use the first non-heading paragraph.
-
-   Result is condensed to ~500 chars for prompt injection.
-
-   Arguments:
-   - body - MDC body text (everything after frontmatter)
-
-   Returns:
-   - Behavior string, or nil if no meaningful content."
-  [body]
-  (when-not (str/blank? body)
-    (let [section (extract-agent-behavior-section body)
-          content (or section (extract-first-paragraph body))]
-      (when content
-        (condense-to-length content behavior-condensation-target)))))
-
 ;------------------------------------------------------------------------------ Layer 2
 
 ;; Rule compilation
@@ -386,7 +293,7 @@
 
           ;; ── Content extraction ──────────────────────────────────────────
           body-trimmed    (when-not (str/blank? body) (str/trim body))
-          agent-behavior  (extract-agent-behavior body)
+          agent-behavior  (agent-behavior/extract-agent-behavior body)
 
           ;; ── Build rule map ──────────────────────────────────────────────
           ;; Enforcement action: a rule MAY opt into a stronger action via
@@ -540,11 +447,11 @@
   (slug->rule-id "pre-commit-discipline.mdc")   ;; => :std/pre-commit-discipline
 
   ;; ── Agent behavior extraction ───────────────────────────────────────────
-  (extract-agent-behavior
+  (agent-behavior/extract-agent-behavior
    "# Title\n\nSome intro text.\n\n## Agent behavior\n\n- Do this first.\n- Then do that.")
   ;; => "- Do this first.\n- Then do that."
 
-  (extract-agent-behavior
+  (agent-behavior/extract-agent-behavior
    "# Title\n\nFirst paragraph used as fallback.\n\nSecond paragraph ignored.")
   ;; => "First paragraph used as fallback."
 
