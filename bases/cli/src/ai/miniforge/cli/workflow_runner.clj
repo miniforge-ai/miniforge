@@ -119,7 +119,6 @@
             manifest-handle (lifecycle/start-workflow-manifest! workflow-id stream)]
         (try
           (let [result (execution/execute-workflow-pipeline run-pipeline workflow workflow-input callbacks-with-url artifact-store stream)]
-            (execution/close-artifact-store artifact-store)
             (lifecycle/mark-manifest-terminal!
              manifest-handle
              (if (phase/succeeded? result) :completed :failed))
@@ -149,6 +148,12 @@
             (lifecycle/mark-manifest-terminal! manifest-handle :cancelled)
             (lifecycle/finish-workflow-manifest! manifest-handle)
             (progress-cleanup)
+            ;; Every exit path — completion or pipeline throw — must
+            ;; release the transit store opened above; the old
+            ;; success-branch-only close leaked it on the throw path.
+            ;; close-artifact-store is nil-safe and swallows close-time
+            ;; exceptions, so one unconditional call covers all exits.
+            (execution/close-artifact-store artifact-store)
             ;; Schedule deferred GC for this workflow's scratch ref — fires
             ;; here (finally) so it runs on both normal completion and any
             ;; exception path.  The ref will be deleted on a future
