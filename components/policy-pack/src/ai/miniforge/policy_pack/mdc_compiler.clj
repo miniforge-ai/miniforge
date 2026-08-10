@@ -24,24 +24,27 @@
 
    Designed to be called by the ETL task (bb standards:pack) at build time.
 
-   Slice 1/6 of a rule 210 split train (SL003: this namespace measured
+   Slice 2/6 of a rule 210 split train (SL003: this namespace measured
    9 real layers, max 3 — same approach as the dag-orchestrator split,
-   miniforge#1485, and the workflow-runner split, miniforge#1662):
-   quote-stripping and the frontmatter scalar-value grammar moved to
-   `ai.miniforge.policy-pack.mdc-compiler.frontmatter-values`. This
-   file now measures 7 real layers; further slices land in subsequent
-   PRs until it's within budget.
+   miniforge#1485, and the workflow-runner split, miniforge#1662).
+   Slice 1 (miniforge#1729) moved the frontmatter scalar-value grammar
+   to `mdc-compiler.frontmatter-values`; this slice moves the
+   remaining frontmatter line-grammar (splitting, key/value and list
+   parsing) to `mdc-compiler.frontmatter`. The file still measures 7
+   real layers — the frontmatter chain was never the sole bottleneck;
+   the surviving critical path is now condense-to-length →
+   extract-agent-behavior → mdc->rule → compile-standards-pack, which
+   the next slices target directly.
 
-   Layer 0: Parsing/config primitives — split-frontmatter,
-     group-dotted-keys, build-exclude-context, build-detection-config,
-     dewey-ranges, default-phases, slug->rule-id/title, agent-behavior
-     paragraph/bullet helpers, format-pack-version, validate-no-duplicate-slugs,
-     parse-list-item, parse-kv-line
+   Layer 0: Parsing/config primitives — group-dotted-keys,
+     build-exclude-context, build-detection-config, dewey-ranges,
+     default-phases, slug->rule-id/title, agent-behavior
+     paragraph/bullet helpers, format-pack-version,
+     validate-no-duplicate-slugs, parse-mdc
    Layer 1: build-remediation-config, find-dewey-range, bullet-line?,
-     condense-prose, export-canonical-taxonomy, process-frontmatter-line
-   Layer 2: dewey->phases/category-id/category-label, condense-bullets,
-     parse-frontmatter
-   Layer 3: condense-to-length, build-categories, parse-mdc
+     condense-prose, export-canonical-taxonomy
+   Layer 2: dewey->phases/category-id/category-label, condense-bullets
+   Layer 3: condense-to-length, build-categories
    Layer 4: extract-agent-behavior
    Layer 5: mdc->rule
    Layer 6: compile-standards-pack
@@ -52,37 +55,13 @@
      .standards/                                 — source .mdc files (input)"
   (:require
    [ai.miniforge.coerce.interface :as coerce]
-   [ai.miniforge.policy-pack.mdc-compiler.frontmatter-values :as frontmatter-values]
+   [ai.miniforge.policy-pack.mdc-compiler.frontmatter :as frontmatter]
    [ai.miniforge.policy-pack.schema-types :as schema-types]
    [ai.miniforge.policy-pack.schema-validation :as schema-validation]
    [clojure.java.io :as io]
    [clojure.string :as str]))
 
 ;------------------------------------------------------------------------------ Layer 0
-
-;; MDC parsing — frontmatter and body extraction
-(defn ^{:stratum 0} split-frontmatter
-  "Split MDC content into frontmatter string and body string.
-
-   Expects --- delimited YAML frontmatter at the top of the file.
-
-   Arguments:
-   - content - Full .mdc file content
-
-   Returns:
-   - {:frontmatter <string> :body <string>}"
-  [content]
-  (let [trimmed (str/trim (str content))]
-    (if (str/starts-with? trimmed "---")
-      (let [after-open (subs trimmed 3)
-            close-idx (str/index-of after-open "---")]
-        (if close-idx
-          {:frontmatter (str/trim (subs after-open 0 close-idx))
-           :body        (str/trim (subs after-open (+ close-idx 3)))}
-          {:frontmatter ""
-           :body        trimmed}))
-      {:frontmatter ""
-       :body        trimmed})))
 
 ;; Detection and remediation config builders
 (defn- ^{:stratum 0} group-dotted-keys
@@ -292,21 +271,18 @@
             (str/join ", " (map first duplicates))
             ". Rule IDs must be unique across all subdirectories.")])))
 
-(defn- ^{:stratum 0} parse-list-item
-  "Parse a '- <value>' frontmatter list line to its string value."
-  [trimmed]
-  (frontmatter-values/strip-quotes (str/trim (subs trimmed 2))))
+(defn ^{:stratum 0} parse-mdc
+  "Parse an MDC file into its structured components.
 
-(defn- ^{:stratum 0} parse-kv-line
-  "Parse a 'key: value' frontmatter line.
-   Returns [new-current-key updated-acc]."
-  [trimmed acc]
-  (let [idx (str/index-of trimmed ":")
-        k   (str/trim (subs trimmed 0 idx))
-        v   (str/trim (subs trimmed (inc idx)))]
-    (if (str/blank? v)
-      [k (assoc acc k [])]
-      [nil (assoc acc k (frontmatter-values/parse-frontmatter-value v))])))
+   Arguments:
+   - content - Full .mdc file content string
+
+   Returns:
+   - {:frontmatter {string-key value} :body string}"
+  [content]
+  (let [{:keys [frontmatter body]} (frontmatter/split-frontmatter content)]
+    {:frontmatter (frontmatter/parse-frontmatter frontmatter)
+     :body        body}))
 
 ;------------------------------------------------------------------------------ Layer 1
 
@@ -385,21 +361,6 @@
             :alias/target (keyword "mf.cat" id)})
          dewey-ranges)})
 
-(defn- ^{:stratum 1} process-frontmatter-line
-  "Process one frontmatter line. Returns [current-key acc]."
-  [trimmed current-key acc]
-  (cond
-    (str/blank? trimmed)
-    [current-key acc]
-
-    (and current-key (str/starts-with? trimmed "- "))
-    [current-key (update acc current-key (fnil conj []) (parse-list-item trimmed))]
-
-    (str/includes? trimmed ":")
-    (parse-kv-line trimmed acc)
-
-    :else [current-key acc]))
-
 ;------------------------------------------------------------------------------ Layer 2
 
 (defn ^{:stratum 2} dewey->phases
@@ -453,28 +414,6 @@
       result
       (keep-whole-sentences result target-length))))
 
-(defn- ^{:stratum 2} parse-frontmatter
-  "Parse YAML-like frontmatter text into a string-keyed map.
-
-   Handles simple key: value pairs, inline arrays [a, b], and
-   multi-line list items (- value) under a key.
-
-   Arguments:
-   - frontmatter-str - Raw text between --- delimiters
-
-   Returns:
-   - Map of {string-key parsed-value}, or empty map."
-  [frontmatter-str]
-  (if (str/blank? frontmatter-str)
-    {}
-    (loop [[line & remaining] (str/split-lines frontmatter-str)
-           current-key nil
-           acc {}]
-      (if (nil? line)
-        acc
-        (let [[current-key' acc'] (process-frontmatter-line (str/trim line) current-key acc)]
-          (recur remaining current-key' acc'))))))
-
 ;------------------------------------------------------------------------------ Layer 3
 
 (defn- ^{:stratum 3} condense-to-length
@@ -514,19 +453,6 @@
                  :category/rules (mapv :rule/id cat-rules)}))
          (sort-by :category/id)
          vec)))
-
-(defn ^{:stratum 3} parse-mdc
-  "Parse an MDC file into its structured components.
-
-   Arguments:
-   - content - Full .mdc file content string
-
-   Returns:
-   - {:frontmatter {string-key value} :body string}"
-  [content]
-  (let [{:keys [frontmatter body]} (split-frontmatter content)]
-    {:frontmatter (parse-frontmatter frontmatter)
-     :body        body}))
 
 ;------------------------------------------------------------------------------ Layer 4
 
