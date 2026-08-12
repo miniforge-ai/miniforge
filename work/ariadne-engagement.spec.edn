@@ -1,0 +1,85 @@
+;; =============================================================================
+;; Spec: Ariadne step 3d — the engagement, or who commissioned this work
+;; =============================================================================
+;;
+;; Normative refs: docs/architecture/rfc-ariadne-adoption.md (adoption
+;; step 3; the mapping table's Engagement row); Ariadne §2-§4. Prior
+;; art: thesium-career ADR 008, where employment became a relation
+;; rather than containment — the same shape as this.
+
+{:spec/title "Ariadne step 3d: engagement as a relation, not containment"
+
+ :spec/description
+ "Model the commissioning relationship: which tenant asked for work to
+  be done on which repository or fleet, and under what terms.
+
+  WHY A RELATION AND NOT A FIELD. The tempting model is that a repo
+  BELONGS to a tenant and runs inherit from it. That model breaks the
+  moment two tenants have a legitimate interest in the same repository —
+  a customer org that owns the code and an operator org running the
+  agents on it. Career hit this exactly: employment could not be
+  containment, because a person is not inside their employer. It had to
+  be a relation, and the same is true here.
+
+  So: an Engagement is an object connecting a commissioning tenant to a
+  target, and a run cites the engagement it was commissioned under.
+  Ownership (3c) still says who OWNS the artifact; the engagement says
+  who ASKED. Those answer different questions and conflating them loses
+  both.
+
+  GROUP 1: The object
+  `:engagement/id`, `:engagement/commissioning-tenant-id`,
+  `:engagement/target` (a repo or fleet reference),
+  `:engagement/status` [:enum :active :suspended :ended],
+  `:engagement/started-at`, `:engagement/ended-at`.
+
+  GROUP 2: Runs cite their engagement
+  A workflow run carries `:workflow-run/engagement-id`. A run with no
+  engagement is a run nobody commissioned, which during
+  single-operator use is the overwhelmingly common case — so this slice
+  creates a default local engagement rather than making the field
+  optional. An optional field here would be filled in by nobody and
+  would answer the question 'who asked' with silence.
+
+  GROUP 3: Ended engagements do not retroactively unown anything
+  Ending an engagement stops NEW work being commissioned under it. It
+  does not orphan the records already created, and it does not delete
+  them. The takeaway-export right the RFC names depends on those records
+  remaining attributable after the relationship ends; an engagement that
+  erased its history on termination would defeat the point.
+
+  DELIBERATELY NOT HERE: entitlements, quotas, or any access check
+  driven by engagement status. Those are Fleet re-scope (step 4)
+  territory and are explicitly the thing the RFC says to delete-and-
+  redesign rather than extend."
+
+ :spec/intent {:type :feature
+               :scope ["components/tenancy/"
+                       "components/workflow/src/"]}
+
+ :spec/constraints
+ ["Engagement is a relation object, never a containment field on a repo"
+  "A workflow run cites an engagement id; the field is required, defaulted locally, never optional"
+  "Ending an engagement does not orphan, unown, or delete existing records"
+  "Ownership and engagement stay distinct - one says who owns, the other who asked"
+  "No access decision is driven by engagement status in this slice"
+  "Stratified design, max 3 layers per file"]
+
+ :spec/acceptance-criteria
+ ["Engagement validates its documented shape and rejects extra keys"
+  "A workflow run carries an engagement id"
+  "Local single-operator use creates and reuses a default engagement rather than leaving the field empty"
+  "Two tenants can hold engagements against the same target simultaneously"
+  "Ending an engagement leaves prior records readable and still attributed"
+  "A test asserts ownership and engagement can name different tenants for one run"
+  "full bb test green"]
+
+ :spec/priority
+ {:tier :high
+  :axes #{:scale :governance-credibility :correctness}
+  :theme :ariadne-tenancy
+  :rationale "Multi-operator and the Fleet data story both need the commissioning relation; nothing earlier in step 3 depends on it."
+  :blocks []
+  :blocked-by ["ariadne-owned-records.spec.edn"]}
+
+ :spec/workflow-type :canonical-sdlc}
