@@ -21,94 +21,22 @@
    Parses PR diffs into artifacts, selects applicable packs, and runs
    evaluation in read-only mode (no repair phase).
 
-   Layer 0: parse-diff-header, path-matches-glob?
-   Layer 1: parse-pr-diff, files-match-globs? (over Layer 0)
-   Layer 2: pack-applies? (over files-match-globs?)
-   Layer 3: select-applicable-packs (over pack-applies?)
-   Layer 4: evaluate-external-pr (over parse-pr-diff + select-applicable-packs)
+   Diff parsing lives in `ai.miniforge.policy-pack.external.diff`; pack
+   applicability / glob matching lives in
+   `ai.miniforge.policy-pack.external.matching` (rule 210: the combined
+   namespace measured 5 real layers, max 3). This namespace keeps pack
+   selection and the top-level evaluation entry point.
 
-   5 real strata — over the rule 210 budget of 3; a genuine namespace split
-   (Wave 2), not a labeling problem."
+   Layer 0: select-applicable-packs (over matching/pack-applies?)
+   Layer 1: evaluate-external-pr (over diff/parse-pr-diff + select-applicable-packs)"
   (:require
    [ai.miniforge.policy-pack.core :as core]
-   [ai.miniforge.policy-pack.registry.support :as registry-support]
-   [clojure.string :as str]))
+   [ai.miniforge.policy-pack.external.diff :as diff]
+   [ai.miniforge.policy-pack.external.matching :as matching]))
 
 ;------------------------------------------------------------------------------ Layer 0
 
-;; Diff parsing
-(defn ^{:stratum 0} parse-diff-header
-  "Parse a diff header to extract the file path.
-   Handles 'diff --git a/path b/path' format."
-  [header-line]
-  (when-let [[_ path] (re-find #"^diff --git a/.+ b/(.+)$" header-line)]
-    path))
-
-;; Pack selection
-(defn ^{:stratum 0} path-matches-glob?
-  "Test a single path against a single glob pattern."
-  [glob-fn glob path]
-  (try (glob-fn glob path) (catch Exception _ false)))
-
-;------------------------------------------------------------------------------ Layer 1
-
-(defn ^{:stratum 1} parse-pr-diff
-  "Parse a unified diff into a vector of artifact maps.
-
-   Arguments:
-   - diff-content - String containing unified diff output
-
-   Returns:
-   [{:artifact/path string
-     :artifact/content string   ;; the new file content (+ lines)
-     :artifact/diff string}]    ;; the raw diff hunk"
-  [diff-content]
-  (when (and diff-content (not (str/blank? diff-content)))
-    (let [lines (str/split-lines diff-content)
-          ;; Split on diff headers
-          segments (reduce
-                    (fn [acc line]
-                      (if (str/starts-with? line "diff --git")
-                        (conj acc {:header line :lines []})
-                        (if (seq acc)
-                          (update-in acc [(dec (count acc)) :lines] conj line)
-                          acc)))
-                    []
-                    lines)]
-      (vec
-       (keep (fn [{:keys [header lines]}]
-               (when-let [path (parse-diff-header header)]
-                 (let [diff-text (str/join "\n" lines)
-                       ;; Extract added lines (content approximation)
-                       added-lines (->> lines
-                                        (filter #(str/starts-with? % "+"))
-                                        (remove #(str/starts-with? % "+++"))
-                                        (map #(subs % 1)))]
-                   {:artifact/path path
-                    :artifact/content (str/join "\n" added-lines)
-                    :artifact/diff diff-text})))
-             segments)))))
-
-(defn ^{:stratum 1} files-match-globs?
-  "True if any path in `paths` matches any pattern in `globs`."
-  [paths globs]
-  (some (fn [path]
-          (some #(path-matches-glob? registry-support/glob-matches? % path) globs))
-        paths))
-
-;------------------------------------------------------------------------------ Layer 2
-
-(defn ^{:stratum 2} pack-applies?
-  "True if a pack applies to the given changed files.
-   Packs with no :file-globs constraint apply to everything."
-  [changed-files pack]
-  (let [file-globs (get-in pack [:pack/applies-to :file-globs])]
-    (or (not (seq file-globs))
-        (files-match-globs? changed-files file-globs))))
-
-;------------------------------------------------------------------------------ Layer 3
-
-(defn ^{:stratum 3} select-applicable-packs
+(defn ^{:stratum 0} select-applicable-packs
   "Select packs applicable to a PR based on metadata.
 
    Arguments:
@@ -118,12 +46,12 @@
    Returns: Vector of applicable packs."
   [packs pr-meta]
   (let [changed-files (get pr-meta :changed-files [])]
-    (filterv (partial pack-applies? changed-files) packs)))
+    (filterv (partial matching/pack-applies? changed-files) packs)))
 
-;------------------------------------------------------------------------------ Layer 4
+;------------------------------------------------------------------------------ Layer 1
 
 ;; Evaluation and reporting
-(defn ^{:stratum 4} evaluate-external-pr
+(defn ^{:stratum 1} evaluate-external-pr
   "Evaluate an external PR against policy packs in read-only mode.
 
    Arguments:
@@ -146,7 +74,7 @@
   (let [packs-vec (if (vector? packs) packs [packs])
         applicable (select-applicable-packs packs-vec pr-data)
         artifacts (or (:artifacts pr-data)
-                      (parse-pr-diff (:diff pr-data))
+                      (diff/parse-pr-diff (:diff pr-data))
                       [])
         context {:read-only? true
                  :phase :review
@@ -170,7 +98,7 @@
 ;------------------------------------------------------------------------------ Rich Comment
 (comment
   ;; Parse a diff
-  (parse-pr-diff
+  (diff/parse-pr-diff
    "diff --git a/main.tf b/main.tf
 --- a/main.tf
 +++ b/main.tf

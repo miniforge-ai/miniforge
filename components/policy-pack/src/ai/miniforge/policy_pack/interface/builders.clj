@@ -19,7 +19,8 @@
   "Policy-pack builders, rule resolution, and external-PR evaluation."
   (:require
    [ai.miniforge.policy-pack.builders :as builders]
-   [ai.miniforge.policy-pack.external :as external]))
+   [ai.miniforge.policy-pack.external :as external]
+   [ai.miniforge.policy-pack.external.diff :as external-diff]))
 
 ;------------------------------------------------------------------------------ Layer 0
 
@@ -109,4 +110,4 @@
   "Parse a unified diff string into artifact maps. (parse-pr-diff diff-content)
    returns a vector of {:artifact/path :artifact/content (added lines)
    :artifact/diff (raw hunk)}, or nil for blank input."
-  external/parse-pr-diff)
+  external-diff/parse-pr-diff)
