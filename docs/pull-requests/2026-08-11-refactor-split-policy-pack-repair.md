@@ -36,17 +36,27 @@ call-site risk, and no data (`.edn`) references any of its symbols.
   implementations (`whitespace-repair`, `trailing-newline-repair`) —
   1 layer, unchanged behavior. Not registered at load time (unchanged
   from before the split) — a caller opts in via
-  `repair.registry/register-repair!`. `trailing-newline-repair`'s
-  docstring was expanded (doc-only, no logic change) to say plainly
-  that `trimr` strips all trailing whitespace, not just newlines,
-  before the single `\n` is appended — flagged by Copilot review as
-  a docstring/behavior mismatch in the moved code.
+  `ai.miniforge.policy-pack.repair.registry/register-repair!`.
+  `trailing-newline-repair`'s docstring was expanded (doc-only, no
+  logic change) to say plainly that `trimr` strips all trailing
+  whitespace, not just newlines, before the single `\n` is appended —
+  flagged by Copilot review as a docstring/behavior mismatch in the
+  moved code.
 - `repair.clj`: now only orchestration — `succeeded?` and
-  `attempt-repair` (requiring `repair.registry` for
-  `get-repair-fn`), and `attempt-repairs` — 2 layers.
+  `attempt-repair` (requiring
+  `ai.miniforge.policy-pack.repair.registry` for `get-repair-fn`),
+  and `attempt-repairs` — 2 layers.
 
 This is pure code motion: no logic changed, only relocated and
 re-namespaced. The def set is unchanged.
+
+Copilot also flagged (as a suppressed, non-blocking note) that
+`trailing-newline-repair` always returns `:success? true` even when
+`fixed` equals `content` — unlike `whitespace-repair`, which returns
+`:success? false` on a no-op. That inconsistency is unchanged
+pre-existing behavior carried over from `main`; fixing it would be a
+logic change outside this PR's pure-restructuring scope, so it is
+left as-is here and flagged separately for a follow-up.
 
 ## Testing Plan
 
@@ -75,7 +85,7 @@ Merges to `main` immediately; no follow-up needed for this file.
 ## Checklist
 
 - [x] stratum-lint clean on all three resulting files
-- [x] `bb test` green (policy-pack change-scope)
+- [x] `bb test` green (full stable-derived changed-and-affected suite)
 - [x] Adversarial self-review: def set unchanged, only relocated
 - [x] Zero fan-in confirmed repo-wide before starting (re-verified,
       not assumed from the task brief)
