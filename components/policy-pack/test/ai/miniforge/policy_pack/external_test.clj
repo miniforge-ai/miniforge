@@ -19,6 +19,7 @@
   (:require
    [clojure.test :refer [deftest testing is]]
    [ai.miniforge.policy-pack.external :as external]
+   [ai.miniforge.policy-pack.external.diff :as diff]
    [ai.miniforge.policy-pack.builders :as builders]))
 
 ;------------------------------------------------------------------------------ Layer 0
@@ -28,24 +29,24 @@
 ;; ============================================================================
 (deftest ^{:stratum 0} parse-pr-diff-test
   (testing "parses single-file diff"
-    (let [diff "diff --git a/main.tf b/main.tf\n--- a/main.tf\n+++ b/main.tf\n@@ -1,3 +1,4 @@\n resource \"aws_vpc\" \"main\" {\n+  enable_dns = true\n   cidr_block = var.vpc_cidr\n }"
-          result (external/parse-pr-diff diff)]
+    (let [diff-content "diff --git a/main.tf b/main.tf\n--- a/main.tf\n+++ b/main.tf\n@@ -1,3 +1,4 @@\n resource \"aws_vpc\" \"main\" {\n+  enable_dns = true\n   cidr_block = var.vpc_cidr\n }"
+          result (diff/parse-pr-diff diff-content)]
       (is (= 1 (count result)))
       (is (= "main.tf" (:artifact/path (first result))))
       (is (string? (:artifact/content (first result))))
       (is (string? (:artifact/diff (first result))))))
 
   (testing "parses multi-file diff"
-    (let [diff (str "diff --git a/a.tf b/a.tf\n--- a/a.tf\n+++ b/a.tf\n@@ -1 +1,2 @@\n+added line\n"
-                    "diff --git a/b.tf b/b.tf\n--- a/b.tf\n+++ b/b.tf\n@@ -1 +1,2 @@\n+another line\n")
-          result (external/parse-pr-diff diff)]
+    (let [diff-content (str "diff --git a/a.tf b/a.tf\n--- a/a.tf\n+++ b/a.tf\n@@ -1 +1,2 @@\n+added line\n"
+                            "diff --git a/b.tf b/b.tf\n--- a/b.tf\n+++ b/b.tf\n@@ -1 +1,2 @@\n+another line\n")
+          result (diff/parse-pr-diff diff-content)]
       (is (= 2 (count result)))
       (is (= "a.tf" (:artifact/path (first result))))
       (is (= "b.tf" (:artifact/path (second result))))))
 
   (testing "returns nil for blank input"
-    (is (nil? (external/parse-pr-diff "")))
-    (is (nil? (external/parse-pr-diff nil)))))
+    (is (nil? (diff/parse-pr-diff "")))
+    (is (nil? (diff/parse-pr-diff nil)))))
 
 ;; ============================================================================
 ;; Read-only mode tests
