@@ -31,7 +31,7 @@
    (Wave 2), not a labeling problem."
   (:require
    [ai.miniforge.policy-pack.core :as core]
-   [ai.miniforge.policy-pack.registry :as registry]
+   [ai.miniforge.policy-pack.registry.support :as registry-support]
    [clojure.string :as str]))
 
 ;------------------------------------------------------------------------------ Layer 0
@@ -93,7 +93,7 @@
   "True if any path in `paths` matches any pattern in `globs`."
   [paths globs]
   (some (fn [path]
-          (some #(path-matches-glob? registry/glob-matches? % path) globs))
+          (some #(path-matches-glob? registry-support/glob-matches? % path) globs))
         paths))
 
 ;------------------------------------------------------------------------------ Layer 2

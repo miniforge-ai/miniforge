@@ -18,7 +18,8 @@
 (ns ai.miniforge.policy-pack.interface.registry
   "Registry-facing policy-pack API."
   (:require
-   [ai.miniforge.policy-pack.registry :as registry]))
+   [ai.miniforge.policy-pack.registry :as registry]
+   [ai.miniforge.policy-pack.registry.support :as registry-support]))
 
 ;------------------------------------------------------------------------------ Layer 0
 
@@ -76,10 +77,10 @@
   "Predicate. (glob-matches? pattern path) returns true when path matches the
    glob pattern (supports * within a segment and ** across segments); false on
    no match or a bad pattern."
-  registry/glob-matches?)
+  registry-support/glob-matches?)
 
 (def ^{:stratum 0} compare-versions
   "Compare two DateVer (YYYY.MM.DD) version strings. Returns a negative int if
    a < b, 0 if equal, positive if a > b; unparseable versions compare as
    [0 0 0]."
-  registry/compare-versions)
+  registry-support/compare-versions)

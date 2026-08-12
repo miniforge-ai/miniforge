@@ -27,7 +27,7 @@
    Layer 1: filter-applicable-rules (over all three Layer 0 predicates plus
      the rule's :rule/enabled? flag)"
   (:require
-   [ai.miniforge.policy-pack.registry :as registry]))
+   [ai.miniforge.policy-pack.registry.support :as registry-support]))
 
 ;------------------------------------------------------------------------------ Layer 0
 
@@ -46,7 +46,7 @@
         path (:artifact/path artifact "")]
     (or (nil? file-globs)
         (empty? file-globs)
-        (some #(registry/glob-matches? % path) file-globs))))
+        (some #(registry-support/glob-matches? % path) file-globs))))
 
 (defn ^{:stratum 0} rule-applies-to-task?
   "Check if a rule applies to a task type.
