@@ -22,16 +22,16 @@
    controls/requirements in another (target). Neither source nor target owns
    the mapping; it is an independent, versioned artifact.
 
-   Layer 0: MappingType/MappingConfidence/MappingSystemRef schemas,
-     resolve-mapping
-   Layer 1: MappingAuthorship/MappingEntry schemas (over MappingSystemRef),
-     project-report (over resolve-mapping)
-   Layer 2: MappingArtifact schema (over MappingEntry + MappingAuthorship)
-   Layer 3: valid-mapping?, validate-mapping (over the MappingArtifact schema)
-   Layer 4: load-mapping (over validate-mapping)
+   The MappingType/MappingConfidence/MappingSystemRef/MappingAuthorship/
+   MappingEntry/MappingArtifact schema hierarchy lives in
+   `ai.miniforge.policy-pack.mapping.schema` (rule 210: the combined
+   namespace measured 5 real layers, over the budget of 3). This namespace
+   holds resolution, projection, validation, and loading:
 
-   5 real strata — over the rule 210 budget of 3; a genuine namespace split
-   (Wave 2), not a labeling problem.
+   Layer 0: resolve-mapping, valid-mapping?, validate-mapping
+     (over schema/MappingArtifact)
+   Layer 1: project-report (over resolve-mapping),
+     load-mapping (over valid-mapping? + validate-mapping)
 
    Related:
      specs/normative/N4-policy-packs.md §2.4 — Mapping artifact spec
@@ -40,25 +40,10 @@
    [clojure.edn :as edn]
    [clojure.java.io :as io]
    [malli.core :as m]
-   [malli.error :as me]))
+   [malli.error :as me]
+   [ai.miniforge.policy-pack.mapping.schema :as schema]))
 
 ;------------------------------------------------------------------------------ Layer 0
-
-;; Schemas
-(def ^{:stratum 0} MappingType
-  "How closely the source satisfies the target."
-  [:enum :exact :broad :partial :none])
-
-(def ^{:stratum 0} MappingConfidence
-  "Confidence in the mapping's accuracy."
-  [:enum :high :medium :low :unvalidated])
-
-(def ^{:stratum 0} MappingSystemRef
-  "Reference to a source or target system."
-  [:map
-   [:mapping/system-kind [:enum :pack :taxonomy :framework]]
-   [:mapping/system-id keyword?]
-   [:mapping/system-version {:optional true} string?]])
 
 ;; Resolution
 (defn ^{:stratum 0} resolve-mapping
@@ -91,23 +76,19 @@
                 rule-title (assoc :rule-title rule-title))))
           (:mapping/entries mapping))))
 
+;; Validation
+(defn ^{:stratum 0} valid-mapping?
+  [value]
+  (m/validate schema/MappingArtifact value))
+
+(defn ^{:stratum 0} validate-mapping
+  [value]
+  (if (m/validate schema/MappingArtifact value)
+    {:valid? true :errors nil}
+    {:valid? false
+     :errors (me/humanize (m/explain schema/MappingArtifact value))}))
+
 ;------------------------------------------------------------------------------ Layer 1
-
-(def ^{:stratum 1} MappingAuthorship
-  "Provenance metadata for a mapping artifact."
-  [:map
-   [:publisher keyword?]
-   [:confidence MappingConfidence]
-   [:validated-at {:optional true} string?]])
-
-(def ^{:stratum 1} MappingEntry
-  "A single mapping between a source rule/category and a target control."
-  [:map
-   [:source/rule {:optional true} keyword?]
-   [:source/category {:optional true} keyword?]
-   [:target/control {:optional true} [:maybe string?]]
-   [:mapping/type MappingType]
-   [:mapping/notes {:optional true} string?]])
 
 (defn ^{:stratum 1} project-report
   "Generate a compliance coverage report by projecting a mapping onto a pack.
@@ -141,36 +122,8 @@
     {:target-controls controls
      :summary         summary}))
 
-;------------------------------------------------------------------------------ Layer 2
-
-(def ^{:stratum 2} MappingArtifact
-  "Schema for a mapping artifact — bridges between policy systems."
-  [:map
-   [:mapping/id keyword?]
-   [:mapping/version string?]
-   [:mapping/source MappingSystemRef]
-   [:mapping/target MappingSystemRef]
-   [:mapping/entries [:vector MappingEntry]]
-   [:mapping/authorship {:optional true} MappingAuthorship]])
-
-;------------------------------------------------------------------------------ Layer 3
-
-;; Validation
-(defn ^{:stratum 3} valid-mapping?
-  [value]
-  (m/validate MappingArtifact value))
-
-(defn ^{:stratum 3} validate-mapping
-  [value]
-  (if (m/validate MappingArtifact value)
-    {:valid? true :errors nil}
-    {:valid? false
-     :errors (me/humanize (m/explain MappingArtifact value))}))
-
-;------------------------------------------------------------------------------ Layer 4
-
 ;; Loading
-(defn ^{:stratum 4} load-mapping
+(defn ^{:stratum 1} load-mapping
   "Load a mapping artifact from an EDN file.
 
    Arguments:
