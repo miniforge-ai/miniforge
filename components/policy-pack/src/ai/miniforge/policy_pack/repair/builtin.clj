@@ -41,7 +41,12 @@
        :fix-description "Removed trailing whitespace and converted tabs to spaces"})))
 
 (defn ^{:stratum 0} trailing-newline-repair
-  "Ensure file ends with exactly one newline."
+  "Ensure file ends with exactly one newline. Uses `trimr`, which strips ALL
+   trailing whitespace (spaces/tabs/newlines), not just newline characters,
+   before appending the single `\\n` — so a file with trailing spaces on its
+   last line loses them too. That overlaps `whitespace-repair` by design:
+   this repair's job is the end-of-file newline invariant, not narrowly
+   scoped to newline characters alone."
   [_violation artifact _context]
   (let [content (get artifact :content "")
         fixed (str (clojure.string/trimr content) "\n")]

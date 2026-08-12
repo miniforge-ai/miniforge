@@ -36,7 +36,11 @@ call-site risk, and no data (`.edn`) references any of its symbols.
   implementations (`whitespace-repair`, `trailing-newline-repair`) —
   1 layer, unchanged behavior. Not registered at load time (unchanged
   from before the split) — a caller opts in via
-  `repair.registry/register-repair!`.
+  `repair.registry/register-repair!`. `trailing-newline-repair`'s
+  docstring was expanded (doc-only, no logic change) to say plainly
+  that `trimr` strips all trailing whitespace, not just newlines,
+  before the single `\n` is appended — flagged by Copilot review as
+  a docstring/behavior mismatch in the moved code.
 - `repair.clj`: now only orchestration — `succeeded?` and
   `attempt-repair` (requiring `repair.registry` for
   `get-repair-fn`), and `attempt-repairs` — 2 layers.
@@ -48,7 +52,11 @@ re-namespaced. The def set is unchanged.
 
 - `stratum-lint` clean on all three files (exit 0, was SL003 exit 1
   on the combined file).
-- `bb test` (change-scope) green on the policy-pack component.
+- `bb test` — the full stable-derived changed-and-affected suite (not
+  scoped to policy-pack alone), run synchronously with the exit code
+  captured to a file rather than piped: exit 0, "Stable-derived test
+  plan passed", 27m35s, zero failures/errors across every namespace
+  exercised.
 - No existing test file for this namespace (confirmed before
   starting); none added, since this is pure restructuring with no
   behavior change — see `workflows/tests-with-code`.
