@@ -10,6 +10,7 @@
                        "components/config/resources"
                        "components/algorithms/src"
                        "components/buzzword-bingo/src"
+                       "components/buzzword-bingo/resources"
                        "components/content-hash/src"
                        "components/opsv/src"
                        "components/logging/src"
