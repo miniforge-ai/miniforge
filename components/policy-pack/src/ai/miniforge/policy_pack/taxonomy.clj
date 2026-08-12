@@ -22,21 +22,22 @@
    the runtime resolves category IDs to display labels and sort orders
    without any knowledge of Dewey codes or MDC format.
 
-   Layer 0: TaxonomyCategory/TaxonomyAlias/TaxonomyRef schemas, category-by-id,
-     resolve-alias
-   Layer 1: Taxonomy schema (composes TaxonomyCategory/TaxonomyAlias),
-     category-title, category-order (over category-by-id)
-   Layer 2: valid-taxonomy?, validate-taxonomy (over the Taxonomy schema)
-   Layer 3: load-taxonomy, load-taxonomy-from-classpath (over
-     validate-taxonomy)
+   Category schemas (TaxonomyCategory/TaxonomyAlias/TaxonomyRef, the
+   composed Taxonomy schema) and the pure category-by-id/resolve-alias/
+   category-title/category-order lookups live in
+   `ai.miniforge.policy-pack.taxonomy.category` (rule 210: this combined
+   namespace measured 4 real layers, max 3). This namespace keeps malli
+   validation and EDN/classpath loading, which build on that schema.
 
-   4 real strata — over the rule 210 budget of 3; a genuine namespace split
-   (Wave 2), not a labeling problem.
+   Layer 0: valid-taxonomy?, validate-taxonomy (over the Taxonomy schema)
+   Layer 1: load-taxonomy, load-taxonomy-from-classpath (over
+     validate-taxonomy)
 
    Related:
      specs/normative/N4-policy-packs.md §2.1 — Taxonomy artifact spec
      docs/design/policy-pack-taxonomy.md     — Four-artifact model design"
   (:require
+   [ai.miniforge.policy-pack.taxonomy.category :as category]
    [clojure.edn :as edn]
    [clojure.java.io :as io]
    [malli.core :as m]
@@ -44,97 +45,22 @@
 
 ;------------------------------------------------------------------------------ Layer 0
 
-;; Schemas
-(def ^{:stratum 0} TaxonomyCategory
-  "Schema for a single category within a taxonomy.
+;; Validation
+(defn ^{:stratum 0} valid-taxonomy?
+  [value]
+  (m/validate category/Taxonomy value))
 
-   :category/id     — Stable namespaced keyword, immutable after publication
-   :category/code   — Display code (e.g. \"210\"); Dewey numbers, display only
-   :category/title  — Human-readable label for reports
-   :category/parent — Parent category ID (nil for root categories)
-   :category/order  — Integer sort order; drives rule application sequence"
-  [:map
-   [:category/id keyword?]
-   [:category/code string?]
-   [:category/title string?]
-   [:category/parent {:optional true} [:maybe keyword?]]
-   [:category/order int?]])
-
-(def ^{:stratum 0} TaxonomyAlias
-  "Schema for a taxonomy alias — stable logical name to category ID mapping.
-   Allows decoupling rule category references from taxonomy reorganization."
-  [:map
-   [:alias/name keyword?]
-   [:alias/target keyword?]])
-
-(def ^{:stratum 0} TaxonomyRef
-  "Schema for a taxonomy reference within a pack manifest.
-   Packs declare which taxonomy they target and the minimum version required."
-  [:map
-   [:taxonomy/id keyword?]
-   [:taxonomy/min-version string?]])
-
-;; Lookup helpers
-(defn ^{:stratum 0} category-by-id
-  [taxonomy category-id]
-  (some (fn [cat]
-          (when (= category-id (:category/id cat))
-            cat))
-        (:taxonomy/categories taxonomy)))
-
-(defn ^{:stratum 0} resolve-alias
-  [taxonomy alias-kw]
-  (or (some (fn [a]
-              (when (= alias-kw (:alias/name a))
-                (:alias/target a)))
-            (:taxonomy/aliases taxonomy))
-      alias-kw))
+(defn ^{:stratum 0} validate-taxonomy
+  [value]
+  (if (m/validate category/Taxonomy value)
+    {:valid? true :errors nil}
+    {:valid? false
+     :errors (me/humanize (m/explain category/Taxonomy value))}))
 
 ;------------------------------------------------------------------------------ Layer 1
 
-(def ^{:stratum 1} Taxonomy
-  "Schema for a taxonomy artifact.
-
-   Taxonomies are independently versioned category trees. Each pack
-   references a taxonomy via :pack/taxonomy-ref and declares a minimum
-   compatible version."
-  [:map
-   [:taxonomy/id keyword?]
-   [:taxonomy/version string?]
-   [:taxonomy/title string?]
-   [:taxonomy/description {:optional true} string?]
-   [:taxonomy/categories [:vector TaxonomyCategory]]
-   [:taxonomy/aliases {:optional true} [:vector TaxonomyAlias]]])
-
-(defn ^{:stratum 1} category-title
-  [taxonomy category-id]
-  (let [resolved (resolve-alias taxonomy category-id)]
-    (:category/title (category-by-id taxonomy resolved))))
-
-(defn ^{:stratum 1} category-order
-  [taxonomy category-id]
-  (let [resolved (resolve-alias taxonomy category-id)]
-    (or (:category/order (category-by-id taxonomy resolved))
-        Integer/MAX_VALUE)))
-
-;------------------------------------------------------------------------------ Layer 2
-
-;; Validation
-(defn ^{:stratum 2} valid-taxonomy?
-  [value]
-  (m/validate Taxonomy value))
-
-(defn ^{:stratum 2} validate-taxonomy
-  [value]
-  (if (m/validate Taxonomy value)
-    {:valid? true :errors nil}
-    {:valid? false
-     :errors (me/humanize (m/explain Taxonomy value))}))
-
-;------------------------------------------------------------------------------ Layer 3
-
 ;; Loading
-(defn ^{:stratum 3} load-taxonomy
+(defn ^{:stratum 1} load-taxonomy
   "Load a taxonomy artifact from an EDN file.
 
    Arguments:
@@ -156,7 +82,7 @@
     (catch Exception e
       {:success? false :error (.getMessage e)})))
 
-(defn ^{:stratum 3} load-taxonomy-from-classpath
+(defn ^{:stratum 1} load-taxonomy-from-classpath
   "Load a taxonomy from the classpath resources.
 
    Arguments:

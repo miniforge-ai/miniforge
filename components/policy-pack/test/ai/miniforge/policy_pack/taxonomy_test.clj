@@ -27,6 +27,7 @@
    [clojure.test :refer [deftest testing is]]
    [malli.core]
    [ai.miniforge.policy-pack.taxonomy :as sut]
+   [ai.miniforge.policy-pack.taxonomy.category :as category]
    [ai.miniforge.policy-pack.mdc-compiler :as mdc-compiler]))
 
 ;------------------------------------------------------------------------------ Layer 0
@@ -68,12 +69,12 @@
 
 (deftest ^{:stratum 0} taxonomy-ref-schema-test
   (testing "valid TaxonomyRef"
-    (is (true? (malli.core/validate sut/TaxonomyRef
+    (is (true? (malli.core/validate category/TaxonomyRef
                                     {:taxonomy/id :miniforge/dewey
                                      :taxonomy/min-version "1.0.0"}))))
 
   (testing "TaxonomyRef missing version fails"
-    (is (false? (malli.core/validate sut/TaxonomyRef
+    (is (false? (malli.core/validate category/TaxonomyRef
                                      {:taxonomy/id :miniforge/dewey})))))
 
 ;; ============================================================================
@@ -122,8 +123,8 @@
 
   (testing "aliases resolve correctly"
     (let [taxonomy (mdc-compiler/export-canonical-taxonomy)]
-      (is (= :mf.cat/foundations (sut/resolve-alias taxonomy :foundations)))
-      (is (= :mf.cat/languages (sut/resolve-alias taxonomy :languages)))))
+      (is (= :mf.cat/foundations (category/resolve-alias taxonomy :foundations)))
+      (is (= :mf.cat/languages (category/resolve-alias taxonomy :languages)))))
 
   (testing "exported taxonomy matches bundled resource"
     (let [exported (mdc-compiler/export-canonical-taxonomy)
@@ -170,34 +171,34 @@
 ;; ============================================================================
 (deftest ^{:stratum 1} category-by-id-test
   (testing "finds category by keyword ID"
-    (let [cat (sut/category-by-id minimal-taxonomy :test.cat/alpha)]
+    (let [cat (category/category-by-id minimal-taxonomy :test.cat/alpha)]
       (is (= :test.cat/alpha (:category/id cat)))
       (is (= "Alpha Category" (:category/title cat)))))
 
   (testing "returns nil for unknown category"
-    (is (nil? (sut/category-by-id minimal-taxonomy :test.cat/unknown)))))
+    (is (nil? (category/category-by-id minimal-taxonomy :test.cat/unknown)))))
 
 (deftest ^{:stratum 1} resolve-alias-test
   (testing "resolves known alias to target"
-    (is (= :test.cat/alpha (sut/resolve-alias minimal-taxonomy :alpha))))
+    (is (= :test.cat/alpha (category/resolve-alias minimal-taxonomy :alpha))))
 
   (testing "returns input unchanged for unknown alias"
-    (is (= :test.cat/beta (sut/resolve-alias minimal-taxonomy :test.cat/beta)))))
+    (is (= :test.cat/beta (category/resolve-alias minimal-taxonomy :test.cat/beta)))))
 
 (deftest ^{:stratum 1} category-title-test
   (testing "returns title for direct category ID"
-    (is (= "Alpha Category" (sut/category-title minimal-taxonomy :test.cat/alpha))))
+    (is (= "Alpha Category" (category/category-title minimal-taxonomy :test.cat/alpha))))
 
   (testing "returns title via alias resolution"
-    (is (= "Alpha Category" (sut/category-title minimal-taxonomy :alpha))))
+    (is (= "Alpha Category" (category/category-title minimal-taxonomy :alpha))))
 
   (testing "returns nil for unknown category"
-    (is (nil? (sut/category-title minimal-taxonomy :unknown)))))
+    (is (nil? (category/category-title minimal-taxonomy :unknown)))))
 
 (deftest ^{:stratum 1} category-order-test
   (testing "returns order for known category"
-    (is (= 0 (sut/category-order minimal-taxonomy :test.cat/alpha)))
-    (is (= 100 (sut/category-order minimal-taxonomy :test.cat/beta))))
+    (is (= 0 (category/category-order minimal-taxonomy :test.cat/alpha)))
+    (is (= 100 (category/category-order minimal-taxonomy :test.cat/beta))))
 
   (testing "returns MAX_VALUE for unknown category"
-    (is (= Integer/MAX_VALUE (sut/category-order minimal-taxonomy :unknown)))))
+    (is (= Integer/MAX_VALUE (category/category-order minimal-taxonomy :unknown)))))
