@@ -361,16 +361,35 @@
 
 (defn- run-pipeline-dag
   "Loop over the DAG until all stages reach a terminal state.
-   Returns {:stage-runs [...] :cursors {...} :failed? bool}."
+   Returns {:stage-runs [...] :cursors {...} :failed? bool}.
+
+   Guards against DAG deadlock: when the run is not yet terminal but no task
+   is ready to execute — which happens when (first (dag/ready-tasks @run-atom))
+   returns nil and the silent failed transitions leave state unchanged — the
+   loop would spin forever. Detecting an empty ready-set before calling
+   step-pipeline lets us skip remaining pending tasks and surface the deadlock
+   as a normal pipeline failure."
   [run-atom stage-map connectors context]
   (loop [stage-outputs {}
          stage-runs    []
          cursors       {}
          sm            stage-map]
-    (if (dag/all-terminal? @run-atom)
+    (cond
+      (dag/all-terminal? @run-atom)
       {:stage-runs stage-runs
        :cursors    cursors
-       :failed?    (seq (:run/failed @run-atom))}
+       :failed?    (boolean (seq (:run/failed @run-atom)))}
+
+      ;; DAG deadlock: non-terminal run with no ready tasks.
+      ;; Skip any remaining pending tasks and return as a failed run so the
+      ;; caller receives a deterministic failure instead of an infinite loop.
+      (empty? (dag/ready-tasks @run-atom))
+      (do (skip-remaining-tasks! run-atom)
+          {:stage-runs stage-runs
+           :cursors    cursors
+           :failed?    true})
+
+      :else
       (let [[outputs' runs' cursors' sm']
             (step-pipeline run-atom sm connectors context stage-outputs stage-runs cursors)]
         (recur outputs' runs' cursors' sm')))))
