@@ -177,7 +177,7 @@
      :dependency string
      :constraints [{:pack-id string :constraint string}...]
      :message string}]"
-  [graph versions]
+  [graph pack-versions]
   (let [;; Collect all constraints for each dependency
         dep-constraints (reduce-kv
                          (fn [acc pack-id node]
@@ -195,7 +195,7 @@
     (->> dep-constraints
          (keep (fn [[dep-id constraints]]
                  (let [;; Get actual version of dependency
-                       actual-version (get versions dep-id)
+                       actual-version (get pack-versions dep-id)
                        ;; Check if all constraints can be satisfied
                        conflicting (when actual-version
                                      (remove (fn [{:keys [constraint]}]

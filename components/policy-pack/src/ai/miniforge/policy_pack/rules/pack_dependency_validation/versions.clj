@@ -54,7 +54,11 @@
    - Range: '>=2026.01.01,<2026.02.01'
    - Wildcard: '2026.01.*'
 
-   Returns {:type :exact/:range/:wildcard :constraints [...]}"
+   Returns one of:
+   - {:type :range :constraints [...]} (comma-separated, each parsed
+     recursively)
+   - {:type :wildcard :prefix string}
+   - {:type :gt/:gte/:lt/:lte/:exact :version string}"
   [constraint-str]
   (cond
     ;; Range constraint (comma-separated)
