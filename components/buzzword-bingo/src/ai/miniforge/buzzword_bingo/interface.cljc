@@ -23,9 +23,11 @@
    keeping or should be written again. A session plays the same hits
    onto a bingo card across the turns of one conversation."
   (:require
+   [ai.miniforge.buzzword-bingo.board :as board]
    [ai.miniforge.buzzword-bingo.card :as card]
    [ai.miniforge.buzzword-bingo.detect :as detect]
    [ai.miniforge.buzzword-bingo.lexicon :as lexicon]
+   [ai.miniforge.buzzword-bingo.report :as report]
    [ai.miniforge.buzzword-bingo.score :as score]
    [ai.miniforge.buzzword-bingo.segment :as segment]
    [ai.miniforge.buzzword-bingo.session :as session]))
@@ -103,8 +105,20 @@
   [session scan-result]
   (session/track session scan-result))
 
+;; Reports
+(defn ^{:stratum 0} scan-report
+  "Render a scan result as text: the verdict first, then the evidence."
+  [scored]
+  (report/scan-report scored))
+
+(defn ^{:stratum 0} board-report
+  "Render a session's card as a grid, with where the game stands."
+  [session]
+  (board/board-report session))
+
 (comment
   (prose-only "Use `robust` in code but not in prose.")
   (scan "A robust, comprehensive, seamless solution.")
   (:score/grade (scan "Plain sentence about a file parser."))
-  (-> (open-session "demo") (track (scan "A robust and seamless solution."))))
+  (println (scan-report (scan "A robust and comprehensive solution.")))
+  (-> (open-session "demo") (track (scan "A robust and seamless solution.")) board-report println))
