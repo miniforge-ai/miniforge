@@ -16,21 +16,11 @@
 ;; See the License for the specific language governing permissions and
 ;; limitations under the License.
 (ns ai.miniforge.knowledge.zettel
-  "Zettel (atomic note) operations.
-   Layer 0: pure helpers — link/backlink management, summary/validation,
-     frontmatter parsing, id/inst coercion (`->iso`, `parse-inst`)
-   Layer 1: frontmatter formatting (over `->iso`) + markdown->zettel +
-     content-projection
-   Layer 2: zettel->markdown (over Layer 1 frontmatter formatting) +
-     compute-digest (over the Layer 1 content-projection)
-   Layer 3: stamp-revision (over the Layer 2 digest)
-   Layer 4: create-zettel / update-zettel (over stamp-revision)
-
-   5 real strata — over the rule 210 budget of 3; a genuine namespace
-   split (Wave 2), not a labeling problem."
+  "Public zettel operations composed from focused representation domains."
   (:require
-   [ai.miniforge.content-hash.interface :as content-hash]
    [ai.miniforge.knowledge.schema :as schema]
+   [ai.miniforge.knowledge.zettel.lifecycle :as lifecycle]
+   [ai.miniforge.knowledge.zettel.revision :as revision]
    [clojure.string :as str]
    [clj-yaml.core :as yaml]
    [malli.core :as m])
@@ -40,143 +30,35 @@
 
 ;------------------------------------------------------------------------------ Layer 0
 
-;; Content-bearing subset + revision-id derivation.
-;;
-;; miniforge-fleet's Phase E Decision 6: trust attaches to the IMMUTABLE
-;; revision of a zettel, not to its mutable logical id. To make that
-;; mechanical we (a) define the closed set of fields that are "the
-;; content" — anything that affects WHAT the zettel says — and (b)
-;; derive `:zettel/revision-id` deterministically from the digest so two
-;; agents producing the same content land on the same revision id.
-(def ^{:stratum 0} ^:private content-bearing-fields
-  "Fields whose value affects the zettel's revision identity. Operational
-   metadata (`:zettel/id`, `:zettel/created`, `:zettel/modified`,
-   `:zettel/author`, `:zettel/backlinks`, `:fleet/*`, `:privacy/*`,
-   `:fleet/oss-version`) is intentionally excluded — they describe
-   surrounding policy, not knowledge content."
-  [:zettel/uid
-   :zettel/title
-   :zettel/content
-   :zettel/type
-   :zettel/dewey
-   :zettel/tags
-   :zettel/links
-   :zettel/source])
-
+;; These delegates preserve the established zettel namespace API while each
+;; implementation stays within its own three-stratum representation domain.
+;; `defn` rather than `def`-aliasing the Var so `doc`/`clojure.repl/doc` still
+;; shows a docstring and arglist here, not just on the internal namespace.
 (defn ^{:stratum 0} revision-id-from-digest
-  "Pure: derive a stable UUID from a digest hex string. Two zettels with
-   identical content land on the same `:zettel/revision-id` — the
-   property miniforge-fleet's E.1 idempotent-retry path needs."
+  "Derive the stable revision UUID for a digest."
   ^UUID [^String digest]
-  (UUID/nameUUIDFromBytes (.getBytes digest "UTF-8")))
+  (revision/revision-id-from-digest digest))
 
-(def ^{:stratum 0} ^:private derived-fields
-  "Fields the constructor / updater own — callers cannot override them
-   directly via `update-zettel`'s `changes` map; they're recomputed
-   from `content-projection` so the relationship between content
-   and revision identity stays tamper-evident.
-
-   `:zettel/trust-level` joins `:zettel/digest` + `:zettel/revision-id`
-   for the same reason: the constructor stamps `:untrusted`,
-   `update-zettel` resets to `:untrusted` whenever a content-bearing
-   rotation happens, and `knowledge.learning/promote-learning` is
-   the one path that may post-assoc `:trusted` on the freshly
-   re-stamped revision (it routes through `update-zettel` first
-   for the canonical content re-stamp, then asserts `:trusted`
-   on the result before persisting).
-
-   Note: enforcement here is at the EDIT path. The lower-level
-   `store/put-zettel` is intentionally permissive — it persists
-   whatever map it's given so load-from-disk paths can round-trip
-   legacy stores. Trust-sensitive consumers (e.g., miniforge-fleet's
-   `share-learning` producer-side gate) re-validate at THEIR
-   boundary; the knowledge component supplies the field, the
-   consumer enforces its meaning."
-  #{:zettel/digest :zettel/revision-id :zettel/trust-level})
-
-(defn ^{:stratum 0} zettel-summary
+(defn ^{:stratum 0} compute-digest
+  "Return the canonical content digest for a zettel."
   [zettel]
-  (select-keys zettel [:zettel/id :zettel/uid :zettel/title
-                       :zettel/type :zettel/dewey :zettel/tags]))
+  (revision/compute-digest zettel))
 
-(defn ^{:stratum 0} validate-zettel
-  [zettel]
-  (if (m/validate schema/Zettel zettel)
-    {:valid? true :errors nil}
-    {:valid? false :errors (m/explain schema/Zettel zettel)}))
+(defn ^{:stratum 0} create-zettel
+  "Create a zettel and stamp its initial untrusted revision. Accepts the
+   same keyword options as ai.miniforge.knowledge.zettel.lifecycle/
+   create-zettel (:dewey, :tags, :links, :source, :author, and the
+   fleet/privacy sharing keys)."
+  [uid title content type & opts]
+  (apply lifecycle/create-zettel uid title content type opts))
 
-;; Link management
-(defn ^{:stratum 0} create-link
-  [target-id type rationale & {:keys [strength bidirectional?]}]
-  (cond-> {:link/target-id target-id
-           :link/type type
-           :link/rationale rationale}
-    strength (assoc :link/strength strength)
-    (some? bidirectional?) (assoc :link/bidirectional? bidirectional?)))
+(defn ^{:stratum 0} update-zettel
+  "Update a zettel while preserving or resetting trust by revision."
+  [zettel changes]
+  (lifecycle/update-zettel zettel changes))
 
-(defn ^{:stratum 0} add-link
-  [zettel link]
-  (let [links (get zettel :zettel/links [])]
-    (-> zettel
-        (assoc :zettel/links (conj links link))
-        (assoc :zettel/modified (java.util.Date.)))))
-
-(defn ^{:stratum 0} remove-link
-  [zettel target-id]
-  (let [links (get zettel :zettel/links [])]
-    (-> zettel
-        (assoc :zettel/links (vec (remove #(= target-id (:link/target-id %)) links)))
-        (assoc :zettel/modified (java.util.Date.)))))
-
-(defn ^{:stratum 0} get-links
-  "Get links from a zettel.
-
-   Direction:
-   - :outgoing  - Links from this zettel
-   - :incoming  - Backlinks to this zettel
-   - :both      - All connections"
-  [zettel direction]
-  (case direction
-    :outgoing (get zettel :zettel/links [])
-    :incoming (mapv (fn [id] {:link/target-id id :link/type :backlink})
-                    (get zettel :zettel/backlinks []))
-    :both (concat (get-links zettel :outgoing)
-                  (get-links zettel :incoming))))
-
-(defn ^{:stratum 0} compute-backlinks
-  [zettels]
-  (reduce
-   (fn [acc zettel]
-     (let [source-id (:zettel/id zettel)]
-       (reduce
-        (fn [acc2 link]
-          (let [target-id (:link/target-id link)]
-            (update acc2 target-id (fnil conj []) source-id)))
-        acc
-        (get zettel :zettel/links []))))
-   {}
-   zettels))
-
-;; Serialization (Markdown with YAML frontmatter)
 (defn ^{:stratum 0} ->iso
-  "Timestamp -> ISO-8601 string, by actual type rather than by `str`.
-
-   `:zettel/created` / `:zettel/modified` are validated with `inst?`,
-   and `inst?` admits BOTH `java.time.Instant` and `java.util.Date` — so
-   a zettel the schema accepts can arrive here holding either. `str` on
-   a Date yields `Sat Aug 01 05:34:56 PDT 2026`, which is not ISO-8601:
-   it carries the writing machine's default timezone, drops
-   milliseconds, and `parse-inst`'s `Instant/parse` cannot read it back.
-   Both types are normalized here; anything else throws.
-
-   Throwing is the right answer at a persistence boundary. The
-   alternative is what this replaces: a frontmatter timestamp that only
-   fails on the way back out, where `markdown->zettel` substitutes
-   `(java.util.Date.)` and the note's creation date silently becomes the
-   moment somebody read it.
-
-   Same defect class as effect-transaction's store and execution-grant's
-   breach history; swept here rather than fixed a third time in place."
+  "Convert an Instant or Date to its ISO-8601 wire representation."
   ^String [v]
   (cond
     (instance? Instant v) (.toString ^Instant v)
@@ -189,47 +71,93 @@
   [frontmatter-str]
   (try
     (yaml/parse-string frontmatter-str)
-    (catch Exception _e
-      nil)))
+    (catch Exception _ nil)))
 
 (defn ^{:stratum 0} extract-title-from-content
-  "Extract title from first H1 heading in content."
+  "Extract the first H1 heading from markdown content."
   [content]
   (when-let [match (re-find #"^#\s+(.+)$" (first (str/split-lines content)))]
     (second match)))
 
 (defn ^{:stratum 0} str->uuid
-  "Parse a string as UUID, or return nil."
+  "Parse a string as UUID, returning nil for invalid input."
   [s]
   (try
     (java.util.UUID/fromString s)
-    (catch Exception _e nil)))
+    (catch Exception _ nil)))
 
 (defn ^{:stratum 0} parse-inst
-  "Parse a string as inst, or return nil.
-
-   The `Date.toString` fallback is a RECOVERY path, not a supported
-   format: `->iso` now writes ISO-8601 for either inst type, so nothing
-   can produce that shape again. It stays only to read frontmatter
-   written before that fix. It is still lossy — `Date.toString` has no
-   millisecond field — so do not treat it as a second wire format.
-
-   The formatter pins `Locale/ENGLISH` rather than inheriting the host
-   default. `Date.toString` always emits English `EEE`/`MMM` regardless
-   of locale, so a default-locale formatter cannot parse its own
-   producer's output on a non-English host: it returns nil, and
-   `markdown->zettel` then stamps `(java.util.Date.)` — silently
-   re-dating the note to the moment it was read. Recovery has to work
-   on exactly the hosts most likely to need it."
+  "Parse the current ISO wire format or the legacy Date.toString format."
   [s]
   (try
-    (java.util.Date/from (java.time.Instant/parse s))
-    (catch Exception _e
+    (Date/from (Instant/parse s))
+    (catch Exception _
       (try
         (let [fmt (java.text.SimpleDateFormat. "EEE MMM dd HH:mm:ss zzz yyyy"
                                                Locale/ENGLISH)]
           (.parse fmt s))
-        (catch Exception _e2 nil)))))
+        (catch Exception _ nil)))))
+
+(defn ^{:stratum 0} zettel-summary
+  "Return a lightweight zettel summary."
+  [zettel]
+  (select-keys zettel [:zettel/id :zettel/uid :zettel/title
+                       :zettel/type :zettel/dewey :zettel/tags]))
+
+(defn ^{:stratum 0} validate-zettel
+  "Validate a zettel against its closed schema."
+  [zettel]
+  (if (m/validate schema/Zettel zettel)
+    {:valid? true :errors nil}
+    {:valid? false :errors (m/explain schema/Zettel zettel)}))
+
+(defn ^{:stratum 0} create-link
+  "Create a link to another zettel."
+  [target-id type rationale & {:keys [strength bidirectional?]}]
+  (cond-> {:link/target-id target-id
+           :link/type type
+           :link/rationale rationale}
+    strength (assoc :link/strength strength)
+    (some? bidirectional?) (assoc :link/bidirectional? bidirectional?)))
+
+(defn ^{:stratum 0} add-link
+  "Add one outgoing link and update the modification timestamp."
+  [zettel link]
+  (let [links (get zettel :zettel/links [])]
+    (-> zettel
+        (assoc :zettel/links (conj links link))
+        (assoc :zettel/modified (java.util.Date.)))))
+
+(defn ^{:stratum 0} remove-link
+  "Remove outgoing links that target `target-id`."
+  [zettel target-id]
+  (let [links (get zettel :zettel/links [])]
+    (-> zettel
+        (assoc :zettel/links (vec (remove #(= target-id (:link/target-id %)) links)))
+        (assoc :zettel/modified (java.util.Date.)))))
+
+(defn ^{:stratum 0} get-links
+  "Return outgoing, incoming, or all zettel links."
+  [zettel direction]
+  (case direction
+    :outgoing (get zettel :zettel/links [])
+    :incoming (mapv (fn [id] {:link/target-id id :link/type :backlink})
+                    (get zettel :zettel/backlinks []))
+    :both (concat (get-links zettel :outgoing)
+                  (get-links zettel :incoming))))
+
+(defn ^{:stratum 0} compute-backlinks
+  "Build target-id to source-id backlinks for a collection of zettels."
+  [zettels]
+  (reduce
+   (fn [acc zettel]
+     (let [source-id (:zettel/id zettel)]
+       (reduce (fn [links link]
+                 (update links (:link/target-id link) (fnil conj []) source-id))
+               acc
+               (get zettel :zettel/links []))))
+   {}
+   zettels))
 
 ;------------------------------------------------------------------------------ Layer 1
 
@@ -252,13 +180,8 @@
                                    (:zettel/links zettel))))]
     (yaml/generate-string meta :dumper-options {:flow-style :block})))
 
-(defn- ^{:stratum 1} content-projection
-  "Pure: project `zettel` down to the content-bearing subset that feeds
-   the digest. Stable across additions of operational metadata."
-  [zettel]
-  (select-keys zettel content-bearing-fields))
-
 (defn ^{:stratum 1} markdown->zettel
+  "Parse a markdown zettel with YAML frontmatter."
   [markdown-str]
   (when-let [matches (re-find #"(?s)^---\n(.+?)\n---\n\n?(.*)$" markdown-str)]
     (let [[_ frontmatter-str content] matches
@@ -267,15 +190,13 @@
         (let [title (or (extract-title-from-content content)
                         (:title frontmatter)
                         "Untitled")
-              ;; Remove title line from content if present
               body (str/replace content #"^#\s+.+\n\n?" "")]
           (cond-> {:zettel/id (or (str->uuid (:id frontmatter)) (random-uuid))
                    :zettel/uid (:uid frontmatter)
                    :zettel/title title
                    :zettel/content body
                    :zettel/type (keyword (:type frontmatter))
-                   :zettel/created (or (parse-inst (:created frontmatter))
-                                       (java.util.Date.))
+                   :zettel/created (or (parse-inst (:created frontmatter)) (Date.))
                    :zettel/author (get frontmatter :author "unknown")}
             (:dewey frontmatter) (assoc :zettel/dewey (:dewey frontmatter))
             (seq (:tags frontmatter)) (assoc :zettel/tags (mapv keyword (:tags frontmatter)))
@@ -291,188 +212,10 @@
 ;------------------------------------------------------------------------------ Layer 2
 
 (defn ^{:stratum 2} zettel->markdown
+  "Serialize a zettel to markdown with YAML frontmatter."
   [zettel]
   (str "---\n"
        (format-frontmatter zettel)
        "---\n\n"
        "# " (:zettel/title zettel) "\n\n"
        (:zettel/content zettel)))
-
-(defn ^{:stratum 2} compute-digest
-  "Pure: SHA-256 hex digest of the zettel's canonical-EDN
-   content-projection. Stable across map-key reorderings and across
-   non-content metadata changes; rotates whenever a content-bearing
-   field changes. Used to seed `:zettel/digest` and (deterministically)
-   `:zettel/revision-id`."
-  [zettel]
-  (content-hash/content-hash (content-projection zettel)))
-
-;------------------------------------------------------------------------------ Layer 3
-
-(defn- ^{:stratum 3} stamp-revision
-  "Pure: stamp a zettel with `:zettel/digest` + `:zettel/revision-id`
-   derived from its current content projection. Idempotent for an
-   already-stamped zettel whose content has not changed."
-  [zettel]
-  (let [d (compute-digest zettel)]
-    (assoc zettel
-           :zettel/digest d
-           :zettel/revision-id (revision-id-from-digest d))))
-
-;------------------------------------------------------------------------------ Layer 4
-
-;; Zettel creation and manipulation
-(defn ^{:stratum 4} create-zettel
-  "Create a new zettel with required fields.
-
-   Arguments:
-   - uid     - Human-readable unique identifier (e.g., '210-clojure-ns')
-   - title   - Short descriptive title
-   - content - Markdown content body
-   - type    - Zettel type keyword
-
-   Options (local Zettelkasten):
-   - :dewey  - Dewey classification code (e.g., \"210\")
-   - :tags   - Vector of keyword tags
-   - :links  - Vector of Link maps
-   - :source - Source/provenance map
-   - :author - Author string (default: 'user')
-
-   Options (miniforge-fleet share intent):
-   - :fleet/shareable        — boolean. Producer's intent to share
-                               via the Fleet event log.
-   - :fleet/share-scope      — `:org` / `:team` / `:repo` / `:workflow`.
-   - :privacy/classification — `:public-org` / `:internal` /
-                               `:restricted` / `:secret`.
-   - :fleet/oss-version      — version string the zettel was captured
-                               against. Stamped onto every event the
-                               agent runtime emits; quarantine + migration
-                               registry key off this on the Fleet side.
-
-   The constructor stamps `:zettel/digest` + `:zettel/revision-id`
-   automatically (per Decision 6 of miniforge-fleet's Phase E plan).
-
-   Example:
-     (create-zettel \"protocol-naming\" \"Protocol Naming Convention\"
-                    \"# Protocol Naming...\" :rule
-                    :dewey \"210\" :tags [:clojure :protocol])"
-  [uid title content type
-   & {:keys [dewey tags links source author
-             fleet/shareable fleet/share-scope privacy/classification
-             fleet/oss-version]
-      :or   {author "user"}}]
-  (let [now    (java.util.Date.)
-        zettel (cond-> {:zettel/id          (random-uuid)
-                        :zettel/uid         uid
-                        :zettel/title       title
-                        :zettel/content     content
-                        :zettel/type        type
-                        :zettel/created     now
-                        :zettel/author      author
-                        ;; Decision 6 + 8 (#836) — every zettel
-                        ;; minted via this constructor starts
-                        ;; untrusted; `update-zettel` preserves
-                        ;; trust on operational edits and resets
-                        ;; on content rotation; only
-                        ;; `learning/promote-learning` post-asserts
-                        ;; `:trusted` on a freshly re-stamped
-                        ;; revision. The lower-level
-                        ;; `store/put-zettel` persists whatever
-                        ;; it's handed (legacy round-trip path),
-                        ;; so security-sensitive consumers
-                        ;; (fleet's `share-learning` producer
-                        ;; gate) re-validate at their own
-                        ;; boundary — see `derived-fields`.
-                        :zettel/trust-level :untrusted}
-                 dewey      (assoc :zettel/dewey dewey)
-                 (seq tags) (assoc :zettel/tags (vec tags))
-                 (seq links) (assoc :zettel/links (vec links))
-                 source     (assoc :zettel/source source)
-                 (some? shareable)      (assoc :fleet/shareable shareable)
-                 share-scope            (assoc :fleet/share-scope share-scope)
-                 classification         (assoc :privacy/classification classification)
-                 oss-version            (assoc :fleet/oss-version oss-version))]
-    (stamp-revision zettel)))
-
-(defn ^{:stratum 4} update-zettel
-  "Update a zettel with new values, setting modified timestamp.
-
-   `:zettel/digest`, `:zettel/revision-id`, and `:zettel/trust-level`
-   are DERIVED — any value the caller supplies for any of them is
-   dropped before the merge. `update-zettel` always re-stamps the
-   result via `stamp-revision`, which is idempotent on unchanged
-   content (same content → same digest → same revision-id) and
-   rotates the revision when a content-bearing field changes
-   (`:zettel/uid` / `:zettel/title` / `:zettel/content` /
-   `:zettel/type` / `:zettel/dewey` / `:zettel/tags` /
-   `:zettel/links` / `:zettel/source`). Three consequences worth
-   pinning:
-
-     - Operational-metadata-only changes (privacy classification,
-       share scope, oss-version, etc.) leave the revision identity
-       intact AND preserve the existing `:zettel/trust-level`.
-       Decision 6 attaches trust to the immutable revision, so
-       changing operational policy must NOT silently migrate trust
-       onto a new revision — and must not drop trust on the
-       current revision either.
-
-     - When a content-bearing field rotates the revision-id,
-       `:zettel/trust-level` resets to `:untrusted`. The new
-       revision was never reviewed, so no trust attaches to it.
-       Re-promoting (`learning/promote-learning`) is the only path
-       back to `:trusted`, and it operates via `store/put-zettel`
-       directly so the producer can't smuggle trust through this
-       updater (#836).
-
-     - A legacy zettel without `:zettel/digest` / `:zettel/revision-id`
-       receives the stamped fields on its first update; legacy
-       zettels also receive `:zettel/trust-level :untrusted` on
-       first update, so the system converges on a fully-stamped
-       state without an explicit backfill pass."
-  [zettel changes]
-  (let [old-rev   (:zettel/revision-id zettel)
-        old-trust (:zettel/trust-level zettel)
-        sanitised (apply dissoc changes derived-fields)
-        merged    (-> zettel
-                      (merge sanitised)
-                      (assoc :zettel/modified (java.util.Date.)))
-        stamped   (stamp-revision merged)
-        new-rev   (:zettel/revision-id stamped)
-        ;; Trust default for legacy zettels (no :zettel/trust-level
-        ;; field present yet) is :untrusted — same convergence
-        ;; behaviour the digest/revision-id backfill already has.
-        ;; Content rotation always resets to :untrusted.
-        next-trust (cond
-                     (and (some? old-rev) (not= old-rev new-rev)) :untrusted
-                     (some? old-trust)                            old-trust
-                     :else                                        :untrusted)]
-    (assoc stamped :zettel/trust-level next-trust)))
-
-;------------------------------------------------------------------------------ Rich Comment
-(comment
-  ;; Create a zettel
-  (def z (create-zettel "210-clojure-ns" "Namespace Conventions"
-                        "Follow Polylith structure for namespaces..."
-                        :rule
-                        :dewey "210"
-                        :tags [:clojure :namespace]))
-  z
-  ;; => {:zettel/id #uuid "...", :zettel/uid "210-clojure-ns", ...}
-
-  ;; Add a link
-  (def z2 (add-link z (create-link (random-uuid) :extends
-                                   "Extends base Clojure conventions")))
-
-  ;; Serialize to markdown
-  (println (zettel->markdown z2))
-
-  ;; Round-trip
-  (def z3 (markdown->zettel (zettel->markdown z2)))
-  (= (:zettel/uid z2) (:zettel/uid z3))
-  ;; => true
-
-  ;; Validate
-  (validate-zettel z)
-  ;; => {:valid? true, :errors nil}
-
-  :leave-this-here)
