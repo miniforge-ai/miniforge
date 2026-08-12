@@ -20,25 +20,20 @@
 
    Layer 0: state-comparison, semantic and capability detectors,
      ast-analysis/content-scan/diff-analysis/plan-output detection,
-     custom-fn registry/reflection primitives, violation-severity
-     filters and formatting — pure or leaf-level, no same-file
-     dependents yet
-   Layer 1: custom-fn arity-reflection/registry helpers, violation
-     location/message builders (over Layer 0)
-   Layer 2: detector-predicate?, detect-custom, custom-fn-resolvable?,
-     violation->error, detect-violation (unified per-type dispatcher)
-     (over Layer 1)
-   Layer 3: register-custom-fn!, check-rules (over Layer 2)
+     unregister-custom-fn!, custom-fn-resolvable?, register-custom-fn!,
+     violation-severity filters and formatting — pure or leaf-level, no
+     same-file dependents yet
+   Layer 1: violation location/message builders, detect-custom,
+     detect-violation (unified per-type dispatcher) (over Layer 0)
+   Layer 2: violation->error, check-rules (over Layer 1)
 
-   4 real strata — over the rule 210 budget of 3; still a genuine
-   namespace split (Wave 2) mid-train. Pattern-matching and
-   terraform-plan-parsing primitives already moved to the sibling
-   `detection.matching` namespace in this same PR; the custom-fn
-   registry/reflection mechanics (`custom-fn-registry`,
-   `declared-method?`, `reflectable-invoke?`, `variadic-accepts-arity?`,
-   `resolve-custom-fn`, `detector-predicate?`) move to
-   `detection.custom-registry` in the next PR of this train, which
-   brings this namespace down to the 3-layer budget.
+   3 real strata — at the rule 210 budget. Pattern-matching and
+   terraform-plan-parsing primitives live in the sibling
+   `detection.matching` namespace; the custom-fn registry/reflection
+   mechanics (`custom-fn-registry`, `declared-method?`,
+   `reflectable-invoke?`, `variadic-accepts-arity?`, `resolve-custom-fn`,
+   `detector-predicate?`) live in `detection.custom-registry` (rule 210
+   split, Wave 2, final slice of this file's train).
 
    Supports detection types:
    - :content-scan - Regex against artifact content
@@ -52,6 +47,7 @@
   (:require
    [ai.miniforge.policy-pack.ast :as ast]
    [ai.miniforge.policy-pack.capability :as capability]
+   [ai.miniforge.policy-pack.detection.custom-registry :as custom-registry]
    [ai.miniforge.policy-pack.detection.matching :as matching]
    [ai.miniforge.policy-pack.schema-validation :as schema]
    [ai.miniforge.policy-clause.interface :as clause]
@@ -88,29 +84,6 @@
            :message       (get-in rule [:rule/enforcement :message])})))))
 
 ;; Custom detection
-(defonce ^{:stratum 0} ^{:private true
-           :doc "Explicit extension registry for custom policy detectors.
-
-Keys are the symbols stored under `:rule/detection :custom-fn`; values are
-2-arity detector functions. This keeps pack manifests data-driven without
-depending on ambient namespace loading or raw var resolution."}
-  custom-fn-registry
-  (atom {}))
-
-(defn- ^{:stratum 0} declared-method?
-  [method-name arity f]
-  (some (fn [^java.lang.reflect.Method method]
-          (and (= method-name (.getName method))
-               (= arity (count (.getParameterTypes method)))))
-        (.getDeclaredMethods (class f))))
-
-(defn- ^{:stratum 0} reflectable-invoke?
-  "True when `f`'s class declares any `invoke` method. JVM functions do; SCI
-   functions under babashka do not, so arity reflection is blind there."
-  [f]
-  (boolean (some #(= "invoke" (.getName ^java.lang.reflect.Method %))
-                 (.getDeclaredMethods (class f)))))
-
 (defn- ^{:stratum 0} run-resolved-custom
   "Run an already-resolved custom fn against `artifact`/`context`, adapting
    the result (or a thrown exception) into a violation map, or nil on pass.
@@ -440,27 +413,39 @@ depending on ambient namespace loading or raw var resolution."}
            :resource-violations (vec resource-violations)
            :message (get-in rule [:rule/enforcement :message])})))))
 
-;------------------------------------------------------------------------------ Layer 1
-
-(defn- ^{:stratum 1} variadic-accepts-arity?
-  [arity f]
-  (when (declared-method? "getRequiredArity" 0 f)
-    (try
-      (<= (.getRequiredArity f) arity)
-      (catch Throwable _ false))))
-
-(defn ^{:stratum 1} unregister-custom-fn!
+(defn ^{:stratum 0} unregister-custom-fn!
   "Remove a registered custom detector. Intended for tests and reload hygiene."
   [custom-fn-sym]
-  (swap! custom-fn-registry dissoc custom-fn-sym)
+  (swap! custom-registry/custom-fn-registry dissoc custom-fn-sym)
   nil)
 
-(defn- ^{:stratum 1} resolve-custom-fn
-  "Look up a `:custom` rule's `:custom-fn` symbol in the explicit registry.
-   Missing registrations are the no-op case routed to the judge."
+(defn ^{:stratum 0} custom-fn-resolvable?
+  "True when a `:custom` rule names a registered `:custom-fn` symbol.
+
+   A `:custom` rule with no resolvable `:custom-fn` is the no-op case the
+   compiled standards pack is full of (PR #979): such rules route to the
+   LLM-as-judge semantic detector instead of silently never firing."
   [rule]
-  (when-let [custom-fn-sym (get-in rule [:rule/detection :custom-fn])]
-    (get @custom-fn-registry custom-fn-sym)))
+  (some? (custom-registry/resolve-custom-fn rule)))
+
+(defn ^{:stratum 0} register-custom-fn!
+  "Register `f` as the detector implementation for `custom-fn-sym`.
+
+   Custom policy detectors are an explicit extension point. Callers that own a
+   detector namespace should register the symbol they place in policy-pack EDN
+   before compiling or applying packs."
+  [custom-fn-sym f]
+  (when-not (symbol? custom-fn-sym)
+    (throw (ex-info "Custom detector key must be a symbol"
+                    {:custom-fn custom-fn-sym})))
+  (when-not (custom-registry/detector-predicate? f)
+    (throw (ex-info "Custom detector value must be a two-arity predicate function"
+                    {:custom-fn custom-fn-sym
+                     :value-type (some-> f class .getName)})))
+  (swap! custom-registry/custom-fn-registry assoc custom-fn-sym f)
+  f)
+
+;------------------------------------------------------------------------------ Layer 1
 
 (defn- ^{:stratum 1} violation-location
   "Location for a gate finding, spanning both detector shapes. Content-scan
@@ -504,26 +489,7 @@ depending on ambient namespace loading or raw var resolution."}
                hits)))
     (:message violation)))
 
-;------------------------------------------------------------------------------ Layer 2
-
-(defn- ^{:stratum 2} detector-predicate?
-  "True when `f` is a custom detector fn. On the JVM its 2-arity shape is verified
-   by reflection; under babashka/SCI (whose fn classes expose no reflectable
-   `invoke` methods, or where reflection is unavailable) arity cannot be
-   introspected, so any `fn?` is accepted rather than rejecting a valid detector
-   we cannot check — this lets detector namespaces register at LOAD time on both
-   runtimes, instead of deferring registration to first use."
-  [f]
-  (and (fn? f)
-       (try
-         (or (declared-method? "invoke" 2 f)
-             (variadic-accepts-arity? 2 f)
-             (not (reflectable-invoke? f)))
-         ;; Reflection/introspection failure (e.g. babashka) → accept the fn.
-         ;; Catch Exception, not Throwable, so JVM Errors are not masked.
-         (catch Exception _ true))))
-
-(defn ^{:stratum 2} detect-custom
+(defn ^{:stratum 1} detect-custom
   "Detect violations using a custom function.
 
    The custom function is specified by registered symbol in :custom-fn and must:
@@ -538,28 +504,11 @@ depending on ambient namespace loading or raw var resolution."}
    Returns:
    - Violation map if detected, nil otherwise"
   [rule artifact context]
-  (when-let [f (resolve-custom-fn rule)]
+  (when-let [f (custom-registry/resolve-custom-fn rule)]
     (run-resolved-custom f rule artifact context)))
 
-(defn ^{:stratum 2} custom-fn-resolvable?
-  "True when a `:custom` rule names a registered `:custom-fn` symbol.
-
-   A `:custom` rule with no resolvable `:custom-fn` is the no-op case the
-   compiled standards pack is full of (PR #979): such rules route to the
-   LLM-as-judge semantic detector instead of silently never firing."
-  [rule]
-  (some? (resolve-custom-fn rule)))
-
-(defn ^{:stratum 2} violation->error
-  [{:keys [rule violation]}]
-  {:code (:rule/id rule)
-   :message (violation-message violation)
-   :severity (:rule/severity rule)
-   :location (violation-location violation)
-   :remediation (get-in rule [:rule/enforcement :remediation])})
-
 ;; Unified detection dispatcher
-(defn ^{:stratum 2} detect-violation
+(defn ^{:stratum 1} detect-violation
   "Detect violations for a rule against an artifact.
 
    Dispatches to the appropriate detection implementation based on
@@ -583,7 +532,7 @@ depending on ambient namespace loading or raw var resolution."}
       :content-scan (detect-content-scan rule artifact context)
       :diff-analysis (detect-diff-analysis rule artifact context)
       :plan-output (detect-plan-output rule artifact context)
-      :custom (if-let [f (resolve-custom-fn rule)]
+      :custom (if-let [f (custom-registry/resolve-custom-fn rule)]
                 (run-resolved-custom f rule artifact context)
                 (detect-semantic rule artifact context))
       :state-comparison (detect-state-comparison rule artifact context)
@@ -591,26 +540,17 @@ depending on ambient namespace loading or raw var resolution."}
       :capability (detect-capability rule artifact context)
       nil)))
 
-;------------------------------------------------------------------------------ Layer 3
+;------------------------------------------------------------------------------ Layer 2
 
-(defn ^{:stratum 3} register-custom-fn!
-  "Register `f` as the detector implementation for `custom-fn-sym`.
+(defn ^{:stratum 2} violation->error
+  [{:keys [rule violation]}]
+  {:code (:rule/id rule)
+   :message (violation-message violation)
+   :severity (:rule/severity rule)
+   :location (violation-location violation)
+   :remediation (get-in rule [:rule/enforcement :remediation])})
 
-   Custom policy detectors are an explicit extension point. Callers that own a
-   detector namespace should register the symbol they place in policy-pack EDN
-   before compiling or applying packs."
-  [custom-fn-sym f]
-  (when-not (symbol? custom-fn-sym)
-    (throw (ex-info "Custom detector key must be a symbol"
-                    {:custom-fn custom-fn-sym})))
-  (when-not (detector-predicate? f)
-    (throw (ex-info "Custom detector value must be a two-arity predicate function"
-                    {:custom-fn custom-fn-sym
-                     :value-type (some-> f class .getName)})))
-  (swap! custom-fn-registry assoc custom-fn-sym f)
-  f)
-
-(defn ^{:stratum 3} check-rules
+(defn ^{:stratum 2} check-rules
   "Check multiple rules against an artifact.
 
    Returns vector of violations found.
