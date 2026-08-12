@@ -29,6 +29,7 @@
    Once the ETL task (bb standards:pack) is implemented, these tests serve
    as the authoritative acceptance suite."
   (:require
+   [ai.miniforge.policy-pack.mdc-to-pack-mapping-test.dewey :as dewey]
    [clojure.test :refer [deftest testing is are]]
    [clojure.string :as str]
    [clojure.set :as set]))
@@ -58,28 +59,6 @@
    Format: 'Engineering standard (<category>): <title>'"
   [category title]
   (str "Engineering standard (" category "): " title))
-
-(defn ^{:stratum 0} parse-dewey
-  "Parse dewey string to integer. Returns -1 on failure (outside all ranges)."
-  [dewey-str]
-  (try
-    (Integer/parseInt (str dewey-str))
-    (catch Exception _ -1)))
-
-(def ^{:stratum 0} dewey-range-to-phases
-  "Dewey range → phase set mapping from Section 2 of the design."
-  [[0 99]    #{:plan :implement :review :verify :release}
-   [100 199] #{:implement :review}
-   [200 299] #{:implement :review}
-   [300 399] #{:plan :implement :review}
-   [400 499] #{:implement :verify}
-   [500 599] #{:implement :review}
-   [600 699] #{:implement :review}
-   [700 799] #{:plan :implement :review :verify :release}
-   [800 899] #{:implement :review}
-   [900 999] #{}])
-
-(def ^{:stratum 0} default-phases #{:implement :review})
 
 (defn ^{:stratum 0} normalize-globs
   "Wrap string globs in a vector; pass vectors through; nil → nil."
@@ -172,8 +151,6 @@
    "meta/rule-format.mdc"                   :std/rule-format
    "index.mdc"                              :std/index})
 
-(def ^{:stratum 0} all-phases #{:plan :implement :review :verify :release})
-
 (deftest ^{:stratum 0} pack-metadata-test
   (testing "Output pack has required identity fields"
     (let [template {:pack/id          "miniforge/standards"
@@ -230,11 +207,6 @@
     (if (and desc (not (str/blank? desc)))
       desc
       (title-from-slug (slug-from-filename filepath)))))
-
-(def ^{:stratum 1} dewey-ranges
-  "Parsed vector of [low high phases] triples."
-  (->> (partition 2 dewey-range-to-phases)
-       (mapv (fn [[[lo hi] phases]] [lo hi phases]))))
 
 (deftest ^{:stratum 1} slug-from-filename-test
   (testing "Strips .mdc extension from filename only"
@@ -421,16 +393,16 @@
       (is (= inventory-ids category-rules)
           "Pack categories should reference exactly the inventory rule IDs"))))
 
-;------------------------------------------------------------------------------ Layer 2
+(defn ^{:stratum 1} build-applies-to
+  "Build :rule/applies-to from dewey + optional globs."
+  [dewey-str globs]
+  (let [phases (dewey/dewey-to-phases dewey-str)
+        base   {:phases phases}]
+    (if-let [g (normalize-globs globs)]
+      (assoc base :file-globs g)
+      base)))
 
-(defn ^{:stratum 2} dewey-to-phases
-  "Look up phases for a dewey code (string). Falls back to default."
-  [dewey-str]
-  (let [code (parse-dewey dewey-str)]
-    (or (some (fn [[lo hi phases]]
-                (when (<= lo code hi) phases))
-              dewey-ranges)
-        default-phases)))
+;------------------------------------------------------------------------------ Layer 2
 
 ;; ===========================================================================
 ;; Section 1: Rule ID Derivation Tests
@@ -473,127 +445,7 @@
     (is (= "Code Quality" (derive-title {"description" ""} "foundations/code-quality.mdc")))
     (is (= "Code Quality" (derive-title {"description" "  "} "foundations/code-quality.mdc")))))
 
-;; ===========================================================================
-;; Section 19: Dewey Range Completeness and Non-Overlap Tests
-;; ===========================================================================
-(deftest ^{:stratum 2} dewey-ranges-non-overlapping-test
-  (testing "Dewey ranges do not overlap"
-    (let [ranges (mapv (fn [[lo hi _]] [lo hi]) dewey-ranges)
-          sorted (sort-by first ranges)]
-      (doseq [[[_ hi1] [lo2 _]] (partition 2 1 sorted)]
-        (is (< hi1 lo2)
-            (str "Ranges overlap: ..." hi1 "] and [" lo2 "..."))))))
-
-(deftest ^{:stratum 2} dewey-ranges-cover-0-to-999-test
-  (testing "Dewey ranges cover all codes from 0 to 999"
-    (let [covered (set (for [[lo hi _] dewey-ranges
-                             code (range lo (inc hi))]
-                         code))
-          full-range (set (range 0 1000))]
-      (is (= full-range covered)
-          (str "Uncovered codes: " (set/difference full-range covered))))))
-
-;------------------------------------------------------------------------------ Layer 3
-
-(defn ^{:stratum 3} build-applies-to
-  "Build :rule/applies-to from dewey + optional globs."
-  [dewey-str globs]
-  (let [phases (dewey-to-phases dewey-str)
-        base   {:phases phases}]
-    (if-let [g (normalize-globs globs)]
-      (assoc base :file-globs g)
-      base)))
-
-;; ===========================================================================
-;; Section 4: Dewey-to-Phases Mapping Tests
-;; ===========================================================================
-(deftest ^{:stratum 3} dewey-to-phases-test
-  (testing "Foundations (0-99) → all phases"
-    (is (= all-phases (dewey-to-phases "001")))
-    (is (= all-phases (dewey-to-phases "000")))
-    (is (= all-phases (dewey-to-phases "099"))))
-
-  (testing "Tools (100-199) → implement + review"
-    (is (= #{:implement :review} (dewey-to-phases "100")))
-    (is (= #{:implement :review} (dewey-to-phases "150"))))
-
-  (testing "Languages (200-299) → implement + review"
-    (is (= #{:implement :review} (dewey-to-phases "210")))
-    (is (= #{:implement :review} (dewey-to-phases "200"))))
-
-  (testing "Frameworks (300-399) → plan + implement + review"
-    (is (= #{:plan :implement :review} (dewey-to-phases "300")))
-    (is (= #{:plan :implement :review} (dewey-to-phases "350"))))
-
-  (testing "Testing (400-499) → implement + verify"
-    (is (= #{:implement :verify} (dewey-to-phases "400")))
-    (is (= #{:implement :verify} (dewey-to-phases "450"))))
-
-  (testing "Operations (500-599) → implement + review"
-    (is (= #{:implement :review} (dewey-to-phases "500")))
-    (is (= #{:implement :review} (dewey-to-phases "550"))))
-
-  (testing "Documentation (600-699) → implement + review"
-    (is (= #{:implement :review} (dewey-to-phases "600"))))
-
-  (testing "Workflows (700-799) → all phases"
-    (is (= all-phases (dewey-to-phases "700")))
-    (is (= all-phases (dewey-to-phases "715"))))
-
-  (testing "Project-specific (800-899) → implement + review"
-    (is (= #{:implement :review} (dewey-to-phases "800"))))
-
-  (testing "Meta (900-999) → empty set (never injected)"
-    (is (= #{} (dewey-to-phases "900")))
-    (is (= #{} (dewey-to-phases "999"))))
-
-  (testing "Boundary values at range transitions"
-    ;; End of foundations → start of tools
-    (is (= all-phases (dewey-to-phases "99")))
-    (is (= #{:implement :review} (dewey-to-phases "100")))
-    ;; End of tools → start of languages
-    (is (= #{:implement :review} (dewey-to-phases "199")))
-    (is (= #{:implement :review} (dewey-to-phases "200"))))
-
-  (testing "Dewey range coverage is contiguous from 0-999"
-    (doseq [code (range 0 1000)]
-      (is (set? (dewey-to-phases (str code)))
-          (str "No phase set for dewey code " code)))))
-
-(deftest ^{:stratum 3} dewey-default-phases-test
-  (testing "Unparseable dewey defaults to implement + review"
-    (is (= default-phases (dewey-to-phases "")))))
-
-(deftest ^{:stratum 3} dewey-missing-defaults-to-000-test
-  (testing "Missing dewey frontmatter defaults to '000' (foundation phases)"
-    ;; Per edge case: "Missing dewey frontmatter" → default to '000'
-    (is (= all-phases (dewey-to-phases "000")))))
-
-;; ===========================================================================
-;; Section 20: Phase Injection Equivalence Tests
-;; ===========================================================================
-(deftest ^{:stratum 3} phase-injection-role-equivalence-test
-  (testing "Foundation rules reach all agent roles"
-    (is (= all-phases (dewey-to-phases "001"))))
-
-  (testing "Workflow rules reach all agent roles"
-    (is (= all-phases (dewey-to-phases "715"))))
-
-  (testing "Language rules reach implementer and reviewer only"
-    (is (= #{:implement :review} (dewey-to-phases "210"))))
-
-  (testing "Framework rules include planner (architecture awareness)"
-    (is (contains? (dewey-to-phases "300") :plan)))
-
-  (testing "Testing rules reach implementer and verifier"
-    (is (= #{:implement :verify} (dewey-to-phases "400"))))
-
-  (testing "Meta rules reach no agents"
-    (is (empty? (dewey-to-phases "900")))))
-
-;------------------------------------------------------------------------------ Layer 4
-
-(defn ^{:stratum 4} compile-rule
+(defn ^{:stratum 2} compile-rule
   "Compile a single MDC file representation into a pack rule map.
    This is the reference implementation of the spec's field mapping."
   [{:keys [filepath frontmatter body]}]
@@ -622,7 +474,7 @@
 ;; ===========================================================================
 ;; Section 6: Applies-To (Phases + Globs) Tests
 ;; ===========================================================================
-(deftest ^{:stratum 4} applies-to-test
+(deftest ^{:stratum 2} applies-to-test
   (testing "Dewey-only → phases from dewey, no globs"
     (is (= {:phases #{:plan :implement :review :verify :release}}
            (build-applies-to "001" nil))))
@@ -640,12 +492,12 @@
             :file-globs [".cursor/rules/**/*.mdc"]}
            (build-applies-to "900" [".cursor/rules/**/*.mdc"])))))
 
-;------------------------------------------------------------------------------ Layer 5
+;------------------------------------------------------------------------------ Layer 3
 
 ;; ===========================================================================
 ;; Section 7: Constant/Default Fields Tests
 ;; ===========================================================================
-(deftest ^{:stratum 5} constant-fields-test
+(deftest ^{:stratum 3} constant-fields-test
   (testing "Non-alwaysApply severity is :low"
     (let [rule (compile-rule {:filepath "test.mdc"
                               :frontmatter {"dewey" "001"}
@@ -678,7 +530,7 @@
 ;; ===========================================================================
 ;; Section 8: Knowledge Content Tests
 ;; ===========================================================================
-(deftest ^{:stratum 5} knowledge-content-test
+(deftest ^{:stratum 3} knowledge-content-test
   (testing "Body text preserved as :rule/knowledge-content"
     (let [body "# Heading\n\nSome content here."
           rule (compile-rule {:filepath "test.mdc"
@@ -713,7 +565,7 @@
 ;; ===========================================================================
 ;; Section 10: Worked Example A — Foundation alwaysApply Rule
 ;; ===========================================================================
-(deftest ^{:stratum 5} worked-example-a-stratified-design-test
+(deftest ^{:stratum 3} worked-example-a-stratified-design-test
   (let [rule (compile-rule
               {:filepath    "foundations/stratified-design.mdc"
                :frontmatter {"dewey"       "001"
@@ -742,7 +594,7 @@
       (is (true? (:rule/always-inject? rule))))
 
     (testing ":rule/applies-to has all phases for dewey 001"
-      (is (= {:phases all-phases}
+      (is (= {:phases dewey/all-phases}
              (:rule/applies-to rule))))
 
     (testing ":rule/detection is {:type :custom}"
@@ -760,7 +612,7 @@
 ;; ===========================================================================
 ;; Section 11: Worked Example B — Language Rule with Globs
 ;; ===========================================================================
-(deftest ^{:stratum 5} worked-example-b-clojure-test
+(deftest ^{:stratum 3} worked-example-b-clojure-test
   (let [globs ["components/**/src/**/*.clj"
                "components/**/src/**/*.cljc"
                "bases/**/src/**/*.clj"
@@ -799,7 +651,7 @@
 ;; ===========================================================================
 ;; Section 12: Worked Example C — Meta Rule (Not Injected)
 ;; ===========================================================================
-(deftest ^{:stratum 5} worked-example-c-meta-rule-test
+(deftest ^{:stratum 3} worked-example-c-meta-rule-test
   (let [rule (compile-rule
               {:filepath    "meta/rule-format.mdc"
                :frontmatter {"dewey"       "900"
@@ -824,7 +676,7 @@
 ;; ===========================================================================
 ;; Section 13: Worked Example D — Testing Rule (alwaysApply)
 ;; ===========================================================================
-(deftest ^{:stratum 5} worked-example-d-testing-rule-test
+(deftest ^{:stratum 3} worked-example-d-testing-rule-test
   (let [rule (compile-rule
               {:filepath    "testing/standards.mdc"
                :frontmatter {"dewey"       "400"
@@ -850,23 +702,23 @@
 ;; ===========================================================================
 ;; Section 14: Edge Case Tests
 ;; ===========================================================================
-(deftest ^{:stratum 5} edge-case-missing-dewey-test
+(deftest ^{:stratum 3} edge-case-missing-dewey-test
   (testing "Missing dewey → default to '000', phases all"
     (let [rule (compile-rule {:filepath "test.mdc"
                               :frontmatter {}
                               :body "content"})]
       (is (= "000" (:rule/category rule)))
-      (is (= all-phases
+      (is (= dewey/all-phases
              (get-in rule [:rule/applies-to :phases]))))))
 
-(deftest ^{:stratum 5} edge-case-missing-description-test
+(deftest ^{:stratum 3} edge-case-missing-description-test
   (testing "Missing description → title derived from slug"
     (let [rule (compile-rule {:filepath "foundations/code-quality.mdc"
                               :frontmatter {"dewey" "001"}
                               :body "content"})]
       (is (= "Code Quality" (:rule/title rule))))))
 
-(deftest ^{:stratum 5} edge-case-empty-body-test
+(deftest ^{:stratum 3} edge-case-empty-body-test
   (testing "Empty body → knowledge-content omitted, rule still valid"
     (let [rule (compile-rule {:filepath "stub.mdc"
                               :frontmatter {"dewey" "001"
@@ -876,7 +728,7 @@
       (is (= :std/stub (:rule/id rule)))
       (is (= "Stub rule" (:rule/title rule))))))
 
-(deftest ^{:stratum 5} edge-case-always-apply-meta-test
+(deftest ^{:stratum 3} edge-case-always-apply-meta-test
   (testing "alwaysApply: true + dewey 900 → always-inject true but empty phases"
     (let [rule (compile-rule {:filepath "meta/weird.mdc"
                               :frontmatter {"dewey"       "900"
@@ -886,7 +738,7 @@
       (is (true? (:rule/always-inject? rule)))
       (is (= #{} (get-in rule [:rule/applies-to :phases]))))))
 
-(deftest ^{:stratum 5} edge-case-globs-string-instead-of-list-test
+(deftest ^{:stratum 3} edge-case-globs-string-instead-of-list-test
   (testing "String globs normalized to vector"
     (let [rule (compile-rule {:filepath "test.mdc"
                               :frontmatter {"dewey" "210"
@@ -894,7 +746,7 @@
                               :body "content"})]
       (is (= ["*.clj"] (get-in rule [:rule/applies-to :file-globs]))))))
 
-(deftest ^{:stratum 5} edge-case-index-mdc-test
+(deftest ^{:stratum 3} edge-case-index-mdc-test
   (testing "index.mdc compiled like any other file, ID :std/index"
     (let [rule (compile-rule {:filepath "index.mdc"
                               :frontmatter {"dewey" "000"
@@ -902,11 +754,11 @@
                                             "alwaysApply" false}
                               :body "# Rules Catalog"})]
       (is (= :std/index (:rule/id rule)))
-      (is (= all-phases (get-in rule [:rule/applies-to :phases])))
+      (is (= dewey/all-phases (get-in rule [:rule/applies-to :phases])))
       ;; alwaysApply false → always-inject? omitted
       (is (not (contains? rule :rule/always-inject?))))))
 
-(deftest ^{:stratum 5} all-rule-schema-fields-produced-test
+(deftest ^{:stratum 3} all-rule-schema-fields-produced-test
   (testing "Compiled rule produces all required schema fields"
     (let [rule (compile-rule {:filepath "test/example.mdc"
                               :frontmatter {"dewey"       "210"
@@ -920,7 +772,7 @@
       (is (set/subset? required-keys (set (keys rule)))
           (str "Missing required keys: " (set/difference required-keys (set (keys rule))))))))
 
-(deftest ^{:stratum 5} optional-fields-conditionally-present-test
+(deftest ^{:stratum 3} optional-fields-conditionally-present-test
   (testing ":rule/always-inject? present only when alwaysApply is true"
     (let [rule-with    (compile-rule {:filepath "a.mdc" :frontmatter {"alwaysApply" true} :body "x"})
           rule-without (compile-rule {:filepath "b.mdc" :frontmatter {} :body "x"})]
@@ -936,7 +788,7 @@
 ;; ===========================================================================
 ;; Section 18: Schema Compatibility Tests
 ;; ===========================================================================
-(deftest ^{:stratum 5} compiled-rule-matches-schema-shape-test
+(deftest ^{:stratum 3} compiled-rule-matches-schema-shape-test
   (testing "Compiled rule has correct value types for schema fields"
     (let [rule (compile-rule {:filepath "foundations/stratified-design.mdc"
                               :frontmatter {"dewey" "001"
@@ -969,7 +821,7 @@
       (is (boolean? (:rule/always-inject? rule)))
       (is (string? (:rule/knowledge-content rule))))))
 
-(deftest ^{:stratum 5} always-inject-does-not-override-phases-test
+(deftest ^{:stratum 3} always-inject-does-not-override-phases-test
   (testing "alwaysApply controls injection, phases control which roles"
     (let [rule (compile-rule {:filepath "testing/standards.mdc"
                               :frontmatter {"dewey" "400"
