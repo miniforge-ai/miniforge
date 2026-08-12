@@ -26,19 +26,36 @@
    [malli.core :as m])
   (:import
    [java.time Instant]
-   [java.util Date Locale]))
+   [java.util Date Locale UUID]))
 
 ;------------------------------------------------------------------------------ Layer 0
 
-;; These aliases preserve the established zettel namespace API while each
+;; These delegates preserve the established zettel namespace API while each
 ;; implementation stays within its own three-stratum representation domain.
-(def ^{:stratum 0} revision-id-from-digest revision/revision-id-from-digest)
+;; `defn` rather than `def`-aliasing the Var so `doc`/`clojure.repl/doc` still
+;; shows a docstring and arglist here, not just on the internal namespace.
+(defn ^{:stratum 0} revision-id-from-digest
+  "Derive the stable revision UUID for a digest."
+  ^UUID [^String digest]
+  (revision/revision-id-from-digest digest))
 
-(def ^{:stratum 0} compute-digest revision/compute-digest)
+(defn ^{:stratum 0} compute-digest
+  "Return the canonical content digest for a zettel."
+  [zettel]
+  (revision/compute-digest zettel))
 
-(def ^{:stratum 0} create-zettel lifecycle/create-zettel)
+(defn ^{:stratum 0} create-zettel
+  "Create a zettel and stamp its initial untrusted revision. Accepts the
+   same keyword options as ai.miniforge.knowledge.zettel.lifecycle/
+   create-zettel (:dewey, :tags, :links, :source, :author, and the
+   fleet/privacy sharing keys)."
+  [uid title content type & opts]
+  (apply lifecycle/create-zettel uid title content type opts))
 
-(def ^{:stratum 0} update-zettel lifecycle/update-zettel)
+(defn ^{:stratum 0} update-zettel
+  "Update a zettel while preserving or resetting trust by revision."
+  [zettel changes]
+  (lifecycle/update-zettel zettel changes))
 
 (defn ^{:stratum 0} ->iso
   "Convert an Instant or Date to its ISO-8601 wire representation."
