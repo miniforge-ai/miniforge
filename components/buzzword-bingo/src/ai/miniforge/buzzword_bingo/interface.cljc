@@ -18,15 +18,39 @@
 (ns ai.miniforge.buzzword-bingo.interface
   "Public API for the buzzword-bingo component.
 
-   Today: prepares a document for counting by blanking the regions that
-   are not authored prose. The counter that consumes it arrives with
-   the term catalog."
+   Counts marketing, corporate and generated-prose tells in a document
+   and grades the result, so a caller can decide whether prose is worth
+   keeping or should be written again."
   (:require
+   [ai.miniforge.buzzword-bingo.detect :as detect]
+   [ai.miniforge.buzzword-bingo.lexicon :as lexicon]
+   [ai.miniforge.buzzword-bingo.score :as score]
    [ai.miniforge.buzzword-bingo.segment :as segment]))
 
 ;------------------------------------------------------------------------------ Layer 0
 
-;; Text preparation
+;; Catalog
+(defn ^{:stratum 0} entries
+  "Every compiled lexicon entry."
+  []
+  lexicon/entries)
+
+(defn ^{:stratum 0} categories
+  "Category key → attributes, including the category's default weight."
+  []
+  lexicon/categories)
+
+(defn ^{:stratum 0} lexicon-version
+  "Version stamp of the catalog backing this build."
+  []
+  lexicon/version)
+
+(defn ^{:stratum 0} default-thresholds
+  "Grade boundaries applied when a caller supplies none."
+  []
+  score/default-thresholds)
+
+;; Scanning
 (defn ^{:stratum 0} prose-only
   "Return `text` with code, links, paths and quotations blanked out.
 
@@ -35,5 +59,19 @@
   ([text] (segment/prose-only text))
   ([text opts] (segment/prose-only text opts)))
 
+(defn ^{:stratum 0} scan
+  "Scan `text` for lexicon terms and grade the result.
+
+   Returns hits with position and context, per-category and per-term
+   tallies, a weighted rate per thousand words, and a grade of
+   `:clean`, `:suspect` or `:slop`.
+
+   Options: `:entries` replaces the catalog, `:thresholds` replaces the
+   grade boundaries, `:score-quotes?` counts blockquoted lines."
+  ([text] (scan text nil))
+  ([text opts] (score/summarize (detect/scan text opts) opts)))
+
 (comment
-  (prose-only "Use `robust` in code but not in prose."))
+  (prose-only "Use `robust` in code but not in prose.")
+  (scan "A robust, comprehensive, seamless solution.")
+  (:score/grade (scan "Plain sentence about a file parser.")))
