@@ -51,7 +51,12 @@
    channel and delivers via a rendered prompt section (landings-text)."
   {:implement "changing-one-side-of-a-boundary"
    :plan      "about-to-commit-consequential"
-   :review    "quality-signal-might-be-lying"})
+   :review    "quality-signal-might-be-lying"
+   ;; Release IS the consequential commitment (branch, push, PR) — the
+   ;; same situation plan enters at, consulted again at the moment the
+   ;; commitment actually happens. Delivered via the releaser's behavior
+   ;; addendum (no existing-files channel, same reasoning as review).
+   :release   "about-to-commit-consequential"})
 
 (defn ^{:stratum 0} configured-codex-dir
   "MINIFORGE_CODEX_PATH, trimmed, or nil — nil means the capability is off."
