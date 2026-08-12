@@ -6,7 +6,7 @@
 
 # miniforge Specification Index
 
-**Version:** 0.23.0-draft
+**Version:** 0.24.0-draft
 **Date:** 2026-08-10
 **Status:** Living specification during OSS development
 
@@ -62,7 +62,6 @@ They use RFC 2119 terminology (MUST, SHALL, SHOULD, MAY).
 |----------|------------|
 | N1-N6 | Every product built on MiniForge Core |
 | N2 checkpoint/resume delta | Implementations that persist workflow state |
-| N4 policy-compilation delta | Implementations that originate compiled policy packs |
 | N5 supervisory deltas | Miniforge SDLC control-plane producers and consumers |
 | N7-N10 | Miniforge Fleet/SDLC capabilities |
 | N11 + runtime-adapter delta | Governed task runtimes in Core and consuming products |
@@ -245,7 +244,6 @@ Defines:
 | File | Base contract | Applicability |
 |------|---------------|---------------|
 | [N2-delta-phase-checkpoint-and-resume.md](normative/N2-delta-phase-checkpoint-and-resume.md) | N2 | Persisted workflow state |
-| [N4-delta-policy-compilation-contract.md](normative/N4-delta-policy-compilation-contract.md) | N4 | Policy-pack origination |
 | [N5-delta-supervisory-control-plane.md](normative/N5-delta-supervisory-control-plane.md) | N5 | Miniforge supervisory UI/API |
 | [N5-delta-2-pr-scoring.md](normative/N5-delta-2-pr-scoring.md) | N5 supervisory | Miniforge PR fleet |
 | [N5-delta-3-observational-entities.md](normative/N5-delta-3-observational-entities.md) | N5 supervisory | Miniforge entity projections |
@@ -475,6 +473,12 @@ Defines:
 
 ## Informative Documentation (Non-Normative)
 
+- [informative/I-policy-compilation-contract.md](informative/I-policy-compilation-contract.md) — policy candidate
+  model and pack compilation design. Reclassified from a normative N4 amendment on 2026-08-10:
+  its requirements were lowercase (non-binding per RFC 8174) and the compiler it describes does
+  not exist. Its two novel ideas — per-rule provenance and enforceability class — were folded
+  into N4 §2.3.2–§2.3.3.
+
 These documents provide guidance, examples, and context but do NOT define contractual requirements.
 
 ### UX References
@@ -611,6 +615,20 @@ Normative specs are enforced by:
 
 ## Version History
 
+- **0.24.0-draft** (2026-08-10) - N4-delta reclassified to informative; its unique content folded
+  into N4. The document's requirements were written lowercase and so bound nothing per RFC 8174,
+  and the document-to-candidate compiler it specifies does not exist — what exists instead is
+  `components/policy-calibration`, which decides gate-readiness empirically by measuring a semantic
+  judge's false-positive and recall rates. **Folded into N4:** `:rule/provenance` (§2.3.3), the
+  rule-level counterpart to N6 §2.13's reproducibility requirement, and `:rule/enforceability`
+  (§2.3.2) with the rule that a rule MUST NOT be silently promoted to `:executable`. Both optional,
+  defaulting to current behaviour, so no existing rule is invalidated. **N4 Annex A.5** records a
+  larger finding: the shipped rule model carries `:rule/enforcement` actions, a
+  semantic-vs-deterministic detector distinction, and a calibration gate refusing to ship a
+  semantic gating rule without a passing `:gate-ready?` record — and N4 mentions calibration zero
+  times. That safety property exists only in code; specifying it is a deliberate future amendment
+  rather than something to reverse-engineer (020). Per-spec bumps: N4 0.7→0.8
+
 - **0.23.0-draft** (2026-08-10) - N7 completion, and a fix to N14 from the previous pass.
   **N7** was missed by the sweep entirely — it was surveyed and then not scheduled. Added
   `N7.EX.*`, `N7.VF.*`, `N7.AC.*` requirement IDs, test obligations, and Annex A. N7 turns out to
@@ -630,10 +648,11 @@ Normative specs are enforced by:
   Amends and Related preserved. Conformance requirement IDs and test obligations added to the six
   deltas carrying MUSTs: `N2D.CK.*`, `N5D1.SV.*`, `N5D2.SC.*`, `N5D3.OE.*`, `N5D4.AE.*`,
   `N11D.RA.*`. N5-delta-3's second `§3.6` renumbered to `§3.7` — it duplicated the pack-management
-  producer's number, and both inbound references mean the producer. **N4-delta contains no RFC 2119
-  keyword at all** and so states no requirements; a Status subsection records that it is effectively
-  informative until its requirements are stated or it is reclassified, and names the two open
-  dispositions rather than choosing one.
+  producer's number, and both inbound references mean the producer. **N4-delta contains no *uppercase* RFC 2119
+  keyword** and so binds nothing per RFC 8174; a Status subsection recorded that it is effectively
+  informative until its requirements are stated or it is reclassified. (That subsection originally
+  read "states no requirements", which was wrong — it states about twenty-five, in lowercase.
+  Corrected in 0.24.0, which reclassified the document.)
 - **0.21.0-draft** (2026-08-10) - N12–N15 completion pass. Conformance requirement IDs and test
   obligations added to all four (`N12.CE.*`, `N13.PI.*`, `N14.WS.*`, `N15.CH.*`), plus Annex A on
   each. **N14 §9.1** declared ten `workspace/*` types as required N3 events and none is registered

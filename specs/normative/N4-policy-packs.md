@@ -6,7 +6,7 @@
 
 # N4 — Policy Packs & Gates Standard
 
-**Version:** 0.7.0-draft
+**Version:** 0.8.0-draft
 **Date:** 2026-08-05
 **Status:** Draft
 **Conformance:** MUST
@@ -185,6 +185,9 @@ no longer routes.
  :rule/remediation-template string     ; REQUIRED: Template for remediation message
  :rule/documentation-url    string     ; OPTIONAL: Link to detailed docs
 
+ :rule/enforceability keyword          ; OPTIONAL: §2.3.2; default :executable
+ :rule/provenance   [{...}]            ; OPTIONAL: §2.3.3; REQUIRED for derived rules
+
  :rule/deprecated-by keyword}          ; OPTIONAL: Rule ID that supersedes this rule
 ```
 
@@ -193,6 +196,64 @@ no longer routes.
 
 **Categories are plural from day one.** Use `:rule/categories [...]` even when a rule currently
 belongs to a single category. This prevents a schema migration when multi-category rules arise.
+
+#### 2.3.2 Enforceability
+
+`:rule/enforceability` declares what kind of check a rule is, independent of how
+severe a violation would be:
+
+| Value | Meaning |
+|-------|---------|
+| `:executable` | Mechanically decidable; may gate |
+| `:heuristic` | Detects reliably enough to report, not reliably enough to gate unaided |
+| `:advisory` | Informational; never gates |
+| `:human-review` | Requires a person to judge; never gates automatically |
+
+Default is `:executable`, so existing rules are unaffected.
+
+**A rule MUST NOT be silently promoted to `:executable`.** Where a pack is
+generated or recompiled, a rule declared `:advisory` or `:human-review` retains
+that class unless a person changes it. Silent promotion turns guidance into a
+blocker for work that was never meant to be gated, and the operator sees only
+the block.
+
+Severity and enforceability are orthogonal: a `:critical` `:advisory` rule says
+"this matters a great deal and a human must decide", not "this blocks".
+
+**Relationship to gate-readiness.** Enforceability is a _declaration_. Whether
+a semantic rule is reliable enough to gate in practice is _measured_ — see
+Annex A, which records that the implementation carries a calibration mechanism
+this spec does not yet describe. Where both exist, the measurement governs: a
+rule declaring `:executable` that fails calibration does not gate.
+
+#### 2.3.3 Rule Provenance
+
+`:rule/provenance` is a non-empty vector of records identifying where a rule
+came from. It is OPTIONAL for hand-authored rules and REQUIRED for any rule
+produced by deriving, composing, or compiling from other material.
+
+```clojure
+{:provenance/source-type  keyword   ; REQUIRED: :file | :url | :repo-artifact | :pack | :manual
+ :provenance/source-ref   string    ; REQUIRED: stable reference to the source object
+ :provenance/support-type keyword   ; REQUIRED: :stated | :derived | :composed | :authored
+ :provenance/source-fingerprint string ; REQUIRED: fingerprint of the source material
+ :provenance/locator      any       ; OPTIONAL: section, line span, AST path, config key
+ :provenance/excerpt-hash string    ; OPTIONAL: hash of the supporting excerpt
+ :provenance/compiler     string}   ; OPTIONAL: producer identity and version
+```
+
+Two rules govern it:
+
+1. A derived rule MUST retain the provenance of every source that materially
+   contributed. Where several sources are merged into one rule, provenance MUST
+   NOT collapse to a single pointer — an auditor asking "why does this rule
+   exist" needs all of them.
+2. Provenance MUST survive promotion. Renaming fields to fit this schema is
+   permitted; dropping the record is not.
+
+This is the rule-level counterpart to N6 §2.13, which requires a gate result to
+be reproducible from its evidence. Pack hash tells a reader which bytes ran;
+provenance tells them why those bytes say what they say.
 
 #### 2.3.1 Severity Levels
 
@@ -2001,7 +2062,7 @@ Research directions:
 ## Annex A — Implementation Conformance Status (informative)
 
 This annex is **informative**. It records where the miniforge implementation
-currently diverges from the contract above, as of 2026-08-06. It is not a
+currently diverges from the contract above, as of 2026-08-10. It is not a
 relaxation of any requirement in §1–§14: the spec is normative and the
 implementation conforms to it, not the reverse.
 
@@ -2108,7 +2169,36 @@ contract the code already satisfies:
   a reader matching §5.1.8 against the pack finds neither set of names in the
   other.
 
-### A.5 Structural
+### A.5 Gate-Readiness Calibration — implemented, unspecified
+
+The implementation carries a mechanism this spec does not describe at all: N4
+mentions calibration zero times.
+
+`components/policy-calibration` decides whether a semantic rule is reliable
+enough to be a hard gate, by measuring a judge's false-positive and recall
+rates over a seeded corpus across independent runs. `gate_check.clj` then
+refuses to ship: a rule whose enforcement action is acting
+(`:hard-halt` or `:require-approval`) **and** whose detector is `:semantic`
+must hold a passing `:gate-ready?` calibration record, or it is reported as
+ungated.
+
+Two consequences for this spec:
+
+1. **`:rule/enforcement {:action ...}` and the semantic/deterministic detector
+   distinction are part of the shipped rule model** and are absent from §2.3's
+   schema. §2.3.2's enforceability field is adjacent but not the same thing —
+   enforceability is declared, calibration is measured.
+2. **The safety property is real and unwritten.** An operator reading N4 would
+   not learn that a semantic gating rule needs an evidence-backed reliability
+   record before it can block anything. That is one of the stronger safety
+   properties in the system and it exists only in code.
+
+This is recorded rather than specified: reverse-engineering the calibration
+contract from its implementation is what standard 020 forbids. Writing it
+belongs in a deliberate N4 amendment, and §2.3.2 defers to the measurement in
+the meantime.
+
+### A.6 Structural
 
 - **Stale citations.** `policy-pack/knowledge_safety.clj`,
   `policy-pack/loader.clj`, and `policy-pack/rules/pack_dependency_validation.clj`
@@ -2123,6 +2213,12 @@ contract the code already satisfies:
 ---
 
 **Version History:**
+
+- 0.8.0-draft (2026-08-10): Absorbed the two novel contracts from the former
+  N4-delta, now informative: `:rule/provenance` (§2.3.3) and
+  `:rule/enforceability` (§2.3.2), both optional and defaulting to current
+  behaviour. Annex A.5 records that the shipped rule model carries an
+  enforcement/detector/calibration mechanism this spec does not describe.
 
 - 0.7.0-draft (2026-08-06): Annex A only, no normative change. A.4's
   self-certifying verification and A.3's canonicalization gap are closed by

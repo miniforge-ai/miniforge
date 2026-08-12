@@ -3,12 +3,12 @@
   Author: Christopher Lester (christopher@miniforge.ai)
   Copyright 2025-2026 Christopher Lester. Licensed under Apache 2.0.
 -->
-# Normative Spec Extension: Policy Candidate Model and Pack Compilation Contract
+# Informative: Policy Candidate Model and Pack Compilation Contract
 
 **Version:** 0.1.0-draft
 **Date:** 2026-08-10
 **Status:** Draft
-**Conformance:** See §Status below
+**Conformance:** None — informative
 
 ## Purpose
 
@@ -42,27 +42,35 @@ The stable boundary is the contract between source policy material and usable po
 - **Type:** Normative
 - **Scope:** Open-source policy origination substrate
 
-### Status: requirements unstated
+### Status: informative
 
-This spec sits in `specs/normative/` but contains **no RFC 2119 keyword** —
-not one MUST, SHALL, SHOULD, or MAY. Standard 020 requires normative specs to
-use them, and an implementation cannot conform to a document that states no
-requirements.
+This document was previously indexed as a normative amendment to N4. It is now
+**informative** and states no requirements.
 
-Its content is a design description: it defines a candidate model, provenance
-fields, an approval lifecycle, and compilation guarantees in declarative prose.
-Turning that prose into requirements is a deliberate authoring act with real
-consequences for implementers, so it is not done here — inventing MUSTs on
-someone else's design would be worse than recording the gap.
+Two things prompted the move.
 
-Until that happens this spec is **effectively informative**. Two dispositions
-are open, and one of them should be chosen rather than left implicit:
+First, its requirements were written in lowercase (`must`, `should`) rather
+than the RFC 2119 uppercase forms. Per RFC 8174 only the uppercase forms carry
+normative weight, so the document read as normative while formally binding
+nothing. An earlier revision of this section overstated that as "contains no
+RFC 2119 keyword… states no requirements" — it states roughly twenty-five, in a
+form that does not bind.
 
-1. State the requirements its content implies, keeping it in `normative/`.
-2. Reclassify it to `informative/` and let N4 carry whatever of it is binding.
+Second and more decisively, the machinery it describes — a document-to-candidate
+compiler with a candidate lifecycle and promotion rules — does not exist. What
+exists instead is `components/policy-calibration`, which decides gate-readiness
+**empirically**, by measuring a semantic judge's false-positive and recall rates
+over a seeded corpus. That is a better answer to the same question than a
+declared enforceability field, and it is already running.
 
-`specs/SPEC_INDEX.md` is authoritative on scope (020) and should record the
-choice.
+The two ideas here that were not already in N4 have been folded into it:
+per-rule provenance and the enforceability class, both as optional fields
+(N4 §2.2.1, §2.2.2).
+
+What remains in this document is design material for a compiler that may never
+be built. If it is built, it is Miniforge-product scope — like N7–N10 — rather
+than MiniForge Core, since nothing outside miniforge itself originates packs
+this way.
 
 ## Description
 
