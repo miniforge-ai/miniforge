@@ -26,22 +26,27 @@
    - Dependency depth limit (default: 5 levels)
    - Complete dependency graph validation before loading
 
-   Layer 0: parse-version(-constraint), get-pack-dependencies,
-     detect-circular/missing-dependencies, tainted-dependency? /
-     untrusted-instruction-escalation? predicates, calculate-pack-depths
-   Layer 1: compare-versions, build-dependency-graph (over
-     get-pack-dependencies), check-dependency-trust, detect-depth-violations
-     (over calculate-pack-depths)
-   Layer 2: satisfies-constraint? (over parse-version-constraint),
-     detect-trust-violations (over check-dependency-trust)
-   Layer 3: detect-version-conflicts (over build-dependency-graph +
-     satisfies-constraint?)
-   Layer 4: validate-pack-dependencies (orchestrates the Layer 0-3 detectors)
-   Layer 5: validate-single-pack (public entry point, over
-     validate-pack-dependencies)
+   Slice 1/3 of a rule 210 split train (SL003: this namespace measured
+   6 real layers, max 3 -- same convention as the mdc-compiler split,
+   miniforge#1729-#1743, and the workflow-runner split, miniforge#1662):
+   version parsing/comparison/constraint-satisfaction moved to
+   `ai.miniforge.policy-pack.rules.pack-dependency-validation.versions`.
+   `detect-version-conflicts` now calls `versions/satisfies-constraint?`
+   (a qualified, cross-namespace call, so it no longer counts toward
+   this file's local layer depth) and drops to Layer 0. This file now
+   measures 5 real layers; the graph-construction and trust-check
+   groups move out in the remaining slices of this train.
 
-   6 real strata — over the rule 210 budget of 3; a genuine namespace split
-   (Wave 2), not a labeling problem."
+   Layer 0: get-pack-dependencies, detect-circular/missing-dependencies,
+     tainted-dependency? / untrusted-instruction-escalation? predicates,
+     calculate-pack-depths, detect-version-conflicts
+   Layer 1: build-dependency-graph (over get-pack-dependencies),
+     check-dependency-trust, detect-depth-violations (over
+     calculate-pack-depths)
+   Layer 2: detect-trust-violations (over check-dependency-trust)
+   Layer 3: validate-pack-dependencies (orchestrates the Layer 0-2 detectors)
+   Layer 4: validate-single-pack (public entry point, over
+     validate-pack-dependencies)"
   (:require
    [ai.miniforge.algorithms.interface :as alg]
    [ai.miniforge.policy-pack.rules.pack-dependency-validation.versions :as versions]

@@ -19,6 +19,7 @@
   "Tests for version constraints and version parsing (N4 S2.4.2)."
   (:require
    [ai.miniforge.policy-pack.rules.pack-dependency-validation :as sut]
+   [ai.miniforge.policy-pack.rules.pack-dependency-validation.versions :as versions]
    [clojure.test :refer [deftest is testing]]))
 
 ;------------------------------------------------------------------------------ Layer 0
@@ -124,7 +125,7 @@
 ;------------------------------------------------------------------------------ Tests: Version Parsing
 (deftest ^{:stratum 0} test-version-parsing
   (testing "Version parsing handles DateVer format"
-    (let [parse-version #'sut/parse-version]
+    (let [parse-version #'versions/parse-version]
       (is (= {:year 2026 :month 1 :day 25 :patch 0}
              (parse-version "2026.01.25")))
       (is (= {:year 2026 :month 1 :day 25 :patch 2}
@@ -133,7 +134,7 @@
 
 (deftest ^{:stratum 0} test-version-comparison
   (testing "Version comparison works correctly"
-    (let [compare-versions #'sut/compare-versions]
+    (let [compare-versions #'versions/compare-versions]
       (is (neg? (compare-versions "2026.01.24" "2026.01.25")))
       (is (pos? (compare-versions "2026.01.26" "2026.01.25")))
       (is (zero? (compare-versions "2026.01.25" "2026.01.25")))
@@ -141,7 +142,7 @@
 
 (deftest ^{:stratum 0} test-version-constraints
   (testing "Version constraint satisfaction"
-    (let [satisfies-constraint? #'sut/satisfies-constraint?]
+    (let [satisfies-constraint? #'versions/satisfies-constraint?]
       (is (satisfies-constraint? "2026.01.25" "2026.01.25"))
       (is (satisfies-constraint? "2026.01.25" ">=2026.01.20"))
       (is (satisfies-constraint? "2026.01.25" ">2026.01.20"))
