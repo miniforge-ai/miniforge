@@ -33,12 +33,13 @@
            :entry/category :probe})
         (range n)))
 
-;; Mirrors the shape score/summarize emits, carrying only what track reads.
+;; Mirrors the shape detect/scan emits: every hit carries its weight, which is
+;; what track sums. Deliberately omits the :score/* keys, so these tests also
+;; cover an unscored scan being tracked.
 (defn- ^{:stratum 0} scan-of
-  [hit-ids & {:keys [words weighted] :or {words 20 weighted 6}}]
-  {:scan/hits       (mapv (fn [id] {:hit/id id}) hit-ids)
-   :scan/word-count words
-   :score/weighted  weighted})
+  [hit-ids & {:keys [words weight] :or {words 20 weight 3}}]
+  {:scan/hits       (mapv (fn [id] {:hit/id id :hit/weight weight}) hit-ids)
+   :scan/word-count words})
 
 (defn- ^{:stratum 0} ids-at
   "Term ids of the squares of `session` at `indices`."
@@ -60,18 +61,30 @@
   (testing "given two turns → marks, counts and totals add up across them"
     (let [session (fresh-session)
           after   (-> session
-                      (sut/track (scan-of (ids-at session [0 1]) :words 20 :weighted 6))
-                      (sut/track (scan-of (ids-at session [2]) :words 30 :weighted 3)))]
+                      (sut/track (scan-of (ids-at session [0 1]) :words 20 :weight 3))
+                      (sut/track (scan-of (ids-at session [2]) :words 30 :weight 3)))]
       (is (= 2 (:session/turns after)))
       (is (= 3 (:session/hit-count after)))
       (is (= 9 (:session/weighted after)))
       (is (= 50 (:session/word-count after)))))
 
+  ;; The weight comes off the hits, so a caller handing track the output of
+  ;; detect/scan rather than a scored result still gets a correct total.
+  (testing "given hits of differing weight → the session sums what the hits carry"
+    (let [session (fresh-session)
+          after   (sut/track session (scan-of (ids-at session [0 1]) :weight 5))]
+      (is (= 10 (:session/weighted after)))))
+
   (testing "given a turn with no hits → the session advances but nothing is marked"
     (let [after (sut/track (fresh-session) (scan-of []))]
       (is (= 1 (:session/turns after)))
       (is (empty? (:session/marked after)))
-      (is (false? (:session/bingo? after))))))
+      (is (false? (:session/bingo? after)))))
+
+  (testing "given a session not yet tracked → it already has the shape track returns"
+    (let [session (fresh-session)]
+      (is (= #{} (:session/new-lines session)))
+      (is (false? (:session/bingo? session))))))
 
 ;; Completing lines
 (deftest ^{:stratum 2} test-a-line-completes-in-any-direction

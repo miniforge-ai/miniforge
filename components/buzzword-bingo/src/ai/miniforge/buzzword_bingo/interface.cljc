@@ -97,7 +97,9 @@
   "Fold one `scan` result into `session`, returning it advanced a turn.
 
    `:session/new-lines` holds only the lines this turn completed, so a
-   caller announcing BINGO announces each line once."
+   caller announcing BINGO announces each line once. Both it and
+   `:session/lines` are sets of indices into `winning-lines`, not
+   square indices and not the line vectors themselves."
   [session scan-result]
   (session/track session scan-result))
 

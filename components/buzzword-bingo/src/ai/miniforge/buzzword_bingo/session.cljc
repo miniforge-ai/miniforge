@@ -22,7 +22,8 @@
    than mutating one, so the caller holding it decides where state
    lives."
   (:require
-   [ai.miniforge.buzzword-bingo.card :as card]))
+   [ai.miniforge.buzzword-bingo.card :as card]
+   [ai.miniforge.buzzword-bingo.tally :as tally]))
 
 ;------------------------------------------------------------------------------ Layer 0
 
@@ -44,6 +45,8 @@
    :session/card       (card/card-for seed entries)
    :session/marked     #{}
    :session/lines      #{}
+   :session/new-lines  #{}
+   :session/bingo?     false
    :session/turns      0
    :session/hit-count  0
    :session/weighted   0
@@ -73,11 +76,17 @@
 (defn ^{:stratum 2} track
   "Fold one `scan` result into `session`.
 
-   Returns the session advanced by a turn, with `:session/new-lines`
-   holding only the lines this turn completed — a caller shouts BINGO
-   on that, so one line is announced once however many turns follow."
+   Returns the session advanced by a turn. `:session/lines` and
+   `:session/new-lines` are sets of indices into `winning-lines` — not
+   square indices and not the line vectors themselves. `:session/new-lines`
+   holds only the lines this turn completed, so a caller shouting BINGO
+   on it announces each line once however many turns follow.
+
+   Turn weight is summed from the hits rather than read from
+   `:score/weighted`, so an unscored scan still totals correctly."
   [session scan]
-  (let [marked (into (:session/marked session) (map :hit/id) (:scan/hits scan))
+  (let [hits   (:scan/hits scan)
+        marked (into (:session/marked session) (map :hit/id) hits)
         lines  (lines-completed (:session/card session) marked)
         fresh  (into #{} (remove (:session/lines session)) lines)]
     (assoc session
@@ -86,8 +95,8 @@
            :session/new-lines  fresh
            :session/bingo?     (boolean (seq lines))
            :session/turns      (inc (:session/turns session))
-           :session/hit-count  (+ (:session/hit-count session) (count (:scan/hits scan)))
-           :session/weighted   (+ (:session/weighted session) (get scan :score/weighted 0))
+           :session/hit-count  (+ (:session/hit-count session) (count hits))
+           :session/weighted   (+ (:session/weighted session) (tally/weight-of hits))
            :session/word-count (+ (:session/word-count session) (get scan :scan/word-count 0)))))
 
 (comment
