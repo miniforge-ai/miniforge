@@ -361,7 +361,7 @@
 
 (defn- run-pipeline-dag
   "Loop over the DAG until all stages reach a terminal state.
-   Returns {:stage-runs [...] :cursors {:} :failed? bool}.
+   Returns {:stage-runs [...] :cursors {...} :failed? bool}.
 
    Guards against DAG deadlock: when the run is not yet terminal but no task
    is ready to execute — which happens when (first (dag/ready-tasks @run-atom))
@@ -378,7 +378,7 @@
       (dag/all-terminal? @run-atom)
       {:stage-runs stage-runs
        :cursors    cursors
-       :failed?    (seq (:run/failed @run-atom))}
+       :failed?    (boolean (seq (:run/failed @run-atom)))}
 
       ;; DAG deadlock: non-terminal run with no ready tasks.
       ;; Skip any remaining pending tasks and return as a failed run so the
