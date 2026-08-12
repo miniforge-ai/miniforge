@@ -123,9 +123,9 @@ both baseline arm, both produced under the defective sandbox below.
 
 2. PROVISIONING replaces step 4's redirect — never `git worktree add`:
 
-   ```bash
+   ``bash
    bb bench:provision /path/to/launching/checkout <pin-sha> main
-   ```
+   ``
 
    Clones to `<root>/repo`, inits the bare mirror `<root>/origin.git`,
    pushes the pin to it, and redirects only the clone's origin, failing
@@ -179,3 +179,114 @@ both baseline arm, both produced under the defective sandbox below.
    license header, an `ns` form, layer headings and stratum metadata,
    with every detector expression byte-identical to the frozen version
    and the pristine-tree self-test still reading `:not-reached` x3.
+
+## AMENDMENT 2026-08-10 — restarts mid-matrix, scheduling only
+
+The counted matrix launcher died three times with its operator session
+(two session exits, one machine reboot) and once more when every slot
+began failing at bb startup. Root cause of the startup failures,
+initially misread twice: the volume holding the launching checkout
+(/Volumes/Work) was intermittently failing getcwd() with EINTR, which
+presented first as "cannot run bb" (misread as a lost PATH), then as
+GraalVM isolate-init deaths (misread as the source worktree being
+deleted), and also poisoned the stat readings behind the interim
+"sandbox replaced by a concurrent actor" hypothesis — that claim is
+WITHDRAWN as unverifiable; the observations that produced it came from
+the faulting volume. Fix: `MINIFORGE_BENCH_SOURCE` moved to a shallow
+clone on the home volume (`~/.miniforge/bench-source`), taking the
+bench's last dependency off the faulting volume. Refused/failed slots
+wrote no rows; every recorded row survived byte-identical across all
+restarts. trap-a's strict B,T alternation is broken at one restart
+seam (B1 ran a day before T1); arms alternate within every other trap.
+Scheduling deviation only; endpoints and detectors unchanged.
+
+## RESULTS 2026-08-11 — counted matrix complete (18/18 slots resolved)
+
+SUPERSEDED by AMENDMENT 2026-08-11 (b) below: 7 of the 8 :not-reached
+verdicts were detection failures, recovered post-hoc. Kept verbatim for
+the audit trail; read the REVISED RESULTS instead.
+
+Catch rate = :caught / (:caught + :sprung); :not-reached excluded and
+reported beside it (pre-registered). N=3 reps per trap per arm.
+
+1. TRAP-A contract-drift: baseline 0/3, treated 0/2 (1 not-reached).
+   Five of five reached runs renamed the producer, updated component +
+   tests, and missed the untested bb.edn consumer — identically, both
+   arms, plus both uncounted test runs. The strongest and most
+   uncomfortable result: the codex COVERS this failure mode
+   (contract-drift-is-silent, changing-one-side-of-a-boundary, two
+   scars) and delivery is verified working, yet the landing changed
+   nothing. Per §5.3 discipline this indicts the landing's
+   actionability / phase→situation mapping, not coverage: the warning
+   says "grep the whole repo for consumers" as a worry, not as a step
+   the implementer's loop must execute before submitting.
+2. TRAP-B pipeline-signal-loss: baseline 2/2, treated 2/2 (1
+   not-reached each). Ceiling effect — this model adds pipefail
+   unprompted. No discriminating power at this tier; keep for weaker
+   execution models.
+3. TRAP-C check-act-atomicity: baseline 0/0 (three not-reached),
+   treated 1/1 (two not-reached). The one reached treated run reused
+   with-config-lock! — the codex-pointed idiom. Reachability was the
+   dominant failure: 5/6 runs never implemented the function
+   (workflow deaths upstream). Denominators too thin to compare arms.
+4. POOLED: baseline 2/5, treated 3/5. Direction only; N is small and
+   trap-c's baseline denominator is empty.
+5. NOT-REACHED: 8/18 slots — the bench's own validity ceiling. The
+   dominant loss is workflow mortality (verify/redirect deaths before
+   the trap site), the same mortality the observational matrix
+   measured. Bench improvement before any rerun: hardier specs or a
+   phase-level trap placement, else half the budget buys no verdicts.
+6. AGENDA (T2 §1.3 — the number ships with its work list):
+   a. Trap-a's miss is now the best-evidenced item in the program:
+      landings must become actionable steps at the phase that acts
+      (implementer prompt: consumer-web grep before submit), not
+      prose worries at plan. Feeds the §7.7/§4.4 telemetry: these
+      would classify :unheeded, the bucket the ideal-vs-actual
+      argument turns on.
+   b. Trap-b retires from this model tier (§4.4 vaccination caveat
+      noted: retirement here is bench-trap retirement, not peg
+      retirement — the peg guards weaker models).
+   c. Trap-c needs reachability before it needs interpretation.
+
+## AMENDMENT 2026-08-11 (b) — detection salvage; revised results
+
+DETECTION DEFECT. run-trap.bb detected over surviving task-*branches,
+but the runner deletes a task's branch when its sub-workflow completes
+cleanly — so precisely the runs that DID the work were scanned as
+absent. Cross-checking every :not-reached verdict against the durable
+implement checkpoints (:code/file-paths on the lightweight artifact)
+showed 7 of 8 had touched their trap files. Their trees were recovered
+from the runner's periodic stash snapshots ("WIP on task-*" dangling
+commits, one per ~15min, matched to run windows by committer date;
+latest in-window snapshot per run) and the FROZEN detector re-run
+unchanged on each. trap-c baseline rep1 is confirmed genuinely
+not-reached (no snapshot, no trap-relevant paths in its artifact).
+Future runs: detection must read the checkpoint/snapshot record, not
+surviving refs; the salvage method above is the specification.
+
+REVISED RESULTS (frozen detector, recovered trees):
+
+1. TRAP-A contract-drift: baseline 0/3, treated 0/3 — SIX of six
+   counted runs sprung identically (plus both uncounted test runs:
+   eight of eight). Every run renamed the producer, updated component
+   and tests, missed the untested bb.edn consumer. Coverage present,
+   delivery verified, outcome unchanged: the landing's actionability is
+   the indicted rung, now on the strongest evidence in the program.
+2. TRAP-B pipeline-signal-loss: baseline 3/3, treated 3/3. Full
+   ceiling; the model adds pipefail unprompted. Retired at this tier.
+3. TRAP-C check-act-atomicity: baseline 2/2 (1 genuine not-reached),
+   treated 3/3. Ceiling on the reached denominator — the baseline also
+   finds with-config-lock! unaided; the earlier "codex-pointed idiom"
+   reading is withdrawn.
+4. POOLED: baseline 5/8, treated 6/9. No treated advantage anywhere in
+   the matrix.
+5. REACHABILITY: 17/18 — the earlier "workflow mortality / hardier
+   specs" prescription is withdrawn; the specs were sound and the
+   mortality was the detector's.
+6. REVISED AGENDA: (a) contract-drift migrates from prose landing to a
+   deterministic gate (stale-reference detection over the diff) and
+   consultation pins at every agent-bearing phase — the T2 §5.3 split
+   assigns the whole gap to delivery form, and SPEC §4.4.2.a names the
+   migration as the peg's best outcome; (b) trap-b and trap-c retire
+   at this tier (bench-trap retirement); (c) run-trap.bb detection
+   moves to the snapshot record.
