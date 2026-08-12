@@ -50,9 +50,10 @@
   loader/resolve-overlay)
 
 (def ^{:stratum 0} discover-packs
-  "Discover packs in a directory: top-level *.pack.edn files and subdirectories
-   containing pack.edn. Returns a vector of {:path string :type :file|:directory}
-   (nil when the directory does not exist)."
+  "Discover packs in a directory: top-level pack files (pack.edn or
+   *.pack.edn) and subdirectories containing pack.edn. Returns a vector of
+   {:path string :type :file|:directory} (nil when the directory does not
+   exist)."
   loader-io/discover-packs)
 
 (def ^{:stratum 0} load-all-packs

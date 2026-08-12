@@ -98,7 +98,7 @@
   "Discover all packs in a directory.
 
    Looks for:
-   - *.pack.edn files
+   - Top-level pack files (pack-file?: pack.edn or *.pack.edn)
    - Subdirectories containing pack.edn
 
    Arguments:
@@ -109,7 +109,7 @@
   [packs-dir]
   (let [dir (io/file packs-dir)]
     (when (.exists dir)
-      (let [;; Find *.pack.edn files
+      (let [;; Find top-level pack files (pack.edn or *.pack.edn)
             pack-files (->> (.listFiles dir)
                             (filter #(.isFile %))
                             (filter pack-file?)
