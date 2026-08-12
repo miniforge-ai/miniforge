@@ -30,6 +30,7 @@
    as the authoritative acceptance suite."
   (:require
    [ai.miniforge.policy-pack.mdc-to-pack-mapping-test.dewey :as dewey]
+   [ai.miniforge.policy-pack.mdc-to-pack-mapping-test.fields :as fields]
    [clojure.test :refer [deftest testing is are]]
    [clojure.string :as str]
    [clojure.set :as set]))
@@ -53,76 +54,6 @@
   (->> (str/split slug #"-")
        (map str/capitalize)
        (str/join " ")))
-
-(defn ^{:stratum 0} derive-description
-  "Generate :rule/description from category and title.
-   Format: 'Engineering standard (<category>): <title>'"
-  [category title]
-  (str "Engineering standard (" category "): " title))
-
-(defn ^{:stratum 0} normalize-globs
-  "Wrap string globs in a vector; pass vectors through; nil → nil."
-  [globs]
-  (cond
-    (nil? globs)    nil
-    (string? globs) [globs]
-    (vector? globs) globs
-    (sequential? globs) (vec globs)
-    :else [globs]))
-
-(defn ^{:stratum 0} build-always-inject
-  "Derive :rule/always-inject? map fragment.
-   true → {:rule/always-inject? true}, false/nil → {}"
-  [always-apply]
-  (if (true? always-apply)
-    {:rule/always-inject? true}
-    {}))
-
-(defn ^{:stratum 0} build-enforcement
-  "Build :rule/enforcement from title and alwaysApply flag."
-  [title always-apply]
-  {:action  (if always-apply :warn :audit)
-   :message (str "Standard: " title)})
-
-;; ---------------------------------------------------------------------------
-;; Agent behavior extraction helpers
-;; ---------------------------------------------------------------------------
-(defn ^{:stratum 0} extract-agent-behavior-section
-  "Extract ## Agent behavior section content from body.
-   Returns nil if section not found."
-  [body]
-  (when body
-    (let [lines (str/split-lines body)
-          start-idx (some (fn [[i line]]
-                           (when (re-matches #"(?i)^##\s+Agent\s+behavior.*" line)
-                             i))
-                         (map-indexed vector lines))]
-      (when start-idx
-        (let [rest-lines (drop (inc start-idx) lines)
-              content-lines (take-while
-                             (fn [line]
-                               (not (re-matches #"^##\s+.*" line)))
-                             rest-lines)
-              content (str/trim (str/join "\n" content-lines))]
-          (when (not (str/blank? content))
-            content))))))
-
-(defn ^{:stratum 0} extract-first-paragraph
-  "Extract first non-heading paragraph from body."
-  [body]
-  (when body
-    (let [lines (str/split-lines body)
-          ;; Skip leading headings and blank lines
-          content-lines (drop-while
-                         (fn [line]
-                           (or (str/blank? line)
-                               (str/starts-with? line "#")))
-                         lines)
-          ;; Take until blank line
-          para-lines (take-while (complement str/blank?) content-lines)
-          para (str/trim (str/join " " para-lines))]
-      (when (not (str/blank? para))
-        para))))
 
 ;; ---------------------------------------------------------------------------
 ;; Design spec data (from the .edn)
@@ -191,6 +122,15 @@
                        (set/union frontmatter-in-sources #{"globs"})) ;; globs is in compound source
           "All frontmatter fields must have mappings"))))
 
+(defn ^{:stratum 0} build-applies-to
+  "Build :rule/applies-to from dewey + optional globs."
+  [dewey-str globs]
+  (let [phases (dewey/dewey-to-phases dewey-str)
+        base   {:phases phases}]
+    (if-let [g (fields/normalize-globs globs)]
+      (assoc base :file-globs g)
+      base)))
+
 ;------------------------------------------------------------------------------ Layer 1
 
 (defn ^{:stratum 1} rule-id-from-filepath
@@ -230,101 +170,12 @@
       "stratified-design"       "Stratified Design"
       "git-branch-management"   "Git Branch Management")))
 
-;; ===========================================================================
-;; Section 3: Description Generation Tests
-;; ===========================================================================
-(deftest ^{:stratum 1} description-generation-test
-  (testing "Format: 'Engineering standard (<category>): <title>'"
-    (is (= "Engineering standard (001): Stratified Design — enforce one-way dependencies"
-           (derive-description "001" "Stratified Design — enforce one-way dependencies")))
-    (is (= "Engineering standard (210): Clojure Polylith + per-file stratified design"
-           (derive-description "210" "Clojure Polylith + per-file stratified design")))
-    (is (= "Engineering standard (000): Index"
-           (derive-description "000" "Index")))))
-
-;; ===========================================================================
-;; Section 5: alwaysApply → :rule/always-inject? Mapping Tests
-;; ===========================================================================
-(deftest ^{:stratum 1} always-inject-mapping-test
-  (testing "alwaysApply: true → {:rule/always-inject? true}"
-    (is (= {:rule/always-inject? true} (build-always-inject true))))
-
-  (testing "alwaysApply: false → {} (key omitted)"
-    (is (= {} (build-always-inject false))))
-
-  (testing "alwaysApply: nil (absent) → {} (key omitted)"
-    (is (= {} (build-always-inject nil))))
-
-  (testing "Consumers get nil (falsy) for missing always-inject?"
-    (let [rule-without (merge {} (build-always-inject false))]
-      (is (nil? (:rule/always-inject? rule-without))))))
-
-(deftest ^{:stratum 1} globs-normalization-test
-  (testing "String globs wrapped in vector"
-    (is (= ["*.clj"] (normalize-globs "*.clj"))))
-
-  (testing "Vector globs passed through"
-    (is (= ["*.clj" "*.cljc"] (normalize-globs ["*.clj" "*.cljc"]))))
-
-  (testing "nil globs → nil"
-    (is (nil? (normalize-globs nil)))))
-
-;; ===========================================================================
-;; Section 9: Agent Behavior Extraction Tests
-;; ===========================================================================
-(deftest ^{:stratum 1} agent-behavior-section-extraction-test
-  (testing "Extracts content from ## Agent behavior section"
-    (let [body "# Heading\n\nIntro paragraph.\n\n## Agent behavior\n\n- Do X.\n- Do Y.\n\n## Next section"]
-      (is (= "- Do X.\n- Do Y." (extract-agent-behavior-section body)))))
-
-  (testing "Case-insensitive heading match"
-    (let [body "## agent behavior\n\nDo stuff."]
-      (is (= "Do stuff." (extract-agent-behavior-section body)))))
-
-  (testing "Extracts to end of file when no next heading"
-    (let [body "## Agent behavior\n\n- Be concise.\n- Be clear."]
-      (is (= "- Be concise.\n- Be clear." (extract-agent-behavior-section body)))))
-
-  (testing "Returns nil when section not present"
-    (let [body "# Heading\n\nJust content, no agent behavior section."]
-      (is (nil? (extract-agent-behavior-section body)))))
-
-  (testing "Returns nil for empty section"
-    (let [body "## Agent behavior\n\n## Next heading"]
-      (is (nil? (extract-agent-behavior-section body)))))
-
-  (testing "Returns nil for nil body"
-    (is (nil? (extract-agent-behavior-section nil)))))
-
-(deftest ^{:stratum 1} first-paragraph-extraction-test
-  (testing "Extracts first non-heading paragraph"
-    (let [body "# Code Quality (ALWAYS)\n\nEvery function must read as a pipeline: data enters, transforms, exits.\n\nMore text."]
-      (is (= "Every function must read as a pipeline: data enters, transforms, exits."
-             (extract-first-paragraph body)))))
-
-  (testing "Skips leading headings and blank lines"
-    (let [body "\n# Heading\n## Sub\n\nActual content here."]
-      (is (= "Actual content here." (extract-first-paragraph body)))))
-
-  (testing "Returns nil for heading-only body"
-    (let [body "# Just a heading\n## And subheading"]
-      (is (nil? (extract-first-paragraph body)))))
-
-  (testing "Returns nil for nil body"
-    (is (nil? (extract-first-paragraph nil)))))
-
 (deftest ^{:stratum 1} edge-case-duplicate-slugs-test
   (testing "Duplicate filename slugs must be detectable"
     (let [files ["foundations/foo.mdc" "workflows/foo.mdc"]
           slugs (map slug-from-filename files)]
       (is (not= (count slugs) (count (set slugs)))
           "Duplicate slugs should be detected by ETL"))))
-
-(deftest ^{:stratum 1} edge-case-body-only-headings-test
-  (testing "Body with only headings → knowledge-content present, agent-behavior nil"
-    (let [body "# Just a heading\n## And subheading"]
-      (is (nil? (extract-agent-behavior-section body)))
-      (is (nil? (extract-first-paragraph body))))))
 
 ;; ===========================================================================
 ;; Section 15: Inventory Completeness Tests
@@ -393,14 +244,26 @@
       (is (= inventory-ids category-rules)
           "Pack categories should reference exactly the inventory rule IDs"))))
 
-(defn ^{:stratum 1} build-applies-to
-  "Build :rule/applies-to from dewey + optional globs."
-  [dewey-str globs]
-  (let [phases (dewey/dewey-to-phases dewey-str)
-        base   {:phases phases}]
-    (if-let [g (normalize-globs globs)]
-      (assoc base :file-globs g)
-      base)))
+;; ===========================================================================
+;; Section 6: Applies-To (Phases + Globs) Tests
+;; ===========================================================================
+(deftest ^{:stratum 1} applies-to-test
+  (testing "Dewey-only → phases from dewey, no globs"
+    (is (= {:phases #{:plan :implement :review :verify :release}}
+           (build-applies-to "001" nil))))
+
+  (testing "Dewey + globs → phases + file-globs"
+    (is (= {:phases     #{:implement :review}
+            :file-globs ["components/**/src/**/*.clj"]}
+           (build-applies-to "210" ["components/**/src/**/*.clj"]))))
+
+  (testing "Meta dewey → empty phases"
+    (is (= {:phases #{}} (build-applies-to "900" nil))))
+
+  (testing "Meta dewey + globs → empty phases + globs"
+    (is (= {:phases     #{}
+            :file-globs [".cursor/rules/**/*.mdc"]}
+           (build-applies-to "900" [".cursor/rules/**/*.mdc"])))))
 
 ;------------------------------------------------------------------------------ Layer 2
 
@@ -451,7 +314,7 @@
   [{:keys [filepath frontmatter body]}]
   (let [dewey       (get frontmatter "dewey" "000")
         title       (derive-title frontmatter filepath)
-        description (derive-description dewey title)
+        description (fields/derive-description dewey title)
         always-apply (get frontmatter "alwaysApply")
         globs       (get frontmatter "globs")
         severity    (if always-apply :high :low)
@@ -466,31 +329,10 @@
       :rule/category          dewey
       :rule/applies-to        (build-applies-to dewey globs)
       :rule/detection         {:type :custom}
-      :rule/enforcement       (build-enforcement title always-apply)}
-     (build-always-inject always-apply)
+      :rule/enforcement       (fields/build-enforcement title always-apply)}
+     (fields/build-always-inject always-apply)
      (when knowledge
        {:rule/knowledge-content knowledge}))))
-
-;; ===========================================================================
-;; Section 6: Applies-To (Phases + Globs) Tests
-;; ===========================================================================
-(deftest ^{:stratum 2} applies-to-test
-  (testing "Dewey-only → phases from dewey, no globs"
-    (is (= {:phases #{:plan :implement :review :verify :release}}
-           (build-applies-to "001" nil))))
-
-  (testing "Dewey + globs → phases + file-globs"
-    (is (= {:phases     #{:implement :review}
-            :file-globs ["components/**/src/**/*.clj"]}
-           (build-applies-to "210" ["components/**/src/**/*.clj"]))))
-
-  (testing "Meta dewey → empty phases"
-    (is (= {:phases #{}} (build-applies-to "900" nil))))
-
-  (testing "Meta dewey + globs → empty phases + globs"
-    (is (= {:phases     #{}
-            :file-globs [".cursor/rules/**/*.mdc"]}
-           (build-applies-to "900" [".cursor/rules/**/*.mdc"])))))
 
 ;------------------------------------------------------------------------------ Layer 3
 
