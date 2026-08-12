@@ -6,7 +6,7 @@
   (:require
    [clojure.test :refer [deftest testing is]]
    [ai.miniforge.policy-pack.core :as core]
-   [ai.miniforge.policy-pack.rules.pack-dependency-validation :as dep-val]))
+   [ai.miniforge.policy-pack.rules.pack-dependency-validation.trust :as trust]))
 
 ;------------------------------------------------------------------------------ Layer 0
 
@@ -63,7 +63,7 @@
                  :pack/authority :authority/data
                  :pack/extends [{:pack-id "tainted"}]}
           by-id {"consumer" pack "tainted" tainted-pack}
-          viols (dep-val/detect-trust-violations {} by-id)]
+          viols (trust/detect-trust-violations {} by-id)]
       (is (= 1 (count viols)))
       (is (= :trust-violation (:type (first viols))))))
 
@@ -72,7 +72,7 @@
                  :pack/authority :authority/data
                  :pack/extends [{:pack-id "tainted"}]}
           by-id {"also-tainted" pack "tainted" tainted-pack}
-          viols (dep-val/detect-trust-violations {} by-id)]
+          viols (trust/detect-trust-violations {} by-id)]
       (is (empty? viols)))))
 
 (deftest ^{:stratum 1} untrusted-instruction-escalation-test
@@ -81,7 +81,7 @@
                  :pack/authority :authority/instruction
                  :pack/extends [{:pack-id "base"}]}
           by-id {"untrusted" pack "base" base-pack}
-          viols (dep-val/detect-trust-violations {} by-id)]
+          viols (trust/detect-trust-violations {} by-id)]
       (is (= 1 (count viols)))
       (is (= :trust-violation (:type (first viols))))))
 
@@ -90,11 +90,11 @@
                  :pack/authority :authority/data
                  :pack/extends [{:pack-id "base"}]}
           by-id {"untrusted" pack "base" base-pack}
-          viols (dep-val/detect-trust-violations {} by-id)]
+          viols (trust/detect-trust-violations {} by-id)]
       (is (empty? viols)))))
 
 (deftest ^{:stratum 1} clean-dependencies-test
   (testing "packs with no trust violations return empty"
     (let [by-id {"base" base-pack}
-          viols (dep-val/detect-trust-violations {} by-id)]
+          viols (trust/detect-trust-violations {} by-id)]
       (is (empty? viols)))))

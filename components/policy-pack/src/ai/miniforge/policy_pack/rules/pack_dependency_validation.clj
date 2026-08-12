@@ -26,29 +26,29 @@
    - Dependency depth limit (default: 5 levels)
    - Complete dependency graph validation before loading
 
-   Slice 1/3 of a rule 210 split train (SL003: this namespace measured
+   Slice 2/3 of a rule 210 split train (SL003: this namespace measured
    6 real layers, max 3 -- same convention as the mdc-compiler split,
-   miniforge#1729-#1743, and the workflow-runner split, miniforge#1662):
-   version parsing/comparison/constraint-satisfaction moved to
-   `ai.miniforge.policy-pack.rules.pack-dependency-validation.versions`.
-   `detect-version-conflicts` now calls `versions/satisfies-constraint?`
-   (a qualified, cross-namespace call, so it no longer counts toward
-   this file's local layer depth) and drops to Layer 0. This file now
-   measures 5 real layers; the graph-construction and trust-check
-   groups move out in the remaining slices of this train.
+   miniforge#1729-#1743, and the workflow-runner split, miniforge#1662).
+   Slice 1 (#1770) moved version parsing/comparison/constraint-satisfaction
+   to `ai.miniforge.policy-pack.rules.pack-dependency-validation.versions`.
+   This slice moves the trust-check chain to
+   `ai.miniforge.policy-pack.rules.pack-dependency-validation.trust`:
+   tainted-dependency?, untrusted-instruction-escalation?,
+   check-dependency-trust, detect-trust-violations. This file now
+   measures 4 real layers; the graph-construction group moves out in
+   the final slice of this train.
 
    Layer 0: get-pack-dependencies, detect-circular/missing-dependencies,
-     tainted-dependency? / untrusted-instruction-escalation? predicates,
      calculate-pack-depths, detect-version-conflicts
    Layer 1: build-dependency-graph (over get-pack-dependencies),
-     check-dependency-trust, detect-depth-violations (over
-     calculate-pack-depths)
-   Layer 2: detect-trust-violations (over check-dependency-trust)
-   Layer 3: validate-pack-dependencies (orchestrates the Layer 0-2 detectors)
-   Layer 4: validate-single-pack (public entry point, over
+     detect-depth-violations (over calculate-pack-depths)
+   Layer 2: validate-pack-dependencies (orchestrates the Layer 0-1
+     detectors plus trust/detect-trust-violations, an external call)
+   Layer 3: validate-single-pack (public entry point, over
      validate-pack-dependencies)"
   (:require
    [ai.miniforge.algorithms.interface :as alg]
+   [ai.miniforge.policy-pack.rules.pack-dependency-validation.trust :as trust]
    [ai.miniforge.policy-pack.rules.pack-dependency-validation.versions :as versions]
    [clojure.string :as str]))
 
@@ -111,21 +111,6 @@
                              :message (str "Pack '" pack-id "' requires missing dependency '" dep-id "'")})
                           missing))))
          vec)))
-
-(defn- ^{:stratum 0} tainted-dependency?
-  "True when a non-tainted pack depends on a tainted pack."
-  [pack dep-pack]
-  (and dep-pack
-       (= :tainted (get dep-pack :pack/trust-level))
-       (not= :tainted (get pack :pack/trust-level))))
-
-(defn- ^{:stratum 0} untrusted-instruction-escalation?
-  "True when an untrusted pack with instruction authority depends on a trusted pack."
-  [pack dep-pack]
-  (and dep-pack
-       (= :untrusted (get pack :pack/trust-level :untrusted))
-       (= :authority/instruction (get pack :pack/authority :authority/data))
-       (= :trusted (get dep-pack :pack/trust-level))))
 
 (defn ^{:stratum 0} calculate-pack-depths
   "Calculate maximum depth for each pack using bottom-up traversal.
@@ -240,26 +225,6 @@
      :by-id by-id
      :versions versions}))
 
-(defn- ^{:stratum 1} check-dependency-trust
-  "Check a single pack→dependency pair for trust violations.
-   Returns a violation map or nil."
-  [pack-id pack dep-id dep-pack]
-  (cond
-    (tainted-dependency? pack dep-pack)
-    {:type       :trust-violation
-     :pack-id    pack-id
-     :dependency dep-id
-     :message    (str "Tainted dependency " dep-id
-                      " cannot be used by non-tainted pack " pack-id)}
-
-    (untrusted-instruction-escalation? pack dep-pack)
-    {:type       :trust-violation
-     :pack-id    pack-id
-     :dependency dep-id
-     :message    (str "Untrusted pack " pack-id
-                      " with instruction authority cannot depend on "
-                      "trusted pack " dep-id)}))
-
 (defn ^{:stratum 1} detect-depth-violations
   "Detect dependency chains that exceed the depth limit.
    Returns vector of violation maps:
@@ -284,29 +249,8 @@
 
 ;------------------------------------------------------------------------------ Layer 2
 
-(defn ^{:stratum 2} detect-trust-violations
-  "Detect trust level constraint violations per N4 §2.4.2.
-
-   Checks:
-   1. Untrusted pack with instruction authority depending on trusted pack
-   2. Tainted pack as dependency of any non-tainted pack
-
-   Returns vector of violation maps."
-  [_graph by-id]
-  (->> (vals by-id)
-       (mapcat (fn [pack]
-                 (let [pack-id (get pack :pack/id)]
-                   (->> (get pack :pack/extends [])
-                        (keep (fn [dep]
-                                (let [dep-id (get dep :pack-id)]
-                                  (check-dependency-trust
-                                   pack-id pack dep-id (get by-id dep-id)))))))))
-       vec))
-
-;------------------------------------------------------------------------------ Layer 3
-
 ;; Public API
-(defn ^{:stratum 3} validate-pack-dependencies
+(defn ^{:stratum 2} validate-pack-dependencies
   "Validate pack dependencies according to N4 §2.4.2.
 
    Checks:
@@ -340,7 +284,7 @@
         missing (detect-missing-dependencies graph by-id)
         version-conflicts (detect-version-conflicts graph versions)
         trust-violations (when check-trust?
-                          (detect-trust-violations graph by-id))
+                          (trust/detect-trust-violations graph by-id))
         depth-violations (detect-depth-violations graph max-depth)
 
         ;; Separate hard failures from warnings
@@ -354,9 +298,9 @@
      :violations failures
      :warnings warnings}))
 
-;------------------------------------------------------------------------------ Layer 4
+;------------------------------------------------------------------------------ Layer 3
 
-(defn ^{:stratum 4} validate-single-pack
+(defn ^{:stratum 3} validate-single-pack
   "Validate a single pack's dependencies against a registry of available packs.
 
    Arguments:
