@@ -35,10 +35,10 @@ and `software_factory.clj` both re-export its `evaluate-external-pr` and
   calls `diff/parse-pr-diff`) — 2 layers (down from 5).
 - `interface/builders.clj` and `software_factory.clj`: both re-exported
   `parse-pr-diff` from `external`; that def moved to `external.diff`, so
-  both now additionally require `ai.miniforge.policy-pack.external.diff
-  :as external-diff` and point their `parse-pr-diff` re-export there.
-  `evaluate-external-pr` stayed in `external.clj`, so those re-exports
-  are unchanged.
+  both now additionally require
+  `[ai.miniforge.policy-pack.external.diff :as external-diff]` and
+  point their `parse-pr-diff` re-export there. `evaluate-external-pr`
+  stayed in `external.clj`, so those re-exports are unchanged.
 - `external_test.clj`: the diff-parsing tests
   (`parse-pr-diff-test`) called `external/parse-pr-diff` directly
   (white-box); updated to require `external.diff` and call
