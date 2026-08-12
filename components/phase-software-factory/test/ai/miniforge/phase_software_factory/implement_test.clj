@@ -81,11 +81,11 @@
     (response/error (or (:message err) "Implementation failed")
                     {:data (or (:data err) {})})))
 
-;------------------------------------------------------------------------------ Layer 0: Defaults Tests
+;; Defaults Tests
 (deftest ^{:stratum 0} default-config-test
   (testing "implement phase has correct default configuration"
     (is (= :implementer (:agent implement/default-config)))
-    (is (= [:syntax :format :lint :codex-consultation] (:gates implement/default-config)))
+    (is (= [:syntax :format :lint :codex-consultation :stale-references] (:gates implement/default-config)))
     (is (map? (:budget implement/default-config)))
     (is (= 30000 (get-in implement/default-config [:budget :tokens])))
     (is (= 8 (get-in implement/default-config [:budget :iterations])))
@@ -96,7 +96,7 @@
     (let [defaults (phase/phase-defaults :implement)]
       (is (some? defaults))
       (is (= :implementer (:agent defaults)))
-      (is (= [:syntax :format :lint :codex-consultation] (:gates defaults))))))
+      (is (= [:syntax :format :lint :codex-consultation :stale-references] (:gates defaults))))))
 
 (deftest ^{:stratum 0} base-ref-candidates-include-resume-merge-base-ranges-test
   (testing "resumed workspaces diff from the original spec base to restored HEAD"
@@ -139,7 +139,7 @@
   (response/error "No files written to environment"
                   {:data {:code :curator/no-files-written}}))
 
-;------------------------------------------------------------------------------ Layer 3: Capsule File Loading
+;; Capsule File Loading
 (deftest ^{:stratum 0} load-files-from-capsule-reads-via-execute-fn-test
   (testing "load-files-from-capsule reads files via execute-fn"
     (let [execute-fn (fn [_executor _env-id cmd _opts]
@@ -770,7 +770,7 @@
                (get-in result [:phase :result :error :message]))
             "Error message should be preserved")))))
 
-;------------------------------------------------------------------------------ Layer 2: Interceptor Leave Tests
+;; Interceptor Leave Tests
 (deftest ^{:stratum 2} leave-implement-records-metrics-test
   (testing "leave-implement records duration and token metrics"
     (with-redefs [agent/create-implementer (fn [_] {:type :mock-implementer})
