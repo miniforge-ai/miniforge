@@ -100,7 +100,11 @@
     (is (some #(= :merge-pr (first %)) @calls)
         (str "an authorized merge should reach the provider, saw: "
              (pr-str @calls)))
-    (is (some? result))))
+    ;; Not `(some? result)` — transact! returns a map on every path, so
+    ;; that would pass while the permitted path silently started
+    ;; erroring. Assert the outcome, and say what it was when it fails.
+    (is (dag/ok? result)
+        (str "an authorized merge should succeed, got: " (pr-str result)))))
 
 (deftest ^{:stratum 2} the-durable-record-precedes-the-provider-test
   ;; A proposal written after the effect is not evidence, it is a
