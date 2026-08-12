@@ -20,12 +20,15 @@
 
    Counts marketing, corporate and generated-prose tells in a document
    and grades the result, so a caller can decide whether prose is worth
-   keeping or should be written again."
+   keeping or should be written again. A session plays the same hits
+   onto a bingo card across the turns of one conversation."
   (:require
+   [ai.miniforge.buzzword-bingo.card :as card]
    [ai.miniforge.buzzword-bingo.detect :as detect]
    [ai.miniforge.buzzword-bingo.lexicon :as lexicon]
    [ai.miniforge.buzzword-bingo.score :as score]
-   [ai.miniforge.buzzword-bingo.segment :as segment]))
+   [ai.miniforge.buzzword-bingo.segment :as segment]
+   [ai.miniforge.buzzword-bingo.session :as session]))
 
 ;------------------------------------------------------------------------------ Layer 0
 
@@ -71,7 +74,35 @@
   ([text] (scan text nil))
   ([text opts] (score/summarize (detect/scan text opts) opts)))
 
+;; Sessions
+(defn ^{:stratum 0} deal-card
+  "Deal the bingo card `seed` selects from the catalog.
+
+   Deterministic: the same seed and catalog always deal the same card,
+   so a card can be rebuilt from its seed rather than stored."
+  ([seed] (card/card-for seed lexicon/entries))
+  ([seed catalog-entries] (card/card-for seed catalog-entries)))
+
+(defn ^{:stratum 0} winning-lines
+  "Square indices of the twelve lines that win."
+  []
+  session/winning-lines)
+
+(defn ^{:stratum 0} open-session
+  "Start a session playing the card `seed` deals."
+  ([seed] (session/open seed lexicon/entries))
+  ([seed catalog-entries] (session/open seed catalog-entries)))
+
+(defn ^{:stratum 0} track
+  "Fold one `scan` result into `session`, returning it advanced a turn.
+
+   `:session/new-lines` holds only the lines this turn completed, so a
+   caller announcing BINGO announces each line once."
+  [session scan-result]
+  (session/track session scan-result))
+
 (comment
   (prose-only "Use `robust` in code but not in prose.")
   (scan "A robust, comprehensive, seamless solution.")
-  (:score/grade (scan "Plain sentence about a file parser.")))
+  (:score/grade (scan "Plain sentence about a file parser."))
+  (-> (open-session "demo") (track (scan "A robust and seamless solution."))))
