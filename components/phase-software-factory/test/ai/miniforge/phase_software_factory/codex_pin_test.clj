@@ -36,9 +36,11 @@
 
 (deftest ^{:stratum 0} only-wired-phases-are-mapped
   ;; implement/plan wire via pin-outcome (existing-files); review wires via
-  ;; landings-text (prompt section). A mapping without a wire would be a
-  ;; defined-but-unreachable capability.
-  (is (= #{:implement :plan :review} (set (keys codex-pin/phase->situation)))))
+  ;; landings-text (prompt section); release wires via landings-outcome
+  ;; through the releaser's behavior addendum. A mapping without a wire
+  ;; would be a defined-but-unreachable capability.
+  (is (= #{:implement :plan :review :release}
+         (set (keys codex-pin/phase->situation)))))
 
 (deftest ^{:stratum 0} landings-text-skip-conditions
   (is (nil? (codex-pin/landings-text :review nil nil)))
