@@ -617,7 +617,7 @@ Normative specs are enforced by:
 
 - **0.24.0-draft** (2026-08-10) - N4-delta reclassified to informative; its unique content folded
   into N4. The document's requirements were written lowercase, with no uppercase
-  keyword anywhere, and so bound nothing per RFC 8174,
+  RFC 2119 keyword anywhere, and so bound nothing per RFC 8174,
   and the document-to-candidate compiler it specifies does not exist — what exists instead is
   `components/policy-calibration`, which decides gate-readiness empirically by measuring a semantic
   judge's false-positive and recall rates. **Folded into N4:** `:rule/provenance` (§2.3.3), the

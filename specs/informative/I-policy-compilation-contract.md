@@ -33,8 +33,8 @@ The stable boundary is the contract between source policy material and usable po
 - `repo-config-profile.spec.*`  
   Declares repo-local pack references and attachment semantics.
 - `policy-pack-compilation.spec.*`  
-  Work spec for current compile / derive / compose implementation and UX. This normative extension constrains that work
-  spec.
+  Work spec for current compile / derive / compose implementation and UX. This
+  document informs that work spec; since reclassification it constrains nothing.
 
 ## Spec metadata
 
