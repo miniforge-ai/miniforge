@@ -38,6 +38,7 @@
    [ai.miniforge.gate.test]
    [ai.miniforge.gate.policy]
    [ai.miniforge.gate.codex-consultation]
+   [ai.miniforge.gate.stale-references]
    [ai.miniforge.gate.precommit-discipline]
    [ai.miniforge.gate.behavioral]
    [ai.miniforge.gate.opsv]
