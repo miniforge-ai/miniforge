@@ -202,6 +202,10 @@ Scheduling deviation only; endpoints and detectors unchanged.
 
 ## RESULTS 2026-08-11 — counted matrix complete (18/18 slots resolved)
 
+SUPERSEDED by AMENDMENT 2026-08-11 (b) below: 7 of the 8 :not-reached
+verdicts were detection failures, recovered post-hoc. Kept verbatim for
+the audit trail; read the REVISED RESULTS instead.
+
 Catch rate = :caught / (:caught + :sprung); :not-reached excluded and
 reported beside it (pre-registered). N=3 reps per trap per arm.
 
@@ -243,3 +247,46 @@ reported beside it (pre-registered). N=3 reps per trap per arm.
       noted: retirement here is bench-trap retirement, not peg
       retirement — the peg guards weaker models).
    c. Trap-c needs reachability before it needs interpretation.
+
+## AMENDMENT 2026-08-11 (b) — detection salvage; revised results
+
+DETECTION DEFECT. run-trap.bb detected over surviving task-*branches,
+but the runner deletes a task's branch when its sub-workflow completes
+cleanly — so precisely the runs that DID the work were scanned as
+absent. Cross-checking every :not-reached verdict against the durable
+implement checkpoints (:code/file-paths on the lightweight artifact)
+showed 7 of 8 had touched their trap files. Their trees were recovered
+from the runner's periodic stash snapshots ("WIP on task-*" dangling
+commits, one per ~15min, matched to run windows by committer date;
+latest in-window snapshot per run) and the FROZEN detector re-run
+unchanged on each. trap-c baseline rep1 is confirmed genuinely
+not-reached (no snapshot, no trap-relevant paths in its artifact).
+Future runs: detection must read the checkpoint/snapshot record, not
+surviving refs; the salvage method above is the specification.
+
+REVISED RESULTS (frozen detector, recovered trees):
+
+1. TRAP-A contract-drift: baseline 0/3, treated 0/3 — SIX of six
+   counted runs sprung identically (plus both uncounted test runs:
+   eight of eight). Every run renamed the producer, updated component
+   and tests, missed the untested bb.edn consumer. Coverage present,
+   delivery verified, outcome unchanged: the landing's actionability is
+   the indicted rung, now on the strongest evidence in the program.
+2. TRAP-B pipeline-signal-loss: baseline 3/3, treated 3/3. Full
+   ceiling; the model adds pipefail unprompted. Retired at this tier.
+3. TRAP-C check-act-atomicity: baseline 2/2 (1 genuine not-reached),
+   treated 3/3. Ceiling on the reached denominator — the baseline also
+   finds with-config-lock! unaided; the earlier "codex-pointed idiom"
+   reading is withdrawn.
+4. POOLED: baseline 5/8, treated 6/9. No treated advantage anywhere in
+   the matrix.
+5. REACHABILITY: 17/18 — the earlier "workflow mortality / hardier
+   specs" prescription is withdrawn; the specs were sound and the
+   mortality was the detector's.
+6. REVISED AGENDA: (a) contract-drift migrates from prose landing to a
+   deterministic gate (stale-reference detection over the diff) and
+   consultation pins at every agent-bearing phase — the T2 §5.3 split
+   assigns the whole gap to delivery form, and SPEC §4.4.2.a names the
+   migration as the peg's best outcome; (b) trap-b and trap-c retire
+   at this tier (bench-trap retirement); (c) run-trap.bb detection
+   moves to the snapshot record.
