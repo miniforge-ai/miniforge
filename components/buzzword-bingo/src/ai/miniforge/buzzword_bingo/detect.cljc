@@ -75,18 +75,24 @@
   "Locate every lexicon hit in `text`.
 
    Returns `{:scan/hits [...] :scan/word-count n :scan/lexicon-version v}`
-   with hits ordered by position. `:entries` in `opts` replaces the
-   catalog; remaining options pass through to masking."
+   with hits ordered by position.
+
+   `:entries` in `opts` replaces the catalog, in which case the version
+   stamp is whatever `:lexicon-version` says and nil otherwise — the
+   stamp exists so a score traces back to the catalog that produced it,
+   and naming the shipped version over somebody else's catalog would
+   defeat that. Remaining options pass through to masking."
   ([text] (scan text nil))
   ([text opts]
    (let [entries (get opts :entries lexicon/entries)
+         shipped? (identical? entries lexicon/entries)
          folded  (regex/ascii-lower (segment/prose-only text opts))
          starts  (locate/line-starts text)
          raw     (sort-by hit-order (mapcat (partial entry-hits folded) entries))
          kept    (:kept (reduce keep-outermost {:kept [] :furthest-end -1} raw))]
      {:scan/hits            (mapv (partial locate/place text starts) kept)
       :scan/word-count      (word-count folded)
-      :scan/lexicon-version lexicon/version})))
+      :scan/lexicon-version (get opts :lexicon-version (when shipped? lexicon/version))})))
 
 (comment
   (scan "This robust and comprehensive solution will delve into synergy.")

@@ -44,7 +44,7 @@ Reading the EDN during macro expansion — which runs on the JVM for both target
 — keeps the catalog canonical as reviewable data on disk while emitting it as a
 literal into the compiled output.
 
-Build tools that cache macro expansion do not know this macro read a file, so
+Build tools that cache macro expansion do not know this macro reads a file, so
 the consuming namespace needs listing under shadow-cljs `:cache-blockers` when
 that build arrives.
 

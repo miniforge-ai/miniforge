@@ -33,7 +33,7 @@
 (def ^{:stratum 0} ^:private generated-pitch
   "The register the scanner exists to catch."
   (str "Our comprehensive platform delivers a seamless, robust experience "
-       "that empowers teams in todays fast-paced landscape. This "
+       "that empowers teams in today's fast-paced landscape. This "
        "game-changing solution is a testament to best-in-class engineering."))
 
 (defn- ^{:stratum 0} graded [text]

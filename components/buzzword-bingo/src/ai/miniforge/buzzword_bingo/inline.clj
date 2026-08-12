@@ -20,7 +20,7 @@
    ClojureScript, which has no runtime classpath. Expansion always runs
    on the JVM, for both targets.
 
-   Build tools that cache macro expansion do not know this read a file,
+   Build tools that cache macro expansion do not know this macro reads a file,
    so a consuming namespace belongs in shadow-cljs `:cache-blockers`."
   (:require
    [clojure.edn :as edn]

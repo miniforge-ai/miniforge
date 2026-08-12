@@ -49,8 +49,16 @@
   (testing "given a document with code → only prose words are counted"
     (is (= 3 (:scan/word-count (scan-with ["robust"] "one two three\n\n```\nignored code here\n```")))))
 
-  (testing "given a scan → the catalog version is stamped on the result"
-    (is (= lexicon/version (:scan/lexicon-version (scan-with ["robust"] "text"))))))
+  (testing "given the shipped catalog → its version is stamped on the result"
+    (is (= lexicon/version (:scan/lexicon-version (sut/scan "text")))))
+
+  (testing "given a caller's own catalog → no shipped version is claimed for it"
+    (is (nil? (:scan/lexicon-version (scan-with ["robust"] "text")))))
+
+  (testing "given a caller's own catalog and version → that version is stamped"
+    (is (= "probe-1"
+           (:scan/lexicon-version
+            (sut/scan "text" {:entries [] :lexicon-version "probe-1"}))))))
 
 ;------------------------------------------------------------------------------ Layer 2
 
