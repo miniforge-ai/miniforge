@@ -17,10 +17,14 @@ the rule 210 budget of 3).
 ## Motivation
 
 Part of the stratum-lint rule-210 remediation program, policy-pack
-Wave 2 batch 2. `intent.clj` (218 lines) has real fan-in — three
-files repo-wide reference `ai.miniforge.policy-pack.intent`
-(its own test, its `interface/intent.clj` re-export, and itself) — so
-this is a real split, not a zero-fan-in cleanup.
+Wave 2 batch 2. `intent.clj` (218 lines) has real fan-in — before
+this split, three files repo-wide referenced
+`ai.miniforge.policy-pack.intent` (its own test, its
+`interface/intent.clj` re-export, and itself) — so this is a real
+split, not a zero-fan-in cleanup. The split itself adds a 4th
+reference: the new `intent/check.clj` now also requires
+`ai.miniforge.policy-pack.intent` to call `infer-intent` and
+`intent-matches?`.
 
 ## Changes in Detail
 
@@ -58,10 +62,12 @@ it directly (test + interface) changed.
 - Repo-wide grep for the fully-qualified namespace
   (`ai\.miniforge\.policy-pack\.intent\b`, not a guessed symbol/alias
   prefix — a prior mistake in this program missed aliased callers)
-  across `components`, `bases`, and `projects` found exactly the three
-  files already listed above; no caller in `projects/miniforge/test/`
+  across `components`, `bases`, and `projects`, run before starting
+  this split, found exactly the three pre-existing files listed in
+  Motivation above; no caller in `projects/miniforge/test/`
   references this namespace, so there was no project-level integration
-  test to update.
+  test to update. (The new `intent/check.clj` created by this split
+  is itself a 4th, expected reference — not a missed caller.)
 - `bb test` (change-scope) ran green, but its "changed since stable
   tag" detection did not pick up this uncommitted worktree diff at all
   (it ran unrelated `workflow`/`workspace` component tests, zero
