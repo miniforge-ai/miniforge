@@ -1,0 +1,91 @@
+;; =============================================================================
+;; Spec: Ariadne step 3b — carry the acting identity through the run
+;; =============================================================================
+;;
+;; Normative refs: docs/architecture/rfc-ariadne-adoption.md (adoption
+;; step 3); Ariadne §2-§4. Prior art: thesium-career ADR 008 migration
+;; M2, which threaded a subject context CLI -> spine -> stores and found
+;; that the threading, not the schema, was the whole job.
+
+{:spec/title "Ariadne step 3b: thread the acting identity through the run hierarchy"
+
+ :spec/description
+ "Carry tenant and principal from the process boundary down through
+  workflow run -> phase -> task -> agent, so that any code about to
+  create a record can answer 'on whose behalf' without guessing.
+
+  WHY THIS IS ITS OWN SLICE, AND THE BIGGEST ONE. The run hierarchy is
+  already threaded with ids — `:task/id` appears in 244 places,
+  `:agent/id` in 115, `:workflow-run/id` in 38. Every one of those is a
+  place that knows WHAT is running and not WHO it is running for. Adding
+  an owner field to a schema is an afternoon; making the identity
+  actually available at the point a record is born is the work.
+
+  The career migration of exactly this shape (ADR 008 M2) found the same
+  thing: the schema change was small and the context threading was the
+  migration.
+
+  GROUP 1: The acting context
+  A closed `:acting/context` carried alongside the existing execution
+  context: `:acting/tenant-id`, `:acting/principal-id`, and
+  `:acting/established-at`. Not a bare tenant id — the principal is what
+  distinguishes 'the operator asked' from 'an agent instance did it',
+  and both stamp differently.
+
+  GROUP 2: One entry point per boundary
+  Every process boundary (CLI command, MCP tool call, daemon start,
+  scheduled trigger) resolves identity ONCE via 3a's resolver and puts
+  it on the context. Downstream code reads; it never re-resolves. A
+  second resolution site is a second answer, and two answers about who
+  acted is worse than none.
+
+  GROUP 3: Absence is loud
+  Code that requires an acting context and does not find one FAILS. It
+  does not substitute a default tenant, and it does not proceed
+  unowned. An unowned record created during the migration is
+  indistinguishable, later, from one that was legitimately anonymous —
+  and there is no such thing as legitimately anonymous here.
+
+  GROUP 4: Propagation across the agent boundary
+  A spawned agent inherits the acting context of the run that spawned
+  it, as a principal in its own right (`:principal/kind
+  :agent-instance`) whose tenant is the spawning tenant. This is the
+  representational half of the fence-not-restrain reframing: the inner
+  agent acts under a named identity inside the boundary rather than
+  under the ambient authority of the process.
+
+  DELIBERATELY NOT HERE: stamping owners onto records (3c). This slice
+  makes the answer AVAILABLE; the next one writes it down."
+
+ :spec/intent {:type :feature
+               :scope ["components/tenancy/"
+                       "components/workflow/src/"
+                       "components/agent/src/"
+                       "bases/"]}
+
+ :spec/constraints
+ ["Identity is resolved ONCE per boundary; downstream reads, never re-resolves"
+  "Code requiring an acting context fails when absent - no default tenant, no unowned proceed"
+  "A spawned agent inherits the spawning tenant and gets its own agent-instance principal"
+  "The acting context rides alongside the existing execution context, not merged into it"
+  "No record schema changes in this slice"
+  "Stratified design, max 3 layers per file"]
+
+ :spec/acceptance-criteria
+ ["A CLI-initiated run carries an acting context reachable at phase, task, and agent scope"
+  "An MCP-initiated run carries the same shape"
+  "Code that requires an acting context and finds none returns an error naming the missing identity"
+  "No call site resolves identity a second time - a test asserts the resolver is called once per run"
+  "A spawned agent's principal is :agent-instance and its tenant matches the spawning run's tenant"
+  "Existing runs without an acting context fail loudly rather than proceeding unowned"
+  "full bb test green"]
+
+ :spec/priority
+ {:tier :blocker
+  :axes #{:correctness :scale :governance-credibility}
+  :theme :ariadne-tenancy
+  :rationale "Owner stamping has nothing to stamp until the identity reaches the place records are created; this is the bulk of the step-3 migration."
+  :blocks ["ariadne-owned-records.spec.edn"]
+  :blocked-by ["ariadne-identity-boundary.spec.edn"]}
+
+ :spec/workflow-type :canonical-sdlc}

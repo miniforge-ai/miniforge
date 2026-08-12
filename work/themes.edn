@@ -199,6 +199,53 @@
    schema-version check). T3 contradictions 1, 2, 4, and 5 are
    recorded resolved in the T3 register (#1560)."}
 
+ :ariadne-tenancy
+ {:theme/id :ariadne-tenancy
+  :theme/title "Ariadne adoption - step 3: tenants, owners, and attested contracts"
+  :theme/description
+  "Step 3 of the ratified Ariadne adoption order. Identity stops being
+   implicit: tenants and principals become objects, every record is born
+   owned, the commissioning relationship becomes a relation rather than
+   containment, and the cross-language contracts gain a content hash and
+   an attestation.
+
+   The move is the same one steps 1 and 2 made twice already — take
+   something currently carried by convention and good behaviour, and
+   carry it by representation instead. Step 1 did it for verdicts, step
+   2 for authority, step 3 does it for identity and for the contracts
+   themselves.
+
+   ONE LESSON CARRIED FORWARD DELIBERATELY. The step-2 wave specified the
+   grant object, checking grants, transacting effects, migrating call
+   sites, and revoking grants — and never specified WHO ISSUES ONE. That
+   gap only surfaced at the call-site migration, where enforcing the
+   spec as written would have denied every merge and deploy permanently.
+   Step 3's equivalent gap is 'who establishes operator identity', and it
+   is spec 3a rather than a discovery. Nothing here is unblocked by
+   accident.
+
+   The RFC's own note that N12's authn half is 'thin' is taken at face
+   value: 3a names the credential->principal dependency and builds a
+   config-backed resolver behind the same seam, so the real one is a
+   drop-in rather than a second migration."
+  :theme/informative-spec "docs/architecture/rfc-ariadne-adoption.md"
+  :theme/normative-refs
+  [{:doc "docs/architecture/rfc-ariadne-adoption.md" :section "Suggested adoption order, step 3"
+    :relation :primary}
+   {:doc "docs/architecture/ariadne.md" :section "sections 2-4 (tenants, principals, relations) and 13.6 (registry discipline)"
+    :relation :primary}
+   {:doc "docs/architecture/diagrams/README.md" :section "T3 contradiction register, #2 and the tenancy-ABSENT note"
+    :relation :supporting}]
+  :theme/completion-criteria
+  ["a tenant and a principal are objects, and one named boundary function establishes them"
+   "no record can be created without an owner - absence fails rather than defaulting"
+   "execution artifacts and domain outputs can be owned by different tenants, and a test proves it"
+   "commissioning is a relation: two tenants can hold engagements against one target"
+   "a consumer can verify the contract bytes it compiled against, not merely a version integer (T3 #2 fully resolved)"]
+  :theme/status :in-flight
+  :theme/owner :christopher
+  :theme/started #inst "2026-08-01"}
+
  :ariadne-grants
  {:theme/id :ariadne-grants
   :theme/title "Ariadne adoption - step 2: grants on the irreversible effects"

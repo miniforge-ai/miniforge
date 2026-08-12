@@ -1,0 +1,90 @@
+;; =============================================================================
+;; Spec: Ariadne step 3c — every record is born owned
+;; =============================================================================
+;;
+;; Normative refs: docs/architecture/rfc-ariadne-adoption.md (adoption
+;; step 3, "Owner on every record"); Ariadne §2-§4. Prior art:
+;; thesium-career ADR 008 migration M4, "every record born owned +
+;; backfilled", and its finding that a derived-identity shortcut had to
+;; be deleted rather than kept alongside.
+
+{:spec/title "Ariadne step 3c: every record is born owned"
+
+ :spec/description
+ "Stamp an owner on every record at the moment it is created, and make
+  an unowned record unrepresentable rather than merely discouraged.
+
+  THE RULE, from the RFC's mapping table: execution artifacts belong to
+  the LAUNCHING tenant; domain outputs belong to the REPO OWNER's
+  tenant. Those are different tenants in the multi-operator case and
+  identical in today's single-operator one, which is exactly why the
+  distinction has to be drawn now — while it is invisible and cheap —
+  rather than after the first customer org exists.
+
+  GROUP 1: Ownership on the canonical entities
+  `:owner/tenant-id` and `:owner/principal-id` on workflow runs, specs,
+  tasks, agent sessions, PR records, evidence bundles, and effect
+  transactions. Required, not optional. An optional owner is an owner
+  nobody fills in.
+
+  GROUP 2: Stamped at birth, from the acting context
+  Ownership is written where the record is created, from 3b's acting
+  context. Never assigned later, never inferred from a neighbouring
+  record, never derived from an id shape. The career migration
+  specifically had to DELETE a derived run identity that looked like a
+  reasonable shortcut and turned out to be a second, disagreeing source
+  of truth.
+
+  GROUP 3: Backfill is explicit and dated
+  Records that predate this change get a one-time backfill to the local
+  operator tenant, marked `:owner/backfilled? true`. Not because the
+  provenance is real, but because pretending it is real is worse: a
+  reader must be able to tell an asserted owner from an observed one.
+
+  GROUP 4: The negative test is the point
+  A record created without an acting context does not get a default
+  owner — it fails. The whole value of ownership is that its absence is
+  impossible, and a fallback owner converts an impossible state into a
+  plausible-looking wrong one.
+
+  DELIBERATELY NOT HERE: access decisions. Nothing in this slice CHECKS
+  an owner. Ownership has to exist and be trustworthy before anything
+  gates on it, and gating on a half-populated owner field is how a
+  governance layer earns a reputation for being wrong."
+
+ :spec/intent {:type :feature
+               :scope ["components/tenancy/"
+                       "components/workflow/src/"
+                       "components/supervisory-state/src/"
+                       "components/effect-transaction/src/"
+                       "components/evidence-bundle/src/"]}
+
+ :spec/constraints
+ ["Owner fields are REQUIRED on the listed entities, not optional"
+  "Ownership is written at record creation from the acting context, never assigned later"
+  "No owner is inferred from a neighbouring record or from an id shape"
+  "Backfilled ownership is marked as backfilled and is distinguishable from observed ownership"
+  "A record created with no acting context FAILS - there is no default owner"
+  "Nothing in this slice reads an owner to make an access decision"
+  "Stratified design, max 3 layers per file"]
+
+ :spec/acceptance-criteria
+ ["A workflow run created through the normal path carries owner tenant and principal"
+  "A spec, task, agent session, PR record, evidence bundle, and effect transaction each carry an owner"
+  "Creating any of those without an acting context fails rather than defaulting"
+  "An execution artifact is owned by the launching tenant"
+  "A domain output is owned by the repo owner's tenant, and a test proves the two can differ"
+  "Backfilled records are marked :owner/backfilled? true and are queryable as such"
+  "No code path assigns ownership after creation - a test asserts the setter does not exist"
+  "full bb test green"]
+
+ :spec/priority
+ {:tier :blocker
+  :axes #{:correctness :governance-credibility :scale}
+  :theme :ariadne-tenancy
+  :rationale "This is what step 3 is for; engagements and attested contracts both assume records already know who owns them."
+  :blocks ["ariadne-engagement.spec.edn"]
+  :blocked-by ["ariadne-identity-boundary.spec.edn"
+               "ariadne-run-identity-threading.spec.edn"]}
+
+ :spec/workflow-type :canonical-sdlc}

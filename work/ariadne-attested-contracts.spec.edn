@@ -1,0 +1,90 @@
+;; =============================================================================
+;; Spec: Ariadne step 3e — contracts that can prove what they are
+;; =============================================================================
+;;
+;; Normative refs: docs/architecture/rfc-ariadne-adoption.md (adoption
+;; step 3, "contracts attested"; T3 contradiction 2, "entity contract is
+;; convention"); Ariadne §13.6 (registry discipline: versioned,
+;; content-addressed, attested).
+
+{:spec/title "Ariadne step 3e: content-addressed, attested contracts"
+
+ :spec/description
+ "Give the three cross-language contract families a content hash and an
+  attestation, so a consumer can verify the contract it compiled against
+  is the contract the producer emitted.
+
+  WHAT EXISTS TODAY. `contracts/` holds three families — event-stream,
+  operator-events, supervisory-entities — and the last carries a
+  `:supervisory/schema-version` integer plus a vendored golden corpus.
+  That version is real discipline and it already caught a live drift
+  (miniforge-control #197 rejected a version mismatch fail-closed). But
+  a version number is an ASSERTION. It says 'I am v2'; it cannot show
+  that the bytes are the v2 the producer meant. Two producers can both
+  claim v2 and disagree.
+
+  T3 recorded contradiction 2 as 'entity contract is convention' and
+  step 1 marked it half-resolved: the contract became versioned and
+  gated, not attested. This closes the other half.
+
+  GROUP 1: Content addressing
+  Each contract family gets a manifest carrying a content hash over its
+  canonical shape definitions and its golden corpus. Same inputs, same
+  hash, on any machine — the repo already has a content-hash component
+  with instant-normalization fixed (#1744), which is the property this
+  depends on.
+
+  GROUP 2: Attestation
+  The manifest records WHO produced it and WHEN, signed by the runtime
+  the way DecisionEnvelopes are. An attestation an agent could forge is
+  a picture of an attestation; the label plane stays model-unwritable
+  (§13.4), same rule as everywhere else.
+
+  GROUP 3: Consumers verify, and fail closed
+  A consumer that vendors a corpus records the hash it vendored. On
+  mismatch it REJECTS, exactly as the schema-version check already
+  does — the fail-closed behaviour is proven, this widens what it
+  covers from a declared integer to the actual bytes.
+
+  GROUP 4: The generator is the only writer
+  Hashes and attestations are produced by the fixture generator, never
+  hand-edited. A hand-editable attestation is a comment.
+
+  WHY THIS BELONGS TO STEP 3 rather than step 1. The RFC groups it with
+  tenants and owners because both are the same move: turning something
+  currently carried by convention and good behaviour into something
+  carried by representation. Ownership makes 'whose is this' checkable;
+  attestation makes 'is this the contract you think' checkable."
+
+ :spec/intent {:type :feature
+               :scope ["contracts/"
+                       "components/supervisory-state/src/"
+                       "tasks/"]}
+
+ :spec/constraints
+ ["Content hash is deterministic across machines - same inputs, same hash"
+  "Attestation records producer and time, runtime-written, never agent-supplied"
+  "A consumer hash mismatch REJECTS, matching the existing fail-closed version behaviour"
+  "Hashes and attestations are generator-written only; a hand-edited manifest is invalid"
+  "The existing :supervisory/schema-version gate keeps working - this widens it, replaces nothing"
+  "Stratified design, max 3 layers per file"]
+
+ :spec/acceptance-criteria
+ ["Each contract family's manifest carries a content hash over its shapes and corpus"
+  "Regenerating with unchanged inputs produces an identical hash"
+  "Changing one shape definition changes the hash"
+  "The manifest records producer identity and generation time"
+  "A consumer verifying against a mismatched hash rejects rather than warning"
+  "A hand-edited manifest fails verification"
+  "The existing schema-version mismatch behaviour is unchanged - a regression test pins it"
+  "full bb test green"]
+
+ :spec/priority
+ {:tier :high
+  :axes #{:correctness :governance-credibility :observation}
+  :theme :ariadne-tenancy
+  :rationale "Closes the unresolved half of T3 contradiction 2; independent of the ownership slices, so it can run in parallel with them."
+  :blocks []
+  :blocked-by []}
+
+ :spec/workflow-type :canonical-sdlc}
