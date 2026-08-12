@@ -26,91 +26,33 @@
    - Dependency depth limit (default: 5 levels)
    - Complete dependency graph validation before loading
 
-   Layer 0: parse-version(-constraint), get-pack-dependencies,
-     detect-circular/missing-dependencies, tainted-dependency? /
-     untrusted-instruction-escalation? predicates, calculate-pack-depths
-   Layer 1: compare-versions, build-dependency-graph (over
-     get-pack-dependencies), check-dependency-trust, detect-depth-violations
-     (over calculate-pack-depths)
-   Layer 2: satisfies-constraint? (over parse-version-constraint),
-     detect-trust-violations (over check-dependency-trust)
-   Layer 3: detect-version-conflicts (over build-dependency-graph +
-     satisfies-constraint?)
-   Layer 4: validate-pack-dependencies (orchestrates the Layer 0-3 detectors)
-   Layer 5: validate-single-pack (public entry point, over
-     validate-pack-dependencies)
+   Slice 1/3 of a rule 210 split train (SL003: this namespace measured
+   6 real layers, max 3 -- same convention as the mdc-compiler split,
+   miniforge#1729-#1743, and the workflow-runner split, miniforge#1662):
+   version parsing/comparison/constraint-satisfaction moved to
+   `ai.miniforge.policy-pack.rules.pack-dependency-validation.versions`.
+   `detect-version-conflicts` now calls `versions/satisfies-constraint?`
+   (a qualified, cross-namespace call, so it no longer counts toward
+   this file's local layer depth) and drops to Layer 0. This file now
+   measures 5 real layers; the graph-construction and trust-check
+   groups move out in the remaining slices of this train.
 
-   6 real strata — over the rule 210 budget of 3; a genuine namespace split
-   (Wave 2), not a labeling problem."
+   Layer 0: get-pack-dependencies, detect-circular/missing-dependencies,
+     tainted-dependency? / untrusted-instruction-escalation? predicates,
+     calculate-pack-depths, detect-version-conflicts
+   Layer 1: build-dependency-graph (over get-pack-dependencies),
+     check-dependency-trust, detect-depth-violations (over
+     calculate-pack-depths)
+   Layer 2: detect-trust-violations (over check-dependency-trust)
+   Layer 3: validate-pack-dependencies (orchestrates the Layer 0-2 detectors)
+   Layer 4: validate-single-pack (public entry point, over
+     validate-pack-dependencies)"
   (:require
    [ai.miniforge.algorithms.interface :as alg]
+   [ai.miniforge.policy-pack.rules.pack-dependency-validation.versions :as versions]
    [clojure.string :as str]))
 
 ;------------------------------------------------------------------------------ Layer 0
-
-;; Version parsing and comparison
-(defn ^{:stratum 0} parse-version
-  "Parse a DateVer version string (YYYY.MM.DD or YYYY.MM.DD.N).
-   Returns {:year int :month int :day int :patch int} or nil if invalid."
-  [version-str]
-  (when version-str
-    (when-let [match (re-matches #"(\d{4})\.(\d{2})\.(\d{2})(?:\.(\d+))?" version-str)]
-      (let [[_ year month day patch] match]
-        {:year (Integer/parseInt year)
-         :month (Integer/parseInt month)
-         :day (Integer/parseInt day)
-         :patch (if patch (Integer/parseInt patch) 0)}))))
-
-(defn ^{:stratum 0} parse-version-constraint
-  "Parse a version constraint string.
-   Supports:
-   - Exact: '2026.01.25' or '=2026.01.25'
-   - Greater: '>2026.01.25', '>=2026.01.25'
-   - Less: '<2026.01.25', '<=2026.01.25'
-   - Range: '>=2026.01.01,<2026.02.01'
-   - Wildcard: '2026.01.*'
-
-   Returns {:type :exact/:range/:wildcard :constraints [...]}"
-  [constraint-str]
-  (cond
-    ;; Range constraint (comma-separated)
-    (str/includes? constraint-str ",")
-    (let [parts (str/split constraint-str #",")
-          trimmed (map str/trim parts)]
-      {:type :range
-       :constraints (mapv parse-version-constraint trimmed)})
-
-    ;; Wildcard (e.g., "2026.01.*")
-    (str/includes? constraint-str "*")
-    {:type :wildcard
-     :prefix (str/replace constraint-str #"\.\*$" "")}
-
-    ;; Greater than or equal
-    (str/starts-with? constraint-str ">=")
-    {:type :gte
-     :version (subs constraint-str 2)}
-
-    ;; Greater than
-    (str/starts-with? constraint-str ">")
-    {:type :gt
-     :version (subs constraint-str 1)}
-
-    ;; Less than or equal
-    (str/starts-with? constraint-str "<=")
-    {:type :lte
-     :version (subs constraint-str 2)}
-
-    ;; Less than
-    (str/starts-with? constraint-str "<")
-    {:type :lt
-     :version (subs constraint-str 1)}
-
-    ;; Exact (with or without '=' prefix)
-    :else
-    {:type :exact
-     :version (if (str/starts-with? constraint-str "=")
-               (subs constraint-str 1)
-               constraint-str)}))
 
 ;; Dependency graph construction
 (defn ^{:stratum 0} get-pack-dependencies
@@ -228,26 +170,51 @@
         (let [[depths' _] (calc-depth (first remaining-packs) #{} depths)]
           (recur (rest remaining-packs) depths'))))))
 
-;------------------------------------------------------------------------------ Layer 1
+(defn ^{:stratum 0} detect-version-conflicts
+  "Detect version conflicts in the dependency tree.
+   Returns vector of violation maps:
+   [{:type :version-conflict
+     :dependency string
+     :constraints [{:pack-id string :constraint string}...]
+     :message string}]"
+  [graph pack-versions]
+  (let [;; Collect all constraints for each dependency
+        dep-constraints (reduce-kv
+                         (fn [acc pack-id node]
+                           (reduce (fn [a dep]
+                                     (update a (:pack-id dep)
+                                             (fnil conj [])
+                                             {:pack-id pack-id
+                                              :constraint (:version-constraint dep)}))
+                                   acc
+                                   (:deps node)))
+                         {}
+                         graph)]
 
-(defn ^{:stratum 1} compare-versions
-  "Compare two version strings.
-   Returns negative if v1 < v2, positive if v1 > v2, 0 if equal."
-  [v1 v2]
-  (let [p1 (parse-version v1)
-        p2 (parse-version v2)]
-    (if (and p1 p2)
-      (let [year-cmp (compare (:year p1) (:year p2))]
-        (if (not= 0 year-cmp)
-          year-cmp
-          (let [month-cmp (compare (:month p1) (:month p2))]
-            (if (not= 0 month-cmp)
-              month-cmp
-              (let [day-cmp (compare (:day p1) (:day p2))]
-                (if (not= 0 day-cmp)
-                  day-cmp
-                  (compare (:patch p1) (:patch p2))))))))
-      (compare v1 v2))))
+    ;; Check each dependency for conflicts
+    (->> dep-constraints
+         (keep (fn [[dep-id constraints]]
+                 (let [;; Get actual version of dependency
+                       actual-version (get pack-versions dep-id)
+                       ;; Check if all constraints can be satisfied
+                       conflicting (when actual-version
+                                     (remove (fn [{:keys [constraint]}]
+                                              (or (nil? constraint)
+                                                  (versions/satisfies-constraint? actual-version constraint)))
+                                            constraints))]
+                   (when (seq conflicting)
+                     {:type :version-conflict
+                      :dependency dep-id
+                      :actual-version actual-version
+                      :conflicts conflicting
+                      :message (str "Version conflict for dependency '" dep-id "': "
+                                   "version " actual-version " does not satisfy constraints from "
+                                   (str/join ", " (map #(str "'" (:pack-id %) "' ("
+                                                                (:constraint %) ")")
+                                                              conflicting)))}))))
+         vec)))
+
+;------------------------------------------------------------------------------ Layer 1
 
 (defn ^{:stratum 1} build-dependency-graph
   "Build a dependency graph from a collection of packs.
@@ -317,23 +284,6 @@
 
 ;------------------------------------------------------------------------------ Layer 2
 
-(defn ^{:stratum 2} satisfies-constraint?
-  "Check if a version satisfies a constraint.
-   Returns true if version satisfies the constraint."
-  [version constraint]
-  (when (and version constraint)
-    (let [parsed (parse-version-constraint constraint)]
-      (case (:type parsed)
-        :exact (= version (:version parsed))
-        :gt (pos? (compare-versions version (:version parsed)))
-        :gte (>= (compare-versions version (:version parsed)) 0)
-        :lt (neg? (compare-versions version (:version parsed)))
-        :lte (<= (compare-versions version (:version parsed)) 0)
-        :wildcard (str/starts-with? version (:prefix parsed))
-        :range (every? #(satisfies-constraint? version (str (:version %)))
-                       (:constraints parsed))
-        false))))
-
 (defn ^{:stratum 2} detect-trust-violations
   "Detect trust level constraint violations per N4 §2.4.2.
 
@@ -355,54 +305,8 @@
 
 ;------------------------------------------------------------------------------ Layer 3
 
-(defn ^{:stratum 3} detect-version-conflicts
-  "Detect version conflicts in the dependency tree.
-   Returns vector of violation maps:
-   [{:type :version-conflict
-     :dependency string
-     :constraints [{:pack-id string :constraint string}...]
-     :message string}]"
-  [graph versions]
-  (let [;; Collect all constraints for each dependency
-        dep-constraints (reduce-kv
-                         (fn [acc pack-id node]
-                           (reduce (fn [a dep]
-                                     (update a (:pack-id dep)
-                                             (fnil conj [])
-                                             {:pack-id pack-id
-                                              :constraint (:version-constraint dep)}))
-                                   acc
-                                   (:deps node)))
-                         {}
-                         graph)]
-
-    ;; Check each dependency for conflicts
-    (->> dep-constraints
-         (keep (fn [[dep-id constraints]]
-                 (let [;; Get actual version of dependency
-                       actual-version (get versions dep-id)
-                       ;; Check if all constraints can be satisfied
-                       conflicting (when actual-version
-                                     (remove (fn [{:keys [constraint]}]
-                                              (or (nil? constraint)
-                                                  (satisfies-constraint? actual-version constraint)))
-                                            constraints))]
-                   (when (seq conflicting)
-                     {:type :version-conflict
-                      :dependency dep-id
-                      :actual-version actual-version
-                      :conflicts conflicting
-                      :message (str "Version conflict for dependency '" dep-id "': "
-                                   "version " actual-version " does not satisfy constraints from "
-                                   (str/join ", " (map #(str "'" (:pack-id %) "' ("
-                                                                (:constraint %) ")")
-                                                              conflicting)))}))))
-         vec)))
-
-;------------------------------------------------------------------------------ Layer 4
-
 ;; Public API
-(defn ^{:stratum 4} validate-pack-dependencies
+(defn ^{:stratum 3} validate-pack-dependencies
   "Validate pack dependencies according to N4 §2.4.2.
 
    Checks:
@@ -450,9 +354,9 @@
      :violations failures
      :warnings warnings}))
 
-;------------------------------------------------------------------------------ Layer 5
+;------------------------------------------------------------------------------ Layer 4
 
-(defn ^{:stratum 5} validate-single-pack
+(defn ^{:stratum 4} validate-single-pack
   "Validate a single pack's dependencies against a registry of available packs.
 
    Arguments:
@@ -483,24 +387,6 @@
 
 ;------------------------------------------------------------------------------ Rich Comment
 (comment
-  ;; Test version parsing
-  (parse-version "2026.01.25")
-  ;; => {:year 2026 :month 1 :day 25 :patch 0}
-
-  (parse-version "2026.01.25.2")
-  ;; => {:year 2026 :month 1 :day 25 :patch 2}
-
-  ;; Test version comparison
-  (compare-versions "2026.01.25" "2026.01.26")
-  ;; => -1
-
-  ;; Test version constraints
-  (satisfies-constraint? "2026.01.25" ">=2026.01.20")
-  ;; => true
-
-  (satisfies-constraint? "2026.01.25" "2026.01.*")
-  ;; => true
-
   ;; Test circular dependency detection
   (def pack-a {:pack/id "pack-a"
                :pack/version "2026.01.25"
