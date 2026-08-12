@@ -197,6 +197,40 @@ no longer routes.
 **Categories are plural from day one.** Use `:rule/categories [...]` even when a rule currently
 belongs to a single category. This prevents a schema migration when multi-category rules arise.
 
+#### 2.3.1 Severity Levels
+
+There is **one severity vocabulary** in miniforge, ordered most to least severe:
+
+```clojure
+:critical  :high  :medium  :low  :info
+```
+
+It is used by `:rule/severity` (§2.3), `:violation/severity` (§3.3), and every
+downstream projection — supervisory attention, dashboards, reports. A rule's
+severity is what its violations carry, so a second vocabulary for rules would
+require a lossy translation at exactly the boundary where enforcement is
+decided.
+
+| Severity | Meaning | Enforcement |
+|----------|---------|-------------|
+| `:critical` | Unsafe or intent-violating; no autonomous path forward | MUST block phase completion; MUST NOT be overridable by `:gate/allow-override?` alone (§6.3.1) |
+| `:high` | Serious defect or policy breach | MUST block phase completion |
+| `:medium` | Should be fixed; auto-repair or review | SHOULD block unless auto-repaired or waived (§6.3.1) |
+| `:low` | Minor; worth reporting | MUST NOT block |
+| `:info` | Informational; no action required | MUST NOT block |
+
+**Legacy values.** `:error` and `:warning` appeared in earlier drafts of this
+spec and MAY be encountered in third-party packs authored against them.
+Implementations MUST normalize `:error` → `:high` and `:warning` → `:medium` at
+load time, and SHOULD warn that the pack targets a withdrawn vocabulary. They
+MUST NOT carry a legacy value past the load boundary.
+
+**Load order.** Normalization runs first; rejection second. After
+normalization, a `:rule/severity` outside the canonical set MUST cause the pack
+to be rejected. So `:error` loads and becomes `:high`, while `:blocker` — a
+value this spec has never defined — is rejected. Rejecting before normalizing
+would fail every pack the normalization rule exists to accept.
+
 #### 2.3.2 Enforceability
 
 `:rule/enforceability` declares what kind of check a rule is, independent of how
@@ -254,40 +288,6 @@ Two rules govern it:
 This is the rule-level counterpart to N6 §2.13, which requires a gate result to
 be reproducible from its evidence. Pack hash tells a reader which bytes ran;
 provenance tells them why those bytes say what they say.
-
-#### 2.3.1 Severity Levels
-
-There is **one severity vocabulary** in miniforge, ordered most to least severe:
-
-```clojure
-:critical  :high  :medium  :low  :info
-```
-
-It is used by `:rule/severity` (§2.3), `:violation/severity` (§3.3), and every
-downstream projection — supervisory attention, dashboards, reports. A rule's
-severity is what its violations carry, so a second vocabulary for rules would
-require a lossy translation at exactly the boundary where enforcement is
-decided.
-
-| Severity | Meaning | Enforcement |
-|----------|---------|-------------|
-| `:critical` | Unsafe or intent-violating; no autonomous path forward | MUST block phase completion; MUST NOT be overridable by `:gate/allow-override?` alone (§6.3.1) |
-| `:high` | Serious defect or policy breach | MUST block phase completion |
-| `:medium` | Should be fixed; auto-repair or review | SHOULD block unless auto-repaired or waived (§6.3.1) |
-| `:low` | Minor; worth reporting | MUST NOT block |
-| `:info` | Informational; no action required | MUST NOT block |
-
-**Legacy values.** `:error` and `:warning` appeared in earlier drafts of this
-spec and MAY be encountered in third-party packs authored against them.
-Implementations MUST normalize `:error` → `:high` and `:warning` → `:medium` at
-load time, and SHOULD warn that the pack targets a withdrawn vocabulary. They
-MUST NOT carry a legacy value past the load boundary.
-
-**Load order.** Normalization runs first; rejection second. After
-normalization, a `:rule/severity` outside the canonical set MUST cause the pack
-to be rejected. So `:error` loads and becomes `:high`, while `:blocker` — a
-value this spec has never defined — is rejected. Rejecting before normalizing
-would fail every pack the normalization rule exists to accept.
 
 ### 2.4 Mapping Artifact
 

@@ -39,13 +39,13 @@ The stable boundary is the contract between source policy material and usable po
 ## Spec metadata
 
 - **Title:** Policy Candidate Model and Pack Compilation Contract
-- **Type:** Normative
+- **Type:** Informative (formerly a normative amendment to N4)
 - **Scope:** Open-source policy origination substrate
 
 ### Status: informative
 
 This document was previously indexed as a normative amendment to N4. It is now
-**informative** and states no requirements.
+**informative**: nothing in it binds an implementation.
 
 Two things prompted the move.
 
@@ -66,7 +66,7 @@ declared enforceability field, and it is already running.
 
 The two ideas here that were not already in N4 have been folded into it:
 per-rule provenance and the enforceability class, both as optional fields
-(N4 §2.2.1, §2.2.2).
+(N4 §2.3.2, §2.3.3).
 
 What remains in this document is design material for a compiler that may never
 be built. If it is built, it is Miniforge-product scope — like N7–N10 — rather
