@@ -58,12 +58,23 @@
 (def ^{:stratum 0} ^:private artifact-id
   #uuid "00000000-0000-0000-0000-000000000799")
 
+;; The fixture ships in components/phase-opsv/test-resources, which the
+;; workspace :test alias puts on the classpath. The project integration
+;; runner (tasks/test_runner.clj) instead launches `clojure -Sdeps
+;; projects/miniforge/deps.edn` from projects/miniforge, and that deps.edn
+;; carries no component test-resources path — so io/resource comes back nil
+;; there. Keep the working-directory-relative fallback alongside it; both
+;; branches are load-bearing, one per runner.
 (def ^{:stratum 0} ^:private fixture
   (let [resource-path "opsv/application-fixture.edn"
-        source (io/resource resource-path)]
+        project-relative (io/file "../../components/phase-opsv/test-resources"
+                                  resource-path)
+        source (or (io/resource resource-path)
+                   (when (.isFile project-relative) project-relative))]
     (when-not source
       (throw (ex-info "OPSV application fixture not found"
-                      {:fixture/path resource-path})))
+                      {:fixture/path resource-path
+                       :fixture/project-relative (.getPath project-relative)})))
     (-> source slurp edn/read-string)))
 
 (defn ^{:stratum 0} event-type-in?
