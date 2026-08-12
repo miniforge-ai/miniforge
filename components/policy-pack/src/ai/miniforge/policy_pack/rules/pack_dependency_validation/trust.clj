@@ -20,8 +20,8 @@
    §2.4.2): tainted-dependency and untrusted-instruction-authority
    escalation detection. Split out of
    `ai.miniforge.policy-pack.rules.pack-dependency-validation` (rule
-   210, SL003 split train, slice 2/3) — the self-contained trust-check
-   chain `detect-trust-violations` sits on top of.
+   210, SL003 split train, slice 2/3) — a self-contained trust-check
+   chain that `detect-trust-violations` sits atop.
 
    Layer 0: tainted-dependency?, untrusted-instruction-escalation?
      predicates

@@ -30,8 +30,9 @@
    6 real layers, max 3 -- same convention as the mdc-compiler split,
    miniforge#1729-#1743, and the workflow-runner split, miniforge#1662).
    Slice 1 (#1770) moved version parsing/comparison/constraint-satisfaction
-   to `...pack-dependency-validation.versions`. This slice moves the
-   trust-check chain to `...pack-dependency-validation.trust`:
+   to `ai.miniforge.policy-pack.rules.pack-dependency-validation.versions`.
+   This slice moves the trust-check chain to
+   `ai.miniforge.policy-pack.rules.pack-dependency-validation.trust`:
    tainted-dependency?, untrusted-instruction-escalation?,
    check-dependency-trust, detect-trust-violations. This file now
    measures 4 real layers; the graph-construction group moves out in
