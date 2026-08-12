@@ -23,21 +23,25 @@
    same approach as the mdc-compiler split, miniforge#1729-#1743, and
    the workflow-runner split, miniforge#1662.
 
-   `custom-fn-registry`, `resolve-custom-fn`, and `detector-predicate?`
-   are public (not private, despite being internal mechanics) because
+   The registry atom itself is private: `register!`, `unregister!`, and
+   `resolve-custom-fn` are this namespace's mutation/read API, so a
+   registry invariant (e.g. keys must be symbols) can be enforced here
+   in one place rather than trusting every caller that reaches in with
+   `swap!` directly. `resolve-custom-fn` and `detector-predicate?` are
+   public (not private, despite being internal mechanics) because
    `ai.miniforge.policy-pack.detection` — the parent namespace, not this
    one — is the caller that actually resolves/runs/(un)registers custom
    detectors; this namespace only stores the registry and validates
    candidate fns.
 
    Layer 0: the registry atom, method-declaration reflection primitives
-   Layer 1: arity-reflection (over declared-method?), registry lookup
-     (over the registry atom)
+   Layer 1: arity-reflection (over declared-method?), registry
+     lookup/register!/unregister! (over the registry atom)
    Layer 2: detector-predicate? (over Layer 0 + Layer 1)")
 
 ;------------------------------------------------------------------------------ Layer 0
 
-(defonce ^{:stratum 0}
+(defonce ^{:stratum 0} ^:private
   ^{:doc "Explicit extension registry for custom policy detectors.
 
 Keys are the symbols stored under `:rule/detection :custom-fn`; values are
@@ -75,6 +79,20 @@ depending on ambient namespace loading or raw var resolution."}
   [rule]
   (when-let [custom-fn-sym (get-in rule [:rule/detection :custom-fn])]
     (get @custom-fn-registry custom-fn-sym)))
+
+(defn ^{:stratum 1} register!
+  "Associate `custom-fn-sym` with `f` in the registry. Callers validate `f`
+   (see `detector-predicate?`) before calling this — this fn only mutates."
+  [custom-fn-sym f]
+  (swap! custom-fn-registry assoc custom-fn-sym f)
+  f)
+
+(defn ^{:stratum 1} unregister!
+  "Remove `custom-fn-sym` from the registry. Intended for tests and reload
+   hygiene."
+  [custom-fn-sym]
+  (swap! custom-fn-registry dissoc custom-fn-sym)
+  nil)
 
 ;------------------------------------------------------------------------------ Layer 2
 

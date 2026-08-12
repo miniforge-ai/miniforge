@@ -30,10 +30,15 @@
    3 real strata — at the rule 210 budget. Pattern-matching and
    terraform-plan-parsing primitives live in the sibling
    `detection.matching` namespace; the custom-fn registry/reflection
-   mechanics (`custom-fn-registry`, `declared-method?`,
+   mechanics (the registry atom, `declared-method?`,
    `reflectable-invoke?`, `variadic-accepts-arity?`, `resolve-custom-fn`,
-   `detector-predicate?`) live in `detection.custom-registry` (rule 210
-   split, Wave 2, final slice of this file's train).
+   `register!`, `unregister!`, `detector-predicate?`) live in
+   `detection.custom-registry` (rule 210 split, Wave 2, final slice of
+   this file's train). The registry atom itself stays private to that
+   namespace — `register-custom-fn!`/`unregister-custom-fn!` here call
+   `custom-registry/register!`/`custom-registry/unregister!` rather than
+   swapping the atom directly, so this namespace can't bypass whatever
+   invariants the registry namespace enforces.
 
    Supports detection types:
    - :content-scan - Regex against artifact content
@@ -416,8 +421,7 @@
 (defn ^{:stratum 0} unregister-custom-fn!
   "Remove a registered custom detector. Intended for tests and reload hygiene."
   [custom-fn-sym]
-  (swap! custom-registry/custom-fn-registry dissoc custom-fn-sym)
-  nil)
+  (custom-registry/unregister! custom-fn-sym))
 
 (defn ^{:stratum 0} custom-fn-resolvable?
   "True when a `:custom` rule names a registered `:custom-fn` symbol.
@@ -442,8 +446,7 @@
     (throw (ex-info "Custom detector value must be a two-arity predicate function"
                     {:custom-fn custom-fn-sym
                      :value-type (some-> f class .getName)})))
-  (swap! custom-registry/custom-fn-registry assoc custom-fn-sym f)
-  f)
+  (custom-registry/register! custom-fn-sym f))
 
 ;------------------------------------------------------------------------------ Layer 1
 
