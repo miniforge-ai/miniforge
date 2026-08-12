@@ -616,7 +616,8 @@ Normative specs are enforced by:
 ## Version History
 
 - **0.24.0-draft** (2026-08-10) - N4-delta reclassified to informative; its unique content folded
-  into N4. The document's requirements were written lowercase and so bound nothing per RFC 8174,
+  into N4. The document's requirements were written lowercase, with no uppercase
+  keyword anywhere, and so bound nothing per RFC 8174,
   and the document-to-candidate compiler it specifies does not exist — what exists instead is
   `components/policy-calibration`, which decides gate-readiness empirically by measuring a semantic
   judge's false-positive and recall rates. **Folded into N4:** `:rule/provenance` (§2.3.3), the
@@ -648,11 +649,11 @@ Normative specs are enforced by:
   Amends and Related preserved. Conformance requirement IDs and test obligations added to the six
   deltas carrying MUSTs: `N2D.CK.*`, `N5D1.SV.*`, `N5D2.SC.*`, `N5D3.OE.*`, `N5D4.AE.*`,
   `N11D.RA.*`. N5-delta-3's second `§3.6` renumbered to `§3.7` — it duplicated the pack-management
-  producer's number, and both inbound references mean the producer. **N4-delta contains no *uppercase* RFC 2119
+  producer's number, and both inbound references mean the producer. **N4-delta contains no uppercase RFC 2119
   keyword** and so binds nothing per RFC 8174; a Status subsection recorded that it is effectively
-  informative until its requirements are stated or it is reclassified. (That subsection originally
-  read "states no requirements", which was wrong — it states about twenty-five, in lowercase.
-  Corrected in 0.24.0, which reclassified the document.)
+  informative until its requirements are stated or it is reclassified. (That subsection also read
+  "states no requirements", which was wrong — it states about twenty-five, in lowercase. Corrected
+  in 0.24.0, which reclassified the document.)
 - **0.21.0-draft** (2026-08-10) - N12–N15 completion pass. Conformance requirement IDs and test
   obligations added to all four (`N12.CE.*`, `N13.PI.*`, `N14.WS.*`, `N15.CH.*`), plus Annex A on
   each. **N14 §9.1** declared ten `workspace/*` types as required N3 events and none is registered

@@ -49,12 +49,13 @@ This document was previously indexed as a normative amendment to N4. It is now
 
 Two things prompted the move.
 
-First, its requirements were written in lowercase (`must`, `should`) rather
-than the RFC 2119 uppercase forms. Per RFC 8174 only the uppercase forms carry
-normative weight, so the document read as normative while formally binding
-nothing. An earlier revision of this section overstated that as "contains no
-RFC 2119 keyword… states no requirements" — it states roughly twenty-five, in a
-form that does not bind.
+First, its requirements were written entirely in lowercase (`must`, `should`).
+The document contained **no uppercase RFC 2119 keyword at all**, and per
+RFC 8174 only the uppercase forms carry normative weight — so it read as
+normative while formally binding nothing. An earlier revision of this section
+put that as "states no requirements", which was wrong: it states roughly
+twenty-five, in a form that does not bind. The absence of keywords was real;
+the absence of requirements was not.
 
 Second and more decisively, the machinery it describes — a document-to-candidate
 compiler with a candidate lifecycle and promotion rules — does not exist. What

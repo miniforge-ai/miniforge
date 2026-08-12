@@ -14,10 +14,10 @@ surfaced.
 
 ## Motivation
 
-**The document bound nothing.** Its requirements are written lowercase — 25
-`must`, 4 `should` — against one uppercase MUST and one SHALL. Per RFC 8174
-only the uppercase forms carry normative weight, so a document indexed as a
-normative amendment to N4 was formally requiring almost nothing.
+**The document bound nothing.** Its requirements are written entirely
+lowercase — 25 `must`, 4 `should` — with **no uppercase RFC 2119 keyword
+anywhere**. Per RFC 8174 only the uppercase forms carry normative weight, so a
+document indexed as a normative amendment to N4 formally required nothing.
 
 **Its subject does not exist.** N4-delta specifies a document-to-candidate
 compiler with a candidate lifecycle, producer types, and promotion rules.
@@ -85,10 +85,18 @@ Both were mine, both from unverified assumptions in a command:
    is indexed too. I ran the check in the main checkout, which sits on an
    unrelated branch and never picked up the merges, so I read a stale file.
 2. I reported that N4-delta **"contains no RFC 2119 keyword… states no
-   requirements."** It contains no *uppercase* keyword; it states about
-   twenty-five requirements in lowercase. My grep was case-sensitive. The
-   0.22.0 index entry carrying that claim has been corrected in place rather
-   than left standing.
+   requirements."** The first half was right — the original file has zero
+   uppercase keywords. The second was wrong: it states about twenty-five
+   requirements in lowercase, which my case-sensitive grep missed.
+
+   I then over-corrected, telling the maintainer the document "contains one
+   uppercase MUST and one SHALL". That came from re-measuring the file *after*
+   I had added a Status section quoting those words — I was counting my own
+   text. Verified against the pre-edit blob this time: zero. The 0.22.0 index
+   entry is corrected in place rather than left standing.
+
+   The root cause of all three passes at this: measuring a file I had already
+   modified, without checking the original.
 
 ## Testing Plan
 

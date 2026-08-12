@@ -7,7 +7,7 @@
 # N4 — Policy Packs & Gates Standard
 
 **Version:** 0.8.0-draft
-**Date:** 2026-08-05
+**Date:** 2026-08-10
 **Status:** Draft
 **Conformance:** MUST
 
