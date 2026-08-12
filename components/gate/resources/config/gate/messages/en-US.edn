@@ -13,7 +13,15 @@
 
   ;; Stale-references gate — no worktree available
   :stale-references/no-worktree
-  "No worktree path on the execution context — stale-reference check skipped"
+  "No worktree path on the execution context — stale-references check skipped"
+
+  ;; Stale-references gate — git missing or worktree is not a repo
+  :stale-references/git-unavailable
+  "git unavailable or the worktree is not a git repository — stale-references check skipped"
+
+  ;; Stale-references gate — changed files carried no readable content
+  :stale-references/no-content
+  "Changed files carried no readable after-content — stale-references check skipped"
 
   ;; Review-approved gate — verdict not approved (carries the decision read)
   :review/not-approved

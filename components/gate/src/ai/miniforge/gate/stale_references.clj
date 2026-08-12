@@ -77,6 +77,17 @@
       (when (zero? exit) (str out)))
     (catch Exception _ nil)))
 
+(defn ^{:stratum 0} token-present?
+  "Whole-token occurrence of `token` in `blob` — boundary-anchored so
+   :skip is not counted present because :skipped survives. Public for
+   tests."
+  [blob token]
+  (boolean
+   (re-find (re-pattern (str "(?<![\\w:*+!?<>=./-])"
+                             (java.util.regex.Pattern/quote token)
+                             "(?![\\w*+!?<>=./-])"))
+            (str blob))))
+
 ;------------------------------------------------------------------------------ Layer 1
 
 (defn ^{:stratum 1} content-tokens
@@ -107,15 +118,15 @@
 ;------------------------------------------------------------------------------ Layer 2
 
 (defn ^{:stratum 2} removed-tokens
-  "Tokens present in some before-content and absent from every
-   after-content, longest first (a rename's long form is the real
-   contract; its fragments are noise). Public for tests."
+  "Tokens present in some before-content and absent (as whole tokens)
+   from every after-content, longest first (a rename's long form is the
+   real contract; its fragments are noise). Public for tests."
   [befores afters]
   (let [before-tokens (reduce into #{} (map content-tokens befores))
         after-blob (str/join "\n" (map str afters))]
     (->> before-tokens
          (remove #(< (count %) min-token-length))
-         (remove #(str/includes? after-blob %))
+         (remove #(token-present? after-blob %))
          (sort-by (comp - count))
          (take max-tokens)
          vec)))
@@ -125,11 +136,36 @@
 (defn ^{:stratum 3} check-stale-references
   "Gate check (see ns docstring). `artifact` is the implement phase
    output; changed files ride on :code/files ({:path :content :action})
-   with :code/file-paths as the path fallback."
+   with :code/file-paths as the path fallback.
+
+   `befores`/`afters`/`stale` are computed up front, unconditionally --
+   each is nil-safe on its own (a nil `worktree` or empty `paths` just
+   flows through as empty results) and the work is cheap, so guarding
+   each behind its own nesting level bought nothing but extra
+   conditional depth."
   [artifact ctx]
   (let [worktree (get ctx :execution/worktree-path)
         files (:code/files artifact)
-        paths (or (seq (keep :path files)) (:code/file-paths artifact))]
+        paths (or (seq (keep :path files)) (:code/file-paths artifact))
+        git-ok? (and worktree (some? (git worktree "rev-parse" "--git-dir")))
+        befores (when (and git-ok? (seq paths)) (keep #(before-content worktree %) paths))
+        afters (when (seq paths)
+                 (if (seq files)
+                   (keep :content files)
+                   (keep #(try (slurp (str worktree "/" %))
+                               (catch Exception _ nil))
+                         paths)))
+        stale (into []
+                    (keep (fn [token]
+                            (let [hits (stale-files worktree paths token)]
+                              (when (seq hits)
+                                {:type :stale-reference
+                                 :token token
+                                 :files hits
+                                 :message (messages/t :stale-references/stale
+                                                      {:token token
+                                                       :files (str/join ", " hits)})}))))
+                    (removed-tokens befores afters))]
     (cond
       (empty? paths)
       {:passed? true}
@@ -139,28 +175,21 @@
        :warnings [{:type :stale-references-skipped
                    :message (messages/t :stale-references/no-worktree)}]}
 
+      (not git-ok?)
+      {:passed? true
+       :warnings [{:type :stale-references-skipped
+                   :message (messages/t :stale-references/git-unavailable)}]}
+
+      (empty? afters)
+      {:passed? true
+       :warnings [{:type :stale-references-skipped
+                   :message (messages/t :stale-references/no-content)}]}
+
+      (seq stale)
+      {:passed? false :errors stale}
+
       :else
-      (let [befores (keep #(before-content worktree %) paths)
-            afters (if (seq files)
-                     (map :content files)
-                     (keep #(try (slurp (str worktree "/" %))
-                                 (catch Exception _ nil))
-                           paths))
-            removed (removed-tokens befores afters)
-            stale (into []
-                        (keep (fn [token]
-                                (let [hits (stale-files worktree paths token)]
-                                  (when (seq hits)
-                                    {:type :stale-reference
-                                     :token token
-                                     :files hits
-                                     :message (messages/t :stale-references/stale
-                                                          {:token token
-                                                           :files (str/join ", " hits)})}))))
-                        removed)]
-        (if (seq stale)
-          {:passed? false :errors stale}
-          {:passed? true})))))
+      {:passed? true})))
 
 ;------------------------------------------------------------------------------ Layer 4
 

@@ -64,11 +64,24 @@
     (is (= []
            (stale/removed-tokens ["{:skipped 0}"]
                                  ["{}" "(get m :skipped)"]))))
+  (testing "boundary-anchored presence: :skip is removed even though
+            :skipped survives in the after-content"
+    (is (= [":skip"]
+           (stale/removed-tokens ["{:skip 1 :skipped 0}"]
+                                 ["{:skipped 0}"]))))
   (testing "short tokens are filtered"
     (is (= []
            (stale/removed-tokens ["{:a 1}"] ["{}"])))))
 
-(deftest ^{:stratum 0} check-guards
+(deftest ^{:stratum 0} token-present?-boundaries
+  (is (true? (stale/token-present? "(get r :skipped 0)" ":skipped")))
+  (is (false? (stale/token-present? "(get r :skipped 0)" ":skip")))
+  (is (false? (stale/token-present? "read-ledger-fast" "read-ledger")))
+  (is (true? (stale/token-present? "(read-ledger x)" "read-ledger"))))
+
+;------------------------------------------------------------------------------ Layer 1
+
+(deftest ^{:stratum 1} check-guards
   (testing "no changed files -> pass, no warnings"
     (is (= {:passed? true}
            (stale/check-stale-references {} {:execution/worktree-path "/tmp"}))))
@@ -76,9 +89,23 @@
     (let [r (stale/check-stale-references
              {:code/files [{:path "a.clj" :content "x" :action :modify}]} {})]
       (is (true? (:passed? r)))
-      (is (= :stale-references-skipped (-> r :warnings first :type))))))
-
-;------------------------------------------------------------------------------ Layer 1
+      (is (= :stale-references-skipped (-> r :warnings first :type)))))
+  (testing "worktree is not a git repo -> fail-open with the
+            git-unavailable warning"
+    (let [dir (str (Files/createTempDirectory "stale-ref-nogit" (make-array FileAttribute 0)))
+          r (stale/check-stale-references
+             {:code/files [{:path "a.clj" :content "x" :action :modify}]}
+             {:execution/worktree-path dir})]
+      (is (true? (:passed? r)))
+      (is (str/includes? (-> r :warnings first :message) "git unavailable"))))
+  (testing "no readable after-content -> fail-open with the no-content
+            warning"
+    (let [dir (temp-git-repo {"a.clj" "(ns a)"})
+          r (stale/check-stale-references
+             {:code/file-paths ["missing.clj"]}
+             {:execution/worktree-path dir})]
+      (is (true? (:passed? r)))
+      (is (str/includes? (-> r :warnings first :message) "no readable after-content")))))
 
 (deftest ^{:stratum 1} check-fails-on-stale-consumer
   (testing "the trap-bench shape: producer renames a key, an uncommitted
