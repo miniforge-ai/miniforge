@@ -65,8 +65,12 @@
 ;; Hashing seed and id together is what makes a different seed deal a different
 ;; card; the id also breaks ties, so the order stays total when two terms hash
 ;; alike.
+;; The whole keyword, not its name: `name` discards the namespace, so
+;; :a/robust and :b/robust would hash and sort alike and the tie-break would
+;; stop being total. The compiler never mints a namespaced id, but card-for
+;; accepts any catalog a caller hands it.
 (defn- ^{:stratum 1} draw-order [seed entry]
-  (let [id (name (:entry/id entry))]
+  (let [id (str (:entry/id entry))]
     [(string-hash (str seed "|" id)) id]))
 
 (def ^{:stratum 1} ^:private term-square-indices

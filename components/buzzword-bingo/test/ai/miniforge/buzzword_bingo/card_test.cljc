@@ -38,6 +38,16 @@
 (defn- ^{:stratum 0} terms-on [card]
   (mapv :square/term (:card/squares card)))
 
+(deftest ^{:stratum 0} test-ids-differing-only-by-namespace-stay-distinct
+  (testing "given ids sharing a name across namespaces → every one is dealt, none merged"
+    (let [namespaced (mapv (fn [i]
+                             {:entry/id       (keyword (str "ns-" i) "same-name")
+                              :entry/display  (str "term " i)
+                              :entry/category :probe})
+                           (range 30))]
+      (is (= (dec sut/square-count)
+             (count (sut/ids-on (sut/card-for "seed" namespaced))))))))
+
 ;------------------------------------------------------------------------------ Layer 1
 
 ;; Dealing
