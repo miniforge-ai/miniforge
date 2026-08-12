@@ -31,6 +31,7 @@
   (:require
    [ai.miniforge.policy-pack.mdc-to-pack-mapping-test.dewey :as dewey]
    [ai.miniforge.policy-pack.mdc-to-pack-mapping-test.fields :as fields]
+   [ai.miniforge.policy-pack.mdc-to-pack-mapping-test.inventory :as inventory]
    [clojure.test :refer [deftest testing is are]]
    [clojure.string :as str]
    [clojure.set :as set]))
@@ -54,73 +55,6 @@
   (->> (str/split slug #"-")
        (map str/capitalize)
        (str/join " ")))
-
-;; ---------------------------------------------------------------------------
-;; Design spec data (from the .edn)
-;; ---------------------------------------------------------------------------
-(def ^{:stratum 0} complete-inventory
-  "All .mdc files and their expected rule IDs from Section 3."
-  {"foundations/stratified-design.mdc"       :std/stratified-design
-   "foundations/simple-made-easy.mdc"        :std/simple-made-easy
-   "foundations/code-quality.mdc"            :std/code-quality
-   "foundations/result-handling.mdc"         :std/result-handling
-   "foundations/validation-boundaries.mdc"   :std/validation-boundaries
-   "foundations/specification-standards.mdc" :std/specification-standards
-   "foundations/localization.mdc"            :std/localization
-   "languages/clojure.mdc"                  :std/clojure
-   "languages/python.mdc"                   :std/python
-   "frameworks/polylith.mdc"                :std/polylith
-   "frameworks/kubernetes.mdc"              :std/kubernetes
-   "testing/standards.mdc"                  :std/standards
-   "workflows/git-branch-management.mdc"    :std/git-branch-management
-   "workflows/pre-commit-discipline.mdc"    :std/pre-commit-discipline
-   "workflows/git-worktrees.mdc"            :std/git-worktrees
-   "workflows/pr-documentation.mdc"         :std/pr-documentation
-   "workflows/pr-layering.mdc"              :std/pr-layering
-   "workflows/datever.mdc"                  :std/datever
-   "project/header-copyright.mdc"           :std/header-copyright
-   "meta/rule-format.mdc"                   :std/rule-format
-   "index.mdc"                              :std/index})
-
-(deftest ^{:stratum 0} pack-metadata-test
-  (testing "Output pack has required identity fields"
-    (let [template {:pack/id          "miniforge/standards"
-                    :pack/name        "Miniforge Engineering Standards"
-                    :pack/author      "miniforge.ai"
-                    :pack/license     "Apache-2.0"
-                    :pack/trust-level :trusted
-                    :pack/authority   :authority/instruction}]
-      (is (string? (:pack/id template)))
-      (is (string? (:pack/name template)))
-      (is (string? (:pack/author template)))
-      (is (= :trusted (:pack/trust-level template)))
-      (is (= :authority/instruction (:pack/authority template))))))
-
-;; ===========================================================================
-;; Section 17: Field Mapping Completeness Tests
-;; ===========================================================================
-(deftest ^{:stratum 0} all-frontmatter-fields-mapped-test
-  (testing "All known MDC frontmatter fields have defined mappings"
-    (let [_known-frontmatter-fields #{"dewey" "description" "alwaysApply" "globs"}
-          mapped-sources #{:filename-slug
-                           [:frontmatter "description"]
-                           [:frontmatter "dewey"]
-                           [:frontmatter "alwaysApply"]
-                           [:frontmatter "dewey" "globs"]
-                           [:derived]
-                           :mdc-body
-                           [:mdc-body "## Agent behavior"]
-                           :constant}
-          ;; Verify each frontmatter field appears in at least one mapping source
-          frontmatter-in-sources (set (for [src mapped-sources
-                                            :when (vector? src)
-                                            field (rest src)
-                                            :when (string? field)]
-                                        field))]
-      ;; description, dewey, alwaysApply, globs should all be covered
-      (is (set/subset? #{"description" "dewey" "alwaysApply" "globs"}
-                       (set/union frontmatter-in-sources #{"globs"})) ;; globs is in compound source
-          "All frontmatter fields must have mappings"))))
 
 (defn ^{:stratum 0} build-applies-to
   "Build :rule/applies-to from dewey + optional globs."
@@ -178,73 +112,6 @@
           "Duplicate slugs should be detected by ETL"))))
 
 ;; ===========================================================================
-;; Section 15: Inventory Completeness Tests
-;; ===========================================================================
-(deftest ^{:stratum 1} inventory-covers-all-mdc-files-test
-  (testing "Complete inventory has 21 entries (all .standards/*.mdc files + index.mdc)"
-    (is (= 21 (count complete-inventory))))
-
-  (testing "All rule IDs in inventory are unique"
-    (let [ids (vals complete-inventory)]
-      (is (= (count ids) (count (set ids))))))
-
-  (testing "All rule IDs use :std/ namespace"
-    (doseq [[_ rule-id] complete-inventory]
-      (is (= "std" (namespace rule-id))
-          (str rule-id " should use :std/ namespace")))))
-
-(deftest ^{:stratum 1} inventory-matches-filesystem-test
-  (testing "Inventory paths match actual .standards/ directory structure"
-    (let [inventory-paths (set (keys complete-inventory))
-          ;; Known actual files from .standards/ directory
-          actual-files #{"workflows/git-worktrees.mdc"
-                         "workflows/pre-commit-discipline.mdc"
-                         "workflows/git-branch-management.mdc"
-                         "workflows/datever.mdc"
-                         "workflows/pr-documentation.mdc"
-                         "workflows/pr-layering.mdc"
-                         "meta/rule-format.mdc"
-                         "foundations/validation-boundaries.mdc"
-                         "foundations/stratified-design.mdc"
-                         "foundations/simple-made-easy.mdc"
-                         "foundations/result-handling.mdc"
-                         "foundations/code-quality.mdc"
-                         "foundations/specification-standards.mdc"
-                         "foundations/localization.mdc"
-                         "languages/python.mdc"
-                         "languages/clojure.mdc"
-                         "project/header-copyright.mdc"
-                         "testing/standards.mdc"
-                         "frameworks/kubernetes.mdc"
-                         "frameworks/polylith.mdc"}
-          ;; index.mdc is at root, not in .standards/ subdirectory
-          inventory-without-index (disj inventory-paths "index.mdc")]
-      (is (= actual-files inventory-without-index)
-          (str "Missing from inventory: " (set/difference actual-files inventory-without-index)
-               ", Extra in inventory: " (set/difference inventory-without-index actual-files))))))
-
-;; ===========================================================================
-;; Section 16: Output Pack Structure Tests
-;; ===========================================================================
-(deftest ^{:stratum 1} pack-structure-categories-cover-all-rules-test
-  (testing "Pack categories reference all rule IDs from inventory"
-    (let [category-rules #{:std/stratified-design :std/simple-made-easy
-                           :std/code-quality :std/result-handling
-                           :std/validation-boundaries :std/specification-standards
-                           :std/localization
-                           :std/clojure :std/python
-                           :std/polylith :std/kubernetes
-                           :std/standards
-                           :std/git-branch-management :std/pre-commit-discipline
-                           :std/git-worktrees :std/pr-documentation
-                           :std/pr-layering :std/datever
-                           :std/header-copyright
-                           :std/rule-format :std/index}
-          inventory-ids (set (vals complete-inventory))]
-      (is (= inventory-ids category-rules)
-          "Pack categories should reference exactly the inventory rule IDs"))))
-
-;; ===========================================================================
 ;; Section 6: Applies-To (Phases + Globs) Tests
 ;; ===========================================================================
 (deftest ^{:stratum 1} applies-to-test
@@ -287,7 +154,7 @@
     (is (= :std/clojure (rule-id-from-filepath "deeply/nested/path/clojure.mdc"))))
 
   (testing "Complete inventory matches expected IDs"
-    (doseq [[filepath expected-id] complete-inventory]
+    (doseq [[filepath expected-id] inventory/complete-inventory]
       (is (= expected-id (rule-id-from-filepath filepath))
           (str "ID mismatch for " filepath)))))
 
