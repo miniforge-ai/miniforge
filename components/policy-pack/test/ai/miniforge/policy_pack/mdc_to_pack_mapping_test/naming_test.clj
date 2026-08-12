@@ -20,7 +20,7 @@
    2 of work/designs/mdc-to-pack-field-mapping.edn).
 
    Split out of `ai.miniforge.policy-pack.mdc-to-pack-mapping-test`
-   (rule 210 split train, slice 4/7). Assertions are unchanged from the
+   (rule 210 split train, slice 4/4, final). Assertions are unchanged from the
    parent namespace — only the deftest forms and their dependency on
    `mdc-to-pack-mapping-test.naming` moved."
   (:require

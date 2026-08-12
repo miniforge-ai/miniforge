@@ -22,7 +22,7 @@
    :rule/id and :rule/title from an .mdc filepath and its frontmatter.
 
    Split out of `ai.miniforge.policy-pack.mdc-to-pack-mapping-test`
-   (rule 210: slice 4/7 of a stratum-lint SL003 split train — see
+   (rule 210: slice 4/4, final, of a stratum-lint SL003 split train — see
    `mdc-to-pack-mapping-test.dewey` for slice 1 and the full train
    rationale). `rule-id-from-filepath` and `derive-title` both call
    `slug-from-filename`; `derive-title` also calls `title-from-slug`.
