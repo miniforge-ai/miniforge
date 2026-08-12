@@ -59,8 +59,8 @@
   Stating it here so the next wave does not discover it the way step 2
   discovered issuance.
 
-  DELIBERATELY NOT HERE: engagements (3d), owner stamping (3b), context
-  threading (3c). This is the vocabulary and its source, nothing that
+  DELIBERATELY NOT HERE: engagements (3d), context threading (3b), owner
+  stamping (3c). This is the vocabulary and its source, nothing that
   consumes them."
 
  :spec/intent {:type :feature
