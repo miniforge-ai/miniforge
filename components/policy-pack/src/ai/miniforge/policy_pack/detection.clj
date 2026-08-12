@@ -18,23 +18,27 @@
 (ns ai.miniforge.policy-pack.detection
   "Rule violation detection implementations.
 
-   Layer 0: Pattern/plan-resource primitives, state-comparison, semantic and
-     capability detectors, violation-severity filters and formatting —
-     pure or leaf-level, no same-file dependents yet
-   Layer 1: find-matches, any-pattern-matches-multiline?, ast-analysis
-     detection, plan-resource-counts, custom-fn resolution/registration
-     helpers, violation location/message builders (over Layer 0)
-   Layer 2: any-pattern-matches?, detector-predicate?, detect-custom,
-     custom-fn-resolvable?, violation->error (over Layer 1)
-   Layer 3: detect-content-scan/diff-analysis/plan-output, register-custom-fn!
-     (over Layer 2)
-   Layer 4: detect-violation (unified per-type dispatcher, over Layer 3)
-   Layer 5: check-rules (over detect-violation)
+   Layer 0: state-comparison, semantic and capability detectors,
+     ast-analysis/content-scan/diff-analysis/plan-output detection,
+     custom-fn registry/reflection primitives, violation-severity
+     filters and formatting — pure or leaf-level, no same-file
+     dependents yet
+   Layer 1: custom-fn arity-reflection/registry helpers, violation
+     location/message builders (over Layer 0)
+   Layer 2: detector-predicate?, detect-custom, custom-fn-resolvable?,
+     violation->error, detect-violation (unified per-type dispatcher)
+     (over Layer 1)
+   Layer 3: register-custom-fn!, check-rules (over Layer 2)
 
-   Pattern-matching and terraform-plan-parsing primitives moved to the
-   sibling `detection.matching` namespace (rule 210 split, Wave 2); layer
-   count in the docstring above is stale pending the next commit's
-   `stratum-lint --fix` renumbering.
+   4 real strata — over the rule 210 budget of 3; still a genuine
+   namespace split (Wave 2) mid-train. Pattern-matching and
+   terraform-plan-parsing primitives already moved to the sibling
+   `detection.matching` namespace in this same PR; the custom-fn
+   registry/reflection mechanics (`custom-fn-registry`,
+   `declared-method?`, `reflectable-invoke?`, `variadic-accepts-arity?`,
+   `resolve-custom-fn`, `detector-predicate?`) move to
+   `detection.custom-registry` in the next PR of this train, which
+   brings this namespace down to the 3-layer budget.
 
    Supports detection types:
    - :content-scan - Regex against artifact content
