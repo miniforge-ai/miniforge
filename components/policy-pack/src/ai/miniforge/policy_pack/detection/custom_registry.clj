@@ -81,9 +81,15 @@ depending on ambient namespace loading or raw var resolution."}
     (get @custom-fn-registry custom-fn-sym)))
 
 (defn ^{:stratum 1} register!
-  "Associate `custom-fn-sym` with `f` in the registry. Callers validate `f`
-   (see `detector-predicate?`) before calling this — this fn only mutates."
+  "Associate `custom-fn-sym` with `f` in the registry, enforcing the one
+   invariant this namespace owns: registry keys are symbols. Callers
+   additionally validate `f` itself (see `detector-predicate?`) before
+   calling this, since only the caller knows what a valid detector fn
+   looks like for its use case."
   [custom-fn-sym f]
+  (when-not (symbol? custom-fn-sym)
+    (throw (ex-info "Custom detector key must be a symbol"
+                    {:custom-fn custom-fn-sym})))
   (swap! custom-fn-registry assoc custom-fn-sym f)
   f)
 
