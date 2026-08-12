@@ -123,9 +123,9 @@ both baseline arm, both produced under the defective sandbox below.
 
 2. PROVISIONING replaces step 4's redirect — never `git worktree add`:
 
-   ```bash
+   ``bash
    bb bench:provision /path/to/launching/checkout <pin-sha> main
-   ```
+   ``
 
    Clones to `<root>/repo`, inits the bare mirror `<root>/origin.git`,
    pushes the pin to it, and redirects only the clone's origin, failing
@@ -192,8 +192,8 @@ GraalVM isolate-init deaths (misread as the source worktree being
 deleted), and also poisoned the stat readings behind the interim
 "sandbox replaced by a concurrent actor" hypothesis — that claim is
 WITHDRAWN as unverifiable; the observations that produced it came from
-the faulting volume. Fix: MINIFORGE_BENCH_SOURCE moved to a shallow
-clone on the home volume (~/.miniforge/bench-source), taking the
+the faulting volume. Fix: `MINIFORGE_BENCH_SOURCE` moved to a shallow
+clone on the home volume (`~/.miniforge/bench-source`), taking the
 bench's last dependency off the faulting volume. Refused/failed slots
 wrote no rows; every recorded row survived byte-identical across all
 restarts. trap-a's strict B,T alternation is broken at one restart
