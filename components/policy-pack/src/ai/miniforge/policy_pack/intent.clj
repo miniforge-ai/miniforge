@@ -37,7 +37,7 @@
      :refactor → Creates: 0, Updates: 0, Destroys: 0
      :migrate  → Creates: >0, Destroys: >0"
   (:require
-   [ai.miniforge.policy-pack.detection :as detection]
+   [ai.miniforge.policy-pack.detection.matching :as matching]
    [clojure.string :as str]))
 
 ;------------------------------------------------------------------------------ Layer 0
@@ -84,7 +84,7 @@
 ;; Terraform plan parsing
 (defn ^{:stratum 0} parse-terraform-plan-counts
   "Parse terraform plan output and return resource change counts.
-   Delegates to detection/plan-resource-counts (added by PR #457).
+   Delegates to matching/plan-resource-counts (added by PR #457).
 
    Arguments:
    - plan-output — Raw terraform plan output string
@@ -92,7 +92,7 @@
   Returns:
    - {:creates int :updates int :destroys int}"
   [plan-output]
-  (detection/plan-resource-counts plan-output))
+  (matching/plan-resource-counts plan-output))
 
 ;; Kubernetes diff parsing
 (defn ^{:stratum 0} parse-k8s-diff-counts

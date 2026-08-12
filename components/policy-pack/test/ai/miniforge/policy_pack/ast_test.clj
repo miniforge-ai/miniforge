@@ -6,7 +6,8 @@
   (:require
    [clojure.test :refer [deftest testing is]]
    [ai.miniforge.policy-pack.ast :as sut]
-   [ai.miniforge.policy-pack.detection :as detection]))
+   [ai.miniforge.policy-pack.detection :as detection]
+   [ai.miniforge.policy-pack.detection.matching :as matching]))
 
 ;------------------------------------------------------------------------------ Layer 0
 
@@ -93,8 +94,8 @@
   (testing "counts creates, updates, destroys from plan output"
     (let [plan "# aws_vpc.main will be created\n# aws_route.old will be destroyed\n# aws_subnet.main will be updated"]
       (is (= {:creates 1 :updates 1 :destroys 1}
-             (detection/plan-resource-counts plan)))))
+             (matching/plan-resource-counts plan)))))
 
   (testing "empty plan returns zeros"
     (is (= {:creates 0 :updates 0 :destroys 0}
-           (detection/plan-resource-counts "no resources")))))
+           (matching/plan-resource-counts "no resources")))))
