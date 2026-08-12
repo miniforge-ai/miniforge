@@ -18,11 +18,12 @@
 (ns ai.miniforge.policy-pack.loader
   "Load policy packs from EDN files and directory structures.
 
-   Layer 0: File discovery and path utilities
-   Layer 1: EDN parsing and validation
-   Layer 2: Single file and directory loaders
-   Layer 3: Pack loading orchestration
-   Layer 4: Trust validation (N1 §2.10.2)
+   Layer 0: Overlay resolution helpers, dependency-validation wrapper, trust
+            ref, and the single-file/directory loaders
+   Layer 1: Overlay pack composition, trust validation (N1 §2.10.2), and
+            format auto-detection
+   Layer 2: Overlay resolution (N4 §2.5) and the trust-validated /
+            load-all-packs top-level entry points
 
    Supports two formats:
    - Single EDN file: pack.edn or *.pack.edn
@@ -32,121 +33,26 @@
    - Instruction authority is not transitive
    - Trust level inheritance (lowest wins)
    - Cross-trust references are validated
-   - Tainted content is isolated from instruction authority"
+   - Tainted content is isolated from instruction authority
+
+   EDN parsing, timestamp/rule normalization, pack writing, and rule/pack
+   discovery live in sibling `ai.miniforge.policy-pack.loader.*` namespaces.
+   Extracting those (rule 210: the combined namespace measured 5 real
+   layers, max 3) also shortened this namespace's own in-file call chain —
+   the file-IO/normalization hops no longer count toward its local layer
+   depth, so the remaining overlay/dependency/trust/orchestration code now
+   measures 3 real layers on its own, within budget."
   (:require
+   [ai.miniforge.policy-pack.loader.io :as loader-io]
+   [ai.miniforge.policy-pack.loader.normalize :as normalize]
+   [ai.miniforge.knowledge.interface :as knowledge]
+   [ai.miniforge.policy-pack.rules.pack-dependency-validation :as dep-validation]
    [ai.miniforge.policy-pack.schema :as schema]
    [ai.miniforge.policy-pack.schema-validation :as schema-validation]
-   [ai.miniforge.policy-pack.rules.pack-dependency-validation :as dep-validation]
-   [ai.miniforge.knowledge.interface :as knowledge]
    [clojure.java.io :as io]
-   [clojure.edn :as edn]
-   [clojure.pprint :as pprint]
-   [clojure.set]
-   [clojure.string :as str])
-  (:import
-   [java.time Instant]
-   [java.util Date]))
+   [clojure.set]))
 
 ;------------------------------------------------------------------------------ Layer 0
-
-;; File discovery and path utilities
-(defn ^{:stratum 0} find-rule-files
-  "Find all rule .edn files in a rules/ directory, recursive."
-  [rules-dir]
-  (when (.exists (io/file rules-dir))
-    (->> (file-seq (io/file rules-dir))
-         (filter #(.isFile %))
-         (filter #(str/ends-with? (.getName %) ".edn")))))
-
-(defn ^{:stratum 0} pack-file?
-  "Check if a file is a pack file (pack.edn or *.pack.edn)."
-  [file]
-  (let [name (.getName file)]
-    (or (= name "pack.edn")
-        (str/ends-with? name ".pack.edn"))))
-
-;; EDN parsing and validation
-(defn ^{:stratum 0} safe-read-edn
-  "Safely read EDN from a file.
-   Returns {:success? bool :data any :error string}."
-  [file]
-  (try
-    (let [content (slurp file)
-          data (edn/read-string content)]
-      (schema-validation/success :data data {:error nil}))
-    (catch Exception e
-      (schema-validation/failure :data (.getMessage e)))))
-
-;; Timestamp wire form
-(defn ^{:stratum 0} map-instant-keys
-  "Apply `f` to every timestamp key PRESENT in `pack`. Those keys cross
-   the disk boundary as ISO-8601 strings, parsed back on read.
-
-   Presence, not non-nil-ness: an absent `:pack/signed-at` is legitimately
-   optional, but a key explicitly holding nil is a bad timestamp and goes
-   to `f` like any other. A missing required one stays missing so the
-   schema reports it, rather than being invented here."
-  [pack f]
-  (reduce (fn [acc k]
-            (if (contains? acc k)
-              (assoc acc k (f (get acc k)))
-              acc))
-          pack
-          [:pack/created-at :pack/updated-at :pack/signed-at]))
-
-(defn ^{:stratum 0} ->iso
-  "Timestamp -> ISO-8601 string, by actual type rather than by print form.
-
-   `inst?` admits BOTH `java.time.Instant` and `java.util.Date`, and
-   `pprint` renders them differently: a Date prints as `#inst` and reads
-   back, an Instant prints as `#object[...]` and makes the whole file
-   unreadable by `edn/read-string`. `builders/make-pack` stamps an
-   Instant, so the unreadable form is the default one.
-
-   Both are normalized; anything else throws, strings included — one that
-   does not parse would persist fine and fail only on the way back out.
-   Same defect class as effect-transaction's store and zettel frontmatter."
-  ^String [v]
-  (cond
-    (instance? Instant v) (.toString ^Instant v)
-    (instance? Date v) (.toString (.toInstant ^Date v))
-    :else (throw (ex-info "policy pack timestamp is not a supported instant type"
-                          {:value v :type (some-> v class .getName)}))))
-
-(defn ^{:stratum 0} ensure-instant
-  "Wire timestamp -> Instant, or nil when the value is not a readable one.
-
-   Returns nil rather than the old fail-soft `Instant/now`. A pack whose
-   created-at cannot be read is corrupt, and stamping the current time
-   hides that at the moment it should surface — the pack loads clean,
-   dated today, and nothing downstream can tell. nil fails the schema's
-   `inst?` on the next step, so the corruption surfaces through the
-   loader's own `{:success? false :errors [...]}` channel: one entry in
-   `load-all-packs`' `:failed`, not an exception aborting the rest."
-  [value]
-  (cond
-    (instance? Instant value) value
-    (instance? Date value) (.toInstant ^Date value)
-    (string? value) (try
-                      (Instant/parse value)
-                      (catch Exception _ nil))
-    :else nil))
-
-(defn ^{:stratum 0} normalize-rule
-  "Normalize a rule, ensuring required fields and types."
-  [rule]
-  (cond-> rule
-    (not (:rule/applies-to rule))
-    (assoc :rule/applies-to {})
-
-    (get-in rule [:rule/applies-to :task-types])
-    (update-in [:rule/applies-to :task-types] #(if (set? %) % (set %)))
-
-    (get-in rule [:rule/applies-to :repo-types])
-    (update-in [:rule/applies-to :repo-types] #(if (set? %) % (set %)))
-
-    (get-in rule [:rule/applies-to :phases])
-    (update-in [:rule/applies-to :phases] #(if (set? %) % (set %)))))
 
 ;; Overlay pack resolution (N4 §2.5)
 (defn- ^{:stratum 0} validate-no-rule-id-collisions
@@ -243,52 +149,103 @@
    (:pack/authority pack :authority/data)
    :dependencies (mapv :pack-id (:pack/extends pack []))))
 
-;------------------------------------------------------------------------------ Layer 1
+;; Single file loader
+(defn ^{:stratum 0} load-pack-from-file
+  "Load a policy pack from a single EDN file.
 
-(defn ^{:stratum 1} normalize-pack
-  "Normalize a pack, ensuring required fields and types."
-  [pack]
-  (-> pack
-      (update :pack/rules #(mapv normalize-rule (or % [])))
-      (update :pack/categories #(or % []))
-      (map-instant-keys ensure-instant)
-      ;; Default trust metadata
-      (update :pack/trust-level #(or % :untrusted))
-      (update :pack/authority #(or % :authority/data))
-      (update :pack/dependencies #(or % []))))
-
-;; Pack writing
-(defn ^{:stratum 1} write-pack-to-file
-  "Write a pack manifest to a single EDN file.
-
-   Timestamps are normalized to ISO-8601 strings first: written raw, the
-   file cannot be read back at all. An unsupported timestamp is refused —
-   `->iso` throws, nothing is written, and the caller gets
-   `{:success? false}` instead of a file that fails only on load.
+   The file should contain a complete pack manifest with all rules inline.
 
    Arguments:
-   - pack - PackManifest
-   - file-path - Output file path
+   - file-path - Path to the .pack.edn or pack.edn file
 
    Returns:
-   - {:success? bool :error string-or-nil} — :error is nil on success"
-  [pack file-path]
-  (try
-    (let [content (with-out-str
-                    (pprint/pprint (map-instant-keys pack ->iso)))]
-      (spit file-path content)
-      {:success? true :error nil})
-    (catch Exception e
-      (schema-validation/failure nil (.getMessage e)))))
+   - {:success? bool :pack PackManifest :errors [...]}
 
-;; Directory structure loader
-(defn ^{:stratum 1} load-rule-file
-  "Load a single rule from an EDN file."
-  [file]
-  (let [{:keys [success? data error]} (safe-read-edn file)]
-    (if success?
-      (schema-validation/success :rule (normalize-rule data) {:error nil})
-      (schema-validation/failure :rule error))))
+   Example:
+     (load-pack-from-file \"terraform-safety.pack.edn\")"
+  [file-path]
+  (let [file (io/file file-path)]
+    (if (.exists file)
+      (let [{:keys [success? data error]} (loader-io/safe-read-edn file)]
+        (if success?
+          (let [pack (normalize/normalize-pack data)
+                {:keys [valid? errors]} (schema/validate-pack pack)]
+            (if valid?
+              (schema-validation/success :pack pack {:errors nil})
+              (schema-validation/failure-with-errors :pack errors)))
+          (schema-validation/failure-with-errors :pack [{:file file-path :error error}])))
+      (schema-validation/failure-with-errors :pack [{:file file-path :error "File not found"}]))))
+
+(defn ^{:stratum 0} load-pack-from-directory
+  "Load a policy pack from a directory structure.
+
+   Expected structure:
+   ```
+   my-pack/
+   ├── pack.edn           # Pack manifest (rules can be inline or in rules/)
+   ├── rules/             # Optional separate rule files
+   │   ├── 310-import-safety/
+   │   │   ├── 310-import-block-preservation.edn
+   │   │   └── 311-import-no-creates.edn
+   │   └── 320-network-safety/
+   │       └── 320-network-recreation-block.edn
+   └── examples/          # Optional test examples
+       └── ...
+   ```
+
+   Arguments:
+   - dir-path - Path to the pack directory
+
+   Returns:
+   - {:success? bool :pack PackManifest :errors [...]}
+
+   Example:
+     (load-pack-from-directory \"./packs/terraform-safety\")"
+  [dir-path]
+  (let [dir (io/file dir-path)
+        manifest-file (io/file dir "pack.edn")
+        rules-dir (io/file dir "rules")]
+
+    (cond
+      (not (.exists dir))
+      (schema-validation/failure-with-errors :pack [{:dir dir-path :error "Directory not found"}])
+
+      (not (.exists manifest-file))
+      (schema-validation/failure-with-errors :pack [{:file "pack.edn" :error "Manifest not found in directory"}])
+
+      :else
+      (let [{:keys [success? data error]} (loader-io/safe-read-edn manifest-file)]
+        (if-not success?
+          (schema-validation/failure-with-errors :pack [{:file "pack.edn" :error error}])
+
+          ;; Load rules from rules/ directory if it exists
+          (let [rule-files (when (.exists rules-dir)
+                             (loader-io/find-rule-files rules-dir))
+                rule-results (mapv loader-io/load-rule-file rule-files)
+                successful-rules (keep :rule (filter schema-validation/succeeded? rule-results))
+                rule-errors (keep (fn [r]
+                                    (when-not (schema-validation/succeeded? r)
+                                      {:error (:error r)}))
+                                  rule-results)
+
+                ;; Merge rules: inline rules + directory rules
+                ;; Directory rules override inline rules with same ID
+                inline-rules (:pack/rules data [])
+                inline-by-id (zipmap (map :rule/id inline-rules) inline-rules)
+                dir-by-id (zipmap (map :rule/id successful-rules) successful-rules)
+                merged-rules (vals (merge inline-by-id dir-by-id))
+
+                pack (-> data
+                         (assoc :pack/rules (vec merged-rules))
+                         normalize/normalize-pack)
+
+                {:keys [valid? errors]} (schema/validate-pack pack)]
+
+            (if valid?
+              (schema-validation/success :pack pack {:errors (when (seq rule-errors) rule-errors)})
+              (schema-validation/failure-with-errors :pack (concat errors rule-errors)))))))))
+
+;------------------------------------------------------------------------------ Layer 1
 
 (defn- ^{:stratum 1} compose-resolved-pack
   "Merge inherited + overlay rules, apply overrides, inherit taxonomy ref."
@@ -301,37 +258,6 @@
         resolved-pack  (cond-> (assoc overlay-pack :pack/rules final-rules)
                          final-tax-ref (assoc :pack/taxonomy-ref final-tax-ref))]
     (schema-validation/success :pack resolved-pack {})))
-
-(defn ^{:stratum 1} discover-packs
-  "Discover all packs in a directory.
-
-   Looks for:
-   - *.pack.edn files
-   - Subdirectories containing pack.edn
-
-   Arguments:
-   - packs-dir - Directory containing packs
-
-   Returns:
-   - Vector of {:path string :type :file|:directory}"
-  [packs-dir]
-  (let [dir (io/file packs-dir)]
-    (when (.exists dir)
-      (let [;; Find *.pack.edn files
-            pack-files (->> (.listFiles dir)
-                            (filter #(.isFile %))
-                            (filter pack-file?)
-                            (map (fn [f]
-                                   {:path (.getPath f)
-                                    :type :file})))
-            ;; Find subdirectories with pack.edn
-            pack-dirs (->> (.listFiles dir)
-                           (filter #(.isDirectory %))
-                           (filter #(.exists (io/file % "pack.edn")))
-                           (map (fn [d]
-                                  {:path (.getPath d)
-                                   :type :directory})))]
-        (vec (concat pack-files pack-dirs))))))
 
 (defn ^{:stratum 1} validate-pack-trust
   "Validate transitive trust rules for a pack.
@@ -380,103 +306,39 @@
         {:valid? false
          :errors [(str "Trust validation error: " (.getMessage e))]}))))
 
-;------------------------------------------------------------------------------ Layer 2
+;; Auto-detect and load
+(defn ^{:stratum 1} load-pack
+  "Load a policy pack, auto-detecting format.
 
-;; Single file loader
-(defn ^{:stratum 2} load-pack-from-file
-  "Load a policy pack from a single EDN file.
-
-   The file should contain a complete pack manifest with all rules inline.
+   Supports:
+   - Single EDN file (pack.edn or *.pack.edn)
+   - Directory with pack.edn manifest
 
    Arguments:
-   - file-path - Path to the .pack.edn or pack.edn file
+   - path - File or directory path
 
    Returns:
    - {:success? bool :pack PackManifest :errors [...]}
 
    Example:
-     (load-pack-from-file \"terraform-safety.pack.edn\")"
-  [file-path]
-  (let [file (io/file file-path)]
-    (if (.exists file)
-      (let [{:keys [success? data error]} (safe-read-edn file)]
-        (if success?
-          (let [pack (normalize-pack data)
-                {:keys [valid? errors]} (schema/validate-pack pack)]
-            (if valid?
-              (schema-validation/success :pack pack {:errors nil})
-              (schema-validation/failure-with-errors :pack errors)))
-          (schema-validation/failure-with-errors :pack [{:file file-path :error error}])))
-      (schema-validation/failure-with-errors :pack [{:file file-path :error "File not found"}]))))
-
-(defn ^{:stratum 2} load-pack-from-directory
-  "Load a policy pack from a directory structure.
-
-   Expected structure:
-   ```
-   my-pack/
-   ├── pack.edn           # Pack manifest (rules can be inline or in rules/)
-   ├── rules/             # Optional separate rule files
-   │   ├── 310-import-safety/
-   │   │   ├── 310-import-block-preservation.edn
-   │   │   └── 311-import-no-creates.edn
-   │   └── 320-network-safety/
-   │       └── 320-network-recreation-block.edn
-   └── examples/          # Optional test examples
-       └── ...
-   ```
-
-   Arguments:
-   - dir-path - Path to the pack directory
-
-   Returns:
-   - {:success? bool :pack PackManifest :errors [...]}
-
-   Example:
-     (load-pack-from-directory \"./packs/terraform-safety\")"
-  [dir-path]
-  (let [dir (io/file dir-path)
-        manifest-file (io/file dir "pack.edn")
-        rules-dir (io/file dir "rules")]
-
+     (load-pack \"terraform-safety.pack.edn\")
+     (load-pack \"./packs/terraform-safety/\")"
+  [path]
+  (let [file (io/file path)]
     (cond
-      (not (.exists dir))
-      (schema-validation/failure-with-errors :pack [{:dir dir-path :error "Directory not found"}])
+      (not (.exists file))
+      (schema-validation/failure-with-errors :pack [{:path path :error "Path not found"}])
 
-      (not (.exists manifest-file))
-      (schema-validation/failure-with-errors :pack [{:file "pack.edn" :error "Manifest not found in directory"}])
+      (.isFile file)
+      (load-pack-from-file path)
+
+      (.isDirectory file)
+      (load-pack-from-directory path)
 
       :else
-      (let [{:keys [success? data error]} (safe-read-edn manifest-file)]
-        (if-not success?
-          (schema-validation/failure-with-errors :pack [{:file "pack.edn" :error error}])
+      (schema-validation/failure-with-errors :pack [{:path path :error "Unknown path type"}]))))
 
-          ;; Load rules from rules/ directory if it exists
-          (let [rule-files (when (.exists rules-dir)
-                             (find-rule-files rules-dir))
-                rule-results (mapv load-rule-file rule-files)
-                successful-rules (keep :rule (filter schema-validation/succeeded? rule-results))
-                rule-errors (keep (fn [r]
-                                    (when-not (schema-validation/succeeded? r)
-                                      {:error (:error r)}))
-                                  rule-results)
-
-                ;; Merge rules: inline rules + directory rules
-                ;; Directory rules override inline rules with same ID
-                inline-rules (:pack/rules data [])
-                inline-by-id (zipmap (map :rule/id inline-rules) inline-rules)
-                dir-by-id (zipmap (map :rule/id successful-rules) successful-rules)
-                merged-rules (vals (merge inline-by-id dir-by-id))
-
-                pack (-> data
-                         (assoc :pack/rules (vec merged-rules))
-                         normalize-pack)
-
-                {:keys [valid? errors]} (schema/validate-pack pack)]
-
-            (if valid?
-              (schema-validation/success :pack pack {:errors (when (seq rule-errors) rule-errors)})
-              (schema-validation/failure-with-errors :pack (concat errors rule-errors)))))))))
+;------------------------------------------------------------------------------ Layer 2
 
 (defn ^{:stratum 2} resolve-overlay
   "Resolve an overlay pack by merging inherited rules from base packs.
@@ -517,43 +379,7 @@
               (compose-resolved-pack overlay-pack base-packs
                                      inherited-rules overlay-rules))))))))
 
-;------------------------------------------------------------------------------ Layer 3
-
-;; Auto-detect and load
-(defn ^{:stratum 3} load-pack
-  "Load a policy pack, auto-detecting format.
-
-   Supports:
-   - Single EDN file (pack.edn or *.pack.edn)
-   - Directory with pack.edn manifest
-
-   Arguments:
-   - path - File or directory path
-
-   Returns:
-   - {:success? bool :pack PackManifest :errors [...]}
-
-   Example:
-     (load-pack \"terraform-safety.pack.edn\")
-     (load-pack \"./packs/terraform-safety/\")"
-  [path]
-  (let [file (io/file path)]
-    (cond
-      (not (.exists file))
-      (schema-validation/failure-with-errors :pack [{:path path :error "Path not found"}])
-
-      (.isFile file)
-      (load-pack-from-file path)
-
-      (.isDirectory file)
-      (load-pack-from-directory path)
-
-      :else
-      (schema-validation/failure-with-errors :pack [{:path path :error "Unknown path type"}]))))
-
-;------------------------------------------------------------------------------ Layer 4
-
-(defn ^{:stratum 4} load-all-packs
+(defn ^{:stratum 2} load-all-packs
   "Load all packs from a packs directory.
 
    Arguments:
@@ -575,7 +401,7 @@
   ([packs-dir opts]
    (let [validate-deps? (get opts :validate-dependencies? true)
          max-depth (get opts :max-dependency-depth 5)
-         discovered (discover-packs packs-dir)
+         discovered (loader-io/discover-packs packs-dir)
          results (map (fn [{:keys [path]}]
                         (assoc (load-pack path) :path path))
                       discovered)
@@ -595,7 +421,7 @@
        dep-validation-result
        (assoc :dependency-validation dep-validation-result)))))
 
-(defn ^{:stratum 4} load-pack-with-trust-validation
+(defn ^{:stratum 2} load-pack-with-trust-validation
   "Load a pack and validate trust rules.
 
    This is the recommended entry point for loading packs with trust enforcement.
@@ -656,24 +482,9 @@
   (load-pack "./packs/terraform-safety.pack.edn")
   (load-pack "./packs/terraform-safety/")
 
-  ;; Discover all packs
-  (discover-packs ".miniforge/packs")
-  ;; => [{:path ".miniforge/packs/terraform-safety.pack.edn" :type :file}
-  ;;     {:path ".miniforge/packs/kubernetes/" :type :directory}]
-
   ;; Load all packs
   (load-all-packs ".miniforge/packs")
   ;; => {:loaded [...] :failed [...]}
-
-  ;; Test normalization
-  (normalize-rule {:rule/id :test
-                   :rule/title "Test"
-                   :rule/description "Desc"
-                   :rule/severity :high
-                   :rule/category "300"
-                   :rule/applies-to {:task-types [:import]}  ; vector, not set
-                   :rule/detection {:type :content-scan}
-                   :rule/enforcement {:action :warn :message "Warning"}})
 
   ;; Trust validation examples
   (def base-pack
