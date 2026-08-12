@@ -325,12 +325,58 @@
        :started started
        :ended (str (java.time.Instant/now))})))
 
+(defn ^{:stratum 1} snapshot-commits
+  "Latest in-window stash snapshot per task, as commit SHAs. The runner
+   deletes a task's branch when its sub-workflow completes CLEANLY, so
+   the runs that did the work leave no branch — the 2026-08-11 salvage
+   found 7 of 8 :not-reached verdicts were exactly this. The runner's
+   periodic 'WIP on task-*' stash commits survive as unreachable
+   objects; the latest one inside [started, ended] per task is the most
+   complete tree the run left behind. git fsck costs ~a minute — noise
+   against a multi-hour run, and the price of a verdict that reads the
+   record instead of the survivors."
+  [repo started ended]
+  (let [t (fn [s] (java.time.Instant/parse s))
+        [s e] [(t started) (t ended)]
+        shas (->> (str (git-out repo "fsck" "--unreachable" "--no-reflogs"))
+                  str/split-lines
+                  (keep #(second (re-find #"unreachable commit ([0-9a-f]{40})" %))))
+        ;; One batched git log over every unreachable commit — a per-sha
+        ;; `git show` loop costs minutes at a few thousand objects.
+        described (when (seq shas)
+                    (try
+                      (:out (p/sh {:dir repo :in (str/join "\n" shas)
+                                   :out :string :err :string :continue true}
+                                  "git" "log" "--no-walk=unsorted"
+                                  "--format=%cI\t%H\t%s" "--stdin"))
+                      (catch Exception _ nil)))
+        wips (keep (fn [line]
+                     (let [[date sha subject] (str/split line #"\t" 3)
+                           task (some->> subject
+                                         (re-find #"^WIP on (task-[0-9a-f]+):")
+                                         second)]
+                       ;; Malformed dates refuse the snapshot, not the run.
+                       (try
+                         (when (and date sha task
+                                    (not (.isBefore (t date) s))
+                                    (not (.isAfter (t date) e)))
+                           {:task task :at (t date) :sha sha})
+                         (catch Exception _ nil))))
+                   (str/split-lines (str described)))]
+    (->> (group-by :task wips)
+         vals
+         (map #(:sha (apply max-key (fn [w] (.toEpochMilli ^java.time.Instant (:at w))) %)))
+         sort
+         vec)))
+
 (defn ^{:stratum 2} run-verdict
-  "Strongest verdict across everything the run produced, with the
-   evidence that earned it."
-  [{:keys [repo detector] :as paths} trap worktrees branches]
+  "Strongest verdict across everything the run produced — surviving
+   worktrees, surviving branches, and the run-window stash snapshots —
+   with the evidence that earned it."
+  [{:keys [repo detector] :as paths} trap worktrees branches snapshots]
   (let [verdicts (into [] (concat (keep #(detect detector repo trap %) worktrees)
-                                  (keep #(detect-branch paths trap %) branches)))
+                                  (keep #(detect-branch paths trap %) branches)
+                                  (keep #(detect-branch paths trap %) snapshots)))
         best (when (seq verdicts)
                (apply max-key #(get verdict-rank (:verdict %) 0) verdicts))]
     {:verdict (get best :verdict :no-worktree)
@@ -361,13 +407,15 @@
         ;; against the next one rather than vary with set iteration order.
         new-wts (vec (sort (remove (:worktrees before) (:worktrees after))))
         new-brs (vec (sort (remove (:branches before) (:branches after))))
+        snapshots (snapshot-commits (:repo paths) (:started run) (:ended run))
         record (merge {:arm arm :trap trap :rep rep
                        :started (:started run) :ended (:ended run) :exit (:exit run)
                        :workflow-ids (mapv #(str/replace (fs/file-name %) #"\.edn$" "")
                                            (sort (remove (:events before) (:events after))))
                        :worktrees new-wts
-                       :task-branches new-brs}
-                      (run-verdict paths trap new-wts new-brs))]
+                       :task-branches new-brs
+                       :snapshots snapshots}
+                      (run-verdict paths trap new-wts new-brs snapshots))]
     ;; stdout first: the run has already been paid for, so a full disk
     ;; must not take its only record with it.
     (println "TRAP-RUN-RECORDED" (pr-str record))
