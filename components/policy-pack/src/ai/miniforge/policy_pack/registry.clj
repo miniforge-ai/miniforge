@@ -18,21 +18,23 @@
 (ns ai.miniforge.policy-pack.registry
   "Policy pack registry protocol and in-memory implementation.
 
-   Layer 0: PolicyPackRegistry protocol, parse-datever, glob-matches?,
-     dedupe-by-id
-   Layer 1: compare-versions, rule-applies? (over parse-datever/glob-matches?)
-   Layer 2: latest-version (over compare-versions)
-   Layer 3: InMemoryPackRegistry (implements the Layer 0 protocol, uses
-     latest-version/rule-applies?/dedupe-by-id)
-   Layer 4: create-registry (constructs InMemoryPackRegistry)
+   Version comparison, glob matching, rule applicability, dedup, and
+   signature decoding live in `ai.miniforge.policy-pack.registry.support`
+   (rule 210: the combined namespace measured 5 real layers, over the
+   budget of 3 — a genuine namespace split (Wave 2), not a labeling
+   problem).
 
-   5 real strata — over the rule 210 budget of 3; a genuine namespace split
-   (Wave 2), not a labeling problem."
+   Layer 0: t (translator), PolicyPackRegistry protocol
+   Layer 1: InMemoryPackRegistry (implements the Layer 0 protocol, uses
+     support/latest-version, support/rule-applies?, support/dedupe-by-id,
+     support/decode-signature)
+   Layer 2: create-registry (constructs InMemoryPackRegistry)"
   (:require
    [ai.miniforge.anomaly.interface :as anomaly]
    [ai.miniforge.messages.interface :as messages]
    [ai.miniforge.policy-pack.canonical-edn :as canonical-edn]
    [ai.miniforge.policy-pack.crypto :as crypto]
+   [ai.miniforge.policy-pack.registry.support :as support]
    [ai.miniforge.policy-pack.schema :as schema]
    [ai.miniforge.policy-pack.trust-roots :as trust-roots]
    [ai.miniforge.policy-pack.trust-roots-config :as trust-roots-config]
@@ -118,110 +120,11 @@
      - :phase - Current workflow phase
      Returns vector of applicable rules."))
 
-;; Version comparison helpers
-(defn ^{:stratum 0} parse-datever
-  "Parse DateVer string (YYYY.MM.DD) into comparable vector."
-  [version-str]
-  (when version-str
-    (try
-      (mapv parse-long (str/split version-str #"\."))
-      (catch Exception _
-        nil))))
-
-;; Rule applicability checking
-(defn ^{:stratum 0} glob-matches?
-  "Simple glob pattern matching.
-   Supports * (any within segment) and ** (any path segments)."
-  [pattern path]
-  (let [regex-pattern (str "^"
-                          (-> pattern
-                              (str/replace "." "\\.")
-                              (str/replace "**/" "<<<GLOBSTAR_SLASH>>>")
-                              (str/replace "**" "<<<GLOBSTAR>>>")
-                              (str/replace "*" "[^/]*")
-                              (str/replace "<<<GLOBSTAR_SLASH>>>" "(.*/)?")
-                              (str/replace "<<<GLOBSTAR>>>" ".*"))
-                          "$")]
-    (try
-      (boolean (re-matches (re-pattern regex-pattern) path))
-      (catch Exception _
-        false))))
-
-(defn ^{:stratum 0} decode-signature
-  "Base64 pack signature to bytes; nil when the field is not a string or not
-   base64. A pack reaching verification has not necessarily been through
-   schema validation, so the type check belongs here."
-  [sig-str]
-  (when (string? sig-str)
-    (try
-      (.decode (java.util.Base64/getDecoder) ^String sig-str)
-      (catch IllegalArgumentException _
-        nil))))
-
-(defn ^{:stratum 0} dedupe-by-id
-  "Remove duplicate rules, keeping the last occurrence (later pack wins)."
-  [rules]
-  (vals (reduce (fn [acc rule]
-                  (assoc acc (:rule/id rule) rule))
-                {}
-                rules)))
-
 ;------------------------------------------------------------------------------ Layer 1
-
-(defn ^{:stratum 1} compare-versions
-  "Compare two DateVer version strings.
-   Returns negative if a < b, 0 if equal, positive if a > b."
-  [a b]
-  (let [va (or (parse-datever a) [0 0 0])
-        vb (or (parse-datever b) [0 0 0])]
-    (compare va vb)))
-
-(defn ^{:stratum 1} rule-applies?
-  "Check if a rule applies to the given context.
-
-   Context map:
-   - :task - Task with :task/intent containing :intent/type
-   - :artifact - Artifact with :artifact/path, :artifact/type
-   - :repo - Repository with :repo/type
-   - :phase - Current workflow phase keyword"
-  [rule context]
-  (let [{:keys [task-types file-globs repo-types phases]}
-        (:rule/applies-to rule)]
-    (and
-     ;; Task type filter
-     (or (nil? task-types)
-         (empty? task-types)
-         (contains? task-types (get-in context [:task :task/intent :intent/type])))
-
-     ;; File glob filter
-     (or (nil? file-globs)
-         (empty? file-globs)
-         (let [path (get-in context [:artifact :artifact/path] "")]
-           (some #(glob-matches? % path) file-globs)))
-
-     ;; Repo type filter
-     (or (nil? repo-types)
-         (empty? repo-types)
-         (contains? repo-types (get-in context [:repo :repo/type])))
-
-     ;; Phase filter
-     (or (nil? phases)
-         (empty? phases)
-         (contains? phases (:phase context))))))
-
-;------------------------------------------------------------------------------ Layer 2
-
-(defn ^{:stratum 2} latest-version
-  "Get the latest version from a collection of version strings."
-  [versions]
-  (when (seq versions)
-    (first (sort-by identity (comparator #(pos? (compare-versions %1 %2))) versions))))
-
-;------------------------------------------------------------------------------ Layer 3
 
 ;; In-memory registry implementation. `trust-roots` (N4 §8.2.1) sits outside
 ;; `state` because it is fixed configuration, not state a caller mutates.
-(defrecord ^{:stratum 3} InMemoryPackRegistry [state trust-roots]
+(defrecord ^{:stratum 1} InMemoryPackRegistry [state trust-roots]
   PolicyPackRegistry
 
   (register-pack [_this pack]
@@ -240,7 +143,7 @@
   (get-pack [this pack-id]
     (let [versions (get-in @state [:packs pack-id])]
       (when (seq versions)
-        (let [latest (latest-version (keys versions))]
+        (let [latest (support/latest-version (keys versions))]
           (get-pack-version this pack-id latest)))))
 
   (get-pack-version [_this pack-id version]
@@ -333,7 +236,7 @@
 
         :else
         (if-let [pub-bytes (trust-roots/resolve-key trust-roots key-id)]
-          (if-let [sig-bytes (decode-signature sig-str)]
+          (if-let [sig-bytes (support/decode-signature sig-str)]
             (merge claimed
                    (crypto/verify-ed25519 (canonical-edn/pack-signable-bytes pack)
                                           sig-bytes
@@ -365,14 +268,14 @@
     (let [resolved-packs (keep #(resolve-pack this %) pack-ids)
           all-rules (mapcat :pack/rules resolved-packs)]
       (->> all-rules
-           (filter #(rule-applies? % context))
-           (dedupe-by-id)
+           (filter #(support/rule-applies? % context))
+           (support/dedupe-by-id)
            vec))))
 
-;------------------------------------------------------------------------------ Layer 4
+;------------------------------------------------------------------------------ Layer 2
 
 ;; Registry constructors
-(defn ^{:stratum 4} create-registry
+(defn ^{:stratum 2} create-registry
   "Create an in-memory policy pack registry.
 
    Options:
@@ -431,22 +334,5 @@
                          ["test-pack"]
                          {:artifact {:artifact/path "main.tf"}
                           :phase :implement})
-
-  ;; Version comparison
-  (compare-versions "2026.01.22" "2026.01.15")
-  ;; => 7 (positive, first is later)
-
-  (latest-version ["2025.12.01" "2026.01.22" "2026.01.15"])
-  ;; => "2026.01.22"
-
-  ;; Glob matching
-  (glob-matches? "**/*.tf" "modules/vpc/main.tf")
-  ;; => true
-
-  (glob-matches? "*.tf" "main.tf")
-  ;; => true
-
-  (glob-matches? "*.tf" "modules/main.tf")
-  ;; => false
 
   :leave-this-here)
