@@ -39,31 +39,41 @@ primitives into `detection.matching`, and picked up one review fix
 ## Changes in Detail
 
 - New file `detection/custom_registry.clj`: the six functions named
-  above, unchanged bodies. 3 layers (L0: `custom-fn-registry`,
+  above, unchanged bodies, plus two new ones added in a review-fix
+  commit (see below). 3 layers (L0: `custom-fn-registry`,
   `declared-method?`, `reflectable-invoke?`; L1: `variadic-accepts-arity?`,
-  `resolve-custom-fn`; L2: `detector-predicate?`).
-  - `custom-fn-registry`, `resolve-custom-fn`, and `detector-predicate?`
-    are now public (were `^:private`/`defn-` in the combined namespace)
-    because `detection.clj` is now a cross-namespace caller of all
-    three — the only visibility changes in this split.
-- `detection.clj`: the six functions removed.
+  `resolve-custom-fn`, `register!`, `unregister!`; L2: `detector-predicate?`).
+  - `resolve-custom-fn` and `detector-predicate?` are public (were
+    `^:private`/`defn-` in the combined namespace) because `detection.clj`
+    is now a cross-namespace caller of both.
+  - `custom-fn-registry` stays `^:private` — never public. A first cut
+    of this slice made it public so `detection.clj` could `swap!` it
+    directly; Copilot review correctly flagged that as an encapsulation
+    regression this split introduced (the atom was never reachable
+    outside its own file before), so a follow-up commit added
+    `register!`/`unregister!` here as the mutation API and put the atom
+    back behind it.
+- `detection.clj`: the six original functions removed.
   `detect-custom`/`custom-fn-resolvable?`/`detect-violation` now call
-  `custom-registry/resolve-custom-fn`, and
-  `register-custom-fn!`/`unregister-custom-fn!` now call
-  `custom-registry/custom-fn-registry` and
-  `custom-registry/detector-predicate?` across the namespace boundary.
-  `register-custom-fn!`, `unregister-custom-fn!`, `custom-fn-resolvable?`,
-  and `detect-custom` themselves stay in `detection.clj`, unchanged in
-  name/signature — they're the "use the registry" half of the custom-fn
-  extension point; the "store/validate the registry" half moved.
+  `custom-registry/resolve-custom-fn` across the namespace boundary.
+  `register-custom-fn!` validates (unchanged: `symbol?` and
+  `custom-registry/detector-predicate?` checks, throwing `ex-info`) then
+  calls `custom-registry/register!`; `unregister-custom-fn!` calls
+  `custom-registry/unregister!`. Neither touches the registry atom
+  itself anymore. `register-custom-fn!`, `unregister-custom-fn!`,
+  `custom-fn-resolvable?`, and `detect-custom` themselves stay in
+  `detection.clj`, unchanged in name/signature — they're the "use the
+  registry" half of the custom-fn extension point; the "store/validate
+  the registry" half moved.
   Ran `stratum-lint --fix` (folded into the pre-commit hook's
   `lint:stratum` step, same as PR 1/2) to renumber the remaining defs:
   4 → 3 real layers. The ns docstring was written to the correct final
-  state directly in the code-motion commit, not left stale.
+  state directly in the code-motion commit, not left stale, and updated
+  again in the review-fix commit to describe the encapsulated registry.
 - Fan-in re-checked via the fully-qualified namespace grep
-  (`ai\.miniforge\.policy-pack\.detection\b`). All 6 moved symbols were
-  `defn-`/`^:private` in the combined namespace, so **no external caller
-  referenced them directly** — confirmed with
+  (`ai\.miniforge\.policy-pack\.detection\b`). All 6 originally-moved
+  symbols were `defn-`/`^:private` in the combined namespace, so **no
+  external caller referenced them directly** — confirmed with
   `grep -rnE 'declared-method\?|reflectable-invoke\?|variadic-accepts-arity\?'`
   across `components`/`bases`/`projects`, which found only
   self-references inside the new file (plus this namespace's own
@@ -71,8 +81,13 @@ primitives into `detection.matching`, and picked up one review fix
   `ai.miniforge.policy-pack.detection` needed call-site updates for this
   slice.
 
-This is pure code motion — no detection logic changed, def set unchanged
-except location and the three visibility flips documented above.
+This is pure code motion for the six originally-moved functions — no
+detection logic changed, def set unchanged except location and two
+visibility flips (`resolve-custom-fn`, `detector-predicate?` private →
+public). The two new `register!`/`unregister!` functions and the
+`custom-fn-registry` visibility reversal are a real (small) design
+change, added in response to review, not part of the original
+code-motion claim.
 
 ## Testing Plan
 
@@ -94,17 +109,21 @@ except location and the three visibility flips documented above.
   - The pre-commit hook's own `test:precommit`/`test:graalvm` passed on
     both commits.
 - Adversarial self-review: diffed the top-level `defn`/`def` set before
-  and after — exactly 6 relocated, 0 added/removed/altered in behavior;
-  3 visibility flips (private → public), documented above; every other
+  and after — 6 relocated with 0 altered behavior, 2 new functions
+  (`register!`/`unregister!`, added in the review-fix commit), 2
+  visibility flips (`resolve-custom-fn`/`detector-predicate?` private →
+  public) plus one visibility reversal (`custom-fn-registry` briefly
+  public, put back to private in the review-fix commit); every other
   call site update is a namespace-qualification change only.
 
-PR size: two commits, 62 and 89 reportable lines respectively (plus the
-pre-commit hook's `lint:stratum` autofix re-staging, same pattern as PR
-1/2 — not a budget violation, `bb commit-budget` measured the pre-hook
-staged diff). Both comfortably under the 600-line PR budget.
-`MINIFORGE_STRATUM_BUDGET_MODE=warn` used on the second commit for the
-plain-lint pre-commit gate, given `detection.clj` was still (briefly,
-pre-autofix) over budget mid-commit.
+PR size: four commits (62, 89, and 43 reportable lines for the
+code-motion/review-fix commits respectively, plus a doc-only commit;
+the pre-commit hook's `lint:stratum` autofix re-stages beyond what
+`bb commit-budget` measures on the pre-hook staged diff, same pattern
+as PR 1/2 — not a budget violation). All comfortably under the 600-line
+PR budget. `MINIFORGE_STRATUM_BUDGET_MODE=warn` used on the code-motion
+commit for the plain-lint pre-commit gate, given `detection.clj` was
+still (briefly, pre-autofix) over budget mid-commit.
 
 Note: this PR was originally opened as #1765, stacked on #1761 before
 that PR merged. Rebasing the stacked branch onto the post-squash-merge
@@ -135,7 +154,9 @@ and `detection.custom-registry`. No further slices needed for this file.
 - [x] Fan-in confirmed via fully-qualified-namespace grep before starting;
       zero external call-site updates needed (all moved symbols were
       already private)
-- [x] Pure code motion — no behavior change; 3 documented visibility flips
+- [x] Pure code motion for the six originally-moved functions; the
+      registry-encapsulation follow-up (2 new fns, 1 visibility
+      reversal) is a documented, review-driven exception
 - [x] `clj-kondo` clean
 - [x] Tests green across all 6 affected namespaces (run from repo root)
 - [x] PR-diff and commit-diff budgets checked
