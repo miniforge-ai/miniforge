@@ -20,6 +20,7 @@
   (:require
    [clojure.test :refer [deftest is testing use-fixtures]]
    [ai.miniforge.policy-pack.loader :as loader]
+   [ai.miniforge.policy-pack.loader.io :as loader-io]
    [clojure.java.io :as io]))
 
 ;------------------------------------------------------------------------------ Layer 0
@@ -265,7 +266,7 @@
                 :pack/description \"\" :pack/author \"\" :pack/categories []
                 :pack/rules [] :pack/created-at #inst \"2026-01-01\" :pack/updated-at #inst \"2026-01-01\"}"))
 
-      (let [discovered (loader/discover-packs (.getPath packs-dir))]
+      (let [discovered (loader-io/discover-packs (.getPath packs-dir))]
         (is (= 2 (count discovered)))
         (is (some #(= :file (:type %)) discovered))
         (is (some #(= :directory (:type %)) discovered))))))
