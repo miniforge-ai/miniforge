@@ -18,7 +18,8 @@
 (ns ai.miniforge.policy-pack.interface.intent
   "Semantic intent validation — declared intent vs actual resource changes."
   (:require
-   [ai.miniforge.policy-pack.intent :as intent]))
+   [ai.miniforge.policy-pack.intent :as intent]
+   [ai.miniforge.policy-pack.intent.check :as intent-check]))
 
 ;------------------------------------------------------------------------------ Layer 0
 
@@ -43,7 +44,7 @@
   "Full semantic intent check (N4 §4).
    (semantic-intent-check declared-intent counts) returns
    {:passed? bool :violations [...] :inferred-intent keyword :metadata {...}}."
-  intent/semantic-intent-check)
+  intent-check/semantic-intent-check)
 
 (def ^{:stratum 0} parse-terraform-plan-counts
   "Parse terraform plan output into resource change counts.
