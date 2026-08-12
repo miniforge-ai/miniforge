@@ -3,7 +3,19 @@
 ;; Copyright 2025-2026 Christopher Lester. Licensed under Apache 2.0.
 
 {:gate/messages
- {;; Review-approved gate — verdict not approved (carries the decision read)
+ {;; Stale-references gate — registry description
+  :stale-references/description
+  "Fails when a removed keyword or def'd name is still referenced elsewhere in the repo (contract drift)"
+
+  ;; Stale-references gate — stale token found
+  :stale-references/stale
+  "'{token}' was removed by this change but is still referenced by: {files}"
+
+  ;; Stale-references gate — no worktree available
+  :stale-references/no-worktree
+  "No worktree path on the execution context — stale-reference check skipped"
+
+  ;; Review-approved gate — verdict not approved (carries the decision read)
   :review/not-approved
   "Review not approved (decision={decision})"
 
