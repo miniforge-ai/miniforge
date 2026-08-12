@@ -24,6 +24,8 @@
    `#object[...]` that `edn/read-string` refuses."
   (:require
    [ai.miniforge.policy-pack.loader :as loader]
+   [ai.miniforge.policy-pack.loader.io :as loader-io]
+   [ai.miniforge.policy-pack.loader.timestamps :as timestamps]
    [ai.miniforge.policy-pack.schema :as schema]
    [clojure.edn :as edn]
    [clojure.java.io :as io]
@@ -66,7 +68,7 @@
   "Write `pack` and read the raw EDN back, without normalization."
   [pack]
   (let [f (out-file)]
-    (loader/write-pack-to-file pack (.getPath f))
+    (loader-io/write-pack-to-file pack (.getPath f))
     (select-keys (edn/read-string (slurp f)) [:pack/created-at :pack/updated-at])))
 
 (deftest ^{:stratum 1} both-inst-types-are-schema-valid-test
@@ -83,7 +85,7 @@
   (doseq [[label t] [["Date" (Date/from now)] ["Instant" now]]]
     (testing (str "a pack written from a " label " survives the disk boundary")
       (let [f      (out-file)
-            _      (loader/write-pack-to-file (pack-with t) (.getPath f))
+            _      (loader-io/write-pack-to-file (pack-with t) (.getPath f))
             result (loader/load-pack-from-file (.getPath f))]
         (is (:success? result))
         (is (= now (get-in result [:pack :pack/created-at])))
@@ -98,9 +100,9 @@
                      ["an explicit nil" nil]]]
     (testing (str label " is refused")
       (let [f      (out-file)
-            result (loader/write-pack-to-file (assoc (pack-with now)
-                                                     :pack/created-at t)
-                                              (.getPath f))]
+            result (loader-io/write-pack-to-file (assoc (pack-with now)
+                                                        :pack/created-at t)
+                                                 (.getPath f))]
         (is (false? (:success? result)))
         (is (not (.exists f))
             "nothing is written when a timestamp is refused")))))
@@ -120,9 +122,9 @@
       (spit f (pr-str (dissoc (pack-with now) :pack/created-at)))
       (is (false? (:success? (loader/load-pack-from-file (.getPath f)))))))
   (testing "ensure-instant itself reports unreadable rather than answering now"
-    (is (nil? (loader/ensure-instant "not-a-timestamp")))
-    (is (nil? (loader/ensure-instant 1754051696789)))
-    (is (nil? (loader/ensure-instant nil)))))
+    (is (nil? (timestamps/ensure-instant "not-a-timestamp")))
+    (is (nil? (timestamps/ensure-instant 1754051696789)))
+    (is (nil? (timestamps/ensure-instant nil)))))
 
 ;------------------------------------------------------------------------------ Layer 2
 
@@ -147,5 +149,5 @@
       (is (= {:pack/created-at "2026-08-01T12:34:56.789Z"
               :pack/updated-at "2026-08-01T12:34:56.789Z"}
              (written-timestamps (assoc (pack-with now) :pack/signed-at now))))
-      (loader/write-pack-to-file (pack-with now) (.getPath plain))
+      (loader-io/write-pack-to-file (pack-with now) (.getPath plain))
       (is (not (contains? (edn/read-string (slurp plain)) :pack/signed-at))))))

@@ -43,9 +43,9 @@
    depth, so the remaining overlay/dependency/trust/orchestration code now
    measures 3 real layers on its own, within budget."
   (:require
+   [ai.miniforge.knowledge.interface :as knowledge]
    [ai.miniforge.policy-pack.loader.io :as loader-io]
    [ai.miniforge.policy-pack.loader.normalize :as normalize]
-   [ai.miniforge.knowledge.interface :as knowledge]
    [ai.miniforge.policy-pack.rules.pack-dependency-validation :as dep-validation]
    [ai.miniforge.policy-pack.schema :as schema]
    [ai.miniforge.policy-pack.schema-validation :as schema-validation]

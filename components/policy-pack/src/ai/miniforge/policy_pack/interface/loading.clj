@@ -18,7 +18,8 @@
 (ns ai.miniforge.policy-pack.interface.loading
   "Pack loading and serialization helpers."
   (:require
-   [ai.miniforge.policy-pack.loader :as loader]))
+   [ai.miniforge.policy-pack.loader :as loader]
+   [ai.miniforge.policy-pack.loader.io :as loader-io]))
 
 ;------------------------------------------------------------------------------ Layer 0
 
@@ -52,7 +53,7 @@
   "Discover packs in a directory: top-level *.pack.edn files and subdirectories
    containing pack.edn. Returns a vector of {:path string :type :file|:directory}
    (nil when the directory does not exist)."
-  loader/discover-packs)
+  loader-io/discover-packs)
 
 (def ^{:stratum 0} load-all-packs
   "Load every pack discovered in a directory. Arity [packs-dir] or
@@ -67,4 +68,4 @@
    neither an Instant nor a Date is refused and nothing is written.
    (write-pack-to-file pack file-path) returns {:success? bool :error
    string-or-nil} — nil on success."
-  loader/write-pack-to-file)
+  loader-io/write-pack-to-file)
