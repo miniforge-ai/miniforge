@@ -53,7 +53,12 @@
 
   (testing "given caller thresholds → they replace the defaults"
     (is (= :slop (graded (scan-of 400 (hit "robust" :marketing 3))
-                         {:thresholds {:threshold/suspect 1.0 :threshold/slop 2.0}})))))
+                         {:thresholds {:threshold/suspect 1.0 :threshold/slop 2.0}}))))
+
+  (testing "given only one boundary → the other keeps its default rather than
+            being compared against nothing"
+    (is (= :suspect (graded (scan-of 400 (hit "robust" :marketing 3))
+                            {:thresholds {:threshold/suspect 1.0}})))))
 
 (deftest ^{:stratum 1} test-short-texts-are-damped-but-not-exempt
   (testing "given a lone filler word in a short reply → clean, not a false alarm"

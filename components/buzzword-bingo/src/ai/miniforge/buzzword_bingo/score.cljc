@@ -73,10 +73,12 @@
    counts, per-thousand-word rates, per-category and per-term tallies,
    and a grade of `:clean`, `:suspect` or `:slop`.
 
-   `:thresholds` in `opts` replaces the default grade boundaries."
+   `:thresholds` in `opts` overrides grade boundaries; it is merged
+   over the defaults, so supplying one boundary leaves the other in
+   place rather than comparing against nothing."
   ([scan] (summarize scan nil))
   ([scan opts]
-   (let [thresholds (get opts :thresholds default-thresholds)
+   (let [thresholds (merge default-thresholds (:thresholds opts))
          hits       (get scan :scan/hits)
          words      (get scan :scan/word-count 0)
          weighted   (tally/weight-of hits)

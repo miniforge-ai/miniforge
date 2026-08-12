@@ -67,4 +67,9 @@
 
   (testing "given neither a term nor a label → the catalog is refused at load"
     (is (thrown? #?(:clj Exception :cljs js/Error)
-                 (compiled {:entry/category :mild})))))
+                 (compiled {:entry/category :mild}))))
+
+  (testing "given a term with no identifier-forming characters → refused rather
+            than given a blank id that would merge it with the next such entry"
+    (is (thrown? #?(:clj Exception :cljs js/Error)
+                 (compiled {:entry/term "!!!" :entry/category :mild})))))

@@ -29,11 +29,18 @@
 ;------------------------------------------------------------------------------ Layer 0
 
 ;; Reading one entry
-(defn- ^{:stratum 0} slug [s]
-  (-> (regex/ascii-lower s)
-      (str/replace #"[^a-z0-9]+" "-")
-      (str/replace #"^-" "")
-      (str/replace #"-$" "")))
+;; A display name with no ASCII alphanumerics at all slugs to the empty
+;; string. Two such entries would share the blank id and silently merge in the
+;; per-term tallies, which group on it, so the catalog is refused instead.
+(defn- ^{:stratum 0} slug-id [s]
+  (let [slug (-> (regex/ascii-lower s)
+                 (str/replace #"[^a-z0-9]+" "-")
+                 (str/replace #"^-" "")
+                 (str/replace #"-$" ""))]
+    (when (str/blank? slug)
+      (throw (#?(:clj IllegalArgumentException. :cljs js/Error.)
+              (str "Lexicon entry has no identifier-forming characters: " (pr-str s)))))
+    (keyword slug)))
 
 ;; An entry supplies either a literal term or raw pattern source; the raw form
 ;; exists for shapes with no single literal, such as a variable middle.
@@ -66,7 +73,7 @@
         weight  (get entry :entry/weight
                      (weight-for categories (get entry :entry/category)))]
     (assoc entry
-           :entry/id (keyword (slug display))
+           :entry/id (slug-id display)
            :entry/display display
            :entry/effective-weight weight
            :entry/regex (entry-pattern entry))))

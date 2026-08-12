@@ -51,10 +51,14 @@
 ;------------------------------------------------------------------------------ Layer 2
 
 ;; Published breakdowns
+;; Written with a transducer rather than update-vals so the namespace carries
+;; no floor on the Clojure or ClojureScript version a consumer builds against.
 (defn ^{:stratum 2} by-category
   "Category key → count and weight, for every category present in `hits`."
   [hits]
-  (update-vals (group-by :hit/category hits) category-tally))
+  (into {}
+        (map (fn [[category grouped]] [category (category-tally grouped)]))
+        (group-by :hit/category hits)))
 
 (defn ^{:stratum 2} by-term
   "Per-term tallies for `hits`, heaviest first."
