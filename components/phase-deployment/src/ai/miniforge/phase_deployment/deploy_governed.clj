@@ -45,9 +45,12 @@
       (str (System/getProperty "user.home") "/.miniforge/effects")))
 
 (defn- ^{:stratum 0} refusal
-  [code detail]
+  "A refusal names the stage it happened at. Hard-coding one stage
+   makes a preflight denial read as an authority failure, which sends
+   whoever is debugging it to the wrong place."
+  [stage code detail]
   {:deploy/status :failed
-   :deploy/stage :authority
+   :deploy/stage stage
    :deploy/rollback-info nil
    :deploy/failure detail
    :deploy/refusal code})
@@ -103,7 +106,7 @@
   (let [rendered ((:dry-run! provider) deploy-config)
         pre (authority/preflight rendered (:policy-context context {}))]
     (if (= :deny (:preflight/result pre))
-      (refusal :deploy/preflight-denied
+      (refusal :preflight :deploy/preflight-denied
                (str "deployment preflight denied: "
                     (pr-str (:preflight/violations pre))))
       (let [rollback-info ((:rollback-info! provider) deploy-config)
@@ -111,17 +114,17 @@
                                     (:preflight/result pre) now)]
         (cond
           (anomaly/anomaly? auth)
-          (refusal :deploy/authority-unavailable (:anomaly/message auth))
+          (refusal :authority :deploy/authority-unavailable (:anomaly/message auth))
 
           (not (authority/permitted? auth))
-          (refusal :deploy/authority-denied
+          (refusal :authority :deploy/authority-denied
                    (str "deploy authority denied: "
                         (get-in auth [:authority/envelope :envelope/decision])))
 
           :else
           (let [proposed (propose! context auth (:preflight/rendered pre) now)]
             (if (anomaly/anomaly? proposed)
-              (refusal :deploy/proposal-failed (:anomaly/message proposed))
+              (refusal :proposal :deploy/proposal-failed (:anomaly/message proposed))
               (let [committed (commit! context proposed auth now
                                        #((:apply! provider) deploy-config)
                                        #((:observe! provider) deploy-config))]

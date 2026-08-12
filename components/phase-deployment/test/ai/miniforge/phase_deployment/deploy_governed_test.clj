@@ -87,6 +87,7 @@
                                      now)]
       (is (= :failed (:deploy/status result)))
       (is (= :deploy/authority-unavailable (:deploy/refusal result)))
+      (is (= :authority (:deploy/stage result)))
       (is (not (some #{:apply!} @calls))
           (str "no kubectl mutation may run without authority, saw: "
                (pr-str @calls))))))
@@ -103,6 +104,8 @@
                                      now)]
       (is (= :failed (:deploy/status result)))
       (is (= :deploy/preflight-denied (:deploy/refusal result)))
+      (is (= :preflight (:deploy/stage result))
+          "a preflight denial must not report as an authority failure")
       (is (not (some #{:apply!} @calls))
           (str "a denied preflight must not reach kubectl, saw: " (pr-str @calls)))))
 
