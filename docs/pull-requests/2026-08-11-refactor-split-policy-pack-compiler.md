@@ -55,7 +55,7 @@ had grown to 8 real dependency layers.
 
 ### Visibility changes (the only non-motion changes)
 
-Four defs go from `defn-`/private to `defn`/public because a sibling
+Five defs go from `defn-`/private to `defn`/public because a sibling
 namespace now calls them cross-namespace; no signature, name, or
 logic changed:
 
@@ -162,9 +162,12 @@ changes are part of this follow-up.
 - [x] stratum-lint clean on all resulting files
 - [x] `bb lint:clj` clean
 - [x] `bb pre-commit` green on both commits
-- [x] `bb test` green (policy-pack change-scope)
-- [x] Adversarial self-review: def set unchanged (relocated + 5
-      re-exports added), 5 visibility flips documented above, one
+- [x] `bb test` (poly runner) hung and was killed; verified directly
+      via `clojure -M:test` instead (86 tests, 460 assertions, 0
+      failures across the affected namespaces) — see Testing Plan
+- [x] Adversarial self-review: def set unchanged (relocated + 3
+      re-export defs added: `resolve-detector`, `rule-enabled?`,
+      `compile-rule-check`), 5 visibility flips documented above, one
       cosmetic local-parameter rename, no logic changes
 - [x] Zero fan-in confirmed repo-wide before starting; all four
       matches accounted for, zero required a code change
