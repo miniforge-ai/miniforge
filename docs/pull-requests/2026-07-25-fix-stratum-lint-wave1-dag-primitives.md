@@ -1,3 +1,8 @@
+<!--
+  Title: Miniforge.ai
+  Author: Christopher Lester (christopher@miniforge.ai)
+  Copyright 2025-2026 Christopher Lester. Licensed under Apache 2.0.
+-->
 # fix: stratum-lint autofix for components/dag-primitives (Wave 1)
 
 ## Overview
