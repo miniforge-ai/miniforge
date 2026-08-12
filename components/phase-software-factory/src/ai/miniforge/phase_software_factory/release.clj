@@ -42,6 +42,16 @@
 
 ;------------------------------------------------------------------------------ Layer 0
 
+(defn ^{:stratum 0} attach-consultation
+  "Record `codex-outcome`'s summary onto `result`, on both success and
+   failure -- :output starts nil on response/failure, so a failed
+   release that consulted must not be ledgered as one that never did."
+  [result codex-outcome]
+  (cond-> result
+    (map? result)
+    (assoc-in [:output :codex/consultation]
+              (codex-pin/consultation-summary codex-outcome nil))))
+
 ;; Defaults
 (def ^{:stratum 0} default-config
   "Phase defaults loaded from config/phase/defaults.edn."
@@ -327,7 +337,9 @@
              :github-token (resolve-github-token ctx)}
       on-chunk (assoc :on-chunk on-chunk)
       behavior-addendum (assoc :task/behavior-addendum behavior-addendum)
-      codex-outcome (assoc :codex/outcome codex-outcome))))
+      ;; :text already rode into the behavior addendum; the summary only
+      ;; needs the status fields — don't ship the rendered prose twice.
+      codex-outcome (assoc :codex/outcome (dissoc codex-outcome :text)))))
 
 (defn ^{:stratum 1} leave-release
   "Post-processing for release phase.
@@ -626,11 +638,7 @@
         ;; SPEC s7.4.3: consultation provenance onto the durable result —
         ;; the gap instrument reads it at leave (same marker implement and
         ;; plan carry). Release has no recorded context-reads channel.
-        result (if (map? (:output result))
-                 (assoc-in result [:output :codex/consultation]
-                           (codex-pin/consultation-summary
-                             (:codex/outcome exec-context) nil))
-                 result)]
+        result (attach-consultation result (:codex/outcome exec-context))]
 
     (-> (phase/enter-context ctx :release :releaser gates budget start-time result)
         ;; Single derived projection of the canonical pr-info onto ctx-level

@@ -82,7 +82,7 @@
    :summary        "Implemented feature: Add feature (2 files)"
    :metrics        {:tokens 1500 :duration-ms 3200}})
 
-;------------------------------------------------------------------------------ Layer 0: Defaults Tests
+;; Defaults Tests
 (deftest ^{:stratum 0} default-config-test
   (testing "release phase has correct default configuration"
     (is (= :releaser (:agent release/default-config)))
@@ -92,6 +92,17 @@
     (is (= 2 (get-in release/default-config [:budget :iterations])))
     (is (= 180 (get-in release/default-config [:budget :time-seconds])))))
 
+(deftest ^{:stratum 0} attach-consultation-test
+  (testing "output starting nil (response/failure shape) still gets the consultation"
+    (let [result (release/attach-consultation {:success? false :output nil} {:pegs []})]
+      (is (some? (get-in result [:output :codex/consultation])))))
+  (testing "output already a map keeps its other keys"
+    (let [result (release/attach-consultation {:output {:pr-url "x"}} {:pegs []})]
+      (is (= "x" (get-in result [:output :pr-url])))
+      (is (some? (get-in result [:output :codex/consultation])))))
+  (testing "a non-map result passes through unchanged"
+    (is (nil? (release/attach-consultation nil {:pegs []})))))
+
 (deftest ^{:stratum 0} phase-defaults-registration-test
   (testing "release phase defaults are registered"
     (let [defaults (phase/phase-defaults :release)]
@@ -99,7 +110,7 @@
       (is (= :releaser (:agent defaults)))
       (is (= [:release-ready] (:gates defaults))))))
 
-;------------------------------------------------------------------------------ Layer 1: Diagnostic-emission regression tests
+;; Diagnostic-emission regression tests
 ;;
 ;; These tests pin the observability behavior added 2026-05-04. The
 ;; production fix for the dogfood release-phase silent fail is two-part:
@@ -125,7 +136,7 @@
   [entries-atom]
   (into #{} (keep :log/event) @entries-atom))
 
-;------------------------------------------------------------------------------ Layer 0: Boundary-commit rehydration regression
+;; Boundary-commit rehydration regression
 ;;
 ;; Stage-3 dogfood (2026-05-07): plan/implement/verify/review all green,
 ;; files committed on the task branch by the implement-phase boundary,
@@ -745,7 +756,7 @@
             (is (= "release chunk" (:chunk/delta (first chunk-events))))
             (is (= :release (:agent/id (first chunk-events)))))))))))
 
-;------------------------------------------------------------------------------ Layer 2: Interceptor Leave Tests
+;; Interceptor Leave Tests
 (deftest ^{:stratum 3} leave-release-records-metrics-test
   (testing "leave-release records duration and completion"
     (with-test-worktree
