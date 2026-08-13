@@ -37,10 +37,11 @@ own test namespace) is one of this batch.
   reported the file back over budget after an initial attempt at
   keeping it in this file).
 - `workflow_selector.clj` (parent): `explain-selection`, an
-  `analyze-spec` re-export (`def` pointing at `spec-analysis/analyze-
-  spec`), and `match-rule` (real implementation — `(some (fn [rule-fn]
-  (rule-fn features)) rules/selection-rules)`) at layer 0, plus
-  `select-workflow` at layer 1. `match-rule` stays here rather than in
+  `analyze-spec` re-export (`def` pointing at
+  `spec-analysis/analyze-spec`), and `match-rule` (real
+  implementation — `(some (fn [rule-fn] (rule-fn features))
+  rules/selection-rules)`) at layer 0, plus `select-workflow` at
+  layer 1. `match-rule` stays here rather than in
   `rules.clj` because the cross-namespace call to
   `rules/selection-rules` doesn't add to *this* file's own layer
   depth — the same technique `loader.clj`'s rule-210 split used
