@@ -101,6 +101,7 @@
   "Select appropriate workflow based on spec analysis.
 
    Returns map with:
+   - :selection-profile - Logical profile the rule matched (:comprehensive, :fast, or :default)
    - :workflow-type - Selected workflow keyword
    - :confidence - :high, :medium, or :low
    - :reason - Human-readable explanation
