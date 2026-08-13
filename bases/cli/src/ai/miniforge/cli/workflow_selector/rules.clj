@@ -114,3 +114,12 @@
    match-bugfix-rule
    match-docs-only-rule
    match-unknown-rule])
+
+;------------------------------------------------------------------------------ Rich Comment
+(comment
+  (some (fn [rule-fn] (rule-fn {:type :bugfix :keywords #{:bugfix}}))
+        selection-rules)
+  ;; => {:selection-profile :fast, :workflow-type :quick-fix,
+  ;;     :confidence :high, :reason "..."}
+
+  :end)

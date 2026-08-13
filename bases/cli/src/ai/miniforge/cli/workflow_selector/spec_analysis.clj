@@ -155,3 +155,14 @@
      :keywords keywords
      :size size
      :constraint-mentions (extract-constraints-mentions spec)}))
+
+;------------------------------------------------------------------------------ Rich Comment
+(comment
+  (analyze-spec {:spec/title "Fix authentication timeout"
+                 :spec/description "Fix bug where auth token expires too quickly"
+                 :spec/intent {:type :bugfix}})
+  ;; => {:type :bugfix, :implementation-plan nil, :pr-count nil,
+  ;;     :has-dependencies? nil, :keywords #{:bugfix}, :size :unknown,
+  ;;     :constraint-mentions #{}}
+
+  :end)
