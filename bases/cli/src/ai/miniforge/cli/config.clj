@@ -26,6 +26,8 @@
    [babashka.process :as process]
    [ai.miniforge.cli.app-config :as app-config]
    [ai.miniforge.cli.backends :as backends]
+   [ai.miniforge.cli.backends.config :as backend-config]
+   [ai.miniforge.cli.backends.status :as backend-status]
    [ai.miniforge.cli.messages :as messages]
    [ai.miniforge.cli.resource-config :as resource-config]))
 
@@ -132,7 +134,7 @@
   (println (messages/t :config/section-llm))
   (println (messages/t :config/llm-backend
                        {:backend (format-config-value (get-in config [:llm :backend]))
-                        :provider (or (get-in backends/backend-specs
+                        :provider (or (get-in backend-config/backend-specs
                                               [(get-in config [:llm :backend]) :provider])
                                       (messages/t :config/llm-backend-provider-unknown))}))
   (println (messages/t :config/llm-model {:model (get-in config [:llm :model])}))
@@ -268,12 +270,12 @@
         (println (messages/t :config/backend-usage {:command (app-config/command-string "config backend <name>")}))
         (println)
         (println (messages/t :config/backend-available-header))
-        (doseq [backend (keys backends/backend-specs)]
+        (doseq [backend (keys backend-config/backend-specs)]
           (println (messages/t :config/backend-item {:name (name backend)})))
         (println)
         (println (messages/t :config/backend-detail-hint {:command (app-config/command-string "config backends")})))
       (let [backend-kw (keyword backend-str)
-            validation (backends/validate-backend backend-kw)]
+            validation (backend-status/validate-backend backend-kw)]
         (if (:valid? validation)
           ;; Backend is available, set it
           (let [user-config (or (read-config-file config-path) default-config)
@@ -282,7 +284,7 @@
             (println)
             (print-success (messages/t :config/backend-set-success {:backend backend-str}))
             (println (messages/t :config/backend-saved {:path config-path}))
-            (let [info (backends/get-backend-info backend-kw)]
+            (let [info (backend-status/get-backend-info backend-kw)]
               (println (messages/t :config/backend-provider {:provider (:provider info)}))
               (when (:default-model info)
                 (println (messages/t :config/backend-model {:model (:default-model info)}))))
@@ -311,7 +313,7 @@
             (println)
             ;; Check backend validity
             (let [backend (get-in config [:llm :backend])
-                  validation (when backend (backends/validate-backend backend))]
+                  validation (when backend (backend-status/validate-backend backend))]
               (when validation
                 (if (:valid? validation)
                   (println (messages/t :config/validate-backend-available
