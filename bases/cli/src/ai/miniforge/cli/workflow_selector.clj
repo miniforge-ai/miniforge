@@ -21,106 +21,55 @@
    Analyzes workflow specs and automatically selects the appropriate workflow
    profile, then resolves that profile to the active app's workflow id.
 
-   Layer 0: Spec analysis - extract features from spec
-   Layer 1: Rule matching - apply selection rules
-   Layer 2: Workflow selection with reasoning"
+   Feature extraction and individual rule matchers live in sibling
+   `ai.miniforge.cli.workflow-selector.*` namespaces (rule 210: the
+   combined namespace measured 5 real layers, max 3) — `analyze-spec`
+   is re-exported from `spec-analysis` here so this stays the single
+   public entry point. `match-rule` itself stays here rather than in
+   `rules`: dispatching over `rules/selection-rules` is a 4th real
+   layer on top of that namespace's own 3 (selection result -> rule
+   matchers -> ordered list), and the cross-namespace call doesn't add
+   to this file's own layer depth.
+
+   Layer 0: Explanation formatting, spec-analysis re-export, rule dispatch
+   Layer 1: Workflow selection with reasoning"
   (:require
-   [clojure.string :as str]
    [ai.miniforge.cli.messages :as messages]
-   [ai.miniforge.cli.workflow-selection-config :as selection-config]))
+   [ai.miniforge.cli.workflow-selector.rules :as rules]
+   [ai.miniforge.cli.workflow-selector.spec-analysis :as spec-analysis]))
 
 ;------------------------------------------------------------------------------ Layer 0
 
-;; Spec feature extraction
-(defn ^{:stratum 0} extract-type
-  "Extract task type from spec.
-   After normalization, :spec/intent is guaranteed to be set."
-  [spec]
-  (or (get-in spec [:spec/intent :type])
-      (get-in spec [:spec/raw-data :type])
-      :unknown))
+(def ^{:stratum 0} analyze-spec
+  "Analyze spec and extract decision features.
 
-(defn ^{:stratum 0} extract-implementation-plan
-  "Extract implementation plan details from spec."
-  [spec]
-  (or (get-in spec [:spec/raw-data :implementation-plan])
-      (get-in spec [:spec/intent :implementation-plan])
-      (:implementation-plan spec)))
+   Returns map with:
+   - :type - Task type (:feature, :refactoring, :bugfix, :docs, etc.)
+   - :implementation-plan - Implementation plan structure
+   - :pr-count - Number of PRs/phases
+   - :has-dependencies? - Whether phases have dependencies
+   - :keywords - Set of extracted keywords
+   - :size - Estimated size (:small, :medium, :large, :unknown)
+   - :constraint-mentions - Set of mentioned constraints"
+  spec-analysis/analyze-spec)
 
-(defn ^{:stratum 0} count-prs
-  "Count number of PRs/phases in implementation plan."
-  [impl-plan]
-  (when impl-plan
-    (count (filter (fn [[k _v]] (str/starts-with? (name k) "pr-"))
-                   impl-plan))))
+(defn ^{:stratum 0} match-rule
+  "Apply selection rules to features and return first match.
 
-(defn ^{:stratum 0} has-dependencies?
-  "Check if implementation plan has dependencies between phases."
-  [impl-plan]
-  (when impl-plan
-    (some (fn [[_k v]]
-            (and (map? v)
-                 (or (seq (:dependencies v))
-                     (not-empty (:base v)))))
-          impl-plan)))
+   Rules are applied in order:
+   1. Multi-phase implementation → comprehensive profile
+   2. Refactoring with stratification → comprehensive profile
+   3. Large feature → comprehensive profile
+   4. Bug fix → fast profile
+   5. Docs only → fast profile
+   6. Unknown → default profile
 
-(defn ^{:stratum 0} extract-description-keywords
-  "Extract significant keywords from spec description."
-  [spec]
-  (let [desc (str/lower-case (or (:spec/description spec) ""))
-        title (str/lower-case (or (:spec/title spec) ""))]
-    (set (concat
-          (when (or (str/includes? desc "refactor")
-                    (str/includes? title "refactor"))
-            [:refactoring])
-          (when (or (str/includes? desc "stratif")
-                    (str/includes? desc "layer"))
-            [:stratified-design])
-          (when (or (str/includes? desc "multi-phase")
-                    (str/includes? desc "multiple phase")
-                    (str/includes? desc "6 pr")
-                    (str/includes? desc "multi-pr"))
-            [:multi-phase])
-          (when (or (str/includes? desc "bug")
-                    (str/includes? desc "fix"))
-            [:bugfix])
-          (when (or (str/includes? desc "document")
-                    (str/includes? desc "docs only"))
-            [:docs-only])
-          (when (or (str/includes? desc "large")
-                    (str/includes? desc "complex")
-                    (str/includes? desc "comprehensive"))
-            [:large-scope])
-          (when (or (str/includes? desc "simple")
-                    (str/includes? desc "small")
-                    (str/includes? desc "quick"))
-            [:small-scope])))))
-
-(defn ^{:stratum 0} extract-constraints-mentions
-  "Extract constraint mentions from spec."
-  [spec]
-  (let [constraints (get spec :spec/constraints [])]
-    (set (concat
-          (when (some #(or (str/includes? (str/lower-case (str %)) "rule 720")
-                           (str/includes? (str/lower-case (str %)) "≤400"))
-                      constraints)
-            [:rule-720])
-          (when (some #(or (str/includes? (str/lower-case (str %)) "rule 210")
-                           (str/includes? (str/lower-case (str %)) "≤3 layer")
-                           (str/includes? (str/lower-case (str %)) "stratif"))
-                      constraints)
-            [:rule-210])
-          (when (some #(str/includes? (str/lower-case (str %)) "zero lint")
-                      constraints)
-            [:zero-linting])))))
-
-(defn ^{:stratum 0} selection-result
-  "Build a selection result from a logical profile."
-  [profile confidence reason]
-  {:selection-profile profile
-   :workflow-type (selection-config/resolve-selection-profile profile)
-   :confidence confidence
-   :reason reason})
+   Returns map with:
+   - :workflow-type - Selected workflow keyword
+   - :confidence - :high, :medium, or :low
+   - :reason - Human-readable explanation"
+  [features]
+  (some (fn [rule-fn] (rule-fn features)) rules/selection-rules))
 
 (defn ^{:stratum 0} explain-selection
   "Generate user-facing explanation for workflow selection.
@@ -146,135 +95,8 @@
 
 ;------------------------------------------------------------------------------ Layer 1
 
-(defn ^{:stratum 1} estimate-size
-  "Estimate scope size from spec."
-  [spec impl-plan]
-  (let [keywords (extract-description-keywords spec)
-        pr-count (count-prs impl-plan)]
-    (cond
-      (and pr-count (>= pr-count 5)) :large
-      (contains? keywords :large-scope) :large
-      (contains? keywords :small-scope) :small
-      (and pr-count (>= pr-count 3)) :medium
-      :else :unknown)))
-
-;; Rule matching
-(defn ^{:stratum 1} match-multi-phase-rule
-  "Multi-phase implementation → comprehensive profile"
-  [features]
-  (when (and (:pr-count features)
-             (>= (:pr-count features) 4))
-    (selection-result :comprehensive
-                      :high
-                      (messages/t :selector/reason-multi-phase
-                                  {:pr-count (:pr-count features)}))))
-
-(defn ^{:stratum 1} match-refactoring-stratification-rule
-  "Refactoring with stratification → comprehensive profile"
-  [features]
-  (when (and (or (= (:type features) :refactoring)
-                 (contains? (:keywords features) :refactoring))
-             (or (contains? (:keywords features) :stratified-design)
-                 (contains? (:constraint-mentions features) :rule-210)))
-    (selection-result :comprehensive
-                      :high
-                      (messages/t :selector/reason-refactoring-stratification))))
-
-(defn ^{:stratum 1} match-large-feature-rule
-  "Large feature → comprehensive profile"
-  [features]
-  (when (and (= (:size features) :large)
-             (not (contains? (:keywords features) :bugfix))
-             (not (contains? (:keywords features) :docs-only)))
-    (selection-result :comprehensive
-                      :medium
-                      (messages/t :selector/reason-large-feature))))
-
-(defn ^{:stratum 1} match-bugfix-rule
-  "Bug fix → fast profile"
-  [features]
-  (when (or (= (:type features) :bugfix)
-            (contains? (:keywords features) :bugfix))
-    (selection-result :fast
-                      :high
-                      (messages/t :selector/reason-bugfix))))
-
-(defn ^{:stratum 1} match-docs-only-rule
-  "Docs only → fast profile"
-  [features]
-  (when (or (= (:type features) :docs)
-            (contains? (:keywords features) :docs-only))
-    (selection-result :fast
-                      :high
-                      (messages/t :selector/reason-docs-only))))
-
-(defn ^{:stratum 1} match-unknown-rule
-  "Unknown/ambiguous → default profile"
-  [_features]
-  (selection-result :default
-                    :low
-                    (messages/t :selector/reason-unknown)))
-
-;------------------------------------------------------------------------------ Layer 2
-
-(defn ^{:stratum 2} analyze-spec
-  "Analyze spec and extract decision features.
-
-   Returns map with:
-   - :type - Task type (:feature, :refactoring, :bugfix, :docs, etc.)
-   - :implementation-plan - Implementation plan structure
-   - :pr-count - Number of PRs/phases
-   - :has-dependencies? - Whether phases have dependencies
-   - :keywords - Set of extracted keywords
-   - :size - Estimated size (:small, :medium, :large, :unknown)
-   - :constraint-mentions - Set of mentioned constraints"
-  [spec]
-  (let [task-type (extract-type spec)
-        impl-plan (extract-implementation-plan spec)
-        pr-count (count-prs impl-plan)
-        keywords (extract-description-keywords spec)
-        size (estimate-size spec impl-plan)]
-    {:type task-type
-     :implementation-plan impl-plan
-     :pr-count pr-count
-     :has-dependencies? (has-dependencies? impl-plan)
-     :keywords keywords
-     :size size
-     :constraint-mentions (extract-constraints-mentions spec)}))
-
-(def ^{:stratum 2} selection-rules
-  "Ordered list of selection rules. First matching rule wins."
-  [match-multi-phase-rule
-   match-refactoring-stratification-rule
-   match-large-feature-rule
-   match-bugfix-rule
-   match-docs-only-rule
-   match-unknown-rule])
-
-;------------------------------------------------------------------------------ Layer 3
-
-(defn ^{:stratum 3} match-rule
-  "Apply selection rules to features and return first match.
-
-   Rules are applied in order:
-   1. Multi-phase implementation → comprehensive profile
-   2. Refactoring with stratification → comprehensive profile
-   3. Large feature → comprehensive profile
-   4. Bug fix → fast profile
-   5. Docs only → fast profile
-   6. Unknown → default profile
-
-   Returns map with:
-   - :workflow-type - Selected workflow keyword
-   - :confidence - :high, :medium, or :low
-   - :reason - Human-readable explanation"
-  [features]
-  (some (fn [rule-fn] (rule-fn features)) selection-rules))
-
-;------------------------------------------------------------------------------ Layer 4
-
 ;; Workflow selection with reasoning
-(defn ^{:stratum 4} select-workflow
+(defn ^{:stratum 1} select-workflow
   "Select appropriate workflow based on spec analysis.
 
    Returns map with:
