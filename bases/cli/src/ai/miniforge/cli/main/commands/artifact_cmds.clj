@@ -19,12 +19,17 @@
   "Artifact commands: list, provenance.
 
    Uses ai.miniforge.artifact.interface directly, falling back to filesystem
-   scanning of the configured artifacts directory when the store cannot be queried."
+   scanning of the configured artifacts directory when the store cannot be queried.
+
+   Provenance rendering (the header/fields/sections spec and its renderer)
+   lives in the sibling ai.miniforge.cli.main.commands.artifact-cmds.provenance-view
+   namespace (rule 210: kept here, it pushed this file to 4 real layers, max 3)."
   (:require
    [ai.miniforge.artifact.interface :as artifact]
    [clojure.java.io :as io]
    [clojure.string :as str]
    [ai.miniforge.cli.app-config :as app-config]
+   [ai.miniforge.cli.main.commands.artifact-cmds.provenance-view :as provenance-view]
    [ai.miniforge.cli.main.commands.shared :as shared]
    [ai.miniforge.cli.main.display :as display]
    [ai.miniforge.cli.messages :as messages]))
@@ -45,12 +50,6 @@
     (< bytes shared/bytes-per-kb) (str bytes "B")
     (< bytes shared/bytes-per-mb) (format "%.1fKB" (/ bytes (double shared/bytes-per-kb)))
     :else                         (format "%.1fMB" (/ bytes (double shared/bytes-per-mb)))))
-
-;; Display helpers
-(defn- ^{:stratum 0} keyword->str
-  "Convert a value to string, rendering keywords as their name."
-  [v]
-  (if (keyword? v) (name v) (str v)))
 
 ;------------------------------------------------------------------------------ Layer 1
 
@@ -74,24 +73,7 @@
     (artifact/get-provenance (create-artifact-store) id)
     (catch Exception _ nil)))
 
-(def ^{:stratum 1} ^:private provenance-spec
-  {:header   :artifact/provenance-header
-   :fields   [[:artifact/workflow-id :artifact/provenance-workflow {:transform keyword->str}]
-              [:artifact/phase       :artifact/provenance-phase    {:transform keyword->str}]
-              [:artifact/agent-id    :artifact/provenance-agent    {:transform keyword->str}]
-              [:artifact/git-commit  :artifact/provenance-commit   {:transform keyword->str}]
-              [:artifact/created-at  :artifact/provenance-created  {:transform keyword->str}]]
-   :sections [{:key :artifact/parent-ids :header :artifact/provenance-parents
-               :entry :artifact/provenance-parent-entry :entry-fn (fn [id] {:id id})}
-              {:key :artifact/files :header :artifact/provenance-files
-               :entry :artifact/provenance-file-entry :entry-fn (fn [p] {:path p})}]})
-
 ;------------------------------------------------------------------------------ Layer 2
-
-(defn- ^{:stratum 2} display-provenance
-  "Render the full provenance block for an artifact."
-  [id provenance]
-  (display/render-detail (assoc provenance-spec :header-params {:id id}) provenance))
 
 ;; Command implementations
 (defn ^{:stratum 2} artifact-list-cmd
@@ -127,9 +109,7 @@
           (println (messages/t :artifact/none))))))
   (println))
 
-;------------------------------------------------------------------------------ Layer 3
-
-(defn ^{:stratum 3} artifact-provenance-cmd
+(defn ^{:stratum 2} artifact-provenance-cmd
   "Show provenance chain for an artifact by ID.
 
    Provenance includes: workflow run, phase that produced it, agent,
@@ -140,7 +120,7 @@
       (shared/usage-error! :artifact/provenance-usage "artifact provenance <id>")
       (let [provenance (get-component-provenance id)]
         (if provenance
-          (display-provenance id provenance)
+          (provenance-view/display-provenance id provenance)
           ;; Fallback: look for artifact file in artifacts dir
           (let [art-file (io/file (str (artifacts-dir) "/" id))]
             (if (.exists art-file)
