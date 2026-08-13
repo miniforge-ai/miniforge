@@ -33,8 +33,16 @@ commands).
 
 - New file `artifact_cmds/provenance_view.clj`
   (`ai.miniforge.cli.main.commands.artifact-cmds.provenance-view`):
-  `keyword->str` (Layer 0), `provenance-spec` (Layer 1),
-  `display-provenance` (Layer 2) — unchanged behavior, 3 layers.
+  `keyword->str` (Layer 0, stays private), `provenance-spec` (Layer 1,
+  stays private), `display-provenance` (Layer 2) — unchanged behavior,
+  3 layers. `display-provenance` is now public (`defn`, not `defn-`)
+  since `artifact_cmds.clj` calls it cross-namespace as
+  `provenance-view/display-provenance`; the other two stay private,
+  used only within this file. Same shape as the reference split
+  (`builtin_detectors.clj` -> `approved_instance_types.clj`,
+  miniforge#1730), which likewise made its extracted entry point
+  public — this codebase has no `:no-doc` convention for
+  internal-but-cross-namespace vars.
 - `artifact_cmds.clj`: requires the new namespace as `provenance-view`
   and calls `provenance-view/display-provenance` in
   `artifact-provenance-cmd` where it previously called the local
@@ -42,11 +50,13 @@ commands).
   helpers; the two command entry points).
 
 This is pure code motion: no logic changed, only relocated and
-re-namespaced. Both moved private functions (`keyword->str`,
-`provenance-spec`, `display-provenance`) had no callers outside this
-file — confirmed via a fully-qualified-namespace grep
+re-namespaced (one function, `display-provenance`, made public to
+serve as the new namespace's entry point). Confirmed via a
+fully-qualified-namespace grep
 (`ai\.miniforge\.cli\.main\.commands\.artifact-cmds\b`) across
-`components/`, `bases/`, and `projects/`; the only real callers are
+`components/`, `bases/`, and `projects/` that none of the three moved
+functions had callers outside the original file; the only real
+callers of the `artifact-cmds` namespace itself are
 `bases/cli/src/ai/miniforge/cli/main.clj` (registers the two unchanged
 public command entry points) and the existing unit test, both of which
 are untouched by this split.
