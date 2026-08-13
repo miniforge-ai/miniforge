@@ -63,11 +63,13 @@ This is pure code motion — no behavior or detection-logic changes.
   computed layer depths).
 - `clj-kondo` clean (0 errors, 0 warnings).
 - Direct namespace verification (not just pre-commit smoke, per
-  program lesson to distrust `bb test` alone under load):
-  `clojure -M:dev:test -e "(require 'ai.miniforge.cli.workflow-
-  selector) (require 'ai.miniforge.cli.workflow-selector-test)
-  (clojure.test/run-tests 'ai.miniforge.cli.workflow-selector-test)"`
-  — 6 tests, 75 assertions, 0 failures/errors.
+  program lesson to distrust `bb test` alone under load) — 6 tests, 75
+  assertions, 0 failures/errors:
+
+  ```sh
+  clojure -M:dev:test -e "(require 'ai.miniforge.cli.workflow-selector) (require 'ai.miniforge.cli.workflow-selector-test) (clojure.test/run-tests 'ai.miniforge.cli.workflow-selector-test)"
+  ```
+
 - Full pre-commit gate (345 tests / 1301 assertions on the
   change-scope smoke suite, plus 8 GraalVM/Babashka compatibility
   tests) passed on the final wire-up commit.
