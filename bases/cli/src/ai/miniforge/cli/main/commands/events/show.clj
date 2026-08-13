@@ -68,8 +68,10 @@
      {:status :ok    :output <string>}
      {:status :error :message <string> :exit-code 1}
 
-  Pure in structure — all IO is isolated to es/read-workflow-events-by-id
-   which is easy to stub in tests."
+  Pure in structure — event-log IO is isolated to
+   es/read-workflow-events-by-id and es/render-timeline, both easy to stub
+   in tests; the only other IO is the fs/exists? existence check on
+   `base-dir`."
   [base-dir workflow-id {:keys [gap-threshold raw]}]
   (try
     (cond
