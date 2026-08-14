@@ -130,6 +130,45 @@
                    state))))
     @result))
 
+(defn ^{:stratum 0} update-agent-atomic!
+  "Update an agent record atomically using a pure transformation fn.
+
+   The transform fn is called INSIDE the swap! callback, so FSM validation
+   and the state write are never separated by a concurrent write. swap! retries
+   the callback on CAS failure, re-running the transform each time — the final
+   committed state is always consistent with the final transform result.
+
+   transform must be pure: it takes the current agent record and returns either:
+   - A new agent record — the registry is updated to this value.
+   - An anomaly map (anomaly/anomaly? returns true) — the registry is NOT
+     modified; the anomaly is returned to the caller.
+
+   If the agent is absent, the registry is not modified and nil is returned.
+
+   The volatile used to propagate the result out of swap! is set on every
+   invocation of the callback; under CAS retry the volatile holds the value
+   from the final (winning) invocation, which matches the committed state.
+
+   Arguments:
+   - registry  - Registry atom
+   - agent-id  - UUID of the agent
+   - transform - Pure fn: current-agent -> new-agent | anomaly
+
+   Returns: new agent record, anomaly map, or nil."
+  [registry agent-id transform]
+  (let [result-box (volatile! nil)]
+    (swap! registry
+           (fn [state]
+             (let [current (get-in state [:agents agent-id])]
+               (if (nil? current)
+                 state
+                 (let [new-val (transform current)]
+                   (vreset! result-box new-val)
+                   (if (anomaly/anomaly? new-val)
+                     state                                    ;; rejected: leave state untouched
+                     (assoc-in state [:agents agent-id] new-val)))))))
+    @result-box))
+
 ;; Query operations
 (defn ^{:stratum 0} get-agent
   "Get an agent record by its control-plane UUID.
@@ -177,6 +216,36 @@
                    (messages/t :registry/agent-not-found)
                    {:agent/id agent-id}))
 
+(defn- ^{:stratum 0} apply-heartbeat-fields
+  "Build an updated agent record from a heartbeat, applying the FSM check
+   for status changes inside the swap! callback.
+
+   Called as the transform fn for update-agent-atomic! — must be pure."
+  [profile heartbeat now current]
+  (let [base (cond-> (assoc current :agent/last-heartbeat now)
+               (:task heartbeat)    (assoc :agent/task (:task heartbeat))
+               (:metrics heartbeat) (assoc :agent/metrics (:metrics heartbeat)))
+        new-status (:status heartbeat)]
+    (if (nil? new-status)
+      base
+      (let [current-status (:agent/status current)]
+        (if (or (nil? current-status)
+                (sm/valid-transition? profile current-status new-status))
+          (assoc base :agent/status new-status)
+          base)))))
+
+(defn- ^{:stratum 0} apply-fsm-transition
+  "Build an updated agent record after validating a status transition,
+   or return an anomaly if the transition is invalid.
+
+   Called as the transform fn for update-agent-atomic! — must be pure."
+  [profile new-status current]
+  (let [current-status (:agent/status current)
+        validation-anomaly (sm/validate-transition-result profile current-status new-status)]
+    (if validation-anomaly
+      validation-anomaly
+      (assoc current :agent/status new-status))))
+
 ;------------------------------------------------------------------------------ Layer 1
 
 (defn ^{:stratum 1} count-agents
@@ -191,51 +260,46 @@
 (defn ^{:stratum 1} record-heartbeat!
   "Record a heartbeat from an agent, updating timestamp and optional fields.
 
+   The FSM validity check for status changes runs inside the swap! callback
+   so the read-validate-write sequence is atomic and safe under concurrent
+   access (e.g., a parallel heartbeat poll loop and external transition calls).
+
    Arguments:
    - registry - Registry atom
    - agent-id - UUID of the agent
    - heartbeat - Map with optional keys:
-     - :status  - New normalized status
+     - :status  - New normalized status (only applied if FSM allows)
      - :task    - Current task description
      - :metrics - Cost/token metrics map
 
-   Returns: Updated agent record."
+   Returns: Updated agent record, or nil if agent not found."
   [registry agent-id heartbeat]
   (let [now (java.util.Date.)
-        profile (sm/get-profile)
-        updates (cond-> {:agent/last-heartbeat now}
-                  (:task heartbeat)    (assoc :agent/task (:task heartbeat))
-                  (:metrics heartbeat) (assoc :agent/metrics (:metrics heartbeat)))
-        ;; Only apply status change if it's a valid transition
-        updates (if-let [new-status (:status heartbeat)]
-                  (let [current (get-in @registry [:agents agent-id :agent/status])]
-                    (if (or (nil? current)
-                            (sm/valid-transition? profile current new-status))
-                      (assoc updates :agent/status new-status)
-                      updates))
-                  updates)]
-    (update-agent! registry agent-id updates)))
+        profile (sm/get-profile)]
+    (update-agent-atomic! registry agent-id
+                          (partial apply-heartbeat-fields profile heartbeat now))))
 
 (defn ^{:stratum 1} transition-agent!
-  "Transition an agent to a new status with validation.
+  "Transition an agent to a new status with FSM validation.
+
+   The FSM check runs inside the swap! callback so the read-validate-write
+   sequence is atomic and safe under concurrent access.
 
    Arguments:
-   - registry - Registry atom
-   - agent-id - UUID of the agent
+   - registry   - Registry atom
+   - agent-id   - UUID of the agent
    - new-status - Target status keyword
 
-   Returns: Updated agent record, or an anomaly map with
-   `:anomaly/type :not-found` when `agent-id` is absent.
-   Throws: ExceptionInfo if transition is invalid."
+   Returns: Updated agent record, or an anomaly map with:
+   - :anomaly/type :not-found    — agent absent from registry
+   - :anomaly/type :invalid-input — FSM transition rejected"
   [registry agent-id new-status]
   (let [profile (sm/get-profile)
-        current-status (get-in @registry [:agents agent-id :agent/status])]
-    (if-not current-status
+        result (update-agent-atomic! registry agent-id
+                                     (partial apply-fsm-transition profile new-status))]
+    (if (nil? result)
       (agent-not-found-anomaly agent-id)
-      (do
-        (sm/validate-transition profile current-status new-status)
-        (or (update-agent! registry agent-id {:agent/status new-status})
-            (agent-not-found-anomaly agent-id))))))
+      result)))
 
 ;------------------------------------------------------------------------------ Rich Comment
 (comment

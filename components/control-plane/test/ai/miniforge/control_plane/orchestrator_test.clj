@@ -910,9 +910,10 @@
         (is (= 1 (count agents)) "should have discovered one agent")
 
         (let [agent-id (:agent/id (first agents))
-              ;; Transition agent to running so we can submit decision
-              _ (try (registry/transition-agent! reg agent-id :running)
-                     (catch Exception _ nil))
+              ;; Transition agent to running so we can submit decision.
+              ;; transition-agent! returns an anomaly (not throws) if the
+              ;; agent is already :running from the poll pass — safe to ignore.
+              _ (registry/transition-agent! reg agent-id :running)
               decision (sut/submit-decision-from-agent!
                         orch agent-id "Deploy to prod?")
               _ (is (some? decision))
@@ -952,8 +953,9 @@
 
       (let [agents (registry/list-agents reg)
             agent-id (:agent/id (first agents))
-            _ (try (registry/transition-agent! reg agent-id :running)
-                   (catch Exception _ nil))
+            ;; transition-agent! returns an anomaly (not throws) if the
+            ;; agent is already :running from the poll pass — safe to ignore.
+            _ (registry/transition-agent! reg agent-id :running)
             decision (sut/submit-decision-from-agent!
                       orch agent-id "Full lifecycle event test")
             _ (sut/resolve-and-deliver!

@@ -170,14 +170,19 @@
       (cp/transition-agent! reg agent-id :running)
       (is (= :running (:agent/status (cp/get-agent reg agent-id))))))
 
-  (testing "Invalid transition throws"
+  (testing "Invalid transition returns :invalid-input anomaly"
+    ;; transition-agent! no longer throws for invalid FSM transitions;
+    ;; it returns an anomaly so callers can inspect the result as data.
     (let [reg (cp/create-registry)
           agent (cp/register-agent! reg {:agent/vendor :test :agent/name "T"})
           agent-id (:agent/id agent)]
       (cp/transition-agent! reg agent-id :running)
       (cp/transition-agent! reg agent-id :completed)
-      (is (thrown-with-msg? clojure.lang.ExceptionInfo #"Invalid"
-                            (cp/transition-agent! reg agent-id :running)))))
+      (let [result (cp/transition-agent! reg agent-id :running)]
+        (is (anomaly/anomaly? result))
+        (is (= :invalid-input (:anomaly/type result)))
+        (is (= :completed (get-in result [:anomaly/data :from])))
+        (is (= :running (get-in result [:anomaly/data :to]))))))
 
   (testing "Missing agent returns not-found anomaly"
     (let [reg (cp/create-registry)
@@ -187,15 +192,18 @@
       (is (= {:agent/id missing-id}
              (:anomaly/data result)))))
 
-  (testing "Concurrent removal during transition returns not-found anomaly"
+  (testing "Agent deleted concurrently before swap! commits returns not-found anomaly"
+    ;; Simulates a concurrent deregistration winning the CAS before the
+    ;; transition's swap! callback completes. The fix moves validation inside
+    ;; swap! so a retry after deletion sees the absent agent and returns nil.
     (let [reg (cp/create-registry)
           agent (cp/register-agent! reg {:agent/vendor :test :agent/name "T"})
           agent-id (:agent/id agent)]
-      (with-redefs [registry/update-agent! (fn [& _] nil)]
-        (let [result (cp/transition-agent! reg agent-id :running)]
-          (is (= :not-found (:anomaly/type result)))
-          (is (= {:agent/id agent-id}
-                 (:anomaly/data result))))))))
+      (cp/deregister-agent! reg agent-id)
+      (let [result (cp/transition-agent! reg agent-id :running)]
+        (is (= :not-found (:anomaly/type result)))
+        (is (= {:agent/id agent-id}
+               (:anomaly/data result)))))))
 
 (deftest ^{:stratum 0} agents-by-status-test
   (let [reg (cp/create-registry)]
@@ -205,6 +213,35 @@
       (let [grouped (cp/agents-by-status reg)]
         (is (= 1 (count (:unknown grouped))))
         (is (= 1 (count (:running grouped))))))))
+
+(deftest ^{:stratum 0} transition-agent-concurrent-fsm-safety-test
+  (testing "concurrent transitions preserve FSM invariants under contention"
+    ;; Regression test for the race where read-validate-write was not atomic.
+    ;; With the old code, two threads could both read :running, both pass the
+    ;; :running→:blocked validation, and both write :blocked — one of them
+    ;; writing a stale base state and silently overwriting the other's update.
+    ;; With the fix (validation inside swap!), the losing CAS retries and
+    ;; re-validates with the committed state; since :blocked→:blocked is not
+    ;; a valid FSM transition, it returns an :invalid-input anomaly.
+    (let [reg (cp/create-registry)
+          agent (cp/register-agent! reg {:agent/vendor :test :agent/name "Concurrent"})
+          agent-id (:agent/id agent)
+          _ (cp/transition-agent! reg agent-id :running)
+          n 20
+          results (->> (repeatedly n #(future (cp/transition-agent! reg agent-id :blocked)))
+                       doall
+                       (mapv deref))]
+      ;; At least one transition must succeed (return an agent record, not an anomaly).
+      (is (some (complement anomaly/anomaly?) results)
+          "at least one concurrent :running→:blocked transition should succeed")
+      ;; All non-anomaly results must be the expected agent record.
+      (doseq [r results :when (not (anomaly/anomaly? r))]
+        (is (= :blocked (:agent/status r))
+            "successful transition result must carry :blocked status"))
+      ;; After all futures settle, the agent must be in a valid FSM state.
+      (let [final-status (:agent/status (cp/get-agent reg agent-id))]
+        (is (= :blocked final-status)
+            "agent must be :blocked after concurrent transitions from :running")))))
 
 ;------------------------------------------------------------------------------ Decision Queue Tests
 (deftest ^{:stratum 0} decision-crud-test
