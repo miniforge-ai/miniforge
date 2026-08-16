@@ -46,11 +46,16 @@
 ;; Lookup
 (defn ^{:stratum 1} t
   "Look up the message `k`, substituting `params` into `{placeholder}`
-   tokens. An absent key renders as its own name rather than throwing,
-   so a missing string degrades a report instead of failing it."
+   tokens. An absent key renders as its own qualified name rather than
+   throwing, so a missing string degrades a report instead of failing it.
+
+   The fallback keeps the namespace — `:report/heading` renders as
+   `report/heading`, not `heading` — because the bare name is ambiguous
+   across the catalog's sections and harder to grep for when a missing
+   string shows up in output."
   ([k] (t k nil))
   ([k params]
-   (let [template (get catalog k (name k))]
+   (let [template (get catalog k (str (symbol k)))]
      (if (seq params)
        (substitute template params)
        template))))

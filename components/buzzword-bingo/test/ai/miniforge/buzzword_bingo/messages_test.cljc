@@ -40,9 +40,14 @@
       (is (str/includes? rendered "29"))))
 
   ;; A report that loses a line is better than a report that throws, and the
-  ;; key name says which string is missing.
-  (testing "given a key absent from the catalog → its name, not an exception"
-    (is (= "missing-string" (sut/t :nowhere/missing-string)))))
+  ;; qualified key says which string is missing. The bare name would not:
+  ;; the catalog reuses names across sections, so `heading` alone does not
+  ;; identify `:report/heading` versus `:card/heading`.
+  (testing "given a key absent from the catalog → its qualified name, not an exception"
+    (is (= "nowhere/missing-string" (sut/t :nowhere/missing-string))))
+
+  (testing "given an absent key → the namespace is kept, not dropped"
+    (is (= "report/nowhere" (sut/t :report/nowhere)))))
 
 ;; Counting
 (deftest ^{:stratum 0} test-plural-forms-are-chosen-by-key

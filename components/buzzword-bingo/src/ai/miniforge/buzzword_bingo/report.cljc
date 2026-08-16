@@ -35,6 +35,16 @@
 (def ^{:stratum 0} ^:private advice-keys
   {:clean :advice/clean :suspect :advice/suspect :slop :advice/slop})
 
+;; Spelled out rather than derived from the category, so a grep for a
+;; message key finds its use site — same reason `counted` takes both of
+;; its keys instead of building them.
+(def ^{:stratum 0} ^:private category-keys
+  {:ai-tell   :category/ai-tell
+   :corporate :category/corporate
+   :filler    :category/filler
+   :hedge     :category/hedge
+   :marketing :category/marketing})
+
 (def ^{:stratum 0} ^:private term-column-width 22)
 
 (def ^{:stratum 0} ^:private count-column-width 10)
@@ -67,6 +77,17 @@
     (msg/t :report/catalog-line {:version version})
     (msg/t :report/catalog-custom)))
 
+(defn- ^{:stratum 0} category-label
+  "Catalog label for `category`.
+
+   A caller-supplied lexicon can name categories this catalog has no
+   string for, so an unknown one falls back to its own name rather than
+   rendering blank."
+  [category]
+  (if-let [k (get category-keys category)]
+    (msg/t k)
+    (name category)))
+
 (defn- ^{:stratum 0} times [n]
   (msg/counted :report/count-one :report/count-many n {:count n}))
 
@@ -78,7 +99,7 @@
 
 (defn- ^{:stratum 1} category-line [[category tally]]
   (str indent-prefix
-       (fmt/pad term-column-width (name category))
+       (fmt/pad term-column-width (category-label category))
        (fmt/pad count-column-width (times (:tally/count tally)))
        (:tally/weighted tally)))
 
@@ -86,7 +107,7 @@
   (str indent-prefix
        (fmt/pad term-column-width (:tally/term tally))
        (fmt/pad count-column-width (times (:tally/count tally)))
-       (name (:tally/category tally))))
+       (category-label (:tally/category tally))))
 
 ;------------------------------------------------------------------------------ Layer 2
 

@@ -28,6 +28,13 @@
   :report/position       "line {line}, column {column}"
   :report/and-more       "and {count} more"
 
+  ;; Categories
+  :category/ai-tell      "ai-tell"
+  :category/corporate    "corporate"
+  :category/filler       "filler"
+  :category/hedge        "hedge"
+  :category/marketing    "marketing"
+
   ;; Card
   :card/heading          "BINGO CARD"
   :card/free             "FREE"
