@@ -1540,9 +1540,7 @@
      affected-workflow-run-id (assoc :affected/workflow-run-id
                                      affected-workflow-run-id))))
 
-;------------------------------------------------------------------------------ Layer 3
-
-(defn ^{:stratum 3} phase-completed [stream workflow-id phase & [result]]
+(defn ^{:stratum 2} phase-completed [stream workflow-id phase & [result]]
   (let [outcome (get result :outcome :success)
         request (phase-transition-request result)
         redirect-to (or (redirect-target result)
@@ -1565,25 +1563,25 @@
           (:phase/termination-reason result)
           (assoc :phase/termination-reason (:phase/termination-reason result))))))
 
-(defn ^{:stratum 3} chain-started [stream chain-id step-count]
+(defn ^{:stratum 2} chain-started [stream chain-id step-count]
   (-> (chain-envelope stream :chain/started)
       (assoc :chain/id chain-id
              :chain/step-count step-count)))
 
-(defn ^{:stratum 3} chain-step-started [stream chain-id step-id step-index workflow-id]
+(defn ^{:stratum 2} chain-step-started [stream chain-id step-id step-index workflow-id]
   (-> (chain-envelope stream :chain/step-started)
       (assoc :chain/id chain-id
              :step/id step-id
              :step/index step-index
              :step/workflow-id workflow-id)))
 
-(defn ^{:stratum 3} chain-step-completed [stream chain-id step-id step-index]
+(defn ^{:stratum 2} chain-step-completed [stream chain-id step-id step-index]
   (-> (chain-envelope stream :chain/step-completed)
       (assoc :chain/id chain-id
              :step/id step-id
              :step/index step-index)))
 
-(defn ^{:stratum 3} chain-step-failed [stream chain-id step-id step-index error & [{:keys [failure/class]}]]
+(defn ^{:stratum 2} chain-step-failed [stream chain-id step-id step-index error & [{:keys [failure/class]}]]
   (-> (chain-envelope stream :chain/step-failed)
       (assoc :chain/id chain-id
              :step/id step-id
@@ -1591,20 +1589,20 @@
              :chain/error error)
       (cond-> class (assoc :failure/class class))))
 
-(defn ^{:stratum 3} chain-completed [stream chain-id duration-ms step-count]
+(defn ^{:stratum 2} chain-completed [stream chain-id duration-ms step-count]
   (-> (chain-envelope stream :chain/completed)
       (assoc :chain/id chain-id
              :chain/duration-ms duration-ms
              :chain/step-count step-count)))
 
-(defn ^{:stratum 3} chain-failed [stream chain-id step-id error & [{:keys [failure/class]}]]
+(defn ^{:stratum 2} chain-failed [stream chain-id step-id error & [{:keys [failure/class]}]]
   (-> (chain-envelope stream :chain/failed)
       (assoc :chain/id chain-id
              :chain/failed-step step-id
              :chain/error error)
       (cond-> class (assoc :failure/class class))))
 
-(defn ^{:stratum 3} dependency-health-updated
+(defn ^{:stratum 2} dependency-health-updated
   "Emit when a dependency health projection changes."
   [stream dependency & [previous-status]]
   (dependency-event stream
@@ -1613,7 +1611,7 @@
                     previous-status
                     :dependency/health-updated))
 
-(defn ^{:stratum 3} dependency-recovered
+(defn ^{:stratum 2} dependency-recovered
   "Emit when a dependency returns to healthy status."
   [stream dependency & [previous-status]]
   (dependency-event stream
