@@ -31,96 +31,12 @@
   (:require
    [ai.miniforge.policy-pack.mdc-to-pack-mapping-test.dewey :as dewey]
    [ai.miniforge.policy-pack.mdc-to-pack-mapping-test.fields :as fields]
-   [clojure.test :refer [deftest testing is are]]
+   [ai.miniforge.policy-pack.mdc-to-pack-mapping-test.naming :as naming]
+   [clojure.test :refer [deftest testing is]]
    [clojure.string :as str]
    [clojure.set :as set]))
 
 ;------------------------------------------------------------------------------ Layer 0
-
-;; ---------------------------------------------------------------------------
-;; Test helpers: Pure functions implementing the mapping spec
-;; ---------------------------------------------------------------------------
-(defn ^{:stratum 0} slug-from-filename
-  "Strip .mdc extension from filename (not full path).
-   'foundations/stratified-design.mdc' → 'stratified-design'"
-  [filepath]
-  (let [filename (last (str/split filepath #"/"))]
-    (str/replace filename #"\.mdc$" "")))
-
-(defn ^{:stratum 0} title-from-slug
-  "Derive title from slug: hyphens → spaces, title-case each word.
-   'pre-commit-discipline' → 'Pre Commit Discipline'"
-  [slug]
-  (->> (str/split slug #"-")
-       (map str/capitalize)
-       (str/join " ")))
-
-;; ---------------------------------------------------------------------------
-;; Design spec data (from the .edn)
-;; ---------------------------------------------------------------------------
-(def ^{:stratum 0} complete-inventory
-  "All .mdc files and their expected rule IDs from Section 3."
-  {"foundations/stratified-design.mdc"       :std/stratified-design
-   "foundations/simple-made-easy.mdc"        :std/simple-made-easy
-   "foundations/code-quality.mdc"            :std/code-quality
-   "foundations/result-handling.mdc"         :std/result-handling
-   "foundations/validation-boundaries.mdc"   :std/validation-boundaries
-   "foundations/specification-standards.mdc" :std/specification-standards
-   "foundations/localization.mdc"            :std/localization
-   "languages/clojure.mdc"                  :std/clojure
-   "languages/python.mdc"                   :std/python
-   "frameworks/polylith.mdc"                :std/polylith
-   "frameworks/kubernetes.mdc"              :std/kubernetes
-   "testing/standards.mdc"                  :std/standards
-   "workflows/git-branch-management.mdc"    :std/git-branch-management
-   "workflows/pre-commit-discipline.mdc"    :std/pre-commit-discipline
-   "workflows/git-worktrees.mdc"            :std/git-worktrees
-   "workflows/pr-documentation.mdc"         :std/pr-documentation
-   "workflows/pr-layering.mdc"              :std/pr-layering
-   "workflows/datever.mdc"                  :std/datever
-   "project/header-copyright.mdc"           :std/header-copyright
-   "meta/rule-format.mdc"                   :std/rule-format
-   "index.mdc"                              :std/index})
-
-(deftest ^{:stratum 0} pack-metadata-test
-  (testing "Output pack has required identity fields"
-    (let [template {:pack/id          "miniforge/standards"
-                    :pack/name        "Miniforge Engineering Standards"
-                    :pack/author      "miniforge.ai"
-                    :pack/license     "Apache-2.0"
-                    :pack/trust-level :trusted
-                    :pack/authority   :authority/instruction}]
-      (is (string? (:pack/id template)))
-      (is (string? (:pack/name template)))
-      (is (string? (:pack/author template)))
-      (is (= :trusted (:pack/trust-level template)))
-      (is (= :authority/instruction (:pack/authority template))))))
-
-;; ===========================================================================
-;; Section 17: Field Mapping Completeness Tests
-;; ===========================================================================
-(deftest ^{:stratum 0} all-frontmatter-fields-mapped-test
-  (testing "All known MDC frontmatter fields have defined mappings"
-    (let [_known-frontmatter-fields #{"dewey" "description" "alwaysApply" "globs"}
-          mapped-sources #{:filename-slug
-                           [:frontmatter "description"]
-                           [:frontmatter "dewey"]
-                           [:frontmatter "alwaysApply"]
-                           [:frontmatter "dewey" "globs"]
-                           [:derived]
-                           :mdc-body
-                           [:mdc-body "## Agent behavior"]
-                           :constant}
-          ;; Verify each frontmatter field appears in at least one mapping source
-          frontmatter-in-sources (set (for [src mapped-sources
-                                            :when (vector? src)
-                                            field (rest src)
-                                            :when (string? field)]
-                                        field))]
-      ;; description, dewey, alwaysApply, globs should all be covered
-      (is (set/subset? #{"description" "dewey" "alwaysApply" "globs"}
-                       (set/union frontmatter-in-sources #{"globs"})) ;; globs is in compound source
-          "All frontmatter fields must have mappings"))))
 
 (defn ^{:stratum 0} build-applies-to
   "Build :rule/applies-to from dewey + optional globs."
@@ -132,117 +48,6 @@
       base)))
 
 ;------------------------------------------------------------------------------ Layer 1
-
-(defn ^{:stratum 1} rule-id-from-filepath
-  "Derive :rule/id from .mdc filepath.
-   Prefix slug with :std/ namespace.
-   'foundations/stratified-design.mdc' → :std/stratified-design"
-  [filepath]
-  (keyword "std" (slug-from-filename filepath)))
-
-(defn ^{:stratum 1} derive-title
-  "Get :rule/title from frontmatter description or fallback to slug."
-  [frontmatter filepath]
-  (let [desc (get frontmatter "description")]
-    (if (and desc (not (str/blank? desc)))
-      desc
-      (title-from-slug (slug-from-filename filepath)))))
-
-(deftest ^{:stratum 1} slug-from-filename-test
-  (testing "Strips .mdc extension from filename only"
-    (are [filepath expected]
-         (= expected (slug-from-filename filepath))
-      "foundations/stratified-design.mdc" "stratified-design"
-      "index.mdc"                        "index"
-      "languages/clojure.mdc"            "clojure"
-      "workflows/pr-layering.mdc"        "pr-layering"))
-
-  (testing "Handles nested directory paths"
-    (is (= "foo" (slug-from-filename "a/b/c/foo.mdc")))))
-
-(deftest ^{:stratum 1} title-from-slug-test
-  (testing "Converts hyphens to spaces and title-cases"
-    (are [slug expected]
-         (= expected (title-from-slug slug))
-      "code-quality"            "Code Quality"
-      "pre-commit-discipline"   "Pre Commit Discipline"
-      "index"                   "Index"
-      "stratified-design"       "Stratified Design"
-      "git-branch-management"   "Git Branch Management")))
-
-(deftest ^{:stratum 1} edge-case-duplicate-slugs-test
-  (testing "Duplicate filename slugs must be detectable"
-    (let [files ["foundations/foo.mdc" "workflows/foo.mdc"]
-          slugs (map slug-from-filename files)]
-      (is (not= (count slugs) (count (set slugs)))
-          "Duplicate slugs should be detected by ETL"))))
-
-;; ===========================================================================
-;; Section 15: Inventory Completeness Tests
-;; ===========================================================================
-(deftest ^{:stratum 1} inventory-covers-all-mdc-files-test
-  (testing "Complete inventory has 21 entries (all .standards/*.mdc files + index.mdc)"
-    (is (= 21 (count complete-inventory))))
-
-  (testing "All rule IDs in inventory are unique"
-    (let [ids (vals complete-inventory)]
-      (is (= (count ids) (count (set ids))))))
-
-  (testing "All rule IDs use :std/ namespace"
-    (doseq [[_ rule-id] complete-inventory]
-      (is (= "std" (namespace rule-id))
-          (str rule-id " should use :std/ namespace")))))
-
-(deftest ^{:stratum 1} inventory-matches-filesystem-test
-  (testing "Inventory paths match actual .standards/ directory structure"
-    (let [inventory-paths (set (keys complete-inventory))
-          ;; Known actual files from .standards/ directory
-          actual-files #{"workflows/git-worktrees.mdc"
-                         "workflows/pre-commit-discipline.mdc"
-                         "workflows/git-branch-management.mdc"
-                         "workflows/datever.mdc"
-                         "workflows/pr-documentation.mdc"
-                         "workflows/pr-layering.mdc"
-                         "meta/rule-format.mdc"
-                         "foundations/validation-boundaries.mdc"
-                         "foundations/stratified-design.mdc"
-                         "foundations/simple-made-easy.mdc"
-                         "foundations/result-handling.mdc"
-                         "foundations/code-quality.mdc"
-                         "foundations/specification-standards.mdc"
-                         "foundations/localization.mdc"
-                         "languages/python.mdc"
-                         "languages/clojure.mdc"
-                         "project/header-copyright.mdc"
-                         "testing/standards.mdc"
-                         "frameworks/kubernetes.mdc"
-                         "frameworks/polylith.mdc"}
-          ;; index.mdc is at root, not in .standards/ subdirectory
-          inventory-without-index (disj inventory-paths "index.mdc")]
-      (is (= actual-files inventory-without-index)
-          (str "Missing from inventory: " (set/difference actual-files inventory-without-index)
-               ", Extra in inventory: " (set/difference inventory-without-index actual-files))))))
-
-;; ===========================================================================
-;; Section 16: Output Pack Structure Tests
-;; ===========================================================================
-(deftest ^{:stratum 1} pack-structure-categories-cover-all-rules-test
-  (testing "Pack categories reference all rule IDs from inventory"
-    (let [category-rules #{:std/stratified-design :std/simple-made-easy
-                           :std/code-quality :std/result-handling
-                           :std/validation-boundaries :std/specification-standards
-                           :std/localization
-                           :std/clojure :std/python
-                           :std/polylith :std/kubernetes
-                           :std/standards
-                           :std/git-branch-management :std/pre-commit-discipline
-                           :std/git-worktrees :std/pr-documentation
-                           :std/pr-layering :std/datever
-                           :std/header-copyright
-                           :std/rule-format :std/index}
-          inventory-ids (set (vals complete-inventory))]
-      (is (= inventory-ids category-rules)
-          "Pack categories should reference exactly the inventory rule IDs"))))
 
 ;; ===========================================================================
 ;; Section 6: Applies-To (Phases + Globs) Tests
@@ -265,55 +70,12 @@
             :file-globs [".cursor/rules/**/*.mdc"]}
            (build-applies-to "900" [".cursor/rules/**/*.mdc"])))))
 
-;------------------------------------------------------------------------------ Layer 2
-
-;; ===========================================================================
-;; Section 1: Rule ID Derivation Tests
-;; ===========================================================================
-(deftest ^{:stratum 2} rule-id-derivation-test
-  (testing "Rule ID is derived from filename slug with :std/ namespace"
-    (are [filepath expected-id]
-         (= expected-id (rule-id-from-filepath filepath))
-      "foundations/stratified-design.mdc"       :std/stratified-design
-      "languages/clojure.mdc"                   :std/clojure
-      "workflows/pre-commit-discipline.mdc"     :std/pre-commit-discipline
-      "testing/standards.mdc"                   :std/standards
-      "index.mdc"                               :std/index
-      "meta/rule-format.mdc"                    :std/rule-format
-      "project/header-copyright.mdc"            :std/header-copyright))
-
-  (testing "Directory path is NOT included in the id"
-    (is (= :std/clojure (rule-id-from-filepath "languages/clojure.mdc")))
-    (is (= :std/clojure (rule-id-from-filepath "deeply/nested/path/clojure.mdc"))))
-
-  (testing "Complete inventory matches expected IDs"
-    (doseq [[filepath expected-id] complete-inventory]
-      (is (= expected-id (rule-id-from-filepath filepath))
-          (str "ID mismatch for " filepath)))))
-
-;; ===========================================================================
-;; Section 2: Title Derivation Tests
-;; ===========================================================================
-(deftest ^{:stratum 2} title-derivation-test
-  (testing "Uses description frontmatter verbatim when present"
-    (let [fm {"description" "Stratified Design — enforce one-way dependencies"}]
-      (is (= "Stratified Design — enforce one-way dependencies"
-             (derive-title fm "foundations/stratified-design.mdc")))))
-
-  (testing "Falls back to title-cased slug when description missing"
-    (is (= "Code Quality" (derive-title {} "foundations/code-quality.mdc")))
-    (is (= "Pre Commit Discipline" (derive-title {} "workflows/pre-commit-discipline.mdc"))))
-
-  (testing "Falls back to title-cased slug when description is blank"
-    (is (= "Code Quality" (derive-title {"description" ""} "foundations/code-quality.mdc")))
-    (is (= "Code Quality" (derive-title {"description" "  "} "foundations/code-quality.mdc")))))
-
-(defn ^{:stratum 2} compile-rule
+(defn ^{:stratum 1} compile-rule
   "Compile a single MDC file representation into a pack rule map.
    This is the reference implementation of the spec's field mapping."
   [{:keys [filepath frontmatter body]}]
   (let [dewey       (get frontmatter "dewey" "000")
-        title       (derive-title frontmatter filepath)
+        title       (naming/derive-title frontmatter filepath)
         description (fields/derive-description dewey title)
         always-apply (get frontmatter "alwaysApply")
         globs       (get frontmatter "globs")
@@ -322,7 +84,7 @@
         knowledge   (when (and trimmed-body (not (str/blank? trimmed-body)))
                       trimmed-body)]
     (merge
-     {:rule/id                (rule-id-from-filepath filepath)
+     {:rule/id                (naming/rule-id-from-filepath filepath)
       :rule/title             title
       :rule/description       description
       :rule/severity          severity
@@ -334,12 +96,12 @@
      (when knowledge
        {:rule/knowledge-content knowledge}))))
 
-;------------------------------------------------------------------------------ Layer 3
+;------------------------------------------------------------------------------ Layer 2
 
 ;; ===========================================================================
 ;; Section 7: Constant/Default Fields Tests
 ;; ===========================================================================
-(deftest ^{:stratum 3} constant-fields-test
+(deftest ^{:stratum 2} constant-fields-test
   (testing "Non-alwaysApply severity is :low"
     (let [rule (compile-rule {:filepath "test.mdc"
                               :frontmatter {"dewey" "001"}
@@ -372,7 +134,7 @@
 ;; ===========================================================================
 ;; Section 8: Knowledge Content Tests
 ;; ===========================================================================
-(deftest ^{:stratum 3} knowledge-content-test
+(deftest ^{:stratum 2} knowledge-content-test
   (testing "Body text preserved as :rule/knowledge-content"
     (let [body "# Heading\n\nSome content here."
           rule (compile-rule {:filepath "test.mdc"
@@ -407,7 +169,7 @@
 ;; ===========================================================================
 ;; Section 10: Worked Example A — Foundation alwaysApply Rule
 ;; ===========================================================================
-(deftest ^{:stratum 3} worked-example-a-stratified-design-test
+(deftest ^{:stratum 2} worked-example-a-stratified-design-test
   (let [rule (compile-rule
               {:filepath    "foundations/stratified-design.mdc"
                :frontmatter {"dewey"       "001"
@@ -454,7 +216,7 @@
 ;; ===========================================================================
 ;; Section 11: Worked Example B — Language Rule with Globs
 ;; ===========================================================================
-(deftest ^{:stratum 3} worked-example-b-clojure-test
+(deftest ^{:stratum 2} worked-example-b-clojure-test
   (let [globs ["components/**/src/**/*.clj"
                "components/**/src/**/*.cljc"
                "bases/**/src/**/*.clj"
@@ -493,7 +255,7 @@
 ;; ===========================================================================
 ;; Section 12: Worked Example C — Meta Rule (Not Injected)
 ;; ===========================================================================
-(deftest ^{:stratum 3} worked-example-c-meta-rule-test
+(deftest ^{:stratum 2} worked-example-c-meta-rule-test
   (let [rule (compile-rule
               {:filepath    "meta/rule-format.mdc"
                :frontmatter {"dewey"       "900"
@@ -518,7 +280,7 @@
 ;; ===========================================================================
 ;; Section 13: Worked Example D — Testing Rule (alwaysApply)
 ;; ===========================================================================
-(deftest ^{:stratum 3} worked-example-d-testing-rule-test
+(deftest ^{:stratum 2} worked-example-d-testing-rule-test
   (let [rule (compile-rule
               {:filepath    "testing/standards.mdc"
                :frontmatter {"dewey"       "400"
@@ -544,7 +306,7 @@
 ;; ===========================================================================
 ;; Section 14: Edge Case Tests
 ;; ===========================================================================
-(deftest ^{:stratum 3} edge-case-missing-dewey-test
+(deftest ^{:stratum 2} edge-case-missing-dewey-test
   (testing "Missing dewey → default to '000', phases all"
     (let [rule (compile-rule {:filepath "test.mdc"
                               :frontmatter {}
@@ -553,14 +315,14 @@
       (is (= dewey/all-phases
              (get-in rule [:rule/applies-to :phases]))))))
 
-(deftest ^{:stratum 3} edge-case-missing-description-test
+(deftest ^{:stratum 2} edge-case-missing-description-test
   (testing "Missing description → title derived from slug"
     (let [rule (compile-rule {:filepath "foundations/code-quality.mdc"
                               :frontmatter {"dewey" "001"}
                               :body "content"})]
       (is (= "Code Quality" (:rule/title rule))))))
 
-(deftest ^{:stratum 3} edge-case-empty-body-test
+(deftest ^{:stratum 2} edge-case-empty-body-test
   (testing "Empty body → knowledge-content omitted, rule still valid"
     (let [rule (compile-rule {:filepath "stub.mdc"
                               :frontmatter {"dewey" "001"
@@ -570,7 +332,7 @@
       (is (= :std/stub (:rule/id rule)))
       (is (= "Stub rule" (:rule/title rule))))))
 
-(deftest ^{:stratum 3} edge-case-always-apply-meta-test
+(deftest ^{:stratum 2} edge-case-always-apply-meta-test
   (testing "alwaysApply: true + dewey 900 → always-inject true but empty phases"
     (let [rule (compile-rule {:filepath "meta/weird.mdc"
                               :frontmatter {"dewey"       "900"
@@ -580,7 +342,7 @@
       (is (true? (:rule/always-inject? rule)))
       (is (= #{} (get-in rule [:rule/applies-to :phases]))))))
 
-(deftest ^{:stratum 3} edge-case-globs-string-instead-of-list-test
+(deftest ^{:stratum 2} edge-case-globs-string-instead-of-list-test
   (testing "String globs normalized to vector"
     (let [rule (compile-rule {:filepath "test.mdc"
                               :frontmatter {"dewey" "210"
@@ -588,7 +350,7 @@
                               :body "content"})]
       (is (= ["*.clj"] (get-in rule [:rule/applies-to :file-globs]))))))
 
-(deftest ^{:stratum 3} edge-case-index-mdc-test
+(deftest ^{:stratum 2} edge-case-index-mdc-test
   (testing "index.mdc compiled like any other file, ID :std/index"
     (let [rule (compile-rule {:filepath "index.mdc"
                               :frontmatter {"dewey" "000"
@@ -600,7 +362,7 @@
       ;; alwaysApply false → always-inject? omitted
       (is (not (contains? rule :rule/always-inject?))))))
 
-(deftest ^{:stratum 3} all-rule-schema-fields-produced-test
+(deftest ^{:stratum 2} all-rule-schema-fields-produced-test
   (testing "Compiled rule produces all required schema fields"
     (let [rule (compile-rule {:filepath "test/example.mdc"
                               :frontmatter {"dewey"       "210"
@@ -614,7 +376,7 @@
       (is (set/subset? required-keys (set (keys rule)))
           (str "Missing required keys: " (set/difference required-keys (set (keys rule))))))))
 
-(deftest ^{:stratum 3} optional-fields-conditionally-present-test
+(deftest ^{:stratum 2} optional-fields-conditionally-present-test
   (testing ":rule/always-inject? present only when alwaysApply is true"
     (let [rule-with    (compile-rule {:filepath "a.mdc" :frontmatter {"alwaysApply" true} :body "x"})
           rule-without (compile-rule {:filepath "b.mdc" :frontmatter {} :body "x"})]
@@ -630,7 +392,7 @@
 ;; ===========================================================================
 ;; Section 18: Schema Compatibility Tests
 ;; ===========================================================================
-(deftest ^{:stratum 3} compiled-rule-matches-schema-shape-test
+(deftest ^{:stratum 2} compiled-rule-matches-schema-shape-test
   (testing "Compiled rule has correct value types for schema fields"
     (let [rule (compile-rule {:filepath "foundations/stratified-design.mdc"
                               :frontmatter {"dewey" "001"
@@ -663,7 +425,7 @@
       (is (boolean? (:rule/always-inject? rule)))
       (is (string? (:rule/knowledge-content rule))))))
 
-(deftest ^{:stratum 3} always-inject-does-not-override-phases-test
+(deftest ^{:stratum 2} always-inject-does-not-override-phases-test
   (testing "alwaysApply controls injection, phases control which roles"
     (let [rule (compile-rule {:filepath "testing/standards.mdc"
                               :frontmatter {"dewey" "400"

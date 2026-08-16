@@ -16,93 +16,29 @@
 ;; See the License for the specific language governing permissions and
 ;; limitations under the License.
 (ns ai.miniforge.cli.workflow-selection-config
-  "Resource-driven workflow selection profile resolution."
+  "Resource-driven workflow selection profile resolution. Configured-profile
+   lookup lives in `workflow-selection-config.profiles-resource`; generic
+   fallback scoring lives in `workflow-selection-config.fallback` (rule 210:
+   this namespace measured 4 real layers, max 3, split by concern)."
   (:require
-   [ai.miniforge.workflow.interface :as workflow]
-   [clojure.edn :as edn]))
+   [ai.miniforge.cli.workflow-selection-config.fallback :as fallback]
+   [ai.miniforge.cli.workflow-selection-config.profiles-resource :as profiles-resource]))
 
 ;------------------------------------------------------------------------------ Layer 0
 
-;; Resource loading
-(def ^{:stratum 0} selection-profiles-resource
-  "Classpath resource path for workflow selection profile mappings."
-  "config/workflow/selection-profiles.edn")
-
-(defn- ^{:stratum 0} read-selection-profile-config
-  "Read a single selection profile config resource."
-  [resource]
-  (let [config (-> resource slurp edn/read-string)]
-    (get config :workflow-selection/profiles {})))
-
-;; Generic fallback resolution
-(defn- ^{:stratum 0} workflow-characteristics
-  "Resolve workflow characteristics through the workflow interface."
-  [workflow-def]
-  (workflow/workflow-characteristics workflow-def))
-
-(defn- ^{:stratum 0} available-workflow-definitions
-  "Return full workflow definitions from the registry for fallback scoring."
-  []
-  (workflow/ensure-initialized!)
-  (keep workflow/get-workflow (workflow/list-workflow-ids)))
-
-;------------------------------------------------------------------------------ Layer 1
-
-(defn ^{:stratum 1} configured-selection-profiles
-  "Merge workflow selection profile mappings from all matching classpath resources."
-  []
-  (->> (enumeration-seq (.getResources (clojure.lang.RT/baseLoader)
-                                       selection-profiles-resource))
-       (map read-selection-profile-config)
-       (apply merge {})))
-
-(defn- ^{:stratum 1} simplest-workflow-id
-  "Choose the simplest available workflow by phase count and max iterations."
-  [available-workflows]
-  (->> available-workflows
-       (sort-by (fn [workflow]
-                  (let [{:keys [phases max-iterations]} (workflow-characteristics workflow)]
-                    [phases max-iterations])))
-       first
-       :workflow/id))
-
-(defn- ^{:stratum 1} most-comprehensive-workflow-id
-  "Choose the most comprehensive available workflow by phase count."
-  [available-workflows]
-  (->> available-workflows
-       (sort-by (fn [workflow]
-                  (let [{:keys [phases max-iterations]} (workflow-characteristics workflow)]
-                    [(- phases) (- max-iterations)])))
-       first
-       :workflow/id))
-
-;------------------------------------------------------------------------------ Layer 2
-
-(defn- ^{:stratum 2} resolve-profile-fallback
-  "Resolve a profile via generic workflow characteristics when no config is present."
-  [profile available-workflows]
-  (case profile
-    :comprehensive (most-comprehensive-workflow-id available-workflows)
-    :fast (simplest-workflow-id available-workflows)
-    :default (or (resolve-profile-fallback :fast available-workflows)
-                 (most-comprehensive-workflow-id available-workflows))
-    nil))
-
-;------------------------------------------------------------------------------ Layer 3
-
 ;; Public API
-(defn ^{:stratum 3} resolve-selection-profile
+(defn ^{:stratum 0} resolve-selection-profile
   "Resolve a logical selection profile to a concrete workflow id.
 
    Profiles are app-owned configuration. If a configured profile points at a
    workflow not present on the active classpath, fall back to generic workflow
   characteristics."
   ([profile]
-   (let [available-workflows (available-workflow-definitions)]
+   (let [available-workflows (fallback/available-workflow-definitions)]
      (resolve-selection-profile profile available-workflows)))
   ([profile available-workflows]
-   (let [configured-id (get (configured-selection-profiles) profile)
+   (let [configured-id (get (profiles-resource/configured-selection-profiles) profile)
          available-ids (set (map :workflow/id available-workflows))]
      (cond
        (contains? available-ids configured-id) configured-id
-       :else (resolve-profile-fallback profile available-workflows)))))
+       :else (fallback/resolve-profile-fallback profile available-workflows)))))
