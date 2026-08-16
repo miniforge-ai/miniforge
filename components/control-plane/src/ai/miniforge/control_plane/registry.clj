@@ -161,7 +161,8 @@
            (fn [state]
              (let [current (get-in state [:agents agent-id])]
                (if (nil? current)
-                 state
+                 (do (vreset! result-box nil)                 ;; clear any stale value from a prior retry
+                     state)
                  (let [new-val (transform current)]
                    (vreset! result-box new-val)
                    (if (anomaly/anomaly? new-val)
@@ -234,11 +235,12 @@
           (assoc base :agent/status new-status)
           base)))))
 
-(defn- ^{:stratum 0} apply-fsm-transition
+(defn- ^{:stratum 1} apply-fsm-transition
   "Build an updated agent record after validating a status transition,
    or return an anomaly if the transition is invalid.
 
-   Called as the transform fn for update-agent-atomic! — must be pure."
+   Called as the transform fn for update-agent-atomic! — must be pure.
+   Stratum 1: depends on sm/validate-transition-result (stratum 1)."
   [profile new-status current]
   (let [current-status (:agent/status current)
         validation-anomaly (sm/validate-transition-result profile current-status new-status)]
