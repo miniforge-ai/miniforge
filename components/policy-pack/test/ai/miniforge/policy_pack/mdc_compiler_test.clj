@@ -31,7 +31,10 @@
   (:require
    [clojure.test :refer [deftest testing is are]]
    [clojure.string :as str]
-   [ai.miniforge.policy-pack.mdc-compiler :as sut]))
+   [ai.miniforge.policy-pack.mdc-compiler :as sut]
+   [ai.miniforge.policy-pack.mdc-compiler.agent-behavior :as agent-behavior]
+   [ai.miniforge.policy-pack.mdc-compiler.dewey :as dewey]
+   [ai.miniforge.policy-pack.mdc-compiler.frontmatter :as frontmatter]))
 
 ;------------------------------------------------------------------------------ Layer 0
 
@@ -43,30 +46,30 @@
 ;; ============================================================================
 (deftest ^{:stratum 0} split-frontmatter-test
   (testing "splits frontmatter and body at --- delimiters"
-    (let [result (sut/split-frontmatter "---\nkey: value\n---\nBody text")]
+    (let [result (frontmatter/split-frontmatter "---\nkey: value\n---\nBody text")]
       (is (= "key: value" (:frontmatter result)))
       (is (= "Body text" (:body result)))))
 
   (testing "handles missing frontmatter (no --- prefix)"
-    (let [result (sut/split-frontmatter "Just body text")]
+    (let [result (frontmatter/split-frontmatter "Just body text")]
       (is (= "" (:frontmatter result)))
       (is (= "Just body text" (:body result)))))
 
   (testing "handles missing closing ---"
-    (let [result (sut/split-frontmatter "---\nkey: value\nno closing")]
+    (let [result (frontmatter/split-frontmatter "---\nkey: value\nno closing")]
       (is (= "" (:frontmatter result)))))
 
   (testing "handles empty frontmatter"
-    (let [result (sut/split-frontmatter "---\n---\nBody only")]
+    (let [result (frontmatter/split-frontmatter "---\n---\nBody only")]
       (is (= "" (:frontmatter result)))
       (is (= "Body only" (:body result)))))
 
   (testing "handles empty content"
-    (let [result (sut/split-frontmatter "")]
+    (let [result (frontmatter/split-frontmatter "")]
       (is (= "" (:frontmatter result)))))
 
   (testing "handles nil content gracefully"
-    (let [result (sut/split-frontmatter nil)]
+    (let [result (frontmatter/split-frontmatter nil)]
       (is (= "" (:frontmatter result))))))
 
 ;; ============================================================================
@@ -124,8 +127,8 @@
 ;; ============================================================================
 (deftest ^{:stratum 0} dewey->category-id-test
   (testing "maps dewey codes to category IDs"
-    (are [dewey expected]
-         (= expected (sut/dewey->category-id dewey))
+    (are [dewey-code expected]
+         (= expected (dewey/dewey->category-id dewey-code))
       "001" "foundations"
       "100" "tools"
       "210" "languages"
@@ -138,17 +141,17 @@
       "900" "meta"))
 
   (testing "unknown dewey returns 'other'"
-    (is (= "other" (sut/dewey->category-id "xyz")))
-    (is (= "other" (sut/dewey->category-id "")))))
+    (is (= "other" (dewey/dewey->category-id "xyz")))
+    (is (= "other" (dewey/dewey->category-id "")))))
 
 (deftest ^{:stratum 0} dewey->category-label-test
   (testing "maps dewey codes to human labels"
-    (is (= "Foundations & Core Principles" (sut/dewey->category-label "001")))
-    (is (= "Languages" (sut/dewey->category-label "210")))
-    (is (= "Workflows & Processes" (sut/dewey->category-label "715"))))
+    (is (= "Foundations & Core Principles" (dewey/dewey->category-label "001")))
+    (is (= "Languages" (dewey/dewey->category-label "210")))
+    (is (= "Workflows & Processes" (dewey/dewey->category-label "715"))))
 
   (testing "unknown dewey returns 'Other'"
-    (is (= "Other" (sut/dewey->category-label "xyz")))))
+    (is (= "Other" (dewey/dewey->category-label "xyz")))))
 
 ;; ============================================================================
 ;; Slug → rule ID tests
@@ -173,34 +176,34 @@
   (testing "priority 1: extracts ## Agent behavior section"
     (let [body "# Title\n\nIntro.\n\n## Agent behavior\n\n- Do this first.\n- Then do that.\n\n## Next section"]
       (is (= "- Do this first.\n- Then do that."
-             (sut/extract-agent-behavior body)))))
+             (agent-behavior/extract-agent-behavior body)))))
 
   (testing "priority 2: falls back to first non-heading paragraph"
     (let [body "# Title\n\nFirst paragraph used as fallback.\n\nSecond paragraph ignored."]
       (is (= "First paragraph used as fallback."
-             (sut/extract-agent-behavior body)))))
+             (agent-behavior/extract-agent-behavior body)))))
 
   (testing "returns nil for nil body"
-    (is (nil? (sut/extract-agent-behavior nil))))
+    (is (nil? (agent-behavior/extract-agent-behavior nil))))
 
   (testing "returns nil for blank body"
-    (is (nil? (sut/extract-agent-behavior ""))))
+    (is (nil? (agent-behavior/extract-agent-behavior ""))))
 
   (testing "returns nil for whitespace-only body"
-    (is (nil? (sut/extract-agent-behavior "   \n  "))))
+    (is (nil? (agent-behavior/extract-agent-behavior "   \n  "))))
 
   (testing "returns nil for body with only headings"
-    (is (nil? (sut/extract-agent-behavior "# Heading only\n## Sub heading"))))
+    (is (nil? (agent-behavior/extract-agent-behavior "# Heading only\n## Sub heading"))))
 
   (testing "condenses long behavior sections to ~500 chars"
     (let [long-body (str "## Agent behavior\n\n"
                          (str/join ". " (repeat 100 "Do something important"))
                          ".")]
-      (is (<= (count (sut/extract-agent-behavior long-body)) 510))))  ;; allow small slack
+      (is (<= (count (agent-behavior/extract-agent-behavior long-body)) 510))))  ;; allow small slack
 
   (testing "preserves bullet lists when condensing"
     (let [body "## Agent behavior\n\n- First bullet.\n- Second bullet.\n- Third bullet.\n- Fourth bullet."
-          result (sut/extract-agent-behavior body)]
+          result (agent-behavior/extract-agent-behavior body)]
       ;; Should preserve first 3 bullets when condensing
       (is (str/includes? result "First bullet"))
       (is (str/includes? result "Second bullet"))
@@ -217,7 +220,7 @@
                     "3. Third numbered step that should survive.\n"
                     "4. Fourth numbered step.\n"
                     "5. Fifth numbered step.")
-          result (sut/extract-agent-behavior body)]
+          result (agent-behavior/extract-agent-behavior body)]
       (is (str/includes? result "First numbered step")
           "first numbered item must be preserved")
       (is (str/includes? result "Second numbered step")
@@ -238,7 +241,7 @@
                             "target so the trimming path is exercised."))
           body (str "## Agent behavior\n\n"
                     (str/join "\n" (map step (range 1 6))))
-          result (str/trim (sut/extract-agent-behavior body))]
+          result (str/trim (agent-behavior/extract-agent-behavior body))]
       (is (> (count (str/join "\n" (map step (range 1 4)))) 500)
           "fixture must actually overflow, else the trim branch isn't tested")
       (is (<= (count result) 510) "still condensed to ~500 chars")
@@ -523,46 +526,46 @@
 
 (deftest ^{:stratum 1} dewey->phases-test
   (testing "foundations (0-99) → all phases"
-    (is (= all-phases (sut/dewey->phases "001")))
-    (is (= all-phases (sut/dewey->phases "000")))
-    (is (= all-phases (sut/dewey->phases "099"))))
+    (is (= all-phases (dewey/dewey->phases "001")))
+    (is (= all-phases (dewey/dewey->phases "000")))
+    (is (= all-phases (dewey/dewey->phases "099"))))
 
   (testing "tools (100-199) → implement + review"
-    (is (= #{:implement :review} (sut/dewey->phases "100"))))
+    (is (= #{:implement :review} (dewey/dewey->phases "100"))))
 
   (testing "languages (200-299) → implement + review"
-    (is (= #{:implement :review} (sut/dewey->phases "210"))))
+    (is (= #{:implement :review} (dewey/dewey->phases "210"))))
 
   (testing "frameworks (300-399) → plan + implement + review"
-    (is (= #{:plan :implement :review} (sut/dewey->phases "300"))))
+    (is (= #{:plan :implement :review} (dewey/dewey->phases "300"))))
 
   (testing "testing (400-499) → implement + verify"
-    (is (= #{:implement :verify} (sut/dewey->phases "400"))))
+    (is (= #{:implement :verify} (dewey/dewey->phases "400"))))
 
   (testing "operations (500-599) → implement + review"
-    (is (= #{:implement :review} (sut/dewey->phases "500"))))
+    (is (= #{:implement :review} (dewey/dewey->phases "500"))))
 
   (testing "documentation (600-699) → implement + review"
-    (is (= #{:implement :review} (sut/dewey->phases "600"))))
+    (is (= #{:implement :review} (dewey/dewey->phases "600"))))
 
   (testing "workflows (700-799) → all phases"
-    (is (= all-phases (sut/dewey->phases "715"))))
+    (is (= all-phases (dewey/dewey->phases "715"))))
 
   (testing "project (800-899) → implement + review"
-    (is (= #{:implement :review} (sut/dewey->phases "800"))))
+    (is (= #{:implement :review} (dewey/dewey->phases "800"))))
 
   (testing "meta (900-999) → empty set (never injected)"
-    (is (= #{} (sut/dewey->phases "900")))
-    (is (= #{} (sut/dewey->phases "999"))))
+    (is (= #{} (dewey/dewey->phases "900")))
+    (is (= #{} (dewey/dewey->phases "999"))))
 
   (testing "boundary values: end of one range, start of next"
-    (is (= all-phases (sut/dewey->phases "99")))
-    (is (= #{:implement :review} (sut/dewey->phases "100"))))
+    (is (= all-phases (dewey/dewey->phases "99")))
+    (is (= #{:implement :review} (dewey/dewey->phases "100"))))
 
   (testing "unparseable dewey falls back to default phases"
-    (is (= #{:implement :review} (sut/dewey->phases "xyz")))
-    (is (= #{:implement :review} (sut/dewey->phases "")))
-    (is (= #{:implement :review} (sut/dewey->phases nil)))))
+    (is (= #{:implement :review} (dewey/dewey->phases "xyz")))
+    (is (= #{:implement :review} (dewey/dewey->phases "")))
+    (is (= #{:implement :review} (dewey/dewey->phases nil)))))
 
 ;; ============================================================================
 ;; mdc->rule compilation tests

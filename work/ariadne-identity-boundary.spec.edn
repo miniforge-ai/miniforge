@@ -1,0 +1,97 @@
+;; =============================================================================
+;; Spec: Ariadne step 3a — Tenant, Principal, and where identity comes from
+;; =============================================================================
+;;
+;; Normative refs: docs/architecture/rfc-ariadne-adoption.md (adoption
+;; step 3, "Tenants + owners on the run hierarchy"); Ariadne §2-§4
+;; (tenants, principals, the #controller relation); T3's tenancy-ABSENT
+;; note.
+
+{:spec/title "Ariadne step 3a: Tenant and Principal, and the boundary that establishes one"
+
+ :spec/description
+ "Create component `tenancy`: the identity objects every later step-3
+  slice stamps onto records, AND the boundary that decides who the
+  operator actually is.
+
+  WHY THOSE TWO THINGS TOGETHER. The step-2 wave specified the grant
+  object, checking grants, transacting effects, migrating call sites,
+  and revoking grants — and never specified WHO ISSUES ONE. The result
+  was a call-site migration that would have denied every merge and
+  deploy permanently, and a spec written after the fact to fill the
+  hole. Ownership has exactly the same shape of gap: a record cannot be
+  born owned if nothing establishes an owner. So the object and its
+  source land together, deliberately.
+
+  GROUP 1: The objects
+  A CLOSED Tenant and a CLOSED Principal, following the DecisionEnvelope
+  and ExecutionGrant precedent — unknown keys rejected, because an
+  identity nobody can describe is an identity nobody can audit.
+
+    :tenant/id, :tenant/kind [:enum :operator :customer-org :service],
+    :tenant/display-name, :tenant/created-at
+
+    :principal/id, :principal/tenant-id, :principal/kind
+    [:enum :human :agent-instance :service], :principal/display-name
+
+  A principal ALWAYS belongs to exactly one tenant. An agent instance is
+  a principal, not a tenant: it acts, it does not own.
+
+  GROUP 2: Where an operator identity comes from
+  Today there is none — single-operator is implicit, and 'the process
+  that is running' stands in for 'who asked'. This slice makes that
+  explicit rather than pretending otherwise:
+
+    * A config-backed local operator tenant, resolved once at process
+      boundary (CLI, MCP server, daemon start).
+    * The resolution is a named function with a stated failure mode, not
+      a default sprinkled through call sites. A missing operator
+      identity is an ERROR at boundary, not an anonymous fallback that
+      later reads as a real owner.
+
+  GROUP 3: The authn dependency is NAMED, not assumed
+  Real multi-operator needs credential->principal mapping, which the RFC
+  puts in the authn layer (N12, 'thin'). That does NOT exist and this
+  spec does NOT build it. What this spec does is make the seam explicit:
+  one resolution point, one shape, so the authn-backed resolver is a
+  drop-in later rather than a rewrite of every record-birth site.
+
+  Stating it here so the next wave does not discover it the way step 2
+  discovered issuance.
+
+  DELIBERATELY NOT HERE: engagements (3d), context threading (3b), owner
+  stamping (3c). This is the vocabulary and its source, nothing that
+  consumes them."
+
+ :spec/intent {:type :feature
+               :scope ["components/tenancy/"
+                       "projects/*/deps.edn"]}
+
+ :spec/constraints
+ ["Closed schemas - m/validate rejects unknown keys; a test proves it"
+  "A principal belongs to exactly one tenant; an orphan principal is invalid"
+  "Operator resolution is ONE named function with a stated failure mode"
+  "A missing operator identity is an error at the boundary, never an anonymous fallback"
+  "No record-birth site is modified in this slice"
+  "Stratified design, max 3 layers per file"
+  "New component MUST be added to all four projects' deps.edn or poly check fails"]
+
+ :spec/acceptance-criteria
+ ["Tenant and Principal schemas validate their documented shape and reject extra keys"
+  "A principal with no tenant fails validation"
+  "Operator resolution returns a tenant and principal from configuration"
+  "Operator resolution with no configured identity returns an error, not a default tenant"
+  "The resolver's return shape is identical whether config-backed or (future) authn-backed - a test pins the shape"
+  "poly check reports 0 errors"
+  "full bb test green"]
+
+ :spec/priority
+ {:tier :blocker
+  :axes #{:correctness :governance-credibility :scale}
+  :theme :ariadne-tenancy
+  :rationale "Every later step-3 slice stamps an owner; nothing can stamp one until something establishes who the owner is."
+  :blocks ["ariadne-owned-records.spec.edn"
+           "ariadne-run-identity-threading.spec.edn"]
+  :blocked-by []}
+
+ :spec/workflow-type :canonical-sdlc}

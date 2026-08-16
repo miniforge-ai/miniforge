@@ -37,6 +37,24 @@
     (with-open [stream stream]
       (slurp stream))))
 
+(defn- ^{:stratum 0} stream-writer
+  "Feed `input` to the process stdin and close it, off-thread: a child
+   that never drains stdin would otherwise block the caller on a full
+   pipe buffer past the command timeout. A nil/empty `input` just
+   closes the stream, which is what a prompt-in-argv backend wants.
+
+   A write failure is ignored, matching `await-stream`: it means the
+   child exited or was destroyed before reading, and that outcome
+   already reaches the caller as an exit code, stderr, or a timeout."
+  [^java.io.OutputStream stream ^String input]
+  (future
+    (try
+      (with-open [out stream]
+        (when (seq input)
+          (.write out (.getBytes input "UTF-8"))
+          (.flush out)))
+      (catch Exception _ nil))))
+
 (defn- ^{:stratum 0} destroy-cli-process!
   [^Process process]
   (try
@@ -67,15 +85,19 @@
 ;------------------------------------------------------------------------------ Layer 2
 
 (defn ^{:stratum 2} run-cli-command
-  [cmd timeout-ms & {:keys [workdir]}]
+  [cmd timeout-ms & {:keys [workdir stdin]}]
+  (when (and (some? stdin) (not (string? stdin)))
+    (throw (ex-info "run-cli-command :stdin must be a string"
+                    {:stdin-type (type stdin)})))
   (let [^Process process (start-cli-process cmd workdir)
-        _ (.close (.getOutputStream process))
+        in-future (stream-writer (.getOutputStream process) stdin)
         out-future (stream-reader (.getInputStream process))
         err-future (stream-reader (.getErrorStream process))
         completed? (.waitFor process timeout-ms java.util.concurrent.TimeUnit/MILLISECONDS)]
     (if-not completed?
       (do
         (destroy-cli-process! process)
+        (future-cancel in-future)
         (future-cancel out-future)
         (future-cancel err-future)
         {:out ""

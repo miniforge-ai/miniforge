@@ -167,6 +167,29 @@
         (is (nil? (get-in entries [0 :miss/consultation :pin-read?]))
             "tri-state pin-read? survives the round trip verbatim")))))
 
+(deftest ^{:stratum 1} build-entry-lifts-pegs-out-of-the-consultation
+  ;; SPEC §7.7: the per-peg record accrues in this ledger. The writer
+  ;; normalizes — pegs live at :miss/pegs only, never duplicated inside
+  ;; the stored consultation.
+  (let [pegs [{:id "peg-a" :answer nil :landings {"yes" ["p1"] "no" ["p2"]}}]
+        e (gap/build-entry {:run-id "r" :phase :implement
+                            :signal drift-signal
+                            :situation "changing-one-side-of-a-boundary"
+                            :consultation {:status :pinned :pinned? true
+                                           :pin-read? nil :pegs pegs}
+                            :bucket :unheeded :attribution nil})]
+    (is (= pegs (:miss/pegs e)))
+    (is (= {:status :pinned :pinned? true :pin-read? nil}
+           (:miss/consultation e))
+        "one canonical location: the stored consultation drops :pegs")
+    (testing "a peg-less consultation stays nil across both keys"
+      (let [e (gap/build-entry {:run-id "r" :phase :review
+                                :signal drift-signal :situation nil
+                                :consultation nil :bucket :uncovered
+                                :attribution nil})]
+        (is (nil? (:miss/pegs e)))
+        (is (nil? (:miss/consultation e)))))))
+
 (deftest ^{:stratum 1} ledger-write-failure-is-data-not-a-throw
   (let [r (gap/record-miss! "/dev/null/not-a-dir" (gap/build-entry
                                                     {:run-id "x" :phase :implement

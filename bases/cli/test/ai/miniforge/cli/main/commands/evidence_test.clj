@@ -22,11 +22,12 @@
    [babashka.fs :as fs]
    [ai.miniforge.cli.app-config :as app-config]
    [ai.miniforge.cli.main.commands.evidence :as sut]
+   [ai.miniforge.cli.main.commands.evidence.bundles :as bundles]
    [ai.miniforge.cli.main.commands.shared :as shared]))
 
 ;------------------------------------------------------------------------------ Layer 0
 
-;------------------------------------------------------------------------------ Layer 0: Fixtures & factories
+;; Fixtures & factories
 (def ^{:stratum 0} ^:dynamic *tmp-dir* nil)
 
 (defn ^{:stratum 0} tmp-dir-fixture [f]
@@ -122,7 +123,7 @@
           :evidence/failure-attribution (make-failure-attribution)}
          overrides))
 
-;------------------------------------------------------------------------------ Layer 1: Tests
+;; Tests
 (deftest ^{:stratum 1} evidence-list-cmd-no-component-empty-dir-test
   (testing "list command shows 'no bundles' when dir is empty"
     (with-redefs [shared/call-optional-provider (constantly nil)
@@ -150,12 +151,12 @@
   (testing "loads valid EDN file"
     (let [f (java.io.File. (str *tmp-dir* "/test.edn"))]
       (spit f (pr-str {:bundle/id "b-1"}))
-      (is (= {:bundle/id "b-1"} (sut/load-bundle-from-file f)))))
+      (is (= {:bundle/id "b-1"} (bundles/load-bundle-from-file f)))))
 
   (testing "returns nil for non-EDN file"
     (let [f (java.io.File. (str *tmp-dir* "/test.json"))]
       (spit f "{}")
-      (is (nil? (sut/load-bundle-from-file f))))))
+      (is (nil? (bundles/load-bundle-from-file f))))))
 
 ;------------------------------------------------------------------------------ Layer 2
 

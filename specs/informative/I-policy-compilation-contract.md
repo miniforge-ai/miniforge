@@ -3,7 +3,12 @@
   Author: Christopher Lester (christopher@miniforge.ai)
   Copyright 2025-2026 Christopher Lester. Licensed under Apache 2.0.
 -->
-# Normative Spec Extension: Policy Candidate Model and Pack Compilation Contract
+# Informative: Policy Candidate Model and Pack Compilation Contract
+
+**Version:** 0.1.0-draft
+**Date:** 2026-08-10
+**Status:** Draft
+**Conformance:** None — informative
 
 ## Purpose
 
@@ -28,14 +33,45 @@ The stable boundary is the contract between source policy material and usable po
 - `repo-config-profile.spec.*`  
   Declares repo-local pack references and attachment semantics.
 - `policy-pack-compilation.spec.*`  
-  Work spec for current compile / derive / compose implementation and UX. This normative extension constrains that work
-  spec.
+  Work spec for current compile / derive / compose implementation and UX. This
+  document informs that work spec; since reclassification it constrains nothing.
 
 ## Spec metadata
 
 - **Title:** Policy Candidate Model and Pack Compilation Contract
-- **Type:** Normative
+- **Type:** Informative (formerly a normative amendment to N4)
 - **Scope:** Open-source policy origination substrate
+
+### Status: informative
+
+This document was previously indexed as a normative amendment to N4. It is now
+**informative**: nothing in it binds an implementation.
+
+Two things prompted the move.
+
+First, its requirements were written entirely in lowercase (`must`, `should`).
+The document contained **no uppercase RFC 2119 keyword at all**, and per
+RFC 8174 only the uppercase forms carry normative weight — so it read as
+normative while formally binding nothing. An earlier revision of this section
+put that as "states no requirements", which was wrong: it states roughly
+twenty-five, in a form that does not bind. The absence of keywords was real;
+the absence of requirements was not.
+
+Second and more decisively, the machinery it describes — a document-to-candidate
+compiler with a candidate lifecycle and promotion rules — does not exist. What
+exists instead is `components/policy-calibration`, which decides gate-readiness
+**empirically**, by measuring a semantic judge's false-positive and recall rates
+over a seeded corpus. That is a better answer to the same question than a
+declared enforceability field, and it is already running.
+
+The two ideas here that were not already in N4 have been folded into it:
+per-rule provenance and the enforceability class, both as optional fields
+(N4 §2.3.2, §2.3.3).
+
+What remains in this document is design material for a compiler that may never
+be built. If it is built, it is Miniforge-product scope — like N7–N10 — rather
+than MiniForge Core, since nothing outside miniforge itself originates packs
+this way.
 
 ## Description
 
@@ -287,3 +323,13 @@ The interesting claim is not that an LLM can turn docs into rules.
 
 The interesting claim is that miniforge policy becomes a compilable, provenance-backed artifact that can be derived from
 organizational reality and attached to repos through stable config and pack semantics.
+
+---
+
+**Version History:**
+
+- 0.1.0-draft (2026-08-10): Spec-completion pass — header metadata added — the spec previously carried no version
+  anywhere; a
+  Status subsection records that the document contains no RFC 2119 keyword
+  and is therefore effectively informative until its requirements are stated
+  or it is reclassified.

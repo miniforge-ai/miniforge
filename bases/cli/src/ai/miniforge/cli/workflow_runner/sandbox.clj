@@ -20,17 +20,17 @@
    the host's container runtime is auto-selected (Podman first, Docker
    second), with MINIFORGE_RUNTIME as the explicit override.
 
+   The repo/branch the container checks out is resolved by
+   `ai.miniforge.cli.workflow-runner.sandbox-clone-target`.
+
    Stratification (intra-namespace):
-   Layer 0 — `sandbox-release-fn`, `git-remote-url`, `infer-branch`
-             (no in-ns deps).
-   Layer 1 — `infer-repo-url` (composes `git-remote-url`).
-   Layer 2 — `prepare-sandbox` (composes Layer 1).
-   Layer 3 — `setup-sandbox-context` (composes Layer 2)."
+   Layer 0 — `sandbox-release-fn`, the `infer-branch` / `infer-repo-url`
+             re-exports, `prepare-sandbox` (no in-ns deps).
+   Layer 1 — `setup-sandbox-context` (composes Layer 0)."
   (:require
-   [clojure.string :as str]
-   [babashka.process :as p]
    [ai.miniforge.cli.runtime-env :as runtime-env]
    [ai.miniforge.cli.workflow-runner.display :as display]
+   [ai.miniforge.cli.workflow-runner.sandbox-clone-target :as clone-target]
    [ai.miniforge.dag-executor.interface :as dag]))
 
 ;------------------------------------------------------------------------------ Layer 0
@@ -42,39 +42,15 @@
       (dag/release-environment! executor environment-id)
       (catch Exception _ nil))))
 
-(defn- ^{:stratum 0} git-remote-url
-  "Get git remote origin URL from a directory. Returns nil on failure."
-  [dir]
-  (try
-    (let [result (p/shell {:out :string :err :string :continue true :dir dir}
-                          "git" "remote" "get-url" "origin")]
-      (when (zero? (:exit result))
-        (str/trim (:out result))))
-    (catch Exception _ nil)))
+;; Relocated public vars re-exported so existing `:require [...
+;; workflow-runner.sandbox :as sandbox]` call sites resolve unchanged —
+;; same convention as the workflow-runner split (miniforge#1667).
+(def ^{:stratum 0} infer-branch clone-target/infer-branch)
 
-(defn ^{:stratum 0} infer-branch [spec enriched-spec]
-  (or (:spec/branch spec)
-      (get-in enriched-spec [:spec/context :git-branch])
-      "main"))
+(def ^{:stratum 0} infer-repo-url clone-target/infer-repo-url)
 
-;------------------------------------------------------------------------------ Layer 1
-
-;; Composes Layer 0.
-(defn ^{:stratum 1} infer-repo-url [spec enriched-spec]
-  (or (:spec/repo-url spec)
-      (get-in enriched-spec [:spec/context :repo-url])
-      ;; If spec came from a file in a different repo, use that repo's remote.
-      ;; :spec/source-dir is set by the run command from the spec file's parent.
-      (when-let [source-dir (:spec/source-dir spec)]
-        (git-remote-url source-dir))
-      ;; Final fallback: cwd's repo
-      (git-remote-url ".")))
-
-;------------------------------------------------------------------------------ Layer 2
-
-;; Sandbox preparation — composes Layer 1 (`infer-repo-url`) plus
-;; Layer 0 (`infer-branch`).
-(defn ^{:stratum 2} prepare-sandbox [spec enriched-spec]
+;; Sandbox preparation — expressed in the clone-target vocabulary.
+(defn ^{:stratum 0} prepare-sandbox [spec enriched-spec]
   (let [prep-result (dag/prepare-runtime-executor!
                      (runtime-env/selection-config {:image-type :clojure}))]
     (if-not (dag/ok? prep-result)
@@ -86,18 +62,18 @@
         (if-not (dag/ok? env-result)
           env-result
           (let [env-id (:environment-id (dag/unwrap env-result))
-                repo-url (infer-repo-url spec enriched-spec)
-                branch (infer-branch spec enriched-spec)]
+                repo-url (clone-target/infer-repo-url spec enriched-spec)
+                branch (clone-target/infer-branch spec enriched-spec)]
             (when repo-url
               (dag/clone-and-checkout! executor env-id repo-url branch {}))
             (dag/ok {:executor executor
                      :environment-id env-id
                      :sandbox-workdir "/workspace"})))))))
 
-;------------------------------------------------------------------------------ Layer 3
+;------------------------------------------------------------------------------ Layer 1
 
-;; Composes Layer 2.
-(defn ^{:stratum 3} setup-sandbox-context [base-context sandbox? spec enriched-spec quiet]
+;; Composes Layer 0.
+(defn ^{:stratum 1} setup-sandbox-context [base-context sandbox? spec enriched-spec quiet]
   (if-not sandbox?
     [base-context nil]
     (do

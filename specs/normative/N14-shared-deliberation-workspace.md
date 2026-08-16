@@ -6,8 +6,8 @@
 
 # N14 — Shared Deliberation Workspace
 
-**Version:** 0.1.0-draft
-**Date:** 2026-07-22
+**Version:** 0.2.1-draft
+**Date:** 2026-08-10
 **Status:** Draft (Speculative — see §0.4)
 **Conformance:** MUST, scoped per §0.4
 **Class:** Extension spec (N7+)
@@ -342,12 +342,23 @@ Closure with open challenges records them as dissent on the affected decisions
 
 ## 9. Events and evidence
 
-### 9.1 Required event types (N3 envelope)
+### 9.1 Event types (N3 envelope)
 
 `workspace/opened`, `workspace/transaction-committed`, `workspace/transaction-rejected`,
 `workspace/activation-started`, `workspace/activation-completed`,
 `workspace/conflict-derived`, `workspace/schedule-decision`, `workspace/budget-exceeded`,
 `workspace/deadlock-detected`, `workspace/closed`.
+
+**None of these is registered in N3 §6.** Under N3 §6 an implementation MUST
+NOT emit an unregistered `:event/type`, so this list cannot be read as an
+emission requirement today. Registering them — a schema in N3 §3, a registry
+row in N3 §6, and an emission point in N3 §4.1, together per N3 §6.1 — is a
+prerequisite to implementing this section.
+
+The list is retained as the proposed content of that amendment. It is stated
+here rather than in N3 because this spec is speculative (§0.4) and N3's
+registry is the contract every consumer reads; adding ten unimplemented types
+to it would misrepresent the stream's surface.
 
 `workspace/transaction-committed` payloads carry the full operation list; the event stream
 is the workspace log (single source of truth; the materialized graph is derived state and
@@ -355,10 +366,14 @@ MUST be reconstructible from events).
 
 ### 9.2 Closure exports (N6)
 
-On close, the engine MUST export as N6 artifacts: (a) the decision record — per-goal
+On close, the engine exports four records: (a) the decision record — per-goal
 outcome, chosen alternatives, rationale links, dissent; (b) the full transaction log;
 (c) the final graph snapshot; (d) per-run accounting — activations, cost, tokens split into
 object-level vs. workspace-overhead classes (consumed by N15).
+
+None of these is an N6 §3.1.1 artifact type today, so as with §9.1 the export
+is gated on registering them there. N6 owns the evidence schema; this spec
+names the content, not a new evidence model.
 
 ## 10. Governance
 
@@ -428,6 +443,52 @@ explicit budgets, and closing rules, with control-policy search deferred to N15.
 LLM-era results (blackboard-style shared workspaces, global-workspace event loops, latent
 collaboration) inform the design but are not incorporated as contracts; the harness exists
 to test their claims under matched budgets before adoption.
+
+## 14. Conformance Requirements
+
+This spec is speculative (§0.4). These IDs bind an experimental implementation
+before the N15 gate; if that gate fails, the spec demotes to informative and
+these requirements withdraw with it.
+
+| ID | Level | Requirement |
+|----|-------|-------------|
+| N14.WS.1 | MUST | Make the event stream the workspace log, with the graph derived and reconstructible from it (§9.1). |
+| N14.WS.2 | MUST | Apply transactions atomically — a rejected transaction leaves no partial state (§3). |
+| N14.WS.3 | MUST | Derive conflicts rather than letting a writer declare its own resolution (§4). |
+| N14.WS.4 | MUST | Enforce the activation budget and terminate per §7 rather than running unbounded. |
+| N14.WS.5 | MUST | Detect deadlock and terminate rather than stalling silently (§7). |
+| N14.WS.6 | MUST NOT | Emit an unregistered event type — §9.1's list requires an N3 §6.1 amendment first. |
+
+### 14.1 Test Obligations
+
+1. Replaying the transaction log reconstructs the graph exactly.
+2. A rejected transaction leaves the graph byte-identical to its prior state.
+3. A run exceeding its budget terminates with the §7 outcome, not by hanging.
+
+---
+
+---
+
+## Annex A — Implementation Conformance Status (informative)
+
+This annex is **informative**, recording implementation state as of 2026-08-10.
+
+### A.1 Specified, Not Implemented
+
+No deliberation-workspace component exists. `components/workspace` is unrelated
+— it handles workflow workspace paths, not the shared graph of §2.
+
+None of §9.1's ten `workspace/*` event types is registered in N3 §6, so under
+N3 §6.1 none may be emitted (N14.WS.6). Since §9.1 also makes the event stream
+the workspace log (N14.WS.1), the spec's central mechanism is blocked on that
+registration.
+
+### A.2 Status
+
+This is expected rather than a defect: §0.4 declares the spec speculative,
+binding experimental implementations pre-gate, and it demotes to informative if
+N15's gate G0 fails. The annex records the position so a reader does not mistake
+the requirement set for a description of something running.
 
 ---
 

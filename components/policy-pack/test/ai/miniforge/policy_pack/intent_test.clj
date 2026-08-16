@@ -25,7 +25,8 @@
    - Kubernetes diff parsing"
   (:require
    [clojure.test :refer [deftest testing is]]
-   [ai.miniforge.policy-pack.intent :as sut]))
+   [ai.miniforge.policy-pack.intent :as sut]
+   [ai.miniforge.policy-pack.intent.check :as check]))
 
 ;------------------------------------------------------------------------------ Layer 0
 
@@ -112,13 +113,13 @@
 ;; ============================================================================
 (deftest ^{:stratum 0} semantic-intent-check-test
   (testing "returns inferred intent and metadata"
-    (let [result (sut/semantic-intent-check :import {:creates 0 :updates 0 :destroys 0})]
+    (let [result (check/semantic-intent-check :import {:creates 0 :updates 0 :destroys 0})]
       (is (true? (:passed? result)))
       (is (= :refactor (:inferred-intent result)))
       (is (= :import (get-in result [:metadata :declared])))))
 
   (testing "failing check includes violations"
-    (let [result (sut/semantic-intent-check :import {:creates 3 :updates 0 :destroys 0})]
+    (let [result (check/semantic-intent-check :import {:creates 3 :updates 0 :destroys 0})]
       (is (false? (:passed? result)))
       (is (seq (:violations result)))
       (is (= :create (:inferred-intent result))))))

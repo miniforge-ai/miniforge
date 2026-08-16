@@ -6,10 +6,12 @@
 
 # N5 Delta — Supervisory Control Plane
 
+**Version:** 0.3.0-draft
+**Date:** 2026-04-22
+**Status:** Draft
+**Conformance:** MUST
+
 - **Spec ID:** `N5-delta-supervisory-control-plane-v1`
-- **Version:** `0.3.0-draft`
-- **Status:** Draft
-- **Date:** 2026-04-22
 - **Amends:** N5 — Interface Standard: CLI/TUI/API
 - **Related:** N3 (event stream), N4 (policy packs), N6 (evidence), N8 (observability control), N9 (external PR
   integration), pr-monitor-loop-v1 (autonomous PR comment resolution)
@@ -589,3 +591,30 @@ through without error. Required keys MUST be present and correctly typed.
 1. Monitor mode MUST render at 60 columns without data loss (truncation is acceptable, absence is not)
 2. Monitor mode MUST update without user interaction when events arrive
 3. Monitor mode MUST show attention items without requiring navigation
+
+---
+
+## Conformance Requirements
+
+| ID | Level | Requirement |
+|----|-------|-------------|
+| N5D1.SV.1 | MUST | Materialize supervisory entities purely as an event-stream projection (§3.5 invariant 1). |
+| N5D1.SV.2 | MUST NOT | Peer with ephemeral in-process registries for supervisory state (§3.5 invariant 1). |
+| N5D1.SV.3 | MUST | Be the sole emitter of each entity family's snapshot event (§3.5 invariant 6). |
+| N5D1.SV.4 | MUST | Rebuild state on startup by replaying the stream, snapshots taking precedence (§3.5 invariant 3). |
+| N5D1.SV.5 | MUST | Coalesce updates within the ≤ 100 ms window per entity (§3.5 invariant 4). |
+| N5D1.SV.6 | MUST | Derive attention items inside this component and nowhere else (§3.5 invariant 5). |
+| N5D1.SV.7 | MUST NOT | Transition a terminal workflow state back to active; a retry is a new run (§3.2). |
+
+### Test Obligations
+
+1. A restart reproduces the entity table from the stream alone.
+2. No second component emits a snapshot for an entity family it does not own.
+3. Terminal states never reactivate.
+
+---
+
+**Version History:**
+
+- 0.3.0-draft (2026-08-10): Spec-completion pass — metadata normalized to the header form; `N5D1.SV.*` conformance
+  requirement IDs and test obligations added.

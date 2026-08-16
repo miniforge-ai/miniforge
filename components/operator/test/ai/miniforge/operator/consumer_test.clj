@@ -35,6 +35,7 @@
    [ai.miniforge.operator.intervention :as intervention]
    [clojure.edn :as edn]
    [clojure.java.io :as io]
+   [clojure.string :as str]
    [clojure.test :refer [deftest is testing]])
   (:import
    [java.nio.channels FileChannel]))
@@ -381,3 +382,208 @@
       (let [change (first (support/events-of-type
                            stream consumer/state-changed-event-type))]
         (is (some? (:workflow/id change)))))))
+
+;------------------------------------------------------------------------------ Operator decision channel (U-6 §8.2)
+;;
+;; A delegated source proposes and parks at `:pending-human`. Without an
+;; inbound decision channel the gate is one-way: the operator sees an
+;; approval card with nowhere to send the answer.
+(deftest ^{:stratum 0} delegated-request-parks-then-approves-across-passes
+  (testing "a :meta-agent request waits for a human, then applies"
+    (let [events-dir (support/temp-events-dir)
+          stream (support/memory-stream)
+          intervention-id (random-uuid)
+          applied (atom [])
+          apply-fn (fn [_ i] (swap! applied conj i))]
+      (support/stage-operator-file!
+       events-dir "req.transit.json"
+       (es/serialize-event (support/meta-agent-request intervention-id)))
+      (consumer/consume-pass! {:events-dir events-dir :stream stream :apply! apply-fn})
+
+      (testing "pass one parks it and does NOT apply"
+        (is (= [:pending-human]
+               (mapv :intervention/state
+                     (support/events-of-type
+                      stream :supervisory/intervention-state-changed))))
+        (is (empty? @applied) "a delegated write must not act before a human answers"))
+
+      (testing "pass two applies the operator's approval"
+        (support/stage-operator-file!
+         events-dir "decide.transit.json"
+         (es/serialize-event (support/decision-event intervention-id :approve)))
+        (let [result (consumer/consume-pass! {:events-dir events-dir
+                                              :stream stream
+                                              :apply! apply-fn})]
+          (is (= 1 (:routed result)))
+          (is (= [:pending-human :approved]
+                 (mapv :intervention/state
+                       (support/events-of-type
+                        stream :supervisory/intervention-state-changed))))
+          (is (= 1 (count @applied)))
+          (is (= intervention-id (:intervention/id (first @applied)))))))))
+
+(deftest ^{:stratum 0} a-decision-routes-to-the-workflows-registered-stream
+  (testing "the verdict lands where the run lives, not on the operator stream"
+    ;; The router reads `:intervention/type` and
+    ;; `:intervention/target-id`. A decision event carries neither — it
+    ;; is deliberately thin — so routing off the EVENT returns nil for
+    ;; every decision and silently falls back to the operator stream.
+    ;; Routing off the parked intervention is what makes this pass.
+    (let [events-dir (support/temp-events-dir)
+          operator-stream (support/memory-stream)
+          workflow-stream (support/memory-stream)
+          intervention-id (random-uuid)
+          applied (atom [])
+          ;; Mirror the production router: workflow-targeted only, and
+          ;; keyed off fields a decision event does not carry.
+          stream-for (fn [event]
+                       (when (= :workflow (:intervention/target-type event))
+                         workflow-stream))]
+      (support/stage-operator-file!
+       events-dir "req.transit.json"
+       (es/serialize-event (support/meta-agent-request intervention-id)))
+      (consumer/consume-pass! {:events-dir events-dir
+                               :stream operator-stream
+                               :stream-for stream-for
+                               :apply! (fn [dest i] (swap! applied conj [dest i]))})
+      (support/stage-operator-file!
+       events-dir "decide.transit.json"
+       (es/serialize-event (support/decision-event intervention-id :approve)))
+      (consumer/consume-pass! {:events-dir events-dir
+                               :stream operator-stream
+                               :stream-for stream-for
+                               :apply! (fn [dest i] (swap! applied conj [dest i]))})
+
+      (is (= [:pending-human :approved]
+             (mapv :intervention/state
+                   (support/events-of-type
+                    workflow-stream :supervisory/intervention-state-changed)))
+          "both transitions belong on the workflow's own stream")
+      (is (empty? (support/events-of-type
+                   operator-stream :supervisory/intervention-state-changed))
+          "nothing should land on the operator stream")
+      (is (= [workflow-stream] (mapv first @applied))
+          "and the application must run against the workflow's stream"))))
+
+(deftest ^{:stratum 0} a-rejection-never-applies
+  (testing "reject transitions and records the reason without applying"
+    (let [events-dir (support/temp-events-dir)
+          stream (support/memory-stream)
+          intervention-id (random-uuid)
+          applied (atom [])
+          apply-fn (fn [_ i] (swap! applied conj i))]
+      (support/stage-operator-file!
+       events-dir "req.transit.json"
+       (es/serialize-event (support/meta-agent-request intervention-id)))
+      (consumer/consume-pass! {:events-dir events-dir :stream stream :apply! apply-fn})
+      (support/stage-operator-file!
+       events-dir "decide.transit.json"
+       (es/serialize-event
+        (assoc (support/decision-event intervention-id :reject)
+               :intervention/reason "not while the train is red")))
+      (consumer/consume-pass! {:events-dir events-dir :stream stream :apply! apply-fn})
+
+      (let [last-change (last (support/events-of-type
+                               stream :supervisory/intervention-state-changed))]
+        (is (= :rejected (:intervention/state last-change)))
+        (is (= "not while the train is red" (:intervention/reason last-change)))
+        (is (empty? @applied))))))
+
+(deftest ^{:stratum 0} a-decision-with-a-malformed-identity-is-rejected
+  (testing "an unparseable :workflow/id must not route to a default stream"
+    (let [events-dir (support/temp-events-dir)
+          stream (support/memory-stream)
+          intervention-id (random-uuid)]
+      (support/stage-operator-file!
+       events-dir "req.transit.json"
+       (es/serialize-event (support/meta-agent-request intervention-id)))
+      (consumer/consume-pass! {:events-dir events-dir :stream stream})
+      ;; `serialize-event` would reject a non-uuid :workflow/id, so the
+      ;; malformed value is staged directly — the shape a foreign or
+      ;; half-migrated producer would actually leave on disk.
+      (support/stage-operator-file!
+       events-dir "decide.transit.json"
+       (str/replace (es/serialize-event (support/decision-event intervention-id :approve))
+                    "\"~:intervention/id\""
+                    "\"~:workflow/id\":\"not-a-uuid\",\"~:intervention/id\""))
+      (let [result (consumer/consume-pass! {:events-dir events-dir :stream stream})]
+        (is (= 1 (:anomalies result)))
+        (is (= [:pending-human]
+               (mapv :intervention/state
+                     (support/events-of-type
+                      stream :supervisory/intervention-state-changed)))
+            "the parked intervention must not have moved")))))
+
+(deftest ^{:stratum 0} a-decision-for-an-unparked-intervention-is-an-anomaly
+  (testing "approving something never parked must not pass silently"
+    (let [events-dir (support/temp-events-dir)
+          stream (support/memory-stream)]
+      (support/stage-operator-file!
+       events-dir "decide.transit.json"
+       (es/serialize-event (support/decision-event (random-uuid) :approve)))
+      (let [result (consumer/consume-pass! {:events-dir events-dir :stream stream})]
+        (is (= 1 (:anomalies result)))
+        (is (= 1 (count (support/events-of-type
+                         stream :operator/intervention-anomaly))))))))
+
+(deftest ^{:stratum 0} an-unknown-verdict-is-an-anomaly
+  (testing "only :approve and :reject are verdicts"
+    (let [events-dir (support/temp-events-dir)
+          stream (support/memory-stream)
+          intervention-id (random-uuid)]
+      (support/stage-operator-file!
+       events-dir "req.transit.json"
+       (es/serialize-event (support/meta-agent-request intervention-id)))
+      (consumer/consume-pass! {:events-dir events-dir :stream stream})
+      (support/stage-operator-file!
+       events-dir "decide.transit.json"
+       (es/serialize-event (support/decision-event intervention-id :maybe)))
+      (is (= 1 (:anomalies (consumer/consume-pass!
+                            {:events-dir events-dir :stream stream})))))))
+
+(deftest ^{:stratum 0} deciding-twice-is-not-honoured-twice
+  (testing "the parked record is retired on the first decision"
+    (let [events-dir (support/temp-events-dir)
+          stream (support/memory-stream)
+          intervention-id (random-uuid)
+          applied (atom [])
+          apply-fn (fn [_ i] (swap! applied conj i))]
+      (support/stage-operator-file!
+       events-dir "req.transit.json"
+       (es/serialize-event (support/meta-agent-request intervention-id)))
+      (consumer/consume-pass! {:events-dir events-dir :stream stream :apply! apply-fn})
+      (support/stage-operator-file!
+       events-dir "decide-1.transit.json"
+       (es/serialize-event (support/decision-event intervention-id :approve)))
+      (consumer/consume-pass! {:events-dir events-dir :stream stream :apply! apply-fn})
+      (support/stage-operator-file!
+       events-dir "decide-2.transit.json"
+       (es/serialize-event (support/decision-event intervention-id :approve)))
+      (let [result (consumer/consume-pass! {:events-dir events-dir
+                                            :stream stream
+                                            :apply! apply-fn})]
+        (is (= 1 (:anomalies result)) "the second decision has nothing to decide")
+        (is (= 1 (count @applied)) "and must not apply the intervention again")))))
+
+(deftest ^{:stratum 0} a-v1-cursor-upgrades-without-losing-its-processed-sets
+  (testing "an in-place upgrade keeps idempotency and gains the parked map"
+    (let [events-dir (support/temp-events-dir)
+          operator-dir (io/file events-dir "operator")
+          _ (io/make-parents (io/file operator-dir ".keep"))
+          _ (spit (io/file operator-dir ".processed")
+                  (pr-str {:schema-version 1
+                           :processed-intervention-ids #{}
+                           :processed-files #{"already-seen.transit.json"}})
+                  :encoding "UTF-8")
+          stream (support/memory-stream)
+          intervention-id (random-uuid)]
+      (support/stage-operator-file!
+       events-dir "req.transit.json"
+       (es/serialize-event (support/meta-agent-request intervention-id)))
+      (consumer/consume-pass! {:events-dir events-dir :stream stream})
+      (let [cursor (edn/read-string (slurp (io/file operator-dir ".processed")
+                                           :encoding "UTF-8"))]
+        (is (= 2 (:schema-version cursor)))
+        (is (contains? (:processed-files cursor) "already-seen.transit.json")
+            "the v1 processed set must survive the upgrade")
+        (is (contains? (:pending-interventions cursor) intervention-id))))))

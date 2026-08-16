@@ -18,7 +18,8 @@
 (ns ai.miniforge.policy-pack.software-factory
   "Software-factory specific policy helpers built on the generic policy-pack SDK."
   (:require
-   [ai.miniforge.policy-pack.external :as external]))
+   [ai.miniforge.policy-pack.external :as external]
+   [ai.miniforge.policy-pack.external.diff :as external-diff]))
 
 ;------------------------------------------------------------------------------ Layer 0
 
@@ -28,4 +29,4 @@
 
 (def ^{:stratum 0} parse-pr-diff
   "Parse a unified diff into artifact-like inputs for external evaluation."
-  external/parse-pr-diff)
+  external-diff/parse-pr-diff)

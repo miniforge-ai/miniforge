@@ -18,7 +18,8 @@
 (ns ai.miniforge.policy-pack.knowledge-safety-test
   (:require
    [clojure.test :refer [deftest testing is]]
-   [ai.miniforge.policy-pack.knowledge-safety :as ks]))
+   [ai.miniforge.policy-pack.knowledge-safety :as ks]
+   [ai.miniforge.policy-pack.knowledge-safety.detectors :as detectors]))
 
 ;------------------------------------------------------------------------------ Layer 0
 
@@ -82,10 +83,10 @@
 ;; ============================================================================
 (deftest ^{:stratum 0} check-trust-labels-test
   (testing "returns nil when no metadata (not a knowledge unit)"
-    (is (nil? (ks/check-trust-labels {:artifact/path "test.txt"} {}))))
+    (is (nil? (detectors/check-trust-labels {:artifact/path "test.txt"} {}))))
 
   (testing "fails when trust-level missing"
-    (let [result (ks/check-trust-labels
+    (let [result (detectors/check-trust-labels
                   {:artifact/path "knowledge.edn"
                    :metadata {:authority :authority/reference}}
                   {})]
@@ -93,7 +94,7 @@
       (is (= :critical (:severity (first result))))))
 
   (testing "fails when authority missing"
-    (let [result (ks/check-trust-labels
+    (let [result (detectors/check-trust-labels
                   {:artifact/path "knowledge.edn"
                    :metadata {:trust-level :trusted}}
                   {})]
@@ -101,7 +102,7 @@
       (is (= :critical (:severity (first result))))))
 
   (testing "passes when both present"
-    (is (nil? (ks/check-trust-labels
+    (is (nil? (detectors/check-trust-labels
                {:artifact/path "knowledge.edn"
                 :metadata {:trust-level :trusted :authority :authority/reference}}
                {})))))
@@ -111,7 +112,7 @@
 ;; ============================================================================
 (deftest ^{:stratum 0} check-instruction-authority-test
   (testing "blocks untrusted content with instruction authority"
-    (let [result (ks/check-instruction-authority
+    (let [result (detectors/check-instruction-authority
                   {:artifact/path "evil.edn"
                    :metadata {:trust-level :untrusted
                               :authority :authority/instruction}}
@@ -120,47 +121,47 @@
       (is (= :critical (:severity (first result))))))
 
   (testing "allows trusted content with instruction authority"
-    (is (nil? (ks/check-instruction-authority
+    (is (nil? (detectors/check-instruction-authority
                {:metadata {:trust-level :trusted
                            :authority :authority/instruction}}
                {}))))
 
   (testing "allows untrusted content without instruction authority"
-    (is (nil? (ks/check-instruction-authority
+    (is (nil? (detectors/check-instruction-authority
                {:metadata {:trust-level :untrusted
                            :authority :authority/reference}}
                {}))))
 
   (testing "returns nil for no metadata"
-    (is (nil? (ks/check-instruction-authority {} {})))))
+    (is (nil? (detectors/check-instruction-authority {} {})))))
 
 ;; ============================================================================
 ;; Pack root allowlist tests
 ;; ============================================================================
 (deftest ^{:stratum 0} check-pack-root-test
   (testing "allows packs from default roots"
-    (is (nil? (ks/check-pack-root
+    (is (nil? (detectors/check-pack-root
                {:artifact/path ".miniforge/packs/safety.edn"} {})))
-    (is (nil? (ks/check-pack-root
+    (is (nil? (detectors/check-pack-root
                {:artifact/path ".cursor/packs/style.edn"} {}))))
 
   (testing "blocks packs from non-allowlisted paths"
-    (let [result (ks/check-pack-root
+    (let [result (detectors/check-pack-root
                   {:artifact/path "/tmp/evil/malicious.edn"} {})]
       (is (some? result))
       (is (= :high (:severity (first result))))))
 
   (testing "respects custom allowlist from config"
-    (is (nil? (ks/check-pack-root
+    (is (nil? (detectors/check-pack-root
                {:artifact/path "/custom/packs/safe.edn"}
                {:config {:pack-root-allowlist ["/custom/packs"]}})))
-    (let [result (ks/check-pack-root
+    (let [result (detectors/check-pack-root
                   {:artifact/path ".miniforge/packs/x.edn"}
                   {:config {:pack-root-allowlist ["/custom/packs"]}})]
       (is (some? result))))
 
   (testing "returns nil when no path"
-    (is (nil? (ks/check-pack-root {} {})))))
+    (is (nil? (detectors/check-pack-root {} {})))))
 
 ;; ============================================================================
 ;; Pack assembly tests

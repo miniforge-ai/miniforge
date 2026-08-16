@@ -6,6 +6,11 @@
 
 # Normative Spec Extension: Phase Checkpoint, Machine Snapshot & Resume
 
+**Version:** 0.2.0-draft
+**Date:** 2026-04-22
+**Status:** Draft
+**Conformance:** MUST (on any implementation that persists to disk)
+
 ## Purpose
 
 Make miniforge workflows genuinely resumable at **phase granularity** with an
@@ -37,6 +42,28 @@ Resumability also supports the dogfood iteration loop: when fixing a
 bug in one phase, engineers should not re-run earlier phases to get
 back to the broken one.
 
+## Conformance Requirements
+
+Requirement IDs are stable identifiers for this delta's normative statements.
+They extend N2's families; IDs are never reused.
+
+| ID | Level | Requirement |
+|----|-------|-------------|
+| N2D.CK.1 | MUST | Write a phase checkpoint and machine snapshot after each successful transition (§1). |
+| N2D.CK.2 | MUST | Maintain the workflow manifest atomically after each checkpoint or snapshot write (§2). |
+| N2D.CK.3 | MUST | Record `:workflow/spec-hash` at start and compare it on resume (§2, §4). |
+| N2D.CK.4 | MUST NOT | Silently resume a workflow whose spec has drifted; error and require the documented override (§4). |
+| N2D.CK.5 | MUST | Emit the checkpoint and resume events of N3 §3.21 at the points §9 defines. |
+| N2D.CK.6 | MUST | Honor the checkpoint store location and retention rules of §3 and §7. |
+
+### Test Obligations
+
+1. A crash after phase N resumes at phase N+1 with no re-execution of N.
+2. A spec edit between run and resume produces the drift error, not a resume.
+3. Every checkpoint write has a corresponding N3 §3.21 event.
+
+---
+
 ## Relationship to other specs
 
 - `N2-workflows.md` — parent spec. §1.1 principle #5 mandates
@@ -63,10 +90,6 @@ worktree from its scratch ref.
 
 - **Title:** Phase Checkpoint, Machine Snapshot & Resume
 - **Type:** Normative extension to N2
-- **Version:** 0.2.0-draft
-- **Status:** Draft
-- **Conformance:** MUST (on any implementation that persists to disk)
-- **Date:** 2026-04-22
 
 ## Definitions
 
@@ -123,8 +146,9 @@ file containing at least:
 - `:workflow/last-checkpoint-at` — ISO-8601 timestamp
 - `:workflow/backend` — string identifying the LLM backend in use
   (`claude`, `codex`, `openai`, etc.)
-- `:workflow/status` — one of `:running`, `:completed`, `:failed`,
-  `:cancelled`, `:paused`
+- `:workflow/status` — a member of N2 §2.2's canonical vocabulary
+  (`:queued`, `:running`, `:paused`, `:blocked`, `:completed`, `:failed`,
+  `:cancelled`)
 
 The manifest MUST be updated atomically after each successful phase
 checkpoint or machine snapshot write.
@@ -281,3 +305,12 @@ Using the original workflow id for resumed runs preserves event-log
 continuity. All events for a given workflow — whether from the initial
 run or a resumed one — live in the same `~/.miniforge/events/<id>/`
 directory. Post-mortem readers see the full history.
+
+---
+
+**Version History:**
+
+- 0.2.0-draft (2026-08-10): Spec-completion pass — metadata moved from a bulleted `## Spec metadata` block to the
+  header form
+  used by N1–N15; `N2D.CK.*` conformance requirement IDs and test
+  obligations added.

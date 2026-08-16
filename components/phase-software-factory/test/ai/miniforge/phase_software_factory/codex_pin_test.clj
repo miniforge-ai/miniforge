@@ -36,9 +36,11 @@
 
 (deftest ^{:stratum 0} only-wired-phases-are-mapped
   ;; implement/plan wire via pin-outcome (existing-files); review wires via
-  ;; landings-text (prompt section). A mapping without a wire would be a
-  ;; defined-but-unreachable capability.
-  (is (= #{:implement :plan :review} (set (keys codex-pin/phase->situation)))))
+  ;; landings-text (prompt section); release wires via landings-outcome
+  ;; through the releaser's behavior addendum. A mapping without a wire
+  ;; would be a defined-but-unreachable capability.
+  (is (= #{:implement :plan :review :release}
+         (set (keys codex-pin/phase->situation)))))
 
 (deftest ^{:stratum 0} landings-text-skip-conditions
   (is (nil? (codex-pin/landings-text :review nil nil)))
@@ -54,9 +56,9 @@
 
 (deftest ^{:stratum 0} pin-outcome-states
   (is (= {:entry nil :status :unconfigured :anomaly nil
-          :situation "changing-one-side-of-a-boundary"}
+          :situation "changing-one-side-of-a-boundary" :pegs nil}
          (codex-pin/pin-outcome :implement nil nil)))
-  (is (= {:entry nil :status :unmapped :anomaly nil :situation nil}
+  (is (= {:entry nil :status :unmapped :anomaly nil :situation nil :pegs nil}
          (codex-pin/pin-outcome :verify nil "/anywhere")))
   (is (= :skipped
          (:status (codex-pin/pin-outcome :implement nil "/nonexistent/codex")))))
@@ -73,6 +75,21 @@
                                pinned [{:path codex-pin/pin-path :source :cache}])))))
     (testing "skipped consultation carries its anomaly"
       (is (= {:pinned? false :status :skipped :anomaly :codex-unreadable
-              :situation nil :pin-read? nil}
+              :situation nil :pegs nil :pin-read? nil}
              (codex-pin/consultation-summary
                {:entry nil :status :skipped :anomaly :codex-unreadable} nil))))))
+
+(deftest ^{:stratum 0} consultation-summary-records-per-peg-telemetry
+  ;; SPEC §7.7: per peg presented, which way it answered — push delivery
+  ;; has no answer channel, so every presented peg records unanswered
+  ;; (:answer nil) with the landing set behind each branch kept intact.
+  (let [outcome {:entry {:path codex-pin/pin-path} :status :pinned
+                 :anomaly nil :situation "process-stuck-or-slow"
+                 :pegs [{:id "peg-a"
+                         :answers {"yes" ["p1"] "no" ["p2" "p3"]}}]}]
+    (is (= [{:id "peg-a" :answer nil
+             :landings {"yes" ["p1"] "no" ["p2" "p3"]}}]
+           (:pegs (codex-pin/consultation-summary outcome nil))))
+    (testing "no pegs presented records nil, not an empty claim"
+      (is (nil? (:pegs (codex-pin/consultation-summary
+                         (assoc outcome :pegs []) nil)))))))

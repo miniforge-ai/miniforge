@@ -1,0 +1,208 @@
+;; Title: Miniforge.ai
+;; Subtitle: An agentic SDLC / fleet-control platform
+;; Author: Christopher Lester
+;; Line: Founder, Miniforge.ai (project)
+;; Copyright 2025-2026 Christopher Lester (christopher@miniforge.ai)
+;;
+;; Licensed under the Apache License, Version 2.0 (the "License");
+;; you may not use this file except in compliance with the License.
+;; You may obtain a copy of the License at
+;;
+;;     http://www.apache.org/licenses/LICENSE-2.0
+;;
+;; Unless required by applicable law or agreed to in writing, software
+;; distributed under the License is distributed on an "AS IS" BASIS,
+;; WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+;; See the License for the specific language governing permissions and
+;; limitations under the License.
+(ns ai.miniforge.content-hash.interface.instant-canonicalization-test
+  "The instant boundary in canonical EDN.
+
+   `inst?` admits BOTH `java.time.Instant` and `java.util.Date`, and
+   `pr-str` renders them as unrelated things — a Date as readable
+   `#inst`, an Instant as `#object[java.time.Instant 0x… \"…\"]` that
+   carries the object's identity hash. So hashing the same value twice
+   used to answer two different digests."
+  (:require
+   [clojure.edn :as edn]
+   [clojure.test :refer [deftest is testing]]
+   [ai.miniforge.content-hash.interface :as ch])
+  (:import
+   [java.time Instant]
+   [java.util Date]))
+
+;------------------------------------------------------------------------------ Layer 0
+
+(def ^{:stratum 0} ^:private now
+  "A pinned instant carrying MILLISECONDS — `.789` proves losslessness."
+  (Instant/parse "2026-08-01T12:34:56.789Z"))
+
+(deftest ^{:stratum 0} unsupported-inst-type-is-refused
+  ;; Hashing a value under a rendering nothing has checked is how this
+  ;; defect class starts. Refuse at the boundary instead.
+  (testing "an inst? that is neither Instant nor Date throws"
+    (let [exotic (reify clojure.core/Inst (inst-ms* [_] 0))]
+      (is (inst? exotic))
+      (is (thrown-with-msg? IllegalArgumentException
+                            #"Not a supported instant type"
+                            (ch/content-hash {:at exotic}))))))
+
+(deftest ^{:stratum 0} era-is-not-dropped
+  ;; A `yyyy` pattern is year-of-era: it renders 1 BC and 2 AD alike as
+  ;; `0002`, collapsing two distinct instants onto one digest — the same
+  ;; defect this namespace exists to keep out, one layer down.
+  (testing "1 BC and 2 AD are distinct instants and distinct hashes"
+    (let [bc (Instant/parse "-0001-01-01T00:00:00Z")
+          ad (Instant/parse "0002-01-01T00:00:00Z")]
+      (is (not= bc ad))
+      (is (not= (ch/canonical-edn {:at bc}) (ch/canonical-edn {:at ad})))
+      (is (not= (ch/content-hash {:at bc}) (ch/content-hash {:at ad}))))))
+
+(deftest ^{:stratum 0} rendering-is-locale-independent
+  ;; Copilot round 4. `clojure.core/format` and a bare
+  ;; `DateTimeFormatter/ofPattern` both take the default locale, so a
+  ;; numbering system other than `latn` rendered the padded fraction in
+  ;; its own digits — `.789` came back `.७८९` under hi-IN-u-nu-deva and
+  ;; the digest changed with the machine that computed it.
+  (let [deva (java.util.Locale/forLanguageTag "hi-IN-u-nu-deva")
+        orig (java.util.Locale/getDefault)
+        v    {:at (Instant/parse "2026-08-01T12:34:56.789Z")}
+        base (ch/canonical-edn v)]
+    (testing "a non-latn default locale changes neither the rendering nor the digest"
+      (try
+        (java.util.Locale/setDefault deva)
+        (is (= base (ch/canonical-edn v)))
+        (is (re-find #"\.789-00:00" (ch/canonical-edn v)))
+        (finally (java.util.Locale/setDefault orig))))
+    (testing "the locale really was restored, so later tests are unaffected"
+      (is (= orig (java.util.Locale/getDefault))))))
+
+(deftest ^{:stratum 0} comparator-equal-non-instants-keep-their-old-behavior
+  ;; The refusals above must not widen into the pre-existing collapse of
+  ;; keys that are distinct under `=` but equal under the comparator.
+  ;; That behavior predates this PR and is out of its scope.
+  (testing "1 and 1.0 still collapse silently rather than throwing"
+    (is (= 1 (count (edn/read-string (ch/canonical-edn #{1 1.0})))))
+    (is (string? (ch/canonical-edn {1 :a 1.0 :b}))))
+  (testing "a non-instant normalization collapse stays silent too"
+    ;; Copilot round 5. `mapv` renders a list and a vector of the same
+    ;; items to one vector, so instant normalization is NOT the only
+    ;; non-injective branch. A container whose comparator is
+    ;; inconsistent with `=` can hold both, and the guard used to throw
+    ;; on it — reporting "normalize to one instant: [1 2]", with no
+    ;; instant anywhere in sight.
+    (let [by-type (fn [a b] (compare (str (type a)) (str (type b))))
+          s       (sorted-set-by by-type [1 2] '(1 2))]
+      (is (= 2 (count s)))
+      (is (= [1 2] (first (edn/read-string (ch/canonical-edn s))))))))
+
+;------------------------------------------------------------------------------ Layer 1
+
+(deftest ^{:stratum 1} both-inst-types-are-inst?
+  ;; The premise the rest of this namespace rests on. If `inst?` stopped
+  ;; admitting Date, canonical EDN would not need to normalize by type —
+  ;; so assert it rather than assume it.
+  (testing "clojure.core/inst? admits an Instant and a Date alike"
+    (is (inst? now))
+    (is (inst? (Date/from now)))))
+
+(deftest ^{:stratum 1} instant-hashing-is-deterministic
+  ;; The defect. Pre-fix, `pr-str` embedded the Instant's identity hash,
+  ;; so two equal values hashed differently and re-verifying a stored
+  ;; digest against a recomputed one always failed.
+  (testing "two equal Instants produce one digest"
+    (let [a (Instant/parse "2026-08-01T12:34:56.789Z")
+          b (Instant/parse "2026-08-01T12:34:56.789Z")]
+      (is (= a b))
+      (is (= (ch/content-hash {:at a}) (ch/content-hash {:at b})))))
+  (testing "no identity hash survives into the serialization"
+    (is (not (re-find #"0x" (ch/canonical-edn {:at now}))))))
+
+(deftest ^{:stratum 1} both-inst-types-converge-on-one-rendering
+  (testing "a Date and an Instant for the same moment are indistinguishable"
+    (is (= (ch/canonical-edn {:at now})
+           (ch/canonical-edn {:at (Date/from now)})))
+    (is (= (ch/content-hash {:at now})
+           (ch/content-hash {:at (Date/from now)})))))
+
+(deftest ^{:stratum 1} date-rendering-is-unchanged
+  ;; Content hashes are persisted and later re-verified, so a Date must
+  ;; render to the byte-identical text `pr-str` gave it before instants
+  ;; were normalized here. Asserted against Date's own print form rather
+  ;; than a literal, so it tracks the JDK rather than this test.
+  ;; Holds across the Gregorian range; `Date` renders pre-1582 dates on
+  ;; the Julian calendar and drops the ISO `+` past year 9999, so it
+  ;; disagrees with ISO-8601 outside it.
+  (testing "a Date renders exactly as pr-str renders it"
+    (let [d (Date/from now)]
+      (is (= (str "{:at " (pr-str d) "}") (ch/canonical-edn {:at d}))))))
+
+(deftest ^{:stratum 1} sub-millisecond-precision-survives
+  ;; `Instant/now` carries microseconds on current JVMs. Truncating to
+  ;; Date's millisecond width would let two distinct instants collide
+  ;; inside a tamper-evidence hash.
+  (testing "microseconds are neither dropped nor collapsed"
+    (let [micros (Instant/parse "2026-08-01T12:34:56.789123Z")]
+      (is (= "{:at #inst \"2026-08-01T12:34:56.789123-00:00\"}"
+             (ch/canonical-edn {:at micros})))
+      (is (not= (ch/content-hash {:at micros}) (ch/content-hash {:at now}))))))
+
+(deftest ^{:stratum 1} normalized-instants-are-readable-edn
+  ;; `#object[...]` has no reader, so pre-fix an Instant made the whole
+  ;; canonical string unreadable. The reader answers a Date for `#inst`,
+  ;; so the round trip recovers the instant, not the original type.
+  (testing "canonical EDN holding an instant reads back to the same moment"
+    (doseq [[label t] [["Instant" now] ["Date" (Date/from now)]]]
+      (testing label
+        (is (= (Date/from now) (:at (edn/read-string (ch/canonical-edn {:at t})))))))))
+
+(deftest ^{:stratum 1} two-instant-keys-for-one-moment-are-refused
+  ;; Copilot caught this on #1744. Normalizing keys turns an Instant key
+  ;; and a Date key for the same moment into one key, so one entry
+  ;; overwrites the other and the survivor follows the source map's
+  ;; iteration order — two `=` maps hashing differently, which is the
+  ;; guarantee `canonical-edn` advertises. Refused rather than dropped.
+  (let [d (Date/from now)]
+    (testing "the two orderings really are one map, so silently collapsing would be a contract break"
+      (is (= (array-map now :a d :b) (array-map d :b now :a))))
+    (testing "an ambiguous map throws instead of dropping an entry"
+      (doseq [m [(array-map now :a d :b) (array-map d :b now :a)]]
+        (is (thrown-with-msg? IllegalArgumentException
+                              #"normalize to one instant"
+                              (ch/content-hash m)))))
+    (testing "one instant key is still fine, at either type"
+      (is (= (ch/canonical-edn {now :v}) (ch/canonical-edn {d :v}))))
+    (testing "a caller's own #inst literal collides the same way, in either order"
+      ;; Copilot round 2. A pre-normalized key is never rewritten, so a
+      ;; guard keyed on rewriting saw nothing to check and let it
+      ;; overwrite an Instant for the same moment — or not, by iteration
+      ;; order. `refuse-collapse!` compares normalized values instead.
+      (let [lit (tagged-literal 'inst "2026-08-01T12:34:56.789-00:00")]
+        (doseq [m [(array-map lit :a now :b) (array-map now :b lit :a)]]
+          (is (thrown-with-msg? IllegalArgumentException
+                                #"normalize to one instant"
+                                (ch/content-hash m))))))))
+
+(deftest ^{:stratum 1} two-instant-set-elements-for-one-moment-are-refused
+  ;; The same collapse as the map-key case, found by re-checking the
+  ;; other sorted container after fixing that one. Worse here: no
+  ;; insertion-order dependence, just a plain collision — `#{i d}` and
+  ;; `#{i}` are distinct values that produced the identical digest.
+  (let [d (Date/from now)]
+    (testing "the set really does hold two elements before normalization"
+      (is (= 2 (count #{now d}))))
+    (testing "an ambiguous set throws instead of collapsing onto one element"
+      (is (thrown-with-msg? IllegalArgumentException
+                            #"normalize to one instant"
+                            (ch/content-hash #{now d}))))
+    (testing "a set with one instant is still fine, at either type"
+      (is (= (ch/canonical-edn #{now}) (ch/canonical-edn #{d}))))
+    (testing "a vector keeps both — order is preserved, nothing is deduped"
+      (is (= 2 (count (edn/read-string (ch/canonical-edn [now d]))))))))
+
+(deftest ^{:stratum 1} instants-normalize-at-any-depth
+  (testing "nested, in sequences, in sets, and as a map key"
+    (is (= (ch/canonical-edn {:a {:b [now]}})
+           (ch/canonical-edn {:a {:b [(Date/from now)]}})))
+    (is (= (ch/canonical-edn #{now}) (ch/canonical-edn #{(Date/from now)})))
+    (is (= (ch/canonical-edn {now :v}) (ch/canonical-edn {(Date/from now) :v})))))

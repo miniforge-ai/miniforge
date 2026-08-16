@@ -18,13 +18,14 @@
 (ns ai.miniforge.cli.workflow-selection-config-test
   (:require
    [clojure.test :refer [deftest is testing]]
-   [ai.miniforge.cli.workflow-selection-config :as cfg]))
+   [ai.miniforge.cli.workflow-selection-config :as cfg]
+   [ai.miniforge.cli.workflow-selection-config.profiles-resource :as profiles-resource]))
 
 ;------------------------------------------------------------------------------ Layer 0
 
 (deftest ^{:stratum 0} configured-selection-profiles-test
   (testing "software-factory workflow selection profiles load from resources"
-    (let [profiles (cfg/configured-selection-profiles)]
+    (let [profiles (profiles-resource/configured-selection-profiles)]
       (is (= :canonical-sdlc (:comprehensive profiles)))
       (is (= :quick-fix (:fast profiles)))
       (is (= :canonical-sdlc (:default profiles))))))

@@ -41,7 +41,8 @@
               :coverage {:landing-count 2 :unanchored-count 1
                          :horizon-mix {"strategic" 1 "operational" 1}
                          :no-strategic-coverage? false
-                         :newest-scar-date "2026-01"}}
+                         :newest-scar-date "2026-01"
+                         :retirement :untriggerable}}
         text (codex/render-response resp)]
     (testing "strategic renders before operational (§7.6.1)"
       (is (< (str/index-of text "p-strategic") (str/index-of text "p-op"))))
@@ -50,7 +51,9 @@
       (is (str/includes? text "unanchored — reasoned, not survived")))
     (testing "coverage line leads with counts and §7.6.1-ordered mix (§7.5)"
       (is (str/includes? text "coverage: 2 landings, 1 unanchored"))
-      (is (str/includes? text "strategic 1 · operational 1")))))
+      (is (str/includes? text "strategic 1 · operational 1")))
+    (testing "coverage says the §4.4 retirement trigger has no data (§7.7)"
+      (is (str/includes? text "retirement: untriggerable")))))
 
 (deftest ^{:stratum 0} render-says-when-strategic-coverage-is-absent
   (let [resp {:situation "s1" :situation-title "t"
@@ -59,7 +62,8 @@
               :coverage {:landing-count 1 :unanchored-count 1
                          :horizon-mix {"tactical" 1}
                          :no-strategic-coverage? true
-                         :newest-scar-date nil}}
+                         :newest-scar-date nil
+                         :retirement :untriggerable}}
         text (codex/render-response resp)]
     (is (str/includes? text "NO STRATEGIC COVERAGE"))))
 
@@ -71,7 +75,10 @@
     (is (= ".miniforge/codex-consider.md" (:path entry)))
     (is (str/includes? (:content entry) "Pinned at phase start"))
     (is (str/includes? (:content entry) "situation: process-stuck-or-slow"))
-    (is (str/includes? (:content entry) "coverage:"))))
+    (is (str/includes? (:content entry) "coverage:"))
+    (testing "the §7.7 telemetry basis rides the entry, outside the file body"
+      (is (= 5 (count (:pegs entry))))
+      (is (not (str/includes? (:content entry) ":pegs"))))))
 
 (deftest ^{:stratum 0} pin-entry-surfaces-anomalies-instead-of-pinning-them
   (let [entry (codex/pin-entry "/nonexistent/codex" "anything" "x.md")]

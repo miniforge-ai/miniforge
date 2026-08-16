@@ -108,9 +108,7 @@ Step 2 of the ratified Ariadne adoption order: authority stops being
 
 | tier | r | theme | spec | axes |
 |---|---|---|---|---|
-| high | ● | ariadne-grants | `ariadne-grant-issuance.spec.edn` — Issue narrow runtime-owned grants for irreversible effects | correctness+policyenforcement+governancecredibility |
-| high | ○ | ariadne-grants | `ariadne-deploy-grant-enforcement.spec.edn` — Require granted, transacted Kubernetes deployments | correctness+observation+governancecredibility |
-| high | ○ | ariadne-grants | `ariadne-merge-grant-enforcement.spec.edn` — Require granted, transacted PR merges | correctness+observation+governancecredibility |
+| high | ● | ariadne-grants | `ariadne-deploy-grant-enforcement.spec.edn` — Require granted, transacted Kubernetes deployments | correctness+observation+governancecredibility |
 
 ## Theme — Polylith compliance (`polylith-compliance`, status: in-flight)
 
@@ -140,6 +138,44 @@ Discover scaling + budget signals via governed experiments, synthesize
 | high | ○ | operational-policy-synthesis | `n07-opsv-cli-tui-drift.spec.edn` — Implement OPSV CLI, TUI drill-down, and drift detection | observation+ux+dogfoodenabler |
 | high | ○ | operational-policy-synthesis | `n07-opsv-governed-actuation.spec.edn` — Implement governed OPSV PR, Kubernetes apply, and rollback effects | correctness+scale |
 | medium | ○ | operational-policy-synthesis | `workflow-policy-convergence.spec.edn` — Converge workflow-selection policy from governed outcomes | governance+workfloworchestration+reliability |
+
+## Theme — Ariadne adoption - step 3: tenants, owners, and attested contracts (`ariadne-tenancy`, status: in-flight)
+
+Step 3 of the ratified Ariadne adoption order. Identity stops being
+   implicit: tenants and principals become objects, every record is born
+   owned, the commissioning relationship becomes a relation rather than
+   containment, and the cross-language contracts gain a content hash and
+   an attestation.
+
+   The move is the same one steps 1 and 2 made twice already — take
+   something currently carried by convention and good behaviour, and
+   carry it by representation instead. Step 1 did it for verdicts, step
+   2 for authority, step 3 does it for identity and for the contracts
+   themselves.
+
+   ONE LESSON CARRIED FORWARD DELIBERATELY. The step-2 wave specified the
+   grant object, checking grants, transacting effects, migrating call
+   sites, and revoking grants — and never specified WHO ISSUES ONE. That
+   gap only surfaced at the call-site migration, where enforcing the
+   spec as written would have denied every merge and deploy permanently.
+   Step 3's equivalent gap is 'who establishes operator identity', and it
+   is spec 3a rather than a discovery. Nothing here is unblocked by
+   accident.
+
+   The RFC's own note that N12's authn half is 'thin' is taken at face
+   value: 3a names the credential->principal dependency and builds a
+   config-backed resolver behind the same seam, so the real one is a
+   drop-in rather than a second migration.
+
+**Informative spec:** `docs/architecture/rfc-ariadne-adoption.md`
+
+| tier | r | theme | spec | axes |
+|---|---|---|---|---|
+| blocker | ● | ariadne-tenancy | `ariadne-identity-boundary.spec.edn` — Ariadne step 3a: Tenant and Principal, and the boundary that establishes one | correctness+scale+governancecredibility |
+| high | ● | ariadne-tenancy | `ariadne-attested-contracts.spec.edn` — Ariadne step 3e: content-addressed, attested contracts | correctness+observation+governancecredibility |
+| blocker | ○ | ariadne-tenancy | `ariadne-owned-records.spec.edn` — Ariadne step 3c: every record is born owned | correctness+scale+governancecredibility |
+| blocker | ○ | ariadne-tenancy | `ariadne-run-identity-threading.spec.edn` — Ariadne step 3b: thread the acting identity through the run hierarchy | correctness+scale+governancecredibility |
+| high | ○ | ariadne-tenancy | `ariadne-engagement.spec.edn` — Ariadne step 3d: engagement as a relation, not containment | correctness+scale+governancecredibility |
 
 ## Theme — unassigned (`unassigned`, status: planned)
 

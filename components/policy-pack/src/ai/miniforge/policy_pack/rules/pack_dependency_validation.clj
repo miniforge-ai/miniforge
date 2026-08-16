@@ -26,343 +26,48 @@
    - Dependency depth limit (default: 5 levels)
    - Complete dependency graph validation before loading
 
-   Layer 0: parse-version(-constraint), get-pack-dependencies,
-     detect-circular/missing-dependencies, tainted-dependency? /
-     untrusted-instruction-escalation? predicates, calculate-pack-depths
-   Layer 1: compare-versions, build-dependency-graph (over
-     get-pack-dependencies), check-dependency-trust, detect-depth-violations
-     (over calculate-pack-depths)
-   Layer 2: satisfies-constraint? (over parse-version-constraint),
-     detect-trust-violations (over check-dependency-trust)
-   Layer 3: detect-version-conflicts (over build-dependency-graph +
-     satisfies-constraint?)
-   Layer 4: validate-pack-dependencies (orchestrates the Layer 0-3 detectors)
-   Layer 5: validate-single-pack (public entry point, over
-     validate-pack-dependencies)
+   Final slice (3/3) of a rule 210 split train (SL003: this namespace
+   originally measured 6 real layers, max 3 -- same convention as the
+   mdc-compiler split, miniforge#1729-#1743, and the workflow-runner
+   split, miniforge#1662). Slice 1 (#1770) moved version
+   parsing/comparison/constraint-satisfaction to
+   `ai.miniforge.policy-pack.rules.pack-dependency-validation.versions`.
+   Slice 2 (#1777) moved the trust-check chain to
+   `ai.miniforge.policy-pack.rules.pack-dependency-validation.trust`.
+   This slice moves dependency-graph construction and
+   circular/missing/depth-limit detection to
+   `ai.miniforge.policy-pack.rules.pack-dependency-validation.graph`:
+   get-pack-dependencies, detect-circular-dependencies,
+   detect-missing-dependencies, calculate-pack-depths,
+   build-dependency-graph, detect-depth-violations. This file now
+   measures 3 real layers -- within the rule 210 budget, closing out
+   the train.
 
-   6 real strata — over the rule 210 budget of 3; a genuine namespace split
-   (Wave 2), not a labeling problem."
+   Layer 0: detect-version-conflicts (over versions/satisfies-constraint?,
+     an external call)
+   Layer 1: validate-pack-dependencies (orchestrates
+     dep-graph/build-dependency-graph, dep-graph/detect-circular-dependencies,
+     dep-graph/detect-missing-dependencies, dep-graph/detect-depth-violations,
+     trust/detect-trust-violations, and the local detect-version-conflicts
+     -- all but the last are external calls)
+   Layer 2: validate-single-pack (public entry point, over
+     validate-pack-dependencies)"
   (:require
-   [ai.miniforge.algorithms.interface :as alg]
+   [ai.miniforge.policy-pack.rules.pack-dependency-validation.graph :as dep-graph]
+   [ai.miniforge.policy-pack.rules.pack-dependency-validation.trust :as trust]
+   [ai.miniforge.policy-pack.rules.pack-dependency-validation.versions :as versions]
    [clojure.string :as str]))
 
 ;------------------------------------------------------------------------------ Layer 0
 
-;; Version parsing and comparison
-(defn ^{:stratum 0} parse-version
-  "Parse a DateVer version string (YYYY.MM.DD or YYYY.MM.DD.N).
-   Returns {:year int :month int :day int :patch int} or nil if invalid."
-  [version-str]
-  (when version-str
-    (when-let [match (re-matches #"(\d{4})\.(\d{2})\.(\d{2})(?:\.(\d+))?" version-str)]
-      (let [[_ year month day patch] match]
-        {:year (Integer/parseInt year)
-         :month (Integer/parseInt month)
-         :day (Integer/parseInt day)
-         :patch (if patch (Integer/parseInt patch) 0)}))))
-
-(defn ^{:stratum 0} parse-version-constraint
-  "Parse a version constraint string.
-   Supports:
-   - Exact: '2026.01.25' or '=2026.01.25'
-   - Greater: '>2026.01.25', '>=2026.01.25'
-   - Less: '<2026.01.25', '<=2026.01.25'
-   - Range: '>=2026.01.01,<2026.02.01'
-   - Wildcard: '2026.01.*'
-
-   Returns {:type :exact/:range/:wildcard :constraints [...]}"
-  [constraint-str]
-  (cond
-    ;; Range constraint (comma-separated)
-    (str/includes? constraint-str ",")
-    (let [parts (str/split constraint-str #",")
-          trimmed (map str/trim parts)]
-      {:type :range
-       :constraints (mapv parse-version-constraint trimmed)})
-
-    ;; Wildcard (e.g., "2026.01.*")
-    (str/includes? constraint-str "*")
-    {:type :wildcard
-     :prefix (str/replace constraint-str #"\.\*$" "")}
-
-    ;; Greater than or equal
-    (str/starts-with? constraint-str ">=")
-    {:type :gte
-     :version (subs constraint-str 2)}
-
-    ;; Greater than
-    (str/starts-with? constraint-str ">")
-    {:type :gt
-     :version (subs constraint-str 1)}
-
-    ;; Less than or equal
-    (str/starts-with? constraint-str "<=")
-    {:type :lte
-     :version (subs constraint-str 2)}
-
-    ;; Less than
-    (str/starts-with? constraint-str "<")
-    {:type :lt
-     :version (subs constraint-str 1)}
-
-    ;; Exact (with or without '=' prefix)
-    :else
-    {:type :exact
-     :version (if (str/starts-with? constraint-str "=")
-               (subs constraint-str 1)
-               constraint-str)}))
-
-;; Dependency graph construction
-(defn ^{:stratum 0} get-pack-dependencies
-  "Extract dependencies from a pack manifest.
-   Returns vector of {:pack-id string :version-constraint string}."
-  [pack]
-  (get pack :pack/extends []))
-
-;; Validation rules
-(defn ^{:stratum 0} detect-circular-dependencies
-  "Detect circular dependencies in the graph.
-   Returns vector of violation maps:
-   [{:type :circular-dependency
-     :cycle [pack-id-1 pack-id-2 ... pack-id-1]
-     :message string}]"
-  [graph]
-  (let [pack-ids (keys graph)
-        cycles (alg/dfs-collect
-                graph
-                pack-ids
-                (fn [node] (map :pack-id (:deps node)))
-                ;; Collect cycle when detected
-                (fn [pack-id path _visited _visiting]
-                  (let [cycle-start-idx (.indexOf (vec path) pack-id)
-                        cycle (if (>= cycle-start-idx 0)
-                                (conj (vec (drop cycle-start-idx path)) pack-id)
-                                [pack-id])]
-                    cycle))
-                :cycle)]
-    (->> cycles
-         (distinct)
-         (map (fn [cycle]
-                {:type :circular-dependency
-                 :cycle cycle
-                 :message (str "Circular dependency detected: "
-                              (str/join " → " cycle))}))
-         vec)))
-
-(defn ^{:stratum 0} detect-missing-dependencies
-  "Detect missing dependencies in the graph.
-   Returns vector of violation maps:
-   [{:type :missing-dependency
-     :pack-id string
-     :missing-dep string
-     :message string}]"
-  [graph by-id]
-  (let [available-ids (set (keys by-id))]
-    (->> graph
-         (mapcat (fn [[pack-id node]]
-                   (let [deps (map :pack-id (:deps node))
-                         missing (remove available-ids deps)]
-                     (map (fn [dep-id]
-                            {:type :missing-dependency
-                             :pack-id pack-id
-                             :missing-dep dep-id
-                             :message (str "Pack '" pack-id "' requires missing dependency '" dep-id "'")})
-                          missing))))
-         vec)))
-
-(defn- ^{:stratum 0} tainted-dependency?
-  "True when a non-tainted pack depends on a tainted pack."
-  [pack dep-pack]
-  (and dep-pack
-       (= :tainted (get dep-pack :pack/trust-level))
-       (not= :tainted (get pack :pack/trust-level))))
-
-(defn- ^{:stratum 0} untrusted-instruction-escalation?
-  "True when an untrusted pack with instruction authority depends on a trusted pack."
-  [pack dep-pack]
-  (and dep-pack
-       (= :untrusted (get pack :pack/trust-level :untrusted))
-       (= :authority/instruction (get pack :pack/authority :authority/data))
-       (= :trusted (get dep-pack :pack/trust-level))))
-
-(defn ^{:stratum 0} calculate-pack-depths
-  "Calculate maximum depth for each pack using bottom-up traversal.
-   Returns map of pack-id -> {:depth int :chain [pack-ids]}."
-  [graph]
-  (letfn [(calc-depth [pack-id visited depths]
-            (cond
-              ;; Already calculated
-              (contains? depths pack-id)
-              [depths (get depths pack-id)]
-
-              ;; Cycle detected
-              (contains? visited pack-id)
-              [depths {:depth 0 :chain []}]
-
-              ;; Calculate depth
-              :else
-              (let [node (get graph pack-id)
-                    deps (map :pack-id (:deps node))
-                    new-visited (conj visited pack-id)]
-                (if (empty? deps)
-                  (let [result {:depth 1 :chain [pack-id]}]
-                    [(assoc depths pack-id result) result])
-                  (loop [remaining-deps deps
-                         d depths
-                         child-results []]
-                    (if (empty? remaining-deps)
-                      (let [max-child (apply max-key :depth child-results)
-                            depth (inc (:depth max-child))
-                            chain (cons pack-id (:chain max-child))
-                            result {:depth depth :chain chain}]
-                        [(assoc d pack-id result) result])
-                      (let [[d' child-result] (calc-depth (first remaining-deps) new-visited d)]
-                        (recur (rest remaining-deps)
-                               d'
-                               (conj child-results child-result)))))))))]
-    ;; Calculate depths for all packs
-    (loop [remaining-packs (keys graph)
-           depths {}]
-      (if (empty? remaining-packs)
-        depths
-        (let [[depths' _] (calc-depth (first remaining-packs) #{} depths)]
-          (recur (rest remaining-packs) depths'))))))
-
-;------------------------------------------------------------------------------ Layer 1
-
-(defn ^{:stratum 1} compare-versions
-  "Compare two version strings.
-   Returns negative if v1 < v2, positive if v1 > v2, 0 if equal."
-  [v1 v2]
-  (let [p1 (parse-version v1)
-        p2 (parse-version v2)]
-    (if (and p1 p2)
-      (let [year-cmp (compare (:year p1) (:year p2))]
-        (if (not= 0 year-cmp)
-          year-cmp
-          (let [month-cmp (compare (:month p1) (:month p2))]
-            (if (not= 0 month-cmp)
-              month-cmp
-              (let [day-cmp (compare (:day p1) (:day p2))]
-                (if (not= 0 day-cmp)
-                  day-cmp
-                  (compare (:patch p1) (:patch p2))))))))
-      (compare v1 v2))))
-
-(defn ^{:stratum 1} build-dependency-graph
-  "Build a dependency graph from a collection of packs.
-
-   Arguments:
-   - packs - Vector of pack manifests
-
-   Returns:
-   - {:graph {pack-id {:pack manifest :deps [dep...]}}
-      :by-id {pack-id pack}
-      :versions {pack-id version-string}}"
-  [packs]
-  (let [by-id (into {} (map (fn [p] [(:pack/id p) p]) packs))
-        versions (into {} (map (fn [p] [(:pack/id p) (:pack/version p)]) packs))]
-    {:graph (reduce (fn [g pack]
-                      (let [pack-id (:pack/id pack)
-                            deps (get-pack-dependencies pack)]
-                        (assoc g pack-id
-                               {:pack pack
-                                :deps deps})))
-                    {}
-                    packs)
-     :by-id by-id
-     :versions versions}))
-
-(defn- ^{:stratum 1} check-dependency-trust
-  "Check a single pack→dependency pair for trust violations.
-   Returns a violation map or nil."
-  [pack-id pack dep-id dep-pack]
-  (cond
-    (tainted-dependency? pack dep-pack)
-    {:type       :trust-violation
-     :pack-id    pack-id
-     :dependency dep-id
-     :message    (str "Tainted dependency " dep-id
-                      " cannot be used by non-tainted pack " pack-id)}
-
-    (untrusted-instruction-escalation? pack dep-pack)
-    {:type       :trust-violation
-     :pack-id    pack-id
-     :dependency dep-id
-     :message    (str "Untrusted pack " pack-id
-                      " with instruction authority cannot depend on "
-                      "trusted pack " dep-id)}))
-
-(defn ^{:stratum 1} detect-depth-violations
-  "Detect dependency chains that exceed the depth limit.
-   Returns vector of violation maps:
-   [{:type :depth-limit
-     :pack-id string
-     :depth int
-     :chain [pack-id...]
-     :message string}]"
-  [graph max-depth]
-  (let [depths (calculate-pack-depths graph)]
-    (->> depths
-         (keep (fn [[pack-id {:keys [depth chain]}]]
-                 (when (> depth max-depth)
-                   {:type :depth-limit
-                    :pack-id pack-id
-                    :depth depth
-                    :chain chain
-                    :message (str "Pack '" pack-id "' has dependency chain of depth "
-                                 depth " (exceeds limit of " max-depth "): "
-                                 (str/join " → " chain))})))
-         vec)))
-
-;------------------------------------------------------------------------------ Layer 2
-
-(defn ^{:stratum 2} satisfies-constraint?
-  "Check if a version satisfies a constraint.
-   Returns true if version satisfies the constraint."
-  [version constraint]
-  (when (and version constraint)
-    (let [parsed (parse-version-constraint constraint)]
-      (case (:type parsed)
-        :exact (= version (:version parsed))
-        :gt (pos? (compare-versions version (:version parsed)))
-        :gte (>= (compare-versions version (:version parsed)) 0)
-        :lt (neg? (compare-versions version (:version parsed)))
-        :lte (<= (compare-versions version (:version parsed)) 0)
-        :wildcard (str/starts-with? version (:prefix parsed))
-        :range (every? #(satisfies-constraint? version (str (:version %)))
-                       (:constraints parsed))
-        false))))
-
-(defn ^{:stratum 2} detect-trust-violations
-  "Detect trust level constraint violations per N4 §2.4.2.
-
-   Checks:
-   1. Untrusted pack with instruction authority depending on trusted pack
-   2. Tainted pack as dependency of any non-tainted pack
-
-   Returns vector of violation maps."
-  [_graph by-id]
-  (->> (vals by-id)
-       (mapcat (fn [pack]
-                 (let [pack-id (get pack :pack/id)]
-                   (->> (get pack :pack/extends [])
-                        (keep (fn [dep]
-                                (let [dep-id (get dep :pack-id)]
-                                  (check-dependency-trust
-                                   pack-id pack dep-id (get by-id dep-id)))))))))
-       vec))
-
-;------------------------------------------------------------------------------ Layer 3
-
-(defn ^{:stratum 3} detect-version-conflicts
+(defn ^{:stratum 0} detect-version-conflicts
   "Detect version conflicts in the dependency tree.
    Returns vector of violation maps:
    [{:type :version-conflict
      :dependency string
      :constraints [{:pack-id string :constraint string}...]
      :message string}]"
-  [graph versions]
+  [graph pack-versions]
   (let [;; Collect all constraints for each dependency
         dep-constraints (reduce-kv
                          (fn [acc pack-id node]
@@ -380,12 +85,12 @@
     (->> dep-constraints
          (keep (fn [[dep-id constraints]]
                  (let [;; Get actual version of dependency
-                       actual-version (get versions dep-id)
+                       actual-version (get pack-versions dep-id)
                        ;; Check if all constraints can be satisfied
                        conflicting (when actual-version
                                      (remove (fn [{:keys [constraint]}]
                                               (or (nil? constraint)
-                                                  (satisfies-constraint? actual-version constraint)))
+                                                  (versions/satisfies-constraint? actual-version constraint)))
                                             constraints))]
                    (when (seq conflicting)
                      {:type :version-conflict
@@ -399,10 +104,10 @@
                                                               conflicting)))}))))
          vec)))
 
-;------------------------------------------------------------------------------ Layer 4
+;------------------------------------------------------------------------------ Layer 1
 
 ;; Public API
-(defn ^{:stratum 4} validate-pack-dependencies
+(defn ^{:stratum 1} validate-pack-dependencies
   "Validate pack dependencies according to N4 §2.4.2.
 
    Checks:
@@ -429,15 +134,15 @@
   [packs & [{:keys [max-depth check-trust?]
              :or {max-depth 5
                   check-trust? false}}]]
-  (let [{:keys [graph by-id versions]} (build-dependency-graph packs)
+  (let [{:keys [graph by-id versions]} (dep-graph/build-dependency-graph packs)
 
         ;; Run all validation checks
-        circular (detect-circular-dependencies graph)
-        missing (detect-missing-dependencies graph by-id)
+        circular (dep-graph/detect-circular-dependencies graph)
+        missing (dep-graph/detect-missing-dependencies graph by-id)
         version-conflicts (detect-version-conflicts graph versions)
         trust-violations (when check-trust?
-                          (detect-trust-violations graph by-id))
-        depth-violations (detect-depth-violations graph max-depth)
+                          (trust/detect-trust-violations graph by-id))
+        depth-violations (dep-graph/detect-depth-violations graph max-depth)
 
         ;; Separate hard failures from warnings
         failures (concat circular missing version-conflicts trust-violations)
@@ -450,9 +155,9 @@
      :violations failures
      :warnings warnings}))
 
-;------------------------------------------------------------------------------ Layer 5
+;------------------------------------------------------------------------------ Layer 2
 
-(defn ^{:stratum 5} validate-single-pack
+(defn ^{:stratum 2} validate-single-pack
   "Validate a single pack's dependencies against a registry of available packs.
 
    Arguments:
@@ -483,24 +188,6 @@
 
 ;------------------------------------------------------------------------------ Rich Comment
 (comment
-  ;; Test version parsing
-  (parse-version "2026.01.25")
-  ;; => {:year 2026 :month 1 :day 25 :patch 0}
-
-  (parse-version "2026.01.25.2")
-  ;; => {:year 2026 :month 1 :day 25 :patch 2}
-
-  ;; Test version comparison
-  (compare-versions "2026.01.25" "2026.01.26")
-  ;; => -1
-
-  ;; Test version constraints
-  (satisfies-constraint? "2026.01.25" ">=2026.01.20")
-  ;; => true
-
-  (satisfies-constraint? "2026.01.25" "2026.01.*")
-  ;; => true
-
   ;; Test circular dependency detection
   (def pack-a {:pack/id "pack-a"
                :pack/version "2026.01.25"

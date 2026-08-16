@@ -43,10 +43,12 @@
 
    Landings are ordered strategic → operational → tactical (§7.6.1); the
    coverage statement carries landing count, unanchored count, horizon mix
-   (including an explicit :no-strategic-coverage? flag, §7.6.2), and the
-   newest scar date (§7.5). Anomalies (unreadable codex, unmatched or
-   ambiguous situation) come back as {:codex/anomaly ...} data, never as an
-   empty success."
+   (including an explicit :no-strategic-coverage? flag, §7.6.2), the
+   newest scar date (§7.5), and the retirement-trigger state (§7.7).
+   :pegs carries the per-peg telemetry basis — every discriminator
+   presented, with the landing set each answer routes to (§7.7/§4.4).
+   Anomalies (unreadable codex, unmatched or ambiguous situation) come
+   back as {:codex/anomaly ...} data, never as an empty success."
   [codex-dir situation-text]
   (core/consider codex-dir situation-text))
 
@@ -61,8 +63,11 @@
 
 (defn ^{:stratum 0} pin-entry
   "Build the per-run blackboard pin (SPEC §7.4): consult the codex for
-   `situation` and return {:path pin-path :content rendered} suitable as a
-   `:task/existing-files` entry — prompt-visible AND cache-fetchable.
+   `situation` and return {:path pin-path :content rendered :pegs [..]} —
+   :path/:content suitable as a `:task/existing-files` entry
+   (prompt-visible AND cache-fetchable); :pegs is the consultation's §7.7
+   telemetry basis riding along for provenance recording, never part of
+   the pinned file itself.
 
    The pinned artifact is the consultation RESULT, ephemeral and per-run;
    the codex itself is durable and is never cached onto the blackboard
@@ -77,7 +82,8 @@
        :content (str (msg/t :pin/header)
                      "\n\n"
                      (render/render-response resp)
-                     "\n")})))
+                     "\n")
+       :pegs (:pegs resp)})))
 
 (defn ^{:stratum 0} unconfigured-anomaly
   "The anomaly returned when no codex location is configured at all.

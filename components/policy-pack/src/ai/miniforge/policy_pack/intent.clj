@@ -23,11 +23,11 @@
      parse-terraform-plan-counts, parse-k8s-diff-counts
    Layer 1: intent-violation (over intent-constraints)
    Layer 2: intent-matches? (over intent-violation)
-   Layer 3: semantic-intent-check (over intent-matches? + the plan/diff
-     count parsers)
 
-   4 real strata — over the rule 210 budget of 3; a genuine namespace split
-   (Wave 2), not a labeling problem.
+   The full semantic check that composes `infer-intent` and
+   `intent-matches?` into one pass/fail result is a 4th layer, split
+   out to `ai.miniforge.policy-pack.intent.check` (rule 210: this
+   namespace measured 4 real layers, over the budget of 3).
 
    Intent Types:
      :import   → Creates: 0, Updates: 0, Destroys: 0 (state-only)
@@ -37,7 +37,7 @@
      :refactor → Creates: 0, Updates: 0, Destroys: 0
      :migrate  → Creates: >0, Destroys: >0"
   (:require
-   [ai.miniforge.policy-pack.detection :as detection]
+   [ai.miniforge.policy-pack.detection.matching :as matching]
    [clojure.string :as str]))
 
 ;------------------------------------------------------------------------------ Layer 0
@@ -84,7 +84,7 @@
 ;; Terraform plan parsing
 (defn ^{:stratum 0} parse-terraform-plan-counts
   "Parse terraform plan output and return resource change counts.
-   Delegates to detection/plan-resource-counts (added by PR #457).
+   Delegates to matching/plan-resource-counts (added by PR #457).
 
    Arguments:
    - plan-output — Raw terraform plan output string
@@ -92,7 +92,7 @@
   Returns:
    - {:creates int :updates int :destroys int}"
   [plan-output]
-  (detection/plan-resource-counts plan-output))
+  (matching/plan-resource-counts plan-output))
 
 ;; Kubernetes diff parsing
 (defn ^{:stratum 0} parse-k8s-diff-counts
@@ -176,25 +176,6 @@
           {:passed? true}
           {:passed? false :violations violations})))))
 
-;------------------------------------------------------------------------------ Layer 3
-
-(defn ^{:stratum 3} semantic-intent-check
-  "Full semantic intent validation check function per N4 §4.
-
-   Arguments:
-   - declared-intent — Keyword from intent-types
-   - counts          — {:creates int :updates int :destroys int}
-
-   Returns:
-   - {:passed? bool :violations [...] :inferred-intent keyword :metadata {...}}"
-  [declared-intent counts]
-  (let [inferred (infer-intent counts)
-        result   (intent-matches? declared-intent counts)]
-    (assoc result
-           :inferred-intent inferred
-           :metadata {:declared declared-intent
-                      :counts   counts})))
-
 ;------------------------------------------------------------------------------ Rich Comment
 (comment
   ;; Infer intent from counts
@@ -211,8 +192,6 @@
   (intent-matches? :create {:creates 3 :updates 1 :destroys 0})
   ;; => {:passed? true}
 
-  ;; Full check
-  (semantic-intent-check :import {:creates 0 :updates 0 :destroys 0})
-  ;; => {:passed? true :inferred-intent :refactor :metadata {...}}
+  ;; Full check lives in ai.miniforge.policy-pack.intent.check
 
   :leave-this-here)

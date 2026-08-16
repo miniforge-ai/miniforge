@@ -18,7 +18,8 @@
 (ns ai.miniforge.policy-pack.interface.mapping
   "Mapping artifact loading, validation, resolution, and report projection."
   (:require
-   [ai.miniforge.policy-pack.mapping :as mapping]))
+   [ai.miniforge.policy-pack.mapping :as mapping]
+   [ai.miniforge.policy-pack.mapping.schema :as schema]))
 
 ;------------------------------------------------------------------------------ Layer 0
 
@@ -27,23 +28,23 @@
   "Malli schema (a `[:map ...]` vector) for a mapping artifact — an independent,
    versioned bridge between a source and target policy system, carrying entries
    and optional authorship."
-  mapping/MappingArtifact)
+  schema/MappingArtifact)
 
 (def ^{:stratum 0} MappingEntry
   "Malli schema (a `[:map ...]` vector) for one mapping entry — an optional
    source rule/category, an optional target control, a :mapping/type, and
    optional notes."
-  mapping/MappingEntry)
+  schema/MappingEntry)
 
 (def ^{:stratum 0} MappingAuthorship
   "Malli schema (a `[:map ...]` vector) for mapping provenance — :publisher,
    :confidence, and an optional :validated-at."
-  mapping/MappingAuthorship)
+  schema/MappingAuthorship)
 
 (def ^{:stratum 0} MappingType
   "Malli enum schema (`[:enum :exact :broad :partial :none]`) for how closely a
    source satisfies a target."
-  mapping/MappingType)
+  schema/MappingType)
 
 ;; Validation
 (def ^{:stratum 0} valid-mapping?

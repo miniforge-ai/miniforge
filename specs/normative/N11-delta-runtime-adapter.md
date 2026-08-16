@@ -352,3 +352,24 @@ called out to ensure the user-facing story matches the contract.
 - N6 — Evidence & Provenance (image-digest pinning is N6's responsibility;
   this delta only requires that defaults are pin-friendly).
 - `docs/platform-support.md` — host platforms that miniforge supports.
+
+---
+
+## Conformance Requirements
+
+| ID | Level | Requirement |
+|----|-------|-------------|
+| N11D.RA.1 | MUST | Select the runtime adapter from the resolved runtime spec, falling through to `:worktree` (§3). |
+| N11D.RA.2 | MUST | Implement the full TaskExecutor protocol of N11 §10 for every adapter (§4). |
+| N11D.RA.3 | MUST | Fail closed when a requested runtime class has no registered adapter (§3). |
+
+### Test Obligations
+
+1. An unregistered runtime class is refused, not silently downgraded to worktree.
+
+---
+
+**Version History:**
+
+- 0.1.0-draft (2026-08-10): Spec-completion pass — `N11D.RA.*` conformance requirement IDs and test obligations added;
+  metadata already used the header form.

@@ -19,8 +19,10 @@
   "Kubernetes reads, mutation, and reconciliation probes."
   (:require
    [ai.miniforge.anomaly.interface :as anomaly]
+   [ai.miniforge.phase-deployment.messages :as msg]
    [ai.miniforge.phase-deployment.shell :as shell]
-   [ai.miniforge.schema.interface :as schema]))
+   [ai.miniforge.schema.interface :as schema]
+   [clojure.string :as str]))
 
 ;------------------------------------------------------------------------------ Layer 0
 
@@ -35,6 +37,23 @@
   [{:keys [kustomize-dir namespace context]}]
   (shell/kustomize-apply! kustomize-dir
                           :namespace namespace :context context))
+
+(defn ^{:stratum 0} render!
+  "Render one Kustomize target without contacting Kubernetes."
+  [{:keys [kustomize-dir]}]
+  (shell/kustomize-build! kustomize-dir))
+
+(defn ^{:stratum 0} apply-rendered!
+  "Apply exactly the manifest bytes recorded by the caller."
+  [{:keys [namespace context]} rendered-yaml]
+  (shell/kubectl-apply! rendered-yaml
+                        :namespace namespace :context context))
+
+(defn ^{:stratum 0} dry-run!
+  "Ask the API server to validate exactly the manifest bytes to be applied."
+  [{:keys [namespace context]} rendered-yaml]
+  (shell/kubectl-apply! rendered-yaml :namespace namespace :context context
+                        :server-dry-run? true))
 
 (def ^{:stratum 0} PodState
   [:map
@@ -65,7 +84,29 @@
      :ready? (boolean (and (seq statuses) (every? :ready statuses)))
      :images (mapv :image (get-in pod [:spec :containers] []))}))
 
+(defn- ^{:stratum 0} target-failure
+  [kubectl-result]
+  (schema/failure
+   :target
+   (or (not-empty (:stderr kubectl-result))
+       (:error kubectl-result)
+       (msg/t :deploy/context-unavailable))
+   {:kubectl-result kubectl-result}))
+
 ;------------------------------------------------------------------------------ Layer 1
+
+(defn ^{:stratum 1} target!
+  "Resolve a context-free target to kubectl's configured current context."
+  [{:keys [context] :as deploy-config}]
+  (if context
+    (schema/success :target deploy-config)
+    (let [result (shell/kubectl! "config" :extra-args ["current-context"])
+          current-context (some-> (:stdout result) str/trim not-empty)]
+      (cond
+        (schema/failed? result) (target-failure result)
+        (nil? current-context) (target-failure result)
+        :else (schema/success :target
+                              (assoc deploy-config :context current-context))))))
 
 (defn ^{:stratum 1} rollback-info!
   "Read the pre-effect deployment state used to recover a partial mutation."

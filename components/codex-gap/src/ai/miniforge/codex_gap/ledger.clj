@@ -39,7 +39,15 @@
 (defn ^{:stratum 0} build-entry
   "Normalize a miss into its ledger shape. `signal` is
    {:type :review-blocking|:gate-failure|:terminal-anomaly :payload ...}
-   with the payload verbatim from the producer."
+   with the payload verbatim from the producer.
+
+   The consultation's :pegs — the §7.7 per-peg record (which way each
+   presented peg answered, or that it went unanswered, and the landing
+   set that followed) — is lifted to :miss/pegs and stripped from the
+   stored consultation: one canonical location per datum. This ledger is
+   deliberately the §7.7 accrual surface — the retirement trigger
+   (T1 §4.4.1) reads answer distributions from here, no new collection
+   surface."
   [{:keys [run-id phase signal situation consultation bucket attribution]}]
   {:miss/id (random-uuid)
    :miss/at (str (java.time.Instant/now))
@@ -47,7 +55,8 @@
    :miss/phase phase
    :miss/signal signal
    :miss/situation situation
-   :miss/consultation consultation
+   :miss/consultation (dissoc consultation :pegs)
+   :miss/pegs (get consultation :pegs)
    :miss/bucket bucket
    :miss/attribution attribution})
 

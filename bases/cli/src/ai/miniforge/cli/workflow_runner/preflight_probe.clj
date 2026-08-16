@@ -67,13 +67,22 @@
   (into [cmd-path "-p" (support/backend-preflight-prompt)]
         (support/claude-preflight-args)))
 
-(defn- ^{:stratum 0} generic-preflight-command
+(defn- ^{:stratum 0} generic-preflight-invocation
+  "Build `{:args :stdin}` for a non-Claude backend's health probe the
+   same way the llm brick builds them for a real call: the backend's
+   declared `:prompt-via` goes into the request so `:args-fn` shapes
+   argv for that mode, and a `:stdin` backend (codex, whose argv ends
+   in the `-` placeholder) gets the prompt piped in rather than left
+   out entirely. The caller prepends the resolved CLI path."
   [llm-client]
   (let [{:keys [backend model]} (:config llm-client)
-        {:keys [cmd args-fn]} (get llm/backends backend)
-        request (cond-> {:prompt (support/backend-preflight-prompt)}
+        {:keys [args-fn] :as backend-config} (get llm/backends backend)
+        prompt (support/backend-preflight-prompt)
+        prompt-via (llm/backend-prompt-via backend-config)
+        request (cond-> {:prompt prompt :prompt-via prompt-via}
                   model (assoc :model model))]
-    (into [cmd] (args-fn request))))
+    {:args (vec (args-fn request))
+     :stdin (when (= :stdin prompt-via) prompt)}))
 
 ;------------------------------------------------------------------------------ Layer 1
 
@@ -81,10 +90,12 @@
   [llm-client cmd-path workdir]
   (let [{:keys [backend]} (:config llm-client)
         backend-config (get llm/backends backend)
-        full-cmd (into [cmd-path] (rest (generic-preflight-command llm-client)))
+        {:keys [args stdin]} (generic-preflight-invocation llm-client)
+        full-cmd (into [cmd-path] args)
         {:keys [out err exit timeout-ms]} (process/run-cli-command full-cmd
                                                                    (support/backend-preflight-timeout-ms)
-                                                                   :workdir workdir)
+                                                                   :workdir workdir
+                                                                   :stdin stdin)
         content (support/decoded-preflight-content backend-config out)]
     (cond
       timeout-ms

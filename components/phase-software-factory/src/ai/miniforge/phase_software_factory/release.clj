@@ -32,6 +32,8 @@
             [ai.miniforge.agent.interface :as agent]
             [ai.miniforge.logging.interface :as log]
             [ai.miniforge.phase.interface :as phase]
+            [ai.miniforge.phase-software-factory.codex-pin :as codex-pin]
+            [ai.miniforge.phase-software-factory.gap-wiring :as gap-wiring]
             [ai.miniforge.phase-software-factory.messages :as messages]
             [ai.miniforge.phase-software-factory.phase-config :as phase-config]
             [ai.miniforge.phase-software-factory.phase-terminal :as phase-terminal]
@@ -39,6 +41,16 @@
             [ai.miniforge.response.interface :as response]))
 
 ;------------------------------------------------------------------------------ Layer 0
+
+(defn ^{:stratum 0} attach-consultation
+  "Record `codex-outcome`'s summary onto `result`, on both success and
+   failure -- :output starts nil on response/failure, so a failed
+   release that consulted must not be ledgered as one that never did."
+  [result codex-outcome]
+  (cond-> result
+    (map? result)
+    (assoc-in [:output :codex/consultation]
+              (codex-pin/consultation-summary codex-outcome nil))))
 
 ;; Defaults
 (def ^{:stratum 0} default-config
@@ -277,8 +289,19 @@
   [ctx config logger]
   (let [on-chunk (phase/create-streaming-callback ctx :release)
         input (get-in ctx [:execution/input])
-        behavior-addendum (phase/load-and-filter-behaviors
-                            :release {:task {:task/intent (:intent input)}})]
+        ;; Codex consultation for the release situation, delivered through
+        ;; the same addendum channel as the compiled standards pack — the
+        ;; releaser has no existing-files channel (SPEC T1 s7.4). The
+        ;; outcome rides on the exec-context so enter-release can attach
+        ;; provenance without consulting twice.
+        codex-outcome (codex-pin/landings-outcome :release logger)
+        pack-addendum (phase/load-and-filter-behaviors
+                        :release {:task {:task/intent (:intent input)}})
+        behavior-addendum (let [t (:text codex-outcome)]
+                            (cond
+                              (and pack-addendum t) (str pack-addendum "\n\n" t)
+                              t t
+                              :else pack-addendum))]
     (cond-> {;; Preserve the original precedence — explicit ctx worktree paths
              ;; win over config; the blessed resolver is the LAST resort,
              ;; adding the opts key + the governed-fail / CWD decision (no
@@ -313,7 +336,10 @@
              ;; Resolve and inject GitHub token for capsule gh CLI auth
              :github-token (resolve-github-token ctx)}
       on-chunk (assoc :on-chunk on-chunk)
-      behavior-addendum (assoc :task/behavior-addendum behavior-addendum))))
+      behavior-addendum (assoc :task/behavior-addendum behavior-addendum)
+      ;; :text already rode into the behavior addendum; the summary only
+      ;; needs the status fields — don't ship the rendered prose twice.
+      codex-outcome (assoc :codex/outcome (dissoc codex-outcome :text)))))
 
 (defn ^{:stratum 1} leave-release
   "Post-processing for release phase.
@@ -326,6 +352,10 @@
    bypasses `:on-fail` and lands on `:failed` because the curator's
    empty-diff signal means the implementer has nothing left to do."
   [ctx]
+  ;; Gap-instrument miss recording (T2 s3): best-effort, opt-in, and it
+  ;; must never change the outcome it measures. Consultation provenance
+  ;; was attached at enter, so it is visible here.
+  (gap-wiring/record-phase-misses! ctx :release)
   (let [start-time (get-in ctx [:phase :started-at])
         end-time (System/currentTimeMillis)
         duration-ms (if start-time (- end-time start-time) 0)
@@ -604,7 +634,11 @@
                    (response/failure e)))
 
         ;; Emit agent-completed telemetry event for release executor
-        _ (phase/emit-agent-completed! ctx :release :releaser result)]
+        _ (phase/emit-agent-completed! ctx :release :releaser result)
+        ;; SPEC s7.4.3: consultation provenance onto the durable result —
+        ;; the gap instrument reads it at leave (same marker implement and
+        ;; plan carry). Release has no recorded context-reads channel.
+        result (attach-consultation result (:codex/outcome exec-context))]
 
     (-> (phase/enter-context ctx :release :releaser gates budget start-time result)
         ;; Single derived projection of the canonical pr-info onto ctx-level

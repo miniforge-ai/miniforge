@@ -30,12 +30,20 @@
       in the `finally` clause of both functions, so it fires on *both* normal
       completion and exception-path exit.
 
-   ## Why workflow_runner.clj is not loaded here
+   ## Why these tests exercise gc-hooks rather than workflow_runner.clj
 
-   `workflow_runner.clj` starts JVM background threads at namespace-load time
-   that never terminate in a test JVM, causing a 30-minute hang.  These tests
-   therefore verify the *lifecycle wiring pattern* directly via `gc-hooks`,
-   using the same DI approach that `workflow_runner.clj` employs internally:
+   These are deliberately *pattern-level* tests: they verify the lifecycle
+   wiring shape directly via `gc-hooks` with mock collaborators, rather than
+   driving `run-workflow!` end-to-end.  Loading `workflow_runner.clj` is not
+   the obstacle — since the rule-210 namespace split, the process-scoped
+   singletons (meta-loop context, operator-event consumer) live in
+   `workflow_runner/control.clj` as lazily initialized `defonce` atoms, and
+   requiring `ai.miniforge.cli.workflow-runner` in a fresh JVM starts no
+   background threads (sibling tests such as `runner_control_wiring_test.clj`
+   and `preflight_test.clj` require it directly).  An earlier revision of this
+   docstring claimed namespace load hung a test JVM; that predates the split
+   and no longer applies.  The gc-hooks-level approach stays because it tests
+   the wiring contract without a full workflow harness:
 
      ;; Pattern in workflow_runner.clj (simplified):
      (run-gc-pass-best-effort!)   ; at entry of run-workflow!

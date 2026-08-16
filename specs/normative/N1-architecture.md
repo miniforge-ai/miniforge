@@ -6,8 +6,8 @@
 
 # N1 — Core Architecture & Concepts
 
-**Version:** 0.7.0-draft
-**Date:** 2026-08-04
+**Version:** 0.8.0-draft
+**Date:** 2026-08-10
 **Status:** Draft
 **Conformance:** MUST
 
@@ -47,7 +47,9 @@ A **workflow** is the top-level unit of autonomous execution.
 ```clojure
 {:workflow/id uuid                  ; REQUIRED: Unique workflow identifier
  :workflow/type keyword             ; REQUIRED: :infrastructure-change, :feature, :refactor
- :workflow/status keyword           ; REQUIRED derived projection: :pending, :running, :completed, :failed, :cancelled
+ :workflow/status keyword           ; REQUIRED derived projection of N2 §2.2's
+                                   ;   canonical vocabulary: :queued :running :paused
+                                   ;   :blocked :completed :failed :cancelled
 
  :workflow/machine                  ; REQUIRED: authoritative execution-machine state
  {:machine/id keyword               ; Compiled machine identity
@@ -2564,6 +2566,59 @@ Implementations MUST demonstrate:
 3. **Evidence bundle portability** - Can read evidence from other instances
 4. **Policy pack compatibility** - Can use community policy packs
 
+### 8.4 Conformance Requirements
+
+N1 already carries requirement IDs for the capabilities added by later
+amendments — `N1.AU.*` (autonomy), `N1.CP.*` (capability), `N1.EV.*`
+(evaluation), `N1.RI.*` (repository intelligence), `N1.RL.*` (reliability), and
+`N1.SI.*` (semantic intent). This section adds the two families the spec's own
+subject matter needs and previously lacked: the domain model of §2 and the
+layering of §3–§4.
+
+IDs are never reused; a withdrawn requirement is marked withdrawn, not deleted.
+
+#### Domain model
+
+| ID | Level | Requirement |
+|----|-------|-------------|
+| N1.DM.1 | MUST | Represent every §2 entity with the required keys its schema declares. |
+| N1.DM.2 | MUST | Validate domain entities at boundaries against those schemas (§8.1). |
+| N1.DM.3 | MUST | Derive `:workflow/status` from the execution machine, using N2 §2.2's vocabulary and no synonym (§2). |
+| N1.DM.4 | MUST | Treat every entity identifier as opaque — no consumer parses meaning out of an id (§2). |
+| N1.DM.5 | MUST NOT | Introduce an entity in an extension spec that duplicates a §2 concept rather than specializing it (§2, standard 020). |
+
+#### Architecture and boundaries
+
+| ID | Level | Requirement |
+|----|-------|-------------|
+| N1.AR.1 | MUST | Keep the three layers of §3 distinct: control plane (§3.1), agent layer (§3.2), learning layer (§3.3). |
+| N1.AR.2 | MUST NOT | Let an agent-layer component depend on a control-plane component (§3). |
+| N1.AR.3 | MUST | Expose each Polylith component only through its `interface` namespace (§4). |
+| N1.AR.4 | MUST NOT | Reference another component's implementation namespace directly (§4). |
+| N1.AR.5 | MUST | Keep components independently testable — a component's tests MUST NOT require the workflow engine (§4, §8.3). |
+| N1.AR.6 | MUST | Tag every namespace with its stratum, and keep dependencies flowing one way through the strata (§3, §4). |
+
+### 8.5 Test Obligations
+
+A conformance suite MUST cover, at minimum:
+
+1. **Schema validation at boundaries** — an invalid entity is rejected at the
+   boundary rather than propagating (N1.DM.1, N1.DM.2).
+2. **Status projection** — `:workflow/status` derived from the machine is a
+   member of N2 §2.2's set at every transition, with no synonym reachable
+   (N1.DM.3).
+3. **Interface-only access** — a static check that no component references
+   another's implementation namespace (N1.AR.3, N1.AR.4).
+4. **Layer direction** — a static check that no agent-layer namespace depends
+   on a control-plane namespace (N1.AR.2).
+5. **Stratum direction** — the stratum linter passes with no downward
+   dependency (N1.AR.6).
+6. **Component isolation** — each component's tests pass with only that
+   component and its declared dependencies on the classpath (N1.AR.5).
+
+Obligations 3 through 5 are static checks the repository can run continuously;
+they are the ones that catch architectural drift before it reaches review.
+
 ---
 
 ## 9. Rationale & Design Notes
@@ -2711,6 +2766,45 @@ conformance checklist.
 
 ---
 
+## Annex A — Implementation Conformance Status (informative)
+
+This annex is **informative**. It records where the miniforge implementation
+diverges from the contract above, as of 2026-08-10.
+
+### A.1 Implemented and Enforced
+
+- **Interface-only access (N1.AR.3, N1.AR.4)** — `poly check` runs in
+  `bb pre-commit` and enforces Polylith component boundaries continuously.
+- **Stratum direction (N1.AR.6)** — `bb lint:stratum` runs in pre-commit,
+  backed by the `stratum-lint` tool.
+- **Component isolation (N1.AR.5)** — the workspace holds 123 components under
+  Polylith, tested independently.
+
+These three are the architectural requirements already covered by a static
+check, which is why they are the ones that have not drifted.
+
+### A.2 Specified, Not Enforced
+
+- **Layer direction (N1.AR.2).** Nothing checks that an agent-layer component
+  does not depend on a control-plane component. Polylith enforces _interface_
+  boundaries, not _layer_ direction, so a legal interface call can still invert
+  the layering of §3.
+- **Status projection (N1.DM.3).** No check that `:workflow/status` stays
+  within N2 §2.2's vocabulary. This is how `:executing` — a value in no spec —
+  reached the implementation and N5's documented CLI filter; see N2 Annex A.
+- **Boundary schema validation (N1.DM.2).** Applied unevenly across entities
+  rather than at every boundary.
+
+### A.3 Structural
+
+- **The reliability, autonomy, and evaluation requirement families**
+  (`N1.RL.*`, `N1.AU.*`, `N1.EV.*`) largely describe capabilities whose
+  implementation status is recorded in the annexes of the specs that consume
+  them — N3 for reliability events, N10 for autonomy gating. N1 states the
+  model; the gaps surface downstream.
+
+---
+
 ## 12. References
 
 - RFC 2119: Key words for use in RFCs to Indicate Requirement Levels
@@ -2793,6 +2887,17 @@ conformance checklist.
 ---
 
 **Version History:**
+
+- 0.8.0-draft (2026-08-10): Spec-completion pass. §2's Workflow entity still
+  declared `:workflow/status` as `:pending, :running, :completed, :failed,
+  :cancelled` — the vocabulary N2 §2.2 superseded, missing `:paused` and
+  `:blocked` and naming `:pending` rather than `:queued`. N1 is a consumer the
+  N2 sweep missed; it now defers to N2 §2.2. Added the two requirement-ID
+  families N1's own subject matter lacked: `N1.DM.*` for the domain model and
+  `N1.AR.*` for layering and component boundaries, plus test obligations
+  (§8.4–§8.5). Annex A records which architectural requirements have a static
+  check — interface boundaries and stratum direction do; layer direction and
+  status-vocabulary conformance do not.
 
 - 0.7.0-draft (2026-08-04): Clarified OPSV requested actuation as intent rather
   than authority; added rollback and required-instrumentation fields to the N7

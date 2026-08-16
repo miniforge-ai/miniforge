@@ -18,7 +18,8 @@
 (ns ai.miniforge.policy-pack.interface.taxonomy
   "Taxonomy loading, validation, and lookup."
   (:require
-   [ai.miniforge.policy-pack.taxonomy :as taxonomy]))
+   [ai.miniforge.policy-pack.taxonomy :as taxonomy]
+   [ai.miniforge.policy-pack.taxonomy.category :as category]))
 
 ;------------------------------------------------------------------------------ Layer 0
 
@@ -27,22 +28,22 @@
   "Malli schema (a `[:map ...]` vector) for a taxonomy artifact — an
    independently versioned category tree with id, version, title, categories,
    and optional aliases."
-  taxonomy/Taxonomy)
+  category/Taxonomy)
 
 (def ^{:stratum 0} TaxonomyCategory
   "Malli schema (a `[:map ...]` vector) for a single taxonomy category —
    :category/id, :category/code, :category/title, optional :category/parent, and an integer :category/order."
-  taxonomy/TaxonomyCategory)
+  category/TaxonomyCategory)
 
 (def ^{:stratum 0} TaxonomyAlias
   "Malli schema (a `[:map ...]` vector) for a taxonomy alias — a stable
    :alias/name keyword pointing at an :alias/target category ID."
-  taxonomy/TaxonomyAlias)
+  category/TaxonomyAlias)
 
 (def ^{:stratum 0} TaxonomyRef
   "Malli schema (a `[:map ...]` vector) for a pack's taxonomy reference —
    :taxonomy/id and :taxonomy/min-version."
-  taxonomy/TaxonomyRef)
+  category/TaxonomyRef)
 
 ;; Validation
 (def ^{:stratum 0} valid-taxonomy?
@@ -74,22 +75,22 @@
   "Look up a category by its keyword ID in a loaded taxonomy.
    (category-by-id taxonomy category-id) returns the TaxonomyCategory map, or
    nil if not present."
-  taxonomy/category-by-id)
+  category/category-by-id)
 
 (def ^{:stratum 0} resolve-alias
   "Resolve an alias keyword to its target category ID.
    (resolve-alias taxonomy alias-kw) returns the target keyword, or the input
    keyword unchanged when no alias matches."
-  taxonomy/resolve-alias)
+  category/resolve-alias)
 
 (def ^{:stratum 0} category-title
   "Get the display title for a category ID, resolving aliases first.
    (category-title taxonomy category-id) returns the title string, or nil if
    not found."
-  taxonomy/category-title)
+  category/category-title)
 
 (def ^{:stratum 0} category-order
   "Get the integer sort order for a category ID, resolving aliases first.
    (category-order taxonomy category-id) returns the order int, or
    Integer/MAX_VALUE if not found."
-  taxonomy/category-order)
+  category/category-order)

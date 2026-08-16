@@ -19,7 +19,8 @@
   (:require
    [clojure.test :refer [deftest is testing]]
    [ai.miniforge.cli.workflow-recommendation-config :as cfg]
-   [ai.miniforge.cli.workflow-recommender :as recommender]))
+   [ai.miniforge.cli.workflow-recommender :as recommender]
+   [ai.miniforge.cli.workflow-recommender.prompt :as prompt]))
 
 ;------------------------------------------------------------------------------ Layer 0
 
@@ -33,34 +34,34 @@
         (with-redefs [cfg/recommendation-prompt-config
                       (fn []
                         prompt-config)
-                      recommender/build-workflow-summaries
+                      prompt/build-workflow-summaries
                       (fn [_workflows]
                         (str "- workflow\n  "
                              (get-in prompt-config [:summary-labels :has-review]) "\n  "
                              (get-in prompt-config [:summary-labels :has-testing])))]
-          (let [prompt (recommender/build-recommendation-prompt
-                        {:spec/title "Fix flaky test"}
-                        available-workflows)]
-            (is (.contains prompt (last (:analysis-dimensions prompt-config))))
-            (is (.contains prompt (get-in prompt-config [:summary-labels :has-review])))
-            (is (.contains prompt (get-in prompt-config [:summary-labels :has-testing])))))))
+          (let [built-prompt (prompt/build-recommendation-prompt
+                              {:spec/title "Fix flaky test"}
+                              available-workflows)]
+            (is (.contains built-prompt (last (:analysis-dimensions prompt-config))))
+            (is (.contains built-prompt (get-in prompt-config [:summary-labels :has-review])))
+            (is (.contains built-prompt (get-in prompt-config [:summary-labels :has-testing])))))))
 
     (testing "generic fallback vocabulary is available when no app config is present"
       (let [prompt-config (cfg/default-prompt-config)]
         (with-redefs [cfg/recommendation-prompt-config
                       (fn []
                         prompt-config)
-                      recommender/build-workflow-summaries
+                      prompt/build-workflow-summaries
                       (fn [_workflows]
                         (str "- workflow\n  "
                              (get-in prompt-config [:summary-labels :has-review]) "\n  "
                              (get-in prompt-config [:summary-labels :has-testing])))]
-          (let [prompt (recommender/build-recommendation-prompt
-                        {:spec/title "Run analytical workflow"}
-                        available-workflows)]
-            (is (.contains prompt (last (:analysis-dimensions prompt-config))))
-            (is (.contains prompt (get-in prompt-config [:summary-labels :has-review])))
-            (is (.contains prompt (get-in prompt-config [:summary-labels :has-testing])))))))))
+          (let [built-prompt (prompt/build-recommendation-prompt
+                              {:spec/title "Run analytical workflow"}
+                              available-workflows)]
+            (is (.contains built-prompt (last (:analysis-dimensions prompt-config))))
+            (is (.contains built-prompt (get-in prompt-config [:summary-labels :has-review])))
+            (is (.contains built-prompt (get-in prompt-config [:summary-labels :has-testing])))))))))
 
 (deftest ^{:stratum 0} recommend-by-task-type-test
   (let [available-workflows [{:workflow/id :quick-fix

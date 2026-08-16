@@ -59,7 +59,7 @@
 
 (defn- ^{:stratum 0} render-coverage
   [{:keys [landing-count unanchored-count horizon-mix
-           no-strategic-coverage? newest-scar-date]}]
+           no-strategic-coverage? newest-scar-date] :as coverage}]
   (str/join "\n"
     (concat
       ;; horizon mix rendered in the §7.6.1 order, not map order
@@ -71,7 +71,10 @@
                                      (for [h ["strategic" "operational" "tactical"]
                                            :let [n (get horizon-mix h)]
                                            :when n]
-                                       (str h " " n)))})]
+                                       (str h " " n)))
+               ;; a coverage map with no retirement slot predates the §7.7
+               ;; telemetry and IS the untriggerable era — same report
+               :retirement (name (get coverage :retirement :untriggerable))})]
       (when no-strategic-coverage?
         [(msg/t :render/no-strategic-coverage)]))))
 

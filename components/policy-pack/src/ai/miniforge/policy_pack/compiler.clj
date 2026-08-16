@@ -41,78 +41,44 @@
 
    All public fns return data: a failed compilation yields an :invalid-input
    anomaly map (N4 §3.1 — anomalies are data at the component interface),
-   never a throw."
+   never a throw.
+
+   Split (rule 210: this namespace originally measured 8 real layers, max 3)
+   across three siblings, each an earlier stage of the same pipeline:
+   `compiler.check` (detector resolution + result/violation construction),
+   `compiler.artifacts` (N4 check-input normalization, required by
+   `compiler.check`), and `compiler.rule` (the executable check-fn built on
+   top of `compiler.check`). `resolve-detector`, `rule-enabled?`, and
+   `compile-rule-check` stay part of this namespace's public surface as thin
+   re-exports so every existing caller (`ai.miniforge.policy-pack.compiler/…`)
+   is unaffected; pack-level compilation — this namespace's own reason to
+   exist — stays here with its real implementation.
+
+   Layer 0: resolve-detector, rule-enabled?, compile-rule-check (re-exports),
+     anomaly-rule-id, compiled-entry-detector
+   Layer 1: compile-pack-checks
+   Layer 2: compile-pack"
   (:require
    [ai.miniforge.anomaly.interface :as anomaly]
-   [ai.miniforge.policy-pack.capability :as capability]
-   [ai.miniforge.policy-pack.detection :as detection]))
+   [ai.miniforge.policy-pack.compiler.check :as check]
+   [ai.miniforge.policy-pack.compiler.rule :as rule]))
 
 ;------------------------------------------------------------------------------ Layer 0
 
-;; Per-rule classification
-(def ^{:stratum 0} ^{:doc "Detection types that bind to a mechanism directly by their type."}
-  by-type-detectors
-  #{:content-scan :diff-analysis :plan-output :state-comparison :ast-analysis})
+(def ^{:stratum 0} resolve-detector
+  "Return the detection-mechanism keyword that `rule` binds to.
+   See `ai.miniforge.policy-pack.compiler.check/resolve-detector`."
+  check/resolve-detector)
 
-(defn ^{:stratum 0} rule-enabled?
+(def ^{:stratum 0} rule-enabled?
   "True unless the rule explicitly sets `:rule/enabled?` to false.
-   A missing `:rule/enabled?` means enabled (the shipped pack omits it)."
-  [rule]
-  (not (false? (:rule/enabled? rule))))
+   See `ai.miniforge.policy-pack.compiler.check/rule-enabled?`."
+  check/rule-enabled?)
 
-(defn- ^{:stratum 0} detector-class
-  [detector]
-  (if (= :semantic detector)
-    :heuristic
-    :deterministic))
-
-(defn- ^{:stratum 0} code-files
-  [artifacts]
-  (or (get artifacts :code/files)
-      (get artifacts :files)))
-
-(defn- ^{:stratum 0} code-files-present?
-  [artifacts]
-  (or (contains? artifacts :code/files)
-      (contains? artifacts :files)))
-
-(defn- ^{:stratum 0} file-entry->artifact
-  [file-entry]
-  (let [path    (or (get file-entry :artifact/path)
-                    (get file-entry :path))
-        content (or (get file-entry :artifact/content)
-                    (get file-entry :content))]
-    (cond-> file-entry
-      path    (assoc :artifact/path path)
-      content (assoc :artifact/content content))))
-
-(defn- ^{:stratum 0} semantic-context-ready?
-  [context]
-  (and (fn? (:semantic-analyze-fn context))
-       (some? (:llm-client context))
-       (fn? (:complete-fn context))))
-
-(defn- ^{:stratum 0} violation-with-rule
-  [rule violation]
-  (assoc violation
-         :rule-id  (or (:rule-id violation) (:rule/id rule))
-         :severity (or (:severity violation) (:rule/severity rule))))
-
-(defn- ^{:stratum 0} exception-violation
-  [rule detector e]
-  {:type     :check-error
-   :rule-id  (:rule/id rule)
-   :severity (:rule/severity rule)
-   :detector detector
-   :error    (ex-message e)
-   :message  (str "Policy check failed: " (ex-message e))})
-
-(defn- ^{:stratum 0} missing-semantic-wiring-violation
-  [rule]
-  {:type     :semantic-error
-   :rule-id  (:rule/id rule)
-   :severity (:rule/severity rule)
-   :message  "Semantic policy check requires :semantic-analyze-fn, :llm-client, and :complete-fn"})
+(def ^{:stratum 0} compile-rule-check
+  "Compile one enabled rule into an executable N4 check entry.
+   See `ai.miniforge.policy-pack.compiler.rule/compile-rule-check`."
+  rule/compile-rule-check)
 
 (defn- ^{:stratum 0} anomaly-rule-id
   [a]
@@ -124,132 +90,8 @@
 
 ;------------------------------------------------------------------------------ Layer 1
 
-(defn ^{:stratum 1} resolve-detector
-  "Return the detection-mechanism keyword that `rule` binds to.
-
-   One of the `by-type-detectors`, or `:capability` / `:custom` / `:semantic`,
-   or `:none` when the rule binds to no available mechanism.
-
-   - :capability binds only if its `:capability` keyword is registered.
-   - :custom binds to :custom when its `:custom-fn` resolves; to :none when a
-     `:custom-fn` is declared but unresolvable (fail-loud); to :semantic when no
-     `:custom-fn` is declared.
-   - An unknown/missing detection type is :none."
-  [rule]
-  (let [detection-type (get-in rule [:rule/detection :type])]
-    (cond
-      (contains? by-type-detectors detection-type)
-      detection-type
-
-      (= :capability detection-type)
-      (let [capability-kw (get-in rule [:rule/detection :capability])]
-        (if (and capability-kw (capability/capability-available? capability-kw))
-          :capability
-          :none))
-
-      (= :custom detection-type)
-      (cond
-        (detection/custom-fn-resolvable? rule) :custom
-        ;; A rule that DECLARES a :custom-fn symbol which does not resolve is a
-        ;; broken registration (the detector namespace never registered it), not
-        ;; an intentional judge rule. Bind to :none so the compiler fails loud
-        ;; (`compile-rule-check` returns an :invalid-input anomaly) instead of
-        ;; silently routing it to the LLM judge — the failure mode from #1381.
-        (get-in rule [:rule/detection :custom-fn]) :none
-        :else :semantic)
-
-      :else
-      :none)))
-
-(defn- ^{:stratum 1} rule-metadata
-  [rule detector]
-  {:rule/id       (:rule/id rule)
-   :rule/severity (:rule/severity rule)
-   :detector      detector
-   :class         (detector-class detector)})
-
-(defn- ^{:stratum 1} normalize-artifacts
-  "Normalize N4 check input into artifact maps that existing detectors accept."
-  [artifacts]
-  (cond
-    (sequential? artifacts) (mapv file-entry->artifact artifacts)
-    (code-files-present? artifacts) (mapv file-entry->artifact (code-files artifacts))
-    (map? artifacts) [(file-entry->artifact artifacts)]
-    :else []))
-
-;------------------------------------------------------------------------------ Layer 2
-
-(defn- ^{:stratum 2} artifact-inputs
-  [detector artifacts]
-  (let [normalized (normalize-artifacts artifacts)]
-    (if (and (= :semantic detector) (seq normalized))
-      [(first normalized)]
-      normalized)))
-
-(defn- ^{:stratum 2} check-result
-  [rule detector violations]
-  {:passed?    (empty? violations)
-   :violations violations
-   :metadata   (rule-metadata rule detector)})
-
-;------------------------------------------------------------------------------ Layer 3
-
-(defn- ^{:stratum 3} detect-rule-violations
-  [rule detector artifacts context]
-  (->> (artifact-inputs detector artifacts)
-       (keep #(detection/detect-violation rule % context))
-       (mapv #(violation-with-rule rule %))))
-
-;------------------------------------------------------------------------------ Layer 4
-
-(defn- ^{:stratum 4} compile-check-fn
-  [rule detector]
-  (fn [artifacts context]
-    (try
-      (if (and (= :semantic detector)
-               (not (semantic-context-ready? context)))
-        (check-result rule detector [(missing-semantic-wiring-violation rule)])
-        (check-result rule detector
-                      (detect-rule-violations rule detector artifacts context)))
-      (catch Exception e
-        (check-result rule detector [(exception-violation rule detector e)])))))
-
-;------------------------------------------------------------------------------ Layer 5
-
-(defn ^{:stratum 5} compile-rule-check
-  "Compile one enabled rule into an executable N4 check entry.
-
-   Returns:
-     {:rule rule
-      :detector <mechanism>
-      :check-fn (fn [artifacts context] -> {:passed? bool
-                                            :violations [...]
-                                            :metadata {...}})}
-
-   Returns an :invalid-input anomaly when the rule cannot bind to any
-   mechanism. Disabled rules are not compiled."
-  [rule]
-  (let [detector (resolve-detector rule)]
-    (cond
-      (not (rule-enabled? rule))
-      (anomaly/anomaly :invalid-input
-                       "Disabled rules are not compiled into checks"
-                       {:rule/id (:rule/id rule)})
-
-      (= :none detector)
-      (anomaly/anomaly :invalid-input
-                       "Enabled policy rule binds to no detection mechanism"
-                       {:rule/id (:rule/id rule)})
-
-      :else
-      {:rule     rule
-       :detector detector
-       :check-fn (compile-check-fn rule detector)})))
-
-;------------------------------------------------------------------------------ Layer 6
-
 ;; Pack-level validation
-(defn ^{:stratum 6} compile-pack-checks
+(defn ^{:stratum 1} compile-pack-checks
   "Compile every enabled rule in `pack` into executable check entries.
 
    Returns:
@@ -280,9 +122,9 @@
          :detector-counts (frequencies (map compiled-entry-detector compiled))
          :compiled-rules  compiled}))))
 
-;------------------------------------------------------------------------------ Layer 7
+;------------------------------------------------------------------------------ Layer 2
 
-(defn ^{:stratum 7} compile-pack
+(defn ^{:stratum 2} compile-pack
   "Validate that every ENABLED rule in `pack` binds to a detection mechanism.
 
    `pack` is a PackManifest map carrying `:pack/rules`.

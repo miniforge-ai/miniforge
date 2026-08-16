@@ -1,3 +1,8 @@
+<!--
+  Title: Miniforge.ai
+  Author: Christopher Lester (christopher@miniforge.ai)
+  Copyright 2025-2026 Christopher Lester. Licensed under Apache 2.0.
+-->
 # Architecture Diagrams — As-Built and Target
 
 Two suites, one palette and legend (legend on panel A1). Solid

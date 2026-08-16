@@ -26,7 +26,10 @@
   (:require
    [babashka.fs :as fs]
    [clojure.string :as str]
-   [ai.miniforge.response.interface :as response]))
+   [ai.miniforge.response.interface :as response])
+  (:import
+   (java.io File)
+   (java.util.regex Pattern)))
 
 ;------------------------------------------------------------------------------ Layer 0
 
@@ -58,9 +61,9 @@
   [cmd]
   (boolean (re-find #"[\\/]" (or cmd ""))))
 
-(defn- ^{:stratum 0} path-entries
-  []
-  (str/split (or (System/getenv "PATH") "") #":"))
+(defn- ^{:stratum 0} split-path-entries
+  [raw-path]
+  (str/split (or raw-path "") (re-pattern (Pattern/quote File/pathSeparator))))
 
 ;------------------------------------------------------------------------------ Layer 1
 
@@ -71,11 +74,9 @@
              fs/path
              fs/absolutize))))
 
-(defn- ^{:stratum 1} matching-command-path
-  [entry cmd]
-  (let [candidate (fs/path entry cmd)]
-    (when (executable-file? candidate)
-      (str candidate))))
+(defn- ^{:stratum 1} path-entries
+  []
+  (split-path-entries (System/getenv "PATH")))
 
 (defn- ^{:stratum 1} source-dir-under-root?
   [source-dir source-root]
@@ -108,20 +109,6 @@
 
 ;------------------------------------------------------------------------------ Layer 2
 
-(defn ^{:stratum 2} resolve-cli-command-path
-  "Absolute path of `cmd` when it resolves to an executable: a direct
-   path is normalized in place; a bare command is looked up via
-   `fs/which` and then, as a fallback, by scanning PATH entries."
-  [cmd]
-  (cond
-    (str/blank? cmd) nil
-    (direct-command-path? cmd)
-    (normalize-command-path cmd)
-
-    :else
-    (or (some-> cmd fs/which str normalize-command-path)
-        (some #(matching-command-path % cmd) (path-entries)))))
-
 (defn ^{:stratum 2} assert-source-dir-alignment!
   [spec context]
   (let [source-dir (:spec/source-dir spec)
@@ -133,3 +120,19 @@
                                {:source-dir source-dir
                                 :source-root source-root
                                 :worktree-path (:worktree-path context)}))))
+
+(defn ^{:stratum 2} resolve-cli-command-path
+  "Absolute path of `cmd` when it resolves to an executable: a direct
+   path is normalized in place; a bare command is looked up via
+   `fs/which` and then, as a fallback, by scanning PATH entries. Every
+   branch goes through `normalize-command-path`, so a relative PATH
+   entry still yields an absolute result."
+  [cmd]
+  (cond
+    (str/blank? cmd) nil
+    (direct-command-path? cmd)
+    (normalize-command-path cmd)
+
+    :else
+    (or (some-> cmd fs/which str normalize-command-path)
+        (some #(normalize-command-path (fs/path % cmd)) (path-entries)))))

@@ -24,68 +24,41 @@
 
    Designed to be called by the ETL task (bb standards:pack) at build time.
 
-   Layer 0: Parsing/config primitives — strip-quotes, split-frontmatter,
-     group-dotted-keys, build-exclude-context, build-detection-config,
-     dewey-ranges, default-phases, slug->rule-id/title, agent-behavior
-     paragraph/bullet helpers, format-pack-version, validate-no-duplicate-slugs
-   Layer 1: parse-inline-array, parse-list-item, build-remediation-config,
-     find-dewey-range, bullet-line?, condense-prose, export-canonical-taxonomy
-   Layer 2: parse-frontmatter-value, dewey->phases/category-id/category-label,
-     condense-bullets
-   Layer 3: parse-kv-line, condense-to-length, build-categories
-   Layer 4: process-frontmatter-line, extract-agent-behavior
-   Layer 5: parse-frontmatter
-   Layer 6: parse-mdc
-   Layer 7: mdc->rule
-   Layer 8: compile-standards-pack
+   Final slice (6/6) of a rule 210 split train (SL003: this namespace
+   originally measured 9 real layers, max 3 — same approach as the
+   dag-orchestrator split, miniforge#1485, and the workflow-runner
+   split, miniforge#1662). Slices 1-2 (miniforge#1729/#1732) moved the
+   frontmatter grammar out; slice 3 (miniforge#1733) moved the
+   text-condensation chain out; slice 4 (miniforge#1740) moved the
+   Dewey-range chain out; slice 5 (miniforge#1742) moved agent-behavior
+   extraction out. This slice moves the remaining rule-config builders
+   (`build-exclude-context`, `build-detection-config`,
+   `valid-enforcement-actions`, `build-remediation-config`) to
+   `mdc-compiler.rule-config` — the second of the two independent
+   chains feeding `mdc->rule`. With both chains moved, this namespace
+   is now within budget at 3 real layers.
 
-   9 real strata — over the rule 210 budget of 3; a genuine namespace
-   split (Wave 2), not a labeling problem.
+   Layer 0: Parsing/config primitives — group-dotted-keys,
+     slug->rule-id/title, normalize-globs, format-pack-version,
+     validate-no-duplicate-slugs, parse-mdc, export-canonical-taxonomy,
+     build-categories
+   Layer 1: mdc->rule
+   Layer 2: compile-standards-pack
 
    Related:
      work/designs/mdc-to-pack-field-mapping.edn — authoritative field mapping spec
      components/policy-pack/src/.../schema.clj  — Rule schema (target format)
      .standards/                                 — source .mdc files (input)"
   (:require
-   [ai.miniforge.coerce.interface :as coerce]
-   [ai.miniforge.policy-pack.schema-types :as schema-types]
+   [ai.miniforge.policy-pack.mdc-compiler.agent-behavior :as agent-behavior]
+   [ai.miniforge.policy-pack.mdc-compiler.dewey :as dewey]
+   [ai.miniforge.policy-pack.mdc-compiler.frontmatter :as frontmatter]
+   [ai.miniforge.policy-pack.mdc-compiler.rule-config :as rule-config]
    [ai.miniforge.policy-pack.schema-validation :as schema-validation]
    [clojure.java.io :as io]
    [clojure.string :as str]))
 
 ;------------------------------------------------------------------------------ Layer 0
-
-;; MDC parsing — frontmatter and body extraction
-(defn- ^{:stratum 0} strip-quotes
-  "Strip surrounding single or double quotes from a string."
-  [s]
-  (cond
-    (and (str/starts-with? s "\"") (str/ends-with? s "\"")) (subs s 1 (dec (count s)))
-    (and (str/starts-with? s "'")  (str/ends-with? s "'"))  (subs s 1 (dec (count s)))
-    :else s))
-
-(defn ^{:stratum 0} split-frontmatter
-  "Split MDC content into frontmatter string and body string.
-
-   Expects --- delimited YAML frontmatter at the top of the file.
-
-   Arguments:
-   - content - Full .mdc file content
-
-   Returns:
-   - {:frontmatter <string> :body <string>}"
-  [content]
-  (let [trimmed (str/trim (str content))]
-    (if (str/starts-with? trimmed "---")
-      (let [after-open (subs trimmed 3)
-            close-idx (str/index-of after-open "---")]
-        (if close-idx
-          {:frontmatter (str/trim (subs after-open 0 close-idx))
-           :body        (str/trim (subs after-open (+ close-idx 3)))}
-          {:frontmatter ""
-           :body        trimmed}))
-      {:frontmatter ""
-       :body        trimmed})))
 
 ;; Detection and remediation config builders
 (defn- ^{:stratum 0} group-dotted-keys
@@ -103,63 +76,7 @@
    {}
    fm))
 
-(defn- ^{:stratum 0} build-exclude-context
-  "Convert path/current exclude lists from MDC remediation config into
-   ExcludeContext maps for the RuleRemediation schema."
-  [remediation-map]
-  (let [path-contains    (get remediation-map "excludePathContains")
-        current-contains (get remediation-map "excludeCurrentContains")]
-    (cond-> []
-      (seq path-contains)
-      (into (mapv (fn [p] {:path-contains p}) path-contains))
-
-      (seq current-contains)
-      (conj {:current-contains (vec current-contains)}))))
-
-(defn- ^{:stratum 0} build-detection-config
-  "Build :rule/detection map from grouped frontmatter detection block.
-   Returns {:type :content-scan ...} when detection config is present,
-   {:type :custom} otherwise."
-  [detection-map]
-  (if (and detection-map (get detection-map "pattern"))
-    (cond-> {:type    :content-scan
-             :pattern (get detection-map "pattern")
-             :mode    (keyword (get detection-map "mode" "positive"))}
-      (get detection-map "emailPattern")
-      (assoc :email-pattern (get detection-map "emailPattern")))
-    {:type :custom}))
-
-(def ^{:stratum 0} ^:private valid-enforcement-actions
-  "Enforcement actions a rule may opt into via frontmatter `enforcement.action`,
-   derived from the ONE canonical source (`schema-types/enforcement-actions`) so the
-   compiler can never accept an action the rule schema rejects. `:hard-halt`
-   makes a pack-derived gate BLOCK; the rest are non-blocking. An unrecognized
-   value falls back to the alwaysApply default — a typo can't produce garbage."
-  (set schema-types/enforcement-actions))
-
 ;; Field mapping transforms
-;; ── Dewey code → phases ─────────────────────────────────────────────────────
-;;
-;; This table lives ONLY in the compiler. After compilation, phases are plain
-;; keyword sets on the rule map. The runtime product never sees Dewey codes.
-(def ^{:stratum 0} ^:private dewey-ranges
-  "Dewey ranges with category metadata and applicable phase sets.
-   Each entry: {:lo <int> :hi <int> :id <string> :label <string> :phases <set>}"
-  [{:lo 0   :hi 99  :id "foundations"   :label "Foundations & Core Principles"     :phases #{:plan :implement :review :verify :release}}
-   {:lo 100 :hi 199 :id "tools"         :label "Development Environment & Tools"   :phases #{:implement :review}}
-   {:lo 200 :hi 299 :id "languages"     :label "Languages"                         :phases #{:implement :review}}
-   {:lo 300 :hi 399 :id "frameworks"    :label "Frameworks & Platforms"             :phases #{:plan :implement :review}}
-   {:lo 400 :hi 499 :id "testing"       :label "Testing & Quality"                 :phases #{:implement :verify}}
-   {:lo 500 :hi 599 :id "operations"    :label "Operations & Infrastructure"       :phases #{:implement :review}}
-   {:lo 600 :hi 699 :id "documentation" :label "Documentation"                     :phases #{:implement :review}}
-   {:lo 700 :hi 799 :id "workflows"     :label "Workflows & Processes"             :phases #{:plan :implement :review :verify :release}}
-   {:lo 800 :hi 899 :id "project"       :label "Project-Specific"                  :phases #{:implement :review}}
-   {:lo 900 :hi 999 :id "meta"          :label "Meta & Templates"                  :phases #{}}])
-
-(def ^{:stratum 0} ^:private default-phases
-  "Fallback phases when Dewey code is outside defined ranges or unparseable."
-  #{:implement :review})
-
 ;; ── Filename slug → rule ID ─────────────────────────────────────────────────
 (defn ^{:stratum 0} slug->rule-id
   "Convert an MDC filename to a namespaced rule ID keyword.
@@ -185,85 +102,6 @@
   (->> (str/split slug #"-")
        (map str/capitalize)
        (str/join " ")))
-
-;; ── Agent behavior extraction ───────────────────────────────────────────────
-(def ^{:stratum 0} ^:private behavior-condensation-target 500)
-
-(defn- ^{:stratum 0} extract-agent-behavior-section
-  "Extract content from a \"## Agent behavior\" section in the MDC body.
-
-   Scans for a heading matching /^## Agent behavior/i, extracts everything
-   from that heading to the next ## heading or end-of-file, strips the
-   heading line itself.
-
-   Returns the section content string, or nil if no such heading exists."
-  [body]
-  (let [lines (str/split-lines body)
-        heading-idx (first
-                     (keep-indexed
-                      (fn [i line]
-                        (when (re-matches #"(?i)^##\s+Agent\s+behavior\s*$"
-                                          (str/trim line))
-                          i))
-                      lines))]
-    (when heading-idx
-      (let [after-heading (drop (inc heading-idx) lines)
-            section-lines (take-while
-                           (fn [line]
-                             (not (re-matches #"^##\s+.*" (str/trim line))))
-                           after-heading)
-            content (str/trim (str/join "\n" section-lines))]
-        (when-not (str/blank? content)
-          content)))))
-
-(defn- ^{:stratum 0} extract-first-paragraph
-  "Extract the first non-heading paragraph from the MDC body.
-
-   Skips any leading # headings and blank lines, then takes text
-   until the next blank line.
-
-   Returns the paragraph string, or nil."
-  [body]
-  (let [lines (str/split-lines body)
-        content-lines (drop-while
-                       (fn [line]
-                         (let [trimmed (str/trim line)]
-                           (or (str/blank? trimmed)
-                               (str/starts-with? trimmed "#"))))
-                       lines)
-        paragraph-lines (take-while
-                         (fn [line] (not (str/blank? (str/trim line))))
-                         content-lines)
-        content (str/trim (str/join "\n" paragraph-lines))]
-    (when-not (str/blank? content)
-      content)))
-
-(def ^{:stratum 0} ^:private bullet-line-pattern
-  "Markdown list-item line: leading whitespace, then either `-` / `*`
-   or a numbered prefix like `1.` / `42.`, then a space. Numbered
-   prefixes are recognized so MDC authors can write `1. … 2. …` lists
-   in `## Agent behavior` sections without the compiler silently
-   falling through to prose-mode condensation and truncating
-   mid-sentence (regression observed on the dewey-211
-   `clojure-exception-handling` rule, copilot review on
-   miniforge#765)."
-  #"^\s*(?:[-*]|\d+\.)\s+.*")
-
-(defn- ^{:stratum 0} keep-whole-sentences
-  "Largest prefix of `text` made of whole sentences (split on `.!?` +
-   whitespace) that fits within `target-length`, rejoined with single
-   spaces. Falls back to a hard character cut ONLY when the first
-   sentence alone already overflows — so a normal directive never ends
-   mid-word."
-  [text target-length]
-  (let [condensed (reduce (fn [acc s]
-                            (let [candidate (if (str/blank? acc) s (str acc " " s))]
-                              (if (> (count candidate) target-length) (reduced acc) candidate)))
-                          ""
-                          (str/split text #"(?<=[.!?])\s+"))]
-    (if (str/blank? condensed)
-      (subs text 0 (min (count text) target-length))
-      condensed)))
 
 ;; ── Globs normalization ─────────────────────────────────────────────────────
 (defn- ^{:stratum 0} normalize-globs
@@ -295,76 +133,26 @@
             (str/join ", " (map first duplicates))
             ". Rule IDs must be unique across all subdirectories.")])))
 
-;------------------------------------------------------------------------------ Layer 1
-
-(defn- ^{:stratum 1} parse-inline-array
-  "Parse a JSON/YAML-style inline array string: [\"a\", \"b\", c].
+(defn ^{:stratum 0} parse-mdc
+  "Parse an MDC file into its structured components.
 
    Arguments:
-   - s - String starting with [ and ending with ]
+   - content - Full .mdc file content string
 
    Returns:
-   - Vector of parsed string items, or empty vector for empty array."
-  [s]
-  (let [inner (-> s
-                  (str/replace #"^\[" "")
-                  (str/replace #"\]$" "")
-                  str/trim)]
-    (if (str/blank? inner)
-      []
-      (->> (str/split inner #",")
-           (mapv (comp strip-quotes str/trim))))))
+   - {:frontmatter {string-key value} :body string}"
+  [content]
+  (let [{:keys [frontmatter body]} (frontmatter/split-frontmatter content)]
+    {:frontmatter (frontmatter/parse-frontmatter frontmatter)
+     :body        body}))
 
-(defn- ^{:stratum 1} parse-list-item
-  "Parse a '- <value>' frontmatter list line to its string value."
-  [trimmed]
-  (strip-quotes (str/trim (subs trimmed 2))))
-
-(defn- ^{:stratum 1} build-remediation-config
-  "Build :rule/remediation map from grouped frontmatter remediation block.
-   Returns nil if no remediation config is present."
-  [remediation-map]
-  (when (and remediation-map (get remediation-map "strategy"))
-    (let [excludes (build-exclude-context remediation-map)]
-      (cond-> {:strategy (keyword (get remediation-map "strategy"))}
-        (get remediation-map "type")
-        (assoc :type (keyword (get remediation-map "type")))
-
-        (get remediation-map "replacement")
-        (assoc :replacement (get remediation-map "replacement"))
-
-        (get remediation-map "template")
-        (assoc :template (get remediation-map "template"))
-
-        (some? (get remediation-map "autoFixable"))
-        (assoc :auto-fixable-default (boolean (get remediation-map "autoFixable")))
-
-        (seq excludes)
-        (assoc :exclude-contexts excludes)))))
-
-(defn- ^{:stratum 1} find-dewey-range
-  "Find the dewey-ranges entry for a given Dewey code string.
-   Returns the matching range map, or nil."
-  [dewey-str]
-  (when-let [code (coerce/safe-parse-int (str/trim (str dewey-str)))]
-    (some (fn [{:keys [lo hi] :as entry}]
-            (when (and (<= lo code) (<= code hi))
-              entry))
-          dewey-ranges)))
-
-(defn- ^{:stratum 1} bullet-line?
-  "True when `line` is a markdown list-item — `-`/`*` bullet OR
-   numbered prefix."
-  [line]
-  (boolean (re-matches bullet-line-pattern line)))
-
-(defn- ^{:stratum 1} condense-prose
-  "Keep complete sentences up to target-length, falling back to hard truncation."
-  [text target-length]
-  (keep-whole-sentences (str/replace text #"\n+" " ") target-length))
-
-;; Canonical taxonomy export
-(defn ^{:stratum 1} export-canonical-taxonomy
+;; Canonical taxonomy export — re-exported here (not just from `dewey`)
+;; because `ai.miniforge.policy-pack.interface` and
+;; `taxonomy_test.clj` require this namespace directly and reference
+;; `mdc-compiler/export-canonical-taxonomy` by name; moving the
+;; definition without this delegating var would be a public-API break
+;; disguised as an internal reorganization.
+(def ^{:stratum 0} export-canonical-taxonomy
   "Export the compiler's dewey-ranges as a first-class Taxonomy artifact.
 
    This bridges the compiler's internal category table to the N4 four-artifact
@@ -373,121 +161,13 @@
    should match this output.
 
    Returns:
-   - A valid Taxonomy map per taxonomy/Taxonomy schema."
-  []
-  {:taxonomy/id      :miniforge/dewey
-   :taxonomy/version "1.0.0"
-   :taxonomy/title   "Miniforge Dewey Taxonomy"
-   :taxonomy/description
-   "Dewey-decimal-inspired category tree for miniforge engineering standards.
-    Ten top-level ranges (000-999) covering foundations, tools, languages,
-    frameworks, testing, operations, documentation, workflows, project, and meta."
-   :taxonomy/categories
-   (mapv (fn [{:keys [lo id label]}]
-           {:category/id    (keyword "mf.cat" id)
-            :category/code  (format "%03d-%03d" lo (+ lo 99))
-            :category/title label
-            :category/order lo})
-         dewey-ranges)
-   :taxonomy/aliases
-   (mapv (fn [{:keys [id]}]
-           {:alias/name   (keyword id)
-            :alias/target (keyword "mf.cat" id)})
-         dewey-ranges)})
+   - A valid Taxonomy map per taxonomy/Taxonomy schema.
 
-;------------------------------------------------------------------------------ Layer 2
-
-(defn- ^{:stratum 2} parse-frontmatter-value
-  "Parse a single YAML-like frontmatter value string into a Clojure value.
-
-   Handles: booleans, quoted strings, inline arrays, bare strings."
-  [raw]
-  (let [v (str/trim raw)]
-    (cond
-      (= v "true")               true
-      (= v "false")              false
-      (str/starts-with? v "[")   (parse-inline-array v)
-      :else                      (strip-quotes v))))
-
-(defn ^{:stratum 2} dewey->phases
-  "Map a Dewey code string to a set of applicable workflow phases.
-
-   Arguments:
-   - dewey-str - Dewey code string, e.g. \"001\", \"210\", \"900\"
-
-   Returns:
-   - Set of phase keywords, e.g. #{:plan :implement :review}"
-  [dewey-str]
-  (if-let [entry (find-dewey-range dewey-str)]
-    (:phases entry)
-    default-phases))
-
-(defn ^{:stratum 2} dewey->category-id
-  "Map a Dewey code to its category ID string.
-
-   Arguments:
-   - dewey-str - Dewey code string
-
-   Returns:
-   - Category ID string (e.g. \"foundations\", \"languages\"), or \"other\"."
-  [dewey-str]
-  (if-let [entry (find-dewey-range dewey-str)]
-    (:id entry)
-    "other"))
-
-(defn ^{:stratum 2} dewey->category-label
-  "Map a Dewey code to its human-readable category label.
-
-   Arguments:
-   - dewey-str - Dewey code string
-
-   Returns:
-   - Category label string, or \"Other\"."
-  [dewey-str]
-  (if-let [entry (find-dewey-range dewey-str)]
-    (:label entry)
-    "Other"))
-
-(defn- ^{:stratum 2} condense-bullets
-  "Keep the first 3 bullets. If the joined result exceeds target-length,
-   trim to whole sentences so the directive never ends mid-word (a raw
-   char cut here once shipped a truncated `named-constants` directive
-   ending \"The on\" — copilot review on miniforge#1302)."
-  [lines target-length]
-  (let [bullets (filterv bullet-line? lines)
-        result  (str/trim (str/join "\n" (take 3 bullets)))]
-    (if (<= (count result) target-length)
-      result
-      (keep-whole-sentences result target-length))))
-
-;------------------------------------------------------------------------------ Layer 3
-
-(defn- ^{:stratum 3} parse-kv-line
-  "Parse a 'key: value' frontmatter line.
-   Returns [new-current-key updated-acc]."
-  [trimmed acc]
-  (let [idx (str/index-of trimmed ":")
-        k   (str/trim (subs trimmed 0 idx))
-        v   (str/trim (subs trimmed (inc idx)))]
-    (if (str/blank? v)
-      [k (assoc acc k [])]
-      [nil (assoc acc k (parse-frontmatter-value v))])))
-
-(defn- ^{:stratum 3} condense-to-length
-  "Condense text to approximately target-length characters.
-   Bullet lists (including numbered): keeps first 3 bullets.
-   Prose: keeps complete sentences."
-  [text target-length]
-  (if (<= (count text) target-length)
-    text
-    (let [lines   (str/split-lines text)
-          bullets (filterv bullet-line? lines)]
-      (if (>= (count bullets) 2)
-        (condense-bullets lines target-length)
-        (condense-prose text target-length)))))
+   Delegates to ai.miniforge.policy-pack.mdc-compiler.dewey/export-canonical-taxonomy."
+  dewey/export-canonical-taxonomy)
 
 ;; ── Category builder ────────────────────────────────────────────────────────
-(defn- ^{:stratum 3} build-categories
+(defn- ^{:stratum 0} build-categories
   "Build PackCategory entries from compiled rules.
 
    Groups rules by Dewey-range-derived category and produces
@@ -500,98 +180,21 @@
    - Sorted vector of PackCategory maps."
   [rules]
   (let [by-cat (group-by (fn [rule]
-                           (dewey->category-id (:rule/category rule)))
+                           (dewey/dewey->category-id (:rule/category rule)))
                          rules)]
     (->> by-cat
          (map (fn [[cat-id cat-rules]]
                 {:category/id    cat-id
-                 :category/name  (dewey->category-label
+                 :category/name  (dewey/dewey->category-label
                                   (:rule/category (first cat-rules)))
                  :category/rules (mapv :rule/id cat-rules)}))
          (sort-by :category/id)
          vec)))
 
-;------------------------------------------------------------------------------ Layer 4
-
-(defn- ^{:stratum 4} process-frontmatter-line
-  "Process one frontmatter line. Returns [current-key acc]."
-  [trimmed current-key acc]
-  (cond
-    (str/blank? trimmed)
-    [current-key acc]
-
-    (and current-key (str/starts-with? trimmed "- "))
-    [current-key (update acc current-key (fnil conj []) (parse-list-item trimmed))]
-
-    (str/includes? trimmed ":")
-    (parse-kv-line trimmed acc)
-
-    :else [current-key acc]))
-
-(defn ^{:stratum 4} extract-agent-behavior
-  "Extract a concise agent behavior directive from an MDC body.
-
-   Priority 1: If the body contains a '## Agent behavior' section,
-               extract and condense its content.
-   Priority 2: If no such section, use the first non-heading paragraph.
-
-   Result is condensed to ~500 chars for prompt injection.
-
-   Arguments:
-   - body - MDC body text (everything after frontmatter)
-
-   Returns:
-   - Behavior string, or nil if no meaningful content."
-  [body]
-  (when-not (str/blank? body)
-    (let [section (extract-agent-behavior-section body)
-          content (or section (extract-first-paragraph body))]
-      (when content
-        (condense-to-length content behavior-condensation-target)))))
-
-;------------------------------------------------------------------------------ Layer 5
-
-(defn- ^{:stratum 5} parse-frontmatter
-  "Parse YAML-like frontmatter text into a string-keyed map.
-
-   Handles simple key: value pairs, inline arrays [a, b], and
-   multi-line list items (- value) under a key.
-
-   Arguments:
-   - frontmatter-str - Raw text between --- delimiters
-
-   Returns:
-   - Map of {string-key parsed-value}, or empty map."
-  [frontmatter-str]
-  (if (str/blank? frontmatter-str)
-    {}
-    (loop [[line & remaining] (str/split-lines frontmatter-str)
-           current-key nil
-           acc {}]
-      (if (nil? line)
-        acc
-        (let [[current-key' acc'] (process-frontmatter-line (str/trim line) current-key acc)]
-          (recur remaining current-key' acc'))))))
-
-;------------------------------------------------------------------------------ Layer 6
-
-(defn ^{:stratum 6} parse-mdc
-  "Parse an MDC file into its structured components.
-
-   Arguments:
-   - content - Full .mdc file content string
-
-   Returns:
-   - {:frontmatter {string-key value} :body string}"
-  [content]
-  (let [{:keys [frontmatter body]} (split-frontmatter content)]
-    {:frontmatter (parse-frontmatter frontmatter)
-     :body        body}))
-
-;------------------------------------------------------------------------------ Layer 7
+;------------------------------------------------------------------------------ Layer 1
 
 ;; Rule compilation
-(defn ^{:stratum 7} mdc->rule
+(defn ^{:stratum 1} mdc->rule
   "Compile a single MDC file into a policy-pack rule map.
 
    Implements the field mapping from the design spec
@@ -619,18 +222,18 @@
           always-apply (true? (get fm "alwaysApply"))
 
           ;; ── Applicability ───────────────────────────────────────────────
-          phases       (dewey->phases dewey)
+          phases       (dewey/dewey->phases dewey)
           globs        (normalize-globs (get fm "globs"))
           applies-to   (cond-> {:phases phases}
                          (seq globs) (assoc :file-globs globs))
 
           ;; ── Detection & remediation ─────────────────────────────────────
-          detection    (build-detection-config (get fm "detection"))
-          remediation  (build-remediation-config (get fm "remediation"))
+          detection    (rule-config/build-detection-config (get fm "detection"))
+          remediation  (rule-config/build-remediation-config (get fm "remediation"))
 
           ;; ── Content extraction ──────────────────────────────────────────
           body-trimmed    (when-not (str/blank? body) (str/trim body))
-          agent-behavior  (extract-agent-behavior body)
+          agent-behavior  (agent-behavior/extract-agent-behavior body)
 
           ;; ── Build rule map ──────────────────────────────────────────────
           ;; Enforcement action: a rule MAY opt into a stronger action via
@@ -642,7 +245,7 @@
           fm-action      (some-> enforcement-fm (get "action") str str/trim
                                  not-empty keyword)
           action         (cond
-                           (contains? valid-enforcement-actions fm-action) fm-action
+                           (contains? rule-config/valid-enforcement-actions fm-action) fm-action
                            always-apply :warn
                            :else :audit)
           ;; A rule that opts into blocking is at least :high (canonical scale).
@@ -683,9 +286,9 @@
       (merge (schema-validation/failure :rule (.getMessage e))
              {:filename filename}))))
 
-;------------------------------------------------------------------------------ Layer 8
+;------------------------------------------------------------------------------ Layer 2
 
-(defn ^{:stratum 8} compile-standards-pack
+(defn ^{:stratum 2} compile-standards-pack
   "Compile all .mdc files from a standards directory into a pack manifest.
 
    Discovers all .mdc files recursively, compiles each via mdc->rule,
@@ -773,10 +376,10 @@
   ;;     :body "# Body here"}
 
   ;; ── Dewey → phases ──────────────────────────────────────────────────────
-  (dewey->phases "001")  ;; => #{:plan :implement :review :verify :release}
-  (dewey->phases "210")  ;; => #{:implement :review}
-  (dewey->phases "900")  ;; => #{}
-  (dewey->phases "xyz")  ;; => #{:implement :review}  (default fallback)
+  (dewey/dewey->phases "001")  ;; => #{:plan :implement :review :verify :release}
+  (dewey/dewey->phases "210")  ;; => #{:implement :review}
+  (dewey/dewey->phases "900")  ;; => #{}
+  (dewey/dewey->phases "xyz")  ;; => #{:implement :review}  (default fallback)
 
   ;; ── Slug → rule ID ──────────────────────────────────────────────────────
   (slug->rule-id "stratified-design.mdc")       ;; => :std/stratified-design
@@ -784,11 +387,11 @@
   (slug->rule-id "pre-commit-discipline.mdc")   ;; => :std/pre-commit-discipline
 
   ;; ── Agent behavior extraction ───────────────────────────────────────────
-  (extract-agent-behavior
+  (agent-behavior/extract-agent-behavior
    "# Title\n\nSome intro text.\n\n## Agent behavior\n\n- Do this first.\n- Then do that.")
   ;; => "- Do this first.\n- Then do that."
 
-  (extract-agent-behavior
+  (agent-behavior/extract-agent-behavior
    "# Title\n\nFirst paragraph used as fallback.\n\nSecond paragraph ignored.")
   ;; => "First paragraph used as fallback."
 
