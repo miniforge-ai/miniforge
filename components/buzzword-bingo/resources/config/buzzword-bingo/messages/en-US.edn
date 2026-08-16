@@ -1,0 +1,51 @@
+;; User-facing strings for buzzword-bingo reports.
+;;
+;; Counts are pluralised by key rather than by rule: `-one` when the
+;; count is exactly one, `-many` otherwise. English needs only the two,
+;; and a locale needing more adds its own keys without touching code.
+
+{:buzzword-bingo/messages
+ {;; Verdict
+  :report/heading        "BUZZWORD BINGO"
+  :grade/clean           "clean"
+  :grade/suspect         "suspect"
+  :grade/slop            "slop"
+  :report/nothing-found  "nothing flagged"
+
+  ;; Figures
+  :report/score-line     "score {value} per 1000 words"
+  :report/threshold-line "suspect from {suspect}, slop from {slop}"
+  :report/tally-one      "{hits} hit in {words} words, weight {weighted}"
+  :report/tally-many     "{hits} hits in {words} words, weight {weighted}"
+  :report/catalog-line   "catalog {version}"
+  :report/catalog-custom "catalog supplied by caller"
+
+  ;; Breakdown
+  :report/by-category    "By category"
+  :report/by-term        "By term"
+  :report/count-one      "{count} time"
+  :report/count-many     "{count} times"
+  :report/position       "line {line}, column {column}"
+  :report/and-more       "and {count} more"
+
+  ;; Categories
+  :category/ai-tell      "ai-tell"
+  :category/corporate    "corporate"
+  :category/filler       "filler"
+  :category/hedge        "hedge"
+  :category/marketing    "marketing"
+
+  ;; Card
+  :card/heading          "BINGO CARD"
+  :card/free             "FREE"
+  :card/bingo            "BINGO!"
+  :card/line-one         "{count} line complete"
+  :card/line-many        "{count} lines complete"
+  :card/squares          "{marked} of {total} squares marked"
+  :card/turns-one        "{turns} turn"
+  :card/turns-many       "{turns} turns"
+
+  ;; Advice
+  :advice/clean          "Nothing to change."
+  :advice/suspect        "Worth a second look before this goes out."
+  :advice/slop           "Write it again without these."}}
