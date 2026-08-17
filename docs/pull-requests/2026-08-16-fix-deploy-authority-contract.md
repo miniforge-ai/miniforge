@@ -9,13 +9,15 @@
 ## Overview
 
 Corrects the deployment authority boundary before the live governed
-deployment flow is wired. Grants now bind the canonical execution ID and
-resolved Kubernetes context, while policy checks consume the Pulumi preview
-they were designed to inspect.
+deployment flow is wired. Grants prefer the canonical execution ID, retain a
+temporary `:run-id` fallback for the existing unwired caller, and bind the
+resolved Kubernetes context. Policy checks consume the Pulumi preview they
+were designed to inspect.
 
 ## Changes
 
-- Build the closed grant request from `:execution/id` and one resolved target.
+- Build the closed grant request from `:execution/id` (or the temporary legacy
+  `:run-id` fallback) and one resolved target.
 - Classify both deployment rules against the provision phase preview.
 - Persist rendered manifests, server dry-run output, rollback information, and
   application label in the exact effect proposal.
