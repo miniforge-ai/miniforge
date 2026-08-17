@@ -21,10 +21,12 @@
             [ai.miniforge.logging.interface :as log]
             [ai.miniforge.phase-deployment.defaults :as defaults]
             [ai.miniforge.phase-deployment.deploy-config :as config]
-            [ai.miniforge.phase-deployment.deploy-flow :as flow]
+            [ai.miniforge.phase-deployment.deploy-governed :as governed]
+            [ai.miniforge.phase-deployment.deploy-operations :as operations]
             [ai.miniforge.phase-deployment.deploy-result :as result]
             [ai.miniforge.phase-deployment.messages :as msg]
-            [ai.miniforge.phase.interface :as phase]))
+            [ai.miniforge.phase.interface :as phase])
+  (:import [java.time Instant]))
 
 ;------------------------------------------------------------------------------ Layer 0
 
@@ -82,8 +84,12 @@
         (if (anomaly/anomaly? deploy-config)
           (invalid-config-result ctx start-time
                                  (:anomaly/message deploy-config))
+          ;; The transaction binds one exact target and one rendered artifact,
+          ;; records its evidence and authority, then mutates and reconciles.
           (result/store-deployment ctx start-time logger deploy-config
-                                   (flow/execute! deploy-config))))
+                                   (governed/transact! ctx deploy-config
+                                                       (operations/operations)
+                                                       (Instant/now)))))
       (catch clojure.lang.ExceptionInfo ex
         (invalid-config-result ctx start-time (ex-message ex))))))
 
