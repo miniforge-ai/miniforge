@@ -46,9 +46,6 @@
       (deployment state :failed :apply
                   {:deploy/failure (:effect/failure effect)})
 
-      (= :succeeded (:effect/state effect))
-      (deployment state :success :observe {:deploy/pod-state pod-state})
-
       (and (= :reconciled (:effect/state effect))
            (:effect/matched? effect))
       (deployment state :success :observe {:deploy/pod-state pod-state})

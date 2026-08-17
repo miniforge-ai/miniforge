@@ -17,17 +17,18 @@
 ;; limitations under the License.
 (ns ai.miniforge.phase-deployment.deploy
   "Thin deploy phase interceptor over provider application flow."
+  (:require
+   [ai.miniforge.anomaly.interface :as anomaly]
+   [ai.miniforge.logging.interface :as log]
+   [ai.miniforge.phase-deployment.defaults :as defaults]
+   [ai.miniforge.phase-deployment.deploy-config :as config]
+   [ai.miniforge.phase-deployment.deploy-governed :as governed]
+   [ai.miniforge.phase-deployment.deploy-operations :as operations]
+   [ai.miniforge.phase-deployment.deploy-result :as result]
+   [ai.miniforge.phase-deployment.messages :as msg]
+   [ai.miniforge.phase.interface :as phase])
   (:import
-   [java.time Instant])
-  (:require [ai.miniforge.anomaly.interface :as anomaly]
-            [ai.miniforge.logging.interface :as log]
-            [ai.miniforge.phase-deployment.defaults :as defaults]
-            [ai.miniforge.phase-deployment.deploy-config :as config]
-            [ai.miniforge.phase-deployment.deploy-governed :as governed]
-            [ai.miniforge.phase-deployment.deploy-operations :as operations]
-            [ai.miniforge.phase-deployment.deploy-result :as result]
-            [ai.miniforge.phase-deployment.messages :as msg]
-            [ai.miniforge.phase.interface :as phase]))
+   [java.time Instant]))
 
 ;------------------------------------------------------------------------------ Layer 0
 
