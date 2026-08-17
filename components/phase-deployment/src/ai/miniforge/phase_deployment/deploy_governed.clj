@@ -61,7 +61,7 @@
 (defn- ^{:stratum 1} render-manifests
   [state]
   (let [result ((get-in state [:operations :render!]) (:target state))
-        rendered (:stdout result)]
+        rendered (:rendered-yaml result)]
     (if (or (schema/failed? result) (str/blank? rendered))
       (fail state :preflight (failure-detail result :deploy/render-failed))
       (assoc state :rendered-yaml rendered))))

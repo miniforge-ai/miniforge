@@ -38,6 +38,18 @@
 
 ;------------------------------------------------------------------------------ Layer 1
 
+(defn ^{:stratum 1} scripted-shell
+  "Stub the process boundary and nothing above it. `kustomize-build!`,
+   `kustomize-render!`, and `kustomize-apply!` all stay real, so what these
+   tests assert is the producers' own output shape rather than a stub's."
+  [calls & {:keys [apply-result]
+            :or {apply-result (schema/success :stdout "deployment.apps/api configured")}}]
+  (fn [command args & {:as options}]
+    (swap! calls conj {:command command :args args :options options})
+    (if (= "kustomize" command)
+      (schema/success :stdout manifest-bytes)
+      apply-result)))
+
 (deftest ^{:stratum 1} server-dry-run-and-apply-use-identical-input-test
   (let [calls (atom [])]
     (with-redefs [exec/sh-with-timeout (recording-shell calls)]
@@ -59,6 +71,14 @@
                 "--context" "cluster-1"]
                (:args apply-call)))))))
 
+(deftest ^{:stratum 1} a-failed-build-renders-no-manifest-test
+  (let [result (with-redefs [exec/sh-with-timeout
+                             (fn [& _] (blank-stderr-failure "build broke"))]
+                 (kustomize/kustomize-render! "/deployment"))]
+    (is (schema/failed? result))
+    (is (nil? (:rendered-yaml result))
+        "a nil manifest means no manifest, not a manifest under another key")))
+
 (deftest ^{:stratum 1} blank-stderr-retains-command-error-test
   (testing "build failures retain the structured command error"
     (let [result (with-redefs [kustomize/kustomize-build!
@@ -74,3 +94,35 @@
                    (kustomize/kustomize-apply! "/deployment"))]
       (is (schema/failed? result))
       (is (= "apply broke" (:error result))))))
+
+;------------------------------------------------------------------------------ Layer 2
+
+(deftest ^{:stratum 2} render-and-apply-report-the-manifest-under-one-key-test
+  ;; The trap this closes: a governed caller wired :render! and then read
+  ;; :rendered-yaml off the result. Rendering used to return a raw shell
+  ;; result, so that key was nil, and a healthy render read as an empty one
+  ;; — which denies every deploy.
+  (let [render-calls (atom [])
+        rendered (with-redefs [exec/sh-with-timeout (scripted-shell render-calls)]
+                   (kustomize/kustomize-render! "/deployment"))
+        applied (with-redefs [exec/sh-with-timeout (scripted-shell (atom []))]
+                  (kustomize/kustomize-apply! "/deployment"))]
+    (is (= manifest-bytes (:rendered-yaml rendered)))
+    (is (= (:rendered-yaml rendered) (:rendered-yaml applied))
+        "render and apply must report the manifest under the same key")
+    (testing "a render contacts no cluster"
+      (is (= ["kustomize"] (mapv :command @render-calls)))
+      (is (nil? (:apply-result rendered))
+          "nothing was applied, so there is no apply result to report"))))
+
+(deftest ^{:stratum 2} a-refused-apply-keeps-the-manifest-it-built-test
+  ;; The manifest kubectl rejected is the evidence of what was attempted.
+  ;; Nilling it left callers digging it out of [:build-result :stdout] by
+  ;; guesswork, which is the same trap wearing a different key.
+  (let [result (with-redefs [exec/sh-with-timeout
+                             (scripted-shell (atom [])
+                                             :apply-result (blank-stderr-failure "apply broke"))]
+                 (kustomize/kustomize-apply! "/deployment"))]
+    (is (schema/failed? result))
+    (is (= manifest-bytes (:rendered-yaml result))
+        "the build succeeded, so its manifest survives the apply failure")))

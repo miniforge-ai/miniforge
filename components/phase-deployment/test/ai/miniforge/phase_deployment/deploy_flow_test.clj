@@ -23,6 +23,7 @@
    [ai.miniforge.phase-deployment.deploy-governed :as governed]
    [ai.miniforge.phase-deployment.deploy-provider :as provider]
    [ai.miniforge.phase-deployment.shell :as shell]
+   [ai.miniforge.phase-deployment.shell.exec :as exec]
    [ai.miniforge.schema.interface :as schema]
    [clojure.test :refer [deftest is]]))
 
@@ -41,8 +42,16 @@
 
 (def ^{:stratum 0} rollback-error "invalid rollback")
 
-(def ^{:stratum 0} apply-failure
-  (schema/failure :rendered-yaml "apply refused" {:build-result {:stdout "image: api:v8"}}))
+(defn ^{:stratum 0} apply-failure
+  "Return a failure produced by the real Kustomize adapter."
+  []
+  (with-redefs [exec/sh-with-timeout
+                (fn [command _args & _]
+                  (if (= "kustomize" command)
+                    (schema/success :stdout "image: api:v8")
+                    (schema/failure :stdout "apply refused"
+                                    {:stderr "apply refused"})))]
+    (shell/kustomize-apply! "/deploy")))
 
 ;------------------------------------------------------------------------------ Layer 1
 
@@ -57,7 +66,7 @@
 (deftest ^{:stratum 1} apply-failure-preserves-rollback-test
   (with-redefs [provider/rollback-info!
                 (constantly (schema/success :rollback-info rollback-info))
-                provider/apply! (constantly apply-failure)]
+                provider/apply! (constantly (apply-failure))]
     (let [deployment (flow/execute! (deployment-config))]
       (is (= :failed (:deploy/status deployment)))
       (is (= :apply (:deploy/stage deployment)))

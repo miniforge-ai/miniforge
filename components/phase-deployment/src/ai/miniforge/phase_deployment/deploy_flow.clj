@@ -34,8 +34,7 @@
 (defn- ^{:stratum 1} apply-outcome!
   [deploy-config rollback-info]
   (let [applied (provider/apply! deploy-config)
-        rendered-yaml (or (:rendered-yaml applied)
-                          (get-in applied [:build-result :stdout]))]
+        rendered-yaml (:rendered-yaml applied)]
     (if (schema/failed? applied)
       (outcome :failed :apply rollback-info
                {:deploy/rendered-yaml rendered-yaml

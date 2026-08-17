@@ -22,6 +22,8 @@
    [ai.miniforge.phase-deployment.deploy-authority :as authority]
    [ai.miniforge.phase-deployment.deploy-governed :as governed]
    [ai.miniforge.phase-deployment.policy :as policy]
+   [ai.miniforge.phase-deployment.shell :as shell]
+   [ai.miniforge.phase-deployment.shell.exec :as exec]
    [ai.miniforge.schema.interface :as schema]
    [clojure.test :refer [deftest is testing]])
   (:import
@@ -62,6 +64,12 @@
   [calls]
   (some #(= :apply (first %)) @calls))
 
+(defn- ^{:stratum 0} render-result
+  [target]
+  (with-redefs [exec/sh-with-timeout
+                (fn [& _] (schema/success :stdout rendered-yaml))]
+    (shell/kustomize-render! (:kustomize-dir target))))
+
 ;------------------------------------------------------------------------------ Layer 1
 
 (def ^{:stratum 1} deploy-config
@@ -87,7 +95,7 @@
                (schema/success :target (assoc config :context "gke-prod")))
     :render! (fn [target]
                (record-call calls :render target)
-               (schema/success :stdout rendered-yaml))
+               (render-result target))
     :dry-run! (fn [target rendered]
                 (record-call calls :dry-run target rendered)
                 (schema/success :stdout server-dry-run))
