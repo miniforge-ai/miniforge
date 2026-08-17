@@ -108,7 +108,7 @@
                                  writer) — consumers guard on this key
                                  for best-effort warning paths and must
                                  never mint their own. Never persisted
-                                 (checkpoint-store whitelists keys).
+                                 (checkpoint-store-records whitelists keys).
 
    ### Supervision Support
    :execution/supervision-runtime — Runtime for workflow health supervision
@@ -124,7 +124,7 @@
   (:require [ai.miniforge.anomaly.interface :as anomaly]
             [ai.miniforge.logging.interface :as log]
             [ai.miniforge.response.interface :as response]
-            [ai.miniforge.workflow.checkpoint-store :as checkpoint-store]
+            [ai.miniforge.workflow.checkpoint-store-paths :as checkpoint-paths]
             [ai.miniforge.workflow.fsm :as fsm]
             [ai.miniforge.workflow.monitoring :as monitoring]
             [ai.miniforge.agent.interface :as agent]))
@@ -338,7 +338,7 @@
   (let [execution-machine (fsm/compile-execution-machine workflow)
         fsm-state (let [initial-state (fsm/initialize-execution execution-machine)]
                     (fsm/start-execution execution-machine initial-state))
-        checkpoint-root (checkpoint-store/resolve-checkpoint-root opts)]
+        checkpoint-root (checkpoint-paths/resolve-checkpoint-root opts)]
     (sync-machine-projections
      (merge
       {:execution/id (or (opts-run-id opts) (random-uuid))
@@ -373,7 +373,7 @@
                     (->> (fsm/initialize-execution execution-machine)
                          (fsm/start-execution execution-machine))
                     (:execution/fsm-state machine-snapshot))
-        checkpoint-root (checkpoint-store/resolve-checkpoint-root
+        checkpoint-root (checkpoint-paths/resolve-checkpoint-root
                          (merge opts machine-snapshot))]
     (sync-machine-projections
      (merge

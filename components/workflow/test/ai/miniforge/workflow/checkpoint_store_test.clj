@@ -20,6 +20,7 @@
    [clojure.java.io :as io]
    [clojure.test :refer [deftest is testing]]
    [ai.miniforge.workflow.checkpoint-store :as checkpoint-store]
+   [ai.miniforge.workflow.checkpoint-store-paths :as checkpoint-paths]
    [ai.miniforge.workflow.context :as ctx]
    [ai.miniforge.workflow.interface :as workflow]))
 
@@ -221,7 +222,7 @@
     (with-temp-checkpoint-root
       (fn [checkpoint-root]
         (let [run-id (random-uuid)
-              snapshot-path (checkpoint-store/machine-snapshot-path
+              snapshot-path (checkpoint-paths/machine-snapshot-path
                              checkpoint-root run-id)]
           (io/make-parents snapshot-path)
           ;; :started-at as the old writer left it (#inst), :ended-at as the
