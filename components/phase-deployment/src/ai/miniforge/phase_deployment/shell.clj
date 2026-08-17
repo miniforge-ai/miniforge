@@ -49,6 +49,8 @@
 
 (def ^{:stratum 0} kustomize-build! kustomize/kustomize-build!)
 
+(def ^{:stratum 0} kustomize-render! kustomize/kustomize-render!)
+
 (def ^{:stratum 0} kubectl-apply! kustomize/kubectl-apply!)
 
 (def ^{:stratum 0} kustomize-apply! kustomize/kustomize-apply!)

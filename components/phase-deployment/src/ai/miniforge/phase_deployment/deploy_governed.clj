@@ -98,10 +98,23 @@
 (defn ^{:stratum 2} transact!
   "Dry-run, check, authorize, record, and only then mutate.
 
-   `provider` supplies `:dry-run!`, `:apply!`, `:observe!`, and
-   `:rollback-info!`. Returns the deploy outcome map the flow already
-   speaks, so the refusal paths look like every other failure to the
-   caller — except that no kubectl mutation ran."
+   `provider` is an adapter, not `deploy-provider` itself. Each slot takes
+   `deploy-config` and must return what this seam reads:
+
+   - `:dry-run!` -> the rendered manifest as a STRING. `preflight` denies a
+     blank one, so returning a result map instead denies every deploy.
+     Bridge it with `(:rendered-yaml (provider/render! config))`.
+   - `:apply!` -> a map in the flow's own vocabulary: `:deploy/failed?`,
+     `:deploy/failure`, `:deploy/rollback-info`. `deploy-provider/apply!`
+     speaks `:success?` instead, so wiring it raw makes a failed apply read
+     as not-failed and fall through to observation.
+   - `:observe!` -> `:provider/matched?` and `:provider/observed`, which
+     `deploy-provider/observe!` already returns.
+   - `:rollback-info!` -> the pre-mutation state, or an anomaly.
+
+   Returns the deploy outcome map the flow already speaks, so the refusal
+   paths look like every other failure to the caller — except that no
+   kubectl mutation ran."
   [context deploy-config provider ^Instant now]
   (let [rendered ((:dry-run! provider) deploy-config)
         pre (authority/preflight rendered (:policy-context context {}))]
