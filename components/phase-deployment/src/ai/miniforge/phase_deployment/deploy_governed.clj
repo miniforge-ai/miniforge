@@ -31,7 +31,8 @@
   (:require
    [ai.miniforge.anomaly.interface :as anomaly]
    [ai.miniforge.effect-transaction.interface :as fx]
-   [ai.miniforge.phase-deployment.deploy-authority :as authority])
+   [ai.miniforge.phase-deployment.deploy-authority :as authority]
+   [ai.miniforge.phase-deployment.deploy-outcome :as outcome])
   (:import
    [java.time Instant]))
 
@@ -128,12 +129,8 @@
               (let [committed (commit! context proposed auth now
                                        #((:apply! provider) deploy-config)
                                        #((:observe! provider) deploy-config))]
-                {:deploy/status (case (:effect/state committed)
-                                  :succeeded :success
-                                  :failed :failed
-                                  :pending)
-                 :deploy/stage :apply
-                 :deploy/rollback-info rollback-info
-                 :deploy/effect-id (:effect/id proposed)
-                 :deploy/rendered-yaml (:preflight/rendered pre)
-                 :deploy/observed (:effect/observed committed)}))))))))
+                (outcome/from-state
+                 {:rollback-info rollback-info
+                  :rendered-yaml (:preflight/rendered pre)
+                  :authority auth
+                  :transaction committed})))))))))
