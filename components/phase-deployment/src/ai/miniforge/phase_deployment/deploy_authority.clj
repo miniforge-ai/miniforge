@@ -21,7 +21,8 @@
    [ai.miniforge.anomaly.interface :as anomaly]
    [ai.miniforge.execution-grant.interface :as grant]
    [ai.miniforge.gate.interface :as gate]
-   [ai.miniforge.phase-deployment.policy :as policy])
+   [ai.miniforge.phase-deployment.policy :as policy]
+   [clojure.string :as str])
   (:import
    [java.time Instant]))
 
@@ -58,7 +59,7 @@
 (defn ^{:stratum 0} request
   "Build the closed runtime request for one preflight-approved deployment."
   [context effect-id target]
-  {:workflow-run/id (:execution/id context)
+  {:workflow-run/id (or (:execution/id context) (:run-id context))
    :workflow-run/status :running
    :effect/id effect-id
    :effect/class :effect/deploy
@@ -69,6 +70,24 @@
    :default-context (:context target)
    :namespace (:namespace target)
    :deployment-name (:deployment-name target)})
+
+(defn- ^{:stratum 0} exact-target
+  [target]
+  (assoc target :context (or (:context target)
+                             (:context-name target)
+                             (:default-context target))))
+
+(defn ^{:stratum 0} preflight
+  "Retain the decision input used by the not-yet-wired governed seam."
+  [rendered policy-context]
+  (if (str/blank? (str rendered))
+    {:preflight/result :deny :preflight/violations [] :preflight/rendered nil}
+    (let [violations (keep identity
+                           [(policy/check-resource-count rendered policy-context)
+                            (policy/check-gke-node-limit rendered policy-context)])]
+      {:preflight/result (if (seq violations) :deny :allow)
+       :preflight/violations (vec violations)
+       :preflight/rendered rendered})))
 
 ;------------------------------------------------------------------------------ Layer 1
 
@@ -114,7 +133,9 @@
 (defn ^{:stratum 2} prepare
   "Evaluate policy, issue exact authority, and derive one deploy decision."
   [context effect-id target preflight ^Instant now]
-  (let [request (request context effect-id target)
+  (let [target (exact-target target)
+        preflight (if (map? preflight) preflight {})
+        request (request context effect-id target)
         classification (policy-classification context target)
         grant-record (grant/issue-for-effect (breach-dir context) request now)]
     (if (anomaly/anomaly? grant-record)
