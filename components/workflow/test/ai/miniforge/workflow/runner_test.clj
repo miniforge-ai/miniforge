@@ -28,6 +28,7 @@
    [ai.miniforge.response.interface :as response]
    [ai.miniforge.supervisory-state.interface :as supervisory]
    [ai.miniforge.workflow.checkpoint-store :as checkpoint-store]
+   [ai.miniforge.workflow.checkpoint-store-records :as checkpoint-records]
    [ai.miniforge.workflow.fsm :as workflow-fsm]
    [ai.miniforge.workflow.phase-test-support :as phase-test-support]
    [ai.miniforge.workflow.runner :as runner]
@@ -358,7 +359,7 @@
           result (runner/run-pipeline workflow
                                       {:task "Ignored"}
                                       {:resume-machine-snapshot
-                                       (checkpoint-store/build-machine-snapshot resume-ctx)
+                                       (checkpoint-records/build-machine-snapshot resume-ctx)
                                        :resume-phase-results {}})]
       (is (= :completed (:execution/status result)))
       (is (= (:execution/id resume-ctx) (:execution/id result))))))
@@ -580,7 +581,7 @@
           (let [result (runner/run-pipeline workflow
                                             {:task "Ignored"}
                                             {:resume-machine-snapshot
-                                             (checkpoint-store/build-machine-snapshot resume-ctx)
+                                             (checkpoint-records/build-machine-snapshot resume-ctx)
                                              :resume-phase-results {}})]
             (is (= metadata (:execution/environment-metadata result)))))))))
 
