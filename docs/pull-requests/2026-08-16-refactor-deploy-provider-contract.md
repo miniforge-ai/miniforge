@@ -16,9 +16,9 @@ None.
 
 ## Overview
 
-Defines the injectable Kubernetes operation map used by the governed deployment
-flow and makes rollback capture obey the same canonical success/failure result
-contract as render, dry-run, and apply operations.
+Defines the injectable Kubernetes operation map available to the next governed
+deployment flow and makes rollback capture obey the same canonical
+success/failure result contract as render, dry-run, and apply operations.
 
 ## Changes
 

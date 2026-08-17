@@ -30,7 +30,7 @@
   []
   {:target! provider/target!
    :render! provider/render!
-   :dry-run! provider/dry-run!
+   :server-dry-run! provider/dry-run!
    :rollback-info! provider/rollback-info!
-   :apply! provider/apply-rendered!
+   :apply-rendered! provider/apply-rendered!
    :observe! provider/observe!})

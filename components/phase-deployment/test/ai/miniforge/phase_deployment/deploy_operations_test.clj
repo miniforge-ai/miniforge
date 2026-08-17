@@ -16,7 +16,7 @@
 ;; See the License for the specific language governing permissions and
 ;; limitations under the License.
 (ns ai.miniforge.phase-deployment.deploy-operations-test
-  "Provider functions exposed to the governed deployment flow."
+  "Normalized Kubernetes operations available to application flows."
   (:require
    [ai.miniforge.phase-deployment.deploy-operations :as operations]
    [ai.miniforge.phase-deployment.deploy-provider :as provider]
@@ -40,7 +40,8 @@
                 provider/dry-run! (fn [_ _] dry-run-result)]
     (let [ops (operations/operations)]
       (is (= render-result ((:render! ops) target)))
-      (is (= dry-run-result ((:dry-run! ops) target rendered-yaml))))))
+      (is (= dry-run-result
+             ((:server-dry-run! ops) target rendered-yaml))))))
 
 (deftest ^{:stratum 1} operations-pass-explicit-bytes-to-provider-test
   (let [applied (atom nil)]
@@ -48,6 +49,6 @@
                   (fn [actual-target rendered]
                     (reset! applied [actual-target rendered])
                     nil)]
-      ((:apply! (operations/operations)) target rendered-yaml)
+      ((:apply-rendered! (operations/operations)) target rendered-yaml)
       (is (= [target rendered-yaml] @applied)
           "the adapter must neither cache nor re-render the artifact"))))
