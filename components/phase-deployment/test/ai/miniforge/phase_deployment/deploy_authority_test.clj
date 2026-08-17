@@ -17,6 +17,7 @@
 ;; limitations under the License.
 (ns ai.miniforge.phase-deployment.deploy-authority-test
   (:require
+   [ai.miniforge.anomaly.interface :as anomaly]
    [ai.miniforge.execution-grant.interface :as grant]
    [ai.miniforge.phase-deployment.deploy-authority :as authority]
    [ai.miniforge.phase-deployment.policy :as policy]
@@ -60,12 +61,23 @@
 
 ;------------------------------------------------------------------------------ Layer 2
 
-(deftest ^{:stratum 2} request-binds-canonical-run-and-exact-target-test
-  (let [request (authority/request (context) (random-uuid)
-                                   (assoc target :default-context "audit"))]
+(deftest ^{:stratum 2} request-binds-canonical-authority-inputs-test
+  (let [request (authority/request (context) (random-uuid) target)]
     (is (= run-id (:workflow-run/id request)))
     (is (= "gke-prod" (:context request)))
-    (is (= "audit" (:default-context request)))))
+    (is (= "gke-prod" (:default-context request)))))
+
+(deftest ^{:stratum 2} prepare-rejects-legacy-only-authority-inputs-test
+  (let [legacy-context (-> (context) (dissoc :execution/id)
+                           (assoc :run-id run-id))
+        legacy-target (-> target (dissoc :context)
+                          (assoc :context-name "legacy"))
+        prepared (authority/prepare legacy-context (random-uuid) legacy-target
+                                    preflight now)]
+    (is (anomaly/anomaly? prepared))
+    (is (= :invalid-input (:anomaly/type prepared)))
+    (is (= [:execution/id :context]
+           (get-in prepared [:anomaly/data :authority/missing-fields])))))
 
 (deftest ^{:stratum 2} prepare-omits-unrecorded-preflight-evidence-test
   (let [proposal (:effect/proposal

@@ -22,8 +22,7 @@
    [ai.miniforge.execution-grant.interface :as grant]
    [ai.miniforge.gate.interface :as gate]
    [ai.miniforge.phase-deployment.messages :as msg]
-   [ai.miniforge.phase-deployment.policy :as policy]
-   [clojure.string :as str])
+   [ai.miniforge.phase-deployment.policy :as policy])
   (:import
    [java.time Instant]))
 
@@ -57,6 +56,17 @@
   {:rule-id :deploy/provision-preview-required
    :message (msg/t :policy/provision-preview-required)})
 
+(defn- ^{:stratum 0} canonical-input-anomaly
+  [context target]
+  (let [missing-fields (cond-> []
+                         (nil? (:execution/id context)) (conj :execution/id)
+                         (nil? (:context target)) (conj :context))]
+    (when (seq missing-fields)
+      (anomaly/anomaly
+       :invalid-input
+       (msg/t :deploy/authority-input-invalid)
+       {:authority/missing-fields missing-fields}))))
+
 (defn- ^{:stratum 0} effect-scope
   [request]
   (dissoc request :workflow-run/status :effect/class :effect/preflight
@@ -77,7 +87,7 @@
 (defn ^{:stratum 0} request
   "Build the closed runtime request for one preflight-approved deployment."
   [context effect-id target]
-  {:workflow-run/id (or (:execution/id context) (:run-id context))
+  {:workflow-run/id (:execution/id context)
    :workflow-run/status :running
    :effect/id effect-id
    :effect/class :effect/deploy
@@ -85,26 +95,9 @@
                       :preflight/result :allow}
    :kustomize-dir (:kustomize-dir target)
    :context (:context target)
-   :default-context (or (:default-context target) (:context target))
+   :default-context (:context target)
    :namespace (:namespace target)
    :deployment-name (:deployment-name target)})
-
-(defn- ^{:stratum 0} exact-target
-  [target]
-  (assoc target :context (or (:context target)
-                             (:context-name target)
-                             (:default-context target))))
-
-(defn ^{:stratum 0} preflight
-  "Reject an absent manifest at the legacy governed-deploy seam."
-  [rendered _policy-context]
-  (if (str/blank? (str rendered))
-    {:preflight/result :deny
-     :preflight/violations [(msg/t :deploy/render-failed)]
-     :preflight/rendered nil}
-    {:preflight/result :allow
-     :preflight/violations []
-     :preflight/rendered rendered}))
 
 ;------------------------------------------------------------------------------ Layer 1
 
@@ -149,28 +142,31 @@
 (defn ^{:stratum 2} prepare
   "Evaluate policy, issue exact authority, and derive one deploy decision."
   [context effect-id target preflight ^Instant now]
-  (let [target (exact-target target)
-        preflight (if (map? preflight) preflight {})
-        request (request context effect-id target)
-        classification (policy-classification context target)
-        policy-envelope (gate/decide classification deployment-policy-pins)
-        policy-allowed? (gate/decision-allowed? policy-envelope)
-        grant-record (when policy-allowed?
-                       (grant/issue-for-effect (breach-dir context) request now))]
-    (cond
-      (not policy-allowed?)
-      (authority-record request classification nil nil policy-envelope preflight)
+  (if-some [invalid-input (canonical-input-anomaly context target)]
+    invalid-input
+    (let [preflight (if (map? preflight) preflight {})
+          request (request context effect-id target)
+          classification (policy-classification context target)
+          policy-envelope (gate/decide classification deployment-policy-pins)
+          policy-allowed? (gate/decision-allowed? policy-envelope)
+          grant-record (when policy-allowed?
+                         (grant/issue-for-effect
+                          (breach-dir context) request now))]
+      (cond
+        (not policy-allowed?)
+        (authority-record request classification nil nil policy-envelope
+                          preflight)
 
-      (anomaly/anomaly? grant-record)
-      grant-record
+        (anomaly/anomaly? grant-record)
+        grant-record
 
-      :else
-      (let [authorization (grant/authorize
-                           grant-record
-                           {:effect/scope (effect-scope request)
-                            :usage/count 1}
-                           now)
-            envelope (gate/decide classification deployment-policy-pins
-                                  authorization)]
-        (authority-record request classification grant-record authorization
-                          envelope preflight)))))
+        :else
+        (let [authorization (grant/authorize
+                             grant-record
+                             {:effect/scope (effect-scope request)
+                              :usage/count 1}
+                             now)
+              envelope (gate/decide classification deployment-policy-pins
+                                    authorization)]
+          (authority-record request classification grant-record authorization
+                            envelope preflight))))))

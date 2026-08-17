@@ -14,6 +14,7 @@
   :deploy/render-failed          "Kustomize render failed"
   :deploy/dry-run-failed         "Kubernetes server dry-run failed"
   :deploy/preflight-failed       "Deployment preflight failed"
+  :deploy/authority-input-invalid "Deployment authority requires canonical execution and target inputs"
   :deploy/authority-denied       "Deployment authority denied"
   :deploy/authority-failed       "Deployment authority check failed"
   :deploy/proposal-failed        "Deployment proposal persistence failed"
