@@ -16,7 +16,10 @@
 ;; See the License for the specific language governing permissions and
 ;; limitations under the License.
 (ns ai.miniforge.phase-deployment.deploy-test
-  (:require [ai.miniforge.phase-deployment.deploy-config :as config]
+  (:require [ai.miniforge.logging.interface :as log]
+            [ai.miniforge.phase-deployment.deploy :as deploy]
+            [ai.miniforge.phase-deployment.deploy-config :as config]
+            [ai.miniforge.phase-deployment.deploy-governed :as governed]
             [ai.miniforge.phase-deployment.deploy-provider :as provider]
             [ai.miniforge.phase-deployment.shell :as shell]
             [ai.miniforge.schema.interface :as schema]
@@ -30,6 +33,17 @@
    :context "cluster-1"})
 
 (def ^{:stratum 0} rollback-error "kubectl unavailable")
+
+(def ^{:stratum 0} rollback-info
+  {:revision "7" :image "api:v7" :replicas 3})
+
+(def ^{:stratum 0} deployment-config
+  {:phase-config {}
+   :kustomize-dir "/deploy"
+   :namespace "production"
+   :context "cluster-1"
+   :app-label "api"
+   :deployment-name "api"})
 
 (deftest ^{:stratum 0} resolve-deploy-config-test
   (testing "deploy config normalizes workflow inputs and provision outputs once"
@@ -96,6 +110,13 @@
 
 ;------------------------------------------------------------------------------ Layer 1
 
+(def ^{:stratum 1} rollout-failure
+  {:deploy/status :failed
+   :deploy/stage :observe
+   :deploy/rollback-info rollback-info
+   :deploy/rendered-yaml "image: api:v8"
+   :deploy/failure "rollout timed out"})
+
 (deftest ^{:stratum 1} rollback-shell-failure-keeps-provider-result-test
   (let [kubectl-result (schema/failure :parsed rollback-error)]
     (with-redefs [shell/kubectl! (fn [& _] kubectl-result)]
@@ -114,3 +135,28 @@
       (let [result (provider/rollback-info! rollback-target)]
         (is (schema/failed? result))
         (is (some? (:validation result)))))))
+
+(deftest ^{:stratum 1} unavailable-pod-observation-does-not-match-test
+  (with-redefs [shell/kubectl-rollout-status!
+                (constantly (schema/success :stdout "ready"))
+                shell/kubectl-get-pods!
+                (constantly (schema/failure :parsed "unavailable"))]
+    (is (false? (:provider/matched?
+                 (provider/observe! deployment-config))))))
+
+;------------------------------------------------------------------------------ Layer 2
+
+(deftest ^{:stratum 2} phase-failure-retains-rollback-evidence-test
+  (let [[logger entries] (log/collecting-logger)]
+    (with-redefs [governed/transact! (constantly rollout-failure)]
+      (let [ctx (deploy/enter-deploy
+                 {:execution/logger logger
+                  :execution/input (select-keys deployment-config
+                                                [:kustomize-dir :namespace
+                                                 :context :app-label])})
+            evidence-types (mapv :evidence/type (:execution/evidence ctx))]
+        (is (= :failed (get-in ctx [:phase :status])))
+        (is (= :rollout-failed (get-in ctx [:phase :result :status])))
+        (is (= [:deploy/applied :deploy/rollout-failed]
+               (mapv :log/event @entries)))
+        (is (some #{:evidence/rollback-info} evidence-types))))))
