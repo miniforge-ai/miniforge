@@ -47,7 +47,7 @@
         from-date (tenancy/establish-acting identity (java.util.Date/from now))]
     (is (= from-instant from-date)
         "Instant and Date for the same moment produce the same context"))
-  (testing "and an unparseable stamp is refused rather than stored"
+  (testing "and an unparseable stamp yields a context that fails validation"
     (is (not (tenancy/valid-acting?
               (tenancy/establish-acting (tenancy/resolve-operator configured now)
                                         "not-an-instant"))))))

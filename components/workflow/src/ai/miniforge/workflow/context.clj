@@ -359,7 +359,13 @@
        ;; first-class execution key rather than something read back off
        ;; :execution/opts, because opts is replaced wholesale on resume.
        :execution/acting (:acting opts)
-       :execution/opts opts
+       ;; ...and REMOVED from the opts copy, so the context holds exactly
+       ;; one answer to 'who is this acting for'. Leaving it in both
+       ;; places would put the resuming caller's identity in
+       ;; :execution/opts and the original in :execution/acting, and a
+       ;; future reader picking the wrong one gets a plausible wrong
+       ;; owner rather than an error.
+       :execution/opts (dissoc opts :acting)
        :execution/checkpoint-root checkpoint-root
        :execution/logger (execution-logger opts)}
       (monitoring-runtime-fields workflow)
@@ -395,7 +401,11 @@
        ;; whoever resumed it. Stated explicitly so a later edit cannot
        ;; reintroduce that by treating acting like the other opts below.
        :execution/acting (:execution/acting machine-snapshot)
-       :execution/opts opts
+       ;; The resuming caller's `:acting` is dropped here for the same
+       ;; reason: one answer, not two. Keeping it would leave the
+       ;; resumer's identity sitting in :execution/opts, contradicting
+       ;; :execution/acting, for a later reader to pick up by mistake.
+       :execution/opts (dissoc opts :acting)
        :execution/checkpoint-root checkpoint-root
        :execution/logger (execution-logger opts)}
       (monitoring-runtime-fields workflow)

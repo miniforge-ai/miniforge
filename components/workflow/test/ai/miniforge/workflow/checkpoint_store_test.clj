@@ -290,4 +290,14 @@
                    (:acting/tenant-id (:execution/acting restored))))
             (is (= (:acting/principal-id acting)
                    (:acting/principal-id (:execution/acting restored)))
-                "resuming must not reattribute the run to the resumer")))))))
+                "resuming must not reattribute the run to the resumer")
+            (testing "and the context holds exactly ONE answer to who is acting"
+              ;; Two sources of truth is the same defect wearing a
+              ;; disguise: the resumer's identity in :execution/opts and
+              ;; the original in :execution/acting, with a later reader
+              ;; free to pick the wrong one and get a plausible wrong
+              ;; owner instead of an error.
+              (is (nil? (:acting (:execution/opts restored)))
+                  "the resuming caller's :acting must not survive in opts")
+              (is (nil? (:acting (:execution/opts ctx)))
+                  "nor the starting caller's, in the fresh context"))))))))
