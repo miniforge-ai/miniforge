@@ -127,8 +127,9 @@
 
 (defn ^{:stratum 1} permitted?
   "True only when the grant check and the DecisionEnvelope both allow."
-  [{:authority/keys [authorization envelope]}]
-  (and (grant/authorized? authorization)
+  [{:authority/keys [grant authorization envelope]}]
+  (and (some? grant)
+       (grant/authorized? authorization)
        (contains? allow-decisions (:envelope/decision envelope))))
 
 (defn- ^{:stratum 1} authority-record

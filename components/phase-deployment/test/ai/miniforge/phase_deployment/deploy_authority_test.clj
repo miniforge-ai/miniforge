@@ -107,6 +107,7 @@
       (let [prepared (authority/prepare (context) (random-uuid)
                                         target preflight now)]
         (is (authority/permitted? prepared))
+        (is (not (authority/permitted? (assoc prepared :authority/grant nil))))
         (is (= [[:resources provision-preview] [:nodes provision-preview]]
                @checked))
         (is (= "manifest"
