@@ -19,11 +19,15 @@
   "What a checkpoint contains: the machine snapshot, the per-phase
    record, and the manifest that indexes them.
 
-   Every builder here is a pure projection of an execution context —
-   given the same context it returns the same map, and none of them
-   touch the filesystem. `persisted-execution-keys`, the allowlist
-   deciding what survives a checkpoint at all, lives here with
-   `build-machine-snapshot`, the one function that applies it.
+   No builder here touches the filesystem, and all of the run's own
+   data comes from the context handed in. Two of them are still not
+   pure: `build-phase-checkpoint` and `build-manifest` stamp the
+   moment they were called, so the same context builds two records
+   that differ in `:workflow/checkpointed-at` /
+   `:workflow/last-checkpoint-at`. `build-machine-snapshot` is the
+   deterministic one, and `persisted-execution-keys` — the allowlist
+   deciding what survives a checkpoint at all — lives here with it,
+   since it is the only function that applies it.
 
    Split out of `checkpoint-store`, which held path resolution, record
    building and persistence as one five-stratum chain in a single file

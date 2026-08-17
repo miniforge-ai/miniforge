@@ -45,9 +45,10 @@ Three namespaces, each a distinct question about a checkpoint:
   contains.** `persisted-execution-keys`, `ordered-phase-ids`,
   `active-or-last-phase`, `build-machine-snapshot`,
   `build-phase-checkpoint`, `build-manifest`, and the private
-  `current-checkpoint-timestamp`. Pure projections of an execution
-  context. The allowlist sits with `build-machine-snapshot`, the one
-  function that applies it.
+  `current-checkpoint-timestamp`. Nothing here opens a file;
+  `build-phase-checkpoint` and `build-manifest` do read the clock, so
+  only `build-machine-snapshot` is deterministic. The allowlist sits
+  with it, being the one function that applies it.
 - **`checkpoint_store.clj` (3 layers) — moving it between memory and
   disk.** `temp-file-suffix`, the private `read-edn-file` and
   `write-edn-atomically!`, and the two public operations
