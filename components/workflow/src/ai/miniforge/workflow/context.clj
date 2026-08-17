@@ -355,6 +355,10 @@
        :execution/output nil
        :execution/metrics {:tokens 0 :cost-usd 0.0 :duration-ms 0}
        :execution/started-at (System/currentTimeMillis)
+       ;; Established once, at the boundary that started this run. A
+       ;; first-class execution key rather than something read back off
+       ;; :execution/opts, because opts is replaced wholesale on resume.
+       :execution/acting (:acting opts)
        :execution/opts opts
        :execution/checkpoint-root checkpoint-root
        :execution/logger (execution-logger opts)}
@@ -385,6 +389,12 @@
        :execution/fsm-state fsm-state
        :execution/input (get machine-snapshot :execution/input input)
        :execution/phase-results phase-results
+       ;; From the SNAPSHOT, never from `opts`. A resumed run is still
+       ;; acting under the authority it was started with; taking this
+       ;; from the resuming invocation would reattribute the run to
+       ;; whoever resumed it. Stated explicitly so a later edit cannot
+       ;; reintroduce that by treating acting like the other opts below.
+       :execution/acting (:execution/acting machine-snapshot)
        :execution/opts opts
        :execution/checkpoint-root checkpoint-root
        :execution/logger (execution-logger opts)}

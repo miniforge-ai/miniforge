@@ -22,7 +22,8 @@
    [ai.miniforge.workflow.checkpoint-store :as checkpoint-store]
    [ai.miniforge.workflow.checkpoint-store-paths :as checkpoint-paths]
    [ai.miniforge.workflow.context :as ctx]
-   [ai.miniforge.workflow.interface :as workflow]))
+   [ai.miniforge.workflow.interface :as workflow]
+   [ai.miniforge.tenancy.interface :as tenancy]))
 
 ;------------------------------------------------------------------------------ Layer 0
 
@@ -237,3 +238,49 @@
             (is (string? (:execution/started-at snapshot)))
             (is (= (:execution/ended-at snapshot)
                    (:execution/started-at snapshot)))))))))
+
+(deftest ^{:stratum 1} acting-identity-survives-a-checkpoint-test
+  ;; `persisted-execution-keys` is an allowlist: a field absent from it
+  ;; is dropped at checkpoint and gone on resume, silently. Identity is
+  ;; the one field where that failure is unrecoverable after the fact,
+  ;; so it gets a round trip through real disk rather than a unit
+  ;; assertion on the key list.
+  (with-temp-checkpoint-root
+    (fn [checkpoint-root]
+      (let [acting (tenancy/establish-acting
+                    (tenancy/resolve-operator {:tenancy {:operator-name "chris"}}
+                                              instant-stamp)
+                    instant-stamp)
+            workflow {:workflow/id :test
+                      :workflow/version "1.0.0"
+                      :workflow/pipeline [{:phase :done}]}
+            ctx (ctx/create-context workflow {:task "Test"}
+                                    {:checkpoint/root checkpoint-root
+                                     :acting acting})
+            _ (checkpoint-store/persist-execution-state! ctx)
+            snapshot (:machine-snapshot
+                      (checkpoint-store/load-checkpoint-data
+                       (:execution/id ctx) {:checkpoint/root checkpoint-root}))]
+        (testing "the boundary's identity reaches the context"
+          (is (= acting (:execution/acting ctx))))
+        (testing "and survives the durable snapshot"
+          (is (= (:acting/tenant-id acting)
+                 (:acting/tenant-id (:execution/acting snapshot))))
+          (is (= (:acting/principal-id acting)
+                 (:acting/principal-id (:execution/acting snapshot)))))
+        (testing "a resumed run keeps the authority it started with"
+          ;; The trap this guards: `restore-context` merges the snapshot
+          ;; first and then overrides `:execution/opts` from the CURRENT
+          ;; invocation. Acting taken from opts would silently
+          ;; reattribute the run to whoever resumed it.
+          (let [someone-else (assoc acting
+                                    :acting/principal-id (random-uuid)
+                                    :acting/tenant-id (random-uuid))
+                restored (ctx/restore-context workflow {:task "Test"} snapshot {}
+                                              {:checkpoint/root checkpoint-root
+                                               :acting someone-else})]
+            (is (= (:acting/tenant-id acting)
+                   (:acting/tenant-id (:execution/acting restored))))
+            (is (= (:acting/principal-id acting)
+                   (:acting/principal-id (:execution/acting restored)))
+                "resuming must not reattribute the run to the resumer")))))))
