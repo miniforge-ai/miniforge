@@ -39,20 +39,11 @@
   (:require
    [ai.miniforge.anomaly.interface :as anomaly]
    [ai.miniforge.tenancy.ids :as ids]
+   [ai.miniforge.tenancy.instant :as instant]
    [ai.miniforge.tenancy.schema :as schema]
-   [malli.core :as m])
-  (:import
-   [java.time Instant]
-   [java.util Date]))
+   [malli.core :as m]))
 
 ;------------------------------------------------------------------------------ Layer 0
-
-(defn ^{:stratum 0} iso-instant?
-  "True for a string this namespace can read back as an instant."
-  [x]
-  (and (string? x)
-       (try (Instant/parse x) true
-            (catch Exception _ false))))
 
 (defn- ^{:stratum 0} no-acting
   [detail]
@@ -80,9 +71,7 @@
    :principal/kind :agent-instance
    :principal/display-name agent-name})
 
-;------------------------------------------------------------------------------ Layer 1
-
-(def ^{:stratum 1} ActingContext
+(def ^{:stratum 0} ActingContext
   "CLOSED. The two ids that answer 'on whose behalf', and when that was
    settled.
 
@@ -99,26 +88,9 @@
   [:map {:closed true}
    [:acting/tenant-id :uuid]
    [:acting/principal-id :uuid]
-   [:acting/established-at [:fn iso-instant?]]])
+   [:acting/established-at [:fn instant/iso-instant?]]])
 
-(defn ^{:stratum 1} ->iso
-  "Normalize an instant to the canonical ISO-8601 string, or nil.
-
-   Takes `Instant` and `Date` both, because `inst?` — which every
-   instant-bearing schema here uses — admits either, so a caller holding
-   a schema-valid instant may hold either one. Assuming `Instant` and
-   calling `str` on a `Date` yields 'Sat Aug 16 ...', which is not a
-   parseable instant and would fail validation somewhere far from here."
-  [now]
-  (cond
-    (instance? Instant now) (str now)
-    (instance? Date now) (str (.toInstant ^Date now))
-    (iso-instant? now) now
-    :else nil))
-
-;------------------------------------------------------------------------------ Layer 2
-
-(defn ^{:stratum 2} establish
+(defn ^{:stratum 0} establish
   "Reduce a resolved `Identity` to the acting context a run carries.
 
    Called ONCE per boundary. Downstream code reads what this produced;
@@ -127,15 +99,17 @@
   [identity now]
   {:acting/tenant-id (get-in identity [:identity/tenant :tenant/id])
    :acting/principal-id (get-in identity [:identity/principal :principal/id])
-   :acting/established-at (->iso now)})
+   :acting/established-at (instant/->iso now)})
 
-(defn ^{:stratum 2} valid?
+;------------------------------------------------------------------------------ Layer 1
+
+(defn ^{:stratum 1} valid?
   [x]
   (m/validate ActingContext x))
 
-;------------------------------------------------------------------------------ Layer 3
+;------------------------------------------------------------------------------ Layer 2
 
-(defn ^{:stratum 3} require-acting
+(defn ^{:stratum 2} require-acting
   "Return the acting context held by `carrier`, or an anomaly.
 
    Never substitutes a default and never returns nil. A record created
@@ -154,7 +128,7 @@
 
       :else acting)))
 
-(defn ^{:stratum 3} for-agent
+(defn ^{:stratum 2} for-agent
   "The acting context a spawned agent runs under.
 
    Same tenant, new principal, and the establishing instant carried
