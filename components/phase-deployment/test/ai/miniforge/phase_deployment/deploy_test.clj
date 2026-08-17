@@ -24,6 +24,13 @@
 
 ;------------------------------------------------------------------------------ Layer 0
 
+(def ^{:stratum 0} rollback-target
+  {:deployment-name "api"
+   :namespace "production"
+   :context "cluster-1"})
+
+(def ^{:stratum 0} rollback-error "kubectl unavailable")
+
 (deftest ^{:stratum 0} resolve-deploy-config-test
   (testing "deploy config normalizes workflow inputs and provision outputs once"
     (let [resolved (config/resolve-config
@@ -86,3 +93,24 @@
         (is (schema/failed? result))
         (is (contains? result :target))
         (is (= kubectl-result (:kubectl-result result)))))))
+
+;------------------------------------------------------------------------------ Layer 1
+
+(deftest ^{:stratum 1} rollback-shell-failure-keeps-provider-result-test
+  (let [kubectl-result (schema/failure :parsed rollback-error)]
+    (with-redefs [shell/kubectl! (fn [& _] kubectl-result)]
+      (let [result (provider/rollback-info! rollback-target)]
+        (is (schema/failed? result))
+        (is (= kubectl-result (:kubectl-result result)))))))
+
+(deftest ^{:stratum 1} invalid-rollback-shape-returns-failure-test
+  (let [kubectl-result
+        (schema/success
+         :parsed
+         {:metadata {:annotations {"deployment.kubernetes.io/revision" "4"}}
+          :spec {:template {:spec {:containers [{:image "api:v4"}]}}}
+          :status {:readyReplicas "three"}})]
+    (with-redefs [shell/kubectl! (fn [& _] kubectl-result)]
+      (let [result (provider/rollback-info! rollback-target)]
+        (is (schema/failed? result))
+        (is (some? (:validation result)))))))
