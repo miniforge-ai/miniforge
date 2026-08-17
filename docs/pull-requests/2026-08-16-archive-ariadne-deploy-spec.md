@@ -27,4 +27,4 @@ queue reflects only unfinished work.
 - `bb fmt:md`
 - `bb pre-commit`
 - Review that the archived spec content is unchanged and the queue contains no
-  stale reference.
+  stale references.
