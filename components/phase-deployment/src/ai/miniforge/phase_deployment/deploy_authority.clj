@@ -44,7 +44,7 @@
    :pins/rule-ids [:deploy/resource-count-limit :deploy/gke-node-limit]
    :pins/event-watermark nil})
 
-(def ^{:stratum 0} default-breach-dir-property
+(def ^{:stratum 0} default-breach-dir-relative-path
   ".miniforge/grant-breaches")
 
 (defn- ^{:stratum 0} policy-blocker
@@ -111,7 +111,8 @@
 (defn ^{:stratum 1} breach-dir
   [context]
   (or (:grant-breach-dir context)
-      (str (System/getProperty "user.home") "/" default-breach-dir-property)))
+      (str (System/getProperty "user.home") "/"
+           default-breach-dir-relative-path)))
 
 (defn ^{:stratum 1} policy-classification
   "Evaluate deployment policy against the Pulumi preview it was defined for."
