@@ -154,3 +154,20 @@
     (testing "and re-establishing from the stored string is idempotent"
       (is (= acting (tenancy/establish-acting (tenancy/resolve-operator configured now)
                                               (:acting/established-at acting)))))))
+
+(deftest ^{:stratum 2} agent-principal-refuses-rather-than-shaping-junk-test
+  ;; `agent-principal` is public API. Returning a Principal-shaped map
+  ;; for invalid input would put the burden of validation on every
+  ;; caller, and a caller that must remember to validate eventually
+  ;; forgets — which is the whole failure mode this component exists to
+  ;; prevent.
+  (let [acting (an-acting)]
+    (is (tenancy/valid-principal? (tenancy/agent-principal acting "reviewer")))
+    (testing "a blank name yields no principal, not an unnamed one"
+      (doseq [bad ["" "   " nil]]
+        (is (anomaly/anomaly? (tenancy/agent-principal acting bad))
+            (str "should refuse agent name " (pr-str bad)))))
+    (testing "no tenant to inherit means no principal"
+      (is (anomaly/anomaly? (tenancy/agent-principal {} "reviewer")))
+      (is (anomaly/anomaly?
+           (tenancy/agent-principal (dissoc acting :acting/tenant-id) "reviewer"))))))

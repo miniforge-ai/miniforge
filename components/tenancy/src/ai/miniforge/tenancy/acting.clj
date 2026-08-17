@@ -52,25 +52,6 @@
                        detail
                        {}))
 
-(defn ^{:stratum 0} agent-principal
-  "The principal a spawned agent acts as.
-
-   The tenant is inherited: an agent owns nothing, so there is nothing
-   for it to own things AS. The principal is its own, so 'an agent
-   instance did it' and 'the operator did it' remain distinguishable
-   after the fact.
-
-   This is the representational half of fence-not-restrain. The inner
-   agent acts under a named identity inside the boundary rather than
-   under the ambient authority of the process, which is what makes
-   revoking the lending tenant's grant end the agent's authority too."
-  [acting agent-name]
-  {:principal/id (ids/stable-id "agent-principal"
-                                (str (:acting/tenant-id acting) "/" agent-name))
-   :principal/tenant-id (:acting/tenant-id acting)
-   :principal/kind :agent-instance
-   :principal/display-name agent-name})
-
 (def ^{:stratum 0} ActingContext
   "CLOSED. The two ids that answer 'on whose behalf', and when that was
    settled.
@@ -102,6 +83,37 @@
    :acting/established-at (instant/->iso now)})
 
 ;------------------------------------------------------------------------------ Layer 1
+
+(defn ^{:stratum 1} agent-principal
+  "The principal a spawned agent acts as.
+
+   The tenant is inherited: an agent owns nothing, so there is nothing
+   for it to own things AS. The principal is its own, so 'an agent
+   instance did it' and 'the operator did it' remain distinguishable
+   after the fact.
+
+   This is the representational half of fence-not-restrain. The inner
+   agent acts under a named identity inside the boundary rather than
+   under the ambient authority of the process, which is what makes
+   revoking the lending tenant's grant end the agent's authority too.
+
+   Returns an anomaly rather than a Principal-shaped map when the
+   derivation does not validate — a blank agent name, or an acting
+   context with no tenant. This is public API, and a caller that has to
+   remember to validate what it was handed is a caller that eventually
+   forgets. Refusing here is the same rule the rest of this component
+   follows."
+  [acting agent-name]
+  (let [principal {:principal/id (ids/stable-id "agent-principal"
+                                                (str (:acting/tenant-id acting)
+                                                     "/" agent-name))
+                   :principal/tenant-id (:acting/tenant-id acting)
+                   :principal/kind :agent-instance
+                   :principal/display-name agent-name}]
+    (if (m/validate schema/Principal principal)
+      principal
+      (no-acting (str "cannot derive a valid agent principal for agent name "
+                      (pr-str agent-name))))))
 
 (defn ^{:stratum 1} valid?
   [x]
@@ -138,9 +150,8 @@
   (if-not (valid? acting)
     (no-acting "cannot spawn an agent from an invalid acting context")
     (let [principal (agent-principal acting agent-name)]
-      (if-not (m/validate schema/Principal principal)
-        (no-acting (str "spawned agent principal is invalid for agent name "
-                        (pr-str agent-name)))
+      (if (anomaly/anomaly? principal)
+        principal
         {:acting/tenant-id (:acting/tenant-id acting)
          :acting/principal-id (:principal/id principal)
          :acting/established-at (:acting/established-at acting)}))))
