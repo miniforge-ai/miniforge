@@ -61,11 +61,19 @@
 ;------------------------------------------------------------------------------ Layer 2
 
 (deftest ^{:stratum 2} request-binds-canonical-run-and-exact-target-test
-  (let [request (authority/request (context) (random-uuid)
-                                   (assoc target :default-context "audit"))]
+  (let [request (authority/request (context) (random-uuid) target)
+        legacy-request (authority/request
+                        (-> (context) (dissoc :execution/id)
+                            (assoc :run-id run-id))
+                        (random-uuid)
+                        (-> target (dissoc :context)
+                            (assoc :context-name "legacy")))]
     (is (= run-id (:workflow-run/id request)))
     (is (= "gke-prod" (:context request)))
-    (is (= "audit" (:default-context request)))))
+    (is (= "gke-prod" (:default-context request)))
+    (is (nil? (:workflow-run/id legacy-request)))
+    (is (nil? (:context legacy-request)))
+    (is (nil? (:default-context legacy-request)))))
 
 (deftest ^{:stratum 2} prepare-omits-unrecorded-preflight-evidence-test
   (let [proposal (:effect/proposal
