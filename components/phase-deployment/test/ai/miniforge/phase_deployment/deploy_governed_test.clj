@@ -64,12 +64,6 @@
   [calls]
   (some #(= :apply (first %)) @calls))
 
-(defn- ^{:stratum 0} render-result
-  [target]
-  (with-redefs [exec/sh-with-timeout
-                (fn [& _] (schema/success :stdout rendered-yaml))]
-    (shell/kustomize-render! (:kustomize-dir target))))
-
 ;------------------------------------------------------------------------------ Layer 1
 
 (def ^{:stratum 1} deploy-config
@@ -78,37 +72,9 @@
 (defn- ^{:stratum 1} context
   []
   {:execution/id (random-uuid)
-   :execution/phase-results {:provision {:result {:output "{\"steps\":[]}"}}}
+   :execution/phase-results {:provision {:result {:output {:steps []}}}}
    :effect-store-dir (tmp-dir)
    :grant-breach-dir (tmp-dir)})
-
-(defn- ^{:stratum 1} recording-operations
-  ([calls] (recording-operations calls {}))
-  ([calls {:keys [apply-result on-apply observe-result]
-           :or {apply-result (schema/success :stdout "applied")
-                observe-result {:provider/matched? true
-                                :provider/observed
-                                {:deployment/ready? true
-                                 :deployment/pods pod-state}}}}]
-   {:target! (fn [config]
-               (record-call calls :target config)
-               (schema/success :target (assoc config :context "gke-prod")))
-    :render! (fn [target]
-               (record-call calls :render target)
-               (render-result target))
-    :server-dry-run! (fn [target rendered]
-                (record-call calls :dry-run target rendered)
-                (schema/success :stdout server-dry-run))
-    :rollback-info! (fn [target]
-                      (record-call calls :rollback target)
-                      (schema/success :rollback-info rollback-info))
-    :apply-rendered! (fn [target rendered]
-              (record-call calls :apply target rendered)
-              (when on-apply (on-apply))
-              apply-result)
-    :observe! (fn [target]
-                (record-call calls :observe target)
-                observe-result)}))
 
 (def ^{:stratum 1} exact-effect-target
   (select-keys exact-target
@@ -125,6 +91,37 @@
     :rollback-info rollback-info}
    now))
 
+(defn- ^{:stratum 1} recording-operations
+  ([calls] (recording-operations calls {}))
+  ([calls {:keys [apply-result on-apply observe-result]
+           :or {apply-result (schema/success :stdout "applied")
+                observe-result {:provider/matched? true
+                                :provider/observed
+                                {:deployment/ready? true
+                                 :deployment/pods pod-state}}}}]
+   {:target! (fn [config]
+               (record-call calls :target config)
+               (schema/success :target (assoc config :context "gke-prod")))
+    :render! (fn [target]
+               (record-call calls :render target)
+               (with-redefs [exec/sh-with-timeout
+                             (fn [& _]
+                               (schema/success :stdout rendered-yaml))]
+                 (shell/kustomize-render! (:kustomize-dir target))))
+    :server-dry-run! (fn [target rendered]
+                       (record-call calls :dry-run target rendered)
+                       (schema/success :stdout server-dry-run))
+    :rollback-info! (fn [target]
+                      (record-call calls :rollback target)
+                      (schema/success :rollback-info rollback-info))
+    :apply-rendered! (fn [target rendered]
+                       (record-call calls :apply target rendered)
+                       (when on-apply (on-apply))
+                       apply-result)
+    :observe! (fn [target]
+                (record-call calls :observe target)
+                observe-result)}))
+
 ;------------------------------------------------------------------------------ Layer 2
 
 (deftest ^{:stratum 2} rejected-dry-run-never-reaches-authority-or-apply-test
@@ -132,8 +129,8 @@
         authority-called? (atom false)
         operations (assoc (recording-operations calls)
                           :server-dry-run! (fn [_ _]
-                                      (record-call calls :dry-run)
-                                      (schema/failure :stdout "rejected")))]
+                                             (record-call calls :dry-run)
+                                             (schema/failure :stdout "rejected")))]
     (with-redefs [authority/prepare
                   (fn [& _] (reset! authority-called? true))]
       (let [result (governed/transact! (context) deploy-config operations now)]
@@ -203,4 +200,5 @@
           (let [result (governed/transact! ctx deploy-config
                                            (recording-operations calls) now)]
             (is (= :failed (:deploy/status result)))
+            (is (= :authority (:deploy/stage result)))
             (is (not (applied? calls)))))))))

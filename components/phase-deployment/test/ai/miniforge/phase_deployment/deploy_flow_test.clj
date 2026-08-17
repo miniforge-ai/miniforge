@@ -43,14 +43,17 @@
 (def ^{:stratum 0} rollback-error "invalid rollback")
 
 (defn ^{:stratum 0} apply-failure
-  "Return a failure produced by the real Kustomize adapter."
+  "A refused apply in the shape `kustomize-apply!` actually produces, taken
+   from that producer with only the process boundary stubbed. Hand-writing
+   this map is how a fixture drifts from what deploys really return — the
+   previous one had no `:rendered-yaml` at all, and passed only because the
+   flow guessed at `[:build-result :stdout]`."
   []
   (with-redefs [exec/sh-with-timeout
                 (fn [command _args & _]
                   (if (= "kustomize" command)
                     (schema/success :stdout "image: api:v8")
-                    (schema/failure :stdout "apply refused"
-                                    {:stderr "apply refused"})))]
+                    (schema/failure :stdout "apply refused" {:stderr "apply refused"})))]
     (shell/kustomize-apply! "/deploy")))
 
 ;------------------------------------------------------------------------------ Layer 1
@@ -70,7 +73,8 @@
     (let [deployment (flow/execute! (deployment-config))]
       (is (= :failed (:deploy/status deployment)))
       (is (= :apply (:deploy/stage deployment)))
-      (is (= "image: api:v8" (:deploy/rendered-yaml deployment)))
+      (is (= "image: api:v8" (:deploy/rendered-yaml deployment))
+          "the manifest reaches the flow from :rendered-yaml, not a guessed key")
       (is (= rollback-info (:deploy/rollback-info deployment))))))
 
 (deftest ^{:stratum 1} invalid-rollback-stops-apply-test

@@ -43,7 +43,10 @@
         pod-state (:deployment/pods observed)]
     (cond
       (= :failed (:effect/state effect))
-      (deployment state :failed :apply
+      (deployment state :failed
+                  (if (= :granted (:effect/authority effect))
+                    :apply
+                    :authority)
                   {:deploy/failure (:effect/failure effect)})
 
       (and (= :reconciled (:effect/state effect))
