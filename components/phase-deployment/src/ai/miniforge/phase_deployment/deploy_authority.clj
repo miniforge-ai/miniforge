@@ -151,9 +151,18 @@
         preflight (if (map? preflight) preflight {})
         request (request context effect-id target)
         classification (policy-classification context target)
-        grant-record (grant/issue-for-effect (breach-dir context) request now)]
-    (if (anomaly/anomaly? grant-record)
+        policy-envelope (gate/decide classification deployment-policy-pins)
+        policy-allowed? (gate/decision-allowed? policy-envelope)
+        grant-record (when policy-allowed?
+                       (grant/issue-for-effect (breach-dir context) request now))]
+    (cond
+      (not policy-allowed?)
+      (authority-record request classification nil nil policy-envelope preflight)
+
+      (anomaly/anomaly? grant-record)
       grant-record
+
+      :else
       (let [authorization (grant/authorize
                            grant-record
                            {:effect/scope (effect-scope request)

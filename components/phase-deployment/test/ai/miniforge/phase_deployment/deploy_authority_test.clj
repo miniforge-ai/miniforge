@@ -17,6 +17,7 @@
 ;; limitations under the License.
 (ns ai.miniforge.phase-deployment.deploy-authority-test
   (:require
+   [ai.miniforge.execution-grant.interface :as grant]
    [ai.miniforge.phase-deployment.deploy-authority :as authority]
    [ai.miniforge.phase-deployment.policy :as policy]
    [clojure.test :refer [deftest is]])
@@ -86,10 +87,13 @@
   (with-redefs [policy/check-resource-count
                 (fn [& _] {:violation/rule-id :deploy/resource-count-limit
                            :violation/message "limit exceeded"})
-                policy/check-gke-node-limit (constantly nil)]
+                policy/check-gke-node-limit (constantly nil)
+                grant/issue-for-effect
+                (fn [& _] (throw (ex-info "grant must not be issued" {})))]
     (let [prepared (authority/prepare (context) (random-uuid)
                                       target preflight now)]
       (is (not (authority/permitted? prepared)))
+      (is (nil? (:authority/grant prepared)))
       (is (= [:deploy/resource-count-limit]
              (mapv :rule-id
                    (get-in prepared [:authority/policy :blocking])))))))
