@@ -22,6 +22,7 @@
    never called. A governance seam is only worth its complexity if the
    mutation genuinely does not happen."
   (:require
+   [ai.miniforge.effect-transaction.interface :as fx]
    [ai.miniforge.phase-deployment.deploy-authority :as authority]
    [ai.miniforge.phase-deployment.deploy-governed :as governed]
    [clojure.test :refer [deftest is testing]])
@@ -40,6 +41,9 @@
 (def ^{:stratum 0} rendered-manifest
   "apiVersion: apps/v1\nkind: Deployment\n")
 
+(def ^{:stratum 0} rollback-info
+  {:deployment/replicas 3})
+
 (defn- ^{:stratum 0} tmp []
   (str (.toFile (Files/createTempDirectory "deploy" (into-array FileAttribute [])))))
 
@@ -48,23 +52,24 @@
    :namespace "prod"
    :context-name "gke-prod"
    :default-context "gke-default"
+   :app-label "api"
    :deployment-name "api"})
 
-(defn- ^{:stratum 0} recording-provider
+;------------------------------------------------------------------------------ Layer 1
+
+(defn- ^{:stratum 1} recording-provider
   "Records every provider call. The assertions are about absence."
   [calls & {:keys [rendered apply-failed?]
             :or {rendered rendered-manifest apply-failed? false}}]
   {:dry-run! (fn [_] (swap! calls conj :dry-run!) rendered)
    :rollback-info! (fn [_] (swap! calls conj :rollback-info!)
-                     {:deployment/replicas 3})
+                     rollback-info)
    :apply! (fn [_] (swap! calls conj :apply!)
              {:deploy/failed? apply-failed?
               :deploy/failure (when apply-failed? "apply exploded")})
    :observe! (fn [_] (swap! calls conj :observe!)
                {:provider/matched? true
                 :provider/observed {:deployment/ready? true}})})
-
-;------------------------------------------------------------------------------ Layer 1
 
 (defn- ^{:stratum 1} context
   ([] (context {}))
@@ -125,7 +130,9 @@
   (let [calls (atom [])
         ctx (context)
         result (governed/transact! ctx deploy-config
-                                   (recording-provider calls) now)]
+                                   (recording-provider calls) now)
+        proposal (:effect/proposal
+                  (first (fx/list-records (:effect-store-dir ctx))))]
     (is (some #{:apply!} @calls) "an authorized deploy should reach the provider")
     (is (= :success (:deploy/status result)))
     (is (some? (:deploy/effect-id result)) "the effect id is reported")
@@ -134,7 +141,11 @@
              (.indexOf ^java.util.List @calls :apply!))))
     (testing "a durable record exists in the effect store"
       (is (some #(.endsWith (.getName ^java.io.File %) ".edn")
-                (file-seq (java.io.File. ^String (:effect-store-dir ctx))))))))
+                (file-seq (java.io.File. ^String (:effect-store-dir ctx))))))
+    (testing "the durable proposal contains the available preflight evidence"
+      (is (= rendered-manifest (:deploy/rendered-yaml proposal)))
+      (is (= rollback-info (:deploy/rollback-info proposal)))
+      (is (= "api" (:app-label proposal))))))
 
 (deftest ^{:stratum 2} rollback-evidence-survives-a-failed-apply-test
   ;; The old store-apply-failure discarded :evidence/rollback-info,

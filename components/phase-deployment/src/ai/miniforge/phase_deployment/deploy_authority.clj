@@ -99,7 +99,9 @@
   "Reject an absent manifest at the legacy governed-deploy seam."
   [rendered _policy-context]
   (if (str/blank? (str rendered))
-    {:preflight/result :deny :preflight/violations [] :preflight/rendered nil}
+    {:preflight/result :deny
+     :preflight/violations [(msg/t :deploy/render-failed)]
+     :preflight/rendered nil}
     {:preflight/result :allow
      :preflight/violations []
      :preflight/rendered rendered}))
