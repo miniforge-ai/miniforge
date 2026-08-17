@@ -26,32 +26,24 @@
 ;------------------------------------------------------------------------------ Layer 0
 
 ;; Kustomize wrappers
-(def ^{:stratum 0} KustomizeResult
-  "The one result shape for producing a Kustomize manifest, shared by
-   `kustomize-render!` and `kustomize-apply!`.
+(def ^{:stratum 0} KustomizeRenderResult
+  "The result of producing a Kustomize manifest.
 
-   The manifest is always under `:rendered-yaml` and the raw build shell
-   result under `:build-result`. Render and apply differ in exactly one
-   key: `:apply-result` is nil for a render, because nothing was applied.
-
-   They share a shape deliberately. When rendering returned a raw shell
-   result and applying returned this one, a caller reading `:rendered-yaml`
-   off the render got nil and read a healthy render as an empty one."
+   The manifest is under `:rendered-yaml` and the raw build shell result is
+   retained under `:build-result`."
   [:map
    [:success? :boolean]
    [:rendered-yaml [:maybe :string]]
    [:build-result map?]
-   [:apply-result [:maybe map?]]
    [:error {:optional true} any?]
    [:anomaly {:optional true} map?]])
 
-(defn ^{:stratum 0} kustomize-build!
+(defn- ^{:stratum 0} kustomize-build!
   "Run `kustomize build` and return `exec/sh-with-timeout`'s raw
    `CommandResult`, whose manifest is under `:stdout`.
 
-   This is the unwrapped process boundary, NOT a `KustomizeResult` — it has
-   no `:rendered-yaml`. Callers outside this namespace want
-   `kustomize-render!`."
+   This private process boundary is not a `KustomizeRenderResult` — it has no
+   `:rendered-yaml`."
   [kustomize-dir & {:keys [timeout-ms] :or {timeout-ms (get timeouts/timeouts :kustomize-build-ms 60000)}}]
   (exec/sh-with-timeout "kustomize" ["build" kustomize-dir] :timeout-ms timeout-ms))
 
@@ -78,61 +70,22 @@
 ;------------------------------------------------------------------------------ Layer 1
 
 (defn ^{:stratum 1} kustomize-render!
-  "Build one Kustomize target and report it as a `KustomizeResult`.
+  "Build one Kustomize target and report it as a `KustomizeRenderResult`.
 
-   `:apply-result` is nil — nothing was applied, and nothing contacted the
-   cluster. `:rendered-yaml` is nil only when the build itself failed, so a
-   nil manifest means no manifest, never a manifest under another key."
+   Nothing contacts the cluster. `:rendered-yaml` is nil only when the build
+   itself failed, so a nil manifest means no manifest, never a manifest under
+   another key."
   [kustomize-dir]
   (let [build-result (kustomize-build! kustomize-dir)]
     (schema/validate-anomaly
-     KustomizeResult
+     KustomizeRenderResult
      (if (schema/failed? build-result)
        (schema/failure :rendered-yaml
                        (msg/t :shell/kustomize-build-failed
                               {:error (failure-detail build-result)})
-                       {:build-result build-result
-                        :apply-result nil})
+                       {:build-result build-result})
        (schema/success :rendered-yaml (:stdout build-result)
-                       {:build-result build-result
-                        :apply-result nil})))))
-
-;------------------------------------------------------------------------------ Layer 2
-
-(defn ^{:stratum 2} kustomize-apply!
-  "Render one Kustomize target and apply exactly those bytes.
-
-   Returns the same `KustomizeResult` shape as `kustomize-render!`, so a
-   caller reads the manifest from `:rendered-yaml` whichever it called. A
-   build failure is returned unchanged from the render — there is nothing
-   to apply and no kubectl runs."
-  [kustomize-dir & {:keys [namespace context dry-run?]}]
-  (let [rendered (kustomize-render! kustomize-dir)]
-    (if (schema/failed? rendered)
-      rendered
-      (let [rendered-yaml (:rendered-yaml rendered)
-            build-result  (:build-result rendered)
-            apply-args    (cond-> ["apply" "-f" "-"]
-                            namespace (into ["--namespace" namespace])
-                            context   (into ["--context" context])
-                            dry-run?  (conj "--dry-run=client"))
-            apply-result  (exec/sh-with-timeout "kubectl" apply-args
-                                                :in rendered-yaml
-                                                :timeout-ms (get timeouts/timeouts :kustomize-apply-ms 120000))]
-        (schema/validate-anomaly
-         KustomizeResult
-         (if (schema/succeeded? apply-result)
-           (schema/success :rendered-yaml rendered-yaml
-                           {:build-result build-result
-                            :apply-result apply-result})
-           ;; `schema/failure` nils its data key and merges opts last. The
-           ;; manifest is re-set deliberately: the build succeeded, and what
-           ;; kubectl rejected is the evidence worth keeping.
-           (schema/failure :rendered-yaml
-                           (failure-detail apply-result)
-                           {:build-result build-result
-                            :apply-result apply-result
-                            :rendered-yaml rendered-yaml})))))))
+                       {:build-result build-result})))))
 
 ;------------------------------------------------------------------------------ Rich Comment
 (comment
