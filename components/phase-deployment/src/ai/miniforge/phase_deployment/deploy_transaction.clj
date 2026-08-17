@@ -25,13 +25,12 @@
 
 ;------------------------------------------------------------------------------ Layer 0
 
-(def ^{:stratum 0} default-store-dir-property ".miniforge/effects")
+(def ^{:stratum 0} default-store-dir-relative-path ".miniforge/effects")
 
 (def ^{:stratum 0} target-keys
   [:kustomize-dir :context :namespace :deployment-name :app-label])
 
-(def ^{:stratum 0} provider-result-keys
-  [:success? :exit-code :stdout :stderr :error])
+(def ^{:stratum 0} provider-result-keys [:success? :exit-code :stdout :stderr :error])
 
 (defn- ^{:stratum 0} failure-detail
   [result]
@@ -44,7 +43,7 @@
 (defn ^{:stratum 1} store-dir
   [context]
   (or (:effect-store-dir context)
-      (str (System/getProperty "user.home") "/" default-store-dir-property)))
+      (str (System/getProperty "user.home") "/" default-store-dir-relative-path)))
 
 (defn- ^{:stratum 1} apply-report
   [operations proposal]
@@ -85,8 +84,7 @@
     (if (anomaly/anomaly? durable)
       durable
       (fx/commit! dir transaction (:authority/grant authority) {} now
-                  (partial apply-report operations
-                           (:effect/proposal durable))))))
+                  (partial apply-report operations (:effect/proposal durable))))))
 
 (defn ^{:stratum 2} reconcile!
   [context transaction operations now]
@@ -97,6 +95,5 @@
       (if (anomaly/anomaly? durable)
         durable
         (fx/reconcile! dir transaction
-                       (partial probe-answer operations
-                                (:effect/proposal durable))
+                       (partial probe-answer operations (:effect/proposal durable))
                        now)))))
