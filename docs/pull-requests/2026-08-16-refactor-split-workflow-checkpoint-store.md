@@ -53,8 +53,10 @@ Three namespaces, each a distinct question about a checkpoint:
   `write-edn-atomically!`, and the two public operations
   `load-checkpoint-data` and `persist-execution-state!`.
 
-Dependency direction is one-way: `checkpoint-store` →
-`checkpoint-store-records` → `checkpoint-store-paths`.
+Dependencies point one way, with no cycles. `checkpoint-store`
+requires both new namespaces; `checkpoint-store-records` requires
+`checkpoint-store-paths` (`build-manifest` records the paths it
+indexes); `checkpoint-store-paths` requires neither of the other two.
 
 `load-checkpoint-data` and `persist-execution-state!` stay defined
 (as `defn`, not re-export `def`) in `checkpoint-store`, so every
