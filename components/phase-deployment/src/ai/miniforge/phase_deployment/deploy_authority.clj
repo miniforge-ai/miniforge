@@ -16,108 +16,161 @@
 ;; See the License for the specific language governing permissions and
 ;; limitations under the License.
 (ns ai.miniforge.phase-deployment.deploy-authority
-  "Authority for one exact Kubernetes deployment (Ariadne step 2d).
-
-   Mirrors `pr-lifecycle.merge-authority`: issue a narrow runtime-owned
-   grant, authorize the concrete scope, and decide. The runtime is the
-   principal — a phase may request a deployment, it cannot mint the
-   authority to perform one.
-
-   The preflight basis here is deployment's own: the provider dry-run
-   plus the existing `check-resource-count` and `check-gke-node-limit`.
-   Those checks already existed and were never consulted before an
-   apply; wiring them as the issuance basis is why this component reuses
-   rather than reinvents them."
+  "Runtime authority preparation for one exact Kubernetes deployment."
   (:require
    [ai.miniforge.anomaly.interface :as anomaly]
    [ai.miniforge.execution-grant.interface :as grant]
    [ai.miniforge.gate.interface :as gate]
-   [ai.miniforge.phase-deployment.policy :as policy])
+   [ai.miniforge.phase-deployment.messages :as msg]
+   [ai.miniforge.phase-deployment.policy :as policy]
+   [clojure.string :as str])
   (:import
    [java.time Instant]))
 
 ;------------------------------------------------------------------------------ Layer 0
 
 (def ^{:stratum 0} allow-decisions
-  "Envelope decisions that permit the apply. `:allow-with-obligations`
-   is included: obligations are recorded, not blocking."
   #{:allow :allow-with-obligations})
 
 (def ^{:stratum 0} empty-classification
-  "No policy-pack violations to classify — deployment's preflight is its
-   own dry-run plus the resource checks, folded in as the grant basis."
-  {:blocking [] :require-approval [] :warnings [] :audits [] :unknown []})
+  {:blocking []
+   :require-approval []
+   :warnings []
+   :audits []
+   :unknown []})
 
-(def ^{:stratum 0} unpinned-policy
-  {:pins/pack-revision nil :pins/rule-ids [] :pins/event-watermark nil})
+(def ^{:stratum 0} deployment-policy-pins
+  {:pins/pack-revision nil
+   :pins/rule-ids [:deploy/resource-count-limit :deploy/gke-node-limit]
+   :pins/event-watermark nil})
 
-(defn ^{:stratum 0} breach-dir
-  [context]
-  (or (:grant-breach-dir context)
-      (str (System/getProperty "user.home") "/.miniforge/grants")))
+(def ^{:stratum 0} default-breach-dir-relative-path
+  ".miniforge/grant-breaches")
+
+(defn- ^{:stratum 0} policy-blocker
+  [violation]
+  {:rule-id (:violation/rule-id violation)
+   :message (:violation/message violation)})
+
+(defn- ^{:stratum 0} missing-preview-violation
+  []
+  {:rule-id :deploy/provision-preview-required
+   :message (msg/t :policy/provision-preview-required)})
+
+(defn- ^{:stratum 0} effect-scope
+  [request]
+  (dissoc request :workflow-run/status :effect/class :effect/preflight
+          :default-context))
+
+(defn- ^{:stratum 0} preflight-evidence
+  [preflight]
+  (reduce-kv (fn [evidence source-key proposal-key]
+               (if-some [value (get preflight source-key)]
+                 (assoc evidence proposal-key value)
+                 evidence))
+             {}
+             {:app-label :app-label
+              :rendered-yaml :deploy/rendered-yaml
+              :server-dry-run :deploy/server-dry-run
+              :rollback-info :deploy/rollback-info}))
+
+(defn ^{:stratum 0} request
+  "Build the closed runtime request for one preflight-approved deployment."
+  [context effect-id target]
+  {:workflow-run/id (or (:execution/id context) (:run-id context))
+   :workflow-run/status :running
+   :effect/id effect-id
+   :effect/class :effect/deploy
+   :effect/preflight {:preflight/type :preflight/deploy-policy-and-dry-run
+                      :preflight/result :allow}
+   :kustomize-dir (:kustomize-dir target)
+   :context (:context target)
+   :default-context (or (:default-context target) (:context target))
+   :namespace (:namespace target)
+   :deployment-name (:deployment-name target)})
+
+(defn- ^{:stratum 0} exact-target
+  [target]
+  (assoc target :context (or (:context target)
+                             (:context-name target)
+                             (:default-context target))))
 
 (defn ^{:stratum 0} preflight
-  "Run the deployment checks that must precede a mutation, over the
-   provider's dry-run render.
-
-   Returns `{:preflight/result :allow|:deny :preflight/violations [...]
-   :preflight/rendered s}`. A dry-run that did not render is `:deny` —
-   we cannot show the apply is safe, and unverifiable is denied."
-  [rendered check-context]
-  (if (clojure.string/blank? (str rendered))
+  "Reject an absent manifest at the legacy governed-deploy seam."
+  [rendered _policy-context]
+  (if (str/blank? (str rendered))
     {:preflight/result :deny
-     :preflight/violations []
+     :preflight/violations [(msg/t :deploy/render-failed)]
      :preflight/rendered nil}
-    (let [violations (remove nil?
-                             [(policy/check-resource-count rendered check-context)
-                              (policy/check-gke-node-limit rendered check-context)])]
-      {:preflight/result (if (seq violations) :deny :allow)
-       :preflight/violations (vec violations)
-       :preflight/rendered rendered})))
+    {:preflight/result :allow
+     :preflight/violations []
+     :preflight/rendered rendered}))
 
 ;------------------------------------------------------------------------------ Layer 1
 
+(defn ^{:stratum 1} breach-dir
+  [context]
+  (or (:grant-breach-dir context)
+      (str (System/getProperty "user.home") "/"
+           default-breach-dir-relative-path)))
+
+(defn ^{:stratum 1} policy-classification
+  "Evaluate deployment policy against the Pulumi preview it was defined for."
+  [context target]
+  (if-some [preview (get-in context
+                            [:execution/phase-results :provision :result :output])]
+    (let [policy-context (:phase-config target)
+          violations (keep identity
+                           [(policy/check-resource-count preview policy-context)
+                            (policy/check-gke-node-limit preview policy-context)])]
+      (assoc empty-classification :blocking (mapv policy-blocker violations)))
+    (assoc empty-classification :blocking [(missing-preview-violation)])))
+
 (defn ^{:stratum 1} permitted?
   "True only when the grant check and the DecisionEnvelope both allow."
-  [{:authority/keys [authorization envelope]}]
-  (and (grant/authorized? authorization)
+  [{:authority/keys [grant authorization envelope]}]
+  (and (some? grant)
+       (grant/authorized? authorization)
        (contains? allow-decisions (:envelope/decision envelope))))
 
-(defn ^{:stratum 1} prepare
-  "Issue, authorize, and decide authority for a preflight-approved
-   deployment. Returns an authority record, or the issuer's anomaly when
-   authority cannot be established at all."
-  [context effect-id deploy-config preflight-result ^Instant now]
-  (let [{:keys [kustomize-dir namespace context-name default-context
-                deployment-name]} deploy-config
-        request {:workflow-run/id (:run-id context)
-                 :workflow-run/status :running
-                 :effect/id effect-id
-                 :effect/class :effect/deploy
-                 :effect/preflight
-                 {:preflight/type :preflight/deploy-policy-and-dry-run
-                  :preflight/result preflight-result}
-                 :kustomize-dir kustomize-dir
-                 :context context-name
-                 :default-context default-context
-                 :namespace namespace
-                 :deployment-name deployment-name}
-        grant-record (grant/issue-for-effect (breach-dir context) request now)]
-    (if (anomaly/anomaly? grant-record)
+(defn- ^{:stratum 1} authority-record
+  [request classification grant-record authorization envelope preflight]
+  {:effect/id (:effect/id request)
+   :effect/proposal
+   (merge (effect-scope request)
+          (preflight-evidence preflight))
+   :authority/grant grant-record
+   :authority/authorization authorization
+   :authority/envelope envelope
+   :authority/policy classification})
+
+;------------------------------------------------------------------------------ Layer 2
+
+(defn ^{:stratum 2} prepare
+  "Evaluate policy, issue exact authority, and derive one deploy decision."
+  [context effect-id target preflight ^Instant now]
+  (let [target (exact-target target)
+        preflight (if (map? preflight) preflight {})
+        request (request context effect-id target)
+        classification (policy-classification context target)
+        policy-envelope (gate/decide classification deployment-policy-pins)
+        policy-allowed? (gate/decision-allowed? policy-envelope)
+        grant-record (when policy-allowed?
+                       (grant/issue-for-effect (breach-dir context) request now))]
+    (cond
+      (not policy-allowed?)
+      (authority-record request classification nil nil policy-envelope preflight)
+
+      (anomaly/anomaly? grant-record)
       grant-record
-      (let [scope {:effect/id effect-id
-                   :workflow-run/id (:run-id context)
-                   :kustomize-dir kustomize-dir
-                   :context (or context-name default-context)
-                   :namespace namespace
-                   :deployment-name deployment-name}
-            authorization (grant/authorize grant-record
-                                           {:effect/scope scope :usage/count 1}
-                                           now)
-            envelope (gate/decide empty-classification unpinned-policy
+
+      :else
+      (let [authorization (grant/authorize
+                           grant-record
+                           {:effect/scope (effect-scope request)
+                            :usage/count 1}
+                           now)
+            envelope (gate/decide classification deployment-policy-pins
                                   authorization)]
-        {:effect/id effect-id
-         :effect/proposal scope
-         :authority/grant grant-record
-         :authority/authorization authorization
-         :authority/envelope envelope}))))
+        (authority-record request classification grant-record authorization
+                          envelope preflight)))))

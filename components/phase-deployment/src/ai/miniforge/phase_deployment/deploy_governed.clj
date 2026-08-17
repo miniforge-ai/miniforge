@@ -55,6 +55,12 @@
    :deploy/failure detail
    :deploy/refusal code})
 
+(defn- ^{:stratum 0} authority-evidence
+  [deploy-config preflight rollback-info]
+  {:app-label (:app-label deploy-config)
+   :rendered-yaml (:preflight/rendered preflight)
+   :rollback-info rollback-info})
+
 ;------------------------------------------------------------------------------ Layer 1
 
 (defn- ^{:stratum 1} propose!
@@ -124,7 +130,9 @@
                     (pr-str (:preflight/violations pre))))
       (let [rollback-info ((:rollback-info! provider) deploy-config)
             auth (authority/prepare context (random-uuid) deploy-config
-                                    (:preflight/result pre) now)]
+                                    (authority-evidence deploy-config pre
+                                                        rollback-info)
+                                    now)]
         (cond
           (anomaly/anomaly? auth)
           (refusal :authority :deploy/authority-unavailable (:anomaly/message auth))
