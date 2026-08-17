@@ -38,6 +38,9 @@
    :deployment-name "api"
    :phase-config {}})
 
+(def ^{:stratum 0} provision-preview
+  {:steps []})
+
 (def ^{:stratum 0} preflight
   {:app-label "api"
    :rendered-yaml "manifest"
@@ -49,7 +52,7 @@
 (defn- ^{:stratum 1} context
   []
   {:execution/id run-id
-   :execution/phase-results {:provision {:result {:output "preview"}}}
+   :execution/phase-results {:provision {:result {:output provision-preview}}}
    :grant-breach-dir
    (str (.toFile
          (Files/createTempDirectory "grant" (into-array FileAttribute []))))})
@@ -70,6 +73,15 @@
                   [:app-label :deploy/rendered-yaml
                    :deploy/server-dry-run :deploy/rollback-info]))))
 
+(deftest ^{:stratum 2} prepare-denies-when-provision-preview-is-absent-test
+  (let [prepared (authority/prepare
+                  (dissoc (context) :execution/phase-results)
+                  (random-uuid) target preflight now)]
+    (is (not (authority/permitted? prepared)))
+    (is (= :deny (get-in prepared [:authority/envelope :envelope/decision])))
+    (is (= [:deploy/provision-preview-required]
+           (mapv :rule-id (get-in prepared [:authority/policy :blocking]))))))
+
 (deftest ^{:stratum 2} prepare-records-policy-and-preflight-basis-test
   (let [checked (atom [])]
     (with-redefs [policy/check-resource-count
@@ -79,7 +91,8 @@
       (let [prepared (authority/prepare (context) (random-uuid)
                                         target preflight now)]
         (is (authority/permitted? prepared))
-        (is (= [[:resources "preview"] [:nodes "preview"]] @checked))
+        (is (= [[:resources provision-preview] [:nodes provision-preview]]
+               @checked))
         (is (= "manifest"
                (get-in prepared [:effect/proposal :deploy/rendered-yaml])))
         (is (= "validated"

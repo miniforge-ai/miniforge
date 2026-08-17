@@ -18,7 +18,10 @@ were designed to inspect.
 
 - Build the closed grant request from `:execution/id` (or the temporary legacy
   `:run-id` fallback) and one resolved target.
+- Fail closed when the successful provision phase did not retain its Pulumi
+  preview.
 - Classify both deployment rules against the provision phase preview.
+- Keep rendered-manifest validation separate from Pulumi-preview policy checks.
 - Persist rendered manifests, server dry-run output, rollback information, and
   application label in the exact effect proposal.
 - Pin the two deployment policy rule IDs in the DecisionEnvelope.

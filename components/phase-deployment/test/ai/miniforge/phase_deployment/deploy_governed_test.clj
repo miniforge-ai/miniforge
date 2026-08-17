@@ -35,9 +35,10 @@
 (def ^{:stratum 0} now (Instant/parse "2026-08-01T00:00:00Z"))
 
 (def ^{:stratum 0} clean-preview
-  "A Pulumi-shaped preview that creates nothing, so both resource checks
-   pass and the preflight is allow-class."
-  "{\"steps\":[]}")
+  {:steps []})
+
+(def ^{:stratum 0} rendered-manifest
+  "apiVersion: apps/v1\nkind: Deployment\n")
 
 (defn- ^{:stratum 0} tmp []
   (str (.toFile (Files/createTempDirectory "deploy" (into-array FileAttribute [])))))
@@ -52,7 +53,7 @@
 (defn- ^{:stratum 0} recording-provider
   "Records every provider call. The assertions are about absence."
   [calls & {:keys [rendered apply-failed?]
-            :or {rendered clean-preview apply-failed? false}}]
+            :or {rendered rendered-manifest apply-failed? false}}]
   {:dry-run! (fn [_] (swap! calls conj :dry-run!) rendered)
    :rollback-info! (fn [_] (swap! calls conj :rollback-info!)
                      {:deployment/replicas 3})
@@ -71,6 +72,8 @@
    (merge {:run-id (random-uuid)
            :effect-store-dir (tmp)
            :grant-breach-dir (tmp)
+           :execution/phase-results
+           {:provision {:result {:output clean-preview}}}
            :policy-context {}}
           overrides)))
 
@@ -92,23 +95,21 @@
           (str "no kubectl mutation may run without authority, saw: "
                (pr-str @calls))))))
 
-(deftest ^{:stratum 2} a-denied-preflight-runs-no-mutation-test
-  ;; check-resource-count and check-gke-node-limit existed in policy.clj
-  ;; and were never consulted before an apply. Now a violation stops it.
-  (testing "a preview that creates more than the limit denies the apply"
-    (let [creates (apply str (repeat 25 "{\"op\":\"create\",\"type\":\"gcp:Node\"},"))
-          preview (str "{\"steps\":[" (subs creates 0 (dec (count creates))) "]}")
-          calls (atom [])
-          result (governed/transact! (context) deploy-config
-                                     (recording-provider calls :rendered preview)
-                                     now)]
+(deftest ^{:stratum 2} missing-policy-evidence-runs-no-mutation-test
+  (testing "a deploy without its provision preview is denied"
+    (let [calls (atom [])
+          result (governed/transact! (dissoc (context)
+                                             :execution/phase-results)
+                                     deploy-config
+                                     (recording-provider calls) now)]
       (is (= :failed (:deploy/status result)))
-      (is (= :deploy/preflight-denied (:deploy/refusal result)))
-      (is (= :preflight (:deploy/stage result))
-          "a preflight denial must not report as an authority failure")
+      (is (= :deploy/authority-denied (:deploy/refusal result)))
+      (is (= :authority (:deploy/stage result)))
       (is (not (some #{:apply!} @calls))
-          (str "a denied preflight must not reach kubectl, saw: " (pr-str @calls)))))
+          (str "missing policy evidence must not reach kubectl, saw: "
+               (pr-str @calls))))))
 
+(deftest ^{:stratum 2} an-empty-preflight-runs-no-mutation-test
   (testing "a dry-run that rendered nothing is denied, not waved through"
     (let [calls (atom [])
           result (governed/transact! (context) deploy-config

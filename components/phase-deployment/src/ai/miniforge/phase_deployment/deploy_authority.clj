@@ -21,6 +21,7 @@
    [ai.miniforge.anomaly.interface :as anomaly]
    [ai.miniforge.execution-grant.interface :as grant]
    [ai.miniforge.gate.interface :as gate]
+   [ai.miniforge.phase-deployment.messages :as msg]
    [ai.miniforge.phase-deployment.policy :as policy]
    [clojure.string :as str])
   (:import
@@ -50,6 +51,11 @@
   [violation]
   {:rule-id (:violation/rule-id violation)
    :message (:violation/message violation)})
+
+(defn- ^{:stratum 0} missing-preview-violation
+  []
+  {:rule-id :deploy/provision-preview-required
+   :message (msg/t :policy/provision-preview-required)})
 
 (defn- ^{:stratum 0} effect-scope
   [request]
@@ -90,16 +96,13 @@
                              (:default-context target))))
 
 (defn ^{:stratum 0} preflight
-  "Retain the decision input used by the not-yet-wired governed seam."
-  [rendered policy-context]
+  "Reject an absent manifest at the legacy governed-deploy seam."
+  [rendered _policy-context]
   (if (str/blank? (str rendered))
     {:preflight/result :deny :preflight/violations [] :preflight/rendered nil}
-    (let [violations (keep identity
-                           [(policy/check-resource-count rendered policy-context)
-                            (policy/check-gke-node-limit rendered policy-context)])]
-      {:preflight/result (if (seq violations) :deny :allow)
-       :preflight/violations (vec violations)
-       :preflight/rendered rendered})))
+    {:preflight/result :allow
+     :preflight/violations []
+     :preflight/rendered rendered}))
 
 ;------------------------------------------------------------------------------ Layer 1
 
@@ -111,14 +114,14 @@
 (defn ^{:stratum 1} policy-classification
   "Evaluate deployment policy against the Pulumi preview it was defined for."
   [context target]
-  (let [preview (get-in context
-                        [:execution/phase-results :provision :result :output]
-                        {})
-        policy-context (:phase-config target)
-        violations (keep identity
-                         [(policy/check-resource-count preview policy-context)
-                          (policy/check-gke-node-limit preview policy-context)])]
-    (assoc empty-classification :warnings (mapv policy-warning violations))))
+  (if-some [preview (get-in context
+                            [:execution/phase-results :provision :result :output])]
+    (let [policy-context (:phase-config target)
+          violations (keep identity
+                           [(policy/check-resource-count preview policy-context)
+                            (policy/check-gke-node-limit preview policy-context)])]
+      (assoc empty-classification :warnings (mapv policy-warning violations)))
+    (assoc empty-classification :blocking [(missing-preview-violation)])))
 
 (defn ^{:stratum 1} permitted?
   "True only when the grant check and the DecisionEnvelope both allow."

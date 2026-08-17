@@ -58,6 +58,8 @@
   "Creating {creates} resources (limit: {limit})"
   :policy/gke-node-limit
   "Creating {node-pools} node pools (limit: {limit})"
+  :policy/provision-preview-required
+  "A successful Pulumi provision preview is required before deployment"
 
   :shell/command-timeout
   "Command timed out after {timeout-ms}ms"
