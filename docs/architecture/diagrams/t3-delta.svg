@@ -16,7 +16,7 @@
   <rect width="1920" height="1060" fill="#ffffff"/>
   <rect class="band" x="0" y="0" width="1920" height="44"/>
   <text class="bandT" x="20" y="29">Miniforge Target — T3. Built-vs-Unbuilt Delta &amp; Contradiction Register</text>
-  <text class="bandS" x="1900" y="28" text-anchor="end">the honesty panel — self-reported completion, ground-truth status, and the nine recorded contradictions (Ariadne step 1 resolved two, half-resolved two)</text>
+  <text class="bandS" x="1900" y="28" text-anchor="end">the honesty panel — self-reported completion, ground-truth status, and the nine recorded contradictions (steps 1-2: four resolved, two bounded, one half, two process)</text>
 
   <!-- SPEC BARS -->
   <rect class="zone" x="20" y="62" width="480" height="620" rx="6"/>
@@ -83,7 +83,7 @@
   <rect class="zone" x="1180" y="62" width="720" height="620" rx="6"/>
   <text class="zoneT" x="1196" y="84">CONTRADICTION REGISTER — nine on record; status after Ariadne step 1 (#1555–#1559)</text>
   <rect class="part" x="1196" y="100" width="688" height="56" rx="6"/>
-  <text class="num" x="1208" y="120">1 · two derivers of supervisory truth — HALF-RESOLVED (step 1e)</text>
+  <text class="num" x="1208" y="120">1 · two derivers of supervisory truth — RESOLVED (steps 1e + console projection)</text>
   <text class="s" x="1208" y="138">One truth artifact exists (:gate/decision envelope, contract v2) — Rust still mints attention locally until it consumes v2.</text>
   <rect class="part" x="1196" y="162" width="688" height="56" rx="6"/>
   <text class="num" x="1208" y="182">2 · entity contract is convention, not contract — HALF-RESOLVED (step 1e)</text>
@@ -98,23 +98,23 @@
   <text class="num" x="1208" y="368">5 · three severity vocabularies, none enforced — RESOLVED (step 1a)</text>
   <text class="s" x="1208" y="386">policy-clause is the one definition site; duplicates are pass-throughs; unknown values anomaly; axis crossings in one place.</text>
   <rect class="risk" x="1196" y="410" width="688" height="56" rx="6"/>
-  <text class="num" x="1208" y="430">6 · two orchestrators, nested</text>
-  <text class="s" x="1208" y="448">N1 assumes a "dumb" LLM fed context-packs; Claude Code IS an orchestrator — restraining the inner one via prose is the worst design point.</text>
+  <text class="num" x="1208" y="430">6 · two orchestrators, nested — BOUNDED (step 2)</text>
+  <text class="s" x="1208" y="448">Fence, not restrain: a spawned agent acts under a named grant with lineage and a ceiling, never ambient process authority.</text>
   <rect class="risk" x="1196" y="472" width="688" height="56" rx="6"/>
-  <text class="num" x="1208" y="492">7 · WorktreeInbox dead-drop</text>
+  <text class="num" x="1208" y="492">7 · WorktreeInbox dead-drop — RESOLVED for effects (step 2c)</text>
   <text class="s" x="1208" y="510">decisions written to .miniforge/inbox.jsonl; read-side normative only for claude-code — bash agents stay write-only ("measures writes, not reads").</text>
   <rect class="risk" x="1196" y="534" width="688" height="56" rx="6"/>
   <text class="num" x="1208" y="554">8 · spec surface outruns the floor</text>
   <text class="s" x="1208" y="572">13 normative specs + deltas at ~45–50% implementation; new deltas minted per dogfood incident — corpus risks becoming aspiration, not contract.</text>
   <rect class="risk" x="1196" y="596" width="688" height="56" rx="6"/>
-  <text class="num" x="1208" y="616">9 · the FSM doesn't own its decisions</text>
-  <text class="s" x="1208" y="634">routing lives outside the (state,event)→state table; redirect budget wired to one channel of two → 3h40m runaway. RFC written, unadopted.</text>
+  <text class="num" x="1208" y="616">9 · the FSM doesn't own its decisions — BOUNDED (step 2b)</text>
+  <text class="s" x="1208" y="634">Effects are transacted — propose, commit, reconcile, with :unknown-outcome first-class. Delivery is no longer mistaken for acceptance.</text>
 
   <!-- bottom -->
   <rect class="note" x="20" y="702" width="1880" height="86" rx="6"/>
   <text class="h" x="36" y="726">Why this panel exists</text>
   <text class="t" x="36" y="748">The adoption started here and step 1 landed (RFC Accepted #1553; wave #1555–#1559): 4 and 5 are resolved in code, 1 and 2 are producer-half resolved pending the</text>
-  <text class="t" x="36" y="766">miniforge-control v2 consume. Contradictions 6/7/9 wait on step 2 (grants + transacted effects); the ownership layer (step 3) still starts from a blank page.</text>
+  <text class="t" x="36" y="766">miniforge-control v2 consume. Step 2 is built and wired: grants bound 6 and 9, transacted effects resolve 7. Step 3 (ownership) is specced, not started — :tenant/ appears zero times in src.</text>
   <text class="s" x="36" y="782" font-style="italic">sources: Critical Review and Miniforge Gaps · miniforge-design-review-2026-06-10 · miniforge-control-design-review-2026-06-10 · miniforge-governance-audit-2026-07-05 · ROADMAP</text>
 
   <rect class="zone" x="20" y="808" width="1880" height="66" rx="6"/>
