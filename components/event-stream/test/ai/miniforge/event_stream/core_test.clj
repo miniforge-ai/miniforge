@@ -23,7 +23,9 @@
    [ai.miniforge.phase.interface :as phase]
    [clojure.test :refer [deftest testing is]]
    [ai.miniforge.response.interface :as response]
-   [ai.miniforge.event-stream.core :as core]))
+   [ai.miniforge.event-stream.core :as core]
+   [ai.miniforge.event-stream.compound-events :as compound]
+   [ai.miniforge.event-stream.phase-events :as phase-events]))
 
 ;------------------------------------------------------------------------------ Layer 0
 
@@ -291,7 +293,7 @@
   (testing "chain-started includes chain-id and step-count"
     (let [stream (no-op-stream)
           chain-id (random-uuid)
-          event (core/chain-started stream chain-id 5)]
+          event (compound/chain-started stream chain-id 5)]
       (is (= :chain/started (:event/type event)))
       (is (= chain-id (:chain/id event)))
       (is (= 5 (:chain/step-count event))))))
@@ -302,7 +304,7 @@
           chain-id (random-uuid)
           step-id :plan
           wf-id (random-uuid)
-          event (core/chain-step-started stream chain-id step-id 0 wf-id)]
+          event (compound/chain-step-started stream chain-id step-id 0 wf-id)]
       (is (= :chain/step-started (:event/type event)))
       (is (= chain-id (:chain/id event)))
       (is (= step-id (:step/id event)))
@@ -312,7 +314,7 @@
 (deftest ^{:stratum 1} chain-step-completed-test
   (testing "chain-step-completed captures step index"
     (let [stream (no-op-stream)
-          event (core/chain-step-completed stream (random-uuid) :implement 1)]
+          event (compound/chain-step-completed stream (random-uuid) :implement 1)]
       (is (= :chain/step-completed (:event/type event)))
       (is (= 1 (:step/index event))))))
 
@@ -320,7 +322,7 @@
   (testing "chain-step-failed captures error"
     (let [stream (no-op-stream)
           error {:message "compilation failed"}
-          event (core/chain-step-failed stream (random-uuid) :implement 1 error)]
+          event (compound/chain-step-failed stream (random-uuid) :implement 1 error)]
       (is (= :chain/step-failed (:event/type event)))
       (is (= error (:chain/error event))))))
 
@@ -328,7 +330,7 @@
   (testing "chain-completed captures duration and step count"
     (let [stream (no-op-stream)
           chain-id (random-uuid)
-          event (core/chain-completed stream chain-id 12000 3)]
+          event (compound/chain-completed stream chain-id 12000 3)]
       (is (= :chain/completed (:event/type event)))
       (is (= chain-id (:chain/id event)))
       (is (= 12000 (:chain/duration-ms event)))
@@ -338,7 +340,7 @@
   (testing "chain-failed captures failed step and error"
     (let [stream (no-op-stream)
           chain-id (random-uuid)
-          event (core/chain-failed stream chain-id :review {:message "timeout"})]
+          event (compound/chain-failed stream chain-id :review {:message "timeout"})]
       (is (= :chain/failed (:event/type event)))
       (is (= chain-id (:chain/id event)))
       (is (= :review (:chain/failed-step event)))
@@ -561,7 +563,7 @@
     (let [stream (no-op-stream)
           wf-id (random-uuid)
           result (phase/request-redirect {:outcome :failure} :implement)
-          event (core/phase-completed stream wf-id :review result)]
+          event (phase-events/phase-completed stream wf-id :review result)]
       (is (= :failure (:phase/outcome event)))
       (is (= :transition/redirect
              (get-in event [:phase/transition-request :transition/type])))
@@ -573,7 +575,7 @@
   (testing "phase-completed captures error details"
     (let [stream (no-op-stream)
           wf-id (random-uuid)
-          event (core/phase-completed stream wf-id :implement
+          event (phase-events/phase-completed stream wf-id :implement
                                        {:outcome :failure
                                         :error {:message "compile error"
                                                 :line 42}})]
@@ -584,7 +586,7 @@
   (testing "dependency-health-updated carries dependency projection and prior status"
     (let [stream (no-op-stream)
           dependency (dependency-health-entity {})
-          event (core/dependency-health-updated stream dependency :healthy)]
+          event (compound/dependency-health-updated stream dependency :healthy)]
       (is (= :dependency/health-updated (:event/type event)))
       (is (= :anthropic (:dependency/id event)))
       (is (= :degraded (:dependency/status event)))
@@ -600,7 +602,7 @@
           dependency (dependency-health-entity {:dependency/status :healthy
                                                 :dependency/failure-count 0
                                                 :dependency/incident-counts {}})
-          event (core/dependency-recovered stream dependency :degraded)]
+          event (compound/dependency-recovered stream dependency :degraded)]
       (is (= :dependency/recovered (:event/type event)))
       (is (= :healthy (:dependency/status event)))
       (is (= :degraded (:dependency/previous-status event)))

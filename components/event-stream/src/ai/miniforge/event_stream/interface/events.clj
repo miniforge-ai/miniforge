@@ -18,7 +18,9 @@
 (ns ai.miniforge.event-stream.interface.events
   "Workflow, agent, gate, task, listener, control, chain, and control-plane event constructors."
   (:require
-   [ai.miniforge.event-stream.core :as core]))
+   [ai.miniforge.event-stream.core :as core]
+   [ai.miniforge.event-stream.compound-events :as compound]
+   [ai.miniforge.event-stream.phase-events :as phase-events]))
 
 ;------------------------------------------------------------------------------ Layer 0
 
@@ -40,7 +42,7 @@
    Records :phase/outcome (default :success) and, when present on the
    result, duration, artifacts, error, transition-request, redirect-to,
    tokens, cost, meta, and termination-reason."
-  core/phase-completed)
+  phase-events/phase-completed)
 
 (def ^{:stratum 0} workspace-persisted
   "Build and return a :workspace/persisted event envelope map recording
@@ -251,34 +253,34 @@
   "Build and return a :chain/started event envelope map (chains are not
    workflow-scoped, so :workflow/id is nil) carrying :chain/id and
    :chain/step-count."
-  core/chain-started)
+  compound/chain-started)
 
 (def ^{:stratum 0} chain-step-started
   "Build and return a :chain/step-started event envelope map carrying
    :chain/id, :step/id, :step/index, and :step/workflow-id."
-  core/chain-step-started)
+  compound/chain-step-started)
 
 (def ^{:stratum 0} chain-step-completed
   "Build and return a :chain/step-completed event envelope map carrying
    :chain/id, :step/id, and :step/index."
-  core/chain-step-completed)
+  compound/chain-step-completed)
 
 (def ^{:stratum 0} chain-step-failed
   "Build and return a :chain/step-failed event envelope map carrying
    :chain/id, :step/id, :step/index, and :chain/error; optional
    :failure/class."
-  core/chain-step-failed)
+  compound/chain-step-failed)
 
 (def ^{:stratum 0} chain-completed
   "Build and return a :chain/completed event envelope map carrying
    :chain/id, :chain/duration-ms, and :chain/step-count."
-  core/chain-completed)
+  compound/chain-completed)
 
 (def ^{:stratum 0} chain-failed
   "Build and return a :chain/failed event envelope map carrying
    :chain/id, :chain/failed-step, and :chain/error; optional
    :failure/class."
-  core/chain-failed)
+  compound/chain-failed)
 
 ;; OCI container event constructors
 (def ^{:stratum 0} container-started
@@ -423,14 +425,14 @@
    (:workflow/id nil) for a changed dependency health projection,
    merging the dependency map; optional previous-status as
    :dependency/previous-status."
-  core/dependency-health-updated)
+  compound/dependency-health-updated)
 
 (def ^{:stratum 0} dependency-recovered
   "Build and return a :dependency/recovered event envelope map
    (:workflow/id nil) for a dependency returning to healthy, merging the
    dependency map; optional previous-status as
    :dependency/previous-status."
-  core/dependency-recovered)
+  compound/dependency-recovered)
 
 (def ^{:stratum 0} degradation-mode-changed
   "Build and return a :reliability/degradation-mode-changed event
