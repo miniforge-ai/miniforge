@@ -86,6 +86,19 @@
       (is (not (tenancy/valid-identity? result))
           "a refusal must not be mistakable for an identity"))))
 
+(deftest ^{:stratum 1} the-default-clock-arity-resolves-test
+  ;; Production calls the 1-arity, which stamps `(Instant/now)`. The
+  ;; 2-arity tests above supply their own instant, so this is the only
+  ;; place the real clock reaches the schema. `inst?` admits both
+  ;; `java.time.Instant` and `java.util.Date`; a validator that admitted
+  ;; only the latter would turn every configured operator into a refusal,
+  ;; and every test above would still pass.
+  (let [resolved (tenancy/resolve-operator configured)]
+    (is (tenancy/valid-identity? resolved))
+    (is (not (anomaly/anomaly? resolved))
+        "a configured operator must not resolve to a refusal")
+    (is (inst? (get-in resolved [:identity/tenant :tenant/created-at])))))
+
 (deftest ^{:stratum 1} the-resolver-shape-is-the-seam-test
   ;; A credential-backed resolver drops in behind this shape later. If
   ;; the shape drifts, that becomes a second migration through every
