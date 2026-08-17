@@ -20,9 +20,9 @@ Application flow.
 
 Completes the deployment half of Ariadne step 2d. The live deploy phase now
 resolves one Kubernetes target, renders and server-validates one manifest,
-captures rollback state, evaluates policy, records the proposal durably,
-rechecks the exact grant at commit, applies the recorded manifest, and
-reconciles the provider-observed result.
+evaluates policy and authority, captures rollback state only after permission,
+records the proposal durably, rechecks the exact grant at commit, applies the
+recorded manifest, and reconciles the provider-observed result.
 
 ## Changes
 
@@ -33,6 +33,7 @@ reconciles the provider-observed result.
 - Re-read the durable proposal for exact-byte apply and reconciliation.
 - Keep failed, unknown, mismatched, and reconciled outcomes explicit.
 - Preserve rollback evidence in failed phase context.
+- Defer rollback reads until deployment authority is permitted.
 - Refuse absent, mismatched, expired, or policy-denied authority without
   running the apply operation.
 
@@ -43,8 +44,8 @@ reconciles the provider-observed result.
 - Durable effect coordination remains in `deploy-transaction`.
 - `deploy-governed` is a flat application pipeline of single-purpose steps.
 - `deploy-outcome` is a pure projection into the existing phase contract.
-- Shared test factories own repeated target, operation, authority, and durable
-  record shapes.
+- Shared fixtures and factories own repeated target, operation, and authority
+  shapes; durable records are asserted from the real store.
 
 ## Verification
 

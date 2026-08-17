@@ -166,8 +166,8 @@
         (is (= rendered-yaml (:deploy/rendered-yaml proposal)))
         (is (= server-dry-run (:deploy/server-dry-run proposal)))
         (is (= rollback-info (:deploy/rollback-info proposal)))
-        (is (every? some? ((juxt :deploy/effect-id :deploy/grant-id
-                                :deploy/envelope-id) result)))
+        (is (every? some? ((juxt :effect/id :effect/grant-id
+                                :effect/envelope-id) @durable-at-apply)))
         (is (= :reconciled (:effect/state record)))
         (is (= {:deployment/ready? true :deployment/pods pod-state}
                (:effect/observed record)))))))
