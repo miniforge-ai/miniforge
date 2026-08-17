@@ -112,8 +112,14 @@
                    :principal/display-name agent-name}]
     (if (m/validate schema/Principal principal)
       principal
-      (no-acting (str "cannot derive a valid agent principal for agent name "
-                      (pr-str agent-name))))))
+      ;; Name the actual cause. A refusal that blames the agent name for
+      ;; a missing tenant sends the reader to the wrong place, and a
+      ;; precise refusal is the only thing this function offers over
+      ;; returning the map and letting the caller find out later.
+      (no-acting (if (uuid? (:acting/tenant-id acting))
+                   (str "cannot derive a valid agent principal: invalid agent name "
+                        (pr-str agent-name))
+                   "cannot derive a valid agent principal: the acting context has no tenant to inherit")))))
 
 (defn ^{:stratum 1} valid?
   [x]

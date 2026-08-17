@@ -170,4 +170,12 @@
     (testing "no tenant to inherit means no principal"
       (is (anomaly/anomaly? (tenancy/agent-principal {} "reviewer")))
       (is (anomaly/anomaly?
-           (tenancy/agent-principal (dissoc acting :acting/tenant-id) "reviewer"))))))
+           (tenancy/agent-principal (dissoc acting :acting/tenant-id) "reviewer"))))
+    (testing "and the refusal names the actual cause, not a plausible one"
+      ;; A refusal that blames the agent name for a missing tenant sends
+      ;; the reader to the wrong place, which costs more than no message.
+      (is (re-find #"no tenant"
+                   (:anomaly/message (tenancy/agent-principal
+                                      (dissoc acting :acting/tenant-id) "reviewer"))))
+      (is (re-find #"agent name"
+                   (:anomaly/message (tenancy/agent-principal acting "  ")))))))
