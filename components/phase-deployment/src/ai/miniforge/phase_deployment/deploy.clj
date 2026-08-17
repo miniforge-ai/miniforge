@@ -26,8 +26,7 @@
             [ai.miniforge.phase-deployment.deploy-result :as result]
             [ai.miniforge.phase-deployment.messages :as msg]
             [ai.miniforge.phase.interface :as phase])
-  (:import
-   [java.time Instant]))
+  (:import [java.time Instant]))
 
 ;------------------------------------------------------------------------------ Layer 0
 
