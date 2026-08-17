@@ -80,36 +80,6 @@ Miniforge's DAG executor exists and is wired but never fires for
 | blocker | ● | dag-orchestration | `plan-from-agent-dag-wiring.spec.edn` — plan-from-agent must emit :plan/id so the DAG orchestrator activates | observation+tokenconservation+dogfoodenabler |
 | high | ● | dag-orchestration | `per-task-base-chaining.spec.edn` — Per-Task Base Chaining for DAG Sub-Workflows | workfloworchestration+dagexecution+localmodefidelity |
 
-## Theme — Ariadne adoption - step 2: grants on the irreversible effects (`ariadne-grants`, status: in-flight)
-
-Step 2 of the ratified Ariadne adoption order: authority stops being
-   ambient. Bounded authority becomes an object (ExecutionGrant with
-   lineage, TTL, and constraints), grant constraints become an input
-   class to the fail-closed decide() kernel step 1 built, the
-   irreversible effects (merge, deploy, spend) become transacted
-   propose->commit->reconcile operations, and a constraint breach
-   revokes the grant and is remembered.
-
-   This is what structurally bounds T3 contradiction 9 (the runaway
-   burn class): a ceiling lives on the grant and is checked at one
-   site, instead of being wired per-channel where one unwired channel
-   costs 3h40m and $8-15.
-
-   Two scope corrections against the RFC's step-2 text, both
-   source-verified during planning: (a) Phase D commands are ALREADY
-   transacted - the operator intervention lifecycle does
-   propose->dispatch->apply->verify with readback comparison, so step 2
-   generalizes an existing in-tree pattern rather than inventing one;
-   (b) spend is bounded by a grant cost constraint rather than a
-   per-call proposal record, because minting a durable record per LLM
-   call would add a disk write per token and reconcile nothing.
-
-**Informative spec:** `docs/architecture/rfc-ariadne-adoption.md`
-
-| tier | r | theme | spec | axes |
-|---|---|---|---|---|
-| high | ● | ariadne-grants | `ariadne-deploy-grant-enforcement.spec.edn` — Require granted, transacted Kubernetes deployments | correctness+observation+governancecredibility |
-
 ## Theme — Polylith compliance (`polylith-compliance`, status: in-flight)
 
 Keep `poly check` at zero errors and warnings so structural drift cannot
