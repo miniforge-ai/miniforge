@@ -16,7 +16,7 @@
 ;; See the License for the specific language governing permissions and
 ;; limitations under the License.
 (ns ai.miniforge.phase-deployment.deploy-operations-test
-  "Provider functions exposed to the governed deployment flow."
+  "Normalized Kubernetes operations available to application flows."
   (:require
    [ai.miniforge.phase-deployment.deploy-operations :as operations]
    [ai.miniforge.phase-deployment.deploy-provider :as provider]
@@ -27,23 +27,28 @@
 (def ^{:stratum 0} target
   {:kustomize-dir "/k8s" :namespace "prod" :context "gke"})
 
+(def ^{:stratum 0} rendered-yaml "manifest")
+
+(def ^{:stratum 0} render-result ::render-result)
+
+(def ^{:stratum 0} dry-run-result ::dry-run-result)
+
 ;------------------------------------------------------------------------------ Layer 1
 
 (deftest ^{:stratum 1} operations-preserve-provider-results-test
-  (let [render-result {:success? true :stdout "manifest"}
-        dry-run-result {:success? true :stdout "validated"}]
-    (with-redefs [provider/render! (constantly render-result)
-                  provider/dry-run! (fn [_ _] dry-run-result)]
-      (let [ops (operations/operations)]
-        (is (= render-result ((:render! ops) target)))
-        (is (= dry-run-result ((:dry-run! ops) target "manifest")))))))
+  (with-redefs [provider/render! (constantly render-result)
+                provider/dry-run! (fn [_ _] dry-run-result)]
+    (let [ops (operations/operations)]
+      (is (= render-result ((:render! ops) target)))
+      (is (= dry-run-result
+             ((:server-dry-run! ops) target rendered-yaml))))))
 
 (deftest ^{:stratum 1} operations-pass-explicit-bytes-to-provider-test
   (let [applied (atom nil)]
     (with-redefs [provider/apply-rendered!
                   (fn [actual-target rendered]
                     (reset! applied [actual-target rendered])
-                    {:success? true})]
-      ((:apply! (operations/operations)) target "manifest")
-      (is (= [target "manifest"] @applied)
+                    nil)]
+      ((:apply-rendered! (operations/operations)) target rendered-yaml)
+      (is (= [target rendered-yaml] @applied)
           "the adapter must neither cache nor re-render the artifact"))))

@@ -68,7 +68,7 @@
 
 (defn- ^{:stratum 1} server-dry-run
   [state]
-  (let [result ((get-in state [:operations :dry-run!])
+  (let [result ((get-in state [:operations :server-dry-run!])
                 (:target state) (:rendered-yaml state))
         output (:stdout result)]
     (if (or (schema/failed? result) (str/blank? output))

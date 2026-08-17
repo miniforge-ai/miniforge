@@ -48,7 +48,7 @@
 
 (defn- ^{:stratum 1} apply-report
   [operations proposal]
-  (let [result ((:apply! operations)
+  (let [result ((:apply-rendered! operations)
                 (select-keys proposal target-keys)
                 (:deploy/rendered-yaml proposal))]
     (if (schema/failed? result)

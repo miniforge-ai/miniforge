@@ -96,13 +96,13 @@
     :render! (fn [target]
                (record-call calls :render target)
                (render-result target))
-    :dry-run! (fn [target rendered]
+    :server-dry-run! (fn [target rendered]
                 (record-call calls :dry-run target rendered)
                 (schema/success :stdout server-dry-run))
     :rollback-info! (fn [target]
                       (record-call calls :rollback target)
                       (schema/success :rollback-info rollback-info))
-    :apply! (fn [target rendered]
+    :apply-rendered! (fn [target rendered]
               (record-call calls :apply target rendered)
               (when on-apply (on-apply))
               apply-result)
@@ -131,7 +131,7 @@
   (let [calls (atom [])
         authority-called? (atom false)
         operations (assoc (recording-operations calls)
-                          :dry-run! (fn [_ _]
+                          :server-dry-run! (fn [_ _]
                                       (record-call calls :dry-run)
                                       (schema/failure :stdout "rejected")))]
     (with-redefs [authority/prepare
