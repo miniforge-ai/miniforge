@@ -20,6 +20,7 @@
    [ai.miniforge.logging.interface :as log]
    [ai.miniforge.phase-deployment.deploy :as deploy]
    [ai.miniforge.phase-deployment.deploy-flow :as flow]
+   [ai.miniforge.phase-deployment.deploy-governed :as governed]
    [ai.miniforge.phase-deployment.deploy-provider :as provider]
    [ai.miniforge.phase-deployment.shell :as shell]
    [ai.miniforge.schema.interface :as schema]
@@ -75,7 +76,7 @@
 
 (deftest ^{:stratum 2} phase-failure-retains-rollback-evidence-test
   (let [[logger entries] (log/collecting-logger)]
-    (with-redefs [flow/execute!
+    (with-redefs [governed/transact!
                   (constantly (rollout-failure))]
       (let [ctx (deploy/enter-deploy
                  {:execution/logger logger

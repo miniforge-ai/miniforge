@@ -93,6 +93,15 @@
        (msg/t :deploy/context-unavailable))
    {:kubectl-result kubectl-result}))
 
+(defn- ^{:stratum 0} rollback-failure
+  [kubectl-result]
+  (schema/failure
+   :rollback-info
+   (or (not-empty (:stderr kubectl-result))
+       (:error kubectl-result)
+       (msg/t :deploy/rollback-capture-failed))
+   {:kubectl-result kubectl-result}))
+
 ;------------------------------------------------------------------------------ Layer 1
 
 (defn ^{:stratum 1} target!
@@ -116,7 +125,8 @@
                                :context context
                                :output "json"
                                :extra-args ["deployment" deployment-name])]
-    (when (schema/succeeded? result)
+    (if (schema/failed? result)
+      (rollback-failure result)
       (schema/validate-anomaly
        RollbackInfo
        {:revision (get-in result [:parsed :metadata :annotations

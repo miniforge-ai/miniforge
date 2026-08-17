@@ -16,46 +16,34 @@
 ;; See the License for the specific language governing permissions and
 ;; limitations under the License.
 (ns ai.miniforge.phase-deployment.deploy-operations-test
-  "The adapter exists for one property: what was dry-run is what gets
-   applied. Re-rendering between the two would validate one artifact and
-   ship another, which is the gap the governed seam exists to close."
+  "Provider functions exposed to the governed deployment flow."
   (:require
    [ai.miniforge.phase-deployment.deploy-operations :as operations]
    [ai.miniforge.phase-deployment.deploy-provider :as provider]
-   [clojure.test :refer [deftest is testing]]))
+   [clojure.test :refer [deftest is]]))
 
 ;------------------------------------------------------------------------------ Layer 0
 
-(def ^{:stratum 0} config {:kustomize-dir "/k8s" :namespace "prod" :context "gke"})
+(def ^{:stratum 0} target
+  {:kustomize-dir "/k8s" :namespace "prod" :context "gke"})
 
 ;------------------------------------------------------------------------------ Layer 1
 
-(deftest ^{:stratum 1} apply-sends-exactly-the-dry-run-bytes-test
-  ;; The render is deliberately made non-deterministic. If the adapter
-  ;; re-rendered for the apply it would ship the second value, and this
-  ;; asserts it ships the first.
-  (let [renders (atom 0)
-        applied (atom nil)]
-    (with-redefs [provider/render! (fn [_] {:success? true :rendered-yaml (str "manifest-" (swap! renders inc))})
-                  provider/dry-run! (fn [_ _] {:success? true})
-                  provider/apply-rendered! (fn [_ text] (reset! applied text) {:success? true})]
-      (let [ops (operations/operations)
-            dry ((:dry-run! ops) config)]
-        ((:apply! ops) config)
-        (is (= "manifest-1" dry))
-        (is (= "manifest-1" @applied)
-            "the apply must send the bytes the dry-run validated")
-        (is (= 1 @renders) "rendering twice would mean validating one thing and applying another")))))
+(deftest ^{:stratum 1} operations-preserve-provider-results-test
+  (let [render-result {:success? true :stdout "manifest"}
+        dry-run-result {:success? true :stdout "validated"}]
+    (with-redefs [provider/render! (constantly render-result)
+                  provider/dry-run! (fn [_ _] dry-run-result)]
+      (let [ops (operations/operations)]
+        (is (= render-result ((:render! ops) target)))
+        (is (= dry-run-result ((:dry-run! ops) target "manifest")))))))
 
-(deftest ^{:stratum 1} a-rejected-dry-run-yields-no-manifest-test
-  (testing "an API-server rejection denies rather than passing the render through"
-    (with-redefs [provider/render! (fn [_] {:success? true :rendered-yaml "manifest"})
-                  provider/dry-run! (fn [_ _] {:success? false :error "invalid"})]
-      (is (nil? ((:dry-run! (operations/operations)) config)))))
-
-  (testing "an apply with nothing rendered fails and never reaches the cluster"
-    (let [reached (atom false)]
-      (with-redefs [provider/apply-rendered! (fn [_ _] (reset! reached true) {:success? true})]
-        (let [result ((:apply! (operations/operations)) config)]
-          (is (:deploy/failed? result))
-          (is (not @reached) "no manifest means no kubectl call"))))))
+(deftest ^{:stratum 1} operations-pass-explicit-bytes-to-provider-test
+  (let [applied (atom nil)]
+    (with-redefs [provider/apply-rendered!
+                  (fn [actual-target rendered]
+                    (reset! applied [actual-target rendered])
+                    {:success? true})]
+      ((:apply! (operations/operations)) target "manifest")
+      (is (= [target "manifest"] @applied)
+          "the adapter must neither cache nor re-render the artifact"))))
