@@ -57,10 +57,18 @@
 ;------------------------------------------------------------------------------ Layer 2
 
 (deftest ^{:stratum 2} request-binds-canonical-run-and-exact-target-test
-  (let [request (authority/request (context) (random-uuid) target)]
+  (let [request (authority/request (context) (random-uuid)
+                                   (assoc target :default-context "audit"))]
     (is (= run-id (:workflow-run/id request)))
     (is (= "gke-prod" (:context request)))
-    (is (= "gke-prod" (:default-context request)))))
+    (is (= "audit" (:default-context request)))))
+
+(deftest ^{:stratum 2} prepare-omits-unrecorded-preflight-evidence-test
+  (let [proposal (:effect/proposal
+                  (authority/prepare (context) (random-uuid) target {} now))]
+    (is (not-any? #(contains? proposal %)
+                  [:app-label :deploy/rendered-yaml
+                   :deploy/server-dry-run :deploy/rollback-info]))))
 
 (deftest ^{:stratum 2} prepare-records-policy-and-preflight-basis-test
   (let [checked (atom [])]

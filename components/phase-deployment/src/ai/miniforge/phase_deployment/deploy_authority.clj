@@ -56,6 +56,18 @@
   (dissoc request :workflow-run/status :effect/class :effect/preflight
           :default-context))
 
+(defn- ^{:stratum 0} preflight-evidence
+  [preflight]
+  (reduce-kv (fn [evidence source-key proposal-key]
+               (if-some [value (get preflight source-key)]
+                 (assoc evidence proposal-key value)
+                 evidence))
+             {}
+             {:app-label :app-label
+              :rendered-yaml :deploy/rendered-yaml
+              :server-dry-run :deploy/server-dry-run
+              :rollback-info :deploy/rollback-info}))
+
 (defn ^{:stratum 0} request
   "Build the closed runtime request for one preflight-approved deployment."
   [context effect-id target]
@@ -67,7 +79,7 @@
                       :preflight/result :allow}
    :kustomize-dir (:kustomize-dir target)
    :context (:context target)
-   :default-context (:context target)
+   :default-context (or (:default-context target) (:context target))
    :namespace (:namespace target)
    :deployment-name (:deployment-name target)})
 
@@ -119,10 +131,7 @@
   {:effect/id (:effect/id request)
    :effect/proposal
    (merge (effect-scope request)
-          {:app-label (:app-label preflight)
-           :deploy/rendered-yaml (:rendered-yaml preflight)
-           :deploy/server-dry-run (:server-dry-run preflight)
-           :deploy/rollback-info (:rollback-info preflight)})
+          (preflight-evidence preflight))
    :authority/grant grant-record
    :authority/authorization authorization
    :authority/envelope envelope
