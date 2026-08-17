@@ -201,4 +201,6 @@
                                            (recording-operations calls) now)]
             (is (= :failed (:deploy/status result)))
             (is (= :authority (:deploy/stage result)))
+            (when (= :absent label)
+              (is (not (some #(= :rollback (first %)) @calls))))
             (is (not (applied? calls)))))))))

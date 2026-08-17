@@ -81,12 +81,15 @@
     (if (schema/failed? result)
       (fail state :capture
             (failure-detail result :deploy/rollback-capture-failed))
-      (assoc state :rollback-info (:rollback-info result)))))
+      (let [rollback-info (:rollback-info result)]
+        (-> state
+            (assoc :rollback-info rollback-info)
+            (assoc-in [:authority :effect/proposal :deploy/rollback-info]
+                      rollback-info))))))
 
 (defn- ^{:stratum 1} prepare-authority
   [state]
-  (let [preflight {:rollback-info (:rollback-info state)
-                   :rendered-yaml (:rendered-yaml state)
+  (let [preflight {:rendered-yaml (:rendered-yaml state)
                    :server-dry-run (:server-dry-run state)
                    :app-label (get-in state [:target :app-label])}
         prepared (authority/prepare (:context state) (random-uuid)
@@ -139,9 +142,9 @@
       (advance resolve-target)
       (advance render-manifests)
       (advance server-dry-run)
-      (advance capture-rollback)
       (advance prepare-authority)
       (advance require-permission)
+      (advance capture-rollback)
       (advance propose-effect)
       (advance commit-effect)
       (advance reconcile-effect)
