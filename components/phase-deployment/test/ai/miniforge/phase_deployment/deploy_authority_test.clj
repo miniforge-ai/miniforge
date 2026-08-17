@@ -17,6 +17,7 @@
 ;; limitations under the License.
 (ns ai.miniforge.phase-deployment.deploy-authority-test
   (:require
+   [ai.miniforge.execution-grant.interface :as grant]
    [ai.miniforge.phase-deployment.deploy-authority :as authority]
    [ai.miniforge.phase-deployment.policy :as policy]
    [clojure.test :refer [deftest is]])
@@ -38,6 +39,9 @@
    :deployment-name "api"
    :phase-config {}})
 
+(def ^{:stratum 0} provision-preview
+  {:steps []})
+
 (def ^{:stratum 0} preflight
   {:app-label "api"
    :rendered-yaml "manifest"
@@ -49,7 +53,7 @@
 (defn- ^{:stratum 1} context
   []
   {:execution/id run-id
-   :execution/phase-results {:provision {:result {:output "preview"}}}
+   :execution/phase-results {:provision {:result {:output provision-preview}}}
    :grant-breach-dir
    (str (.toFile
          (Files/createTempDirectory "grant" (into-array FileAttribute []))))})
@@ -57,10 +61,42 @@
 ;------------------------------------------------------------------------------ Layer 2
 
 (deftest ^{:stratum 2} request-binds-canonical-run-and-exact-target-test
-  (let [request (authority/request (context) (random-uuid) target)]
+  (let [request (authority/request (context) (random-uuid)
+                                   (assoc target :default-context "audit"))]
     (is (= run-id (:workflow-run/id request)))
     (is (= "gke-prod" (:context request)))
-    (is (= "gke-prod" (:default-context request)))))
+    (is (= "audit" (:default-context request)))))
+
+(deftest ^{:stratum 2} prepare-omits-unrecorded-preflight-evidence-test
+  (let [proposal (:effect/proposal
+                  (authority/prepare (context) (random-uuid) target {} now))]
+    (is (not-any? #(contains? proposal %)
+                  [:app-label :deploy/rendered-yaml
+                   :deploy/server-dry-run :deploy/rollback-info]))))
+
+(deftest ^{:stratum 2} prepare-denies-when-provision-preview-is-absent-test
+  (let [prepared (authority/prepare
+                  (dissoc (context) :execution/phase-results)
+                  (random-uuid) target preflight now)]
+    (is (not (authority/permitted? prepared)))
+    (is (= :deny (get-in prepared [:authority/envelope :envelope/decision])))
+    (is (= [:deploy/provision-preview-required]
+           (mapv :rule-id (get-in prepared [:authority/policy :blocking]))))))
+
+(deftest ^{:stratum 2} prepare-denies-policy-violations-test
+  (with-redefs [policy/check-resource-count
+                (fn [& _] {:violation/rule-id :deploy/resource-count-limit
+                           :violation/message "limit exceeded"})
+                policy/check-gke-node-limit (constantly nil)
+                grant/issue-for-effect
+                (fn [& _] (throw (ex-info "grant must not be issued" {})))]
+    (let [prepared (authority/prepare (context) (random-uuid)
+                                      target preflight now)]
+      (is (not (authority/permitted? prepared)))
+      (is (nil? (:authority/grant prepared)))
+      (is (= [:deploy/resource-count-limit]
+             (mapv :rule-id
+                   (get-in prepared [:authority/policy :blocking])))))))
 
 (deftest ^{:stratum 2} prepare-records-policy-and-preflight-basis-test
   (let [checked (atom [])]
@@ -71,7 +107,9 @@
       (let [prepared (authority/prepare (context) (random-uuid)
                                         target preflight now)]
         (is (authority/permitted? prepared))
-        (is (= [[:resources "preview"] [:nodes "preview"]] @checked))
+        (is (not (authority/permitted? (assoc prepared :authority/grant nil))))
+        (is (= [[:resources provision-preview] [:nodes provision-preview]]
+               @checked))
         (is (= "manifest"
                (get-in prepared [:effect/proposal :deploy/rendered-yaml])))
         (is (= "validated"

@@ -21,6 +21,7 @@
    [ai.miniforge.anomaly.interface :as anomaly]
    [ai.miniforge.execution-grant.interface :as grant]
    [ai.miniforge.gate.interface :as gate]
+   [ai.miniforge.phase-deployment.messages :as msg]
    [ai.miniforge.phase-deployment.policy :as policy]
    [clojure.string :as str])
   (:import
@@ -43,18 +44,35 @@
    :pins/rule-ids [:deploy/resource-count-limit :deploy/gke-node-limit]
    :pins/event-watermark nil})
 
-(def ^{:stratum 0} default-breach-dir-property
+(def ^{:stratum 0} default-breach-dir-relative-path
   ".miniforge/grant-breaches")
 
-(defn- ^{:stratum 0} policy-warning
+(defn- ^{:stratum 0} policy-blocker
   [violation]
   {:rule-id (:violation/rule-id violation)
    :message (:violation/message violation)})
+
+(defn- ^{:stratum 0} missing-preview-violation
+  []
+  {:rule-id :deploy/provision-preview-required
+   :message (msg/t :policy/provision-preview-required)})
 
 (defn- ^{:stratum 0} effect-scope
   [request]
   (dissoc request :workflow-run/status :effect/class :effect/preflight
           :default-context))
+
+(defn- ^{:stratum 0} preflight-evidence
+  [preflight]
+  (reduce-kv (fn [evidence source-key proposal-key]
+               (if-some [value (get preflight source-key)]
+                 (assoc evidence proposal-key value)
+                 evidence))
+             {}
+             {:app-label :app-label
+              :rendered-yaml :deploy/rendered-yaml
+              :server-dry-run :deploy/server-dry-run
+              :rollback-info :deploy/rollback-info}))
 
 (defn ^{:stratum 0} request
   "Build the closed runtime request for one preflight-approved deployment."
@@ -67,7 +85,7 @@
                       :preflight/result :allow}
    :kustomize-dir (:kustomize-dir target)
    :context (:context target)
-   :default-context (:context target)
+   :default-context (or (:default-context target) (:context target))
    :namespace (:namespace target)
    :deployment-name (:deployment-name target)})
 
@@ -78,35 +96,35 @@
                              (:default-context target))))
 
 (defn ^{:stratum 0} preflight
-  "Retain the decision input used by the not-yet-wired governed seam."
-  [rendered policy-context]
+  "Reject an absent manifest at the legacy governed-deploy seam."
+  [rendered _policy-context]
   (if (str/blank? (str rendered))
-    {:preflight/result :deny :preflight/violations [] :preflight/rendered nil}
-    (let [violations (keep identity
-                           [(policy/check-resource-count rendered policy-context)
-                            (policy/check-gke-node-limit rendered policy-context)])]
-      {:preflight/result (if (seq violations) :deny :allow)
-       :preflight/violations (vec violations)
-       :preflight/rendered rendered})))
+    {:preflight/result :deny
+     :preflight/violations [(msg/t :deploy/render-failed)]
+     :preflight/rendered nil}
+    {:preflight/result :allow
+     :preflight/violations []
+     :preflight/rendered rendered}))
 
 ;------------------------------------------------------------------------------ Layer 1
 
 (defn ^{:stratum 1} breach-dir
   [context]
   (or (:grant-breach-dir context)
-      (str (System/getProperty "user.home") "/" default-breach-dir-property)))
+      (str (System/getProperty "user.home") "/"
+           default-breach-dir-relative-path)))
 
 (defn ^{:stratum 1} policy-classification
   "Evaluate deployment policy against the Pulumi preview it was defined for."
   [context target]
-  (let [preview (get-in context
-                        [:execution/phase-results :provision :result :output]
-                        {})
-        policy-context (:phase-config target)
-        violations (keep identity
-                         [(policy/check-resource-count preview policy-context)
-                          (policy/check-gke-node-limit preview policy-context)])]
-    (assoc empty-classification :warnings (mapv policy-warning violations))))
+  (if-some [preview (get-in context
+                            [:execution/phase-results :provision :result :output])]
+    (let [policy-context (:phase-config target)
+          violations (keep identity
+                           [(policy/check-resource-count preview policy-context)
+                            (policy/check-gke-node-limit preview policy-context)])]
+      (assoc empty-classification :blocking (mapv policy-blocker violations)))
+    (assoc empty-classification :blocking [(missing-preview-violation)])))
 
 (defn ^{:stratum 1} permitted?
   "True only when the grant check and the DecisionEnvelope both allow."
@@ -120,10 +138,7 @@
   {:effect/id (:effect/id request)
    :effect/proposal
    (merge (effect-scope request)
-          {:app-label (:app-label preflight)
-           :deploy/rendered-yaml (:rendered-yaml preflight)
-           :deploy/server-dry-run (:server-dry-run preflight)
-           :deploy/rollback-info (:rollback-info preflight)})
+          (preflight-evidence preflight))
    :authority/grant grant-record
    :authority/authorization authorization
    :authority/envelope envelope
@@ -138,9 +153,18 @@
         preflight (if (map? preflight) preflight {})
         request (request context effect-id target)
         classification (policy-classification context target)
-        grant-record (grant/issue-for-effect (breach-dir context) request now)]
-    (if (anomaly/anomaly? grant-record)
+        policy-envelope (gate/decide classification deployment-policy-pins)
+        policy-allowed? (gate/decision-allowed? policy-envelope)
+        grant-record (when policy-allowed?
+                       (grant/issue-for-effect (breach-dir context) request now))]
+    (cond
+      (not policy-allowed?)
+      (authority-record request classification nil nil policy-envelope preflight)
+
+      (anomaly/anomaly? grant-record)
       grant-record
+
+      :else
       (let [authorization (grant/authorize
                            grant-record
                            {:effect/scope (effect-scope request)
