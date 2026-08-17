@@ -35,8 +35,7 @@
 (defn ^{:stratum 0} render!
   "Render one Kustomize target without contacting Kubernetes.
 
-   Returns a `kustomize/KustomizeResult`: the manifest is under
-   `:rendered-yaml`, and `:apply-result` is nil because nothing was applied."
+   Returns the rendered manifest under `:rendered-yaml`."
   [{:keys [kustomize-dir]}]
   (shell/kustomize-render! kustomize-dir))
 
@@ -53,9 +52,8 @@
 (defn ^{:stratum 0} dry-run!
   "Ask the API server to validate exactly the manifest bytes to be applied.
 
-   Like [[apply-rendered!]], takes the manifest and returns a raw
-   `exec/CommandResult`, not a `KustomizeResult`. The server's echo of the
-   validated objects is under `:stdout`."
+   Like [[apply-rendered!]], takes the manifest and returns kubectl's raw
+   result. The server's echo of the validated objects is under `:stdout`."
   [{:keys [namespace context]} rendered-yaml]
   (shell/kubectl-apply! rendered-yaml :namespace namespace :context context
                         :server-dry-run? true))
