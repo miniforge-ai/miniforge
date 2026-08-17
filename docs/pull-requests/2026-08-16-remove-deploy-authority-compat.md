@@ -23,9 +23,12 @@ execution identifier before authority preparation.
   `:default-context` inside the authority boundary.
 - Bind the issuance-required `:default-context` field to that same exact
   context.
+- Reject missing canonical execution or target inputs before policy or grant
+  evaluation.
 - Delete the unused legacy render-only `preflight` function and its string
   dependency.
-- Assert that legacy-only run and target inputs remain unbound.
+- Assert that legacy-only run and target inputs are rejected before grant
+  issuance.
 
 ## Verification
 

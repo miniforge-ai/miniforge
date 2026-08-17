@@ -56,6 +56,17 @@
   {:rule-id :deploy/provision-preview-required
    :message (msg/t :policy/provision-preview-required)})
 
+(defn- ^{:stratum 0} canonical-input-anomaly
+  [context target]
+  (let [missing-fields (cond-> []
+                         (nil? (:execution/id context)) (conj :execution/id)
+                         (nil? (:context target)) (conj :context))]
+    (when (seq missing-fields)
+      (anomaly/anomaly
+       :invalid-input
+       (msg/t :deploy/authority-input-invalid)
+       {:authority/missing-fields missing-fields}))))
+
 (defn- ^{:stratum 0} effect-scope
   [request]
   (dissoc request :workflow-run/status :effect/class :effect/preflight
@@ -131,27 +142,31 @@
 (defn ^{:stratum 2} prepare
   "Evaluate policy, issue exact authority, and derive one deploy decision."
   [context effect-id target preflight ^Instant now]
-  (let [preflight (if (map? preflight) preflight {})
-        request (request context effect-id target)
-        classification (policy-classification context target)
-        policy-envelope (gate/decide classification deployment-policy-pins)
-        policy-allowed? (gate/decision-allowed? policy-envelope)
-        grant-record (when policy-allowed?
-                       (grant/issue-for-effect (breach-dir context) request now))]
-    (cond
-      (not policy-allowed?)
-      (authority-record request classification nil nil policy-envelope preflight)
+  (if-some [invalid-input (canonical-input-anomaly context target)]
+    invalid-input
+    (let [preflight (if (map? preflight) preflight {})
+          request (request context effect-id target)
+          classification (policy-classification context target)
+          policy-envelope (gate/decide classification deployment-policy-pins)
+          policy-allowed? (gate/decision-allowed? policy-envelope)
+          grant-record (when policy-allowed?
+                         (grant/issue-for-effect
+                          (breach-dir context) request now))]
+      (cond
+        (not policy-allowed?)
+        (authority-record request classification nil nil policy-envelope
+                          preflight)
 
-      (anomaly/anomaly? grant-record)
-      grant-record
+        (anomaly/anomaly? grant-record)
+        grant-record
 
-      :else
-      (let [authorization (grant/authorize
-                           grant-record
-                           {:effect/scope (effect-scope request)
-                            :usage/count 1}
-                           now)
-            envelope (gate/decide classification deployment-policy-pins
-                                  authorization)]
-        (authority-record request classification grant-record authorization
-                          envelope preflight)))))
+        :else
+        (let [authorization (grant/authorize
+                             grant-record
+                             {:effect/scope (effect-scope request)
+                              :usage/count 1}
+                             now)
+              envelope (gate/decide classification deployment-policy-pins
+                                    authorization)]
+          (authority-record request classification grant-record authorization
+                            envelope preflight))))))
