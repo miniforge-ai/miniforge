@@ -72,8 +72,7 @@
   [context authority now]
   (fx/propose!
    (store-dir context)
-   {:effect-id (:effect/id authority)
-    :effect-class :effect/deploy
+   {:effect-id (:effect/id authority) :effect-class :effect/deploy
     :grant-id (get-in authority [:authority/grant :grant/id])
     :envelope-id (get-in authority [:authority/envelope :envelope/id])
     :proposal (:effect/proposal authority)}

@@ -24,14 +24,12 @@
 
 (defn- ^{:stratum 0} deployment
   [state status stage data]
-  (merge {:deploy/status status
-          :deploy/stage stage
+  (merge {:deploy/status status :deploy/stage stage
           :deploy/rollback-info (:rollback-info state)
           :deploy/rendered-yaml (:rendered-yaml state)
           :deploy/effect-id (get-in state [:authority :effect/id])
           :deploy/grant-id (get-in state [:authority :authority/grant :grant/id])
-          :deploy/envelope-id
-          (get-in state [:authority :authority/envelope :envelope/id])}
+          :deploy/envelope-id (get-in state [:authority :authority/envelope :envelope/id])}
          data))
 
 ;------------------------------------------------------------------------------ Layer 1

@@ -44,17 +44,13 @@
 (def ^{:stratum 0} pod-state {:pod-count 1 :ready-count 1 :pods []})
 
 (def ^{:stratum 0} exact-target
-  {:kustomize-dir "/repo/k8s/overlays/prod"
-   :namespace "prod"
-   :context "gke-prod"
-   :app-label "api"
-   :deployment-name "api"
-   :phase-config {}})
+  {:kustomize-dir "/repo/k8s/overlays/prod" :namespace "prod"
+   :context "gke-prod" :app-label "api"
+   :deployment-name "api" :phase-config {}})
 
 (defn- ^{:stratum 0} tmp-dir
   []
-  (str (.toFile
-        (Files/createTempDirectory "deploy" (into-array FileAttribute [])))))
+  (str (.toFile (Files/createTempDirectory "deploy" (into-array FileAttribute [])))))
 
 (defn- ^{:stratum 0} record-call
   [calls operation & arguments]
@@ -73,22 +69,14 @@
   []
   {:execution/id (random-uuid)
    :execution/phase-results {:provision {:result {:output {:steps []}}}}
-   :effect-store-dir (tmp-dir)
-   :grant-breach-dir (tmp-dir)})
-
-(def ^{:stratum 1} exact-effect-target
-  (select-keys exact-target
-               [:kustomize-dir :context :namespace :deployment-name
-                :app-label]))
+   :effect-store-dir (tmp-dir) :grant-breach-dir (tmp-dir)})
 
 (defn- ^{:stratum 1} prepared-authority
   [ctx]
   (authority/prepare
    ctx (random-uuid) exact-target
-   {:app-label "api"
-    :rendered-yaml rendered-yaml
-    :server-dry-run server-dry-run
-    :rollback-info rollback-info}
+   {:app-label "api" :rendered-yaml rendered-yaml
+    :server-dry-run server-dry-run :rollback-info rollback-info}
    now))
 
 (defn- ^{:stratum 1} recording-operations
@@ -96,9 +84,8 @@
   ([calls {:keys [apply-result on-apply observe-result]
            :or {apply-result (schema/success :stdout "applied")
                 observe-result {:provider/matched? true
-                                :provider/observed
-                                {:deployment/ready? true
-                                 :deployment/pods pod-state}}}}]
+                                :provider/observed {:deployment/ready? true
+                                                    :deployment/pods pod-state}}}}]
    {:target! (fn [config]
                (record-call calls :target config)
                (schema/success :target (assoc config :context "gke-prod")))
@@ -169,7 +156,7 @@
             call-names (mapv first @calls)]
         (is (= :success (:deploy/status result)))
         (is (= 1 (count (filter #{:target} call-names))))
-        (is (= [:apply exact-effect-target rendered-yaml]
+        (is (= [:apply (dissoc exact-target :phase-config) rendered-yaml]
                (first (filter #(= :apply (first %)) @calls))))
         (is (< (.indexOf call-names :resource-policy)
                (.indexOf call-names :apply)))

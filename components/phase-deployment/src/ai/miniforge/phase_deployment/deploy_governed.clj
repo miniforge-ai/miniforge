@@ -30,10 +30,6 @@
 
 ;------------------------------------------------------------------------------ Layer 0
 
-(defn- ^{:stratum 0} failed-flow?
-  [state]
-  (contains? state :flow/failure))
-
 (defn- ^{:stratum 0} fail
   [state stage message]
   (assoc state :flow/failure {:stage stage :message message}))
@@ -45,11 +41,11 @@
            (:anomaly/message result)
            (msg/t fallback-key))))
 
-;------------------------------------------------------------------------------ Layer 1
-
-(defn- ^{:stratum 1} advance
+(defn- ^{:stratum 0} advance
   [state step]
-  (if (failed-flow? state) state (step state)))
+  (if (:flow/failure state) state (step state)))
+
+;------------------------------------------------------------------------------ Layer 1
 
 (defn- ^{:stratum 1} resolve-target
   [state]
