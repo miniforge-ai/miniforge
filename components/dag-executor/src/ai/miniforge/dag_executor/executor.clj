@@ -340,16 +340,16 @@
    Returns result with checkout info."
   [executor environment-id repo-url branch opts]
   (let [depth-args (when (:depth opts) ["--depth" (str (:depth opts))])
-        clone-cmd (str "git clone "
-                       (when depth-args (str (first depth-args) " " (second depth-args) " "))
-                       repo-url " .")
+        ;; Use a vector so ProcessBuilder exec's git directly — no shell
+        ;; metacharacter expansion on user-supplied repo-url or branch.
+        clone-cmd (into ["git" "clone"] (concat (or depth-args []) [repo-url "."]))
         clone-result (execute! executor environment-id clone-cmd
                                {:timeout-ms 300000})]
     (if (and (result/ok? clone-result)
              (zero? (:exit-code (:data clone-result))))
-      ;; Checkout branch
+      ;; Checkout branch — vector prevents shell injection on branch name.
       (let [checkout-result (execute! executor environment-id
-                                      (str "git checkout " branch)
+                                      ["git" "checkout" branch]
                                       {:timeout-ms 60000})]
         (if (and (result/ok? checkout-result)
                  (zero? (:exit-code (:data checkout-result))))

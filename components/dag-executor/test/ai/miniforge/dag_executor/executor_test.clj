@@ -336,7 +336,8 @@
 
 (deftest clone-and-checkout!-success-test
   (testing "Successful clone + checkout returns ok with :cloned? and :branch.
-            Two commands are issued in order: git clone then git checkout."
+            Two commands are issued in order: git clone then git checkout.
+            Both use vector form so no shell metacharacter expansion occurs."
     (let [exec (mock-executor :worktree)
           ret  (sut/clone-and-checkout! exec "env-1"
                                         "https://example.com/r.git"
@@ -349,12 +350,17 @@
       (is (true? (-> ret :data :cloned?)))
       (is (= "feature/x" (-> ret :data :branch)))
       (is (= 2 (count cmds)))
-      (is (str/starts-with? (first cmds) "git clone "))
-      (is (str/includes? (first cmds) "https://example.com/r.git"))
-      (is (= "git checkout feature/x" (second cmds))))))
+      ;; Commands must be vectors — never strings — so ProcessBuilder can exec
+      ;; git directly without a shell (prevents shell injection on user-supplied
+      ;; repo-url and branch values).
+      (is (vector? (first cmds)))
+      (is (= "git" (first (first cmds))))
+      (is (= "clone" (second (first cmds))))
+      (is (some #{"https://example.com/r.git"} (first cmds)))
+      (is (= ["git" "checkout" "feature/x"] (second cmds))))))
 
 (deftest clone-and-checkout!-with-depth-option-test
-  (testing "Supplying :depth adds --depth N to the clone command"
+  (testing "Supplying :depth adds [\"--depth\" N] to the clone command vector"
     (let [exec (mock-executor :worktree)
           _ (sut/clone-and-checkout! exec "env-1"
                                      "https://example.com/r.git"
@@ -364,7 +370,9 @@
                         (->> (filter #(= :execute (first %))))
                         first
                         (nth 2))]
-      (is (str/includes? clone-cmd "--depth 5")))))
+      (is (vector? clone-cmd))
+      (is (some #{"--depth"} clone-cmd))
+      (is (some #{"5"} clone-cmd)))))
 
 (deftest clone-and-checkout!-clone-failure-short-circuits-test
   (testing "If git clone returns a non-zero exit code, checkout is never run
@@ -381,7 +389,8 @@
                     (map #(nth % 2)))]
       ;; Only the clone command was issued.
       (is (= 1 (count cmds)))
-      (is (str/starts-with? (first cmds) "git clone"))
+      (is (= "git" (first (first cmds))))
+      (is (= "clone" (second (first cmds))))
       ;; The clone result (exit-code 128) is what the function returns.
       (is (= 128 (:exit-code (:data ret)))))))
 

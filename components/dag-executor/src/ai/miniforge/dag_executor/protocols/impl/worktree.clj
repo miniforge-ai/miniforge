@@ -748,14 +748,18 @@
 (defn execute-command
   "Execute a command in a directory using ProcessBuilder.
 
+   Accepts either a string (passed to sh -c, suitable for shell builtins and
+   pipelines) or a vector of strings (exec'd directly without a shell —
+   preferred for user-supplied values to avoid shell injection).
+
    This allows proper environment variable handling and working directory."
   [workdir command env-map]
-  (let [cmd-str (if (string? command)
-                  command
-                  (str/join " " command))
+  (let [cmd-args (if (string? command)
+                   ["sh" "-c" command]
+                   (vec command))
         start-time (System/currentTimeMillis)]
     (try
-      (let [pb (ProcessBuilder. ["sh" "-c" cmd-str])
+      (let [pb (ProcessBuilder. ^java.util.List cmd-args)
             _ (.directory pb (File. ^String workdir))
             _ (when (seq env-map)
                 (let [pb-env (.environment pb)]
