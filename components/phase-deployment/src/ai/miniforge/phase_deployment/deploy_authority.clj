@@ -47,7 +47,7 @@
 (def ^{:stratum 0} default-breach-dir-property
   ".miniforge/grant-breaches")
 
-(defn- ^{:stratum 0} policy-warning
+(defn- ^{:stratum 0} policy-blocker
   [violation]
   {:rule-id (:violation/rule-id violation)
    :message (:violation/message violation)})
@@ -122,7 +122,7 @@
           violations (keep identity
                            [(policy/check-resource-count preview policy-context)
                             (policy/check-gke-node-limit preview policy-context)])]
-      (assoc empty-classification :warnings (mapv policy-warning violations)))
+      (assoc empty-classification :blocking (mapv policy-blocker violations)))
     (assoc empty-classification :blocking [(missing-preview-violation)])))
 
 (defn ^{:stratum 1} permitted?
