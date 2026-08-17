@@ -20,6 +20,7 @@
   (:require
    [ai.miniforge.anomaly.interface :as anomaly]
    [ai.miniforge.tenancy.interface :as tenancy]
+   [clojure.edn :as edn]
    [clojure.test :refer [deftest is testing]])
   (:import
    [java.time Instant]))
@@ -35,6 +36,21 @@
 (defn ^{:stratum 1} an-acting
   []
   (tenancy/establish-acting (tenancy/resolve-operator configured now) now))
+
+(deftest ^{:stratum 1} both-instant-representations-are-accepted-test
+  ;; `inst?` admits java.util.Date as readily as java.time.Instant, so a
+  ;; caller holding a schema-valid instant may hold either. Assuming
+  ;; Instant and calling `str` on a Date yields "Sat Aug 16 ...", which
+  ;; is not parseable and would fail validation far from its cause.
+  (let [identity (tenancy/resolve-operator configured now)
+        from-instant (tenancy/establish-acting identity now)
+        from-date (tenancy/establish-acting identity (java.util.Date/from now))]
+    (is (= from-instant from-date)
+        "Instant and Date for the same moment produce the same context"))
+  (testing "and an unparseable stamp is refused rather than stored"
+    (is (not (tenancy/valid-acting?
+              (tenancy/establish-acting (tenancy/resolve-operator configured now)
+                                        "not-an-instant"))))))
 
 ;------------------------------------------------------------------------------ Layer 2
 
@@ -121,3 +137,20 @@
   (is (anomaly/anomaly? (tenancy/acting-for-agent nil "reviewer")))
   (testing "a blank agent name is not a name"
     (is (anomaly/anomaly? (tenancy/acting-for-agent (an-acting) "   ")))))
+
+(deftest ^{:stratum 2} established-at-survives-serialization-test
+  ;; The acting context is written into the workflow machine snapshot,
+  ;; which stringifies every instant. A field typed `inst?` would go in
+  ;; an Instant and come back a String, failing its own validation on
+  ;; resume and leaving every resumed run unowned. So the canonical
+  ;; representation IS the string.
+  (let [acting (an-acting)]
+    (is (string? (:acting/established-at acting)))
+    (is (tenancy/valid-acting? acting))
+    (testing "it round-trips through edn unchanged, which is what the snapshot does"
+      (let [round-tripped (edn/read-string (pr-str acting))]
+        (is (= acting round-tripped))
+        (is (tenancy/valid-acting? round-tripped))))
+    (testing "and re-establishing from the stored string is idempotent"
+      (is (= acting (tenancy/establish-acting (tenancy/resolve-operator configured now)
+                                              (:acting/established-at acting)))))))

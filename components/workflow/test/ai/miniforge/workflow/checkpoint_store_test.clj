@@ -263,11 +263,18 @@
                        (:execution/id ctx) {:checkpoint/root checkpoint-root}))]
         (testing "the boundary's identity reaches the context"
           (is (= acting (:execution/acting ctx))))
-        (testing "and survives the durable snapshot"
-          (is (= (:acting/tenant-id acting)
-                 (:acting/tenant-id (:execution/acting snapshot))))
-          (is (= (:acting/principal-id acting)
-                 (:acting/principal-id (:execution/acting snapshot)))))
+        (testing "and survives the durable snapshot INTACT"
+          ;; Not just the ids. The snapshot puts every value through
+          ;; `coerce/stringify-instants`, so a field typed `inst?` would
+          ;; go in an Instant and come back a String, and the context
+          ;; would fail its own validation on resume — leaving every
+          ;; resumed run unowned. Asserting the whole map, and that a
+          ;; consumer can still read it, is what catches that.
+          (is (= acting (:execution/acting snapshot))
+              "the acting context round-trips unchanged, field for field")
+          (is (tenancy/valid-acting? (:execution/acting snapshot)))
+          (is (= acting (tenancy/require-acting snapshot :execution/acting))
+              "a consumer reading the restored snapshot gets the identity, not a refusal"))
         (testing "a resumed run keeps the authority it started with"
           ;; The trap this guards: `restore-context` merges the snapshot
           ;; first and then overrides `:execution/opts` from the CURRENT
