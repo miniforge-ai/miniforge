@@ -39,6 +39,8 @@
 
 (def ^{:stratum 0} rollback-info {:revision "7" :image "api:v7" :replicas 3})
 
+(def ^{:stratum 0} rollback-error "invalid rollback")
+
 (defn ^{:stratum 0} apply-failure
   "A refused apply in the shape `kustomize-apply!` actually produces, taken
    from that producer with only the process boundary stubbed. Hand-writing
@@ -64,7 +66,8 @@
    :deploy/failure "rollout timed out"})
 
 (deftest ^{:stratum 1} apply-failure-preserves-rollback-test
-  (with-redefs [provider/rollback-info! (constantly rollback-info)
+  (with-redefs [provider/rollback-info!
+                (constantly (schema/success :rollback-info rollback-info))
                 provider/apply! (constantly (apply-failure))]
     (let [deployment (flow/execute! (deployment-config))]
       (is (= :failed (:deploy/status deployment)))
@@ -74,7 +77,8 @@
       (is (= rollback-info (:deploy/rollback-info deployment))))))
 
 (deftest ^{:stratum 1} invalid-rollback-stops-apply-test
-  (with-redefs [provider/rollback-info! (constantly (schema/validate-anomaly [:map [:valid? true?]] {}))
+  (with-redefs [provider/rollback-info!
+                (constantly (schema/failure :rollback-info rollback-error))
                 provider/apply! #(throw (ex-info "apply must not run" %))]
     (is (= :capture (:deploy/stage (flow/execute! (deployment-config)))))))
 

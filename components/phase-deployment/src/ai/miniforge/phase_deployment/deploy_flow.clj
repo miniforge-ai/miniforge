@@ -18,7 +18,6 @@
 (ns ai.miniforge.phase-deployment.deploy-flow
   "Application flow for deployment provider operations."
   (:require
-   [ai.miniforge.anomaly.interface :as anomaly]
    [ai.miniforge.phase-deployment.deploy-provider :as provider]
    [ai.miniforge.schema.interface :as schema]))
 
@@ -55,7 +54,7 @@
 (defn ^{:stratum 2} execute!
   "Capture rollback state, apply, and translate provider observation."
   [deploy-config]
-  (let [rollback-info (provider/rollback-info! deploy-config)]
-    (if (anomaly/anomaly? rollback-info)
-      (outcome :failed :capture nil {:deploy/failure (:anomaly/message rollback-info)})
-      (apply-outcome! deploy-config rollback-info))))
+  (let [result (provider/rollback-info! deploy-config)]
+    (if (schema/failed? result)
+      (outcome :failed :capture nil {:deploy/failure (:error result)})
+      (apply-outcome! deploy-config (:rollback-info result)))))
