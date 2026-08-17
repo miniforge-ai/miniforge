@@ -102,6 +102,13 @@
        (msg/t :deploy/rollback-capture-failed))
    {:kubectl-result kubectl-result}))
 
+(defn- ^{:stratum 0} rollback-result
+  [rollback-info]
+  (if (anomaly/anomaly? rollback-info)
+    (schema/failure :rollback-info (:anomaly/message rollback-info)
+                    {:validation rollback-info})
+    (schema/success :rollback-info rollback-info)))
+
 ;------------------------------------------------------------------------------ Layer 1
 
 (defn ^{:stratum 1} target!
@@ -127,13 +134,14 @@
                                :extra-args ["deployment" deployment-name])]
     (if (schema/failed? result)
       (rollback-failure result)
-      (schema/validate-anomaly
-       RollbackInfo
-       {:revision (get-in result [:parsed :metadata :annotations
-                                  "deployment.kubernetes.io/revision"])
-        :image (get-in result [:parsed :spec :template :spec
-                               :containers 0 :image])
-        :replicas (get-in result [:parsed :status :readyReplicas])}))))
+      (rollback-result
+       (schema/validate-anomaly
+        RollbackInfo
+        {:revision (get-in result [:parsed :metadata :annotations
+                                   "deployment.kubernetes.io/revision"])
+         :image (get-in result [:parsed :spec :template :spec
+                                :containers 0 :image])
+         :replicas (get-in result [:parsed :status :readyReplicas])})))))
 
 (defn ^{:stratum 1} pod-state
   [pods]
