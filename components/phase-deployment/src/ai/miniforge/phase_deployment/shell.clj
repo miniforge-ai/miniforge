@@ -47,16 +47,14 @@
 
 (def ^{:stratum 0} kubectl-get-pods! kubectl/kubectl-get-pods!)
 
-(def ^{:stratum 0} kustomize-build! kustomize/kustomize-build!)
+(def ^{:stratum 0} kustomize-render! kustomize/kustomize-render!)
 
 (def ^{:stratum 0} kubectl-apply! kustomize/kubectl-apply!)
-
-(def ^{:stratum 0} kustomize-apply! kustomize/kustomize-apply!)
 
 ;------------------------------------------------------------------------------ Rich Comment
 (comment
   (sh-with-timeout "echo" ["hello world"])
   (pulumi-preview! "/path/to/project" :stack "dev")
   (kubectl! "get" :extra-args ["pods"] :namespace "default" :output "json")
-  (kustomize-build! "/path/to/overlay")
+  (kustomize-render! "/path/to/overlay")
   :leave-this-here)

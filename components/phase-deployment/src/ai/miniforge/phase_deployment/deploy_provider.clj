@@ -32,25 +32,28 @@
    [:image {:optional true} [:maybe :string]]
    [:replicas {:optional true} [:maybe int?]]])
 
-(defn ^{:stratum 0} apply!
-  "Build and apply one Kustomize target through the shell adapter."
-  [{:keys [kustomize-dir namespace context]}]
-  (shell/kustomize-apply! kustomize-dir
-                          :namespace namespace :context context))
-
 (defn ^{:stratum 0} render!
-  "Render one Kustomize target without contacting Kubernetes."
+  "Render one Kustomize target without contacting Kubernetes.
+
+   Returns the rendered manifest under `:rendered-yaml`."
   [{:keys [kustomize-dir]}]
-  (shell/kustomize-build! kustomize-dir))
+  (shell/kustomize-render! kustomize-dir))
 
 (defn ^{:stratum 0} apply-rendered!
-  "Apply exactly the manifest bytes recorded by the caller."
+  "Apply exactly the manifest bytes recorded by the caller.
+
+   Takes the manifest and returns a raw `exec/CommandResult` — kubectl's
+   own output under `:stdout`. Unlike [[render!]], it has no
+   `:rendered-yaml`, because the caller already holds the bytes it passed in."
   [{:keys [namespace context]} rendered-yaml]
   (shell/kubectl-apply! rendered-yaml
                         :namespace namespace :context context))
 
 (defn ^{:stratum 0} dry-run!
-  "Ask the API server to validate exactly the manifest bytes to be applied."
+  "Ask the API server to validate exactly the manifest bytes to be applied.
+
+   Like [[apply-rendered!]], takes the manifest and returns kubectl's raw
+   result. The server's echo of the validated objects is under `:stdout`."
   [{:keys [namespace context]} rendered-yaml]
   (shell/kubectl-apply! rendered-yaml :namespace namespace :context context
                         :server-dry-run? true))
@@ -93,6 +96,22 @@
        (msg/t :deploy/context-unavailable))
    {:kubectl-result kubectl-result}))
 
+(defn- ^{:stratum 0} rollback-failure
+  [kubectl-result]
+  (schema/failure
+   :rollback-info
+   (or (not-empty (:stderr kubectl-result))
+       (:error kubectl-result)
+       (msg/t :deploy/rollback-capture-failed))
+   {:kubectl-result kubectl-result}))
+
+(defn- ^{:stratum 0} rollback-result
+  [rollback-info]
+  (if (anomaly/anomaly? rollback-info)
+    (schema/failure :rollback-info (:anomaly/message rollback-info)
+                    {:validation rollback-info})
+    (schema/success :rollback-info rollback-info)))
+
 ;------------------------------------------------------------------------------ Layer 1
 
 (defn ^{:stratum 1} target!
@@ -116,14 +135,16 @@
                                :context context
                                :output "json"
                                :extra-args ["deployment" deployment-name])]
-    (when (schema/succeeded? result)
-      (schema/validate-anomaly
-       RollbackInfo
-       {:revision (get-in result [:parsed :metadata :annotations
-                                  "deployment.kubernetes.io/revision"])
-        :image (get-in result [:parsed :spec :template :spec
-                               :containers 0 :image])
-        :replicas (get-in result [:parsed :status :readyReplicas])}))))
+    (if (schema/failed? result)
+      (rollback-failure result)
+      (rollback-result
+       (schema/validate-anomaly
+        RollbackInfo
+        {:revision (get-in result [:parsed :metadata :annotations
+                                   "deployment.kubernetes.io/revision"])
+         :image (get-in result [:parsed :spec :template :spec
+                                :containers 0 :image])
+         :replicas (get-in result [:parsed :status :readyReplicas])})))))
 
 (defn ^{:stratum 1} pod-state
   [pods]

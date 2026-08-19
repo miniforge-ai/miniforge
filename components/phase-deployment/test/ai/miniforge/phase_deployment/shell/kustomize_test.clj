@@ -30,15 +30,26 @@
   [message]
   (schema/failure :stdout message {:stderr ""}))
 
-(defn ^{:stratum 0} recording-shell
+;------------------------------------------------------------------------------ Layer 1
+
+(defn ^{:stratum 1} recording-shell
   [calls]
   (fn [command args & {:as options}]
     (swap! calls conj {:command command :args args :options options})
-    (schema/success :stdout "accepted")))
+    (schema/success :stdout manifest-bytes)))
 
-;------------------------------------------------------------------------------ Layer 1
+(deftest ^{:stratum 1} a-failed-build-retains-error-and-renders-no-manifest-test
+  (let [result (with-redefs [exec/sh-with-timeout
+                             (fn [& _] (blank-stderr-failure "build broke"))]
+                 (kustomize/kustomize-render! "/deployment"))]
+    (is (schema/failed? result))
+    (is (nil? (:rendered-yaml result))
+        "a nil manifest means no manifest, not a manifest under another key")
+    (is (re-find #"build broke" (:error result)))))
 
-(deftest ^{:stratum 1} server-dry-run-and-apply-use-identical-input-test
+;------------------------------------------------------------------------------ Layer 2
+
+(deftest ^{:stratum 2} server-dry-run-and-apply-use-identical-input-test
   (let [calls (atom [])]
     (with-redefs [exec/sh-with-timeout (recording-shell calls)]
       (kustomize/kubectl-apply! manifest-bytes
@@ -59,18 +70,15 @@
                 "--context" "cluster-1"]
                (:args apply-call)))))))
 
-(deftest ^{:stratum 1} blank-stderr-retains-command-error-test
-  (testing "build failures retain the structured command error"
-    (let [result (with-redefs [kustomize/kustomize-build!
-                               (fn [& _] (blank-stderr-failure "build broke"))]
-                   (kustomize/kustomize-apply! "/deployment"))]
-      (is (schema/failed? result))
-      (is (re-find #"build broke" (:error result)))))
-  (testing "apply failures retain the structured command error"
-    (let [result (with-redefs [kustomize/kustomize-build!
-                               (fn [& _] (schema/success :stdout manifest-bytes))
-                               exec/sh-with-timeout
-                               (fn [& _] (blank-stderr-failure "apply broke"))]
-                   (kustomize/kustomize-apply! "/deployment"))]
-      (is (schema/failed? result))
-      (is (= "apply broke" (:error result))))))
+(deftest ^{:stratum 2} render-reports-the-manifest-under-a-stable-key-test
+  ;; The trap this closes: a governed caller wired :render! and then read
+  ;; :rendered-yaml off the result. Rendering used to return a raw shell
+  ;; result, so that key was nil, and a healthy render read as an empty one
+  ;; — which denies every deploy.
+  (let [render-calls (atom [])
+        rendered (with-redefs [exec/sh-with-timeout
+                               (recording-shell render-calls)]
+                   (kustomize/kustomize-render! "/deployment"))]
+    (is (= manifest-bytes (:rendered-yaml rendered)))
+    (testing "a render contacts no cluster"
+      (is (= ["kustomize"] (mapv :command @render-calls))))))
