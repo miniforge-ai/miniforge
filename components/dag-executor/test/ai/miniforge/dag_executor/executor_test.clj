@@ -431,7 +431,7 @@
                                         "-evil-option"
                                         {})]
       (is (result/err? ret))
-      (is (= :invalid-branch (:error ret)))
+      (is (= :invalid-branch (-> ret :error :code)))
       ;; No execute! calls should be made — rejection is a pure guard.
       (is (zero? (count (filter #(= :execute (first %)) @(:calls exec))))
           "no git commands should run for an invalid branch"))))
