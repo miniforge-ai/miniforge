@@ -30,185 +30,27 @@
 
    The `etl repo` command clones the repository and runs the direct
    repo-analyzer interface. The `etl run|list|validate` commands shell
-   out to `ai.miniforge.etl.main` on the JVM."
+   out to `ai.miniforge.etl.main` on the JVM.
+
+   Git-URL validation/cloning, JVM shell-out, and pack-path resolution
+   live in sibling `ai.miniforge.cli.main.commands.etl.*` namespaces
+   (rule 210: the combined namespace measured 4 real layers, max 3).
+   With those hops no longer counted toward this namespace's own local
+   layer depth, the five command entry points below don't call each
+   other — each calls straight into a sibling namespace — so they all
+   measure a single layer."
   (:require
-   [babashka.fs :as fs]
-   [babashka.process :as process]
-   [clojure.string :as str]
-   [ai.miniforge.response.interface :as response]
+   [ai.miniforge.cli.main.commands.etl.paths :as etl-paths]
+   [ai.miniforge.cli.main.commands.etl.repo :as etl-repo]
+   [ai.miniforge.cli.main.commands.etl.shell :as etl-shell]
    [ai.miniforge.cli.main.commands.shared :as shared]
    [ai.miniforge.cli.main.display :as display]
-   [ai.miniforge.cli.messages :as messages]
-   [ai.miniforge.repo-analyzer.interface :as repo-analyzer]
-   [ai.miniforge.schema.interface :as schema]))
+   [ai.miniforge.cli.messages :as messages]))
 
 ;------------------------------------------------------------------------------ Layer 0
 
-;; Helpers — shared by etl repo
-(defn ^{:stratum 0} validate-git-url
-  "Return true when url begins with a recognised git transport prefix."
-  [url]
-  (boolean
-   (or (str/starts-with? url "https://")
-       (str/starts-with? url "git@")
-       (str/starts-with? url "ssh://")
-       (str/starts-with? url "http://"))))
-
-(defn- ^{:stratum 0} git-clone-temp
-  "Shallow-clone `url` into a temporary directory.
-   Returns a schema/success or schema/failure result."
-  [url]
-  (try
-    (let [tmp-dir (str (System/getProperty "java.io.tmpdir") "/miniforge-etl-"
-                       (System/currentTimeMillis))
-          result  (process/sh "git" "clone" "--depth" "1" url tmp-dir)]
-      (if (zero? (:exit result))
-        (schema/success :path tmp-dir)
-        (schema/failure :path (str/trim (:err result)))))
-    (catch Exception e
-      (schema/failure :path (ex-message e)))))
-
-;; Pack-path resolution (shared by run + validate)
-(defn- ^{:stratum 0} single-file-under
-  "If exactly one .edn file lives under `dir/subdir`, return its abs path;
-   otherwise nil (caller decides whether to error)."
-  [dir subdir]
-  (let [sub (fs/file dir subdir)]
-    (when (fs/directory? sub)
-      (let [ednfiles (->> (fs/glob sub "*.edn") (map fs/file))]
-        (when (= 1 (count ednfiles))
-          (str (first ednfiles)))))))
-
-(defn- ^{:stratum 0} resolve-env-path
-  "Resolve `--env`, which may be a `.edn` path or a bare env name that
-   maps to `<pack-dir>/envs/<name>.edn`. Returns an absolute path or
-   throws on an unresolvable input."
-  [env pack-dir]
-  (cond
-    (nil? env)
-    (response/throw-anomaly! :anomalies/incorrect
-                             "missing --env <env.edn|name>"
-                             {})
-
-    (str/ends-with? env ".edn")
-    (str (fs/absolutize env))
-
-    pack-dir
-    (let [candidate (fs/file pack-dir "envs" (str env ".edn"))]
-      (if (fs/regular-file? candidate)
-        (str (fs/absolutize candidate))
-        (response/throw-anomaly! :anomalies/not-found
-                                 (str "env not found: " candidate)
-                                 {:env env :candidate (str candidate)})))
-
-    :else
-    (response/throw-anomaly! :anomalies/incorrect
-                             (str "--env was a name but pipeline was given directly; pass a .edn path instead: " env)
-                             {:env env})))
-
-;; JVM shell-out (run / list / validate)
-(defn- ^{:stratum 0} find-miniforge-root
-  "Walk up from `start` until a directory containing both `workspace.edn`
-   and `bases/etl/deps.edn` is found. Returns the absolute path or nil
-   if no such ancestor exists (i.e., not inside a miniforge checkout
-   that ships the etl base)."
-  ([] (find-miniforge-root (fs/file (System/getProperty "user.dir"))))
-  ([start]
-   (loop [dir (fs/absolutize start)]
-     (cond
-       (nil? dir)
-       nil
-
-       (and (fs/exists? (fs/file dir "workspace.edn"))
-            (fs/exists? (fs/file dir "bases/etl/deps.edn")))
-       (str dir)
-
-       :else
-       (recur (fs/parent dir))))))
-
-;------------------------------------------------------------------------------ Layer 1
-
-(defn- ^{:stratum 1} resolve-pipeline-path
-  "Resolve `pack-or-pipeline` into `[pack-dir pipeline-path]` as absolute
-   paths. `pack-dir` is nil when the caller passed a pipeline EDN
-   directly (no envs/ lookup possible)."
-  [pack-or-pipeline]
-  (let [f (fs/file pack-or-pipeline)]
-    (cond
-      (fs/directory? f)
-      (if-let [p (single-file-under f "pipelines")]
-        [(str (fs/absolutize f)) (str (fs/absolutize p))]
-        (response/throw-anomaly! :anomalies/not-found
-                                 (str "Could not find a single pipelines/*.edn under " f)
-                                 {:pack-dir (str (fs/absolutize f))}))
-
-      (and (fs/regular-file? f) (str/ends-with? (str f) ".edn"))
-      [nil (str (fs/absolutize f))]
-
-      :else
-      (response/throw-anomaly! :anomalies/incorrect
-                               (str "Not a pack directory or pipeline EDN: " pack-or-pipeline)
-                               {:input pack-or-pipeline}))))
-
-(defn- ^{:stratum 1} shell-etl!
-  "Shell out to the JVM etl entry point from the miniforge root. `args`
-   are the post-`-m` args: the subcommand name and its flags. Streams
-   stdout/stderr to the user's terminal. Returns the subprocess exit
-   code."
-  [args]
-  (if-let [root (find-miniforge-root)]
-    (let [argv (into ["clojure" "-M:dev" "-m" "ai.miniforge.etl.main"] args)
-          {:keys [exit]} (deref (process/process argv {:dir  root
-                                                       :out  :inherit
-                                                       :err  :inherit}))]
-      exit)
-    (do (display/print-error (messages/t :etl/run-requires-checkout))
-        1)))
-
-;; Repository analysis (etl repo)
-(defn- ^{:stratum 1} analyze-repo-url!
-  "Clone repo and run repo-analyzer against the temporary checkout."
-  [url]
-  (let [clone-result (git-clone-temp url)]
-    (if (schema/failed? clone-result)
-      (do
-        (display/print-error (messages/t :etl/clone-failed {:error (:error clone-result)}))
-        1)
-      (let [repo-path (:path clone-result)]
-        (try
-          (let [analysis (repo-analyzer/analyze-repo repo-path)]
-            (display/print-success (messages/t :etl/analysis-complete))
-            (println (messages/t :etl/technologies {:value (pr-str (:technologies analysis))}))
-            (println (messages/t :etl/git-host {:value (get analysis :git-host "unknown")}))
-            (println (messages/t :etl/packs {:value (pr-str (:packs analysis))}))
-            (println)
-            (println (display/style (messages/t :etl/install-note) :foreground :yellow))
-            0)
-          (catch Exception e
-            (display/print-error (messages/t :etl/analysis-failed {:error (ex-message e)}))
-            1)
-          (finally
-            (try (fs/delete-tree repo-path)
-                 (catch Exception _ nil))))))))
-
-;------------------------------------------------------------------------------ Layer 2
-
-(defn- ^{:stratum 2} resolve-pack-paths
-  "Given the positional arg to `etl run` / `etl validate` and the `--env`
-   flag, return `[pipeline-path env-path]` as absolute file paths, or
-   throw ex-info on an unresolvable input.
-
-   - If `pack-or-pipeline` is a directory, look for one `pipelines/*.edn`.
-   - If it's an .edn file, use it as the pipeline.
-   - `env` may be a path or a bare env name that resolves to
-     `<pack>/envs/<name>.edn` when pack-or-pipeline is a directory."
-  [pack-or-pipeline env]
-  (let [[pack-dir pipeline-path] (resolve-pipeline-path pack-or-pipeline)
-        env-path                 (resolve-env-path env pack-dir)]
-    [pipeline-path env-path]))
-
 ;; Command implementations
-(defn ^{:stratum 2} etl-repo-cmd
+(defn ^{:stratum 0} etl-repo-cmd
   "Run the ETL pipeline against a git repository URL.
 
    Clones the repository, extracts structured metadata (languages, packs,
@@ -220,35 +62,33 @@
   (let [{:keys [url]} opts]
     (if-not url
       (shared/usage-error! :etl/repo-usage "etl repo <url>")
-      (if-not (validate-git-url url)
+      (if-not (etl-repo/validate-git-url url)
         (do (display/print-error (messages/t :etl/invalid-url {:url url}))
             (shared/exit! 1))
         (do
           (display/print-info (messages/t :etl/running {:url url}))
-          (let [exit-code (analyze-repo-url! url)]
+          (let [exit-code (etl-repo/analyze-repo-url! url)]
             (when (pos? exit-code)
               (shared/exit! exit-code))))))))
 
-(defn ^{:stratum 2} etl-list-cmd
+(defn ^{:stratum 0} etl-list-cmd
   "List pipeline EDN files discovered under a search path.
 
    Usage: miniforge etl list [<search-path>]
           (defaults to `.`)"
   [opts]
   (let [path (get opts :paths ".")]
-    (shared/exit! (shell-etl! ["list" path]))))
+    (shared/exit! (etl-shell/shell-etl! ["list" path]))))
 
-(defn ^{:stratum 2} etl-registry-cmd
+(defn ^{:stratum 0} etl-registry-cmd
   "Export the product-owned ETL state-variable registry as EDN or JSON."
   [opts]
   (if-let [out (:out opts)]
-    (shared/exit! (shell-etl! ["registry" "--out" out]))
+    (shared/exit! (etl-shell/shell-etl! ["registry" "--out" out]))
     (shared/usage-error! :etl/registry-usage
                          "etl registry --out <registry.edn|.json>")))
 
-;------------------------------------------------------------------------------ Layer 3
-
-(defn ^{:stratum 3} etl-run-cmd
+(defn ^{:stratum 0} etl-run-cmd
   "Execute a Data Foundry ETL pack.
 
    Usage:
@@ -270,7 +110,7 @@
                                 " [--workbench-out <snapshot.json> --experiment-id <id> --label <label>"
                                 " --source-hash <sha256:...> [--baseline <snapshot.json>]]"))
       (try
-        (let [[pipeline-path env-path] (resolve-pack-paths pack env)
+        (let [[pipeline-path env-path] (etl-paths/resolve-pack-paths pack env)
               args (cond-> ["run" pipeline-path "--env" env-path]
                      out            (into ["--out" out])
                      workbench-out  (into ["--workbench-out" workbench-out])
@@ -280,12 +120,12 @@
                      baseline       (into ["--baseline" baseline])
                      snapshot-id    (into ["--snapshot-id" snapshot-id])
                      run-id         (into ["--run-id" run-id]))]
-          (shared/exit! (shell-etl! args)))
+          (shared/exit! (etl-shell/shell-etl! args)))
         (catch clojure.lang.ExceptionInfo e
           (display/print-error (ex-message e))
           (shared/exit! 1))))))
 
-(defn ^{:stratum 3} etl-validate-cmd
+(defn ^{:stratum 0} etl-validate-cmd
   "Load + resolve a pack without executing. Surfaces loader, env, or
    resolver errors.
 
@@ -296,8 +136,8 @@
       (shared/usage-error! :etl/validate-usage
                            "etl validate <pack-dir-or-pipeline.edn> --env <env.edn|name>")
       (try
-        (let [[pipeline-path env-path] (resolve-pack-paths pack env)]
-          (shared/exit! (shell-etl! ["validate" pipeline-path "--env" env-path])))
+        (let [[pipeline-path env-path] (etl-paths/resolve-pack-paths pack env)]
+          (shared/exit! (etl-shell/shell-etl! ["validate" pipeline-path "--env" env-path])))
         (catch clojure.lang.ExceptionInfo e
           (display/print-error (ex-message e))
           (shared/exit! 1))))))
