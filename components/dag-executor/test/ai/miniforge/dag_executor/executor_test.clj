@@ -336,8 +336,8 @@
 
 (deftest clone-and-checkout!-success-test
   (testing "Successful clone + checkout returns ok with :cloned? and :branch.
-            Two commands are issued in order: git clone then git checkout.
-            Both use vector form so no shell metacharacter expansion occurs."
+            Both commands use vector form (no shell) and clone includes \"--\"
+            before the repo URL to prevent option injection."
     (let [exec (mock-executor :worktree)
           ret  (sut/clone-and-checkout! exec "env-1"
                                         "https://example.com/r.git"
@@ -350,13 +350,15 @@
       (is (true? (-> ret :data :cloned?)))
       (is (= "feature/x" (-> ret :data :branch)))
       (is (= 2 (count cmds)))
-      ;; Commands must be vectors — never strings — so ProcessBuilder can exec
-      ;; git directly without a shell (prevents shell injection on user-supplied
-      ;; repo-url and branch values).
+      ;; Commands are vectors so ProcessBuilder exec's git directly, no shell.
       (is (vector? (first cmds)))
       (is (= "git" (first (first cmds))))
       (is (= "clone" (second (first cmds))))
-      (is (some #{"https://example.com/r.git"} (first cmds)))
+      ;; "--" end-of-options separator must precede repo-url to block option injection.
+      (let [clone-cmd (first cmds)
+            sep-idx   (.indexOf ^java.util.List clone-cmd "--")]
+        (is (pos? sep-idx) "\"--\" must appear after git clone [opts]")
+        (is (= "https://example.com/r.git" (nth clone-cmd (inc sep-idx)))))
       (is (= ["git" "checkout" "feature/x"] (second cmds))))))
 
 (deftest clone-and-checkout!-with-depth-option-test
@@ -420,3 +422,16 @@
       (is (= 2 (count (filter #(= :execute (first %)) @(:calls exec)))))
       ;; The checkout result is what we get back.
       (is (= 1 (:exit-code (:data ret)))))))
+
+(deftest clone-and-checkout!-rejects-dash-prefix-branch-test
+  (testing "A branch name starting with '-' is rejected before any git command runs"
+    (let [exec (mock-executor :worktree)
+          ret  (sut/clone-and-checkout! exec "env-1"
+                                        "https://example.com/r.git"
+                                        "-evil-option"
+                                        {})]
+      (is (result/err? ret))
+      (is (= :invalid-branch (:error ret)))
+      ;; No execute! calls should be made — rejection is a pure guard.
+      (is (zero? (count (filter #(= :execute (first %)) @(:calls exec))))
+          "no git commands should run for an invalid branch"))))
