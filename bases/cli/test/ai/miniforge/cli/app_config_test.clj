@@ -19,6 +19,8 @@
   (:require
    [clojure.test :refer [deftest is testing]]
    [ai.miniforge.cli.app-config :as app-config]
+   [ai.miniforge.cli.app-config.paths :as paths]
+   [ai.miniforge.cli.app-config.profile :as profile]
    [ai.miniforge.cli.resource-config :as resource-config]))
 
 ;------------------------------------------------------------------------------ Layer 0
@@ -48,16 +50,16 @@
 
 (deftest ^{:stratum 0} home-dir-prefers-miniforge-home-env-test
   (testing "MINIFORGE_HOME overrides the default CLI home path"
-    (with-redefs [app-config/getenv (fn [var-name]
-                                      (when (= "MINIFORGE_HOME" var-name)
-                                        "/tmp/mf-home"))
-                  app-config/default-home-dir (constantly "/Users/test/.miniforge")]
+    (with-redefs [profile/getenv (fn [var-name]
+                                   (when (= "MINIFORGE_HOME" var-name)
+                                     "/tmp/mf-home"))
+                  paths/default-home-dir (constantly "/Users/test/.miniforge")]
       (is (= "/tmp/mf-home" (app-config/home-dir)))
       (is (= "/tmp/mf-home/events" (app-config/events-dir))))))
 
 (deftest ^{:stratum 0} home-dir-falls-back-to-profile-based-default-test
   (testing "default CLI home path stays profile-derived when MINIFORGE_HOME is unset"
-    (with-redefs [app-config/getenv (constantly nil)
-                  app-config/default-home-dir (constantly "/Users/test/.miniforge-core")]
+    (with-redefs [profile/getenv (constantly nil)
+                  paths/default-home-dir (constantly "/Users/test/.miniforge-core")]
       (is (= "/Users/test/.miniforge-core" (app-config/home-dir)))
       (is (= "/Users/test/.miniforge-core/config.edn" (app-config/config-path))))))
