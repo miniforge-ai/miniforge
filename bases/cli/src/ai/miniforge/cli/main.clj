@@ -40,7 +40,6 @@
   (:require
    [babashka.cli :as cli]
    [babashka.fs :as fs]
-   [babashka.process :as process]
    [clojure.string :as str]
    [ai.miniforge.cli.app-config :as app-config]
    [ai.miniforge.cli.messages :as messages]
@@ -87,76 +86,11 @@
 
 ;------------------------------------------------------------------------------ Layer 0
 
-;; Composition seams (optional web/TUI providers) and pure helpers
-(defn- ^{:stratum 0} optional-composition-var
-  "Resolve a provider whose entire component is optional for this CLI product.
-   This is the CLI's only late-binding boundary: miniforge-core loads this
-   namespace without web-dashboard or TUI components on its classpath."
-  [ns-sym var-sym]
-  (try
-    (require ns-sym)
-    (ns-resolve ns-sym var-sym)
-    (catch Throwable _ nil)))
-
-(defn- ^{:stratum 0} caught-message
-  [caught throwable]
-  (cond
-    (instance? Throwable caught)
-    (or (.getMessage ^Throwable caught)
-        (some-> caught class .getName)
-        "unknown exception")
-
-    throwable
-    (or (.getMessage ^Throwable throwable)
-        (some-> throwable class .getName)
-        "unknown exception")
-
-    :else
-    (str caught)))
-
 ;; ── Constants and pure helpers ──────────────────────────────────────────────
 (def ^{:stratum 0} version-info
   {:name (app-config/binary-name)
    :version "2026.01.20.1"
    :description (app-config/description)})
-
-(defn ^{:stratum 0} current-time-ms
-  "Current epoch time in milliseconds. Public so CLI tests can rebind it."
-  []
-  (System/currentTimeMillis))
-
-(defn ^{:stratum 0} get-opts
-  "Extract opts from dispatch result."
-  [m]
-  (if (contains? m :opts)
-    (:opts m)
-    m))
-
-(defn ^{:stratum 0} check-command
-  "Check if a command is available."
-  [cmd]
-  (let [{:keys [exit]} (process/sh "which" cmd)]
-    (zero? exit)))
-
-(defn- ^{:stratum 0} timestamp->epoch-ms
-  [timestamp]
-  (cond
-    (instance? java.util.Date timestamp)
-    (.getTime ^java.util.Date timestamp)
-
-    (instance? java.time.Instant timestamp)
-    (.toEpochMilli ^java.time.Instant timestamp)
-
-    (string? timestamp)
-    (try
-      (.toEpochMilli (java.time.Instant/parse timestamp))
-      (catch Exception _ nil))
-
-    :else nil))
-
-(defn- ^{:stratum 0} status-label
-  [status]
-  (messages/t (keyword "status" (str "value-" (name status)))))
 
 (defn ^{:stratum 0} workflow-list-cmd [_m] (workflow-runner/list-workflows!))
 
