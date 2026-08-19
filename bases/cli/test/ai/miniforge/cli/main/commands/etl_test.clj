@@ -22,11 +22,12 @@
    [ai.miniforge.schema.interface :as schema]
    [clojure.test :refer [deftest testing is]]
    [ai.miniforge.cli.main.commands.etl :as sut]
+   [ai.miniforge.cli.main.commands.etl.repo :as etl-repo]
    [ai.miniforge.cli.main.commands.shared :as shared]))
 
 ;------------------------------------------------------------------------------ Layer 0
 
-;------------------------------------------------------------------------------ Layer 0: Factory helpers
+;; Factory helpers
 (defn ^{:stratum 0} make-etl-opts
   "Build a minimal ETL opts map for testing."
   ([]
@@ -37,22 +38,22 @@
 ;; Tests
 (deftest ^{:stratum 0} validate-git-url-test
   (testing "HTTPS URL is valid"
-    (is (true? (sut/validate-git-url "https://github.com/org/repo"))))
+    (is (true? (etl-repo/validate-git-url "https://github.com/org/repo"))))
 
   (testing "SSH URL is valid"
-    (is (true? (sut/validate-git-url "ssh://git@github.com/org/repo"))))
+    (is (true? (etl-repo/validate-git-url "ssh://git@github.com/org/repo"))))
 
   (testing "git@ URL is valid"
-    (is (true? (sut/validate-git-url "git@github.com:org/repo"))))
+    (is (true? (etl-repo/validate-git-url "git@github.com:org/repo"))))
 
   (testing "HTTP URL is valid"
-    (is (true? (sut/validate-git-url "http://github.com/org/repo"))))
+    (is (true? (etl-repo/validate-git-url "http://github.com/org/repo"))))
 
   (testing "random string is invalid"
-    (is (false? (sut/validate-git-url "not-a-url"))))
+    (is (false? (etl-repo/validate-git-url "not-a-url"))))
 
   (testing "empty string is invalid"
-    (is (false? (sut/validate-git-url "")))))
+    (is (false? (etl-repo/validate-git-url "")))))
 
 (deftest ^{:stratum 0} etl-repo-cmd-missing-url-test
   (testing "command exits with error when no url provided"
@@ -76,7 +77,7 @@
                      (make-array java.nio.file.attribute.FileAttribute 0)))
           calls (atom [])]
       (.deleteOnExit repo-dir)
-      (with-redefs-fn {#'sut/git-clone-temp
+      (with-redefs-fn {#'etl-repo/git-clone-temp
                        (fn [url]
                          (swap! calls conj [:clone url])
                          (schema/success :path (.getAbsolutePath repo-dir)))
@@ -102,7 +103,7 @@
 (deftest ^{:stratum 0} etl-repo-cmd-exits-on-clone-failure-test
   (testing "clone failures become a non-zero command exit"
     (let [exit-code (atom nil)]
-      (with-redefs-fn {#'sut/git-clone-temp
+      (with-redefs-fn {#'etl-repo/git-clone-temp
                        (fn [_url]
                          (schema/failure :path "clone failed"))
                        #'shared/exit!
@@ -121,7 +122,7 @@
                      (make-array java.nio.file.attribute.FileAttribute 0)))
           exit-code (atom nil)]
       (.deleteOnExit repo-dir)
-      (with-redefs-fn {#'sut/git-clone-temp
+      (with-redefs-fn {#'etl-repo/git-clone-temp
                        (fn [_url]
                          (schema/success :path (.getAbsolutePath repo-dir)))
                        #'repo-analyzer/analyze-repo
