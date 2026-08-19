@@ -24,7 +24,7 @@
    [ai.miniforge.cli.app-config :as app-config]
    [ai.miniforge.cli.web.response :as response]
    [ai.miniforge.cli.web.handlers :as handlers]
-   [ai.miniforge.cli.web.sse :as sse]))
+   [ai.miniforge.cli.web.sse.registry :as registry]))
 
 ;------------------------------------------------------------------------------ Layer 0
 
@@ -39,11 +39,11 @@
       (some-> edn/read-string (get-in [:fleet :repos]))
       (or [])))
 
-(def ^{:stratum 0} register-workflow-stream! sse/register!)
+(def ^{:stratum 0} register-workflow-stream! registry/register!)
 
-(def ^{:stratum 0} unregister-workflow-stream! sse/unregister!)
+(def ^{:stratum 0} unregister-workflow-stream! registry/unregister!)
 
-(def ^{:stratum 0} get-workflow-stream sse/get-stream)
+(def ^{:stratum 0} get-workflow-stream registry/get-stream)
 
 ;------------------------------------------------------------------------------ Layer 1
 
