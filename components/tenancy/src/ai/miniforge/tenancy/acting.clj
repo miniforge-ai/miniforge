@@ -41,6 +41,7 @@
    [ai.miniforge.tenancy.ids :as ids]
    [ai.miniforge.tenancy.instant :as instant]
    [ai.miniforge.tenancy.schema :as schema]
+   [clojure.string :as str]
    [malli.core :as m]))
 
 ;------------------------------------------------------------------------------ Layer 0
@@ -104,12 +105,19 @@
    forgets. Refusing here is the same rule the rest of this component
    follows."
   [acting agent-name]
-  (let [principal {:principal/id (ids/stable-id "agent-principal"
+  ;; Trimmed before the id is derived, so "reviewer" and " reviewer "
+  ;; are one agent rather than two. The id is stable-derived and 3c
+  ;; stamps it onto records, so an untrimmed name would put the same
+  ;; logical actor in the audit trail twice with no way to tell they
+  ;; were ever the same. `resolve-operator` already trims for the same
+  ;; reason.
+  (let [trimmed (some-> agent-name str/trim)
+        principal {:principal/id (ids/stable-id "agent-principal"
                                                 (str (:acting/tenant-id acting)
-                                                     "/" agent-name))
+                                                     "/" trimmed))
                    :principal/tenant-id (:acting/tenant-id acting)
                    :principal/kind :agent-instance
-                   :principal/display-name agent-name}]
+                   :principal/display-name trimmed}]
     (if (m/validate schema/Principal principal)
       principal
       ;; Name the actual cause. A refusal that blames the agent name for

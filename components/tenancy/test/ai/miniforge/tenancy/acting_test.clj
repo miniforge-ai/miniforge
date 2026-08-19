@@ -130,6 +130,25 @@
         (is (not= (:acting/principal-id (tenancy/acting-for-agent acting "reviewer"))
                   (:acting/principal-id (tenancy/acting-for-agent other "reviewer"))))))))
 
+(deftest ^{:stratum 2} agent-names-are-normalized-before-deriving-an-id-test
+  ;; The principal id is stable-derived from the name and 3c stamps it
+  ;; onto records. An untrimmed name would put the same logical actor in
+  ;; the audit trail twice with no way to tell they were ever the same.
+  (let [acting (an-acting)]
+    (is (= (:principal/id (tenancy/agent-principal acting "reviewer"))
+           (:principal/id (tenancy/agent-principal acting "  reviewer  "))
+           (:principal/id (tenancy/agent-principal acting "reviewer\n")))
+        "equivalent names are one agent, not several")
+    (is (= "reviewer" (:principal/display-name
+                       (tenancy/agent-principal acting "  reviewer  ")))
+        "and the stored name is the trimmed one")
+    (testing "the same holds through the acting context a spawned agent runs under"
+      (is (= (tenancy/acting-for-agent acting "reviewer")
+             (tenancy/acting-for-agent acting " reviewer "))))
+    (testing "but distinct names stay distinct"
+      (is (not= (:principal/id (tenancy/agent-principal acting "reviewer"))
+                (:principal/id (tenancy/agent-principal acting "re viewer")))))))
+
 (deftest ^{:stratum 2} spawning-from-a-bad-context-refuses-test
   ;; Refuse rather than mint an agent principal under a tenant that was
   ;; never established.
