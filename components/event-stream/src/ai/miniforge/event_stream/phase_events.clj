@@ -40,8 +40,8 @@
 
    The workflow runner now emits :phase/transition-request. This helper keeps
    :phase/redirect-to available only when the transition request represents a
-  redirect, so older event consumers do not break while the newer event shape
-  remains authoritative."
+   redirect, so older event consumers do not break while the newer event shape
+   remains authoritative."
   [result]
   (let [request (phase-transition-request result)
         transition-type (get request tk/transition-type-key)]
