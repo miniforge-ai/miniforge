@@ -50,6 +50,7 @@
    [ai.miniforge.cli.config :as config]
    [ai.miniforge.cli.observability :as observability]
    [ai.miniforge.cli.main.display :as display]
+   [ai.miniforge.cli.main.util :as util]
    [ai.miniforge.cli.main.commands.run :as cmd-run]
    [ai.miniforge.cli.main.commands.resume :as cmd-resume]
    [ai.miniforge.cli.main.commands.shared :as cmd-shared]
@@ -242,9 +243,7 @@
                        {:command (app-config/command-string "help")}))
   (System/exit 1))
 
-;------------------------------------------------------------------------------ Layer 1
-
-(defn- ^{:stratum 1} create-pr-train-manager
+(defn- ^{:stratum 0} create-pr-train-manager
   "Build the PR-train manager bound to `event-stream` so train
    mutations (add-pr, complete-merge) publish governed events that
    supervisory-state materializes for the consoles."
@@ -257,42 +256,42 @@
        (pr-train/create-manager))
      (catch Object e
        (println (messages/t :web/pr-train-warning
-                            {:error (caught-message e (:throwable &throw-context))}))
+                            {:error (util/caught-message e (:throwable &throw-context))}))
        nil))))
 
-(defn- ^{:stratum 1} create-repo-dag-manager
+(defn- ^{:stratum 0} create-repo-dag-manager
   []
   (try+
     (repo-dag/create-manager)
     (catch Object e
       (println (messages/t :web/repo-dag-warning
-                           {:error (caught-message e (:throwable &throw-context))}))
+                           {:error (util/caught-message e (:throwable &throw-context))}))
       nil)))
 
 ;; TUI components loaded conditionally (only in JVM/jlink bundled runtime).
 ;; This is an optional composition seam: miniforge-core includes the CLI
 ;; without bundling the JVM TUI component.
-(def ^{:stratum 1} tui-launcher
-  (optional-composition-var 'ai.miniforge.tui-views.interface 'start-standalone-tui!))
+(def ^{:stratum 0} tui-launcher
+  (util/optional-composition-var 'ai.miniforge.tui-views.interface 'start-standalone-tui!))
 
-(defn- ^{:stratum 1} stale-running?
+(defn- ^{:stratum 0} stale-running?
   [last-updated]
-  (when-let [last-updated-ms (timestamp->epoch-ms last-updated)]
+  (when-let [last-updated-ms (util/timestamp->epoch-ms last-updated)]
     (let [configured-threshold-ms (:running-stale-threshold-ms (app-config/status-config))
           default-threshold-ms (:running-stale-threshold-ms app-config/default-status-config)
           threshold-ms (if (nat-int? configured-threshold-ms)
                          configured-threshold-ms
                          default-threshold-ms)]
-      (> (- (current-time-ms) last-updated-ms)
+      (> (- (util/current-time-ms) last-updated-ms)
          threshold-ms))))
 
-(defn- ^{:stratum 1} print-workflow-status
+(defn- ^{:stratum 0} print-workflow-status
   [{:keys [workflow-id status spec-name event-count completed-phases
            completed-dag-task-count last-updated]}]
   (let [unknown (messages/t :status/value-unknown)
         none    (messages/t :status/value-none)]
     (display/print-info (messages/t :status/workflow {:workflow-id workflow-id}))
-    (println (messages/t :status/field-status {:value (status-label status)}))
+    (println (messages/t :status/field-status {:value (util/status-label status)}))
     (println (messages/t :status/field-spec {:value (or spec-name unknown)}))
     (println (messages/t :status/field-events {:value event-count}))
     (println (messages/t :status/field-last-updated {:value (or last-updated unknown)}))
@@ -303,20 +302,14 @@
     (println (messages/t :status/field-completed-dag-tasks
                          {:value completed-dag-task-count}))))
 
-;; Command implementations
-(defn ^{:stratum 1} version-cmd
-  [_m]
-  (println (str (:name version-info) " " (:version version-info)))
-  (println (:description version-info)))
-
-(defn ^{:stratum 1} doctor-cmd
+(defn ^{:stratum 0} doctor-cmd
   [_m]
   (println "\n" (display/style (app-config/system-check-title) :foreground :cyan :bold true) "\n")
 
   (let [checks (messages/t :doctor/checks)]
 
     (doseq [[cmd name desc] checks]
-      (let [available? (check-command cmd)
+      (let [available? (util/check-command cmd)
             status (if available?
                      (display/style "✓" :foreground :green)
                      (display/style "✗" :foreground :red))
@@ -343,28 +336,28 @@
     (println)))
 
 ;; Config commands — one-liner delegates
-(defn ^{:stratum 1} config-init-cmd [m] (config/cmd-init (get-opts m)))
+(defn ^{:stratum 0} config-init-cmd [m] (config/cmd-init (util/get-opts m)))
 
-(defn ^{:stratum 1} config-list-cmd [m] (config/cmd-list (get-opts m)))
+(defn ^{:stratum 0} config-list-cmd [m] (config/cmd-list (util/get-opts m)))
 
-(defn ^{:stratum 1} config-get-cmd [m] (config/cmd-get (get-opts m)))
+(defn ^{:stratum 0} config-get-cmd [m] (config/cmd-get (util/get-opts m)))
 
-(defn ^{:stratum 1} config-set-cmd [m] (config/cmd-set (get-opts m)))
+(defn ^{:stratum 0} config-set-cmd [m] (config/cmd-set (util/get-opts m)))
 
-(defn ^{:stratum 1} config-edit-cmd [m] (config/cmd-edit (get-opts m)))
+(defn ^{:stratum 0} config-edit-cmd [m] (config/cmd-edit (util/get-opts m)))
 
-(defn ^{:stratum 1} config-reset-cmd [m] (config/cmd-reset (get-opts m)))
+(defn ^{:stratum 0} config-reset-cmd [m] (config/cmd-reset (util/get-opts m)))
 
-(defn ^{:stratum 1} config-backends-cmd [m] (config/cmd-backends (get-opts m)))
+(defn ^{:stratum 0} config-backends-cmd [m] (config/cmd-backends (util/get-opts m)))
 
-(defn ^{:stratum 1} config-backend-cmd [m] (config/cmd-backend (get-opts m)))
+(defn ^{:stratum 0} config-backend-cmd [m] (config/cmd-backend (util/get-opts m)))
 
-(defn ^{:stratum 1} config-validate-cmd [m] (config/cmd-validate (get-opts m)))
+(defn ^{:stratum 0} config-validate-cmd [m] (config/cmd-validate (util/get-opts m)))
 
 ;; Workflow commands
-(defn ^{:stratum 1} workflow-run-cmd
+(defn ^{:stratum 0} workflow-run-cmd
   [m]
-  (let [{:keys [workflow-id version input input-json output quiet dashboard-url]} (get-opts m)]
+  (let [{:keys [workflow-id version input input-json output quiet dashboard-url]} (util/get-opts m)]
     (if-not workflow-id
       (display/print-error (messages/t :workflow-run/usage
                                        {:command (app-config/command-string "workflow run <workflow-id> [options]")}))
@@ -382,20 +375,20 @@
                                            {:error (ex-message e)})))))))
 
 ;; Workflow subcommands — spec-driven execution and lifecycle (N5)
-(defn ^{:stratum 1} workflow-execute-cmd [m] (cmd-workflow/workflow-execute-cmd (get-opts m)))
+(defn ^{:stratum 0} workflow-execute-cmd [m] (cmd-workflow/workflow-execute-cmd (util/get-opts m)))
 
-(defn ^{:stratum 1} workflow-inspect-cmd [m] (cmd-workflow/workflow-inspect-cmd (get-opts m)))
+(defn ^{:stratum 0} workflow-inspect-cmd [m] (cmd-workflow/workflow-inspect-cmd (util/get-opts m)))
 
-(defn ^{:stratum 1} workflow-status-cmd  [m] (cmd-workflow/workflow-status-cmd  (get-opts m)))
+(defn ^{:stratum 0} workflow-status-cmd  [m] (cmd-workflow/workflow-status-cmd  (util/get-opts m)))
 
-(defn ^{:stratum 1} workflow-cancel-cmd  [m] (cmd-workflow/workflow-cancel-cmd  (get-opts m)))
+(defn ^{:stratum 0} workflow-cancel-cmd  [m] (cmd-workflow/workflow-cancel-cmd  (util/get-opts m)))
 
-(defn ^{:stratum 1} workflow-gc-scratch-cmd [m] (cmd-workflow/workflow-gc-scratch-cmd (get-opts m)))
+(defn ^{:stratum 0} workflow-gc-scratch-cmd [m] (cmd-workflow/workflow-gc-scratch-cmd (util/get-opts m)))
 
 ;; Chain commands
-(defn ^{:stratum 1} chain-run-cmd
+(defn ^{:stratum 0} chain-run-cmd
   [m]
-  (let [{:keys [chain-id version spec input-json quiet]} (get-opts m)]
+  (let [{:keys [chain-id version spec input-json quiet]} (util/get-opts m)]
     (if-not chain-id
       (display/print-error (messages/t :chain-run/usage
                                        {:command (app-config/command-string "chain run <chain-id> [options]")}))
@@ -411,25 +404,25 @@
                                            {:error (ex-message e)})))))))
 
 ;; Observability commands
-(defn ^{:stratum 1} logs-tail-cmd [m] (observability/handle-logs (assoc (get-opts m) :subcommand "tail")))
+(defn ^{:stratum 0} logs-tail-cmd [m] (observability/handle-logs (assoc (util/get-opts m) :subcommand "tail")))
 
-(defn ^{:stratum 1} events-tail-cmd [m] (observability/handle-events (assoc (get-opts m) :subcommand "tail")))
+(defn ^{:stratum 0} events-tail-cmd [m] (observability/handle-events (assoc (util/get-opts m) :subcommand "tail")))
 
-(defn ^{:stratum 1} events-show-cmd
+(defn ^{:stratum 0} events-show-cmd
   "Render a human-readable timeline for a workflow from the local event log.
    Delegates to the GROUP 3b events command module."
   [m]
-  (cmd-events/events-show-cmd (get-opts m)))
+  (cmd-events/events-show-cmd (util/get-opts m)))
 
 ;; Delegated commands
-(defn ^{:stratum 1} run-cmd [m] (cmd-run/run-cmd (get-opts m)))
+(defn ^{:stratum 0} run-cmd [m] (cmd-run/run-cmd (util/get-opts m)))
 
-(defn ^{:stratum 1} resume-cmd
+(defn ^{:stratum 0} resume-cmd
   "First-class `mf resume <workflow-id>` subcommand. The `<workflow-id>`
    can be passed positionally, or via `--workflow-id`/`-w` / the legacy
    `--resume`/`-r` flag (kept so existing docs keep working)."
   [m]
-  (let [opts (get-opts m)
+  (let [opts (util/get-opts m)
         args (:args m)
         wf-id (or (:workflow-id opts)
                   (:resume opts)
@@ -438,87 +431,87 @@
       (display/print-error (messages/t :resume/missing-workflow-id))
       (cmd-resume/resume-workflow wf-id opts))))
 
-(defn ^{:stratum 1} scan-cmd [m] (cmd-scan/scan-cmd (get-opts m)))
+(defn ^{:stratum 0} scan-cmd [m] (cmd-scan/scan-cmd (util/get-opts m)))
 
-(defn ^{:stratum 1} init-cmd [m] (cmd-init/init-cmd (get-opts m)))
+(defn ^{:stratum 0} init-cmd [m] (cmd-init/init-cmd (util/get-opts m)))
 
-(defn ^{:stratum 1} web-cmd [m] (cmd-monitoring/web-cmd (get-opts m)))
+(defn ^{:stratum 0} web-cmd [m] (cmd-monitoring/web-cmd (util/get-opts m)))
 
-(defn ^{:stratum 1} tui-cmd [m] (cmd-monitoring/tui-cmd (get-opts m)))
+(defn ^{:stratum 0} tui-cmd [m] (cmd-monitoring/tui-cmd (util/get-opts m)))
 
-(defn ^{:stratum 1} fleet-start-cmd [m] (cmd-fleet/fleet-start-cmd (get-opts m)))
+(defn ^{:stratum 0} fleet-start-cmd [m] (cmd-fleet/fleet-start-cmd (util/get-opts m)))
 
-(defn ^{:stratum 1} fleet-stop-cmd [m] (cmd-fleet/fleet-stop-cmd (get-opts m)))
+(defn ^{:stratum 0} fleet-stop-cmd [m] (cmd-fleet/fleet-stop-cmd (util/get-opts m)))
 
-(defn ^{:stratum 1} fleet-status-cmd [m] (cmd-fleet/fleet-status-cmd (get-opts m) config/default-user-config-path config/default-config))
+(defn ^{:stratum 0} fleet-status-cmd [m] (cmd-fleet/fleet-status-cmd (util/get-opts m) config/default-user-config-path config/default-config))
 
-(defn ^{:stratum 1} fleet-add-cmd [m] (cmd-fleet/fleet-add-cmd (get-opts m) config/default-user-config-path config/default-config))
+(defn ^{:stratum 0} fleet-add-cmd [m] (cmd-fleet/fleet-add-cmd (util/get-opts m) config/default-user-config-path config/default-config))
 
-(defn ^{:stratum 1} fleet-remove-cmd [m] (cmd-fleet/fleet-remove-cmd (get-opts m) config/default-user-config-path config/default-config))
+(defn ^{:stratum 0} fleet-remove-cmd [m] (cmd-fleet/fleet-remove-cmd (util/get-opts m) config/default-user-config-path config/default-config))
 
-(defn ^{:stratum 1} fleet-watch-cmd [m] (cmd-fleet/fleet-watch-cmd (get-opts m)))
+(defn ^{:stratum 0} fleet-watch-cmd [m] (cmd-fleet/fleet-watch-cmd (util/get-opts m)))
 
-(defn ^{:stratum 1} fleet-prs-cmd [m] (cmd-fleet/fleet-prs-cmd (get-opts m) config/default-user-config-path config/default-config))
+(defn ^{:stratum 0} fleet-prs-cmd [m] (cmd-fleet/fleet-prs-cmd (util/get-opts m) config/default-user-config-path config/default-config))
 
-(defn ^{:stratum 1} pr-list-cmd [m]
-  (cmd-pr/pr-list-cmd (get-opts m)
+(defn ^{:stratum 0} pr-list-cmd [m]
+  (cmd-pr/pr-list-cmd (util/get-opts m)
                       (fn [config-path]
                         (cmd-fleet/load-config config-path config/default-user-config-path config/default-config))))
 
-(defn ^{:stratum 1} pr-review-cmd [m] (cmd-pr/pr-review-cmd (get-opts m)))
+(defn ^{:stratum 0} pr-review-cmd [m] (cmd-pr/pr-review-cmd (util/get-opts m)))
 
-(defn ^{:stratum 1} pr-respond-cmd [m] (cmd-pr/pr-respond-cmd (get-opts m)))
+(defn ^{:stratum 0} pr-respond-cmd [m] (cmd-pr/pr-respond-cmd (util/get-opts m)))
 
-(defn ^{:stratum 1} pr-merge-cmd [m] (cmd-pr/pr-merge-cmd (get-opts m)))
+(defn ^{:stratum 0} pr-merge-cmd [m] (cmd-pr/pr-merge-cmd (util/get-opts m)))
 
-(defn ^{:stratum 1} pr-monitor-cmd [m] (cmd-pr/pr-monitor-cmd (get-opts m)))
+(defn ^{:stratum 0} pr-monitor-cmd [m] (cmd-pr/pr-monitor-cmd (util/get-opts m)))
 
-(defn ^{:stratum 1} pr-review-monitor-cmd [m] (cmd-pr-review-monitor/pr-review-monitor-cmd (get-opts m)))
+(defn ^{:stratum 0} pr-review-monitor-cmd [m] (cmd-pr-review-monitor/pr-review-monitor-cmd (util/get-opts m)))
 
-(defn ^{:stratum 1} pr-resume-dispatcher-cmd [m] (cmd-pr-resume/pr-resume-dispatcher-cmd (get-opts m)))
+(defn ^{:stratum 0} pr-resume-dispatcher-cmd [m] (cmd-pr-resume/pr-resume-dispatcher-cmd (util/get-opts m)))
 
-(defn ^{:stratum 1} pr-policy-respond-cmd [m] (cmd-pr-policy/pr-policy-respond-cmd (get-opts m)))
+(defn ^{:stratum 0} pr-policy-respond-cmd [m] (cmd-pr-policy/pr-policy-respond-cmd (util/get-opts m)))
 
 ;; Control Plane commands
-(defn ^{:stratum 1} cp-status-cmd [m] (cmd-cp/status-cmd (get-opts m)))
+(defn ^{:stratum 0} cp-status-cmd [m] (cmd-cp/status-cmd (util/get-opts m)))
 
-(defn ^{:stratum 1} cp-decisions-cmd [m] (cmd-cp/decisions-cmd (get-opts m)))
+(defn ^{:stratum 0} cp-decisions-cmd [m] (cmd-cp/decisions-cmd (util/get-opts m)))
 
-(defn ^{:stratum 1} cp-resolve-cmd [m] (cmd-cp/resolve-cmd (get-opts m)))
+(defn ^{:stratum 0} cp-resolve-cmd [m] (cmd-cp/resolve-cmd (util/get-opts m)))
 
-(defn ^{:stratum 1} cp-terminate-cmd [m] (cmd-cp/terminate-cmd (get-opts m)))
+(defn ^{:stratum 0} cp-terminate-cmd [m] (cmd-cp/terminate-cmd (util/get-opts m)))
 
 ;; Policy commands (N5)
-(defn ^{:stratum 1} policy-list-cmd    [m] (cmd-policy/policy-list-cmd    (get-opts m)))
+(defn ^{:stratum 0} policy-list-cmd    [m] (cmd-policy/policy-list-cmd    (util/get-opts m)))
 
-(defn ^{:stratum 1} policy-show-cmd    [m] (cmd-policy/policy-show-cmd    (get-opts m)))
+(defn ^{:stratum 0} policy-show-cmd    [m] (cmd-policy/policy-show-cmd    (util/get-opts m)))
 
-(defn ^{:stratum 1} policy-install-cmd [m] (cmd-policy/policy-install-cmd (get-opts m)))
+(defn ^{:stratum 0} policy-install-cmd [m] (cmd-policy/policy-install-cmd (util/get-opts m)))
 
 ;; Evidence commands (N5)
-(defn ^{:stratum 1} evidence-list-cmd   [m] (cmd-evidence/evidence-list-cmd   (get-opts m)))
+(defn ^{:stratum 0} evidence-list-cmd   [m] (cmd-evidence/evidence-list-cmd   (util/get-opts m)))
 
-(defn ^{:stratum 1} evidence-show-cmd   [m] (cmd-evidence/evidence-show-cmd   (get-opts m)))
+(defn ^{:stratum 0} evidence-show-cmd   [m] (cmd-evidence/evidence-show-cmd   (util/get-opts m)))
 
-(defn ^{:stratum 1} evidence-export-cmd [m] (cmd-evidence/evidence-export-cmd (get-opts m)))
+(defn ^{:stratum 0} evidence-export-cmd [m] (cmd-evidence/evidence-export-cmd (util/get-opts m)))
 
 ;; Artifact commands (N5)
-(defn ^{:stratum 1} artifact-list-cmd       [m] (cmd-artifact/artifact-list-cmd       (get-opts m)))
+(defn ^{:stratum 0} artifact-list-cmd       [m] (cmd-artifact/artifact-list-cmd       (util/get-opts m)))
 
-(defn ^{:stratum 1} artifact-provenance-cmd [m] (cmd-artifact/artifact-provenance-cmd (get-opts m)))
+(defn ^{:stratum 0} artifact-provenance-cmd [m] (cmd-artifact/artifact-provenance-cmd (util/get-opts m)))
 
 ;; ETL commands (N5)
-(defn ^{:stratum 1} etl-repo-cmd     [m] (cmd-etl/etl-repo-cmd     (get-opts m)))
+(defn ^{:stratum 0} etl-repo-cmd     [m] (cmd-etl/etl-repo-cmd     (util/get-opts m)))
 
-(defn ^{:stratum 1} etl-run-cmd      [m] (cmd-etl/etl-run-cmd      (get-opts m)))
+(defn ^{:stratum 0} etl-run-cmd      [m] (cmd-etl/etl-run-cmd      (util/get-opts m)))
 
-(defn ^{:stratum 1} etl-list-cmd     [m] (cmd-etl/etl-list-cmd     (get-opts m)))
+(defn ^{:stratum 0} etl-list-cmd     [m] (cmd-etl/etl-list-cmd     (util/get-opts m)))
 
-(defn ^{:stratum 1} etl-validate-cmd [m] (cmd-etl/etl-validate-cmd (get-opts m)))
+(defn ^{:stratum 0} etl-validate-cmd [m] (cmd-etl/etl-validate-cmd (util/get-opts m)))
 
-(defn ^{:stratum 1} etl-registry-cmd [m] (cmd-etl/etl-registry-cmd (get-opts m)))
+(defn ^{:stratum 0} etl-registry-cmd [m] (cmd-etl/etl-registry-cmd (util/get-opts m)))
 
-(defn ^{:stratum 1} context-server-cmd
+(defn ^{:stratum 0} context-server-cmd
   "Run the MCP context server (internal — spawned as subprocess by the agent).
 
    Reads JSON-RPC 2.0 from stdin, serves context_read/context_grep/context_glob
@@ -526,15 +519,21 @@
    writes to --workdir (the agent's worktree). Invoked automatically; not
    intended for direct user use."
   [m]
-  (let [{:keys [artifact-dir source-root workdir]} (get-opts m)]
+  (let [{:keys [artifact-dir source-root workdir]} (util/get-opts m)]
     (mcp-context-server/start-server artifact-dir source-root workdir)))
 
-;------------------------------------------------------------------------------ Layer 2
+;------------------------------------------------------------------------------ Layer 1
 
-(defn- ^{:stratum 2} optional-web-launcher
+;; Command implementations
+(defn ^{:stratum 1} version-cmd
+  [_m]
+  (println (str (:name version-info) " " (:version version-info)))
+  (println (:description version-info)))
+
+(defn- ^{:stratum 1} optional-web-launcher
   "Compose the dashboard command when the product includes web-dashboard."
   []
-  (when-let [start! (optional-composition-var
+  (when-let [start! (util/optional-composition-var
                      'ai.miniforge.web-dashboard.interface
                      'start!)]
     (fn [{:keys [port]}]
@@ -547,10 +546,10 @@
                  :pr-train-manager pr-train-manager
                  :repo-dag-manager repo-dag-manager})))))
 
-(def ^{:stratum 2} tui-available?
+(def ^{:stratum 1} tui-available?
   (some? tui-launcher))
 
-(defn- ^{:stratum 2} reconstructed-status
+(defn- ^{:stratum 1} reconstructed-status
   [reconstructed last-updated]
   (cond
     (wr/completed? reconstructed) :completed
@@ -559,12 +558,12 @@
     (stale-running? last-updated) :stale
     :else :running))
 
-;------------------------------------------------------------------------------ Layer 3
+;------------------------------------------------------------------------------ Layer 2
 
-(def ^{:stratum 3} web-launcher
+(def ^{:stratum 2} web-launcher
   (optional-web-launcher))
 
-(defn- ^{:stratum 3} workflow-status-summary
+(defn- ^{:stratum 2} workflow-status-summary
   [workflow-id]
   (let [events-dir (app-config/events-dir)
         events (es/read-workflow-events-by-id events-dir workflow-id)
@@ -580,12 +579,12 @@
      :completed-dag-task-count (count (:completed-dag-tasks reconstructed))
      :last-updated (:event/timestamp last-event)}))
 
-;------------------------------------------------------------------------------ Layer 4
+;------------------------------------------------------------------------------ Layer 3
 
-(def ^{:stratum 4} web-available?
+(def ^{:stratum 3} web-available?
   (some? web-launcher))
 
-(defn- ^{:stratum 4} all-workflow-summaries
+(defn- ^{:stratum 3} all-workflow-summaries
   []
   (let [events-dir (app-config/events-dir)]
     (if (fs/exists? events-dir)
@@ -599,11 +598,11 @@
            (sort-by :last-updated #(compare %2 %1)))
       [])))
 
-;------------------------------------------------------------------------------ Layer 5
+;------------------------------------------------------------------------------ Layer 4
 
-(defn ^{:stratum 5} status-cmd
+(defn ^{:stratum 4} status-cmd
   [m]
-  (let [{:keys [workflow-id]} (get-opts m)]
+  (let [{:keys [workflow-id]} (util/get-opts m)]
     (if workflow-id
       (try
         (print-workflow-status (workflow-status-summary (str workflow-id)))
@@ -617,16 +616,16 @@
           (doseq [{:keys [workflow-id status spec-name last-updated]} summaries]
             (println (messages/t :status/summary-row
                                  {:workflow-id (format "%-36s" workflow-id)
-                                  :status      (format "%-10s" (status-label status))
+                                  :status      (format "%-10s" (util/status-label status))
                                   :spec-name   (or spec-name unknown)}))
             (println (messages/t :status/summary-last-updated
                                  {:value (or last-updated unknown)})))
           (println (str "  " none)))))))
 
-;------------------------------------------------------------------------------ Layer 6
+;------------------------------------------------------------------------------ Layer 5
 
 ;; CLI dispatch
-(def ^{:stratum 6} dispatch-table
+(def ^{:stratum 5} dispatch-table
   [{:cmds ["version"] :fn version-cmd}
    {:cmds ["doctor"]  :fn doctor-cmd}
    {:cmds ["help"]    :fn help-cmd}
@@ -896,9 +895,9 @@
    {:cmds ["etl" "validate"]  :fn etl-validate-cmd :args->opts [:pack]}
    {:cmds ["etl" "registry"]  :fn etl-registry-cmd}])
 
-;------------------------------------------------------------------------------ Layer 7
+;------------------------------------------------------------------------------ Layer 6
 
-(defn ^{:stratum 7} -main
+(defn ^{:stratum 6} -main
   "CLI entry point."
   [& args]
   (try+
@@ -921,7 +920,7 @@
    'ai.miniforge.tui-views.interface/start-standalone-tui!
    tui-launcher))
 
-(when-let [start-fleet-tui! (optional-composition-var 'ai.miniforge.tui-views.interface
+(when-let [start-fleet-tui! (util/optional-composition-var 'ai.miniforge.tui-views.interface
                                                       'start-fleet-tui!)]
   (cmd-shared/register-optional-fn!
    'ai.miniforge.tui-views.interface/start-fleet-tui!
