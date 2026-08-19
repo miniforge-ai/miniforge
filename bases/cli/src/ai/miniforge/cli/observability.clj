@@ -22,367 +22,38 @@
    - logs tail <workflow-id>  - Tail logs for specific workflow
    - logs tail --all          - Tail all workflow logs (aggregated)
    - events tail <workflow-id> - Tail events for specific workflow
-   - events tail --all         - Tail all workflow events (aggregated)"
+   - events tail --all         - Tail all workflow events (aggregated)
+
+   Layer 0: tail-logs, tail-events (over the observability.io /
+     observability.formatting / observability.tailing sibling namespaces)
+   Layer 1: logs-command, events-command (over Layer 0)
+   Layer 2: handle-logs, handle-events — public API (over Layer 1)
+
+   3 real strata, within the rule 210 budget. PR 2/2 of this train:
+   file path resolution and EDN log-line parsing moved to
+   `observability.io`, ANSI-color/entry formatting to
+   `observability.formatting`, and (in this PR) the workflow-timeline
+   (`workflow-events-dir`, `strip-transit-prefix`, `ts-short`,
+   `summarize-event`, `read-workflow-events`, `show-events`) and stream-
+   tailing (`show-last-n-lines`, `tail-file`, `print-stream-header`,
+   `list-files-command`, `cat-file-command`, `tail-stream-file`)
+   primitives to `observability.timeline` and `observability.tailing`
+   respectively — bringing this namespace from 7 real layers down to 3.
+   Same approach as the policy-pack loader split, miniforge#1772, and
+   detection split, miniforge#1761/#1773."
   (:require
-   [clojure.string :as str]
-   [clojure.java.io :as io]
-   [cheshire.core :as json]
    [ai.miniforge.cli.app-config :as app-config]
    [ai.miniforge.cli.messages :as messages]
+   [ai.miniforge.cli.observability.formatting :as formatting]
    [ai.miniforge.cli.observability.io :as observability-io]
+   [ai.miniforge.cli.observability.tailing :as tailing]
+   [ai.miniforge.cli.observability.timeline :as timeline]
    [ai.miniforge.logging.interface :as logging]))
 
 ;------------------------------------------------------------------------------ Layer 0
 
-;;------------------------------------------------------------------------------ ANSI Colors
-(def ^{:stratum 0} ansi-codes
-  {:reset "\u001b[0m"
-   :bold "\u001b[1m"
-   :cyan "\u001b[36m"
-   :green "\u001b[32m"
-   :yellow "\u001b[33m"
-   :red "\u001b[31m"
-   :gray "\u001b[90m"
-   :blue "\u001b[34m"
-   :magenta "\u001b[35m"})
-
-(defn ^{:stratum 0} format-timestamp [inst]
-  (when inst
-    (let [formatter (java.time.format.DateTimeFormatter/ofPattern "HH:mm:ss.SSS")]
-      (.format (java.time.LocalDateTime/ofInstant inst (java.time.ZoneId/systemDefault))
-               formatter))))
-
-;; Tailing Helpers
-(defn ^{:stratum 0} show-last-n-lines
-  "Show last N lines from a file without following.
-
-   Arguments:
-     file-path - Path to file
-     parse-fn - Function to parse each line
-     format-fn - Function to format parsed entry
-     lines - Number of lines to show
-     filter-fn - Optional predicate to filter entries"
-  [file-path parse-fn format-fn lines & [filter-fn]]
-  (let [file (io/file file-path)
-        filter-fn (or filter-fn (constantly true))]
-    (with-open [rdr (io/reader file)]
-      (doseq [line (take-last lines (line-seq rdr))]
-        (when-let [entry (parse-fn line)]
-          (when (filter-fn entry)
-            (println (format-fn entry))))))))
-
-;; Workflow timeline (show)
-(defn- ^{:stratum 0} workflow-events-dir
-  "Path to the per-workflow event directory for a given workflow id."
-  [workflow-id]
-  (io/file (app-config/events-dir) (str workflow-id)))
-
-(defn- ^{:stratum 0} strip-transit-prefix
-  "Transit-json keys arrive as '~:foo/bar'. Strip the prefix so our code
-   can use keyword accessors. Recursive walk over maps + vectors."
-  [x]
-  (cond
-    (map? x)
-    (reduce-kv (fn [acc k v]
-                 (let [k' (if (and (string? k) (.startsWith ^String k "~:"))
-                            (keyword (subs k 2))
-                            k)]
-                   (assoc acc k' (strip-transit-prefix v))))
-               {}
-               x)
-
-    (vector? x)
-    (mapv strip-transit-prefix x)
-
-    (and (string? x) (.startsWith ^String x "~:"))
-    (keyword (subs x 2))
-
-    (and (string? x) (.startsWith ^String x "~t"))
-    (subs x 2)
-
-    (and (string? x) (.startsWith ^String x "~u"))
-    (subs x 2)
-
-    :else x))
-
-(defn- ^{:stratum 0} ts-short
-  "Render the :event/timestamp field (may be a plain string after transit
-   stripping) as HH:MM:SS."
-  [ts]
-  (let [s (str ts)]
-    (cond
-      (re-find #"\d\d:\d\d:\d\d" s)
-      (first (re-find #"(\d\d:\d\d:\d\d)" s))
-      :else
-      (subs s 0 (min 8 (count s))))))
-
-(defn- ^{:stratum 0} summarize-event
-  "One-line summary for a single event. Emphasizes tool names, phase
-   outcomes, DAG decisions."
-  [ev]
-  (let [t (:event/type ev)
-        phase (:workflow/phase ev)
-        tool (:tool/name ev)
-        tool-names (:tool/names ev)
-        dag-outcome (:dag/outcome ev)
-        dag-reason (:dag/reason ev)
-        outcome (:phase/outcome ev)
-        duration (:phase/duration-ms ev)
-        err (or (:phase/error ev)
-                (get-in ev [:dag/diagnostic :result/error :error/message]))]
-    (cond
-      (= :workflow/phase-started t)
-      (str "→ " (some-> phase name) " started")
-
-      (= :workflow/phase-completed t)
-      (str "✓ " (some-> phase name) " " (some-> outcome name)
-           (when duration (format " (%.1fs)" (/ duration 1000.0)))
-           (when err (str " — " (subs (str err) 0 (min 160 (count (str err)))))))
-
-      (= :agent/tool-call t)
-      (str "  • tool " (or tool
-                           (when (seq tool-names) (str/join "," (map str tool-names)))
-                           "(unnamed)"))
-
-      (= :agent/status t)
-      (str "  · " (or (:status/type ev) "status") " — " (:message ev ""))
-
-      (= :agent/chunk t)
-      (str "  … chunk "
-           (if (:chunk/done? ev) "done" "streaming"))
-
-      (= :workflow/dag-considered t)
-      (str "⇒ DAG " (some-> dag-outcome name)
-           (when dag-reason (str " — " (name dag-reason))))
-
-      (= :workflow/started t) "▶ workflow started"
-      (= :workflow/completed t) (str "■ workflow completed — " (some-> (:workflow/status ev) name))
-      (= :workflow/failed t) (str "✗ workflow failed — " (:workflow/failure-reason ev ""))
-
-      :else (str (some-> t name)))))
-
-;------------------------------------------------------------------------------ Layer 1
-
-(defn ^{:stratum 1} colorize [color text]
-  (str (get ansi-codes color "") text (:reset ansi-codes)))
-
-(defn- ^{:stratum 1} read-workflow-events
-  "Read + parse every .json event file under the workflow directory, sorted
-   by filename (which is timestamp-prefixed)."
-  [dir]
-  (when (.exists ^java.io.File dir)
-    (->> (.listFiles ^java.io.File dir)
-         (filter #(.endsWith (.getName ^java.io.File %) ".json"))
-         (sort-by #(.getName ^java.io.File %))
-         (keep (fn [f]
-                 (try
-                   (let [raw (json/parse-string (slurp f) false)]
-                     (strip-transit-prefix raw))
-                   (catch Exception _e nil)))))))
-
-;------------------------------------------------------------------------------ Layer 2
-
-(defn ^{:stratum 2} format-log-entry
-  "Format a log entry for display.
-
-   Arguments:
-     entry - Parsed log map
-
-   Returns: Formatted string"
-  [entry]
-  (let [timestamp (format-timestamp (:timestamp entry))
-        level (:level entry)
-        level-color (case level
-                      :error :red
-                      :warn :yellow
-                      :info :cyan
-                      :debug :gray
-                      :gray)
-        message (:message entry)
-        context (:context entry)]
-    (str (colorize :gray timestamp)
-         " "
-         (colorize level-color (str/upper-case (name level)))
-         " "
-         message
-         (when (seq context)
-           (str " " (colorize :gray (pr-str context)))))))
-
-;; Event Parsing
-(defn ^{:stratum 2} format-event
-  "Format an event for display.
-
-   Arguments:
-     event - Event map
-
-   Returns: Formatted string"
-  [event]
-  (let [timestamp (format-timestamp (:event/timestamp event))
-        event-type (:event/type event)
-        type-color (case event-type
-                     :workflow/started :green
-                     :workflow/completed :green
-                     :workflow/failed :red
-                     :phase/started :cyan
-                     :phase/completed :cyan
-                     :agent/chunk :gray
-                     :error :red
-                     :blue)
-        workflow-id (:workflow/id event)
-        message (:message event)]
-    (str (colorize :gray timestamp)
-         " "
-         (colorize type-color (str "[" (name event-type) "]"))
-         " "
-         (when workflow-id
-           (str (colorize :magenta (str "wf-" (subs (str workflow-id) 0 8))) " "))
-         (or message (pr-str (dissoc event :event/timestamp :event/type :workflow/id))))))
-
-;; File Tailing
-(defn ^{:stratum 2} tail-file
-  "Tail a file and print each new line.
-
-   Arguments:
-     file-path - String path to file
-     format-fn - Function to format each line
-     lines - Number of initial lines to show (default 10)
-
-   Returns: Never (blocks forever)"
-  [file-path format-fn & [{:keys [lines] :or {lines 10}}]]
-  (let [file (io/file file-path)
-        raf (java.io.RandomAccessFile. file "r")]
-    (try
-      ;; Show last N lines
-      (let [file-length (.length file)
-            start-pos (max 0 (- file-length (* lines 200)))] ; Rough estimate
-        (.seek raf start-pos)
-        (doseq [line (line-seq (io/reader raf))]
-          (when-let [formatted (format-fn line)]
-            (println formatted))))
-
-      ;; Tail forever
-      (loop [last-pos (.length file)]
-        (Thread/sleep 500)
-        (let [current-length (.length file)]
-          (if (> current-length last-pos)
-            (do
-              (.seek raf last-pos)
-              (doseq [line (line-seq (io/reader raf))]
-                (when-let [formatted (format-fn line)]
-                  (println formatted)))
-              (recur (.length file)))
-            (recur last-pos))))
-      (catch Exception e
-        (println (colorize :red (messages/t :observability/error-tailing {:error (.getMessage e)}))))
-      (finally
-        (.close raf)))))
-
-(defn ^{:stratum 2} print-stream-header
-  "Print header for stream tailing.
-
-   Arguments:
-     icon - Icon to show (e.g., 📋 or 📊)
-     label - Stream label (e.g., 'logs' or 'events')
-     file-path - Path being tailed
-     extra-info - Optional extra info to display (e.g., filter)"
-  [icon label file-path & [extra-info]]
-  (println (colorize :cyan (messages/t :observability/tailing-header {:icon icon :label label :file-path file-path})))
-  (when extra-info
-    (println (colorize :gray extra-info)))
-  (println (colorize :gray (apply str (repeat 80 "─")))))
-
-;; Command Helpers
-(defn ^{:stratum 2} list-files-command
-  "List files with sizes.
-
-   Arguments:
-     find-fn - Function to find files
-     label - Label for output (e.g., 'log files')"
-  [find-fn label]
-  (let [files (find-fn)]
-    (if (seq files)
-      (do
-        (println (colorize :cyan (messages/t :observability/available-files {:label label})))
-        (doseq [f files]
-          (let [size-mb (/ (.length (io/file f)) 1024.0 1024.0)]
-            (println (messages/t :observability/file-entry {:path f :size (format "%.2f" size-mb)})))))
-      (println (colorize :yellow (messages/t :observability/no-files-found {:label label}))))))
-
-(defn ^{:stratum 2} cat-file-command
-  "Display contents of a file.
-
-   Arguments:
-     file - File path to display"
-  [file]
-  (if file
-    (println (slurp file))
-    (println (colorize :red (messages/t :observability/file-required)))))
-
-(defn ^{:stratum 2} show-events
-  "Render a human-readable timeline for a specific workflow.
-
-   Output per line: HH:MM:SS  summary. Filters are available via opts.
-
-   Opts:
-     :filter     — keyword event-type to include (default: show all)
-     :no-chunks  — drop :agent/chunk events (default: true; too noisy)
-     :no-status  — drop :agent/status events (default: false)"
-  [{:keys [workflow-id filter no-chunks no-status]
-    :or {no-chunks true no-status false}}]
-  (if-not workflow-id
-    (do (println (colorize :red "error: workflow-id is required"))
-        (println "usage: mf events show <workflow-id>"))
-    (let [dir (workflow-events-dir workflow-id)
-          events (read-workflow-events dir)]
-      (if (empty? events)
-        (println (colorize :yellow (str "No events found for workflow " workflow-id
-                                        " (looked in " (.getPath dir) ")")))
-        (let [kept (cond->> events
-                     filter     (clojure.core/filter #(= filter (:event/type %)))
-                     no-chunks  (remove #(= :agent/chunk (:event/type %)))
-                     no-status  (remove #(= :agent/status (:event/type %))))]
-          (println (colorize :cyan (str "Timeline for workflow " workflow-id
-                                        " — " (count kept) " event(s)")))
-          (println (colorize :gray (apply str (repeat 80 "─"))))
-          (doseq [ev kept]
-            (println (colorize :gray (ts-short (:event/timestamp ev)))
-                     (summarize-event ev))))))))
-
-;------------------------------------------------------------------------------ Layer 3
-
-(defn ^{:stratum 3} tail-stream-file
-  "Generic file tailing for logs/events.
-
-   Arguments:
-     opts - Map with:
-       :file-path - Path to file
-       :parse-fn - Function to parse line
-       :format-fn - Function to format entry
-       :filter-fn - Optional predicate
-       :lines - Lines to show initially
-       :follow - Whether to tail -f
-       :icon - Header icon
-       :label - Header label
-       :extra-info - Extra header info"
-  [{:keys [file-path parse-fn format-fn filter-fn lines follow icon label extra-info]
-    :or {lines 10 follow true filter-fn (constantly true)}}]
-  (if (.exists (io/file file-path))
-    (do
-      (print-stream-header icon label file-path extra-info)
-      (if follow
-        (tail-file file-path
-                   (fn [line]
-                     (when-let [entry (parse-fn line)]
-                       (when (filter-fn entry)
-                         (format-fn entry))))
-                   {:lines lines})
-        (show-last-n-lines file-path parse-fn format-fn lines filter-fn)))
-    (println (colorize :yellow (messages/t :observability/file-not-found {:file-path file-path})))))
-
-;------------------------------------------------------------------------------ Layer 4
-
 ;; Stream Tailing
-(defn ^{:stratum 4} tail-logs
+(defn ^{:stratum 0} tail-logs
   "Tail MiniForge logs.
 
    Options:
@@ -401,15 +72,15 @@
       ;; Tail all workflows
       all
       (do
-        (println (colorize :cyan (messages/t :observability/tailing-all-logs {:icon "📋"})))
-        (println (colorize :gray (apply str (repeat 80 "─"))))
-        (println (colorize :yellow (messages/t :observability/aggregated-not-implemented))))
+        (println (formatting/colorize :cyan (messages/t :observability/tailing-all-logs {:icon "📋"})))
+        (println (formatting/colorize :gray (apply str (repeat 80 "─"))))
+        (println (formatting/colorize :yellow (messages/t :observability/aggregated-not-implemented))))
 
       ;; Tail specific workflow
       target-file
-      (tail-stream-file {:file-path target-file
+      (tailing/tail-stream-file {:file-path target-file
                          :parse-fn observability-io/parse-log-line
-                         :format-fn format-log-entry
+                         :format-fn formatting/format-log-entry
                          :lines lines
                          :follow follow
                          :icon "📋"
@@ -417,9 +88,9 @@
 
       ;; No logs found
       :else
-      (println (colorize :yellow (messages/t :observability/no-log-files {:dir (app-config/logs-dir)}))))))
+      (println (formatting/colorize :yellow (messages/t :observability/no-log-files {:dir (app-config/logs-dir)}))))))
 
-(defn ^{:stratum 4} tail-events
+(defn ^{:stratum 0} tail-events
   "Tail MiniForge workflow events in real-time.
 
    Options:
@@ -443,17 +114,17 @@
       ;; Tail all workflows
       all
       (do
-        (println (colorize :cyan (messages/t :observability/tailing-all-events {:icon "📊"})))
+        (println (formatting/colorize :cyan (messages/t :observability/tailing-all-events {:icon "📊"})))
         (when filter
-          (println (colorize :gray (str "Filter: " filter))))
-        (println (colorize :gray (apply str (repeat 80 "─"))))
-        (println (colorize :yellow (messages/t :observability/aggregated-not-implemented))))
+          (println (formatting/colorize :gray (str "Filter: " filter))))
+        (println (formatting/colorize :gray (apply str (repeat 80 "─"))))
+        (println (formatting/colorize :yellow (messages/t :observability/aggregated-not-implemented))))
 
       ;; Tail specific workflow
       target-file
-      (tail-stream-file {:file-path target-file
+      (tailing/tail-stream-file {:file-path target-file
                          :parse-fn observability-io/parse-log-line
-                         :format-fn format-event
+                         :format-fn formatting/format-event
                          :filter-fn filter-fn
                          :lines lines
                          :follow follow
@@ -463,12 +134,12 @@
 
       ;; No events found
       :else
-      (println (colorize :yellow (messages/t :observability/no-event-files {:dir (app-config/events-dir)}))))))
+      (println (formatting/colorize :yellow (messages/t :observability/no-event-files {:dir (app-config/events-dir)}))))))
 
-;------------------------------------------------------------------------------ Layer 5
+;------------------------------------------------------------------------------ Layer 1
 
 ;; CLI Commands
-(defn ^{:stratum 5} logs-command
+(defn ^{:stratum 1} logs-command
   "Handle 'mf logs' command.
 
    Subcommands:
@@ -479,14 +150,14 @@
   [{:keys [subcommand workflow-id file lines follow all] :or {subcommand "tail" lines 10 follow true}}]
   (case subcommand
     "tail" (tail-logs {:workflow-id workflow-id :all all :file file :lines lines :follow follow})
-    "list" (list-files-command observability-io/find-log-files "log files")
-    "cat" (cat-file-command file)
+    "list" (tailing/list-files-command observability-io/find-log-files "log files")
+    "cat" (tailing/cat-file-command file)
     "cleanup" (let [logs-dir (app-config/logs-dir)
                     count (logging/cleanup-old-rotated-logs logs-dir 7)]
-                (println (colorize :green (messages/t :observability/cleanup-result {:count count}))))
-    (println (colorize :red (messages/t :observability/unknown-subcommand {:subcommand subcommand})))))
+                (println (formatting/colorize :green (messages/t :observability/cleanup-result {:count count}))))
+    (println (formatting/colorize :red (messages/t :observability/unknown-subcommand {:subcommand subcommand})))))
 
-(defn ^{:stratum 5} events-command
+(defn ^{:stratum 1} events-command
   "Handle 'mf events' command.
 
    Subcommands:
@@ -498,22 +169,22 @@
     :or {subcommand "tail" lines 20 follow true}}]
   (case subcommand
     "tail" (tail-events {:workflow-id workflow-id :all all :file file :lines lines :follow follow :filter filter})
-    "list" (list-files-command observability-io/find-event-stream-files "event files")
-    "cat" (cat-file-command file)
-    "show" (show-events {:workflow-id workflow-id :filter filter
+    "list" (tailing/list-files-command observability-io/find-event-stream-files "event files")
+    "cat" (tailing/cat-file-command file)
+    "show" (timeline/show-events {:workflow-id workflow-id :filter filter
                          :no-chunks (if (nil? no-chunks) true no-chunks)
                          :no-status no-status})
-    (println (colorize :red (messages/t :observability/unknown-subcommand {:subcommand subcommand})))))
+    (println (formatting/colorize :red (messages/t :observability/unknown-subcommand {:subcommand subcommand})))))
 
-;------------------------------------------------------------------------------ Layer 6
+;------------------------------------------------------------------------------ Layer 2
 
 ;;------------------------------------------------------------------------------ Public API
-(defn ^{:stratum 6} handle-logs
+(defn ^{:stratum 2} handle-logs
   "Entry point for 'mf logs' command."
   [args]
   (logs-command args))
 
-(defn ^{:stratum 6} handle-events
+(defn ^{:stratum 2} handle-events
   "Entry point for 'mf events' command."
   [args]
   (events-command args))
