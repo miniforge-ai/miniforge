@@ -184,7 +184,7 @@
                           {:message (ex-message e)
                            :data {:agent-id (:agent/id agent-record)
                                   :vendor    (:agent/vendor agent-record)
-                                  :cause     (ex-data e)}}))))))))
+                                  :cause     (ex-data e)}})))))))))
 
 (defn ^{:stratum 1} submit-decision-from-agent!
   "Submit a decision from an agent to the queue.
