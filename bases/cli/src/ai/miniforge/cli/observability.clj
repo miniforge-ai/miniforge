@@ -26,10 +26,10 @@
   (:require
    [clojure.string :as str]
    [clojure.java.io :as io]
-   [clojure.edn :as edn]
    [cheshire.core :as json]
    [ai.miniforge.cli.app-config :as app-config]
    [ai.miniforge.cli.messages :as messages]
+   [ai.miniforge.cli.observability.io :as observability-io]
    [ai.miniforge.logging.interface :as logging]))
 
 ;------------------------------------------------------------------------------ Layer 0
@@ -51,74 +51,6 @@
     (let [formatter (java.time.format.DateTimeFormatter/ofPattern "HH:mm:ss.SSS")]
       (.format (java.time.LocalDateTime/ofInstant inst (java.time.ZoneId/systemDefault))
                formatter))))
-
-;;------------------------------------------------------------------------------ Layer 0: File Discovery
-(defn ^{:stratum 0} event-file-path
-  "Get path to event file for a workflow.
-
-   Arguments:
-     workflow-id - UUID or string workflow identifier
-
-   Returns: String path to the active CLI app events directory."
-  [workflow-id]
-  (let [events-dir (io/file (app-config/events-dir))
-        event-file (str workflow-id ".edn")]
-    (.getPath (io/file events-dir event-file))))
-
-(defn ^{:stratum 0} log-file-path
-  "Get path to log file for a workflow.
-
-   Arguments:
-     workflow-id - UUID or string workflow identifier
-
-   Returns: String path to the active CLI app logs directory."
-  [workflow-id]
-  (let [logs-dir (io/file (app-config/logs-dir))
-        log-file (str workflow-id ".log")]
-    (.getPath (io/file logs-dir log-file))))
-
-(defn ^{:stratum 0} find-log-files
-  "Find all log files in the active CLI app logs directory.
-
-   Returns: Vector of file paths sorted by modification time (newest first)"
-  []
-  (let [log-dir (io/file (app-config/logs-dir))]
-    (if (.exists log-dir)
-      (->> (.listFiles log-dir)
-           (filter #(.isFile %))
-           (filter #(.endsWith (.getName %) ".log"))
-           (sort-by #(.lastModified %) >)
-           (mapv #(.getAbsolutePath %)))
-      [])))
-
-(defn ^{:stratum 0} find-event-stream-files
-  "Find event stream files (workflow execution events).
-
-   Returns: Vector of file paths sorted by modification time (newest first)"
-  []
-  (let [event-dir (io/file (app-config/events-dir))]
-    (if (.exists event-dir)
-      (->> (.listFiles event-dir)
-           (filter #(.isFile %))
-           (filter #(.endsWith (.getName %) ".edn"))
-           (sort-by #(.lastModified %) >)
-           (mapv #(.getAbsolutePath %)))
-      [])))
-
-;; Log Parsing
-(defn ^{:stratum 0} parse-log-line
-  "Parse a single log line (EDN format).
-
-   Arguments:
-     line - String log line
-
-   Returns: Parsed map or nil if parse fails"
-  [line]
-  (when-not (str/blank? line)
-    (try
-      (edn/read-string line)
-      (catch Exception _
-        nil))))
 
 ;; Tailing Helpers
 (defn ^{:stratum 0} show-last-n-lines
@@ -276,7 +208,7 @@
          (when (seq context)
            (str " " (colorize :gray (pr-str context)))))))
 
-;;------------------------------------------------------------------------------ Layer 2: Event Parsing
+;; Event Parsing
 (defn ^{:stratum 2} format-event
   "Format an event for display.
 
@@ -460,10 +392,10 @@
      :lines - Number of initial lines to show (default: 10)
      :follow - Whether to follow (tail -f) (default: true)"
   [& [{:keys [workflow-id all file lines follow] :or {lines 10 follow true}}]]
-  (let [log-files (find-log-files)
+  (let [log-files (observability-io/find-log-files)
         target-file (cond
                       file file
-                      workflow-id (log-file-path workflow-id)
+                      workflow-id (observability-io/log-file-path workflow-id)
                       :else (first log-files))]
     (cond
       ;; Tail all workflows
@@ -476,7 +408,7 @@
       ;; Tail specific workflow
       target-file
       (tail-stream-file {:file-path target-file
-                         :parse-fn parse-log-line
+                         :parse-fn observability-io/parse-log-line
                          :format-fn format-log-entry
                          :lines lines
                          :follow follow
@@ -498,10 +430,10 @@
      :follow - Whether to follow (tail -f) (default: true)
      :filter - Event type filter (e.g., :agent/chunk)"
   [& [{:keys [workflow-id all file lines follow filter] :or {lines 20 follow true}}]]
-  (let [event-files (find-event-stream-files)
+  (let [event-files (observability-io/find-event-stream-files)
         target-file (cond
                       file file
-                      workflow-id (event-file-path workflow-id)
+                      workflow-id (observability-io/event-file-path workflow-id)
                       :else (first event-files))
         filter-fn (if filter
                     (fn [event] (= (:event/type event) filter))
@@ -520,7 +452,7 @@
       ;; Tail specific workflow
       target-file
       (tail-stream-file {:file-path target-file
-                         :parse-fn parse-log-line
+                         :parse-fn observability-io/parse-log-line
                          :format-fn format-event
                          :filter-fn filter-fn
                          :lines lines
@@ -547,7 +479,7 @@
   [{:keys [subcommand workflow-id file lines follow all] :or {subcommand "tail" lines 10 follow true}}]
   (case subcommand
     "tail" (tail-logs {:workflow-id workflow-id :all all :file file :lines lines :follow follow})
-    "list" (list-files-command find-log-files "log files")
+    "list" (list-files-command observability-io/find-log-files "log files")
     "cat" (cat-file-command file)
     "cleanup" (let [logs-dir (app-config/logs-dir)
                     count (logging/cleanup-old-rotated-logs logs-dir 7)]
@@ -566,7 +498,7 @@
     :or {subcommand "tail" lines 20 follow true}}]
   (case subcommand
     "tail" (tail-events {:workflow-id workflow-id :all all :file file :lines lines :follow follow :filter filter})
-    "list" (list-files-command find-event-stream-files "event files")
+    "list" (list-files-command observability-io/find-event-stream-files "event files")
     "cat" (cat-file-command file)
     "show" (show-events {:workflow-id workflow-id :filter filter
                          :no-chunks (if (nil? no-chunks) true no-chunks)
