@@ -190,6 +190,20 @@
       (is (anomaly/anomaly? (tenancy/agent-principal {} "reviewer")))
       (is (anomaly/anomaly?
            (tenancy/agent-principal (dissoc acting :acting/tenant-id) "reviewer"))))
+    (testing "an unestablished tenant id cannot be laundered into an actor"
+      ;; A bare tenant id yields a schema-valid Principal while the
+      ;; acting context it came from was never established. Validating
+      ;; only the output would let any uuid a caller happens to hold
+      ;; become a well-formed agent identity.
+      (is (anomaly/anomaly?
+           (tenancy/agent-principal {:acting/tenant-id (random-uuid)} "reviewer")))
+      (is (anomaly/anomaly?
+           (tenancy/agent-principal (dissoc acting :acting/principal-id) "reviewer")))
+      (is (anomaly/anomaly?
+           (tenancy/agent-principal (dissoc acting :acting/established-at) "reviewer")))
+      (is (re-find #"never established"
+                   (:anomaly/message
+                    (tenancy/agent-principal {:acting/tenant-id (random-uuid)} "reviewer")))))
     (testing "and the refusal names the actual cause, not a plausible one"
       ;; A refusal that blames the agent name for a missing tenant sends
       ;; the reader to the wrong place, which costs more than no message.

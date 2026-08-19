@@ -118,16 +118,32 @@
                    :principal/tenant-id (:acting/tenant-id acting)
                    :principal/kind :agent-instance
                    :principal/display-name trimmed}]
-    (if (m/validate schema/Principal principal)
+    ;; Validate the acting context as well as the derived principal. A
+    ;; bare {:acting/tenant-id <uuid>} yields a schema-valid Principal
+    ;; under a tenant nobody established — an agent identity fabricated
+    ;; from a uuid a caller happened to hold. Checking only the output
+    ;; would let this function launder an unestablished tenant into a
+    ;; well-formed actor, which is the opposite of what it is for.
+    (if (and (m/validate ActingContext acting)
+             (m/validate schema/Principal principal))
       principal
       ;; Name the actual cause. A refusal that blames the agent name for
       ;; a missing tenant sends the reader to the wrong place, and a
       ;; precise refusal is the only thing this function offers over
       ;; returning the map and letting the caller find out later.
-      (no-acting (if (uuid? (:acting/tenant-id acting))
+      ;; Most specific cause first. "Never established" is true of a
+      ;; context missing its tenant too, but it sends the reader looking
+      ;; at the wrong field.
+      (no-acting (cond
+                   (not (uuid? (:acting/tenant-id acting)))
+                   "cannot derive a valid agent principal: the acting context has no tenant to inherit"
+
+                   (not (m/validate ActingContext acting))
+                   "cannot derive a valid agent principal: the acting context was never established"
+
+                   :else
                    (str "cannot derive a valid agent principal: invalid agent name "
-                        (pr-str agent-name))
-                   "cannot derive a valid agent principal: the acting context has no tenant to inherit")))))
+                        (pr-str agent-name)))))))
 
 (defn ^{:stratum 1} valid?
   [x]
