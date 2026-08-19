@@ -26,16 +26,24 @@
 ;------------------------------------------------------------------------------ Layer 0
 
 ;; Kustomize wrappers
-(def ^{:stratum 0} KustomizeApplyResult
+(def ^{:stratum 0} KustomizeRenderResult
+  "The result of producing a Kustomize manifest.
+
+   The manifest is under `:rendered-yaml` and the raw build shell result is
+   retained under `:build-result`."
   [:map
    [:success? :boolean]
    [:rendered-yaml [:maybe :string]]
    [:build-result map?]
-   [:apply-result [:maybe map?]]
    [:error {:optional true} any?]
    [:anomaly {:optional true} map?]])
 
-(defn ^{:stratum 0} kustomize-build!
+(defn- ^{:stratum 0} kustomize-build!
+  "Run `kustomize build` and return `exec/sh-with-timeout`'s raw
+   `CommandResult`, whose manifest is under `:stdout`.
+
+   This private process boundary is not a `KustomizeRenderResult` — it has no
+   `:rendered-yaml`."
   [kustomize-dir & {:keys [timeout-ms] :or {timeout-ms (get timeouts/timeouts :kustomize-build-ms 60000)}}]
   (exec/sh-with-timeout "kustomize" ["build" kustomize-dir] :timeout-ms timeout-ms))
 
@@ -61,39 +69,26 @@
 
 ;------------------------------------------------------------------------------ Layer 1
 
-(defn ^{:stratum 1} kustomize-apply!
-  [kustomize-dir & {:keys [namespace context dry-run?]}]
+(defn ^{:stratum 1} kustomize-render!
+  "Build one Kustomize target and report it as a `KustomizeRenderResult`.
+
+   Nothing contacts the cluster. `:rendered-yaml` is nil only when the build
+   itself failed, so a nil manifest means no manifest, never a manifest under
+   another key."
+  [kustomize-dir]
   (let [build-result (kustomize-build! kustomize-dir)]
-    (if (schema/failed? build-result)
-      (schema/validate-anomaly
-       KustomizeApplyResult
+    (schema/validate-anomaly
+     KustomizeRenderResult
+     (if (schema/failed? build-result)
        (schema/failure :rendered-yaml
                        (msg/t :shell/kustomize-build-failed
                               {:error (failure-detail build-result)})
-                       {:build-result build-result
-                        :apply-result nil}))
-      (let [rendered-yaml (:stdout build-result)
-            apply-args    (cond-> ["apply" "-f" "-"]
-                            namespace (into ["--namespace" namespace])
-                            context   (into ["--context" context])
-                            dry-run?  (conj "--dry-run=client"))
-            apply-result  (exec/sh-with-timeout "kubectl" apply-args
-                                                :in rendered-yaml
-                                                :timeout-ms (get timeouts/timeouts :kustomize-apply-ms 120000))]
-        (if (schema/succeeded? apply-result)
-          (schema/validate-anomaly
-           KustomizeApplyResult
-           (schema/success :rendered-yaml rendered-yaml
-                           {:build-result build-result
-                            :apply-result apply-result}))
-          (schema/validate-anomaly
-           KustomizeApplyResult
-           (schema/failure :rendered-yaml
-                           (failure-detail apply-result)
-                           {:build-result build-result
-                            :apply-result apply-result})))))))
+                       {:build-result build-result})
+       (schema/success :rendered-yaml (:stdout build-result)
+                       {:build-result build-result})))))
 
 ;------------------------------------------------------------------------------ Rich Comment
 (comment
   (kustomize-build! "/path/to/overlay")
+  (kustomize-render! "/path/to/overlay")
   :leave-this-here)

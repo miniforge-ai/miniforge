@@ -54,7 +54,10 @@
   (reduce evidence/add-evidence-to-ctx ctx items))
 
 (def ^{:stratum 0 :private true} failure-details
-  {:capture {:event :deploy/rollback-capture-failed :status :error}
+  {:preflight {:event :deploy/preflight-failed :status :error}
+   :capture {:event :deploy/rollback-capture-failed :status :error}
+   :authority {:event :deploy/authority-failed :status :error}
+   :proposal {:event :deploy/proposal-failed :status :error}
    :apply {:event :deploy/apply-failed :status :error}
    :observe {:event :deploy/rollout-failed :status :rollout-failed}})
 
