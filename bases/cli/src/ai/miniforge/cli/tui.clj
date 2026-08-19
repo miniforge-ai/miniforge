@@ -27,6 +27,8 @@
    The key insight: AI pre-digests content to reduce cognitive load.
    PRs get risk scores, summaries, and suggested actions."
   (:require
+   [ai.miniforge.cli.tui.risk :as risk]
+   [ai.miniforge.cli.tui.terminal :as terminal]
    [babashka.process :as process]
    [clojure.string :as str]))
 
@@ -187,6 +189,51 @@
     (str (subs s 0 (- max-len 1)) "…")
     s))
 
+(defn ^{:stratum 0} render-box
+  "Render a box with title and content lines.
+   Uses blue borders for XTreeGold-style visibility.
+   Returns vector of strings (one per line)."
+  [title lines width height]
+  (let [inner-width (- width 2)
+        title-str (terminal/truncate (or title "") (- inner-width 4))
+        ;; Blue borders with bright title
+        top-line (str (terminal/style "┌─ " :fg :blue) (terminal/style title-str :fg :bright-white :bold true)
+                      (terminal/style " " :fg :blue) (terminal/style (terminal/repeat-char "─" (- inner-width (count title-str) 3)) :fg :blue)
+                      (terminal/style "┐" :fg :blue))
+        bottom-line (str (terminal/style "└" :fg :blue) (terminal/style (terminal/repeat-char "─" inner-width) :fg :blue) (terminal/style "┘" :fg :blue))
+        content-height (- height 2)
+        padded-lines (take content-height
+                           (concat (map #(str (terminal/style "│" :fg :blue)
+                                              (terminal/pad-right (terminal/truncate % inner-width) inner-width)
+                                              (terminal/style "│" :fg :blue))
+                                        lines)
+                                   (repeat (str (terminal/style "│" :fg :blue)
+                                                (terminal/repeat-char " " inner-width)
+                                                (terminal/style "│" :fg :blue)))))]
+    (vec (concat [top-line] padded-lines [bottom-line]))))
+
+(defn ^{:stratum 0} render-tree-item
+  "Render a single tree item with proper indentation and icons.
+   Uses XTreeGold-inspired blue highlight for selected items."
+  [{:keys [label selected? expanded? has-children? depth risk]} width]
+  (let [indent (terminal/repeat-char " " (* 2 depth))
+        icon (cond
+               (and has-children? expanded?) "▼"
+               has-children? "▸"
+               :else " ")
+        risk-indicator (when risk
+                         (str (terminal/style (get risk/risk-icons risk "○")
+                                     :fg (get risk/risk-colors risk :white)) " "))
+        prefix (str indent icon " " (or risk-indicator ""))
+        label-width (- width (count prefix) 2)
+        formatted-label (terminal/truncate label label-width)
+        line-content (terminal/pad-right (str prefix formatted-label) width)]
+    (if selected?
+      ;; XTreeGold style: bright white on blue background
+      (terminal/style line-content :fg :bright-white :bg :bg-blue :bold true)
+      ;; Normal: bright cyan text for visibility
+      (terminal/style line-content :fg :bright-cyan))))
+
 ;------------------------------------------------------------------------------ Layer 1
 
 (defn ^{:stratum 1} style
@@ -217,51 +264,6 @@
       (str s (repeat-char " " (- width len))))))
 
 ;------------------------------------------------------------------------------ Layer 2
-
-(defn ^{:stratum 2} render-box
-  "Render a box with title and content lines.
-   Uses blue borders for XTreeGold-style visibility.
-   Returns vector of strings (one per line)."
-  [title lines width height]
-  (let [inner-width (- width 2)
-        title-str (truncate (or title "") (- inner-width 4))
-        ;; Blue borders with bright title
-        top-line (str (style "┌─ " :fg :blue) (style title-str :fg :bright-white :bold true)
-                      (style " " :fg :blue) (style (repeat-char "─" (- inner-width (count title-str) 3)) :fg :blue)
-                      (style "┐" :fg :blue))
-        bottom-line (str (style "└" :fg :blue) (style (repeat-char "─" inner-width) :fg :blue) (style "┘" :fg :blue))
-        content-height (- height 2)
-        padded-lines (take content-height
-                           (concat (map #(str (style "│" :fg :blue)
-                                              (pad-right (truncate % inner-width) inner-width)
-                                              (style "│" :fg :blue))
-                                        lines)
-                                   (repeat (str (style "│" :fg :blue)
-                                                (repeat-char " " inner-width)
-                                                (style "│" :fg :blue)))))]
-    (vec (concat [top-line] padded-lines [bottom-line]))))
-
-(defn ^{:stratum 2} render-tree-item
-  "Render a single tree item with proper indentation and icons.
-   Uses XTreeGold-inspired blue highlight for selected items."
-  [{:keys [label selected? expanded? has-children? depth risk]} width]
-  (let [indent (repeat-char " " (* 2 depth))
-        icon (cond
-               (and has-children? expanded?) "▼"
-               has-children? "▸"
-               :else " ")
-        risk-indicator (when risk
-                         (str (style (get risk-icons risk "○")
-                                     :fg (get risk-colors risk :white)) " "))
-        prefix (str indent icon " " (or risk-indicator ""))
-        label-width (- width (count prefix) 2)
-        formatted-label (truncate label label-width)
-        line-content (pad-right (str prefix formatted-label) width)]
-    (if selected?
-      ;; XTreeGold style: bright white on blue background
-      (style line-content :fg :bright-white :bg :bg-blue :bold true)
-      ;; Normal: bright cyan text for visibility
-      (style line-content :fg :bright-cyan))))
 
 ;; PR detail rendering
 (defn ^{:stratum 2} render-pr-detail
@@ -294,9 +296,7 @@
                  "[c] Chat      [o] Open in browser"
                  "[j/k] Navigate   [q] Back"]}]}))
 
-;------------------------------------------------------------------------------ Layer 3
-
-(defn ^{:stratum 3} render-two-pane
+(defn ^{:stratum 2} render-two-pane
   "Render a two-pane layout with XTreeGold-inspired color scheme.
 
    left-pane: {:title string :items [{:label :selected? :expanded? :has-children? :depth :risk}]}
