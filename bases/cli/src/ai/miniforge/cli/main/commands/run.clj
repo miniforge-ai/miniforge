@@ -22,6 +22,7 @@
    [clojure.edn :as edn]
    [ai.miniforge.cli.app-config :as app-config]
    [ai.miniforge.cli.main.display :as display]
+   [ai.miniforge.cli.main.display.classified-error :as classified-error]
    [ai.miniforge.cli.messages :as messages]
    [ai.miniforge.cli.spec-parser :as spec-parser]
    [ai.miniforge.cli.workflow-runner :as workflow-runner]
@@ -99,7 +100,7 @@
   [e]
   (let [classification (classify-error e)]
     (if classification
-      (display/print-classified-error classification)
+      (classified-error/print-classified-error classification)
       (do
         (display/print-error (messages/t :run/failed {:error (ex-message e)}))
         (when-let [data (ex-data e)]

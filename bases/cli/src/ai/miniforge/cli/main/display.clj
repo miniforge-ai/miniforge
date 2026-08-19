@@ -16,7 +16,16 @@
 ;; See the License for the specific language governing permissions and
 ;; limitations under the License.
 (ns ai.miniforge.cli.main.display
-  "Terminal styling and error display for CLI output."
+  "Terminal styling and generic entity/detail rendering for CLI output.
+
+   Layer 0: ANSI color table and data-driven field/section renderers
+   Layer 1: ANSI styling primitive
+   Layer 2: Styled print helpers and the composite detail-view renderer
+
+   Classified-error display (headers, context, retry recommendation, and
+   the `print-classified-error` composite) lives in
+   `ai.miniforge.cli.main.display.classified-error` (rule 210: the
+   combined namespace measured 5 real layers, max 3)."
   (:require
    [clojure.string :as str]
    [ai.miniforge.cli.messages :as messages]))
@@ -58,29 +67,6 @@
       (doseq [item (cond->> items max (take max))]
         (println (messages/t entry (if entry-fn (entry-fn item) {:value (str item)})))))))
 
-(defn ^{:stratum 0} print-agent-backend-error-context
-  [completed-work]
-  (if (seq completed-work)
-    (println (messages/t :classified-error/agent-backend-context-success))
-    (println (messages/t :classified-error/agent-backend-context))))
-
-(defn ^{:stratum 0} print-task-code-error-context
-  [completed-work]
-  (println (messages/t :classified-error/task-code-context))
-  (when (seq completed-work)
-    (println)
-    (println (messages/t :classified-error/partial-work))
-    (doseq [work completed-work]
-      (println (str "  ⏸️  " work)))))
-
-(defn ^{:stratum 0} get-retry-recommendation
-  [error-type]
-  (case error-type
-    :task-code (messages/t :classified-error/retry-task-code)
-    :external (messages/t :classified-error/retry-external)
-    :agent-backend (messages/t :classified-error/retry-agent-backend)
-    (messages/t :classified-error/retry-generic)))
-
 ;------------------------------------------------------------------------------ Layer 1
 
 (defn ^{:stratum 1} style
@@ -116,95 +102,3 @@
   (doseq [section sections]
     (render-section entity section))
   (println))
-
-;; Error classification display
-(defn ^{:stratum 2} print-agent-backend-error-header
-  [completed-work]
-  (println (style (messages/t :classified-error/agent-backend-header)
-                  :foreground :yellow :bold true))
-  (when (seq completed-work)
-    (println)
-    (println (style (messages/t :classified-error/task-completed)
-                    :foreground :green))
-    (doseq [work completed-work]
-      (println (str "  " (style "✅" :foreground :green) " " work)))))
-
-(defn ^{:stratum 2} print-task-code-error-header
-  []
-  (println (style (messages/t :classified-error/task-code-header)
-                  :foreground :red :bold true)))
-
-(defn ^{:stratum 2} print-external-error-header
-  []
-  (println (style (messages/t :classified-error/external-header)
-                  :foreground :yellow :bold true)))
-
-(defn ^{:stratum 2} print-generic-error-header
-  []
-  (println (style (messages/t :classified-error/generic-header)
-                  :foreground :red :bold true)))
-
-(defn ^{:stratum 2} print-external-error-context
-  [completed-work]
-  (println (messages/t :classified-error/external-context))
-  (when (seq completed-work)
-    (println)
-    (println (messages/t :classified-error/partial-work))
-    (doseq [work completed-work]
-      (println (str "  " (style "✅" :foreground :green) " " work)))))
-
-(defn ^{:stratum 2} print-error-report-url
-  [report-url vendor]
-  (when report-url
-    (println)
-    (println (str (style (messages/t :classified-error/report-prefix)
-                         :foreground :cyan)
-                  vendor ":"))
-    (println (str "   " report-url))))
-
-(defn ^{:stratum 2} print-retry-recommendation
-  [should-retry error-type completed-work]
-  (println)
-  (if should-retry
-    (println (str (style (messages/t :classified-error/recommendation-prefix)
-                         :foreground :cyan)
-                 (get-retry-recommendation error-type)))
-    (println (str (style (messages/t :classified-error/no-retry-prefix)
-                         :foreground :cyan)
-                 (if (seq completed-work)
-                   (messages/t :classified-error/no-retry-success)
-                   (messages/t :classified-error/no-retry-failure))))))
-
-;------------------------------------------------------------------------------ Layer 3
-
-(defn ^{:stratum 3} print-error-header-by-type
-  [error-type completed-work]
-  (case error-type
-    :agent-backend (print-agent-backend-error-header completed-work)
-    :task-code (print-task-code-error-header)
-    :external (print-external-error-header)
-    (print-generic-error-header)))
-
-(defn ^{:stratum 3} print-error-context
-  [error-type completed-work]
-  (case error-type
-    :agent-backend (print-agent-backend-error-context completed-work)
-    :task-code (print-task-code-error-context completed-work)
-    :external (print-external-error-context completed-work)
-    nil))
-
-;------------------------------------------------------------------------------ Layer 4
-
-;; Composite error display
-(defn ^{:stratum 4} print-classified-error
-  "Display a classified error with rich formatting."
-  [error-classification]
-  (when error-classification
-    (let [{:keys [type message completed-work report-url should-retry vendor]} error-classification]
-      (print-error-header-by-type type completed-work)
-      (println)
-      (println (str "  " message))
-      (println)
-      (print-error-context type completed-work)
-      (print-error-report-url report-url vendor)
-      (print-retry-recommendation should-retry type completed-work))))
