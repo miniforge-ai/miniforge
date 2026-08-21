@@ -64,6 +64,15 @@
 ;; merge-with-defaults
 (def ^{:stratum 0} ^:private verify-like-phase :registry-test/verify-like)
 
+(deftest ^{:stratum 0} merge-gates-preserves-stale-references-gate-test
+  (testing "the canonical-sdlc v2 implement override shape cannot drop
+            :stale-references — promoted to policy-gates 2026-08-12 so the
+            contract-drift check runs in every workflow"
+    (is (= [:syntax :lint :no-secrets :codex-consultation :stale-references]
+           (registry/merge-gates
+            [:syntax :format :lint :codex-consultation :stale-references]
+            [:syntax :lint :no-secrets :codex-consultation])))))
+
 ;------------------------------------------------------------------------------ Layer 1
 
 (deftest ^{:stratum 1} merge-with-defaults-no-gates-override-keeps-defaults-test
