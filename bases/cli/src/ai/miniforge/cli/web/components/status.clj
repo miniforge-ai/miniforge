@@ -16,16 +16,17 @@
 ;; See the License for the specific language governing permissions and
 ;; limitations under the License.
 (ns ai.miniforge.cli.web.components.status
-  "Status-oriented dashboard fragments."
+  "Status-oriented dashboard fragments. The per-run workflow list rendering
+   lives in `ai.miniforge.cli.web.components.status.workflow-runs` (rule 210:
+   this namespace measured 4 real layers, max 3; the icon -> run -> runs
+   composition chain is layer-coherent on its own)."
   (:require
    [hiccup2.core :as h]
    [ai.miniforge.cli.messages :as messages]
-   [ai.miniforge.cli.web.fleet :as fleet]))
+   [ai.miniforge.cli.web.fleet :as fleet]
+   [ai.miniforge.cli.web.components.status.workflow-runs :as workflow-runs]))
 
 ;------------------------------------------------------------------------------ Layer 0
-
-(def ^{:stratum 0} ^:const no-workflows-style
-  "color: var(--text-muted); font-size: 12px; text-align: center;")
 
 (defn- ^{:stratum 0} t
   ([message-key]
@@ -47,15 +48,10 @@
   [:span {:class class-name}
    [:span value]])
 
-(defn ^{:stratum 0} workflow-status-icon
-  [run]
-  (let [status (get run :status)
-        conclusion (get run :conclusion)]
-    (cond
-      (= status "in_progress") "⏳"
-      (= conclusion "success") "✓"
-      (#{"failure" "timed_out" "startup_failure"} conclusion) "✗"
-      :else "○")))
+(def ^{:stratum 0} workflow-status-icon
+  "Re-exported from `status.workflow-runs`: callers outside this component
+   tree (e.g. `web.components`) reach it via this namespace."
+  workflow-runs/workflow-status-icon)
 
 ;------------------------------------------------------------------------------ Layer 1
 
@@ -72,31 +68,13 @@
       [:span.status-dot]
       [:span status-text]])))
 
-(defn- ^{:stratum 1} workflow-run
-  [{:keys [workflowName createdAt] :as run}]
-  [:div.workflow-run
-   [:span.workflow-run-status (workflow-status-icon run)]
-   [:span.workflow-run-name workflowName]
-   [:span.workflow-run-time (fleet/format-time-ago createdAt)]])
-
-;------------------------------------------------------------------------------ Layer 2
-
-(defn- ^{:stratum 2} workflow-runs
-  [runs]
-  (if (seq runs)
-    (map workflow-run runs)
-    [[:div {:style no-workflows-style}
-      (t :web-ui/workflow-status-none)]]))
-
-;------------------------------------------------------------------------------ Layer 3
-
-(defn ^{:stratum 3} workflow-status
+(defn ^{:stratum 1} workflow-status
   [repos]
   (let [{:keys [running failed succeeded runs]} (fleet/get-workflow-status repos)
         running-value (str running " ⏳")
         failed-value (str failed " ✗")
         succeeded-value (str succeeded " ✓")
-        rendered-runs (workflow-runs runs)]
+        rendered-runs (workflow-runs/workflow-runs runs)]
     (h/html
      [:div.workflow-status
       {:hx-get "/api/workflows"
