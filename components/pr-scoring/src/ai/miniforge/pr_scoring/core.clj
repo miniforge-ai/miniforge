@@ -56,7 +56,8 @@
    [clojure.edn :as edn]
    [clojure.java.io :as io]
    [ai.miniforge.event-stream.interface :as es]
-   [ai.miniforge.event-stream.interface.events :as events]))
+   [ai.miniforge.event-stream.interface.events :as events]
+   [ai.miniforge.logging.interface :as log]))
 
 ;------------------------------------------------------------------------------ Layer 0
 
@@ -103,14 +104,19 @@
 
 (defn- ^{:stratum 1} handle-event!
   "Entry point for every event the stream delivers. No-op unless the
-   event type is in `triggers`. A scorer-fn that throws is suppressed
-   silently (for the scaffold) — a follow-up PR wires proper structured
-   logging once the real scoring integration lands."
-  [triggers scorer-fn stream event]
+   event type is in `triggers`. A scorer-fn that throws is logged at
+   WARN and then suppressed so a transient scorer error never kills the
+   subscription loop. `logger` may be nil (no-op)."
+  [triggers scorer-fn stream logger event]
   (when (contains? triggers (:event/type event))
     (try
       (emit-scored! stream scorer-fn event)
-      (catch Throwable _t nil))))
+      (catch Exception e
+        (log/warn logger :pr-scoring :pr-scoring/handler-error
+                  {:message  (ex-message e)
+                   :event-type (:event/type event)
+                   :pr-repo  (:pr/repo event)
+                   :pr-number (:pr/number event)})))))
 
 (defn ^{:stratum 1} stop!
   "Unsubscribe. Idempotent."
@@ -129,10 +135,10 @@
 (defn ^{:stratum 2} start!
   "Subscribe to the stream. Idempotent — repeat calls are no-ops."
   [component]
-  (let [{:keys [stream scorer-fn triggers subscribed?]} @component]
+  (let [{:keys [stream scorer-fn triggers logger subscribed?]} @component]
     (when-not subscribed?
       (es/subscribe! stream subscriber-id
-                     (fn [event] (handle-event! triggers scorer-fn stream event)))
+                     (fn [event] (handle-event! triggers scorer-fn stream logger event)))
       (swap! component assoc :subscribed? true))
     component))
 
@@ -148,13 +154,16 @@
                             to [[default-scorer-fn]] which emits nothing
      :trigger-event-types — set of event-type keywords that trigger
                             scoring; defaults to the EDN set at
-                            [[trigger-config-resource]]"
+                            [[trigger-config-resource]]
+     :logger              — logging/logger for scorer errors; nil (default)
+                            suppresses all log output (backwards-compatible)"
   ([stream] (create stream {}))
-  ([stream {:keys [scorer-fn trigger-event-types]
+  ([stream {:keys [scorer-fn trigger-event-types logger]
             :or   {scorer-fn default-scorer-fn}}]
    (atom {:stream stream
           :scorer-fn scorer-fn
           :triggers (or trigger-event-types @default-trigger-event-types)
+          :logger logger
           :subscribed? false})))
 
 ;------------------------------------------------------------------------------ Layer 4
