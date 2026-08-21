@@ -522,8 +522,11 @@
             "Phase should complete when agent returns success with nil output")
         (is (= env-id (get-in final-result [:phase :result :environment-id]))
             "Result should reference the environment-id")
-        (is (nil? (get-in final-result [:phase :result :output]))
-            "Result should NOT contain serialized :output / :code/files")))))
+        (is (= [:codex/consultation]
+               (keys (get-in final-result [:phase :result :output])))
+            "Result should NOT contain serialized :output / :code/files —
+             only consultation provenance survives (attached on every
+             result since the consultation-on-failure fix)")))))
 
 (deftest ^{:stratum 2} leave-implement-preserves-codex-consultation-test
   (testing "the lightweight success result keeps :codex/consultation — the
@@ -847,6 +850,23 @@
         (is (= :failed (get-in final-result [:phase :status])))
         (is (empty? (get-in final-result [:execution :phases-completed] []))
             "Failed implement must not be counted as completed")))))
+
+(deftest ^{:stratum 2} enter-implement-attaches-consultation-on-failure-test
+  (testing "a failed implement still carries :codex/consultation on its
+            result — the gap instrument must not ledger a consulted
+            failure as one that never consulted (the release-phase
+            review finding, applied here)"
+    (with-redefs [agent/create-implementer (fn [_] {:type :mock-implementer})
+                  agent/invoke (fn [_ _ _]
+                                 (response/error "LLM timeout" {:tokens 0 :duration-ms 5000}))
+                  agent/curate-implement-output mock-curator-error]
+      (let [ctx (-> (create-base-context)
+                    (assoc :phase-config {:phase :implement}))
+            interceptor (phase/get-phase-interceptor {:phase :implement})
+            enter-result ((:enter interceptor) ctx)
+            c (get-in enter-result [:phase :result :output :codex/consultation])]
+        (is (map? c) "consultation marker present on the failed result")
+        (is (contains? c :status))))))
 
 (deftest ^{:stratum 2} leave-implement-rejects-already-implemented-after-review-feedback-test
   (testing "already-implemented after review feedback fails closed instead of skipping"

@@ -182,7 +182,7 @@
           ;; Result should have environment-id, not serialized code
           (is (= env-id (get-in ctx-left [:phase :result :environment-id]))
               "Phase result should reference the environment-id")
-          (is (nil? (get-in ctx-left [:phase :result :output]))
+          (is (= [:codex/consultation] (keys (get-in ctx-left [:phase :result :output])))
               "Phase result should not carry serialized :output / :code/files")
 
           ;; Files written by agent should exist in the worktree
