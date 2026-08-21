@@ -19,10 +19,11 @@
   "Public API for tenancy (Ariadne step 3a): who owns, who acts, and the
    one boundary that establishes an operator.
 
-   Nothing consumes these yet — 3b threads the identity through the run
-   hierarchy and 3c stamps it onto records. This slice is the vocabulary
-   and its source."
+   3b threads the identity through the run hierarchy; 3c stamps it onto
+   records. This namespace is the vocabulary, its source, and the acting
+   context that carries it."
   (:require
+   [ai.miniforge.tenancy.acting :as acting]
    [ai.miniforge.tenancy.resolver :as resolver]
    [ai.miniforge.tenancy.schema :as schema]
    [malli.core :as m]))
@@ -53,3 +54,26 @@
 (defn ^{:stratum 0} valid-principal? [p] (m/validate schema/Principal p))
 
 (defn ^{:stratum 0} valid-identity? [i] (m/validate schema/Identity i))
+
+(def ^{:stratum 0} ActingContext acting/ActingContext)
+
+(def ^{:stratum 0} establish-acting
+  "Reduce a resolved identity to the acting context a run carries.
+   Called once per boundary; downstream reads rather than re-resolving."
+  acting/establish)
+
+(def ^{:stratum 0} require-acting
+  "Return the acting context held at `key`, or an anomaly. Never
+   substitutes a default and never returns nil."
+  acting/require-acting)
+
+(def ^{:stratum 0} acting-for-agent
+  "The acting context a spawned agent runs under: same tenant, its own
+   `:agent-instance` principal."
+  acting/for-agent)
+
+(def ^{:stratum 0} agent-principal
+  "The principal a spawned agent acts as."
+  acting/agent-principal)
+
+(defn ^{:stratum 0} valid-acting? [a] (acting/valid? a))

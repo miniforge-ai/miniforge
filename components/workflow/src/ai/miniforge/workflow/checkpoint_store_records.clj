@@ -44,8 +44,14 @@
   (str (java.time.Instant/now)))
 
 (def ^{:stratum 0} persisted-execution-keys
-  "Serializable execution fields kept in the durable machine snapshot."
+  "Serializable execution fields kept in the durable machine snapshot.
+
+   This is an allowlist: a field absent here is silently dropped at
+   checkpoint and gone on resume. `:execution/acting` is listed
+   deliberately — identity that did not survive a checkpoint would let a
+   resumed run be reattributed to whoever resumed it."
   [:execution/id
+   :execution/acting
    :execution/workflow-id
    :execution/workflow-version
    :execution/input
