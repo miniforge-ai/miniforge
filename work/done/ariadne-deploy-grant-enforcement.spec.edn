@@ -15,7 +15,41 @@
   proposal before mutation. Preserve rollback evidence on failed and successful
   apply paths so partial mutations remain recoverable. Decompose the current
   nested deploy phase into provider, domain-decision, and application-flow
-  namespaces before adding enforcement."
+  namespaces before adding enforcement.
+
+  PREFLIGHT BASIS — the reused checks are vacuous as written. Both parse Pulumi
+  preview JSON (policy/parse-preview -> json/parse-string, exceptions swallowed
+  to {}). Against a kustomize render they yield no steps and therefore no
+  violations, so deploy-authority/preflight returns :allow for any manifest.
+  Measured on main (1eab1888b): a 5000-document kustomize render returns
+  {:preflight/result :allow :preflight/violations []}. deploy-governed/transact!
+  does call both checks before the apply, so the previous acceptance criteria
+  ('check-X is evaluated before the real apply') were satisfiable by a gate that
+  cannot deny anything. Evaluation is not enforcement; the criteria below now
+  require a demonstrated denial over a kustomize render.
+
+  Kustomize is the primary Kubernetes provisioning path, so the checks become
+  kustomize-aware rather than the deploy seam acquiring a separate basis. Two
+  sub-decisions belong to this work, not to this spec: whether to add a YAML
+  parser dependency (phase-deployment currently has cheshire and malli only, no
+  YAML reader) or split documents structurally; and what check-gke-node-limit
+  means over a kustomize render, given GKE node pools are infrastructure rather
+  than manifest resources — either it counts NodePool kinds in the render, or it
+  is explicitly scoped to the Pulumi path and deploy gains a second check that
+  can fail against kustomize. Whichever is chosen, no check may be left in the
+  preflight path unable to return a violation for the artifact it receives.
+
+  PROVIDER SHAPE — deploy-provider does not yet satisfy the map transact!
+  expects, and wiring it unreconciled introduces a second fail-open.
+  transact! calls (:dry-run! provider) with one argument; deploy-provider/dry-run!
+  is 2-arity ([{:keys [namespace context]} rendered-yaml]). commit! branches on
+  (:deploy/failed? applied); deploy-provider/apply! returns a schema-shaped map
+  ({:success? ...}) that has no :deploy/failed? key, so a failed apply reads
+  falsy and never records :effect/outcome :failed. :observe! and :rollback-info!
+  already match on both arity and return shape. The exact-bytes operations
+  (render!, apply-rendered!, dry-run!) landed in #1713 for this purpose: the
+  bytes recorded in the proposal must be the bytes applied, so :apply! binds to
+  apply-rendered! over the captured render rather than re-running kustomize."
 
  :spec/intent
  {:type :feature
@@ -25,6 +59,9 @@
  ["No kubectl mutation runs without an active matching grant and allow-class envelope"
   "The durable proposal is the authority recheck input at commit"
   "Existing deployment policy checks are reused rather than reimplemented"
+  "Every check in the preflight path parses the artifact the configured provider actually renders"
+  "A check that cannot return a violation for the render it receives is not left in the preflight path"
+  "The bytes recorded in the durable proposal are the bytes applied — no re-render between dry-run and apply"
   "The dry-run output is durable before the real apply begins"
   "Rollback evidence survives every apply outcome"
   "Provider operations, domain decisions, and phase orchestration remain separate"
@@ -35,8 +72,13 @@
  :spec/acceptance-criteria
  ["A deploy without an active :effect/deploy grant runs no kubectl mutation"
   "A mismatched or expired deploy grant runs no kubectl mutation"
-  "check-resource-count is evaluated before the real apply"
-  "check-gke-node-limit is evaluated before the real apply"
+  "check-resource-count denies a kustomize render exceeding :max-resources, before the real apply"
+  "check-gke-node-limit denies a render exceeding :max-nodes, or is explicitly scoped away from the kustomize path with a replacement check that denies"
+  "Each check remaining in the preflight path has a test asserting a violation over a kustomize render, not only over Pulumi preview JSON"
+  "A preflight denial reports :deploy/stage :preflight, distinct from an authority failure"
+  "(:dry-run! provider) is callable with the single argument transact! passes it"
+  "A provider apply failure records :effect/outcome :failed in the durable effect store"
+  "The manifest bytes in the durable proposal are byte-identical to those passed to the real apply"
   "The durable deploy proposal contains the provider dry-run diff"
   "A valid deploy records effect, grant, and DecisionEnvelope identifiers before mutation"
   ":evidence/rollback-info remains in context after a failed apply"
@@ -48,7 +90,7 @@
  {:tier :high
   :axes #{:correctness :observation :governance-credibility}
   :theme :ariadne-grants
-  :rationale "Deployment remains an ambient-authority escape hatch until mutation is proposed, granted, committed, and reconciled."
+  :rationale "Deployment remains an ambient-authority escape hatch until mutation is proposed, granted, committed, and reconciled. The reused preflight checks cannot deny a kustomize render, so wiring the seam as-is would record a governance decision that was never made."
   :blocks []
   :blocked-by ["ariadne-grant-issuance.spec.edn"
                "ariadne-effect-transaction-fencing.spec.edn"]}
