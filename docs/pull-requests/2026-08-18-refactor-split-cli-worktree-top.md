@@ -34,9 +34,7 @@ stack: the directory walk down to the nearest `.git` marker
   (`ai.miniforge.cli.worktree.root-resolution`): the marker-walk group
   — `git-marker-name`, `file->dir` (layer 0), `canonical-dir`,
   `git-marker-path` (layer 1), `nearest-git-root` (layer 2). 3 layers,
-  unchanged behavior. `canonical-dir` and `nearest-git-root` stay
-  public (as they were) since `worktree-root` in the parent namespace
-  calls both.
+  unchanged behavior. `nearest-git-root` remains public; `canonical-dir` is now public so `worktree-root` in the parent namespace can call it across namespaces.
 - `worktree.clj`: now `worktree-root` (layer 0, calls
   `root-resolution/nearest-git-root` and
   `root-resolution/canonical-dir`) and `git-info` (layer 1, calls
