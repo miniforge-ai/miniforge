@@ -127,6 +127,11 @@
                                     :tags (:agent/tags registered)
                                     :heartbeat-interval-ms (:agent/heartbeat-interval-ms
                                                             registered)}))))))))
+      (catch InterruptedException ie
+        ;; Re-interrupt so the outer loop's Thread/sleep sees the flag
+        ;; and the future shuts down promptly on future-cancel.
+        (.interrupt (Thread/currentThread))
+        (throw ie))
       (catch Exception e
         (log/warn logger :loop :orchestrator/discovery-adapter-error
                   {:message (ex-message e)
@@ -179,6 +184,11 @@
                                      (:agent/id agent-record)
                                      old-status
                                      new-status)))))
+              (catch InterruptedException ie
+                ;; Re-interrupt so the outer loop's Thread/sleep sees the flag
+                ;; and the future shuts down promptly on future-cancel.
+                (.interrupt (Thread/currentThread))
+                (throw ie))
               (catch Exception e
                 (log/warn logger :loop :orchestrator/poll-agent-error
                           {:message (ex-message e)
@@ -282,6 +292,10 @@
              (while @running
                (try
                  (run-discovery-pass orchestrator)
+                 (catch InterruptedException ie
+                   ;; Restore the interrupt flag; Thread/sleep below will
+                   ;; throw immediately and let the future terminate cleanly.
+                   (.interrupt (Thread/currentThread)))
                  (catch Exception e
                    (log/warn logger :loop :orchestrator/discovery-pass-error
                              {:message (ex-message e)
@@ -294,6 +308,10 @@
              (while @running
                (try
                  (run-poll-pass orchestrator)
+                 (catch InterruptedException ie
+                   ;; Restore the interrupt flag; Thread/sleep below will
+                   ;; throw immediately and let the future terminate cleanly.
+                   (.interrupt (Thread/currentThread)))
                  (catch Exception e
                    (log/warn logger :loop :orchestrator/poll-pass-error
                              {:message (ex-message e)
