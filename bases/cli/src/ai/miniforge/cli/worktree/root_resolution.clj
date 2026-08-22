@@ -41,6 +41,9 @@
 ;------------------------------------------------------------------------------ Layer 1
 
 (defn ^{:stratum 1} canonical-dir
+  "Canonicalized directory string for `path`; a file path resolves to its
+   parent directory. Nil-safe. Public because `worktree-root` in the parent
+   namespace calls it across the namespace boundary."
   [path]
   (some-> path file->dir fs/canonicalize str))
 
