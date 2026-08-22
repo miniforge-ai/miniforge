@@ -167,11 +167,11 @@
                                            (throw (ex-info "boom" {:ctx :test})))
                               :logger logger})]
     (es/publish! s (pr-created-event s "acme/widget" 42))
-    (let [warnings (filter #(= :warn (:level %)) @entries)]
+    (let [warnings (filter #(= :warn (:log/level %)) @entries)]
       (is (= 1 (count warnings))
           "exactly one :warn entry is emitted per scorer exception")
       (let [w (first warnings)]
-        (is (= :pr-scoring/handler-error (:event w)))
+        (is (= :inner/handler-error (:log/event w)))
         (is (= :pr/created (get-in w [:data :event-type])))
         (is (= "acme/widget" (get-in w [:data :pr-repo])))
         (is (= 42 (get-in w [:data :pr-number])))

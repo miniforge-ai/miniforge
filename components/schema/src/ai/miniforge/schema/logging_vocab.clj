@@ -55,6 +55,7 @@
    :inner/validation-failed
    :inner/repair-attempted
    :inner/escalated
+   :inner/handler-error
    :outer/phase-entered
    :outer/phase-completed
    :outer/phase-failed

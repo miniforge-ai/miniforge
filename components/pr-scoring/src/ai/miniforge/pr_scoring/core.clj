@@ -112,7 +112,7 @@
     (try
       (emit-scored! stream scorer-fn event)
       (catch Exception e
-        (log/warn logger :pr-scoring :pr-scoring/handler-error
+        (log/warn logger :loop :inner/handler-error
                   {:message (or (ex-message e) (str (type e)))
                    :data    {:event-type (:event/type event)
                              :pr-repo    (:pr/repo event)
