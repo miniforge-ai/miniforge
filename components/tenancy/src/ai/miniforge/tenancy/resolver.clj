@@ -91,8 +91,13 @@
 (defn ^{:stratum 1} resolve-operator
   "Resolve who is operating, from configuration.
 
-   Returns an `Identity`, or an `:invalid-input` anomaly when no operator
-   is configured. It does NOT invent one.
+   Returns an `Identity`, or an `:invalid-input` anomaly. The anomaly
+   carries one of two subtypes, and the difference matters to callers:
+   `:anomalies.tenancy/no-operator-identity` when nothing is configured,
+   and `:anomalies.tenancy/invalid-operator-identity` when something is
+   configured and is wrong — a non-string, a blank string, or a value
+   that does not produce a valid identity. It does NOT invent one in
+   either case.
 
    The refusal is the important half. A default tenant here would be
    indistinguishable, later, from a real operator who happened to be

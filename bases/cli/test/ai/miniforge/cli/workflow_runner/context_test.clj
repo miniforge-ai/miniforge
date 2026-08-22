@@ -62,18 +62,20 @@
 
 (defn- ^{:stratum 0} context-with-config
   "Build a workflow context with `cfg` standing in for the user config."
-  [cfg]
-  (with-redefs [config/load-config (constantly cfg)
-                worktree/worktree-root (constantly "/tmp/repo-root")
-                es/create-streaming-callback (fn [& _] nil)
-                es/workflow-started (fn [& _] {})
-                es/publish! (fn [& _] nil)]
-    (sut/create-workflow-context
-     {:callbacks {}
-      :event-stream :stream
-      :workflow-id (random-uuid)
-      :workflow-type :canonical-sdlc
-      :workflow-version "1.0.0"})))
+  ([cfg] (context-with-config cfg false))
+  ([cfg quiet]
+   (with-redefs [config/load-config (constantly cfg)
+                 worktree/worktree-root (constantly "/tmp/repo-root")
+                 es/create-streaming-callback (fn [& _] nil)
+                 es/workflow-started (fn [& _] {})
+                 es/publish! (fn [& _] nil)]
+     (sut/create-workflow-context
+      {:callbacks {}
+       :event-stream :stream
+       :workflow-id (random-uuid)
+       :workflow-type :canonical-sdlc
+       :workflow-version "1.0.0"
+       :quiet quiet}))))
 
 (deftest ^{:stratum 0} an-explicit-acting-context-is-not-overridden-test
   ;; A future non-CLI boundary (MCP, daemon) resolves its own identity
@@ -114,7 +116,9 @@
   ;; configures an operator yet, so requiring one here would fail every
   ;; run in existence. The refusal lands in 3c, where records get owners
   ;; and an absent identity has something real to protect.
-  (doseq [cfg [{} {:tenancy {}} {:tenancy {:operator-name "   "}}]]
+  ;; A blank name is a MISCONFIGURATION, not an absence — it warns, and
+  ;; it belongs in the test below that captures output.
+  (doseq [cfg [{} {:tenancy {}} {:tenancy {:operator-name nil}}]]
     (let [context (context-with-config cfg)]
       (is (nil? (:acting context))
           (str "no operator configured must attach nothing, given " (pr-str cfg)))
@@ -139,3 +143,12 @@
     (let [out (java.io.StringWriter.)]
       (binding [*out* out] (context-with-config {}))
       (is (not (re-find #"(?i)warning" (str out)))))))
+
+(deftest ^{:stratum 1} quiet-suppresses-the-misconfiguration-warning-test
+  ;; A --quiet run that still prints is a run whose output cannot be
+  ;; piped. Every other diagnostic on this path respects the flag.
+  (let [out (java.io.StringWriter.)
+        context (binding [*out* out]
+                  (context-with-config {:tenancy {:operator-name 42}} true))]
+    (is (nil? (:acting context)) "still attaches nothing")
+    (is (= "" (str out)) "and says nothing when asked to be quiet")))

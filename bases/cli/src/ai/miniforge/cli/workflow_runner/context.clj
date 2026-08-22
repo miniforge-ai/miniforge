@@ -116,6 +116,10 @@
 (defn ^{:stratum 0} resolve-acting
   "Resolve who this run acts for, or nil when no operator is configured.
 
+   `quiet` suppresses the misconfiguration warning, matching every other
+   diagnostic on this path — a --quiet run that still prints is a run
+   whose output cannot be piped.
+
    Called once per run, at the boundary that starts it. Everything
    downstream reads `:execution/acting` off the context rather than
    resolving again — two resolutions are two answers about who acted.
@@ -132,7 +136,7 @@
    created under it would carry an owner that looks observed and is
    fabricated. Carrying no answer is recoverable; carrying a plausible
    wrong one is not."
-  []
+  [quiet]
   (let [identity (tenancy/resolve-operator (config/load-config))]
     (cond
       (not (anomaly/anomaly? identity))
@@ -146,10 +150,11 @@
       ;; that governs nothing would be worse than saying so. It becomes
       ;; fatal in 3c, where records get owners.
       (= tenancy/invalid-operator-identity (:anomaly/subtype identity))
-      (do (println (display/colorize
-                    :yellow
-                    (str "Warning: " (:anomaly/message identity)
-                         " — this run will proceed with no owning identity")))
+      (do (when-not quiet
+            (println (display/colorize
+                      :yellow
+                      (str "Warning: " (:anomaly/message identity)
+                           " — this run will proceed with no owning identity"))))
           nil)
 
       ;; Nobody has configured an operator. The expected state today, and
@@ -206,7 +211,7 @@
                                        routing-trigger-event-id acting]}]
   (let [on-chunk (es/create-streaming-callback event-stream workflow-id :agent
                                                {:print? (not quiet) :quiet? quiet})
-        acting (or acting (resolve-acting))
+        acting (or acting (resolve-acting quiet))
         source-root (source-root-path source-dir)
         git-info (git/get-git-state source-root)
         worktree-path (or (execution-worktree-path execution-opts)
