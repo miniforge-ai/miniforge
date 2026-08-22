@@ -985,6 +985,29 @@
         (is (= :agent-stalled (:phase/termination-reason reason)))
         (is (= 120000 (:stall/gap-duration-ms reason)))))))
 
+(deftest ^{:stratum 2} rate-limit-classification-survives-consultation-normalization-test
+  (testing "a specialized-agent failure whose scalar :output carries a
+            rate-limit message still classifies as rate-limited after
+            attach-consultation wraps the scalar under :agent/raw-output
+            (the round-2 review finding on #1825)"
+    (with-redefs [agent/create-implementer (fn [_] {:type :mock-implementer})
+                  agent/invoke (fn [_ _ _]
+                                 {:status :error
+                                  :output "HTTP 429 Too Many Requests — quota exhausted"
+                                  :error {:message nil}
+                                  :metrics {:tokens 0 :duration-ms 100}})
+                  agent/curate-implement-output mock-curator-error]
+      (let [ctx (-> (create-base-context)
+                    (assoc :phase-config {:phase :implement}))
+            interceptor (phase/get-phase-interceptor {:phase :implement})
+            enter-result ((:enter interceptor) ctx)
+            final-result ((:leave interceptor) enter-result)]
+        (is (= "HTTP 429 Too Many Requests — quota exhausted"
+               (get-in final-result [:phase :result :output :agent/raw-output]))
+            "scalar output preserved under :agent/raw-output")
+        (is (true? (get-in final-result [:phase :error :rate-limited?]))
+            "rate-limit classifier reads through the normalized shape")))))
+
 (use-fixtures :each
   (fn [f]
     (phase/reset-phase-loader!)
