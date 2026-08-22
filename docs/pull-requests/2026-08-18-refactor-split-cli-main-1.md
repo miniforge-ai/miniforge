@@ -39,7 +39,7 @@ train needs `util` available to require.
   seven (`optional-composition-var`, `caught-message`,
   `timestamp->epoch-ms`, `status-label`) were `defn-` (private) in
   `main.clj`; made public (`defn`) since callers now cross a namespace
-  boundary — the only visibility change in this slice.
+  boundary — the only visibility changes in this slice.
 - `main.clj`: the seven bodies removed; every call site across the
   file (~50 of them, spanning nearly every command function) requalified
   to `util/<name>`. Split across two commits to stay under the
@@ -58,7 +58,7 @@ train needs `util` available to require.
   slice) now calls the qualified var, so the test must redefine the
   var where it now lives.
 
-This is pure code motion aside from the two required visibility
+This is pure code motion aside from the four required visibility
 changes and the one test call-site update above — no helper's logic
 changed.
 
@@ -118,7 +118,7 @@ rebases onto the updated `main` after the prior one merges.
 
 - [x] Zero unaccounted-for fan-in confirmed via fully-qualified
       namespace grep before starting, including project-level tests
-- [x] Pure code motion — no behavior changes, two required
+- [x] Pure code motion — no behavior changes, four required
       defn-\-\>defn visibility flips documented above
 - [x] `stratum-lint` clean on the new file; `main.clj`'s remaining
       over-budget state tracked and expected mid-train
@@ -130,7 +130,7 @@ rebases onto the updated `main` after the prior one merges.
 - [x] Adversarial self-review: diffed `main.clj` end to end against
       the original — every relocated def is byte-identical apart from
       its `:stratum` tag/heading and call-site qualification; no def
-      added, removed, or behaviorally altered beyond the two
+      added, removed, or behaviorally altered beyond the four
       documented visibility flips
 
 🤖 Generated with [Claude Code](https://claude.com/claude-code)
