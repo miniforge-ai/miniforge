@@ -50,9 +50,25 @@
 ;------------------------------------------------------------------------------ Layer 0
 
 (defn- ^{:stratum 0} no-identity
+  "No operator was configured. An expected state today, and the caller
+   may reasonably carry on without one."
   [detail]
   (anomaly/sub-anomaly :invalid-input
                        :anomalies.tenancy/no-operator-identity
+                       detail
+                       {}))
+
+(defn- ^{:stratum 0} bad-identity
+  "An operator WAS configured and is wrong.
+
+   A distinct subtype rather than a distinguishing message, because the
+   difference is what callers must branch on: 'nobody set this up yet'
+   is silence, and 'you set it up wrong' has to be visible or the
+   configuration error is undetectable. Prose in a message cannot be
+   branched on without matching strings."
+  [detail]
+  (anomaly/sub-anomaly :invalid-input
+                       :anomalies.tenancy/invalid-operator-identity
                        detail
                        {}))
 
@@ -98,17 +114,17 @@
        ;; Most specific cause first — a blank string is a string, and
        ;; reporting a type error for it sends the reader to the wrong
        ;; field.
-       (no-identity (cond
-                      (nil? configured)
-                      "no operator identity configured at [:tenancy :operator-name]; refusing to invent one"
+       (cond
+         (nil? configured)
+         (no-identity "no operator identity configured at [:tenancy :operator-name]; refusing to invent one")
 
-                      (not (string? configured))
-                      (str "operator identity at [:tenancy :operator-name] must be a string, got "
-                           (.getSimpleName (class configured)) "; refusing to coerce one")
+         (not (string? configured))
+         (bad-identity (str "operator identity at [:tenancy :operator-name] must be a string, got "
+                            (.getSimpleName (class configured)) "; refusing to coerce one"))
 
-                      :else
-                      "operator identity at [:tenancy :operator-name] is blank; refusing to invent one"))
+         :else
+         (bad-identity "operator identity at [:tenancy :operator-name] is blank; refusing to invent one"))
        (let [identity (operator-identity operator-name now)]
          (if (m/validate schema/Identity identity)
            identity
-           (no-identity "configured operator did not produce a valid identity")))))))
+           (bad-identity "configured operator did not produce a valid identity")))))))

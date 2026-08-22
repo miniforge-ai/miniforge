@@ -122,3 +122,20 @@
           "and must not leave a nil :acting key for a later reader to trust")))
   (testing "the run still proceeds — the context is otherwise intact"
     (is (= "/tmp/repo-root" (:worktree-path (context-with-config {}))))))
+
+(deftest ^{:stratum 1} a-misconfigured-operator-is-visible-not-silent-test
+  ;; Configured-and-wrong is not the same as not-configured. Swallowing
+  ;; both would leave the run unowned while the operator believed they
+  ;; had set an identity, and the resolver's distinct refusal causes
+  ;; would be unobservable.
+  (doseq [bad [42 {:a 1} [1 2] "  "]]
+    (let [out (java.io.StringWriter.)
+          context (binding [*out* out] (context-with-config {:tenancy {:operator-name bad}}))]
+      (is (nil? (:acting context))
+          (str "a misconfigured operator still attaches nothing, given " (pr-str bad)))
+      (is (re-find #"(?i)warning" (str out))
+          (str "but it must say so, given " (pr-str bad)))))
+  (testing "while a merely absent operator stays quiet — that is the expected state today"
+    (let [out (java.io.StringWriter.)]
+      (binding [*out* out] (context-with-config {}))
+      (is (not (re-find #"(?i)warning" (str out)))))))

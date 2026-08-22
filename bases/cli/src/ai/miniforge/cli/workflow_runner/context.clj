@@ -134,8 +134,27 @@
    wrong one is not."
   []
   (let [identity (tenancy/resolve-operator (config/load-config))]
-    (when-not (anomaly/anomaly? identity)
-      (tenancy/establish-acting identity (java.time.Instant/now)))))
+    (cond
+      (not (anomaly/anomaly? identity))
+      (tenancy/establish-acting identity (java.time.Instant/now))
+
+      ;; Configured and WRONG is not the same as not configured, and
+      ;; swallowing both would make the second undetectable — the run
+      ;; would proceed unowned while the operator believed they had set
+      ;; an identity. Not fatal in this slice, because nothing requires
+      ;; acting yet and failing the run over a config typo in a field
+      ;; that governs nothing would be worse than saying so. It becomes
+      ;; fatal in 3c, where records get owners.
+      (= tenancy/invalid-operator-identity (:anomaly/subtype identity))
+      (do (println (display/colorize
+                    :yellow
+                    (str "Warning: " (:anomaly/message identity)
+                         " — this run will proceed with no owning identity")))
+          nil)
+
+      ;; Nobody has configured an operator. The expected state today, and
+      ;; not worth a warning on every run.
+      :else nil)))
 
 (defn ^{:stratum 0} create-llm-client
   ([workflow spec quiet] (create-llm-client workflow spec quiet nil))
