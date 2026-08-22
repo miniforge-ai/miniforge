@@ -27,7 +27,8 @@
    [ai.miniforge.control-plane.heartbeat :as heartbeat]
    [ai.miniforge.control-plane-adapter.interface :as adapter]
    [ai.miniforge.event-stream.interface.events :as events]
-   [ai.miniforge.event-stream.interface.stream :as stream]))
+   [ai.miniforge.event-stream.interface.stream :as stream]
+   [ai.miniforge.logging.interface :as log]))
 
 ;------------------------------------------------------------------------------ Layer 0
 
@@ -69,6 +70,9 @@
      - :registry         - Agent registry atom (or creates new)
      - :decision-manager - Decision manager atom (or creates new)
      - :adapters         - Seq of ControlPlaneAdapter instances
+     - :logger           - Optional ai.miniforge.logging logger; adapter/agent
+                           errors in the discovery and poll loops are emitted at
+                           :warn level.  Pass nil to suppress all loop logging.
      - :discovery-interval-ms - Discovery loop interval (default 30000)
      - :poll-interval-ms      - Status poll interval (default 10000)
      - :on-agent-discovered   - Callback (fn [agent-record])
@@ -80,7 +84,8 @@
    Example:
      (def orch (create-orchestrator {:adapters [claude-adapter]}))"
   [opts]
-  {:registry (or (:registry opts) (registry/create-registry))
+  {:logger (:logger opts)
+   :registry (or (:registry opts) (registry/create-registry))
    :decision-manager (or (:decision-manager opts) (dq/create-decision-manager))
    :adapters (vec (get opts :adapters []))
    :event-stream (:event-stream opts)
@@ -97,7 +102,7 @@
 (defn- ^{:stratum 1} run-discovery-pass
   "Run one discovery pass across all adapters.
    Registers any newly discovered agents."
-  [{:keys [registry adapters on-agent-discovered event-stream workflow-id]}]
+  [{:keys [registry adapters on-agent-discovered event-stream workflow-id logger]}]
   (doseq [adapter adapters]
     (try
       (let [discovered (adapter/discover-agents
@@ -122,11 +127,20 @@
                                     :tags (:agent/tags registered)
                                     :heartbeat-interval-ms (:agent/heartbeat-interval-ms
                                                             registered)}))))))))
-      (catch Exception _e nil))))
+      (catch InterruptedException ie
+        ;; Re-interrupt so the outer loop's Thread/sleep sees the flag
+        ;; and the future shuts down promptly on future-cancel.
+        (.interrupt (Thread/currentThread))
+        (throw ie))
+      (catch Exception e
+        (log/warn logger :loop :orchestrator/discovery-adapter-error
+                  {:message (ex-message e)
+                   :data {:vendor (adapter/adapter-id adapter)
+                          :cause  (ex-data e)}})))))
 
 (defn- ^{:stratum 1} run-poll-pass
   "Run one status poll pass for all non-terminal agents."
-  [{:keys [registry adapters event-stream workflow-id]}]
+  [{:keys [registry adapters event-stream workflow-id logger]}]
   (let [agents (registry/list-agents registry)
         by-vendor (group-by :agent/vendor agents)
         adapter-map (into {} (map (fn [a]
@@ -170,7 +184,17 @@
                                      (:agent/id agent-record)
                                      old-status
                                      new-status)))))
-              (catch Exception _e nil))))))))
+              (catch InterruptedException ie
+                ;; Re-interrupt so the outer loop's Thread/sleep sees the flag
+                ;; and the future shuts down promptly on future-cancel.
+                (.interrupt (Thread/currentThread))
+                (throw ie))
+              (catch Exception e
+                (log/warn logger :loop :orchestrator/poll-agent-error
+                          {:message (ex-message e)
+                           :data {:agent-id (:agent/id agent-record)
+                                  :vendor    (:agent/vendor agent-record)
+                                  :cause     (ex-data e)}})))))))))
 
 (defn ^{:stratum 1} submit-decision-from-agent!
   "Submit a decision from an agent to the queue.
@@ -259,7 +283,7 @@
    Returns: Updated orchestrator with running futures."
   [orchestrator]
   (let [{:keys [running futures discovery-interval-ms poll-interval-ms
-                registry on-agent-unreachable]} orchestrator]
+                registry on-agent-unreachable logger]} orchestrator]
     (reset! running true)
 
     ;; Discovery loop
@@ -268,7 +292,14 @@
              (while @running
                (try
                  (run-discovery-pass orchestrator)
-                 (catch Exception _e nil))
+                 (catch InterruptedException ie
+                   ;; Restore the interrupt flag; Thread/sleep below will
+                   ;; throw immediately and let the future terminate cleanly.
+                   (.interrupt (Thread/currentThread)))
+                 (catch Exception e
+                   (log/warn logger :loop :orchestrator/discovery-pass-error
+                             {:message (ex-message e)
+                              :data    {:cause (ex-data e)}})))
                (Thread/sleep discovery-interval-ms))))
 
     ;; Poll loop
@@ -277,7 +308,14 @@
              (while @running
                (try
                  (run-poll-pass orchestrator)
-                 (catch Exception _e nil))
+                 (catch InterruptedException ie
+                   ;; Restore the interrupt flag; Thread/sleep below will
+                   ;; throw immediately and let the future terminate cleanly.
+                   (.interrupt (Thread/currentThread)))
+                 (catch Exception e
+                   (log/warn logger :loop :orchestrator/poll-pass-error
+                             {:message (ex-message e)
+                              :data    {:cause (ex-data e)}})))
                (Thread/sleep poll-interval-ms))))
 
     ;; Heartbeat watchdog

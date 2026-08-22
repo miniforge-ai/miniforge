@@ -25,6 +25,12 @@
   :vendor/ollama      "L"
   :vendor/unknown     "?"
 
+  ;; orchestrator — background loop warnings
+  :orchestrator/discovery-adapter-error "Discovery pass failed for adapter {vendor}: {message}"
+  :orchestrator/poll-agent-error        "Poll pass failed for agent {agent-id}: {message}"
+  :orchestrator/discovery-pass-error    "Discovery pass threw an unexpected error: {message}"
+  :orchestrator/poll-pass-error         "Poll pass threw an unexpected error: {message}"
+
   ;; heartbeat intervals (ms) — used by adapter utilities
   :heartbeat/claude-code 15000
   :heartbeat/miniforge   10000
