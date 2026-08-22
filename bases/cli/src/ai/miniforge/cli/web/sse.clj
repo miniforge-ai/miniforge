@@ -33,7 +33,7 @@
 (defn ^{:stratum 0} on-open [workflow-id channel]
   (let [event-stream (registry/get-or-create-stream workflow-id)
         sub-id (random-uuid)]
-    (swap! registry/subscriptions assoc-in [workflow-id channel] sub-id)
+    (registry/subscribe! workflow-id channel sub-id)
     (http/send! channel (response/sse-headers) false)
     (es/subscribe! event-stream sub-id
                    (fn [event]

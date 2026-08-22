@@ -48,6 +48,10 @@
         (swap! streams assoc workflow-id stream)
         stream)))
 
+(defn ^{:stratum 1} subscribe! [workflow-id channel sub-id]
+  (swap! subscriptions assoc-in [workflow-id channel] sub-id)
+  sub-id)
+
 (defn ^{:stratum 1} on-close [workflow-id channel]
   (when-let [sub-id (get-in @subscriptions [workflow-id channel])]
     (when-let [event-stream (get @streams workflow-id)]
