@@ -709,6 +709,7 @@
                  "components/algorithms/src"
                  "components/anomaly/src"
                  "components/anomaly/resources"
+                 "components/tenancy/src"
                  "components/schema/src"
                  "components/schema/resources"
                  "components/logging/src"
