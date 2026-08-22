@@ -136,7 +136,9 @@ already-known SL003 finding this PR exists to fix — not for anything
       existing test file to run instead)
 - [x] Pre-commit smoke suite green on every commit (not just the last)
 - [x] PR-diff and commit-diff budgets checked (492 insertions / 378
-      deletions across 4 files, 199 reportable lines max per commit)
+      deletions across the 4 code files — 5 files counting this PR
+      doc, which the reportable-line filter excludes — 199 reportable
+      lines max per commit)
 - [x] Adversarial self-review: diffed `tui.clj` end to end against the
       original — every relocated def is byte-identical apart from its
       `:stratum` tag/heading and call-site qualification; no def
