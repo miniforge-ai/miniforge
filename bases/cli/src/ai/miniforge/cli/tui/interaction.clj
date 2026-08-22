@@ -64,7 +64,9 @@
 
 (defn ^{:stratum 0} nav-down [state]
   (let [max-idx (dec (count (:flat-items state)))]
-    (update state :selected-index #(min max-idx (inc %)))))
+    (if (neg? max-idx)
+      state
+      (update state :selected-index #(min max-idx (inc %))))))
 
 (defn ^{:stratum 0} get-selected-item [state]
   (get-in state [:flat-items (:selected-index state)]))

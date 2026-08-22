@@ -62,7 +62,7 @@
      :hx-swap "innerHTML"
      :hx-prompt (t :web-ui/reject-prompt)}
     (t :web-ui/reject-button)]
-   [:a.btn.btn-secondary {:href url :target "_blank"}
+   [:a.btn.btn-secondary {:href url :target "_blank" :rel "noopener noreferrer"}
     (t :web-ui/open-github-button)]])
 
 ;------------------------------------------------------------------------------ Layer 2

@@ -23,7 +23,7 @@
    file (no same-file references), so the whole namespace is one real
    layer."
   (:require
-   [babashka.process :as process]
+   [babashka.fs :as fs]
    [ai.miniforge.cli.messages :as messages]))
 
 ;------------------------------------------------------------------------------ Layer 0
@@ -69,8 +69,7 @@
 (defn ^{:stratum 0} check-command
   "Check if a command is available."
   [cmd]
-  (let [{:keys [exit]} (process/sh "which" cmd)]
-    (zero? exit)))
+  (boolean (fs/which cmd)))
 
 (defn ^{:stratum 0} timestamp->epoch-ms
   [timestamp]

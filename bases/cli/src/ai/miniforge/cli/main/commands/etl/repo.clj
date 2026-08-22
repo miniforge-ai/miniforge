@@ -45,12 +45,14 @@
    Returns a schema/success or schema/failure result."
   [url]
   (try
-    (let [tmp-dir (str (System/getProperty "java.io.tmpdir") "/miniforge-etl-"
-                       (System/currentTimeMillis))
+    (let [tmp-dir (str (fs/path (System/getProperty "java.io.tmpdir")
+                                (str "miniforge-etl-" (random-uuid))))
           result  (process/sh "git" "clone" "--depth" "1" url tmp-dir)]
       (if (zero? (:exit result))
         (schema/success :path tmp-dir)
-        (schema/failure :path (str/trim (:err result)))))
+        (do
+          (try (fs/delete-tree tmp-dir) (catch Exception _ nil))
+          (schema/failure :path (str/trim (:err result))))))
     (catch Exception e
       (schema/failure :path (ex-message e)))))
 
