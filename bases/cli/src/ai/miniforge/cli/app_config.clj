@@ -16,122 +16,85 @@
 ;; See the License for the specific language governing permissions and
 ;; limitations under the License.
 (ns ai.miniforge.cli.app-config
-  "Project-composed CLI app identity and filesystem layout."
+  "Project-composed CLI app identity and filesystem layout. A stable facade
+   over `ai.miniforge.cli.app-config.profile` (resource-backed identity)
+   and `ai.miniforge.cli.app-config.paths` (home-dir resolution and
+   filesystem layout) — split out (rule 210: the combined namespace
+   measured 6 real layers, max 3). Every symbol here is a plain re-export;
+   the real logic and each sibling's own layer structure live in those two
+   namespaces. Kept as a facade, rather than moving callers over, because
+   this namespace is required directly (fully-qualified) across bases,
+   components, and projects — re-exporting keeps every one of those call
+   sites unchanged."
   (:require
-   [babashka.fs :as fs]
-   [clojure.string :as str]
-   [ai.miniforge.cli.resource-config :as resource-config]))
+   [ai.miniforge.cli.app-config.profile :as profile]
+   [ai.miniforge.cli.app-config.paths :as paths]))
 
 ;------------------------------------------------------------------------------ Layer 0
 
-;; Resource loading
+;; Re-exported from ai.miniforge.cli.app-config.profile
 (def ^{:stratum 0} app-config-resource
   "Classpath resource path for CLI app identity."
-  "config/cli/app.edn")
+  profile/app-config-resource)
 
 (def ^{:stratum 0} default-status-config
   "Defaults for workflow status rendering and health classification."
-  {:running-stale-threshold-ms 300000})
+  profile/default-status-config)
 
-(defn- ^{:stratum 0} normalize-profile
-  [profile]
-  (-> profile
-      (update :help-examples #(vec (or % [])))))
-
-(defn ^{:stratum 0} getenv
+(def ^{:stratum 0} getenv
   "Environment-variable lookup seam. Public so tests can rebind it via
    `with-redefs` when validating MINIFORGE_HOME resolution; not part of
    the external API."
-  [var-name]
-  (System/getenv var-name))
+  profile/getenv)
 
-;------------------------------------------------------------------------------ Layer 1
-
-(defn ^{:stratum 1} app-profile
+(def ^{:stratum 0} app-profile
   "Resolve the active CLI app profile from the classpath."
-  []
-  (-> (resource-config/merged-resource-config app-config-resource
-                                              :cli-app/profile
-                                              {})
-      normalize-profile))
+  profile/app-profile)
 
-(defn ^{:stratum 1} pr-monitor-config
+(def ^{:stratum 0} pr-monitor-config
   "Resolve PR monitor CLI config from the classpath."
-  []
-  (resource-config/merged-resource-config app-config-resource
-                                          :cli-app/pr-monitor
-                                          {}))
+  profile/pr-monitor-config)
 
-(defn ^{:stratum 1} status-config
+(def ^{:stratum 0} status-config
   "Resolve workflow status CLI config from the classpath."
-  []
-  (resource-config/merged-resource-config app-config-resource
-                                          :cli-app/status
-                                          default-status-config))
+  profile/status-config)
 
-;------------------------------------------------------------------------------ Layer 2
+(def ^{:stratum 0} binary-name profile/binary-name)
 
-;; Identity helpers
-(defn ^{:stratum 2} binary-name []
-  (:name (app-profile)))
+(def ^{:stratum 0} display-name profile/display-name)
 
-(defn ^{:stratum 2} display-name []
-  (:display-name (app-profile)))
+(def ^{:stratum 0} description profile/description)
 
-(defn ^{:stratum 2} description []
-  (:description (app-profile)))
+(def ^{:stratum 0} system-check-title profile/system-check-title)
 
-(defn ^{:stratum 2} system-check-title []
-  (:system-check-title (app-profile)))
+(def ^{:stratum 0} home-dir-name profile/home-dir-name)
 
-(defn ^{:stratum 2} home-dir-name []
-  (:home-dir-name (app-profile)))
+(def ^{:stratum 0} tui-package profile/tui-package)
 
-(defn ^{:stratum 2} tui-package []
-  (:tui-package (app-profile)))
+(def ^{:stratum 0} help-examples profile/help-examples)
 
-(defn ^{:stratum 2} help-examples []
-  (:help-examples (app-profile)))
-
-;------------------------------------------------------------------------------ Layer 3
-
-(defn ^{:stratum 3} default-home-dir
+;; Re-exported from ai.miniforge.cli.app-config.paths
+(def ^{:stratum 0} default-home-dir
   "Profile-derived default home directory. Public so tests can rebind
    it via `with-redefs`; not part of the external API."
-  []
-  (str (fs/home) "/" (home-dir-name)))
+  paths/default-home-dir)
 
-(defn ^{:stratum 3} command-string
+(def ^{:stratum 0} command-string
   "Build a CLI command string prefixed with the active binary name."
-  [& parts]
-  (str/join " " (cons (binary-name) (remove str/blank? parts))))
+  paths/command-string)
 
-;------------------------------------------------------------------------------ Layer 4
+(def ^{:stratum 0} home-dir paths/home-dir)
 
-(defn ^{:stratum 4} home-dir []
-  (or (getenv "MINIFORGE_HOME")
-      (default-home-dir)))
+(def ^{:stratum 0} config-path paths/config-path)
 
-;------------------------------------------------------------------------------ Layer 5
+(def ^{:stratum 0} artifacts-dir paths/artifacts-dir)
 
-;; Filesystem layout helpers
-(defn ^{:stratum 5} config-path []
-  (str (home-dir) "/config.edn"))
+(def ^{:stratum 0} worktrees-dir paths/worktrees-dir)
 
-(defn ^{:stratum 5} artifacts-dir []
-  (str (home-dir) "/artifacts"))
+(def ^{:stratum 0} events-dir paths/events-dir)
 
-(defn ^{:stratum 5} worktrees-dir []
-  (str (home-dir) "/worktrees"))
+(def ^{:stratum 0} logs-dir paths/logs-dir)
 
-(defn ^{:stratum 5} events-dir []
-  (str (home-dir) "/events"))
+(def ^{:stratum 0} dashboard-port-file paths/dashboard-port-file)
 
-(defn ^{:stratum 5} logs-dir []
-  (str (home-dir) "/logs"))
-
-(defn ^{:stratum 5} dashboard-port-file []
-  (str (home-dir) "/dashboard.port"))
-
-(defn ^{:stratum 5} state-file []
-  (str (home-dir) "/state.edn"))
+(def ^{:stratum 0} state-file paths/state-file)
