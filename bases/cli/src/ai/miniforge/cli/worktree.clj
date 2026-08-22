@@ -19,7 +19,7 @@
   "Resolve the nearest checkout root, preferring the nearest .git marker.
 
    This makes nested linked worktrees safe: if an agent is launched inside a
-  child worktree under a larger repository, we bind tooling to the child
+   child worktree under a larger repository, we bind tooling to the child
   checkout instead of accidentally drifting up to the parent repo.
 
    The directory walk to the nearest `.git` marker lives in
