@@ -41,9 +41,11 @@ The branch originally carried the fix the commit title names: six files
 returning serialization and validation failures as anomaly values before
 any write, across `effect-transaction` and `execution-grant`. A 2026-08-07
 rebase dropped them. They patched `store/write!`, a function the durable
-store no longer has: `store.clj` delegates to `persistence.clj` and
-`codec.clj` instead. Every production file conflicted, and the conflicts
-were resolved by discarding the changes rather than porting them.
+store no longer has. `store.clj` now delegates to `persistence.clj`, which
+owns the file, lock, and link handling and in turn calls `codec.clj` at the
+EDN boundary; `store.clj` does not reference the codec itself. Every
+production file conflicted, and the conflicts were resolved by discarding
+the changes rather than porting them.
 
 The commit that performed that split is not identifiable from the current
 history. The earliest commit in this repository (`e67c640`, 2026-08-07) is
