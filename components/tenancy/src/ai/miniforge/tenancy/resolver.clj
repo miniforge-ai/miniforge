@@ -86,9 +86,28 @@
    is not."
   ([config] (resolve-operator config (Instant/now)))
   ([config ^Instant now]
-   (let [operator-name (some-> (get-in config [:tenancy :operator-name]) str str/trim)]
+   (let [configured (get-in config [:tenancy :operator-name])
+         ;; A STRING or nothing. Coercing with `str` would turn a config
+         ;; typo — a map, a vector, a number — into a tenant display name
+         ;; like "{:a 1}", and step 3c stamps that onto records as an
+         ;; owner that looks observed and is really a mistyped key. That
+         ;; is the same fabrication this function refuses elsewhere,
+         ;; arriving by coercion instead of by default.
+         operator-name (when (string? configured) (str/trim configured))]
      (if (str/blank? operator-name)
-       (no-identity "no operator identity configured at [:tenancy :operator-name]; refusing to invent one")
+       ;; Most specific cause first — a blank string is a string, and
+       ;; reporting a type error for it sends the reader to the wrong
+       ;; field.
+       (no-identity (cond
+                      (nil? configured)
+                      "no operator identity configured at [:tenancy :operator-name]; refusing to invent one"
+
+                      (not (string? configured))
+                      (str "operator identity at [:tenancy :operator-name] must be a string, got "
+                           (.getSimpleName (class configured)) "; refusing to coerce one")
+
+                      :else
+                      "operator identity at [:tenancy :operator-name] is blank; refusing to invent one"))
        (let [identity (operator-identity operator-name now)]
          (if (m/validate schema/Identity identity)
            identity
