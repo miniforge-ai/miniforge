@@ -339,23 +339,29 @@
 
    Returns result with checkout info."
   [executor environment-id repo-url branch opts]
-  (let [depth-args (when (:depth opts) ["--depth" (str (:depth opts))])
-        clone-cmd (str "git clone "
-                       (when depth-args (str (first depth-args) " " (second depth-args) " "))
-                       repo-url " .")
-        clone-result (execute! executor environment-id clone-cmd
-                               {:timeout-ms 300000})]
-    (if (and (result/ok? clone-result)
-             (zero? (:exit-code (:data clone-result))))
-      ;; Checkout branch
-      (let [checkout-result (execute! executor environment-id
-                                      (str "git checkout " branch)
-                                      {:timeout-ms 60000})]
-        (if (and (result/ok? checkout-result)
-                 (zero? (:exit-code (:data checkout-result))))
-          (result/ok {:cloned? true :branch branch})
-          checkout-result))
-      clone-result)))
+  ;; Reject branches that start with '-': git parses them as options even in
+  ;; argv-vector (no-shell) mode. Mirrors the safe-branch? guard in workspace.clj.
+  (if (and (string? branch) (.startsWith ^String branch "-"))
+    (result/err :invalid-branch
+                (str "Branch must not start with '-': " (pr-str branch)))
+    (let [depth-args (when (:depth opts) ["--depth" (str (:depth opts))])
+          ;; Use a vector (no shell) + "--" end-of-options separator so git
+          ;; cannot interpret a leading-dash repo-url as an option flag.
+          ;; Matches the pattern in protocols/impl/runtime/oci_cli.clj:826.
+          clone-cmd (into ["git" "clone"] (concat (or depth-args []) ["--" repo-url "."]))
+          clone-result (execute! executor environment-id clone-cmd
+                                 {:timeout-ms 300000})]
+      (if (and (result/ok? clone-result)
+               (zero? (:exit-code (:data clone-result))))
+        ;; Checkout branch — vector exec prevents shell metacharacter expansion.
+        (let [checkout-result (execute! executor environment-id
+                                        ["git" "checkout" branch]
+                                        {:timeout-ms 60000})]
+          (if (and (result/ok? checkout-result)
+                   (zero? (:exit-code (:data checkout-result))))
+            (result/ok {:cloned? true :branch branch})
+            checkout-result))
+        clone-result))))
 
 ;------------------------------------------------------------------------------ Layer 2
 

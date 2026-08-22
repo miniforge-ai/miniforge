@@ -336,7 +336,8 @@
 
 (deftest clone-and-checkout!-success-test
   (testing "Successful clone + checkout returns ok with :cloned? and :branch.
-            Two commands are issued in order: git clone then git checkout."
+            Both commands use vector form (no shell) and clone includes \"--\"
+            before the repo URL to prevent option injection."
     (let [exec (mock-executor :worktree)
           ret  (sut/clone-and-checkout! exec "env-1"
                                         "https://example.com/r.git"
@@ -349,12 +350,19 @@
       (is (true? (-> ret :data :cloned?)))
       (is (= "feature/x" (-> ret :data :branch)))
       (is (= 2 (count cmds)))
-      (is (str/starts-with? (first cmds) "git clone "))
-      (is (str/includes? (first cmds) "https://example.com/r.git"))
-      (is (= "git checkout feature/x" (second cmds))))))
+      ;; Commands are vectors so ProcessBuilder exec's git directly, no shell.
+      (is (vector? (first cmds)))
+      (is (= "git" (first (first cmds))))
+      (is (= "clone" (second (first cmds))))
+      ;; "--" end-of-options separator must precede repo-url to block option injection.
+      (let [clone-cmd (first cmds)
+            sep-idx   (.indexOf ^java.util.List clone-cmd "--")]
+        (is (pos? sep-idx) "\"--\" must appear after git clone [opts]")
+        (is (= "https://example.com/r.git" (nth clone-cmd (inc sep-idx)))))
+      (is (= ["git" "checkout" "feature/x"] (second cmds))))))
 
 (deftest clone-and-checkout!-with-depth-option-test
-  (testing "Supplying :depth adds --depth N to the clone command"
+  (testing "Supplying :depth adds [\"--depth\" N] to the clone command vector"
     (let [exec (mock-executor :worktree)
           _ (sut/clone-and-checkout! exec "env-1"
                                      "https://example.com/r.git"
@@ -364,7 +372,9 @@
                         (->> (filter #(= :execute (first %))))
                         first
                         (nth 2))]
-      (is (str/includes? clone-cmd "--depth 5")))))
+      (is (vector? clone-cmd))
+      (is (some #{"--depth"} clone-cmd))
+      (is (some #{"5"} clone-cmd)))))
 
 (deftest clone-and-checkout!-clone-failure-short-circuits-test
   (testing "If git clone returns a non-zero exit code, checkout is never run
@@ -381,7 +391,8 @@
                     (map #(nth % 2)))]
       ;; Only the clone command was issued.
       (is (= 1 (count cmds)))
-      (is (str/starts-with? (first cmds) "git clone"))
+      (is (= "git" (first (first cmds))))
+      (is (= "clone" (second (first cmds))))
       ;; The clone result (exit-code 128) is what the function returns.
       (is (= 128 (:exit-code (:data ret)))))))
 
@@ -411,3 +422,16 @@
       (is (= 2 (count (filter #(= :execute (first %)) @(:calls exec)))))
       ;; The checkout result is what we get back.
       (is (= 1 (:exit-code (:data ret)))))))
+
+(deftest clone-and-checkout!-rejects-dash-prefix-branch-test
+  (testing "A branch name starting with '-' is rejected before any git command runs"
+    (let [exec (mock-executor :worktree)
+          ret  (sut/clone-and-checkout! exec "env-1"
+                                        "https://example.com/r.git"
+                                        "-evil-option"
+                                        {})]
+      (is (result/err? ret))
+      (is (= :invalid-branch (-> ret :error :code)))
+      ;; No execute! calls should be made — rejection is a pure guard.
+      (is (zero? (count (filter #(= :execute (first %)) @(:calls exec))))
+          "no git commands should run for an invalid branch"))))
