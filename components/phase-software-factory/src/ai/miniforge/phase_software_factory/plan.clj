@@ -231,10 +231,8 @@
                ;; Attached on failures too (:output starts nil on
                ;; response/failure): a failed plan that consulted must not be
                ;; ledgered as one that never did.
-               (cond-> r
-                 (map? r)
-                 (assoc-in [:output :codex/consultation]
-                           (codex-pin/consultation-summary codex-outcome nil))))
+               (codex-pin/attach-consultation
+                 r (codex-pin/consultation-summary codex-outcome nil)))
      :rules-manifest rules-manifest}))
 
 ;------------------------------------------------------------------------------ Layer 2

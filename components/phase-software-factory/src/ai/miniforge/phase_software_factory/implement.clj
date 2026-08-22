@@ -924,11 +924,10 @@
         ;; FAILURES too (:output starts nil on response/failure): a failed
         ;; implement that consulted must not be ledgered as one that never
         ;; did — the gap instrument's :undelivered bucket depends on it.
-        result (cond-> result
-                 (map? result)
-                 (assoc-in [:output :codex/consultation]
-                           (codex-pin/consultation-summary
-                             codex-outcome (:context-reads impl-result))))]
+        result (codex-pin/attach-consultation
+                 result
+                 (codex-pin/consultation-summary
+                   codex-outcome (:context-reads impl-result)))]
     (-> (phase/enter-context ctx :implement :implementer gates budget start-time result)
         (assoc-in [:phase :rules-manifest] rules-manifest)
         (assoc-in [:phase :watchdog-state]
