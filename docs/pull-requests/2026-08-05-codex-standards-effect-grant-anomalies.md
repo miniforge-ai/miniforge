@@ -3,21 +3,71 @@
   Author: Christopher Lester (christopher@miniforge.ai)
   Copyright 2025-2026 Christopher Lester. Licensed under Apache 2.0.
 -->
-# fix: return anomalies from durable effect boundaries
+# test: cover anomaly propagation through the effect lifecycle
 
 ## Overview
 
-Moves effect-transaction and execution-grant persistence validation failures onto the anomaly value path.
+Adds one regression test proving that `record/propose!` and
+`record/advance!` return a store write failure unchanged instead of
+reporting success. No production code changed.
+
+This document originally described a broader fix. That fix did not land —
+see [What did not land](#what-did-not-land) — and the document has been
+corrected to describe the commit that did.
 
 ## Changes in Detail
 
-- Reject unsupported timestamps before writing.
-- Propagate persistence anomalies to callers.
-- Update focused tests for the returned anomaly contract.
+Merged as `3d2361e4` ("fix: return anomalies from durable effect
+boundaries (#1672)", 2026-08-11), which squash-merged two files:
+
+| File | Change |
+|------|--------|
+| `components/effect-transaction/test/ai/miniforge/effect_transaction/store_test.clj` | Adds `lifecycle-writes-propagate-store-anomalies-test` (stratum 2). |
+| `docs/pull-requests/2026-08-05-codex-standards-effect-grant-anomalies.md` | This document. |
+
+The test redefines `store/create!` and `store/transition!` to return an
+`:unavailable` anomaly, then asserts both lifecycle entry points return
+that value unchanged. It guards against reintroducing a
+`(do (store/create! dir t) t)` shape, which discards the store's return
+value and reports success on a failed write.
+
+The commit title names a fix the merged diff does not contain. The title
+is preserved here as the durable identifier for `3d2361e4`; treat this
+section, not the title, as the description of what changed.
+
+## What did not land
+
+The branch originally carried the fix the commit title names: six files
+returning serialization and validation failures as anomaly values before
+any write, across `effect-transaction` and `execution-grant`. A 2026-08-07
+rebase dropped them. They patched `store/write!`, which #1705 (`e67c640`)
+had already removed when it split `store.clj` into `persistence.clj` and
+`codec.clj`; every production file conflicted, and the conflicts were
+resolved by discarding the changes rather than porting them.
+
+No follow-up is required. `main` reaches the same guarantees by another
+route:
+
+- `record/propose!` and `record/advance!` validate against
+  `schema/EffectTransaction` before writing, and return `store/create!` /
+  `store/transition!` in tail position, so persistence anomalies reach
+  callers.
+- `persistence/persist!` wraps serialization in `try`/`catch`, and
+  `pr-str` is evaluated before `spit`, so a rejected record never reaches
+  disk.
+- `interface/record-breach!` validates `schema/Breach`, and
+  `interface/revoke-for-cause!` validates
+  `[ExecutionGrant BreachObservation inst?]`, which makes the breach
+  record built from those arguments valid by construction.
+
+Coverage for the execution-grant half already exists in
+`breach_test.clj`: `malformed-breach-is-refused-test`,
+`storage-failures-are-returned-as-data-test`, and
+`both-inst-types-round-trip-test`.
 
 ## Testing Plan
 
-- Focused effect-transaction and execution-grant tests
+- Focused `effect-transaction` tests
 - Normal pre-commit validation
 
 ## Deployment Plan
@@ -28,8 +78,11 @@ No migration or rollout is needed.
 
 - Base Branch: `main`
 - Depends On: none
+- Merged As: `3d2361e4`
+- Context: #1705 (`e67c640`) restructured the durable effect boundary and
+  supplies the anomaly contract this branch set out to add
 
 ## Checklist
 
-- [x] Audit gap fixed
 - [x] Pre-commit checks passed
+- [ ] Audit gap fixed — closed by #1705, not by this commit
