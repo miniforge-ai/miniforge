@@ -40,10 +40,17 @@ section, not the title, as the description of what changed.
 The branch originally carried the fix the commit title names: six files
 returning serialization and validation failures as anomaly values before
 any write, across `effect-transaction` and `execution-grant`. A 2026-08-07
-rebase dropped them. They patched `store/write!`, which #1705 (`e67c640`)
-had already removed when it split `store.clj` into `persistence.clj` and
-`codec.clj`; every production file conflicted, and the conflicts were
-resolved by discarding the changes rather than porting them.
+rebase dropped them. They patched `store/write!`, a function the durable
+store no longer has: `store.clj` delegates to `persistence.clj` and
+`codec.clj` instead. Every production file conflicted, and the conflicts
+were resolved by discarding the changes rather than porting them.
+
+The commit that performed that split is not identifiable from the current
+history. The earliest commit in this repository (`e67c640`, 2026-08-07) is
+a root commit with no parents, and it already contains the split layout,
+so the restructure predates everything now visible. `git log` on these
+paths reports `e67c640` only because history stops there — that is
+truncation, not authorship.
 
 No follow-up is required. `main` reaches the same guarantees by another
 route:
@@ -79,10 +86,12 @@ No migration or rollout is needed.
 - Base Branch: `main`
 - Depends On: none
 - Merged As: `3d2361e4`
-- Context: #1705 (`e67c640`) restructured the durable effect boundary and
-  supplies the anomaly contract this branch set out to add
+- Context: the durable effect boundary on `main` already supplies the
+  anomaly contract this branch set out to add; see
+  [What did not land](#what-did-not-land)
 
 ## Checklist
 
 - [x] Pre-commit checks passed
-- [ ] Audit gap fixed — closed by #1705, not by this commit
+- [ ] Audit gap fixed — the guarantees hold on `main` today, but not
+      because of this commit
