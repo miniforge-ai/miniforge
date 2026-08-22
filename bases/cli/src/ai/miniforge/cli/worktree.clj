@@ -19,72 +19,38 @@
   "Resolve the nearest checkout root, preferring the nearest .git marker.
 
    This makes nested linked worktrees safe: if an agent is launched inside a
-  child worktree under a larger repository, we bind tooling to the child
-  checkout instead of accidentally drifting up to the parent repo."
+   child worktree under a larger repository, we bind tooling to the child
+   checkout instead of accidentally drifting up to the parent repo.
+
+   The directory walk to the nearest `.git` marker lives in
+   `ai.miniforge.cli.worktree.root-resolution` (rule 210: this namespace
+   measured 5 layers, max 3); this file resolves the public
+   `worktree-root` entry point against it and adds git metadata lookup."
   (:require
-   [babashka.fs :as fs]
    [clojure.java.shell :as shell]
-   [clojure.string :as str]))
+   [clojure.string :as str]
+   [ai.miniforge.cli.worktree.root-resolution :as root-resolution]))
 
 ;------------------------------------------------------------------------------ Layer 0
 
-;; Path resolution
-(def ^{:stratum 0} ^:private git-marker-name
-  ".git")
-
-(defn- ^{:stratum 0} file->dir
-  [path]
-  (let [file (fs/file path)]
-    (if (fs/directory? file)
-      file
-      (fs/parent file))))
-
-;------------------------------------------------------------------------------ Layer 1
-
-(defn- ^{:stratum 1} canonical-dir
-  [path]
-  (some-> path file->dir fs/canonicalize str))
-
-(defn- ^{:stratum 1} git-marker-path
-  [dir]
-  (fs/path dir git-marker-name))
-
-;------------------------------------------------------------------------------ Layer 2
-
-(defn ^{:stratum 2} nearest-git-root
-  "Walk upward from start-path and return the nearest directory containing
-   a .git file or directory. Returns nil when no checkout is found."
-  ([] (nearest-git-root (System/getProperty "user.dir")))
-  ([start-path]
-   (loop [dir (canonical-dir start-path)]
-     (when dir
-       (let [git-path (git-marker-path dir)
-             parent (some-> dir fs/parent str)]
-         (cond
-           (fs/exists? git-path) dir
-           (or (nil? parent) (= dir parent)) nil
-           :else (recur parent)))))))
-
-;------------------------------------------------------------------------------ Layer 3
-
-(defn ^{:stratum 3} worktree-root
+(defn ^{:stratum 0} worktree-root
   "Return the canonical checkout root for start-path.
 
    Prefers the nearest .git marker. Falls back to git rev-parse only when
    directory walking does not find a marker."
   ([] (worktree-root (System/getProperty "user.dir")))
   ([start-path]
-   (or (nearest-git-root start-path)
-       (let [dir (or (canonical-dir start-path)
+   (or (root-resolution/nearest-git-root start-path)
+       (let [dir (or (root-resolution/canonical-dir start-path)
                      (System/getProperty "user.dir"))
              {:keys [exit out]} (shell/sh "git" "rev-parse" "--show-toplevel" :dir dir)]
          (when (zero? exit)
            (some-> out str/trim not-empty))))))
 
-;------------------------------------------------------------------------------ Layer 4
+;------------------------------------------------------------------------------ Layer 1
 
 ;; Git metadata
-(defn ^{:stratum 4} git-info
+(defn ^{:stratum 1} git-info
   "Return basic git metadata for the resolved worktree root.
 
    Returns nil when start-path is not inside a git checkout."
