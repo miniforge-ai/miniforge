@@ -70,9 +70,10 @@
   "Get terminal dimensions [width height]."
   []
   (try
-    (let [result (process/sh "stty" "size" :in (java.io.FileInputStream. "/dev/tty"))
-          [h w] (str/split (str/trim (:out result)) #" ")]
-      [(Integer/parseInt w) (Integer/parseInt h)])
+    (with-open [tty (java.io.FileInputStream. "/dev/tty")]
+      (let [result (process/sh "stty" "size" :in tty)
+            [h w] (str/split (str/trim (:out result)) #" ")]
+        [(Integer/parseInt w) (Integer/parseInt h)]))
     (catch Exception _
       [120 40])))  ; fallback
 
