@@ -74,7 +74,7 @@
   "A missing operator identity is an error at the boundary, never an anonymous fallback"
   "No record-birth site is modified in this slice"
   "Stratified design, max 3 layers per file"
-  "New component MUST be added to all four projects' deps.edn or poly check fails"]
+  "New component MUST be registered in the deps.edn of every project that uses it, or poly check fails"]
 
  :spec/acceptance-criteria
  ["Tenant and Principal schemas validate their documented shape and reject extra keys"

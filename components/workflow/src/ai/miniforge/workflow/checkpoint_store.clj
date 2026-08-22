@@ -16,89 +16,35 @@
 ;; See the License for the specific language governing permissions and
 ;; limitations under the License.
 (ns ai.miniforge.workflow.checkpoint-store
-  "Durable execution-machine snapshots and phase checkpoints.
+  "Durable execution-machine snapshots and phase checkpoints: the two
+   operations that move a checkpoint between memory and disk.
 
-   Strata, bottom-up: filenames, key lists and path normalization (0);
-   the per-run paths, the atomic write, and the snapshot/phase-record
-   builders (1); `resolve-checkpoint-root` and `phase-checkpoint-path`
-   (2); `build-manifest` and `load-checkpoint-data` (3);
-   `persist-execution-state!`, which drives all of it (4).
+   `persist-execution-state!` writes a run's snapshot, manifest and
+   current phase checkpoint; `load-checkpoint-data` reads them back.
+   Both go through the same EDN read/write pair below, so the instant
+   normalization a restore depends on is a property of the store rather
+   than of whichever version wrote the file.
 
-   Five, two over the budget — SL003 fires here and fired identically
-   before this file carried any stratum metadata. The chain is real
-   (persist → manifest → per-phase path → atomic write → path
-   normalization), so closing it means splitting the namespace along
-   the path-resolution / record-building / persistence seam, not
-   renumbering what is here."
+   Two siblings carry what used to be the lower half of this chain,
+   which stood at five strata against rule 210's cap of three:
+   `checkpoint-store-paths` resolves the checkpoint root and every
+   per-run path; `checkpoint-store-records` builds the snapshot,
+   per-phase and manifest records — including
+   `persisted-execution-keys`, the allowlist deciding what survives a
+   checkpoint."
   (:require
    [ai.miniforge.coerce.interface :as coerce]
-   [ai.miniforge.config.interface :as config]
+   [ai.miniforge.workflow.checkpoint-store-paths :as checkpoint-paths]
+   [ai.miniforge.workflow.checkpoint-store-records :as checkpoint-records]
    [ai.miniforge.workflow.schemas :as schemas]
    [babashka.fs :as fs]
    [clojure.edn :as edn]))
 
 ;------------------------------------------------------------------------------ Layer 0
 
-;; Constants and path resolution
-(def ^{:stratum 0} checkpoint-root-option-key
-  "Execution option key for overriding the checkpoint root."
-  :checkpoint/root)
-
-(def ^{:stratum 0} machine-snapshot-filename
-  "Filename for the authoritative execution-machine snapshot."
-  "machine-snapshot.edn")
-
-(def ^{:stratum 0} manifest-filename
-  "Filename for the durable workflow checkpoint manifest."
-  "manifest.edn")
-
-(def ^{:stratum 0} phase-checkpoints-directory-name
-  "Directory name for per-phase checkpoint files."
-  "phases")
-
 (def ^{:stratum 0} temp-file-suffix
   "Temporary suffix used for atomic checkpoint writes."
   ".tmp")
-
-(defn- ^{:stratum 0} current-checkpoint-timestamp
-  []
-  (str (java.time.Instant/now)))
-
-(def ^{:stratum 0} persisted-execution-keys
-  "Serializable execution fields kept in the durable machine snapshot."
-  [:execution/id
-   :execution/workflow-id
-   :execution/workflow-version
-   :execution/input
-   :execution/status
-   :execution/current-phase
-   :execution/phase-index
-   :execution/redirect-count
-   :execution/fsm-state
-   :execution/response-chain
-   :execution/errors
-   :execution/phase-handoffs
-   :execution/artifacts
-   :execution/dag-result
-   :execution/dag-pr-infos
-   :execution/metrics
-   :execution/output
-   :execution/started-at
-   :execution/ended-at
-   :execution/environment-id
-   :execution/environment-metadata
-   :execution/worktree-path
-   :execution/mode
-   :execution/completed-with-warnings?])
-
-(defn- ^{:stratum 0} normalize-checkpoint-root
-  [checkpoint-root]
-  (some-> checkpoint-root fs/expand-home str))
-
-(defn ^{:stratum 0} workflow-checkpoint-dir
-  "Directory for one workflow run's durable checkpoint state."
-  [checkpoint-root workflow-run-id]
-  (str (fs/path checkpoint-root (str workflow-run-id))))
 
 (defn- ^{:stratum 0} read-edn-file
   "Read a checkpoint EDN file, normalizing instants the same way the
@@ -114,41 +60,7 @@
   (when (fs/exists? path)
     (coerce/stringify-instants (edn/read-string (slurp path)))))
 
-(defn ^{:stratum 0} ordered-phase-ids
-  "Phase ids in workflow pipeline order, filtered to checkpointed phases."
-  [ctx]
-  (let [phase-results (:execution/phase-results ctx)
-        pipeline-phase-ids (map :phase (get-in ctx [:execution/workflow :workflow/pipeline]))
-        ordered-phase-ids (filter #(contains? phase-results %) pipeline-phase-ids)
-        remaining-phase-ids (remove (set ordered-phase-ids) (keys phase-results))]
-    (vec (concat ordered-phase-ids remaining-phase-ids))))
-
 ;------------------------------------------------------------------------------ Layer 1
-
-(defn ^{:stratum 1} default-checkpoint-root
-  "Default durable checkpoint root from merged config."
-  []
-  (normalize-checkpoint-root
-   (or (get-in (config/load-merged-config) [:workflow :checkpoint-root])
-       (str (config/miniforge-home) "/checkpoints"))))
-
-(defn ^{:stratum 1} machine-snapshot-path
-  "Path to the authoritative machine snapshot for a workflow run."
-  [checkpoint-root workflow-run-id]
-  (str (fs/path (workflow-checkpoint-dir checkpoint-root workflow-run-id)
-                machine-snapshot-filename)))
-
-(defn ^{:stratum 1} manifest-path
-  "Path to the manifest for a workflow run."
-  [checkpoint-root workflow-run-id]
-  (str (fs/path (workflow-checkpoint-dir checkpoint-root workflow-run-id)
-                manifest-filename)))
-
-(defn ^{:stratum 1} phase-checkpoints-dir
-  "Directory that stores per-phase checkpoint files."
-  [checkpoint-root workflow-run-id]
-  (str (fs/path (workflow-checkpoint-dir checkpoint-root workflow-run-id)
-                phase-checkpoints-directory-name)))
 
 (defn- ^{:stratum 1} write-edn-atomically!
   [target-path data]
@@ -161,101 +73,19 @@
     (fs/move temp-path target-path)
     target-path))
 
-(defn ^{:stratum 1} active-or-last-phase
-  "Current phase when present, otherwise the last checkpointed phase."
-  [ctx]
-  (or (:execution/current-phase ctx)
-      (last (ordered-phase-ids ctx))))
-
-(defn ^{:stratum 1} build-machine-snapshot
-  "Build the durable machine snapshot for an execution context.
-
-   Timestamps are normalized by type on the way out. Writers of
-   :execution/started-at / :execution/ended-at disagree today
-   (context.clj writes epoch millis, runner.clj an Instant), and
-   `inst?` admits a Date as readily as an Instant — so without
-   normalization a restore hands its reader an Instant-derived string
-   from one writer and a live Date from another for the same key."
-  [ctx]
-  (-> (select-keys ctx persisted-execution-keys)
-      coerce/stringify-instants))
-
-(defn ^{:stratum 1} build-phase-checkpoint
-  "Build a durable per-phase checkpoint record."
-  [ctx phase-name phase-result]
-  (let [checkpointed-at (current-checkpoint-timestamp)]
-    (coerce/stringify-instants
-     {:workflow/id (:execution/id ctx)
-      :workflow/workflow-id (:execution/workflow-id ctx)
-      :workflow/workflow-version (:execution/workflow-version ctx)
-      :workflow/phase phase-name
-      :workflow/checkpointed-at checkpointed-at
-      :phase/result phase-result})))
-
-;------------------------------------------------------------------------------ Layer 2
-
-(defn ^{:stratum 2} resolve-checkpoint-root
-  "Resolve checkpoint root from context/opts/config."
-  ([]
-   (default-checkpoint-root))
-  ([m]
-   (normalize-checkpoint-root
-    (or (:execution/checkpoint-root m)
-        (get m checkpoint-root-option-key)
-        (get-in m [:execution/opts checkpoint-root-option-key])
-        (default-checkpoint-root)))))
-
-(defn ^{:stratum 2} phase-checkpoint-path
-  "Path to a persisted phase checkpoint."
-  [checkpoint-root workflow-run-id phase-name]
-  (str (fs/path (phase-checkpoints-dir checkpoint-root workflow-run-id)
-                (str (name phase-name) ".edn"))))
-
-;------------------------------------------------------------------------------ Layer 3
-
-(defn ^{:stratum 3} build-manifest
-  "Build the durable checkpoint manifest for an execution context."
-  ([ctx checkpoint-root]
-   (build-manifest ctx checkpoint-root nil))
-  ([ctx checkpoint-root existing-manifest]
-   (let [workflow-run-id (:execution/id ctx)
-         current-phase-ids (ordered-phase-ids ctx)
-         existing-phase-paths (or (:workflow/phase-checkpoints existing-manifest) {})
-         existing-phase-ids (or (not-empty (:workflow/phases-completed existing-manifest))
-                                (sort-by name (keys existing-phase-paths)))
-         phase-ids (vec (concat existing-phase-ids
-                                (remove (set existing-phase-ids)
-                                        current-phase-ids)))
-         current-phase-paths (into {}
-                                   (map (fn [phase-id]
-                                          [phase-id
-                                           (phase-checkpoint-path checkpoint-root
-                                                                  workflow-run-id
-                                                                  phase-id)]))
-                                   current-phase-ids)
-         phase-paths (merge existing-phase-paths current-phase-paths)]
-     (coerce/stringify-instants
-      {:workflow/id workflow-run-id
-       :workflow/workflow-id (:execution/workflow-id ctx)
-       :workflow/workflow-version (:execution/workflow-version ctx)
-       :workflow/phases-completed phase-ids
-       :workflow/machine-snapshot-path
-       (machine-snapshot-path checkpoint-root workflow-run-id)
-       :workflow/phase-checkpoints phase-paths
-       :workflow/last-checkpoint-at (current-checkpoint-timestamp)}))))
-
-(defn ^{:stratum 3} load-checkpoint-data
+(defn ^{:stratum 1} load-checkpoint-data
   "Load durable checkpoint data for a workflow run, if present."
   ([workflow-run-id]
    (load-checkpoint-data workflow-run-id {}))
   ([workflow-run-id opts]
    (try
-     (let [checkpoint-root (resolve-checkpoint-root opts)
-           manifest-path' (manifest-path checkpoint-root workflow-run-id)
-           manifest (read-edn-file manifest-path')
-           snapshot-path' (or (:workflow/machine-snapshot-path manifest)
-                              (machine-snapshot-path checkpoint-root workflow-run-id))
-           machine-snapshot (read-edn-file snapshot-path')
+     (let [checkpoint-root (checkpoint-paths/resolve-checkpoint-root opts)
+           manifest-path (checkpoint-paths/manifest-path checkpoint-root workflow-run-id)
+           manifest (read-edn-file manifest-path)
+           snapshot-path (or (:workflow/machine-snapshot-path manifest)
+                             (checkpoint-paths/machine-snapshot-path checkpoint-root
+                                                                     workflow-run-id))
+           machine-snapshot (read-edn-file snapshot-path)
            phase-paths (or (:workflow/phase-checkpoints manifest) {})
            phase-results (into {}
                                (keep (fn [[phase-id path]]
@@ -270,21 +100,21 @@
      (catch Exception _
        nil))))
 
-;------------------------------------------------------------------------------ Layer 4
+;------------------------------------------------------------------------------ Layer 2
 
-;; Persistence and restore inputs
-(defn ^{:stratum 4} persist-execution-state!
+(defn ^{:stratum 2} persist-execution-state!
   "Persist a machine snapshot, manifest, and current phase checkpoint."
   [ctx]
   (when-let [workflow-run-id (:execution/id ctx)]
-    (let [checkpoint-root (resolve-checkpoint-root ctx)
-          phase-name (active-or-last-phase ctx)
+    (let [checkpoint-root (checkpoint-paths/resolve-checkpoint-root ctx)
+          phase-name (checkpoint-records/active-or-last-phase ctx)
           phase-result (get-in ctx [:execution/phase-results phase-name])
-          snapshot-path' (machine-snapshot-path checkpoint-root workflow-run-id)
-          manifest-path' (manifest-path checkpoint-root workflow-run-id)
-          existing-manifest (read-edn-file manifest-path')
-          snapshot (build-machine-snapshot ctx)
-          manifest (build-manifest ctx checkpoint-root existing-manifest)
+          snapshot-path (checkpoint-paths/machine-snapshot-path checkpoint-root
+                                                                workflow-run-id)
+          manifest-path (checkpoint-paths/manifest-path checkpoint-root workflow-run-id)
+          existing-manifest (read-edn-file manifest-path)
+          snapshot (checkpoint-records/build-machine-snapshot ctx)
+          manifest (checkpoint-records/build-manifest ctx checkpoint-root existing-manifest)
           checkpoint-data {:checkpoint/root checkpoint-root
                            :manifest manifest
                            :machine-snapshot snapshot
@@ -293,12 +123,14 @@
       (try
         (when (and phase-name phase-result)
           (write-edn-atomically!
-           (phase-checkpoint-path checkpoint-root workflow-run-id phase-name)
-           (build-phase-checkpoint ctx phase-name phase-result)))
-        (write-edn-atomically! snapshot-path' snapshot)
-        (write-edn-atomically! manifest-path' manifest)
+           (checkpoint-paths/phase-checkpoint-path checkpoint-root
+                                                   workflow-run-id
+                                                   phase-name)
+           (checkpoint-records/build-phase-checkpoint ctx phase-name phase-result)))
+        (write-edn-atomically! snapshot-path snapshot)
+        (write-edn-atomically! manifest-path manifest)
         {:checkpoint/root checkpoint-root
-         :checkpoint/machine-snapshot-path snapshot-path'
-         :checkpoint/manifest-path manifest-path'}
+         :checkpoint/machine-snapshot-path snapshot-path
+         :checkpoint/manifest-path manifest-path}
         (catch Exception _
           nil)))))

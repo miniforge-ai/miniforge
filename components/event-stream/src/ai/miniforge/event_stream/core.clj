@@ -29,18 +29,6 @@
 ;; Constants
 (def ^{:stratum 0} ^:const event-version "1.0.0")
 
-(def ^{:stratum 0} ^:private redirect-transition-type
-  :transition/redirect)
-
-(def ^{:stratum 0} ^:private phase-transition-request-key
-  :phase/transition-request)
-
-(def ^{:stratum 0} ^:private transition-type-key
-  :transition/type)
-
-(def ^{:stratum 0} ^:private transition-target-key
-  :transition/target)
-
 ;; Event persistence via configurable sinks
 ;; Note: File persistence moved to sinks.clj for configurability
 ;; Event envelope constructor
@@ -265,12 +253,6 @@
        (filter #(or (nil? agent-id) (= agent-id (:agent/id %))))
        last))
 
-(defn- ^{:stratum 0} dependency-id-string
-  [dependency-id]
-  (if (keyword? dependency-id)
-    (name dependency-id)
-    (str dependency-id)))
-
 ;; Observer / knowledge failure events
 (defn- ^{:stratum 0} failure-message
   [failure]
@@ -281,10 +263,6 @@
     :else nil))
 
 ;------------------------------------------------------------------------------ Layer 1
-
-(defn- ^{:stratum 1} phase-transition-request
-  [result]
-  (get result phase-transition-request-key))
 
 (defn ^{:stratum 1} create-envelope
   "Create an event envelope with sequence numbering.
@@ -494,19 +472,6 @@
            {:ok? true :drained-count (count results)}))))))
 
 ;------------------------------------------------------------------------------ Layer 2
-
-(defn- ^{:stratum 2} redirect-target
-  "Project a redirect target for legacy consumers.
-
-   The workflow runner now emits :phase/transition-request. This helper keeps
-   :phase/redirect-to available only when the transition request represents a
-  redirect, so older event consumers do not break while the newer event shape
-  remains authoritative."
-  [result]
-  (let [request (phase-transition-request result)
-        transition-type (get request transition-type-key)]
-    (when (= redirect-transition-type transition-type)
-      (get request transition-target-key))))
 
 ;; publish! orchestrates the helpers above as a small pipeline.
 (defn ^{:stratum 2} publish!
@@ -1330,18 +1295,6 @@
              :safe-mode/duration-ms duration-ms
              :safe-mode/workflows-queued workflows-queued)))
 
-(defn- ^{:stratum 2} dependency-event
-  [stream event-type dependency previous-status message-key]
-  (let [dependency-id (:dependency/id dependency)
-        status (:dependency/status dependency)
-        message (messages/t message-key
-                            {:dependency-id (dependency-id-string dependency-id)
-                             :status (name status)})]
-    (-> (create-envelope stream event-type nil message)
-        (merge dependency)
-        (cond-> previous-status
-          (assoc :dependency/previous-status previous-status)))))
-
 ;; Repository intelligence event constructors (RN-19/20)
 (defn ^{:stratum 2} repo-index-quality-measured
   "Build a :repo-index/quality-measured event.
@@ -1540,88 +1493,6 @@
      affected-workflow-run-id (assoc :affected/workflow-run-id
                                      affected-workflow-run-id))))
 
-;------------------------------------------------------------------------------ Layer 3
-
-(defn ^{:stratum 3} phase-completed [stream workflow-id phase & [result]]
-  (let [outcome (get result :outcome :success)
-        request (phase-transition-request result)
-        redirect-to (or (redirect-target result)
-                        (:redirect-to result))]
-    (-> (create-envelope stream :workflow/phase-completed workflow-id
-                         (str (name phase) " phase " (name outcome)))
-        (assoc :workflow/phase phase
-               :phase/outcome outcome)
-        (cond->
-          (:duration-ms result) (assoc :phase/duration-ms (:duration-ms result))
-          (:review-decision result) (assoc :phase/review-decision (:review-decision result))
-          (:phase/blocked-reason result) (assoc :phase/blocked-reason (:phase/blocked-reason result))
-          (:artifacts result) (assoc :phase/artifacts (:artifacts result))
-          (:error result) (assoc :phase/error (:error result))
-          request (assoc :phase/transition-request request)
-          redirect-to (assoc :phase/redirect-to redirect-to)
-          (:tokens result) (assoc :phase/tokens (:tokens result))
-          (:cost-usd result) (assoc :phase/cost-usd (:cost-usd result))
-          (:meta result) (assoc :phase/meta (:meta result))
-          (:phase/termination-reason result)
-          (assoc :phase/termination-reason (:phase/termination-reason result))))))
-
-(defn ^{:stratum 3} chain-started [stream chain-id step-count]
-  (-> (chain-envelope stream :chain/started)
-      (assoc :chain/id chain-id
-             :chain/step-count step-count)))
-
-(defn ^{:stratum 3} chain-step-started [stream chain-id step-id step-index workflow-id]
-  (-> (chain-envelope stream :chain/step-started)
-      (assoc :chain/id chain-id
-             :step/id step-id
-             :step/index step-index
-             :step/workflow-id workflow-id)))
-
-(defn ^{:stratum 3} chain-step-completed [stream chain-id step-id step-index]
-  (-> (chain-envelope stream :chain/step-completed)
-      (assoc :chain/id chain-id
-             :step/id step-id
-             :step/index step-index)))
-
-(defn ^{:stratum 3} chain-step-failed [stream chain-id step-id step-index error & [{:keys [failure/class]}]]
-  (-> (chain-envelope stream :chain/step-failed)
-      (assoc :chain/id chain-id
-             :step/id step-id
-             :step/index step-index
-             :chain/error error)
-      (cond-> class (assoc :failure/class class))))
-
-(defn ^{:stratum 3} chain-completed [stream chain-id duration-ms step-count]
-  (-> (chain-envelope stream :chain/completed)
-      (assoc :chain/id chain-id
-             :chain/duration-ms duration-ms
-             :chain/step-count step-count)))
-
-(defn ^{:stratum 3} chain-failed [stream chain-id step-id error & [{:keys [failure/class]}]]
-  (-> (chain-envelope stream :chain/failed)
-      (assoc :chain/id chain-id
-             :chain/failed-step step-id
-             :chain/error error)
-      (cond-> class (assoc :failure/class class))))
-
-(defn ^{:stratum 3} dependency-health-updated
-  "Emit when a dependency health projection changes."
-  [stream dependency & [previous-status]]
-  (dependency-event stream
-                    :dependency/health-updated
-                    dependency
-                    previous-status
-                    :dependency/health-updated))
-
-(defn ^{:stratum 3} dependency-recovered
-  "Emit when a dependency returns to healthy status."
-  [stream dependency & [previous-status]]
-  (dependency-event stream
-                    :dependency/recovered
-                    dependency
-                    previous-status
-                    :dependency/recovered))
-
 ;------------------------------------------------------------------------------ Rich Comment
 (comment
   ;; Create event stream
@@ -1637,7 +1508,8 @@
   (publish! stream (phase-started stream wf-id :plan))
   (publish! stream (agent-status stream wf-id :planner :thinking "Analyzing specification"))
   (publish! stream (agent-chunk stream wf-id :planner "Creating plan..."))
-  (publish! stream (phase-completed stream wf-id :plan {:outcome :success :duration-ms 5000}))
+  ;; phase-completed now lives in `phase-events` (SL003 split)
+  ;; (publish! stream (phase-events/phase-completed stream wf-id :plan {:outcome :success}))
   (publish! stream (workflow-completed stream wf-id :success 10000))
 
   ;; Query events

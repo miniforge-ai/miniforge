@@ -108,7 +108,7 @@
                                  writer) — consumers guard on this key
                                  for best-effort warning paths and must
                                  never mint their own. Never persisted
-                                 (checkpoint-store whitelists keys).
+                                 (checkpoint-store-records whitelists keys).
 
    ### Supervision Support
    :execution/supervision-runtime — Runtime for workflow health supervision
@@ -124,7 +124,7 @@
   (:require [ai.miniforge.anomaly.interface :as anomaly]
             [ai.miniforge.logging.interface :as log]
             [ai.miniforge.response.interface :as response]
-            [ai.miniforge.workflow.checkpoint-store :as checkpoint-store]
+            [ai.miniforge.workflow.checkpoint-store-paths :as checkpoint-paths]
             [ai.miniforge.workflow.fsm :as fsm]
             [ai.miniforge.workflow.monitoring :as monitoring]
             [ai.miniforge.agent.interface :as agent]))
@@ -338,7 +338,7 @@
   (let [execution-machine (fsm/compile-execution-machine workflow)
         fsm-state (let [initial-state (fsm/initialize-execution execution-machine)]
                     (fsm/start-execution execution-machine initial-state))
-        checkpoint-root (checkpoint-store/resolve-checkpoint-root opts)]
+        checkpoint-root (checkpoint-paths/resolve-checkpoint-root opts)]
     (sync-machine-projections
      (merge
       {:execution/id (or (opts-run-id opts) (random-uuid))
@@ -355,7 +355,17 @@
        :execution/output nil
        :execution/metrics {:tokens 0 :cost-usd 0.0 :duration-ms 0}
        :execution/started-at (System/currentTimeMillis)
-       :execution/opts opts
+       ;; Established once, at the boundary that started this run. A
+       ;; first-class execution key rather than something read back off
+       ;; :execution/opts, because opts is replaced wholesale on resume.
+       :execution/acting (:acting opts)
+       ;; ...and REMOVED from the opts copy, so the context holds exactly
+       ;; one answer to 'who is this acting for'. Leaving it in both
+       ;; places would put the resuming caller's identity in
+       ;; :execution/opts and the original in :execution/acting, and a
+       ;; future reader picking the wrong one gets a plausible wrong
+       ;; owner rather than an error.
+       :execution/opts (dissoc opts :acting)
        :execution/checkpoint-root checkpoint-root
        :execution/logger (execution-logger opts)}
       (monitoring-runtime-fields workflow)
@@ -373,7 +383,7 @@
                     (->> (fsm/initialize-execution execution-machine)
                          (fsm/start-execution execution-machine))
                     (:execution/fsm-state machine-snapshot))
-        checkpoint-root (checkpoint-store/resolve-checkpoint-root
+        checkpoint-root (checkpoint-paths/resolve-checkpoint-root
                          (merge opts machine-snapshot))]
     (sync-machine-projections
      (merge
@@ -385,7 +395,17 @@
        :execution/fsm-state fsm-state
        :execution/input (get machine-snapshot :execution/input input)
        :execution/phase-results phase-results
-       :execution/opts opts
+       ;; From the SNAPSHOT, never from `opts`. A resumed run is still
+       ;; acting under the authority it was started with; taking this
+       ;; from the resuming invocation would reattribute the run to
+       ;; whoever resumed it. Stated explicitly so a later edit cannot
+       ;; reintroduce that by treating acting like the other opts below.
+       :execution/acting (:execution/acting machine-snapshot)
+       ;; The resuming caller's `:acting` is dropped here for the same
+       ;; reason: one answer, not two. Keeping it would leave the
+       ;; resumer's identity sitting in :execution/opts, contradicting
+       ;; :execution/acting, for a later reader to pick up by mistake.
+       :execution/opts (dissoc opts :acting)
        :execution/checkpoint-root checkpoint-root
        :execution/logger (execution-logger opts)}
       (monitoring-runtime-fields workflow)

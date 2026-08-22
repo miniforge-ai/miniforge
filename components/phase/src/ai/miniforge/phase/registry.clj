@@ -61,7 +61,12 @@
    provenance for the codex warning surface, and the canonical-sdlc v2
    implement `:gates` override was silently dropping it — exactly the
    footgun this set exists to close."
-  #{:policy-verify :policy-review :policy-pack :codex-consultation})
+  ;; :stale-references joined 2026-08-12 under the operator directive that
+   ;; the contract-drift worry be deterministically enforced: the trap bench
+   ;; measured prose delivery changing nothing (eight of eight sprung), so
+   ;; the check lives here where a workflow override cannot drop it.
+  #{:policy-verify :policy-review :policy-pack :codex-consultation
+    :stale-references})
 
 ;; Phase status predicates
 ;;

@@ -18,14 +18,15 @@
 (ns ai.miniforge.cli.backends-test
   (:require
    [clojure.test :refer [deftest testing is]]
-   [ai.miniforge.cli.backends :as backends]))
+   [ai.miniforge.cli.backends.config :as backend-config]
+   [ai.miniforge.cli.backends.status :as backend-status]))
 
 ;------------------------------------------------------------------------------ Layer 0
 
 ;; Resource-backed backend config
 (deftest ^{:stratum 0} backend-specs-loaded-from-resource-test
   (testing "backend specs include opencode from resource config"
-    (is (= "OpenCode" (get-in backends/backend-specs [:opencode :provider]))))
+    (is (= "OpenCode" (get-in backend-config/backend-specs [:opencode :provider]))))
 
   (testing "current backend fallback comes from resource defaults"
-    (is (= :opencode (backends/get-current-backend {})))))
+    (is (= :opencode (backend-status/get-current-backend {})))))

@@ -16,124 +16,132 @@
 ;; See the License for the specific language governing permissions and
 ;; limitations under the License.
 (ns ai.miniforge.phase-deployment.deploy-governed
-  "Granted, gated, and durably transacted Kubernetes application
-   (Ariadne step 2d, deployment half).
-
-   `enter-deploy` previously went config -> rollback capture ->
-   `kustomize-apply!` with no policy gate at all, while
-   `check-resource-count` and `check-gke-node-limit` sat in
-   `policy.clj` uncalled. This is the seam that makes the mutation
-   conditional: dry-run, check, issue authority, record durably, and
-   only then apply.
-
-   The provider is injected. A governance seam whose tests need a real
-   cluster is a seam nobody tests."
+  "Application flow for one granted, transacted Kubernetes deployment."
   (:require
    [ai.miniforge.anomaly.interface :as anomaly]
-   [ai.miniforge.effect-transaction.interface :as fx]
-   [ai.miniforge.phase-deployment.deploy-authority :as authority])
+   [ai.miniforge.phase-deployment.deploy-authority :as authority]
+   [ai.miniforge.phase-deployment.deploy-outcome :as outcome]
+   [ai.miniforge.phase-deployment.deploy-transaction :as transaction]
+   [ai.miniforge.phase-deployment.messages :as msg]
+   [ai.miniforge.schema.interface :as schema]
+   [clojure.string :as str])
   (:import
    [java.time Instant]))
 
 ;------------------------------------------------------------------------------ Layer 0
 
-(defn ^{:stratum 0} store-dir
-  "Effect store location. Never relative to the process working
-   directory — a durable record written where nobody looks is not one."
-  [context]
-  (or (:effect-store-dir context)
-      (str (System/getProperty "user.home") "/.miniforge/effects")))
+(defn- ^{:stratum 0} fail
+  [state stage message]
+  (assoc state :flow/failure {:stage stage :message message}))
 
-(defn- ^{:stratum 0} refusal
-  "A refusal names the stage it happened at. Hard-coding one stage
-   makes a preflight denial read as an authority failure, which sends
-   whoever is debugging it to the wrong place."
-  [stage code detail]
-  {:deploy/status :failed
-   :deploy/stage stage
-   :deploy/rollback-info nil
-   :deploy/failure detail
-   :deploy/refusal code})
+(defn- ^{:stratum 0} failure-detail
+  [result fallback-key]
+  (str (or (not-empty (:stderr result))
+           (:error result)
+           (:anomaly/message result)
+           (msg/t fallback-key))))
+
+(defn- ^{:stratum 0} advance
+  [state step]
+  (if (:flow/failure state) state (step state)))
 
 ;------------------------------------------------------------------------------ Layer 1
 
-(defn- ^{:stratum 1} propose!
-  "Record correlated authority and intent BEFORE any mutation. The
-   proposal carries the dry-run render, so the record says what was
-   about to change rather than only that something was."
-  [context auth rendered now]
-  (fx/propose! (store-dir context)
-               {:effect-id (:effect/id auth)
-                :effect-class :effect/deploy
-                :grant-id (get-in auth [:authority/grant :grant/id])
-                :envelope-id (get-in auth [:authority/envelope :envelope/id])
-                :proposal (assoc (:effect/proposal auth)
-                                 :deploy/dry-run rendered)}
-               now))
+(defn- ^{:stratum 1} resolve-target
+  [state]
+  (let [result ((get-in state [:operations :target!]) (:deploy-config state))]
+    (if (schema/failed? result)
+      (fail state :preflight (failure-detail result :deploy/context-unavailable))
+      (assoc state :target (:target result)))))
 
-(defn- ^{:stratum 1} commit!
-  "Apply, then ask the provider what it observes.
+(defn- ^{:stratum 1} render-manifests
+  [state]
+  (let [result ((get-in state [:operations :render!]) (:target state))
+        rendered (:rendered-yaml result)]
+    (if (or (schema/failed? result) (str/blank? rendered))
+      (fail state :preflight (failure-detail result :deploy/render-failed))
+      (assoc state :rendered-yaml rendered))))
 
-   A failed apply is a definite `:failed` — the provider told us it did
-   not take. Anything else defers to the observation, and an
-   unobservable result stays `:accepted`, which the coordinator records
-   as unknown rather than as success."
-  [context t auth now apply! observe!]
-  (fx/commit! (store-dir context) t (:authority/grant auth) {:usage/count 1} now
-              (fn []
-                (let [applied (apply!)]
-                  (if (:deploy/failed? applied)
-                    {:effect/outcome :failed
-                     :effect/failure (str (:deploy/failure applied))
-                     :effect/observed (:deploy/rollback-info applied)}
-                    (let [observed (observe!)]
-                      (if (:provider/matched? observed)
-                        {:effect/outcome :succeeded
-                         :effect/observed (:provider/observed observed)}
-                        {:effect/outcome :accepted
-                         :effect/observed (:provider/observed observed)})))))))
+(defn- ^{:stratum 1} server-dry-run
+  [state]
+  (let [result ((get-in state [:operations :server-dry-run!])
+                (:target state) (:rendered-yaml state))
+        output (:stdout result)]
+    (if (or (schema/failed? result) (str/blank? output))
+      (fail state :preflight (failure-detail result :deploy/dry-run-failed))
+      (assoc state :server-dry-run output))))
+
+(defn- ^{:stratum 1} capture-rollback
+  [state]
+  (let [result ((get-in state [:operations :rollback-info!]) (:target state))]
+    (if (schema/failed? result)
+      (fail state :capture
+            (failure-detail result :deploy/rollback-capture-failed))
+      (let [rollback-info (:rollback-info result)]
+        (-> state
+            (assoc :rollback-info rollback-info)
+            (assoc-in [:authority :effect/proposal :deploy/rollback-info]
+                      rollback-info))))))
+
+(defn- ^{:stratum 1} prepare-authority
+  [state]
+  (let [preflight {:rendered-yaml (:rendered-yaml state)
+                   :server-dry-run (:server-dry-run state)
+                   :app-label (get-in state [:target :app-label])}
+        prepared (authority/prepare (:context state) (random-uuid)
+                                    (:target state) preflight (:now state))]
+    (if (anomaly/anomaly? prepared)
+      (fail state :authority (:anomaly/message prepared))
+      (assoc state :authority prepared))))
+
+(defn- ^{:stratum 1} propose-effect
+  [state]
+  (let [proposed (transaction/propose! (:context state) (:authority state)
+                                       (:now state))]
+    (if (anomaly/anomaly? proposed)
+      (fail state :proposal (:anomaly/message proposed))
+      (assoc state :transaction proposed))))
+
+(defn- ^{:stratum 1} require-permission
+  [state]
+  (if (authority/permitted? (:authority state))
+    state
+    (fail state :authority (msg/t :deploy/authority-denied))))
+
+(defn- ^{:stratum 1} commit-effect
+  [state]
+  (let [committed (transaction/commit!
+                   (:context state) (:transaction state) (:authority state)
+                   (:operations state) (:now state))]
+    (if (anomaly/anomaly? committed)
+      (fail state :apply (:anomaly/message committed))
+      (assoc state :transaction committed))))
+
+(defn- ^{:stratum 1} reconcile-effect
+  [state]
+  (let [reconciled (transaction/reconcile!
+                    (:context state) (:transaction state)
+                    (:operations state) (:now state))]
+    (if (anomaly/anomaly? reconciled)
+      (fail state :observe (:anomaly/message reconciled))
+      (assoc state :transaction reconciled))))
 
 ;------------------------------------------------------------------------------ Layer 2
 
 (defn ^{:stratum 2} transact!
-  "Dry-run, check, authorize, record, and only then mutate.
-
-   `provider` supplies `:dry-run!`, `:apply!`, `:observe!`, and
-   `:rollback-info!`. Returns the deploy outcome map the flow already
-   speaks, so the refusal paths look like every other failure to the
-   caller — except that no kubectl mutation ran."
-  [context deploy-config provider ^Instant now]
-  (let [rendered ((:dry-run! provider) deploy-config)
-        pre (authority/preflight rendered (:policy-context context {}))]
-    (if (= :deny (:preflight/result pre))
-      (refusal :preflight :deploy/preflight-denied
-               (str "deployment preflight denied: "
-                    (pr-str (:preflight/violations pre))))
-      (let [rollback-info ((:rollback-info! provider) deploy-config)
-            auth (authority/prepare context (random-uuid) deploy-config
-                                    (:preflight/result pre) now)]
-        (cond
-          (anomaly/anomaly? auth)
-          (refusal :authority :deploy/authority-unavailable (:anomaly/message auth))
-
-          (not (authority/permitted? auth))
-          (refusal :authority :deploy/authority-denied
-                   (str "deploy authority denied: "
-                        (get-in auth [:authority/envelope :envelope/decision])))
-
-          :else
-          (let [proposed (propose! context auth (:preflight/rendered pre) now)]
-            (if (anomaly/anomaly? proposed)
-              (refusal :proposal :deploy/proposal-failed (:anomaly/message proposed))
-              (let [committed (commit! context proposed auth now
-                                       #((:apply! provider) deploy-config)
-                                       #((:observe! provider) deploy-config))]
-                {:deploy/status (case (:effect/state committed)
-                                  :succeeded :success
-                                  :failed :failed
-                                  :pending)
-                 :deploy/stage :apply
-                 :deploy/rollback-info rollback-info
-                 :deploy/effect-id (:effect/id proposed)
-                 :deploy/rendered-yaml (:preflight/rendered pre)
-                 :deploy/observed (:effect/observed committed)}))))))))
+  "Resolve, preflight, authorize, persist, commit, and reconcile one deploy."
+  [context deploy-config operations ^Instant now]
+  (-> {:context context
+       :deploy-config deploy-config
+       :operations operations
+       :now now}
+      (advance resolve-target)
+      (advance render-manifests)
+      (advance server-dry-run)
+      (advance prepare-authority)
+      (advance require-permission)
+      (advance capture-rollback)
+      (advance propose-effect)
+      (advance commit-effect)
+      (advance reconcile-effect)
+      outcome/from-state))

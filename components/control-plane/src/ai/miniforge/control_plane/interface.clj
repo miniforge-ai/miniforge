@@ -116,9 +116,12 @@
   registry/record-heartbeat!)
 
 (def ^{:stratum 0} transition-agent!
-  "Transition an agent to a new status with validation.
-   Returns an updated agent record, or an anomaly map with
-   `:anomaly/type :not-found` when the agent ID is absent."
+  "Transition an agent to a new status with FSM validation (atomic).
+
+   Returns: updated agent record, or an anomaly map:
+   - :anomaly/type :not-found    — agent absent from registry
+   - :anomaly/type :invalid-input — FSM transition rejected
+   Does not throw; callers check the result with anomaly/anomaly?."
   registry/transition-agent!)
 
 ;; Decision queue

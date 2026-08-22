@@ -19,6 +19,7 @@
         ai.miniforge/policy-clause {:local/root "../../components/policy-clause"}
         ai.miniforge/decision-envelope {:local/root "../../components/decision-envelope"}
         ai.miniforge/execution-grant {:local/root "../../components/execution-grant"}
+        ai.miniforge/tenancy {:local/root "../../components/tenancy"}
         ai.miniforge/effect-transaction {:local/root "../../components/effect-transaction"}
         ai.miniforge/config {:local/root "../../components/config"}
         ai.miniforge/algorithms {:local/root "../../components/algorithms"}

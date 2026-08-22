@@ -16,71 +16,42 @@
 ;; See the License for the specific language governing permissions and
 ;; limitations under the License.
 (ns ai.miniforge.cli.messages
-  "Resource-backed message catalog for shared CLI user-facing copy."
+  "Resource-backed message catalog for shared CLI user-facing copy. Locale
+   resolution primitives live in `ai.miniforge.cli.messages.locale` and
+   template-value rendering lives in `ai.miniforge.cli.messages.rendering`
+   (rule 210 split); this namespace composes them into the public
+   `catalog`/`t` API."
   (:require
    [clojure.string :as str]
+   [ai.miniforge.cli.messages.locale :as locale]
+   [ai.miniforge.cli.messages.rendering :as rendering]
    [ai.miniforge.cli.resource-config :as resource-config]
    [ai.miniforge.response.interface :as response]))
 
 ;------------------------------------------------------------------------------ Layer 0
 
-;; Catalog loading
-(def ^{:stratum 0} default-locale "en-US")
-
-(defn- ^{:stratum 0} locale-resource
-  [locale]
-  (str "config/cli/messages/" locale ".edn"))
-
-(defn- ^{:stratum 0} lang->locale
-  "Convert POSIX LANG (e.g. 'en_US.UTF-8') to BCP 47 tag (e.g. 'en-US')."
-  [lang]
-  (when-let [base (some-> lang (str/split #"\.") first not-empty)]
-    (str/replace base "_" "-")))
-
-;; Template rendering
-(defn- ^{:stratum 0} render-string
-  [template params]
-  (reduce-kv (fn [rendered key value]
-               (str/replace rendered
-                            (str "{" (name key) "}")
-                            (str value)))
-             template
-             params))
+(defn ^{:stratum 0} active-locale
+  []
+  (or (some-> (System/getenv "MINIFORGE_LOCALE") str/trim not-empty)
+      (locale/lang->locale (System/getenv "LANG"))
+      locale/default-locale))
 
 ;------------------------------------------------------------------------------ Layer 1
 
-(defn ^{:stratum 1} active-locale
-  []
-  (or (some-> (System/getenv "MINIFORGE_LOCALE") str/trim not-empty)
-      (lang->locale (System/getenv "LANG"))
-      default-locale))
-
-(defn- ^{:stratum 1} render-value
-  [value params]
-  (cond
-    (string? value) (render-string value params)
-    (vector? value) (mapv #(render-value % params) value)
-    (map? value) (into {} (map (fn [[key entry]]
-                                 [key (render-value entry params)]))
-                     value)
-    :else value))
+(defn ^{:stratum 1} catalog
+  "Load the active message catalog, falling back to English."
+  ([] (catalog (active-locale)))
+  ([locale-tag]
+   (let [catalog-data (resource-config/merged-resource-config (locale/locale-resource locale-tag)
+                                                               :cli/messages
+                                                               {})]
+     (if (or (= locale-tag locale/default-locale) (seq catalog-data))
+       catalog-data
+       (catalog locale/default-locale)))))
 
 ;------------------------------------------------------------------------------ Layer 2
 
-(defn ^{:stratum 2} catalog
-  "Load the active message catalog, falling back to English."
-  ([] (catalog (active-locale)))
-  ([locale]
-   (let [catalog-data (resource-config/merged-resource-config (locale-resource locale)
-                                                              :cli/messages
-                                                              {})]
-     (if (or (= locale default-locale) (seq catalog-data))
-       catalog-data
-       (catalog default-locale)))))
-
-;------------------------------------------------------------------------------ Layer 3
-
-(defn ^{:stratum 3} t
+(defn ^{:stratum 2} t
   "Return a rendered message value for `message-key`.
 
    Supports strings, vectors, and maps loaded from EDN resources."
@@ -88,7 +59,7 @@
    (t message-key {}))
   ([message-key params]
    (if-let [value (get (catalog) message-key)]
-     (render-value value params)
+     (rendering/render-value value params)
      (response/throw-anomaly! :anomalies/not-found
                              "Missing CLI message key"
                              {:message-key message-key

@@ -23,6 +23,7 @@
    [clojure.test :refer [deftest testing is]]
    [malli.core :as m]
    [ai.miniforge.event-stream.core :as core]
+   [ai.miniforge.event-stream.phase-events :as phase-events]
    [ai.miniforge.event-stream.interface :as events-iface]
    [ai.miniforge.event-stream.interface.events :as events]
    [ai.miniforge.event-stream.schema :as schema]))
@@ -89,7 +90,7 @@
   (testing "termination-reason :normal is passed through"
     (let [stream (no-op-stream)
           wf-id  (random-uuid)
-          event  (core/phase-completed stream wf-id :implement
+          event  (phase-events/phase-completed stream wf-id :implement
                                        {:outcome :success
                                         :phase/termination-reason :normal})]
       (is (= :normal (:phase/termination-reason event)))))
@@ -97,7 +98,7 @@
   (testing "termination-reason :agent-stalled is passed through"
     (let [stream (no-op-stream)
           wf-id  (random-uuid)
-          event  (core/phase-completed stream wf-id :implement
+          event  (phase-events/phase-completed stream wf-id :implement
                                        {:outcome :failure
                                         :phase/termination-reason :agent-stalled})]
       (is (= :agent-stalled (:phase/termination-reason event)))))
@@ -105,7 +106,7 @@
   (testing "termination-reason :curator-rejected is passed through"
     (let [stream (no-op-stream)
           wf-id  (random-uuid)
-          event  (core/phase-completed stream wf-id :verify
+          event  (phase-events/phase-completed stream wf-id :verify
                                        {:outcome :failure
                                         :phase/termination-reason :curator-rejected})]
       (is (= :curator-rejected (:phase/termination-reason event)))))
@@ -113,7 +114,7 @@
   (testing "termination-reason :tool-error is passed through"
     (let [stream (no-op-stream)
           wf-id  (random-uuid)
-          event  (core/phase-completed stream wf-id :implement
+          event  (phase-events/phase-completed stream wf-id :implement
                                        {:outcome :failure
                                         :phase/termination-reason :tool-error})]
       (is (= :tool-error (:phase/termination-reason event)))))
@@ -121,13 +122,13 @@
   (testing "absence of termination-reason leaves key absent"
     (let [stream (no-op-stream)
           wf-id  (random-uuid)
-          event  (core/phase-completed stream wf-id :plan {:outcome :success})]
+          event  (phase-events/phase-completed stream wf-id :plan {:outcome :success})]
       (is (not (contains? event :phase/termination-reason)))))
 
   (testing "termination-reason does not displace existing result fields"
     (let [stream (no-op-stream)
           wf-id  (random-uuid)
-          event  (core/phase-completed stream wf-id :implement
+          event  (phase-events/phase-completed stream wf-id :implement
                                        {:outcome :success
                                         :duration-ms 4200
                                         :phase/termination-reason :normal})]

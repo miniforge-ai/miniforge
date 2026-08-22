@@ -19,12 +19,12 @@
   "Unit / integration tests for the `events show` CLI command.
 
    Strategy:
-   - events-show (pure core) tested with synthetic event vectors via
-     with-redefs on es/read-workflow-events-by-id.  The base-dir is passed
-     as a real temp directory so the fs/exists? check passes without further
-     stubbing.
-   - events-show-cmd (CLI handler) tested via with-redefs on app-config/events-dir
-     and es/read-workflow-events-by-id.
+   - events-show (pure core, in the sibling `events.show` namespace) tested
+     with synthetic event vectors via with-redefs on
+     es/read-workflow-events-by-id.  The base-dir is passed as a real temp
+     directory so the fs/exists? check passes without further stubbing.
+   - events-show-cmd (CLI handler, in `sut`) tested via with-redefs on
+     app-config/events-dir and es/read-workflow-events-by-id.
    - shared/exit! is always stubbed to prevent JVM termination during tests."
   (:require
    [clojure.test :refer [deftest testing is use-fixtures]]
@@ -32,6 +32,7 @@
    [babashka.fs :as fs]
    [ai.miniforge.cli.app-config :as app-config]
    [ai.miniforge.cli.main.commands.events :as sut]
+   [ai.miniforge.cli.main.commands.events.show :as show]
    [ai.miniforge.cli.main.commands.shared :as shared]
    [ai.miniforge.event-stream.interface :as es]))
 
@@ -94,13 +95,13 @@
 
 (deftest ^{:stratum 1} events-show-errors-when-workflow-id-blank
   (testing "pure command returns :error when workflow-id is blank"
-    (let [result (sut/events-show *tmp-dir* " " {})]
+    (let [result (show/events-show *tmp-dir* " " {})]
       (is (= :error (:status result)))
       (is (= 1 (:exit-code result))))))
 
 (deftest ^{:stratum 1} events-show-errors-when-base-dir-missing
   (testing "returns :error when the events base directory does not exist"
-    (let [result (sut/events-show nonexistent-base-dir "any-wf-id" {})]
+    (let [result (show/events-show nonexistent-base-dir "any-wf-id" {})]
       (is (= :error (:status result)))
       (is (pos-int? (:exit-code result)))
       (is (str/includes? (:message result) "not found")))))
@@ -108,7 +109,7 @@
 (deftest ^{:stratum 1} events-show-errors-when-workflow-not-found
   (testing "returns :error when reader returns nil (workflow-id unknown)"
     (let [result (with-redefs [es/read-workflow-events-by-id (fn [_ _] nil)]
-                   (sut/events-show *tmp-dir* "ghost-wf-id" {}))]
+                   (show/events-show *tmp-dir* "ghost-wf-id" {}))]
       (is (= :error (:status result)))
       (is (pos-int? (:exit-code result)))
       (is (str/includes? (:message result) "ghost-wf-id")))))
@@ -116,14 +117,14 @@
 (deftest ^{:stratum 1} events-show-empty-rendered-timeline-has-fallback
   (let [result (with-redefs [es/read-workflow-events-by-id (fn [_ _] [])
                              es/render-timeline (fn [_ _] "")]
-                 (sut/events-show *tmp-dir* "test-wf-abc123" {}))]
+                 (show/events-show *tmp-dir* "test-wf-abc123" {}))]
     (is (= :ok (:status result)))
     (is (str/includes? (:output result) "no renderable events"))))
 
 (deftest ^{:stratum 1} events-show-reader-exception-is-error
   (let [result (with-redefs [es/read-workflow-events-by-id
                              (fn [_ _] (throw (ex-info "broken reader" {})))]
-                 (sut/events-show *tmp-dir* "test-wf-abc123" {}))]
+                 (show/events-show *tmp-dir* "test-wf-abc123" {}))]
     (is (= :error (:status result)))
     (is (= 1 (:exit-code result)))
     (is (str/includes? (:message result) "broken reader"))))
@@ -161,7 +162,7 @@
                                (fn [_ _] synthetic-events)
                                es/render-timeline
                                (fn [_ _] "rendered timeline")]
-                   (sut/events-show *tmp-dir* "test-wf-abc123" {}))]
+                   (show/events-show *tmp-dir* "test-wf-abc123" {}))]
       (is (= :ok (:status result)))
       (is (= "rendered timeline" (:output result))))))
 
@@ -169,7 +170,7 @@
   (testing ":raw true produces EDN output containing the event type keyword"
     (let [result (with-redefs [es/read-workflow-events-by-id
                                (fn [_ _] synthetic-events)]
-                   (sut/events-show *tmp-dir* "test-wf-abc123" {:raw true}))]
+                   (show/events-show *tmp-dir* "test-wf-abc123" {:raw true}))]
       (is (= :ok (:status result)))
       (is (str/includes? (:output result) "workflow/started"))
       (is (str/includes? (:output result) "workflow/completed")))))
@@ -181,7 +182,7 @@
                                es/render-timeline
                                (fn [_ opts]
                                  (str "gap=" (:gap-threshold-ms opts)))]
-                   (sut/events-show *tmp-dir* "test-wf-abc123" {:gap-threshold 5}))]
+                   (show/events-show *tmp-dir* "test-wf-abc123" {:gap-threshold 5}))]
       (is (= :ok (:status result)))
       (is (= "gap=5000" (:output result))))))
 

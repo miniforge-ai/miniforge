@@ -188,10 +188,11 @@
                 event-stream workflow-id]} orchestrator
         decision (dq/create-decision agent-id summary opts)]
     (dq/submit-decision! decision-manager decision)
-    ;; Try to transition agent to blocked (may fail if already terminal)
-    (try
-      (registry/transition-agent! registry agent-id :blocked)
-      (catch Exception _))
+    ;; transition-agent! is now atomic and returns an anomaly (not throws)
+    ;; when the agent is terminal or the transition is otherwise invalid.
+    ;; Intentionally ignore the result: submitting a decision for an already-
+    ;; terminal agent is a valid race that does not invalidate the decision.
+    (registry/transition-agent! registry agent-id :blocked)
     (on-decision-created decision)
     (when (and event-stream workflow-id)
       (publish-event! event-stream
@@ -231,10 +232,10 @@
             delivery (when adapter
                        (adapter/deliver-decision
                         adapter agent-record resolved))]
-        ;; Try to transition agent back to running
-        (try
-          (registry/transition-agent! registry agent-id :running)
-          (catch Exception _))
+        ;; transition-agent! returns an anomaly (not throws) when the
+        ;; transition is invalid (e.g. agent deleted between resolve and here).
+        ;; Intentionally ignore the result: the decision is resolved regardless.
+        (registry/transition-agent! registry agent-id :running)
         (when (and event-stream workflow-id)
           (publish-event! event-stream
                           (events/cp-decision-resolved
