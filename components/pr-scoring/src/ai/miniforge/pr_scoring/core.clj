@@ -113,10 +113,11 @@
       (emit-scored! stream scorer-fn event)
       (catch Exception e
         (log/warn logger :pr-scoring :pr-scoring/handler-error
-                  {:message  (ex-message e)
-                   :event-type (:event/type event)
-                   :pr-repo  (:pr/repo event)
-                   :pr-number (:pr/number event)})))))
+                  {:message (or (ex-message e) (str (type e)))
+                   :data    {:event-type (:event/type event)
+                             :pr-repo    (:pr/repo event)
+                             :pr-number  (:pr/number event)
+                             :ex-data    (ex-data e)}})))))
 
 (defn ^{:stratum 1} stop!
   "Unsubscribe. Idempotent."

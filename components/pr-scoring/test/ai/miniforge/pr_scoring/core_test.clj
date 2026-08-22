@@ -23,6 +23,7 @@
   (:require
    [clojure.test :refer [deftest testing is]]
    [ai.miniforge.event-stream.interface :as es]
+   [ai.miniforge.logging.interface :as log]
    [ai.miniforge.pr-scoring.interface :as scoring]))
 
 ;------------------------------------------------------------------------------ Layer 0
@@ -158,6 +159,23 @@
     (es/publish! s (pr-created-event s "acme/widget" 42))
     (is (empty? (scored-events @captured))
         "scorer throwing does not crash the component nor emit partial events")))
+
+(deftest ^{:stratum 2} scorer-fn-exception-is-logged-with-structured-data
+  (let [[s _captured] (captured-stream)
+        [logger entries] (log/collecting-logger)
+        _ (scoring/attach! s {:scorer-fn (fn [_]
+                                           (throw (ex-info "boom" {:ctx :test})))
+                              :logger logger})]
+    (es/publish! s (pr-created-event s "acme/widget" 42))
+    (let [warnings (filter #(= :warn (:level %)) @entries)]
+      (is (= 1 (count warnings))
+          "exactly one :warn entry is emitted per scorer exception")
+      (let [w (first warnings)]
+        (is (= :pr-scoring/handler-error (:event w)))
+        (is (= :pr/created (get-in w [:data :event-type])))
+        (is (= "acme/widget" (get-in w [:data :pr-repo])))
+        (is (= 42 (get-in w [:data :pr-number])))
+        (is (= {:ctx :test} (get-in w [:data :ex-data])))))))
 
 (deftest ^{:stratum 2} partial-score-maps-pass-through
   (testing "Scorer returns only readiness; emitted event carries only that field"
