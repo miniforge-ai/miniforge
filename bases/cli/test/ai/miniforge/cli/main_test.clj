@@ -21,6 +21,7 @@
    [ai.miniforge.cli.app-config :as app-config]
    [ai.miniforge.cli.messages :as messages]
    [ai.miniforge.cli.main :as sut]
+   [ai.miniforge.cli.main.util :as util]
    [ai.miniforge.cli.main.commands.pr-monitor :as cmd-pr-monitor]
    [ai.miniforge.event-stream.interface :as es]
    [ai.miniforge.pr-train.interface :as pr-train]
@@ -128,7 +129,7 @@
                        :failed? false
                        :dag-paused? false
                        :event-count test-reconstructed-event-count})
-                    sut/current-time-ms (constantly now-ms)]
+                    util/current-time-ms (constantly now-ms)]
         (is (= :stale
                (:status (#'sut/workflow-status-summary "workflow-id"))))))))
 
@@ -149,7 +150,7 @@
                        :failed? false
                        :dag-paused? false
                        :event-count test-reconstructed-event-count})
-                    sut/current-time-ms (constantly now-ms)]
+                    util/current-time-ms (constantly now-ms)]
         (is (= :running
                (:status (#'sut/workflow-status-summary "workflow-id"))))))))
 
@@ -170,7 +171,7 @@
                        :failed? false
                        :dag-paused? false
                        :event-count test-reconstructed-event-count})
-                    sut/current-time-ms (constantly now-ms)]
+                    util/current-time-ms (constantly now-ms)]
         (is (= :stale
                (:status (#'sut/workflow-status-summary "workflow-id"))))))))
 
