@@ -228,10 +228,11 @@
                                                   :metrics {:tokens toks}})))))]
                ;; SPEC §7.4.3 consultation provenance. The planner session does
                ;; not surface :context-reads yet, so :pin-read? is nil (unknown).
-               (if (map? (:output r))
-                 (assoc-in r [:output :codex/consultation]
-                           (codex-pin/consultation-summary codex-outcome nil))
-                 r))
+               ;; Attached on failures too (:output starts nil on
+               ;; response/failure): a failed plan that consulted must not be
+               ;; ledgered as one that never did.
+               (codex-pin/attach-consultation
+                 r (codex-pin/consultation-summary codex-outcome nil)))
      :rules-manifest rules-manifest}))
 
 ;------------------------------------------------------------------------------ Layer 2

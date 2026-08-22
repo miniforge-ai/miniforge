@@ -76,6 +76,22 @@
                             :anomaly (name anomaly)
                             :reason reason})))))
 
+(defn ^{:stratum 0} attach-consultation
+  "Record `summary` at [:output :codex/consultation] on a phase result,
+   on success AND failure — a failed phase that consulted must not be
+   ledgered as one that never did. Normalizes a non-map :output (the
+   specialized-agent failure path can leave a scalar there) under
+   :agent/raw-output instead of throwing away the diagnostic or crashing
+   the enter interceptor. Non-map results pass through untouched."
+  [result summary]
+  (if (map? result)
+    (let [out (:output result)
+          out (if (map? out)
+                out
+                (cond-> {} (some? out) (assoc :agent/raw-output out)))]
+      (assoc result :output (assoc out :codex/consultation summary)))
+    result))
+
 ;------------------------------------------------------------------------------ Layer 1
 
 (defn ^{:stratum 1} pin-outcome

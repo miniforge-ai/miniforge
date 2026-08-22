@@ -270,6 +270,20 @@
   (or (:artifact result)
       (:output result)))
 
+(defn- ^{:stratum 0} raw-agent-output
+  "The agent's scalar output text, whether it still sits at :output or
+   was preserved under [:output :agent/raw-output] when
+   codex-pin/attach-consultation normalized a scalar into a map. Every
+   classifier that reads the raw text (rate-limit detection, error
+   message, summary fallback) must go through this accessor or it goes
+   blind after normalization."
+  [result]
+  (let [out (:output result)]
+    (cond
+      (string? out) out
+      (map? out) (let [raw (:agent/raw-output out)]
+                   (when (string? raw) raw)))))
+
 (defn- ^{:stratum 0} lightweight-curated-artifact
   "Persist only lightweight curated metadata in phase results.
    Serialized code stays in the worktree and can be rehydrated later."
@@ -430,8 +444,7 @@
   "Build a structured phase error map from an agent result."
   [result agent-status rate-limited? iterations]
   {:message (or (extract-error-message result nil)
-                (when (string? (:output result))
-                  (not-empty (:output result)))
+                (not-empty (raw-agent-output result))
                 (messages/t :implement/exhausted-retries))
    :agent-status agent-status
    :rate-limited? (boolean rate-limited?)
@@ -459,7 +472,7 @@
   (or (some (fn [text]
               (and (string? text) (re-find rate-limit-pattern text)))
             [(get-in result [:error :message])
-             (when (string? (:output result)) (:output result))])
+             (raw-agent-output result)])
       (suspicious-short-termination? result)))
 
 ;------------------------------------------------------------------------------ Layer 3
@@ -621,7 +634,7 @@
         degraded-handoff? (true? (:degraded-handoff? result))
         raw-agent-status (or (:raw-agent-status result) agent-status)
         summary (or (get-in result [:output :code/summary])
-                    (when (string? (:output result)) (:output result))
+                    (raw-agent-output result)
                     (messages/t :implement/summary-default))
         on-fail (get-in ctx [:phase-config :on-fail])
         ;; Phase 3c verdict — only meaningful for terminal phase
@@ -920,12 +933,14 @@
         ;; enter-context stores it — gates run between enter and leave and
         ;; read [:result :output]. Reads come from the agent result's
         ;; :context-reads (host-mode sessions); curator-result branches drop
-        ;; that key, so read it off impl-result directly.
-        result (if (map? (:output result))
-                 (assoc-in result [:output :codex/consultation]
-                           (codex-pin/consultation-summary
-                             codex-outcome (:context-reads impl-result)))
-                 result)]
+        ;; that key, so read it off impl-result directly. Attached on
+        ;; FAILURES too (:output starts nil on response/failure): a failed
+        ;; implement that consulted must not be ledgered as one that never
+        ;; did — the gap instrument's :undelivered bucket depends on it.
+        result (codex-pin/attach-consultation
+                 result
+                 (codex-pin/consultation-summary
+                   codex-outcome (:context-reads impl-result)))]
     (-> (phase/enter-context ctx :implement :implementer gates budget start-time result)
         (assoc-in [:phase :rules-manifest] rules-manifest)
         (assoc-in [:phase :watchdog-state]

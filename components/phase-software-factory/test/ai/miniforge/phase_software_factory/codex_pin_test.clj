@@ -93,3 +93,23 @@
     (testing "no pegs presented records nil, not an empty claim"
       (is (nil? (:pegs (codex-pin/consultation-summary
                          (assoc outcome :pegs []) nil)))))))
+
+(deftest ^{:stratum 0} attach-consultation-shapes
+  (let [summary {:status :unconfigured :pinned? false}]
+    (testing "failure result with nil :output gains the marker"
+      (is (= summary
+             (get-in (codex-pin/attach-consultation
+                      {:status :error :error {:message "x"} :output nil} summary)
+                     [:output :codex/consultation]))))
+    (testing "scalar :output (specialized-agent failure path) is preserved
+              under :agent/raw-output instead of crashing assoc-in"
+      (let [r (codex-pin/attach-consultation
+               {:status :error :output "raw agent text"} summary)]
+        (is (= "raw agent text" (get-in r [:output :agent/raw-output])))
+        (is (= summary (get-in r [:output :codex/consultation])))))
+    (testing "map :output keeps its keys"
+      (is (= {:code/summary "s" :codex/consultation summary}
+             (:output (codex-pin/attach-consultation
+                       {:status :success :output {:code/summary "s"}} summary)))))
+    (testing "non-map result passes through untouched"
+      (is (nil? (codex-pin/attach-consultation nil summary))))))
