@@ -47,9 +47,11 @@
                             to [[default-scorer-fn]] (emits nothing)
      :trigger-event-types — set of event-type keywords that trigger scoring;
                             defaults to the EDN set at [[trigger-config-resource]]
+     :logger              — logging/logger for scorer errors; nil (default)
+                            suppresses all log output (backwards-compatible)
 
    Returns an atom holding the component state map
-   {:stream :scorer-fn :triggers :subscribed?}."
+   {:stream :scorer-fn :triggers :logger :subscribed?}."
   core/create)
 
 (def ^{:stratum 0} start!
