@@ -46,6 +46,20 @@
   indistinguishable, later, from one that was legitimately anonymous —
   and there is no such thing as legitimately anonymous here.
 
+  WHEN THAT RULE STARTS BITING. Nothing configures an operator today,
+  so requiring an acting context in THIS slice would fail every run in
+  existence until someone sets `[:tenancy :operator-name]`. The rule as
+  written still holds — code that REQUIRES acting still refuses — but
+  in 3b nothing requires it yet. The boundary attaches the context when
+  an operator is configured and attaches nothing when one is not.
+
+  The hard requirement lands in 3c, where records actually get owners
+  and the gate protects something real. That ordering is the point: the
+  alternative is inventing an identity now to keep runs working, and a
+  fabricated owner stamped onto records is precisely the damage 3a's
+  refusal exists to prevent. Better to carry no answer than a plausible
+  wrong one.
+
   GROUP 4: Propagation across the agent boundary
   A spawned agent inherits the acting context of the run that spawned
   it, as a principal in its own right (`:principal/kind
@@ -77,7 +91,7 @@
   "Code that requires an acting context and finds none returns an error naming the missing identity"
   "No call site resolves identity a second time - a test asserts the resolver is called once per run"
   "A spawned agent's principal is :agent-instance and its tenant matches the spawning run's tenant"
-  "Existing runs without an acting context fail loudly rather than proceeding unowned"
+  "A run with no configured operator proceeds WITHOUT an acting context and does not invent one"
   "full bb test green"]
 
  :spec/priority

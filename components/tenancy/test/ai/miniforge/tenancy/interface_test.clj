@@ -99,6 +99,24 @@
         "a configured operator must not resolve to a refusal")
     (is (inst? (get-in resolved [:identity/tenant :tenant/created-at])))))
 
+(deftest ^{:stratum 1} a-non-string-operator-name-is-refused-not-coerced-test
+  ;; `str` would turn a config typo into a tenant display name like
+  ;; "{:a 1}" or "[1 2]", and 3c stamps that onto records as an owner
+  ;; that looks observed and is really a mistyped key. Fabrication by
+  ;; coercion is the same harm as fabrication by default.
+  (doseq [bad [42 [1 2] {:a 1} :chris]]
+    (let [result (tenancy/resolve-operator {:tenancy {:operator-name bad}} now)]
+      (is (anomaly/anomaly? result) (str "should refuse: " (pr-str bad)))
+      (is (not (tenancy/valid-identity? result)))
+      (is (re-find #"must be a string" (:anomaly/message result))
+          "and says the name is the wrong type, not that none was configured")))
+  (testing "the three causes stay distinguishable"
+    (is (re-find #"no operator identity configured"
+                 (:anomaly/message (tenancy/resolve-operator {} now))))
+    (is (re-find #"is blank"
+                 (:anomaly/message (tenancy/resolve-operator
+                                    {:tenancy {:operator-name "   "}} now))))))
+
 (deftest ^{:stratum 1} the-resolver-shape-is-the-seam-test
   ;; A credential-backed resolver drops in behind this shape later. If
   ;; the shape drifts, that becomes a second migration through every

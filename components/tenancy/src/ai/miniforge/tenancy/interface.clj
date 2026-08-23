@@ -40,6 +40,12 @@
 
 (def ^{:stratum 0} Identity schema/Identity)
 
+(def ^{:stratum 0} invalid-operator-identity
+  "Anomaly subtype meaning an operator WAS configured and is wrong, as
+   distinct from none being configured. Callers branch on this to tell
+   'nobody set this up yet' from 'you set it up wrong'."
+  :anomalies.tenancy/invalid-operator-identity)
+
 (def ^{:stratum 0} resolve-operator
   "Resolve the operating identity from configuration, or return an
    anomaly. Never invents a default owner."
