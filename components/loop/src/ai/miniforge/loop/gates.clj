@@ -300,10 +300,14 @@
                           acc)
 
                         ;; Require docstrings
+                        ;; Matches (defn name [...]) with NO string literal between
+                        ;; the function name and the arg vector.  The negative
+                        ;; lookahead (?!") explicitly excludes (defn name "doc" [...])
+                        ;; so documented functions are never flagged.
                         :require-docstrings
                         (if (and (string? content)
                                  (#{:code} artifact-type)
-                                 (re-find #"\(defn\s+\S+\s+\[" content))
+                                 (re-find #"\(defn\s+\S+\s+(?!\")\[" content))
                           (conj acc (make-error :missing-docstring
                                                 (messages/t :gate/missing-docstring)))
                           acc)

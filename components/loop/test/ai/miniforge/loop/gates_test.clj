@@ -183,7 +183,32 @@
                                 :artifact/content "; TODO: fix this later\n(defn x [] :ok)"}
             result (gates/check todo-gate artifact-with-todo {})]
         (is (not (:gate/passed? result)))
-        (is (= :todo-found (:code (first (:gate/errors result)))))))))
+        (is (= :todo-found (:code (first (:gate/errors result)))))))
+
+    (testing "require-docstrings policy flags functions without docstrings"
+      (let [doc-gate (gates/policy-gate :docs {:policies [:require-docstrings]})
+            artifact-no-doc {:artifact/id (random-uuid)
+                             :artifact/type :code
+                             :artifact/content "(defn undocumented [x] (* x 2))"}
+            result (gates/check doc-gate artifact-no-doc {})]
+        (is (not (:gate/passed? result)))
+        (is (= :missing-docstring (:code (first (:gate/errors result)))))))
+
+    (testing "require-docstrings policy passes for functions with docstrings"
+      (let [doc-gate (gates/policy-gate :docs {:policies [:require-docstrings]})
+            artifact-with-doc {:artifact/id (random-uuid)
+                               :artifact/type :code
+                               :artifact/content "(defn documented \"Doubles x.\" [x] (* x 2))"}
+            result (gates/check doc-gate artifact-with-doc {})]
+        (is (:gate/passed? result))))
+
+    (testing "require-docstrings policy passes for multiline functions with docstrings"
+      (let [doc-gate (gates/policy-gate :docs {:policies [:require-docstrings]})
+            artifact-multiline-doc {:artifact/id (random-uuid)
+                                    :artifact/type :code
+                                    :artifact/content "(defn documented\n  \"Doubles x.\"\n  [x]\n  (* x 2))"}
+            result (gates/check doc-gate artifact-multiline-doc {})]
+        (is (:gate/passed? result))))))
 
 (deftest ^{:stratum 1} test-gate-test
   (testing "test gate with no test-fn passes with warning"
