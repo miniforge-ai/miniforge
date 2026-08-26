@@ -77,11 +77,19 @@
   [workspace operation {:keys [basis]}]
   (let [known (objects-of workspace)
         targets (keep known (tx/touched-ids operation))]
-    (if (= :additive (tx/class-of (:op operation)))
+    (cond
+      (not (number? basis))
+      (reject :invalid-input :anomalies.deliberation/missing-basis
+              "Transaction must declare the workspace version its projection was rendered from"
+              {:op (:op operation) :basis basis})
+
+      (= :additive (tx/class-of (:op operation)))
       (when-let [terminal (seq (filter object/terminal? targets))]
         (reject :conflict :anomalies.deliberation/terminal-target
                 "Operation targets an object already in a terminal status"
                 {:op (:op operation) :targets (mapv :object/id terminal)}))
+
+      :else
       (when-let [moved (seq (filter #(> (:object/touched-at %) basis) targets))]
         (reject :conflict :anomalies.deliberation/stale-basis
                 "Object changed since the projection this transaction was built from"
