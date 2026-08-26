@@ -55,6 +55,16 @@
 
 (defrecord ^{:stratum 0} Wrapper [inner])
 
+(deftest ^{:stratum 0} secret-string?-answers-for-non-strings-test
+  (testing "a predicate on the interface answers rather than throws"
+    ;; Only a string can carry a secret by shape, so the answer for
+    ;; anything else is no — not an NPE.
+    (is (false? (sut/secret-string? nil)))
+    (is (false? (sut/secret-string? 42)))
+    (is (false? (sut/secret-string? :keyword)))
+    (is (false? (sut/secret-string? {:a 1})))
+    (is (true? (sut/secret-string? "AKIAIOSFODNN7EXAMPLE")))))
+
 ;------------------------------------------------------------------------------ Layer 1
 
 (deftest ^{:stratum 1} marker-is-the-one-N3-mandates-test

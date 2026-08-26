@@ -16,7 +16,9 @@
 ;; See the License for the specific language governing permissions and
 ;; limitations under the License.
 (ns ai.miniforge.evidence-bundle.scanner
-  "Sensitive-data scanner for assembled evidence bundles.")
+  "Sensitive-data scanner for assembled evidence bundles."
+  (:require
+   [ai.miniforge.redaction.interface :as redaction]))
 
 ;------------------------------------------------------------------------------ Layer 0
 
@@ -31,7 +33,17 @@
 (def ^{:stratum 0} ^:private pii-finding-types
   #{:email :ssn})
 
+(def ^{:stratum 0} ^:private secret-finding-types
+  #{:aws-access-key :embedded-secret})
+
 (defn- ^{:stratum 0} bundle-text
+  "Render BUNDLE for pattern matching.
+
+   Bounded by print-length and print-level, so detection sees a truncated
+   view of a deep or wide bundle. That makes the findings best-effort
+   metadata, not a security boundary: redaction walks the whole structure
+   and does not share this limit, so a secret past level 20 is still
+   removed even when nothing reports it."
   [bundle]
   (binding [*print-length* 1000
             *print-level* 20]
@@ -47,11 +59,28 @@
   [bundle]
   (let [text (bundle-text bundle)]
     {:scan/findings
-     (vec
-      (keep (fn [{:finding/keys [type pattern]}]
-              (when (re-find pattern text)
-                {:finding/type type}))
-            sensitive-patterns))}))
+     (let [labelled (vec
+                     (keep (fn [{:finding/keys [type pattern]}]
+                             (when (re-find pattern text)
+                               {:finding/type type}))
+                           sensitive-patterns))]
+       ;; N6.SD.3 requires the bundle to scan independently of the
+       ;; stream — not to hold a different definition of "secret". The
+       ;; patterns above name specific types worth reporting; this
+       ;; covers the rest of the N3 §8 set (private keys, connection
+       ;; strings, JWTs, provider tokens), so a bundle cannot report
+       ;; clean on a value the stream would have redacted.
+       ;;
+       ;; A fallback rather than an additional label, so one secret is
+       ;; not reported twice under two names. A bundle holding both a
+       ;; named and an unnamed secret reports only the named one, which
+       ;; costs nothing: the answer to "does this contain secrets" is
+       ;; unchanged, and redaction below is unconditional either way.
+       (cond-> labelled
+         (and (redaction/secret-string? text)
+              (not-any? #(contains? secret-finding-types (:finding/type %))
+                        labelled))
+         (conj {:finding/type :embedded-secret})))}))
 
 (defn ^{:stratum 1} compliance-metadata
   "Convert scan results into evidence compliance metadata."
