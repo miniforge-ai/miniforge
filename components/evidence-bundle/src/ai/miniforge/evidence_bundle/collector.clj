@@ -31,6 +31,7 @@
 
 ;------------------------------------------------------------------------------ Layer 0
 
+;; Intent Collection
 (defn ^{:stratum 0} extract-intent
   [workflow-spec]
   {:intent/type (get workflow-spec :intent/type :update)
@@ -42,7 +43,7 @@
    :intent/declared-at (java.time.Instant/now)
    :intent/author (get workflow-spec :author "system")})
 
-;; Compliance Defaults and Overrides
+;; Access Log
 (defn ^{:stratum 0} append-access-log-entry
   "Append an access log entry to the bundle's :evidence/access-log.
    Stamps :access-log/timestamp on the entry when absent.
@@ -56,7 +57,7 @@
             (fn [access-log]
               (conj (vec (or access-log [])) stamped)))))
 
-;; Phase Evidence Collection
+;; Workflow Integration Helpers
 (defn ^{:stratum 0} should-create-bundle?
   "Check if evidence bundle should be created for workflow.
    Always create bundle at completion, even on failure (per N6 spec)."

@@ -21,6 +21,7 @@
 
 ;------------------------------------------------------------------------------ Layer 0
 
+;; Phase Evidence Collection
 (defn- ^{:stratum 0} build-phase-output
   "Extract the output map for phase evidence.
 

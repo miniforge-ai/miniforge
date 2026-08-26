@@ -38,7 +38,6 @@
   (or (anomaly/anomaly? x)
       (response/anomaly-map? x)))
 
-;; Intent Collection
 (def ^{:stratum 0} ^:private failure-attribution-keys
   [:failure/source
    :failure/vendor
@@ -54,7 +53,7 @@
 
 ;------------------------------------------------------------------------------ Layer 1
 
-;; Workflow Integration Helpers
+;; Outcome Evidence
 (defn ^{:stratum 1} build-outcome-evidence
   "Build outcome evidence from workflow final state.
    Uses anomaly->outcome-evidence when anomaly maps are available.

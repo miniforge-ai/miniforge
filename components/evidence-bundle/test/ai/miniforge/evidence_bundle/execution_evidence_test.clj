@@ -19,7 +19,7 @@
   "Tests for N11 section 9.1 execution evidence collection.
 
    Covers:
-   - collectors/collect-execution-evidence (public, Layer 4.5)
+   - collectors/collect-execution-evidence (public)
    - evidence_bundle/extract-execution-evidence (private, Layer 1)
    - runner/extract-output evidence field enrichment"
   (:require

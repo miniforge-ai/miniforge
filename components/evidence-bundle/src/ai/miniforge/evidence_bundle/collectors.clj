@@ -24,6 +24,7 @@
 
 ;------------------------------------------------------------------------------ Layer 0
 
+;; Rules Applied Evidence
 (defn- ^{:stratum 0} build-rule-applied-entry
   "Normalize a manifest entry into the expected rule-applied shape.
    Ensures all fields have valid defaults and annotates with phase name."
@@ -73,7 +74,6 @@
      :pack-hash (get promotion-record :pack-hash "")
      :pack-signature (get promotion-record :pack-signature "")}))
 
-;------------------------------------------------------------------------------ Layer 3.5
 ;; Supervision Decision Evidence (N6)
 (defn ^{:stratum 0} collect-event-stream-events
   [event-stream query]
@@ -83,15 +83,12 @@
     (catch Exception _e
       [])))
 
-;------------------------------------------------------------------------------ Layer 4.5
-;; Execution Evidence (N11 §9.1)
 (defn ^{:stratum 0} collect-tool-invocations
   "Collect tool invocation records from workflow state."
   [workflow-state]
   (vec (get workflow-state :workflow/tool-invocations [])))
 
-;------------------------------------------------------------------------------ Layer 1.5
-;; Rules Applied Evidence
+;; Execution Evidence (N11 §9.1)
 (defn ^{:stratum 0} collect-execution-evidence
   "Extract N11 §9.1 execution evidence fields from workflow state.
    Looks in :execution/output for evidence fields produced by runner/extract-output.

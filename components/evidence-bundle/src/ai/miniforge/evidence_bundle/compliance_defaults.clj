@@ -31,6 +31,7 @@
     :evidence/regulatory-tags
     :evidence/created-by})
 
+;; Compliance Defaults and Overrides
 (defn ^{:stratum 0} build-default-compliance-metadata
   "Return the default compliance map for assembled evidence bundles.
    Uses schema.compliance-defined defaults so the single source of truth
@@ -62,7 +63,6 @@
 
 ;------------------------------------------------------------------------------ Layer 1
 
-;; Access Log
 (defn- ^{:stratum 1} normalize-compliance-overrides
   "Return only documented compliance override keys from m, or nil for non-maps."
   [m]
