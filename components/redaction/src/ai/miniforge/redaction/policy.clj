@@ -23,13 +23,20 @@
    007), and N8 §5.2 forbids a function as a redaction configuration
    value since it cannot be serialized, diffed, or audited."
   (:require
-   [clojure.edn :as edn]
-   [clojure.java.io :as io]))
+   [ai.miniforge.config.interface :as config]))
 
 ;------------------------------------------------------------------------------ Layer 0
 
 (def ^{:stratum 0} ^:private config-resource
   "config/redaction/patterns.edn")
+
+(def ^{:stratum 0} disambiguator-separator
+  "Between a redacted key and the counter that keeps two of them apart.
+
+   A space, so `[REDACTED] 2` reads as one redacted key rather than as a
+   key literally named for the marker — and so the counter cannot be
+   mistaken for part of the marker N3 §8.2 mandates."
+  " ")
 
 ;------------------------------------------------------------------------------ Layer 1
 
@@ -37,19 +44,28 @@
   "The redaction policy, patterns compiled.
 
    EDN has no regex literal, so the config holds pattern strings and
+   EDN has no regex literal, so the config holds pattern strings and
    they are compiled here — the policy stays inspectable data on disk
-   (dewey 007) and becomes usable regexes exactly once."
+   (dewey 007) and becomes usable regexes exactly once.
+
+   Loaded through config's resource boundary rather than io/resource +
+   slurp here. That namespace owns resource loading, so its throw is a
+   boundary throw (dewey 005 forbids ex-info in component code paths),
+   and its message is localized (dewey 050). The required-keys argument
+   makes a truncated or half-written config fail at load rather than
+   silently redacting nothing."
   (delay
-    (let [url (or (io/resource config-resource)
-                  ;; Fail naming the resource. A bare slurp of nil throws
-                  ;; an NPE with no hint, and the failure mode that
-                  ;; produces it — the resource missing from a package or
-                  ;; a test classpath — is one where redaction silently
-                  ;; not running is the dangerous outcome.
-                  (throw (ex-info "Redaction policy resource missing from classpath"
-                                  {:anomaly/category :anomaly/not-found
-                                   :redaction/resource config-resource})))
-          raw (-> url slurp edn/read-string)]
+    (let [raw (config/load-config-resource
+               config-resource
+               ;; Every key the compile step below touches. Leaving one
+               ;; out does not throw — (mapv f nil) is [] — it silently
+               ;; yields an empty pattern list, so a truncated resource
+               ;; would quietly change what gets redacted instead of
+               ;; failing at the boundary.
+               [:redaction/marker
+                :redaction/secret-key-patterns
+                :redaction/secret-key-exclusions
+                :redaction/secret-value-patterns])]
       (-> raw
           (update :redaction/secret-key-patterns #(mapv re-pattern %))
           (update :redaction/secret-key-exclusions #(mapv re-pattern %))

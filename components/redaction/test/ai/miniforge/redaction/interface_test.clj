@@ -19,8 +19,8 @@
   "N3 §8 conformance — N3.SD.1 (never emit excluded values), N3.SD.3
    (substitute the marker, never omit the key)."
   (:require
+   [clojure.edn :as edn]
    [clojure.string :as str]
-   [clojure.walk :as walk]
    [clojure.test :refer [deftest is testing]]
    [ai.miniforge.redaction.interface :as sut]))
 
@@ -64,6 +64,71 @@
     (is (false? (sut/secret-string? :keyword)))
     (is (false? (sut/secret-string? {:a 1})))
     (is (true? (sut/secret-string? "AKIAIOSFODNN7EXAMPLE")))))
+
+(defn- ^{:stratum 0} strings-in
+  "Every string reachable from X — values, keys, and metadata — as text.
+
+   Independent of printing, so it sees what pr-str hides."
+  [x]
+  (concat
+   (when-let [m (meta x)] (strings-in m))
+   (cond
+     (string? x)  [x]
+     (keyword? x) [(str x)]
+     (symbol? x)  [(str x)]
+     (map? x)     (mapcat (fn [[k v]] (concat (strings-in k) (strings-in v))) x)
+     (coll? x)    (mapcat strings-in x)
+     :else        [])))
+
+(deftest ^{:stratum 0} redacted-events-still-round-trip-test
+  (testing "redaction never makes an event unreadable"
+    ;; N3 §4.3 makes every event durable, so a redacted event must still
+    ;; serialize and read back. Naming a keyword "[REDACTED]" prints as
+    ;; :[REDACTED], which edn/read-string rejects — a redacted key comes
+    ;; back as a string for exactly this reason.
+    (doseq [event [{"AKIAIOSFODNN7EXAMPLE" :v}
+                   {(keyword "ghp_abcdefghijklmnopqrstuvwxyz0123") :v}
+                   {(keyword "auth" "sk-abcdefghijklmnopqrst") :v}
+                   {(symbol "xoxb-abcdefghijklmnop") :v}
+                   {:password "p" :nested {:items ["AKIAIOSFODNN7EXAMPLE"]}}]]
+      (let [text (pr-str (sut/redact event))]
+        (is (some? (edn/read-string text))
+            (str "did not read back: " text))
+        (is (not (str/includes? text "AKIA"))
+            (str "secret survived: " text))))))
+
+(deftest ^{:stratum 0} boundary-cases-test
+  (testing "redaction covers Clojure data, and stops there"
+    ;; Not an endorsement — a record of where the guarantee ends. N3 §4.3
+    ;; makes every event durable, so a conformant event contains only
+    ;; values that survive pr-str and edn/read-string; none of these do.
+    ;; If one ever appears in an event, this test is where to start.
+    (let [secret "AKIAIOSFODNN7EXAMPLE"]
+      (doseq [[what v] {"java.util.List" (doto (java.util.ArrayList.) (.add secret))
+                        "java.util.Map"  (doto (java.util.HashMap.) (.put "k" secret))
+                        "array"          (into-array String [secret])
+                        "atom"           (atom secret)}]
+        (is (identical? v (sut/redact v))
+            (str what " is passed through, not walked"))))))
+
+(deftest ^{:stratum 0} collision-disambiguation-keeps-the-collection-kind-test
+  (testing "disambiguating a collection key does not coerce it"
+    ;; (conj (vec k) ...) would turn every colliding collection key into
+    ;; a vector — the coercion the branch exists to avoid.
+    (let [a "AKIAIOSFODNN7EXAMPLE"
+          b "AKIAJJJJJJJJJJJJJJJJ"]
+      (doseq [[kind build pred]
+              [["vector" vector                                              vector?]
+               ["set"    hash-set                                            set?]
+               ["queue"  #(into clojure.lang.PersistentQueue/EMPTY [%])
+                #(instance? clojure.lang.PersistentQueue %)]
+               ;; a list arrives as a seq from redact's seq branch, so
+               ;; seq-ness is what survives here, not the concrete class
+               ["list"   list                                                seq?]]]
+        (let [out (sut/redact {(build a) :first (build b) :second})]
+          (is (= 2 (count out)) (str kind ": both entries survive"))
+          (is (every? pred (keys out)) (str kind ": both keys keep the kind"))
+          (is (= #{:first :second} (set (vals out)))))))))
 
 ;------------------------------------------------------------------------------ Layer 1
 
@@ -189,13 +254,24 @@
 
 (deftest ^{:stratum 1} no-container-lets-a-secret-through-test
   (testing "a secret survives no container type, at any nesting depth"
-    ;; Two defects in review were the same shape: redaction that looked
-    ;; correct but silently missed a container — the PEM body, and
-    ;; PersistentQueue. Checking against `clean?` would not have caught
-    ;; either, because `clean?` walks with the same code that missed
-    ;; them. `pr-str` is independent of the walk, so it can.
+    ;; Defects found in review were all this shape: redaction that
+    ;; looked correct but silently missed a container. Checking against
+    ;; `clean?` would not catch them, since `clean?` walks with the same
+    ;; code that missed them and agrees with itself.
+    ;;
+    ;; `strings-in` collects every string reachable from the structure,
+    ;; keys and metadata included, without going through pr-str — which
+    ;; prints a PersistentQueue as #object[...] and drops metadata
+    ;; entirely, hiding a surviving secret in both places.
     (let [secret     "AKIAIOSFODNN7EXAMPLE"
           containers [identity
+                      #(hash-map % :held-as-a-key)
+                      ;; namespace position only makes sense for a string
+                      #(if (string? %)
+                         (hash-map (keyword % "v") :held-in-a-namespace)
+                         (hash-map % :held-in-a-namespace))
+                      #(hash-map (with-meta (symbol "sym") {:note %}) :held-in-key-meta)
+                      #(with-meta {:carrier true} {:note %})
                       vector
                       list
                       #(hash-set %)
@@ -209,14 +285,46 @@
       (doseq [outer containers
               inner containers]
         (let [nested (outer (inner secret))
-              ;; pr-str prints a PersistentQueue as #object[...] without
-              ;; its contents, which would hide a surviving secret as
-              ;; readily as a redacted one. Normalise every non-map
-              ;; collection to a vector first so the check can see in.
-              out    (pr-str (walk/postwalk
-                              #(if (and (coll? %) (not (map? %))) (vec %) %)
-                              (sut/redact nested)))]
+              out    (str/join " " (strings-in (sut/redact nested)))]
           (is (not (str/includes? out secret))
               (str "secret survived " (pr-str nested)))
           (is (str/includes? out marker)
               (str "no marker in " out)))))))
+
+(deftest ^{:stratum 1} colliding-secret-keys-keep-their-values-test
+  (testing "two secrets redact to the same marker without losing an entry"
+    ;; The keys were secret; the values they held were not. Collapsing
+    ;; them would silently drop data, which is the exact class of defect
+    ;; this component keeps producing — something that looks right.
+    (let [m   {"AKIAIOSFODNN7EXAMPLE" :first
+               "AKIAJJJJJJJJJJJJJJJJ" :second
+               "AKIAKKKKKKKKKKKKKKKK" :third}
+          out (sut/redact m)]
+      (is (= (count m) (count out)) "no entry is lost")
+      (is (= (set (vals m)) (set (vals out))) "every value survives")
+      (is (every? #(str/starts-with? % marker) (keys out))
+          "every key is marked redacted")
+      (is (not-any? #(str/includes? % "AKIA") (keys out))
+          "no secret survives in a key"))))
+
+(deftest ^{:stratum 1} secrets-inside-keys-test
+  (testing "a keyword's namespace is as exposed as its name"
+    (let [out (sut/redact {(keyword "AKIAIOSFODNN7EXAMPLE" "v") :held})]
+      (is (= {"[REDACTED]/v" :held} out))))
+
+  (testing "a symbol key's metadata is walked"
+    ;; Only symbols among scalar keys can carry metadata — keywords and
+    ;; strings are not IObj — but a symbol key's metadata is as reachable
+    ;; as any value's.
+    (let [out (sut/redact {(with-meta 'sym {:note "AKIAIOSFODNN7EXAMPLE"}) :v})]
+      (is (= [{:note marker}] (map meta (keys out))))))
+
+  (testing "colliding keys keep their type"
+    ;; Appending to the string form would turn a vector key into a string
+    ;; containing a printed vector — two keys from one collision ending
+    ;; up as different types.
+    (let [out (sut/redact {["AKIAIOSFODNN7EXAMPLE"] :a
+                           ["AKIAJJJJJJJJJJJJJJJJ"] :b})]
+      (is (= 2 (count out)) "both entries survive")
+      (is (every? vector? (keys out)) "both keys are still vectors")
+      (is (= #{:a :b} (set (vals out)))))))
