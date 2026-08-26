@@ -106,3 +106,36 @@
           out (:items (sut/redact {:items src}))]
       (is (realized? out) "redaction is forced, not deferred")
       (is (= [marker "plain"] (vec out))))))
+
+(deftest ^{:stratum 1} counts-are-not-secrets-test
+  (testing "a token count is a number, not a bearer token"
+    ;; Miniforge tracks LLM token usage on nearly every event. Replacing
+    ;; 42 with a string broke the web dashboard with a ClassCastException
+    ;; before this rule existed.
+    (let [out (sut/redact {:metrics {:tokens 42 :max-tokens 8000}
+                           :input_tokens 17
+                           :password "hunter2"})]
+      (is (= 42 (get-in out [:metrics :tokens])))
+      (is (= 8000 (get-in out [:metrics :max-tokens])))
+      (is (= 17 (:input_tokens out)))
+      (is (= marker (:password out)) "textual secrets are still redacted"))))
+
+(deftest ^{:stratum 1} references-to-secrets-are-not-secrets-test
+  (testing "a qualifier suffix makes the key a reference, not the secret"
+    (let [out (sut/redact {:auth/credential-id  "cred-7"
+                           :auth/token-endpoint "https://idp.example/token"
+                           :session-cookie-name "sid"
+                           :auth/token          "ghp_abcdefghijklmnopqrstuvwxyz0123"})]
+      (is (= "cred-7" (:auth/credential-id out)))
+      (is (= "https://idp.example/token" (:auth/token-endpoint out)))
+      (is (= "sid" (:session-cookie-name out)))
+      (is (= marker (:auth/token out))
+          "an unqualified secret key is still redacted wholesale"))))
+
+(deftest ^{:stratum 1} excluded-keys-are-still-shape-scanned-test
+  (testing "excluding a key from the wholesale rule does not skip its value"
+    ;; This is what makes the exclusion list safe: only the key rule is
+    ;; disabled, so a secret hiding inside an excluded key is still caught.
+    (let [out (sut/redact {:token-endpoint "https://x/AKIAIOSFODNN7EXAMPLE"})]
+      (is (str/includes? (:token-endpoint out) marker))
+      (is (not (str/includes? (:token-endpoint out) "AKIAIOSFODNN7EXAMPLE"))))))

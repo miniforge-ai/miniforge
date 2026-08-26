@@ -47,7 +47,8 @@
     ;; back onto X preserves the type — record, sorted map, or plain.
     (map? x)
     (reduce-kv (fn [m k v]
-                 (assoc m k (if (match/secret-key? k)
+                 (assoc m k (if (and (match/secret-key? k)
+                                     (match/redactable-value? v))
                               (policy/marker)
                               (redact v))))
                x

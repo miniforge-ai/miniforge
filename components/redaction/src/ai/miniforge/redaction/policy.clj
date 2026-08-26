@@ -43,6 +43,7 @@
     (let [raw (-> config-resource io/resource slurp edn/read-string)]
       (-> raw
           (update :redaction/secret-key-patterns #(mapv re-pattern %))
+          (update :redaction/secret-key-exclusions #(mapv re-pattern %))
           (update :redaction/secret-value-patterns #(mapv re-pattern %))))))
 
 ;------------------------------------------------------------------------------ Layer 2

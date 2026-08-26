@@ -35,6 +35,18 @@
   "(?i)session[-_]?cookie"
   "(?i)^cookie$"]
 
+ ;; A key whose name ends in one of these is a *reference to* a secret,
+ ;; not the secret: `:auth/credential-id` is an id, `:auth/token-endpoint`
+ ;; a URL, `:session-cookie-name` a name. Redacting them wholesale
+ ;; destroys diagnostic data — an event reporting which credential failed
+ ;; becomes unreadable — for no security gain.
+ ;;
+ ;; This is safe because it only disables the *key* rule. The value is
+ ;; still walked and still scanned against :secret-value-patterns, so an
+ ;; AKIA key sitting inside `:token-endpoint` is still caught by shape.
+ :redaction/secret-key-exclusions
+ ["(?i)[-_](id|name|type|scope|endpoint|url|uri|path|file|dir|patterns|exclusions|placeholder|prefix|suffix|count|usage|limit|expiry|ttl|namespaces|services|required|missing|empty|exceeded|failed)$"]
+
  ;; Matched against string values anywhere they occur.
  :redaction/secret-value-patterns
  [;; AWS access key id

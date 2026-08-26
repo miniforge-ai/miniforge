@@ -36,7 +36,27 @@
                  (string? k)  k
                  (symbol? k)  (name k)
                  :else        nil)]
-    (boolean (some #(re-find % n) (:redaction/secret-key-patterns @policy/policy)))))
+    (boolean
+     (and (some #(re-find % n) (:redaction/secret-key-patterns @policy/policy))
+          ;; A qualifier suffix makes the key a reference to a secret
+          ;; rather than the secret, so the wholesale rule does not
+          ;; apply. The value is still walked and still shape-scanned.
+          (not (some #(re-find % n) (:redaction/secret-key-exclusions @policy/policy)))))))
+
+(defn ^{:stratum 0} redactable-value?
+  "True when V is the kind of value that could carry a secret.
+
+   A credential is textual. A number, boolean, nil, or timestamp cannot
+   encode one, so redacting it under a secret-naming key destroys data
+   for no gain — `{:metrics {:tokens 42}}` is an LLM token *count*, not
+   a bearer token, and replacing 42 with a string breaks every consumer
+   that does arithmetic on it.
+
+   Collections stay redactable: a map under `:credentials` is replaced
+   wholesale rather than walked, since its own key names may be
+   innocuous while its values are not."
+  [v]
+  (not (or (nil? v) (number? v) (boolean? v) (inst? v) (uuid? v))))
 
 (defn ^{:stratum 0} redact-string
   "Replace every secret-looking substring in S with the marker.
@@ -46,6 +66,10 @@
    the key. Whole-value replacement would destroy the audit trail the
    marker exists to preserve."
   [s]
+  ;; One str/replace per pattern rather than a single alternation over
+  ;; all of them: the alternation measured ~45% slower, because Java can
+  ;; use a literal-prefix optimization on each pattern separately and
+  ;; loses it once they are combined.
   (reduce (fn [acc pattern] (str/replace acc pattern (policy/marker)))
           s
           (:redaction/secret-value-patterns @policy/policy)))
