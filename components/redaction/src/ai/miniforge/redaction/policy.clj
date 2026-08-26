@@ -57,8 +57,14 @@
   (delay
     (let [raw (config/load-config-resource
                config-resource
+               ;; Every key the compile step below touches. Leaving one
+               ;; out does not throw — (mapv f nil) is [] — it silently
+               ;; yields an empty pattern list, so a truncated resource
+               ;; would quietly change what gets redacted instead of
+               ;; failing at the boundary.
                [:redaction/marker
                 :redaction/secret-key-patterns
+                :redaction/secret-key-exclusions
                 :redaction/secret-value-patterns])]
       (-> raw
           (update :redaction/secret-key-patterns #(mapv re-pattern %))
