@@ -70,7 +70,14 @@
     (is (thrown? IllegalArgumentException (claim :statement "   "))))
   (testing "seeded links cannot smuggle in an unknown edge type"
     (is (thrown? IllegalArgumentException (claim :links {:vibes #{"claim-2"}})))
-    (is (some? (claim :links {:supports #{"evidence-1"}})))))
+    (is (some? (claim :links {:supports #{"evidence-1"}}))))
+  (testing "a seeded link value must be a collection, so it cannot erase a default"
+    (is (thrown? IllegalArgumentException (claim :links {:supports nil})))
+    (is (thrown? IllegalArgumentException (claim :links {:supports "evidence-1"}))))
+  (testing "seeded link values are coerced to sets"
+    (is (= #{"evidence-1"}
+           (object/linked (claim :links {:supports ["evidence-1" "evidence-1"]})
+                          :supports)))))
 
 (deftest ^{:stratum 1} terminal-detection-covers-every-type
   (is (object/terminal? (assoc (claim) :object/status :accepted)))

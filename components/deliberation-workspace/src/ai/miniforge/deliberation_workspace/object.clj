@@ -143,6 +143,9 @@
     (throw (IllegalArgumentException. (str "Object " id " requires a statement"))))
   (when-let [unknown (seq (remove link-types (keys links)))]
     (throw (IllegalArgumentException. (str "Unknown link types: " (vec unknown)))))
+  (when-let [bad (seq (remove (comp coll? val) links))]
+    (throw (IllegalArgumentException.
+            (str "Link values must be collections of object ids: " (vec (map key bad))))))
   {:object/id id
    :object/type type
    :object/status (initial-status type)
@@ -151,5 +154,6 @@
    :object/activation activation
    :object/version version
    :object/touched-at version
-   :object/links (merge (zipmap link-types (repeat #{})) links)
+   :object/links (merge (zipmap link-types (repeat #{}))
+                        (into {} (map (fn [[edge targets]] [edge (set targets)])) links))
    :object/attrs (or attrs {})})
