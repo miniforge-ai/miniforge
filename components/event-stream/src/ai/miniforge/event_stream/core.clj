@@ -21,6 +21,7 @@
    [ai.miniforge.event-stream.messages :as messages]
    [ai.miniforge.event-stream.snowflake :as snowflake]
    [ai.miniforge.logging.interface :as log]
+   [ai.miniforge.redaction.interface :as redaction]
    [ai.miniforge.response.interface :as response]
    [ai.miniforge.event-stream.sinks :as sinks]))
 
@@ -492,25 +493,30 @@
   [stream event]
   (if (response/anomaly-map? event)
     event
-    ;; Fast path: check quiesce before acquiring the in-flight slot so
-    ;; already-quiesced workflows skip the swap! entirely.
-    (or (rejection-if-quiesced stream event)
-        (let [result (with-in-flight stream event
-                       (fn []
-                         (let [{:keys [sinks subscribers filters logger]} @stream]
-                           (deliver-to-sinks! sinks event logger)
-                           (record-event! stream event)
-                           (deliver-to-subscribers! subscribers filters event logger)
-                           (log-published! logger event)
-                           event)))]
-          ;; with-in-flight returns quiesced-sentinel when the workflow was
-          ;; fenced during the atomic acquire (the TOCTOU window). Convert
-          ;; to the canonical rejection shape so callers see a consistent
-          ;; {:rejected? true ...} map regardless of which path triggered it.
-          (if (= result quiesced-sentinel)
-            (do (log-rejection! (:logger @stream) event)
-                (rejection-result event :workflow-quiesced))
-            result)))))
+    ;; N3 §8.1: redact before the event reaches a sink, the log, or a
+    ;; subscriber. This is the last point at which no durable or
+    ;; delivered copy exists yet — redacting at a sink would leave the
+    ;; in-memory log and every other sink holding the secret.
+    (let [event (redaction/redact event)]
+      ;; Fast path: check quiesce before acquiring the in-flight slot so
+      ;; already-quiesced workflows skip the swap! entirely.
+      (or (rejection-if-quiesced stream event)
+          (let [result (with-in-flight stream event
+                         (fn []
+                           (let [{:keys [sinks subscribers filters logger]} @stream]
+                             (deliver-to-sinks! sinks event logger)
+                             (record-event! stream event)
+                             (deliver-to-subscribers! subscribers filters event logger)
+                             (log-published! logger event)
+                             event)))]
+            ;; with-in-flight returns quiesced-sentinel when the workflow was
+            ;; fenced during the atomic acquire (the TOCTOU window). Convert
+            ;; to the canonical rejection shape so callers see a consistent
+            ;; {:rejected? true ...} map regardless of which path triggered it.
+            (if (= result quiesced-sentinel)
+              (do (log-rejection! (:logger @stream) event)
+                  (rejection-result event :workflow-quiesced))
+              result))))))
 
 ;; Event constructors (N3 compliant)
 (defn ^{:stratum 2} workflow-started

@@ -1,0 +1,78 @@
+;; Redaction policy — N3 §8.1 excluded values.
+;;
+;; Patterns are DATA, never code (dewey 007; N8 §5.2 forbids a function
+;; as a redaction configuration value). A deployment adds patterns here;
+;; it can never configure the built-in set away — N3 §8.1 is a MUST NOT,
+;; and deployment patterns apply IN ADDITION to these, never instead.
+;;
+;; Two mechanisms, because secrets hide in two places:
+;;
+;; Patterns are EDN strings, compiled with `re-pattern` on load — EDN has no
+;; regex literal, and keeping them as data rather than code is the point
+;; (dewey 007).
+;;
+;;   :secret-key-patterns  — the KEY names a secret, so the whole value
+;;                           goes. A password is not pattern-matchable;
+;;                           `{:password "hunter2"}` is only detectable
+;;                           by its key.
+;;   :secret-value-patterns — the VALUE looks like a secret wherever it
+;;                           appears, including mid-sentence in free
+;;                           text. Only the match is replaced, so the
+;;                           surrounding message survives for audit.
+
+{:redaction/marker "[REDACTED]"
+
+ ;; Matched case-insensitively against the key's name.
+ :redaction/secret-key-patterns
+ ["(?i)pass(word|wd|phrase)"
+  "(?i)secret"
+  "(?i)token"
+  "(?i)api[-_]?key"
+  "(?i)access[-_]?key"
+  "(?i)private[-_]?key"
+  "(?i)credential"
+  "(?i)authoriz(ation|e)"
+  "(?i)session[-_]?cookie"
+  "(?i)^cookie$"]
+
+ ;; A key whose name ends in one of these is a *reference to* a secret,
+ ;; not the secret: `:auth/credential-id` is an id, `:auth/token-endpoint`
+ ;; a URL, `:session-cookie-name` a name. Redacting them wholesale
+ ;; destroys diagnostic data — an event reporting which credential failed
+ ;; becomes unreadable — for no security gain.
+ ;;
+ ;; This is safe because it only disables the *key* rule. The value is
+ ;; still walked and still scanned against :secret-value-patterns, so an
+ ;; AKIA key sitting inside `:token-endpoint` is still caught by shape.
+ :redaction/secret-key-exclusions
+ ["(?i)[-_](id|name|type|scope|endpoint|url|uri|path|file|dir|patterns|exclusions|placeholder|prefix|suffix|count|usage|limit|expiry|ttl|namespaces|services|required|missing|empty|exceeded|failed)$"]
+
+ ;; Matched against string values anywhere they occur.
+ :redaction/secret-value-patterns
+ [;; AWS access key id
+  "\\bAKIA[0-9A-Z]{16}\\b"
+  ;; Anthropic / OpenAI style bearer keys
+  "\\bsk-[A-Za-z0-9_-]{16,}\\b"
+  ;; GitHub tokens (classic, fine-grained, and the app/refresh variants)
+  "\\bgh[pousr]_[A-Za-z0-9]{16,}\\b"
+  "\\bgithub_pat_[A-Za-z0-9_]{22,}\\b"
+  ;; Slack tokens
+  "\\bxox[abposr]-[A-Za-z0-9-]{10,}\\b"
+  ;; PEM private key blocks
+  ;; The whole PEM block, not just its header: replacing the BEGIN line
+  ;; alone leaves the base64 key material — the part that matters —
+  ;; sitting in the event.
+  ;;
+  ;; Two patterns because a truncated key is still a key. The first
+  ;; consumes complete blocks; the second catches a header whose END
+  ;; marker was lost to truncation, along with the base64 that follows.
+  "-----BEGIN [A-Z ]*PRIVATE KEY-----[\\s\\S]*?-----END [A-Z ]*PRIVATE KEY-----"
+  "-----BEGIN [A-Z ]*PRIVATE KEY-----[A-Za-z0-9+/=\\s]*"
+  ;; JWTs
+  "\\beyJ[A-Za-z0-9_-]{8,}\\.[A-Za-z0-9_-]{8,}\\.[A-Za-z0-9_-]{8,}\\b"
+  ;; Connection strings carrying inline credentials:
+  ;; scheme://user:secret@host
+  "(?i)\\b[a-z][a-z0-9+.-]*://[^\\s/:@]+:[^\\s/@]+@"
+  ;; Authorization header values
+  "(?i)\\bBearer\\s+[A-Za-z0-9._~+/-]{16,}=*"
+  "(?i)\\bBasic\\s+[A-Za-z0-9+/]{16,}=*"]}
