@@ -116,11 +116,23 @@
   [op]
   (get operation-class op))
 
-(defn ^{:stratum 1} permitted?
+;------------------------------------------------------------------------------ Layer 2
+
+(defn ^{:stratum 2} permitted?
   "True when `role` may propose `op` (N14 §5.3). Operations with no explicit
-   restriction are open to every role."
+   restriction are open to every role.
+
+   An operation outside the vocabulary is never permitted: schema conformance
+   rejects it first, but the permission gate must not be the layer that lets
+   an unknown operation through.
+
+   `:user` is the OCI principal, not a role. Per §10.2 its operations are
+   subject to N8 audit rather than the §5.3 role matrix, so it passes any
+   operation in the vocabulary."
   [role op]
   (cond
+    (not (known-operation? op)) false
+    (= :user role) true
     (contains? universal-operations op) true
     (contains? role-permissions op) (contains? (get role-permissions op) role)
     :else true))

@@ -107,6 +107,15 @@
                         (transaction :proposer 10
                                      {:op :attach-evidence :targets #{"claim-1"}})))))))
 
+(deftest ^{:stratum 1} a-missing-basis-is-rejected-not-thrown
+  (testing "nothing in the pipeline throws, including on a malformed basis"
+    (doseq [basis [nil "10"]]
+      (is (= :anomalies.deliberation/missing-basis
+             (subtype-of (validate-tx (workspace (object-at "claim-1" 4))
+                                      (transaction :proposer basis
+                                                   {:op :refine-claim
+                                                    :targets #{"claim-1"}}))))))))
+
 (deftest ^{:stratum 1} the-first-failing-stage-wins
   (testing "schema conformance is checked before target existence"
     (is (= :anomalies.deliberation/unknown-operation
