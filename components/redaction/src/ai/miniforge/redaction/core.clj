@@ -44,9 +44,9 @@
             ;; key into a string containing a printed vector, so each
             ;; kind grows in its own way instead.
             (cond
-              (string? k) (str k " " n)
+              (string? k) (str k policy/disambiguator-separator n)
               (map? k)    (assoc k ::disambiguator n)
-              (set? k)    (conj k (str (policy/marker) " " n))
+              (set? k)    (conj k (str (policy/marker) policy/disambiguator-separator n))
               ;; conj, not (conj (vec k) ...): vec would coerce a seq
               ;; or a queue to a vector, which is the coercion this
               ;; branch exists to avoid. conj adds wherever the type
@@ -57,8 +57,8 @@
               ;; branch returns a LazySeq — so seq-ness is preserved but
               ;; the concrete class is not. That is upstream of this
               ;; branch, not a coercion it introduces.
-              (coll? k)   (conj k (str (policy/marker) " " n))
-              :else       (str k " " n)))]
+              (coll? k)   (conj k (str (policy/marker) policy/disambiguator-separator n))
+              :else       (str k policy/disambiguator-separator n)))]
     (if (contains? m k)
       (first (for [n (iterate inc 2)
                    :let [candidate (nth-form k n)]

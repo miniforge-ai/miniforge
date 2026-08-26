@@ -30,6 +30,14 @@
 (def ^{:stratum 0} ^:private config-resource
   "config/redaction/patterns.edn")
 
+(def ^{:stratum 0} disambiguator-separator
+  "Between a redacted key and the counter that keeps two of them apart.
+
+   A space, so `[REDACTED] 2` reads as one redacted key rather than as a
+   key literally named for the marker — and so the counter cannot be
+   mistaken for part of the marker N3 §8.2 mandates."
+  " ")
+
 ;------------------------------------------------------------------------------ Layer 1
 
 (def ^{:stratum 1} policy
