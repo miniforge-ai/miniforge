@@ -52,7 +52,7 @@
 (deftest ^{:stratum 1} unknown-operations-are-refused
   (is (= :anomalies.deliberation/unknown-operation
          (subtype-of (validate-tx (workspace)
-                                          (transaction :proposer 10 {:op :rewrite-history}))))))
+                                  (transaction :proposer 10 {:op :rewrite-history}))))))
 
 (deftest ^{:stratum 1} operations-must-target-existing-objects
   (is (= :anomalies.deliberation/unknown-target
