@@ -37,44 +37,79 @@
      2. A string containing a secret-shaped value has that value
         replaced in place.
 
-   Map keys are not redacted: a key names a field, and losing the name
-   would hide that the field existed at all."
+   Map keys keep their names — a key names a field — but a secret
+   hiding *in* a key is still removed by shape, and metadata is walked
+   like any other value. See `match/redact-key`."
   [x]
-  (cond
-    ;; Rebuilt onto X itself rather than (empty x): records throw
-    ;; UnsupportedOperationException on empty, and a record in an event
-    ;; payload would crash publish! on the hot path. Assoc'ing every key
-    ;; back onto X preserves the type — record, sorted map, or plain.
-    (map? x)
-    (reduce-kv (fn [m k v]
-                 (assoc m k (if (and (match/secret-key? k)
-                                     (match/redactable-value? v))
-                              (policy/marker)
-                              (redact v))))
+  (let [result
+        (cond
+          ;; Rebuilt onto X itself rather than (empty x): records throw
+          ;; UnsupportedOperationException on empty, and a record in an event
+          ;; payload would crash publish! on the hot path. Assoc'ing every key
+          ;; back onto X preserves the type — record, sorted map, or plain.
+          (map? x)
+          (reduce-kv (fn [m k v]
+                 (let [;; A collection can be a key too, and match/redact-key
+                       ;; only knows scalars — it cannot recurse without
+                       ;; depending on this namespace. Dispatch here, where
+                       ;; the recursion already lives.
+                       k* (if (coll? k) (redact k) (match/redact-key k))
+                       v* (if (and (match/secret-key? k)
+                                   (match/redactable-value? v))
+                            (policy/marker)
+                            (redact v))]
+                   (cond-> (assoc m k v*)
+                     ;; Only touch the key when it actually changed —
+                     ;; dissoc/assoc would otherwise reorder an array-map
+                     ;; and re-sort a sorted-map for nothing.
+                     ;;
+                     ;; Metadata compared separately because = ignores it,
+                     ;; so a key whose secret sat only in its metadata
+                     ;; would test equal to its redacted self and the
+                     ;; original would stay in the map.
+                     (or (not= k k*) (not= (meta k) (meta k*)))
+                     (-> (dissoc k) (assoc k* v*)))))
                x
                x)
 
-    (vector? x) (mapv redact x)
-    (set? x)    (into (empty x) (map redact) x)
+          (vector? x) (mapv redact x)
+          (set? x)    (into (empty x) (map redact) x)
 
-    ;; doall, not a bare map: a lazy seq would defer redaction and keep
-    ;; the un-redacted value alive in the closure, so the secret would
-    ;; still be reachable from an event §8.1 calls conformant.
-    (seq? x)    (doall (map redact x))
+          ;; doall, not a bare map: a lazy seq would defer redaction and keep
+          ;; the un-redacted value alive in the closure, so the secret would
+          ;; still be reachable from an event §8.1 calls conformant.
+          (seq? x)    (doall (map redact x))
 
-    ;; Any other Clojure collection. A PersistentQueue is coll? but none
-    ;; of map?, vector?, set? or seq?, so without this clause its
-    ;; contents pass through untouched — the cond above enumerates
-    ;; concrete types, and enumerations of types leak.
-    (coll? x)   (into (empty x) (map redact) x)
+          ;; Any other Clojure collection. A PersistentQueue is coll? but none
+          ;; of map?, vector?, set? or seq?, so without this clause its
+          ;; contents pass through untouched — the cond above enumerates
+          ;; concrete types, and enumerations of types leak.
+          (coll? x)   (into (empty x) (map redact) x)
 
-    (string? x) (match/redact-string x)
-    :else       x))
+          (string? x) (match/redact-string x)
+          :else       x)]
+    ;; Metadata is data. pr-str drops it, so a sink that serializes never
+    ;; sees it — but the in-memory log and every in-process subscriber
+    ;; hold the object itself, and §8.1 is about what is emitted, not
+    ;; about what one representation happens to show.
+    ;;
+    ;; Inline rather than a redact*/redact pair: two mutually recursive
+    ;; names are a reference cycle the stratifier rejects (SL007), while
+    ;; a single self-recursive function is one node.
+    (if-let [m (meta x)]
+      (if (instance? clojure.lang.IObj result)
+        (with-meta result (redact m))
+        result)
+      result)))
 
 ;------------------------------------------------------------------------------ Layer 1
 
 (defn ^{:stratum 1} clean?
   "True when X carries no value excluded by N3 §8.1. Redaction is
-   idempotent, so this is `redact` reaching a fixed point."
+   idempotent, so this is `redact` reaching a fixed point.
+
+   Blind to metadata: `=` ignores it, so a secret carried only in
+   metadata reports clean here even though `redact` removes it. `redact`
+   is the security property; this is a convenience predicate."
   [x]
   (= x (redact x)))

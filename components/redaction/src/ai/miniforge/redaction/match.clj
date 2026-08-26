@@ -86,3 +86,34 @@
     (reduce (fn [acc pattern] (str/replace acc pattern marker))
             s
             (:redaction/secret-value-patterns @policy/policy))))
+
+;------------------------------------------------------------------------------ Layer 1
+
+(defn ^{:stratum 1} redact-key
+  "Redact a secret hiding in K itself, by shape.
+
+   Keys normally keep their names: a key names a field, and losing the
+   name would hide that the field existed. That holds for a structural
+   key like :password or :event/type — but not for a key that *is*
+   data. A map keyed by session token carries the secret in the key and
+   nowhere else.
+
+   Shape separates the two. No field name looks like an AWS access key
+   or a JWT, so only the value-shape rules apply here; the key-name rule
+   deliberately does not, since replacing the whole of `:password` would
+   destroy the field.
+
+   A redacted keyword or symbol comes back as a string, because the
+   marker is not readable inside one: `(keyword \"[REDACTED]\")` prints
+   as `:[REDACTED]`, which `edn/read-string` rejects, and N3 §4.3 makes
+   every event durable — an unreadable key corrupts the log. The type
+   change is honest anyway; such a key was data, not a field name."
+  [k]
+  (letfn [(shorten [s] (let [r (redact-string s)] (when (not= r s) r)))]
+    (cond
+      (string? k)  (or (shorten k) k)
+      (keyword? k) (or (some->> (name k) shorten (str (when-let [n (namespace k)] (str n "/"))))
+                       k)
+      (symbol? k)  (or (some->> (name k) shorten (str (when-let [n (namespace k)] (str n "/"))))
+                       k)
+      :else        k)))

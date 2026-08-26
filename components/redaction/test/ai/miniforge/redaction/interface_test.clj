@@ -19,8 +19,8 @@
   "N3 §8 conformance — N3.SD.1 (never emit excluded values), N3.SD.3
    (substitute the marker, never omit the key)."
   (:require
+   [clojure.edn :as edn]
    [clojure.string :as str]
-   [clojure.walk :as walk]
    [clojure.test :refer [deftest is testing]]
    [ai.miniforge.redaction.interface :as sut]))
 
@@ -64,6 +64,38 @@
     (is (false? (sut/secret-string? :keyword)))
     (is (false? (sut/secret-string? {:a 1})))
     (is (true? (sut/secret-string? "AKIAIOSFODNN7EXAMPLE")))))
+
+(defn- ^{:stratum 0} strings-in
+  "Every string reachable from X — values, keys, and metadata — as text.
+
+   Independent of printing, so it sees what pr-str hides."
+  [x]
+  (concat
+   (when-let [m (meta x)] (strings-in m))
+   (cond
+     (string? x)  [x]
+     (keyword? x) [(str x)]
+     (symbol? x)  [(str x)]
+     (map? x)     (mapcat (fn [[k v]] (concat (strings-in k) (strings-in v))) x)
+     (coll? x)    (mapcat strings-in x)
+     :else        [])))
+
+(deftest ^{:stratum 0} redacted-events-still-round-trip-test
+  (testing "redaction never makes an event unreadable"
+    ;; N3 §4.3 makes every event durable, so a redacted event must still
+    ;; serialize and read back. Naming a keyword "[REDACTED]" prints as
+    ;; :[REDACTED], which edn/read-string rejects — a redacted key comes
+    ;; back as a string for exactly this reason.
+    (doseq [event [{"AKIAIOSFODNN7EXAMPLE" :v}
+                   {(keyword "ghp_abcdefghijklmnopqrstuvwxyz0123") :v}
+                   {(keyword "auth" "sk-abcdefghijklmnopqrst") :v}
+                   {(symbol "xoxb-abcdefghijklmnop") :v}
+                   {:password "p" :nested {:items ["AKIAIOSFODNN7EXAMPLE"]}}]]
+      (let [text (pr-str (sut/redact event))]
+        (is (some? (edn/read-string text))
+            (str "did not read back: " text))
+        (is (not (str/includes? text "AKIA"))
+            (str "secret survived: " text))))))
 
 ;------------------------------------------------------------------------------ Layer 1
 
@@ -189,13 +221,19 @@
 
 (deftest ^{:stratum 1} no-container-lets-a-secret-through-test
   (testing "a secret survives no container type, at any nesting depth"
-    ;; Two defects in review were the same shape: redaction that looked
-    ;; correct but silently missed a container — the PEM body, and
-    ;; PersistentQueue. Checking against `clean?` would not have caught
-    ;; either, because `clean?` walks with the same code that missed
-    ;; them. `pr-str` is independent of the walk, so it can.
+    ;; Defects found in review were all this shape: redaction that
+    ;; looked correct but silently missed a container. Checking against
+    ;; `clean?` would not catch them, since `clean?` walks with the same
+    ;; code that missed them and agrees with itself.
+    ;;
+    ;; `strings-in` collects every string reachable from the structure,
+    ;; keys and metadata included, without going through pr-str — which
+    ;; prints a PersistentQueue as #object[...] and drops metadata
+    ;; entirely, hiding a surviving secret in both places.
     (let [secret     "AKIAIOSFODNN7EXAMPLE"
           containers [identity
+                      #(hash-map % :held-as-a-key)
+                      #(with-meta {:carrier true} {:note %})
                       vector
                       list
                       #(hash-set %)
@@ -213,9 +251,7 @@
               ;; its contents, which would hide a surviving secret as
               ;; readily as a redacted one. Normalise every non-map
               ;; collection to a vector first so the check can see in.
-              out    (pr-str (walk/postwalk
-                              #(if (and (coll? %) (not (map? %))) (vec %) %)
-                              (sut/redact nested)))]
+              out    (str/join " " (strings-in (sut/redact nested)))]
           (is (not (str/includes? out secret))
               (str "secret survived " (pr-str nested)))
           (is (str/includes? out marker)
