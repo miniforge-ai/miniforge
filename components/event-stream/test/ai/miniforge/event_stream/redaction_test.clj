@@ -47,6 +47,30 @@
       (is (= (:event/type event) (:event/type out)))
       (is (= (:event/version event) (:event/version out))))))
 
+(deftest ^{:stratum 0} every-position-is-covered-at-the-stream-test
+  (testing "a secret reaches the log from no position in an event"
+    ;; Through publish! rather than redact directly, because that is the
+    ;; boundary §8.1 governs. Each position here was a live leak at some
+    ;; point: free text and secret-named keys were the original two,
+    ;; then key names, key namespaces, and metadata each in turn.
+    (let [secret "AKIAIOSFODNN7EXAMPLE"]
+      (doseq [[position event]
+              [["free text"     {:message (str "ran deploy with " secret)}]
+               ["secret key"    {:password "hunter2"}]
+               ["key name"      {(keyword secret) :held}]
+               ["key namespace" {(keyword secret "field") :held}]
+               ["metadata"      {:carrier (with-meta {:a 1} {:note secret})}]]]
+        (let [stream (sut/create-event-stream)]
+          (sut/publish! stream (assoc event
+                                      :event/type :tool/invoked
+                                      :workflow/id (str (random-uuid))))
+          ;; *print-meta* or a metadata-borne secret is invisible to the
+          ;; check that is supposed to catch it.
+          (let [log (binding [*print-meta* true]
+                      (pr-str (sut/get-events stream)))]
+            (is (not (str/includes? log secret))
+                (str "secret survived in " position))))))))
+
 ;------------------------------------------------------------------------------ Layer 1
 
 (deftest ^{:stratum 1} secret-reaches-no-destination-test
