@@ -266,10 +266,6 @@
       (doseq [outer containers
               inner containers]
         (let [nested (outer (inner secret))
-              ;; pr-str prints a PersistentQueue as #object[...] without
-              ;; its contents, which would hide a surviving secret as
-              ;; readily as a redacted one. Normalise every non-map
-              ;; collection to a vector first so the check can see in.
               out    (str/join " " (strings-in (sut/redact nested)))]
           (is (not (str/includes? out secret))
               (str "secret survived " (pr-str nested)))
