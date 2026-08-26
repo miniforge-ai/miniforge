@@ -3,6 +3,7 @@
         ai.miniforge/config {:local/root "../config"}
         ai.miniforge/logging {:local/root "../logging"}
         ai.miniforge/messages {:local/root "../messages"}
+        ai.miniforge/redaction {:local/root "../redaction"}
         ai.miniforge/response {:local/root "../response"}
         ai.miniforge/schema {:local/root "../schema"}
         cheshire/cheshire {:mvn/version "5.13.0"}
