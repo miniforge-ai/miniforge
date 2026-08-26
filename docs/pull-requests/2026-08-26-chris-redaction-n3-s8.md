@@ -1,3 +1,9 @@
+<!--
+  Title: Miniforge.ai
+  Author: Christopher Lester (christopher@miniforge.ai)
+  Copyright 2025-2026 Christopher Lester. Licensed under Apache 2.0.
+-->
+
 # feat: redact secrets at event construction per N3 §8.1
 
 Historical record. Merged as PR #1842.
@@ -10,8 +16,14 @@ sink, the in-memory log, or a subscriber.
 
 ## Motivation
 
-N3 §8.1 had required this since 0.9.0 and nothing enforced it. The
-requirement is a MUST NOT on **emission**, not a filter on delivery:
+Four specs recorded this contract as unimplemented in their annexes — N3,
+N6, N8 and N9 — and `REDACTED` appeared nowhere in the tree. The only
+redaction that existed was `dag-executor/host_git_guard/redact-credentials`,
+which strips userinfo from git remote URLs: real, but scoped to one field of
+one subsystem.
+
+N3 §8.1 had required this since 0.9.0. The requirement is a MUST NOT on
+**emission**, not a filter on delivery:
 
 > A redacting sink does not make a secret-bearing event conformant — the
 > event is already in memory, already sequenced, and already durable per
