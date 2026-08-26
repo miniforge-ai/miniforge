@@ -1,5 +1,5 @@
 {:paths ["src"]
 
- :deps {}
+ :deps {ai.miniforge/anomaly {:local/root "../anomaly"}}
 
  :aliases {:test {:extra-paths ["test"]}}}
