@@ -40,15 +40,19 @@
    The §4.4 visible set is exactly: goals and hard constraints (the run's
    shared frame, not another role's contribution), the role's own objects,
    the interpreter's specification-derived objects, and anything the user
-   injected via OCI. Nothing else — not even an existence signal."
+   injected via OCI. Nothing else — not even an existence signal.
+
+   User-injected objects carry `:object/role :user`, the same principal
+   `transaction/permitted?` exempts from the §5.3 role matrix. One canonical
+   place records who authored an object; a second marker on `:object/attrs`
+   would drift from it."
   [object role visibility]
   (case visibility
     :full true
     :none (or (= :goal (:object/type object))
               (object/hard-constraint? object)
               (= role (:object/role object))
-              (= :interpreter (:object/role object))
-              (= :user (get-in object [:object/attrs :source])))))
+              (contains? #{:interpreter :user} (:object/role object)))))
 
 (defn- ^{:stratum 0} by-id [objects]
   (sort-by :object/id objects))
@@ -94,11 +98,16 @@
    the delta — is computed over the visible set, so the ablation cannot be
    defeated through derived objects."
   [workspace role {:keys [visibility since] :or {visibility :full since 0}}]
-  (let [visible (visible-objects workspace role visibility)
-        visible-ids (into #{} (map :object/id) visible)
-        conflicts (->> (of-type visible :conflict)
-                       (filter open?)
-                       (filter #(renderable-conflict? % visible-ids)))]
+  (let [candidates (visible-objects workspace role visibility)
+        candidate-ids (into #{} (map :object/id) candidates)
+        ;; A conflict the role may otherwise see is withheld ENTIRELY when it
+        ;; references something hidden — dropping it from :projection/conflicts
+        ;; alone would still leak its existence through the object list and the
+        ;; delta. One pass suffices: conflicts never reference other conflicts.
+        visible (remove #(and (= :conflict (:object/type %))
+                              (not (renderable-conflict? % candidate-ids)))
+                        candidates)
+        conflicts (filter open? (of-type visible :conflict))]
     {:projection/version (get workspace :workspace/version 0)
      :projection/role role
      :projection/visibility visibility

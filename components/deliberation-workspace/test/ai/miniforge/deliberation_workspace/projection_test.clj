@@ -48,7 +48,7 @@
 
 (def ^{:stratum 1} ^:private interpreter-claim (obj "claim-spec" :claim :interpreter))
 
-(def ^{:stratum 1} ^:private user-claim (obj "claim-user" :claim :proposer {:attrs {:source :user}}))
+(def ^{:stratum 1} ^:private user-claim (obj "claim-user" :claim :user))
 
 (deftest ^{:stratum 1} resolved-conflicts-are-not-rendered
   (let [conflict (assoc (obj "conflict-1" :conflict :skeptic) :object/status :resolved)]
@@ -100,6 +100,26 @@
       (let [p (projection/project ws :skeptic {:visibility :none})]
         (is (empty? (:projection/conflicts p)))
         (is (not (contains? (set (ids (:projection/objects p))) "conflict-1")))))))
+
+(deftest ^{:stratum 2} a-visible-conflict-naming-a-hidden-object-is-withheld-entirely
+  (testing "the leak is through the object list and delta, not just conflicts"
+    (let [conflict (obj "conflict-1" :conflict :skeptic
+                        {:links {:contradicts #{"claim-own" "claim-foreign"}}
+                         :touched-at 11})
+          ws (workspace own-claim foreign-claim conflict)
+          p (projection/project ws :skeptic {:visibility :none :since 10})]
+      (is (empty? (:projection/conflicts p)))
+      (is (not (contains? (set (ids (:projection/objects p))) "conflict-1"))
+          "a conflict the role authored still leaks the hidden object's existence")
+      (is (not (contains? (set (ids (:projection/delta p))) "conflict-1"))
+          "and the delta is the second way that existence escapes"))))
+
+(deftest ^{:stratum 2} an-interpreter-authored-conflict-is-withheld-the-same-way
+  (let [conflict (obj "conflict-1" :conflict :interpreter
+                      {:links {:contradicts #{"claim-own" "claim-foreign"}}})
+        ws (workspace own-claim foreign-claim conflict)
+        p (projection/project ws :skeptic {:visibility :none})]
+    (is (not (contains? (set (ids (:projection/objects p))) "conflict-1")))))
 
 (deftest ^{:stratum 2} conflicts-render-when-every-referenced-object-is-visible
   (let [conflict (obj "conflict-1" :conflict :skeptic
