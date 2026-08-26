@@ -20,6 +20,7 @@
    (substitute the marker, never omit the key)."
   (:require
    [clojure.string :as str]
+   [clojure.walk :as walk]
    [clojure.test :refer [deftest is testing]]
    [ai.miniforge.redaction.interface :as sut]))
 
@@ -51,6 +52,8 @@
       (is (= event (sut/redact event))))))
 
 (defrecord ^{:stratum 0} PayloadRecord [password note])
+
+(defrecord ^{:stratum 0} Wrapper [inner])
 
 ;------------------------------------------------------------------------------ Layer 1
 
@@ -173,3 +176,37 @@
     (let [out (sut/redact {:token-endpoint "https://x/AKIAIOSFODNN7EXAMPLE"})]
       (is (str/includes? (:token-endpoint out) marker))
       (is (not (str/includes? (:token-endpoint out) "AKIAIOSFODNN7EXAMPLE"))))))
+
+(deftest ^{:stratum 1} no-container-lets-a-secret-through-test
+  (testing "a secret survives no container type, at any nesting depth"
+    ;; Two defects in review were the same shape: redaction that looked
+    ;; correct but silently missed a container — the PEM body, and
+    ;; PersistentQueue. Checking against `clean?` would not have caught
+    ;; either, because `clean?` walks with the same code that missed
+    ;; them. `pr-str` is independent of the walk, so it can.
+    (let [secret     "AKIAIOSFODNN7EXAMPLE"
+          containers [identity
+                      vector
+                      list
+                      #(hash-set %)
+                      #(hash-map :v %)
+                      #(sorted-map :v %)
+                      #(array-map :v %)
+                      #(->Wrapper %)
+                      #(doall (map identity [%]))
+                      #(into clojure.lang.PersistentQueue/EMPTY [%])
+                      #(lazy-seq [%])]]
+      (doseq [outer containers
+              inner containers]
+        (let [nested (outer (inner secret))
+              ;; pr-str prints a PersistentQueue as #object[...] without
+              ;; its contents, which would hide a surviving secret as
+              ;; readily as a redacted one. Normalise every non-map
+              ;; collection to a vector first so the check can see in.
+              out    (pr-str (walk/postwalk
+                              #(if (and (coll? %) (not (map? %))) (vec %) %)
+                              (sut/redact nested)))]
+          (is (not (str/includes? out secret))
+              (str "secret survived " (pr-str nested)))
+          (is (str/includes? out marker)
+              (str "no marker in " out)))))))
