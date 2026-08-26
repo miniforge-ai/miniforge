@@ -62,6 +62,12 @@
     ;; still be reachable from an event §8.1 calls conformant.
     (seq? x)    (doall (map redact x))
 
+    ;; Any other Clojure collection. A PersistentQueue is coll? but none
+    ;; of map?, vector?, set? or seq?, so without this clause its
+    ;; contents pass through untouched — the cond above enumerates
+    ;; concrete types, and enumerations of types leak.
+    (coll? x)   (into (empty x) (map redact) x)
+
     (string? x) (match/redact-string x)
     :else       x))
 

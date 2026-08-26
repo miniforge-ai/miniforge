@@ -120,6 +120,17 @@
       (is (= marker (:password out)))
       (is (= "ok" (:note out))))))
 
+(deftest ^{:stratum 1} other-collections-are-walked-test
+  (testing "a collection outside the enumerated types is still walked"
+    ;; PersistentQueue is coll? but none of map?, vector?, set? or seq?.
+    ;; Enumerating concrete types leaks; this pins the fallback.
+    (let [q   (into clojure.lang.PersistentQueue/EMPTY
+                    ["AKIAIOSFODNN7EXAMPLE" "ok"])
+          out (:q (sut/redact {:q q}))]
+      (is (instance? clojure.lang.PersistentQueue out)
+          "the collection type is preserved")
+      (is (= [marker "ok"] (vec out))))))
+
 (deftest ^{:stratum 1} seqs-are-redacted-eagerly-test
   (testing "no lazy seq defers redaction past emission"
     ;; A lazy seq would leave the un-redacted value reachable from its
