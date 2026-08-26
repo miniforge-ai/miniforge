@@ -84,6 +84,25 @@
    :add-constraint #{:interpreter}
    :retire-question #{:meta-watchdog}})
 
+(def ^{:stratum 0} status-effect
+  "Status an operation imposes on the objects it targets (N14 §2.3).
+   Operations absent from this table do not move target status.
+
+   The engine reads the effect from the operation rather than from the
+   transaction payload: an activation chooses which operation to propose,
+   and this table decides what that operation does."
+  {:accept-decision :accepted
+   :reject-decision :rejected
+   :answer-question :answered
+   :retire-question :retired
+   :record-experiment-result :completed
+   :invalidate-artifact :superseded
+   :challenge :contested})
+
+(def ^{:stratum 0} goal-outcomes
+  "Outcomes `close-goal` may impose (N14 §2.3)."
+  #{:accepted :rejected})
+
 (def ^{:stratum 0} ^:private universal-operations
   "Operations every role may propose (N14 §5.3, final clause)."
   #{:assert-claim :add-question :declare-blocked})
