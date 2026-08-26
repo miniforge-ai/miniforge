@@ -17,7 +17,8 @@ sink, the in-memory log, or a subscriber.
 ## Motivation
 
 Four specs recorded this contract as unimplemented in their annexes — N3,
-N6, N8 and N9 — and `REDACTED` appeared nowhere in the tree. The only
+N6, N8 and N9 — and the marker they mandate, `"[REDACTED]"`, appeared
+nowhere in the tree. The only
 redaction that existed was `dag-executor/host_git_guard/redact-credentials`,
 which strips userinfo from git remote URLs: real, but scoped to one field of
 one subsystem.
