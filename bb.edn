@@ -743,6 +743,8 @@
                  "components/spec-parser/src"
                  "components/self-healing/src"
                  "components/self-healing/resources"
+                 "components/redaction/src"
+                 "components/redaction/resources"
                  "components/event-stream/src"
                  "components/event-stream/resources"
                  "components/supervisory-state/src"

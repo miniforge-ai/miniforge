@@ -41,17 +41,26 @@
    would hide that the field existed at all."
   [x]
   (cond
+    ;; Rebuilt onto X itself rather than (empty x): records throw
+    ;; UnsupportedOperationException on empty, and a record in an event
+    ;; payload would crash publish! on the hot path. Assoc'ing every key
+    ;; back onto X preserves the type — record, sorted map, or plain.
     (map? x)
     (reduce-kv (fn [m k v]
                  (assoc m k (if (match/secret-key? k)
                               (policy/marker)
                               (redact v))))
-               (empty x)
+               x
                x)
 
     (vector? x) (mapv redact x)
     (set? x)    (into (empty x) (map redact) x)
-    (seq? x)    (map redact x)
+
+    ;; doall, not a bare map: a lazy seq would defer redaction and keep
+    ;; the un-redacted value alive in the closure, so the secret would
+    ;; still be reachable from an event §8.1 calls conformant.
+    (seq? x)    (doall (map redact x))
+
     (string? x) (match/redact-string x)
     :else       x))
 

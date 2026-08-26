@@ -45,6 +45,8 @@
                  :ok? true :ratio 0.5 :nothing nil}]
       (is (= event (sut/redact event))))))
 
+(defrecord ^{:stratum 0} PayloadRecord [password note])
+
 ;------------------------------------------------------------------------------ Layer 1
 
 (deftest ^{:stratum 1} secret-naming-key-redacts-its-value-test
@@ -85,3 +87,22 @@
           "non-secret values are untouched")
       (is (= marker (get-in out [:items 0 :secret])))
       (is (contains? (get-in out [:items 1]) marker)))))
+
+(deftest ^{:stratum 1} records-survive-redaction-test
+  (testing "a record in an event payload redacts without throwing"
+    ;; (empty a-record) throws UnsupportedOperationException, so rebuilding
+    ;; a map onto (empty x) would crash publish! for any record payload.
+    (let [out (sut/redact (->PayloadRecord "hunter2" "ok"))]
+      (is (instance? PayloadRecord out) "the record type is preserved")
+      (is (= marker (:password out)))
+      (is (= "ok" (:note out))))))
+
+(deftest ^{:stratum 1} seqs-are-redacted-eagerly-test
+  (testing "no lazy seq defers redaction past emission"
+    ;; A lazy seq would leave the un-redacted value reachable from its
+    ;; closure, so the event would carry the secret §8.1 forbids while
+    ;; still looking redacted.
+    (let [src (map identity ["AKIAIOSFODNN7EXAMPLE" "plain"])
+          out (:items (sut/redact {:items src}))]
+      (is (realized? out) "redaction is forced, not deferred")
+      (is (= [marker "plain"] (vec out))))))
