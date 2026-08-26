@@ -109,10 +109,11 @@
   (update-in object [:object/links link-type] (fnil conj #{}) target-id))
 
 (defn ^{:stratum 1} acceptable-claim?
-  "Structural acceptance rule of N14 §2.3(a): a claim may be accepted only
-   when it carries at least one execution- or user-grade evidence link and
-   no unresolved challenge. Rule (b) — acceptance by explicit decision — is
-   applied by the transaction layer, not here.
+  "Structural acceptance rule of N14 §2.3: a claim may be accepted only when
+   it carries at least one execution- or user-grade evidence link (the
+   provenance classes of §2.4) and no unresolved challenge. The alternative
+   route — acceptance by explicit decision — is applied by the transaction
+   layer, not here.
 
    `evidence-objects` are the objects the claim links via :supports;
    `open-challenges` counts unresolved challenges referencing it."
@@ -140,6 +141,8 @@
     (throw (IllegalArgumentException. (str "Unknown workspace object type: " type))))
   (when (str/blank? statement)
     (throw (IllegalArgumentException. (str "Object " id " requires a statement"))))
+  (when-let [unknown (seq (remove link-types (keys links)))]
+    (throw (IllegalArgumentException. (str "Unknown link types: " (vec unknown)))))
   {:object/id id
    :object/type type
    :object/status (initial-status type)
