@@ -17,7 +17,9 @@
 ;; limitations under the License.
 (ns ai.miniforge.evidence-bundle.scanner-test
   (:require
+   [clojure.string :as str]
    [clojure.test :refer [deftest is testing]]
+   [ai.miniforge.redaction.interface :as redaction]
    [ai.miniforge.evidence-bundle.scanner :as scanner]))
 
 ;------------------------------------------------------------------------------ Layer 0
@@ -69,3 +71,21 @@
                   {:evidence/intent
                    {:intent/description "Contact alice@example.com"}})]
       (is (= [{:finding/type :email}] (:scan/findings result))))))
+
+(deftest ^{:stratum 0} detection-is-bounded-but-redaction-is-not
+  (testing "a secret too deep to scan is still redacted"
+    ;; bundle-text is bounded by print-level, so detection sees a
+    ;; truncated view. That makes findings best-effort metadata rather
+    ;; than a security boundary — redaction walks the whole structure and
+    ;; does not share the limit. Asserted here so the asymmetry stays a
+    ;; documented property rather than an assumption.
+    (let [deep (reduce (fn [acc _] {:n acc})
+                       {:leaked "AKIAIOSFODNN7EXAMPLE"}
+                       (range 30))]
+      (is (empty? (:scan/findings (scanner/scan-artifact deep)))
+          "the scan cannot see past its print-level bound")
+      (is (not (str/includes?
+                (binding [*print-level* nil *print-length* nil]
+                  (pr-str (redaction/redact deep)))
+                "AKIAIOSFODNN7EXAMPLE"))
+          "redaction removes it regardless"))))
