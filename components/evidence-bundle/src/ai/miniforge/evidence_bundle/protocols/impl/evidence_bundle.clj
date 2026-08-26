@@ -20,6 +20,7 @@
    Pure functions organized in layers."
   (:require
    [ai.miniforge.evidence-bundle.collector :as collector]
+   [ai.miniforge.evidence-bundle.collectors :as collectors]
    [ai.miniforge.evidence-bundle.schema.domain :as domain]
    [ai.miniforge.evidence-bundle.schema.validation :as validation]
    [ai.miniforge.logging.interface :as log]))
@@ -48,7 +49,7 @@
   "Compatibility wrapper for execution evidence extraction.
    Delegates to the canonical collector implementation."
   [workflow-state]
-  (collector/collect-execution-evidence workflow-state))
+  (collectors/collect-execution-evidence workflow-state))
 
 (defn ^{:stratum 0} create-bundle-impl
   "Create evidence bundle from workflow state.
