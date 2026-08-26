@@ -256,3 +256,19 @@
               (str "secret survived " (pr-str nested)))
           (is (str/includes? out marker)
               (str "no marker in " out)))))))
+
+(deftest ^{:stratum 1} colliding-secret-keys-keep-their-values-test
+  (testing "two secrets redact to the same marker without losing an entry"
+    ;; The keys were secret; the values they held were not. Collapsing
+    ;; them would silently drop data, which is the exact class of defect
+    ;; this component keeps producing — something that looks right.
+    (let [m   {"AKIAIOSFODNN7EXAMPLE" :first
+               "AKIAJJJJJJJJJJJJJJJJ" :second
+               "AKIAKKKKKKKKKKKKKKKK" :third}
+          out (sut/redact m)]
+      (is (= (count m) (count out)) "no entry is lost")
+      (is (= (set (vals m)) (set (vals out))) "every value survives")
+      (is (every? #(str/starts-with? % marker) (keys out))
+          "every key is marked redacted")
+      (is (not-any? #(str/includes? % "AKIA") (keys out))
+          "no secret survives in a key"))))

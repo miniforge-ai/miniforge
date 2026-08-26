@@ -28,7 +28,25 @@
 
 ;------------------------------------------------------------------------------ Layer 0
 
-(defn ^{:stratum 0} redact
+(defn- ^{:stratum 0} free-key
+  "K, or K with a counter appended until it is absent from M.
+
+   Two different secrets redact to the same marker, so a map keyed by
+   both would collapse to one entry and silently drop a value — the
+   keys were secret, but the values they held were not. Only runs for a
+   key that actually changed, which is rare, so the common path pays
+   nothing."
+  [m k]
+  (if (contains? m k)
+    (first (for [n (iterate inc 2)
+                 :let [candidate (str k " " n)]
+                 :when (not (contains? m candidate))]
+             candidate))
+    k))
+
+;------------------------------------------------------------------------------ Layer 1
+
+(defn ^{:stratum 1} redact
   "Redact X — any nested data structure — per N3 §8.1/§8.2.
 
    Two rules, applied together:
@@ -68,7 +86,8 @@
                      ;; would test equal to its redacted self and the
                      ;; original would stay in the map.
                      (or (not= k k*) (not= (meta k) (meta k*)))
-                     (-> (dissoc k) (assoc k* v*)))))
+                     (-> (dissoc k)
+                         (as-> m' (assoc m' (free-key m' k*) v*))))))
                x
                x)
 
@@ -102,9 +121,9 @@
         result)
       result)))
 
-;------------------------------------------------------------------------------ Layer 1
+;------------------------------------------------------------------------------ Layer 2
 
-(defn ^{:stratum 1} clean?
+(defn ^{:stratum 2} clean?
   "True when X carries no value excluded by N3 §8.1. Redaction is
    idempotent, so this is `redact` reaching a fixed point.
 
