@@ -49,7 +49,16 @@
 
 (deftest ^{:stratum 0} unknown-operations-are-rejected
   (is (not (tx/known-operation? :rewrite-history)))
-  (is (nil? (tx/class-of :rewrite-history))))
+  (is (nil? (tx/class-of :rewrite-history)))
+  (testing "the permission gate is not the layer that lets one through"
+    (is (not (tx/permitted? :synthesizer :rewrite-history)))
+    (is (not (tx/permitted? :user :rewrite-history)))))
+
+(deftest ^{:stratum 0} the-oci-user-is-exempt-from-the-role-matrix
+  (testing "N14 §10.2: user operations answer to audit, not role restrictions"
+    (is (tx/permitted? :user :accept-decision))
+    (is (tx/permitted? :user :add-constraint))
+    (is (tx/permitted? :user :retire-question))))
 
 (deftest ^{:stratum 0} role-permissions-restrict-the-right-operations
   (testing "only the verifier records experiment results"
