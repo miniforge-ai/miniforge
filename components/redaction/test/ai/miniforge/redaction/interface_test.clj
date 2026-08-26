@@ -73,6 +73,20 @@
     (is (= marker (sut/redact "sk-abcdefghijklmnopqrst")))
     (is (= marker (sut/redact "ghp_abcdefghijklmnopqrstuvwxyz0123")))
     (is (str/includes? (sut/redact "-----BEGIN RSA PRIVATE KEY-----") marker)))
+  (testing "a PEM block loses its key material, not just its header"
+    ;; Replacing the BEGIN line alone left the base64 body — the part
+    ;; that is actually the key — sitting in the event.
+    (let [body "MIIEpAIBAAKCAQEAvxQ8kZ2mNqR7wTc3d4e5f6g7h8i9j0kLmNoPqRsTuVwX"]
+      (doseq [pem [(str "-----BEGIN RSA PRIVATE KEY-----\n" body
+                        "\n-----END RSA PRIVATE KEY-----")
+                   (str "-----BEGIN PRIVATE KEY-----\n" body
+                        "\n-----END PRIVATE KEY-----")
+                   ;; truncated: a key without its END marker is still a key
+                   (str "-----BEGIN OPENSSH PRIVATE KEY-----\n" body)]]
+        (let [out (sut/redact pem)]
+          (is (str/includes? out marker))
+          (is (not (str/includes? out body))
+              "the base64 key material must not survive")))))
   (testing "connection string with inline credentials"
     (is (str/includes? (sut/redact "postgres://user:pw@host/db") marker))))
 

@@ -59,7 +59,15 @@
   ;; Slack tokens
   "\\bxox[abposr]-[A-Za-z0-9-]{10,}\\b"
   ;; PEM private key blocks
-  "-----BEGIN [A-Z ]*PRIVATE KEY-----"
+  ;; The whole PEM block, not just its header: replacing the BEGIN line
+  ;; alone leaves the base64 key material — the part that matters —
+  ;; sitting in the event.
+  ;;
+  ;; Two patterns because a truncated key is still a key. The first
+  ;; consumes complete blocks; the second catches a header whose END
+  ;; marker was lost to truncation, along with the base64 that follows.
+  "-----BEGIN [A-Z ]*PRIVATE KEY-----[\\s\\S]*?-----END [A-Z ]*PRIVATE KEY-----"
+  "-----BEGIN [A-Z ]*PRIVATE KEY-----[A-Za-z0-9+/=\\s]*"
   ;; JWTs
   "\\beyJ[A-Za-z0-9_-]{8,}\\.[A-Za-z0-9_-]{8,}\\.[A-Za-z0-9_-]{8,}\\b"
   ;; Connection strings carrying inline credentials:
