@@ -111,6 +111,25 @@
         (is (identical? v (sut/redact v))
             (str what " is passed through, not walked"))))))
 
+(deftest ^{:stratum 0} collision-disambiguation-keeps-the-collection-kind-test
+  (testing "disambiguating a collection key does not coerce it"
+    ;; (conj (vec k) ...) would turn every colliding collection key into
+    ;; a vector — the coercion the branch exists to avoid.
+    (let [a "AKIAIOSFODNN7EXAMPLE"
+          b "AKIAJJJJJJJJJJJJJJJJ"]
+      (doseq [[kind build pred]
+              [["vector" vector                                              vector?]
+               ["set"    hash-set                                            set?]
+               ["queue"  #(into clojure.lang.PersistentQueue/EMPTY [%])
+                #(instance? clojure.lang.PersistentQueue %)]
+               ;; a list arrives as a seq from redact's seq branch, so
+               ;; seq-ness is what survives here, not the concrete class
+               ["list"   list                                                seq?]]]
+        (let [out (sut/redact {(build a) :first (build b) :second})]
+          (is (= 2 (count out)) (str kind ": both entries survive"))
+          (is (every? pred (keys out)) (str kind ": both keys keep the kind"))
+          (is (= #{:first :second} (set (vals out)))))))))
+
 ;------------------------------------------------------------------------------ Layer 1
 
 (deftest ^{:stratum 1} marker-is-the-one-N3-mandates-test

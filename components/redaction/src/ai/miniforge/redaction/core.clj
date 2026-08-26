@@ -47,7 +47,17 @@
               (string? k) (str k " " n)
               (map? k)    (assoc k ::disambiguator n)
               (set? k)    (conj k (str (policy/marker) " " n))
-              (coll? k)   (conj (vec k) (str (policy/marker) " " n))
+              ;; conj, not (conj (vec k) ...): vec would coerce a seq
+              ;; or a queue to a vector, which is the coercion this
+              ;; branch exists to avoid. conj adds wherever the type
+              ;; adds, so a vector, set and queue each keep their exact
+              ;; class and a list gains the element at the front.
+              ;;
+              ;; A list arrives here as a seq regardless — redact's seq
+              ;; branch returns a LazySeq — so seq-ness is preserved but
+              ;; the concrete class is not. That is upstream of this
+              ;; branch, not a coercion it introduces.
+              (coll? k)   (conj k (str (policy/marker) " " n))
               :else       (str k " " n)))]
     (if (contains? m k)
       (first (for [n (iterate inc 2)
