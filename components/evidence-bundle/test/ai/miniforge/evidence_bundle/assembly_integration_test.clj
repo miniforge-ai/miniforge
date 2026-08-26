@@ -27,6 +27,9 @@
    [clojure.test :refer [deftest testing is]]
    [ai.miniforge.content-hash.interface :as hash]
    [ai.miniforge.evidence-bundle.collector :as collector]
+   [ai.miniforge.evidence-bundle.collectors :as collectors]
+   [ai.miniforge.evidence-bundle.outcome :as outcome]
+   [ai.miniforge.evidence-bundle.phases :as phases]
    [ai.miniforge.evidence-bundle.schema :as schema]
    [ai.miniforge.evidence-bundle.schema.domain :as domain]
    [ai.miniforge.evidence-bundle.schema.validation :as validation]))
@@ -199,7 +202,7 @@
   (testing "Evidence is collected for an executed phase"
     (let [workflow-state (make-workflow-state
                           :phases {:implement (make-phase-data :agent :implementer)})
-          evidence (collector/collect-phase-evidence workflow-state :implement)]
+          evidence (phases/collect-phase-evidence workflow-state :implement)]
       (is (some? evidence)
           "Phase evidence should be returned")
       (is (= :implement (:phase/name evidence))
@@ -220,7 +223,7 @@
 (deftest ^{:stratum 2} collect-phase-evidence-missing-phase-test
   (testing "Returns nil for unexecuted phase"
     (let [workflow-state (make-workflow-state :phases {})
-          evidence (collector/collect-phase-evidence workflow-state :implement)]
+          evidence (phases/collect-phase-evidence workflow-state :implement)]
       (is (nil? evidence)
           "Should return nil for unexecuted phase"))))
 
@@ -251,7 +254,7 @@
                                     :url "https://github.com/org/repo/pull/42"
                                     :status :merged
                                     :merged-at (make-timestamp)})
-          outcome (collector/build-outcome-evidence workflow-state)]
+          outcome (outcome/build-outcome-evidence workflow-state)]
       (is (true? (:outcome/success outcome))
           "Outcome should indicate success")
       (is (= 42 (:outcome/pr-number outcome))
@@ -265,7 +268,7 @@
                           :status :failed
                           :error {:message "Compilation error"
                                   :phase :implement})
-          outcome (collector/build-outcome-evidence workflow-state)]
+          outcome (outcome/build-outcome-evidence workflow-state)]
       (is (false? (:outcome/success outcome))
           "Outcome should indicate failure")
       (is (= "Compilation error" (:outcome/error-message outcome))
@@ -279,7 +282,7 @@
     (let [workflow-state (make-workflow-state
                           :gate-results [(make-gate-result :phase :implement :passed? true)
                                          (make-gate-result :phase :review :passed? false)])
-          checks (collector/collect-policy-checks workflow-state)]
+          checks (collectors/collect-policy-checks workflow-state)]
       (is (= 2 (count checks))
           "Should collect both gate results")
       (is (true? (:policy-check/passed? (first checks)))
@@ -292,7 +295,7 @@
 (deftest ^{:stratum 2} collect-policy-checks-empty-test
   (testing "Empty gate results produce empty vector"
     (let [workflow-state (make-workflow-state :gate-results [])
-          checks (collector/collect-policy-checks workflow-state)]
+          checks (collectors/collect-policy-checks workflow-state)]
       (is (empty? checks)
           "Should return empty vector when no gate results"))))
 
@@ -395,7 +398,7 @@
                                             :role :quality
                                             :tags-matched [:clojure]
                                             :score 0.9}])})
-          rules (collector/collect-rules-applied workflow-state)]
+          rules (collectors/collect-rules-applied workflow-state)]
       (is (= 1 (count rules))
           "Should collect one rule")
       (is (= rule-id (:id (first rules)))
@@ -406,7 +409,7 @@
 (deftest ^{:stratum 2} collect-rules-applied-empty-test
   (testing "Returns empty vector when no rules manifests exist"
     (let [workflow-state (make-workflow-state :phases {:implement (make-phase-data)})
-          rules (collector/collect-rules-applied workflow-state)]
+          rules (collectors/collect-rules-applied workflow-state)]
       (is (empty? rules)
           "Should return empty vector"))))
 
@@ -420,7 +423,7 @@
           workflow-state (make-workflow-state)
           state-with-tools (assoc workflow-state
                                   :workflow/tool-invocations [invocation])
-          invocations (collector/collect-tool-invocations state-with-tools)]
+          invocations (collectors/collect-tool-invocations state-with-tools)]
       (is (= 1 (count invocations))
           "Should collect one invocation")
       (is (= :gh-pr-create (:tool/id (first invocations)))

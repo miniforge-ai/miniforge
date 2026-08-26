@@ -19,12 +19,12 @@
   "Tests for N11 section 9.1 execution evidence collection.
 
    Covers:
-   - collector/collect-execution-evidence (public, Layer 4.5)
+   - collectors/collect-execution-evidence (public)
    - evidence_bundle/extract-execution-evidence (private, Layer 1)
    - runner/extract-output evidence field enrichment"
   (:require
    [clojure.test :refer [deftest is testing]]
-   [ai.miniforge.evidence-bundle.collector :as collector]
+   [ai.miniforge.evidence-bundle.collectors :as collectors]
    [ai.miniforge.dag-executor.executor :as dag-exec]
    [ai.miniforge.workflow.runner :as runner]))
 
@@ -38,7 +38,7 @@
                        'extract-execution-evidence)))
 
 ;; ============================================================================
-;; collector/collect-execution-evidence — pure data extraction
+;; collectors/collect-execution-evidence — pure data extraction
 ;; ============================================================================
 (deftest ^{:stratum 0} collect-evidence-all-fields-present-test
   (testing "extracts all five evidence fields when present"
@@ -50,7 +50,7 @@
                   :evidence/task-started-at started
                   :evidence/task-finished-at finished
                   :evidence/image-digest    "sha256:abc123"}}
-          result (collector/collect-execution-evidence state)]
+          result (collectors/collect-execution-evidence state)]
       (is (= :governed (:evidence/execution-mode result)))
       (is (= :docker (:evidence/runtime-class result)))
       (is (= started (:evidence/task-started-at result)))
@@ -59,12 +59,12 @@
 
 (deftest ^{:stratum 0} collect-evidence-empty-output-test
   (testing "returns empty map when :execution/output is absent"
-    (let [result (collector/collect-execution-evidence {})]
+    (let [result (collectors/collect-execution-evidence {})]
       (is (= {} result)))))
 
 (deftest ^{:stratum 0} collect-evidence-nil-output-test
   (testing "returns empty map when :execution/output is nil"
-    (let [result (collector/collect-execution-evidence {:execution/output nil})]
+    (let [result (collectors/collect-execution-evidence {:execution/output nil})]
       (is (= {} result)))))
 
 (deftest ^{:stratum 0} collect-evidence-partial-fields-test
@@ -74,7 +74,7 @@
                   :evidence/runtime-class  :worktree
                   ;; no timestamps, no image-digest
                   :artifacts []}}
-          result (collector/collect-execution-evidence state)]
+          result (collectors/collect-execution-evidence state)]
       (is (= :local (:evidence/execution-mode result)))
       (is (= :worktree (:evidence/runtime-class result)))
       (is (not (contains? result :evidence/task-started-at)))
@@ -84,7 +84,7 @@
 (deftest ^{:stratum 0} collect-evidence-image-digest-only-test
   (testing "extracts image-digest alone when other fields absent"
     (let [state {:execution/output {:evidence/image-digest "sha256:deadbeef"}}
-          result (collector/collect-execution-evidence state)]
+          result (collectors/collect-execution-evidence state)]
       (is (= "sha256:deadbeef" (:evidence/image-digest result)))
       (is (not (contains? result :evidence/execution-mode))))))
 

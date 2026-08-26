@@ -28,7 +28,7 @@
   (:require
    [clojure.test :refer [deftest is testing]]
    [ai.miniforge.anomaly.interface :as anomaly]
-   [ai.miniforge.evidence-bundle.collector :as collector]
+   [ai.miniforge.evidence-bundle.outcome :as outcome]
    [ai.miniforge.response.interface :as response]))
 
 ;------------------------------------------------------------------------------ Layer 0
@@ -48,7 +48,7 @@
 (deftest ^{:stratum 1} canonical-anomaly-at-error-info-routes-through-outcome
   (testing "a canonical anomaly map as :workflow/error is detected"
     (let [a       (anomaly/anomaly :fault "Compilation error" {})
-          outcome (collector/build-outcome-evidence
+          outcome (outcome/build-outcome-evidence
                    (workflow-state-with-error a))]
       (is (false? (:outcome/success outcome)))
       (is (= "Compilation error" (:outcome/error-message outcome))))))
@@ -56,7 +56,7 @@
 (deftest ^{:stratum 1} canonical-anomaly-nested-under-anomaly-routes-through-outcome
   (testing "a canonical anomaly under {:anomaly a} is also detected"
     (let [a       (anomaly/anomaly :timeout "agent timed out" {})
-          outcome (collector/build-outcome-evidence
+          outcome (outcome/build-outcome-evidence
                    (workflow-state-with-error {:anomaly a}))]
       (is (false? (:outcome/success outcome)))
       (is (= "agent timed out" (:outcome/error-message outcome))))))
@@ -65,7 +65,7 @@
 (deftest ^{:stratum 1} legacy-anomaly-at-error-info-still-detected
   (testing "a legacy :anomaly/category map as :workflow/error is detected"
     (let [a       (response/make-anomaly :anomalies/fault "boom")
-          outcome (collector/build-outcome-evidence
+          outcome (outcome/build-outcome-evidence
                    (workflow-state-with-error a))]
       (is (false? (:outcome/success outcome)))
       (is (= "boom" (:outcome/error-message outcome))))))
@@ -73,7 +73,7 @@
 (deftest ^{:stratum 1} legacy-anomaly-nested-under-anomaly-still-detected
   (testing "a legacy anomaly under {:anomaly a} is still detected"
     (let [a       (response/make-anomaly :anomalies/timeout "slow")
-          outcome (collector/build-outcome-evidence
+          outcome (outcome/build-outcome-evidence
                    (workflow-state-with-error {:anomaly a}))]
       (is (false? (:outcome/success outcome)))
       (is (= "slow" (:outcome/error-message outcome))))))
@@ -82,7 +82,7 @@
 (deftest ^{:stratum 1} non-anomaly-error-falls-back-to-legacy-shape
   (testing "a plain error map (no :anomaly/type, no :anomaly/category)
             is preserved via the legacy non-anomaly fall-through"
-    (let [outcome (collector/build-outcome-evidence
+    (let [outcome (outcome/build-outcome-evidence
                    (workflow-state-with-error
                     {:message "old style" :phase :verify}))]
       (is (false? (:outcome/success outcome)))
