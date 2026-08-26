@@ -70,6 +70,7 @@
   ;; all of them: the alternation measured ~45% slower, because Java can
   ;; use a literal-prefix optimization on each pattern separately and
   ;; loses it once they are combined.
-  (reduce (fn [acc pattern] (str/replace acc pattern (policy/marker)))
-          s
-          (:redaction/secret-value-patterns @policy/policy)))
+  (let [marker (policy/marker)]
+    (reduce (fn [acc pattern] (str/replace acc pattern marker))
+            s
+            (:redaction/secret-value-patterns @policy/policy))))

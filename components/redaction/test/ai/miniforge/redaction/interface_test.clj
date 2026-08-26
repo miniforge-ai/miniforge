@@ -25,7 +25,12 @@
 
 ;------------------------------------------------------------------------------ Layer 0
 
-(def ^{:stratum 0} ^:private marker "[REDACTED]")
+(def ^{:stratum 0} ^:private marker
+  ;; Deliberately the literal from N3 §8.2, not (sut/marker). Reading the
+  ;; marker from the policy under test would make every assertion below
+  ;; agree with whatever the config says, including a config that has
+  ;; drifted off the spec. The test below pins the two together.
+  "[REDACTED]")
 
 (deftest ^{:stratum 0} redaction-is-idempotent-test
   (testing "re-redacting a redacted value changes nothing"
@@ -48,6 +53,10 @@
 (defrecord ^{:stratum 0} PayloadRecord [password note])
 
 ;------------------------------------------------------------------------------ Layer 1
+
+(deftest ^{:stratum 1} marker-is-the-one-N3-mandates-test
+  (testing "N3 §8.2 names the marker; the config may not choose another"
+    (is (= marker (sut/marker)))))
 
 (deftest ^{:stratum 1} secret-naming-key-redacts-its-value-test
   (testing "a password is detectable only by its key — no value pattern matches it"
