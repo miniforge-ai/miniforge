@@ -69,7 +69,14 @@
 
    Map keys keep their names — a key names a field — but a secret
    hiding *in* a key is still removed by shape, and metadata is walked
-   like any other value. See `match/redact-key`."
+   like any other value. See `match/redact-key`.
+
+   Covers Clojure data, which is what an N3 event is: §4.3 makes every
+   event durable, so anything in one has to survive pr-str and
+   edn/read-string. A java.util collection, an array, or an atom is not
+   walked and its contents are returned untouched — such a value cannot
+   be in a conformant event to begin with, but the limit is real and
+   worth naming rather than discovering. `boundary-cases-test` pins it."
   [x]
   (let [result
         (cond

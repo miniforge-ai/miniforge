@@ -97,6 +97,20 @@
         (is (not (str/includes? text "AKIA"))
             (str "secret survived: " text))))))
 
+(deftest ^{:stratum 0} boundary-cases-test
+  (testing "redaction covers Clojure data, and stops there"
+    ;; Not an endorsement — a record of where the guarantee ends. N3 §4.3
+    ;; makes every event durable, so a conformant event contains only
+    ;; values that survive pr-str and edn/read-string; none of these do.
+    ;; If one ever appears in an event, this test is where to start.
+    (let [secret "AKIAIOSFODNN7EXAMPLE"]
+      (doseq [[what v] {"java.util.List" (doto (java.util.ArrayList.) (.add secret))
+                        "java.util.Map"  (doto (java.util.HashMap.) (.put "k" secret))
+                        "array"          (into-array String [secret])
+                        "atom"           (atom secret)}]
+        (is (identical? v (sut/redact v))
+            (str what " is passed through, not walked"))))))
+
 ;------------------------------------------------------------------------------ Layer 1
 
 (deftest ^{:stratum 1} marker-is-the-one-N3-mandates-test
