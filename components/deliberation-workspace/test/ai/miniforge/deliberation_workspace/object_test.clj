@@ -67,7 +67,10 @@
                  (object/new-object {:id "x-1" :type :not-a-type :statement "s"
                                      :role :proposer :activation "a" :version 1}))))
   (testing "a blank statement is rejected"
-    (is (thrown? IllegalArgumentException (claim :statement "   ")))))
+    (is (thrown? IllegalArgumentException (claim :statement "   "))))
+  (testing "seeded links cannot smuggle in an unknown edge type"
+    (is (thrown? IllegalArgumentException (claim :links {:vibes #{"claim-2"}})))
+    (is (some? (claim :links {:supports #{"evidence-1"}})))))
 
 (deftest ^{:stratum 1} terminal-detection-covers-every-type
   (is (object/terminal? (assoc (claim) :object/status :accepted)))
