@@ -233,6 +233,11 @@
     (let [secret     "AKIAIOSFODNN7EXAMPLE"
           containers [identity
                       #(hash-map % :held-as-a-key)
+                      ;; namespace position only makes sense for a string
+                      #(if (string? %)
+                         (hash-map (keyword % "v") :held-in-a-namespace)
+                         (hash-map % :held-in-a-namespace))
+                      #(hash-map (with-meta (symbol "sym") {:note %}) :held-in-key-meta)
                       #(with-meta {:carrier true} {:note %})
                       vector
                       list
@@ -272,3 +277,25 @@
           "every key is marked redacted")
       (is (not-any? #(str/includes? % "AKIA") (keys out))
           "no secret survives in a key"))))
+
+(deftest ^{:stratum 1} secrets-inside-keys-test
+  (testing "a keyword's namespace is as exposed as its name"
+    (let [out (sut/redact {(keyword "AKIAIOSFODNN7EXAMPLE" "v") :held})]
+      (is (= {"[REDACTED]/v" :held} out))))
+
+  (testing "a symbol key's metadata is walked"
+    ;; Only symbols among scalar keys can carry metadata — keywords and
+    ;; strings are not IObj — but a symbol key's metadata is as reachable
+    ;; as any value's.
+    (let [out (sut/redact {(with-meta 'sym {:note "AKIAIOSFODNN7EXAMPLE"}) :v})]
+      (is (= [{:note marker}] (map meta (keys out))))))
+
+  (testing "colliding keys keep their type"
+    ;; Appending to the string form would turn a vector key into a string
+    ;; containing a printed vector — two keys from one collision ending
+    ;; up as different types.
+    (let [out (sut/redact {["AKIAIOSFODNN7EXAMPLE"] :a
+                           ["AKIAJJJJJJJJJJJJJJJJ"] :b})]
+      (is (= 2 (count out)) "both entries survive")
+      (is (every? vector? (keys out)) "both keys are still vectors")
+      (is (= #{:a :b} (set (vals out)))))))

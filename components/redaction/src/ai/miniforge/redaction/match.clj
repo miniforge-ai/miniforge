@@ -109,11 +109,18 @@
    every event durable — an unreadable key corrupts the log. The type
    change is honest anyway; such a key was data, not a field name."
   [k]
-  (letfn [(shorten [s] (let [r (redact-string s)] (when (not= r s) r)))]
+  (letfn [(qualified [k]
+            ;; Namespace as well as name: a secret can sit in either
+            ;; half, and `(keyword "AKIA..." "v")` hides it entirely in
+            ;; the namespace.
+            (let [n  (namespace k)
+                  nm (name k)
+                  n* (some-> n redact-string)
+                  nm* (redact-string nm)]
+              (when (or (not= n n*) (not= nm nm*))
+                (if n* (str n* "/" nm*) nm*))))]
     (cond
-      (string? k)  (or (shorten k) k)
-      (keyword? k) (or (some->> (name k) shorten (str (when-let [n (namespace k)] (str n "/"))))
-                       k)
-      (symbol? k)  (or (some->> (name k) shorten (str (when-let [n (namespace k)] (str n "/"))))
-                       k)
+      (string? k)  (let [r (redact-string k)] (if (= r k) k r))
+      (keyword? k) (or (qualified k) k)
+      (symbol? k)  (or (qualified k) k)
       :else        k)))

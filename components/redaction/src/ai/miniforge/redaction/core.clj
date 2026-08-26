@@ -37,12 +37,24 @@
    key that actually changed, which is rare, so the common path pays
    nothing."
   [m k]
-  (if (contains? m k)
-    (first (for [n (iterate inc 2)
-                 :let [candidate (str k " " n)]
-                 :when (not (contains? m candidate))]
-             candidate))
-    k))
+  (letfn [(nth-form [k n]
+            ;; Type-preserving: a map key is compared by value, so the
+            ;; only way to keep two entries is to make the keys differ by
+            ;; value. Appending to the string form would turn a vector
+            ;; key into a string containing a printed vector, so each
+            ;; kind grows in its own way instead.
+            (cond
+              (string? k) (str k " " n)
+              (map? k)    (assoc k ::disambiguator n)
+              (set? k)    (conj k (str (policy/marker) " " n))
+              (coll? k)   (conj (vec k) (str (policy/marker) " " n))
+              :else       (str k " " n)))]
+    (if (contains? m k)
+      (first (for [n (iterate inc 2)
+                   :let [candidate (nth-form k n)]
+                   :when (not (contains? m candidate))]
+               candidate))
+      k)))
 
 ;------------------------------------------------------------------------------ Layer 1
 
@@ -66,30 +78,45 @@
           ;; payload would crash publish! on the hot path. Assoc'ing every key
           ;; back onto X preserves the type — record, sorted map, or plain.
           (map? x)
-          (reduce-kv (fn [m k v]
-                 (let [;; A collection can be a key too, and match/redact-key
-                       ;; only knows scalars — it cannot recurse without
-                       ;; depending on this namespace. Dispatch here, where
-                       ;; the recursion already lives.
-                       k* (if (coll? k) (redact k) (match/redact-key k))
-                       v* (if (and (match/secret-key? k)
-                                   (match/redactable-value? v))
-                            (policy/marker)
-                            (redact v))]
-                   (cond-> (assoc m k v*)
-                     ;; Only touch the key when it actually changed —
-                     ;; dissoc/assoc would otherwise reorder an array-map
-                     ;; and re-sort a sorted-map for nothing.
-                     ;;
-                     ;; Metadata compared separately because = ignores it,
-                     ;; so a key whose secret sat only in its metadata
-                     ;; would test equal to its redacted self and the
-                     ;; original would stay in the map.
-                     (or (not= k k*) (not= (meta k) (meta k*)))
-                     (-> (dissoc k)
-                         (as-> m' (assoc m' (free-key m' k*) v*))))))
-               x
-               x)
+          (reduce-kv
+           (fn [m k v]
+             (let [;; A collection can be a key too, and match/redact-key
+                   ;; knows only scalars — it cannot recurse without
+                   ;; depending on this namespace. Dispatch here, where
+                   ;; the recursion already lives.
+                   ;;
+                   ;; A scalar key needs its metadata walked as well.
+                   ;; Only a symbol can carry any — keywords and strings
+                   ;; are not IObj — but a symbol key's metadata is as
+                   ;; reachable as a value's.
+                   k* (if (coll? k)
+                        (redact k)
+                        (let [rk (match/redact-key k)]
+                          (if-let [km (meta k)]
+                            (if (instance? clojure.lang.IObj rk)
+                              (with-meta rk (redact km))
+                              rk)
+                            rk)))
+                   v* (if (and (match/secret-key? k)
+                             (match/redactable-value? v))
+                        (policy/marker)
+                        (redact v))]
+               (cond-> (assoc m k v*)
+                 ;; Only touch the key when it actually changed —
+                 ;; dissoc/assoc would otherwise reorder an array-map
+                 ;; and re-sort a sorted-map for nothing.
+                 ;;
+                 ;; Identity, not =. Equality ignores metadata at every
+                 ;; depth, so a key whose secret sat in the metadata of
+                 ;; something nested inside it tested equal to its own
+                 ;; redacted form and the original stayed in the map.
+                 ;; redact-key returns k itself when nothing changed, so
+                 ;; a scalar key still costs nothing.
+                 (not (identical? k k*))
+                 (-> (dissoc k)
+                     (as-> m' (assoc m' (free-key m' k*) v*))))))
+           x
+           x)
 
           (vector? x) (mapv redact x)
           (set? x)    (into (empty x) (map redact) x)
