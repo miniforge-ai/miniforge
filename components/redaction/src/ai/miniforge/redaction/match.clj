@@ -59,9 +59,16 @@
   (not (or (nil? v) (number? v) (boolean? v) (inst? v) (uuid? v))))
 
 (defn ^{:stratum 0} secret-string?
-  "True when S contains a secret-shaped value."
+  "True when S contains a secret-shaped value.
+
+   False for anything that is not a string. A predicate reached through
+   the interface should answer rather than throw, and \"does this
+   non-string contain a secret\" has an answer: no. Only a string can
+   carry one by shape — a key names it instead, which is `secret-key?`."
   [s]
-  (boolean (some #(re-find % s) (:redaction/secret-value-patterns @policy/policy))))
+  (boolean
+   (when (string? s)
+     (some #(re-find % s) (:redaction/secret-value-patterns @policy/policy)))))
 
 (defn ^{:stratum 0} redact-string
   "Replace every secret-looking substring in S with the marker.
