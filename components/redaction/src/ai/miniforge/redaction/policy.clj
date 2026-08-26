@@ -40,7 +40,16 @@
    they are compiled here — the policy stays inspectable data on disk
    (dewey 007) and becomes usable regexes exactly once."
   (delay
-    (let [raw (-> config-resource io/resource slurp edn/read-string)]
+    (let [url (or (io/resource config-resource)
+                  ;; Fail naming the resource. A bare slurp of nil throws
+                  ;; an NPE with no hint, and the failure mode that
+                  ;; produces it — the resource missing from a package or
+                  ;; a test classpath — is one where redaction silently
+                  ;; not running is the dangerous outcome.
+                  (throw (ex-info "Redaction policy resource missing from classpath"
+                                  {:anomaly/category :anomaly/not-found
+                                   :redaction/resource config-resource})))
+          raw (-> url slurp edn/read-string)]
       (-> raw
           (update :redaction/secret-key-patterns #(mapv re-pattern %))
           (update :redaction/secret-key-exclusions #(mapv re-pattern %))
