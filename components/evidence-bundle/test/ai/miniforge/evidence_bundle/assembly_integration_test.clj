@@ -24,6 +24,7 @@
 
    All externals are mocked — no artifact store, no event stream, no network."
   (:require
+   [clojure.string :as str]
    [clojure.test :refer [deftest testing is]]
    [ai.miniforge.content-hash.interface :as hash]
    [ai.miniforge.evidence-bundle.collector :as collector]
@@ -428,3 +429,58 @@
           "Should collect one invocation")
       (is (= :gh-pr-create (:tool/id (first invocations)))
           "Tool ID should match"))))
+
+;; N6 §7.2 — sensitive data in assembled bundles
+(deftest ^{:stratum 2} assembled-bundle-is-redacted-before-sealing-test
+  (testing "a secret in phase output does not survive into the bundle"
+    ;; N6.SD.4: flagging alone does not satisfy N3 §8.1. Before this, the
+    ;; scanner recorded that a bundle held a secret and stored it anyway.
+    (let [secret "AKIAIOSFODNN7EXAMPLE"
+          phase  (assoc-in (make-phase-data)
+                           [:output :summary]
+                           (str "Deployed with " secret))
+          bundle (collector/assemble-evidence-bundle
+                  (make-workflow-id)
+                  (make-workflow-state :phases {:implement phase})
+                  nil)
+          text   (pr-str bundle)]
+      (is (not (str/includes? text secret))
+          "the secret must not survive anywhere in the bundle")
+      (is (str/includes? text "[REDACTED]")
+          "the marker records that a value was removed")))
+
+  (testing "the compliance finding survives the redaction that follows it"
+    ;; Scan first, then redact: that a secret *was* present is the
+    ;; auditable fact. Redacting first would erase the evidence of it.
+    (let [phase  (assoc-in (make-phase-data)
+                           [:output :summary]
+                           "Deployed with AKIAIOSFODNN7EXAMPLE")
+          bundle (collector/assemble-evidence-bundle
+                  (make-workflow-id)
+                  (make-workflow-state :phases {:implement phase})
+                  nil)]
+      (is (some #(= :aws-access-key (:finding/type %))
+                (:compliance/sensitive-findings bundle))
+          "the scan finding is still reported after redaction")))
+
+  (testing "the content hash binds the redacted bundle, not the original"
+    ;; N6 §7.2 seals only after the substitution. Hashing first would
+    ;; bind the bundle to a form that no longer exists.
+    (let [phase  (assoc-in (make-phase-data)
+                           [:output :summary]
+                           "Deployed with AKIAIOSFODNN7EXAMPLE")
+          bundle (collector/assemble-evidence-bundle
+                  (make-workflow-id)
+                  (make-workflow-state :phases {:implement phase})
+                  nil)]
+      (is (= (:evidence/content-hash bundle)
+             (hash/content-hash (dissoc bundle :evidence/content-hash)))
+          "the stored hash recomputes over the redacted bundle")))
+
+  (testing "token counts in phase metrics survive"
+    (let [bundle (collector/assemble-evidence-bundle
+                  (make-workflow-id)
+                  (make-workflow-state :phases {:implement (make-phase-data)})
+                  nil)]
+      (is (str/includes? (pr-str bundle) ":tokens 1000")
+          "an LLM token count is not a bearer token"))))

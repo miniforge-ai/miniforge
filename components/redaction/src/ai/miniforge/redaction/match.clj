@@ -58,6 +58,11 @@
   [v]
   (not (or (nil? v) (number? v) (boolean? v) (inst? v) (uuid? v))))
 
+(defn ^{:stratum 0} secret-string?
+  "True when S contains a secret-shaped value."
+  [s]
+  (boolean (some #(re-find % s) (:redaction/secret-value-patterns @policy/policy))))
+
 (defn ^{:stratum 0} redact-string
   "Replace every secret-looking substring in S with the marker.
 

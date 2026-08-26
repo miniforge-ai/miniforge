@@ -25,6 +25,7 @@
    [ai.miniforge.evidence-bundle.dependency-health :as dependency-health]
    [ai.miniforge.evidence-bundle.outcome :as outcome]
    [ai.miniforge.evidence-bundle.phases :as phases]
+   [ai.miniforge.redaction.interface :as redaction]
    [ai.miniforge.evidence-bundle.protocols.impl.semantic-validator :as semantic-validator]
    [ai.miniforge.evidence-bundle.scanner :as scanner]
    [ai.miniforge.evidence-bundle.schema :as schema]))
@@ -181,7 +182,19 @@
 
         ;; Merge compliance metadata
         bundle (cond-> bundle
-                 scan-result (merge scan-result))]
+                 scan-result (merge scan-result))
+
+        ;; N6.SD.4: redact on detection — flagging alone does not satisfy
+        ;; N3 §8.1, which is a MUST NOT on the content, not a labelling
+        ;; requirement. Until now the scanner recorded that a bundle held
+        ;; a secret and then stored the secret anyway.
+        ;;
+        ;; After the scan, so the compliance finding survives: that a
+        ;; secret *was* present is the auditable fact, and redacting
+        ;; first would erase the evidence of it. Before the hash, because
+        ;; N6 §7.2 seals only after the substitution — hashing first
+        ;; would bind the bundle to its un-redacted form.
+        bundle (redaction/redact bundle)]
     (assoc bundle :evidence/content-hash (content-hash/content-hash bundle))))
 
 ;------------------------------------------------------------------------------ Layer 2

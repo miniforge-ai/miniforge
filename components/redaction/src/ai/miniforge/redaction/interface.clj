@@ -19,6 +19,7 @@
   "Redaction of never-emitted values per N3 §8."
   (:require
    [ai.miniforge.redaction.core :as core]
+   [ai.miniforge.redaction.match :as match]
    [ai.miniforge.redaction.policy :as policy]))
 
 ;------------------------------------------------------------------------------ Layer 0
@@ -36,6 +37,16 @@
   "True when X carries no value excluded by N3 §8.1."
   [x]
   (core/clean? x))
+
+(defn ^{:stratum 0} secret-string?
+  "True when S contains a value excluded by N3 §8.1 by its shape.
+
+   Exposed so a consumer that must *detect* rather than replace — the
+   evidence-bundle scanner, recording that a secret was present — uses
+   the same pattern set as the stream. Two independent lists would let
+   the bundle report clean while the stream redacted, or the reverse."
+  [s]
+  (match/secret-string? s))
 
 (defn ^{:stratum 0} marker
   "The redaction marker substituted for an excluded value."
