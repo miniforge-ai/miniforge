@@ -113,9 +113,7 @@
   :runtime/info-probed "Probed:         {probed}"
   :runtime/error-no-runtime "No usable container runtime: {code} — {message}"
   :status/workflow "Status for workflow: {workflow-id}"
-  :status/workflow-todo "TODO: Query workflow component"
   :status/all-workflows "All workflows:"
-  :status/all-workflows-todo "TODO: List active workflows"
   ;; Workflow-status field labels emitted by `print-workflow-status` and
   ;; the all-workflows summary view.
   :status/field-status "  status: {value}"
@@ -502,10 +500,8 @@
   :pr/query-failed "Failed to query GitHub: {error}"
   :pr/review-usage "Usage: {command}"
   :pr/reviewing "Reviewing: {url}"
-  :pr/review-todo "TODO: Implement PR review with agent"
   :pr/respond-usage "Usage: {command}"
   :pr/responding "Responding to comments on: {url}"
-  :pr/respond-todo "TODO: Implement PR comment response"
   :pr/merge-usage "Usage: {command}"
   :pr/merge-not-available "PR merge is not yet implemented — run: {hint}"
 
