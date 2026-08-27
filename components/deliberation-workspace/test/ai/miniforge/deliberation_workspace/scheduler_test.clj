@@ -96,3 +96,18 @@
            (scheduler/next-activation reversed)))
     (is (= "conflict-1" (:activation/target (scheduler/next-activation forward)))
         "lowest id wins, not map iteration order")))
+
+(deftest ^{:stratum 2} a-trigger-with-no-eligible-role-does-not-suppress-lower-tiers
+  (testing "an unsubscribed higher tier falls through, not out"
+    (let [ws (workspace [(obj "conflict-1" :conflict)
+                         (obj "question-1" :question :touched-at 1)]
+                        :workspace/eligibility {:stale-question [:proposer]})
+          next (scheduler/next-activation ws)]
+      (is (= :stale-question (:activation/reason next))
+          "a conflict nobody subscribes to must not mask a stale question")
+      (is (= :proposer (:activation/role next)))
+      (is (= "question-1" (:activation/target next)))))
+  (testing "with no tier eligible at all, round-robin still takes over"
+    (let [ws (workspace [(obj "conflict-1" :conflict)]
+                        :workspace/eligibility {})]
+      (is (= :round-robin (:activation/reason (scheduler/next-activation ws)))))))

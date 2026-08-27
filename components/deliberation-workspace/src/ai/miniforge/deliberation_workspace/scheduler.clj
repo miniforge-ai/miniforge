@@ -96,10 +96,16 @@
   (let [triggers [[:conflict (first (open-conflicts workspace))]
                   [:blocked-goal (first (blocked-goals workspace))]
                   [:stale-question (first (stale-questions workspace))]]
-        [event target] (first (filter second triggers))]
-    (if-let [role (and event (first (eligible-roles workspace event)))]
-      {:activation/role role
-       :activation/reason event
-       :activation/target (:object/id target)}
-      (when-let [role (round-robin-next workspace)]
-        {:activation/role role :activation/reason :round-robin}))))
+        ;; A trigger only fires when something is waiting AND a role is
+        ;; subscribed to it. An eligibility table that omits a subscription
+        ;; must not silently suppress the tiers beneath it, so a trigger with
+        ;; no eligible role is skipped rather than ending the search.
+        fired (fn [[event target]]
+                (when target
+                  (when-let [role (first (eligible-roles workspace event))]
+                    {:activation/role role
+                     :activation/reason event
+                     :activation/target (:object/id target)})))]
+    (or (first (keep fired triggers))
+        (when-let [role (round-robin-next workspace)]
+          {:activation/role role :activation/reason :round-robin}))))
