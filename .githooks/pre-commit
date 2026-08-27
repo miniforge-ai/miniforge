@@ -7,7 +7,7 @@ set -e
 # Runs here, not in the bb task, because it needs the staged-file
 # list. Filenames containing newlines are out of scope (macOS bash 3.2).
 if command -v plainspeak >/dev/null 2>&1; then
-  prose_files=$(git diff --cached --name-only --diff-filter=ACM -- "*.md" "*.markdown" "*.txt")
+  prose_files=$(git diff --cached --name-only --diff-filter=ACMR -- "*.md" "*.markdown" "*.txt")
   if [ -n "$prose_files" ]; then
     printf "%s\n" "$prose_files" | tr "\n" "\0" | xargs -0 plainspeak --
   fi
