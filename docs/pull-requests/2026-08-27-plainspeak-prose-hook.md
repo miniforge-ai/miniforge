@@ -18,7 +18,8 @@ and LLM style artifacts, repo by repo, at the cheapest point.
 - The step is skipped when the `plainspeak` binary is absent, so CI
   and fresh machines are unaffected.
 - Findings can be suppressed per line (`plainspeak:ignore`) or per
-  code via `[tool.plainspeak]`.
+  finding code, via the repo-level `disable` list in
+  `[tool.plainspeak]`.
 
 ## Testing Plan
 
