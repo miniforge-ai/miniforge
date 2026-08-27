@@ -19,7 +19,7 @@
   (:require
    [ai.miniforge.deliberation-workspace.object :as object]
    [ai.miniforge.deliberation-workspace.termination :as termination]
-   [clojure.test :refer [deftest is]]))
+   [clojure.test :refer [deftest is testing]]))
 
 ;------------------------------------------------------------------------------ Layer 0
 
@@ -64,3 +64,24 @@
 (deftest ^{:stratum 1} deadlock-closes-a-run-with-no-eligible-role
   (let [ws (workspace [(obj "goal-1" :goal)] :workspace/roles [])]
     (is (= :deadlock (:termination/rule (termination/closing-rule ws))))))
+
+(deftest ^{:stratum 1} cost-exhaustion-closes-the-run-the-same-way
+  (testing "the cost ceiling is a budget dimension like any other"
+    (let [ws (workspace [(obj "goal-1" :goal)]
+                        :workspace/budget {:cost 25.0}
+                        :workspace/spent {:cost 25.0})
+          result (termination/closing-rule ws)]
+      (is (= :budget-boundary (:termination/rule result)))
+      (is (= :cost (:termination/detail result)))
+      (is (:termination/forced-synthesis result))))
+  (testing "spend below the ceiling does not close the run"
+    (let [ws (workspace [(obj "goal-1" :goal)]
+                        :workspace/budget {:cost 25.0}
+                        :workspace/spent {:cost 24.0}
+                        :workspace/log [{:tx/role :proposer}])]
+      (is (nil? (termination/closing-rule ws)))))
+  (testing "activations are checked before cost, so the detail is unambiguous"
+    (let [ws (workspace [(obj "goal-1" :goal)]
+                        :workspace/budget {:activations 5 :cost 25.0}
+                        :workspace/spent {:activations 5 :cost 25.0})]
+      (is (= :activations (:termination/detail (termination/closing-rule ws)))))))
