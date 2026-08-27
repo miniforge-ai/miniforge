@@ -30,20 +30,37 @@
 
 ;------------------------------------------------------------------------------ Layer 0
 
-(defn- ^{:stratum 0} apply-links [workspace operation]
-  (reduce (fn [ws [edge targets]]
-            (reduce (fn [w id]
-                      (update-in w [:workspace/objects id]
-                                 object/add-link edge (:source operation)))
-                    ws
-                    targets))
-          workspace
-          (get operation :links {})))
+(defn- ^{:stratum 0} apply-links
+  "Add the operation's edges to the objects it declared as targets.
+
+   Edges are written onto the DECLARED targets and point at the
+   destinations in `:links`. Writing onto the destinations instead would
+   mutate objects the validator never saw: `touched-ids` reads `:targets`
+   only, so target-existence, staleness, and terminal checks would all be
+   bypassed for anything reachable through `:links`."
+  [workspace operation]
+  (let [targets (tx/touched-ids operation)
+        known (get workspace :workspace/objects {})]
+    (reduce (fn [ws [edge destinations]]
+              (reduce (fn [w target-id]
+                        (reduce (fn [acc destination]
+                                  (update-in acc [:workspace/objects target-id]
+                                             object/add-link edge destination))
+                                w
+                                destinations))
+                      ws
+                      (filter known targets)))
+            workspace
+            (get operation :links {}))))
 
 (defn- ^{:stratum 0} record-challenge [workspace operation context version]
   (if (= :challenge (:op operation))
     (reduce (fn [ws id]
-              (let [challenge-id (str "challenge-" version "-" id)]
+              ;; The ordinal keeps two challenges on the same target inside one
+              ;; commit from colliding. Overwriting would undercount open
+              ;; challenges, which is exactly what the §3.5 cap reads.
+              (let [ordinal (count (get ws :workspace/challenges {}))
+                    challenge-id (str "challenge-" version "-" ordinal "-" id)]
                 (assoc-in ws [:workspace/challenges challenge-id]
                           {:challenge/id challenge-id
                            :challenge/role (:role context)

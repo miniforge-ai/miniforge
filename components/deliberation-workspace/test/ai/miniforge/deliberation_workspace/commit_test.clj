@@ -105,3 +105,29 @@
     (is (= :skeptic (:challenge/role recorded)))
     (is (= "claim-1" (:challenge/target recorded)))
     (is (= :open (:challenge/status recorded)))))
+
+(deftest ^{:stratum 1} links-are-written-onto-declared-targets-only
+  (testing "an undeclared destination is not mutated"
+    (let [ws (transact (workspace (obj "claim-1" :claim) (obj "evidence-1" :evidence))
+                       :proposer
+                       {:op :attach-evidence :targets #{"claim-1"}
+                        :links {:supports #{"evidence-1"}}})]
+      (is (= #{"evidence-1"}
+             (object/linked (object-at ws "claim-1") :supports))
+          "the declared target carries the edge")
+      (is (= #{} (object/linked (object-at ws "evidence-1") :supports))
+          "the destination was never declared, so validation never saw it"))))
+
+(deftest ^{:stratum 1} links-to-an-unknown-target-do-not-create-objects
+  (let [ws (transact (workspace (obj "claim-1" :claim)) :proposer
+                     {:op :attach-evidence :targets #{"claim-1"}
+                      :links {:supports #{"evidence-404"}}})]
+    (is (nil? (object-at ws "evidence-404")))
+    (is (= #{"evidence-404"} (object/linked (object-at ws "claim-1") :supports)))))
+
+(deftest ^{:stratum 1} two-challenges-on-one-target-in-one-commit-both-record
+  (testing "collapsing them would undercount the anti-livelock cap"
+    (let [ws (transact (workspace (obj "claim-1" :claim)) :skeptic
+                       {:op :challenge :targets #{"claim-1"} :evidence #{"e-1"}}
+                       {:op :challenge :targets #{"claim-1"} :evidence #{"e-2"}})]
+      (is (= 2 (count (:workspace/challenges ws)))))))
