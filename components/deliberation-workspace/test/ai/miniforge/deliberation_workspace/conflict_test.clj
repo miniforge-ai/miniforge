@@ -85,3 +85,28 @@
         reversed (conflict/derive-conflicts (apply workspace (reverse objects)) 6)]
     (is (= (sort (map :object/id (conflicts-in forward)))
            (sort (map :object/id (conflicts-in reversed)))))))
+
+(deftest ^{:stratum 1} a-symmetric-pair-derives-exactly-one-conflict
+  (testing "both sides holding the edge is still one contradiction"
+    (let [ws (conflict/derive-conflicts
+              (workspace (obj "claim-1" :claim :links {:contradicts #{"claim-2"}})
+                         (obj "claim-2" :claim :links {:contradicts #{"claim-1"}}))
+              6)]
+      (is (= 1 (count (conflicts-in ws))))
+      (is (= "conflict-claim-1-claim-2"
+             (:object/id (first (conflicts-in ws))))))))
+
+(deftest ^{:stratum 1} the-conflict-id-is-canonical-whichever-side-holds-the-edge
+  (let [forward (conflict/derive-conflicts
+                 (workspace (obj "claim-1" :claim :links {:contradicts #{"claim-2"}})
+                            (obj "claim-2" :claim))
+                 6)
+        backward (conflict/derive-conflicts
+                  (workspace (obj "claim-1" :claim)
+                             (obj "claim-2" :claim :links {:contradicts #{"claim-1"}}))
+                  6)]
+    (is (= (map :object/id (conflicts-in forward))
+           (map :object/id (conflicts-in backward)))
+        "a directional id would make the same contradiction derive twice")
+    (is (= "conflict-claim-1-claim-2"
+           (:object/id (first (conflicts-in backward)))))))
