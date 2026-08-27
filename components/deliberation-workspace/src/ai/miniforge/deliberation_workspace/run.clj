@@ -47,6 +47,17 @@
 (defn- ^{:stratum 0} note-activation [workspace role]
   (assoc-in workspace [:workspace/last-seen role] (:workspace/version workspace)))
 
+(defn- ^{:stratum 0} stages-of
+  "The validation chain for this run.
+
+   Defaulting to an empty chain would let a caller who forgot to populate
+   :workspace/stages commit unknown operations, unknown targets, and stale
+   writes without a single check running — silently, and looking healthy in
+   the event log. The concurrency stages are the floor."
+  [workspace]
+  (let [stages (get workspace :workspace/stages)]
+    (if (seq stages) stages validation/concurrency-stages)))
+
 (defn- ^{:stratum 0} count-quiet
   "Track consecutive transactions that added no new object, which is what
    the §7 quiescence rule measures. Takes the committed workspace first so
@@ -67,25 +78,27 @@
    `activate` receives {:role :projection :workspace} and returns a
    transaction, or nil to pass."
   [workspace activate]
-  (let [{:activation/keys [role reason]} (scheduler/next-activation workspace)
-        visibility (get workspace :workspace/visibility :full)
-        rendered (projection/project workspace role
-                                     {:visibility visibility
-                                      :since (last-seen workspace role)})
-        proposed (activate {:role role :projection rendered :workspace workspace})
-        spent (-> workspace spend (note-activation role)
-                  (record-event {:event :activation/completed
-                                 :role role :reason reason}))]
-    (if (nil? proposed)
-      (record-event spent {:event :transaction/passed :role role})
-      (if-let [rejection (validation/validate spent proposed
-                                              (get workspace :workspace/stages []))]
-        (record-event spent {:event :transaction/rejected
-                             :role role
-                             :reason (anomaly/subtype rejection)})
-        (-> (commit/commit spent proposed)
-            (count-quiet spent)
-            (record-event {:event :transaction/committed :role role}))))))
+  (if-let [{:activation/keys [role reason target]} (scheduler/next-activation workspace)]
+    (let [visibility (get workspace :workspace/visibility :full)
+          rendered (projection/project workspace role
+                                       {:visibility visibility
+                                        :since (last-seen workspace role)})
+          proposed (activate {:role role :projection rendered :workspace workspace})
+          spent (-> workspace spend (note-activation role)
+                    (record-event {:event :activation/completed
+                                   :role role :reason reason :target target}))]
+      (if (nil? proposed)
+        (record-event spent {:event :transaction/passed :role role})
+        (if-let [rejection (validation/validate spent proposed (stages-of workspace))]
+          (record-event spent {:event :transaction/rejected
+                               :role role
+                               :reason (anomaly/subtype rejection)})
+          (-> (commit/commit spent proposed)
+              (count-quiet spent)
+              (record-event {:event :transaction/committed :role role})))))
+    ;; Nothing eligible. Charging an activation that never ran would distort
+    ;; the N15 cost accounting; the deadlock rule closes the run instead.
+    (record-event workspace {:event :activation/none-eligible})))
 
 ;------------------------------------------------------------------------------ Layer 2
 

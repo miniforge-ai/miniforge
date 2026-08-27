@@ -115,3 +115,37 @@
         closed (run/run endless passes {:max-steps 5})]
     (is (= :step-bound-exceeded
            (get-in closed [:workspace/termination :termination/rule])))))
+
+(deftest ^{:stratum 2} missing-stages-fall-back-to-validation-not-to-nothing
+  (testing "an empty chain would commit anything the activation proposed"
+    (let [ws (dissoc (workspace) :workspace/stages)
+          activate (fn [{:keys [role]}]
+                     (tx/new-transaction {:role role :activation "act-1" :basis 1
+                                          :operations [{:op :not-an-operation}]}))
+          after (run/step ws activate)]
+      (is (= 1 (:workspace/version after)) "nothing may commit unvalidated")
+      (is (= :anomalies.deliberation/unknown-operation
+             (:reason (first (events-of after :transaction/rejected))))))))
+
+(deftest ^{:stratum 2} an-uneligible-workspace-does-not-charge-an-activation
+  (testing "no role to run means no activation ran"
+    (let [ws (workspace :workspace/roles [] :workspace/eligibility {})
+          called (atom false)
+          activate (fn [_] (reset! called true) nil)
+          after (run/step ws activate)]
+      (is (false? @called) "activate must not be invoked with a nil role")
+      (is (nil? (get-in after [:workspace/spent :activations])))
+      (is (= 1 (count (events-of after :activation/none-eligible)))))))
+
+(deftest ^{:stratum 2} the-activation-event-records-what-triggered-it
+  (let [conflict (object/new-object {:id "conflict-1" :type :conflict
+                                     :statement "a contradiction"
+                                     :role :engine :activation "derived"
+                                     :version 1})
+        ws (-> (workspace)
+               (assoc-in [:workspace/objects "conflict-1"] conflict)
+               (assoc :workspace/eligibility {:conflict [:skeptic]}))
+        after (run/step ws passes)
+        event (first (events-of after :activation/completed))]
+    (is (= :conflict (:reason event)))
+    (is (= "conflict-1" (:target event)) "the trigger must be auditable")))
