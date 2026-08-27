@@ -14,7 +14,8 @@ and LLM style artifacts, repo by repo, at the cheapest point.
 ## Changes in Detail
 
 - The hook lints only staged prose files, so legacy documents block
-  nothing until they are edited.
+  nothing until they are edited or renamed — a rename is a deliberate
+  touch, and per-line suppression covers grandfathered text.
 - The step is skipped when the `plainspeak` binary is absent, so CI
   and fresh machines are unaffected.
 - Findings can be suppressed per line (`plainspeak:ignore`) or per
