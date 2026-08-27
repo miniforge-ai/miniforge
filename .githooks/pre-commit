@@ -1,6 +1,16 @@
 #!/bin/bash
 set -e
 
+# Prose lint (plainspeak): staged .md/.markdown/.txt must pass.
+# Skips when the linter is not installed (CI, fresh machines):
+#   pipx install git+https://github.com/miniforge-ai/plainspeak.git
+if command -v plainspeak >/dev/null 2>&1; then
+  prose_files=$(git diff --cached --name-only --diff-filter=ACM -- "*.md" "*.markdown" "*.txt")
+  if [ -n "$prose_files" ]; then
+    printf "%s\n" "$prose_files" | tr "\n" "\0" | xargs -0 plainspeak
+  fi
+fi
+
 echo "🔒 Running pre-commit validation..."
 echo ""
 
