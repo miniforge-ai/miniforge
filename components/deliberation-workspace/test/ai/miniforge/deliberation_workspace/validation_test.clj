@@ -186,10 +186,18 @@
       (is (= :anomalies.deliberation/invalid-creation (subtype-of rejection)))
       (is (= :malformed-creates (:reason (:anomaly/data rejection)))
           "the shape is what is wrong, so blaming :blank-id would misroute")))
-  (testing "a sequence of specs is what the stage accepts"
+  (testing "a set is refused: the scan reports the first defect, and a set has no first"
+    (is (= :malformed-creates
+           (-> (validate-tx (workspace)
+                            (transaction :proposer 10
+                                         {:op :assert-claim
+                                          :creates #{{:id "c-1" :type :claim
+                                                      :statement "s"}}}))
+               :anomaly/data :reason))
+        "an unordered payload would make the routed :reason vary between runs"))
+  (testing "an ordered sequence of specs is what the stage accepts"
     (doseq [[label creates] [["vector" [{:id "c-1" :type :claim :statement "s"}]]
-                             ["list" (list {:id "c-1" :type :claim :statement "s"})]
-                             ["set" #{{:id "c-1" :type :claim :statement "s"}}]]]
+                             ["list" (list {:id "c-1" :type :claim :statement "s"})]]]
       (is (nil? (validate-tx (workspace)
                              (transaction :proposer 10
                                           {:op :assert-claim :creates creates})))

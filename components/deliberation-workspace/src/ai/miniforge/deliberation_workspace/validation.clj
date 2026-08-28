@@ -109,12 +109,19 @@
    partway through commit. Those conditions are agent-reachable input, so
    they belong here as a routable rejection.
 
-   `:creates` must be a sequence or a set, not merely a collection. A map
-   is `coll?` too, and reducing over one yields MapEntries: `insert-created`
-   would then `assoc` onto a MapEntry and die on a non-integer key, while
-   the per-spec checks below would read nil out of every entry and
-   blame `:blank-id` — a reason that misroutes, because the payload's shape
-   is what is wrong.
+   `:creates` must be a sequence. A map is `coll?` too, and reducing over
+   one yields MapEntries: `insert-created` would then `assoc` onto a
+   MapEntry and die on a non-integer key, while the per-spec checks below
+   would read nil out of every entry and blame `:blank-id` — a reason that
+   misroutes, because the payload's shape is what is wrong.
+
+   A set is refused for a different reason. Its elements would construct
+   correctly, but the scan below reports the FIRST defect it finds, and a
+   set has no first: two malformed specs in one payload could be blamed on
+   either, so the `:reason` routing dispatches on would vary between runs
+   over identical input. Sorting them back into an order is not available
+   here either — the ids are exactly what may be missing or malformed in
+   the payloads this has to describe.
 
    The id collisions are the same gap without the crash. `insert-created`
    writes with `assoc-in`, so a create at an id that already exists replaces
@@ -133,9 +140,9 @@
     (cond
       (nil? creates) nil
 
-      (not (or (sequential? creates) (set? creates)))
+      (not (sequential? creates))
       (reject :invalid-input :anomalies.deliberation/invalid-creation
-              "Operation :creates must be a sequence or set of object specifications"
+              "Operation :creates must be a sequence of object specifications"
               {:op (:op operation) :reason :malformed-creates :creates creates})
 
       :else
