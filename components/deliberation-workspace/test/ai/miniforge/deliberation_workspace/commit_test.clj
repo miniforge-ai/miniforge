@@ -131,3 +131,24 @@
                        {:op :challenge :targets #{"claim-1"} :evidence #{"e-1"}}
                        {:op :challenge :targets #{"claim-1"} :evidence #{"e-2"}})]
       (is (= 2 (count (:workspace/challenges ws)))))))
+
+(deftest ^{:stratum 1} challenge-ids-follow-sorted-targets-not-set-order
+  (testing "an id the log cannot rebuild is not reconstructible from the log"
+    (let [ws (transact (workspace (obj "claim-1" :claim)
+                                  (obj "claim-2" :claim)
+                                  (obj "claim-3" :claim))
+                       :skeptic
+                       {:op :challenge :targets #{"claim-1" "claim-2" "claim-3"}})]
+      (is (= {"claim-1" "challenge-6-0-claim-1"
+              "claim-2" "challenge-6-1-claim-2"
+              "claim-3" "challenge-6-2-claim-3"}
+             (into {} (map (juxt :challenge/target :challenge/id))
+                   (vals (:workspace/challenges ws))))
+          "targets iterate out of order as a set, so ordinals must come from sort")))
+  (testing "a second challenge operation counts on from the first"
+    (let [ws (transact (workspace (obj "claim-1" :claim) (obj "claim-2" :claim))
+                       :skeptic
+                       {:op :challenge :targets #{"claim-1"}}
+                       {:op :challenge :targets #{"claim-2"}})]
+      (is (= #{"challenge-6-0-claim-1" "challenge-6-1-claim-2"}
+             (set (keys (:workspace/challenges ws))))))))

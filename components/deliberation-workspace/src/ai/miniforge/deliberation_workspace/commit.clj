@@ -53,22 +53,33 @@
             workspace
             (get operation :links {}))))
 
-(defn- ^{:stratum 0} record-challenge [workspace operation context version]
+(defn- ^{:stratum 0} record-challenge
+  "Record one open challenge per target for the §3.5 anti-livelock cap.
+
+   The ordinal keeps two challenges on the same target inside one commit
+   from colliding. Overwriting would undercount open challenges, which is
+   exactly what the cap reads.
+
+   Ordinals are handed out over SORTED targets from a single start count
+   read before the reduce. `touched-ids` returns a set, so counting inside
+   the reduce would tie each id to set iteration order: the same
+   transaction could rebuild different challenge ids on a different run,
+   and an id that does not follow from the log is not reconstructible
+   from it."
+  [workspace operation context version]
   (if (= :challenge (:op operation))
-    (reduce (fn [ws id]
-              ;; The ordinal keeps two challenges on the same target inside one
-              ;; commit from colliding. Overwriting would undercount open
-              ;; challenges, which is exactly what the §3.5 cap reads.
-              (let [ordinal (count (get ws :workspace/challenges {}))
-                    challenge-id (str "challenge-" version "-" ordinal "-" id)]
-                (assoc-in ws [:workspace/challenges challenge-id]
-                          {:challenge/id challenge-id
-                           :challenge/role (:role context)
-                           :challenge/target id
-                           :challenge/status :open
-                           :challenge/version version})))
-            workspace
-            (tx/touched-ids operation))
+    (let [start (count (get workspace :workspace/challenges {}))]
+      (reduce (fn [ws [ordinal id]]
+                (let [challenge-id (str "challenge-" version "-"
+                                        (+ start ordinal) "-" id)]
+                  (assoc-in ws [:workspace/challenges challenge-id]
+                            {:challenge/id challenge-id
+                             :challenge/role (:role context)
+                             :challenge/target id
+                             :challenge/status :open
+                             :challenge/version version})))
+              workspace
+              (map-indexed vector (sort (tx/touched-ids operation)))))
     workspace))
 
 (defn- ^{:stratum 0} insert-created
