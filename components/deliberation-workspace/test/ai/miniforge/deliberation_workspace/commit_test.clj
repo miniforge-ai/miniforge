@@ -17,9 +17,11 @@
 ;; limitations under the License.
 (ns ai.miniforge.deliberation-workspace.commit-test
   (:require
+   [ai.miniforge.anomaly.interface :as anomaly]
    [ai.miniforge.deliberation-workspace.commit :as commit]
    [ai.miniforge.deliberation-workspace.object :as object]
    [ai.miniforge.deliberation-workspace.transaction :as tx]
+   [ai.miniforge.deliberation-workspace.validation :as validation]
    [clojure.test :refer [deftest is testing]]))
 
 ;------------------------------------------------------------------------------ Layer 0
@@ -159,3 +161,45 @@
                        {:op :challenge :targets #{"claim-2"}})]
       (is (= #{"challenge-6-0-claim-1" "challenge-6-1-claim-2"}
              (set (keys (:workspace/challenges ws))))))))
+
+(deftest ^{:stratum 1} an-unknown-target-reaching-commit-is-a-programmer-error
+  (testing "a status-bearing operation no longer seeds a placeholder at the missing id"
+    (is (thrown-with-msg?
+         IllegalArgumentException #"absent from the workspace"
+         (transact (workspace) :synthesizer
+                   {:op :accept-decision :targets #{"ghost-404"}}))))
+  (testing "a link-bearing operation answers the same way instead of skipping"
+    (is (thrown-with-msg?
+         IllegalArgumentException #"absent from the workspace"
+         (transact (workspace (obj "evidence-1" :evidence)) :proposer
+                   {:op :attach-evidence :targets #{"ghost-404"}
+                    :links {:supports #{"evidence-1"}}}))))
+  (testing "an operation carrying neither status nor links is refused too"
+    (is (thrown-with-msg?
+         IllegalArgumentException #"absent from the workspace"
+         (transact (workspace) :proposer
+                   {:op :add-question :targets #{"ghost-404"}}))))
+  (testing "the message names the operation and the ids"
+    (is (thrown-with-msg?
+         IllegalArgumentException #":accept-decision.*ghost-404"
+         (transact (workspace) :synthesizer
+                   {:op :accept-decision :targets #{"ghost-404"}})))))
+
+(deftest ^{:stratum 1} validation-refuses-an-unknown-target-before-commit-can-throw
+  (testing "the throw is the contract behind the gate, never what a run surfaces"
+    (let [ws (workspace)
+          proposed (tx/new-transaction
+                    {:role :synthesizer :activation "act-9" :basis 5
+                     :operations [{:op :accept-decision :targets #{"ghost-404"}}]})]
+      (is (= :anomalies.deliberation/unknown-target
+             (anomaly/subtype
+              (validation/validate ws proposed validation/concurrency-stages)))))))
+
+(deftest ^{:stratum 1} known-targets-still-commit-unchanged
+  (testing "the precondition admits every operation validation would have passed"
+    (let [ws (transact (workspace (obj "claim-1" :claim) (obj "evidence-1" :evidence))
+                       :proposer
+                       {:op :attach-evidence :targets #{"claim-1"}
+                        :links {:supports #{"evidence-1"}}})]
+      (is (= #{"evidence-1"} (object/linked (object-at ws "claim-1") :supports)))
+      (is (= 6 (:object/touched-at (object-at ws "claim-1")))))))
