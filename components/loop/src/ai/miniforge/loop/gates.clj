@@ -300,6 +300,10 @@
                           acc)
 
                         ;; Require docstrings
+                        ;; Matches (defn name [...]) where the arg vector immediately
+                        ;; follows the function name (whitespace only).  A docstring
+                        ;; literal between the name and the vector breaks \s+\[, so
+                        ;; documented functions are never flagged.
                         :require-docstrings
                         (if (and (string? content)
                                  (#{:code} artifact-type)
