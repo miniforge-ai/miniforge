@@ -103,12 +103,17 @@
 
 (deftest ^{:stratum 2} each-role-sees-a-delta-from-its-own-last-activation
   (let [seen (atom [])
+        ;; This test runs four activations, so the basis has to come from the
+        ;; projection each one was actually rendered from — that is what the
+        ;; §3.1 contract means by basis. A constant would be right only for
+        ;; the first activation.
         activate (fn [{:keys [role projection workspace]}]
                    (swap! seen conj
                           {:role role
                            :delta (set (map :object/id (:projection/delta projection)))})
                    (tx/new-transaction
-                    {:role role :activation "act-1" :basis 1
+                    {:role role :activation "act-1"
+                     :basis (:projection/version projection)
                      :operations [{:op :assert-claim
                                    :creates [{:id (str "claim-" (:workspace/version workspace))
                                               :type :claim :statement "a claim"}]}]}))
