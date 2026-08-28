@@ -133,7 +133,7 @@
                              {:op :refine-claim :targets #{"claim-404"}}))))))
 
 (deftest ^{:stratum 1} creations-the-engine-cannot-construct-are-refused
-  (testing "every payload object/new-object throws on is rejected as data first"
+  (testing "every payload that object/new-object throws on is rejected as data first"
     (doseq [[label spec] [["unknown type" {:id "x" :type :wormhole :statement "s"}]
                           ["blank statement" {:id "x" :type :claim :statement "   "}]
                           ["missing statement" {:id "x" :type :claim}]
@@ -176,7 +176,24 @@
     (is (= :anomalies.deliberation/invalid-creation
            (subtype-of (validate-tx (workspace)
                                     (transaction :proposer 10
-                                                 {:op :assert-claim :creates 5})))))))
+                                                 {:op :assert-claim :creates 5}))))))
+  (testing "a map is coll? too, and reducing over one yields MapEntries"
+    (let [rejection (validate-tx (workspace)
+                                 (transaction :proposer 10
+                                              {:op :assert-claim
+                                               :creates {:id "x" :type :claim
+                                                         :statement "s"}}))]
+      (is (= :anomalies.deliberation/invalid-creation (subtype-of rejection)))
+      (is (= :malformed-creates (:reason (:anomaly/data rejection)))
+          "the shape is what is wrong, so blaming :blank-id would misroute")))
+  (testing "a sequence of specs is what the stage accepts"
+    (doseq [[label creates] [["vector" [{:id "c-1" :type :claim :statement "s"}]]
+                             ["list" (list {:id "c-1" :type :claim :statement "s"})]
+                             ["set" #{{:id "c-1" :type :claim :statement "s"}}]]]
+      (is (nil? (validate-tx (workspace)
+                             (transaction :proposer 10
+                                          {:op :assert-claim :creates creates})))
+          label))))
 
 (deftest ^{:stratum 1} creations-may-not-overwrite-an-object-the-workspace-holds
   (testing "insert-created writes with assoc-in, so a collision would erase the original"
