@@ -35,7 +35,13 @@
    Pairs are canonicalised into sorted id order and de-duplicated, so the
    conflict a pair derives does not depend on which side happens to hold the
    `contradicts` edge, and a symmetric pair that points both ways still
-   derives exactly one conflict."
+   derives exactly one conflict.
+
+   A conflict is a relation between two objects, so an object contradicting
+   its own id derives nothing. Admitting it would mint a `conflict-x-x` that
+   no transaction can resolve — nothing supersedes a participant without
+   superseding the other — and the §6.1 conflict tier would keep selecting
+   it for as long as the run lasts."
   [workspace version]
   (let [objects (get workspace :workspace/objects {})
         contradictable? (fn [id]
@@ -44,7 +50,9 @@
                                  (not= :conflict (:object/type o)))))
         pairs (->> (for [[id o] objects
                          target (object/linked o :contradicts)
-                         :when (and (contradictable? id) (contradictable? target))]
+                         :when (and (not= id target)
+                                    (contradictable? id)
+                                    (contradictable? target))]
                      (vec (sort [id target])))
                    distinct
                    sort)]

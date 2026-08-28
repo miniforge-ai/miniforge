@@ -110,3 +110,19 @@
         "a directional id would make the same contradiction derive twice")
     (is (= "conflict-claim-1-claim-2"
            (:object/id (first (conflicts-in backward)))))))
+
+(deftest ^{:stratum 1} an-object-contradicting-itself-derives-no-conflict
+  (testing "a conflict is a relation between two objects"
+    (let [ws (conflict/derive-conflicts
+              (workspace (obj "claim-1" :claim :links {:contradicts #{"claim-1"}}))
+              6)]
+      (is (empty? (conflicts-in ws))
+          "conflict-claim-1-claim-1 has no second participant to resolve")))
+  (testing "a self-link does not suppress the real pair beside it"
+    (let [ws (conflict/derive-conflicts
+              (workspace (obj "claim-1" :claim
+                              :links {:contradicts #{"claim-1" "claim-2"}})
+                         (obj "claim-2" :claim))
+              6)]
+      (is (= ["conflict-claim-1-claim-2"]
+             (map :object/id (conflicts-in ws)))))))
