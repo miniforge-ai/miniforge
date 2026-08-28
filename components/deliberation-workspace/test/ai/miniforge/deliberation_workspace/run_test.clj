@@ -103,12 +103,27 @@
 
 (deftest ^{:stratum 2} each-role-sees-a-delta-from-its-own-last-activation
   (let [seen (atom [])
-        activate (fn [{:keys [role projection]}]
-                   (swap! seen conj [role (:projection/version projection)])
-                   nil)]
-    (run/run (workspace) activate {})
-    (testing "every activation renders at the current version"
-      (is (= 3 (count @seen))))))
+        activate (fn [{:keys [role projection workspace]}]
+                   (swap! seen conj
+                          {:role role
+                           :delta (set (map :object/id (:projection/delta projection)))})
+                   (tx/new-transaction
+                    {:role role :activation "act-1" :basis 1
+                     :operations [{:op :assert-claim
+                                   :creates [{:id (str "claim-" (:workspace/version workspace))
+                                              :type :claim :statement "a claim"}]}]}))
+        by-role (do (run/run (workspace :workspace/budget {:activations 4}) activate {})
+                    (group-by :role @seen))
+        proposals (get by-role :proposer)]
+    (testing "round-robin brings the first role back for a second activation"
+      (is (= [:proposer :skeptic :synthesizer :proposer] (mapv :role @seen))))
+    (testing "a role's first activation has seen nothing, so the delta is everything"
+      (is (= #{"goal-1"} (:delta (first proposals)))))
+    (testing "the second delta starts at that role's own last activation"
+      (is (= #{"claim-1" "claim-2" "claim-3"} (:delta (second proposals)))
+          "goal-1 has not moved since the proposer last ran, so it is not in the delta"))
+    (testing "a role that ran more recently sees a shorter delta than one that has not"
+      (is (= #{"goal-1" "claim-1"} (:delta (first (get by-role :skeptic))))))))
 
 (deftest ^{:stratum 2} the-step-bound-is-a-defect-signal-not-a-normal-ending
   (let [endless (workspace :workspace/budget {} :workspace/quiescence-rounds 10000)
@@ -127,7 +142,7 @@
       (is (= :anomalies.deliberation/unknown-operation
              (:reason (first (events-of after :transaction/rejected))))))))
 
-(deftest ^{:stratum 2} an-uneligible-workspace-does-not-charge-an-activation
+(deftest ^{:stratum 2} an-ineligible-workspace-does-not-charge-an-activation
   (testing "no role to run means no activation ran"
     (let [ws (workspace :workspace/roles [] :workspace/eligibility {})
           called (atom false)
