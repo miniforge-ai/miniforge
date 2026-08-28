@@ -35,9 +35,16 @@
    :workspace/objects (into {} (map (juxt :object/id identity)) objects)
    :workspace/log []})
 
-(defn- ^{:stratum 0} transact [ws role & operations]
-  (commit/commit ws (tx/new-transaction {:role role :activation "act-9"
-                                         :basis 5 :operations operations})))
+(defn- ^{:stratum 0} transact
+  "Commit `operations` against `ws`, declaring the basis the workspace is
+   actually at. `commit` never reads the basis — validation does — but a
+   hardcoded one goes stale the moment a test commits twice, and would
+   read as a stale-basis scenario to anyone adding a non-additive op here."
+  [ws role & operations]
+  (commit/commit ws (tx/new-transaction
+                     {:role role :activation "act-9"
+                      :basis (get ws :workspace/version 0)
+                      :operations operations})))
 
 (defn- ^{:stratum 0} object-at [ws id]
   (get-in ws [:workspace/objects id]))
