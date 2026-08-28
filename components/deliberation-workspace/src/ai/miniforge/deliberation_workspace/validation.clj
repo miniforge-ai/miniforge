@@ -51,14 +51,25 @@
    so a non-map `:links` reaches it as a ClassCastException before any of
    its own guards run. Each predicate here is total over arbitrary EDN —
    a validator that crashes on the input it exists to refuse would move the
-   crash rather than remove it."
+   crash rather than remove it.
+
+   The id is required to be a non-blank string, which `new-object` does not
+   itself demand. Without it a spec with no `:id` lands in the object graph
+   under a nil key, and the collision check below — which reads `:id` — has
+   nothing to compare. Every id in the component is already a string, so
+   holding the graph to one key type costs nothing and keeps `:workspace/
+   objects` addressable."
   [spec]
-  (let [statement (:statement spec)
+  (let [id (:id spec)
+        statement (:statement spec)
         links (get spec :links {})
         mapped? (or (nil? links) (map? links))
         unknown-edges (when mapped? (seq (remove object/link-types (keys links))))
         scalar-edges (when mapped? (seq (remove (comp coll? val) links)))]
     (cond
+      (not (and (string? id) (not (str/blank? id))))
+      [:blank-id {:id id}]
+
       (not (contains? object/object-types (:type spec)))
       [:unknown-type {:type (:type spec)}]
 
@@ -98,11 +109,17 @@
    partway through commit. Those conditions are agent-reachable input, so
    they belong here as a routable rejection.
 
-   The id collision is the same gap without the crash. `insert-created`
-   writes with `assoc-in`, so creating an object at an id the graph already
-   holds replaces it outright — the previous type, status, statement and
-   links are gone, and every edge pointing at that id now resolves to the
-   new object."
+   The id collisions are the same gap without the crash. `insert-created`
+   writes with `assoc-in`, so a create at an id that already exists replaces
+   it outright — the previous type, status, statement and links are gone,
+   and every edge pointing at that id now resolves to the new object. Both
+   directions are refused: against the objects the workspace already holds,
+   and against the other specs in this same `:creates`, where the reduce
+   would otherwise let a later spec quietly overwrite an earlier one.
+
+   Collisions with a create in a SIBLING operation of the same transaction
+   are still undetected: `validate-operation` sees one operation at a time,
+   and blaming either of the two for the other's id would be arbitrary."
   [workspace operation _context]
   (let [creates (get operation :creates)
         known (objects-of workspace)]
@@ -122,6 +139,12 @@
                             (merge {:op (:op operation) :reason reason :id (:id spec)}
                                    data))))
                 creates)
+          (when-let [repeated (seq (for [[id n] (frequencies (map :id creates))
+                                         :when (> n 1)]
+                                     id))]
+            (reject :conflict :anomalies.deliberation/duplicate-object-id
+                    "Operation creates more than one object at the same id"
+                    {:op (:op operation) :ids (vec repeated)}))
           (when-let [taken (seq (filter #(contains? known (:id %)) creates))]
             (reject :conflict :anomalies.deliberation/duplicate-object-id
                     "Operation creates objects at ids the workspace already holds"

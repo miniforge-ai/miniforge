@@ -201,3 +201,41 @@
                                     (transaction :proposer 10
                                                  {:op :rewrite-history
                                                   :creates [{:id "x" :type :wormhole}]})))))))
+
+(deftest ^{:stratum 1} a-creation-must-carry-a-usable-id
+  (testing "without one the object lands in the graph under a nil key"
+    (doseq [[label spec] [["missing" {:type :claim :statement "s"}]
+                          ["blank" {:id "  " :type :claim :statement "s"}]
+                          ["non-string" {:id :claim-1 :type :claim :statement "s"}]]]
+      (is (= :anomalies.deliberation/invalid-creation
+             (subtype-of (validate-tx (workspace)
+                                      (transaction :proposer 10
+                                                   {:op :assert-claim :creates [spec]}))))
+          label)))
+  (testing "the reason names the id, so the collision check is not silently vacuous"
+    (is (= :blank-id
+           (-> (validate-tx (workspace)
+                            (transaction :proposer 10
+                                         {:op :assert-claim
+                                          :creates [{:type :claim :statement "s"}]}))
+               :anomaly/data :reason)))))
+
+(deftest ^{:stratum 1} one-operation-may-not-create-two-objects-at-one-id
+  (testing "insert-created reduces, so the later spec would overwrite the earlier"
+    (is (= :anomalies.deliberation/duplicate-object-id
+           (subtype-of (validate-tx
+                        (workspace)
+                        (transaction :proposer 10
+                                     {:op :assert-claim
+                                      :creates [{:id "claim-1" :type :claim
+                                                 :statement "first"}
+                                                {:id "claim-1" :type :goal
+                                                 :statement "second"}]}))))))
+  (testing "distinct ids in one operation are fine"
+    (is (nil? (validate-tx (workspace)
+                           (transaction :proposer 10
+                                        {:op :assert-claim
+                                         :creates [{:id "claim-1" :type :claim
+                                                    :statement "first"}
+                                                   {:id "claim-2" :type :claim
+                                                    :statement "second"}]}))))))
