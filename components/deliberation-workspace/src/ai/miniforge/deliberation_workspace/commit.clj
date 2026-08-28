@@ -30,6 +30,28 @@
 
 ;------------------------------------------------------------------------------ Layer 0
 
+(defn- ^{:stratum 0} assert-known-targets
+  "Every id an operation touches must already exist in the workspace.
+
+   `validation/check-targets` refuses a missing target, so one arriving here
+   is a broken contract between validation and commit rather than agent
+   input — rule 005 territory, and it throws. Degrading instead is what let
+   the two writers below disagree: `apply-links` filtered unknown targets
+   out while `apply-status` handed them to `update-in`, where `object/touch`
+   received nil and `assoc` fabricated a `#:object{:touched-at n}`
+   placeholder carrying no type, status, or statement. Both readers of
+   `touched-ids` now share this single precondition instead of each holding
+   a private opinion about an id that cannot legally be here."
+  [workspace operation]
+  (let [known (get workspace :workspace/objects {})
+        missing (remove #(contains? known %) (tx/touched-ids operation))]
+    (when (seq missing)
+      (throw (IllegalArgumentException.
+              (str "Operation " (pr-str (:op operation))
+                   " targets objects absent from the workspace: "
+                   (pr-str (vec missing))
+                   " — validation must reject these before commit"))))))
+
 (defn- ^{:stratum 0} apply-links
   "Add the operation's edges to the objects it declared as targets.
 
@@ -37,10 +59,13 @@
    destinations in `:links`. Writing onto the destinations instead would
    mutate objects the validator never saw: `touched-ids` reads `:targets`
    only, so target-existence, staleness, and terminal checks would all be
-   bypassed for anything reachable through `:links`."
+   bypassed for anything reachable through `:links`.
+
+   Targets are written unscreened. `assert-known-targets` has already
+   established that each one exists, so filtering here could only differ
+   from `apply-status` about a case neither is allowed to see."
   [workspace operation]
-  (let [targets (tx/touched-ids operation)
-        known (get workspace :workspace/objects {})]
+  (let [targets (tx/touched-ids operation)]
     (reduce (fn [ws [edge destinations]]
               (reduce (fn [w target-id]
                         (reduce (fn [acc destination]
@@ -49,7 +74,7 @@
                                 w
                                 destinations))
                       ws
-                      (filter known targets)))
+                      targets))
             workspace
             (get operation :links {}))))
 
@@ -97,7 +122,11 @@
 (defn- ^{:stratum 0} apply-status
   "Impose the operation's status on its targets and advance their staleness
    clock. A status illegal for the target's type is skipped; the object is
-   still touched, so the clock stays honest."
+   still touched, so the clock stays honest.
+
+   Every target is known to exist by the time this runs — see
+   `assert-known-targets` — so `update-in` always lands on a real object
+   rather than seeding a placeholder at a missing id."
   [workspace operation version]
   (let [status (if (= :close-goal (:op operation))
                  (tx/goal-outcomes (:outcome operation))
@@ -116,6 +145,7 @@
 
 (defn- ^{:stratum 1} apply-operation [workspace operation context]
   (let [version (:version context)]
+    (assert-known-targets workspace operation)
     (-> workspace
         (insert-created operation context)
         (apply-status operation version)
@@ -129,7 +159,11 @@
 
    The version increments once per committed transaction — it is the clock
    every basis check and staleness measure reads, so it must move exactly
-   with the log, never with wall time."
+   with the log, never with wall time.
+
+   `transaction` must already have passed `validation/validate`: an
+   operation touching an object the workspace does not hold throws rather
+   than being quietly absorbed."
   [workspace transaction]
   (let [version (inc (get workspace :workspace/version 0))
         context {:role (:tx/role transaction)

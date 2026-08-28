@@ -131,3 +131,136 @@
                 (transaction :proposer 10
                              {:op :attach-evidence :targets #{"claim-1"}}
                              {:op :refine-claim :targets #{"claim-404"}}))))))
+
+(deftest ^{:stratum 1} creations-the-engine-cannot-construct-are-refused
+  (testing "every payload that object/new-object throws on is rejected as data first"
+    (doseq [[label spec] [["unknown type" {:id "x" :type :wormhole :statement "s"}]
+                          ["blank statement" {:id "x" :type :claim :statement "   "}]
+                          ["missing statement" {:id "x" :type :claim}]
+                          ["non-string statement" {:id "x" :type :claim :statement :s}]
+                          ["unknown link type" {:id "x" :type :claim :statement "s"
+                                                :links {:bogus #{"claim-1"}}}]
+                          ["scalar link value" {:id "x" :type :claim :statement "s"
+                                                :links {:supports "claim-1"}}]
+                          ["non-map links" {:id "x" :type :claim :statement "s"
+                                            :links [:supports]}]]]
+      (is (= :anomalies.deliberation/invalid-creation
+             (subtype-of (validate-tx (workspace)
+                                      (transaction :proposer 10
+                                                   {:op :assert-claim :creates [spec]}))))
+          label))))
+
+(deftest ^{:stratum 1} a-creation-rejection-carries-the-reason-it-failed
+  (testing "routing reads the reason without parsing the message"
+    (is (= :unknown-type
+           (-> (validate-tx (workspace)
+                            (transaction :proposer 10
+                                         {:op :assert-claim
+                                          :creates [{:id "x" :type :wormhole
+                                                     :statement "s"}]}))
+               :anomaly/data :reason)))))
+
+(deftest ^{:stratum 1} a-well-formed-creation-passes
+  (testing "the stage refuses malformed specs, not creation itself"
+    (is (nil? (validate-tx (workspace)
+                           (transaction :proposer 10
+                                        {:op :assert-claim
+                                         :creates [{:id "claim-9" :type :claim
+                                                    :statement "the invariant holds"
+                                                    :links {:supports #{"claim-1"}}}]})))))
+  (testing "an operation that creates nothing is untouched by the stage"
+    (is (nil? (validate-tx (workspace) (transaction :proposer 10 {:op :add-question}))))))
+
+(deftest ^{:stratum 1} a-malformed-creates-payload-is-rejected-not-thrown
+  (testing "insert-created reduces over :creates, so a scalar would crash the engine"
+    (is (= :anomalies.deliberation/invalid-creation
+           (subtype-of (validate-tx (workspace)
+                                    (transaction :proposer 10
+                                                 {:op :assert-claim :creates 5}))))))
+  (testing "a map is coll? too, and reducing over one yields MapEntries"
+    (let [rejection (validate-tx (workspace)
+                                 (transaction :proposer 10
+                                              {:op :assert-claim
+                                               :creates {:id "x" :type :claim
+                                                         :statement "s"}}))]
+      (is (= :anomalies.deliberation/invalid-creation (subtype-of rejection)))
+      (is (= :malformed-creates (:reason (:anomaly/data rejection)))
+          "the shape is what is wrong, so blaming :blank-id would misroute")))
+  (testing "a set is refused: the scan reports the first defect, and a set has no first"
+    (is (= :malformed-creates
+           (-> (validate-tx (workspace)
+                            (transaction :proposer 10
+                                         {:op :assert-claim
+                                          :creates #{{:id "c-1" :type :claim
+                                                      :statement "s"}}}))
+               :anomaly/data :reason))
+        "an unordered payload would make the routed :reason vary between runs"))
+  (testing "an ordered sequence of specs is what the stage accepts"
+    (doseq [[label creates] [["vector" [{:id "c-1" :type :claim :statement "s"}]]
+                             ["list" (list {:id "c-1" :type :claim :statement "s"})]]]
+      (is (nil? (validate-tx (workspace)
+                             (transaction :proposer 10
+                                          {:op :assert-claim :creates creates})))
+          label))))
+
+(deftest ^{:stratum 1} creations-may-not-overwrite-an-object-the-workspace-holds
+  (testing "insert-created writes with assoc-in, so a collision would erase the original"
+    (is (= :anomalies.deliberation/duplicate-object-id
+           (subtype-of (validate-tx
+                        (workspace (object-at "claim-1" 4))
+                        (transaction :proposer 10
+                                     {:op :assert-claim
+                                      :creates [{:id "claim-1" :type :goal
+                                                 :statement "clobbered"}]}))))))
+  (testing "a fresh id is free to be created"
+    (is (nil? (validate-tx (workspace (object-at "claim-1" 4))
+                           (transaction :proposer 10
+                                        {:op :assert-claim
+                                         :creates [{:id "claim-2" :type :claim
+                                                    :statement "a second claim"}]}))))))
+
+(deftest ^{:stratum 1} an-unknown-operation-outranks-a-bad-creation
+  (testing "payload conformance runs after schema, so the vocabulary is reported first"
+    (is (= :anomalies.deliberation/unknown-operation
+           (subtype-of (validate-tx (workspace)
+                                    (transaction :proposer 10
+                                                 {:op :rewrite-history
+                                                  :creates [{:id "x" :type :wormhole}]})))))))
+
+(deftest ^{:stratum 1} a-creation-must-carry-a-usable-id
+  (testing "without one the object lands in the graph under a nil key"
+    (doseq [[label spec] [["missing" {:type :claim :statement "s"}]
+                          ["blank" {:id "  " :type :claim :statement "s"}]
+                          ["non-string" {:id :claim-1 :type :claim :statement "s"}]]]
+      (is (= :anomalies.deliberation/invalid-creation
+             (subtype-of (validate-tx (workspace)
+                                      (transaction :proposer 10
+                                                   {:op :assert-claim :creates [spec]}))))
+          label)))
+  (testing "the reason names the id, so the collision check is not silently vacuous"
+    (is (= :blank-id
+           (-> (validate-tx (workspace)
+                            (transaction :proposer 10
+                                         {:op :assert-claim
+                                          :creates [{:type :claim :statement "s"}]}))
+               :anomaly/data :reason)))))
+
+(deftest ^{:stratum 1} one-operation-may-not-create-two-objects-at-one-id
+  (testing "insert-created reduces, so the later spec would overwrite the earlier"
+    (is (= :anomalies.deliberation/duplicate-object-id
+           (subtype-of (validate-tx
+                        (workspace)
+                        (transaction :proposer 10
+                                     {:op :assert-claim
+                                      :creates [{:id "claim-1" :type :claim
+                                                 :statement "first"}
+                                                {:id "claim-1" :type :goal
+                                                 :statement "second"}]}))))))
+  (testing "distinct ids in one operation are fine"
+    (is (nil? (validate-tx (workspace)
+                           (transaction :proposer 10
+                                        {:op :assert-claim
+                                         :creates [{:id "claim-1" :type :claim
+                                                    :statement "first"}
+                                                   {:id "claim-2" :type :claim
+                                                    :statement "second"}]}))))))
