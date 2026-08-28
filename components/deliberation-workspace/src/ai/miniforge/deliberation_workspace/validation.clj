@@ -17,16 +17,17 @@
 ;; limitations under the License.
 (ns ai.miniforge.deliberation-workspace.validation
   "The concurrency stages of the N14 §3.4 transaction validation pipeline:
-   schema conformance, target existence, role permission, and basis
-   staleness. Rejections are anomalies as data — a routable value the
-   scheduler logs, never an exception.
+   schema conformance, creation-payload conformance, target existence, role
+   permission, and basis staleness. Rejections are anomalies as data — a
+   routable value the scheduler logs, never an exception.
 
    The abuse guards (hard-constraint immutability, anti-livelock,
    idempotency) compose onto this chain in a sibling namespace."
   (:require
    [ai.miniforge.anomaly.interface :as anomaly]
    [ai.miniforge.deliberation-workspace.object :as object]
-   [ai.miniforge.deliberation-workspace.transaction :as tx]))
+   [ai.miniforge.deliberation-workspace.transaction :as tx]
+   [clojure.string :as str]))
 
 ;------------------------------------------------------------------------------ Layer 0
 
@@ -41,6 +42,38 @@
   [workspace]
   (get workspace :workspace/objects {}))
 
+(defn- ^{:stratum 0} creation-defect
+  "The first structural defect in a `:creates` specification, as
+   `[reason data]`, or nil when the engine can construct the object.
+
+   Mirrors every condition `object/new-object` throws on, plus the shape
+   those throws take for granted: the constructor calls `keys` on `:links`,
+   so a non-map `:links` reaches it as a ClassCastException before any of
+   its own guards run. Each predicate here is total over arbitrary EDN —
+   a validator that crashes on the input it exists to refuse would move the
+   crash rather than remove it."
+  [spec]
+  (let [statement (:statement spec)
+        links (get spec :links {})
+        mapped? (or (nil? links) (map? links))
+        unknown-edges (when mapped? (seq (remove object/link-types (keys links))))
+        scalar-edges (when mapped? (seq (remove (comp coll? val) links)))]
+    (cond
+      (not (contains? object/object-types (:type spec)))
+      [:unknown-type {:type (:type spec)}]
+
+      (not (and (string? statement) (not (str/blank? statement))))
+      [:blank-statement {:statement statement}]
+
+      (not mapped?)
+      [:malformed-links {:links links}]
+
+      unknown-edges
+      [:unknown-link-type {:link-types (vec unknown-edges)}]
+
+      scalar-edges
+      [:non-collection-links {:link-types (mapv key scalar-edges)}])))
+
 (defn ^{:stratum 0} validate-operation
   "Run `stages` against one operation in order, returning the first anomaly
    or nil. `context` carries :role and :basis from the enclosing transaction."
@@ -54,6 +87,45 @@
     (reject :invalid-input :anomalies.deliberation/unknown-operation
             "Operation is outside the closed N14 §3.2 vocabulary"
             {:op (:op operation)})))
+
+(defn- ^{:stratum 1} check-creates
+  "N14 §3.2 conformance for the objects an operation asks to create.
+
+   `object/new-object` throws IllegalArgumentException on an unknown type, a
+   blank statement, or malformed `:links`. That contract is right for a
+   programmer error, but `:creates` carries agent-supplied data and no stage
+   inspected it: a transaction cleared validation and then crashed the engine
+   partway through commit. Those conditions are agent-reachable input, so
+   they belong here as a routable rejection.
+
+   The id collision is the same gap without the crash. `insert-created`
+   writes with `assoc-in`, so creating an object at an id the graph already
+   holds replaces it outright — the previous type, status, statement and
+   links are gone, and every edge pointing at that id now resolves to the
+   new object."
+  [workspace operation _context]
+  (let [creates (get operation :creates)
+        known (objects-of workspace)]
+    (cond
+      (nil? creates) nil
+
+      (not (coll? creates))
+      (reject :invalid-input :anomalies.deliberation/invalid-creation
+              "Operation :creates must be a collection of object specifications"
+              {:op (:op operation) :reason :malformed-creates :creates creates})
+
+      :else
+      (or (some (fn [spec]
+                  (when-let [[reason data] (creation-defect spec)]
+                    (reject :invalid-input :anomalies.deliberation/invalid-creation
+                            "Operation creates an object the engine cannot construct"
+                            (merge {:op (:op operation) :reason reason :id (:id spec)}
+                                   data))))
+                creates)
+          (when-let [taken (seq (filter #(contains? known (:id %)) creates))]
+            (reject :conflict :anomalies.deliberation/duplicate-object-id
+                    "Operation creates objects at ids the workspace already holds"
+                    {:op (:op operation) :ids (mapv :id taken)}))))))
 
 (defn- ^{:stratum 1} check-targets [workspace operation _context]
   (let [known (objects-of workspace)
@@ -115,5 +187,7 @@
 
 (def ^{:stratum 2} concurrency-stages
   "Ordered §3.4 stages. Schema conformance runs first because every later
-   stage reads the operation vocabulary."
-  [check-schema check-targets check-permission check-basis])
+   stage reads the operation vocabulary, and payload conformance follows it
+   for the same reason: an operation outside the vocabulary should be
+   reported as an unknown operation, not as a bad creation."
+  [check-schema check-creates check-targets check-permission check-basis])
