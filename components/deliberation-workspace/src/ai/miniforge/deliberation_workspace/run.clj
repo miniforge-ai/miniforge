@@ -59,9 +59,12 @@
     (if (seq stages) stages validation/concurrency-stages)))
 
 (defn- ^{:stratum 0} count-quiet
-  "Track consecutive transactions that added no new object, which is what
-   the §7 quiescence rule measures. Takes the committed workspace first so
-   it threads after `commit`."
+  "Track consecutive transactions that did not grow the object set, which
+   is what the §7 quiescence rule measures. The measure is the size of
+   `:workspace/objects`, not a scan for open objects: `new-object` gives
+   every created object a non-terminal initial status, so a transaction
+   grows the set exactly when it adds an object a role can still act on.
+   Takes the committed workspace first so it threads after `commit`."
   [committed previous]
   (let [object-count (fn [ws] (count (get ws :workspace/objects {})))]
     (if (> (object-count committed) (object-count previous))

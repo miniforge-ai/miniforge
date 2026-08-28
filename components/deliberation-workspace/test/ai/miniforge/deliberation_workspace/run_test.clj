@@ -112,8 +112,8 @@
                      :operations [{:op :assert-claim
                                    :creates [{:id (str "claim-" (:workspace/version workspace))
                                               :type :claim :statement "a claim"}]}]}))
-        by-role (do (run/run (workspace :workspace/budget {:activations 4}) activate {})
-                    (group-by :role @seen))
+        _ (run/run (workspace :workspace/budget {:activations 4}) activate {})
+        by-role (group-by :role @seen)
         proposals (get by-role :proposer)]
     (testing "round-robin brings the first role back for a second activation"
       (is (= [:proposer :skeptic :synthesizer :proposer] (mapv :role @seen))))
