@@ -169,3 +169,19 @@
         event (first (events-of after :activation/completed))]
     (is (= :conflict (:reason event)))
     (is (= "conflict-1" (:target event)) "the trigger must be auditable")))
+
+(deftest ^{:stratum 2} a-creation-the-engine-cannot-construct-is-routed-not-thrown
+  (testing "the rejection reaches the event log as a subtype, like every other"
+    (let [propose (fn [{:keys [role]}]
+                    (tx/new-transaction
+                     {:role role :activation "act-1" :basis 1
+                      :operations [{:op :assert-claim
+                                    :creates [{:id "x" :type :wormhole
+                                               :statement "unconstructable"}]}]}))
+          after (run/step (workspace) propose)]
+      (is (= [:anomalies.deliberation/invalid-creation]
+             (mapv :reason (events-of after :transaction/rejected))))
+      (is (= 1 (:workspace/version after))
+          "a rejected transaction does not advance the clock")
+      (is (= #{"goal-1"} (set (keys (:workspace/objects after))))
+          "and leaves no half-created object behind"))))
