@@ -109,8 +109,8 @@
    partway through commit. Those conditions are agent-reachable input, so
    they belong here as a routable rejection.
 
-   `:creates` must be a sequence, not merely a collection. A map is
-   `coll?` too, and reducing over one yields MapEntries: `insert-created`
+   `:creates` must be a sequence or a set, not merely a collection. A map
+   is `coll?` too, and reducing over one yields MapEntries: `insert-created`
    would then `assoc` onto a MapEntry and die on a non-integer key, while
    the per-spec checks below would read nil out of every entry and
    blame `:blank-id` — a reason that misroutes, because the payload's shape
@@ -135,7 +135,7 @@
 
       (not (or (sequential? creates) (set? creates)))
       (reject :invalid-input :anomalies.deliberation/invalid-creation
-              "Operation :creates must be a sequence of object specifications"
+              "Operation :creates must be a sequence or set of object specifications"
               {:op (:op operation) :reason :malformed-creates :creates creates})
 
       :else
