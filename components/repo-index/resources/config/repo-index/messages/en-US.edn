@@ -19,6 +19,13 @@
   :prompt/already-impl-template
   "```clojure\n{:status :already-implemented\n :summary \"Brief explanation of why no changes are needed\"}\n```"
 
+  ;; Implementer prompt — prior attempt denied by deterministic gates
+  :prompt/gate-failures-header
+  "Gate denial — fix before resubmitting"
+
+  :prompt/gate-failures-intro
+  "Your previous attempt was DENIED by deterministic gates. The same change resubmitted unchanged will be denied again. Fix every item below (search the whole repo when a stale reference is named), then resubmit:"
+
   ;; task->text section headers
   :prompt/plan-header             "Plan"
   :prompt/intent-header           "Intent"

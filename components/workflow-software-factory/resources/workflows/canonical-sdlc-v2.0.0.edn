@@ -35,6 +35,11 @@
   {:phase :plan}
   {:phase :implement
    :gates [:syntax :lint :no-secrets]
+   ;; Self-repair on failure: a gate-denied implement re-enters with the
+   ;; denial's structured errors in its prompt instead of dying
+   ;; :exhausted. Bounded by max-consecutive-phase-retries (3) before
+   ;; max-redirects (5) — a self-redirect never changes the active phase.
+   :on-fail :implement
    :budget {:tokens 50000}}
   {:phase :verify
    :on-fail :implement}

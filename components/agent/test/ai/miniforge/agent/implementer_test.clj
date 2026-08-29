@@ -15,7 +15,6 @@
 ;; WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 ;; See the License for the specific language governing permissions and
 ;; limitations under the License.
-
 (ns ai.miniforge.agent.implementer-test
   "Tests for the Implementer agent."
   (:require
@@ -33,9 +32,9 @@
    [ai.miniforge.response.interface :as response]))
 
 ;------------------------------------------------------------------------------ Layer 0
-;; Test fixtures
 
-(def valid-code-artifact
+;; Test fixtures
+(def ^{:stratum 0} valid-code-artifact
   {:code/id (random-uuid)
    :code/files [{:path "src/example/core.clj"
                  :content "(ns example.core)\n\n(defn hello [] \"world\")"
@@ -45,13 +44,13 @@
    :code/language "clojure"
    :code/summary "Added example core"})
 
-(def minimal-code-artifact
+(def ^{:stratum 0} minimal-code-artifact
   {:code/id (random-uuid)
    :code/files [{:path "src/minimal.clj"
                  :content "(ns minimal)"
                  :action :create}]})
 
-(defn- llm-response
+(defn- ^{:stratum 0} llm-response
   "Create a mock successful LLM response."
   [& {:keys [content tokens cost-usd tools-called]
       :or {content ""
@@ -64,7 +63,7 @@
    :cost-usd cost-usd
    :tools-called tools-called})
 
-(defn- session-map
+(defn- ^{:stratum 0} session-map
   "Create an artifact session map for tests."
   [& {:keys [pre-session-snapshot]
       :or {pre-session-snapshot {:untracked #{}
@@ -76,15 +75,13 @@
    :artifact-path "/tmp/miniforge-artifact-test/artifact.edn"
    :pre-session-snapshot pre-session-snapshot})
 
-(defn- find-log-entry
+(defn- ^{:stratum 0} find-log-entry
   "Find a specific event in collected log entries."
   [entries event]
   (some #(when (= event (:log/event %)) %) @entries))
 
-;------------------------------------------------------------------------------ Layer 1
 ;; Agent creation tests
-
-(deftest create-implementer-test
+(deftest ^{:stratum 0} create-implementer-test
   (testing "creates implementer with default config"
     (let [agent (implementer/create-implementer)]
       (is (some? agent))
@@ -102,10 +99,322 @@
           agent (implementer/create-implementer {:logger logger})]
       (is (some? (:logger agent))))))
 
-;------------------------------------------------------------------------------ Layer 2
-;; Invoke tests
+;------------------------------------------------------------------------------ Layer 3b
+;; Session checkpoint — iter-24 regression
+(deftest ^{:stratum 0} session-checkpoint-is-stored-under-gitignored-directory
+  (testing "the checkpoint lives under .miniforge/, not at the worktree root"
+    ;; Iter-24 receipt: the old `.miniforge-session-id` path at the worktree
+    ;; root was committed into git, so every fresh sub-workflow worktree
+    ;; inherited a stale UUID. Passing `--resume <stale>` to Claude CLI
+    ;; killed the session in ~5s with no output. Parent `.miniforge/` is
+    ;; already gitignored in this repo, so moving the file there decouples
+    ;; the runtime checkpoint from source control automatically.
+    (let [write! @#'implementer/write-session-checkpoint!
+          read  @#'implementer/read-session-checkpoint
+          tmp   (java.io.File/createTempFile "mf-wt-" "")]
+      (.delete tmp) (.mkdirs tmp)
+      (try
+        (let [wt (.getPath tmp)]
+          (is (nil? (read wt))
+              "a fresh worktree with no checkpoint reads nil")
+          (write! wt "sess-123")
+          (is (.exists (io/file wt ".miniforge" "session-id"))
+              "the checkpoint MUST be written under .miniforge/ (gitignored)")
+          (is (not (.exists (io/file wt ".miniforge-session-id")))
+              "the legacy root path MUST NOT be used — it gets committed")
+          (is (= "sess-123" (read wt))
+              "round-trip: write then read returns the session id"))
+        (finally
+          (io/delete-file
+            (io/file tmp ".miniforge" "session-id") true)
+          (io/delete-file
+            (io/file tmp ".miniforge") true)
+          (.delete tmp))))))
 
-(deftest implementer-invoke-test
+(deftest ^{:stratum 0} read-session-checkpoint-tolerates-garbage
+  (testing "blank content and read errors produce nil, not a bad --resume id"
+    (let [write! @#'implementer/write-session-checkpoint!
+          read  @#'implementer/read-session-checkpoint
+          tmp   (java.io.File/createTempFile "mf-wt-" "")]
+      (.delete tmp) (.mkdirs tmp)
+      (try
+        (write! (.getPath tmp) "   \n  ")
+        (is (nil? (read (.getPath tmp)))
+            "blank/whitespace content must read as nil — never fed to --resume")
+        (finally
+          (io/delete-file
+            (io/file tmp ".miniforge" "session-id") true)
+          (io/delete-file
+            (io/file tmp ".miniforge") true)
+          (.delete tmp))))))
+
+(deftest ^{:stratum 0} base-ref-candidates-avoid-ambiguous-branch-names
+  (testing "bare branch names are not used as diff bases"
+    (let [candidates (@#'implementer/base-ref-candidates
+                      {:execution/environment-metadata {:base-sha "abc123"
+                                                        :base-branch "main"}})]
+      (is (= ["abc123"
+              "refs/remotes/origin/main"
+              "origin/main"
+              "refs/heads/main"]
+             candidates))
+      (is (not (contains? (set candidates) "main"))))))
+
+(deftest ^{:stratum 0} base-ref-candidates-use-resume-merge-base-ranges
+  (testing "resumed workspaces compare the original spec base to restored HEAD"
+    (let [candidates (@#'implementer/base-ref-candidates
+                      {:execution/environment-metadata {:base-sha "task-sha"
+                                                        :base-branch "task-restored"}
+                       :execution/opts {:resume-workspace {:branch "task-restored"}}
+                       :execution/input {:context {:git-commit "spec-sha"
+                                                   :git-branch "dogfood/source"}}})]
+      (is (= ["spec-sha...HEAD"
+              "refs/remotes/origin/dogfood/source...HEAD"
+              "origin/dogfood/source...HEAD"
+              "refs/heads/dogfood/source...HEAD"
+              "task-sha"
+              "refs/remotes/origin/task-restored"
+              "origin/task-restored"
+              "refs/heads/task-restored"]
+             candidates)))))
+
+(deftest ^{:stratum 0} files-by-action-test
+  (testing "groups files by action"
+    (let [artifact {:code/files [{:path "a.clj" :content "" :action :create}
+                                 {:path "b.clj" :content "" :action :modify}
+                                 {:path "c.clj" :content "" :action :create}]}
+          grouped (implementer/files-by-action artifact)]
+      (is (= 2 (count (:create grouped))))
+      (is (= 1 (count (:modify grouped)))))))
+
+(deftest ^{:stratum 0} total-lines-test
+  (testing "counts total lines of code"
+    (let [artifact {:code/files [{:path "a.clj"
+                                  :content "line1\nline2\nline3"
+                                  :action :create}
+                                 {:path "b.clj"
+                                  :content "line1\nline2"
+                                  :action :modify}]}
+          lines (implementer/total-lines artifact)]
+      (is (= 5 lines))))
+
+  (testing "excludes deleted files from count"
+    (let [artifact {:code/files [{:path "a.clj"
+                                  :content "line1\nline2"
+                                  :action :create}
+                                 {:path "b.clj"
+                                  :content "should not count"
+                                  :action :delete}]}
+          lines (implementer/total-lines artifact)]
+      (is (= 2 lines)))))
+
+;; task->text tests
+(deftest ^{:stratum 0} task->text-basic-test
+  (testing "string task passes through"
+    (is (= "hello" (implementer/task->text "hello"))))
+
+  (testing "map task uses :task/description"
+    (is (= "Implement login"
+           (implementer/task->text {:task/description "Implement login"}))))
+
+  (testing "includes plan when present"
+    (let [text (implementer/task->text {:task/description "Do thing"
+                                        :task/plan "Step 1: foo\nStep 2: bar"})]
+      (is (str/includes? text "Do thing"))
+      (is (str/includes? text "## Plan"))
+      (is (str/includes? text "Step 1: foo"))))
+
+  (testing "includes intent when present"
+    (let [text (implementer/task->text {:task/description "Do thing"
+                                        :task/intent {:scope ["src/core.clj"]}})]
+      (is (str/includes? text "## Intent"))
+      (is (str/includes? text "src/core.clj")))))
+
+(deftest ^{:stratum 0} task->text-review-feedback-test
+  (testing "includes review feedback as string"
+    (let [text (implementer/task->text {:task/description "Fix it"
+                                        :task/review-feedback "Missing error handling in login"})]
+      (is (str/includes? text "## Review Feedback (MUST FIX)"))
+      (is (str/includes? text "Missing error handling in login"))))
+
+  (testing "includes review feedback as map"
+    (let [text (implementer/task->text {:task/description "Fix it"
+                                        :task/review-feedback {:issues ["no validation" "no tests"]}})]
+      (is (str/includes? text "## Review Feedback (MUST FIX)"))
+      (is (str/includes? text "no validation")))))
+
+(deftest ^{:stratum 0} task->text-phase-handoff-test
+  (testing "includes phase handoff before review feedback"
+    (let [phase-handoff-header (str "## " (messages/t :prompt/phase-handoff-header))
+          review-feedback-header (str "## " (messages/t :prompt/review-feedback-header))
+          missing-group-summary "GROUP 3 missing"
+          missing-group-id "GROUP 3"
+          fallback-feedback "Fallback feedback"
+          task-description "Fix it"
+          handoff {:frame/kind :repair-request
+                   :frame/body {:repair/findings
+                                [{:finding/summary missing-group-summary
+                                  :finding/group-id missing-group-id
+                                  :finding/severity :blocking}]}}
+          text (implementer/task->text {:task/description task-description
+                                        :task/phase-handoff handoff
+                                        :task/review-feedback fallback-feedback})]
+      (is (str/includes? text phase-handoff-header))
+      (is (str/includes? text missing-group-summary))
+      (is (str/includes? text (messages/t :prompt/phase-handoff-group-label)))
+      (is (not (str/includes? text ":frame/kind")))
+      (is (< (str/index-of text phase-handoff-header)
+             (str/index-of text review-feedback-header))))))
+
+(deftest ^{:stratum 0} task->text-verify-failures-test
+  (testing "includes verify failures with test-results"
+    (let [text (implementer/task->text
+                 {:task/description "Fix failing tests"
+                  :task/verify-failures
+                  {:test-results {:passed? false
+                                  :test-count 5
+                                  :fail-count 2
+                                  :error-count 0}
+                   :test-output "FAIL in (login-test)\nexpected: 200\n  actual: 401"}})]
+      (is (str/includes? text "## Test Failures (MUST FIX)"))
+      (is (str/includes? text "Test results:"))
+      (is (str/includes? text ":fail-count 2"))
+      (is (str/includes? text "FAIL in (login-test)"))
+      (is (str/includes? text "expected: 200"))))
+
+  (testing "includes verify failures without test-results"
+    (let [text (implementer/task->text
+                 {:task/description "Fix it"
+                  :task/verify-failures
+                  {:error "Verification timed out"}})]
+      (is (str/includes? text "## Test Failures (MUST FIX)"))
+      (is (str/includes? text "Verify failure details:"))
+      (is (str/includes? text "Verification timed out"))))
+
+  (testing "includes both review feedback and verify failures"
+    (let [text (implementer/task->text
+                 {:task/description "Fix everything"
+                  :task/review-feedback "Add input validation"
+                  :task/verify-failures
+                  {:test-results {:passed? false :fail-count 1}}})]
+      (is (str/includes? text "## Review Feedback (MUST FIX)"))
+      (is (str/includes? text "Add input validation"))
+      (is (str/includes? text "## Test Failures (MUST FIX)"))
+      (is (str/includes? text ":fail-count 1"))))
+
+  (testing "no verify section when verify-failures is nil"
+    (let [text (implementer/task->text {:task/description "Normal task"})]
+      (is (not (str/includes? text "Test Failures"))))))
+
+;; Repair tests
+(deftest ^{:stratum 0} implementer-repair-test
+  (testing "repairs missing ID"
+    (let [agent (implementer/create-implementer)
+          bad-artifact {:code/files [{:path "src/test.clj"
+                                      :content "(ns test)"
+                                      :action :create}]}
+          result (core/repair agent bad-artifact {:code/id ["required"]} {})]
+      (is (response/success? result))
+      (is (uuid? (get-in result [:output :code/id])))))
+
+  (testing "adds content to empty :create files"
+    (let [agent (implementer/create-implementer)
+          bad-artifact {:code/id (random-uuid)
+                        :code/files [{:path "src/empty.clj"
+                                      :content ""
+                                      :action :create}]}
+          result (core/repair agent bad-artifact {:files ["empty content"]} {})]
+      (is (response/success? result))
+      (is (seq (get-in result [:output :code/files 0 :content])))
+      (is (:valid? (implementer/validate-code-artifact (:output result)))))))
+
+;; Full cycle tests
+(deftest ^{:stratum 0} implementer-cycle-test
+  (testing "full invoke-validate cycle fails without LLM (no silent fallback)"
+    (let [agent (implementer/create-implementer)
+          result (core/cycle-agent agent {} {:task/description "Create a helper function"
+                                              :task/type :implement})]
+      (is (= :error (:status result))))))
+
+;; Tool-disallow-list — role-scoped restriction forcing the implementer onto
+;; the MCP context cache (Fable #4 context side). Mirrors planner/tester.
+(deftest ^{:stratum 0} implementer-disallowed-tools-contents-test
+  (testing "names the native read/search tools (forced onto context_*)"
+    (let [dt @#'implementer/implementer-disallowed-tools]
+      (doseq [t ["Read" "Grep" "Glob" "LS" "Agent"]]
+        (is (some #{t} dt) (str "expected " t " in disallowed-tools")))))
+
+  (testing "does NOT include the write tools — the implementer's whole job"
+    (let [dt @#'implementer/implementer-disallowed-tools]
+      (doseq [t ["Write" "Edit" "MultiEdit"]]
+        (is (nil? (some #{t} dt)) (str t " must stay allowed")))))
+
+  (testing "does NOT include the MCP context tools"
+    (let [dt @#'implementer/implementer-disallowed-tools]
+      (doseq [t ["context_read" "context_grep" "context_glob"]]
+        (is (nil? (some #{t} dt)) (str "MCP tool " t " must NOT be disallowed")))))
+
+  (testing "does NOT (yet) include Bash — kept for build/git; tighten if dogfood
+            shows cat/rg-via-Bash cache evasion"
+    (is (nil? (some #{"Bash"} @#'implementer/implementer-disallowed-tools)))))
+
+(deftest ^{:stratum 0} task->text-gate-failures-test
+  (testing "a prior gate denial renders as an imperative repair section,
+            one line per error, gate-tagged"
+    (let [text (implementer/task->text
+                {:task/description "Rename the key"
+                 :task/gate-failures
+                 [{:gate :stale-references
+                   :errors [{:message "':skipped' was removed by this change but is still referenced by: bb.edn"}
+                            {:message "'read-ledger' was removed by this change but is still referenced by: tasks/report.clj"}]}]})]
+      (is (str/includes? text "Gate denial"))
+      (is (str/includes? text "[stale-references] ':skipped'"))
+      (is (str/includes? text "tasks/report.clj"))
+      (is (str/includes? text "DENIED by deterministic gates"))))
+  (testing "absent gate failures render nothing"
+    (is (not (str/includes?
+              (implementer/task->text {:task/description "x"})
+              "Gate denial")))))
+
+(deftest ^{:stratum 0} invoke-worktree-metadata-already-implemented-test
+  (testing "worktree metadata artifact is canonical for already-implemented outcomes"
+    (let [[logger _] (log/collecting-logger {:min-level :trace})
+          response {:success false
+                    :content "Plan submitted but no final artifact text"
+                    :tokens 7
+                    :cost-usd 0.01
+                    :error {:type "cli_error"
+                            :message "artifact file not found"}}
+          result (with-redefs [artifact-session/with-session
+                               (fn [_context body-fn]
+                                 {:llm-result (body-fn {})
+                                  :artifact nil
+                                  :worktree-artifacts {:implement {:status :already-implemented
+                                                                   :summary "found in worktree metadata"}}
+                                  :context-misses nil
+                                  :pre-session-snapshot {:untracked #{}
+                                                         :modified #{}
+                                                         :deleted #{}
+                                                         :added #{}}
+                                  :session-mode :host})
+                               budget/resolve-cost-budget-usd
+                               (fn [& _] 1.0)
+                               llm/chat
+                               (fn [& _] response)
+                               file-artifacts/collect-written-files
+                               (fn [_ _] nil)
+                               file-artifacts/collect-worktree-files
+                               (fn [_ _] nil)]
+                   (@#'implementer/invoke-with-llm
+                    nil "prompt" "system" {} {} nil logger [] {}))]
+      (is (= :already-implemented (:status result)))
+      (is (= "found in worktree metadata" (:summary result)))
+      (is (= [] (get-in result [:output :code/files]))))))
+
+;------------------------------------------------------------------------------ Layer 1
+
+;; Invoke tests
+(deftest ^{:stratum 1} implementer-invoke-test
   (testing "fails explicitly without LLM backend (no silent fallback)"
     (let [agent (implementer/create-implementer)
           result (core/invoke agent
@@ -359,44 +668,8 @@
       (is (= "done" (:summary result)))
       (is (= [] (get-in result [:output :code/files]))))))
 
-  (testing "worktree metadata artifact is canonical for already-implemented outcomes"
-    (let [[logger _] (log/collecting-logger {:min-level :trace})
-          response {:success false
-                    :content "Plan submitted but no final artifact text"
-                    :tokens 7
-                    :cost-usd 0.01
-                    :error {:type "cli_error"
-                            :message "artifact file not found"}}
-          result (with-redefs [artifact-session/with-session
-                               (fn [_context body-fn]
-                                 {:llm-result (body-fn {})
-                                  :artifact nil
-                                  :worktree-artifacts {:implement {:status :already-implemented
-                                                                   :summary "found in worktree metadata"}}
-                                  :context-misses nil
-                                  :pre-session-snapshot {:untracked #{}
-                                                         :modified #{}
-                                                         :deleted #{}
-                                                         :added #{}}
-                                  :session-mode :host})
-                               budget/resolve-cost-budget-usd
-                               (fn [& _] 1.0)
-                               llm/chat
-                               (fn [& _] response)
-                               file-artifacts/collect-written-files
-                               (fn [_ _] nil)
-                               file-artifacts/collect-worktree-files
-                               (fn [_ _] nil)]
-                   (@#'implementer/invoke-with-llm
-                    nil "prompt" "system" {} {} nil logger [] {}))]
-      (is (= :already-implemented (:status result)))
-      (is (= "found in worktree metadata" (:summary result)))
-      (is (= [] (get-in result [:output :code/files])))))
-
-;------------------------------------------------------------------------------ Layer 3
 ;; Validation tests
-
-(deftest validate-code-artifact-test
+(deftest ^{:stratum 1} validate-code-artifact-test
   (testing "valid artifact passes validation"
     (let [result (implementer/validate-code-artifact valid-code-artifact)]
       (is (:valid? result))
@@ -430,90 +703,8 @@
           result (implementer/validate-code-artifact bad-artifact)]
       (is (not (:valid? result))))))
 
-;------------------------------------------------------------------------------ Layer 3b
-;; Session checkpoint — iter-24 regression
-
-(deftest session-checkpoint-is-stored-under-gitignored-directory
-  (testing "the checkpoint lives under .miniforge/, not at the worktree root"
-    ;; Iter-24 receipt: the old `.miniforge-session-id` path at the worktree
-    ;; root was committed into git, so every fresh sub-workflow worktree
-    ;; inherited a stale UUID. Passing `--resume <stale>` to Claude CLI
-    ;; killed the session in ~5s with no output. Parent `.miniforge/` is
-    ;; already gitignored in this repo, so moving the file there decouples
-    ;; the runtime checkpoint from source control automatically.
-    (let [write! @#'implementer/write-session-checkpoint!
-          read  @#'implementer/read-session-checkpoint
-          tmp   (java.io.File/createTempFile "mf-wt-" "")]
-      (.delete tmp) (.mkdirs tmp)
-      (try
-        (let [wt (.getPath tmp)]
-          (is (nil? (read wt))
-              "a fresh worktree with no checkpoint reads nil")
-          (write! wt "sess-123")
-          (is (.exists (io/file wt ".miniforge" "session-id"))
-              "the checkpoint MUST be written under .miniforge/ (gitignored)")
-          (is (not (.exists (io/file wt ".miniforge-session-id")))
-              "the legacy root path MUST NOT be used — it gets committed")
-          (is (= "sess-123" (read wt))
-              "round-trip: write then read returns the session id"))
-        (finally
-          (io/delete-file
-            (io/file tmp ".miniforge" "session-id") true)
-          (io/delete-file
-            (io/file tmp ".miniforge") true)
-          (.delete tmp))))))
-
-(deftest read-session-checkpoint-tolerates-garbage
-  (testing "blank content and read errors produce nil, not a bad --resume id"
-    (let [write! @#'implementer/write-session-checkpoint!
-          read  @#'implementer/read-session-checkpoint
-          tmp   (java.io.File/createTempFile "mf-wt-" "")]
-      (.delete tmp) (.mkdirs tmp)
-      (try
-        (write! (.getPath tmp) "   \n  ")
-        (is (nil? (read (.getPath tmp)))
-            "blank/whitespace content must read as nil — never fed to --resume")
-        (finally
-          (io/delete-file
-            (io/file tmp ".miniforge" "session-id") true)
-          (io/delete-file
-            (io/file tmp ".miniforge") true)
-          (.delete tmp))))))
-
-(deftest base-ref-candidates-avoid-ambiguous-branch-names
-  (testing "bare branch names are not used as diff bases"
-    (let [candidates (@#'implementer/base-ref-candidates
-                      {:execution/environment-metadata {:base-sha "abc123"
-                                                        :base-branch "main"}})]
-      (is (= ["abc123"
-              "refs/remotes/origin/main"
-              "origin/main"
-              "refs/heads/main"]
-             candidates))
-      (is (not (contains? (set candidates) "main"))))))
-
-(deftest base-ref-candidates-use-resume-merge-base-ranges
-  (testing "resumed workspaces compare the original spec base to restored HEAD"
-    (let [candidates (@#'implementer/base-ref-candidates
-                      {:execution/environment-metadata {:base-sha "task-sha"
-                                                        :base-branch "task-restored"}
-                       :execution/opts {:resume-workspace {:branch "task-restored"}}
-                       :execution/input {:context {:git-commit "spec-sha"
-                                                   :git-branch "dogfood/source"}}})]
-      (is (= ["spec-sha...HEAD"
-              "refs/remotes/origin/dogfood/source...HEAD"
-              "origin/dogfood/source...HEAD"
-              "refs/heads/dogfood/source...HEAD"
-              "task-sha"
-              "refs/remotes/origin/task-restored"
-              "origin/task-restored"
-              "refs/heads/task-restored"]
-             candidates)))))
-
-;------------------------------------------------------------------------------ Layer 4
 ;; Utility tests
-
-(deftest code-summary-test
+(deftest ^{:stratum 1} code-summary-test
   (testing "returns code summary"
     (let [summary (implementer/code-summary valid-code-artifact)]
       (is (uuid? (:id summary)))
@@ -521,193 +712,6 @@
       (is (map? (:actions summary)))
       (is (string? (:language summary)))
       (is (boolean? (:tests-needed? summary))))))
-
-(deftest files-by-action-test
-  (testing "groups files by action"
-    (let [artifact {:code/files [{:path "a.clj" :content "" :action :create}
-                                 {:path "b.clj" :content "" :action :modify}
-                                 {:path "c.clj" :content "" :action :create}]}
-          grouped (implementer/files-by-action artifact)]
-      (is (= 2 (count (:create grouped))))
-      (is (= 1 (count (:modify grouped)))))))
-
-(deftest total-lines-test
-  (testing "counts total lines of code"
-    (let [artifact {:code/files [{:path "a.clj"
-                                  :content "line1\nline2\nline3"
-                                  :action :create}
-                                 {:path "b.clj"
-                                  :content "line1\nline2"
-                                  :action :modify}]}
-          lines (implementer/total-lines artifact)]
-      (is (= 5 lines))))
-
-  (testing "excludes deleted files from count"
-    (let [artifact {:code/files [{:path "a.clj"
-                                  :content "line1\nline2"
-                                  :action :create}
-                                 {:path "b.clj"
-                                  :content "should not count"
-                                  :action :delete}]}
-          lines (implementer/total-lines artifact)]
-      (is (= 2 lines)))))
-
-;------------------------------------------------------------------------------ Layer 5
-;; task->text tests
-
-(deftest task->text-basic-test
-  (testing "string task passes through"
-    (is (= "hello" (implementer/task->text "hello"))))
-
-  (testing "map task uses :task/description"
-    (is (= "Implement login"
-           (implementer/task->text {:task/description "Implement login"}))))
-
-  (testing "includes plan when present"
-    (let [text (implementer/task->text {:task/description "Do thing"
-                                        :task/plan "Step 1: foo\nStep 2: bar"})]
-      (is (str/includes? text "Do thing"))
-      (is (str/includes? text "## Plan"))
-      (is (str/includes? text "Step 1: foo"))))
-
-  (testing "includes intent when present"
-    (let [text (implementer/task->text {:task/description "Do thing"
-                                        :task/intent {:scope ["src/core.clj"]}})]
-      (is (str/includes? text "## Intent"))
-      (is (str/includes? text "src/core.clj")))))
-
-(deftest task->text-review-feedback-test
-  (testing "includes review feedback as string"
-    (let [text (implementer/task->text {:task/description "Fix it"
-                                        :task/review-feedback "Missing error handling in login"})]
-      (is (str/includes? text "## Review Feedback (MUST FIX)"))
-      (is (str/includes? text "Missing error handling in login"))))
-
-  (testing "includes review feedback as map"
-    (let [text (implementer/task->text {:task/description "Fix it"
-                                        :task/review-feedback {:issues ["no validation" "no tests"]}})]
-      (is (str/includes? text "## Review Feedback (MUST FIX)"))
-      (is (str/includes? text "no validation")))))
-
-(deftest task->text-phase-handoff-test
-  (testing "includes phase handoff before review feedback"
-    (let [phase-handoff-header (str "## " (messages/t :prompt/phase-handoff-header))
-          review-feedback-header (str "## " (messages/t :prompt/review-feedback-header))
-          missing-group-summary "GROUP 3 missing"
-          missing-group-id "GROUP 3"
-          fallback-feedback "Fallback feedback"
-          task-description "Fix it"
-          handoff {:frame/kind :repair-request
-                   :frame/body {:repair/findings
-                                [{:finding/summary missing-group-summary
-                                  :finding/group-id missing-group-id
-                                  :finding/severity :blocking}]}}
-          text (implementer/task->text {:task/description task-description
-                                        :task/phase-handoff handoff
-                                        :task/review-feedback fallback-feedback})]
-      (is (str/includes? text phase-handoff-header))
-      (is (str/includes? text missing-group-summary))
-      (is (str/includes? text (messages/t :prompt/phase-handoff-group-label)))
-      (is (not (str/includes? text ":frame/kind")))
-      (is (< (str/index-of text phase-handoff-header)
-             (str/index-of text review-feedback-header))))))
-
-(deftest task->text-verify-failures-test
-  (testing "includes verify failures with test-results"
-    (let [text (implementer/task->text
-                 {:task/description "Fix failing tests"
-                  :task/verify-failures
-                  {:test-results {:passed? false
-                                  :test-count 5
-                                  :fail-count 2
-                                  :error-count 0}
-                   :test-output "FAIL in (login-test)\nexpected: 200\n  actual: 401"}})]
-      (is (str/includes? text "## Test Failures (MUST FIX)"))
-      (is (str/includes? text "Test results:"))
-      (is (str/includes? text ":fail-count 2"))
-      (is (str/includes? text "FAIL in (login-test)"))
-      (is (str/includes? text "expected: 200"))))
-
-  (testing "includes verify failures without test-results"
-    (let [text (implementer/task->text
-                 {:task/description "Fix it"
-                  :task/verify-failures
-                  {:error "Verification timed out"}})]
-      (is (str/includes? text "## Test Failures (MUST FIX)"))
-      (is (str/includes? text "Verify failure details:"))
-      (is (str/includes? text "Verification timed out"))))
-
-  (testing "includes both review feedback and verify failures"
-    (let [text (implementer/task->text
-                 {:task/description "Fix everything"
-                  :task/review-feedback "Add input validation"
-                  :task/verify-failures
-                  {:test-results {:passed? false :fail-count 1}}})]
-      (is (str/includes? text "## Review Feedback (MUST FIX)"))
-      (is (str/includes? text "Add input validation"))
-      (is (str/includes? text "## Test Failures (MUST FIX)"))
-      (is (str/includes? text ":fail-count 1"))))
-
-  (testing "no verify section when verify-failures is nil"
-    (let [text (implementer/task->text {:task/description "Normal task"})]
-      (is (not (str/includes? text "Test Failures"))))))
-
-;------------------------------------------------------------------------------ Layer 6
-;; Repair tests
-
-(deftest implementer-repair-test
-  (testing "repairs missing ID"
-    (let [agent (implementer/create-implementer)
-          bad-artifact {:code/files [{:path "src/test.clj"
-                                      :content "(ns test)"
-                                      :action :create}]}
-          result (core/repair agent bad-artifact {:code/id ["required"]} {})]
-      (is (response/success? result))
-      (is (uuid? (get-in result [:output :code/id])))))
-
-  (testing "adds content to empty :create files"
-    (let [agent (implementer/create-implementer)
-          bad-artifact {:code/id (random-uuid)
-                        :code/files [{:path "src/empty.clj"
-                                      :content ""
-                                      :action :create}]}
-          result (core/repair agent bad-artifact {:files ["empty content"]} {})]
-      (is (response/success? result))
-      (is (seq (get-in result [:output :code/files 0 :content])))
-      (is (:valid? (implementer/validate-code-artifact (:output result)))))))
-
-;------------------------------------------------------------------------------ Layer 6
-;; Full cycle tests
-
-(deftest implementer-cycle-test
-  (testing "full invoke-validate cycle fails without LLM (no silent fallback)"
-    (let [agent (implementer/create-implementer)
-          result (core/cycle-agent agent {} {:task/description "Create a helper function"
-                                              :task/type :implement})]
-      (is (= :error (:status result))))))
-
-;; Tool-disallow-list — role-scoped restriction forcing the implementer onto
-;; the MCP context cache (Fable #4 context side). Mirrors planner/tester.
-
-(deftest implementer-disallowed-tools-contents-test
-  (testing "names the native read/search tools (forced onto context_*)"
-    (let [dt @#'implementer/implementer-disallowed-tools]
-      (doseq [t ["Read" "Grep" "Glob" "LS" "Agent"]]
-        (is (some #{t} dt) (str "expected " t " in disallowed-tools")))))
-
-  (testing "does NOT include the write tools — the implementer's whole job"
-    (let [dt @#'implementer/implementer-disallowed-tools]
-      (doseq [t ["Write" "Edit" "MultiEdit"]]
-        (is (nil? (some #{t} dt)) (str t " must stay allowed")))))
-
-  (testing "does NOT include the MCP context tools"
-    (let [dt @#'implementer/implementer-disallowed-tools]
-      (doseq [t ["context_read" "context_grep" "context_glob"]]
-        (is (nil? (some #{t} dt)) (str "MCP tool " t " must NOT be disallowed")))))
-
-  (testing "does NOT (yet) include Bash — kept for build/git; tighten if dogfood
-            shows cat/rg-via-Bash cache evasion"
-    (is (nil? (some #{"Bash"} @#'implementer/implementer-disallowed-tools)))))
 
 ;------------------------------------------------------------------------------ Rich Comment
 (comment

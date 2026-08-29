@@ -151,6 +151,20 @@
        (when-let [test-output (:test-output verify-failures)]
          (str "\n\n" (messages/t :prompt/test-output-label) "\n" test-output))))
 
+(defn- ^{:stratum 0} format-gate-failures-section
+  "Format a prior attempt's gate denial as an imperative repair section.
+   These are DETERMINISTIC checks: the same change resubmitted unchanged
+   is denied again, so the section leads and reads as instructions."
+  [gate-failures]
+  (str "\n\n## " (messages/t :prompt/gate-failures-header) "\n\n"
+       (messages/t :prompt/gate-failures-intro) "\n\n"
+       (str/join "\n"
+                 (for [{:keys [gate errors]} gate-failures
+                       error errors]
+                   (str "- [" (name (or gate :unknown)) "] "
+                        (or (:message error) (pr-str error)))))
+       "\n"))
+
 (defn- ^{:stratum 0} format-prior-attempts-section
   "Format prior attempt context as a prominent warning section."
   [{:keys [attempt-number prior-error instruction]}]
@@ -664,10 +678,13 @@
                       phase-handoff (:task/phase-handoff task)
                       review-feedback (:task/review-feedback task)
                       verify-failures (:task/verify-failures task)
+                      gate-failures (:task/gate-failures task)
                       prior-attempts (:task/prior-attempts task)
                       parts (cond-> []
                               prior-attempts
                               (conj (format-prior-attempts-section prior-attempts))
+                              (seq gate-failures)
+                              (conj (format-gate-failures-section gate-failures))
                               phase-handoff
                               (conj (format-phase-handoff-section phase-handoff))
                               desc

@@ -504,6 +504,13 @@
                             :implement {:task {:task/intent (:intent input)}})
         review-feedback (resolve-review-feedback ctx)
         phase-handoff (resolve-phase-handoff ctx)
+        ;; A prior implement attempt DENIED by gates: its structured gate
+        ;; errors ride :execution/phase-results (the [:phase ...] channel
+        ;; is cleared before every step). This is what turns a gate from
+        ;; a wall into a repair instruction — deny, retry with the
+        ;; evidence, fix, pass.
+        gate-failures (seq (get-in ctx [:execution/phase-results
+                                        :implement :phase/gate-failures]))
         {:keys [formatted manifest]} (kb-helpers/inject-with-manifest
                                        (:knowledge-store ctx) :implementer (get input :tags []))
         base-task (assoc-optional-task-fields
@@ -522,6 +529,8 @@
         task (cond-> base-task
                verify-failure
                (assoc :task/verify-failures (build-verify-failures verify-failure))
+               gate-failures
+               (assoc :task/gate-failures (vec gate-failures))
                review-feedback
                (assoc :task/review-feedback review-feedback)
                phase-handoff
