@@ -100,6 +100,21 @@
       (not (and (string? statement) (not (str/blank? statement))))
       [:blank-statement {:statement statement}])))
 
+(defn- ^{:stratum 0} proposed-specs
+  "Every object specification the operations of one transaction ask to
+   create, in the order the payload lists them.
+
+   Operations whose `:creates` is not a sequence are skipped rather than
+   interpreted: `check-creates` refuses that shape on its own behalf, and
+   reading specs out of a payload whose shape is unestablished is how a
+   validator ends up reporting the wrong fault."
+  [operations]
+  (for [operation operations
+        :let [creates (get operation :creates)]
+        :when (sequential? creates)
+        spec creates]
+    spec))
+
 (defn ^{:stratum 0} validate-operation
   "Run `stages` against one operation in order, returning the first anomaly
    or nil. `context` carries :role and :basis from the enclosing transaction."
@@ -141,15 +156,27 @@
    The id collisions are the same gap without the crash. `insert-created`
    writes with `assoc-in`, so a create at an id that already exists replaces
    it outright — the previous type, status, statement and links are gone,
-   and every edge pointing at that id now resolves to the new object. Both
-   directions are refused: against the objects the workspace already holds,
-   and against the other specs in this same `:creates`, where the reduce
-   would otherwise let a later spec quietly overwrite an earlier one.
+   and every edge pointing at that id now resolves to the new object.
 
-   Collisions with a create in a SIBLING operation of the same transaction
-   are still undetected: `validate-operation` sees one operation at a time,
-   and blaming either of the two for the other's id would be arbitrary."
-  [workspace operation _context]
+   Two directions are refused, and the second reads the whole transaction
+   rather than this operation alone. `commit` reduces every operation onto
+   one accumulator, so two creates at one id overwrite each other whether
+   they sit in one `:creates` vector or in two operations of the same
+   transaction — one rule, not two. Reading only this operation would have
+   left the cross-operation half of an identical failure admitted.
+
+   Blaming one of the two operations was the objection to checking it, and
+   it does not survive contact: a rejected transaction is discarded whole
+   (§3.4), so no operation is being singled out for a penalty. What the
+   anomaly carries is where the pipeline noticed, and the message says the
+   transaction is at fault. `:tx/operations` is a vector, so which operation
+   notices is fixed by the payload rather than by iteration order.
+
+   Only specs the engine could construct are counted. A sibling carrying
+   two id-less specs would otherwise collide with itself at the id nil and
+   be reported as a duplicate, when the fault it will be rejected for on
+   its own turn is the missing id."
+  [workspace operation context]
   (let [creates (get operation :creates)
         known (objects-of workspace)]
     (cond
@@ -169,12 +196,15 @@
                             (merge {:op (:op operation) :reason reason :id (:id spec)}
                                    data))))
                 creates)
-          (when-let [repeated (seq (for [[id n] (frequencies (map :id creates))
-                                         :when (> n 1)]
-                                     id))]
-            (reject :conflict :anomalies.deliberation/duplicate-object-id
-                    "Operation creates more than one object at the same id"
-                    {:op (:op operation) :ids (vec repeated)}))
+          (let [ids (->> (get context :siblings [operation])
+                         proposed-specs
+                         (remove creation-defect)
+                         (map :id))
+                counts (frequencies ids)]
+            (when-let [repeated (seq (distinct (filter #(< 1 (get counts %)) ids)))]
+              (reject :conflict :anomalies.deliberation/duplicate-object-id
+                      "Transaction creates more than one object at the same id"
+                      {:op (:op operation) :ids (vec repeated)})))
           (when-let [taken (seq (filter #(contains? known (:id %)) creates))]
             (reject :conflict :anomalies.deliberation/duplicate-object-id
                     "Operation creates objects at ids the workspace already holds"

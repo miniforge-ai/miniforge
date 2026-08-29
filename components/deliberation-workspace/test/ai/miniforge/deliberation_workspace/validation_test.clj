@@ -297,6 +297,51 @@
                                           :creates [{:type :claim :statement "s"}]}))
                :anomaly/data :reason)))))
 
+(deftest ^{:stratum 1} a-transaction-may-not-create-two-objects-at-one-id
+  (testing "commit reduces every operation onto one accumulator, so siblings collide too"
+    (let [rejection (validate-tx
+                     (workspace)
+                     (transaction :proposer 10
+                                  {:op :assert-claim
+                                   :creates [{:id "claim-1" :type :claim
+                                              :statement "first"}]}
+                                  {:op :add-question
+                                   :creates [{:id "claim-1" :type :question
+                                              :statement "second"}]}))]
+      (is (= :anomalies.deliberation/duplicate-object-id (subtype-of rejection)))
+      (is (= ["claim-1"] (:ids (:anomaly/data rejection))))))
+  (testing "distinct ids across sibling operations are fine"
+    (is (nil? (validate-tx
+               (workspace)
+               (transaction :proposer 10
+                            {:op :assert-claim
+                             :creates [{:id "claim-1" :type :claim
+                                        :statement "first"}]}
+                            {:op :add-question
+                             :creates [{:id "question-1" :type :question
+                                        :statement "second"}]})))))
+  (testing "id-less specs in a sibling are its own fault, not a collision at nil"
+    (is (= :blank-id
+           (-> (validate-tx (workspace)
+                            (transaction :proposer 10
+                                         {:op :assert-claim
+                                          :creates [{:id "claim-1" :type :claim
+                                                     :statement "s"}]}
+                                         {:op :add-question
+                                          :creates [{:type :question :statement "a"}
+                                                    {:type :question :statement "b"}]}))
+               :anomaly/data :reason))))
+  (testing "a sibling whose :creates has no usable shape is skipped, not guessed at"
+    (is (= :malformed-creates
+           (-> (validate-tx (workspace)
+                            (transaction :proposer 10
+                                         {:op :assert-claim :creates 5}
+                                         {:op :add-question
+                                          :creates [{:id "question-1" :type :question
+                                                     :statement "s"}]}))
+               :anomaly/data :reason))
+        "the shape fault is reported rather than a collision read out of it")))
+
 (deftest ^{:stratum 1} one-operation-may-not-create-two-objects-at-one-id
   (testing "insert-created reduces, so the later spec would overwrite the earlier"
     (is (= :anomalies.deliberation/duplicate-object-id
