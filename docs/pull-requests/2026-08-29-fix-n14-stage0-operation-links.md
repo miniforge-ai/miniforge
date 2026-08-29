@@ -11,10 +11,10 @@ three in the validation pipeline, as anomalies routed by subtype.
 
 [#1851](https://github.com/miniforge-ai/miniforge/pull/1851) added
 `check-creates`, which reads the `:creates` payload of an operation, and
-`assert-known-targets`, which fails fast on a target commit should never see.
-It deliberately left three gaps, all of the same class: input an activation
-controls, reaching the engine as an exception or as graph corruption instead of
-as a routable rejection.
+`assert-known-targets`, which fails fast on a target that commit should never
+see. It deliberately left three gaps, all of the same class: input that an
+activation controls, reaching the engine as an exception or as graph corruption
+rather than as a routable rejection.
 
 Reproduced on 2026-08-27 and again on 2026-08-29 against `f2b0382e0`:
 
