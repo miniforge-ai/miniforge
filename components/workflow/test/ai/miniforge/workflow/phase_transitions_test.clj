@@ -286,7 +286,41 @@
           "self-redirect must NOT route to transition-to-failed-fn")
       (is (= 1 (:execution/redirect-count out))
           "the redirect counter must have moved — that is what proves the
-           guarded branch ran rather than a swallowed no-op"))))
+           guarded branch ran rather than a swallowed no-op")
+      (is (= (workflow-fsm/current-state (:execution/fsm-state ctx))
+             (workflow-fsm/current-state (:execution/fsm-state out)))
+          "the state id is UNCHANGED — this is the same-state case the
+           validity rule exists for; a state-changing redirect would not
+           exercise it"))))
+
+(deftest ^{:stratum 1} apply-phase-transition-infra-self-retry-is-a-valid-transition
+  (testing "the infra-retry self-branch goes through the same wrapper:
+            an infrastructure verdict must return the advanced ctx with
+            the infra counter moved, not route to failure — this branch
+            was equally dead under the state-id-delta rule"
+    (let [wf {:workflow/id :infra-self-retry-test
+              :workflow/version "1.0.0"
+              :workflow/pipeline [{:phase :implement}]}
+          machine (workflow-fsm/compile-execution-machine wf)
+          state (->> (workflow-fsm/initialize-execution machine)
+                     (workflow-fsm/start-execution machine))
+          ctx {:execution/fsm-machine machine
+               :execution/fsm-state state
+               :execution/redirect-count 0
+               :execution/errors []
+               :execution/response-chain {:operation :infra-self-retry-test
+                                          :responses []}}
+          out (exec/apply-phase-transition
+               ctx {:type :phase/fail :phase/verdict :verify/timeout}
+               [] identity always-fail)]
+      (is (nil? (:test/transition-to-failed-called? out))
+          "infra self-retry must NOT route to transition-to-failed-fn")
+      (is (= (workflow-fsm/current-state (:execution/fsm-state ctx))
+             (workflow-fsm/current-state (:execution/fsm-state out)))
+          "same state — retry-same-phase")
+      (is (= 1 (get (fsm/context (:execution/fsm-state out))
+                    :infra-retry-count))
+          "the infra counter moved — the guarded branch ran"))))
 
 ;------------------------------------------------------------------------------ Layer 2
 
