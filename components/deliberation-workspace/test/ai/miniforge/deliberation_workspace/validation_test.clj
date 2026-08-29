@@ -331,6 +331,21 @@
                                           :creates [{:type :question :statement "a"}
                                                     {:type :question :statement "b"}]}))
                :anomaly/data :reason))))
+  (testing "an unconstructable sibling spec is its own fault, whichever field is wrong"
+    (let [rejection (validate-tx
+                     (workspace)
+                     (transaction :proposer 10
+                                  {:op :assert-claim
+                                   :creates [{:id "claim-1" :type :claim
+                                              :statement "s"}]}
+                                  {:op :add-question
+                                   :creates [{:id "question-1" :type :question
+                                              :statement "a" :links {:bogus #{"x"}}}
+                                             {:id "question-1" :type :question
+                                              :statement "b" :links {:bogus #{"x"}}}]}))]
+      (is (= :anomalies.deliberation/invalid-creation (subtype-of rejection)))
+      (is (= :unknown-link-type (:reason (:anomaly/data rejection)))
+          "a spec that never reaches insert-created cannot collide with anything")))
   (testing "a sibling whose :creates has no usable shape is skipped, not guessed at"
     (is (= :malformed-creates
            (-> (validate-tx (workspace)

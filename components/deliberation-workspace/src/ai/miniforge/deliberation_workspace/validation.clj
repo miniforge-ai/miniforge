@@ -148,12 +148,17 @@
    The transaction is what a collision faults, and it is discarded whole
    (§3.4); `:op` records where the pipeline noticed. `:tx/operations` is a
    vector, so which operation notices is fixed by the payload, and `:ids`
-   is ordered by first appearance. Only specs the engine could construct
-   are counted, so a sibling's id-less specs are its own `:blank-id`
-   rejection rather than a collision at nil."
+   is ordered by first appearance.
+
+   Only specs that would reach the graph are counted, read by the same
+   `defect` the per-spec scan reports on. A defective spec never reaches
+   `insert-created`, so counting one invents a collision whose blame lands
+   on whichever operation the scan happens to run first, ahead of the
+   defect its own operation would report."
   [workspace operation context]
   (let [creates (get operation :creates)
-        known (objects-of workspace)]
+        known (objects-of workspace)
+        defect (fn [spec] (or (creation-defect spec) (link-defect (:links spec))))]
     (cond
       (nil? creates) nil
 
@@ -164,8 +169,7 @@
 
       :else
       (or (some (fn [spec]
-                  (when-let [[reason data] (or (creation-defect spec)
-                                               (link-defect (:links spec)))]
+                  (when-let [[reason data] (defect spec)]
                     (reject :invalid-input :anomalies.deliberation/invalid-creation
                             "Operation creates an object the engine cannot construct"
                             (merge {:op (:op operation) :reason reason :id (:id spec)}
@@ -173,7 +177,7 @@
                 creates)
           (let [ids (->> (get context :siblings [operation])
                          proposed-specs
-                         (remove creation-defect)
+                         (remove defect)
                          (map :id))
                 counts (frequencies ids)]
             (when-let [repeated (seq (distinct (filter #(< 1 (get counts %)) ids)))]
