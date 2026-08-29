@@ -44,18 +44,16 @@
 
 (defn- ^{:stratum 0} link-defect
   "The first structural defect in a `:links` map, as `[reason data]`, or nil
-   when the engine can write every edge the map declares.
+   when the engine can write every edge the map declares: a map, keyed by
+   `object/link-types`, each value a collection of object ids.
 
-   Two callers read `:links`. `object/new-object` reads the map on a
-   `:creates` spec, and `commit/apply-links` reads the one an operation
-   carries itself; both reach `object/add-link`, which throws
-   IllegalArgumentException on an edge outside `object/link-types`, and both
-   walk each destination as a collection. One definition keeps the two paths
-   from forming different opinions about the same payload.
+   The one reading for both writers of `:links` — `object/new-object` on a
+   `:creates` spec, `commit/apply-links` on the map an operation carries
+   itself.
 
-   Total over arbitrary EDN: `keys` throws on a non-map, so that check
-   guards the two after it. A validator that crashes on the input it exists
-   to refuse would move the crash rather than remove it."
+   Total over arbitrary EDN, `keys` on a non-map included: a validator that
+   crashes on the input it exists to refuse moves the crash rather than
+   removing it."
   [links]
   (let [mapped? (or (nil? links) (map? links))
         unknown-edges (when mapped? (seq (remove object/link-types (keys links))))
@@ -74,19 +72,14 @@
   "The first structural defect in a `:creates` specification, as
    `[reason data]`, or nil when the engine can construct the object.
 
-   Covers the fields `object/new-object` throws on that belong to the spec
-   alone; [[link-defect]] is its sibling for the `:links` half, and
-   `check-creates` runs the two in order over each spec. They are separate
-   because an operation carries a `:links` map of its own with no spec
-   around it, and that map needs the same reading. Each predicate here is
-   total over arbitrary EDN.
+   Covers the fields belonging to the spec alone; [[link-defect]] is the
+   sibling reading for its `:links`, and `check-creates` runs the two in
+   order. Each predicate here is total over arbitrary EDN.
 
-   The id is required to be a non-blank string, which `new-object` does not
-   itself demand. Without it a spec with no `:id` lands in the object graph
-   under a nil key, and the collision check below — which reads `:id` — has
-   nothing to compare. Every id in the component is already a string, so
-   holding the graph to one key type costs nothing and keeps `:workspace/
-   objects` addressable."
+   The id must be a non-blank string, which `object/new-object` does not
+   itself demand: without one the object lands in `:workspace/objects` under
+   a nil key, and the collision checks below read `:id`. Holding the graph
+   to one key type keeps it addressable."
   [spec]
   (let [id (:id spec)
         statement (:statement spec)]
@@ -104,10 +97,10 @@
   "Every object specification the operations of one transaction ask to
    create, in the order the payload lists them.
 
-   Operations whose `:creates` is not a sequence are skipped rather than
-   interpreted: `check-creates` refuses that shape on its own behalf, and
-   reading specs out of a payload whose shape is unestablished is how a
-   validator ends up reporting the wrong fault."
+   Operations whose `:creates` is not a sequence are skipped, not
+   interpreted. `check-creates` refuses that shape on its own behalf, and
+   reading specs out of a payload of unestablished shape reports the wrong
+   fault."
   [operations]
   (for [operation operations
         :let [creates (get operation :creates)]
@@ -117,7 +110,8 @@
 
 (defn ^{:stratum 0} validate-operation
   "Run `stages` against one operation in order, returning the first anomaly
-   or nil. `context` carries :role and :basis from the enclosing transaction."
+   or nil. `context` carries :role, :basis and :siblings from the enclosing
+   transaction; stages reading :siblings must tolerate its absence here."
   [workspace operation context stages]
   (some #(% workspace operation context) stages))
 
@@ -132,50 +126,31 @@
 (defn- ^{:stratum 1} check-creates
   "N14 §3.2 conformance for the objects an operation asks to create.
 
-   `object/new-object` throws IllegalArgumentException on an unknown type, a
-   blank statement, or malformed `:links`. That contract is right for a
-   programmer error, but `:creates` carries agent-supplied data and no stage
-   inspected it: a transaction cleared validation and then crashed the engine
-   partway through commit. Those conditions are agent-reachable input, so
-   they belong here as a routable rejection.
+   `:creates` carries agent-supplied data that `object/new-object` and
+   `insert-created` both treat as a programmer error, so every condition
+   they throw on is a routable rejection here instead.
 
-   `:creates` must be a sequence. A map is `coll?` too, and reducing over
-   one yields MapEntries: `insert-created` would then `assoc` onto a
-   MapEntry and die on a non-integer key, while the per-spec checks below
-   would read nil out of every entry and blame `:blank-id` — a reason that
-   misroutes, because the payload's shape is what is wrong.
+   `:creates` must be sequential. A map is `coll?` too, and `insert-created`
+   reducing over one would `assoc` onto a MapEntry and die on a non-integer
+   key. A set is refused for determinism: the per-spec scan below reports
+   the FIRST defect it finds, and a set has no first, so the `:reason`
+   routing dispatches on would vary between runs over identical input.
+   Sorting one into an order is not available — the ids are exactly what
+   may be missing or malformed in the payloads this describes.
 
-   A set is refused for a different reason. Its elements would construct
-   correctly, but the scan below reports the FIRST defect it finds, and a
-   set has no first: two malformed specs in one payload could be blamed on
-   either, so the `:reason` routing dispatches on would vary between runs
-   over identical input. Sorting them back into an order is not available
-   here either — the ids are exactly what may be missing or malformed in
-   the payloads this has to describe.
+   Two collision directions are refused, both because `insert-created`
+   writes with `assoc-in`: a create at an id that already exists replaces
+   the object outright, and every edge pointing there resolves to the new
+   one. Against `:workspace/objects`, and against every other create in the
+   same transaction — `commit` reduces all operations onto one accumulator,
+   so one `:creates` vector and two sibling operations collide alike.
 
-   The id collisions are the same gap without the crash. `insert-created`
-   writes with `assoc-in`, so a create at an id that already exists replaces
-   it outright — the previous type, status, statement and links are gone,
-   and every edge pointing at that id now resolves to the new object.
-
-   Two directions are refused, and the second reads the whole transaction
-   rather than this operation alone. `commit` reduces every operation onto
-   one accumulator, so two creates at one id overwrite each other whether
-   they sit in one `:creates` vector or in two operations of the same
-   transaction — one rule, not two. Reading only this operation would have
-   left the cross-operation half of an identical failure admitted.
-
-   Blaming one of the two operations was the objection to checking it, and
-   it does not survive contact: a rejected transaction is discarded whole
-   (§3.4), so no operation is being singled out for a penalty. What the
-   anomaly carries is where the pipeline noticed, and the message says the
-   transaction is at fault. `:tx/operations` is a vector, so which operation
-   notices is fixed by the payload rather than by iteration order.
-
-   Only specs the engine could construct are counted. A sibling carrying
-   two id-less specs would otherwise collide with itself at the id nil and
-   be reported as a duplicate, when the fault it will be rejected for on
-   its own turn is the missing id."
+   The transaction is what a collision faults, and it is discarded whole
+   (§3.4); `:op` records where the pipeline noticed. `:tx/operations` is a
+   vector, so which operation notices is fixed by the payload, and `:ids`
+   is ordered by first appearance. Only specs the engine could construct
+   are counted, so a sibling's id-less specs are its own `:blank-id`
+   rejection rather than a collision at nil."
   [workspace operation context]
   (let [creates (get operation :creates)
         known (objects-of workspace)]
@@ -213,23 +188,15 @@
 (defn- ^{:stratum 1} check-links
   "N14 §3.2 conformance for the edges an operation writes onto its targets.
 
-   `check-creates` covers the `:links` of the objects an operation CREATES.
-   Nothing covered the map the operation carries at its own top level, and
-   `commit/apply-links` reduces over exactly that map: an edge outside
-   `object/link-types` reached `object/add-link` and threw
-   IllegalArgumentException partway through commit, after earlier operations
-   in the same transaction had already been applied to the accumulator.
+   `commit/apply-links` reduces over the operation's own `:links`, so the
+   map is held to the same contract `check-creates` holds a spec's `:links`
+   to: `object/add-link` throws on an edge outside `object/link-types`, and
+   a scalar destination dies in the inner `reduce`. A string destination is
+   the case worth naming, since it would not crash at all — `reduce` walks
+   its characters and writes one edge per letter.
 
-   The destinations are walked as a collection, so a scalar there dies in
-   `reduce` instead. A string is the case worth naming: it is not `coll?`,
-   and left admitted it would not crash at all — `reduce` would walk its
-   characters and write one edge per letter. A non-map `:links` reaches
-   neither, since destructuring `[edge destinations]` out of it throws
-   first.
-
-   All of it is agent-supplied payload, so it belongs here as a routable
-   rejection rather than as an exception — the same contract #1851 restored
-   one layer down."
+   Agent-supplied payload, so a violation is a routable rejection rather
+   than an exception."
   [_workspace operation _context]
   (when-let [[reason data] (link-defect (:links operation))]
     (reject :invalid-input :anomalies.deliberation/invalid-links
