@@ -258,6 +258,36 @@
    :pack/name  "Test Pack"
    :pack/rules [(policy-rule)]})
 
+(deftest ^{:stratum 1} apply-phase-transition-self-redirect-is-a-valid-transition
+  (testing "on-fail self-repair: a guarded :phase/fail whose redirect
+            branch targets the CURRENT phase must return the advanced ctx,
+            not route to failure — the state id is unchanged but the
+            statechart context's redirect counter moved. Observed live in
+            the trap-bench repair demonstration: :repair-requested with
+            :on-fail :implement died terminal because validity was
+            inferred from the state-id delta alone (which also disabled
+            the infra-retry self-branch)."
+    (let [wf {:workflow/id :self-redirect-test
+              :workflow/version "1.0.0"
+              :workflow/pipeline [{:phase :implement :on-fail :implement}]}
+          machine (workflow-fsm/compile-execution-machine wf)
+          state (->> (workflow-fsm/initialize-execution machine)
+                     (workflow-fsm/start-execution machine))
+          ctx {:execution/fsm-machine machine
+               :execution/fsm-state state
+               :execution/redirect-count 0
+               :execution/errors []
+               :execution/response-chain {:operation :self-redirect-test
+                                          :responses []}}
+          out (exec/apply-phase-transition
+               ctx {:type :phase/fail :phase/verdict :repair-requested}
+               [] identity always-fail)]
+      (is (nil? (:test/transition-to-failed-called? out))
+          "self-redirect must NOT route to transition-to-failed-fn")
+      (is (= 1 (:execution/redirect-count out))
+          "the redirect counter must have moved — that is what proves the
+           guarded branch ran rather than a swallowed no-op"))))
+
 ;------------------------------------------------------------------------------ Layer 2
 
 ;; Phase 4b removed `apply-phase-transition-redirect-over-budget-
