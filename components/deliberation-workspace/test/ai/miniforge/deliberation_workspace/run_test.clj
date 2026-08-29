@@ -170,6 +170,24 @@
     (is (= :conflict (:reason event)))
     (is (= "conflict-1" (:target event)) "the trigger must be auditable")))
 
+(deftest ^{:stratum 2} an-edge-the-engine-cannot-write-is-routed-not-thrown
+  (testing "the operation's own :links reach the event log as a subtype too"
+    (let [propose (fn [{:keys [role]}]
+                    (tx/new-transaction
+                     {:role role :activation "act-1" :basis 1
+                      :operations [{:op :assert-claim
+                                    :creates [{:id "claim-1" :type :claim
+                                               :statement "a claim"}]}
+                                   {:op :attach-evidence :targets #{"goal-1"}
+                                    :links {:bogus #{"evidence-1"}}}]}))
+          after (run/step (workspace) propose)]
+      (is (= [:anomalies.deliberation/invalid-links]
+             (mapv :reason (events-of after :transaction/rejected))))
+      (is (= 1 (:workspace/version after))
+          "a rejected transaction does not advance the clock")
+      (is (= #{"goal-1"} (set (keys (:workspace/objects after))))
+          "and the create in the operation before it is discarded with the rest"))))
+
 (deftest ^{:stratum 2} a-creation-the-engine-cannot-construct-is-routed-not-thrown
   (testing "the rejection reaches the event log as a subtype, like every other"
     (let [propose (fn [{:keys [role]}]
