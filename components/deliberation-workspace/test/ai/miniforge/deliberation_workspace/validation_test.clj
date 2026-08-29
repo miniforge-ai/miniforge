@@ -219,6 +219,58 @@
                                          :creates [{:id "claim-2" :type :claim
                                                     :statement "a second claim"}]}))))))
 
+(deftest ^{:stratum 1} operation-links-the-engine-cannot-write-are-refused
+  (testing "apply-links reduces over the operation's own :links, not just a spec's"
+    (doseq [[label links] [["unknown edge type" {:bogus #{"evidence-1"}}]
+                           ["scalar destination" {:supports :evidence-1}]
+                           ["string destination" {:supports "evidence-1"}]
+                           ["non-map links" [:supports "evidence-1"]]
+                           ["links as a scalar" :supports]]]
+      (is (= :anomalies.deliberation/invalid-links
+             (subtype-of (validate-tx
+                          (workspace (object-at "claim-1" 4))
+                          (transaction :proposer 10
+                                       {:op :attach-evidence :targets #{"claim-1"}
+                                        :links links}))))
+          label))))
+
+(deftest ^{:stratum 1} an-operation-link-rejection-carries-the-reason-it-failed
+  (testing "routing reads the reason without parsing the message"
+    (doseq [[reason links] [[:unknown-link-type {:bogus #{"evidence-1"}}]
+                            [:non-collection-links {:supports :evidence-1}]
+                            [:malformed-links [:supports "evidence-1"]]]]
+      (is (= reason
+             (-> (validate-tx (workspace (object-at "claim-1" 4))
+                              (transaction :proposer 10
+                                           {:op :attach-evidence
+                                            :targets #{"claim-1"}
+                                            :links links}))
+                 :anomaly/data :reason))))))
+
+(deftest ^{:stratum 1} well-formed-operation-links-pass
+  (testing "the stage refuses malformed edges, not linking itself"
+    (is (nil? (validate-tx
+               (workspace (object-at "claim-1" 4))
+               (transaction :proposer 10
+                            {:op :attach-evidence :targets #{"claim-1"}
+                             :links {:supports #{"evidence-1"}
+                                     :contradicts ["evidence-2"]}})))))
+  (testing "an operation that declares no edges is untouched by the stage"
+    (is (nil? (validate-tx (workspace (object-at "claim-1" 4))
+                           (transaction :proposer 10
+                                        {:op :attach-evidence
+                                         :targets #{"claim-1"}}))))))
+
+(deftest ^{:stratum 1} a-malformed-payload-outranks-a-missing-target
+  (testing "both payload stages run before the three that read the object graph"
+    (is (= :anomalies.deliberation/invalid-links
+           (subtype-of (validate-tx
+                        (workspace)
+                        (transaction :proposer 10
+                                     {:op :attach-evidence :targets #{"claim-404"}
+                                      :links {:bogus #{"evidence-1"}}}))))
+        "the ids check-targets would name come out of the same unvalidated payload")))
+
 (deftest ^{:stratum 1} an-unknown-operation-outranks-a-bad-creation
   (testing "payload conformance runs after schema, so the vocabulary is reported first"
     (is (= :anomalies.deliberation/unknown-operation
