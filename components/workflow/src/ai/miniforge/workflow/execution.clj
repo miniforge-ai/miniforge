@@ -482,9 +482,12 @@
                    ;; gate, which token, which files). This rides the phase
                    ;; result into :execution/phase-results, the one channel
                    ;; a redirect re-entry can still read.
+                   ;; gate/passed? handles response-shaped results too;
+                   ;; a bare (remove :passed?) would misfile them.
                    :phase/gate-failures (->> (:results gate-result)
-                                             (remove :passed?)
-                                             (mapv #(select-keys % [:gate :errors]))))))
+                                             (remove gate/passed?)
+                                             (mapv #(-> (select-keys % [:gate :errors])
+                                                        (update :errors (fnil vec []))))))))
         phase-result))))
 
 (defn ^{:stratum 2} update-response-chain
