@@ -25,6 +25,7 @@
             [clojure.string :as str]
             [ai.miniforge.anomaly.interface :as anomaly]
             [ai.miniforge.event-stream.interface :as events]
+            [ai.miniforge.fsm.interface :as fsm]
             [ai.miniforge.gate.interface :as gate]
             [ai.miniforge.phase.interface :as phase]
             [ai.miniforge.response.interface :as response]
@@ -547,6 +548,18 @@
       (not= prior-current-state
             (workflow-fsm/current-state (:execution/fsm-state next-ctx))) next-ctx
       (= :phase/retry event) next-ctx
+      ;; A SELF-transition is legitimate exactly when a guarded branch's
+      ;; action ran: the redirect/infra counters in the statechart
+      ;; context moved. Inferring validity from the state-id delta alone
+      ;; silently killed both self-targeting branches of the guarded
+      ;; :phase/fail array — on-fail self-repair (:repair-requested with
+      ;; :on-fail :implement died terminal, observed live in the
+      ;; trap-bench repair demonstration) and the infra-retry branch
+      ;; (:verify/timeout never consulted its budget).
+      (not= (select-keys (fsm/context (:execution/fsm-state ctx))
+                         [:redirect-count :infra-retry-count])
+            (select-keys (fsm/context (:execution/fsm-state next-ctx))
+                         [:redirect-count :infra-retry-count])) next-ctx
       :else (fail))))
 
 (defn- ^{:stratum 2} summarize-error
