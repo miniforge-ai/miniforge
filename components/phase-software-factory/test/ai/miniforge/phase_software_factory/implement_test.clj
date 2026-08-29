@@ -1008,6 +1008,21 @@
         (is (true? (get-in final-result [:phase :error :rate-limited?]))
             "rate-limit classifier reads through the normalized shape")))))
 
+(deftest ^{:stratum 2} build-implement-task-threads-gate-failures-test
+  (testing "a prior denied attempt's structured gate errors reach the new
+            task via :execution/phase-results (the [:phase ...] channel is
+            cleared every step and must not be relied on)"
+    (let [failures [{:gate :stale-references
+                     :errors [{:message "':skipped' still referenced by: bb.edn"}]}]
+          ctx (-> (create-base-context)
+                  (assoc-in [:execution/phase-results :implement :phase/gate-failures]
+                            failures))
+          {:keys [task]} (implement/build-implement-task ctx)]
+      (is (= failures (:task/gate-failures task)))))
+  (testing "no prior denial -> key absent"
+    (let [{:keys [task]} (implement/build-implement-task (create-base-context))]
+      (is (not (contains? task :task/gate-failures))))))
+
 (use-fixtures :each
   (fn [f]
     (phase/reset-phase-loader!)

@@ -178,6 +178,13 @@
       (is (= :allow (get-in out [:phase/decision-envelope :envelope/decision])))
       (is (not (contains? out :phase/status)))
       (is (not (contains? out :phase/gate-errors)))))
+  (testing "deny also attaches the STRUCTURED :phase/gate-failures the
+            repair loop reads (Reasons are schema-bound strings)"
+    (let [out (exec/apply-gate-validation {:config {:gates [:review-approved]}}
+                                          {:result {}} {})]
+      (is (vector? (:phase/gate-failures out)))
+      (is (= [:review-approved] (mapv :gate (:phase/gate-failures out))))
+      (is (every? #(contains? % :errors) (:phase/gate-failures out)))))
   (testing "no gates configured → unchanged (nothing to validate)"
     (let [pr {:result {}}]
       (is (= pr (exec/apply-gate-validation {:config {:gates []}} pr {}))))))

@@ -51,14 +51,20 @@
   [envelope]
   (not= :deny (:envelope/decision envelope)))
 
-(defn- ^{:stratum 0} mechanical-failure-reason
+(defn- ^{:stratum 0} mechanical-failure-reasons
+  "One Reason PER ERROR, not per gate — a gate that found five stale
+   references used to surface only the first, and a repair loop cannot
+   fix what the record never named."
   [result]
   (let [gate (name (get result :gate :unknown))
-        error (first (:errors result))
-        detail (or (:message error) (msg/system-t :decide/check-failed))]
-    (reason/create :reason/gate-check-failed
-                   (msg/system-t :decide/gate-failed
-                                 {:gate gate :message detail}))))
+        errors (or (seq (:errors result)) [nil])]
+    (mapv (fn [error]
+            (reason/create :reason/gate-check-failed
+                          (msg/system-t :decide/gate-failed
+                                        {:gate gate
+                                         :message (or (:message error)
+                                                      (msg/system-t :decide/check-failed))})))
+          errors)))
 
 ;------------------------------------------------------------------------------ Layer 1
 
@@ -99,7 +105,7 @@
                   :pins/event-watermark nil})]
     (env/envelope
      (concat (mapcat :envelope/reasons gate-envs)
-             (map mechanical-failure-reason mech-failures)
+             (mapcat mechanical-failure-reasons mech-failures)
              (when artifact-nil? [(missing-artifact-reason)]))
      (mapcat :envelope/obligations gate-envs)
      pins)))

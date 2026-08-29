@@ -191,6 +191,21 @@
       (is (= [:reason/rule-violation]
              (mapv :reason/code (:envelope/reasons phase-env))))
       (is (= "test@1" (get-in phase-env [:envelope/pins :pins/pack-revision])))))
+  (testing "a mechanical gate with several errors contributes one Reason
+            PER ERROR — a repair loop cannot fix what the record never
+            named (first-error-only was the old collapse)"
+    (let [phase-env (decide/gates->envelope
+                     {:results [{:passed? false :gate :stale-references
+                                 :errors [{:message "':skipped' still referenced by: bb.edn"}
+                                          {:message "'read-ledger' still referenced by: tasks/x.clj"}]}]}
+                     false)]
+      (is (= 2 (count (:envelope/reasons phase-env))))
+      (is (every? #(= :reason/gate-check-failed (:reason/code %))
+                  (:envelope/reasons phase-env)))
+      (is (some #(clojure.string/includes? (:reason/detail %) ":skipped")
+                (:envelope/reasons phase-env)))
+      (is (some #(clojure.string/includes? (:reason/detail %) "read-ledger")
+                (:envelope/reasons phase-env)))))
   (testing "a mechanical failure contributes :reason/gate-check-failed"
     (let [phase-env (decide/gates->envelope
                      {:results [{:passed? false :gate :lint

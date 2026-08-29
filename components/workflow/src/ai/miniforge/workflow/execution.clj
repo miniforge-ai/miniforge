@@ -37,7 +37,7 @@
 
 ;------------------------------------------------------------------------------ Layer 0
 
-;------------------------------------------------------------------------------ Layer 0: Atomic operations
+;; Atomic operations
 (defn- ^{:stratum 0} enter-error-record
   "Build the canonical entry recorded against `:execution/errors` for a
    phase-enter exception. Used uniformly whether or not the interceptor
@@ -476,7 +476,15 @@
                    :phase/decision-envelope envelope
                    :phase/gate-errors (if envelope
                                         (vec (:envelope/reasons envelope))
-                                        (vec (:failed-gates gate-result))))))
+                                        (vec (:failed-gates gate-result)))
+                   ;; The envelope's Reasons are schema-bound strings; the
+                   ;; repair loop needs the gates' STRUCTURED errors (which
+                   ;; gate, which token, which files). This rides the phase
+                   ;; result into :execution/phase-results, the one channel
+                   ;; a redirect re-entry can still read.
+                   :phase/gate-failures (->> (:results gate-result)
+                                             (remove :passed?)
+                                             (mapv #(select-keys % [:gate :errors]))))))
         phase-result))))
 
 (defn ^{:stratum 2} update-response-chain
@@ -562,7 +570,7 @@
 
 ;------------------------------------------------------------------------------ Layer 3
 
-;------------------------------------------------------------------------------ Layer 1: Composition
+;; Composition
 (defn ^{:stratum 3} execute-phase-lifecycle
   "Execute phase enter -> gates -> leave lifecycle.
 
@@ -713,7 +721,7 @@
 
 ;------------------------------------------------------------------------------ Layer 5
 
-;------------------------------------------------------------------------------ Layer 2: Phase step execution
+;; Phase step execution
 (defn ^{:stratum 5} execute-phase-step
   "Execute a single phase step and return updated context.
 
