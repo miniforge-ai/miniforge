@@ -126,6 +126,24 @@
 
 ;------------------------------------------------------------------------------ Layer 1
 
+(deftest ^{:stratum 1} get-recent-commits-multiline-body-test
+  (testing "A commit with a multi-line body is parsed as one commit, not split"
+    ;; The split regex must use escaped \|\|\| so the lookahead only fires at
+    ;; lines that actually start a new commit record (40-hex hash + |||).
+    ;; Before the fix the unescaped ||| was a regex alternation with empty
+    ;; alternatives (always-match), so every \n split the output and lines
+    ;; inside a multi-line body were handed to the parser as if they were
+    ;; standalone records — producing nil fields and str/trim NPEs.
+    (let [hash "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+          fake-out (str hash "|||feat: multi-line|||Line 1 of body\nLine 2 of body|||Author|||2026-08-30 10:00:00 +0000")]
+      (with-redefs [ai.miniforge.gate.precommit-discipline/exec-git
+                    (fn [_args] {:exit 0 :out fake-out :err ""})]
+        (let [commits (discipline/get-recent-commits :limit 5 :branch "HEAD")]
+          (is (= 1 (count commits))
+              "Multi-line body must yield exactly one commit map")
+          (is (str/includes? (:body (first commits)) "Line 2 of body")
+              "Body must include all lines from the multi-line body"))))))
+
 (deftest ^{:stratum 1} get-recent-commits-format-arg-test
   (testing "exec-git receives --format= as a single joined argument"
     ;; Before the fix, `\"--format=\"` and the format string were two separate
