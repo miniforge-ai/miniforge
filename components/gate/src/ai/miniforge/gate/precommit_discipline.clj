@@ -145,7 +145,7 @@
      Vector of {:hash string :message string :author string :date string}"
   [& {:keys [limit branch] :or {limit 50 branch "HEAD"}}]
   (let [format "%H|||%s|||%b|||%an|||%ai"
-        result (exec-git ["log" (str "-" limit) "--format=" format branch])]
+        result (exec-git ["log" (str "-" limit) (str "--format=" format) branch])]
     (if (zero? (:exit result))
       (->> (str/split (:out result) #"\n(?=[0-9a-f]{40}|||)")
            (keep (fn [commit-str]
