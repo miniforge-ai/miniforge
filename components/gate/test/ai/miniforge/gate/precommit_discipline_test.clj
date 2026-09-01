@@ -17,7 +17,8 @@
 ;; limitations under the License.
 (ns ai.miniforge.gate.precommit-discipline-test
   "Tests for pre-commit discipline policy gate."
-  (:require [clojure.test :refer [deftest is testing]]
+  (:require [clojure.string :as str]
+            [clojure.test :refer [deftest is testing]]
             [ai.miniforge.gate.precommit-discipline :as discipline]))
 
 ;------------------------------------------------------------------------------ Layer 0
