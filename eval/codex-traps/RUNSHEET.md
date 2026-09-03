@@ -345,7 +345,7 @@ implement gate denies the sprung tree on its first iteration
 (gate-history.edn shows :stale-references among failing gates with
 token ":skipped", family "ai.miniforge.codex-gap", file bb.edn), and
 the :on-fail :implement retry carries :task/gate-failures
-(logs/<rep>.log shows :implementer/prompt-sections including
+(eval/codex-traps/logs/<arm>-<trap>-<rep>.log shows :implementer/prompt-sections including
 :gate-failures).
 Success: >=2/3 reps :caught (bb.edn updated) within budget.
 Falsifier A: gate fires, retries carry the section, tree still sprung
@@ -373,7 +373,7 @@ implementer. No prompt log (pre-amendment launch).
 
 AMENDMENT 2026-09-03 (series 4 pin): the fourth-series pre-registration
 names "the main commit that merges #1864". The harness fixes (#1865:
-provision pins main/origin-main to the pin; run-trap logs) merged after
+provision pins main/origin/main to the pin; run-trap logs) merged after
 it as d6d5d77c5, which contains #1864. Series 4 pins d6d5d77c5 so the
 provisioning defect above cannot recur in the sandbox under test.
 Hypothesis, endpoints, and success criteria are unchanged.
