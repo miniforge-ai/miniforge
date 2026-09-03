@@ -969,6 +969,18 @@
               task-text (task->text input)
               effective-system-prompt (build-effective-system-prompt input)
               user-prompt (build-user-prompt task-text input)]
+          ;; Ground truth for which evidence sections this prompt carried —
+          ;; stream dumps record the model's OUTPUT, not its input, so a
+          ;; retry's prompt contents were unverifiable from the record.
+          (when logger
+            (log/info logger :implementer :implementer/prompt-sections
+                      {:data {:sections (filterv #(contains? input %)
+                                                 [:task/prior-attempts
+                                                  :task/gate-failures
+                                                  :task/phase-handoff
+                                                  :task/review-feedback
+                                                  :task/verify-failures])
+                              :prompt-chars (count user-prompt)}}))
           (if llm-client
             (invoke-with-llm llm-client user-prompt effective-system-prompt
                              config context on-chunk logger
