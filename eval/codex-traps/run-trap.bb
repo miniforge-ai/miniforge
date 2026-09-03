@@ -324,11 +324,15 @@
         ;; discarding the ground truth the third series was run to get.
         log-dir (str (fs/path (fs/parent runs) "logs"))
         _ (fs/create-dirs log-dir)
-        log-file (fs/file (str (fs/path log-dir (str arm "-" trap "-" rep ".log"))))]
+        ;; `rep` is a CLI argument: keep the filename to one path segment.
+        safe-rep (str/replace (str rep) #"[^A-Za-z0-9._-]" "_")
+        log-file (fs/file (str (fs/path log-dir (str arm "-" trap "-" safe-rep ".log"))))]
     (if-let [failure (or (reset-anomaly repo) (copy-anomaly specs repo spec-name))]
       failure
+      ;; stderr is merged into stdout at the process level (`:err :out`),
+      ;; so the log is one faithful stream, not two writers on one file.
       {:exit (:exit (p/shell {:dir repo :env (run-env arm codex home) :continue true
-                              :out log-file :err log-file}
+                              :out log-file :err :out}
                              "bb" "dogfood" (str "work/" spec-name)))
        :log (str log-file)
        :started started

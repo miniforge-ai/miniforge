@@ -170,7 +170,7 @@
             commit even when the launching checkout's <branch> trails it —
             the 2026-09-03 bench had `main` three weeks behind its pin"
     (let [root (temp-dir)
-          source (init-launching-repo! (str (File. root "launching")))
+          source (init-launching-repo! (temp-dir))
           main-sha (str/trim (str (:out (git/git source "rev-parse" "HEAD"))))
           _ (git/git source "checkout" "--quiet" "--detach")
           _ (spit (str (File. (str source) "later.txt")) "later\n")
