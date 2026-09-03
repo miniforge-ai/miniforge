@@ -521,8 +521,11 @@
   extract:artifact
   {:doc "Extract files from a code artifact EDN file and write them to disk"
    :extra-paths ["components/evidence-bundle/src"
+                 "components/evidence-bundle/resources"
                  "components/response/src"
-                 "components/messages/src"]
+                 "components/response/resources"
+                 "components/messages/src"
+                 "components/messages/resources"]
    :extra-deps {slingshot/slingshot {:mvn/version "0.12.2"}}
    :requires ([ai.miniforge.evidence-bundle.extraction-bulk :as extraction-bulk])
    :task (if-let [artifact-file (first *command-line-args*)]
@@ -593,6 +596,7 @@
                  "components/codex/src"
                  "components/codex/resources"
                  "components/messages/src"
+                 "components/messages/resources"
                  "components/messages/resources"]
    :requires ([ai.miniforge.codex-gap.interface :as codex-gap]
               [babashka.fs :as fs]
@@ -635,6 +639,7 @@
                  "components/codex-gap/src"
                  "components/codex-gap/resources"
                  "components/messages/src"
+                 "components/messages/resources"
                  "components/messages/resources"]
    :requires ([ai.miniforge.codex-gap.interface :as codex-gap]
               [babashka.fs :as fs])
@@ -663,6 +668,7 @@
                  "components/codex-gap/src"
                  "components/codex-gap/resources"
                  "components/messages/src"
+                 "components/messages/resources"
                  "components/messages/resources"]
    :extra-deps {cheshire/cheshire {:mvn/version "5.13.0"}}
    :requires ([ai.miniforge.mcp-context-server.main :as mcp])
@@ -678,9 +684,11 @@
                  "bases/lsp-mcp-bridge/resources"
                  "components/tool-registry/resources"
                  "components/response/src"
+                 "components/response/resources"
                  "components/messages/src"
                  "components/messages/resources"
                  "components/config/src"
+                 "components/config/resources"
                  "components/config/resources"]
    ;; response → anomaly requires slingshot; config → governance requires
    ;; aero (both caught by check:bb-classpaths)
@@ -695,9 +703,11 @@
                  "bases/lsp-mcp-bridge/resources"
                  "components/tool-registry/resources"
                  "components/response/src"
+                 "components/response/resources"
                  "components/messages/src"
                  "components/messages/resources"
                  "components/config/src"
+                 "components/config/resources"
                  "components/config/resources"]
    ;; response → anomaly requires slingshot (caught by check:bb-classpaths)
    :extra-deps {slingshot/slingshot {:mvn/version "0.12.2"}}
@@ -710,9 +720,11 @@
                  "bases/lsp-mcp-bridge/resources"
                  "components/tool-registry/resources"
                  "components/response/src"
+                 "components/response/resources"
                  "components/messages/src"
                  "components/messages/resources"
                  "components/config/src"
+                 "components/config/resources"
                  "components/config/resources"]
    ;; response → anomaly requires slingshot (caught by check:bb-classpaths)
    :extra-deps {slingshot/slingshot {:mvn/version "0.12.2"}}
@@ -725,9 +737,11 @@
                  "bases/lsp-mcp-bridge/resources"
                  "components/tool-registry/resources"
                  "components/response/src"
+                 "components/response/resources"
                  "components/messages/src"
                  "components/messages/resources"
                  "components/config/src"
+                 "components/config/resources"
                  "components/config/resources"]
    ;; response → anomaly requires slingshot (caught by check:bb-classpaths)
    :extra-deps {slingshot/slingshot {:mvn/version "0.12.2"}}
@@ -774,10 +788,12 @@
                  "components/heuristic/src"
                  "components/heuristic/resources"
                  "components/response/src"
+                 "components/response/resources"
                  "components/fsm/src"
                  "components/phase/src"
                  "components/phase/resources"
                  "components/gate/src"
+                 "components/gate/resources"
                  "components/workflow/src"
                  "components/workflow/resources"
                  "components/spec-parser/src"
@@ -788,10 +804,13 @@
                  "components/event-stream/src"
                  "components/event-stream/resources"
                  "components/supervisory-state/src"
+                 "components/supervisory-state/resources"
                  "components/policy-clause/src"
                  "components/decision-envelope/src"
                  "components/effect-transaction/src"
+                 "components/effect-transaction/resources"
                  "components/execution-grant/src"
+                 "components/execution-grant/resources"
                  "components/automation-edge-correlator/src"
                  "components/workflow-resume/src"
                  "components/workflow-resume/resources"
@@ -799,6 +818,7 @@
                  "components/dag-executor/src"
                  "components/dag-executor/resources"
                  "components/task-executor/src"
+                 "components/task-executor/resources"
                  "components/pr-lifecycle/src"
                 "components/pr-lifecycle/resources"
                  "components/release-executor/src"
@@ -884,18 +904,23 @@
                  "components/evaluation/resources"
                  ;; Keep the Babashka CLI task aligned with deps.edn :dev.
                  "bases/etl/src"
+                 "bases/etl/resources"
                  "components/workbench-etl-adapter/src"
                  "components/workbench-etl-adapter/resources"
                  "components/bb-config/src"
+                 "components/bb-config/resources"
                  "components/bb-data-plane-http/src"
+                 "components/bb-data-plane-http/resources"
                  "components/bb-dev-tools/src"
                  "components/bb-etl-runner/src"
                  "components/bb-generate-icon/src"
+                 "components/bb-generate-icon/resources"
                  "components/bb-out/src"
                  "components/bb-paths/src"
                  "components/bb-platform/src"
                  "components/bb-proc/src"
                  "components/bb-r2/src"
+                 "components/bb-r2/resources"
                  "components/bb-test-runner/src"
                  "components/boundary/src"
                  "components/coerce/src"
@@ -922,6 +947,7 @@
                  "components/connector-sarif/src"
                  "components/content-hash/src"
                  "components/cursor-store/src"
+                 "components/cursor-store/resources"
                  "components/data-quality/src"
                  "components/data-quality/resources"
                  "components/dataset/src"
@@ -929,6 +955,7 @@
                  "components/dataset-schema/src"
                  "components/dataset-schema/resources"
                  "components/gate-classification/src"
+                 "components/gate-classification/resources"
                  "components/messages/resources"
                  "components/metric-registry/src"
                  "components/metric-registry/resources"
@@ -944,6 +971,7 @@
                  "components/pipeline-runner/src"
                  "components/pipeline-runner/resources"
                  "components/pr-scoring/src"
+                 "components/pr-scoring/resources"
                  "components/response-chain/src"
                  "components/tui-engine/src"
                  "components/tui-engine/resources"
@@ -954,6 +982,7 @@
                  "components/workflow-financial-etl/src"
                  "components/workflow-financial-etl/resources"
                  "components/workflow-security-compliance/src"
+                 "components/workflow-security-compliance/resources"
                  "components/workflow-security-compliance/resources"]
    :extra-deps {metosin/malli {:mvn/version "0.16.1"}
                 clj-statecharts/clj-statecharts {:mvn/version "0.1.5"}

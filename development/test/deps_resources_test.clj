@@ -41,6 +41,18 @@
 
 ;------------------------------------------------------------------------------ Layer 1
 
+(defn- ^{:stratum 1} resource-gaps
+  "Resources dirs that exist but are missing from a path vector in
+   `file` that lists the brick's src."
+  [file]
+  (let [form (edn/read-string {:default (fn [_ v] v)} (slurp file))]
+    (for [v (path-vectors form)
+          p v :when (brick-src? p)
+          :let [brick (str/replace p #"/src$" "")
+                res (str brick "/resources")]
+          :when (and (.isDirectory (io/file res)) (not (some #{res} v)))]
+      res)))
+
 (deftest ^{:stratum 1} listed-brick-src-brings-its-resources
   (let [deps (edn/read-string (slurp "deps.edn"))
         gaps (for [v (path-vectors deps)
@@ -52,3 +64,13 @@
     (is (empty? (vec gaps))
         (str "resources dirs that exist but are missing from a path list that has the brick's src: "
              (pr-str (vec gaps))))))
+
+;------------------------------------------------------------------------------ Layer 2
+
+(deftest ^{:stratum 2} bb-task-path-lists-bring-resources-too
+  ;; bb.edn tasks (`bb miniforge run` is how dogfood launches the
+  ;; workflow) carry their own :extra-paths lists; the trap bench read
+  ;; bare message keys from exactly this gap after deps.edn was fixed.
+  (is (empty? (vec (resource-gaps "bb.edn")))
+      (str "bb.edn path lists missing a listed brick's resources: "
+           (pr-str (vec (resource-gaps "bb.edn"))))))
