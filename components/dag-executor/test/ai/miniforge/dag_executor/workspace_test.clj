@@ -70,6 +70,24 @@
     (is (result/err? r))
     (is (= :persist-push-failed (get-in r [:error :code])))))
 
+(deftest ^{:stratum 0} git-restore!-fetch-and-checkout-failures-are-errors-test
+  (let [failing (fn [needle code]
+                  (fn [cmd]
+                    (if (and (vector? cmd) (some #{needle} cmd))
+                      (result/ok {:exit-code 1 :stdout "" :stderr (str needle " failed")})
+                      (result/ok {:exit-code 0 :stdout "abc\n" :stderr ""}))))]
+    (is (= :restore-fetch-failed (get-in (sut/git-restore! (failing "fetch" 1) {:branch "task/x"}) [:error :code])))
+    (is (= :restore-checkout-failed (get-in (sut/git-restore! (failing "checkout" 1) {:branch "task/x"}) [:error :code])))))
+
+(deftest ^{:stratum 0} rev-parse-failure-is-an-error-test
+  (let [exec-fn (fn [cmd]
+                  (cond
+                    (and (string? cmd) (str/includes? cmd "rev-parse")) (result/ok {:exit-code 128 :stdout "" :stderr "not a git repo"})
+                    (and (string? cmd) (str/includes? cmd "status")) (result/ok {:exit-code 0 :stdout " M a\n" :stderr ""})
+                    :else (result/ok {:exit-code 0 :stdout "" :stderr ""})))]
+    (is (= :persist-sha-failed (get-in (sut/git-persist! exec-fn {:branch "task/x"}) [:error :code])))
+    (is (= :restore-sha-failed (get-in (sut/git-restore! exec-fn {:branch "task/x"}) [:error :code])))))
+
 ;------------------------------------------------------------------------------ Layer 1
 
 (defn- ^{:stratum 1} cmd-has?

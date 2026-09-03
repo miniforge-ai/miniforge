@@ -37,6 +37,13 @@
   [branch]
   (and (string? branch) (not (str/blank? branch)) (not (str/starts-with? branch "-"))))
 
+(defn- ^{:stratum 0} failed-step
+  "The step's stderr when its exit code is non-zero, else nil. An exec
+   result without an exit code is trusted (older stubs and shells)."
+  [r fallback]
+  (when (and r (not (zero? (get-in r [:data :exit-code] 0))))
+    (get-in r [:data :stderr] fallback)))
+
 ;------------------------------------------------------------------------------ Layer 1
 
 (defn ^{:stratum 1} git-persist!
@@ -48,7 +55,9 @@
               no shell — preferred for user-supplied values to avoid injection)
    - opts: {:branch string, :message string}
 
-   Returns result monad with {:persisted? bool :commit-sha string :branch string}"
+   Returns result monad with {:persisted? bool :commit-sha string :branch string}.
+   Every git step's exit code is checked: a failed commit or push that
+   still reported :persisted? true was a silent loss of work."
   [exec-fn {:keys [branch message] :or {branch "task/unknown" message "phase checkpoint"}}]
   (if (not (safe-branch? branch))
     (result/err :invalid-branch (str "Branch must be a non-empty string not starting with '-': " (pr-str branch)))
@@ -56,21 +65,22 @@
       (let [_ (exec-fn "git add -A")
             status-r (exec-fn "git status --porcelain")
             has-changes? (seq (str/trim (get-in status-r [:data :stdout] "")))]
-        (if has-changes?
+        (if-not has-changes?
+          (result/ok {:persisted? false :commit-sha nil :no-changes? true :branch branch})
           ;; Unsigned: a scratch-worktree commit must not depend on the
           ;; operator's signing agent (see worktree tier commit-staged!).
-          ;; Each step's exit code is checked: a failed commit or push that
-          ;; still reported :persisted? true was a silent loss of work.
-          (let [commit-r (exec-fn ["git" "-c" "commit.gpgsign=false" "commit" "-m" (str message)])]
-            (if-not (zero? (get-in commit-r [:data :exit-code] 0))
-              (result/err :persist-commit-failed (get-in commit-r [:data :stderr] "git commit failed"))
-              (let [push-r (exec-fn ["git" "push" "origin" (str "HEAD:" branch) "--force"])]
-                (if-not (zero? (get-in push-r [:data :exit-code] 0))
-                  (result/err :persist-push-failed (get-in push-r [:data :stderr] "git push failed"))
-                  (let [sha-r (exec-fn "git rev-parse HEAD")
-                        sha   (str/trim (get-in sha-r [:data :stdout] ""))]
-                    (result/ok {:persisted? true :commit-sha sha :branch branch}))))))
-          (result/ok {:persisted? false :commit-sha nil :no-changes? true :branch branch})))
+          (let [commit-r (exec-fn ["git" "-c" "commit.gpgsign=false" "commit" "-m" (str message)])
+                push-r (when-not (failed-step commit-r "")
+                         (exec-fn ["git" "push" "origin" (str "HEAD:" branch) "--force"]))
+                sha-r (when (and push-r (not (failed-step push-r "")))
+                        (exec-fn "git rev-parse HEAD"))]
+            (cond
+              (failed-step commit-r "") (result/err :persist-commit-failed (failed-step commit-r "git commit failed"))
+              (failed-step push-r "")   (result/err :persist-push-failed (failed-step push-r "git push failed"))
+              (failed-step sha-r "")    (result/err :persist-sha-failed (failed-step sha-r "git rev-parse failed"))
+              :else (result/ok {:persisted? true
+                                :commit-sha (str/trim (get-in sha-r [:data :stdout] ""))
+                                :branch branch})))))
       (catch Exception e
         (result/err :persist-failed (.getMessage e))))))
 
@@ -88,10 +98,17 @@
   (if (not (safe-branch? branch))
     (result/err :invalid-branch (str "Branch must be a non-empty string not starting with '-': " (pr-str branch)))
     (try
-      (let [_ (exec-fn ["git" "fetch" "origin" branch])
-            _ (exec-fn ["git" "checkout" branch])
-            sha-r (exec-fn "git rev-parse HEAD")
-            sha   (str/trim (get-in sha-r [:data :stdout] ""))]
-        (result/ok {:restored? true :commit-sha sha :branch branch}))
+      (let [fetch-r (exec-fn ["git" "fetch" "origin" branch])]
+        (if-let [e (failed-step fetch-r "git fetch failed")]
+          (result/err :restore-fetch-failed e)
+          (let [co-r (exec-fn ["git" "checkout" branch])]
+            (if-let [e (failed-step co-r "git checkout failed")]
+              (result/err :restore-checkout-failed e)
+              (let [sha-r (exec-fn "git rev-parse HEAD")]
+                (if-let [e (failed-step sha-r "git rev-parse failed")]
+                  (result/err :restore-sha-failed e)
+                  (result/ok {:restored? true
+                              :commit-sha (str/trim (get-in sha-r [:data :stdout] ""))
+                              :branch branch})))))))
       (catch Exception e
         (result/err :restore-failed (.getMessage e))))))
