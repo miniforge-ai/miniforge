@@ -596,7 +596,6 @@
                  "components/codex/src"
                  "components/codex/resources"
                  "components/messages/src"
-                 "components/messages/resources"
                  "components/messages/resources"]
    :requires ([ai.miniforge.codex-gap.interface :as codex-gap]
               [babashka.fs :as fs]
@@ -636,9 +635,7 @@
                  "components/codex-gap/resources"
                  "components/codex/src"
                  "components/codex/resources"
-                 "components/codex-gap/src"
                  "components/messages/src"
-                 "components/messages/resources"
                  "components/messages/resources"]
    :requires ([ai.miniforge.codex-gap.interface :as codex-gap]
               [babashka.fs :as fs])
@@ -667,7 +664,6 @@
                  "components/codex-gap/src"
                  "components/codex-gap/resources"
                  "components/messages/src"
-                 "components/messages/resources"
                  "components/messages/resources"]
    :extra-deps {cheshire/cheshire {:mvn/version "5.13.0"}}
    :requires ([ai.miniforge.mcp-context-server.main :as mcp])
@@ -687,7 +683,6 @@
                  "components/messages/src"
                  "components/messages/resources"
                  "components/config/src"
-                 "components/config/resources"
                  "components/config/resources"]
    ;; response → anomaly requires slingshot; config → governance requires
    ;; aero (both caught by check:bb-classpaths)
@@ -706,7 +701,6 @@
                  "components/messages/src"
                  "components/messages/resources"
                  "components/config/src"
-                 "components/config/resources"
                  "components/config/resources"]
    ;; response → anomaly requires slingshot (caught by check:bb-classpaths)
    :extra-deps {slingshot/slingshot {:mvn/version "0.12.2"}}
@@ -723,7 +717,6 @@
                  "components/messages/src"
                  "components/messages/resources"
                  "components/config/src"
-                 "components/config/resources"
                  "components/config/resources"]
    ;; response → anomaly requires slingshot (caught by check:bb-classpaths)
    :extra-deps {slingshot/slingshot {:mvn/version "0.12.2"}}
@@ -740,7 +733,6 @@
                  "components/messages/src"
                  "components/messages/resources"
                  "components/config/src"
-                 "components/config/resources"
                  "components/config/resources"]
    ;; response → anomaly requires slingshot (caught by check:bb-classpaths)
    :extra-deps {slingshot/slingshot {:mvn/version "0.12.2"}}
@@ -980,7 +972,6 @@
                  "components/workflow-financial-etl/src"
                  "components/workflow-financial-etl/resources"
                  "components/workflow-security-compliance/src"
-                 "components/workflow-security-compliance/resources"
                  "components/workflow-security-compliance/resources"]
    :extra-deps {metosin/malli {:mvn/version "0.16.1"}
                 clj-statecharts/clj-statecharts {:mvn/version "0.1.5"}
