@@ -36,8 +36,8 @@
    (`ai.miniforge.codex-gap` for `...codex-gap.ledger`). A family's
    candidate tokens are keywords and def'd names present in a
    producer's before and absent from THAT producer's after -- judged
-   per file. A token that survives in another changed file of the
-   family is still a candidate (trap-bench rep ru3d: report.clj kept
+   per file. A token that survives in another changed non-test file
+   (of any family) is still a candidate (trap-bench rep ru3d: report.clj kept
    `:skipped` as a message-template key while ledger.clj renamed its
    result key, and a family-wide rule read that as a move and passed
    the sprung tree); the error names where it survives so the
