@@ -15,7 +15,6 @@
 ;; WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 ;; See the License for the specific language governing permissions and
 ;; limitations under the License.
-
 (ns ai.miniforge.workflow.runner-environment
   "Execution environment lifecycle for workflow pipeline.
 
@@ -33,13 +32,13 @@
    [clojure.java.shell :as shell]
    [clojure.string :as str]))
 
-(defonce ^:private env-logger
+;------------------------------------------------------------------------------ Layer 0
+
+(defonce ^{:stratum 0} ^:private env-logger
   (log/create-logger {:min-level :debug :output :human}))
 
-;------------------------------------------------------------------------------ Layer 0
 ;; Executor function references
-
-(defn dag-executor-fns
+(defn ^{:stratum 0} dag-executor-fns
   "DAG executor function references — resolved at call time so with-redefs works."
   []
   {:create-registry dag/create-executor-registry
@@ -49,10 +48,8 @@
    :result-ok?      dag/ok?
    :result-unwrap   dag/unwrap})
 
-;------------------------------------------------------------------------------ Layer 0
 ;; Configuration
-
-(defn registry-config-for-mode
+(defn ^{:stratum 0} registry-config-for-mode
   "Build executor registry config for execution mode.
    :governed — Docker/K8s only (no worktree; no-silent-downgrade per N11 §7.4).
    :local    — worktree only."
@@ -63,7 +60,7 @@
                        {:docker {:image (defaults/default-docker-image)}}))
     {:worktree {}}))
 
-(defn select-capsule-executor
+(defn ^{:stratum 0} select-capsule-executor
   "Select executor for mode; rejects worktree fallback in governed mode (N11 §7.4)."
   [registry mode {:keys [select-exec executor-type]}]
   (let [raw (case mode
@@ -72,7 +69,7 @@
     (when-not (and (= :governed mode) raw (= :worktree (executor-type raw)))
       raw)))
 
-(defn check-executor-for-mode
+(defn ^{:stratum 0} check-executor-for-mode
   "Validate executor / mode pairing per the N11 §7.4 invariant.
 
    Returns nil when the pair is acceptable, or an `:unavailable`
@@ -91,10 +88,8 @@
                      {:mode :governed
                       :hint (messages/t :governed/no-capsule-hint)})))
 
-;------------------------------------------------------------------------------ Layer 1
 ;; Environment record construction
-
-(defn- read-head-sha
+(defn- ^{:stratum 0} read-head-sha
   "Return the current HEAD SHA of `working-dir` as a string, or nil
    when the directory is missing, not a git repo, or `git rev-parse`
    exits non-zero. Best-effort — never throws."
@@ -106,13 +101,77 @@
         (when (zero? exit) (str/trim out)))
       (catch Exception _ nil))))
 
-(defn- normalized-environment-metadata
+(defn- ^{:stratum 0} normalized-environment-metadata
   "Return acquired environment metadata when it is a map; otherwise return an empty map."
   [env]
   (let [metadata (get env :metadata)]
     (if (map? metadata) metadata {})))
 
-(defn build-env-record
+(defn ^{:stratum 0} release-execution-environment!
+  "Release an execution environment. Safe to call with nil values."
+  [executor environment-id]
+  (when (and executor environment-id)
+    (try
+      (dag/release-environment! executor environment-id)
+      (catch Exception e
+        (println (messages/t :env/release-failed {:error (ex-message e)}))))))
+
+(defn- ^{:stratum 0} boundary-phase
+  [phase-ctx]
+  (if-some [current-phase (get phase-ctx :execution/current-phase)]
+    current-phase
+    (if-some [last-phase (context/active-or-last-phase phase-ctx)]
+      last-phase
+      :unknown)))
+
+(def ^{:stratum 0} ^:private persist-tier-by-mode
+  "Maps `:execution/mode` to the persist tier the executor is using.
+   :governed routes through the docker/k8s tier's `git-persist!` (push to
+   remote). :local routes through the worktree tier's `archive-bundle!`
+   (git bundle on local disk). The event consumers (dashboard, evidence
+   bundle) display the tier so users can tell push-to-remote checkpoints
+   from local-archive checkpoints at a glance."
+  {:governed :remote
+   :local    :worktree})
+
+(def ^{:stratum 0} ^:private default-persist-tier
+  "Tier label used when `:execution/mode` is missing or unrecognized.
+   Conservative default — local archive is always present in OSS."
+  :worktree)
+
+(defn- ^{:stratum 0} persist-opts
+  "Build the opts map passed to `dag/persist-workspace!`. Keeps map
+   construction key-value with all derivations lifted into the let so
+   readers see the shape of the call without a cond-> obscuring it."
+  [context phase env-id]
+  (let [metadata    (get context :execution/environment-metadata)
+        branch      (get context :execution/task-branch)
+        base-branch (:base-branch metadata)
+        message     (messages/t :env/persist-message {:phase (name phase)})]
+    (cond-> {:message     message
+             :workdir     (get context :execution/worktree-path)
+             :workflow-id (get context :execution/id)
+             :task-id     env-id}
+      branch      (assoc :branch branch)
+      base-branch (assoc :base-branch base-branch))))
+
+(defn- ^{:stratum 0} publish-workspace-persisted!
+  "Publish the `:workspace/persisted` event when the run has an event
+   stream. Swallows publish exceptions — persistence already succeeded;
+   a downstream subscriber's failure should not surface as a workflow
+   error."
+  [context event-data]
+  (when-let [stream (get context :event-stream)]
+    (try
+      (es/publish! stream
+                   (es/workspace-persisted stream
+                                           (get context :execution/id)
+                                           event-data))
+      (catch Exception _e nil))))
+
+;------------------------------------------------------------------------------ Layer 1
+
+(defn ^{:stratum 1} build-env-record
   "Acquire environment from executor and build the result map.
 
    Records the acquired worktree's HEAD SHA under
@@ -135,7 +194,7 @@
          :execution-mode       mode
          :environment-metadata metadata}))))
 
-(defn- restore-local-workspace-checkpoint!
+(defn- ^{:stratum 1} restore-local-workspace-checkpoint!
   "Restore a persisted local workspace branch before acquiring a worktree.
 
    Local resume must make the last persisted branch visible before
@@ -163,7 +222,21 @@
                    :data checkpoint})
         nil))))
 
-(defn- acquire-worktree-and-capsule
+(defn- ^{:stratum 1} persist-tier-for
+  [context]
+  (get persist-tier-by-mode (get context :execution/mode) default-persist-tier))
+
+(defn- ^{:stratum 1} log-workspace-persisted!
+  [event-data]
+  (let [bundle-or-sha (or (:bundle-path event-data) (:commit-sha event-data))
+        message       (str "Workspace persisted: " bundle-or-sha)]
+    (log/info env-logger :workflow :workflow/workspace-persisted
+              {:message message
+               :data    event-data})))
+
+;------------------------------------------------------------------------------ Layer 2
+
+(defn- ^{:stratum 2} acquire-worktree-and-capsule
   "Acquire both a host worktree and a capsule for governed mode."
   [executor workflow-id mode env-config fns]
   (let [wt-registry  ((:create-registry fns) {:worktree {}})
@@ -177,10 +250,22 @@
              :worktree-executor wt-executor
              :worktree-environment-id (:environment-id wt-result)))))
 
-;------------------------------------------------------------------------------ Layer 2
-;; Full acquisition and release
+(defn- ^{:stratum 2} persist-event-data
+  "Shared event/log payload for a persisted checkpoint. Both the log line
+   and the `:workspace/persisted` event read from this — single source of
+   truth for the persistence record."
+  [context phase env-id data]
+  {:phase        phase
+   :env-id       env-id
+   :branch       (:branch data)
+   :commit-sha   (:commit-sha data)
+   :bundle-path  (:bundle-path data)
+   :persist-tier (persist-tier-for context)})
 
-(defn acquire-execution-environment!
+;------------------------------------------------------------------------------ Layer 3
+
+;; Full acquisition and release
+(defn ^{:stratum 3} acquire-execution-environment!
   "Acquire an isolated execution environment before pipeline starts.
    Boundary wrapper around the anomaly-returning executor availability check.
 
@@ -222,93 +307,7 @@
                   {:message (messages/t :env/acquisition-failed {:error (ex-message e)})})
         nil))))
 
-(defn release-execution-environment!
-  "Release an execution environment. Safe to call with nil values."
-  [executor environment-id]
-  (when (and executor environment-id)
-    (try
-      (dag/release-environment! executor environment-id)
-      (catch Exception e
-        (println (messages/t :env/release-failed {:error (ex-message e)}))))))
-
-(defn- boundary-phase
-  [phase-ctx]
-  (if-some [current-phase (get phase-ctx :execution/current-phase)]
-    current-phase
-    (if-some [last-phase (context/active-or-last-phase phase-ctx)]
-      last-phase
-      :unknown)))
-
-(def ^:private persist-tier-by-mode
-  "Maps `:execution/mode` to the persist tier the executor is using.
-   :governed routes through the docker/k8s tier's `git-persist!` (push to
-   remote). :local routes through the worktree tier's `archive-bundle!`
-   (git bundle on local disk). The event consumers (dashboard, evidence
-   bundle) display the tier so users can tell push-to-remote checkpoints
-   from local-archive checkpoints at a glance."
-  {:governed :remote
-   :local    :worktree})
-
-(def ^:private default-persist-tier
-  "Tier label used when `:execution/mode` is missing or unrecognized.
-   Conservative default — local archive is always present in OSS."
-  :worktree)
-
-(defn- persist-tier-for
-  [context]
-  (get persist-tier-by-mode (get context :execution/mode) default-persist-tier))
-
-(defn- persist-opts
-  "Build the opts map passed to `dag/persist-workspace!`. Keeps map
-   construction key-value with all derivations lifted into the let so
-   readers see the shape of the call without a cond-> obscuring it."
-  [context phase env-id]
-  (let [metadata    (get context :execution/environment-metadata)
-        branch      (get context :execution/task-branch)
-        base-branch (:base-branch metadata)
-        message     (messages/t :env/persist-message {:phase (name phase)})]
-    (cond-> {:message     message
-             :workdir     (get context :execution/worktree-path)
-             :workflow-id (get context :execution/id)
-             :task-id     env-id}
-      branch      (assoc :branch branch)
-      base-branch (assoc :base-branch base-branch))))
-
-(defn- persist-event-data
-  "Shared event/log payload for a persisted checkpoint. Both the log line
-   and the `:workspace/persisted` event read from this — single source of
-   truth for the persistence record."
-  [context phase env-id data]
-  {:phase        phase
-   :env-id       env-id
-   :branch       (:branch data)
-   :commit-sha   (:commit-sha data)
-   :bundle-path  (:bundle-path data)
-   :persist-tier (persist-tier-for context)})
-
-(defn- log-workspace-persisted!
-  [event-data]
-  (let [bundle-or-sha (or (:bundle-path event-data) (:commit-sha event-data))
-        message       (str "Workspace persisted: " bundle-or-sha)]
-    (log/info env-logger :workflow :workflow/workspace-persisted
-              {:message message
-               :data    event-data})))
-
-(defn- publish-workspace-persisted!
-  "Publish the `:workspace/persisted` event when the run has an event
-   stream. Swallows publish exceptions — persistence already succeeded;
-   a downstream subscriber's failure should not surface as a workflow
-   error."
-  [context event-data]
-  (when-let [stream (get context :event-stream)]
-    (try
-      (es/publish! stream
-                   (es/workspace-persisted stream
-                                           (get context :execution/id)
-                                           event-data))
-      (catch Exception _e nil))))
-
-(defn- announce-persisted!
+(defn- ^{:stratum 3} announce-persisted!
   "Announce a successful persist on every visibility surface: log line,
    first-class event, and (transitively) the evidence-bundle collector
    that harvests events."
@@ -317,7 +316,9 @@
     (log-workspace-persisted! event-data)
     (publish-workspace-persisted! context event-data)))
 
-(defn persist-workspace-at-phase-boundary!
+;------------------------------------------------------------------------------ Layer 4
+
+(defn ^{:stratum 4} persist-workspace-at-phase-boundary!
   "Persist workspace at phase completion.
 
    Both modes (:governed and :local) participate. :governed pushes to a
@@ -331,27 +332,61 @@
    the fidelity goal in N11 §7.4, local should match governed in not
    destroying work on failure."
   [context phase-ctx]
-  (when-let [executor (get context :execution/executor)]
-    (let [env-id  (get context :execution/environment-id)
-          mode    (get context :execution/mode)
-          workdir (get context :execution/worktree-path)
-          phase   (boundary-phase phase-ctx)]
-      ;; Governed mode pushes to a remote via the capsule, so it persists with or
-      ;; without a host worktree. LOCAL mode archives a git bundle of the
-      ;; worktree — with NO worktree-path there is nothing to archive and the git
-      ;; tier falls back to the process CWD, committing the HOST repo. That is
-      ;; what let a caller that drove run-pipeline without a sandbox leak a real
-      ;; commit into the live worktree. So local persistence requires a worktree.
-      (when (and env-id (or (= :governed mode) workdir))
-        (try
-          (let [result (dag/persist-workspace! executor env-id
-                                               (persist-opts context phase env-id))
-                data   (when (dag/ok? result) (dag/unwrap result))]
-            (when (:persisted? data)
-              (announce-persisted! context phase env-id data))
-            result)
-          (catch Exception e
-            (log/warn env-logger :workflow :workflow/persist-failed
-                      {:message (messages/t :env/persist-failed
-                                            {:error (ex-message e)})})
-            nil))))))
+  (let [executor (get context :execution/executor)
+        env-id   (get context :execution/environment-id)
+        mode     (get context :execution/mode)
+        ;; The phase step enriches its own context with the worktree it
+        ;; ran in; a loop context that never carried the path must not
+        ;; turn an allowed implement into work that is never committed.
+        workdir  (or (get context :execution/worktree-path)
+                     (get phase-ctx :execution/worktree-path))
+        phase    (boundary-phase phase-ctx)
+        ;; Governed mode pushes to a remote via the capsule, so it persists with
+        ;; or without a host worktree. LOCAL mode archives a git bundle of the
+        ;; worktree — with NO worktree-path there is nothing to archive and the
+        ;; git tier falls back to the process CWD, committing the HOST repo.
+        ;; That is what let a caller that drove run-pipeline without a sandbox
+        ;; leak a real commit into the live worktree. So local persistence
+        ;; requires a worktree.
+        skip     (cond
+                   (nil? executor) :no-executor
+                   (nil? env-id) :no-environment-id
+                   (not (or (= :governed mode) workdir)) :no-worktree)]
+    (if skip
+      ;; A skipped persist is a silent loss of work unless it is said out
+      ;; loud: trap-bench series 4/5 read an allowed implement whose fix
+      ;; was never on the task branch, with nothing in the log or events.
+      (do (log/warn env-logger :workflow :workflow/persist-skipped
+                    {:message (messages/t :env/persist-skipped
+                                          {:phase (name phase) :reason (name skip)})
+                     :data {:phase phase :reason skip :mode mode
+                            :environment-id? (some? env-id)
+                            :worktree? (some? workdir)}})
+          nil)
+      (try
+        (let [result (dag/persist-workspace! executor env-id
+                                             (-> (persist-opts context phase env-id)
+                                                 (assoc :workdir workdir)))
+              data   (when (dag/ok? result) (dag/unwrap result))]
+          (cond
+            (not (dag/ok? result))
+            (log/warn env-logger :workflow :workflow/persist-rejected
+                      {:message (messages/t :env/persist-rejected
+                                            {:phase (name phase)
+                                             :code (str (get-in result [:error :code]))})
+                       :data {:phase phase :result result}})
+
+            (:persisted? data)
+            (announce-persisted! context phase env-id data)
+
+            :else
+            (log/info env-logger :workflow :workflow/persist-no-changes
+                      {:message (messages/t :env/persist-no-changes {:phase (name phase)})
+                       :data {:phase phase :branch (:branch data)}}))
+          result)
+        (catch Exception e
+          (log/warn env-logger :workflow :workflow/persist-failed
+                    {:message (messages/t :env/persist-failed
+                                          {:error (ex-message e)})
+                     :data {:phase phase :error (ex-message e)}})
+          nil)))))
