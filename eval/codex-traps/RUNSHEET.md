@@ -650,7 +650,7 @@ committed path with the message text rendered.
 
 ## PRE-REGISTRATION — EIGHTH SERIES, TREATED ARM (rx1–rx3)
 
-Written 2026-09-03 22:35Z, before any eighth-series rep ran; series 7
+Written 2026-09-03 22:16Z, before any eighth-series rep ran; series 7
 (rw1–rw3, baseline) is in progress (rw1 :caught from the task branch)
 and its results are recorded separately when it ends.
 
