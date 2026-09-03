@@ -71,6 +71,6 @@
   ;; bb.edn tasks (`bb miniforge run` is how dogfood launches the
   ;; workflow) carry their own :extra-paths lists; the trap bench read
   ;; bare message keys from exactly this gap after deps.edn was fixed.
-  (is (empty? (vec (resource-gaps "bb.edn")))
-      (str "bb.edn path lists missing a listed brick's resources: "
-           (pr-str (vec (resource-gaps "bb.edn"))))))
+  (let [gaps (vec (resource-gaps "bb.edn"))]
+    (is (empty? gaps)
+        (str "bb.edn path lists missing a listed brick's resources: " (pr-str gaps)))))

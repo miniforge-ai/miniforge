@@ -637,7 +637,6 @@
                  "components/codex/src"
                  "components/codex/resources"
                  "components/codex-gap/src"
-                 "components/codex-gap/resources"
                  "components/messages/src"
                  "components/messages/resources"
                  "components/messages/resources"]
@@ -956,7 +955,6 @@
                  "components/dataset-schema/resources"
                  "components/gate-classification/src"
                  "components/gate-classification/resources"
-                 "components/messages/resources"
                  "components/metric-registry/src"
                  "components/metric-registry/resources"
                  "components/phase-deployment/src"
