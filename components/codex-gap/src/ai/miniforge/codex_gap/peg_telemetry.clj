@@ -169,9 +169,13 @@
         history (delay (read-gate-history run-dir))]
     (for [peg pegs
           :let [mechanisms (peg-mechanisms peg nodes)
-                gate (some gate-map mechanisms)]]
+                ;; The mechanism reported is the one whose gate produced
+                ;; the answers -- the first mapped one, in sorted order.
+                mechanism (or (some #(when (contains? gate-map %) %) mechanisms)
+                              (first mechanisms))
+                gate (get gate-map mechanism)]]
       {:peg (:id peg)
-       :mechanism (first mechanisms)
+       :mechanism mechanism
        :collapsed? (branches-collapsed? peg)
        :answers (if gate (gate-answers @history gate) [])
        :observed? (some? gate)})))

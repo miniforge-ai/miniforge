@@ -124,3 +124,13 @@
       (is (= {:denied sut/min-observations} (:answers drift)))
       (is (= 0.0 (:entropy-bits drift)))
       (is (= :entropy (:trigger drift))))))
+
+(deftest ^{:stratum 1} reported-mechanism-is-the-one-that-answered
+  (let [root (str (Files/createTempDirectory "peg-telemetry-mech" (make-array FileAttribute 0)))
+        peg {:id "two-mechanisms" :answers {"a" ["unmapped-problem"] "b" ["contract-drift-is-silent"]}}]
+    (run-dir! root "run-a" [peg]
+              [{:phase :implement :decision :deny :phase/gate-failures [{:gate :stale-references}]}])
+    (let [rec (get-in (sut/peg-telemetry root nodes gate-map) [:pegs "two-mechanisms"])]
+      (is (= "miniforge/gate/stale-references" (:mechanism rec))
+          "the unmapped mechanism sorts first but did not answer")
+      (is (= {:denied 1} (:answers rec))))))
