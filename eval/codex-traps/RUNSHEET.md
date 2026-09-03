@@ -627,8 +627,8 @@ occur. Falsifier D occurred in every rep after the catch (verify loop
 on :policy-verify to the redirect cap); recorded, not counted.
 
 Falsifier E fired in every rep: the persist step logged
-`persist-rejected ... :archive-commit-failed — error: 1Password:
-failed to fill whole buffer` at implement and verify. The scratch-
+"persist-rejected ... :archive-commit-failed — error: 1Password:
+failed to fill whole buffer" at implement and verify. The scratch-
 worktree commit inherited the operator's global commit signing and a
 locked signing agent; this is the mechanism behind every "fixed but
 never on the branch" outcome since series 4. Fixed in PR 1877
