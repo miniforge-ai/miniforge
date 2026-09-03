@@ -125,8 +125,11 @@
                    :at (str (java.time.Instant/now))
                    :decision (:envelope/decision envelope)
                    :redirect-count (get ctx :execution/redirect-count 0)
-                   :gate-errors (:phase/gate-errors phase-result)
-                   :gate-failures (:phase/gate-failures phase-result)}]
+                   ;; The phase result's own keys — one canonical name per
+                   ;; datum, so a history consumer reads what a checkpoint
+                   ;; consumer reads.
+                   :phase/gate-errors (:phase/gate-errors phase-result)
+                   :phase/gate-failures (:phase/gate-failures phase-result)}]
         (fs/create-dirs dir)
         (with-open [w (java.io.FileOutputStream. (fs/file dir gate-history-filename) true)]
           (.write w (.getBytes (str (pr-str entry) "\n") "UTF-8"))))

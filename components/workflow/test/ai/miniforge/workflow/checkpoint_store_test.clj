@@ -17,6 +17,8 @@
 ;; limitations under the License.
 (ns ai.miniforge.workflow.checkpoint-store-test
   (:require
+   [clojure.edn :as edn]
+   [clojure.string :as str]
    [clojure.java.io :as io]
    [clojure.test :refer [deftest is testing]]
    [ai.miniforge.workflow.checkpoint-store :as checkpoint-store]
@@ -325,12 +327,12 @@
               _ (checkpoint-store/persist-execution-state! allowed)
               run-dir (str checkpoint-root "/" (:execution/id base))
               history (->> (slurp (str run-dir "/" checkpoint-store/gate-history-filename))
-                           clojure.string/split-lines
-                           (mapv clojure.edn/read-string))
-              phase-file (clojure.edn/read-string
+                           str/split-lines
+                           (mapv edn/read-string))
+              phase-file (edn/read-string
                           (slurp (str run-dir "/phases/implement.edn")))]
           (is (= 2 (count history)) "both iterations recorded")
           (is (= [:deny :allow] (mapv :decision history)))
-          (is (= :stale-references (-> history first :gate-failures first :gate)))
+          (is (= :stale-references (-> history first :phase/gate-failures first :gate)))
           (is (= :allow (get-in phase-file [:phase/result :phase/decision-envelope :envelope/decision]))
               "the phase checkpoint holds only the last iteration — the reason the history exists"))))))
