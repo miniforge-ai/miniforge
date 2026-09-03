@@ -667,7 +667,8 @@ mechanism's verdict per implement iteration, so
 `bb codex-gap-peg-telemetry` has real input for the first time.
 
 Hypothesis H8a (catch): >=2/3 :caught with the fix on the task branch,
-matching or exceeding series 7's baseline rate at the same pin. The
+matching or exceeding series 7's baseline rate (pin 228eca5c1; the
+pins differ only by #1880, a read-only telemetry tool). The
 codex is not expected to lift trap-a's catch rate above a working gate;
 a drop would be the finding.
 Hypothesis H8b (telemetry): after the series, the per-peg record for
