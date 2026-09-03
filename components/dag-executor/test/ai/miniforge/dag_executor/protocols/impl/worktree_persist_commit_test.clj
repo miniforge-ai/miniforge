@@ -24,7 +24,7 @@
 
 ;------------------------------------------------------------------------------ Layer 0
 
-(deftest ^{:stratum 0} persist-commit-disables-signing
+(deftest ^{:stratum 0} persist-commit-disables-signing-test
   (let [calls (atom [])]
     (with-redefs [wt/run-git (fn [& args] (swap! calls conj (vec args)) {:exit 0 :out "" :err ""})]
       (testing "the commit carries -c commit.gpgsign=false ahead of the subcommand"
@@ -34,7 +34,7 @@
           (is (= ["-c" "commit.gpgsign=false"] (subvec args (- i 2) i)))
           (is (some #{"--no-verify"} args)))))))
 
-(deftest ^{:stratum 0} persist-commit-failure-is-a-result
+(deftest ^{:stratum 0} persist-commit-failure-is-a-result-test
   (with-redefs [wt/run-git (fn [& _] {:exit 128 :out "" :err "error: 1Password: failed to fill whole buffer"})]
     (let [r (#'wt/commit-staged! "/tmp/wt" "m")]
       (is (result/err? r))
