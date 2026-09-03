@@ -183,11 +183,11 @@
    sibling's payload would describe a fault the named operation does not
    have."
   [_workspace operation context]
-  (some (fn [[op field value]]
+  (some (fn [[carrier field value]]
           (when-let [[reason data] (id-listing-defect value)]
             (reject :invalid-input :anomalies.deliberation/invalid-object-ids
                     "Operation field must name object ids the engine can look up"
-                    (merge {:op (:op op) :field field :reason reason} data))))
+                    (merge {:op (:op carrier) :field field :reason reason} data))))
         (id-listings (get context :siblings [operation]))))
 
 (defn- ^{:stratum 1} check-creates
