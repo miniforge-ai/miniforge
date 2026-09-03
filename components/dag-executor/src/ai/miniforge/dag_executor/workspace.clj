@@ -38,11 +38,16 @@
   (and (string? branch) (not (str/blank? branch)) (not (str/starts-with? branch "-"))))
 
 (defn- ^{:stratum 0} failed-step
-  "The step's stderr when its exit code is non-zero, else nil. An exec
-   result without an exit code is trusted (older stubs and shells)."
+  "Why the step failed, or nil: the error message when exec-fn returned
+   a result/err, the stderr when the exit code is non-zero. A nil step
+   (skipped) or a result without an exit code (older stubs and shells)
+   is trusted."
   [r fallback]
-  (when (and r (not (zero? (get-in r [:data :exit-code] 0))))
-    (get-in r [:data :stderr] fallback)))
+  (cond
+    (nil? r) nil
+    (result/err? r) (or (get-in r [:error :message]) fallback)
+    (not (zero? (get-in r [:data :exit-code] 0))) (get-in r [:data :stderr] fallback)
+    :else nil))
 
 ;------------------------------------------------------------------------------ Layer 1
 
@@ -62,11 +67,15 @@
   (if (not (safe-branch? branch))
     (result/err :invalid-branch (str "Branch must be a non-empty string not starting with '-': " (pr-str branch)))
     (try
-      (let [_ (exec-fn "git add -A")
-            status-r (exec-fn "git status --porcelain")
+      (let [add-r (exec-fn "git add -A")
+            status-r (when-not (failed-step add-r "") (exec-fn "git status --porcelain"))
             has-changes? (seq (str/trim (get-in status-r [:data :stdout] "")))]
-        (if-not has-changes?
+        (cond
+          (failed-step add-r "") (result/err :persist-add-failed (failed-step add-r "git add failed"))
+          (failed-step status-r "") (result/err :persist-status-failed (failed-step status-r "git status failed"))
+          (not has-changes?)
           (result/ok {:persisted? false :commit-sha nil :no-changes? true :branch branch})
+          :else
           ;; Unsigned: a scratch-worktree commit must not depend on the
           ;; operator's signing agent (see worktree tier commit-staged!).
           (let [commit-r (exec-fn ["git" "-c" "commit.gpgsign=false" "commit" "-m" (str message)])

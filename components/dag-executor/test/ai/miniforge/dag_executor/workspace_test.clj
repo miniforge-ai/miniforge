@@ -88,6 +88,23 @@
     (is (= :persist-sha-failed (get-in (sut/git-persist! exec-fn {:branch "task/x"}) [:error :code])))
     (is (= :restore-sha-failed (get-in (sut/git-restore! exec-fn {:branch "task/x"}) [:error :code])))))
 
+(deftest ^{:stratum 0} exec-fn-result-err-is-surfaced-test
+  (testing "an exec-fn that returns result/err on commit is a persist-commit-failed, not success"
+    (let [exec-fn (fn [cmd]
+                    (cond
+                      (and (vector? cmd) (some #{"commit"} cmd)) (result/err :exec-failed "container gone")
+                      (and (string? cmd) (str/includes? cmd "status")) (result/ok {:exit-code 0 :stdout " M a\n" :stderr ""})
+                      :else (result/ok {:exit-code 0 :stdout "" :stderr ""})))
+          r (sut/git-persist! exec-fn {:branch "task/x"})]
+      (is (= :persist-commit-failed (get-in r [:error :code])))
+      (is (= "container gone" (get-in r [:error :message])))))
+  (testing "a failing status step is not read as no changes"
+    (let [exec-fn (fn [cmd] (if (and (string? cmd) (str/includes? cmd "status"))
+                              (result/err :exec-failed "status blew up")
+                              (result/ok {:exit-code 0 :stdout "" :stderr ""})))
+          r (sut/git-persist! exec-fn {:branch "task/x"})]
+      (is (= :persist-status-failed (get-in r [:error :code]))))))
+
 ;------------------------------------------------------------------------------ Layer 1
 
 (defn- ^{:stratum 1} cmd-has?
