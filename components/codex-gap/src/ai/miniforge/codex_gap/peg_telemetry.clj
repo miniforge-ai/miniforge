@@ -143,7 +143,10 @@
                      entropy (entropy-bits freqs)
                      collapsed (count (filter :collapsed? obs))]
                  [peg {:runs (count obs)
-                       :mechanism (some :mechanism obs)
+                       ;; The mechanism that answered in some run wins over
+                       ;; one that never did; ties resolve by sorted name.
+                       :mechanism (or (->> obs (filter :observed?) (keep :mechanism) sort first)
+                                      (->> obs (keep :mechanism) sort first))
                        :observed? (boolean (some :observed? obs))
                        :observations n
                        :answers freqs

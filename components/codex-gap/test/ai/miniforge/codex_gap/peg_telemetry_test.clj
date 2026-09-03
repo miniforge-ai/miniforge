@@ -79,6 +79,13 @@
     (.mkdirs (io/file dir sut/gate-history-filename))
     (is (= [] (sut/read-gate-history dir)))))
 
+(deftest ^{:stratum 0} aggregate-prefers-the-mechanism-that-answered
+  (let [obs [{:peg "p" :mechanism "no/such/mechanism" :observed? false :answers [] :collapsed? false}
+             {:peg "p" :mechanism "miniforge/gate/stale-references" :observed? true :answers [:denied] :collapsed? false}]]
+    (is (= "miniforge/gate/stale-references" (get-in (sut/aggregate obs) ["p" :mechanism])))
+    (is (= "miniforge/gate/stale-references" (get-in (sut/aggregate (reverse obs)) ["p" :mechanism]))
+        "independent of observation order")))
+
 ;------------------------------------------------------------------------------ Layer 1
 
 (deftest ^{:stratum 1} entropy-and-collapse-primitives
