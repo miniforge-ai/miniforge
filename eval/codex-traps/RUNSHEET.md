@@ -603,3 +603,47 @@ is a new defect, the same reason is a failed fix.
 Falsifier F: the message renders but :files/:hits differ from the
 message text — the two carriers disagree; read gate-history.
 Nothing edited after launch; results appended below.
+
+## REPAIR DEMONSTRATION SIXTH SERIES RESULTS (rv1–rv3, pin ffb335599)
+
+Sandbox provisioned with HEAD, `main` and `origin/main` all at
+ffb335599. Reps launched back to back with no preflight refusals.
+
+| rep | verdict | minutes | first denial (run) | retry prompt | provenance |
+|-----|---------|---------|--------------------|--------------|------------|
+| rv1 | :caught | 72 | 3ee9be72: [bb.edn], hit bb.edn:648 | +382 chars | stash snapshot c77f4a00 |
+| rv2 | :caught | 94 | d54dafc7: [bb.edn] | +382 chars | stash snapshot 83b146dd |
+| rv3 | :caught | 80 | 73b2c851: [bb.edn] | same shape | stash snapshot 74f3a178 |
+
+3/3 on the pre-registered endpoint. H6 held on every clause it could
+be tested on at this pin: the first denial's :files carried bb.edn and
+only bb.edn with its matching line in :hits; the retry prompt grew by
+382 characters — the 288-character bare-key section plus the
+structural "files still referencing it: bb.edn" and "bb.edn:NNN:
+..." lines — so the file name and line reached the implementer; the
+retry updated bb.edn and implement was allowed on iteration 2 in
+every rep. Falsifier A″ (evidence in the prompt, not acted on) did not
+occur. Falsifier D occurred in every rep after the catch (verify loop
+on :policy-verify to the redirect cap); recorded, not counted.
+
+Falsifier E fired in every rep: the persist step logged
+"persist-rejected ... :archive-commit-failed — error: 1Password:
+failed to fill whole buffer" at implement and verify. The scratch-
+worktree commit inherited the operator's global commit signing and a
+locked signing agent; this is the mechanism behind every "fixed but
+never on the branch" outcome since series 4. Fixed in PR 1877
+(#1877): persist commits run unsigned and every git step's exit is
+reported. All three verdicts were therefore read from run-window
+stash snapshots, not task branches.
+
+Two observations for the record. The denial :message text was still
+the bare key at this pin: the `bb miniforge run` task's path list in
+bb.edn lacked the gate's resources, a second path list with the same
+gap #1872 closed in deps.edn; fixed in PR 1876 (#1876). And the
+missing-key warning from #1872 surfaced four more bare keys in the
+verify phase (:policy/violation-summary, :decide/gate-failed,
+:decide/policy-rule-violated, :decide/missing-artifact), all from the
+same cause.
+
+The seventh series (pre-registered above at 228eca5c1) tests the
+committed path with the message text rendered.
