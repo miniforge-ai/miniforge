@@ -28,7 +28,8 @@
   (:require [ai.miniforge.codex-gap.attribute :as attribute]
             [ai.miniforge.codex-gap.classify :as classify]
             [ai.miniforge.codex-gap.ledger :as ledger]
-            [ai.miniforge.codex-gap.report :as report]))
+            [ai.miniforge.codex-gap.report :as report]
+            [ai.miniforge.codex-gap.retrodict :as retrodict]))
 
 ;------------------------------------------------------------------------------ Layer 0
 
@@ -69,6 +70,14 @@
    -> problem id) from the classpath resource."
   []
   (attribute/load-gate-reason-map))
+
+(defn ^{:stratum 0} retrodict
+  "T2 §5.4: re-classify recorded misses offline against the codex as it
+   is now, mapping :miss/phase through `phase->situation`. Returns
+   {:entries [..] :shift {[recorded retrodicted] n}} — the shift table is
+   a newly admitted peg's promotion evidence."
+  [entries codex-dir phase->situation]
+  (retrodict/retrodict entries codex-dir phase->situation))
 
 (defn ^{:stratum 0} build-report
   "Ledger entries + {:skipped :run-count :anchoring} -> the T2 §4 gap

@@ -5,4 +5,10 @@
 ;; code-wide mappings. A lookup miss falls through to similarity
 ;; attribution.
 {[:reason/grant-absent nil]   "fail-closed-by-default"
- [:reason/grant-exceeded nil] "authority-outside-the-model"}
+ [:reason/grant-exceeded nil] "authority-outside-the-model"
+ ;; Policy-pack rule violations at verify: the author shipped code an
+ ;; enforced standard refuses — the dominant failure shape of the codex
+ ;; baseline matrix (~280 misses) and the gap the 2026-08-29 harvest
+ ;; admission covers. Code-wide: every rule-id lands on the same problem,
+ ;; because the problem is WHEN the rule reached the author, not which.
+ [:reason/rule-violation nil] "enforcement-after-authoring"}
