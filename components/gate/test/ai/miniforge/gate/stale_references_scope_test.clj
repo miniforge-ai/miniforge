@@ -109,3 +109,19 @@
                 {:code/files [{:path producer :content new-producer :action :modify}]}
                 {:execution/worktree-path dir})]
     (is (true? (:passed? result)))))
+
+(deftest ^{:stratum 0} renamed-family-with-no-remaining-mention-does-not-go-repo-wide
+  (testing "the old family string vanishes from the worktree with the
+            rename, so its consumer search has no matches at all; that
+            is an empty scope, not a repo-wide one"
+    (let [producer "src/ai/old/c/ledger.clj"
+          stranger "src/ai/other/x.clj"
+          dir (base/temp-git-repo
+               {producer "(ns ai.old.c.ledger)\n(defn read [] {:skipped 0})"
+                stranger "(ns ai.other.x)\n(def r {:status :skipped})"})
+          new-producer "(ns ai.new.c.ledger)\n(defn read [] {:torn-lines 0})"
+          _ (spit (str dir "/" producer) new-producer)
+          result (stale/check-stale-references
+                  {:code/files [{:path producer :content new-producer :action :modify}]}
+                  {:execution/worktree-path dir})]
+      (is (true? (:passed? result))))))

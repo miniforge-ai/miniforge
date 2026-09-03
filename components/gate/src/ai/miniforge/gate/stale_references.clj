@@ -248,7 +248,10 @@
         non-test-afters (keep (fn [[path a]] (when-not (test-path? path) a)) after-of)
         stale (into []
                     (for [[family befores] (producer-families paths before-of)
-                          :let [consumers (delay (referencing-files worktree paths family nil))]
+                          ;; A family nobody names any more (renamed out of
+                          ;; the worktree) has NO consumers -- an empty scope,
+                          ;; never nil, or bare tokens would go repo-wide.
+                          :let [consumers (delay (or (referencing-files worktree paths family nil) []))]
                           token (removed-tokens befores non-test-afters)
                           :let [scope (when-not (namespaced-keyword? token) @consumers)
                                 hits (->> (referencing-files worktree paths token scope)
