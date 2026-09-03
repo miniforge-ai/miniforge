@@ -15,7 +15,6 @@
 ;; WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 ;; See the License for the specific language governing permissions and
 ;; limitations under the License.
-
 (ns ai.miniforge.dag-executor.workspace
   "Git-based workspace persistence shared by Docker and K8s executors.
 
@@ -29,14 +28,18 @@
    [ai.miniforge.dag-executor.result :as result]
    [clojure.string :as str]))
 
-(defn- safe-branch?
+;------------------------------------------------------------------------------ Layer 0
+
+(defn- ^{:stratum 0} safe-branch?
   "Branch names that start with '-' are parsed by git as options even in arg-vector
    mode (no shell involved). Reject them before invoking any git subcommand.
    Non-string values are also invalid — argv elements must be Strings."
   [branch]
   (and (string? branch) (not (str/blank? branch)) (not (str/starts-with? branch "-"))))
 
-(defn git-persist!
+;------------------------------------------------------------------------------ Layer 1
+
+(defn ^{:stratum 1} git-persist!
   "Persist workspace via git commit + push.
 
    Arguments:
@@ -54,7 +57,9 @@
             status-r (exec-fn "git status --porcelain")
             has-changes? (seq (str/trim (get-in status-r [:data :stdout] "")))]
         (if has-changes?
-          (let [_ (exec-fn ["git" "commit" "-m" (str message)])
+          ;; Unsigned: a scratch-worktree commit must not depend on the
+          ;; operator's signing agent (see worktree tier commit-staged!).
+          (let [_ (exec-fn ["git" "-c" "commit.gpgsign=false" "commit" "-m" (str message)])
                 _ (exec-fn ["git" "push" "origin" (str "HEAD:" branch) "--force"])
                 sha-r (exec-fn "git rev-parse HEAD")
                 sha   (str/trim (get-in sha-r [:data :stdout] ""))]
@@ -63,7 +68,7 @@
       (catch Exception e
         (result/err :persist-failed (.getMessage e))))))
 
-(defn git-restore!
+(defn ^{:stratum 1} git-restore!
   "Restore workspace via git fetch + checkout.
 
    Arguments:
