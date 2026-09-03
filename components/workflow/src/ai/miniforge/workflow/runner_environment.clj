@@ -387,5 +387,6 @@
         (catch Exception e
           (log/warn env-logger :workflow :workflow/persist-failed
                     {:message (messages/t :env/persist-failed
-                                          {:error (ex-message e)})})
+                                          {:error (ex-message e)})
+                     :data {:phase phase :error (ex-message e)}})
           nil)))))
