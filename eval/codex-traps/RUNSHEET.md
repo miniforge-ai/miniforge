@@ -410,7 +410,7 @@ Series 4 (rt1–rt3) at pin 25f017442 follows immediately.
 
 ## REPAIR DEMONSTRATION FOURTH SERIES RESULTS (rt1–rt3, pin 25f017442)
 
-Sandbox provisioned with HEAD, `main` and `origin/main` all at 25f01744
+Sandbox provisioned with HEAD, `main` and `origin/main` all at 25f017442
 (the #1865 fix holds in situ).
 
 | rep | verdict | minutes | gate-history (run) | retry prompt |
@@ -425,7 +425,6 @@ token ":skipped", family "ai.miniforge.codex-gap", file bb.edn first,
 and the :on-fail :implement retry carries :task/gate-failures
 (eval/codex-traps/logs/baseline-trap-a-rt{1,2,3}.log, readable since
 PR #1866). Falsifier B is ruled out. Falsifier A is what happened, with an
-
 aggravator the pre-registration did not anticipate:
 
 Every denial listed six files: bb.edn (real), interface_test.clj (real,
@@ -468,3 +467,9 @@ not touch bb.edn -> attention leak is not a precision problem.
 Falsifier D: implement allowed but verify/other gates deny on the
 consumer edit -> a different leak, read gate-history first.
 Falsifier C as before. Nothing edited after launch.
+
+AMENDMENT 2026-09-03 (series 5 pin): the fifth-series pre-registration
+names "the main commit that merges the precision PR". That PR is
+miniforge 1869 (PR #1869); its merge commit is c4e52062b. Series 5
+(ru1–ru3) provisioned with HEAD, `main` and `origin/main` all at
+c4e52062b.
