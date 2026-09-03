@@ -209,3 +209,8 @@
                                  ["a.clj" "b.clj"]
                                  {"a.clj" "{:torn-lines 0}" "b.clj" "{:x 1 :skipped 2}"}))
       "removed from a.clj even though b.clj still has it"))
+
+(deftest ^{:stratum 0} deleted-producer-loses-every-token
+  (is (= [":skipped"]
+         (stale/removed-per-file ["{:skipped 0}"] ["gone.clj"] {}))
+      "no after-content means every token of the before is removed"))

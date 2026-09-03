@@ -264,12 +264,12 @@
 (defn ^{:stratum 3} removed-per-file
   "Tokens removed from any single producer: present in a file's before
    and absent from that same file's after. `after-of` maps path to
-   after-content; a producer with no readable after contributes nothing.
-   Longest first, deduplicated. Public for tests."
+   after-content; a producer with no after-content -- deleted, or
+   unreadable -- has lost every token it had. Longest first,
+   deduplicated. Public for tests."
   [befores paths after-of]
   (->> (map (fn [before path]
-              (when-let [after (get after-of path)]
-                (removed-tokens [before] [after])))
+              (removed-tokens [before] [(get after-of path "")]))
             befores paths)
        (apply concat)
        distinct
@@ -332,12 +332,13 @@
                                            (take max-files-per-token)
                                            vec)
                                 hits (into [] (keep #(first-hit worktree token %)) files)
-                                survives-in (into []
-                                                  (keep (fn [[path a]]
-                                                          (when (and (not (test-path? path))
-                                                                     (token-present? a token))
-                                                            path)))
-                                                  after-of)]
+                                survives-in (->> after-of
+                                                 (keep (fn [[path a]]
+                                                         (when (and (not (test-path? path))
+                                                                    (token-present? a token))
+                                                           path)))
+                                                 sort
+                                                 vec)]
                           :when (seq files)]
                       {:type :stale-reference
                        :token token
