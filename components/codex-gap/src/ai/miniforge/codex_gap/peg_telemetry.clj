@@ -18,7 +18,8 @@
 (ns ai.miniforge.codex-gap.peg-telemetry
   "T1 SPEC §7.7 per-peg telemetry, computed from records that already
    exist: the gap ledger's :miss/pegs (which discriminators a
-   consultation presented, with each answer's landing set) and the run's
+   consultation presented, each as {:id :answer nil :landings {answer
+   [landing-ids]}}) and the run's
    gate-history.edn (every gate decision per iteration).
 
    A peg's recorded answer is the verdict of the mechanism its landing
@@ -67,26 +68,13 @@
                        :let [p (/ n total)]]
                    (* p (/ (Math/log p) (Math/log 2)))))))))
 
-(defn ^{:stratum 0} branches-collapsed?
-  "True when every answer of `peg` lands on the same problem set -- the
-   second §4.4.1 signature. A peg with fewer than two answers cannot
-   collapse."
+(defn ^{:stratum 0} peg-landings
+  "The peg's {answer [landing-ids]} map. The ledger's per-peg record
+   (built by phase-software-factory's consultation summary) carries it
+   under :landings, with :answer nil; the raw codex basis carries it
+   under :answers. Both are read so a record from either side counts."
   [peg]
-  (let [landings (map set (vals (get peg :answers {})))]
-    (and (> (count landings) 1)
-         (apply = landings))))
-
-(defn ^{:stratum 0} peg-mechanisms
-  "Mechanism pointers carried by the problems `peg` can land on, from
-   `nodes` ({id node}); sorted so the choice among several is stable
-   across runs; empty when none carries one."
-  [peg nodes]
-  (->> (vals (get peg :answers {}))
-       (apply concat)
-       (keep #(get-in nodes [% :mechanism]))
-       distinct
-       sort
-       vec))
+  (or (get peg :landings) (get peg :answers) {}))
 
 (defn ^{:stratum 0} gate-answers
   "The answers a run's gate-history records for `gate`: one per
@@ -102,6 +90,27 @@
         history))
 
 ;------------------------------------------------------------------------------ Layer 1
+
+(defn ^{:stratum 1} branches-collapsed?
+  "True when every answer of `peg` lands on the same problem set -- the
+   second §4.4.1 signature. A peg with fewer than two answers cannot
+   collapse."
+  [peg]
+  (let [landings (map set (vals (peg-landings peg)))]
+    (and (> (count landings) 1)
+         (apply = landings))))
+
+(defn ^{:stratum 1} peg-mechanisms
+  "Mechanism pointers carried by the problems `peg` can land on, from
+   `nodes` ({id node}); sorted so the choice among several is stable
+   across runs; empty when none carries one."
+  [peg nodes]
+  (->> (vals (peg-landings peg))
+       (apply concat)
+       (keep #(get-in nodes [% :mechanism]))
+       distinct
+       sort
+       vec))
 
 (defn ^{:stratum 1} load-mechanism-gate-map
   "The mechanism->gate map, or {} when the resource is absent."

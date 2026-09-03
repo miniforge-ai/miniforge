@@ -36,14 +36,15 @@
 (def ^{:stratum 0} gate-map {"miniforge/gate/stale-references" :stale-references})
 
 (def ^{:stratum 0} drift-peg
-  {:id "did-you-update-every-consumer"
-   :answers {"yes" ["other-problem"] "no" ["contract-drift-is-silent"]}})
+  ;; The production per-peg record: :answer nil, landings under :landings.
+  {:id "did-you-update-every-consumer" :answer nil
+   :landings {"yes" ["other-problem"] "no" ["contract-drift-is-silent"]}})
 
 (def ^{:stratum 0} collapsed-peg
-  {:id "collapsed" :answers {"a" ["other-problem"] "b" ["other-problem"]}})
+  {:id "collapsed" :answer nil :landings {"a" ["other-problem"] "b" ["other-problem"]}})
 
 (def ^{:stratum 0} unmapped-peg
-  {:id "unmapped" :answers {"x" ["unmapped-problem"] "y" ["other-problem"]}})
+  {:id "unmapped" :answer nil :landings {"x" ["unmapped-problem"] "y" ["other-problem"]}})
 
 (defn- ^{:stratum 0} run-dir!
   "A checkpoint run dir with one ledger entry presenting `pegs` and the
@@ -67,7 +68,7 @@
         "a deny on another gate is an allow for this one")))
 
 (deftest ^{:stratum 0} mechanisms-are-sorted-for-stable-choice
-  (let [peg {:id "p" :answers {"a" ["m-b"] "b" ["m-a"]}}
+  (let [peg {:id "p" :answer nil :landings {"a" ["m-b"] "b" ["m-a"]}}
         nodes {"m-a" {:id "m-a" :mechanism "z/mechanism"} "m-b" {:id "m-b" :mechanism "a/mechanism"}}]
     (is (= ["a/mechanism" "z/mechanism"] (sut/peg-mechanisms peg nodes)))))
 
@@ -94,7 +95,9 @@
   (is (= 0.0 (sut/entropy-bits {})))
   (is (true? (sut/branches-collapsed? collapsed-peg)))
   (is (false? (sut/branches-collapsed? drift-peg)))
-  (is (false? (sut/branches-collapsed? {:id "one" :answers {"only" ["x"]}}))))
+  (is (false? (sut/branches-collapsed? {:id "one" :landings {"only" ["x"]}})))
+  (is (true? (sut/branches-collapsed? {:id "raw" :answers {"a" ["x"] "b" ["x"]}}))
+      "the raw codex basis key is read too"))
 
 (deftest ^{:stratum 1} telemetry-over-runs
   (let [root (str (Files/createTempDirectory "peg-telemetry" (make-array FileAttribute 0)))]
@@ -134,7 +137,7 @@
 
 (deftest ^{:stratum 1} reported-mechanism-is-the-one-that-answered
   (let [root (str (Files/createTempDirectory "peg-telemetry-mech" (make-array FileAttribute 0)))
-        peg {:id "two-mechanisms" :answers {"a" ["unmapped-problem"] "b" ["contract-drift-is-silent"]}}]
+        peg {:id "two-mechanisms" :answer nil :landings {"a" ["unmapped-problem"] "b" ["contract-drift-is-silent"]}}]
     (run-dir! root "run-a" [peg]
               [{:phase :implement :decision :deny :phase/gate-failures [{:gate :stale-references}]}])
     (let [rec (get-in (sut/peg-telemetry root nodes gate-map) [:pegs "two-mechanisms"])]
