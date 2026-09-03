@@ -50,4 +50,5 @@
                    :when (and (.isDirectory (io/file res)) (not (some #{res} v)))]
                res)]
     (is (empty? (vec gaps))
-        "these resources dirs exist but are missing from a path list that has the brick's src")))
+        (str "resources dirs that exist but are missing from a path list that has the brick's src: "
+             (pr-str (vec gaps))))))

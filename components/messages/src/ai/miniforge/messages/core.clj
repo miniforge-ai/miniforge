@@ -59,11 +59,11 @@
    a word, not an error, and once shipped an implementer a denial that
    said \"stale\" instead of naming the stale file. Say it on stderr."
   [k]
-  (when-not (contains? @warned-keys k)
-    (swap! warned-keys conj k)
-    (binding [*out* *err*]
+  (let [[before _] (swap-vals! warned-keys conj k)]
+    (when-not (contains? before k)
+      (binding [*out* *err*]
       (println (str "WARN messages: no catalog entry for " k
-                    " -- rendering the key name; check the catalog resource is on the classpath")))))
+                    " -- rendering the key name; check the catalog resource is on the classpath"))))))
 
 ;------------------------------------------------------------------------------ Layer 2
 
