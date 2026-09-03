@@ -1023,6 +1023,21 @@
     (let [{:keys [task]} (implement/build-implement-task (create-base-context))]
       (is (not (contains? task :task/gate-failures))))))
 
+(deftest ^{:stratum 2} gate-denial-evidence-reaches-the-rendered-prompt-test
+  (testing "end to end: a stored denied attempt -> build-implement-task ->
+            agent task->text renders the gate-denial section with the
+            token and file — the chain the repair loop depends on"
+    (let [failures [{:gate :stale-references
+                     :errors [{:message "':skipped' was removed by this change but is still referenced by: bb.edn"}]}]
+          ctx (-> (create-base-context)
+                  (assoc-in [:execution/phase-results :implement :phase/gate-failures]
+                            failures))
+          {:keys [task]} (implement/build-implement-task ctx)
+          text (agent/implementer-task->text task)]
+      (is (clojure.string/includes? text "Gate denial"))
+      (is (clojure.string/includes? text "[stale-references]"))
+      (is (clojure.string/includes? text "bb.edn")))))
+
 (use-fixtures :each
   (fn [f]
     (phase/reset-phase-loader!)

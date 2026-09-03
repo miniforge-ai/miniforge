@@ -103,6 +103,24 @@
   [worktree path]
   (git worktree "show" (str "HEAD:" path)))
 
+(defn- ^{:stratum 1} worktree-changed-paths
+  "Every path the worktree has changed against HEAD — tracked
+   modifications AND untracked files — regardless of which implement
+   attempt produced them. A retry that changes nothing must still be
+   judged on the state the previous attempt left behind; judging only
+   the attempt's own artifact let an empty-diff retry pass vacuously
+   while the stale rename persisted (trap-bench REPAIR DEMONSTRATION,
+   reps rq1-rq3: every run's final iteration was decision :allow on
+   zero files)."
+  [worktree]
+  (let [tracked (str (git worktree "diff" "--name-only" "HEAD" "--"))
+        untracked (str (git worktree "ls-files" "--others" "--exclude-standard"))]
+    (->> (concat (str/split-lines tracked) (str/split-lines untracked))
+         (map str/trim)
+         (remove str/blank?)
+         distinct
+         vec)))
+
 (defn- ^{:stratum 1} stale-files
   "Repo files outside `changed-paths` still referencing `token`."
   [worktree changed-paths token]
@@ -146,15 +164,20 @@
   [artifact ctx]
   (let [worktree (get ctx :execution/worktree-path)
         files (:code/files artifact)
-        paths (or (seq (keep :path files)) (:code/file-paths artifact))
         git-ok? (and worktree (some? (git worktree "rev-parse" "--git-dir")))
+        artifact-paths (or (seq (keep :path files)) (:code/file-paths artifact))
+        ;; CUMULATIVE: the attempt's artifact plus everything the worktree
+        ;; already carries against HEAD — see worktree-changed-paths.
+        paths (vec (distinct (concat artifact-paths
+                                     (when git-ok? (worktree-changed-paths worktree)))))
+        artifact-content (into {} (map (juxt :path :content)) files)
         befores (when (and git-ok? (seq paths)) (keep #(before-content worktree %) paths))
         afters (when (seq paths)
-                 (if (seq files)
-                   (keep :content files)
-                   (keep #(try (slurp (str worktree "/" %))
-                               (catch Exception _ nil))
-                         paths)))
+                 (keep (fn [path]
+                         (or (get artifact-content path)
+                             (try (slurp (str worktree "/" path))
+                                  (catch Exception _ nil))))
+                       paths))
         stale (into []
                     (keep (fn [token]
                             (let [hits (stale-files worktree paths token)]

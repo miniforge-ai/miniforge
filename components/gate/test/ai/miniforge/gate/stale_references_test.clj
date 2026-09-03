@@ -139,3 +139,19 @@
                               {:path consumer :content new-consumer :action :modify}]}
                 {:execution/worktree-path dir})]
     (is (true? (:passed? result)))))
+
+(deftest ^{:stratum 1} check-judges-cumulative-worktree-diff-not-just-the-artifact
+  (testing "an EMPTY-artifact retry is still denied when the worktree
+            carries a prior attempt's stale rename — the vacuous-pass
+            escape every repair-demonstration run took"
+    (let [producer "src/producer.clj"
+          consumer "tasks/report.clj"
+          dir (temp-git-repo
+               {producer "(ns producer)\n(defn read-ledger [] {:skipped 0})"
+                consumer "(ns report)\n(get {} :skipped)"})
+          _ (spit (str dir "/" producer) "(ns producer)\n(defn read-ledger [] {:torn-lines 0})")
+          result (stale/check-stale-references
+                  {:code/files []}
+                  {:execution/worktree-path dir})]
+      (is (false? (:passed? result)))
+      (is (= [":skipped"] (mapv :token (:errors result)))))))

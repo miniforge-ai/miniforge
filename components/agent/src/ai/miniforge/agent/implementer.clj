@@ -309,6 +309,20 @@
        (map #(count (str/split-lines %)))
        (reduce + 0)))
 
+(defn ^{:stratum 0} task-sections
+  "The evidence sections `task->text` will actually render for `task`,
+   in render order — the ONE place the render predicates live, so the
+   prompt-section telemetry can only ever claim what was rendered.
+   :task/gate-failures renders on non-empty; the others on presence."
+  [task]
+  (when (map? task)
+    (cond-> []
+      (:task/prior-attempts task) (conj :task/prior-attempts)
+      (seq (:task/gate-failures task)) (conj :task/gate-failures)
+      (:task/phase-handoff task) (conj :task/phase-handoff)
+      (:task/review-feedback task) (conj :task/review-feedback)
+      (:task/verify-failures task) (conj :task/verify-failures))))
+
 ;------------------------------------------------------------------------------ Layer 1
 
 (def ^{:stratum 1} CodeArtifact
@@ -680,12 +694,13 @@
                       verify-failures (:task/verify-failures task)
                       gate-failures (:task/gate-failures task)
                       prior-attempts (:task/prior-attempts task)
+                      sections (set (task-sections task))
                       parts (cond-> []
-                              prior-attempts
+                              (sections :task/prior-attempts)
                               (conj (format-prior-attempts-section prior-attempts))
-                              (seq gate-failures)
+                              (sections :task/gate-failures)
                               (conj (format-gate-failures-section gate-failures))
-                              phase-handoff
+                              (sections :task/phase-handoff)
                               (conj (format-phase-handoff-section phase-handoff))
                               desc
                               (conj desc)
@@ -693,9 +708,9 @@
                               (conj (format-plan-section plan))
                               (and intent (map? intent))
                               (conj (format-intent-section intent))
-                              review-feedback
+                              (sections :task/review-feedback)
                               (conj (format-review-section review-feedback))
-                              verify-failures
+                              (sections :task/verify-failures)
                               (conj (format-verify-section verify-failures)))]
                   (if (seq parts)
                     (str/join "" parts)
@@ -969,6 +984,13 @@
               task-text (task->text input)
               effective-system-prompt (build-effective-system-prompt input)
               user-prompt (build-user-prompt task-text input)]
+          ;; Ground truth for which evidence sections this prompt carried —
+          ;; stream dumps record the model's OUTPUT, not its input, so a
+          ;; retry's prompt contents were unverifiable from the record.
+          (when logger
+            (log/info logger :implementer :implementer/prompt-sections
+                      {:data {:sections (task-sections input)
+                              :prompt-chars (count user-prompt)}}))
           (if llm-client
             (invoke-with-llm llm-client user-prompt effective-system-prompt
                              config context on-chunk logger
