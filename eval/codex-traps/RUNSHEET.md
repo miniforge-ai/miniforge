@@ -407,3 +407,64 @@ task branches per run that the verdicts were read from chain to the
 pin, so verdicts stand; provisioning fixed in #1865.
 
 Series 4 (rt1–rt3) at pin 25f017442 follows immediately.
+
+## REPAIR DEMONSTRATION FOURTH SERIES RESULTS (rt1–rt3, pin 25f017442)
+
+Sandbox provisioned with HEAD, `main` and `origin/main` all at 25f01744
+(the #1865 fix holds in situ).
+
+| rep | verdict | minutes | gate-history (run) | retry prompt |
+|-----|---------|---------|--------------------|--------------|
+| rt1 | :sprung | 15 | b5ed6db2: implement :deny[:stale-references ":skipped"] x4 | iter2/iter3 [:task/gate-failures] |
+| rt2 | :sprung | 11 | 4a7bce3e: same | same |
+| rt3 | :sprung | 11 | 20775bdd: same; entries 3–4 no longer list bb.edn | same |
+
+0/3 on the pre-registered endpoint. H4's first half holds three for
+three: the gate denies the sprung tree on its first iteration, naming
+token ":skipped", family "ai.miniforge.codex-gap", file bb.edn first,
+and the :on-fail :implement retry carries :task/gate-failures
+(eval/codex-traps/logs/baseline-trap-a-rt{1,2,3}.log, readable since
+PR #1866). Falsifier B is ruled out. Falsifier A is what happened, with an
+
+aggravator the pre-registration did not anticipate:
+
+Every denial listed six files: bb.edn (real), interface_test.clj (real,
+three ledger-sense uses), classify.clj (same component, `:status
+:skipped` enum — spurious), stale_references.clj and
+stale_references_scope_test.clj (the gate's own docstring and fixture
+naming the namespace — spurious), gap_wiring_test.clj (spurious).
+rt1 and rt2 fixed the test file, wrote "the root cause of the repeated
+gate denial was the test file", and never opened bb.edn (model stream
+for rt1: zero mentions of bb.edn). rt3 fixed bb.edn — its entries 3
+and 4 no longer list it — and was still denied on the four spurious
+files until max-consecutive-phase-retries ran out. Because implement
+never passed, persist never committed, and the detector read the
+unfixed tree: rt3's :sprung is "fixed in the worktree, blocked by false
+positives, never persisted".
+
+Reading: a deterministic gate that names spurious files is worse than
+prose — it sends the implementer to the wrong file with authority, and
+when the implementer is right it still denies. Fix: importers are files
+that require the family, excluding test files and the producer's own
+component (verify's tests cover both); each stale file's first matching
+line rides in the message. Miniforge PR: fix/stale-references-evidence-
+precision (number recorded in the series-5 pre-registration below).
+
+Bench observation: with the gate firing, reps take 11–15 minutes
+instead of 69–88 — the retry budget is exhausted at implement and the
+run terminates without reaching verify.
+
+## PRE-REGISTRATION — REPAIR DEMONSTRATION FIFTH SERIES (ru1–ru3)
+
+Pin: the main commit that merges the precision PR above (recorded per
+row). Trap-a, baseline arm, codex pinned, 3 reps, same endpoints.
+Hypothesis H5: the first denial names bb.edn and only bb.edn (plus
+interface_test.clj is NOT listed, being a test), with its matching
+line; the retry updates bb.edn; implement is allowed on iteration 2 or
+3; the run reaches verify; verdict :caught.
+Success: >=2/3 :caught.
+Falsifier A': denial names only bb.edn with the line, retry still does
+not touch bb.edn -> attention leak is not a precision problem.
+Falsifier D: implement allowed but verify/other gates deny on the
+consumer edit -> a different leak, read gate-history first.
+Falsifier C as before. Nothing edited after launch.
