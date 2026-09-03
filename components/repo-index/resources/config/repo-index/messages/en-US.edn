@@ -23,6 +23,9 @@
   :prompt/gate-failures-header
   "Gate denial — fix before resubmitting"
 
+  :prompt/gate-failure-files
+  "files still referencing it:"
+
   :prompt/gate-failures-intro
   "Your previous attempt was DENIED by deterministic gates. The same change resubmitted unchanged will be denied again. Fix every item below (search the whole repo when a stale reference is named), then resubmit:"
 

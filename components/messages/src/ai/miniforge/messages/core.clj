@@ -15,7 +15,6 @@
 ;; WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 ;; See the License for the specific language governing permissions and
 ;; limitations under the License.
-
 (ns ai.miniforge.messages.core
   "Shared message catalog loader.
 
@@ -26,7 +25,9 @@
             [clojure.java.io :as io]
             [clojure.string :as str]))
 
-(defn load-catalog
+;------------------------------------------------------------------------------ Layer 0
+
+(defn ^{:stratum 0} load-catalog
   "Load a message catalog from an EDN resource on the classpath.
 
    Arguments:
@@ -39,26 +40,11 @@
     (when-let [res (io/resource resource-path)]
       (get (edn/read-string (slurp res)) section-key {}))))
 
-(defn t
-  "Look up a message by key, substituting params into {placeholder} tokens.
+(defonce ^{:stratum 0} ^:private warned-keys
+  ;; One warning per missing key per process: enough to be seen, not a flood.
+  (atom #{}))
 
-   Arguments:
-     catalog - A delay (from load-catalog) containing the message map
-     k       - Message key
-     params  - Optional map of placeholder replacements
-
-   Returns: The resolved message string, or the key name as fallback."
-  ([catalog k] (t catalog k {}))
-  ([catalog k params]
-   (let [template (get @catalog k (name k))]
-     (if (string? template)
-       (reduce-kv (fn [s pk pv]
-                    (str/replace s (str "{" (name pk) "}") (str pv)))
-                  template
-                  params)
-       template))))
-
-(defn all
+(defn ^{:stratum 0} all
   "Return the full message map from a catalog delay.
 
    Useful for bulk export — e.g. hydrating a browser-side translator
@@ -66,7 +52,48 @@
   [catalog]
   (or @catalog {}))
 
-(defn create-translator
+;------------------------------------------------------------------------------ Layer 1
+
+(defn- ^{:stratum 1} warn-missing-key!
+  "A key with no catalog entry renders as its bare name -- which reads as
+   a word, not an error, and once shipped an implementer a denial that
+   said \"stale\" instead of naming the stale file. Say it on stderr."
+  [k]
+  (let [[before _] (swap-vals! warned-keys conj k)]
+    (when-not (contains? before k)
+      (binding [*out* *err*]
+      (println (str "WARN messages: no catalog entry for " k
+                    " -- rendering the key name; check the catalog resource is on the classpath"))))))
+
+;------------------------------------------------------------------------------ Layer 2
+
+(defn ^{:stratum 2} t
+  "Look up a message by key, substituting params into {placeholder} tokens.
+
+   Arguments:
+     catalog - A delay (from load-catalog) containing the message map
+     k       - Message key
+     params  - Optional map of placeholder replacements
+
+   Returns: The resolved message string, or the key name as fallback
+   (warned once per key on stderr: a bare key name is a defect, not a
+   message)."
+  ([catalog k] (t catalog k {}))
+  ([catalog k params]
+   (let [template (get @catalog k ::missing)
+         template (if (= ::missing template)
+                    (do (warn-missing-key! k) (name k))
+                    template)]
+     (if (string? template)
+       (reduce-kv (fn [s pk pv]
+                    (str/replace s (str "{" (name pk) "}") (str pv)))
+                  template
+                  params)
+       template))))
+
+;------------------------------------------------------------------------------ Layer 3
+
+(defn ^{:stratum 3} create-translator
   "Create a translator function for a specific component's message catalog.
 
    Arguments:
