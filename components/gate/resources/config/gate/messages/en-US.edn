@@ -11,6 +11,10 @@
   :stale-references/stale
   "'{token}' was removed by this change but is still referenced by: {files}"
 
+  ;; Stale-references gate — one matching line per stale file
+  :stale-references/hit
+  "  - {file}:{line}: {text}"
+
   ;; Stale-references gate — no worktree available
   :stale-references/no-worktree
   "No worktree path on the execution context — stale-references check skipped"

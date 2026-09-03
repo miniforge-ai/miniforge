@@ -37,10 +37,21 @@
    candidate tokens are keywords and def'd names present in one of its
    producers' befores and absent from EVERY changed non-test file's
    after-content. Each candidate is then searched in the family's
-   consumers -- files outside the changed set that name the family, as
-   a require of its interface does -- with namespaced keywords searched
-   repo-wide; any hit is a stale reference and fails the gate with the
-   token and its files.
+   importers -- files outside the changed set that require the family:
+   the family name opened by a require vector's bracket or preceded by
+   a quote, as a ns :require, a bb.edn :requires, or a quoted require
+   write it (spelled out in `import-needles`; not repeated here, since
+   this docstring would otherwise import every family it names) -- with
+   namespaced keywords searched repo-wide; any hit is a stale reference
+   and fails the gate with the token, its files, and each file's first
+   matching line. Three kinds of file are never importers: prose that
+   merely mentions the namespace, test files, and the producer's own
+   component -- the last two are exercised by verify's tests, and this
+   gate exists for the consumer no test covers. Trap-bench series 4:
+   the denial listed the gate's own docstring, a test fixture and a
+   same-component enum use of the keyword next to the real consumer;
+   the implementer fixed the wrong files in rt1/rt2, and in rt3 fixed
+   the right one and was still denied on the spurious ones.
 
    Why per-family and consumer-scoped (trap-bench repair series 3,
    rep rs1): the implementer renamed the ledger's :skipped but a changed
@@ -100,6 +111,18 @@
   (let [s (str ns-name)
         i (str/last-index-of s ".")]
     (if i (subs s 0 i) s)))
+
+(defn ^{:stratum 0} component-dir
+  "The brick directory -- `components/<c>/` or `bases/<b>/` -- for a
+   Polylith path, else nil. Public for tests."
+  [path]
+  (second (re-find #"^((?:components|bases)/[^/]+/)" (str path))))
+
+(defn ^{:stratum 0} import-needles
+  "The literal forms a file uses to require a namespace family: the
+   opening of a require vector and a quoted symbol. Public for tests."
+  [family]
+  [(str "[" family) (str "'" family)])
 
 (defn ^{:stratum 0} namespaced-keyword?
   "`:ledger/skipped` -- precise enough to search the whole repo for."
@@ -170,7 +193,7 @@
 (defn- ^{:stratum 1} referencing-files
   "Repo files outside `changed-paths` mentioning `needle`. Always a
    whole-repo `git grep` -- cheap, and the argv stays constant-size;
-   scoping to consumers is a set intersection in the caller, never a
+   scoping to importers is a set intersection in the caller, never a
    pathspec list that could outgrow the OS argument limit."
   [worktree changed-paths needle]
   ;; -e makes the needle an explicit pattern — it can never be parsed
@@ -180,6 +203,22 @@
          (remove str/blank?)
          (remove (set changed-paths))
          vec)))
+
+(defn- ^{:stratum 1} first-hit
+  "`{:file :line :text}` for the first line of `path` mentioning `token`
+   -- the evidence an implementer can act on without re-running the
+   search. Nil when git reports nothing."
+  [worktree token path]
+  (when-let [out (git worktree "grep" "-n" "-I" "-F" "-e" token "--" path)]
+    (when-let [line (first (remove str/blank? (str/split-lines out)))]
+      ;; git grep -n prints path:lineno:text; the path may itself
+      ;; contain ":" only on exotic filesystems, so split from the
+      ;; known prefix rather than on the first two colons.
+      (let [rest (subs line (min (count line) (inc (count path))))
+            [lineno text] (str/split rest #":" 2)]
+        {:file path
+         :line (some-> lineno str/trim parse-long)
+         :text (str/trim (str text))}))))
 
 ;------------------------------------------------------------------------------ Layer 2
 
@@ -199,14 +238,16 @@
 
 (defn ^{:stratum 2} producer-families
   "The changed non-test files that declare a namespace, grouped by
-   namespace family: {family [before-content ...]}. `before-of` maps a
-   path to its pre-change content. Public for tests."
+   namespace family: {family {:befores [content ...] :paths [path ...]}}.
+   `before-of` maps a path to its pre-change content. Public for tests."
   [paths before-of]
   (reduce (fn [acc path]
             (let [before (get before-of path)
                   ns-name (ns-name-of before)]
               (if (and ns-name (not (test-path? path)))
-                (update acc (namespace-family ns-name) (fnil conj []) before)
+                (-> acc
+                    (update-in [(namespace-family ns-name) :befores] (fnil conj []) before)
+                    (update-in [(namespace-family ns-name) :paths] (fnil conj []) path))
                 acc)))
           {}
           paths))
@@ -247,25 +288,37 @@
                          paths))
         non-test-afters (keep (fn [[path a]] (when-not (test-path? path) a)) after-of)
         stale (into []
-                    (for [[family befores] (producer-families paths before-of)
+                    (for [[family {:keys [befores] producer-paths :paths}] (producer-families paths before-of)
                           ;; A family nobody names any more (renamed out of
                           ;; the worktree) has NO consumers -- an empty set,
                           ;; so its bare tokens match nothing.
-                          :let [consumers (delay (set (referencing-files worktree paths family)))]
+                          :let [own-component (some component-dir producer-paths)
+                                consumers (delay (into #{}
+                                                       (comp (mapcat #(referencing-files worktree paths %))
+                                                             (remove test-path?)
+                                                             (remove #(and own-component
+                                                                           (str/starts-with? % own-component))))
+                                                       (import-needles family)))]
                           token (removed-tokens befores non-test-afters)
-                          :let [in-scope? (if (namespaced-keyword? token) any? @consumers)
-                                hits (->> (referencing-files worktree paths token)
-                                          (filter in-scope?)
-                                          (take max-files-per-token)
-                                          vec)]
-                          :when (seq hits)]
+                          :let [in-scope? (if (namespaced-keyword? token)
+                                            (constantly true)
+                                            @consumers)
+                                files (->> (referencing-files worktree paths token)
+                                           (filter in-scope?)
+                                           (take max-files-per-token)
+                                           vec)
+                                hits (into [] (keep #(first-hit worktree token %)) files)]
+                          :when (seq files)]
                       {:type :stale-reference
                        :token token
                        :family family
-                       :files hits
-                       :message (messages/t :stale-references/stale
-                                            {:token token
-                                             :files (str/join ", " hits)})}))]
+                       :files files
+                       :hits hits
+                       :message (str (messages/t :stale-references/stale
+                                                 {:token token
+                                                  :files (str/join ", " files)})
+                                     (str/join "" (map #(str "\n" (messages/t :stale-references/hit %))
+                                                       hits)))}))]
     (cond
       (empty? paths)
       {:passed? true}

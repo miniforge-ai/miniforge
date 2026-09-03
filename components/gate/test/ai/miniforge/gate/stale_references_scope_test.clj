@@ -22,7 +22,8 @@
    in another sense, the bb.edn consumer requiring the interface and
    still reading the old key, and an unrelated file using the same bare
    keyword with no import of the family."
-  (:require [clojure.test :refer [deftest is testing]]
+  (:require [clojure.string :as str]
+            [clojure.test :refer [deftest is testing]]
             [ai.miniforge.gate.stale-references :as stale]
             [ai.miniforge.gate.stale-references-test :as base]))
 
@@ -55,7 +56,14 @@
                    "bb.edn" "{:tasks {}}"}
         families (stale/producer-families (keys before-of) before-of)]
     (is (= ["ai.m.c"] (keys families)))
-    (is (= 2 (count (get families "ai.m.c"))))))
+    (is (= 2 (count (get-in families ["ai.m.c" :befores]))))
+    (is (= #{"components/c/src/ai/m/c/ledger.clj" "components/c/src/ai/m/c/report.clj"}
+           (set (get-in families ["ai.m.c" :paths]))))))
+
+(deftest ^{:stratum 0} component-dir-of-paths
+  (is (= "components/codex-gap/" (stale/component-dir "components/codex-gap/src/ai/miniforge/codex_gap/ledger.clj")))
+  (is (= "bases/cli/" (stale/component-dir "bases/cli/src/x.clj")))
+  (is (nil? (stale/component-dir "bb.edn"))))
 
 (deftest ^{:stratum 0} rs1-shape-flags-only-the-importing-consumer
   (testing "a changed test keeping :skipped in another sense does not
@@ -80,7 +88,50 @@
                   {:execution/worktree-path dir})]
       (is (false? (:passed? result)))
       (is (= [{:token ":skipped" :family "ai.miniforge.codex-gap" :files [consumer]}]
-             (mapv #(select-keys % [:token :family :files]) (:errors result)))))))
+             (mapv #(select-keys % [:token :family :files]) (:errors result))))
+      (testing "the message carries the consumer's first matching line"
+        (let [{:keys [hits message]} (first (:errors result))]
+          (is (= [{:file consumer :line 2 :text ":task (:skipped (codex-gap/read-ledger d))}}}"}] hits))
+          (is (str/includes? message (str "  - " consumer ":2: :task (:skipped"))))))))
+
+(deftest ^{:stratum 0} same-component-siblings-and-tests-are-not-importers
+  (testing "rt3: a sibling in the producer's component using the keyword in
+            another sense, and a test fixture quoting the require form,
+            kept denying after the real consumer was fixed"
+    (let [producer "components/c/src/ai/m/c/ledger.clj"
+          sibling "components/c/src/ai/m/c/classify.clj"
+          fixture "components/gate/test/ai/m/gate/scope_test.clj"
+          consumer "components/other/src/ai/m/other/report.clj"
+          dir (base/temp-git-repo
+               {producer "(ns ai.m.c.ledger)\n(defn read [] {:skipped 0})"
+                sibling "(ns ai.m.c.classify (:require [ai.m.c.ledger]))\n(def r {:status :skipped})"
+                fixture "(ns ai.m.gate.scope-test)\n(def s \"[ai.m.c.interface :as c] :skipped\")"
+                consumer "(ns ai.m.other.report (:require [ai.m.c.ledger :as l]))\n(:skipped (l/read))"})
+          new-producer "(ns ai.m.c.ledger)\n(defn read [] {:torn-lines 0})"
+          _ (spit (str dir "/" producer) new-producer)
+          result (stale/check-stale-references
+                  {:code/files [{:path producer :content new-producer :action :modify}]}
+                  {:execution/worktree-path dir})]
+      (is (false? (:passed? result)))
+      (is (= [[consumer]] (mapv :files (:errors result)))))))
+
+(deftest ^{:stratum 0} prose-mention-of-the-family-is-not-an-import
+  (testing "rt1: a docstring naming the namespace and a fixture quoting it
+            were listed next to the real consumer; only require forms count"
+    (let [producer "src/ai/m/c/ledger.clj"
+          prose "src/ai/other/gate.clj"
+          quoted "src/ai/other/loader.clj"
+          dir (base/temp-git-repo
+               {producer "(ns ai.m.c.ledger)\n(defn read [] {:skipped 0})"
+                prose "(ns ai.other.gate\n  \"Enforces ai.m.c contracts\")\n(def r {:status :skipped})"
+                quoted "(ns ai.other.loader)\n(require 'ai.m.c.ledger)\n(get (read) :skipped)"})
+          new-producer "(ns ai.m.c.ledger)\n(defn read [] {:torn-lines 0})"
+          _ (spit (str dir "/" producer) new-producer)
+          result (stale/check-stale-references
+                  {:code/files [{:path producer :content new-producer :action :modify}]}
+                  {:execution/worktree-path dir})]
+      (is (false? (:passed? result)))
+      (is (= [[quoted]] (mapv :files (:errors result)))))))
 
 (deftest ^{:stratum 0} namespaced-keyword-is-searched-repo-wide
   (let [producer "src/ai/m/c/ledger.clj"

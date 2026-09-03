@@ -37,6 +37,9 @@
     (shell/sh "git" "-C" dir "init" "-q")
     (shell/sh "git" "-C" dir "config" "user.email" "test@test")
     (shell/sh "git" "-C" dir "config" "user.name" "test")
+    ;; A signing agent that is locked or absent fails the fixture commit,
+    ;; and the gate then reads an empty HEAD and passes vacuously.
+    (shell/sh "git" "-C" dir "config" "commit.gpgsign" "false")
     (doseq [[path content] files]
       (let [f (java.io.File. dir path)]
         (.mkdirs (.getParentFile f))
