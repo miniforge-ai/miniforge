@@ -376,3 +376,122 @@
                                                     :statement "first"}
                                                    {:id "claim-2" :type :claim
                                                     :statement "second"}]}))))))
+
+(deftest ^{:stratum 1} id-fields-that-are-not-collections-of-ids-are-refused
+  (testing "set and seq both throw on a scalar, out of validate itself"
+    (doseq [[label operation] [["scalar :targets"
+                                {:op :refine-claim :targets :claim-1}]
+                               ["scalar :evidence"
+                                {:op :challenge :targets #{"claim-1"} :evidence :e-1}]
+                               ["scalar :discriminates"
+                                {:op :propose-experiment :discriminates :h-1}]
+                               ["numeric :targets"
+                                {:op :refine-claim :targets 7}]
+                               ["map :targets"
+                                {:op :refine-claim :targets {:claim-1 true}}]]]
+      (is (= :anomalies.deliberation/invalid-object-ids
+             (subtype-of (validate-tx (workspace (object-at "claim-1" 4))
+                                      (transaction :proposer 10 operation))))
+          label))))
+
+(deftest ^{:stratum 1} a-string-of-ids-is-refused-rather-than-walked
+  (testing "a string is seqable, so set would yield one id per character"
+    (let [rejection (validate-tx
+                     (workspace (object-at "claim-1" 4))
+                     (transaction :proposer 10
+                                  {:op :refine-claim :targets "claim-1"}))]
+      (is (= :anomalies.deliberation/invalid-object-ids (subtype-of rejection)))
+      (is (= :non-collection-ids (:reason (:anomaly/data rejection)))
+          "reported as the shape fault it is, not as seven missing targets"))))
+
+(deftest ^{:stratum 1} an-id-field-rejection-names-the-field-and-the-reason
+  (testing "routing reads the field and reason without parsing the message"
+    (doseq [[field reason operation]
+            [[:targets :non-collection-ids {:op :refine-claim :targets :claim-1}]
+             [:targets :unusable-id {:op :refine-claim :targets #{""}}]
+             [:evidence :unusable-id
+              {:op :challenge :targets #{"claim-1"} :evidence [:e-1]}]
+             [:discriminates :non-collection-ids
+              {:op :propose-experiment :discriminates "h-1"}]]]
+      (let [data (:anomaly/data (validate-tx
+                                 (workspace (object-at "claim-1" 4))
+                                 (transaction :proposer 10 operation)))]
+        (is (= field (:field data)))
+        (is (= reason (:reason data)))))))
+
+(deftest ^{:stratum 1} a-malformed-id-field-is-blamed-on-the-operation-carrying-it
+  (testing "the backing check reads a sibling, so the scan covers the transaction"
+    (let [data (:anomaly/data
+                (validate-tx (workspace (object-at "claim-1" 4))
+                             (transaction :proposer 10
+                                          {:op :challenge :targets #{"claim-1"}}
+                                          {:op :propose-experiment
+                                           :discriminates :h-1})))]
+      (is (= :propose-experiment (:op data))
+          "not :challenge, whose turn noticed and whose own payload is fine")
+      (is (= :discriminates (:field data))))))
+
+(deftest ^{:stratum 1} well-formed-id-fields-pass
+  (testing "the stage refuses malformed listings, not the fields themselves"
+    (is (nil? (validate-tx
+               (workspace (object-at "claim-1" 4))
+               (transaction :proposer 10
+                            {:op :challenge :targets #{"claim-1"}
+                             :evidence ["evidence-1"]}
+                            {:op :propose-experiment
+                             :discriminates '("claim-1")})))))
+  (testing "absent and explicitly nil fields are legal — readers default to empty"
+    (is (nil? (validate-tx (workspace)
+                           (transaction :proposer 10
+                                        {:op :assert-claim :targets nil}))))
+    (is (nil? (validate-tx (workspace)
+                           (transaction :proposer 10 {:op :assert-claim}))))))
+
+(deftest ^{:stratum 1} an-unusable-id-outranks-the-targets-it-would-be-looked-up-as
+  (testing "shape is established before any stage reads the object graph"
+    (is (= :anomalies.deliberation/invalid-object-ids
+           (subtype-of (validate-tx
+                        (workspace)
+                        (transaction :proposer 10
+                                     {:op :refine-claim :targets #{"claim-404" 7}}))))
+        "check-targets would otherwise report 7 as a missing object")))
+
+(deftest ^{:stratum 1} an-operation-that-is-not-a-map-is-left-to-schema-conformance
+  (testing "reading id fields out of a scalar sibling would move the crash"
+    (is (= :anomalies.deliberation/unknown-operation
+           (subtype-of (validate-tx (workspace)
+                                    (transaction :proposer 10
+                                                 {:op :assert-claim} 42))))
+        "the sibling scan skips it; its own turn refuses it by vocabulary")))
+
+(deftest ^{:stratum 1} a-transaction-whose-operations-are-not-a-sequence-is-refused
+  (testing "no stage can run until validate has iterated :tx/operations"
+    (doseq [[label operations] [["a scalar" :assert-claim]
+                                ["a map" {:op :assert-claim}]
+                                ["a set" #{{:op :assert-claim}}]]]
+      (is (= :anomalies.deliberation/invalid-transaction
+             (subtype-of (validation/validate
+                          (workspace)
+                          {:tx/role :proposer :tx/basis 10
+                           :tx/operations operations}
+                          validation/concurrency-stages)))
+          label)))
+  (testing "a transaction proposing nothing is empty, not malformed"
+    (is (nil? (validation/validate (workspace)
+                                   {:tx/role :proposer :tx/basis 10}
+                                   validation/concurrency-stages)))))
+
+(deftest ^{:stratum 1} an-unknown-sibling-operation-outranks-its-own-id-fields
+  (testing "the sibling scan must not report a shape fault ahead of schema"
+    (is (= :anomalies.deliberation/unknown-operation
+           (subtype-of (validate-tx (workspace)
+                                    (transaction :proposer 10
+                                                 {:op :assert-claim}
+                                                 {:op :rewrite-history :targets :x}))))
+        "an operation outside the vocabulary has no fields worth reporting"))
+  (testing "a known sibling's malformed field is still reported"
+    (is (= :anomalies.deliberation/invalid-object-ids
+           (subtype-of (validate-tx (workspace)
+                                    (transaction :proposer 10
+                                                 {:op :assert-claim}
+                                                 {:op :refine-claim :targets :x})))))))

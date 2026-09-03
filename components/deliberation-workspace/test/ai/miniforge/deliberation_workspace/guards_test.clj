@@ -143,3 +143,23 @@
            (subtype-of (validate (workspace [(hard-constraint "constraint-1")])
                                  :proposer
                                  {:op :not-an-op :targets #{"constraint-1"}}))))))
+
+(deftest ^{:stratum 2} the-fields-the-backing-check-reads-are-routed-not-thrown
+  (testing "backed? seqs :evidence and sets a sibling's :discriminates; both would throw"
+    (doseq [[label operations]
+            [["scalar :evidence"
+              [{:op :challenge :targets #{"claim-1"} :evidence :evidence-4}]]
+             ["scalar :discriminates on a sibling"
+              [{:op :challenge :targets #{"claim-1"}}
+               {:op :propose-experiment :discriminates :claim-1}]]]]
+      (is (= :anomalies.deliberation/invalid-object-ids
+             (subtype-of (apply validate (workspace [(claim-object "claim-1")])
+                                :skeptic operations)))
+          label)))
+  (testing "the shape fault outranks the bare challenge read out of it"
+    (is (not= :anomalies.deliberation/bare-challenge
+              (subtype-of (validate (workspace [(claim-object "claim-1")]) :skeptic
+                                    {:op :challenge :targets #{"claim-1"}}
+                                    {:op :propose-experiment
+                                     :discriminates :claim-1})))
+        "an experiment whose :discriminates is unreadable never backed anything")))

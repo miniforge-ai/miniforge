@@ -203,3 +203,27 @@
           "a rejected transaction does not advance the clock")
       (is (= #{"goal-1"} (set (keys (:workspace/objects after))))
           "and leaves no half-created object behind"))))
+
+(deftest ^{:stratum 2} an-unreadable-id-field-is-routed-not-thrown
+  (testing "a scalar :targets threw out of validate itself, so step saw no anomaly"
+    (let [propose (fn [{:keys [role]}]
+                    (tx/new-transaction
+                     {:role role :activation "act-1" :basis 1
+                      :operations [{:op :assert-claim
+                                    :creates [{:id "claim-1" :type :claim
+                                               :statement "a claim"}]}
+                                   {:op :refine-claim :targets :goal-1}]}))
+          after (run/step (workspace) propose)]
+      (is (= [:anomalies.deliberation/invalid-object-ids]
+             (mapv :reason (events-of after :transaction/rejected))))
+      (is (= 1 (:workspace/version after))
+          "a rejected transaction does not advance the clock")
+      (is (= #{"goal-1"} (set (keys (:workspace/objects after))))
+          "and the create in the operation before it is discarded with the rest"))))
+
+(deftest ^{:stratum 2} an-activation-returning-a-malformed-transaction-is-routed
+  (testing "step hands the activation's return straight to validate"
+    (let [after (run/step (workspace) (fn [_] {:tx/role :proposer :tx/basis 1
+                                               :tx/operations :assert-claim}))]
+      (is (= [:anomalies.deliberation/invalid-transaction]
+             (mapv :reason (events-of after :transaction/rejected)))))))

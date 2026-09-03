@@ -49,7 +49,12 @@
 (defn- ^{:stratum 0} backed?
   "N14 §3.5: a challenge must carry evidence, or ride in the same transaction
    as an experiment that discriminates what it challenges. Bare objections are
-   refused — that rule is what stops a skeptic looping forever."
+   refused — that rule is what stops a skeptic looping forever.
+
+   `:evidence` and a sibling's `:discriminates` are read unscreened.
+   `validation/concurrency-stages` establishes that both name object ids
+   before any guard runs, which is why the guards must be composed onto that
+   chain rather than run alone."
   [operation siblings]
   (let [targets (tx/touched-ids operation)
         discriminates? (fn [sibling]
