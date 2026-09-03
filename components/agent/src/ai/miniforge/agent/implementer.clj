@@ -700,7 +700,7 @@
                               (conj (format-prior-attempts-section prior-attempts))
                               (sections :task/gate-failures)
                               (conj (format-gate-failures-section gate-failures))
-                              phase-handoff
+                              (sections :task/phase-handoff)
                               (conj (format-phase-handoff-section phase-handoff))
                               desc
                               (conj desc)
@@ -708,9 +708,9 @@
                               (conj (format-plan-section plan))
                               (and intent (map? intent))
                               (conj (format-intent-section intent))
-                              review-feedback
+                              (sections :task/review-feedback)
                               (conj (format-review-section review-feedback))
-                              verify-failures
+                              (sections :task/verify-failures)
                               (conj (format-verify-section verify-failures)))]
                   (if (seq parts)
                     (str/join "" parts)
