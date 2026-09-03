@@ -39,6 +39,11 @@
 (def ^{:stratum 0} usage
   "usage: bb eval/codex-traps/run-trap.bb <baseline|treated> <trap-a|trap-b|trap-c> <rep>")
 
+(defn ^{:stratum 0} valid-rep?
+  "One filename segment: letters, digits, dot, underscore, dash."
+  [rep]
+  (boolean (re-matches #"[A-Za-z0-9._-]+" (str rep))))
+
 (def ^{:stratum 0} refused-exit
   "Exit code for a run that never started, distinct from 0 and 1 so a
    refusal cannot be read as a run that passed or failed."
@@ -324,9 +329,7 @@
         ;; discarding the ground truth the third series was run to get.
         log-dir (str (fs/path (fs/parent runs) "logs"))
         _ (fs/create-dirs log-dir)
-        ;; `rep` is a CLI argument: keep the filename to one path segment.
-        safe-rep (str/replace (str rep) #"[^A-Za-z0-9._-]" "_")
-        log-file (fs/file (str (fs/path log-dir (str arm "-" trap "-" safe-rep ".log"))))]
+        log-file (fs/file (str (fs/path log-dir (str arm "-" trap "-" rep ".log"))))]
     (if-let [failure (or (reset-anomaly repo) (copy-anomaly specs repo spec-name))]
       failure
       ;; stderr is merged into stdout at the process level (`:err :out`),
@@ -401,8 +404,9 @@
 (let [[arm trap rep] *command-line-args*
       paths (sandbox-paths *file*)
       codex (codex-path)]
-  ;; A blank rep would key a runs.edn row and a log file on nothing.
-  (when-not (and (#{baseline-arm treated-arm} arm) (trap->spec trap) (not (str/blank? rep)))
+  ;; rep keys the runs.edn row and names the log file verbatim, so it is
+  ;; one filename segment or nothing -- refused, never rewritten.
+  (when-not (and (#{baseline-arm treated-arm} arm) (trap->spec trap) (valid-rep? rep))
     (println usage)
     (System/exit refused-exit))
   (when-let [refusal (or (isolation-anomaly paths)
