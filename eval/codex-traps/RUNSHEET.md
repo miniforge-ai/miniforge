@@ -477,6 +477,9 @@ c4e52062b.
 ## REPAIR DEMONSTRATION FIFTH SERIES RESULTS (ru1–ru3, pin c4e52062b)
 
 Sandbox provisioned with HEAD, `main` and `origin/main` all at c4e52062b.
+The pre-registered reps are ru1–ru3. Rows suffixed b/c are re-launches
+of a rep whose earlier launch was refused before any workflow ran;
+they are not additional reps.
 
 | rep | verdict | minutes | gate-history (run) |
 |-----|---------|---------|--------------------|
@@ -493,8 +496,10 @@ sandbox (probes at 13:50–14:10Z and 14:55Z hung for 45–70 s; probes at
 14:25Z and 14:51Z answered). The preflight refusals are not
 measurements (exit 1 in 33 s, no workflow ran).
 
-H5 on the measured reps: the first denial named bb.edn and only
-bb.edn, in every rep (ru1, ru2b) — the precision change held. ru1's
+H5 on the measured reps: the first denial's :files carried bb.edn and
+only bb.edn, in every rep (ru1, ru2b) — the precision change held in
+the gate's record. What reached the implementer prompt is a separate
+matter, settled by the correction below: the file name did not. ru1's
 retry updated bb.edn and implement was allowed on iteration 2; ru2b's
 three retries did not touch bb.edn. ru1's :caught was read from a
 run-window stash snapshot (ce3a9f41); no persist commit existed
