@@ -29,13 +29,20 @@
   (pr-str entry))
 
 (defn ^{:stratum 0} format-human
-  "Format a log entry as a human-readable string."
+  "Format a log entry as one line: timestamp, [level], category/event,
+   ` - message` when present, then :data as EDN when present -- the
+   payload is the evidence for payload-only events."
   [entry]
-  (let [{:log/keys [timestamp level category event message]} entry]
+  (let [{:log/keys [timestamp level category event message]} entry
+        data (get entry :data)]
     (str (when timestamp (.toInstant timestamp))
          " [" (name level) "] "
          (name category) "/" (name event)
-         (when message (str " - " message)))))
+         (when message (str " - " message))
+         ;; :data is documented as a map, but a sink must never throw on
+         ;; a scalar — anything non-nil and non-empty is printed as-is.
+         (when-not (or (nil? data) (and (coll? data) (empty? data)))
+           (str " " (pr-str data))))))
 
 ;------------------------------------------------------------------------------ Layer 1
 
