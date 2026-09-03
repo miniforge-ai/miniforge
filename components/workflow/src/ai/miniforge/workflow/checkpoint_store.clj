@@ -131,8 +131,12 @@
                    :phase/gate-errors (:phase/gate-errors phase-result)
                    :phase/gate-failures (:phase/gate-failures phase-result)}]
         (fs/create-dirs dir)
+        ;; Same instant normalization the checkpoint records get: gate
+        ;; errors carry java.time.Instant values (policy-pack violations'
+        ;; :timestamp), which pr-str would emit as #object[...] and make
+        ;; the history unreadable.
         (with-open [w (java.io.FileOutputStream. (fs/file dir gate-history-filename) true)]
-          (.write w (.getBytes (str (pr-str entry) "\n") "UTF-8"))))
+          (.write w (.getBytes (str (pr-str (coerce/stringify-instants entry)) "\n") "UTF-8"))))
       (catch Exception _ nil))))
 
 ;------------------------------------------------------------------------------ Layer 2

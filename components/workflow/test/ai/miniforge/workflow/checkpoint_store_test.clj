@@ -319,7 +319,9 @@
                                {:status :failed
                                 :phase/decision-envelope {:envelope/decision :deny}
                                 :phase/gate-failures [{:gate :stale-references
-                                                       :errors [{:message "stale"}]}]})
+                                                       :errors [{:message "stale"
+                                                                 ;; policy-pack violations carry Instants
+                                                                 :timestamp (java.time.Instant/parse "2026-08-29T00:00:00Z")}]}]})
               allowed (assoc-in base [:execution/phase-results :implement]
                                 {:status :completed
                                  :phase/decision-envelope {:envelope/decision :allow}})
@@ -334,5 +336,8 @@
           (is (= 2 (count history)) "both iterations recorded")
           (is (= [:deny :allow] (mapv :decision history)))
           (is (= :stale-references (-> history first :phase/gate-failures first :gate)))
+          (is (= "2026-08-29T00:00:00Z"
+                 (-> history first :phase/gate-failures first :errors first :timestamp))
+              "Instants inside gate errors are normalized to strings so the history stays EDN-readable")
           (is (= :allow (get-in phase-file [:phase/result :phase/decision-envelope :envelope/decision]))
               "the phase checkpoint holds only the last iteration — the reason the history exists"))))))
