@@ -42,6 +42,12 @@
                               :log/event :policy/budget-exceeded
                               :log/message "over"
                               :data {:used 100 :limit 50}}))))
+  (testing "scalar data does not throw and is printed"
+    (is (= " [info] loop/tick 42"
+           (fmt/format-human {:log/level :info :log/category :loop :log/event :loop/tick :data 42}))))
+  (testing "empty data is omitted"
+    (is (= " [info] loop/tick"
+           (fmt/format-human {:log/level :info :log/category :loop :log/event :loop/tick :data {}}))))
   (testing "no data, no trailing map"
     (is (= " [info] loop/iteration-started"
            (fmt/format-human {:log/level :info

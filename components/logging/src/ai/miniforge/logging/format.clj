@@ -41,7 +41,10 @@
          " [" (name level) "] "
          (name category) "/" (name event)
          (when message (str " - " message))
-         (when (seq data) (str " " (pr-str data))))))
+         ;; :data is documented as a map, but a sink must never throw on
+         ;; a scalar — anything non-nil and non-empty is printed as-is.
+         (when-not (or (nil? data) (and (coll? data) (empty? data)))
+           (str " " (pr-str data))))))
 
 ;------------------------------------------------------------------------------ Layer 1
 
