@@ -31,11 +31,25 @@
 
    Mechanics: for each changed file, the before-content comes from
    `git show HEAD:<path>` in the worktree (implement runs on uncommitted
-   work, so HEAD is the pre-change state). Candidate tokens are keywords
-   and def'd names present in a before and absent from EVERY changed
-   file's after-content. Each candidate is then searched repo-wide
-   (`git grep -F`); any hit outside the changed set is a stale
-   reference and fails the gate with the token and its files.
+   work, so HEAD is the pre-change state). Producers are the changed
+   non-test files that declare a namespace, grouped by namespace family
+   (`ai.miniforge.codex-gap` for `...codex-gap.ledger`). A family's
+   candidate tokens are keywords and def'd names present in one of its
+   producers' befores and absent from EVERY changed non-test file's
+   after-content. Each candidate is then searched in the family's
+   consumers -- files outside the changed set that name the family, as
+   a require of its interface does -- with namespaced keywords searched
+   repo-wide; any hit is a stale reference and fails the gate with the
+   token and its files.
+
+   Why per-family and consumer-scoped (trap-bench repair series 3,
+   rep rs1): the implementer renamed the ledger's :skipped but a changed
+   TEST kept `{:status :skipped}` in another sense, so a global
+   absent-from-every-changed-file rule never saw a removal -- allow, five
+   iterations running. And an unscoped repo-wide search for a bare
+   keyword like :skipped returns dozens of unrelated files, which is
+   noise the implementer cannot act on. Tests are not producers and
+   not a token's new home; consumers are the files that import you.
 
    Fail-open guards, each surfaced as a warning: no worktree path, no
    changed-file content, git unavailable. The gate never guesses."
@@ -67,6 +81,32 @@
   "Names bound by def/defn/defn-/defmacro/defmulti at any nesting."
   #"\(def(?:n-?|macro|multi)?\s+(?:\^\S+\s+|\^\{[^}]*\}\s+)*([A-Za-z][A-Za-z0-9*+!?_<>=<-]*[A-Za-z0-9*+!?_<>=-])")
 
+(def ^{:stratum 0} ns-pattern
+  "The name bound by a file's (ns ...) form."
+  #"\(ns\s+(?:\^\S+\s+|\^\{[^}]*\}\s+)*([A-Za-z][\w.*+!?<>=-]*)")
+
+(defn ^{:stratum 0} test-path?
+  "Test files are neither producers nor a token's new home. Public for
+   tests."
+  [path]
+  (boolean (re-find #"(?:^|/)test/|[_-]test\.clj[cs]?$" (str path))))
+
+(defn ^{:stratum 0} namespace-family
+  "A namespace with its last segment dropped -- `ai.miniforge.codex-gap`
+   for `ai.miniforge.codex-gap.ledger` -- which is the string every
+   consumer of the component writes when it requires the interface. A
+   single-segment namespace is its own family. Public for tests."
+  [ns-name]
+  (let [s (str ns-name)
+        i (str/last-index-of s ".")]
+    (if i (subs s 0 i) s)))
+
+(defn ^{:stratum 0} namespaced-keyword?
+  "`:ledger/skipped` -- precise enough to search the whole repo for."
+  [token]
+  (let [s (str token)]
+    (and (str/starts-with? s ":") (str/includes? s "/"))))
+
 (defn- ^{:stratum 0} git
   "Trimmed stdout of a git command in `dir`, or nil on any failure."
   [dir & args]
@@ -89,6 +129,12 @@
             (str blob))))
 
 ;------------------------------------------------------------------------------ Layer 1
+
+(defn ^{:stratum 1} ns-name-of
+  "The namespace a Clojure file declares, or nil -- edn, bb.edn and
+   scripts without an ns form are data, not producers. Public for tests."
+  [content]
+  (second (re-find ns-pattern (str content))))
 
 (defn ^{:stratum 1} content-tokens
   "The keyword literals and def'd names in `content`. Public for tests."
@@ -121,17 +167,19 @@
          distinct
          vec)))
 
-(defn- ^{:stratum 1} stale-files
-  "Repo files outside `changed-paths` still referencing `token`."
-  [worktree changed-paths token]
-  ;; -e makes the token an explicit pattern — a token can never be
-  ;; parsed as an option or pathspec regardless of its first character.
-  (when-let [out (git worktree "grep" "-I" "-l" "-F" "-e" token "--")]
-    (->> (str/split-lines out)
-         (remove str/blank?)
-         (remove (set changed-paths))
-         (take max-files-per-token)
-         vec)))
+(defn- ^{:stratum 1} referencing-files
+  "Repo files outside `changed-paths` mentioning `needle`, limited to
+   the `scope` paths -- nil scope is the whole repo, an empty scope is
+   nothing (a family nobody imports has no consumers to check)."
+  [worktree changed-paths needle scope]
+  ;; -e makes the needle an explicit pattern — it can never be parsed
+  ;; as an option or pathspec regardless of its first character.
+  (when (or (nil? scope) (seq scope))
+    (when-let [out (apply git worktree "grep" "-I" "-l" "-F" "-e" needle "--" (or scope []))]
+      (->> (str/split-lines out)
+           (remove str/blank?)
+           (remove (set changed-paths))
+           vec))))
 
 ;------------------------------------------------------------------------------ Layer 2
 
@@ -149,6 +197,20 @@
          (take max-tokens)
          vec)))
 
+(defn ^{:stratum 2} producer-families
+  "The changed non-test files that declare a namespace, grouped by
+   namespace family: {family [before-content ...]}. `before-of` maps a
+   path to its pre-change content. Public for tests."
+  [paths before-of]
+  (reduce (fn [acc path]
+            (let [before (get before-of path)
+                  ns-name (ns-name-of before)]
+              (if (and ns-name (not (test-path? path)))
+                (update acc (namespace-family ns-name) (fnil conj []) before)
+                acc)))
+          {}
+          paths))
+
 ;------------------------------------------------------------------------------ Layer 3
 
 (defn ^{:stratum 3} check-stale-references
@@ -156,10 +218,10 @@
    output; changed files ride on :code/files ({:path :content :action})
    with :code/file-paths as the path fallback.
 
-   `befores`/`afters`/`stale` are computed up front, unconditionally --
-   each is nil-safe on its own (a nil `worktree` or empty `paths` just
-   flows through as empty results) and the work is cheap, so guarding
-   each behind its own nesting level bought nothing but extra
+   `before-of`/`after-of`/`stale` are computed up front, unconditionally
+   -- each is nil-safe on its own (a nil `worktree` or empty `paths`
+   just flows through as empty results) and the work is cheap, so
+   guarding each behind its own nesting level bought nothing but extra
    conditional depth."
   [artifact ctx]
   (let [worktree (get ctx :execution/worktree-path)
@@ -171,24 +233,35 @@
         paths (vec (distinct (concat artifact-paths
                                      (when git-ok? (worktree-changed-paths worktree)))))
         artifact-content (into {} (map (juxt :path :content)) files)
-        befores (when (and git-ok? (seq paths)) (keep #(before-content worktree %) paths))
-        afters (when (seq paths)
-                 (keep (fn [path]
-                         (or (get artifact-content path)
-                             (try (slurp (str worktree "/" path))
-                                  (catch Exception _ nil))))
-                       paths))
+        before-of (when (and git-ok? (seq paths))
+                    (into {} (keep (fn [path]
+                                     (when-let [b (before-content worktree path)]
+                                       [path b])))
+                          paths))
+        after-of (when (seq paths)
+                   (into {} (keep (fn [path]
+                                    (when-let [a (or (get artifact-content path)
+                                                     (try (slurp (str worktree "/" path))
+                                                          (catch Exception _ nil)))]
+                                      [path a])))
+                         paths))
+        non-test-afters (keep (fn [[path a]] (when-not (test-path? path) a)) after-of)
         stale (into []
-                    (keep (fn [token]
-                            (let [hits (stale-files worktree paths token)]
-                              (when (seq hits)
-                                {:type :stale-reference
-                                 :token token
-                                 :files hits
-                                 :message (messages/t :stale-references/stale
-                                                      {:token token
-                                                       :files (str/join ", " hits)})}))))
-                    (removed-tokens befores afters))]
+                    (for [[family befores] (producer-families paths before-of)
+                          :let [consumers (delay (referencing-files worktree paths family nil))]
+                          token (removed-tokens befores non-test-afters)
+                          :let [scope (when-not (namespaced-keyword? token) @consumers)
+                                hits (->> (referencing-files worktree paths token scope)
+                                          (take max-files-per-token)
+                                          vec)]
+                          :when (seq hits)]
+                      {:type :stale-reference
+                       :token token
+                       :family family
+                       :files hits
+                       :message (messages/t :stale-references/stale
+                                            {:token token
+                                             :files (str/join ", " hits)})}))]
     (cond
       (empty? paths)
       {:passed? true}
@@ -203,7 +276,7 @@
        :warnings [{:type :stale-references-skipped
                    :message (messages/t :stale-references/git-unavailable)}]}
 
-      (empty? afters)
+      (empty? after-of)
       {:passed? true
        :warnings [{:type :stale-references-skipped
                    :message (messages/t :stale-references/no-content)}]}
