@@ -141,12 +141,16 @@
            ;; artifact (which would repeat the pin header mid-file). A
            ;; secondary that fails to answer is dropped with a warning
            ;; rather than failing the primary consultation.
-           (let [secondaries (keep (fn [s]
+           ;; Realized once: keep is lazy and the seq is traversed for
+           ;; content and again for pegs — an unrealized seq would consult
+           ;; the codex (IO + warnings) once per traversal.
+           (let [secondaries (into []
+                                   (keep (fn [s]
                                      (let [resp (codex/consider codex-dir s)]
                                        (if-let [a (:codex/anomaly resp)]
                                          (do (warn-skip! phase logger a (:codex/reason resp)) nil)
                                          {:content (codex/render-response resp)
-                                          :pegs (:pegs resp)})))
+                                          :pegs (:pegs resp)}))))
                                    (get phase->secondary-situations phase))
                  content (str/join "\n\n" (cons (:content entry) (map :content secondaries)))
                  pegs (into (vec (:pegs entry)) (mapcat :pegs secondaries))]
