@@ -315,13 +315,22 @@
 (defn ^{:stratum 2} run-dogfood!
   "Returns `{:exit .. :started .. :ended ..}`, or an anomaly when the run
    could not be started from a clean tree."
-  [{:keys [repo specs]} {:keys [arm trap codex home]}]
+  [{:keys [repo specs runs]} {:keys [arm trap codex home rep]}]
   (let [spec-name (trap->spec trap)
-        started (str (java.time.Instant/now))]
+        started (str (java.time.Instant/now))
+        ;; Full dogfood stdout+stderr per run: the logger lines (e.g.
+        ;; :implementer/prompt-sections) live ONLY there — stream dumps
+        ;; are the model's output, events are a subset — and tail -1 was
+        ;; discarding the ground truth the third series was run to get.
+        log-dir (str (fs/path (fs/parent runs) "logs"))
+        _ (fs/create-dirs log-dir)
+        log-file (fs/file (str (fs/path log-dir (str arm "-" trap "-" rep ".log"))))]
     (if-let [failure (or (reset-anomaly repo) (copy-anomaly specs repo spec-name))]
       failure
-      {:exit (:exit (p/shell {:dir repo :env (run-env arm codex home) :continue true}
+      {:exit (:exit (p/shell {:dir repo :env (run-env arm codex home) :continue true
+                              :out log-file :err log-file}
                              "bb" "dogfood" (str "work/" spec-name)))
+       :log (str log-file)
        :started started
        :ended (str (java.time.Instant/now))})))
 
@@ -398,7 +407,7 @@
     (System/exit refused-exit))
   (let [inputs (arm-inputs (:root paths) arm)
         before (snapshot (:repo paths) inputs)
-        run (run-dogfood! paths (assoc inputs :arm arm :trap trap :codex codex))
+        run (run-dogfood! paths (assoc inputs :arm arm :trap trap :codex codex :rep rep))
         _ (when (:anomaly/type run)
             (report-refusal! run)
             (System/exit refused-exit))

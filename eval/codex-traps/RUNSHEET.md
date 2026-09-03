@@ -290,3 +290,20 @@ REVISED RESULTS (frozen detector, recovered trees):
    migration as the peg's best outcome; (b) trap-b and trap-c retire
    at this tier (bench-trap retirement); (c) run-trap.bb detection
    moves to the snapshot record.
+
+AMENDMENT 2026-09-03 (instrument only): run-trap.bb captures each run's
+full dogfood stdout+stderr to eval/codex-traps/logs/<arm>-<trap>-<rep>.log.
+The :implementer/prompt-sections ground truth is a LOGGER line, present
+only in that stream (stream dumps are the model's output; events are a
+subset), and the harness was discarding it. Applied mid-series 3 from
+rs3 onward; rs1/rs2 have gate-history.edn but no prompt log.
+
+AMENDMENT 2026-09-03 (bench defect, provisioning): a provisioned
+sandbox's local `main` and `origin/main` were the launching checkout's
+copies, not the pin — in the series-3 sandbox both sat at d2f0860b
+(#1744) while HEAD was the pin c87b55e7a. Anything that branches from
+`main` by name (the dag-executor's default base ref) started three weeks
+stale; 69 task-* branches in that sandbox were "Created from d2f0860b".
+The two task branches the rs1 verdict was read from chain to the pin,
+so the rs1 evidence stands; series 4 provisions with `bench:provision`
+pinning both refs (tasks/bench.clj, this PR).
