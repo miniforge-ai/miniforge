@@ -473,3 +473,83 @@ names "the main commit that merges the precision PR". That PR is
 miniforge 1869 (PR #1869); its merge commit is c4e52062b. Series 5
 (ru1–ru3) provisioned with HEAD, `main` and `origin/main` all at
 c4e52062b.
+
+## REPAIR DEMONSTRATION FIFTH SERIES RESULTS (ru1–ru3, pin c4e52062b)
+
+Sandbox provisioned with HEAD, `main` and `origin/main` all at c4e52062b.
+The pre-registered reps are ru1–ru3. Rows suffixed b/c are re-launches
+of a rep whose earlier launch was refused before any workflow ran;
+they are not additional reps.
+
+| rep | verdict | minutes | gate-history (run) |
+|-----|---------|---------|--------------------|
+| ru1 | :caught | 106 | a12e6285: implement :deny[:stale-references, bb.edn only] x1; implement :allow / verify :deny[:policy-verify] x4; terminal verify :deny x2 |
+| ru2 | refused | 0.5 | none: "Backend preflight failed for claude: Process timed out after 30000ms" |
+| ru3 | refused | 0.5 | same |
+| ru2b | :sprung | 31 | 591fcbad: implement :deny[:stale-references, bb.edn only] x4 |
+| ru3b, ru3c | refused | 0.5 | preflight timeout, same message |
+
+Measured reps: ru1 :caught, ru2b :sprung. ru3 is unmeasured so far;
+a further re-run (ru3d) is queued behind a probe that requires the
+claude CLI to answer within the preflight's 30 seconds from the
+sandbox (probes at 13:50–14:10Z and 14:55Z hung for 45–70 s; probes at
+14:25Z and 14:51Z answered). The preflight refusals are not
+measurements (exit 1 in 33 s, no workflow ran).
+
+H5 on the measured reps: the first denial's :files carried bb.edn and
+only bb.edn, in every rep (ru1, ru2b) — the precision change held in
+the gate's record. What reached the implementer prompt is a separate
+matter, settled by the correction below: the file name did not. ru1's
+retry updated bb.edn and implement was allowed on iteration 2; ru2b's
+three retries did not touch bb.edn. ru1's :caught was read from a
+run-window stash snapshot (ce3a9f41); no persist commit existed
+(#1871 was not at this pin). After the catch, ru1 looped at verify
+four times: a test consumer in another component (gap_wiring_test.clj
+line 106, excluded from importers by design and caught by verify's
+tests as intended) plus :std/exceptions-as-data and :std/localization
+rule violations; each verify retry read the failing test as
+"environmental — stream-recovery/abort events from backend
+unavailability" and re-declared the tree correct. That misattribution
+is recorded as a codex harvest candidate (HARVEST-2026-09 §1).
+
+CORRECTION 2026-09-03 (series 4 and 5, append-only): the gate-history
+entries of every :stale-references denial in series 4 and 5 store the
+denial :message as the bare word "stale", with hit lines rendered as
+"hit". The gate's message catalog (components/gate/resources) was not
+on the dogfood JVM classpath — deps.edn listed components/gate/src in
+its path vectors without the resources sibling, as it did for 32
+bricks — messages/t fell back silently to the key name, and the
+implementer's gate-denial section rendered only :message. Predicted
+section size with the bare key: 288 characters; with the real text:
+408; observed retry-prompt deltas: 282–286 (rt1–rt3, ru1, ru2b). No
+series-4 or series-5 retry prompt ever named bb.edn. The series-4
+reading "Falsifier A, the implementer fixed the wrong file" and the
+series-5 reading "Falsifier A′" are withdrawn: both were Falsifier B
+(delivery) at the message layer. ru1's catch happened without the
+file name in the prompt. Fix: miniforge PR #1872 (resources on every
+path vector with a guard test; a missing key warns on stderr; the
+section renders :files and :hits from the error map). The
+"90-minute budget" was never enforced by the harness; runs end at the
+redirect cap (ru1: 106 minutes).
+
+## PRE-REGISTRATION — REPAIR DEMONSTRATION SIXTH SERIES (rv1–rv3)
+
+Pin: the main commit that merges PR #1872 (recorded per row; the
+amendment below names it once known). Trap-a, baseline arm, codex
+pinned, 3 reps, same endpoints. Series 6 is the first series in which
+the denial text names the file and its matching line in the prompt.
+Hypothesis H6: the first denial names bb.edn with its line; the retry
+prompt contains the string "bb.edn" (verified from the log's
+:implementer/prompt-sections payload and the rendered denial text);
+the retry updates bb.edn; implement is allowed on iteration 2; the
+allowed implement is persisted to the task branch (#1871 is at this
+pin, so any skip is logged with its reason); verdict :caught read
+from the branch, not a snapshot.
+Success: >=2/3 :caught with the fix on the task branch.
+Falsifier A″: the prompt names bb.edn with its line and the retry
+still does not touch it — the attention leak, now actually tested.
+Falsifier D: as in series 5 (verify loop after the catch) — recorded,
+not counted against H6.
+Falsifier E: persist skipped or rejected after an allowed implement —
+read the :workflow/persist-skipped reason first.
+Nothing edited after launch.
