@@ -589,6 +589,25 @@
   ;; MCP Context Server
   ;; ──────────────────────────────────────────────────────────────────────────
 
+  codex-gap-peg-telemetry
+  {:doc "T1 §7.7 per-peg telemetry over run ledgers + gate histories: mechanism verdicts as answers, entropy, collapsed branches. Usage: bb codex-gap-peg-telemetry [checkpoint-root]; codex from MINIFORGE_CODEX_PATH"
+   :extra-paths ["components/codex-gap/src"
+                 "components/codex-gap/resources"
+                 "components/codex/src"
+                 "components/codex/resources"
+                 "components/messages/src"
+                 "components/messages/resources"]
+   :requires ([ai.miniforge.codex-gap.interface :as codex-gap]
+              [ai.miniforge.codex.interface :as codex]
+              [babashka.fs :as fs])
+   :task (let [[root] *command-line-args*
+               root (or root (str (fs/path (System/getProperty "user.home") ".miniforge" "checkpoints")))
+               codex-dir (System/getenv "MINIFORGE_CODEX_PATH")
+               graph (when codex-dir (codex/load-graph codex-dir))]
+           (if (or (nil? codex-dir) (:codex/anomaly graph))
+             (do (println "codex unavailable:" (or (:codex/reason graph) "MINIFORGE_CODEX_PATH unset")) (System/exit 2))
+             (prn (codex-gap/peg-telemetry root (:nodes graph) (codex-gap/load-mechanism-gate-map)))))}
+
   codex-gap-retrodict
   {:doc "T2 §5.4 retrodiction: re-classify run ledgers against the codex as it is NOW. Usage: bb codex-gap-retrodict [checkpoint-root] [phase=situation ...]; codex from MINIFORGE_CODEX_PATH"
    :extra-paths ["components/codex-gap/src"

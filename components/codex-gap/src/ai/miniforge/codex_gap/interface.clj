@@ -29,6 +29,7 @@
             [ai.miniforge.codex-gap.classify :as classify]
             [ai.miniforge.codex-gap.ledger :as ledger]
             [ai.miniforge.codex-gap.report :as report]
+            [ai.miniforge.codex-gap.peg-telemetry :as peg-telemetry]
             [ai.miniforge.codex-gap.retrodict :as retrodict]))
 
 ;------------------------------------------------------------------------------ Layer 0
@@ -95,3 +96,18 @@
   "The §4.1.3 anchoring slot from the codex graph, or nil when unreadable."
   [codex-dir]
   (report/codex-anchoring-stats codex-dir))
+
+(defn ^{:stratum 0} peg-telemetry
+  "T1 SPEC §7.7 per-peg record over the run directories under
+   `checkpoint-root`: for each peg a consultation presented, the answers
+   its landing problem's mechanism recorded in gate-history.edn, their
+   entropy, and whether the peg's answer branches collapsed onto one
+   landing set. `nodes` is the codex graph's {id node}; `gate-map` maps
+   mechanism pointers to gate keywords (see load-mechanism-gate-map)."
+  [checkpoint-root nodes gate-map]
+  (peg-telemetry/peg-telemetry checkpoint-root nodes gate-map))
+
+(defn ^{:stratum 0} load-mechanism-gate-map
+  "The mechanism->gate map resource, or {} when absent."
+  []
+  (peg-telemetry/load-mechanism-gate-map))

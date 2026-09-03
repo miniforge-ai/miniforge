@@ -1,0 +1,7 @@
+;; Mechanism pointer (T1 SPEC §4.5, the `mechanism:` field a problem node
+;; carries once a peg migrated into enforcement) -> the gate keyword whose
+;; decision is that mechanism's verdict in a run's gate-history.edn.
+;; A peg landing on a problem listed here has a mechanically recorded
+;; answer (§7.7): the gate denied (the guarded failure occurred) or
+;; allowed (it did not). Pegs with no mapped mechanism stay unobserved.
+{"miniforge/gate/stale-references" :stale-references}
