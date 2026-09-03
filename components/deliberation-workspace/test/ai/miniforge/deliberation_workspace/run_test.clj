@@ -220,3 +220,10 @@
           "a rejected transaction does not advance the clock")
       (is (= #{"goal-1"} (set (keys (:workspace/objects after))))
           "and the create in the operation before it is discarded with the rest"))))
+
+(deftest ^{:stratum 2} an-activation-returning-a-malformed-transaction-is-routed
+  (testing "step hands the activation's return straight to validate"
+    (let [after (run/step (workspace) (fn [_] {:tx/role :proposer :tx/basis 1
+                                               :tx/operations :assert-claim}))]
+      (is (= [:anomalies.deliberation/invalid-transaction]
+             (mapv :reason (events-of after :transaction/rejected)))))))

@@ -322,13 +322,25 @@
    workspace in a state no activation ever proposed.
 
    Stages are supplied by the caller rather than defaulted, so the abuse
-   guards extend the chain without reopening this namespace."
+   guards extend the chain without reopening this namespace.
+
+   `:tx/operations` is held to a shape here rather than by a stage, because
+   a stage cannot run until this function has iterated it. `run/step` hands
+   an activation's return value straight in, so a scalar there would throw
+   out of the validator with no anomaly for the caller to route. Sequential
+   for the reason `check-creates` requires it of `:creates`: a set has no
+   first operation, so which one the pipeline reported would vary between
+   runs over identical input."
   [workspace transaction stages]
   (let [operations (:tx/operations transaction)
         context {:role (:tx/role transaction)
                  :basis (:tx/basis transaction)
                  :siblings operations}]
-    (some #(validate-operation workspace % context stages) operations)))
+    (if (or (nil? operations) (sequential? operations))
+      (some #(validate-operation workspace % context stages) operations)
+      (reject :invalid-input :anomalies.deliberation/invalid-transaction
+              "Transaction :tx/operations must be a sequence of operations"
+              {:operations operations}))))
 
 ;------------------------------------------------------------------------------ Layer 2
 

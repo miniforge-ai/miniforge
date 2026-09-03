@@ -463,3 +463,20 @@
                                     (transaction :proposer 10
                                                  {:op :assert-claim} 42))))
         "the sibling scan skips it; its own turn refuses it by vocabulary")))
+
+(deftest ^{:stratum 1} a-transaction-whose-operations-are-not-a-sequence-is-refused
+  (testing "no stage can run until validate has iterated :tx/operations"
+    (doseq [[label operations] [["a scalar" :assert-claim]
+                                ["a map" {:op :assert-claim}]
+                                ["a set" #{{:op :assert-claim}}]]]
+      (is (= :anomalies.deliberation/invalid-transaction
+             (subtype-of (validation/validate
+                          (workspace)
+                          {:tx/role :proposer :tx/basis 10
+                           :tx/operations operations}
+                          validation/concurrency-stages)))
+          label)))
+  (testing "a transaction proposing nothing is empty, not malformed"
+    (is (nil? (validation/validate (workspace)
+                                   {:tx/role :proposer :tx/basis 10}
+                                   validation/concurrency-stages)))))
