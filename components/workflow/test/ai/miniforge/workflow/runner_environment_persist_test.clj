@@ -79,4 +79,7 @@
        {:execution/executor ::stub :execution/environment-id (random-uuid)
         :execution/worktree-path "/tmp/wt"}
        {:execution/current-phase :implement})
-      (is (= [:workflow/persist-rejected] (mapv :log/event @sink))))))
+      (is (= [:workflow/persist-rejected] (mapv :log/event @sink)))
+      (is (= "Workspace persist rejected at implement: :worktree-missing"
+             (:log/message (first @sink)))
+          "the executor's error code is in the message"))))

@@ -373,7 +373,7 @@
             (log/warn env-logger :workflow :workflow/persist-rejected
                       {:message (messages/t :env/persist-rejected
                                             {:phase (name phase)
-                                             :code (str (:error/code result (:code result)))})
+                                             :code (str (get-in result [:error :code]))})
                        :data {:phase phase :result result}})
 
             (:persisted? data)
