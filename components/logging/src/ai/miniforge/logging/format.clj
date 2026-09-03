@@ -29,13 +29,19 @@
   (pr-str entry))
 
 (defn ^{:stratum 0} format-human
-  "Format a log entry as a human-readable string."
+  "Format a log entry as a human-readable string. A :data map rides on
+   the same line as EDN: an event whose whole point is its payload
+   (:implementer/prompt-sections, :policy/budget-exceeded) is otherwise
+   just a name in the console and file sinks, and the trap bench read
+   two series of logs that recorded the name and nothing else."
   [entry]
-  (let [{:log/keys [timestamp level category event message]} entry]
+  (let [{:log/keys [timestamp level category event message]} entry
+        data (get entry :data)]
     (str (when timestamp (.toInstant timestamp))
          " [" (name level) "] "
          (name category) "/" (name event)
-         (when message (str " - " message)))))
+         (when message (str " - " message))
+         (when (seq data) (str " " (pr-str data))))))
 
 ;------------------------------------------------------------------------------ Layer 1
 
