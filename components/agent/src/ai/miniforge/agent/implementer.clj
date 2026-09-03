@@ -161,8 +161,18 @@
        (str/join "\n"
                  (for [{:keys [gate errors]} gate-failures
                        error errors]
+                   ;; The file list and matching lines ride structurally,
+                   ;; not only inside :message: when a catalog entry was
+                   ;; missing, :message was the bare word "stale" and five
+                   ;; trap-bench reps never saw the file they had to fix.
                    (str "- [" (name (or gate :unknown)) "] "
-                        (or (:message error) (pr-str error)))))
+                        (or (:message error) (pr-str error))
+                        (when-let [files (seq (:files error))]
+                          (str "\n  " (messages/t :prompt/gate-failure-files)
+                               " " (str/join ", " files)))
+                        (str/join ""
+                                  (for [{:keys [file line text]} (:hits error)]
+                                    (str "\n  - " file ":" line ": " text))))))
        "\n"))
 
 (defn- ^{:stratum 0} format-prior-attempts-section
