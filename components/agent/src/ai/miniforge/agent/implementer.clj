@@ -309,6 +309,20 @@
        (map #(count (str/split-lines %)))
        (reduce + 0)))
 
+(defn ^{:stratum 0} task-sections
+  "The evidence sections `task->text` will actually render for `task`,
+   in render order — the ONE place the render predicates live, so the
+   prompt-section telemetry can only ever claim what was rendered.
+   :task/gate-failures renders on non-empty; the others on presence."
+  [task]
+  (when (map? task)
+    (cond-> []
+      (:task/prior-attempts task) (conj :task/prior-attempts)
+      (seq (:task/gate-failures task)) (conj :task/gate-failures)
+      (:task/phase-handoff task) (conj :task/phase-handoff)
+      (:task/review-feedback task) (conj :task/review-feedback)
+      (:task/verify-failures task) (conj :task/verify-failures))))
+
 ;------------------------------------------------------------------------------ Layer 1
 
 (def ^{:stratum 1} CodeArtifact
@@ -680,10 +694,11 @@
                       verify-failures (:task/verify-failures task)
                       gate-failures (:task/gate-failures task)
                       prior-attempts (:task/prior-attempts task)
+                      sections (set (task-sections task))
                       parts (cond-> []
-                              prior-attempts
+                              (sections :task/prior-attempts)
                               (conj (format-prior-attempts-section prior-attempts))
-                              (seq gate-failures)
+                              (sections :task/gate-failures)
                               (conj (format-gate-failures-section gate-failures))
                               phase-handoff
                               (conj (format-phase-handoff-section phase-handoff))
@@ -974,12 +989,7 @@
           ;; retry's prompt contents were unverifiable from the record.
           (when logger
             (log/info logger :implementer :implementer/prompt-sections
-                      {:data {:sections (filterv #(contains? input %)
-                                                 [:task/prior-attempts
-                                                  :task/gate-failures
-                                                  :task/phase-handoff
-                                                  :task/review-feedback
-                                                  :task/verify-failures])
+                      {:data {:sections (task-sections input)
                               :prompt-chars (count user-prompt)}}))
           (if llm-client
             (invoke-with-llm llm-client user-prompt effective-system-prompt
