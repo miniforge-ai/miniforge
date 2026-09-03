@@ -36,12 +36,14 @@
       (is (= {:sections [:gate-failures :phase-handoff] :prompt-chars 4120}
              (edn/read-string (subs line (str/index-of line "{")))))))
   (testing "message and data both render, message first"
-    (is (= " [warn] policy/budget-exceeded - over {:used 100, :limit 50}"
-           (fmt/format-human {:log/level :warn
-                              :log/category :policy
-                              :log/event :policy/budget-exceeded
-                              :log/message "over"
-                              :data {:used 100 :limit 50}}))))
+    (let [line (fmt/format-human {:log/level :warn
+                                  :log/category :policy
+                                  :log/event :policy/budget-exceeded
+                                  :log/message "over"
+                                  :data {:used 100 :limit 50}})]
+      (is (str/starts-with? line " [warn] policy/budget-exceeded - over {"))
+      (is (= {:used 100 :limit 50}
+             (edn/read-string (subs line (str/index-of line "{")))))))
   (testing "scalar data does not throw and is printed"
     (is (= " [info] loop/tick 42"
            (fmt/format-human {:log/level :info :log/category :loop :log/event :loop/tick :data 42}))))

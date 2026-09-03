@@ -29,11 +29,9 @@
   (pr-str entry))
 
 (defn ^{:stratum 0} format-human
-  "Format a log entry as a human-readable string. A :data map rides on
-   the same line as EDN: an event whose whole point is its payload
-   (:implementer/prompt-sections, :policy/budget-exceeded) is otherwise
-   just a name in the console and file sinks, and the trap bench read
-   two series of logs that recorded the name and nothing else."
+  "Format a log entry as one line: timestamp, [level], category/event,
+   ` - message` when present, then :data as EDN when present -- the
+   payload is the evidence for payload-only events."
   [entry]
   (let [{:log/keys [timestamp level category event message]} entry
         data (get entry :data)]
