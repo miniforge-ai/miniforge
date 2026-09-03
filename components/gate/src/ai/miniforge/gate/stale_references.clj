@@ -34,9 +34,15 @@
    work, so HEAD is the pre-change state). Producers are the changed
    non-test files that declare a namespace, grouped by namespace family
    (`ai.miniforge.codex-gap` for `...codex-gap.ledger`). A family's
-   candidate tokens are keywords and def'd names present in one of its
-   producers' befores and absent from EVERY changed non-test file's
-   after-content. Each candidate is then searched in the family's
+   candidate tokens are keywords and def'd names present in a
+   producer's before and absent from THAT producer's after -- judged
+   per file. A token that survives in another changed file of the
+   family is still a candidate (trap-bench rep ru3d: report.clj kept
+   `:skipped` as a message-template key while ledger.clj renamed its
+   result key, and a family-wide rule read that as a move and passed
+   the sprung tree); the error names where it survives so the
+   implementer can tell a same-name key from a reference to update.
+   Each candidate is then searched in the family's
    importers -- files outside the changed set that require the family:
    the family name opened by a require vector's bracket or preceded by
    a quote, as a ns :require, a bb.edn :requires, or a quoted require
@@ -238,8 +244,9 @@
 
 (defn ^{:stratum 2} producer-families
   "The changed non-test files that declare a namespace, grouped by
-   namespace family: {family {:befores [content ...] :paths [path ...]}}.
-   `before-of` maps a path to its pre-change content. Public for tests."
+   namespace family: {family {:befores [content ...] :paths [path ...]}},
+   befores and paths in the same order. `before-of` maps a path to its
+   pre-change content. Public for tests."
   [paths before-of]
   (reduce (fn [acc path]
             (let [before (get before-of path)
@@ -254,7 +261,25 @@
 
 ;------------------------------------------------------------------------------ Layer 3
 
-(defn ^{:stratum 3} check-stale-references
+(defn ^{:stratum 3} removed-per-file
+  "Tokens removed from any single producer: present in a file's before
+   and absent from that same file's after. `after-of` maps path to
+   after-content; a producer with no readable after contributes nothing.
+   Longest first, deduplicated. Public for tests."
+  [befores paths after-of]
+  (->> (map (fn [before path]
+              (when-let [after (get after-of path)]
+                (removed-tokens [before] [after])))
+            befores paths)
+       (apply concat)
+       distinct
+       (sort-by (comp - count))
+       (take max-tokens)
+       vec))
+
+;------------------------------------------------------------------------------ Layer 4
+
+(defn ^{:stratum 4} check-stale-references
   "Gate check (see ns docstring). `artifact` is the implement phase
    output; changed files ride on :code/files ({:path :content :action})
    with :code/file-paths as the path fallback.
@@ -286,7 +311,6 @@
                                                           (catch Exception _ nil)))]
                                       [path a])))
                          paths))
-        non-test-afters (keep (fn [[path a]] (when-not (test-path? path) a)) after-of)
         stale (into []
                     (for [[family {:keys [befores] producer-paths :paths}] (producer-families paths before-of)
                           ;; A family nobody names any more (renamed out of
@@ -299,7 +323,7 @@
                                                              (remove #(and own-component
                                                                            (str/starts-with? % own-component))))
                                                        (import-needles family)))]
-                          token (removed-tokens befores non-test-afters)
+                          token (removed-per-file befores producer-paths after-of)
                           :let [in-scope? (if (namespaced-keyword? token)
                                             (constantly true)
                                             @consumers)
@@ -307,16 +331,26 @@
                                            (filter in-scope?)
                                            (take max-files-per-token)
                                            vec)
-                                hits (into [] (keep #(first-hit worktree token %)) files)]
+                                hits (into [] (keep #(first-hit worktree token %)) files)
+                                survives-in (into []
+                                                  (keep (fn [[path a]]
+                                                          (when (and (not (test-path? path))
+                                                                     (token-present? a token))
+                                                            path)))
+                                                  after-of)]
                           :when (seq files)]
                       {:type :stale-reference
                        :token token
                        :family family
                        :files files
                        :hits hits
+                       :survives-in survives-in
                        :message (str (messages/t :stale-references/stale
                                                  {:token token
                                                   :files (str/join ", " files)})
+                                     (when (seq survives-in)
+                                       (str " " (messages/t :stale-references/survives
+                                                            {:files (str/join ", " survives-in)})))
                                      (str/join "" (map #(str "\n" (messages/t :stale-references/hit %))
                                                        hits)))}))]
     (cond
@@ -344,9 +378,9 @@
       :else
       {:passed? true})))
 
-;------------------------------------------------------------------------------ Layer 4
+;------------------------------------------------------------------------------ Layer 5
 
-(defmethod ^{:stratum 4} registry/get-gate :stale-references
+(defmethod ^{:stratum 5} registry/get-gate :stale-references
   [_]
   {:name :stale-references
    :description (messages/t :stale-references/description)

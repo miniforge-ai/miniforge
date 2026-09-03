@@ -11,6 +11,10 @@
   :stale-references/stale
   "'{token}' was removed by this change but is still referenced by: {files}"
 
+  ;; Stale-references gate — the token still appears in another changed file
+  :stale-references/survives
+  "(it still appears in {files} — a same-name key in another sense, or a reference to update)"
+
   ;; Stale-references gate — one matching line per stale file
   :stale-references/hit
   "  - {file}:{line}: {text}"
