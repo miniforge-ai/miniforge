@@ -188,4 +188,4 @@
           (is (= pin-sha (rev "origin/main")))
           (is (= main-sha (str/trim (str (:out (git/git source "rev-parse" "main")))))
               "the launching checkout's own main is untouched"))
-        (finally (delete-tree! root))))))
+        (finally (delete-tree! root) (delete-tree! source))))))
