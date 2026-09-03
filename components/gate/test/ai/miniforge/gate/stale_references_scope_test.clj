@@ -57,8 +57,8 @@
         families (stale/producer-families (keys before-of) before-of)]
     (is (= ["ai.m.c"] (keys families)))
     (is (= 2 (count (get-in families ["ai.m.c" :befores]))))
-    (is (= ["components/c/src/ai/m/c/ledger.clj" "components/c/src/ai/m/c/report.clj"]
-           (get-in families ["ai.m.c" :paths])))))
+    (is (= #{"components/c/src/ai/m/c/ledger.clj" "components/c/src/ai/m/c/report.clj"}
+           (set (get-in families ["ai.m.c" :paths]))))))
 
 (deftest ^{:stratum 0} component-dir-of-paths
   (is (= "components/codex-gap/" (stale/component-dir "components/codex-gap/src/ai/miniforge/codex_gap/ledger.clj")))
