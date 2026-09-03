@@ -115,12 +115,14 @@
   (let [f (io/file run-dir gate-history-filename)]
     (if-not (.exists f)
       []
-      (into []
-            (keep (fn [line]
-                    (when-not (str/blank? line)
-                      (try (edn/read-string {:default (fn [_ v] v)} line)
-                           (catch Exception _ nil)))))
-            (str/split-lines (slurp f))))))
+      ;; Streamed line by line: the file is append-only and unbounded.
+      (with-open [rdr (io/reader f)]
+        (into []
+              (keep (fn [line]
+                      (when-not (str/blank? line)
+                        (try (edn/read-string {:default (fn [_ v] v)} line)
+                             (catch Exception _ nil)))))
+              (line-seq rdr))))))
 
 (defn ^{:stratum 1} aggregate
   "Fold per-run observations into the §7.7 record per peg."
