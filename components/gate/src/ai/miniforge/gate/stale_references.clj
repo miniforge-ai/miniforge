@@ -37,9 +37,11 @@
    candidate tokens are keywords and def'd names present in one of its
    producers' befores and absent from EVERY changed non-test file's
    after-content. Each candidate is then searched in the family's
-   importers -- files outside the changed set that require the family
-   (`[ai.miniforge.codex-gap` or `'ai.miniforge.codex-gap`, as a ns
-   :require, a bb.edn :requires, or a quoted require do) -- with
+   importers -- files outside the changed set that require the family:
+   the family name opened by a require vector's bracket or preceded by
+   a quote, as a ns :require, a bb.edn :requires, or a quoted require
+   write it (spelled out in `import-needles`; not repeated here, since
+   this docstring would otherwise import every family it names) -- with
    namespaced keywords searched repo-wide; any hit is a stale reference
    and fails the gate with the token, its files, and each file's first
    matching line. Three kinds of file are never importers: prose that
@@ -111,8 +113,8 @@
     (if i (subs s 0 i) s)))
 
 (defn ^{:stratum 0} component-dir
-  "`components/<c>/` for a Polylith component path, else nil. Public
-   for tests."
+  "The brick directory -- `components/<c>/` or `bases/<b>/` -- for a
+   Polylith path, else nil. Public for tests."
   [path]
   (second (re-find #"^((?:components|bases)/[^/]+/)" (str path))))
 
@@ -298,7 +300,9 @@
                                                                            (str/starts-with? % own-component))))
                                                        (import-needles family)))]
                           token (removed-tokens befores non-test-afters)
-                          :let [in-scope? (if (namespaced-keyword? token) any? @consumers)
+                          :let [in-scope? (if (namespaced-keyword? token)
+                                            (constantly true)
+                                            @consumers)
                                 files (->> (referencing-files worktree paths token)
                                            (filter in-scope?)
                                            (take max-files-per-token)
