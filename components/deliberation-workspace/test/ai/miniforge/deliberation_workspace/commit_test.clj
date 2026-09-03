@@ -97,7 +97,11 @@
     (let [ws (transact (workspace (obj "goal-1" :goal)) :synthesizer
                        {:op :close-goal :targets #{"goal-1"} :outcome :accepted})]
       (is (= :accepted (:object/status (object-at ws "goal-1"))))))
-  (testing "an outcome outside the closed set leaves the goal open"
+  (testing "an outcome outside the closed set imposes no status"
+    ;; `validation/check-outcome` refuses this payload, so a run never
+    ;; reaches here with one. What this pins is the layer beneath it: commit
+    ;; must not invent a status for an outcome it cannot read, so an
+    ;; unvalidated caller leaves the goal open rather than closing it wrong.
     (let [ws (transact (workspace (obj "goal-1" :goal)) :synthesizer
                        {:op :close-goal :targets #{"goal-1"} :outcome :maybe})]
       (is (= :open (:object/status (object-at ws "goal-1")))))))

@@ -227,3 +227,21 @@
                                                :tx/operations :assert-claim}))]
       (is (= [:anomalies.deliberation/invalid-transaction]
              (mapv :reason (events-of after :transaction/rejected)))))))
+(deftest ^{:stratum 2} a-close-goal-the-engine-cannot-honor-is-routed-not-absorbed
+  (testing "this committed, advanced the version, and left the goal open"
+    (let [propose (fn [{:keys [role]}]
+                    (tx/new-transaction
+                     {:role role :activation "act-1" :basis 1
+                      :operations [{:op :close-goal :targets #{"goal-1"}
+                                    :outcome :maybe}]}))
+          after (run/step (workspace :workspace/roles [:synthesizer]) propose)
+          closed (get-in after [:workspace/objects "goal-1"])]
+      (is (= [:anomalies.deliberation/invalid-outcome]
+             (mapv :reason (events-of after :transaction/rejected))))
+      (is (empty? (events-of after :transaction/committed))
+          "the log recorded a synthesizer's misbelief as a committed transaction")
+      (is (= 1 (:workspace/version after))
+          "a rejected transaction does not advance the clock")
+      (is (= :open (:object/status closed)))
+      (is (= 1 (:object/touched-at closed))
+          "and the goal is untouched, not touched-but-still-open"))))

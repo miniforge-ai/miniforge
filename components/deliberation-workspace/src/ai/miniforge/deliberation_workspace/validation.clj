@@ -17,7 +17,7 @@
 ;; limitations under the License.
 (ns ai.miniforge.deliberation-workspace.validation
   "The concurrency stages of the N14 §3.4 transaction validation pipeline:
-   schema conformance, creation-payload conformance, target existence, role
+   schema conformance, operation-payload conformance, target existence, role
    permission, and basis staleness. Rejections are anomalies as data — a
    routable value the scheduler logs, never an exception.
 
@@ -285,6 +285,45 @@
             "Operation declares edges the engine cannot write"
             (merge {:op (:op operation) :reason reason} data))))
 
+(defn- ^{:stratum 1} check-outcome
+  "N14 §2.3 conformance for the outcome `close-goal` imposes on its goals.
+
+   `close-goal` is the one operation whose status comes from the payload
+   rather than from `tx/status-effect`, and `commit/apply-status` reads it
+   as `(tx/goal-outcomes (:outcome operation))` — a set used as a function,
+   so anything outside the set yields nil. nil is also what the table
+   yields for an operation with no status effect at all, and one line later
+   the two are indistinguishable: the goal is touched, the transaction
+   commits, the version advances, and the goal stays `:open`.
+
+   Nothing downstream notices. `termination/goals-terminal?` closes a run
+   when every goal is terminal, so a synthesizer that believes it closed
+   the last goal leaves the run to end on a budget boundary rather than on
+   the §7 success rule.
+
+   An absent outcome is refused for the same reason as an illegal one, and
+   under the same `:reason`: both name a status the engine cannot impose,
+   and both are repaired by supplying one it can.
+
+   Every other operation is refused for carrying the field. `commit`
+   derives their status from the operation precisely so a payload cannot
+   name one — otherwise a transaction could say `:challenge` and carry
+   `:accepted`. That defense stops the field taking effect; it does not
+   report it, which leaves the same silence in the other direction. An
+   explicit nil is absent rather than inapplicable: it names no status."
+  [_workspace operation _context]
+  (let [outcome (:outcome operation)]
+    (if (= :close-goal (:op operation))
+      (when-not (contains? tx/goal-outcomes outcome)
+        (reject :invalid-input :anomalies.deliberation/invalid-outcome
+                "close-goal must carry an outcome legal for a goal (N14 §2.3)"
+                {:op (:op operation) :reason :unknown-outcome :outcome outcome}))
+      (when (some? outcome)
+        (reject :invalid-input :anomalies.deliberation/invalid-outcome
+                "Only close-goal carries an outcome"
+                {:op (:op operation) :reason :inapplicable-outcome
+                 :outcome outcome})))))
+
 (defn- ^{:stratum 1} check-targets [workspace operation _context]
   (let [known (objects-of workspace)
         missing (remove #(contains? known %) (tx/touched-ids operation))]
@@ -368,9 +407,14 @@
    It still runs after `check-schema`, and skips siblings outside the
    vocabulary, so an unknown operation is never reported as a shape fault.
 
+   Order among the payload stages after it is a preference. `check-outcome`
+   reads one scalar field of the operation it is handed, so nothing depends
+   on where it sits; it is placed last of them because it is the only one
+   whose fault is silent absorption at commit rather than a crash there.
+
    The payload stages precede the three that read the object graph. A
    transaction can carry a malformed payload and a missing target at once,
    and the payload is the more basic fault: the ids a graph stage would
    report come out of the same payload whose shape is not yet established."
-  [check-schema check-id-fields check-creates check-links
+  [check-schema check-id-fields check-creates check-links check-outcome
    check-targets check-permission check-basis])
