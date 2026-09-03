@@ -378,7 +378,7 @@
                                                     :statement "second"}]}))))))
 
 (deftest ^{:stratum 1} id-fields-that-are-not-collections-of-ids-are-refused
-  (testing "every reader sets these fields, so a scalar throws out of validate itself"
+  (testing "set and seq both throw on a scalar, out of validate itself"
     (doseq [[label operation] [["scalar :targets"
                                 {:op :refine-claim :targets :claim-1}]
                                ["scalar :evidence"
@@ -480,3 +480,18 @@
     (is (nil? (validation/validate (workspace)
                                    {:tx/role :proposer :tx/basis 10}
                                    validation/concurrency-stages)))))
+
+(deftest ^{:stratum 1} an-unknown-sibling-operation-outranks-its-own-id-fields
+  (testing "the sibling scan must not report a shape fault ahead of schema"
+    (is (= :anomalies.deliberation/unknown-operation
+           (subtype-of (validate-tx (workspace)
+                                    (transaction :proposer 10
+                                                 {:op :assert-claim}
+                                                 {:op :rewrite-history :targets :x}))))
+        "an operation outside the vocabulary has no fields worth reporting"))
+  (testing "a known sibling's malformed field is still reported"
+    (is (= :anomalies.deliberation/invalid-object-ids
+           (subtype-of (validate-tx (workspace)
+                                    (transaction :proposer 10
+                                                 {:op :assert-claim}
+                                                 {:op :refine-claim :targets :x})))))))

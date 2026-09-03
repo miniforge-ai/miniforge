@@ -145,7 +145,7 @@
                                  {:op :not-an-op :targets #{"constraint-1"}}))))))
 
 (deftest ^{:stratum 2} the-fields-the-backing-check-reads-are-routed-not-thrown
-  (testing "backed? sets :evidence and a sibling's :discriminates; both would throw"
+  (testing "backed? seqs :evidence and sets a sibling's :discriminates; both would throw"
     (doseq [[label operations]
             [["scalar :evidence"
               [{:op :challenge :targets #{"claim-1"} :evidence :evidence-4}]]

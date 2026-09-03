@@ -143,13 +143,22 @@
    validating a challenge, so a stage reading only its own operation would
    reach a malformed field before the operation carrying it had a turn.
 
-   Operations that are not maps are skipped, not interpreted: `check-schema`
-   refuses one on its own turn, and `contains?` throws on a scalar — reading
-   fields out of a payload that is not one moves the crash rather than
-   removing it."
+   Two kinds of sibling are skipped rather than interpreted, both because
+   `check-schema` refuses them on their own turn and reporting a field of
+   theirs first would outrank it:
+
+   - operations that are not maps, on which `contains?` throws — reading
+     fields out of a payload that is not one moves the crash rather than
+     removing it;
+   - operations outside the §3.2 vocabulary, whose fields mean nothing.
+
+   Skipping the second leaves no reader unguarded. The only field any stage
+   reads from a SIBLING is `:discriminates`, and `guards/backed?` reaches it
+   only after `(= :propose-experiment (:op sibling))` — a vocabulary member,
+   so a scanned one."
   [operations]
   (for [operation operations
-        :when (map? operation)
+        :when (and (map? operation) (tx/known-operation? (:op operation)))
         field tx/id-fields
         :when (contains? operation field)]
     [operation field (get operation field)]))
@@ -353,9 +362,11 @@
    reported as an unknown operation, not as a bad creation.
 
    `check-id-fields` leads the payload stages, and is the one ordering
-   constraint that is not a preference: every stage after it — payload,
-   graph, and abuse guard alike — `set`s a field it establishes the shape
-   of, and would throw out of the validator rather than reject.
+   constraint that is not a preference: stages after it — payload, graph,
+   and abuse guard alike — hand a field it establishes the shape of to
+   `set` or `seq`, either of which throws on a scalar rather than rejecting.
+   It still runs after `check-schema`, and skips siblings outside the
+   vocabulary, so an unknown operation is never reported as a shape fault.
 
    The payload stages precede the three that read the object graph. A
    transaction can carry a malformed payload and a missing target at once,
