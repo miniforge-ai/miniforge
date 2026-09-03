@@ -170,8 +170,10 @@
 ;------------------------------------------------------------------------------ Layer 2
 
 (defn ^{:stratum 2} run-observations
-  "Per distinct peg presented in `run-dir`'s ledger: the answers its
-   mechanism's gate recorded in that run, or :unobserved."
+  "Per distinct peg presented in `run-dir`'s ledger: {:peg :mechanism
+   :collapsed? :answers :observed?} -- the answers its mechanism's gate
+   recorded in that run, or :observed? false with no answers when no
+   landing carries a mapped mechanism."
   [run-dir nodes gate-map]
   (let [pegs (->> (:entries (ledger/read-ledger (str run-dir)))
                   (mapcat :miss/pegs)
@@ -202,8 +204,16 @@
   [checkpoint-root nodes gate-map]
   (let [run-dirs (->> (.listFiles (io/file checkpoint-root))
                       (filter #(.isDirectory ^java.io.File %)))
-        per-run (map #(vec (run-observations % nodes gate-map)) run-dirs)
-        obs (vec (apply concat per-run))]
+        ;; One pass over the run dirs: observations accumulate into a
+        ;; single vector and runs contributing any are counted as we go.
+        {:keys [obs runs-with-pegs]}
+        (reduce (fn [acc run-dir]
+                  (let [these (run-observations run-dir nodes gate-map)]
+                    (if (seq these)
+                      (-> acc (update :obs into these) (update :runs-with-pegs inc))
+                      acc)))
+                {:obs [] :runs-with-pegs 0}
+                run-dirs)]
     {:pegs (aggregate obs)
-     :runs-with-pegs (count (filter seq per-run))
+     :runs-with-pegs runs-with-pegs
      :runs-scanned (count run-dirs)}))
