@@ -44,6 +44,32 @@
       (is (result/err? r))
       (is (= :restore-failed (-> r :error :code))))))
 
+(deftest ^{:stratum 0} git-persist!-commit-failure-is-an-error-test
+  (testing "a non-zero commit exit becomes :persist-commit-failed, never :persisted? true"
+    (let [exec-fn (fn [cmd]
+                    (cond
+                      (and (vector? cmd) (some #{"commit"} cmd))
+                      (result/ok {:exit-code 128 :stdout "" :stderr "error: 1Password: failed to fill whole buffer"})
+                      (and (string? cmd) (str/includes? cmd "status"))
+                      (result/ok {:exit-code 0 :stdout " M a.clj\n" :stderr ""})
+                      :else (result/ok {:exit-code 0 :stdout "" :stderr ""})))
+          r (sut/git-persist! exec-fn {:branch "task/x" :message "m"})]
+      (is (result/err? r))
+      (is (= :persist-commit-failed (get-in r [:error :code])))
+      (is (str/includes? (get-in r [:error :message]) "1Password")))))
+
+(deftest ^{:stratum 0} git-persist!-push-failure-is-an-error-test
+  (let [exec-fn (fn [cmd]
+                  (cond
+                    (and (vector? cmd) (some #{"push"} cmd))
+                    (result/ok {:exit-code 1 :stdout "" :stderr "rejected"})
+                    (and (string? cmd) (str/includes? cmd "status"))
+                    (result/ok {:exit-code 0 :stdout " M a.clj\n" :stderr ""})
+                    :else (result/ok {:exit-code 0 :stdout "" :stderr ""})))
+        r (sut/git-persist! exec-fn {:branch "task/x" :message "m"})]
+    (is (result/err? r))
+    (is (= :persist-push-failed (get-in r [:error :code])))))
+
 ;------------------------------------------------------------------------------ Layer 1
 
 (defn- ^{:stratum 1} cmd-has?

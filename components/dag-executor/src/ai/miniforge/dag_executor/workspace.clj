@@ -59,11 +59,17 @@
         (if has-changes?
           ;; Unsigned: a scratch-worktree commit must not depend on the
           ;; operator's signing agent (see worktree tier commit-staged!).
-          (let [_ (exec-fn ["git" "-c" "commit.gpgsign=false" "commit" "-m" (str message)])
-                _ (exec-fn ["git" "push" "origin" (str "HEAD:" branch) "--force"])
-                sha-r (exec-fn "git rev-parse HEAD")
-                sha   (str/trim (get-in sha-r [:data :stdout] ""))]
-            (result/ok {:persisted? true :commit-sha sha :branch branch}))
+          ;; Each step's exit code is checked: a failed commit or push that
+          ;; still reported :persisted? true was a silent loss of work.
+          (let [commit-r (exec-fn ["git" "-c" "commit.gpgsign=false" "commit" "-m" (str message)])]
+            (if-not (zero? (get-in commit-r [:data :exit-code] 0))
+              (result/err :persist-commit-failed (get-in commit-r [:data :stderr] "git commit failed"))
+              (let [push-r (exec-fn ["git" "push" "origin" (str "HEAD:" branch) "--force"])]
+                (if-not (zero? (get-in push-r [:data :exit-code] 0))
+                  (result/err :persist-push-failed (get-in push-r [:data :stderr] "git push failed"))
+                  (let [sha-r (exec-fn "git rev-parse HEAD")
+                        sha   (str/trim (get-in sha-r [:data :stdout] ""))]
+                    (result/ok {:persisted? true :commit-sha sha :branch branch}))))))
           (result/ok {:persisted? false :commit-sha nil :no-changes? true :branch branch})))
       (catch Exception e
         (result/err :persist-failed (.getMessage e))))))
