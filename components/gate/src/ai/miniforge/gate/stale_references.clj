@@ -168,18 +168,18 @@
          vec)))
 
 (defn- ^{:stratum 1} referencing-files
-  "Repo files outside `changed-paths` mentioning `needle`, limited to
-   the `scope` paths -- nil scope is the whole repo, an empty scope is
-   nothing (a family nobody imports has no consumers to check)."
-  [worktree changed-paths needle scope]
+  "Repo files outside `changed-paths` mentioning `needle`. Always a
+   whole-repo `git grep` -- cheap, and the argv stays constant-size;
+   scoping to consumers is a set intersection in the caller, never a
+   pathspec list that could outgrow the OS argument limit."
+  [worktree changed-paths needle]
   ;; -e makes the needle an explicit pattern — it can never be parsed
   ;; as an option or pathspec regardless of its first character.
-  (when (or (nil? scope) (seq scope))
-    (when-let [out (apply git worktree "grep" "-I" "-l" "-F" "-e" needle "--" (or scope []))]
-      (->> (str/split-lines out)
-           (remove str/blank?)
-           (remove (set changed-paths))
-           vec))))
+  (when-let [out (git worktree "grep" "-I" "-l" "-F" "-e" needle "--")]
+    (->> (str/split-lines out)
+         (remove str/blank?)
+         (remove (set changed-paths))
+         vec)))
 
 ;------------------------------------------------------------------------------ Layer 2
 
@@ -249,12 +249,13 @@
         stale (into []
                     (for [[family befores] (producer-families paths before-of)
                           ;; A family nobody names any more (renamed out of
-                          ;; the worktree) has NO consumers -- an empty scope,
-                          ;; never nil, or bare tokens would go repo-wide.
-                          :let [consumers (delay (or (referencing-files worktree paths family nil) []))]
+                          ;; the worktree) has NO consumers -- an empty set,
+                          ;; so its bare tokens match nothing.
+                          :let [consumers (delay (set (referencing-files worktree paths family)))]
                           token (removed-tokens befores non-test-afters)
-                          :let [scope (when-not (namespaced-keyword? token) @consumers)
-                                hits (->> (referencing-files worktree paths token scope)
+                          :let [in-scope? (if (namespaced-keyword? token) any? @consumers)
+                                hits (->> (referencing-files worktree paths token)
+                                          (filter in-scope?)
                                           (take max-files-per-token)
                                           vec)]
                           :when (seq hits)]
