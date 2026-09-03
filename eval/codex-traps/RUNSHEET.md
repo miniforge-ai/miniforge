@@ -307,3 +307,103 @@ stale; 69 task-* branches in that sandbox were "Created from d2f0860b".
 The two task branches the rs1 verdict was read from chain to the pin,
 so the rs1 evidence stands; series 4 provisions with `bench:provision`
 pinning both refs (tasks/bench.clj, this PR).
+
+## REPAIR DEMONSTRATION THIRD SERIES — rs1 FORENSICS (2026-09-03)
+
+Ground truth from gate-history.edn (run 4ad44a07, pin c87b55e7a):
+implement decision :allow on all five iterations; every deny came from
+:policy-verify at verify (7 entries). :stale-references never fired.
+Task branch task-83dbab21: ledger.clj/interface.clj/report.clj rename
+complete, bb.edn codex-gap-report still reads :skipped, and the changed
+interface_test.clj retains `{:status :skipped}` twice (a different
+sense). By the gate's definition ("absent from EVERY changed file")
+:skipped was never a removed token, so nothing was searched. Had it
+been, the unscoped repo-wide search would have returned 76 files using
+:skipped — noise, not evidence.
+
+Consequence for the series: rs1's :sprung is a gate-definition miss,
+not an implementer or delivery miss. rs2/rs3 run the same pin and
+count for this pre-registration as-is; a fourth series is required at
+the fixed pin. The persist commit ("implement phase completed") lands
+AFTER the gate, so iteration 1 does run on uncommitted work — the
+before/after mechanics were not the cause.
+
+Fix: miniforge PR #1864 — per-namespace-family removal (tests are not
+producers nor a token's new home) and consumer-scoped search (files
+that name the family; namespaced keywords stay repo-wide). Unit fixture
+reproduces the rs1 shape exactly.
+
+## PRE-REGISTRATION — REPAIR DEMONSTRATION FOURTH SERIES (rt1–rt3)
+
+Pin: the main commit that merges miniforge PR #1864 (consumer-scoped
+stale-references), recorded in runs.edn per row as before.
+Trap: trap-a only, baseline arm, codex pinned, 3 reps, 90-minute
+budget each, same endpoints as series 3.
+
+Hypothesis H4: with per-family removal and consumer-scoped search, the
+implement gate denies the sprung tree on its first iteration
+(gate-history.edn shows :stale-references among failing gates with
+token ":skipped", family "ai.miniforge.codex-gap", file bb.edn), and
+the :on-fail :implement retry carries :task/gate-failures
+(eval/codex-traps/logs/<arm>-<trap>-<rep>.log shows :implementer/prompt-sections including
+:gate-failures).
+Success: >=2/3 reps :caught (bb.edn updated) within budget.
+Falsifier A: gate fires, retries carry the section, tree still sprung
+-> implementer ignores delivered evidence (attention leak).
+Falsifier B: gate fires, section absent from retry prompt -> delivery
+bug in the redirect path.
+Falsifier C: gate silent again -> read gate-history + task branch
+before any other conclusion; do not infer from verdicts alone.
+Nothing in this pre-registration is edited after launch; results are
+appended below it.
+
+AMENDMENT 2026-09-03 (record keeping): run-trap's per-rep clean-tree
+reset reverts uncommitted edits to tracked files, so the FORENSICS and
+PRE-REGISTRATION sections above, first appended to the sandbox runsheet
+between the rs2 and rs3 launches, were lost from the sandbox at the rs3
+launch and are restored here verbatim from the session record. Pre-
+registration timing stands: it was written before rs2 finished and
+before any series-4 rep ran. From series 4 on, runsheet records are
+written to the tracked branch, not the sandbox copy.
+
+rs2 (2026-09-03, 69 min): :sprung. gate-history.edn (run b03bfe7d):
+implement :allow x5, verify :deny[:policy-verify] x7 — identical shape
+to rs1. Same cause (gate definition), no new information about the
+implementer. No prompt log (pre-amendment launch).
+
+AMENDMENT 2026-09-03 (series 4 pin): the fourth-series pre-registration
+names "the main commit that merges #1864". The harness fixes (#1865:
+provision pins both `main` and `origin/main` to the pin; run-trap captures dogfood stdout+stderr per rep) merged after
+it as d6d5d77c5, which contains #1864. Series 4 pins d6d5d77c5 so the
+provisioning defect above cannot recur in the sandbox under test.
+Hypothesis, endpoints, and success criteria are unchanged.
+
+AMENDMENT 2026-09-03 (series 4 pin, second): #1866 (human log format
+carries :data — without it the prompt-sections line is a bare name, as
+rs3's log shows) merged as 25f017442 after d6d5d77c5. Series 4 pins
+25f017442 so H4's retry-prompt evidence is readable. Nothing else changes.
+
+## REPAIR DEMONSTRATION THIRD SERIES RESULTS (rs1–rs3, pin c87b55e7a)
+
+| rep | verdict | minutes | gate-history (run) |
+|-----|---------|---------|--------------------|
+| rs1 | :sprung | 85 | 4ad44a07: implement :allow x5, verify :deny[:policy-verify] x7 |
+| rs2 | :sprung | 69 | b03bfe7d: same shape |
+| rs3 | :sprung | 88 | f50d4de4: same shape |
+
+0/3. Pre-registered H3 (repair retry fixes the consumer) is not tested
+by this series: the implement gate never denied, so no repair loop on
+the trap ever ran. Every redirect was verify's :policy-verify. The
+cause is the gate's definition (rs1 FORENSICS above), reproduced in a
+unit fixture and fixed in #1864; the series is a clean measurement of
+that defect, not of the implementer.
+
+Prompt-sections telemetry: rs3's log carries 6 :implementer/
+prompt-sections lines but no payload (the human log format dropped
+:data, fixed in #1866). Falsifiers A/B remain untested.
+
+Bench validity: sandbox `main` was stale (#1744) throughout — the two
+task branches per run that the verdicts were read from chain to the
+pin, so verdicts stand; provisioning fixed in #1865.
+
+Series 4 (rt1–rt3) at pin 25f017442 follows immediately.
