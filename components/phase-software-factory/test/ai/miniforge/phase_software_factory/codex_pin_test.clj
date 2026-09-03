@@ -39,12 +39,16 @@
   ;; landings-text (prompt section); release wires via landings-outcome
   ;; through the releaser's behavior addendum. A mapping without a wire
   ;; would be a defined-but-unreachable capability.
-  (is (= #{:implement :plan :review :release}
-         (set (keys codex-pin/phase->situation)))))
+  ;; verify is mapped for the gap instrument only (no agent, no pin) —
+  ;; its misses classify against board 3 instead of :uncovered.
+  (is (= #{:implement :plan :review :release :verify}
+         (set (keys codex-pin/phase->situation))))
+  (is (= {:implement ["submitting-work-to-enforced-gates"]}
+         codex-pin/phase->secondary-situations)))
 
 (deftest ^{:stratum 0} landings-text-skip-conditions
   (is (nil? (codex-pin/landings-text :review nil nil)))
-  (is (nil? (codex-pin/landings-text :verify nil "/anywhere")))
+  (is (nil? (codex-pin/landings-text :explore nil "/anywhere")))
   (is (nil? (codex-pin/landings-text :review nil "/nonexistent/codex"))))
 
 (deftest ^{:stratum 0} anomaly-with-nil-logger-warns-on-stderr
@@ -59,7 +63,7 @@
           :situation "changing-one-side-of-a-boundary" :pegs nil}
          (codex-pin/pin-outcome :implement nil nil)))
   (is (= {:entry nil :status :unmapped :anomaly nil :situation nil :pegs nil}
-         (codex-pin/pin-outcome :verify nil "/anywhere")))
+         (codex-pin/pin-outcome :explore nil "/anywhere")))
   (is (= :skipped
          (:status (codex-pin/pin-outcome :implement nil "/nonexistent/codex")))))
 

@@ -56,7 +56,20 @@
    ;; same situation plan enters at, consulted again at the moment the
    ;; commitment actually happens. Delivered via the releaser's behavior
    ;; addendum (no existing-files channel, same reasoning as review).
-   :release   "about-to-commit-consequential"})
+   :release   "about-to-commit-consequential"
+   ;; Verify has no agent to deliver to; the mapping exists for the gap
+   ;; instrument, so verify-phase misses (the dominant failure shape in
+   ;; the observational matrix — policy-gate redirect loops) classify
+   ;; against the board that now covers them instead of :uncovered.
+   :verify    "submitting-work-to-enforced-gates"})
+
+(def ^{:stratum 0} phase->secondary-situations
+  "Additional situations a phase consults, whose landings APPEND to the
+   primary pin. The implementer is at two doors at once: changing a
+   boundary, and about to submit work that gates will judge (HARVEST
+   2026-08 §7, admitted 2026-08-29). The primary stays the ledger's
+   :situation; secondary pegs merge into the §7.7 telemetry."
+  {:implement ["submitting-work-to-enforced-gates"]})
 
 (defn ^{:stratum 0} configured-codex-dir
   "MINIFORGE_CODEX_PATH, trimmed, or nil — nil means the capability is off."
@@ -123,8 +136,19 @@
            (do (warn-skip! phase logger anomaly (:codex/reason entry))
                {:entry nil :status :skipped :anomaly anomaly :situation situation
                 :pegs nil})
-           {:entry (select-keys entry [:path :content]) :status :pinned
-            :anomaly nil :situation situation :pegs (:pegs entry)}))))))
+           ;; Secondary situations append their landings to the same pin
+           ;; entry; a secondary that fails to answer is dropped with a
+           ;; warning rather than failing the primary consultation.
+           (let [secondaries (keep (fn [s]
+                                     (let [e (codex/pin-entry codex-dir s pin-path)]
+                                       (if-let [a (:codex/anomaly e)]
+                                         (do (warn-skip! phase logger a (:codex/reason e)) nil)
+                                         e)))
+                                   (get phase->secondary-situations phase))
+                 content (str/join "\n\n" (cons (:content entry) (map :content secondaries)))
+                 pegs (into (vec (:pegs entry)) (mapcat :pegs secondaries))]
+             {:entry {:path (:path entry) :content content} :status :pinned
+              :anomaly nil :situation situation :pegs (not-empty pegs)})))))))
 
 (defn ^{:stratum 1} landings-outcome
   "Prompt-section delivery outcome for phases with no existing-files
