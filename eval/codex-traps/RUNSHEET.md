@@ -553,3 +553,22 @@ not counted against H6.
 Falsifier E: persist skipped or rejected after an allowed implement —
 read the :workflow/persist-skipped reason first.
 Nothing edited after launch.
+
+AMENDMENT 2026-09-03 (fifth series, ru3d): re-launch ru3d (pin
+c4e52062b, run af4c5dbc, 97 minutes) — :sprung. Implement iteration 1
+was ALLOWED with bb.edn untouched: the implementer renamed the ledger
+key in ledger.clj and interface.clj but kept `:skipped` once in
+report.clj as a message-template parameter key, and the gate's
+family-wide removal rule ("absent from every changed non-test file")
+read the token as moved. Verify then denied on :policy-verify five
+times to the redirect cap (tests-pass passed in this rep). Fifth
+series final: ru1 :caught, ru2b :sprung, ru3d :sprung — 1/3 measured.
+Fix: miniforge PR 1874 (#1874) — removal judged per producer file, and
+the error names where a token survives (`:survives-in`).
+
+AMENDMENT 2026-09-03 (sixth series pin): the pre-registration names
+the merge of PR 1872 (#1872). Series 6 pins the merge of PR 1874
+(#1874) instead, ffb335599, which contains #1872, because ru3d showed
+the family-wide exemption passing a sprung tree even with the denial
+text repaired. H6 and its falsifiers are unchanged. Launch is chained
+to ru3d's row landing (16:39Z).
