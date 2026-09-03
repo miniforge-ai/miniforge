@@ -29,7 +29,8 @@
    retrodicted bucket replaces :miss/bucket."
   (:require [ai.miniforge.codex.interface :as codex]
             [ai.miniforge.codex-gap.attribute :as attribute]
-            [ai.miniforge.codex-gap.classify :as classify]))
+            [ai.miniforge.codex-gap.classify :as classify]
+            [clojure.string :as str]))
 
 ;------------------------------------------------------------------------------ Layer 0
 
@@ -49,7 +50,11 @@
    memoizable (fn [situation] consider-resp); `classify-fn` is injected
    so the remap is testable without a codex."
   [classify-fn consider problems opts situation entry]
-  (let [situation (or situation (:miss/situation entry))
+  (let [;; Blank (nil, "", whitespace) means "no mapping" — codex/consider
+        ;; throws on blank situation text, and a blank must behave like
+        ;; keep-the-recorded-situation, never crash the retrodiction.
+        blank->nil (fn [s] (not-empty (some-> s str str/trim)))
+        situation (or (blank->nil situation) (blank->nil (:miss/situation entry)))
         consider-resp (when situation (consider situation))
         {:keys [bucket attribution]}
         (classify-fn {:miss/situation situation

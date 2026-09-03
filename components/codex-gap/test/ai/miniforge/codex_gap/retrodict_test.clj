@@ -44,6 +44,11 @@
             twice (retrodict/retrodict-entry classify-fn consider [] {} "submitting-work-to-enforced-gates" once)]
         (is (= :uncovered (:miss/bucket-recorded twice)))
         (is (= :unheeded (:miss/bucket twice)))))
+    (testing "a BLANK mapping behaves like no mapping — never reaches consider"
+      (let [exploding (fn [_] (throw (ex-info "consider called with blank" {})))
+            out (retrodict/retrodict-entry classify-fn exploding [] {} "  " entry)]
+        (is (= :uncovered (:miss/bucket out)))
+        (is (nil? (:miss/situation out)))))
     (testing "no mapping keeps the recorded situation (nil) and bucket"
       (let [out (retrodict/retrodict-entry classify-fn consider [] {} nil entry)]
         (is (= :uncovered (:miss/bucket out)))
