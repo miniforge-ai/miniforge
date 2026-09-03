@@ -338,6 +338,7 @@
                                                                     (token-present? a token))
                                                            path)))
                                                  sort
+                                                 (take max-files-per-token)
                                                  vec)]
                           :when (seq files)]
                       {:type :stale-reference
