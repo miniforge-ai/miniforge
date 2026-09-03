@@ -136,14 +136,17 @@
            (do (warn-skip! phase logger anomaly (:codex/reason entry))
                {:entry nil :status :skipped :anomaly anomaly :situation situation
                 :pegs nil})
-           ;; Secondary situations append their landings to the same pin
-           ;; entry; a secondary that fails to answer is dropped with a
-           ;; warning rather than failing the primary consultation.
+           ;; Secondary situations append their rendered LANDINGS BODY to
+           ;; the same pin entry — consider + render, not a second pinned
+           ;; artifact (which would repeat the pin header mid-file). A
+           ;; secondary that fails to answer is dropped with a warning
+           ;; rather than failing the primary consultation.
            (let [secondaries (keep (fn [s]
-                                     (let [e (codex/pin-entry codex-dir s pin-path)]
-                                       (if-let [a (:codex/anomaly e)]
-                                         (do (warn-skip! phase logger a (:codex/reason e)) nil)
-                                         e)))
+                                     (let [resp (codex/consider codex-dir s)]
+                                       (if-let [a (:codex/anomaly resp)]
+                                         (do (warn-skip! phase logger a (:codex/reason resp)) nil)
+                                         {:content (codex/render-response resp)
+                                          :pegs (:pegs resp)})))
                                    (get phase->secondary-situations phase))
                  content (str/join "\n\n" (cons (:content entry) (map :content secondaries)))
                  pegs (into (vec (:pegs entry)) (mapcat :pegs secondaries))]

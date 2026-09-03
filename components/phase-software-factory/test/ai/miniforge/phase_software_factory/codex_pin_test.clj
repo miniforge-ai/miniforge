@@ -29,7 +29,7 @@
   (is (nil? (codex-pin/pin-file :implement nil nil))))
 
 (deftest ^{:stratum 0} unmapped-phase-gets-no-pin
-  (is (nil? (codex-pin/pin-file :verify nil "/anywhere"))))
+  (is (nil? (codex-pin/pin-file :explore nil "/anywhere"))))
 
 (deftest ^{:stratum 0} anomaly-skips-the-pin-rather-than-pinning-garbage
   (is (nil? (codex-pin/pin-file :implement nil "/nonexistent/codex"))))
