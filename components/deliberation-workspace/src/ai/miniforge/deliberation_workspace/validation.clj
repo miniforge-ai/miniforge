@@ -110,13 +110,14 @@
 
 (defn- ^{:stratum 0} id-listing-defect
   "The first structural defect in an operation field that names object ids,
-   as `[reason data]`, or nil when the field's readers can `set` it and look
-   its elements up in the object graph.
+   as `[reason data]`, or nil when the field's readers can iterate it and
+   look its elements up in the object graph.
 
-   A scalar is refused because `set` throws on one. A string is refused for
-   the opposite reason — it is seqable, so `(set \"claim-1\")` yields seven
-   single-character ids and the operation is reported against ids no
-   activation named. A map is neither and is refused with the scalars.
+   A scalar is refused because `set` and `seq` both throw on one. A string
+   and a map throw on neither, and are refused for what they yield instead:
+   `(set \"claim-1\")` walks the string into seven single-character ids, so
+   the operation would be reported against ids no activation named, and a
+   map yields its entries, which are not ids either.
 
    Absent and nil are legal: every reader defaults the field to empty.
    Unusable elements are ordered by printed form. `:targets` is canonically
@@ -171,8 +172,9 @@
 (defn- ^{:stratum 1} check-id-fields
   "N14 §3.2 conformance for the operation fields that name object ids.
 
-   `tx/touched-ids` and the §3.5 backing check both `set` these fields, so a
-   scalar there throws out of `validate` itself. That is worse than a
+   `tx/touched-ids` `set`s `:targets`; the §3.5 backing check `seq`s
+   `:evidence` and `set`s a sibling's `:discriminates`. Both throw on a
+   scalar, so one there throws out of `validate` itself. That is worse than a
    commit-time throw: no stage returns, `run/step` never receives an
    anomaly, and there is nothing to route. This stage runs ahead of every
    reader.

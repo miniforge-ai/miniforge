@@ -158,8 +158,8 @@ Added to `run_test.clj`:
   the transaction-level shape.
 
 All 118 tests / 368 assertions in the component pass. `bb commit-budget`,
-`bb lint:clj`, `bb lint:stratum` and the full pre-commit suite pass on each of
-the two commits.
+`bb lint:clj`, `bb lint:stratum` and the full pre-commit suite pass on every
+commit.
 
 ## Deployment Plan
 

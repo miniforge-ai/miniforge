@@ -111,8 +111,8 @@
   "Operation fields that name object ids (N14 §3.2).
 
    `:targets` is read by [[touched-ids]]; `:evidence` and `:discriminates`
-   by the §3.5 backing check. Each is optional, and each reader `set`s the
-   field, so validation holds all three to one shape."
+   by the §3.5 backing check. Each is optional, and each reader hands the
+   field to `set` or `seq`, so validation holds all three to one shape."
   [:targets :evidence :discriminates])
 
 (defn ^{:stratum 0} touched-ids
