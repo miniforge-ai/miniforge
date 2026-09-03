@@ -586,6 +586,43 @@
   ;; MCP Context Server
   ;; ──────────────────────────────────────────────────────────────────────────
 
+  codex-gap-retrodict
+  {:doc "T2 s5.4 retrodiction: re-classify run ledgers against the codex as it is NOW. Usage: bb codex-gap-retrodict [checkpoint-root] [phase=situation ...]; codex from MINIFORGE_CODEX_PATH"
+   :extra-paths ["components/codex-gap/src"
+                 "components/codex-gap/resources"
+                 "components/codex/src"
+                 "components/codex/resources"
+                 "components/messages/src"
+                 "components/messages/resources"]
+   :requires ([ai.miniforge.codex-gap.interface :as codex-gap]
+              [babashka.fs :as fs]
+              [clojure.string :as str])
+   :task (let [[root & mappings] *command-line-args*
+               root (or root (str (fs/path (System/getProperty "user.home")
+                                           ".miniforge" "checkpoints")))
+               codex-dir (System/getenv "MINIFORGE_CODEX_PATH")
+               phase->situation (into {} (map (fn [m]
+                                                (let [[p s] (str/split m (re-pattern "=") 2)]
+                                                  [(keyword p) s]))
+                                              mappings))
+               dirs (when (fs/directory? root)
+                      (sort (filter fs/directory? (fs/list-dir root))))
+               entries (vec (mapcat (fn [d] (:entries (codex-gap/read-ledger (str d)))) dirs))]
+           (if (or (nil? codex-dir) (not (fs/directory? codex-dir)))
+             (do (println "MINIFORGE_CODEX_PATH must name the codex directory") (System/exit 2))
+             (let [{:keys [shift entries]} (codex-gap/retrodict entries codex-dir phase->situation)]
+               (println "retrodicted" (count entries) "misses against" codex-dir)
+               (println "phase->situation" (pr-str phase->situation))
+               (println "shift [recorded retrodicted] -> count")
+               (doseq [[k v] (sort-by (comp - val) shift)] (println " " (pr-str k) v))
+               (let [queued (filter (fn [e] (= :review-queue (:miss/bucket e))) entries)]
+                 (when (seq queued)
+                   (println "review-queue by signal [type reason-code] -> count")
+                   (doseq [[k v] (sort-by (comp - val)
+                                          (frequencies (map (fn [e] [(get-in e [:miss/signal :type])
+                                                                     (get-in e [:miss/signal :payload :reason/code])])
+                                                            queued)))]
+                     (println " " (pr-str k) v)))))))}
   codex-gap-report
   {:doc "Render the Codex gap report (T2 §4) from run ledgers. Usage: bb codex-gap-report [checkpoint-root]; codex from MINIFORGE_CODEX_PATH"
    :extra-paths ["components/codex-gap/src"

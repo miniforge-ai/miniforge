@@ -143,6 +143,24 @@
     (is (= 1.0 (:confidence attribution)))
     (is (= :unheeded bucket))))
 
+(deftest ^{:stratum 1} policy-rule-violations-attribute-to-enforcement-after-authoring
+  ;; The observational matrix's dominant miss shape: a policy-pack rule
+  ;; violation at verify. Code-wide mapping — WHEN the rule reached the
+  ;; author is the problem, not which rule.
+  (let [signal {:type :gate-failure
+                :payload {:reason/code :reason/rule-violation
+                          :reason/rule-id :std/config-as-data
+                          :reason/detail "policy rule violated"}}
+        {:keys [bucket attribution]}
+        (gap/classify (entry "submitting-work-to-enforced-gates"
+                             {:status :pinned :pinned? true :pin-read? true}
+                             signal)
+                      {:landings [{:id "enforcement-after-authoring" :type "problem"}]}
+                      problems {})]
+    (is (= :mechanical (:method attribution)))
+    (is (= "enforcement-after-authoring" (:problem attribution)))
+    (is (= :unheeded bucket))))
+
 (deftest ^{:stratum 1} ledger-round-trips-and-survives-corrupt-lines
   (let [dir (str (java.nio.file.Files/createTempDirectory
                    "codex-gap-test-"
