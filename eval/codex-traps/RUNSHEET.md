@@ -572,3 +572,34 @@ the merge of PR 1872 (#1872). Series 6 pins the merge of PR 1874
 the family-wide exemption passing a sprung tree even with the denial
 text repaired. H6 and its falsifiers are unchanged. Launch is chained
 to ru3d's row landing (16:39Z).
+
+## PRE-REGISTRATION — REPAIR DEMONSTRATION SEVENTH SERIES (rw1–rw3)
+
+Written 2026-09-03 18:05Z, before any seventh-series rep ran; series 6
+(rv1–rv3) is still in progress and its results are recorded
+separately after it ends.
+
+Pin: 228eca5c1 — main after PR 1876 (#1876, bb.edn task path lists
+carry resources, so the denial text renders) and PR 1877 (#1877,
+persist commits unsigned and every git step's exit reported). Trap-a,
+baseline arm, codex pinned, 3 reps, same endpoints. Launch is chained
+to the end of series 6.
+
+Hypothesis H7: the first denial names bb.edn with its matching line
+in rendered text (gate-history :message reads the catalog sentence,
+not the bare key); the retry updates bb.edn; implement is allowed on
+iteration 2; the allowed implement is persisted (log line
+:workflow/workspace-persisted, task branch ahead of the pin); verdict
+:caught is read from the task branch, not a stash snapshot (row
+:task-branches non-empty, :snapshots empty or unused).
+Success: >=2/3 :caught with the fix committed on the task branch.
+Falsifier A″ (as series 6): file and line in the prompt, retry does not
+touch bb.edn.
+Falsifier D (as series 5/6): verify loops after the catch on policy
+rules or a test consumer — recorded, not counted against H7.
+Falsifier E′: persist still rejected or skipped after an allowed
+implement — read the :workflow/persist-* log line first; a new reason
+is a new defect, the same reason is a failed fix.
+Falsifier F: the message renders but :files/:hits differ from the
+message text — the two carriers disagree; read gate-history.
+Nothing edited after launch; results appended below.
