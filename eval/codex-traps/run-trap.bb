@@ -401,7 +401,8 @@
 (let [[arm trap rep] *command-line-args*
       paths (sandbox-paths *file*)
       codex (codex-path)]
-  (when-not (and (#{baseline-arm treated-arm} arm) (trap->spec trap) rep)
+  ;; A blank rep would key a runs.edn row and a log file on nothing.
+  (when-not (and (#{baseline-arm treated-arm} arm) (trap->spec trap) (not (str/blank? rep)))
     (println usage)
     (System/exit refused-exit))
   (when-let [refusal (or (isolation-anomaly paths)
