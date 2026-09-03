@@ -495,3 +495,78 @@
                                     (transaction :proposer 10
                                                  {:op :assert-claim}
                                                  {:op :refine-claim :targets :x})))))))
+(deftest ^{:stratum 1} closing-a-goal-requires-an-outcome-the-engine-can-impose
+  (testing "apply-status reads :outcome through a set, so anything outside yields nil"
+    (doseq [[label outcome] [["outside the closed set" :maybe]
+                             ["a string, not a status" "accepted"]
+                             ["explicitly nil" nil]]]
+      (is (= :anomalies.deliberation/invalid-outcome
+             (subtype-of (validate-tx
+                          (workspace (object-at "goal-1" 4 :object/type :goal))
+                          (transaction :synthesizer 10
+                                       {:op :close-goal :targets #{"goal-1"}
+                                        :outcome outcome}))))
+          label)))
+  (testing "an absent :outcome is the same fault: the operation names no status"
+    (is (= :anomalies.deliberation/invalid-outcome
+           (subtype-of (validate-tx
+                        (workspace (object-at "goal-1" 4 :object/type :goal))
+                        (transaction :synthesizer 10
+                                     {:op :close-goal :targets #{"goal-1"}})))))))
+
+(deftest ^{:stratum 1} a-legal-outcome-passes
+  (testing "the stage refuses outcomes the engine cannot impose, not closing itself"
+    (doseq [outcome tx/goal-outcomes]
+      (is (nil? (validate-tx
+                 (workspace (object-at "goal-1" 4 :object/type :goal))
+                 (transaction :synthesizer 10
+                              {:op :close-goal :targets #{"goal-1"}
+                               :outcome outcome})))
+          outcome))))
+
+(deftest ^{:stratum 1} only-close-goal-carries-an-outcome
+  (testing "every other status is derived from the operation, and the field is ignored"
+    (is (= :anomalies.deliberation/invalid-outcome
+           (subtype-of (validate-tx
+                        (workspace (object-at "claim-1" 4))
+                        (transaction :skeptic 10
+                                     {:op :challenge :targets #{"claim-1"}
+                                      :outcome :accepted}))))
+        "naming :challenge and carrying :accepted is a confusion, not an inert field"))
+  (testing "an explicit nil names no status, so it is absent rather than inapplicable"
+    (is (nil? (validate-tx (workspace (object-at "claim-1" 4))
+                           (transaction :proposer 10
+                                        {:op :attach-evidence :targets #{"claim-1"}
+                                         :outcome nil}))))))
+
+(deftest ^{:stratum 1} an-outcome-rejection-carries-the-reason-and-the-value
+  (testing "routing reads both without parsing the message"
+    (doseq [[reason outcome operation]
+            [[:unknown-outcome :maybe
+              {:op :close-goal :targets #{"goal-1"} :outcome :maybe}]
+             [:unknown-outcome nil
+              {:op :close-goal :targets #{"goal-1"}}]
+             [:inapplicable-outcome :accepted
+              {:op :declare-blocked :targets #{"goal-1"} :outcome :accepted}]]]
+      (let [data (:anomaly/data
+                  (validate-tx (workspace (object-at "goal-1" 4 :object/type :goal))
+                               (transaction :synthesizer 10 operation)))]
+        (is (= reason (:reason data)))
+        (is (= outcome (:outcome data)))))))
+
+(deftest ^{:stratum 1} an-unusable-outcome-outranks-the-goal-it-would-close
+  (testing "the payload stages run before the three that read the object graph"
+    (is (= :anomalies.deliberation/invalid-outcome
+           (subtype-of (validate-tx
+                        (workspace)
+                        (transaction :synthesizer 10
+                                     {:op :close-goal :targets #{"goal-404"}
+                                      :outcome :maybe}))))
+        "check-targets would otherwise report the missing goal first"))
+  (testing "but the vocabulary is established before either"
+    (is (= :anomalies.deliberation/unknown-operation
+           (subtype-of (validate-tx
+                        (workspace)
+                        (transaction :synthesizer 10
+                                     {:op :close-every-goal :outcome :accepted}))))
+        "an operation outside the vocabulary has no outcome contract to violate")))
