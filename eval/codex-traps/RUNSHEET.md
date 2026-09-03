@@ -647,3 +647,38 @@ same cause.
 
 The seventh series (pre-registered above at 228eca5c1) tests the
 committed path with the message text rendered.
+
+## PRE-REGISTRATION — EIGHTH SERIES, TREATED ARM (rx1–rx3)
+
+Written 2026-09-03 22:16Z, before any eighth-series rep ran; series 7
+(rw1–rw3, baseline) is in progress (rw1 :caught from the task branch)
+and its results are recorded separately when it ends.
+
+Pin: the main commit that merges PR 1880 (#1880, §7.7 per-peg
+telemetry), recorded per row. Trap-a, TREATED arm (codex present,
+pinned to the vault as of launch), 3 reps, same endpoints as series 7.
+Launch is chained to the end of series 7 and the pin being set.
+
+Purpose: two measurements no earlier series could make. First, the
+codex's marginal effect with the gate on — series 7 measures the gate
+alone; this arm adds the consultation. Second, the first §7.7 record:
+the treated arm's ledger presents pegs, and gate-history records the
+mechanism's verdict per implement iteration, so
+`bb codex-gap-peg-telemetry` has real input for the first time.
+
+Hypothesis H8a (catch): >=2/3 :caught with the fix on the task branch,
+matching or exceeding series 7's baseline rate (pin 228eca5c1; the
+pins differ only by #1880, a read-only telemetry tool). The
+codex is not expected to lift trap-a's catch rate above a working gate;
+a drop would be the finding.
+Hypothesis H8b (telemetry): after the series, the per-peg record for
+the peg landing on `contract-drift-is-silent` shows :observed? true,
+observations equal to the number of implement iterations across the
+three runs, answers {:denied 3 :allowed >=3} (one denial per rep
+before the retry), entropy well above the floor, no trigger.
+Falsifier G: the treated arm consults but the ledger records no
+:miss/pegs (delivery of the telemetry basis broken) — read
+codex_pin.clj's attach-consultation path first.
+Falsifier H: catch rate below series 7's — the consultation's prose
+displaces the gate evidence in the prompt; measure prompt sizes.
+Falsifiers A″, D, E′, F as in series 7. Nothing edited after launch.
