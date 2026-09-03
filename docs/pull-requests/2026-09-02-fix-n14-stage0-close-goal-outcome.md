@@ -63,8 +63,11 @@ routing, following the `invalid-creation` / `invalid-links` precedent:
 1. `:unknown-outcome` — a `close-goal` whose `:outcome` is not in
    `tx/goal-outcomes`. An absent outcome is refused under the same reason as an
    illegal one: both name a status the engine cannot impose, and both are
-   repaired by supplying one it can. The value is carried in `:outcome` so the
-   two cases stay distinguishable to a reader without splitting the routing.
+   repaired by supplying one it can. The offending value is carried in
+   `:outcome`, so an illegal one is legible as itself without splitting the
+   routing. An absent `:outcome` and an explicit nil both report `:outcome nil`,
+   which is the whole of the distinction between them — neither names a status,
+   and the repair does not differ.
 2. `:inapplicable-outcome` — the field on any other operation. `commit`
    ignores it there by design, which stops it taking effect but does not report
    it, leaving the same silence in the other direction. An explicit nil names
