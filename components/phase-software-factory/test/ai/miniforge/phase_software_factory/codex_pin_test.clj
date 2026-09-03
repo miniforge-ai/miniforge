@@ -20,7 +20,8 @@
    component's own tests against generator-produced fixtures
    (ai.miniforge.codex.render-test/pin-entry-builds-a-prompt-ready-file);
    these cover the phase-side skip conditions."
-  (:require [ai.miniforge.phase-software-factory.codex-pin :as codex-pin]
+  (:require [ai.miniforge.codex.interface :as codex]
+   [ai.miniforge.phase-software-factory.codex-pin :as codex-pin]
             [clojure.test :refer [deftest is testing]]))
 
 ;------------------------------------------------------------------------------ Layer 0
@@ -117,3 +118,29 @@
                        {:status :success :output {:code/summary "s"}} summary)))))
     (testing "non-map result passes through untouched"
       (is (nil? (codex-pin/attach-consultation nil summary))))))
+
+(deftest ^{:stratum 0} secondary-consultations-append-and-merge
+  (let [primary {:path codex-pin/pin-path :content "PRIMARY" :pegs [{:id "p1"}]}]
+    (testing "secondary landings append after a blank line; pegs merge primary-first"
+      (with-redefs [codex/pin-entry (fn [_dir _situation _path] primary)
+                    codex/consider (fn [_dir situation]
+                                     (when (= "submitting-work-to-enforced-gates" situation)
+                                       {:landings [] :pegs [{:id "s1"}]}))
+                    codex/render-response (fn [_resp] "SECONDARY")]
+        (let [out (codex-pin/pin-outcome :implement nil "/codex")]
+          (is (= :pinned (:status out)))
+          (is (= "PRIMARY\n\nSECONDARY" (get-in out [:entry :content])))
+          (is (= [{:id "p1"} {:id "s1"}] (:pegs out)))
+          (is (= "changing-one-side-of-a-boundary" (:situation out))
+              "the ledger's situation stays the primary"))))
+    (testing "a secondary that fails to answer warns and is dropped; the primary stands"
+      (let [err (java.io.StringWriter.)]
+        (with-redefs [codex/pin-entry (fn [_dir _situation _path] primary)
+                      codex/consider (fn [_dir _situation]
+                                       {:codex/anomaly :codex-unreadable :codex/reason "no nodes"})
+                      codex/render-response (fn [_resp] (throw (ex-info "must not render an anomaly" {})))]
+          (let [out (binding [*err* err] (codex-pin/pin-outcome :implement nil "/codex"))]
+            (is (= :pinned (:status out)))
+            (is (= "PRIMARY" (get-in out [:entry :content])))
+            (is (= [{:id "p1"}] (:pegs out)))
+            (is (re-find #"WARN: codex consultation skipped for implement" (str err)))))))))
