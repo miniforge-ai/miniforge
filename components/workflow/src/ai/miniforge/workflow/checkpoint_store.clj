@@ -60,6 +60,16 @@
   (when (fs/exists? path)
     (coerce/stringify-instants (edn/read-string (slurp path)))))
 
+(def ^{:stratum 0} gate-history-filename
+  "Append-only per-run log of every gate decision, one pr-str'd entry per
+   line. The per-phase checkpoint is OVERWRITTEN on phase re-entry (a
+   redirect loop keeps only its last iteration), which is exactly the
+   record a gate-denied-then-retried phase needs and lost — the
+   trap-bench repair demonstrations could not attribute their retries.
+   Same append discipline as the codex-gap ledger: one O_APPEND write, a
+   failed append cannot damage prior entries."
+  "gate-history.edn")
+
 ;------------------------------------------------------------------------------ Layer 1
 
 (defn- ^{:stratum 1} write-edn-atomically!
@@ -100,10 +110,41 @@
      (catch Exception _
        nil))))
 
+(defn- ^{:stratum 1} append-gate-history!
+  "Append the phase's gate decision to the run's gate history when the
+   phase result carries a decision envelope. Best-effort: a failed
+   append logs nothing and changes nothing — the checkpoint write is the
+   authority, this is the audit trail."
+  [checkpoint-root workflow-run-id phase-name phase-result ctx]
+  (when-let [envelope (:phase/decision-envelope phase-result)]
+    ;; Plain try, class-only catch at an absolute boundary (std 211 ex. a):
+    ;; the audit append must never fail the checkpoint write.
+    (try
+      (let [dir (checkpoint-paths/workflow-checkpoint-dir checkpoint-root workflow-run-id)
+            entry {:phase phase-name
+                   :at (str (java.time.Instant/now))
+                   :decision (:envelope/decision envelope)
+                   :redirect-count (get ctx :execution/redirect-count 0)
+                   ;; The phase result's own keys — one canonical name per
+                   ;; datum, so a history consumer reads what a checkpoint
+                   ;; consumer reads.
+                   :phase/gate-errors (:phase/gate-errors phase-result)
+                   :phase/gate-failures (:phase/gate-failures phase-result)}]
+        (fs/create-dirs dir)
+        ;; Same instant normalization the checkpoint records get: gate
+        ;; errors carry java.time.Instant values (policy-pack violations'
+        ;; :timestamp), which pr-str would emit as #object[...] and make
+        ;; the history unreadable.
+        (with-open [w (java.io.FileOutputStream. (fs/file dir gate-history-filename) true)]
+          (.write w (.getBytes (str (pr-str (coerce/stringify-instants entry)) "\n") "UTF-8"))))
+      (catch Exception _ nil))))
+
 ;------------------------------------------------------------------------------ Layer 2
 
 (defn ^{:stratum 2} persist-execution-state!
-  "Persist a machine snapshot, manifest, and current phase checkpoint."
+  "Persist a machine snapshot, manifest, and current phase checkpoint,
+   and append the phase's gate decision (if any) to the run's
+   append-only gate history."
   [ctx]
   (when-let [workflow-run-id (:execution/id ctx)]
     (let [checkpoint-root (checkpoint-paths/resolve-checkpoint-root ctx)
@@ -126,7 +167,8 @@
            (checkpoint-paths/phase-checkpoint-path checkpoint-root
                                                    workflow-run-id
                                                    phase-name)
-           (checkpoint-records/build-phase-checkpoint ctx phase-name phase-result)))
+           (checkpoint-records/build-phase-checkpoint ctx phase-name phase-result))
+          (append-gate-history! checkpoint-root workflow-run-id phase-name phase-result ctx))
         (write-edn-atomically! snapshot-path snapshot)
         (write-edn-atomically! manifest-path manifest)
         {:checkpoint/root checkpoint-root

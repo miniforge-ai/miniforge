@@ -17,6 +17,8 @@
 ;; limitations under the License.
 (ns ai.miniforge.workflow.checkpoint-store-test
   (:require
+   [clojure.edn :as edn]
+   [clojure.string :as str]
    [clojure.java.io :as io]
    [clojure.test :refer [deftest is testing]]
    [ai.miniforge.workflow.checkpoint-store :as checkpoint-store]
@@ -301,3 +303,41 @@
                   "the resuming caller's :acting must not survive in opts")
               (is (nil? (:acting (:execution/opts ctx)))
                   "nor the starting caller's, in the fresh context"))))))))
+
+(deftest ^{:stratum 1} gate-history-survives-phase-re-entry-test
+  (testing "phase re-entry overwrites the phase checkpoint but every gate
+            decision survives in the append-only gate history"
+    (with-temp-checkpoint-root
+      (fn [checkpoint-root]
+        (let [workflow {:workflow/id :gate-history-test
+                        :workflow/version "1.0.0"
+                        :workflow/pipeline [{:phase :implement} {:phase :done}]}
+              base (-> (ctx/create-context workflow {:task "Test"}
+                                           {:checkpoint/root checkpoint-root})
+                       (assoc :execution/current-phase :implement))
+              denied (assoc-in base [:execution/phase-results :implement]
+                               {:status :failed
+                                :phase/decision-envelope {:envelope/decision :deny}
+                                :phase/gate-failures [{:gate :stale-references
+                                                       :errors [{:message "stale"
+                                                                 ;; policy-pack violations carry Instants
+                                                                 :timestamp (java.time.Instant/parse "2026-08-29T00:00:00Z")}]}]})
+              allowed (assoc-in base [:execution/phase-results :implement]
+                                {:status :completed
+                                 :phase/decision-envelope {:envelope/decision :allow}})
+              _ (checkpoint-store/persist-execution-state! denied)
+              _ (checkpoint-store/persist-execution-state! allowed)
+              run-dir (str checkpoint-root "/" (:execution/id base))
+              history (->> (slurp (str run-dir "/" checkpoint-store/gate-history-filename))
+                           str/split-lines
+                           (mapv edn/read-string))
+              phase-file (edn/read-string
+                          (slurp (str run-dir "/phases/implement.edn")))]
+          (is (= 2 (count history)) "both iterations recorded")
+          (is (= [:deny :allow] (mapv :decision history)))
+          (is (= :stale-references (-> history first :phase/gate-failures first :gate)))
+          (is (= "2026-08-29T00:00:00Z"
+                 (-> history first :phase/gate-failures first :errors first :timestamp))
+              "Instants inside gate errors are normalized to strings so the history stays EDN-readable")
+          (is (= :allow (get-in phase-file [:phase/result :phase/decision-envelope :envelope/decision]))
+              "the phase checkpoint holds only the last iteration — the reason the history exists"))))))
