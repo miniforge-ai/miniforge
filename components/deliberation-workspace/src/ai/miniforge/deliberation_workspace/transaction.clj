@@ -107,6 +107,14 @@
   "Operations every role may propose (N14 §5.3, final clause)."
   #{:assert-claim :add-question :declare-blocked})
 
+(def ^{:stratum 0} id-fields
+  "Operation fields that name object ids (N14 §3.2).
+
+   `:targets` is read by [[touched-ids]]; `:evidence` and `:discriminates`
+   by the §3.5 backing check. Each is optional, and each reader `set`s the
+   field, so validation holds all three to one shape."
+  [:targets :evidence :discriminates])
+
 (defn ^{:stratum 0} touched-ids
   "The object ids `operation` reads or writes. Every operation must declare
    these so the validator can check basis staleness without interpreting

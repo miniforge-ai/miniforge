@@ -108,6 +108,51 @@
         spec creates]
     spec))
 
+(defn- ^{:stratum 0} id-listing-defect
+  "The first structural defect in an operation field that names object ids,
+   as `[reason data]`, or nil when the field's readers can `set` it and look
+   its elements up in the object graph.
+
+   A scalar is refused because `set` throws on one. A string is refused for
+   the opposite reason — it is seqable, so `(set \"claim-1\")` yields seven
+   single-character ids and the operation is reported against ids no
+   activation named. A map is neither and is refused with the scalars.
+
+   Absent and nil are legal: every reader defaults the field to empty.
+   Unusable elements are ordered by printed form. `:targets` is canonically
+   a set, and what the anomaly reports must not vary between runs over
+   identical input."
+  [value]
+  (let [listed? (or (nil? value) (and (coll? value) (not (map? value))))
+        unusable (when listed?
+                   (seq (remove #(and (string? %) (not (str/blank? %))) value)))]
+    (cond
+      (not listed?)
+      [:non-collection-ids {:value value}]
+
+      unusable
+      [:unusable-id {:ids (vec (sort-by pr-str unusable))}])))
+
+(defn- ^{:stratum 0} id-listings
+  "Every id-naming field the operations of one transaction carry, as
+   `[operation field value]` in payload order.
+
+   Read across the whole transaction rather than one operation at a time:
+   the §3.5 backing check consults a SIBLING's `:discriminates` while
+   validating a challenge, so a stage reading only its own operation would
+   reach a malformed field before the operation carrying it had a turn.
+
+   Operations that are not maps are skipped, not interpreted: `check-schema`
+   refuses one on its own turn, and `contains?` throws on a scalar — reading
+   fields out of a payload that is not one moves the crash rather than
+   removing it."
+  [operations]
+  (for [operation operations
+        :when (map? operation)
+        field tx/id-fields
+        :when (contains? operation field)]
+    [operation field (get operation field)]))
+
 (defn ^{:stratum 0} validate-operation
   "Run `stages` against one operation in order, returning the first anomaly
    or nil. `context` carries :role, :basis and :siblings from the enclosing
@@ -122,6 +167,28 @@
     (reject :invalid-input :anomalies.deliberation/unknown-operation
             "Operation is outside the closed N14 §3.2 vocabulary"
             {:op (:op operation)})))
+
+(defn- ^{:stratum 1} check-id-fields
+  "N14 §3.2 conformance for the operation fields that name object ids.
+
+   `tx/touched-ids` and the §3.5 backing check both `set` these fields, so a
+   scalar there throws out of `validate` itself. That is worse than a
+   commit-time throw: no stage returns, `run/step` never receives an
+   anomaly, and there is nothing to route. This stage runs ahead of every
+   reader.
+
+   The offending operation is named rather than the one whose turn noticed.
+   The scan covers the whole transaction, `:tx/operations` is a vector so
+   the first defect is fixed by the payload, and pointing repair at a
+   sibling's payload would describe a fault the named operation does not
+   have."
+  [_workspace operation context]
+  (some (fn [[op field value]]
+          (when-let [[reason data] (id-listing-defect value)]
+            (reject :invalid-input :anomalies.deliberation/invalid-object-ids
+                    "Operation field must name object ids the engine can look up"
+                    (merge {:op (:op op) :field field :reason reason} data))))
+        (id-listings (get context :siblings [operation]))))
 
 (defn- ^{:stratum 1} check-creates
   "N14 §3.2 conformance for the objects an operation asks to create.
@@ -271,9 +338,14 @@
    for the same reason: an operation outside the vocabulary should be
    reported as an unknown operation, not as a bad creation.
 
-   Both payload stages precede the three that read the object graph. A
+   `check-id-fields` leads the payload stages, and is the one ordering
+   constraint that is not a preference: every stage after it — payload,
+   graph, and abuse guard alike — `set`s a field it establishes the shape
+   of, and would throw out of the validator rather than reject.
+
+   The payload stages precede the three that read the object graph. A
    transaction can carry a malformed payload and a missing target at once,
    and the payload is the more basic fault: the ids a graph stage would
    report come out of the same payload whose shape is not yet established."
-  [check-schema check-creates check-links
+  [check-schema check-id-fields check-creates check-links
    check-targets check-permission check-basis])
