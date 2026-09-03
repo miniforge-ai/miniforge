@@ -28,6 +28,7 @@
    The recorded bucket is preserved as :miss/bucket-recorded; the
    retrodicted bucket replaces :miss/bucket."
   (:require [ai.miniforge.codex.interface :as codex]
+            [ai.miniforge.codex-gap.attribute :as attribute]
             [ai.miniforge.codex-gap.classify :as classify]))
 
 ;------------------------------------------------------------------------------ Layer 0
@@ -47,16 +48,19 @@
    entry's phase (nil keeps the recorded situation); `consider` is a
    memoizable (fn [situation] consider-resp); `classify-fn` is injected
    so the remap is testable without a codex."
-  [classify-fn consider problems situation entry]
+  [classify-fn consider problems opts situation entry]
   (let [situation (or situation (:miss/situation entry))
         consider-resp (when situation (consider situation))
         {:keys [bucket attribution]}
         (classify-fn {:miss/situation situation
                       :miss/consultation (:miss/consultation entry)
                       :miss/signal (:miss/signal entry)}
-                     consider-resp problems {})]
+                     consider-resp problems opts)]
     (assoc entry
-           :miss/bucket-recorded (:miss/bucket entry)
+           ;; Idempotent over re-runs: the ORIGINAL recorded bucket is the
+           ;; datum; a second retrodiction must not overwrite it with the
+           ;; first retrodiction's result.
+           :miss/bucket-recorded (or (:miss/bucket-recorded entry) (:miss/bucket entry))
            :miss/bucket bucket
            :miss/situation situation
            :miss/attribution attribution
@@ -74,8 +78,11 @@
   [entries codex-dir phase->situation]
   (let [problems (codex-problems codex-dir)
         consider (memoize (fn [situation] (codex/consider codex-dir situation)))
+        ;; Loaded once and closed over — classify would otherwise re-read
+        ;; and re-parse the gate-reason map for every entry.
+        opts {:gate-reason-map (attribute/load-gate-reason-map)}
         out (mapv (fn [e]
-                    (retrodict-entry classify/classify consider problems
+                    (retrodict-entry classify/classify consider problems opts
                                      (get phase->situation (:miss/phase e))
                                      e))
                   entries)]

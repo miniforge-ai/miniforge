@@ -34,12 +34,17 @@
                                                 :method :mechanical :confidence :high})})
         consider (fn [situation] (when situation {:landings [:enforcement-after-authoring]}))]
     (testing "a supplied situation moves an :uncovered miss into a covered bucket"
-      (let [out (retrodict/retrodict-entry classify-fn consider [] "submitting-work-to-enforced-gates" entry)]
+      (let [out (retrodict/retrodict-entry classify-fn consider [] {} "submitting-work-to-enforced-gates" entry)]
         (is (= :uncovered (:miss/bucket-recorded out)) "the recorded bucket is preserved")
         (is (= :unheeded (:miss/bucket out)))
         (is (= "submitting-work-to-enforced-gates" (:miss/situation out)))
         (is (true? (:miss/retrodicted? out)))))
+    (testing "retrodicting twice preserves the ORIGINAL recorded bucket"
+      (let [once (retrodict/retrodict-entry classify-fn consider [] {} "submitting-work-to-enforced-gates" entry)
+            twice (retrodict/retrodict-entry classify-fn consider [] {} "submitting-work-to-enforced-gates" once)]
+        (is (= :uncovered (:miss/bucket-recorded twice)))
+        (is (= :unheeded (:miss/bucket twice)))))
     (testing "no mapping keeps the recorded situation (nil) and bucket"
-      (let [out (retrodict/retrodict-entry classify-fn consider [] nil entry)]
+      (let [out (retrodict/retrodict-entry classify-fn consider [] {} nil entry)]
         (is (= :uncovered (:miss/bucket out)))
         (is (nil? (:miss/situation out)))))))

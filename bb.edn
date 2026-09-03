@@ -587,7 +587,7 @@
   ;; ──────────────────────────────────────────────────────────────────────────
 
   codex-gap-retrodict
-  {:doc "T2 s5.4 retrodiction: re-classify run ledgers against the codex as it is NOW. Usage: bb codex-gap-retrodict [checkpoint-root] [phase=situation ...]; codex from MINIFORGE_CODEX_PATH"
+  {:doc "T2 §5.4 retrodiction: re-classify run ledgers against the codex as it is NOW. Usage: bb codex-gap-retrodict [checkpoint-root] [phase=situation ...]; codex from MINIFORGE_CODEX_PATH"
    :extra-paths ["components/codex-gap/src"
                  "components/codex-gap/resources"
                  "components/codex/src"
@@ -603,6 +603,9 @@
                codex-dir (System/getenv "MINIFORGE_CODEX_PATH")
                phase->situation (into {} (map (fn [m]
                                                 (let [[p s] (str/split m (re-pattern "=") 2)]
+                                                  (when (or (str/blank? p) (str/blank? s))
+                                                    (println "malformed mapping" (pr-str m) "— expected phase=situation")
+                                                    (System/exit 2))
                                                   [(keyword p) s]))
                                               mappings))
                dirs (when (fs/directory? root)
