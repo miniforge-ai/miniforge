@@ -114,8 +114,9 @@
 
    Clones `:source` to `<root>/repo` at `:ref`, creates the throwaway bare
    mirror `<root>/origin.git`, pushes the pinned commit to it as a fully
-   qualified `refs/heads/<branch>`, and points only the clone's origin at
-   the mirror. Seeding by explicit push rather than by mirroring every ref
+   qualified `refs/heads/<branch>`, pins the clone's local `<branch>` and
+   `origin/<branch>` to that same commit, and points only the clone's
+   origin at the mirror. Seeding by explicit push rather than by mirroring every ref
    also stops junk refs in the source propagating into the bench.
 
    The launching checkout is read from and never written to: its
@@ -133,7 +134,8 @@
         repo-dir (str (File. (str root) repo-dir-name))
         mirror-dir (str (File. (str root) mirror-dir-name))
         origin-before (git/remote-url source "origin")
-        target-ref (qualified-branch-ref branch)]
+        target-ref (qualified-branch-ref branch)
+        branch-name (when target-ref (subs target-ref (count "refs/heads/")))]
     (cond
       (nil? target-ref)
       (anomaly :invalid-input "branch name is empty once ref prefixes are stripped"
@@ -158,6 +160,15 @@
                      [:seed-mirror #(git/git repo-dir "push" "--quiet" mirror-dir
                                              (str "HEAD:" target-ref))]
                      [:mirror-head #(git/git mirror-dir "symbolic-ref" "HEAD" target-ref)]
+                     ;; The clone copied the launching checkout's local
+                     ;; `<branch>` and its `origin/<branch>` as they were,
+                     ;; which can trail the pin by weeks. Anything that
+                     ;; branches from `<branch>` by name (the dag-executor's
+                     ;; default base ref is "main") would then start from
+                     ;; that stale commit. Pin both refs to the checkout.
+                     [:pin-branch #(git/git repo-dir "branch" "--force" branch-name "HEAD")]
+                     [:pin-tracking #(git/git repo-dir "update-ref"
+                                              (str "refs/remotes/origin/" branch-name) "HEAD")]
                      [:redirect-origin #(git/git repo-dir "remote" "set-url" "origin" mirror-dir)]]
               failed (reduce (fn [_ [step run-step!]]
                                (let [r (run-step!)]

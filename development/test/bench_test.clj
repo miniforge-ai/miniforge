@@ -164,3 +164,28 @@
           (git/git source "worktree" "remove" "--force" leaky)
           (delete-tree! parent)
           (delete-tree! source))))))
+
+(deftest ^{:stratum 2} provision-pins-branch-refs-to-the-checkout-test
+  (testing "the clone's local <branch> and origin/<branch> equal the pinned
+            commit even when the launching checkout's <branch> trails it —
+            the 2026-09-03 bench had `main` three weeks behind its pin"
+    (let [root (temp-dir)
+          source (init-launching-repo! (temp-dir))
+          main-sha (str/trim (str (:out (git/git source "rev-parse" "HEAD"))))
+          _ (git/git source "checkout" "--quiet" "--detach")
+          _ (spit (str (File. (str source) "later.txt")) "later\n")
+          _ (git/git source "add" "later.txt")
+          _ (git/git source "commit" "--quiet" "-m" "later")
+          pin-sha (str/trim (str (:out (git/git source "rev-parse" "HEAD"))))]
+      (try
+        (let [bench-root (str (File. root "bench"))
+              report (sut/provision! {:source source :root bench-root :ref pin-sha})
+              repo (str (File. bench-root sut/repo-dir-name))
+              rev (fn [r] (str/trim (str (:out (git/git repo "rev-parse" r)))))]
+          (is (nil? (:anomaly/type report)) (pr-str report))
+          (is (not= main-sha pin-sha) "fixture: the source's main must trail the pin")
+          (is (= pin-sha (rev "main")))
+          (is (= pin-sha (rev "origin/main")))
+          (is (= main-sha (str/trim (str (:out (git/git source "rev-parse" "main")))))
+              "the launching checkout's own main is untouched"))
+        (finally (delete-tree! root) (delete-tree! source))))))
