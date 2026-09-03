@@ -66,6 +66,19 @@
     (is (= [:denied :allowed :allowed] (sut/gate-answers history :stale-references))
         "a deny on another gate is an allow for this one")))
 
+(deftest ^{:stratum 0} mechanisms-are-sorted-for-stable-choice
+  (let [peg {:id "p" :answers {"a" ["m-b"] "b" ["m-a"]}}
+        nodes {"m-a" {:id "m-a" :mechanism "z/mechanism"} "m-b" {:id "m-b" :mechanism "a/mechanism"}}]
+    (is (= ["a/mechanism" "z/mechanism"] (sut/peg-mechanisms peg nodes)))))
+
+(deftest ^{:stratum 0} unreadable-gate-history-yields-no-entries
+  (let [root (str (Files/createTempDirectory "peg-telemetry-io" (make-array FileAttribute 0)))
+        dir (io/file root "run-x")]
+    (.mkdirs dir)
+    ;; a directory where the file should be: opening it as a file fails
+    (.mkdirs (io/file dir sut/gate-history-filename))
+    (is (= [] (sut/read-gate-history dir)))))
+
 ;------------------------------------------------------------------------------ Layer 1
 
 (deftest ^{:stratum 1} entropy-and-collapse-primitives

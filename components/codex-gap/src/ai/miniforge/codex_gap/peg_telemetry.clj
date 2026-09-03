@@ -78,12 +78,14 @@
 
 (defn ^{:stratum 0} peg-mechanisms
   "Mechanism pointers carried by the problems `peg` can land on, from
-   `nodes` ({id node}); empty when none carries one."
+   `nodes` ({id node}); sorted so the choice among several is stable
+   across runs; empty when none carries one."
   [peg nodes]
   (->> (vals (get peg :answers {}))
        (apply concat)
        (keep #(get-in nodes [% :mechanism]))
        distinct
+       sort
        vec))
 
 (defn ^{:stratum 0} gate-answers
@@ -110,19 +112,25 @@
 
 (defn ^{:stratum 1} read-gate-history
   "Every readable line of a run's gate-history.edn as a map; unreadable
-   lines are skipped (a torn last line must not lose the run)."
+   lines are skipped (a torn last line must not lose the run) and an
+   unreadable file yields no entries (one run's IO failure must not
+   abort the scan of a whole checkpoint root)."
   [run-dir]
   (let [f (io/file run-dir gate-history-filename)]
     (if-not (.exists f)
       []
       ;; Streamed line by line: the file is append-only and unbounded.
-      (with-open [rdr (io/reader f)]
-        (into []
-              (keep (fn [line]
-                      (when-not (str/blank? line)
-                        (try (edn/read-string {:default (fn [_ v] v)} line)
-                             (catch Exception _ nil)))))
-              (line-seq rdr))))))
+      ;; Plain try, IOException only (std 211 ex. a): this is the IO
+      ;; boundary of a read-only report.
+      (try
+        (with-open [rdr (io/reader f)]
+          (into []
+                (keep (fn [line]
+                        (when-not (str/blank? line)
+                          (try (edn/read-string {:default (fn [_ v] v)} line)
+                               (catch Exception _ nil)))))
+                (line-seq rdr)))
+        (catch java.io.IOException _ [])))))
 
 (defn ^{:stratum 1} aggregate
   "Fold per-run observations into the §7.7 record per peg."
