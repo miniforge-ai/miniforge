@@ -15,7 +15,6 @@
 ;; WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 ;; See the License for the specific language governing permissions and
 ;; limitations under the License.
-
 (ns ai.miniforge.dag-executor.protocols.impl.worktree
   "Worktree executor implementation (fallback).
 
@@ -32,16 +31,17 @@
    [java.io File]
    [java.nio.file Files StandardCopyOption CopyOption]))
 
+;------------------------------------------------------------------------------ Layer 0
+
 ;; ============================================================================
 ;; Configuration
 ;; ============================================================================
-
-(def ^:dynamic *warn-fn*
+(def ^{:stratum 0} ^:dynamic *warn-fn*
   "Emit a warning message to stderr.
    Rebind via `binding` in tests to capture warnings without stderr noise."
   (fn [msg] (binding [*out* *err*] (println msg))))
 
-(defn- expand-home
+(defn- ^{:stratum 0} expand-home
   "Expand a leading `~/` in a path string to the user home directory.
    Pass-through for absolute paths and bare paths that do not start with `~/`."
   [path]
@@ -51,7 +51,186 @@
       (= "~" path)                 home
       :else                        path)))
 
-(defn default-base-path
+(def ^{:stratum 0} default-max-concurrent 4)
+
+(defn ^{:stratum 0} default-archive-dir
+  "Default location for persisted task work archives.
+   Lives under the user home rather than /tmp so checkpoints survive reboots
+   and can be referenced from evidence bundles long after the run ends."
+  []
+  (str (System/getProperty "user.home") "/.miniforge/checkpoints"))
+
+;; ============================================================================
+;; Legacy /tmp detection
+;; ============================================================================
+(def ^{:stratum 0} ^:private legacy-tmp-worktrees-path
+  "Legacy default worktree base directory that lived under /tmp.
+   Created before the 2026-04-17 gates-workflow data-loss incident forced the
+   move to `~/.miniforge/worktrees`. Checked at creation time to prompt
+   migration without blocking active workflows."
+  "/tmp/miniforge-worktrees")
+
+;; Non-private so tests can `(reset! worktree/legacy-tmp-warned? false)` before
+;; exercising the warning path. `compare-and-set!` in check-legacy-tmp-worktrees!
+;; ensures the advisory fires at most once per JVM session even under concurrent
+;; load — without this, all four default worktree slots could race to emit
+;; identical WARNING lines before any of them acquires worktree-lock.
+(defonce ^{:stratum 0} legacy-tmp-warned?
+  (atom false))
+
+;; ============================================================================
+;; Helper Functions
+;; ============================================================================
+(defn ^{:stratum 0} run-git
+  "Execute a git command and return the result."
+  [& args]
+  (try
+    (apply shell/sh "git" args)
+    (catch Exception e
+      {:exit 1 :err (.getMessage e) :out ""})))
+
+(defn ^{:stratum 0} run-shell
+  "Execute a shell command and return the result."
+  [& args]
+  (try
+    (apply shell/sh args)
+    (catch Exception e
+      {:exit 1 :err (.getMessage e) :out ""})))
+
+(defn ^{:stratum 0} ensure-directory
+  "Ensure a directory exists."
+  [path]
+  (.mkdirs (File. ^String path)))
+
+(defn- ^{:stratum 0} command-output
+  "Return command stdout when it is a string; otherwise return empty text."
+  [result]
+  (let [output (get result :out)]
+    (if (string? output) output "")))
+
+(def ^{:stratum 0} ^:private worktree-lock
+  "JVM-level lock for git worktree add commands.
+   Git uses a config.lock file internally — concurrent worktree adds from
+   multiple threads hit this lock and fail silently. Serializing creation at
+   the JVM level prevents the conflict. Tasks still run in parallel once their
+   worktrees are acquired.
+
+   `check-legacy-tmp-worktrees!` runs inside this lock so that at most one
+   thread emits the advisory warning at a time, avoiding duplicated log lines
+   in high-parallelism scenarios where all default concurrent slots start
+   simultaneously."
+  (Object.))
+
+;; ============================================================================
+;; Archive-based persistence (local-tier fidelity for :governed parity)
+;; ============================================================================
+(def ^{:stratum 0} ^:private default-commit-message
+  "Commit message for the per-phase persist commit when the caller did not
+   override `:message`. Internal infrastructure; not user-visible at
+   commit time."
+  "phase checkpoint")
+
+(def ^{:stratum 0} ^:private default-base-ref
+  "Final fallback base ref when neither :base-branch nor :base-ref was
+   passed by the caller. Used only by direct callers of `archive-bundle!`;
+   the runner threads the real base from environment metadata."
+  "main")
+
+(defn- ^{:stratum 0} ensure-archive-dir
+  "Create the archive directory if it does not exist. Returns the absolute path."
+  [archive-dir]
+  (let [d (File. ^String archive-dir)]
+    (.mkdirs d)
+    (.getAbsolutePath d)))
+
+;; Each git helper below does exactly one operation, returns a result/ok
+;; on exit 0 with the parsed output, or a result/err carrying the git
+;; stderr. Persist treats all errors as diagnosable failures rather than
+;; silent zeros — Copilot review on PR #729 caught the original "treat
+;; non-zero exit as no-changes" pattern as a silent-failure vector.
+(def ^{:stratum 0} ^:private detached-head-sentinel
+  "What `git rev-parse --abbrev-ref HEAD` prints in a detached worktree.
+   Treated as 'no branch' for archive purposes — `archive-bundle!` creates
+   a real branch before recording the bundle so the result always has a
+   `refs/heads/<name>` ref, never a bare HEAD."
+  "HEAD")
+
+(def ^{:stratum 0} ^:private detached-branch-prefix
+  "Prefix prepended to a `task-id` to derive the recovery branch name in
+   `ensure-named-branch!`. Skipped when the task-id already starts with
+   the prefix (the common path: persist-workspace! defaults task-id to
+   the environment-id, which is itself shaped like `task-<id>`)."
+  "task-")
+
+;; ============================================================================
+;; Worktree Lifecycle Registry
+;; ============================================================================
+(def ^{:stratum 0} ^:private worktree-lifecycle-registry
+  "Lightweight atom-based registry tracking worktrees created by the executor.
+
+   Structure: {workflow-id {:scratch-ref   str
+                             :worktree-path str
+                             :created-at    long  ; epoch ms
+                             :status        :active | :released
+                             :released-at   long  ; epoch ms, only present when :released}}
+
+   This is an in-memory atom that retains all entries (including :released)
+   for the lifetime of the process. It is NOT persisted and is NOT pruned by
+   `gc-scratch-refs!`. Git-ref cleanup happens independently via
+   `gc-scratch-refs!`, which neither reads nor mutates this registry. This
+   lets post-mortem tooling inspect which workflows wrote which scratch
+   commits even after the worktrees are gone."
+  (atom {}))
+
+;; ============================================================================
+;; Command Execution
+;; ============================================================================
+(defn ^{:stratum 0} execute-command
+  "Execute a command in a directory using ProcessBuilder.
+
+   Accepts either a string (passed to sh -c, suitable for shell builtins and
+   pipelines) or a vector of strings (exec'd directly without a shell —
+   preferred for user-supplied values to avoid shell injection).
+
+   This allows proper environment variable handling and working directory."
+  [workdir command env-map]
+  (let [cmd-args (if (string? command)
+                   ["sh" "-c" command]
+                   (vec command))
+        start-time (System/currentTimeMillis)]
+    (try
+      (let [pb (ProcessBuilder. ^java.util.List cmd-args)
+            _ (.directory pb (File. ^String workdir))
+            _ (when (seq env-map)
+                (let [pb-env (.environment pb)]
+                  (doseq [[k v] env-map]
+                    (.put pb-env (name k) (str v)))))
+            process (.start pb)
+            stdout (slurp (.getInputStream process))
+            stderr (slurp (.getErrorStream process))
+            exit-code (.waitFor process)]
+        (result/ok {:exit-code exit-code
+                    :stdout stdout
+                    :stderr stderr
+                    :duration-ms (- (System/currentTimeMillis) start-time)}))
+      (catch Exception e
+        (result/err :exec-failed (.getMessage e))))))
+
+;; ============================================================================
+;; File Operations
+;; ============================================================================
+(defn- ^{:stratum 0} path-inside-worktree?
+  "True when `file` (a canonicalized File) is the worktree root or is nested
+   inside it. Prevents path-traversal escape via `../` segments."
+  [^File worktree ^File file]
+  (let [root-path (str (.getPath worktree) File/separator)
+        file-path (.getPath file)]
+    (or (= file-path (.getPath worktree))
+        (str/starts-with? file-path root-path))))
+
+;------------------------------------------------------------------------------ Layer 1
+
+(defn ^{:stratum 1} default-base-path
   "Default location for git worktrees acquired by the worktree executor.
 
    Arity 0: returns the hardcoded default `~/.miniforge/worktrees`.
@@ -81,27 +260,7 @@
        (expand-home configured)
        (default-base-path)))))
 
-(def default-max-concurrent 4)
-
-(defn default-archive-dir
-  "Default location for persisted task work archives.
-   Lives under the user home rather than /tmp so checkpoints survive reboots
-   and can be referenced from evidence bundles long after the run ends."
-  []
-  (str (System/getProperty "user.home") "/.miniforge/checkpoints"))
-
-;; ============================================================================
-;; Legacy /tmp detection
-;; ============================================================================
-
-(def ^:private legacy-tmp-worktrees-path
-  "Legacy default worktree base directory that lived under /tmp.
-   Created before the 2026-04-17 gates-workflow data-loss incident forced the
-   move to `~/.miniforge/worktrees`. Checked at creation time to prompt
-   migration without blocking active workflows."
-  "/tmp/miniforge-worktrees")
-
-(defn legacy-tmp-worktrees-exist?
+(defn ^{:stratum 1} legacy-tmp-worktrees-exist?
   "Returns true if the legacy /tmp/miniforge-worktrees directory exists and
    contains at least one entry (indicating active or stale worktrees).
 
@@ -113,78 +272,10 @@
          (let [files (.listFiles dir)]
            (and (some? files) (pos? (alength files)))))))
 
-;; Non-private so tests can `(reset! worktree/legacy-tmp-warned? false)` before
-;; exercising the warning path. `compare-and-set!` in check-legacy-tmp-worktrees!
-;; ensures the advisory fires at most once per JVM session even under concurrent
-;; load — without this, all four default worktree slots could race to emit
-;; identical WARNING lines before any of them acquires worktree-lock.
-(defonce legacy-tmp-warned?
-  (atom false))
-
-(defn check-legacy-tmp-worktrees!
-  "Warn once per JVM session when the legacy /tmp/miniforge-worktrees directory
-   has entries.
-
-   Uses `compare-and-set!` on `legacy-tmp-warned?` so exactly one thread emits
-   the advisory, even when multiple worktree-create calls race at startup.
-
-   Does NOT error — graceful coexistence per the worktree-persistence spec
-   constraint. Existing /tmp worktrees remain usable; the warning tells
-   operators how to migrate to the persistent default path.
-
-   Rebind `*warn-fn*` via `binding` in tests to capture the output.
-   Reset `legacy-tmp-warned?` to false before tests that assert the warning fires."
-  []
-  (when (and (legacy-tmp-worktrees-exist?)
-             (compare-and-set! legacy-tmp-warned? false true))
-    (*warn-fn*
-     (str
-      "[miniforge] WARNING: legacy worktrees detected at "
-      legacy-tmp-worktrees-path "\n"
-      "  These worktrees live under /tmp and will not survive a reboot.\n"
-      "  To migrate to the persistent default:\n"
-      "    1. Add `:workflow/worktree-root \"~/.miniforge/worktrees\"` to\n"
-      "       ~/.miniforge/config.edn (this is already the shipped default).\n"
-      "    2. Let in-flight tasks complete, then remove the stale /tmp directory:\n"
-      "       rm -rf " legacy-tmp-worktrees-path "\n"
-      "  New worktrees are now created under: " (default-base-path)))))
-
-;; ============================================================================
-;; Helper Functions
-;; ============================================================================
-
-(defn run-git
-  "Execute a git command and return the result."
-  [& args]
-  (try
-    (apply shell/sh "git" args)
-    (catch Exception e
-      {:exit 1 :err (.getMessage e) :out ""})))
-
-(defn run-shell
-  "Execute a shell command and return the result."
-  [& args]
-  (try
-    (apply shell/sh args)
-    (catch Exception e
-      {:exit 1 :err (.getMessage e) :out ""})))
-
-(defn ensure-directory
-  "Ensure a directory exists."
-  [path]
-  (.mkdirs (File. ^String path)))
-
-(defn- command-output
-  "Return command stdout when it is a string; otherwise return empty text."
-  [result]
-  (let [output (get result :out)]
-    (if (string? output) output "")))
-
 ;; ============================================================================
 ;; Git Operations
 ;; ============================================================================
-
-(defn git-version
+(defn ^{:stratum 1} git-version
   "Get git version."
   []
   (let [result (run-git "--version")]
@@ -194,20 +285,7 @@
       {:available? false
        :reason "git not found"})))
 
-(def ^:private worktree-lock
-  "JVM-level lock for git worktree add commands.
-   Git uses a config.lock file internally — concurrent worktree adds from
-   multiple threads hit this lock and fail silently. Serializing creation at
-   the JVM level prevents the conflict. Tasks still run in parallel once their
-   worktrees are acquired.
-
-   `check-legacy-tmp-worktrees!` runs inside this lock so that at most one
-   thread emits the advisory warning at a time, avoiding duplicated log lines
-   in high-parallelism scenarios where all default concurrent slots start
-   simultaneously."
-  (Object.))
-
-(defn- resolve-branch-sha
+(defn- ^{:stratum 1} resolve-branch-sha
   "Resolve a branch name to its commit sha so `git worktree add -b new path
    <sha>` works even when <branch> is checked out in another worktree.
 
@@ -227,60 +305,7 @@
       (let [sha (str/trim (command-output r))]
         (when (seq sha) sha)))))
 
-(defn create-worktree
-  "Create a git worktree for the task.
-
-   Serializes creation through worktree-lock to prevent concurrent git
-   config.lock conflicts when multiple sub-workflows acquire environments
-   simultaneously. The legacy /tmp worktree check also runs inside the lock so
-   at most one thread emits the advisory warning at a time.
-
-   Attempts in order:
-   1. git worktree add -b <name> <path> <sha-or-ref>
-   2. Clean up stale branch/directory and retry step 1
-   3. git worktree add --detach <path> — detached HEAD (last resort)
-
-   Detached HEAD is a real fallback path here, but downstream `archive-bundle!`
-   handles it defensively by creating a real branch at HEAD before bundling.
-   This one-two punch keeps `git worktree add` failures from cascading into
-   broken bundles whose only ref is a bare HEAD."
-  [base-path repo-path worktree-name branch]
-  (locking worktree-lock
-    (check-legacy-tmp-worktrees!)
-    (let [worktree-path (str base-path "/" worktree-name)
-          base-sha      (resolve-branch-sha repo-path branch)
-          base-ref      (or base-sha branch)]
-      (ensure-directory base-path)
-      (let [result (run-git "-C" repo-path
-                            "worktree" "add" "-b" worktree-name
-                            worktree-path base-ref)]
-        (if (zero? (:exit result))
-          (result/ok {:worktree-path worktree-path
-                      :base-sha base-sha
-                      :base-ref branch})
-          ;; Failed — clean up stale branch/directory from a prior run and retry
-          (do
-            (run-shell "rm" "-rf" worktree-path)
-            (run-git "-C" repo-path "worktree" "prune")
-            (run-git "-C" repo-path "branch" "-D" worktree-name)
-            (let [result2 (run-git "-C" repo-path
-                                   "worktree" "add" "-b" worktree-name
-                                   worktree-path base-ref)]
-              (if (zero? (:exit result2))
-                (result/ok {:worktree-path worktree-path
-                            :base-sha base-sha
-                            :base-ref branch})
-                ;; Still failing — detached HEAD as last resort
-                (let [result3 (run-git "-C" repo-path
-                                       "worktree" "add" "--detach"
-                                       worktree-path)]
-                  (if (zero? (:exit result3))
-                    (result/ok {:worktree-path worktree-path
-                                :base-sha base-sha
-                                :base-ref branch})
-                    (result/err :worktree-create-failed (:err result3))))))))))))
-
-(defn remove-worktree
+(defn ^{:stratum 1} remove-worktree
   "Remove a git worktree."
   [worktree-path]
   ;; Try git worktree remove first
@@ -293,47 +318,11 @@
         (run-shell "rm" "-rf" worktree-path)
         (result/ok {:released? true})))))
 
-;; ============================================================================
-;; Archive-based persistence (local-tier fidelity for :governed parity)
-;; ============================================================================
-
-(def ^:private default-commit-message
-  "Commit message for the per-phase persist commit when the caller did not
-   override `:message`. Internal infrastructure; not user-visible at
-   commit time."
-  "phase checkpoint")
-
-(def ^:private default-base-ref
-  "Final fallback base ref when neither :base-branch nor :base-ref was
-   passed by the caller. Used only by direct callers of `archive-bundle!`;
-   the runner threads the real base from environment metadata."
-  "main")
-
-(defn- ensure-archive-dir
-  "Create the archive directory if it does not exist. Returns the absolute path."
-  [archive-dir]
-  (let [d (File. ^String archive-dir)]
-    (.mkdirs d)
-    (.getAbsolutePath d)))
-
-;; Each git helper below does exactly one operation, returns a result/ok
-;; on exit 0 with the parsed output, or a result/err carrying the git
-;; stderr. Persist treats all errors as diagnosable failures rather than
-;; silent zeros — Copilot review on PR #729 caught the original "treat
-;; non-zero exit as no-changes" pattern as a silent-failure vector.
-
-(def ^:private detached-head-sentinel
-  "What `git rev-parse --abbrev-ref HEAD` prints in a detached worktree.
-   Treated as 'no branch' for archive purposes — `archive-bundle!` creates
-   a real branch before recording the bundle so the result always has a
-   `refs/heads/<name>` ref, never a bare HEAD."
-  "HEAD")
-
-(defn- detached?
+(defn- ^{:stratum 1} detached?
   [branch-name]
   (= detached-head-sentinel branch-name))
 
-(defn- current-branch
+(defn- ^{:stratum 1} current-branch
   "Returns the worktree HEAD branch name, or the literal sentinel
    `\"HEAD\"` when the worktree is detached. Callers that need a real
    branch name should call `ensure-named-branch!` to materialize one."
@@ -343,14 +332,7 @@
       (result/ok (str/trim (get r :out "")))
       (result/err :archive-no-branch (get r :err "could not resolve HEAD")))))
 
-(def ^:private detached-branch-prefix
-  "Prefix prepended to a `task-id` to derive the recovery branch name in
-   `ensure-named-branch!`. Skipped when the task-id already starts with
-   the prefix (the common path: persist-workspace! defaults task-id to
-   the environment-id, which is itself shaped like `task-<id>`)."
-  "task-")
-
-(defn- recovery-branch-name
+(defn- ^{:stratum 1} recovery-branch-name
   "Branch name to materialize when recovering from a detached scratch.
    Avoids a `task-task-` double-prefix when task-id already carries it."
   [task-id]
@@ -359,29 +341,7 @@
       s
       (str detached-branch-prefix s))))
 
-(defn- ensure-named-branch!
-  "If the worktree is in detached-HEAD state, create a real branch at HEAD
-   so the bundle records `refs/heads/<name>` (not just bare HEAD).
-
-   Returns result/ok with the branch name to use for bundling. Pass-through
-   when the worktree is already on a named branch.
-
-   Uses `git checkout -B` (force-reset to HEAD) so recovery is idempotent
-   across reruns with the same task-id and across leftover local refs from
-   prior runs. The branch is task-namespaced internal infrastructure, not
-   a user-curated ref; resetting it is the right semantics."
-  [worktree-path branch task-id]
-  (if-not (detached? branch)
-    (result/ok branch)
-    (let [name (recovery-branch-name task-id)
-          r    (run-git "-C" worktree-path "checkout" "-B" name)]
-      (if (zero? (:exit r))
-        (result/ok name)
-        (result/err :archive-detach-recovery-failed
-                    (or (:err r)
-                        "could not create or reset branch from detached HEAD"))))))
-
-(defn- dirty?
+(defn- ^{:stratum 1} dirty?
   [worktree-path]
   (let [r (run-git "-C" worktree-path "status" "--porcelain")]
     (if (zero? (:exit r))
@@ -389,7 +349,7 @@
       (result/err :archive-status-failed
                   (get r :err "git status --porcelain failed")))))
 
-(defn- commits-ahead
+(defn- ^{:stratum 1} commits-ahead
   "Count commits on HEAD not reachable from base-ref."
   [worktree-path base-ref]
   (let [r (run-git "-C" worktree-path "rev-list" "--count"
@@ -403,27 +363,32 @@
       (result/err :archive-rev-list-failed
                   (get r :err "git rev-list --count failed")))))
 
-(defn- stage-all!
+(defn- ^{:stratum 1} stage-all!
   [worktree-path]
   (let [r (run-git "-C" worktree-path "add" "-A")]
     (if (zero? (:exit r))
       (result/ok :staged)
       (result/err :archive-stage-failed (get r :err "git add -A failed")))))
 
-(defn- commit-staged!
-  "Commit staged changes with --no-verify. Persist runs inside a scratch
-   worktree where the host pre-commit hook (bb pre-commit) fails because
-   deps are not installed. Persist is infrastructure preservation, not a
-   validated commit — the gate layer upstream owns validation."
+(defn- ^{:stratum 1} commit-staged!
+  "Commit staged changes with --no-verify and without a signature.
+   Persist runs inside a scratch worktree where the host pre-commit hook
+   (bb pre-commit) fails because deps are not installed, and where the
+   operator's global commit.gpgsign would route a machine commit through
+   their signing agent -- which, when locked or absent, fails the commit
+   (\"1Password: failed to fill whole buffer\") and silently strands the
+   task's work in the worktree (trap-bench series 4-6). Persist is
+   infrastructure preservation, not a validated or attributable commit;
+   the gate layer upstream owns validation."
   [worktree-path message]
-  (let [r (run-git "-C" worktree-path "commit"
+  (let [r (run-git "-C" worktree-path "-c" "commit.gpgsign=false" "commit"
                    "--no-verify" "--allow-empty-message" "-m" message)]
     (if (zero? (:exit r))
       (result/ok :committed)
       (result/err :archive-commit-failed
                   (get r :err "git commit --no-verify failed")))))
 
-(defn- head-sha
+(defn- ^{:stratum 1} head-sha
   [worktree-path]
   (let [r (run-git "-C" worktree-path "rev-parse" "HEAD")]
     (if (zero? (:exit r))
@@ -431,7 +396,7 @@
       (result/err :archive-rev-parse-failed
                   (get r :err "git rev-parse HEAD failed")))))
 
-(defn- write-bundle!
+(defn- ^{:stratum 1} write-bundle!
   "Run `git bundle create FILE BRANCH --not BASE`. The `BRANCH --not BASE`
    form records `refs/heads/BRANCH` in the bundle, which is what
    `git fetch <bundle> BRANCH:BRANCH` consumes when the harvest CLI pulls
@@ -444,99 +409,7 @@
       (result/err :archive-bundle-failed
                   (get r :err "git bundle create failed")))))
 
-(defn- maybe-commit
-  "Commit only when the worktree has dirty changes. `git add -A` already
-   ran — if no paths were staged (e.g. all changes were gitignored),
-   commit-staged! would fail with `nothing to commit`, which is not an
-   archive error."
-  [worktree-path message]
-  (-> (dirty? worktree-path)
-      (result/and-then
-       (fn [is-dirty]
-         (if is-dirty
-           (commit-staged! worktree-path message)
-           (result/ok :clean))))))
-
-(defn- bundle-result
-  "Final step of the persist pipeline once we know the worktree is ahead
-   of base-ref. Reads HEAD, writes the bundle, and packages the persist
-   result map."
-  [worktree-path branch base-ref archive-dir task-id ahead]
-  (let [bundle-path (str (ensure-archive-dir archive-dir) "/" task-id ".bundle")]
-    (-> (head-sha worktree-path)
-        (result/and-then
-         (fn [sha]
-           (-> (write-bundle! worktree-path bundle-path branch base-ref)
-               (result/map-ok
-                (fn [_]
-                  {:persisted?    true
-                   :bundle-path   bundle-path
-                   :commit-sha    sha
-                   :branch        branch
-                   :commits-ahead ahead}))))))))
-
-(defn- commit-and-bundle!
-  "Pipeline: stage -> commit-if-dirty -> recompute ahead -> bundle-or-noop."
-  [worktree-path branch base-ref archive-dir task-id message]
-  (-> (stage-all! worktree-path)
-      (result/and-then (fn [_] (maybe-commit worktree-path message)))
-      (result/and-then (fn [_] (commits-ahead worktree-path base-ref)))
-      (result/and-then
-       (fn [ahead]
-         (if (zero? ahead)
-           (result/ok {:persisted? false :no-changes? true :branch branch})
-           (bundle-result worktree-path branch base-ref archive-dir task-id ahead))))))
-
-(defn- already-clean?
-  "True when the worktree has no dirty paths AND no commits ahead of
-   base-ref — there is nothing to bundle. Returns a result so callers see
-   git failures rather than treating them as a clean state."
-  [worktree-path base-ref]
-  (-> (dirty? worktree-path)
-      (result/and-then
-       (fn [is-dirty]
-         (if is-dirty
-           (result/ok false)
-           (-> (commits-ahead worktree-path base-ref)
-               (result/map-ok zero?)))))))
-
-(defn archive-bundle!
-  "Persist a worktree task work as a git bundle.
-
-   Pipeline: resolve current branch -> check for dirty changes or commits
-   ahead of base-ref -> if clean, return no-changes; otherwise stage,
-   commit on the task branch with --no-verify, and write a bundle of
-   `base-ref..HEAD` to <archive-dir>/<task-id>.bundle.
-
-   Arguments:
-   - worktree-path: absolute path to the scratch worktree
-   - opts: {:archive-dir string  -- destination dir for bundles
-           :task-id      string  -- identifier used as the bundle filename
-           :base-ref     string  -- base branch the worktree was forked from
-           :message      string  -- commit message for the persist commit}
-
-   Returns result/ok with one of:
-   - {:persisted? true  :bundle-path str :commit-sha str :branch str}
-   - {:persisted? false :no-changes? true :branch str}
-   Returns result/err on any git failure (no silent fallbacks)."
-  [worktree-path {:keys [archive-dir task-id base-ref message]
-                  :or   {message  default-commit-message
-                         base-ref default-base-ref}}]
-  (-> (current-branch worktree-path)
-      (result/and-then
-       (fn [raw-branch]
-         (-> (ensure-named-branch! worktree-path raw-branch task-id)
-             (result/and-then
-              (fn [branch]
-                (-> (already-clean? worktree-path base-ref)
-                    (result/and-then
-                     (fn [clean?]
-                       (if clean?
-                         (result/ok {:persisted? false :no-changes? true :branch branch})
-                         (commit-and-bundle! worktree-path branch base-ref
-                                             archive-dir task-id message))))))))))))
-
-(defn restore-from-bundle!
+(defn ^{:stratum 1} restore-from-bundle!
   "Restore work from a previously-persisted bundle into the host repo.
 
    `git fetch <bundle> <branch>:<branch>` pulls the branch and all reachable
@@ -603,28 +476,7 @@
       (catch Exception e
         (result/err :archive-restore-failed (.getMessage e))))))
 
-;; ============================================================================
-;; Worktree Lifecycle Registry
-;; ============================================================================
-
-(def ^:private worktree-lifecycle-registry
-  "Lightweight atom-based registry tracking worktrees created by the executor.
-
-   Structure: {workflow-id {:scratch-ref   str
-                             :worktree-path str
-                             :created-at    long  ; epoch ms
-                             :status        :active | :released
-                             :released-at   long  ; epoch ms, only present when :released}}
-
-   This is an in-memory atom that retains all entries (including :released)
-   for the lifetime of the process. It is NOT persisted and is NOT pruned by
-   `gc-scratch-refs!`. Git-ref cleanup happens independently via
-   `gc-scratch-refs!`, which neither reads nor mutates this registry. This
-   lets post-mortem tooling inspect which workflows wrote which scratch
-   commits even after the worktrees are gone."
-  (atom {}))
-
-(defn get-worktree-registry
+(defn ^{:stratum 1} get-worktree-registry
   "Return a snapshot of the current worktree lifecycle registry.
 
    Each entry is keyed by workflow-id and contains:
@@ -636,7 +488,7 @@
   []
   @worktree-lifecycle-registry)
 
-(defn register-worktree-entry!
+(defn ^{:stratum 1} register-worktree-entry!
   "Register a new worktree entry in the lifecycle registry.
 
    Called on worktree creation to record the scratch-ref and worktree path
@@ -651,7 +503,7 @@
           :status        :active})
   nil)
 
-(defn release-worktree-entry!
+(defn ^{:stratum 1} release-worktree-entry!
   "Mark a registry entry as :released while preserving the scratch ref.
 
    Called on worktree destruction. The entry is retained in the registry
@@ -668,7 +520,7 @@
              registry)))
   nil)
 
-(defn- find-workflow-id-by-worktree
+(defn- ^{:stratum 1} find-workflow-id-by-worktree
   "Find the workflow-id whose registry entry has the given worktree-path.
    Returns nil when no match is found."
   [worktree-path]
@@ -680,8 +532,7 @@
 ;; ============================================================================
 ;; Parent-Repo Derivation
 ;; ============================================================================
-
-(defn derive-parent-repo-path
+(defn ^{:stratum 1} derive-parent-repo-path
   "Derive the parent repository path from a linked worktree path.
 
    Uses `git rev-parse --git-common-dir` which returns the shared .git
@@ -716,11 +567,118 @@
                   {:worktree-path worktree-path
                    :stderr        (get r :err "")}))))
 
+(defn- ^{:stratum 1} safe-worktree-path
+  "Resolve `relative-path` inside `worktree-path` and return the canonical
+   File, or nil if the resolved path would escape the worktree sandbox or
+   if canonicalization fails (I/O error, invalid path)."
+  [worktree-path relative-path]
+  (try
+    (let [worktree (.getCanonicalFile (File. ^String worktree-path))
+          file     (.getCanonicalFile (File. worktree ^String relative-path))]
+      (when (path-inside-worktree? worktree file)
+        file))
+    (catch java.io.IOException _ nil)))
+
+;------------------------------------------------------------------------------ Layer 2
+
+(defn ^{:stratum 2} check-legacy-tmp-worktrees!
+  "Warn once per JVM session when the legacy /tmp/miniforge-worktrees directory
+   has entries.
+
+   Uses `compare-and-set!` on `legacy-tmp-warned?` so exactly one thread emits
+   the advisory, even when multiple worktree-create calls race at startup.
+
+   Does NOT error — graceful coexistence per the worktree-persistence spec
+   constraint. Existing /tmp worktrees remain usable; the warning tells
+   operators how to migrate to the persistent default path.
+
+   Rebind `*warn-fn*` via `binding` in tests to capture the output.
+   Reset `legacy-tmp-warned?` to false before tests that assert the warning fires."
+  []
+  (when (and (legacy-tmp-worktrees-exist?)
+             (compare-and-set! legacy-tmp-warned? false true))
+    (*warn-fn*
+     (str
+      "[miniforge] WARNING: legacy worktrees detected at "
+      legacy-tmp-worktrees-path "\n"
+      "  These worktrees live under /tmp and will not survive a reboot.\n"
+      "  To migrate to the persistent default:\n"
+      "    1. Add `:workflow/worktree-root \"~/.miniforge/worktrees\"` to\n"
+      "       ~/.miniforge/config.edn (this is already the shipped default).\n"
+      "    2. Let in-flight tasks complete, then remove the stale /tmp directory:\n"
+      "       rm -rf " legacy-tmp-worktrees-path "\n"
+      "  New worktrees are now created under: " (default-base-path)))))
+
+(defn- ^{:stratum 2} ensure-named-branch!
+  "If the worktree is in detached-HEAD state, create a real branch at HEAD
+   so the bundle records `refs/heads/<name>` (not just bare HEAD).
+
+   Returns result/ok with the branch name to use for bundling. Pass-through
+   when the worktree is already on a named branch.
+
+   Uses `git checkout -B` (force-reset to HEAD) so recovery is idempotent
+   across reruns with the same task-id and across leftover local refs from
+   prior runs. The branch is task-namespaced internal infrastructure, not
+   a user-curated ref; resetting it is the right semantics."
+  [worktree-path branch task-id]
+  (if-not (detached? branch)
+    (result/ok branch)
+    (let [name (recovery-branch-name task-id)
+          r    (run-git "-C" worktree-path "checkout" "-B" name)]
+      (if (zero? (:exit r))
+        (result/ok name)
+        (result/err :archive-detach-recovery-failed
+                    (or (:err r)
+                        "could not create or reset branch from detached HEAD"))))))
+
+(defn- ^{:stratum 2} maybe-commit
+  "Commit only when the worktree has dirty changes. `git add -A` already
+   ran — if no paths were staged (e.g. all changes were gitignored),
+   commit-staged! would fail with `nothing to commit`, which is not an
+   archive error."
+  [worktree-path message]
+  (-> (dirty? worktree-path)
+      (result/and-then
+       (fn [is-dirty]
+         (if is-dirty
+           (commit-staged! worktree-path message)
+           (result/ok :clean))))))
+
+(defn- ^{:stratum 2} bundle-result
+  "Final step of the persist pipeline once we know the worktree is ahead
+   of base-ref. Reads HEAD, writes the bundle, and packages the persist
+   result map."
+  [worktree-path branch base-ref archive-dir task-id ahead]
+  (let [bundle-path (str (ensure-archive-dir archive-dir) "/" task-id ".bundle")]
+    (-> (head-sha worktree-path)
+        (result/and-then
+         (fn [sha]
+           (-> (write-bundle! worktree-path bundle-path branch base-ref)
+               (result/map-ok
+                (fn [_]
+                  {:persisted?    true
+                   :bundle-path   bundle-path
+                   :commit-sha    sha
+                   :branch        branch
+                   :commits-ahead ahead}))))))))
+
+(defn- ^{:stratum 2} already-clean?
+  "True when the worktree has no dirty paths AND no commits ahead of
+   base-ref — there is nothing to bundle. Returns a result so callers see
+   git failures rather than treating them as a clean state."
+  [worktree-path base-ref]
+  (-> (dirty? worktree-path)
+      (result/and-then
+       (fn [is-dirty]
+         (if is-dirty
+           (result/ok false)
+           (-> (commits-ahead worktree-path base-ref)
+               (result/map-ok zero?)))))))
+
 ;; ============================================================================
 ;; File-Write Scratch-Commit Hook
 ;; ============================================================================
-
-(defn notify-file-written!
+(defn ^{:stratum 2} notify-file-written!
   "Snapshot a file written inside a worktree into the workflow's scratch ref.
 
    Called by the layer that processes Write tool responses from agents running
@@ -741,67 +699,7 @@
        (fn [{:keys [parent-repo-path]}]
          (scratch-commit/scratch-commit! parent-repo-path workflow-id phase file-path)))))
 
-;; ============================================================================
-;; Command Execution
-;; ============================================================================
-
-(defn execute-command
-  "Execute a command in a directory using ProcessBuilder.
-
-   Accepts either a string (passed to sh -c, suitable for shell builtins and
-   pipelines) or a vector of strings (exec'd directly without a shell —
-   preferred for user-supplied values to avoid shell injection).
-
-   This allows proper environment variable handling and working directory."
-  [workdir command env-map]
-  (let [cmd-args (if (string? command)
-                   ["sh" "-c" command]
-                   (vec command))
-        start-time (System/currentTimeMillis)]
-    (try
-      (let [pb (ProcessBuilder. ^java.util.List cmd-args)
-            _ (.directory pb (File. ^String workdir))
-            _ (when (seq env-map)
-                (let [pb-env (.environment pb)]
-                  (doseq [[k v] env-map]
-                    (.put pb-env (name k) (str v)))))
-            process (.start pb)
-            stdout (slurp (.getInputStream process))
-            stderr (slurp (.getErrorStream process))
-            exit-code (.waitFor process)]
-        (result/ok {:exit-code exit-code
-                    :stdout stdout
-                    :stderr stderr
-                    :duration-ms (- (System/currentTimeMillis) start-time)}))
-      (catch Exception e
-        (result/err :exec-failed (.getMessage e))))))
-
-;; ============================================================================
-;; File Operations
-;; ============================================================================
-
-(defn- path-inside-worktree?
-  "True when `file` (a canonicalized File) is the worktree root or is nested
-   inside it. Prevents path-traversal escape via `../` segments."
-  [^File worktree ^File file]
-  (let [root-path (str (.getPath worktree) File/separator)
-        file-path (.getPath file)]
-    (or (= file-path (.getPath worktree))
-        (str/starts-with? file-path root-path))))
-
-(defn- safe-worktree-path
-  "Resolve `relative-path` inside `worktree-path` and return the canonical
-   File, or nil if the resolved path would escape the worktree sandbox or
-   if canonicalization fails (I/O error, invalid path)."
-  [worktree-path relative-path]
-  (try
-    (let [worktree (.getCanonicalFile (File. ^String worktree-path))
-          file     (.getCanonicalFile (File. worktree ^String relative-path))]
-      (when (path-inside-worktree? worktree file)
-        file))
-    (catch java.io.IOException _ nil)))
-
-(defn copy-file-to
+(defn ^{:stratum 2} copy-file-to
   "Copy a file into the worktree."
   [worktree-path local-path remote-path]
   (let [dest (safe-worktree-path worktree-path remote-path)]
@@ -817,7 +715,7 @@
         (catch Exception e
           (result/err :copy-failed (.getMessage e)))))))
 
-(defn copy-file-from
+(defn ^{:stratum 2} copy-file-from
   "Copy a file from the worktree."
   [worktree-path remote-path local-path]
   (let [source (safe-worktree-path worktree-path remote-path)]
@@ -833,11 +731,123 @@
         (catch Exception e
           (result/err :copy-failed (.getMessage e)))))))
 
+(defn ^{:stratum 2} remove-worktree!
+  "Remove a git worktree created by create-worktree!.
+
+   Takes a map with keys:
+   - :worktree-path - Absolute path to the worktree directory to remove"
+  [{:keys [worktree-path]}]
+  (remove-worktree worktree-path))
+
+;------------------------------------------------------------------------------ Layer 3
+
+(defn ^{:stratum 3} create-worktree
+  "Create a git worktree for the task.
+
+   Serializes creation through worktree-lock to prevent concurrent git
+   config.lock conflicts when multiple sub-workflows acquire environments
+   simultaneously. The legacy /tmp worktree check also runs inside the lock so
+   at most one thread emits the advisory warning at a time.
+
+   Attempts in order:
+   1. git worktree add -b <name> <path> <sha-or-ref>
+   2. Clean up stale branch/directory and retry step 1
+   3. git worktree add --detach <path> — detached HEAD (last resort)
+
+   Detached HEAD is a real fallback path here, but downstream `archive-bundle!`
+   handles it defensively by creating a real branch at HEAD before bundling.
+   This one-two punch keeps `git worktree add` failures from cascading into
+   broken bundles whose only ref is a bare HEAD."
+  [base-path repo-path worktree-name branch]
+  (locking worktree-lock
+    (check-legacy-tmp-worktrees!)
+    (let [worktree-path (str base-path "/" worktree-name)
+          base-sha      (resolve-branch-sha repo-path branch)
+          base-ref      (or base-sha branch)]
+      (ensure-directory base-path)
+      (let [result (run-git "-C" repo-path
+                            "worktree" "add" "-b" worktree-name
+                            worktree-path base-ref)]
+        (if (zero? (:exit result))
+          (result/ok {:worktree-path worktree-path
+                      :base-sha base-sha
+                      :base-ref branch})
+          ;; Failed — clean up stale branch/directory from a prior run and retry
+          (do
+            (run-shell "rm" "-rf" worktree-path)
+            (run-git "-C" repo-path "worktree" "prune")
+            (run-git "-C" repo-path "branch" "-D" worktree-name)
+            (let [result2 (run-git "-C" repo-path
+                                   "worktree" "add" "-b" worktree-name
+                                   worktree-path base-ref)]
+              (if (zero? (:exit result2))
+                (result/ok {:worktree-path worktree-path
+                            :base-sha base-sha
+                            :base-ref branch})
+                ;; Still failing — detached HEAD as last resort
+                (let [result3 (run-git "-C" repo-path
+                                       "worktree" "add" "--detach"
+                                       worktree-path)]
+                  (if (zero? (:exit result3))
+                    (result/ok {:worktree-path worktree-path
+                                :base-sha base-sha
+                                :base-ref branch})
+                    (result/err :worktree-create-failed (:err result3))))))))))))
+
+(defn- ^{:stratum 3} commit-and-bundle!
+  "Pipeline: stage -> commit-if-dirty -> recompute ahead -> bundle-or-noop."
+  [worktree-path branch base-ref archive-dir task-id message]
+  (-> (stage-all! worktree-path)
+      (result/and-then (fn [_] (maybe-commit worktree-path message)))
+      (result/and-then (fn [_] (commits-ahead worktree-path base-ref)))
+      (result/and-then
+       (fn [ahead]
+         (if (zero? ahead)
+           (result/ok {:persisted? false :no-changes? true :branch branch})
+           (bundle-result worktree-path branch base-ref archive-dir task-id ahead))))))
+
+;------------------------------------------------------------------------------ Layer 4
+
+(defn ^{:stratum 4} archive-bundle!
+  "Persist a worktree task work as a git bundle.
+
+   Pipeline: resolve current branch -> check for dirty changes or commits
+   ahead of base-ref -> if clean, return no-changes; otherwise stage,
+   commit on the task branch with --no-verify, and write a bundle of
+   `base-ref..HEAD` to <archive-dir>/<task-id>.bundle.
+
+   Arguments:
+   - worktree-path: absolute path to the scratch worktree
+   - opts: {:archive-dir string  -- destination dir for bundles
+           :task-id      string  -- identifier used as the bundle filename
+           :base-ref     string  -- base branch the worktree was forked from
+           :message      string  -- commit message for the persist commit}
+
+   Returns result/ok with one of:
+   - {:persisted? true  :bundle-path str :commit-sha str :branch str}
+   - {:persisted? false :no-changes? true :branch str}
+   Returns result/err on any git failure (no silent fallbacks)."
+  [worktree-path {:keys [archive-dir task-id base-ref message]
+                  :or   {message  default-commit-message
+                         base-ref default-base-ref}}]
+  (-> (current-branch worktree-path)
+      (result/and-then
+       (fn [raw-branch]
+         (-> (ensure-named-branch! worktree-path raw-branch task-id)
+             (result/and-then
+              (fn [branch]
+                (-> (already-clean? worktree-path base-ref)
+                    (result/and-then
+                     (fn [clean?]
+                       (if clean?
+                         (result/ok {:persisted? false :no-changes? true :branch branch})
+                         (commit-and-bundle! worktree-path branch base-ref
+                                             archive-dir task-id message))))))))))))
+
 ;; ============================================================================
 ;; Public Utility Functions
 ;; ============================================================================
-
-(defn create-worktree!
+(defn ^{:stratum 4} create-worktree!
   "Create a git worktree at <base-path>/task-<task-id> from <branch>.
 
    Takes a map with keys:
@@ -857,19 +867,12 @@
                   :task-id (str task-id)})
       result)))
 
-(defn remove-worktree!
-  "Remove a git worktree created by create-worktree!.
-
-   Takes a map with keys:
-   - :worktree-path - Absolute path to the worktree directory to remove"
-  [{:keys [worktree-path]}]
-  (remove-worktree worktree-path))
+;------------------------------------------------------------------------------ Layer 5
 
 ;; ============================================================================
 ;; WorktreeExecutor Record
 ;; ============================================================================
-
-(defrecord WorktreeExecutor [config base-path max-concurrent]
+(defrecord ^{:stratum 5} WorktreeExecutor [config base-path max-concurrent]
   proto/TaskExecutor
 
   (executor-type [_this] :worktree)
@@ -977,11 +980,12 @@
                         ".")]
       (restore-from-bundle! host-repo opts))))
 
+;------------------------------------------------------------------------------ Layer 6
+
 ;; ============================================================================
 ;; Factory
 ;; ============================================================================
-
-(defn create-worktree-executor
+(defn ^{:stratum 6} create-worktree-executor
   "Create a worktree-based executor (fallback).
 
    Config:
