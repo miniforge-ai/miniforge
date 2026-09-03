@@ -176,3 +176,41 @@
                   {:code/files [{:path producer :content new-producer :action :modify}]}
                   {:execution/worktree-path dir})]
       (is (true? (:passed? result))))))
+
+(deftest ^{:stratum 0} key-kept-in-a-sibling-in-another-sense-still-flags-the-consumer
+  (testing "ru3d: report.clj kept :skipped as a message-template key while
+            ledger.clj renamed its result key; the consumer is still stale
+            and the error says where the token survives"
+    (let [ledger "components/c/src/ai/m/c/ledger.clj"
+          report "components/c/src/ai/m/c/report.clj"
+          consumer "bb.edn"
+          dir (base/temp-git-repo
+               {ledger "(ns ai.m.c.ledger)\n(defn read-ledger [] {:entries [] :skipped 0})"
+                report "(ns ai.m.c.report (:require [ai.m.c.ledger :as l]))\n(defn header [] (t :h {:skipped (:skipped (l/read-ledger))}))"
+                consumer "{:tasks {r {:requires ([ai.m.c.interface :as c]) :task (:skipped (c/read-ledger d))}}}"})
+          new-ledger "(ns ai.m.c.ledger)\n(defn read-ledger [] {:entries [] :torn-lines 0})"
+          new-report "(ns ai.m.c.report (:require [ai.m.c.ledger :as l]))\n(defn header [] (t :h {:skipped (:torn-lines (l/read-ledger))}))"
+          _ (spit (str dir "/" ledger) new-ledger)
+          _ (spit (str dir "/" report) new-report)
+          result (stale/check-stale-references
+                  {:code/files [{:path ledger :content new-ledger :action :modify}
+                                {:path report :content new-report :action :modify}]}
+                  {:execution/worktree-path dir})
+          err (first (:errors result))]
+      (is (false? (:passed? result)))
+      (is (= ":skipped" (:token err)))
+      (is (= [consumer] (:files err)))
+      (is (= [report] (:survives-in err)))
+      (is (str/includes? (:message err) "still appears in")))))
+
+(deftest ^{:stratum 0} removed-per-file-judges-each-producer-alone
+  (is (= [":skipped"]
+         (stale/removed-per-file ["{:skipped 0}" "{:x 1 :skipped 2}"]
+                                 ["a.clj" "b.clj"]
+                                 {"a.clj" "{:torn-lines 0}" "b.clj" "{:x 1 :skipped 2}"}))
+      "removed from a.clj even though b.clj still has it"))
+
+(deftest ^{:stratum 0} deleted-producer-loses-every-token
+  (is (= [":skipped"]
+         (stale/removed-per-file ["{:skipped 0}"] ["gone.clj"] {}))
+      "no after-content means every token of the before is removed"))
