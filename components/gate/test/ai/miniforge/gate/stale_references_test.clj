@@ -114,7 +114,7 @@
           consumer "tasks/report.clj"
           dir (temp-git-repo
                {producer "(ns producer)\n(defn read-ledger [] {:entries [] :skipped 0})"
-                consumer "(ns report)\n(defn skipped-count [r] (get r :skipped 0))"})
+                consumer "(ns report (:require [producer :as p]))\n(defn skipped-count [r] (get (p/read-ledger) :skipped 0))"})
           new-producer "(ns producer)\n(defn read-ledger [] {:entries [] :torn-lines 0})"
           _ (spit (str dir "/" producer) new-producer)
           result (stale/check-stale-references
@@ -129,9 +129,9 @@
         consumer "tasks/report.clj"
         dir (temp-git-repo
              {producer "(ns producer)\n(defn read-ledger [] {:skipped 0})"
-              consumer "(ns report)\n(get {} :skipped)"})
+              consumer "(ns report (:require [producer]))\n(get {} :skipped)"})
         new-producer "(ns producer)\n(defn read-ledger [] {:torn-lines 0})"
-        new-consumer "(ns report)\n(get {} :torn-lines)"
+        new-consumer "(ns report (:require [producer]))\n(get {} :torn-lines)"
         _ (spit (str dir "/" producer) new-producer)
         _ (spit (str dir "/" consumer) new-consumer)
         result (stale/check-stale-references
@@ -148,7 +148,7 @@
           consumer "tasks/report.clj"
           dir (temp-git-repo
                {producer "(ns producer)\n(defn read-ledger [] {:skipped 0})"
-                consumer "(ns report)\n(get {} :skipped)"})
+                consumer "(ns report (:require [producer]))\n(get {} :skipped)"})
           _ (spit (str dir "/" producer) "(ns producer)\n(defn read-ledger [] {:torn-lines 0})")
           result (stale/check-stale-references
                   {:code/files []}
