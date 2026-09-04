@@ -15,7 +15,6 @@
 ;; WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 ;; See the License for the specific language governing permissions and
 ;; limitations under the License.
-
 (ns ai.miniforge.workflow.runner-environment-test
   "Regression tests for runner-environment's base-sha capture and phase-boundary persistence guard behavior."
   (:require [clojure.java.io :as io]
@@ -26,7 +25,9 @@
             [ai.miniforge.dag-executor.result :as result]
             [ai.miniforge.workflow.runner-environment :as env]))
 
-(defn- sh!
+;------------------------------------------------------------------------------ Layer 0
+
+(defn- ^{:stratum 0} sh!
   "Run a shell command and throw ex-info when exit != 0."
   [& args]
   (let [r (apply shell/sh args)]
@@ -35,7 +36,69 @@
                       {:cmd args :exit (:exit r) :err (:err r) :out (:out r)})))
     r))
 
-(defn- with-temp-git-repo
+(deftest ^{:stratum 0} normalized-environment-metadata-is-always-a-map-test
+  (testing "valid metadata maps are preserved"
+    (is (= {:base-branch "main"}
+           (#'env/normalized-environment-metadata
+            {:metadata {:base-branch "main"}}))))
+  (testing "absent and malformed metadata becomes an empty map"
+    (doseq [env-value [{}
+                       {:metadata nil}
+                       {:metadata false}
+                       {:metadata :not-a-map}
+                       {:metadata 42}
+                       {:metadata []}]]
+      (is (= {} (#'env/normalized-environment-metadata env-value))))))
+
+(deftest ^{:stratum 0} build-env-record-omits-base-sha-when-no-git-test
+  (testing "non-git worktree → :base-sha absent, no crash"
+    (let [non-git-dir (str (System/getProperty "java.io.tmpdir") "/m1-no-git-"
+                           (random-uuid))]
+      (.mkdirs (io/file non-git-dir))
+      (try
+        (let [fns {:create-registry (constantly {})
+                   :select-exec     (constantly ::stub)
+                   :acquire-env!    (fn [_ _ _]
+                                      (result/ok {:environment-id "e"
+                                                  :workdir non-git-dir
+                                                  :metadata {}}))
+                   :result-ok?      result/ok?
+                   :result-unwrap   :data
+                   :executor-type   (constantly :worktree)}
+              record (env/build-env-record ::stub (random-uuid) :local {} fns)]
+          (is (some? record))
+          (is (not (contains? (:environment-metadata record) :base-sha))
+              ":base-sha must be absent (not nil) when HEAD can't be read"))
+        (finally
+          (.delete (io/file non-git-dir)))))))
+
+(deftest ^{:stratum 0} persist-at-phase-boundary-guards-on-worktree-test
+  (testing "an executor + env-id but NO :execution/worktree-path -> the persist
+            never runs; it must not fall back to committing the process CWD (the
+            leak that let a sandboxless run-pipeline commit into the live repo)"
+    (let [calls (atom 0)]
+      (with-redefs [dag/persist-workspace!
+                    (fn [& _] (swap! calls inc) (result/ok {:persisted? false}))]
+        (let [outcome (env/persist-workspace-at-phase-boundary!
+                       {:execution/executor ::stub-executor
+                        :execution/environment-id (random-uuid)}
+                       {})]
+          (is (nil? outcome) "no worktree -> no persist -> nil")
+          (is (zero? @calls) "persist-workspace! is never invoked without a worktree")))))
+  (testing "a configured worktree-path DOES run the persist"
+    (let [calls (atom 0)]
+      (with-redefs [dag/persist-workspace!
+                    (fn [& _] (swap! calls inc) (result/ok {:persisted? false}))]
+        (env/persist-workspace-at-phase-boundary!
+         {:execution/executor ::stub-executor
+          :execution/environment-id (random-uuid)
+          :execution/worktree-path "/tmp/sandbox-worktree"}
+         {})
+        (is (= 1 @calls) "persist runs when a worktree is configured")))))
+
+;------------------------------------------------------------------------------ Layer 1
+
+(defn- ^{:stratum 1} with-temp-git-repo
   "Initialise a temp git repo with one commit and pass its path to f.
    Every shell call is checked for a zero exit code — a silent failure
    would leave an unborn branch and cause `git rev-parse HEAD` to return
@@ -56,7 +119,9 @@
         (doseq [^java.io.File fp (reverse (file-seq (io/file dir)))]
           (.delete fp))))))
 
-(deftest build-env-record-captures-base-sha-test
+;------------------------------------------------------------------------------ Layer 2
+
+(deftest ^{:stratum 2} build-env-record-captures-base-sha-test
   ;; The watcher in M2 needs to know what SHA each in-flight workflow
   ;; was acquired at to run the `git merge-base --is-ancestor` ancestry
   ;; check against a freshly-merged PR's SHA. Pin the capture here so
@@ -87,63 +152,3 @@
               "build-env-record sets :base-sha to resolved worktree HEAD SHA")
           (is (= "main" (get-in record [:environment-metadata :base-branch]))
               "pre-existing metadata fields must survive the merge"))))))
-
-(deftest normalized-environment-metadata-is-always-a-map-test
-  (testing "valid metadata maps are preserved"
-    (is (= {:base-branch "main"}
-           (#'env/normalized-environment-metadata
-            {:metadata {:base-branch "main"}}))))
-  (testing "absent and malformed metadata becomes an empty map"
-    (doseq [env-value [{}
-                       {:metadata nil}
-                       {:metadata false}
-                       {:metadata :not-a-map}
-                       {:metadata 42}
-                       {:metadata []}]]
-      (is (= {} (#'env/normalized-environment-metadata env-value))))))
-
-(deftest build-env-record-omits-base-sha-when-no-git-test
-  (testing "non-git worktree → :base-sha absent, no crash"
-    (let [non-git-dir (str (System/getProperty "java.io.tmpdir") "/m1-no-git-"
-                           (random-uuid))]
-      (.mkdirs (io/file non-git-dir))
-      (try
-        (let [fns {:create-registry (constantly {})
-                   :select-exec     (constantly ::stub)
-                   :acquire-env!    (fn [_ _ _]
-                                      (result/ok {:environment-id "e"
-                                                  :workdir non-git-dir
-                                                  :metadata {}}))
-                   :result-ok?      result/ok?
-                   :result-unwrap   :data
-                   :executor-type   (constantly :worktree)}
-              record (env/build-env-record ::stub (random-uuid) :local {} fns)]
-          (is (some? record))
-          (is (not (contains? (:environment-metadata record) :base-sha))
-              ":base-sha must be absent (not nil) when HEAD can't be read"))
-        (finally
-          (.delete (io/file non-git-dir)))))))
-
-(deftest persist-at-phase-boundary-guards-on-worktree-test
-  (testing "an executor + env-id but NO :execution/worktree-path -> the persist
-            never runs; it must not fall back to committing the process CWD (the
-            leak that let a sandboxless run-pipeline commit into the live repo)"
-    (let [calls (atom 0)]
-      (with-redefs [dag/persist-workspace!
-                    (fn [& _] (swap! calls inc) (result/ok {:persisted? false}))]
-        (let [outcome (env/persist-workspace-at-phase-boundary!
-                       {:execution/executor ::stub-executor
-                        :execution/environment-id (random-uuid)}
-                       {})]
-          (is (nil? outcome) "no worktree -> no persist -> nil")
-          (is (zero? @calls) "persist-workspace! is never invoked without a worktree")))))
-  (testing "a configured worktree-path DOES run the persist"
-    (let [calls (atom 0)]
-      (with-redefs [dag/persist-workspace!
-                    (fn [& _] (swap! calls inc) (result/ok {:persisted? false}))]
-        (env/persist-workspace-at-phase-boundary!
-         {:execution/executor ::stub-executor
-          :execution/environment-id (random-uuid)
-          :execution/worktree-path "/tmp/sandbox-worktree"}
-         {})
-        (is (= 1 @calls) "persist runs when a worktree is configured")))))

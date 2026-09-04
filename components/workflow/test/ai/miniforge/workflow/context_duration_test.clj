@@ -15,7 +15,6 @@
 ;; WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 ;; See the License for the specific language governing permissions and
 ;; limitations under the License.
-
 (ns ai.miniforge.workflow.context-duration-test
   "Pin the wall-clock semantic of :execution/metrics :duration-ms.
    Pre-fix the field summed per-phase :duration-ms which under DAG
@@ -27,9 +26,28 @@
    [ai.miniforge.workflow.context :as context]
    [clojure.test :refer [deftest is testing]]))
 
-(def ^:private synthetic-started-at
+;------------------------------------------------------------------------------ Layer 0
+
+(def ^{:stratum 0} ^:private synthetic-started-at
   "Fixed instant in epoch ms — keeps the assertion deterministic."
   1000000000)
+
+(deftest ^{:stratum 0} transition-without-started-at-leaves-duration-untouched-test
+  (testing "When :execution/started-at is missing (older callers /
+            partial state), the wall-clock stamp is a no-op rather
+            than producing nonsense. The pre-existing per-phase sum
+            is preserved as a fallback."
+    (let [ctx {:execution/metrics {:tokens 100
+                                   :cost-usd 0.001
+                                   :duration-ms 5000}}
+          completed (with-redefs [context/transition-execution identity]
+                      (context/transition-to-completed ctx))]
+      (is (= 5000 (get-in completed [:execution/metrics :duration-ms]))
+          "no started-at → duration left as the pre-existing value")
+      (is (some? (:execution/ended-at completed))
+          "ended-at is still stamped"))))
+
+;------------------------------------------------------------------------------ Layer 1
 
 ;; transition-to-completed and transition-to-failed both stamp
 ;; :execution/ended-at with (System/currentTimeMillis) at call
@@ -37,8 +55,7 @@
 ;; were assoc'ing a synthetic ended-at that the transition
 ;; immediately overwrote — misleading to readers and didn't
 ;; tighten the assertion.
-
-(deftest transition-to-completed-stamps-wall-clock-duration-test
+(deftest ^{:stratum 1} transition-to-completed-stamps-wall-clock-duration-test
   (testing "transition-to-completed sets :execution/metrics :duration-ms
             to (ended-at − started-at) — exact difference, not just
             a value larger than something. Pin the difference
@@ -66,7 +83,7 @@
       (is (= 0.42 (get-in completed [:execution/metrics :cost-usd]))
           "cost preserved"))))
 
-(deftest transition-to-failed-stamps-wall-clock-duration-test
+(deftest ^{:stratum 1} transition-to-failed-stamps-wall-clock-duration-test
   (testing "Failed workflows also report wall-clock duration so the
             user can see how long the run ran before failing. Same
             difference-semantic assertion as the completed-path test
@@ -84,22 +101,7 @@
           ":duration-ms is the exact (ended-at − started-at) delta
            on the failure path too"))))
 
-(deftest transition-without-started-at-leaves-duration-untouched-test
-  (testing "When :execution/started-at is missing (older callers /
-            partial state), the wall-clock stamp is a no-op rather
-            than producing nonsense. The pre-existing per-phase sum
-            is preserved as a fallback."
-    (let [ctx {:execution/metrics {:tokens 100
-                                   :cost-usd 0.001
-                                   :duration-ms 5000}}
-          completed (with-redefs [context/transition-execution identity]
-                      (context/transition-to-completed ctx))]
-      (is (= 5000 (get-in completed [:execution/metrics :duration-ms]))
-          "no started-at → duration left as the pre-existing value")
-      (is (some? (:execution/ended-at completed))
-          "ended-at is still stamped"))))
-
-(deftest transition-handles-instant-shape-started-at-test
+(deftest ^{:stratum 1} transition-handles-instant-shape-started-at-test
   (testing "Pre-existing inconsistency: context.clj writes
             :execution/started-at as System/currentTimeMillis (Long),
             runner.clj writes it as java.time.Instant/now. The
