@@ -783,9 +783,9 @@ f413dd80 (rx3) explains it; rx1 and rx2 match line for line.
    still expects `:skipped`. The stale-references gate exempts tests by
    design (PR 1869 (#1869)), so verify was the mechanism that had to
    name it.
-2. The parser took the first namespace's `Ran 3 tests … 0 failures, 0
-   errors` for the whole run and synthesized one error from the
-   non-zero exit. Summary: "Tests failed: 0 failure(s), 1 error(s)";
+2. The parser took the first namespace's `Ran 3 tests` line and its
+   `0 failures, 0 errors` line for the whole run and synthesized one
+   error from the non-zero exit. Summary: "Tests failed: 0 failure(s), 1 error(s)";
    metrics: pass-count 3, fail-count 1. The tests-pass gate passed on
    every iteration (it reads artifact metadata the verify path never
    sets); only the policy judge and the nil-output reason denied.
