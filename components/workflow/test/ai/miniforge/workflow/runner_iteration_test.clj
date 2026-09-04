@@ -21,13 +21,16 @@
    Includes slingshot try+/throw+ bb-compatibility tests."
   (:require
    [clojure.test :refer [deftest testing is use-fixtures]]
+   [ai.miniforge.workflow.checkpoint-test-support :as checkpoint-test-support]
    [ai.miniforge.workflow.context :as ctx]
    [ai.miniforge.workflow.monitoring :as monitoring]
    [ai.miniforge.workflow.phase-test-support :as phase-test-support]
    [ai.miniforge.workflow.runner :as runner]
    [slingshot.slingshot :refer [try+ throw+]]))
 
-(use-fixtures :each phase-test-support/with-workflow-phase-test-support)
+(use-fixtures :each
+  phase-test-support/with-workflow-phase-test-support
+  checkpoint-test-support/with-temp-checkpoint-root)
 
 ;------------------------------------------------------------------------------ Layer 0
 
