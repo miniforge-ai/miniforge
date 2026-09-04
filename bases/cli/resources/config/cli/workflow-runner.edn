@@ -3,5 +3,10 @@
   {:prompt "Reply with exactly {\"ok\":true}"
    :timeout-ms 30000
    :version-timeout-ms 5000
+   ;; A single probe can time out while the CLI is still tearing down a
+   ;; previous session; retry up to :attempts times with :retry-pause-ms
+   ;; between failed attempts before the preflight fails closed.
+   :attempts 3
+   :retry-pause-ms 2000
    :claude-args ["--output-format" "json"
                  "--max-turns" "1"]}}}

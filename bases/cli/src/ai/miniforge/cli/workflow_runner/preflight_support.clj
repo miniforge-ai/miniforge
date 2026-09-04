@@ -31,6 +31,21 @@
 
 ;------------------------------------------------------------------------------ Layer 0
 
+(def ^{:stratum 0} ^:private default-preflight-attempts
+  "Health-probe attempts before the preflight fails closed, when the
+   config is silent. Three: on 2026-09-03 four runs were refused on a
+   single 30s timeout that landed within ~30s of a previous long run
+   ending, while a hand probe answered inside a minute. One retry covers
+   that window; the third attempt is margin against a slower recovery."
+  3)
+
+(def ^{:stratum 0} ^:private default-preflight-retry-pause-ms
+  "Pause between failed probe attempts when the config is silent (2s):
+   long enough for a CLI still releasing a prior session to finish,
+   short enough that a hard failure still surfaces well inside two
+   minutes across three 30s attempts."
+  2000)
+
 (def ^{:stratum 0} ^:private workflow-runner-config
   "Merged workflow-runner resource config. Only the :backend-preflight
    section is consumed today, which is why the delay lives here rather
@@ -126,6 +141,12 @@
 
 (defn ^{:stratum 2} backend-version-timeout-ms []
   (:version-timeout-ms (backend-preflight-config)))
+
+(defn ^{:stratum 2} backend-preflight-attempts []
+  (get (backend-preflight-config) :attempts default-preflight-attempts))
+
+(defn ^{:stratum 2} backend-preflight-retry-pause-ms []
+  (get (backend-preflight-config) :retry-pause-ms default-preflight-retry-pause-ms))
 
 (defn ^{:stratum 2} claude-preflight-args []
   (:claude-args (backend-preflight-config)))
