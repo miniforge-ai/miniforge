@@ -15,7 +15,6 @@
 ;; WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 ;; See the License for the specific language governing permissions and
 ;; limitations under the License.
-
 (ns ai.miniforge.workflow.environment-promotion-integration-test
   "Integration tests for the environment promotion pipeline.
 
@@ -40,51 +39,35 @@
    [ai.miniforge.workflow.phase-test-support :as phase-test-support]
    [ai.miniforge.workflow.runner :as runner]))
 
-;------------------------------------------------------------------------------ Fixtures
+;------------------------------------------------------------------------------ Layer 0
 
-(def ^:private env-promotion-implement
+;------------------------------------------------------------------------------ Fixtures
+(def ^{:stratum 0} ^:private env-promotion-implement
   :env-promotion-test-implement)
 
-(def ^:private env-promotion-verify
+(def ^{:stratum 0} ^:private env-promotion-verify
   :env-promotion-test-verify)
 
-(def ^:private env-promotion-done
+(def ^{:stratum 0} ^:private env-promotion-done
   phase-test-support/runner-test-done)
 
-(def ^:dynamic *test-worktree* nil)
+(def ^{:stratum 0} ^:dynamic *test-worktree* nil)
 
-(def phase-test-config-resource
+(def ^{:stratum 0} phase-test-config-resource
   "config/phase/workflow-test-support-namespaces.edn")
 
-(defn create-temp-worktree []
+(defn ^{:stratum 0} create-temp-worktree []
   (let [temp-dir (io/file (System/getProperty "java.io.tmpdir")
                           (str "env-promotion-test-" (random-uuid)))]
     (.mkdirs temp-dir)
     (.getPath temp-dir)))
 
-(defn cleanup-temp-worktree [dir-path]
+(defn ^{:stratum 0} cleanup-temp-worktree [dir-path]
   (when dir-path
     (try (fs/delete-tree dir-path) (catch Exception _e nil))))
 
-(defn worktree-fixture [f]
-  (let [worktree (create-temp-worktree)]
-    (binding [*test-worktree* worktree]
-      (try (f)
-           (finally (cleanup-temp-worktree worktree))))))
-
-(defn phase-loader-fixture [f]
-  (phase/reset-phase-loader!)
-  (try
-    (binding [loader/phase-loader-config-resource phase-test-config-resource]
-      (f))
-    (finally
-      (phase/reset-phase-loader!))))
-
-(use-fixtures :each worktree-fixture phase-loader-fixture)
-
 ;------------------------------------------------------------------------------ Helpers
-
-(defn mock-curator
+(defn ^{:stratum 0} mock-curator
   "Default curator stub for tests that don't care about file-diff semantics.
 
    The real curator (agent/curate-implement-output) inspects the worktree
@@ -100,20 +83,14 @@
      :code/summary "test fixture wrote feature.clj"}
     {:metrics {:tokens 0 :duration-ms 0}}))
 
-(def ^:private env-promotion-phase-defaults
+(def ^{:stratum 0} ^:private env-promotion-phase-defaults
   {:agent :workflow-tester
    :gates []
    :budget {:tokens 1
             :iterations 1
             :time-seconds 1}})
 
-(defn- register-env-promotion-phase!
-  [phase-name]
-  (registry/register-phase-defaults!
-   phase-name
-   (assoc env-promotion-phase-defaults :phase phase-name)))
-
-(defn- implement-phase-result
+(defn- ^{:stratum 0} implement-phase-result
   [ctx]
   (let [agent-result (agent/invoke (agent/create-implementer nil) nil ctx)
         curated-result (when (response/success? agent-result)
@@ -129,33 +106,14 @@
        :result agent-result
        :metrics (:metrics agent-result)})))
 
-(defn- verify-phase-result
+(defn- ^{:stratum 0} verify-phase-result
   [ctx]
   {:status :completed
    :result {:status :success
             :environment-id (:execution/environment-id ctx)
             :output {:tests-passed? true}}})
 
-(defmethod registry/get-phase-interceptor env-promotion-implement
-  [config]
-  {:name ::env-promotion-implement
-   :config (registry/merge-with-defaults config)
-   :enter (fn [ctx] (assoc ctx :phase (implement-phase-result ctx)))
-   :leave identity
-   :error (fn [ctx _ex] ctx)})
-
-(defmethod registry/get-phase-interceptor env-promotion-verify
-  [config]
-  {:name ::env-promotion-verify
-   :config (registry/merge-with-defaults config)
-   :enter (fn [ctx] (assoc ctx :phase (verify-phase-result ctx)))
-   :leave identity
-   :error (fn [ctx _ex] ctx)})
-
-(register-env-promotion-phase! env-promotion-implement)
-(register-env-promotion-phase! env-promotion-verify)
-
-(defn make-workflow
+(defn ^{:stratum 0} make-workflow
   "Build a minimal workflow config with the given phase sequence.
 
    Gates are disabled because these tests target environment-promotion
@@ -168,15 +126,52 @@
    :workflow/version "1.0.0"
    :workflow/pipeline (mapv (fn [p] {:phase p :gates []}) phases)})
 
-(defn base-input []
+(defn ^{:stratum 0} base-input []
   {:task "Add a new feature"
    :description "Add a new feature to the codebase"
    :title "Add feature"
    :intent "implement"})
 
-;------------------------------------------------------------------------------ Test 1: Full pipeline — environment flows through all phases
+;------------------------------------------------------------------------------ Layer 1
 
-(deftest full-pipeline-environment-flows-through-phases-test
+(defn ^{:stratum 1} worktree-fixture [f]
+  (let [worktree (create-temp-worktree)]
+    (binding [*test-worktree* worktree]
+      (try (f)
+           (finally (cleanup-temp-worktree worktree))))))
+
+(defn ^{:stratum 1} phase-loader-fixture [f]
+  (phase/reset-phase-loader!)
+  (try
+    (binding [loader/phase-loader-config-resource phase-test-config-resource]
+      (f))
+    (finally
+      (phase/reset-phase-loader!))))
+
+(defn- ^{:stratum 1} register-env-promotion-phase!
+  [phase-name]
+  (registry/register-phase-defaults!
+   phase-name
+   (assoc env-promotion-phase-defaults :phase phase-name)))
+
+(defmethod ^{:stratum 1} registry/get-phase-interceptor env-promotion-implement
+  [config]
+  {:name ::env-promotion-implement
+   :config (registry/merge-with-defaults config)
+   :enter (fn [ctx] (assoc ctx :phase (implement-phase-result ctx)))
+   :leave identity
+   :error (fn [ctx _ex] ctx)})
+
+(defmethod ^{:stratum 1} registry/get-phase-interceptor env-promotion-verify
+  [config]
+  {:name ::env-promotion-verify
+   :config (registry/merge-with-defaults config)
+   :enter (fn [ctx] (assoc ctx :phase (verify-phase-result ctx)))
+   :leave identity
+   :error (fn [ctx _ex] ctx)})
+
+;------------------------------------------------------------------------------ Test 1: Full pipeline — environment flows through all phases
+(deftest ^{:stratum 1} full-pipeline-environment-flows-through-phases-test
   (testing "Full plan→implement→verify→done pipeline with pre-acquired executor"
     (let [env-id      (random-uuid)
           release-env-called? (atom false)
@@ -223,8 +218,7 @@
               "File written by implement agent should exist in executor environment"))))))
 
 ;------------------------------------------------------------------------------ Test 2: Environment released on pipeline failure
-
-(deftest environment-released-on-pipeline-failure-test
+(deftest ^{:stratum 1} environment-released-on-pipeline-failure-test
   (testing "Environment is released in finally block even when pipeline fails"
     (let [acquired-env-id (random-uuid)
           release-called? (atom false)
@@ -262,8 +256,7 @@
                   "release-environment! should be called in the finally block even on failure"))))))))
 
 ;------------------------------------------------------------------------------ Test 3: Environment-id propagates through context via pre-acquired shortcut
-
-(deftest environment-id-propagates-via-pre-acquired-shortcut-test
+(deftest ^{:stratum 1} environment-id-propagates-via-pre-acquired-shortcut-test
   (testing "Pre-acquired :executor + :environment-id shortcut sets env-id on initial context"
     (let [env-id   (random-uuid)
           workflow (make-workflow env-promotion-implement env-promotion-done)]
@@ -294,8 +287,7 @@
               "Pipeline should complete when pre-acquired executor is provided"))))))
 
 ;------------------------------------------------------------------------------ Test 4: release-environment! NOT called when pre-acquired executor was passed
-
-(deftest pre-acquired-executor-not-released-by-runner-test
+(deftest ^{:stratum 1} pre-acquired-executor-not-released-by-runner-test
   (testing "Runner does not call release-environment! when executor was pre-acquired (caller owns lifecycle)"
     (let [env-id         (random-uuid)
           release-called? (atom false)
@@ -318,6 +310,12 @@
           ;; When executor is pre-acquired, runner should NOT release it
           (is (false? @release-called?)
               "Runner should not release a pre-acquired environment (caller owns lifecycle)"))))))
+
+(use-fixtures :each worktree-fixture phase-loader-fixture)
+
+(register-env-promotion-phase! env-promotion-implement)
+
+(register-env-promotion-phase! env-promotion-verify)
 
 ;------------------------------------------------------------------------------ Rich Comment
 (comment

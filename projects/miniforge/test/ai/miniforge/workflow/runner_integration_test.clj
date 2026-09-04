@@ -15,7 +15,6 @@
 ;; WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 ;; See the License for the specific language governing permissions and
 ;; limitations under the License.
-
 (ns ai.miniforge.workflow.runner-integration-test
   "Integration tests for the workflow runner that execute real phase pipelines."
   (:require
@@ -33,7 +32,9 @@
    [ai.miniforge.gate.test]
    [ai.miniforge.gate.policy]))
 
-(defn with-mocked-test-runner
+;------------------------------------------------------------------------------ Layer 0
+
+(defn ^{:stratum 0} with-mocked-test-runner
   "Run body-fn with run-tests! mocked to prevent recursive bb test."
   [body-fn]
   (let [run-var (resolve 'ai.miniforge.phase-software-factory.verify/run-tests!)]
@@ -41,7 +42,7 @@
       {run-var (fn [& _args] {:passed? true :test-count 1 :fail-count 0 :error-count 0})}
       body-fn)))
 
-(deftest run-pipeline-max-phases-test
+(deftest ^{:stratum 0} run-pipeline-max-phases-test
   (testing "run-pipeline respects max phases option"
     (let [workflow {:workflow/id :test
                     :workflow/version "1.0.0"
@@ -49,7 +50,7 @@
           result (runner/run-pipeline workflow {:task "Test"} {:max-phases 50})]
       (is (= :completed (:execution/status result))))))
 
-(deftest response-chain-records-phases-test
+(deftest ^{:stratum 0} response-chain-records-phases-test
   (testing "response chain records phase results"
     (let [workflow {:workflow/id :test
                     :workflow/version "1.0.0"

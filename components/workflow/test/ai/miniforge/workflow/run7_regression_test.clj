@@ -15,7 +15,6 @@
 ;; WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 ;; See the License for the specific language governing permissions and
 ;; limitations under the License.
-
 (ns ai.miniforge.workflow.run7-regression-test
   "Regression tests for Run 7+ bugs:
    1. Duration-ms always 0 — agent metrics fallback shadows real wall-clock time
@@ -31,15 +30,10 @@
    [ai.miniforge.workflow.runner :as runner]
    [ai.miniforge.workflow.execution :as exec]))
 
-(def phase-test-config-resource
-  "config/phase/workflow-test-support-namespaces.edn")
+;------------------------------------------------------------------------------ Layer 0
 
-(use-fixtures :each
-  (fn [f]
-    (phase/reset-phase-loader!)
-    (binding [loader/phase-loader-config-resource phase-test-config-resource]
-      (f))
-    (phase/reset-phase-loader!)))
+(def ^{:stratum 0} phase-test-config-resource
+  "config/phase/workflow-test-support-namespaces.edn")
 
 ;; ============================================================================
 ;; Fix 1: Duration-ms extraction in publish-phase-completed!
@@ -47,8 +41,7 @@
 ;; Root cause: (or [:metrics :duration-ms] ...) returned 0 (agent fallback)
 ;; before (:duration-ms result) (real wall-clock time) was tried.
 ;; ============================================================================
-
-(deftest duration-ms-extraction-order-test
+(deftest ^{:stratum 0} duration-ms-extraction-order-test
   (testing "phase result with real :duration-ms takes priority over :metrics fallback"
     ;; Simulate a phase result where:
     ;; - [:metrics :duration-ms] = 0 (agent didn't track time)
@@ -90,8 +83,7 @@
 ;; Root cause: an optional dynamic constructor lookup silently did nothing when
 ;; the constructor var was not resolvable.
 ;; ============================================================================
-
-(deftest publish-workflow-completed-fallback-test
+(deftest ^{:stratum 0} publish-workflow-completed-fallback-test
   (testing "publishes ad-hoc event when event-stream is provided"
     (let [_events (atom [])
           ;; Use a simple map as event-stream — publish-event! uses find-ns
@@ -119,8 +111,7 @@
 ;; the LLM client doesn't track wall-clock time. The phase leave function
 ;; computes real duration but the agent's 0 was used instead.
 ;; ============================================================================
-
-(deftest phase-leave-overrides-agent-duration-test
+(deftest ^{:stratum 0} phase-leave-overrides-agent-duration-test
   (testing "implement leave stores real duration in :phase :metrics :duration-ms"
     ;; We can't easily call leave-implement directly without a full context,
     ;; but we can verify the pattern: after applying the fix, the metrics map
@@ -150,8 +141,7 @@
 ;; ============================================================================
 ;; Fix 4: Stale :phase map cleared between phases (from PR #268, verify here)
 ;; ============================================================================
-
-(deftest phase-map-cleared-between-phases-test
+(deftest ^{:stratum 0} phase-map-cleared-between-phases-test
   (testing "execute-phase-lifecycle clears :phase before entering next phase"
     ;; Simulate a context with a stale :phase map from a previous phase
     ;; (e.g., verify left a redirect transition request on it)
@@ -176,7 +166,7 @@
       (is (nil? (get-in ctx-after [:phase :phase/transition-request]))
           "Stale phase transition request must not leak"))))
 
-(deftest enter-failure-skips-leave-test
+(deftest ^{:stratum 0} enter-failure-skips-leave-test
   (testing "execute-phase-lifecycle does not invoke :leave when :enter never established phase context"
     (let [leave-called? (atom false)
           interceptor {:name ::failing-enter
@@ -203,8 +193,7 @@
 ;; execute-phase-lifecycle clears :phase before entering next phase.
 ;; Implement now reads from [:execution/phase-results :review] instead.
 ;; ============================================================================
-
-(deftest review-feedback-survives-phase-clearing-test
+(deftest ^{:stratum 0} review-feedback-survives-phase-clearing-test
   (testing "implement reads review feedback from phase-results, not :phase"
     ;; Simulate context after review phase: :phase cleared, but phase-results has review output
     (let [review-feedback [{:type :blocking :message "Missing error handling for nil input"}]
@@ -238,3 +227,10 @@
   (testing "max-redirects is now 5"
     (is (= 5 exec/max-redirects)
         "Should allow 5 redirects for complex repair cycles")))
+
+(use-fixtures :each
+  (fn [f]
+    (phase/reset-phase-loader!)
+    (binding [loader/phase-loader-config-resource phase-test-config-resource]
+      (f))
+    (phase/reset-phase-loader!)))
