@@ -15,7 +15,6 @@
 ;; WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 ;; See the License for the specific language governing permissions and
 ;; limitations under the License.
-
 (ns ai.miniforge.workflow.meta-agent-e2e-test
   "End-to-end tests for meta-agent monitoring with real CLI backends.
 
@@ -32,9 +31,10 @@
    [ai.miniforge.llm.interface :as llm]
    [babashka.process :as p]))
 
-;------------------------------------------------------------------------------ Test configuration
+;------------------------------------------------------------------------------ Layer 0
 
-(defn claude-cli-available?
+;------------------------------------------------------------------------------ Test configuration
+(defn ^{:stratum 0} claude-cli-available?
   "Check if claude CLI is installed and available."
   []
   (try
@@ -43,22 +43,8 @@
     (catch Exception _e
       false)))
 
-(def cli-available?
-  "Check if claude CLI is available."
-  (claude-cli-available?))
-
-(defn skip-if-no-cli
-  "Fixture to skip tests if claude CLI is not available."
-  [f]
-  (if cli-available?
-    (f)
-    (println "⏭️  Skipping E2E test - claude CLI not installed")))
-
-(use-fixtures :each skip-if-no-cli)
-
 ;------------------------------------------------------------------------------ Test workflows
-
-(def simple-planning-workflow
+(def ^{:stratum 0} simple-planning-workflow
   "A minimal workflow that runs a single planning phase with real LLM."
   {:workflow/id :e2e-simple-plan
    :workflow/version "1.0.0"
@@ -70,99 +56,16 @@
      :enabled? true
      :config {:check-interval-ms 2000          ; Check every 2 seconds
               :stagnation-threshold-ms 30000   ; 30 seconds without progress = stagnation
-              :max-total-ms 120000}}]})         ; 2 minute total timeout
+              :max-total-ms 120000}}]})  ; 2 minute total timeout
 
 ;------------------------------------------------------------------------------ Helper functions
-
-(defn create-claude-backend
+(defn ^{:stratum 0} create-claude-backend
   "Create a real Claude CLI backend for E2E testing."
   []
   ;; Create Claude client using CLI backend (wraps `claude` command)
   (llm/create-client {:backend :claude}))
 
-;------------------------------------------------------------------------------ E2E Tests
-
-(deftest ^:e2e test-simple-workflow-with-real-llm
-  (testing "Run simple planning workflow with real Claude CLI backend"
-    (when cli-available?
-      (let [llm-backend (create-claude-backend)
-            input {:task "Create a simple hello world function in Clojure"
-                   :description "Write a function that returns 'Hello, World!'"
-                   :constraints ["Keep it simple"
-                                 "Use idiomatic Clojure"]}
-            result (runner/run-pipeline simple-planning-workflow
-                                        input
-                                        {:llm-backend llm-backend})]
-
-        ;; Verify workflow completed (or at least attempted to run)
-        (is (contains? #{:completed :failed} (:execution/status result))
-            "Workflow should complete or fail (not hang)")
-
-        ;; Verify meta-coordinator infrastructure is present
-        (is (contains? result :execution/meta-coordinator)
-            "Should have meta-coordinator")
-
-        (let [coordinator (:execution/meta-coordinator result)]
-          (when coordinator
-            (let [stats (agent/get-meta-agent-stats coordinator)
-                  history (agent/get-meta-check-history coordinator {:limit 100})]
-
-              ;; Should have progress monitor configured
-              (is (some #(= :progress-monitor (:id %)) (:agents stats))
-                  "Should have progress monitor agent configured")
-
-              history)))
-
-        ;; Just verify the infrastructure ran - don't require specific outputs
-        ;; (real LLM execution may vary)
-        (is (map? result)
-            "Should return execution result map")))))
-
-(deftest ^:e2e test-meta-agent-streaming-detection
-  (testing "Meta-agent infrastructure works with real CLI backend"
-    (when cli-available?
-      (let [llm-backend (create-claude-backend)
-            input {:task "Write a simple test function"}
-            result (runner/run-pipeline simple-planning-workflow
-                                        input
-                                        {:llm-backend llm-backend})]
-
-        ;; Should not hang (meta-agent monitoring prevents hangs)
-        (is (contains? #{:completed :failed} (:execution/status result))
-            "Should complete or fail (not hang)")
-
-        ;; Verify meta-agent infrastructure
-        (when-let [coordinator (:execution/meta-coordinator result)]
-          (let [history (agent/get-meta-check-history
-                         coordinator
-                         {:agent-id :progress-monitor :limit 100})]
-
-            ;; Infrastructure should be present
-            history
-            (is (some? coordinator)
-                "Meta-coordinator should exist")))))))
-
-(deftest ^:e2e test-meta-agent-metrics-tracking
-  (testing "Meta-agent tracks execution metrics"
-    (when cli-available?
-      (let [llm-backend (create-claude-backend)
-            input {:task "Simple test"}
-            result (runner/run-pipeline simple-planning-workflow
-                                        input
-                                        {:llm-backend llm-backend})]
-
-        ;; Should not hang
-        (is (contains? #{:completed :failed} (:execution/status result))
-            "Should complete or fail")
-
-        ;; Should have metrics structure
-        (let [metrics (:execution/metrics result)]
-          (is (map? metrics)
-              "Should have metrics map")
-
-          metrics)))))
-
-(defn create-iterating-mock-llm
+(defn ^{:stratum 0} create-iterating-mock-llm
   "Create a mock LLM that returns multiple responses for multiple iterations.
 
    This simulates a workflow that goes through multiple phases/iterations,
@@ -174,7 +77,13 @@
               "(defn plan-iteration-3 [] :final-plan)"
               ":done"]}))
 
-(deftest ^:e2e test-meta-agent-monitors-mocked-workflow
+;------------------------------------------------------------------------------ Layer 1
+
+(def ^{:stratum 1} cli-available?
+  "Check if claude CLI is available."
+  (claude-cli-available?))
+
+(deftest ^{:stratum 1} ^:e2e test-meta-agent-monitors-mocked-workflow
   (testing "Real meta-agent monitors mocked workflow and performs health checks"
     ;; This test uses:
     ;; - Real meta-agents (progress monitor with real health checks)
@@ -228,8 +137,99 @@
             (is (every? #(#{:healthy :warning :halt} %) statuses)
                 "All checks should return valid status")))))))
 
-;------------------------------------------------------------------------------ Test summary comment
+;------------------------------------------------------------------------------ Layer 2
 
+(defn ^{:stratum 2} skip-if-no-cli
+  "Fixture to skip tests if claude CLI is not available."
+  [f]
+  (if cli-available?
+    (f)
+    (println "⏭️  Skipping E2E test - claude CLI not installed")))
+
+;------------------------------------------------------------------------------ E2E Tests
+(deftest ^{:stratum 2} ^:e2e test-simple-workflow-with-real-llm
+  (testing "Run simple planning workflow with real Claude CLI backend"
+    (when cli-available?
+      (let [llm-backend (create-claude-backend)
+            input {:task "Create a simple hello world function in Clojure"
+                   :description "Write a function that returns 'Hello, World!'"
+                   :constraints ["Keep it simple"
+                                 "Use idiomatic Clojure"]}
+            result (runner/run-pipeline simple-planning-workflow
+                                        input
+                                        {:llm-backend llm-backend})]
+
+        ;; Verify workflow completed (or at least attempted to run)
+        (is (contains? #{:completed :failed} (:execution/status result))
+            "Workflow should complete or fail (not hang)")
+
+        ;; Verify meta-coordinator infrastructure is present
+        (is (contains? result :execution/meta-coordinator)
+            "Should have meta-coordinator")
+
+        (let [coordinator (:execution/meta-coordinator result)]
+          (when coordinator
+            (let [stats (agent/get-meta-agent-stats coordinator)
+                  history (agent/get-meta-check-history coordinator {:limit 100})]
+
+              ;; Should have progress monitor configured
+              (is (some #(= :progress-monitor (:id %)) (:agents stats))
+                  "Should have progress monitor agent configured")
+
+              history)))
+
+        ;; Just verify the infrastructure ran - don't require specific outputs
+        ;; (real LLM execution may vary)
+        (is (map? result)
+            "Should return execution result map")))))
+
+(deftest ^{:stratum 2} ^:e2e test-meta-agent-streaming-detection
+  (testing "Meta-agent infrastructure works with real CLI backend"
+    (when cli-available?
+      (let [llm-backend (create-claude-backend)
+            input {:task "Write a simple test function"}
+            result (runner/run-pipeline simple-planning-workflow
+                                        input
+                                        {:llm-backend llm-backend})]
+
+        ;; Should not hang (meta-agent monitoring prevents hangs)
+        (is (contains? #{:completed :failed} (:execution/status result))
+            "Should complete or fail (not hang)")
+
+        ;; Verify meta-agent infrastructure
+        (when-let [coordinator (:execution/meta-coordinator result)]
+          (let [history (agent/get-meta-check-history
+                         coordinator
+                         {:agent-id :progress-monitor :limit 100})]
+
+            ;; Infrastructure should be present
+            history
+            (is (some? coordinator)
+                "Meta-coordinator should exist")))))))
+
+(deftest ^{:stratum 2} ^:e2e test-meta-agent-metrics-tracking
+  (testing "Meta-agent tracks execution metrics"
+    (when cli-available?
+      (let [llm-backend (create-claude-backend)
+            input {:task "Simple test"}
+            result (runner/run-pipeline simple-planning-workflow
+                                        input
+                                        {:llm-backend llm-backend})]
+
+        ;; Should not hang
+        (is (contains? #{:completed :failed} (:execution/status result))
+            "Should complete or fail")
+
+        ;; Should have metrics structure
+        (let [metrics (:execution/metrics result)]
+          (is (map? metrics)
+              "Should have metrics map")
+
+          metrics)))))
+
+(use-fixtures :each skip-if-no-cli)
+
+;------------------------------------------------------------------------------ Test summary comment
 (comment
   ;; How to run these E2E tests locally:
   ;;

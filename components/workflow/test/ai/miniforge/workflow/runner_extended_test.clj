@@ -15,7 +15,6 @@
 ;; WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 ;; See the License for the specific language governing permissions and
 ;; limitations under the License.
-
 (ns ai.miniforge.workflow.runner-extended-test
   "Extended tests for workflow runner: output extraction, event publishing,
    and edge cases not covered by the main runner_test."
@@ -30,6 +29,8 @@
    [ai.miniforge.workflow.messages :as messages]
    [ai.miniforge.workflow.phase-test-support :as phase-test-support]))
 
+;------------------------------------------------------------------------------ Layer 0
+
 ;; ---------------------------------------------------------------------------- mock capsule executor
 ;; The governed-mode tests below assert that run-pipeline routes mode/worktree
 ;; metadata correctly. They should never touch a real Docker daemon —
@@ -37,15 +38,14 @@
 ;; daemon is busy or stuck (which is exactly the hang documented in PR #893's
 ;; PR doc, where bb pre-commit's stable-derived sweep stalled here for 300s+).
 ;; Mock the dag-executor surface so these tests stay deterministic.
-
-(defn- mock-capsule-registry
+(defn- ^{:stratum 0} mock-capsule-registry
   "Drop-in for `dag-exec/create-executor-registry` that returns a synthetic
    capsule executor without ever talking to Docker."
   [_config]
   {:docker   ::mock-capsule
    :worktree ::mock-worktree})
 
-(defn- mock-capsule-select
+(defn- ^{:stratum 0} mock-capsule-select
   "Drop-in for `dag-exec/select-executor` — returns the stub capsule
    under governed mode and the stub worktree otherwise."
   ([registry] (:docker registry))
@@ -55,7 +55,7 @@
        :worktree (:worktree registry)
        (:docker registry)))))
 
-(defn- mock-capsule-acquire
+(defn- ^{:stratum 0} mock-capsule-acquire
   "Drop-in for `dag-exec/acquire-environment!`. Returns a host-path
    environment record so :execution/worktree-path looks like a real
    host worktree, not the container-internal /workspace."
@@ -64,7 +64,7 @@
                 :workdir        "/tmp/mock-host-worktree"
                 :metadata       {:base-branch "main"}}))
 
-(defn- mock-capsule-type
+(defn- ^{:stratum 0} mock-capsule-type
   "Drop-in for `dag-exec/executor-type`. The capsule stub is :docker,
    the worktree stub is :worktree — matches what the runner expects so
    N11 §7.4's no-silent-downgrade check still discriminates."
@@ -74,7 +74,135 @@
     ::mock-worktree :worktree
     :unknown))
 
-(defmacro ^:private with-mock-capsule-executor
+(def ^{:stratum 0} ^:private runner-test-plan
+  phase-test-support/runner-test-plan)
+
+(def ^{:stratum 0} ^:private runner-test-implement
+  phase-test-support/runner-test-implement)
+
+(def ^{:stratum 0} ^:private runner-test-verify
+  phase-test-support/runner-test-verify)
+
+(def ^{:stratum 0} ^:private runner-test-done
+  phase-test-support/runner-test-done)
+
+;; ---------------------------------------------------------------------------- extract-output
+(deftest ^{:stratum 0} extract-output-empty-results-test
+  (testing "extract-output handles empty phase-results"
+    (let [ctx {:execution/artifacts []
+               :execution/phase-results {}
+               :execution/current-phase nil
+               :execution/status :completed}
+          result (runner/extract-output ctx)
+          output (:execution/output result)]
+      (is (= [] (:artifacts output)))
+      (is (= {} (:phase-results output)))
+      (is (nil? (:last-phase-result output)))
+      (is (= :completed (:status output))))))
+
+(deftest ^{:stratum 0} build-pipeline-no-pipeline-no-phases-test
+  (testing "no pipeline and no phases returns empty"
+    (let [pipeline (runner/build-pipeline {})]
+      (is (empty? pipeline)))))
+
+;; ---------------------------------------------------------------------------- DAG metric rollup regression
+;; Two sets of fixture metrics back the rollup tests below.
+;; success-path fixture: arbitrary but ergonomic numbers chosen to be visually
+;; distinct from any wall-clock or framework default so an off-by-one or wrong-
+;; key bug surfaces as an exact-value mismatch in the assertion output.
+(def ^{:stratum 0} ^:private dag-success-fixture-metrics
+  "Synthetic metrics injected into a successful DAG result. Values are
+   deliberately chosen to be non-zero, non-round in cost, and well below any
+   real wall-clock duration so they cannot collide with `stamp-wall-clock-
+   duration`'s output."
+  {:tokens      12345
+   :cost-usd    9.87
+   :duration-ms 60000})
+
+;; failure-path fixture: REAL numbers from the 2026-06-04
+;; `eliminate-requiring-resolve` dogfood (3h26m, 20-task DAG, 20/20 failed).
+;; Pinning to the observed values turns the test into a regression anchor for
+;; the specific cost-zero bug the PR fixes — if these don't round-trip, the
+;; rollup is broken on the same failure shape that originally surfaced it.
+(def ^{:stratum 0} ^:private dag-failure-fixture-tokens
+  "Total tokens observed across all 20 sub-workflows of the
+   2026-06-04 eliminate-requiring-resolve dogfood run."
+  516816)
+
+(def ^{:stratum 0} ^:private dag-failure-fixture-cost-usd
+  "Total cost (USD) observed across all 20 sub-workflows of the
+   2026-06-04 eliminate-requiring-resolve dogfood run. Pre-fix this surfaced
+   as `Cost: $0.0000` at the top of the run summary."
+  42.22608595)
+
+(def ^{:stratum 0} ^:private dag-failure-fixture-duration-ms
+  "Total summed sub-workflow duration from the 2026-06-04 dogfood. Note this
+   value is INTENTIONALLY overwritten by wall-clock stamping in
+   `transition-to-failed`, so it's pinned for completeness but not asserted."
+  48356404)
+
+;; ---------------------------------------------------------------------------- publish-event edge cases
+(deftest ^{:stratum 0} publish-event-nil-stream-test
+  (testing "publish-event with nil stream is a no-op"
+    ;; Should not throw
+    (is (nil? (runner/publish-event! nil {:event/type :test})))))
+
+(deftest ^{:stratum 0} publish-event-in-memory-stream-test
+  (testing "publish-event no-ops for non-stream maps"
+    (is (nil? (runner/publish-event! {} {:event/type :test})))))
+
+;; ---------------------------------------------------------------------------- terminal-state?
+(deftest ^{:stratum 0} terminal-state-test
+  (testing "completed and failed are terminal"
+    (is (true? (runner/terminal-state? {:execution/status :completed})))
+    (is (true? (runner/terminal-state? {:execution/status :failed}))))
+
+  (testing "running is not terminal"
+    (is (false? (runner/terminal-state? {:execution/status :running})))))
+
+;; ---------------------------------------------------------------------------- handle-empty-pipeline
+(deftest ^{:stratum 0} handle-empty-pipeline-test
+  (testing "adds error and transitions to failed"
+    (let [ctx (ctx/create-context {:workflow/id :test} {} {})
+          result (runner/handle-empty-pipeline ctx)]
+      (is (= :failed (:execution/status result)))
+      (is (some #(= :empty-pipeline (:type %)) (:execution/errors result))))))
+
+;; ---------------------------------------------------------------------------- handle-max-phases-exceeded
+(deftest ^{:stratum 0} handle-max-phases-exceeded-test
+  (testing "adds error about max phases"
+    (let [ctx (ctx/create-context {:workflow/id :test} {} {})
+          result (runner/handle-max-phases-exceeded ctx 10)]
+      (is (= :failed (:execution/status result)))
+      (is (some #(= :max-phases-exceeded (:type %)) (:execution/errors result))))))
+
+;; ---------------------------------------------------------------------------- publish helpers with nil stream
+(deftest ^{:stratum 0} publish-workflow-started-nil-stream-test
+  (testing "no-op with nil event stream"
+    (is (nil? (runner/publish-workflow-started! nil {})))))
+
+(deftest ^{:stratum 0} publish-workflow-completed-nil-stream-test
+  (testing "no-op with nil event stream"
+    (is (nil? (runner/publish-workflow-completed! nil {})))))
+
+(deftest ^{:stratum 0} publish-phase-started-nil-stream-test
+  (testing "no-op with nil event stream"
+    (is (nil? (runner/publish-phase-started! nil {} :plan)))))
+
+(deftest ^{:stratum 0} publish-phase-completed-nil-stream-test
+  (testing "no-op with nil event stream"
+    (is (nil? (runner/publish-phase-completed! nil {} :plan {})))))
+
+;; ---------------------------------------------------------------------------- persist-workspace-at-phase-boundary!
+(def ^{:stratum 0} ^:private persist-fn
+  "Var accessor for persist-workspace-at-phase-boundary! (extracted to runner-environment)."
+  (do (require 'ai.miniforge.workflow.runner-environment)
+      (ns-resolve 'ai.miniforge.workflow.runner-environment
+                  'persist-workspace-at-phase-boundary!)))
+
+;------------------------------------------------------------------------------ Layer 1
+
+(defmacro ^{:stratum 1} ^:private with-mock-capsule-executor
   "Run body with the dag-executor surface mocked out so governed-mode
    path doesn't reach a real Docker daemon. Also no-ops release and
    persist so the cleanup path doesn't log protocol-mismatch warnings
@@ -88,36 +216,7 @@
                  dag-exec/persist-workspace!       (fn [& _#] (dag-exec/ok {}))]
      ~@body))
 
-(use-fixtures :each phase-test-support/with-workflow-phase-test-support)
-
-(def ^:private runner-test-plan
-  phase-test-support/runner-test-plan)
-
-(def ^:private runner-test-implement
-  phase-test-support/runner-test-implement)
-
-(def ^:private runner-test-verify
-  phase-test-support/runner-test-verify)
-
-(def ^:private runner-test-done
-  phase-test-support/runner-test-done)
-
-;; ---------------------------------------------------------------------------- extract-output
-
-(deftest extract-output-empty-results-test
-  (testing "extract-output handles empty phase-results"
-    (let [ctx {:execution/artifacts []
-               :execution/phase-results {}
-               :execution/current-phase nil
-               :execution/status :completed}
-          result (runner/extract-output ctx)
-          output (:execution/output result)]
-      (is (= [] (:artifacts output)))
-      (is (= {} (:phase-results output)))
-      (is (nil? (:last-phase-result output)))
-      (is (= :completed (:status output))))))
-
-(deftest extract-output-failed-status-test
+(deftest ^{:stratum 1} extract-output-failed-status-test
   (testing "extract-output preserves failed status"
     (let [ctx {:execution/artifacts []
                :execution/phase-results {runner-test-plan {:phase/status :failed}}
@@ -127,7 +226,7 @@
       (is (= :failed (:status output)))
       (is (= {:phase/status :failed} (:last-phase-result output))))))
 
-(deftest extract-output-falls-back-to-pipeline-phase-order-test
+(deftest ^{:stratum 1} extract-output-falls-back-to-pipeline-phase-order-test
   (testing "extract-output chooses the last recorded phase using workflow pipeline order"
     (let [ctx {:execution/workflow {:workflow/pipeline [{:phase runner-test-plan}
                                                        {:phase runner-test-implement}
@@ -143,22 +242,15 @@
              (get-in output [:phase-results runner-test-done]))))))
 
 ;; ---------------------------------------------------------------------------- build-pipeline edge cases
-
-(deftest build-pipeline-nil-pipeline-falls-back-to-legacy-test
+(deftest ^{:stratum 1} build-pipeline-nil-pipeline-falls-back-to-legacy-test
   (testing "nil pipeline with phases falls back to legacy format"
     (let [wf {:workflow/phases [{:phase/id runner-test-plan}
                                 {:phase/id runner-test-done}]}
           pipeline (runner/build-pipeline wf)]
       (is (= 2 (count pipeline))))))
 
-(deftest build-pipeline-no-pipeline-no-phases-test
-  (testing "no pipeline and no phases returns empty"
-    (let [pipeline (runner/build-pipeline {})]
-      (is (empty? pipeline)))))
-
 ;; ---------------------------------------------------------------------------- run-pipeline edge cases
-
-(deftest run-pipeline-two-arity-test
+(deftest ^{:stratum 1} run-pipeline-two-arity-test
   (testing "run-pipeline works with 2-arity (no opts)"
     (let [wf {:workflow/id :test
               :workflow/version "1.0.0"
@@ -166,7 +258,7 @@
           result (runner/run-pipeline wf {:task "Test"})]
       (is (= :completed (:execution/status result))))))
 
-(deftest run-pipeline-skip-lifecycle-events-test
+(deftest ^{:stratum 1} run-pipeline-skip-lifecycle-events-test
   (testing "skip-lifecycle-events suppresses event publishing"
     (let [wf {:workflow/id :test
               :workflow/version "1.0.0"
@@ -175,7 +267,7 @@
                    {:skip-lifecycle-events true})]
       (is (= :completed (:execution/status result))))))
 
-(deftest run-pipeline-custom-control-state-test
+(deftest ^{:stratum 1} run-pipeline-custom-control-state-test
   (testing "run-pipeline accepts custom control-state atom"
     (let [wf {:workflow/id :test
               :workflow/version "1.0.0"
@@ -185,7 +277,7 @@
                    {:control-state cs})]
       (is (= :completed (:execution/status result))))))
 
-(deftest run-pipeline-completed-with-warnings-test
+(deftest ^{:stratum 1} run-pipeline-completed-with-warnings-test
   (testing "completed workflow with no artifacts gets warning status"
     ;; The :done phase produces a phase result, so this should complete normally.
     ;; This tests that the check is in place even if not triggered.
@@ -196,7 +288,7 @@
       ;; :done produces a phase result, so it should be :completed (not :completed-with-warnings)
       (is (contains? #{:completed :completed-with-warnings} (:execution/status result))))))
 
-(deftest run-pipeline-max-phases-1-with-done-test
+(deftest ^{:stratum 1} run-pipeline-max-phases-1-with-done-test
   (testing "max-phases 1 allows single :done phase to complete"
     (let [wf {:workflow/id :test
               :workflow/version "1.0.0"
@@ -204,7 +296,7 @@
           result (runner/run-pipeline wf {:task "Test"} {:max-phases 1})]
       (is (= :completed (:execution/status result))))))
 
-(deftest apply-dag-success-does-not-consume-redirect-budget-test
+(deftest ^{:stratum 1} apply-dag-success-does-not-consume-redirect-budget-test
   (testing "DAG fast-path advances with normal success events"
     (let [workflow {:workflow/id :test
                     :workflow/version "1.0.0"
@@ -227,49 +319,12 @@
       (is (= runner-test-verify (:execution/current-phase result)))
       (is (= 0 (:execution/redirect-count result))))))
 
-;; ---------------------------------------------------------------------------- DAG metric rollup regression
-;; Two sets of fixture metrics back the rollup tests below.
-
-;; success-path fixture: arbitrary but ergonomic numbers chosen to be visually
-;; distinct from any wall-clock or framework default so an off-by-one or wrong-
-;; key bug surfaces as an exact-value mismatch in the assertion output.
-(def ^:private dag-success-fixture-metrics
-  "Synthetic metrics injected into a successful DAG result. Values are
-   deliberately chosen to be non-zero, non-round in cost, and well below any
-   real wall-clock duration so they cannot collide with `stamp-wall-clock-
-   duration`'s output."
-  {:tokens      12345
-   :cost-usd    9.87
-   :duration-ms 60000})
-
-;; failure-path fixture: REAL numbers from the 2026-06-04
-;; `eliminate-requiring-resolve` dogfood (3h26m, 20-task DAG, 20/20 failed).
-;; Pinning to the observed values turns the test into a regression anchor for
-;; the specific cost-zero bug the PR fixes — if these don't round-trip, the
-;; rollup is broken on the same failure shape that originally surfaced it.
-(def ^:private dag-failure-fixture-tokens
-  "Total tokens observed across all 20 sub-workflows of the
-   2026-06-04 eliminate-requiring-resolve dogfood run."
-  516816)
-
-(def ^:private dag-failure-fixture-cost-usd
-  "Total cost (USD) observed across all 20 sub-workflows of the
-   2026-06-04 eliminate-requiring-resolve dogfood run. Pre-fix this surfaced
-   as `Cost: $0.0000` at the top of the run summary."
-  42.22608595)
-
-(def ^:private dag-failure-fixture-duration-ms
-  "Total summed sub-workflow duration from the 2026-06-04 dogfood. Note this
-   value is INTENTIONALLY overwritten by wall-clock stamping in
-   `transition-to-failed`, so it's pinned for completeness but not asserted."
-  48356404)
-
-(def ^:private dag-failure-fixture-metrics
+(def ^{:stratum 1} ^:private dag-failure-fixture-metrics
   {:tokens      dag-failure-fixture-tokens
    :cost-usd    dag-failure-fixture-cost-usd
    :duration-ms dag-failure-fixture-duration-ms})
 
-(def ^:private minimal-rollup-test-workflow
+(def ^{:stratum 1} ^:private minimal-rollup-test-workflow
   "Smallest pipeline that satisfies `create-context` for the rollup tests —
    we only exercise the metric merge, not phase advancement."
   {:workflow/id      :test
@@ -277,62 +332,7 @@
    :workflow/pipeline [{:phase runner-test-plan}
                        {:phase runner-test-done}]})
 
-(deftest create-context-adopts-caller-run-id-test
-  (testing "one run, one identity: a :workflow-id in opts becomes
-            :execution/id (uuid or uuid-shaped string), so lifecycle events
-            published by the caller and phase/agent events published by the
-            pipeline land under the same id"
-    (let [wid (random-uuid)]
-      (is (= wid (:execution/id (ctx/create-context minimal-rollup-test-workflow
-                                                    {:task "T"} {:workflow-id wid}))))
-      (is (= wid (:execution/id (ctx/create-context minimal-rollup-test-workflow
-                                                    {:task "T"} {:workflow-id (str wid)}))))))
-  (testing "a non-uuid session label never breaks event routing — fresh uuid"
-    (let [adopted (:execution/id (ctx/create-context minimal-rollup-test-workflow
-                                                     {:task "T"}
-                                                     {:workflow-id "session-label"}))]
-      (is (uuid? adopted)))))
-
-(deftest apply-dag-success-rolls-dag-metrics-into-execution-test
-  (testing "DAG sub-workflow tokens/cost/duration roll into :execution/metrics on success"
-    ;; `apply-phase-transition` ignores its `pipeline` arg (see _pipeline in
-    ;; the defn), so we pass nil rather than call `runner/build-pipeline`,
-    ;; which would force the phase loader and trip the same classpath error
-    ;; that affects the other pipeline-running tests in this file.
-    (let [context (ctx/create-context minimal-rollup-test-workflow {:task "Test"} {})
-          dag-result {:artifacts []
-                      :worktree-paths []
-                      :metrics dag-success-fixture-metrics}
-          result #_{:clj-kondo/ignore [:invalid-arity]}
-                 (exec/apply-dag-success context dag-result nil
-                                         ctx/transition-to-completed
-                                         ctx/transition-to-failed)]
-      (is (= (:tokens dag-success-fixture-metrics)
-             (get-in result [:execution/metrics :tokens])))
-      (is (= (:cost-usd dag-success-fixture-metrics)
-             (get-in result [:execution/metrics :cost-usd]))))))
-
-(deftest apply-dag-failure-rolls-dag-metrics-into-execution-test
-  (testing "DAG sub-workflow spend rolls into :execution/metrics on failure too"
-    ;; Without this rollup the run summary lies ($0.0000 on a real spend) —
-    ;; tokens were spent whether or not the DAG succeeded.
-    (let [context (ctx/create-context minimal-rollup-test-workflow {:task "Test"} {})
-          dag-result {:artifacts []
-                      :metrics dag-failure-fixture-metrics}
-          result (exec/apply-dag-failure context dag-result ctx/transition-to-failed)]
-      (is (= :failed (:execution/status result)))
-      (is (= dag-failure-fixture-tokens
-             (get-in result [:execution/metrics :tokens])))
-      (is (= dag-failure-fixture-cost-usd
-             (get-in result [:execution/metrics :cost-usd])))
-      ;; :duration-ms is intentionally overwritten by wall-clock stamping in
-      ;; transition-to-failed (see context/stamp-wall-clock-duration). The
-      ;; rollup still runs so mid-run reads stay consistent; just don't
-      ;; assert against the DAG-supplied value here.
-      (is (= dag-result (:execution/dag-result result))
-          "dag-result remains attached for downstream consumers"))))
-
-(deftest execute-phase-step-uses-machine-state-over-phase-index-test
+(deftest ^{:stratum 1} execute-phase-step-uses-machine-state-over-phase-index-test
   (testing "standard execution selects the active phase from the machine snapshot"
     (let [workflow {:workflow/id :test
                     :workflow/version "1.0.0"
@@ -349,66 +349,8 @@
       (is (= :completed (:execution/status result)))
       (is (contains? (:execution/phase-results result) runner-test-done)))))
 
-;; ---------------------------------------------------------------------------- publish-event edge cases
-
-(deftest publish-event-nil-stream-test
-  (testing "publish-event with nil stream is a no-op"
-    ;; Should not throw
-    (is (nil? (runner/publish-event! nil {:event/type :test})))))
-
-(deftest publish-event-in-memory-stream-test
-  (testing "publish-event no-ops for non-stream maps"
-    (is (nil? (runner/publish-event! {} {:event/type :test})))))
-
-;; ---------------------------------------------------------------------------- terminal-state?
-
-(deftest terminal-state-test
-  (testing "completed and failed are terminal"
-    (is (true? (runner/terminal-state? {:execution/status :completed})))
-    (is (true? (runner/terminal-state? {:execution/status :failed}))))
-
-  (testing "running is not terminal"
-    (is (false? (runner/terminal-state? {:execution/status :running})))))
-
-;; ---------------------------------------------------------------------------- handle-empty-pipeline
-
-(deftest handle-empty-pipeline-test
-  (testing "adds error and transitions to failed"
-    (let [ctx (ctx/create-context {:workflow/id :test} {} {})
-          result (runner/handle-empty-pipeline ctx)]
-      (is (= :failed (:execution/status result)))
-      (is (some #(= :empty-pipeline (:type %)) (:execution/errors result))))))
-
-;; ---------------------------------------------------------------------------- handle-max-phases-exceeded
-
-(deftest handle-max-phases-exceeded-test
-  (testing "adds error about max phases"
-    (let [ctx (ctx/create-context {:workflow/id :test} {} {})
-          result (runner/handle-max-phases-exceeded ctx 10)]
-      (is (= :failed (:execution/status result)))
-      (is (some #(= :max-phases-exceeded (:type %)) (:execution/errors result))))))
-
-;; ---------------------------------------------------------------------------- publish helpers with nil stream
-
-(deftest publish-workflow-started-nil-stream-test
-  (testing "no-op with nil event stream"
-    (is (nil? (runner/publish-workflow-started! nil {})))))
-
-(deftest publish-workflow-completed-nil-stream-test
-  (testing "no-op with nil event stream"
-    (is (nil? (runner/publish-workflow-completed! nil {})))))
-
-(deftest publish-phase-started-nil-stream-test
-  (testing "no-op with nil event stream"
-    (is (nil? (runner/publish-phase-started! nil {} :plan)))))
-
-(deftest publish-phase-completed-nil-stream-test
-  (testing "no-op with nil event stream"
-    (is (nil? (runner/publish-phase-completed! nil {} :plan {})))))
-
 ;; ---------------------------------------------------------------------------- execution mode: local (default)
-
-(deftest run-pipeline-local-mode-sets-execution-mode-test
+(deftest ^{:stratum 1} run-pipeline-local-mode-sets-execution-mode-test
   (testing ":local mode is the default and sets :execution/mode on context"
     (let [wf {:workflow/id :test
               :workflow/version "1.0.0"
@@ -416,7 +358,7 @@
           result (runner/run-pipeline wf {:task "Test"})]
       (is (= :local (:execution/mode result))))))
 
-(deftest run-pipeline-explicit-local-mode-test
+(deftest ^{:stratum 1} run-pipeline-explicit-local-mode-test
   (testing "explicit :local mode uses worktree"
     (let [wf {:workflow/id :test
               :workflow/version "1.0.0"
@@ -425,34 +367,7 @@
       (is (= :completed (:execution/status result)))
       (is (= :local (:execution/mode result))))))
 
-(deftest run-pipeline-governed-mode-sets-execution-mode-test
-  (testing ":governed mode sets :execution/mode :governed on context"
-    (let [wf {:workflow/id :test
-              :workflow/version "1.0.0"
-              :workflow/pipeline [{:phase runner-test-done}]}]
-      (with-mock-capsule-executor
-        (let [result (runner/run-pipeline wf {:task "Test"}
-                                          {:execution-mode :governed})]
-          (is (= :governed (:execution/mode result))))))))
-
-(deftest run-pipeline-governed-mode-has-host-worktree-test
-  (testing ":governed mode provides a host-accessible worktree-path (not /workspace)"
-    (let [wf {:workflow/id :test
-              :workflow/version "1.0.0"
-              :workflow/pipeline [{:phase runner-test-done}]}]
-      (with-mock-capsule-executor
-        (let [result (runner/run-pipeline wf {:task "Test"}
-                                          {:execution-mode :governed})]
-          (is (some? (:execution/worktree-path result))
-              "Should have a worktree path")
-          (is (not= "/workspace" (:execution/worktree-path result))
-              "Worktree path should be host-accessible, not container-internal")
-          (is (some? (:execution/executor result))
-              "Should have a capsule executor")
-          (is (some? (:execution/environment-id result))
-              "Should have a capsule environment-id"))))))
-
-(deftest run-pipeline-governed-mode-rejects-worktree-fallback-test
+(deftest ^{:stratum 1} run-pipeline-governed-mode-rejects-worktree-fallback-test
   (testing ":governed mode does not fall through to worktree (N11 §7.4 no-silent-downgrade)"
     ;; Simulate all executors appearing as :worktree type so governed mode
     ;; rejects them and throws rather than silently falling back.
@@ -467,15 +382,7 @@
              (runner/run-pipeline wf {:task "Test"}
                                   {:execution-mode :governed})))))))
 
-;; ---------------------------------------------------------------------------- persist-workspace-at-phase-boundary!
-
-(def ^:private persist-fn
-  "Var accessor for persist-workspace-at-phase-boundary! (extracted to runner-environment)."
-  (do (require 'ai.miniforge.workflow.runner-environment)
-      (ns-resolve 'ai.miniforge.workflow.runner-environment
-                  'persist-workspace-at-phase-boundary!)))
-
-(deftest persist-workspace-noop-when-no-executor-test
+(deftest ^{:stratum 1} persist-workspace-noop-when-no-executor-test
   (testing "returns nil when context has no :execution/executor"
     (let [context {:execution/mode :governed
                    :execution/environment-id "env-1"
@@ -483,7 +390,7 @@
           phase-ctx {:execution/current-phase :implement}]
       (is (nil? (persist-fn context phase-ctx))))))
 
-(deftest persist-workspace-fires-in-local-mode-test
+(deftest ^{:stratum 1} persist-workspace-fires-in-local-mode-test
   (testing "persist fires in :local mode (parity with :governed) so worktree-tier work survives release"
     (let [call-args (atom nil)
           context {:execution/executor :stub
@@ -503,7 +410,7 @@
         (is (= "feat/foo" (get-in @call-args [:opts :base-branch])))
         (is (= "env-1" (get-in @call-args [:opts :task-id])))))))
 
-(deftest persist-workspace-calls-executor-in-governed-mode-test
+(deftest ^{:stratum 1} persist-workspace-calls-executor-in-governed-mode-test
   (testing "calls dag-exec/persist-workspace! with correct args in governed mode"
     (let [call-args (atom nil)
           context {:execution/executor :mock-executor
@@ -526,7 +433,7 @@
         (is (= (messages/t :env/persist-message {:phase "implement"})
                (get-in @call-args [:opts :message])))))))
 
-(deftest persist-workspace-uses-unknown-when-no-phase-test
+(deftest ^{:stratum 1} persist-workspace-uses-unknown-when-no-phase-test
   (testing "uses 'unknown' when phase-ctx has no :execution/current-phase"
     (let [call-args (atom nil)
           context {:execution/executor :mock
@@ -541,7 +448,7 @@
         (is (= (messages/t :env/persist-message {:phase "unknown"})
                (:message @call-args)))))))
 
-(deftest persist-workspace-catches-exceptions-test
+(deftest ^{:stratum 1} persist-workspace-catches-exceptions-test
   (testing "catches exceptions from persist-workspace! without propagating"
     (let [context {:execution/executor :mock
                    :execution/mode :governed
@@ -555,7 +462,7 @@
         ;; Should not throw
         (is (nil? (persist-fn context phase-ctx)))))))
 
-(defn- capture-persist-event-data
+(defn- ^{:stratum 1} capture-persist-event-data
   "Capture the data passed to es/workspace-persisted by running the
    persist boundary against a stub executor that always reports a
    successful persist."
@@ -579,7 +486,91 @@
       (persist-fn context phase-ctx)
       @event-data)))
 
-(deftest persist-tier-is-worktree-in-local-mode-test
+;------------------------------------------------------------------------------ Layer 2
+
+(deftest ^{:stratum 2} create-context-adopts-caller-run-id-test
+  (testing "one run, one identity: a :workflow-id in opts becomes
+            :execution/id (uuid or uuid-shaped string), so lifecycle events
+            published by the caller and phase/agent events published by the
+            pipeline land under the same id"
+    (let [wid (random-uuid)]
+      (is (= wid (:execution/id (ctx/create-context minimal-rollup-test-workflow
+                                                    {:task "T"} {:workflow-id wid}))))
+      (is (= wid (:execution/id (ctx/create-context minimal-rollup-test-workflow
+                                                    {:task "T"} {:workflow-id (str wid)}))))))
+  (testing "a non-uuid session label never breaks event routing — fresh uuid"
+    (let [adopted (:execution/id (ctx/create-context minimal-rollup-test-workflow
+                                                     {:task "T"}
+                                                     {:workflow-id "session-label"}))]
+      (is (uuid? adopted)))))
+
+(deftest ^{:stratum 2} apply-dag-success-rolls-dag-metrics-into-execution-test
+  (testing "DAG sub-workflow tokens/cost/duration roll into :execution/metrics on success"
+    ;; `apply-phase-transition` ignores its `pipeline` arg (see _pipeline in
+    ;; the defn), so we pass nil rather than call `runner/build-pipeline`,
+    ;; which would force the phase loader and trip the same classpath error
+    ;; that affects the other pipeline-running tests in this file.
+    (let [context (ctx/create-context minimal-rollup-test-workflow {:task "Test"} {})
+          dag-result {:artifacts []
+                      :worktree-paths []
+                      :metrics dag-success-fixture-metrics}
+          result #_{:clj-kondo/ignore [:invalid-arity]}
+                 (exec/apply-dag-success context dag-result nil
+                                         ctx/transition-to-completed
+                                         ctx/transition-to-failed)]
+      (is (= (:tokens dag-success-fixture-metrics)
+             (get-in result [:execution/metrics :tokens])))
+      (is (= (:cost-usd dag-success-fixture-metrics)
+             (get-in result [:execution/metrics :cost-usd]))))))
+
+(deftest ^{:stratum 2} apply-dag-failure-rolls-dag-metrics-into-execution-test
+  (testing "DAG sub-workflow spend rolls into :execution/metrics on failure too"
+    ;; Without this rollup the run summary lies ($0.0000 on a real spend) —
+    ;; tokens were spent whether or not the DAG succeeded.
+    (let [context (ctx/create-context minimal-rollup-test-workflow {:task "Test"} {})
+          dag-result {:artifacts []
+                      :metrics dag-failure-fixture-metrics}
+          result (exec/apply-dag-failure context dag-result ctx/transition-to-failed)]
+      (is (= :failed (:execution/status result)))
+      (is (= dag-failure-fixture-tokens
+             (get-in result [:execution/metrics :tokens])))
+      (is (= dag-failure-fixture-cost-usd
+             (get-in result [:execution/metrics :cost-usd])))
+      ;; :duration-ms is intentionally overwritten by wall-clock stamping in
+      ;; transition-to-failed (see context/stamp-wall-clock-duration). The
+      ;; rollup still runs so mid-run reads stay consistent; just don't
+      ;; assert against the DAG-supplied value here.
+      (is (= dag-result (:execution/dag-result result))
+          "dag-result remains attached for downstream consumers"))))
+
+(deftest ^{:stratum 2} run-pipeline-governed-mode-sets-execution-mode-test
+  (testing ":governed mode sets :execution/mode :governed on context"
+    (let [wf {:workflow/id :test
+              :workflow/version "1.0.0"
+              :workflow/pipeline [{:phase runner-test-done}]}]
+      (with-mock-capsule-executor
+        (let [result (runner/run-pipeline wf {:task "Test"}
+                                          {:execution-mode :governed})]
+          (is (= :governed (:execution/mode result))))))))
+
+(deftest ^{:stratum 2} run-pipeline-governed-mode-has-host-worktree-test
+  (testing ":governed mode provides a host-accessible worktree-path (not /workspace)"
+    (let [wf {:workflow/id :test
+              :workflow/version "1.0.0"
+              :workflow/pipeline [{:phase runner-test-done}]}]
+      (with-mock-capsule-executor
+        (let [result (runner/run-pipeline wf {:task "Test"}
+                                          {:execution-mode :governed})]
+          (is (some? (:execution/worktree-path result))
+              "Should have a worktree path")
+          (is (not= "/workspace" (:execution/worktree-path result))
+              "Worktree path should be host-accessible, not container-internal")
+          (is (some? (:execution/executor result))
+              "Should have a capsule executor")
+          (is (some? (:execution/environment-id result))
+              "Should have a capsule environment-id"))))))
+
+(deftest ^{:stratum 2} persist-tier-is-worktree-in-local-mode-test
   (testing ":workspace/persisted event labels :local mode as :worktree tier"
     (let [data (capture-persist-event-data
                 {:execution/executor :stub
@@ -596,7 +587,7 @@
       (is (= :worktree (:persist-tier data))
           "local mode persists to a local archive — worktree tier"))))
 
-(deftest persist-tier-is-remote-in-governed-mode-test
+(deftest ^{:stratum 2} persist-tier-is-remote-in-governed-mode-test
   (testing ":workspace/persisted event labels :governed mode as :remote tier"
     (let [data (capture-persist-event-data
                 {:execution/executor :stub
@@ -608,3 +599,5 @@
                 {:execution/current-phase :implement})]
       (is (= :remote (:persist-tier data))
           "governed mode pushes to remote — remote tier label, not worktree"))))
+
+(use-fixtures :each phase-test-support/with-workflow-phase-test-support)

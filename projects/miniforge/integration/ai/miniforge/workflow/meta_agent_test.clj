@@ -15,7 +15,6 @@
 ;; WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 ;; See the License for the specific language governing permissions and
 ;; limitations under the License.
-
 (ns ai.miniforge.workflow.meta-agent-test
   "Integration tests for meta-agent monitoring in workflow execution.
 
@@ -27,9 +26,10 @@
    [ai.miniforge.workflow.runner :as runner]
    [ai.miniforge.agent.interface :as agent]))
 
-;------------------------------------------------------------------------------ Test fixtures
+;------------------------------------------------------------------------------ Layer 0
 
-(def simple-workflow-with-meta-agents
+;------------------------------------------------------------------------------ Test fixtures
+(def ^{:stratum 0} simple-workflow-with-meta-agents
   "A minimal test workflow with meta-agent monitoring enabled."
   {:workflow/id :test-meta-monitoring
    :workflow/version "1.0.0"
@@ -41,9 +41,9 @@
      :enabled? true
      :config {:check-interval-ms 1000        ; Check every second
               :stagnation-threshold-ms 5000  ; 5 seconds without progress
-              :max-total-ms 30000}}]})       ; 30 second total timeout
+              :max-total-ms 30000}}]})  ; 30 second total timeout
 
-(def workflow-without-meta-agents
+(def ^{:stratum 0} workflow-without-meta-agents
   "A workflow without meta-agents for comparison."
   {:workflow/id :test-no-monitoring
    :workflow/version "1.0.0"
@@ -52,8 +52,7 @@
     {:phase :done}]})
 
 ;------------------------------------------------------------------------------ Helper functions
-
-(defn create-streaming-mock-llm
+(defn ^{:stratum 0} create-streaming-mock-llm
   "Create a mock LLM that simulates streaming with chunks.
 
    Each response will include streaming chunks to test meta-agent
@@ -74,15 +73,16 @@
                   :usage (or (:usage response)
                              {:input-tokens 50 :output-tokens 25})}))))))
 
-(defn count-health-checks
+(defn ^{:stratum 0} count-health-checks
   "Count how many health checks were performed during execution."
   [coordinator]
   (let [history (agent/get-meta-check-history coordinator {:limit 1000})]
     (count history)))
 
-;------------------------------------------------------------------------------ Meta-agent initialization tests
+;------------------------------------------------------------------------------ Layer 1
 
-(deftest test-meta-coordinator-initialized
+;------------------------------------------------------------------------------ Meta-agent initialization tests
+(deftest ^{:stratum 1} test-meta-coordinator-initialized
   (testing "Meta-coordinator is initialized in workflow context"
     (let [workflow simple-workflow-with-meta-agents
           mock-llm (create-streaming-mock-llm {:content "(defn plan [] :ok)"})
@@ -109,7 +109,7 @@
           (is (some #(= :progress-monitor (:id %)) (:agents stats))
               "Should have progress monitor agent"))))))
 
-(deftest test-meta-coordinator-default-creation
+(deftest ^{:stratum 1} test-meta-coordinator-default-creation
   (testing "Meta-coordinator created with default progress monitor when no config"
     (let [workflow workflow-without-meta-agents
           mock-llm (create-streaming-mock-llm {:content "(defn plan [] :ok)"})
@@ -127,8 +127,7 @@
             "Should have at least one meta-agent (default progress monitor)")))))
 
 ;------------------------------------------------------------------------------ Health check execution tests
-
-(deftest test-health-checks-run-during-execution
+(deftest ^{:stratum 1} test-health-checks-run-during-execution
   (testing "Health checks are executed during workflow phases"
     (let [workflow simple-workflow-with-meta-agents
           mock-llm (create-streaming-mock-llm
@@ -155,7 +154,7 @@
           (is (some #(= :progress-monitor (:id %)) (:agents stats))
               "Should have progress monitor configured"))))))
 
-(deftest test-streaming-activity-tracking
+(deftest ^{:stratum 1} test-streaming-activity-tracking
   (testing "Streaming activity is tracked in workflow context"
     (let [workflow simple-workflow-with-meta-agents
           ;; Create mock with lots of streaming chunks
@@ -187,8 +186,7 @@
             "Should have meta-agent configuration")))))
 
 ;------------------------------------------------------------------------------ Progress detection tests
-
-(deftest test-progress-vs-stagnation-detection
+(deftest ^{:stratum 1} test-progress-vs-stagnation-detection
   (testing "Meta-agents detect real progress vs stagnation"
     ;; This test verifies the progress monitor can distinguish between:
     ;; 1. Active streaming (making progress)
@@ -215,8 +213,7 @@
             "All health checks should be healthy or warning (no halts)")))))
 
 ;------------------------------------------------------------------------------ Callback integration tests
-
-(deftest test-meta-monitoring-with-callbacks
+(deftest ^{:stratum 1} test-meta-monitoring-with-callbacks
   (testing "Meta-agent monitoring works with phase callbacks"
     (let [workflow simple-workflow-with-meta-agents
           mock-llm (create-streaming-mock-llm {:content "(defn plan [] :ok)"})
@@ -251,8 +248,7 @@
           "Meta-coordinator should be present with callbacks"))))
 
 ;------------------------------------------------------------------------------ Response chain integration tests
-
-(deftest test-meta-monitoring-response-chain
+(deftest ^{:stratum 1} test-meta-monitoring-response-chain
   (testing "Meta-agent checks are reflected in response chain"
     (let [workflow simple-workflow-with-meta-agents
           mock-llm (create-streaming-mock-llm {:content "(defn plan [] :ok)"})
@@ -275,8 +271,7 @@
             "Response chain should indicate success")))))
 
 ;------------------------------------------------------------------------------ FSM integration tests
-
-(deftest test-meta-monitoring-fsm-transitions
+(deftest ^{:stratum 1} test-meta-monitoring-fsm-transitions
   (testing "Meta-agent monitoring integrates with FSM state transitions"
     (let [workflow simple-workflow-with-meta-agents
           mock-llm (create-streaming-mock-llm {:content "(defn plan [] :ok)"})
@@ -296,8 +291,7 @@
           "Execution status should match FSM state"))))
 
 ;------------------------------------------------------------------------------ Metrics accumulation tests
-
-(deftest test-meta-monitoring-metrics
+(deftest ^{:stratum 1} test-meta-monitoring-metrics
   (testing "Metrics are accumulated correctly with meta-agent monitoring"
     (let [workflow simple-workflow-with-meta-agents
           mock-llm (create-streaming-mock-llm
@@ -322,8 +316,7 @@
             "Token count should be a number")))))
 
 ;------------------------------------------------------------------------------ Artifact tracking tests
-
-(deftest test-meta-monitoring-artifacts
+(deftest ^{:stratum 1} test-meta-monitoring-artifacts
   (testing "Artifacts are tracked with meta-agent monitoring"
     (let [workflow simple-workflow-with-meta-agents
           mock-llm (create-streaming-mock-llm {:content "(defn plan [] :ok)"})

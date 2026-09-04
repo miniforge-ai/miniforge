@@ -15,7 +15,6 @@
 ;; WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 ;; See the License for the specific language governing permissions and
 ;; limitations under the License.
-
 (ns ai.miniforge.workflow.anomaly.build-initial-context-test
   "Coverage for `runner/build-initial-context` (anomaly-returning) and
    its failed-context conversion in `runner/run-pipeline`.
@@ -30,21 +29,24 @@
             [ai.miniforge.anomaly.interface :as anomaly]
             [ai.miniforge.workflow.runner :as runner]))
 
-(def workflow
+;------------------------------------------------------------------------------ Layer 0
+
+(def ^{:stratum 0} workflow
   {:workflow/id :test
    :workflow/version "1.0.0"
    :workflow/phases []
    :workflow/pipeline []})
 
-(def input {:repo-url "https://example.test/repo"})
+(def ^{:stratum 0} input {:repo-url "https://example.test/repo"})
+
+;------------------------------------------------------------------------------ Layer 1
 
 ;------------------------------------------------------------------------------ Anomaly-returning happy path
 ;;
 ;; :local mode bypasses the capsule check and assembles a context. We
 ;; only assert non-anomaly here because the assembled map's full shape
 ;; is the responsibility of the existing runner_pipeline_test suite.
-
-(deftest build-initial-context-local-mode-returns-context
+(deftest ^{:stratum 1} build-initial-context-local-mode-returns-context
   (testing ":local mode produces a context map (not an anomaly)"
     (let [result (runner/build-initial-context workflow input
                                                 {:execution-mode :local})]
@@ -52,15 +54,14 @@
       (is (= :local (:execution/mode result))))))
 
 ;------------------------------------------------------------------------------ Anomaly-returning failure path
-
-(deftest build-initial-context-governed-without-capsule
+(deftest ^{:stratum 1} build-initial-context-governed-without-capsule
   (testing ":governed mode with no executor + env-id yields :invalid-input anomaly"
     (let [result (runner/build-initial-context workflow input
                                                 {:execution-mode :governed})]
       (is (anomaly/anomaly? result))
       (is (= :invalid-input (:anomaly/type result))))))
 
-(deftest build-initial-context-anomaly-data-carries-flags
+(deftest ^{:stratum 1} build-initial-context-anomaly-data-carries-flags
   (testing "anomaly data carries enough triage info for the caller"
     (let [result (runner/build-initial-context workflow input
                                                 {:execution-mode :governed})
@@ -69,7 +70,7 @@
       (is (false? (:has-executor? data)))
       (is (false? (:has-environment-id? data))))))
 
-(deftest build-initial-context-governed-with-executor-only
+(deftest ^{:stratum 1} build-initial-context-governed-with-executor-only
   (testing "executor without env-id is still an anomaly — both must be present"
     (let [result (runner/build-initial-context workflow input
                                                 {:execution-mode :governed
@@ -85,8 +86,7 @@
 ;; helper so the context-building anomaly is exercised directly rather
 ;; than being masked by runner-environment's separate governed-mode
 ;; acquisition checks.
-
-(deftest run-pipeline-context-anomaly-returns-failed-context
+(deftest ^{:stratum 1} run-pipeline-context-anomaly-returns-failed-context
   (testing "run-pipeline converts build-initial-context anomaly to failed context"
     (with-redefs-fn {#'runner/acquire-environment
                      (fn [_workflow _input opts] [nil opts])}
