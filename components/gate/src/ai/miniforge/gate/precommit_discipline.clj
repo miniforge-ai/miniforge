@@ -142,23 +142,24 @@
      branch - Branch to check (default HEAD)
      
    Returns:
-     Vector of {:hash string :message string :author string :date string}"
+     Vector of {:hash string :subject string :body string :message string :author string :date string}"
   [& {:keys [limit branch] :or {limit 50 branch "HEAD"}}]
   (let [format "%H|||%s|||%b|||%an|||%ai"
         result (exec-git ["log" (str "-" limit) (str "--format=" format) branch])]
     (if (zero? (:exit result))
-      ;; Split only at lines that begin a new commit record (40-hex hash then |||).
+      ;; Split only at lines that begin a new commit record (hex hash then |||).
       ;; The unescaped ||| in a lookahead is a regex alternation with empty alternatives,
       ;; which always matches — so we must escape the pipes to match literal |||.
-      (->> (str/split (:out result) #"\n(?=[0-9a-f]{40}\|\|\|)")
+      ;; {40,64} covers both SHA-1 (40-hex) and SHA-256 (64-hex) repositories.
+      (->> (str/split (:out result) #"\n(?=[0-9a-f]{40,64}\|\|\|)")
            (keep (fn [commit-str]
                    (when-not (str/blank? commit-str)
                      (let [[hash subject body author date] (str/split commit-str #"\|\|\|" 5)
                            hash-val (str/trim (or hash ""))]
-                       ;; Only accept entries whose first field is a 40-hex commit hash.
-                       ;; Body lines from multi-line commit messages pass `when hash` because
-                       ;; any non-nil string is truthy; the regex gate rejects them.
-                       (when (re-matches #"[0-9a-f]{40}" hash-val)
+                       ;; Accept only entries whose first field is a valid hex commit hash
+                       ;; (40-hex for SHA-1 repos, 64-hex for SHA-256 repos).
+                       ;; Body lines from multi-line commit messages are rejected here.
+                       (when (re-matches #"[0-9a-f]{40,64}" hash-val)
                          {:hash hash-val
                           :subject (str/trim (or subject ""))
                           :body (str/trim (or body ""))
