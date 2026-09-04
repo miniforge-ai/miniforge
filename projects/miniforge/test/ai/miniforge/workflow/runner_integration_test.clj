@@ -18,6 +18,7 @@
 (ns ai.miniforge.workflow.runner-integration-test
   "Integration tests for the workflow runner that execute real phase pipelines."
   (:require
+   [ai.miniforge.workflow.isolation-support :as isolation]
    [clojure.test :refer [deftest is testing use-fixtures]]
    [ai.miniforge.workflow.checkpoint-root-support :as checkpoint-root-support]
    [ai.miniforge.workflow.runner :as runner]
@@ -73,3 +74,8 @@
       (is (= :plan (get-in chain [:response-chain 0 :operation])))
       (is (= :completed (get-in result [:execution/phase-results :implement :status])))
       (is (true? (:succeeded? chain))))))
+
+;; Every pipeline this namespace runs acquires its worktree from a
+;; throwaway host repository and checkpoints into a throwaway root — never
+;; the checkout the test JVM was launched in, never `~/.miniforge`.
+(clojure.test/use-fixtures :once isolation/with-isolated-host)
