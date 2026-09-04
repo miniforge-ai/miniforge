@@ -49,8 +49,10 @@
    The future runs on the agent thread pool — fine for short-lived runtime
    CLI output. If the process is destroyed before the read completes,
    `future-cancel` alone is not enough: a read parked on a pipe ignores
-   interrupts, so close the stream as well, or use `drain-stream` +
-   `cancel-drain!`, which do both."
+   interrupts, so the stream must be closed as well. Passing
+   `(.getInputStream process)` inline, as the runtime callers do, leaves
+   no reference to close; for a cancellable read prefer `drain-stream` +
+   `cancel-drain!`, which retain the stream and do both steps."
   [^InputStream stream]
   (future (with-open [s stream] (.readAllBytes s))))
 
