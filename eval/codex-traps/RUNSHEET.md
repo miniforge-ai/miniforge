@@ -747,13 +747,12 @@ f413dd80 (rx3) explains it; rx1 and rx2 match line for line.
    itself, saw OCI-timeout lines from unrelated tests, and wrote that
    the one error was "infrastructure flakiness unrelated to this
    rename": `:already-implemented`, five times, to the cap.
-4. The other two FAIL blocks (lines 550 and 572 of
-   components/phase-software-factory/test/ai/miniforge/phase_software_factory/release_test.clj)
-   only occur
-   with MINIFORGE_CODEX_PATH exported: behavior loading consults the
-   codex through the environment and appends the consultation to the
-   release addendum. Treated-arm noise, not a task consequence; the
-   baseline arm sees one failure, the treated arm three.
+4. The other two FAIL blocks, at lines 550 and 572 of
+   `components/phase-software-factory/test/ai/miniforge/phase_software_factory/release_test.clj`,
+   only occur with `MINIFORGE_CODEX_PATH` exported: behavior loading
+   consults the codex through the environment and appends the
+   consultation to the release addendum. Treated-arm noise, not a task
+   consequence; the baseline arm sees one failure, the treated arm three.
 
 Fix: PR 1884 (#1884) sums every namespace, keeps each FAIL/ERROR block with
 name, location and detail, names the failing tests in the verify
