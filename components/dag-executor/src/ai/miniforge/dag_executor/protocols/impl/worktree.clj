@@ -25,11 +25,13 @@
    [ai.miniforge.dag-executor.result :as result]
    [ai.miniforge.dag-executor.scratch-commit :as scratch-commit]
    [ai.miniforge.dag-executor.protocols.executor :as proto]
+   [ai.miniforge.dag-executor.protocols.impl.runtime.process :as runtime-process]
    [clojure.java.shell :as shell]
    [clojure.string :as str])
   (:import
    [java.io File]
-   [java.nio.file Files StandardCopyOption CopyOption]))
+   [java.nio.file Files StandardCopyOption CopyOption]
+   [java.util.concurrent TimeUnit]))
 
 ;------------------------------------------------------------------------------ Layer 0
 
@@ -185,36 +187,27 @@
 ;; ============================================================================
 ;; Command Execution
 ;; ============================================================================
-(defn ^{:stratum 0} execute-command
-  "Execute a command in a directory using ProcessBuilder.
+(def ^{:stratum 0} partial-output-drain-ms
+  "How long a deadline-bounded `execute-command` waits for the stdout/stderr
+   drain threads to reach end-of-stream — after killing a timed-out process
+   tree, and after the child exits on its own — before it samples whatever
+   bytes they copied. One second covers the pipe buffers emptying once the
+   writers are dead; if an orphan grandchild still holds a pipe open the
+   sample is taken anyway, so the deadline holds and the caller gets
+   partial output rather than a second hang."
+  1000)
 
-   Accepts either a string (passed to sh -c, suitable for shell builtins and
-   pipelines) or a vector of strings (exec'd directly without a shell —
-   preferred for user-supplied values to avoid shell injection).
-
-   This allows proper environment variable handling and working directory."
-  [workdir command env-map]
-  (let [cmd-args (if (string? command)
-                   ["sh" "-c" command]
-                   (vec command))
-        start-time (System/currentTimeMillis)]
-    (try
-      (let [pb (ProcessBuilder. ^java.util.List cmd-args)
-            _ (.directory pb (File. ^String workdir))
-            _ (when (seq env-map)
-                (let [pb-env (.environment pb)]
-                  (doseq [[k v] env-map]
-                    (.put pb-env (name k) (str v)))))
-            process (.start pb)
-            stdout (slurp (.getInputStream process))
-            stderr (slurp (.getErrorStream process))
-            exit-code (.waitFor process)]
-        (result/ok {:exit-code exit-code
-                    :stdout stdout
-                    :stderr stderr
-                    :duration-ms (- (System/currentTimeMillis) start-time)}))
-      (catch Exception e
-        (result/err :exec-failed (.getMessage e))))))
+(defn- ^{:stratum 0} timed-out-result
+  "Result for a child killed at its deadline: exit `timeout-exit-code`, the
+   partial stdout/stderr captured before the kill, and `:timed-out? true`
+   at the top level — the shape `verify/run-tests-in-capsule!` routes as a
+   non-actionable timeout instead of a test failure."
+  [start-time stdout-drain stderr-drain]
+  (assoc (result/ok {:exit-code   runtime-process/timeout-exit-code
+                     :stdout      (runtime-process/drained-text stdout-drain)
+                     :stderr      (runtime-process/drained-text stderr-drain)
+                     :duration-ms (- (System/currentTimeMillis) start-time)})
+         :timed-out? true))
 
 ;; ============================================================================
 ;; File Operations
@@ -229,6 +222,17 @@
         (str/starts-with? file-path root-path))))
 
 ;------------------------------------------------------------------------------ Layer 1
+
+(defn- ^{:stratum 1} kill-and-collect!
+  "Destroy `process` and its descendants, give the drain threads a bounded
+   chance to hit end-of-stream, then cancel them so no reader sits on a
+   dead pipe."
+  [^Process process stdout-drain stderr-drain]
+  (runtime-process/destroy-process-tree! process)
+  (deref (:future stdout-drain) partial-output-drain-ms nil)
+  (deref (:future stderr-drain) partial-output-drain-ms nil)
+  (future-cancel (:future stdout-drain))
+  (future-cancel (:future stderr-drain)))
 
 (defn ^{:stratum 1} default-base-path
   "Default location for git worktrees acquired by the worktree executor.
@@ -581,6 +585,69 @@
 
 ;------------------------------------------------------------------------------ Layer 2
 
+(defn ^{:stratum 2} execute-command
+  "Execute a command in a directory using ProcessBuilder.
+
+   Accepts either a string (passed to sh -c, suitable for shell builtins and
+   pipelines) or a vector of strings (exec'd directly without a shell —
+   preferred for user-supplied values to avoid shell injection).
+
+   stdout and stderr are drained on separate threads while the child runs,
+   so a child that fills the OS pipe buffer (64 KB) on one stream before
+   closing the other cannot deadlock the parent.
+
+   When `timeout-ms` is a positive number the wait is bounded: on expiry
+   the whole process tree is destroyed and the result carries exit
+   `timeout-exit-code`, the partial output, and `:timed-out? true`. A nil
+   or non-positive `timeout-ms` waits without a deadline."
+  ([workdir command env-map]
+   (execute-command workdir command env-map nil))
+  ([workdir command env-map timeout-ms]
+   (let [cmd-args (if (string? command)
+                    ["sh" "-c" command]
+                    (vec command))
+         start-time (System/currentTimeMillis)]
+     (try
+       (let [pb (ProcessBuilder. ^java.util.List cmd-args)
+             _ (.directory pb (File. ^String workdir))
+             _ (when (seq env-map)
+                 (let [pb-env (.environment pb)]
+                   (doseq [[k v] env-map]
+                     (.put pb-env (name k) (str v)))))
+             process      (.start pb)
+             stdout-drain (runtime-process/drain-stream (.getInputStream process))
+             stderr-drain (runtime-process/drain-stream (.getErrorStream process))]
+         (try
+           (let [timed?     (and (number? timeout-ms) (pos? timeout-ms))
+                 completed? (if timed?
+                              (.waitFor process (long timeout-ms) TimeUnit/MILLISECONDS)
+                              (do (.waitFor process) true))]
+             (if completed?
+               (do
+                 ;; Wait for end-of-stream so the last pipe-buffered bytes land.
+                 ;; Bounded when a deadline was given: an orphan grandchild
+                 ;; holding the pipe must not outlive the caller's deadline.
+                 (if timed?
+                   (do (deref (:future stdout-drain) partial-output-drain-ms nil)
+                       (deref (:future stderr-drain) partial-output-drain-ms nil))
+                   (do @(:future stdout-drain)
+                       @(:future stderr-drain)))
+                 (result/ok {:exit-code   (.exitValue process)
+                             :stdout      (runtime-process/drained-text stdout-drain)
+                             :stderr      (runtime-process/drained-text stderr-drain)
+                             :duration-ms (- (System/currentTimeMillis) start-time)}))
+               (do
+                 (kill-and-collect! process stdout-drain stderr-drain)
+                 (timed-out-result start-time stdout-drain stderr-drain))))
+           (catch InterruptedException e
+             ;; The caller's thread was interrupted mid-wait: do not leak the
+             ;; child, and keep the interrupt visible to whoever is unwinding.
+             (kill-and-collect! process stdout-drain stderr-drain)
+             (.interrupt (Thread/currentThread))
+             (result/err :exec-interrupted (.getMessage e)))))
+       (catch Exception e
+         (result/err :exec-failed (.getMessage e)))))))
+
 (defn ^{:stratum 2} check-legacy-tmp-worktrees!
   "Warn once per JVM session when the legacy /tmp/miniforge-worktrees directory
    has entries.
@@ -912,7 +979,7 @@
     (let [worktree-path (str base-path "/" environment-id)
           workdir (get opts :workdir worktree-path)
           env-map (merge {} (:env opts))]
-      (execute-command workdir command env-map)))
+      (execute-command workdir command env-map (get opts :timeout-ms))))
 
   (copy-to! [_this environment-id local-path remote-path]
     (let [worktree-path (str base-path "/" environment-id)]
