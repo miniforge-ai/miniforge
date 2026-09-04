@@ -141,8 +141,10 @@
       (is (false? (:passed? gate-result)))
       (is (= :tests-pass (:gate failed)))
       (is (= failures (-> failed :errors first :failures)))))
-  (testing "the :test alias denies too"
-    (is (false? (:passed? (gate/check-gates [:test] nil (verify-ctx (verify-error-result 0 1 failures)))))))
+  (testing "the :test alias denies too, with the singular message for one failure"
+    (let [gate-result (gate/check-gates [:test] nil (verify-ctx (verify-error-result 0 1 failures)))]
+      (is (false? (:passed? gate-result)))
+      (is (= "1 test failed" (-> gate-result :failed-gates first :errors first :message)))))
   (testing "and allows a green verify"
     (is (true? (:passed? (gate/check-gates [:tests-pass] nil
                                            (verify-ctx {:status :success

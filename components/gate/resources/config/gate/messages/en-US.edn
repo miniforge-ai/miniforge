@@ -112,6 +112,7 @@
 
   ;; Tests-pass gate — failing tests counted (phase result or artifact metadata)
   :tests-pass/failed "{fail-count} tests failed"
+  :tests-pass/failed-one "1 test failed"
 
   ;; Tests-pass gate — verify reported :error with no failing tests and no message
   :tests-pass/verify-error "Verify phase reported an error without test counts"

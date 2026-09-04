@@ -1026,7 +1026,7 @@
                                :errors [{:message "':skipped' still referenced"}]}]
           verify-failures    [{:gate :tests-pass
                                :errors [{:type :tests-failed
-                                         :message "1 tests failed"
+                                         :message "1 test failed"
                                          :failures [{:test "t" :location "t.clj:1"}]}]}]
           ctx (-> (create-base-context)
                   (assoc-in [:execution/phase-results :implement :phase/gate-failures]

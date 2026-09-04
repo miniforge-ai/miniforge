@@ -45,6 +45,32 @@
     (when (contains? (:metrics result) :fail-count)
       result)))
 
+(defn ^{:stratum 0} check-coverage
+  "Check if coverage meets threshold.
+
+   Default threshold: 80%"
+  [artifact ctx]
+  (let [threshold (or (get-in ctx [:coverage-threshold]) 80)
+        coverage (or (get-in artifact [:metadata :coverage])
+                     (get-in artifact [:artifact/metadata :coverage]))]
+    (cond
+      (nil? coverage)
+      {:passed? true
+       :warnings [{:type :no-coverage
+                   :message "No coverage data found"}]}
+
+      (>= coverage threshold)
+      {:passed? true
+       :coverage coverage
+       :threshold threshold}
+
+      :else
+      {:passed? false
+       :errors [{:type :coverage-below-threshold
+                 :message (str "Coverage " coverage "% below threshold " threshold "%")
+                 :coverage coverage
+                 :threshold threshold}]})))
+
 (defn- ^{:stratum 0} check-phase-test-result
   "Judge a test-bearing phase result. Fails on any failing test, and on a
    phase :status :error with no failing tests (parse error, crashed or timed
@@ -62,7 +88,10 @@
        :pass-count pass-count
        :fail-count fail-count
        :errors [{:type :tests-failed
-                 :message (messages/t :tests-pass/failed {:fail-count fail-count})
+                 :message (messages/t (if (= 1 fail-count)
+                                        :tests-pass/failed-one
+                                        :tests-pass/failed)
+                                      {:fail-count fail-count})
                  :failures failures}]}
 
       (= :error (:status result))
@@ -97,34 +126,10 @@
     :else
     {:passed? false
      :errors [{:type :tests-failed
-               :message (messages/t :tests-pass/failed {:fail-count (:fail-count test-results)})
+               :message (let [n (get test-results :fail-count 0)]
+                          (messages/t (if (= 1 n) :tests-pass/failed-one :tests-pass/failed)
+                                      {:fail-count n}))
                :failures (:failures test-results)}]}))
-
-(defn ^{:stratum 0} check-coverage
-  "Check if coverage meets threshold.
-
-   Default threshold: 80%"
-  [artifact ctx]
-  (let [threshold (or (get-in ctx [:coverage-threshold]) 80)
-        coverage (or (get-in artifact [:metadata :coverage])
-                     (get-in artifact [:artifact/metadata :coverage]))]
-    (cond
-      (nil? coverage)
-      {:passed? true
-       :warnings [{:type :no-coverage
-                   :message "No coverage data found"}]}
-
-      (>= coverage threshold)
-      {:passed? true
-       :coverage coverage
-       :threshold threshold}
-
-      :else
-      {:passed? false
-       :errors [{:type :coverage-below-threshold
-                 :message (str "Coverage " coverage "% below threshold " threshold "%")
-                 :coverage coverage
-                 :threshold threshold}]})))
 
 ;------------------------------------------------------------------------------ Layer 1
 
