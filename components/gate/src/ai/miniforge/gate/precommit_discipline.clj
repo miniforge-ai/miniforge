@@ -153,9 +153,13 @@
       (->> (str/split (:out result) #"\n(?=[0-9a-f]{40}\|\|\|)")
            (keep (fn [commit-str]
                    (when-not (str/blank? commit-str)
-                     (let [[hash subject body author date] (str/split commit-str #"\|\|\|" 5)]
-                       (when hash  ;; skip partial/malformed entries that lack a hash
-                         {:hash (str/trim hash)
+                     (let [[hash subject body author date] (str/split commit-str #"\|\|\|" 5)
+                           hash-val (str/trim (or hash ""))]
+                       ;; Only accept entries whose first field is a 40-hex commit hash.
+                       ;; Body lines from multi-line commit messages pass `when hash` because
+                       ;; any non-nil string is truthy; the regex gate rejects them.
+                       (when (re-matches #"[0-9a-f]{40}" hash-val)
+                         {:hash hash-val
                           :subject (str/trim (or subject ""))
                           :body (str/trim (or body ""))
                           :message (str/trim (str (or subject "") "\n" (or body "")))
