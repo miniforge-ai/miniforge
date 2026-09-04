@@ -42,7 +42,8 @@
    merged config carries that value even under an empty home."
   (:require
    [ai.miniforge.workflow.checkpoint-store-paths :as checkpoint-paths]
-   [babashka.fs :as fs])
+   [babashka.fs :as fs]
+   [slingshot.slingshot :refer [try+]])
   (:import
    (java.nio.file Files)
    (java.nio.file.attribute FileAttribute)))
@@ -57,9 +58,17 @@
                                   (make-array FileAttribute 0))))
 
 (defn ^{:stratum 0} delete-checkpoint-root!
-  "Remove a temp checkpoint root and everything a run wrote under it."
+  "Remove a temp checkpoint root and everything a run wrote under it.
+
+   Best effort: this runs in a fixture's `finally`, so a cleanup failure
+   (a file still open on Windows, a permission change under the root)
+   must not turn a passing test red or replace a failing test's real
+   error. A leaked root is findable by its `mf-checkpoint-test-` prefix."
   [root]
-  (fs/delete-tree root))
+  (try+
+    (fs/delete-tree root)
+    (catch Exception _
+      nil)))
 
 ;------------------------------------------------------------------------------ Layer 1
 
