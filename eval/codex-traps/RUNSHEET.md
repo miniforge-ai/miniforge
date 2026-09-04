@@ -814,3 +814,33 @@ Reading for the harvest: "failing test read as environmental" was not
 a discriminator the implementer lacked. The mechanism handed it a wrong
 summary and an excerpt with the evidence cut out; the misread followed.
 Re-observe after the fix before admitting anything.
+
+## REPAIR DEMONSTRATION NINTH SERIES — PRE-REGISTRATION (ry1–ry3, baseline arm, pin 4c07d54f8)
+
+Question: with the failing tests named (PR 1884 (#1884)), does the
+verify loop close instead of running to the redirect cap?
+
+Arm: baseline (MINIFORGE_CODEX_PATH unset), so the run's only expected
+failure is the trap's stale test consumer; the treated arm adds two
+codex-environment failures (release_test.clj:550 and :572) that would
+confound the count. Trap-a, three reps, same pin protocol as series 7
+(HEAD, `main` and `origin/main` all at the pin).
+
+H9a (catch, control): 3/3 `:caught` — the gate path is unchanged.
+
+H9b (loop closes): in at least two of three reps the verify phase that
+follows the first allowed implement records the failing test by name in
+its summary ("Failing: recording-is-a-no-op-without-a-configured-
+codex"), the next implement's prompt carries the FAIL block, and the
+implement after that changes gap_wiring_test.clj (or the ledger key it
+asserts) so that verify's fail-count drops to 0 within the redirect
+budget. Falsifier I: the summary names the test, the block is in the
+prompt, and the implementer still returns `:already-implemented` — then
+the discriminator IS missing and HARVEST-2026-09 §1 goes to admission.
+Falsifier J: verify's fail-count reaches 0 but the policy judge still
+denies on pre-existing style in codex-gap files — the loop has a second
+cause and the judge's scope is the next situation.
+
+Records: per rep — verify summaries per iteration, implementer
+prompt-sections with `:task/verify-failures`, the implement results'
+`:status`, the final verdict. Gate-history entries as before.
