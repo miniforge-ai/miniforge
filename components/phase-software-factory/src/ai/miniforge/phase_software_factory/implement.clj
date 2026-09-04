@@ -337,6 +337,14 @@
   [ctx ex]
   (phase/handle-error ctx ex 5))
 
+(defn- ^{:stratum 0} render-failure-block
+  "One parsed failure back in clojure.test's own shape, so the implementer
+   reads it exactly as a local run would print it."
+  [{:keys [kind test location detail]}]
+  (str (if (= :fail kind) "FAIL" "ERROR") " in (" test ")"
+       (when location (str " (" location ")"))
+       (when-not (str/blank? detail) (str "\n" detail))))
+
 ;------------------------------------------------------------------------------ Layer 1
 
 (defn- ^{:stratum 1} truncate-test-output
@@ -452,15 +460,16 @@
 
 ;------------------------------------------------------------------------------ Layer 2
 
-(defn- ^{:stratum 2} build-verify-failures
-  "Extract lean verify-failure data from phase results.
-   In the environment model, test metrics are in :result :metrics."
-  [verify-result]
-  {:test-results {:pass-count (get-in verify-result [:result :metrics :pass-count] 0)
-                  :fail-count (get-in verify-result [:result :metrics :fail-count] 0)
-                  :summary    (get-in verify-result [:result :summary])}
-   :test-output (truncate-test-output
-                 (get-in verify-result [:result :metrics :test-output]))})
+(defn- ^{:stratum 2} failure-focused-output
+  "The failure blocks first, verbatim, then the head/tail excerpt. Head and
+   tail alone lost every failure of a 6,000-line run (series 8, 2026-09-04):
+   the first namespace's clean summary was the head, the runner's epilogue
+   the tail, and the three FAIL blocks sat in the omitted middle."
+  [failures output]
+  (let [excerpt (truncate-test-output output)]
+    (if (seq failures)
+      (str (str/join "\n\n" (map render-failure-block failures)) "\n\n" excerpt)
+      excerpt)))
 
 (defn- ^{:stratum 2} rate-limit-in-result?
   "Check if an agent result indicates an infrastructure failure that
@@ -477,72 +486,17 @@
 
 ;------------------------------------------------------------------------------ Layer 3
 
-(defn ^{:stratum 3} build-implement-task
-  "Build the task map for the implementer agent from execution context.
-   Returns {:task task-map :rules-manifest manifest-or-nil}."
-  [ctx]
-  (let [input (get-in ctx [:execution/input])
-        plan-result (get-in ctx [:execution/phase-results :plan :result :output])
-        verify-failure (get-in ctx [:execution/phase-results :verify])
-        worktree-path (resolve-worktree-path ctx)
-        files-in-scope (resolve-files-in-scope input)
-        pack-ctx (or (get-in ctx [:execution/pack-context])
-                     (build-context-pack worktree-path files-in-scope))
-        existing-files (resolve-existing-files ctx pack-ctx worktree-path files-in-scope)
-        ;; Thesium Codex blackboard pin (SPEC §7.4): pinned FIRST so the
-        ;; worries render before the content they apply to. Retry iterations
-        ;; reuse :execution/cached-files which already contains the previous
-        ;; pin — drop it so the fresh consultation replaces it instead of
-        ;; rendering twice.
-        codex-outcome (codex-pin/pin-outcome :implement (get-in ctx [:execution/logger]))
-        existing-files (vec (remove #(= codex-pin/pin-path (:path %))
-                                    (or existing-files [])))
-        existing-files (if-let [pin (:entry codex-outcome)]
-                         (into [pin] existing-files)
-                         existing-files)
-        behavior-addendum (phase/load-guidance-addendum
-                            :implement {:task {:task/intent (:intent input)}})
-        review-feedback (resolve-review-feedback ctx)
-        phase-handoff (resolve-phase-handoff ctx)
-        ;; A prior implement attempt DENIED by gates: its structured gate
-        ;; errors ride :execution/phase-results (the [:phase ...] channel
-        ;; is cleared before every step). This is what turns a gate from
-        ;; a wall into a repair instruction — deny, retry with the
-        ;; evidence, fix, pass.
-        gate-failures (seq (get-in ctx [:execution/phase-results
-                                        :implement :phase/gate-failures]))
-        {:keys [formatted manifest]} (kb-helpers/inject-with-manifest
-                                       (:knowledge-store ctx) :implementer (get input :tags []))
-        base-task (assoc-optional-task-fields
-                    {:task/id (random-uuid)
-                     :task/type :implement
-                     :task/description (:description input)
-                     :task/title (:title input)
-                     :task/intent (:intent input)
-                     :task/constraints (:constraints input)
-                     :task/plan plan-result
-                     :task/existing-files existing-files
-                     :task/behavior-addendum behavior-addendum}
-                    pack-ctx formatted)
-        iteration (get-in ctx [:phase :iterations] 0)
-        last-error (get-in ctx [:phase :last-error])
-        task (cond-> base-task
-               verify-failure
-               (assoc :task/verify-failures (build-verify-failures verify-failure))
-               gate-failures
-               (assoc :task/gate-failures (vec gate-failures))
-               review-feedback
-               (assoc :task/review-feedback review-feedback)
-               phase-handoff
-               (assoc :task/phase-handoff phase-handoff)
-               (pos? iteration)
-               (assoc :task/prior-attempts
-                      {:attempt-number (inc iteration)
-                       :prior-error    (or last-error (messages/t :implement/prior-error-default))
-                       :instruction    (messages/t :implement/retry-instruction)}))]
-    {:task task
-     :rules-manifest manifest
-     :codex-outcome codex-outcome}))
+(defn- ^{:stratum 3} build-verify-failures
+  "Extract lean verify-failure data from phase results.
+   In the environment model, test metrics are in :result :metrics."
+  [verify-result]
+  (let [metrics  (get-in verify-result [:result :metrics])
+        failures (get metrics :failures [])]
+    {:test-results (cond-> {:pass-count (get metrics :pass-count 0)
+                            :fail-count (get metrics :fail-count 0)
+                            :summary    (get-in verify-result [:result :summary])}
+                     (seq failures) (assoc :failing-tests (mapv :test failures)))
+     :test-output (failure-focused-output failures (get metrics :test-output))}))
 
 (defn ^{:stratum 3} leave-implement
   "Post-processing for implementation phase.
@@ -754,7 +708,76 @@
 
 ;------------------------------------------------------------------------------ Layer 4
 
-(defn ^{:stratum 4} enter-implement
+(defn ^{:stratum 4} build-implement-task
+  "Build the task map for the implementer agent from execution context.
+   Returns {:task task-map :rules-manifest manifest-or-nil}."
+  [ctx]
+  (let [input (get-in ctx [:execution/input])
+        plan-result (get-in ctx [:execution/phase-results :plan :result :output])
+        verify-failure (get-in ctx [:execution/phase-results :verify])
+        worktree-path (resolve-worktree-path ctx)
+        files-in-scope (resolve-files-in-scope input)
+        pack-ctx (or (get-in ctx [:execution/pack-context])
+                     (build-context-pack worktree-path files-in-scope))
+        existing-files (resolve-existing-files ctx pack-ctx worktree-path files-in-scope)
+        ;; Thesium Codex blackboard pin (SPEC §7.4): pinned FIRST so the
+        ;; worries render before the content they apply to. Retry iterations
+        ;; reuse :execution/cached-files which already contains the previous
+        ;; pin — drop it so the fresh consultation replaces it instead of
+        ;; rendering twice.
+        codex-outcome (codex-pin/pin-outcome :implement (get-in ctx [:execution/logger]))
+        existing-files (vec (remove #(= codex-pin/pin-path (:path %))
+                                    (or existing-files [])))
+        existing-files (if-let [pin (:entry codex-outcome)]
+                         (into [pin] existing-files)
+                         existing-files)
+        behavior-addendum (phase/load-guidance-addendum
+                            :implement {:task {:task/intent (:intent input)}})
+        review-feedback (resolve-review-feedback ctx)
+        phase-handoff (resolve-phase-handoff ctx)
+        ;; A prior implement attempt DENIED by gates: its structured gate
+        ;; errors ride :execution/phase-results (the [:phase ...] channel
+        ;; is cleared before every step). This is what turns a gate from
+        ;; a wall into a repair instruction — deny, retry with the
+        ;; evidence, fix, pass.
+        gate-failures (seq (get-in ctx [:execution/phase-results
+                                        :implement :phase/gate-failures]))
+        {:keys [formatted manifest]} (kb-helpers/inject-with-manifest
+                                       (:knowledge-store ctx) :implementer (get input :tags []))
+        base-task (assoc-optional-task-fields
+                    {:task/id (random-uuid)
+                     :task/type :implement
+                     :task/description (:description input)
+                     :task/title (:title input)
+                     :task/intent (:intent input)
+                     :task/constraints (:constraints input)
+                     :task/plan plan-result
+                     :task/existing-files existing-files
+                     :task/behavior-addendum behavior-addendum}
+                    pack-ctx formatted)
+        iteration (get-in ctx [:phase :iterations] 0)
+        last-error (get-in ctx [:phase :last-error])
+        task (cond-> base-task
+               verify-failure
+               (assoc :task/verify-failures (build-verify-failures verify-failure))
+               gate-failures
+               (assoc :task/gate-failures (vec gate-failures))
+               review-feedback
+               (assoc :task/review-feedback review-feedback)
+               phase-handoff
+               (assoc :task/phase-handoff phase-handoff)
+               (pos? iteration)
+               (assoc :task/prior-attempts
+                      {:attempt-number (inc iteration)
+                       :prior-error    (or last-error (messages/t :implement/prior-error-default))
+                       :instruction    (messages/t :implement/retry-instruction)}))]
+    {:task task
+     :rules-manifest manifest
+     :codex-outcome codex-outcome}))
+
+;------------------------------------------------------------------------------ Layer 5
+
+(defn ^{:stratum 5} enter-implement
   "Execute implementation phase.
 
    Reads plan from context, invokes implementer agent,
@@ -955,10 +978,10 @@
         (assoc-in [:phase :watchdog-state]
                   {:stalled? stalled? :stall/gap-duration-ms gap-ms}))))
 
-;------------------------------------------------------------------------------ Layer 5
+;------------------------------------------------------------------------------ Layer 6
 
 ;; Registry method
-(defmethod ^{:stratum 5} phase/get-phase-interceptor-method :implement
+(defmethod ^{:stratum 6} phase/get-phase-interceptor-method :implement
   [config]
   (let [merged (phase/merge-with-defaults config)]
     {:name ::implement

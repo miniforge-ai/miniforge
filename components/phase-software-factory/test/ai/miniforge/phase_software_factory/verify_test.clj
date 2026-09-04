@@ -49,7 +49,7 @@
                      :intent "testing"}
    :execution/metrics {:tokens 0 :duration-ms 0}})
 
-;------------------------------------------------------------------------------ Layer 0: Defaults tests
+;; Defaults tests
 (deftest ^{:stratum 0} default-config-test
   (testing "default config has correct structure"
     (is (nil? (:agent verify/default-config))
@@ -280,6 +280,20 @@
           (is (str/includes? (str (get-in result [:error :message])) "timed out")
               ":error :message must carry the fragment — leave-verify branches on this"))))))
 
+(defn ^{:stratum 1} with-named-failure-runner
+  "Run body-fn with run-tests! mocked to return one parsed failure block."
+  [body-fn]
+  (with-redefs-fn
+    {run-tests-var (fn [_ & _opts]
+                     {:passed? false :test-count 10 :assertion-count 20
+                      :fail-count 1 :error-count 0
+                      :failures [{:kind :fail
+                                  :test "recording-is-a-no-op-without-a-configured-codex"
+                                  :location "gap_wiring_test.clj:106"
+                                  :detail "expected: {:skipped 0}\n  actual: {:torn-lines 0}"}]
+                      :output "Ran 10 tests containing 20 assertions.\n1 failures, 0 errors."})}
+    body-fn))
+
 ;------------------------------------------------------------------------------ Layer 2
 
 ;; Interceptor enter tests
@@ -325,6 +339,18 @@
           ;; Fail count captured in metrics for implement-retry loop
           (is (pos? (get-in result [:phase :result :metrics :fail-count]))
               "Fail count captured in metrics when tests fail"))))))
+
+(deftest ^{:stratum 2} enter-verify-names-failing-tests-test
+  (testing "the summary names the failing test and the metrics carry the block"
+    (with-named-failure-runner
+      (fn []
+        (let [ctx (assoc (create-base-context) :phase-config {:phase :verify})
+              result (verify/enter-verify ctx)
+              summary (get-in result [:phase :result :summary])]
+          (is (str/includes? summary "1 failure(s), 0 error(s)"))
+          (is (str/includes? summary "Failing: recording-is-a-no-op-without-a-configured-codex"))
+          (is (= "gap_wiring_test.clj:106"
+                 (get-in result [:phase :result :metrics :failures 0 :location]))))))))
 
 (use-fixtures :each
   (fn [f]

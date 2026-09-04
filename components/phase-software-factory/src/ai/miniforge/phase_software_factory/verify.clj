@@ -67,6 +67,42 @@
   "Suffix appended when test-runner output is truncated for display."
   "\n...")
 
+(def ^{:stratum 0} ^:private ran-tests-pattern
+  "clojure.test's per-namespace count line. A Polylith run prints one per
+   namespace; the run's totals are the SUM over every match, never the
+   first match alone (series 8, 2026-09-04: the first namespace's
+   `Ran 3 tests` stood in for a 911-namespace run)."
+  #"Ran (\d+) tests? containing (\d+) assertions?")
+
+(def ^{:stratum 0} ^:private namespace-summary-pattern
+  "clojure.test's per-namespace `F failures, E errors.` line, anchored to
+   the start of a line so the runner's per-project roll-up
+   (`Test results: N passes, F failures, E errors.`), which repeats the
+   same numbers, is not counted a second time."
+  #"(?m)^(\d+) failures?,\s*(\d+) errors?")
+
+(def ^{:stratum 0} ^:private failure-header-pattern
+  "One clojure.test failure header: `FAIL in (test-name) (file:line)` or
+   `ERROR in (test-name) (file:line)`. The location group is optional —
+   a fixture that throws before any test runs prints none."
+  #"^(FAIL|ERROR) in \(([^)]*)\)(?: \(([^)]*)\))?")
+
+(def ^{:stratum 0} ^:private max-failure-blocks
+  "Failure blocks kept per run. A compile error can fail every test in a
+   namespace; twenty shows the pattern without flooding the implementer
+   prompt."
+  20)
+
+(def ^{:stratum 0} ^:private max-failure-block-lines
+  "Detail lines kept under one failure header — the `expected:`/`actual:`
+   pair plus a short stack is enough to act on."
+  12)
+
+(def ^{:stratum 0} ^:private max-named-failures
+  "Failing test names spelled out in the verify summary; any beyond this
+   are counted, not listed."
+  5)
+
 ;------------------------------------------------------------------------------ Layer 0.5
 ;; Test execution helpers
 (defn- ^{:stratum 0} test-error-result
@@ -176,64 +212,43 @@
   [ctx ex]
   (phase/handle-error ctx ex 3))
 
+(defn- ^{:stratum 0} sum-groups
+  "Sum capture group `group` over every match of `pattern` in `output`."
+  [pattern group output]
+  (reduce + 0 (map #(parse-long (nth % group)) (re-seq pattern output))))
+
+(defn- ^{:stratum 0} synthesized-error-count
+  "The parsed error count, or one phantom error when every parsed count is
+   clean yet the runner exited non-zero (a brick that failed to compile
+   leaves no summary line). Counted failures are never topped up."
+  [fail-count error-count exit-code]
+  (if (and (zero? fail-count) (zero? error-count) (not (zero? exit-code)))
+    1
+    error-count))
+
 ;------------------------------------------------------------------------------ Layer 1
 
-(defn ^{:stratum 1} parse-test-output
-  "Parse test summary output. Handles Clojure (bb test) and Rust (cargo test) formats.
+(defn- ^{:stratum 1} failure-detail-line?
+  "A line that still belongs to the failure block above it: non-blank and
+   not the next failure header."
+  [line]
+  (and (not (str/blank? line))
+       (nil? (re-find failure-header-pattern line))))
 
-   Clojure: 'Ran N tests containing M assertions. F failures, E errors.'
-   Rust:    'test result: ok. N passed; M failed; ...' (exit code is authoritative)"
-  [output exit-code]
-  (cond
-    (re-find #"(?i)No changed bricks|nothing to test" output)
-    ;; "Nothing to test" is only a pass when the runner ALSO exited cleanly. A
-    ;; non-zero exit alongside this text means the runner failed to discover or
-    ;; compile the test namespaces (e.g. a load/compile error before any test
-    ;; ran) — that must not be reported as success.
-    ;; A non-zero exit is reflected as one error so the downstream failure
-    ;; message/metrics don't read "0 failures, 0 errors" on a failed run.
-    {:passed? (zero? exit-code) :test-count 0 :assertion-count 0 :fail-count 0
-     :error-count (if (zero? exit-code) 0 1)
-     :no-tests? true :output output}
+(defn- ^{:stratum 1} failure-header-index
+  "Index of `line` when it is a failure header, else nil (for keep-indexed)."
+  [index line]
+  (when (re-find failure-header-pattern line)
+    index))
 
-    ;; Rust / cargo test
-    (re-find #"test result:" output)
-    (let [result-match (re-find #"test result: (\w+)\. (\d+) passed; (\d+) failed" output)
-          passed (if result-match (parse-long (nth result-match 2)) 0)
-          failed (if result-match (parse-long (nth result-match 3)) 0)]
-      {:passed? (zero? exit-code)
-       :test-count (+ passed failed)
-       :assertion-count (+ passed failed)
-       :fail-count failed
-       :error-count 0
-       :output output})
-
-    ;; Clojure / bb test
-    :else
-    (let [ran-match  (re-find #"Ran (\d+) tests? containing (\d+) assertions?" output)
-          fail-match (re-find #"(\d+) failures?,\s*(\d+) errors?" output)]
-      (if (and ran-match fail-match)
-        (let [test-count  (parse-long (nth ran-match 1))
-              fail-count  (parse-long (nth fail-match 1))
-              error-count (parse-long (nth fail-match 2))]
-          ;; Exit code is authoritative alongside the parsed counts: a brick
-          ;; whose tests fail to COMPILE (or a runner that exits non-zero for
-          ;; any reason) can still leave a "Ran N tests ... 0 failures, 0
-          ;; errors" line from OTHER bricks in the output. Requiring a zero
-          ;; exit too means such a run fails verify instead of being reported
-          ;; as passing on the text alone.
-          {:passed? (and (zero? fail-count) (zero? error-count) (zero? exit-code))
-           :test-count test-count
-           :assertion-count (parse-long (nth ran-match 2))
-           :fail-count fail-count
-           ;; If the parsed counts are clean but the runner exited non-zero
-           ;; (e.g. another brick failed to compile), reflect that as at least
-           ;; one error so the failure metrics/message don't read "0 errors".
-           :error-count (if (and (zero? error-count) (not (zero? exit-code)))
-                          1
-                          error-count)
-           :output output})
-        (assoc (test-error-result output) :parse-error? true)))))
+(defn- ^{:stratum 1} failing-test-list
+  "Comma-separated failing test names, at most `max-named-failures`, with
+   the remainder counted."
+  [names]
+  (let [shown (take max-named-failures names)
+        extra (- (count names) (count shown))]
+    (cond-> (str/join ", " shown)
+      (pos? extra) (str " (+" extra " more)"))))
 
 (defn- ^{:stratum 1} bounded-output-preview
   "Return a bounded, trimmed preview of test runner output."
@@ -341,6 +356,19 @@
 
 ;------------------------------------------------------------------------------ Layer 2
 
+(defn- ^{:stratum 2} failure-block
+  "The failure header at the head of `lines` plus its detail lines, bounded
+   by `max-failure-block-lines`."
+  [lines]
+  (let [[_ kind test-name location] (re-find failure-header-pattern (first lines))
+        detail (->> (rest lines)
+                    (take-while failure-detail-line?)
+                    (take max-failure-block-lines))]
+    {:kind     (if (= "FAIL" kind) :fail :error)
+     :test     test-name
+     :location location
+     :detail   (str/join "\n" detail)}))
+
 (defn- ^{:stratum 2} verify-failure-message
   "Build the user-facing verify failure message from parsed test results."
   [test-results raw-fails raw-errors]
@@ -357,9 +385,85 @@
            (str "\n" preview)))
 
     :else
-    (messages/t :verify/tests-failed {:fail-count raw-fails :error-count raw-errors})))
+    (let [names (map :test (:failures test-results))
+          counts (messages/t :verify/tests-failed {:fail-count raw-fails :error-count raw-errors})]
+      (cond-> counts
+        (seq names) (str " " (messages/t :verify/failing-tests
+                                         {:tests (failing-test-list names)}))))))
 
-(defn ^{:stratum 2} run-tests!
+;------------------------------------------------------------------------------ Layer 3
+
+(defn- ^{:stratum 3} failure-blocks
+  "Every `FAIL in` / `ERROR in` block in clojure.test output, in order,
+   capped at `max-failure-blocks`. Names the failing tests so a consumer
+   three namespaces into a 6,000-line run is not hidden behind the first
+   namespace's clean summary."
+  [output]
+  (let [lines (vec (str/split-lines (str output)))]
+    (->> (keep-indexed failure-header-index lines)
+         (take max-failure-blocks)
+         (mapv #(failure-block (subvec lines %))))))
+
+;------------------------------------------------------------------------------ Layer 4
+
+(defn ^{:stratum 4} parse-test-output
+  "Parse test summary output. Handles Clojure (bb test) and Rust (cargo test) formats.
+
+   Clojure: 'Ran N tests containing M assertions. F failures, E errors.'
+   Rust:    'test result: ok. N passed; M failed; ...' (exit code is authoritative)"
+  [output exit-code]
+  (cond
+    (re-find #"(?i)No changed bricks|nothing to test" output)
+    ;; "Nothing to test" is only a pass when the runner ALSO exited cleanly. A
+    ;; non-zero exit alongside this text means the runner failed to discover or
+    ;; compile the test namespaces (e.g. a load/compile error before any test
+    ;; ran) — that must not be reported as success.
+    ;; A non-zero exit is reflected as one error so the downstream failure
+    ;; message/metrics don't read "0 failures, 0 errors" on a failed run.
+    {:passed? (zero? exit-code) :test-count 0 :assertion-count 0 :fail-count 0
+     :error-count (if (zero? exit-code) 0 1)
+     :no-tests? true :output output}
+
+    ;; Rust / cargo test
+    (re-find #"test result:" output)
+    (let [result-match (re-find #"test result: (\w+)\. (\d+) passed; (\d+) failed" output)
+          passed (if result-match (parse-long (nth result-match 2)) 0)
+          failed (if result-match (parse-long (nth result-match 3)) 0)]
+      {:passed? (zero? exit-code)
+       :test-count (+ passed failed)
+       :assertion-count (+ passed failed)
+       :fail-count failed
+       :error-count 0
+       :output output})
+
+    ;; Clojure / bb test
+    :else
+    (let [ran-any?     (some? (re-find ran-tests-pattern output))
+          summary-any? (some? (re-find namespace-summary-pattern output))]
+      (if (and ran-any? summary-any?)
+        (let [fail-count  (sum-groups namespace-summary-pattern 1 output)
+              error-count (sum-groups namespace-summary-pattern 2 output)
+              ;; Exit code is authoritative alongside the parsed counts: a brick
+              ;; whose tests fail to COMPILE (or a runner that exits non-zero for
+              ;; any reason) can still leave a "Ran N tests ... 0 failures, 0
+              ;; errors" line from OTHER bricks in the output. Requiring a zero
+              ;; exit too means such a run fails verify instead of being reported
+              ;; as passing on the text alone.
+              passed?     (and (zero? fail-count) (zero? error-count) (zero? exit-code))
+              ;; A passing run has no blocks to find; skip the scan.
+              failures    (if passed? [] (failure-blocks output))]
+          {:passed? passed?
+           :test-count (sum-groups ran-tests-pattern 1 output)
+           :assertion-count (sum-groups ran-tests-pattern 2 output)
+           :fail-count fail-count
+           :error-count (synthesized-error-count fail-count error-count exit-code)
+           :failures failures
+           :output output})
+        (assoc (test-error-result output) :parse-error? true)))))
+
+;------------------------------------------------------------------------------ Layer 5
+
+(defn ^{:stratum 5} run-tests!
   "Run tests in the worktree. Infers the test command from the repo structure
    unless test-cmd is supplied explicitly.
 
@@ -405,7 +509,7 @@
       (catch Exception e
         (test-error-result (.getMessage e))))))
 
-(defn ^{:stratum 2} run-tests-in-capsule!
+(defn ^{:stratum 5} run-tests-in-capsule!
   "Run tests inside a task capsule via execute-fn (N11 §6).
    Routes the test command through the executor instead of host process/shell.
    execute-fn is dag-exec/execute! passed through context to avoid cross-component requires.
@@ -440,9 +544,9 @@
       (catch Exception e
         (test-error-result (.getMessage e))))))
 
-;------------------------------------------------------------------------------ Layer 3
+;------------------------------------------------------------------------------ Layer 6
 
-(defn ^{:stratum 3} enter-verify
+(defn ^{:stratum 6} enter-verify
   "Execute verification phase.
 
    Runs the test suite directly inside the executor environment.
@@ -502,7 +606,9 @@
                                                 (+ raw-fails raw-errors)
                                                 (get test-results :output ""))
                      (:parse-error? test-results)
-                     (assoc :parse-error? true))
+                     (assoc :parse-error? true)
+                     (seq (:failures test-results))
+                     (assoc :failures (:failures test-results)))
         summary    (if passed?
                      (messages/t :verify/tests-passed {:pass-count pass-count})
                      (verify-failure-message test-results raw-fails raw-errors))
@@ -512,10 +618,10 @@
 
     (phase/enter-context ctx :verify nil gates budget start-time result)))
 
-;------------------------------------------------------------------------------ Layer 4
+;------------------------------------------------------------------------------ Layer 7
 
 ;; Registry method
-(defmethod ^{:stratum 4} phase/get-phase-interceptor-method :verify
+(defmethod ^{:stratum 7} phase/get-phase-interceptor-method :verify
   [config]
   (let [merged (phase/merge-with-defaults config)]
     {:name ::verify
