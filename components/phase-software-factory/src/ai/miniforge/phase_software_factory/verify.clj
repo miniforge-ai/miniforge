@@ -393,7 +393,7 @@
 
 ;------------------------------------------------------------------------------ Layer 3
 
-(defn ^{:stratum 3} failure-blocks
+(defn- ^{:stratum 3} failure-blocks
   "Every `FAIL in` / `ERROR in` block in clojure.test output, in order,
    capped at `max-failure-blocks`. Names the failing tests so a consumer
    three namespaces into a 6,000-line run is not hidden behind the first
