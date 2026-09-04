@@ -32,10 +32,9 @@
    [babashka.fs :as fs]
    [ai.miniforge.agent.interface :as agent]
    [ai.miniforge.dag-executor.executor :as dag-exec]
-   [ai.miniforge.phase.interface :as phase]
-   [ai.miniforge.phase.loader :as loader]
    [ai.miniforge.phase.registry :as registry]
    [ai.miniforge.response.interface :as response]
+   [ai.miniforge.workflow.checkpoint-test-support :as checkpoint-test-support]
    [ai.miniforge.workflow.phase-test-support :as phase-test-support]
    [ai.miniforge.workflow.runner :as runner]))
 
@@ -52,9 +51,6 @@
   phase-test-support/runner-test-done)
 
 (def ^{:stratum 0} ^:dynamic *test-worktree* nil)
-
-(def ^{:stratum 0} phase-test-config-resource
-  "config/phase/workflow-test-support-namespaces.edn")
 
 (defn ^{:stratum 0} create-temp-worktree []
   (let [temp-dir (io/file (System/getProperty "java.io.tmpdir")
@@ -139,14 +135,6 @@
     (binding [*test-worktree* worktree]
       (try (f)
            (finally (cleanup-temp-worktree worktree))))))
-
-(defn ^{:stratum 1} phase-loader-fixture [f]
-  (phase/reset-phase-loader!)
-  (try
-    (binding [loader/phase-loader-config-resource phase-test-config-resource]
-      (f))
-    (finally
-      (phase/reset-phase-loader!))))
 
 (defn- ^{:stratum 1} register-env-promotion-phase!
   [phase-name]
@@ -311,7 +299,10 @@
           (is (false? @release-called?)
               "Runner should not release a pre-acquired environment (caller owns lifecycle)"))))))
 
-(use-fixtures :each worktree-fixture phase-loader-fixture)
+(use-fixtures :each
+  worktree-fixture
+  phase-test-support/with-workflow-phase-test-support
+  checkpoint-test-support/with-temp-checkpoint-root)
 
 (register-env-promotion-phase! env-promotion-implement)
 

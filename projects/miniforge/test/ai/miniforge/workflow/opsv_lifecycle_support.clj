@@ -23,9 +23,7 @@
    [malli.core :as m]
    [ai.miniforge.event-stream.interface.opsv :as opsv-event]
    [ai.miniforge.opsv-adapter-simulated.interface :as simulated]
-   [ai.miniforge.phase-opsv.interface :as opsv])
-  (:import
-   [org.apache.commons.io FileUtils]))
+   [ai.miniforge.phase-opsv.interface :as opsv]))
 
 ;------------------------------------------------------------------------------ Layer 0
 
@@ -98,16 +96,6 @@
   (count (filter #(and (= event-type (:event/type %))
                        (= phase-key (:workflow/phase %)))
                  events)))
-
-(defn ^{:stratum 0} with-temp-checkpoint-root
-  [f]
-  (let [root (doto (io/file (System/getProperty "java.io.tmpdir")
-                            (str "opsv-lifecycle-" (random-uuid)))
-               .mkdirs)]
-    (try
-      (f (.getAbsolutePath root))
-      (finally
-        (FileUtils/deleteQuietly root)))))
 
 ;------------------------------------------------------------------------------ Layer 1
 
