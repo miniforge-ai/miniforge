@@ -58,7 +58,8 @@ SL003), so it lives in its own namespace.
    parse stdout are not affected), `log-attempt-failed!` (one
    `:llm/preflight-retry` warn entry with `:attempt`, `:attempts`,
    `:elapsed-ms`, `:will-retry?`, `:backend`, `:cmd-path`, `:error-type`,
-   `:error-message`), and `pause-before-retry!`.
+   `:error-message`), and `pause-before-retry!` (an `InterruptedException`
+   during the pause is rethrown with the interrupt flag restored).
 2. Layer 1: `probe-backend-with-retries` runs `probe/run-backend-probe`
    up to the configured count, logs each failure, pauses between
    attempts, and returns the first success or the last failure.
@@ -69,8 +70,9 @@ SL003), so it lives in its own namespace.
    `retry/probe-backend-with-retries` and throws the same
    `:anomalies/unavailable` anomaly as before, with the same data keys
    (`:backend :cmd :cmd-path :cmd-version :probe-response`).
-2. Layer 2: `run-backend-preflight!` reads `:logger` from the context,
-   falling back to the stderr logger.
+2. Layer 2: `run-backend-preflight!` reads `:logger` from the context via
+   `context-logger`, which builds the stderr fallback only when the
+   context carries none.
 
 Retries apply to every failed probe, not only timeouts. A non-timeout
 failure (non-zero exit, unexpected output) returns fast, so the extra

@@ -59,9 +59,16 @@
                         :error-message (get-in probe-response [:error :message])}}))
 
 (defn- ^{:stratum 0} pause-before-retry!
+  "Sleep between attempts. Cancellation (`InterruptedException`) is
+   propagated with the interrupt flag restored, never swallowed, so an
+   operator stop during the pause still reaches the caller."
   [pause-ms]
   (when (pos? pause-ms)
-    (Thread/sleep ^long pause-ms)))
+    (try
+      (Thread/sleep ^long pause-ms)
+      (catch InterruptedException e
+        (.interrupt (Thread/currentThread))
+        (throw e)))))
 
 ;------------------------------------------------------------------------------ Layer 1
 

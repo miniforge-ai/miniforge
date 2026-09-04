@@ -69,6 +69,15 @@
                             :cmd-version cmd-version
                             :probe-response (support/response-summary probe-response)}))
 
+(defn- ^{:stratum 0} context-logger
+  "The runtime context's `:logger`, else the stderr fallback. Built only
+   when needed: a `get` default would construct the fallback on every
+   call, even when the context already carries a logger."
+  [context]
+  (if-some [logger (get context :logger)]
+    logger
+    (retry/stderr-logger)))
+
 (defn- ^{:stratum 0} backend-stamp
   [llm-client]
   (when-let [backend (llm/client-backend llm-client)]
@@ -121,6 +130,6 @@
     (let [stamp (-> stamp
                     ensure-cli-command-path!
                     versioned-backend-stamp)
-          logger (get context :logger (retry/stderr-logger))]
+          logger (context-logger context)]
       (provenance/print-backend-provenance! quiet stamp)
       (verify-backend-probe! logger llm-client stamp (:worktree-path context)))))

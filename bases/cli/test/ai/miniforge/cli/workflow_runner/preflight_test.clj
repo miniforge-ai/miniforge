@@ -27,6 +27,7 @@
    [ai.miniforge.cli.workflow-runner.paths :as paths]
    [ai.miniforge.cli.workflow-runner.preflight :as preflight]
    [ai.miniforge.cli.workflow-runner.preflight-probe :as probe]
+   [ai.miniforge.cli.workflow-runner.preflight-retry :as retry]
    [ai.miniforge.cli.workflow-runner.preflight-support :as support]
    [ai.miniforge.cli.workflow-runner.process :as process]
    [ai.miniforge.cli.workflow-runner.provenance :as provenance]))
@@ -69,6 +70,15 @@
 
 (defn- ^{:stratum 0} retry-log-entries [entries]
   (filterv (fn [entry] (= :llm/preflight-retry (:log/event entry))) @entries))
+
+(def ^{:stratum 0} ^:private interrupted-pause-ms
+  "Pause long enough that an already-interrupted thread fails the sleep
+   immediately rather than completing it; the assertion is on the
+   exception and the restored flag, not on the wait."
+  50)
+
+(defn- ^{:stratum 0} fallback-logger-must-not-be-built []
+  (throw (ex-info "stderr fallback logger built although :logger was supplied" {})))
 
 (deftest ^{:stratum 0} backend-preflight-attempts-clamps-to-at-least-one-test
   (testing "a zero or negative configured attempt count still means one probe"
@@ -232,6 +242,12 @@
 
 ;------------------------------------------------------------------------------ Layer 1
 
+(deftest ^{:stratum 1} pause-before-retry-propagates-interrupt-test
+  (testing "an interrupt during the retry pause is rethrown with the flag restored"
+    (.interrupt (Thread/currentThread))
+    (is (thrown? InterruptedException (#'retry/pause-before-retry! interrupted-pause-ms)))
+    (is (true? (Thread/interrupted)) "interrupt flag restored before rethrow")))
+
 (defn- ^{:stratum 1} timed-out-process-result []
   {:out ""
    :err (str "Process timed out after " stubbed-probe-timeout-ms "ms")
@@ -246,6 +262,7 @@
       (with-redefs-fn {#'paths/resolve-cli-command-path (fn [_] "/opt/homebrew/bin/claude")
                        #'probe/read-cli-version (fn [_] {:success true :version "2.1.126"})
                        #'support/backend-preflight-retry-pause-ms (constantly 0)
+                       #'retry/stderr-logger fallback-logger-must-not-be-built
                        #'process/run-cli-command (counting-process-runner calls [ok-claude-process-result])}
         (fn []
           (#'preflight/run-backend-preflight!
