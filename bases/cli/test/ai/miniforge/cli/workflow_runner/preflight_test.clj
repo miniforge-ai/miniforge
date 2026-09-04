@@ -244,9 +244,16 @@
 
 (deftest ^{:stratum 1} pause-before-retry-propagates-interrupt-test
   (testing "an interrupt during the retry pause is rethrown with the flag restored"
+    ;; Read the flag before any `is`: clojure.test's pass counter commutes a
+    ;; ref, and that STM transaction clears a pending interrupt.
     (.interrupt (Thread/currentThread))
-    (is (thrown? InterruptedException (#'retry/pause-before-retry! interrupted-pause-ms)))
-    (is (true? (Thread/interrupted)) "interrupt flag restored before rethrow")))
+    (let [thrown (try
+                   (#'retry/pause-before-retry! interrupted-pause-ms)
+                   nil
+                   (catch InterruptedException e e))
+          flag-restored? (Thread/interrupted)]
+      (is (instance? InterruptedException thrown))
+      (is (true? flag-restored?) "interrupt flag restored before rethrow"))))
 
 (defn- ^{:stratum 1} timed-out-process-result []
   {:out ""
