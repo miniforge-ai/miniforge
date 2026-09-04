@@ -21,6 +21,7 @@
   Tests artifact creation, validation, and error handling."
   (:require
    [clojure.test :refer [deftest testing is use-fixtures]]
+   [clojure.string :as str]
    [ai.miniforge.anomaly.interface :as anomaly]
    [ai.miniforge.phase-software-factory.implement :as implement]
    [ai.miniforge.phase.interface :as phase]
@@ -1022,6 +1023,39 @@
   (testing "no prior denial -> key absent"
     (let [{:keys [task]} (implement/build-implement-task (create-base-context))]
       (is (not (contains? task :task/gate-failures))))))
+
+(deftest ^{:stratum 2} build-implement-task-puts-failing-tests-in-front-test
+  ;; Series 8 (2026-09-04): head 30 + tail 25 lines of a 6,681-line run
+  ;; carried no FAIL block; the implementer re-ran the suite itself and
+  ;; blamed unrelated timeout noise, five times, to the redirect cap.
+  (testing "verify's FAIL blocks lead the excerpt and their names ride on
+            :test-results, however long the raw run"
+    (let [filler (str/join "\n" (repeat 3000 "Ran 3 tests containing 4 assertions.\n0 failures, 0 errors."))
+          failure {:kind :fail
+                   :test "recording-is-a-no-op-without-a-configured-codex"
+                   :location "gap_wiring_test.clj:106"
+                   :detail "expected: {:skipped 0}\n  actual: {:torn-lines 0}"}
+          ctx (assoc-in (create-base-context) [:execution/phase-results :verify]
+                        {:result {:status :error
+                                  :summary "Tests failed: 1 failure(s), 0 error(s)"
+                                  :metrics {:pass-count 10 :fail-count 1
+                                            :failures [failure] :test-output filler}}})
+          {:keys [task]} (implement/build-implement-task ctx)
+          {:keys [test-results test-output]} (:task/verify-failures task)]
+      (is (= ["recording-is-a-no-op-without-a-configured-codex"] (:failing-tests test-results)))
+      (is (str/starts-with? test-output
+                            "FAIL in (recording-is-a-no-op-without-a-configured-codex) (gap_wiring_test.clj:106)"))
+      (is (str/includes? test-output "actual: {:torn-lines 0}"))
+      (is (str/includes? test-output "lines omitted")
+          "the head/tail excerpt still follows the blocks")))
+  (testing "no failure blocks -> the excerpt alone, no :failing-tests key"
+    (let [ctx (assoc-in (create-base-context) [:execution/phase-results :verify]
+                        {:result {:status :error :summary "Tests failed: 0 failure(s), 1 error(s)"
+                                  :metrics {:pass-count 0 :fail-count 1 :test-output "boom"}}})
+          {:keys [task]} (implement/build-implement-task ctx)
+          {:keys [test-results test-output]} (:task/verify-failures task)]
+      (is (= "boom" test-output))
+      (is (not (contains? test-results :failing-tests))))))
 
 (deftest ^{:stratum 2} gate-denial-evidence-reaches-the-rendered-prompt-test
   (testing "end to end: a stored denied attempt -> build-implement-task ->

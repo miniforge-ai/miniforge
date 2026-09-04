@@ -89,6 +89,20 @@
            :execution/metrics {:tokens 0 :duration-ms 0}}
     on-fail (assoc :phase-config {:on-fail on-fail})))
 
+(def ^{:stratum 0} ^:private multi-namespace-run
+  "Two namespaces the way the Polylith runner prints them: the first clean,
+   the second with one failure, then the runner's colored project roll-up
+   that repeats the same numbers."
+  (str "Testing ai.miniforge.anomaly.interface.timestamp-test\n\n"
+       "Ran 3 tests containing 4 assertions.\n0 failures, 0 errors.\n\n"
+       "Testing ai.miniforge.phase-software-factory.gap-wiring-test\n\n"
+       "FAIL in (recording-is-a-no-op-without-a-configured-codex) (gap_wiring_test.clj:106)\n"
+       "no codex configured -> no gap to measure -> nothing written\n"
+       "expected: (= {:entries [], :skipped 0} (gap/read-ledger dir))\n"
+       "  actual: (not (= {:entries [], :skipped 0} {:entries [], :torn-lines 0}))\n\n"
+       "Ran 7 tests containing 16 assertions.\n1 failures, 0 errors.\n\n"
+       "\u001b[31mTest results: 15 passes, 1 failures, 0 errors.\u001b[0m\n"))
+
 ;------------------------------------------------------------------------------ Layer 1
 
 (defn ^{:stratum 1} with-passing-tests [body-fn]
@@ -265,6 +279,42 @@
           result (verify/leave-verify ctx)]
       (is (= :exhausted (get-in result [:phase :verdict])))
       (is (phase/failed? (get result :phase))))))
+
+(deftest ^{:stratum 1} parse-test-output-sums-every-namespace-test
+  ;; Series 8 (2026-09-04): the first namespace's "Ran 3 tests ... 0
+  ;; failures" stood in for a 911-namespace run, so the summary read
+  ;; "0 failure(s), 1 error(s)" while three FAIL blocks sat in the middle.
+  (testing "counts are the sum over namespaces, not the first match"
+    (let [r (verify/parse-test-output multi-namespace-run 1)]
+      (is (false? (:passed? r)))
+      (is (= 10 (:test-count r)))
+      (is (= 20 (:assertion-count r)))
+      (is (= 1 (:fail-count r)))
+      (is (= 0 (:error-count r))
+          "a counted failure is never topped up with a phantom error")))
+  (testing "the roll-up line is not counted a second time"
+    (is (= 1 (:fail-count (verify/parse-test-output multi-namespace-run 1))))))
+
+(deftest ^{:stratum 1} parse-test-output-names-failing-tests-test
+  (testing "every FAIL block is kept with its name, location and detail"
+    (let [[block :as failures] (:failures (verify/parse-test-output multi-namespace-run 1))]
+      (is (= 1 (count failures)))
+      (is (= :fail (:kind block)))
+      (is (= "recording-is-a-no-op-without-a-configured-codex" (:test block)))
+      (is (= "gap_wiring_test.clj:106" (:location block)))
+      (is (str/includes? (:detail block) "actual: (not (= {:entries [], :skipped 0} {:entries [], :torn-lines 0}))"))
+      (is (not (str/includes? (:detail block) "Ran 7 tests"))
+          "the block stops at the blank line")))
+  (testing "an ERROR header without a location parses too"
+    (let [output (str "ERROR in (boom-test)\njava.lang.Exception: kaboom\n\n"
+                      "Ran 1 tests containing 1 assertions.\n0 failures, 1 errors.\n")
+          [block] (:failures (verify/parse-test-output output 1))]
+      (is (= :error (:kind block)))
+      (is (= "boom-test" (:test block)))
+      (is (nil? (:location block)))
+      (is (= "java.lang.Exception: kaboom" (:detail block)))))
+  (testing "a clean run has no failure blocks"
+    (is (= [] (:failures (verify/parse-test-output "Ran 3 tests containing 4 assertions.\n0 failures, 0 errors.\n" 0))))))
 
 ;------------------------------------------------------------------------------ Layer 2
 
