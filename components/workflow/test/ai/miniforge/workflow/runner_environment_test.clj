@@ -17,7 +17,8 @@
 ;; limitations under the License.
 (ns ai.miniforge.workflow.runner-environment-test
   "Regression tests for runner-environment's base-sha capture and phase-boundary persistence guard behavior."
-  (:require [clojure.java.io :as io]
+  (:require [ai.miniforge.workflow.isolation-test-support :as isolation]
+            [clojure.java.io :as io]
             [clojure.java.shell :as shell]
             [clojure.string :as str]
             [clojure.test :refer [deftest is testing]]
@@ -152,3 +153,8 @@
               "build-env-record sets :base-sha to resolved worktree HEAD SHA")
           (is (= "main" (get-in record [:environment-metadata :base-branch]))
               "pre-existing metadata fields must survive the merge"))))))
+
+;; Every pipeline this namespace runs acquires its worktree from a
+;; throwaway host repository and checkpoints into a throwaway root — never
+;; the checkout the test JVM was launched in, never `~/.miniforge`.
+(clojure.test/use-fixtures :once isolation/with-isolated-host)

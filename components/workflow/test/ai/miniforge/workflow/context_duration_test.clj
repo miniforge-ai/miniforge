@@ -23,6 +23,7 @@
    into parent metrics). Post-fix it's the workflow wall-clock
    (`ended-at` − `started-at`)."
   (:require
+   [ai.miniforge.workflow.isolation-test-support :as isolation]
    [ai.miniforge.workflow.context :as context]
    [clojure.test :refer [deftest is testing]]))
 
@@ -131,6 +132,11 @@
              (get-in completed [:execution/metrics :duration-ms]))
           "Instant-shaped started-at coerces correctly AND stamps
            the right delta (not just survives without throwing)"))))
+
+;; Every pipeline this namespace runs acquires its worktree from a
+;; throwaway host repository and checkpoints into a throwaway root — never
+;; the checkout the test JVM was launched in, never `~/.miniforge`.
+(clojure.test/use-fixtures :once isolation/with-isolated-host)
 
 ;------------------------------------------------------------------------------ Rich Comment
 (comment
