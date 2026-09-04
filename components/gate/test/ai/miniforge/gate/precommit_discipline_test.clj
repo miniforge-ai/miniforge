@@ -17,7 +17,8 @@
 ;; limitations under the License.
 (ns ai.miniforge.gate.precommit-discipline-test
   "Tests for pre-commit discipline policy gate."
-  (:require [clojure.test :refer [deftest is testing]]
+  (:require [clojure.string :as str]
+            [clojure.test :refer [deftest is testing]]
             [ai.miniforge.gate.precommit-discipline :as discipline]))
 
 ;------------------------------------------------------------------------------ Layer 0
@@ -109,12 +110,12 @@
   (testing "Gate returns passed for clean history"
     ;; Note: This test will check actual git history if run in a git repo
     ;; In CI/test environments without recent bypass commits, should pass
-    (let [result (discipline/check-precommit-discipline 
-                  {} 
+    (let [result (discipline/check-precommit-discipline
+                  {}
                   {:config {:commits-to-check 5}})]
       (is (contains? result :passed?))
       (is (boolean? (:passed? result)))))
-  
+
   (testing "Gate accepts configuration options"
     (let [result (discipline/check-precommit-discipline
                   {}
@@ -122,3 +123,57 @@
                            :branch "HEAD"
                            :fail-on-warning true}})]
       (is (contains? result :passed?)))))
+
+;------------------------------------------------------------------------------ Layer 1
+
+(deftest ^{:stratum 1} get-recent-commits-multiline-body-test
+  (testing "A commit with a multi-line body is parsed as one commit, not split"
+    ;; The split regex must use escaped \|\|\| so the lookahead only fires at
+    ;; lines that actually start a new commit record (40-hex hash + |||).
+    ;; Before the fix the unescaped ||| was a regex alternation with empty
+    ;; alternatives (always-match), so every \n split the output and lines
+    ;; inside a multi-line body were handed to the parser as if they were
+    ;; standalone records — producing nil fields and str/trim NPEs.
+    (let [hash "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+          fake-out (str hash "|||feat: multi-line|||Line 1 of body\nLine 2 of body|||Author|||2026-08-30 10:00:00 +0000")]
+      (with-redefs [ai.miniforge.gate.precommit-discipline/exec-git
+                    (fn [_args] {:exit 0 :out fake-out :err ""})]
+        (let [commits (discipline/get-recent-commits :limit 5 :branch "HEAD")]
+          (is (= 1 (count commits))
+              "Multi-line body must yield exactly one commit map")
+          (is (str/includes? (:body (first commits)) "Line 2 of body")
+              "Body must include all lines from the multi-line body"))))))
+
+(deftest ^{:stratum 1} get-recent-commits-format-arg-test
+  (testing "exec-git receives --format= as a single joined argument"
+    ;; Before the fix, `\"--format=\"` and the format string were two separate
+    ;; vector elements, so git received them as distinct positional args.
+    ;; Git treated the format string as a revision reference and exited 128,
+    ;; making get-recent-commits silently return [] on every call.
+    (let [received-args (atom nil)]
+      (with-redefs [ai.miniforge.gate.precommit-discipline/exec-git
+                    (fn [args]
+                      (reset! received-args args)
+                      {:exit 0 :out "" :err ""})]
+        (discipline/get-recent-commits :limit 5 :branch "HEAD")
+        (is (some #(str/starts-with? % "--format=") @received-args)
+            "exec-git must receive --format=<value> as a single fused argument")
+        (is (not (some #(= "--format=" %) @received-args))
+            "exec-git must not receive --format= as a bare argument with no value")))))
+
+(deftest ^{:stratum 1} check-precommit-discipline-rejects-undocumented-bypass-test
+  (testing "Gate fails when a bypass commit lacks proper documentation"
+    ;; Stub exec-git to inject a commit that bypassed hooks without the
+    ;; required [BYPASS-HOOKS: reason] marker so the gate exercises the full
+    ;; detection + validation path.
+    (let [fake-commit (str "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+                           "|||fix: skip hooks|||"
+                           "Used --no-verify because I was in a hurry"
+                           "|||Test Author|||2026-08-30 10:00:00 +0000")]
+      (with-redefs [ai.miniforge.gate.precommit-discipline/exec-git
+                    (fn [_args] {:exit 0 :out fake-commit :err ""})]
+        (let [result (discipline/check-precommit-discipline {} {:config {:commits-to-check 5}})]
+          (is (false? (:passed? result))
+              "Gate must fail when a bypass commit has no [BYPASS-HOOKS:] marker")
+          (is (seq (:errors result))
+              "Gate must produce at least one error for an undocumented bypass"))))))
