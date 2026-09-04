@@ -734,7 +734,7 @@ f413dd80 (rx3) explains it; rx1 and rx2 match line for line.
    consequence: the task renamed `:skipped` to `:torn-lines`, and a
    consumer test in phase-software-factory (gap_wiring_test.clj:106)
    still expects `:skipped`. The stale-references gate exempts tests by
-   design (PR 1869), so verify was the mechanism that had to name it.
+   design (PR 1869 (#1869)), so verify was the mechanism that had to name it.
 2. The parser took the first namespace's `Ran 3 tests … 0 failures, 0
    errors` for the whole run and synthesized one error from the
    non-zero exit. Summary: "Tests failed: 0 failure(s), 1 error(s)";
@@ -746,13 +746,13 @@ f413dd80 (rx3) explains it; rx1 and rx2 match line for line.
    itself, saw OCI-timeout lines from unrelated tests, and wrote that
    the one error was "infrastructure flakiness unrelated to this
    rename": `:already-implemented`, five times, to the cap.
-4. The other two FAIL blocks (release_test.clj:550 and :572) only occur
+4. The other two FAIL blocks (release_test.clj:550 and release_test.clj:572) only occur
    with MINIFORGE_CODEX_PATH exported: behavior loading consults the
    codex through the environment and appends the consultation to the
    release addendum. Treated-arm noise, not a task consequence; the
    baseline arm sees one failure, the treated arm three.
 
-Fix: PR 1884 sums every namespace, keeps each FAIL/ERROR block with
+Fix: PR 1884 (#1884) sums every namespace, keeps each FAIL/ERROR block with
 name, location and detail, names the failing tests in the verify
 summary, and leads the implementer's excerpt with the blocks. Checked
 against the rx3 output: all three named. Filed separately: the
