@@ -98,8 +98,11 @@
 
 (deftest ^{:stratum 2} execute-command-drains-stderr-flood-without-deadlock-test
   (testing "a child that fills the stderr pipe before writing stdout still completes"
-    (let [r (deref (future (worktree/execute-command scratch-dir stderr-flood-cmd {}))
-                   regression-guard-ms ::hung)]
+    (let [run (future (worktree/execute-command scratch-dir stderr-flood-cmd {}))
+          r   (deref run regression-guard-ms ::hung)]
+      ;; On a regression, interrupt the waiter so its InterruptedException
+      ;; path kills the child instead of leaving it to outlive the suite.
+      (when (= ::hung r) (future-cancel run))
       (is (not= ::hung r) "execute-command deadlocked on a stderr flood")
       (when (not= ::hung r)
         (is (result/ok? r))

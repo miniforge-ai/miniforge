@@ -47,9 +47,10 @@
 (defn ^{:stratum 0} read-stream-future
   "Drain `stream` into a future of bytes and close it at end-of-stream.
    The future runs on the agent thread pool — fine for short-lived runtime
-   CLI output. Callers should `future-cancel` it if they destroy the
-   process before reading completes, otherwise the reader thread sits
-   blocked on a dead pipe."
+   CLI output. If the process is destroyed before the read completes,
+   `future-cancel` alone is not enough: a read parked on a pipe ignores
+   interrupts, so close the stream as well, or use `drain-stream` +
+   `cancel-drain!`, which do both."
   [^InputStream stream]
   (future (with-open [s stream] (.readAllBytes s))))
 
