@@ -1020,6 +1020,21 @@
                             failures))
           {:keys [task]} (implement/build-implement-task ctx)]
       (is (= failures (:task/gate-failures task)))))
+  (testing "verify's gate denial (:tests-pass on the verify result) rides the
+            same channel, after any implement denial"
+    (let [implement-failures [{:gate :stale-references
+                               :errors [{:message "':skipped' still referenced"}]}]
+          verify-failures    [{:gate :tests-pass
+                               :errors [{:type :tests-failed
+                                         :message "1 tests failed"
+                                         :failures [{:test "t" :location "t.clj:1"}]}]}]
+          ctx (-> (create-base-context)
+                  (assoc-in [:execution/phase-results :implement :phase/gate-failures]
+                            implement-failures)
+                  (assoc-in [:execution/phase-results :verify :phase/gate-failures]
+                            verify-failures))
+          {:keys [task]} (implement/build-implement-task ctx)]
+      (is (= (into implement-failures verify-failures) (:task/gate-failures task)))))
   (testing "no prior denial -> key absent"
     (let [{:keys [task]} (implement/build-implement-task (create-base-context))]
       (is (not (contains? task :task/gate-failures))))))

@@ -345,6 +345,18 @@
        (when location (str " (" location ")"))
        (when-not (str/blank? detail) (str "\n" detail))))
 
+(defn- ^{:stratum 0} prior-gate-failures
+  "Structured gate errors from the prior denied attempts that redirected
+   here, implement's own first, then verify's. Verify's gates (:tests-pass,
+   :policy-verify) deny on the verify result and redirect to implement, and
+   their errors travel the same [:phase/gate-failures] channel — so the
+   failing tests reach the implementer as a denial, not only as test output.
+   nil when no prior denial exists."
+  [ctx]
+  (seq (mapcat (fn [phase-name]
+                 (get-in ctx [:execution/phase-results phase-name :phase/gate-failures]))
+               [:implement :verify])))
+
 ;------------------------------------------------------------------------------ Layer 1
 
 (defn- ^{:stratum 1} truncate-test-output
@@ -740,8 +752,7 @@
         ;; is cleared before every step). This is what turns a gate from
         ;; a wall into a repair instruction — deny, retry with the
         ;; evidence, fix, pass.
-        gate-failures (seq (get-in ctx [:execution/phase-results
-                                        :implement :phase/gate-failures]))
+        gate-failures (prior-gate-failures ctx)
         {:keys [formatted manifest]} (kb-helpers/inject-with-manifest
                                        (:knowledge-store ctx) :implementer (get input :tags []))
         base-task (assoc-optional-task-fields

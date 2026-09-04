@@ -376,6 +376,24 @@
               (implementer/task->text {:task/description "x"})
               "Gate denial")))))
 
+(deftest ^{:stratum 0} task->text-gate-failures-names-failing-tests-test
+  (testing "a :tests-pass denial lists each failing test with its location"
+    (let [text (implementer/task->text
+                {:task/description "Fix the ledger"
+                 :task/gate-failures
+                 [{:gate :tests-pass
+                   :errors [{:type :tests-failed
+                             :message "2 tests failed"
+                             :failures [{:kind :fail
+                                         :test "records-a-miss"
+                                         :location "gap_wiring_test.clj:106"}
+                                        {:kind :error
+                                         :test "reads-the-ledger"}]}]}]})]
+      (is (str/includes? text "[tests-pass] 2 tests failed"))
+      (is (str/includes? text "- records-a-miss (gap_wiring_test.clj:106)"))
+      (is (str/includes? text "- reads-the-ledger\n")
+          "a failure without a location renders bare"))))
+
 (deftest ^{:stratum 0} invoke-worktree-metadata-already-implemented-test
   (testing "worktree metadata artifact is canonical for already-implemented outcomes"
     (let [[logger _] (log/collecting-logger {:min-level :trace})

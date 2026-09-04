@@ -172,7 +172,13 @@
                                " " (str/join ", " files)))
                         (str/join ""
                                   (for [{:keys [file line text]} (:hits error)]
-                                    (str "\n  - " file ":" line ": " text))))))
+                                    (str "\n  - " file ":" line ": " text)))
+                        ;; :tests-pass carries verify's failing tests here so
+                        ;; the denial names what to fix, not only how many.
+                        (str/join ""
+                                  (for [{:keys [test location]} (:failures error)]
+                                    (str "\n  - " test
+                                         (when location (str " (" location ")"))))))))
        "\n"))
 
 (defn- ^{:stratum 0} format-prior-attempts-section
