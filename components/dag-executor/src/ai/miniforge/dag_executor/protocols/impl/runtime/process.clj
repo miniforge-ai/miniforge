@@ -45,16 +45,18 @@
   1000)
 
 (defn ^{:stratum 0} read-stream-future
-  "Drain `stream` into a future of bytes. The future runs on the agent
-   thread pool — fine for short-lived runtime CLI output. Callers should
-   `future-cancel` it if they destroy the process before reading
-   completes, otherwise the reader thread sits blocked on a dead pipe."
-  [stream]
-  (future (.readAllBytes stream)))
+  "Drain `stream` into a future of bytes and close it at end-of-stream.
+   The future runs on the agent thread pool — fine for short-lived runtime
+   CLI output. Callers should `future-cancel` it if they destroy the
+   process before reading completes, otherwise the reader thread sits
+   blocked on a dead pipe."
+  [^InputStream stream]
+  (future (with-open [s stream] (.readAllBytes s))))
 
 (defn ^{:stratum 0} drain-stream
-  "Copy `stream` into a growable byte buffer on a background thread.
-   Returns {:buffer ByteArrayOutputStream :future f}. Unlike
+  "Copy `stream` into a growable byte buffer on a background thread and
+   close it at end-of-stream. Returns {:buffer ByteArrayOutputStream
+   :future f}. Unlike
    `read-stream-future`, the bytes copied so far can be read at any time
    via `drained-text`, so a caller that kills the process at its deadline
    can still surface the partial stdout/stderr the child managed to write.
@@ -63,7 +65,7 @@
   [^InputStream stream]
   (let [buffer (ByteArrayOutputStream.)]
     {:buffer buffer
-     :future (future (.transferTo stream buffer))}))
+     :future (future (with-open [s stream] (.transferTo s buffer)))}))
 
 (defn ^{:stratum 0} drained-text
   "UTF-8 text copied so far by a `drain-stream` handle."

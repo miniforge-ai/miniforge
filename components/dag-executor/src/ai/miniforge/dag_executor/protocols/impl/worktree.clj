@@ -629,7 +629,11 @@
                  ;; holding the pipe must not outlive the caller's deadline.
                  (if timed?
                    (do (deref (:future stdout-drain) partial-output-drain-ms nil)
-                       (deref (:future stderr-drain) partial-output-drain-ms nil))
+                       (deref (:future stderr-drain) partial-output-drain-ms nil)
+                       ;; No-ops when the drains finished; otherwise frees the
+                       ;; reader threads instead of leaking them on an open pipe.
+                       (future-cancel (:future stdout-drain))
+                       (future-cancel (:future stderr-drain)))
                    (do @(:future stdout-drain)
                        @(:future stderr-drain)))
                  (result/ok {:exit-code   (.exitValue process)

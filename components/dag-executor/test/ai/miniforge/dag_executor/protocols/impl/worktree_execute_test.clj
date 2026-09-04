@@ -57,6 +57,12 @@
    under test is `returns at the deadline`, not the production default."
   500)
 
+(def ^{:stratum 0} ^:private pgrep-no-match-exit
+  "pgrep(1) exits 1 when no process matched. Asserting this exact code,
+   rather than any non-zero, keeps a missing binary or bad flag (exit 2/127)
+   from passing as a reaped sleeper."
+  1)
+
 (def ^{:stratum 0} ^:private deadline-slack-ms
   "Wall-clock allowance for the timeout path: the deadline, the one-second
    graceful-shutdown wait in `destroy-process-tree!`, and JVM scheduling."
@@ -77,7 +83,7 @@
       (is (true? (:timed-out? r)) ":timed-out? must sit at the top level of the result")
       (is (= runtime-process/timeout-exit-code (:exit-code (:data r))))
       (is (< took deadline-slack-ms) (str "returned after " took "ms"))
-      (is (not= 0 (:exit (shell/sh "pgrep" "-f" outlives-deadline-cmd)))
+      (is (= pgrep-no-match-exit (:exit (shell/sh "pgrep" "-f" outlives-deadline-cmd)))
           "the sleeper must be reaped, not orphaned"))))
 
 (deftest ^{:stratum 1} worktree-executor-execute-threads-timeout-test
