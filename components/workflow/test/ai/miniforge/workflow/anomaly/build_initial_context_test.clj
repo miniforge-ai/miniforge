@@ -25,9 +25,12 @@
    `:invalid-input`. `run-pipeline` converts that anomaly to a failed
    execution context so callers receive the runner's normal result
    shape."
-  (:require [clojure.test :refer [deftest is testing]]
+  (:require [clojure.test :refer [deftest is testing use-fixtures]]
             [ai.miniforge.anomaly.interface :as anomaly]
+            [ai.miniforge.workflow.checkpoint-test-support :as checkpoint-test-support]
             [ai.miniforge.workflow.runner :as runner]))
+
+(use-fixtures :each checkpoint-test-support/with-temp-checkpoint-root)
 
 ;------------------------------------------------------------------------------ Layer 0
 

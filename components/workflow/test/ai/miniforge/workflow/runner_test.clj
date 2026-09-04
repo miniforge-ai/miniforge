@@ -20,7 +20,6 @@
    Tests that execute real phase pipelines (plan, implement, etc.)
    live in runner-integration-test under project tests."
   (:require
-   [clojure.java.io :as io]
    [clojure.test :refer [deftest is testing use-fixtures]]
    [ai.miniforge.event-stream.interface :as es]
    [ai.miniforge.logging.interface :as log]
@@ -29,6 +28,7 @@
    [ai.miniforge.supervisory-state.interface :as supervisory]
    [ai.miniforge.workflow.checkpoint-store :as checkpoint-store]
    [ai.miniforge.workflow.checkpoint-store-records :as checkpoint-records]
+   [ai.miniforge.workflow.checkpoint-test-support :as checkpoint-test-support]
    [ai.miniforge.workflow.fsm :as workflow-fsm]
    [ai.miniforge.workflow.phase-test-support :as phase-test-support]
    [ai.miniforge.workflow.runner :as runner]
@@ -68,17 +68,6 @@
 
 (def ^{:stratum 0} test-done-phase
   phase-test-support/runner-test-done)
-
-(defn- ^{:stratum 0} with-temp-checkpoint-root
-  [f]
-  (let [root (doto (io/file (System/getProperty "java.io.tmpdir")
-                            (str "mf-runner-checkpoint-test-" (random-uuid)))
-               .mkdirs)]
-    (try
-      (f (.getAbsolutePath root))
-      (finally
-        (doseq [file (reverse (file-seq root))]
-          (.delete ^java.io.File file))))))
 
 ;; ============================================================================
 ;; Context creation tests
@@ -211,11 +200,9 @@
       (is (contains? ctx :execution/output))
       (is (nil? (:execution/output ctx))))))
 
-;------------------------------------------------------------------------------ Layer 1
-
-(deftest ^{:stratum 1} run-pipeline-persists-final-terminal-snapshot-test
+(deftest ^{:stratum 0} run-pipeline-persists-final-terminal-snapshot-test
   (testing "terminal failures produced after the loop overwrite the running checkpoint"
-    (with-temp-checkpoint-root
+    (checkpoint-test-support/call-with-temp-checkpoint-root
       (fn [checkpoint-root]
         (let [workflow {:workflow/id :empty-test
                         :workflow/version "1.0.0"
@@ -231,6 +218,8 @@
                                  [:machine-snapshot :execution/status])))
           (is (seq (get-in checkpoint-data
                            [:machine-snapshot :execution/errors]))))))))
+
+;------------------------------------------------------------------------------ Layer 1
 
 ;; ============================================================================
 ;; Pipeline building tests
@@ -305,7 +294,7 @@
         (is (some #{:supervisory/workflow-upserted} event-types))))))
 
 (deftest ^{:stratum 1} run-pipeline-persists-machine-snapshot-test
-  (with-temp-checkpoint-root
+  (checkpoint-test-support/call-with-temp-checkpoint-root
     (fn [checkpoint-root]
       (let [workflow {:workflow/id :test
                       :workflow/version "1.0.0"
@@ -602,8 +591,9 @@
             (is (nil? (:execution/worktree-path result)))))))))
 
 ;; Compose phase-test-support's loader setup with the acquire-environment
-;; stub. clojure.test/use-fixtures REPLACES prior :each fixtures, so both
-;; must be registered in a single call.
+;; stub and the temp checkpoint root. clojure.test/use-fixtures REPLACES
+;; prior :each fixtures, so all three must be registered in a single call.
 (use-fixtures :each
   phase-test-support/with-workflow-phase-test-support
-  with-stubbed-acquire-environment)
+  with-stubbed-acquire-environment
+  checkpoint-test-support/with-temp-checkpoint-root)

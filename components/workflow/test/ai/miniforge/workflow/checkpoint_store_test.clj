@@ -23,22 +23,12 @@
    [clojure.test :refer [deftest is testing]]
    [ai.miniforge.workflow.checkpoint-store :as checkpoint-store]
    [ai.miniforge.workflow.checkpoint-store-paths :as checkpoint-paths]
+   [ai.miniforge.workflow.checkpoint-test-support :as checkpoint-test-support]
    [ai.miniforge.workflow.context :as ctx]
    [ai.miniforge.workflow.interface :as workflow]
    [ai.miniforge.tenancy.interface :as tenancy]))
 
 ;------------------------------------------------------------------------------ Layer 0
-
-(defn- ^{:stratum 0} with-temp-checkpoint-root
-  [f]
-  (let [root (doto (io/file (System/getProperty "java.io.tmpdir")
-                            (str "mf-checkpoint-test-" (random-uuid)))
-               .mkdirs)]
-    (try
-      (f (.getAbsolutePath root))
-      (finally
-        (doseq [file (reverse (file-seq root))]
-          (.delete ^java.io.File file))))))
 
 (def ^{:stratum 0} ^:private instant-stamp
   "One instant, written twice — once as an Instant, once as the Date
@@ -72,10 +62,130 @@
                             #"Invalid checkpoint data"
                             (workflow/load-checkpoint-data (random-uuid) {}))))))
 
+(deftest ^{:stratum 0} persist-execution-state-validates-before-saving-test
+  (checkpoint-test-support/call-with-temp-checkpoint-root
+    (fn [checkpoint-root]
+      (let [workflow {:workflow/id :test
+                      :workflow/version "1.0.0"
+                      :workflow/pipeline [{:phase :done}]}
+            invalid-ctx (-> (ctx/create-context workflow {:task "Test"}
+                                                {:checkpoint/root checkpoint-root})
+                            (assoc :execution/phase-results {:done :invalid-phase-result}))]
+        (is (thrown-with-msg? clojure.lang.ExceptionInfo
+                              #"Invalid checkpoint data"
+                              (checkpoint-store/persist-execution-state! invalid-ctx)))))))
+
+(deftest ^{:stratum 0} persist-execution-state-preserves-existing-phase-checkpoints-test
+  (testing "a resumed partial pipeline does not shrink the checkpoint manifest"
+    (checkpoint-test-support/call-with-temp-checkpoint-root
+      (fn [checkpoint-root]
+        (let [workflow-id (random-uuid)
+              initial-workflow {:workflow/id :test
+                                :workflow/version "1.0.0"
+                                :workflow/pipeline [{:phase :explore}
+                                                    {:phase :plan}
+                                                    {:phase :implement}
+                                                    {:phase :review}]}
+              resumed-workflow {:workflow/id :test
+                                :workflow/version "1.0.0"
+                                :workflow/pipeline [{:phase :release}]}
+              initial-ctx (-> (ctx/create-context initial-workflow {:task "Test"}
+                                                  {:checkpoint/root checkpoint-root})
+                              (assoc :execution/id workflow-id)
+                              (assoc :execution/phase-results
+                                     {:explore {:status :completed}
+                                      :plan {:status :completed}
+                                      :implement {:status :completed}
+                                      :review {:status :completed}}))
+              resumed-ctx (-> (ctx/create-context resumed-workflow {:task "Test"}
+                                                  {:checkpoint/root checkpoint-root})
+                              (assoc :execution/id workflow-id)
+                              (assoc :execution/phase-results
+                                     {:plan {:status :completed}
+                                      :implement {:status :completed}
+                                      :release {:status :failed}})
+                              (assoc :execution/current-phase :release))]
+          (checkpoint-store/persist-execution-state! initial-ctx)
+          (checkpoint-store/persist-execution-state! resumed-ctx)
+          (let [checkpoint-data (checkpoint-store/load-checkpoint-data
+                                 workflow-id
+                                 {:checkpoint/root checkpoint-root})]
+            (is (= [:explore :plan :implement :review :release]
+                   (get-in checkpoint-data [:manifest :workflow/phases-completed])))
+            (is (= {:status :completed}
+                   (get-in checkpoint-data [:phase-results :explore])))
+            (is (= {:status :failed}
+                   (get-in checkpoint-data [:phase-results :release])))))))))
+
+(deftest ^{:stratum 0} persist-execution-state-preserves-phase-handoffs-test
+  (checkpoint-test-support/call-with-temp-checkpoint-root
+    (fn [checkpoint-root]
+      (let [handoff {:frame/kind :repair-request
+                     :transition/from :review
+                     :transition/to :implement}
+            workflow {:workflow/id :test
+                      :workflow/version "1.0.0"
+                      :workflow/pipeline [{:phase :review}]}
+            execution-ctx (-> (ctx/create-context workflow {:task "Test"}
+                                                  {:checkpoint/root checkpoint-root})
+                              (assoc :execution/phase-handoffs [handoff])
+                              (assoc-in [:execution/phase-results :review]
+                                        {:status :failed
+                                         :phase/handoff handoff})
+                              (assoc :execution/current-phase :review))
+            _ (checkpoint-store/persist-execution-state! execution-ctx)
+            checkpoint-data (checkpoint-store/load-checkpoint-data
+                             (:execution/id execution-ctx)
+                             {:checkpoint/root checkpoint-root})]
+        (is (= [handoff]
+               (get-in checkpoint-data
+                       [:machine-snapshot :execution/phase-handoffs])))
+        (is (= handoff
+               (get-in checkpoint-data
+                       [:phase-results :review :phase/handoff])))))))
+
+(deftest ^{:stratum 0} gate-history-survives-phase-re-entry-test
+  (testing "phase re-entry overwrites the phase checkpoint but every gate
+            decision survives in the append-only gate history"
+    (checkpoint-test-support/call-with-temp-checkpoint-root
+      (fn [checkpoint-root]
+        (let [workflow {:workflow/id :gate-history-test
+                        :workflow/version "1.0.0"
+                        :workflow/pipeline [{:phase :implement} {:phase :done}]}
+              base (-> (ctx/create-context workflow {:task "Test"}
+                                           {:checkpoint/root checkpoint-root})
+                       (assoc :execution/current-phase :implement))
+              denied (assoc-in base [:execution/phase-results :implement]
+                               {:status :failed
+                                :phase/decision-envelope {:envelope/decision :deny}
+                                :phase/gate-failures [{:gate :stale-references
+                                                       :errors [{:message "stale"
+                                                                 ;; policy-pack violations carry Instants
+                                                                 :timestamp (java.time.Instant/parse "2026-08-29T00:00:00Z")}]}]})
+              allowed (assoc-in base [:execution/phase-results :implement]
+                                {:status :completed
+                                 :phase/decision-envelope {:envelope/decision :allow}})
+              _ (checkpoint-store/persist-execution-state! denied)
+              _ (checkpoint-store/persist-execution-state! allowed)
+              run-dir (str checkpoint-root "/" (:execution/id base))
+              history (->> (slurp (str run-dir "/" checkpoint-store/gate-history-filename))
+                           str/split-lines
+                           (mapv edn/read-string))
+              phase-file (edn/read-string
+                          (slurp (str run-dir "/phases/implement.edn")))]
+          (is (= 2 (count history)) "both iterations recorded")
+          (is (= [:deny :allow] (mapv :decision history)))
+          (is (= :stale-references (-> history first :phase/gate-failures first :gate)))
+          (is (= "2026-08-29T00:00:00Z"
+                 (-> history first :phase/gate-failures first :errors first :timestamp))
+              "Instants inside gate errors are normalized to strings so the history stays EDN-readable")
+          (is (= :allow (get-in phase-file [:phase/result :phase/decision-envelope :envelope/decision]))
+              "the phase checkpoint holds only the last iteration — the reason the history exists"))))))
+
 ;------------------------------------------------------------------------------ Layer 1
 
 (deftest ^{:stratum 1} persist-and-load-checkpoint-data-test
-  (with-temp-checkpoint-root
+  (checkpoint-test-support/call-with-temp-checkpoint-root
     (fn [checkpoint-root]
       (let [workflow {:workflow/id :test
                       :workflow/version "1.0.0"
@@ -133,88 +243,6 @@
           (is (= [:done]
                  (get-in checkpoint-data [:manifest :workflow/phases-completed]))))))))
 
-(deftest ^{:stratum 1} persist-execution-state-validates-before-saving-test
-  (with-temp-checkpoint-root
-    (fn [checkpoint-root]
-      (let [workflow {:workflow/id :test
-                      :workflow/version "1.0.0"
-                      :workflow/pipeline [{:phase :done}]}
-            invalid-ctx (-> (ctx/create-context workflow {:task "Test"}
-                                                {:checkpoint/root checkpoint-root})
-                            (assoc :execution/phase-results {:done :invalid-phase-result}))]
-        (is (thrown-with-msg? clojure.lang.ExceptionInfo
-                              #"Invalid checkpoint data"
-                              (checkpoint-store/persist-execution-state! invalid-ctx)))))))
-
-(deftest ^{:stratum 1} persist-execution-state-preserves-existing-phase-checkpoints-test
-  (testing "a resumed partial pipeline does not shrink the checkpoint manifest"
-    (with-temp-checkpoint-root
-      (fn [checkpoint-root]
-        (let [workflow-id (random-uuid)
-              initial-workflow {:workflow/id :test
-                                :workflow/version "1.0.0"
-                                :workflow/pipeline [{:phase :explore}
-                                                    {:phase :plan}
-                                                    {:phase :implement}
-                                                    {:phase :review}]}
-              resumed-workflow {:workflow/id :test
-                                :workflow/version "1.0.0"
-                                :workflow/pipeline [{:phase :release}]}
-              initial-ctx (-> (ctx/create-context initial-workflow {:task "Test"}
-                                                  {:checkpoint/root checkpoint-root})
-                              (assoc :execution/id workflow-id)
-                              (assoc :execution/phase-results
-                                     {:explore {:status :completed}
-                                      :plan {:status :completed}
-                                      :implement {:status :completed}
-                                      :review {:status :completed}}))
-              resumed-ctx (-> (ctx/create-context resumed-workflow {:task "Test"}
-                                                  {:checkpoint/root checkpoint-root})
-                              (assoc :execution/id workflow-id)
-                              (assoc :execution/phase-results
-                                     {:plan {:status :completed}
-                                      :implement {:status :completed}
-                                      :release {:status :failed}})
-                              (assoc :execution/current-phase :release))]
-          (checkpoint-store/persist-execution-state! initial-ctx)
-          (checkpoint-store/persist-execution-state! resumed-ctx)
-          (let [checkpoint-data (checkpoint-store/load-checkpoint-data
-                                 workflow-id
-                                 {:checkpoint/root checkpoint-root})]
-            (is (= [:explore :plan :implement :review :release]
-                   (get-in checkpoint-data [:manifest :workflow/phases-completed])))
-            (is (= {:status :completed}
-                   (get-in checkpoint-data [:phase-results :explore])))
-            (is (= {:status :failed}
-                   (get-in checkpoint-data [:phase-results :release])))))))))
-
-(deftest ^{:stratum 1} persist-execution-state-preserves-phase-handoffs-test
-  (with-temp-checkpoint-root
-    (fn [checkpoint-root]
-      (let [handoff {:frame/kind :repair-request
-                     :transition/from :review
-                     :transition/to :implement}
-            workflow {:workflow/id :test
-                      :workflow/version "1.0.0"
-                      :workflow/pipeline [{:phase :review}]}
-            execution-ctx (-> (ctx/create-context workflow {:task "Test"}
-                                                  {:checkpoint/root checkpoint-root})
-                              (assoc :execution/phase-handoffs [handoff])
-                              (assoc-in [:execution/phase-results :review]
-                                        {:status :failed
-                                         :phase/handoff handoff})
-                              (assoc :execution/current-phase :review))
-            _ (checkpoint-store/persist-execution-state! execution-ctx)
-            checkpoint-data (checkpoint-store/load-checkpoint-data
-                             (:execution/id execution-ctx)
-                             {:checkpoint/root checkpoint-root})]
-        (is (= [handoff]
-               (get-in checkpoint-data
-                       [:machine-snapshot :execution/phase-handoffs])))
-        (is (= handoff
-               (get-in checkpoint-data
-                       [:phase-results :review :phase/handoff])))))))
-
 (deftest ^{:stratum 1} inst-tagged-checkpoint-loads-as-string-test
   (testing "a checkpoint written before normalization restores as a string"
     ;; Checkpoints already on disk predate the write-side normalization, so
@@ -222,7 +250,7 @@
     ;; hands that back as a Date, which is the mixed-type restore this
     ;; change exists to stop. Written here by hand because the current
     ;; write path can no longer produce it.
-    (with-temp-checkpoint-root
+    (checkpoint-test-support/call-with-temp-checkpoint-root
       (fn [checkpoint-root]
         (let [run-id (random-uuid)
               snapshot-path (checkpoint-paths/machine-snapshot-path
@@ -247,7 +275,7 @@
   ;; the one field where that failure is unrecoverable after the fact,
   ;; so it gets a round trip through real disk rather than a unit
   ;; assertion on the key list.
-  (with-temp-checkpoint-root
+  (checkpoint-test-support/call-with-temp-checkpoint-root
     (fn [checkpoint-root]
       (let [acting (tenancy/establish-acting
                     (tenancy/resolve-operator {:tenancy {:operator-name "chris"}}
@@ -303,41 +331,3 @@
                   "the resuming caller's :acting must not survive in opts")
               (is (nil? (:acting (:execution/opts ctx)))
                   "nor the starting caller's, in the fresh context"))))))))
-
-(deftest ^{:stratum 1} gate-history-survives-phase-re-entry-test
-  (testing "phase re-entry overwrites the phase checkpoint but every gate
-            decision survives in the append-only gate history"
-    (with-temp-checkpoint-root
-      (fn [checkpoint-root]
-        (let [workflow {:workflow/id :gate-history-test
-                        :workflow/version "1.0.0"
-                        :workflow/pipeline [{:phase :implement} {:phase :done}]}
-              base (-> (ctx/create-context workflow {:task "Test"}
-                                           {:checkpoint/root checkpoint-root})
-                       (assoc :execution/current-phase :implement))
-              denied (assoc-in base [:execution/phase-results :implement]
-                               {:status :failed
-                                :phase/decision-envelope {:envelope/decision :deny}
-                                :phase/gate-failures [{:gate :stale-references
-                                                       :errors [{:message "stale"
-                                                                 ;; policy-pack violations carry Instants
-                                                                 :timestamp (java.time.Instant/parse "2026-08-29T00:00:00Z")}]}]})
-              allowed (assoc-in base [:execution/phase-results :implement]
-                                {:status :completed
-                                 :phase/decision-envelope {:envelope/decision :allow}})
-              _ (checkpoint-store/persist-execution-state! denied)
-              _ (checkpoint-store/persist-execution-state! allowed)
-              run-dir (str checkpoint-root "/" (:execution/id base))
-              history (->> (slurp (str run-dir "/" checkpoint-store/gate-history-filename))
-                           str/split-lines
-                           (mapv edn/read-string))
-              phase-file (edn/read-string
-                          (slurp (str run-dir "/phases/implement.edn")))]
-          (is (= 2 (count history)) "both iterations recorded")
-          (is (= [:deny :allow] (mapv :decision history)))
-          (is (= :stale-references (-> history first :phase/gate-failures first :gate)))
-          (is (= "2026-08-29T00:00:00Z"
-                 (-> history first :phase/gate-failures first :errors first :timestamp))
-              "Instants inside gate errors are normalized to strings so the history stays EDN-readable")
-          (is (= :allow (get-in phase-file [:phase/result :phase/decision-envelope :envelope/decision]))
-              "the phase checkpoint holds only the last iteration — the reason the history exists"))))))

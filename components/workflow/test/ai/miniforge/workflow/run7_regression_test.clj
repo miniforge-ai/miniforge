@@ -24,16 +24,17 @@
    5. Review feedback lost during phase clearing (Run 9)"
   (:require
    [ai.miniforge.phase.interface :as phase]
-   [ai.miniforge.phase.loader :as loader]
    [clojure.test :refer [deftest testing is use-fixtures]]
+   [ai.miniforge.workflow.checkpoint-test-support :as checkpoint-test-support]
    [ai.miniforge.workflow.phase-test-support :as phase-test-support]
    [ai.miniforge.workflow.runner :as runner]
    [ai.miniforge.workflow.execution :as exec]))
 
-;------------------------------------------------------------------------------ Layer 0
+(use-fixtures :each
+  phase-test-support/with-workflow-phase-test-support
+  checkpoint-test-support/with-temp-checkpoint-root)
 
-(def ^{:stratum 0} phase-test-config-resource
-  "config/phase/workflow-test-support-namespaces.edn")
+;------------------------------------------------------------------------------ Layer 0
 
 ;; ============================================================================
 ;; Fix 1: Duration-ms extraction in publish-phase-completed!
@@ -227,10 +228,3 @@
   (testing "max-redirects is now 5"
     (is (= 5 exec/max-redirects)
         "Should allow 5 redirects for complex repair cycles")))
-
-(use-fixtures :each
-  (fn [f]
-    (phase/reset-phase-loader!)
-    (binding [loader/phase-loader-config-resource phase-test-config-resource]
-      (f))
-    (phase/reset-phase-loader!)))

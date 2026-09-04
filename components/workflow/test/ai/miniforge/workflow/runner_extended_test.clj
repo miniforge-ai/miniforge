@@ -23,6 +23,7 @@
    [ai.miniforge.dag-executor.interface :as dag-exec]
    [ai.miniforge.event-stream.interface :as es]
    [ai.miniforge.logging.interface :as log]
+   [ai.miniforge.workflow.checkpoint-test-support :as checkpoint-test-support]
    [ai.miniforge.workflow.runner :as runner]
    [ai.miniforge.workflow.context :as ctx]
    [ai.miniforge.workflow.execution :as exec]
@@ -600,4 +601,6 @@
       (is (= :remote (:persist-tier data))
           "governed mode pushes to remote — remote tier label, not worktree"))))
 
-(use-fixtures :each phase-test-support/with-workflow-phase-test-support)
+(use-fixtures :each
+  phase-test-support/with-workflow-phase-test-support
+  checkpoint-test-support/with-temp-checkpoint-root)

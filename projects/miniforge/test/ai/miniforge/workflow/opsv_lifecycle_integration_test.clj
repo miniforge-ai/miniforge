@@ -22,6 +22,7 @@
    [ai.miniforge.event-stream.interface :as event-stream]
    [ai.miniforge.phase.interface :as phase]
    [ai.miniforge.phase-opsv.interface :as opsv]
+   [ai.miniforge.workflow.checkpoint-root-support :as checkpoint-root-support]
    [ai.miniforge.workflow.interface :as workflow]
    [ai.miniforge.workflow.opsv-lifecycle-support :as support]))
 
@@ -104,7 +105,7 @@
 (deftest ^{:stratum 1} test-opsv-run-emits-lifecycle-and-domain-events
   (let [{:keys [result lifecycle-events domain-events domain-type-counts
                 planned-event evidence-id evidence-store checkpoint]}
-        (support/with-temp-checkpoint-root run-opsv-scenario)
+        (checkpoint-root-support/call-with-temp-checkpoint-root run-opsv-scenario)
         assembly (when (and evidence-store evidence-id)
                    (evidence/get-opsv-assembly evidence-store evidence-id))
         checkpoint-input (get-in checkpoint [:machine-snapshot :execution/input])

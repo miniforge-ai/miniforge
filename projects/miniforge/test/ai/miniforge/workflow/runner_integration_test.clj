@@ -18,7 +18,8 @@
 (ns ai.miniforge.workflow.runner-integration-test
   "Integration tests for the workflow runner that execute real phase pipelines."
   (:require
-   [clojure.test :refer [deftest is testing]]
+   [clojure.test :refer [deftest is testing use-fixtures]]
+   [ai.miniforge.workflow.checkpoint-root-support :as checkpoint-root-support]
    [ai.miniforge.workflow.runner :as runner]
    ;; Require phase implementations
    [ai.miniforge.phase-software-factory.plan]
@@ -31,6 +32,8 @@
    [ai.miniforge.gate.lint]
    [ai.miniforge.gate.test]
    [ai.miniforge.gate.policy]))
+
+(use-fixtures :each checkpoint-root-support/with-temp-checkpoint-root)
 
 ;------------------------------------------------------------------------------ Layer 0
 
