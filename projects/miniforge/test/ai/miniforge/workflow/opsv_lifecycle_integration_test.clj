@@ -17,6 +17,7 @@
 ;; limitations under the License.
 (ns ai.miniforge.workflow.opsv-lifecycle-integration-test
   (:require
+   [ai.miniforge.workflow.isolation-support :as isolation]
    [clojure.test :refer [deftest is testing]]
    [ai.miniforge.evidence-bundle.interface :as evidence]
    [ai.miniforge.event-stream.interface :as event-stream]
@@ -149,3 +150,8 @@
     (testing "the default posture remains side-effect free"
       (is (= :recommend-only (:effective-actuation-mode actuation)))
       (is (= [] (:governed-effects actuation))))))
+
+;; Every pipeline this namespace runs acquires its worktree from a
+;; throwaway host repository and checkpoints into a throwaway root — never
+;; the checkout the test JVM was launched in, never `~/.miniforge`.
+(clojure.test/use-fixtures :once isolation/with-isolated-host)

@@ -20,6 +20,7 @@
   "Tests for iteration helpers extracted from runner.clj.
    Includes slingshot try+/throw+ bb-compatibility tests."
   (:require
+   [ai.miniforge.workflow.isolation-test-support :as isolation]
    [clojure.test :refer [deftest testing is use-fixtures]]
    [ai.miniforge.workflow.checkpoint-test-support :as checkpoint-test-support]
    [ai.miniforge.workflow.context :as ctx]
@@ -199,3 +200,8 @@
                 (:execution/errors result)))
       (is (= :progress-monitor
              (:supervisor (last (:execution/errors result))))))))
+
+;; Every pipeline this namespace runs acquires its worktree from a
+;; throwaway host repository and checkpoints into a throwaway root — never
+;; the checkout the test JVM was launched in, never `~/.miniforge`.
+(clojure.test/use-fixtures :once isolation/with-isolated-host)
