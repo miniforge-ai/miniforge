@@ -769,3 +769,48 @@ Arc summary (trap-a, this bench): prose 0/8 → gate blind 0/3, 0/3 →
 gate without evidence 1/3 → evidence in prompt 3/3 (snapshots) →
 evidence and persisted fixes 3/3 (branches) → codex on top 3/3
 (branches) with telemetry.
+
+## Series 8 forensics — Falsifier D root cause (2026-09-04)
+
+Every series since the fifth ended each catch with a verify loop to the
+redirect cap (Falsifier D, recorded, never explained). Checkpoint
+f413dd80 (rx3) explains it; rx1 and rx2 match line for line.
+
+1. The verify run really failed. Its stored output is 215,100 chars,
+   6,681 lines, with three `FAIL in` blocks. One is the trap's own
+   consequence: the task renamed `:skipped` to `:torn-lines`, and a
+   consumer test in phase-software-factory (gap_wiring_test.clj:106)
+   still expects `:skipped`. The stale-references gate exempts tests by
+   design (PR 1869 (#1869)), so verify was the mechanism that had to
+   name it.
+2. The parser took the first namespace's `Ran 3 tests` line and its
+   `0 failures, 0 errors` line for the whole run and synthesized one
+   error from the non-zero exit. Summary: "Tests failed: 0 failure(s), 1 error(s)";
+   metrics: pass-count 3, fail-count 1. The tests-pass gate passed on
+   every iteration (it reads artifact metadata the verify path never
+   sets); only the policy judge and the nil-output reason denied.
+3. The implementer's excerpt keeps 30 head and 25 tail lines; every FAIL
+   block sat in the omitted middle. The implementer ran the suite
+   itself, saw OCI-timeout lines from unrelated tests, and wrote that
+   the one error was "infrastructure flakiness unrelated to this
+   rename": `:already-implemented`, five times, to the cap.
+4. The other two FAIL blocks, at lines 550 and 572 of
+   `components/phase-software-factory/test/ai/miniforge/phase_software_factory/release_test.clj`,
+   only occur with `MINIFORGE_CODEX_PATH` exported: behavior loading
+   consults the codex through the environment and appends the
+   consultation to the release addendum. Treated-arm noise, not a task
+   consequence; the baseline arm sees one failure, the treated arm three.
+
+Fix: PR 1884 (#1884) sums every namespace, keeps each FAIL/ERROR block with
+name, location and detail, names the failing tests in the verify
+summary, and leads the implementer's excerpt with the blocks. Checked
+against the rx3 output: all three named. Filed separately: the
+tests-pass gate reading verify metrics; the host executor honoring its
+timeout and draining both streams; tests isolated from the codex
+environment variable and from the enclosing repo (the suite created 108
+`task-*` branches in the sandbox in one minute).
+
+Reading for the harvest: "failing test read as environmental" was not
+a discriminator the implementer lacked. The mechanism handed it a wrong
+summary and an excerpt with the evidence cut out; the misread followed.
+Re-observe after the fix before admitting anything.
