@@ -442,19 +442,22 @@
           summary-any? (some? (re-find namespace-summary-pattern output))]
       (if (and ran-any? summary-any?)
         (let [fail-count  (sum-groups namespace-summary-pattern 1 output)
-              error-count (sum-groups namespace-summary-pattern 2 output)]
-          ;; Exit code is authoritative alongside the parsed counts: a brick
-          ;; whose tests fail to COMPILE (or a runner that exits non-zero for
-          ;; any reason) can still leave a "Ran N tests ... 0 failures, 0
-          ;; errors" line from OTHER bricks in the output. Requiring a zero
-          ;; exit too means such a run fails verify instead of being reported
-          ;; as passing on the text alone.
-          {:passed? (and (zero? fail-count) (zero? error-count) (zero? exit-code))
+              error-count (sum-groups namespace-summary-pattern 2 output)
+              ;; Exit code is authoritative alongside the parsed counts: a brick
+              ;; whose tests fail to COMPILE (or a runner that exits non-zero for
+              ;; any reason) can still leave a "Ran N tests ... 0 failures, 0
+              ;; errors" line from OTHER bricks in the output. Requiring a zero
+              ;; exit too means such a run fails verify instead of being reported
+              ;; as passing on the text alone.
+              passed?     (and (zero? fail-count) (zero? error-count) (zero? exit-code))
+              ;; A passing run has no blocks to find; skip the scan.
+              failures    (if passed? [] (failure-blocks output))]
+          {:passed? passed?
            :test-count (sum-groups ran-tests-pattern 1 output)
            :assertion-count (sum-groups ran-tests-pattern 2 output)
            :fail-count fail-count
            :error-count (synthesized-error-count fail-count error-count exit-code)
-           :failures (failure-blocks output)
+           :failures failures
            :output output})
         (assoc (test-error-result output) :parse-error? true)))))
 
