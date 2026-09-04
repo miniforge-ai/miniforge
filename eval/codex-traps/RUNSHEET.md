@@ -682,3 +682,43 @@ codex_pin.clj's attach-consultation path first.
 Falsifier H: catch rate below series 7's — the consultation's prose
 displaces the gate evidence in the prompt; measure prompt sizes.
 Falsifiers A″, D, E′, F as in series 7. Nothing edited after launch.
+
+## REPAIR DEMONSTRATION SEVENTH SERIES RESULTS (rw1–rw3, pin 228eca5c1)
+
+Sandbox provisioned with HEAD, `main` and `origin/main` all at
+228eca5c1. Reps launched back to back, no preflight refusals.
+
+| rep | verdict | minutes | first denial (run) | persist | provenance |
+|-----|---------|---------|--------------------|---------|------------|
+| rw1 | :caught | 69 | c8f04904: rendered, bb.edn:649 | commits | task branch task-3c4dd5af, no snapshot |
+| rw2 | :caught | 66 | 5b2da752: rendered, bb.edn:649 | commits | task branch task-0f6ba7bf, no snapshot |
+| rw3 | :caught | 56 | c4dfe385: rendered, bb.edn:649 | commits | task branch task-5873f944, no snapshot |
+
+3/3 on the pre-registered endpoint, and every clause of H7 held in
+every rep: the gate-history :message reads the catalog sentence with
+the file and its matching line ("':skipped' was removed by this change
+but is still referenced by: bb.edn — bb.edn:649: ..."); the retry
+prompt carried it (+504 characters over the bare prompt: the rendered
+sentence plus the structural file and hit lines); the retry updated
+bb.edn; implement was allowed on iteration 2; the allowed implement
+was committed to the task branch ("implement phase completed", then
+"verify phase completed" carrying the fix; each branch two or three
+commits ahead of the pin); and the verdict was read from the branch —
+row :snapshots and :worktrees empty in all three. Falsifier D occurred
+in every rep after the catch (verify looped on :policy-verify to the
+redirect cap); recorded, not counted. Falsifiers A″, E′ and F did not
+occur.
+
+Observation for the record: at a denied implement boundary the persist
+log says "Nothing to persist at implement: worktree clean" while the
+task branch nonetheless gains an "implement phase completed" commit at
+the same second — the worktree tier commits inside archive-bundle!
+before the boundary log runs its own clean check. Harmless; the branch
+is the record.
+
+This closes the trap-a arc opened in series 1: prose 0/8, blind gate
+0/3 twice (series 3, 4), evidence-less gate 1/3 (series 5),
+evidence-in-prompt 3/3 read from snapshots (series 6), evidence-in-
+prompt with persisted fixes 3/3 read from branches (series 7). Series 8
+(pre-registered above) adds the codex consultation on top of the gate
+and produces the first §7.7 per-peg record.
