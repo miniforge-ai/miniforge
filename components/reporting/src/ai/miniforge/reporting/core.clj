@@ -49,11 +49,6 @@
   [workflows status]
   (count (filter #(= status (:workflow/status %)) workflows)))
 
-;; Note: Keep for future phase-based filtering
-#_(defn count-by-phase
-    "Count workflows by phase."
-    [workflows phase]
-    (count (filter #(= phase (:workflow/phase %)) workflows)))
 ;; Subscription management (polling-based for BB compatibility)
 (defn ^{:stratum 0} create-subscription
   "Create a new subscription record."
@@ -88,13 +83,6 @@
 
 ;------------------------------------------------------------------------------ Layer 1
 
-;; Note: Keep for future event broadcasting support
-#_(defn add-event-to-subscriptions
-    "Add event to relevant subscriptions."
-    [subscriptions event]
-    (doseq [[_id sub] @subscriptions]
-      (when (contains? (:subscription/topics sub) (:event/topic event))
-        (swap! (:subscription/event-queue sub) conj event))))
 ;; System status aggregation
 (defn ^{:stratum 1} aggregate-workflow-stats
   "Aggregate workflow statistics."
