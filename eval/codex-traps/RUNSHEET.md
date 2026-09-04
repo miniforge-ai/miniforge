@@ -723,7 +723,7 @@ prompt with persisted fixes 3/3 read from branches (series 7). Series 8
 (pre-registered above) adds the codex consultation on top of the gate
 and produces the first §7.7 per-peg record.
 
-## EIGHTH SERIES RESULTS — TREATED ARM (rx1–rx3, pin ed8967bff)
+## REPAIR DEMONSTRATION EIGHTH SERIES RESULTS — TREATED ARM (rx1–rx3, pin ed8967bff)
 
 Sandbox provisioned with HEAD, `main` and `origin/main` all at
 ed8967bff; MINIFORGE_CODEX_PATH set to the vault; every phase's
@@ -733,9 +733,9 @@ boundary). Reps launched back to back, no preflight refusals.
 
 | rep | verdict | minutes | first denial (run) | provenance |
 |-----|---------|---------|--------------------|------------|
-| rx1 | :caught | 62 | d1ae186b: [bb.edn] | task branch, no snapshot |
-| rx2 | :caught | 67 | 77c18220: [bb.edn] | task branch, no snapshot |
-| rx3 | :caught | 62 | f413dd80: [bb.edn] | task branch, no snapshot |
+| rx1 | :caught | 62 | d1ae186b: `bb.edn` | task branch, no snapshot |
+| rx2 | :caught | 67 | 77c18220: `bb.edn` | task branch, no snapshot |
+| rx3 | :caught | 62 | f413dd80: `bb.edn` | task branch, no snapshot |
 
 H8a (catch): 3/3, equal to series 7's baseline 3/3 at the pin one
 read-only tool behind. The codex neither lifted nor lowered trap-a's
@@ -746,15 +746,16 @@ fixed, allowed on iteration 2, persisted, verify loop on policy rules
 to the cap (Falsifier D, recorded).
 
 H8b (telemetry): held on every clause. Each implement consultation
-recorded nine pegs as {:id :answer nil :landings}; Falsifier G did not
-occur. `bb codex-gap-peg-telemetry` over the three dag-task
+recorded nine pegs in the production shape (keys `:id`, `:answer`
+holding nil, and `:landings` mapping each answer to its landing ids);
+Falsifier G did not occur. `bb codex-gap-peg-telemetry` over the three dag-task
 checkpoints (record kept at eval/codex-traps/telemetry/
 series-8-peg-telemetry.edn):
 
 | peg | observed | observations | answers | entropy (bits) | trigger |
 |-----|----------|--------------|---------|----------------|---------|
 | contract-verified-against-producer | yes (miniforge/gate/stale-references) | 15 | denied 3, allowed 12 | 0.722 | none |
-| eight others | no mapped mechanism | 0 | — | — | none |
+| eight others | no mapped mechanism | 0 | none recorded (`{}`) | 0.0 (no observations) | none |
 
 Observations equal the implement iterations across the three runs
 (five per rep); the three denials are the three first-iteration
