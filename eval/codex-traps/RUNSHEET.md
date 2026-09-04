@@ -815,23 +815,25 @@ a discriminator the implementer lacked. The mechanism handed it a wrong
 summary and an excerpt with the evidence cut out; the misread followed.
 Re-observe after the fix before admitting anything.
 
-## REPAIR DEMONSTRATION NINTH SERIES — PRE-REGISTRATION (ry1–ry3, baseline arm, pin 4c07d54f8)
+## PRE-REGISTRATION — NINTH REPAIR SERIES (ry1–ry3, baseline arm, pin 4c07d54f8)
 
 Question: with the failing tests named (PR 1884 (#1884)), does the
 verify loop close instead of running to the redirect cap?
 
 Arm: baseline (MINIFORGE_CODEX_PATH unset), so the run's only expected
 failure is the trap's stale test consumer; the treated arm adds two
-codex-environment failures (release_test.clj:550 and :572) that would
-confound the count. Trap-a, three reps, same pin protocol as series 7
+codex-environment failures (lines 550 and 572 of
+`components/phase-software-factory/test/ai/miniforge/phase_software_factory/release_test.clj`)
+that would confound the count. Trap-a, three reps, same pin protocol as series 7
 (HEAD, `main` and `origin/main` all at the pin).
 
 H9a (catch, control): 3/3 `:caught` — the gate path is unchanged.
 
 H9b (loop closes): in at least two of three reps the verify phase that
 follows the first allowed implement records the failing test by name in
-its summary ("Failing: recording-is-a-no-op-without-a-configured-
-codex"), the next implement's prompt carries the FAIL block, and the
+its summary (`Failing:` followed by
+`recording-is-a-no-op-without-a-configured-codex`), the next
+implement's prompt carries the FAIL block, and the
 implement after that changes gap_wiring_test.clj (or the ledger key it
 asserts) so that verify's fail-count drops to 0 within the redirect
 budget. Falsifier I: the summary names the test, the block is in the
