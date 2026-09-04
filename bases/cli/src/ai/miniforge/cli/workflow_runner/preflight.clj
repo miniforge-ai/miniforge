@@ -18,8 +18,12 @@
 (ns ai.miniforge.cli.workflow-runner.preflight
   "Backend preflight orchestration: resolve the backend's CLI stamp
    (path + version), print its provenance, and verify the health probe
-   before a workflow runs. Fails closed with anomalies carrying the
-   resolved stamp so failures are attributable. Split out of
+   before a workflow runs. The health probe runs through
+   `preflight-retry/probe-backend-with-retries`, so one transient CLI
+   timeout does not refuse the whole workflow. Fails closed with
+   anomalies carrying the resolved stamp so failures are attributable;
+   the anomaly shape is the same whether one attempt ran or all of them
+   did. Split out of
    `ai.miniforge.cli.workflow-runner` (rule 210: the parent namespace
    measured 10 real layers, max 3; each concern moves to its own
    layer-coherent file)."
@@ -28,6 +32,7 @@
    [ai.miniforge.cli.messages :as messages]
    [ai.miniforge.cli.workflow-runner.paths :as paths]
    [ai.miniforge.cli.workflow-runner.preflight-probe :as probe]
+   [ai.miniforge.cli.workflow-runner.preflight-retry :as retry]
    [ai.miniforge.cli.workflow-runner.preflight-support :as support]
    [ai.miniforge.cli.workflow-runner.provenance :as provenance]
    [ai.miniforge.response.interface :as response]))
@@ -64,6 +69,15 @@
                             :cmd-version cmd-version
                             :probe-response (support/response-summary probe-response)}))
 
+(defn- ^{:stratum 0} context-logger
+  "The runtime context's `:logger`, else the stderr fallback. Built only
+   when needed: a `get` default would construct the fallback on every
+   call, even when the context already carries a logger."
+  [context]
+  (if-some [logger (get context :logger)]
+    logger
+    (retry/stderr-logger)))
+
 (defn- ^{:stratum 0} backend-stamp
   [llm-client]
   (when-let [backend (llm/client-backend llm-client)]
@@ -99,8 +113,8 @@
       stamp)))
 
 (defn- ^{:stratum 1} verify-backend-probe!
-  [llm-client stamp workdir]
-  (let [probe-response (probe/run-backend-probe llm-client stamp workdir)]
+  [logger llm-client stamp workdir]
+  (let [probe-response (retry/probe-backend-with-retries logger llm-client stamp workdir)]
     (when-not (support/response-succeeded? probe-response)
       (backend-preflight-failed! stamp probe-response))
     stamp))
@@ -108,10 +122,14 @@
 ;------------------------------------------------------------------------------ Layer 2
 
 (defn ^{:stratum 2} run-backend-preflight!
+  "Resolve and print the backend stamp, then verify the health probe.
+   `context` supplies `:worktree-path` and may supply `:logger`; without
+   one, retry diagnostics go to a warn-level stderr logger."
   [quiet llm-client context]
   (when-let [stamp (cli-required-backend-stamp llm-client)]
     (let [stamp (-> stamp
                     ensure-cli-command-path!
-                    versioned-backend-stamp)]
+                    versioned-backend-stamp)
+          logger (context-logger context)]
       (provenance/print-backend-provenance! quiet stamp)
-      (verify-backend-probe! llm-client stamp (:worktree-path context)))))
+      (verify-backend-probe! logger llm-client stamp (:worktree-path context)))))
