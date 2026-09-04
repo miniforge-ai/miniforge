@@ -734,7 +734,8 @@ f413dd80 (rx3) explains it; rx1 and rx2 match line for line.
    consequence: the task renamed `:skipped` to `:torn-lines`, and a
    consumer test in phase-software-factory (gap_wiring_test.clj:106)
    still expects `:skipped`. The stale-references gate exempts tests by
-   design (PR 1869 (#1869)), so verify was the mechanism that had to name it.
+   design (PR 1869 (#1869)), so verify was the mechanism that had to
+   name it.
 2. The parser took the first namespace's `Ran 3 tests … 0 failures, 0
    errors` for the whole run and synthesized one error from the
    non-zero exit. Summary: "Tests failed: 0 failure(s), 1 error(s)";
