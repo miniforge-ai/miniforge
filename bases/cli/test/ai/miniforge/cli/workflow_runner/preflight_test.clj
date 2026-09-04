@@ -70,6 +70,14 @@
 (defn- ^{:stratum 0} retry-log-entries [entries]
   (filterv (fn [entry] (= :llm/preflight-retry (:log/event entry))) @entries))
 
+(deftest ^{:stratum 0} backend-preflight-attempts-clamps-to-at-least-one-test
+  (testing "a zero or negative configured attempt count still means one probe"
+    (doseq [configured [0 -2]]
+      (with-redefs-fn {#'support/backend-preflight-config (constantly {:attempts configured})}
+        (fn [] (is (= 1 (support/backend-preflight-attempts))))))
+    (with-redefs-fn {#'support/backend-preflight-config (constantly {:attempts 5})}
+      (fn [] (is (= 5 (support/backend-preflight-attempts)))))))
+
 (deftest ^{:stratum 0} await-stream-waits-for-reader-completion-test
   (testing "stream join waits for a completed reader instead of dropping late output"
     (let [started-at (System/currentTimeMillis)

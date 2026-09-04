@@ -2,9 +2,14 @@
 
 ## Overview
 
-The workflow runner probes the backend CLI once (`claude -p "Reply with
-exactly {"ok":true}"`, 30 s budget) before a workflow starts. One timeout
-refused the whole run with `Backend preflight failed for claude`.
+The workflow runner probes the backend CLI once before a workflow starts,
+with a 30 s budget:
+
+```bash
+claude -p 'Reply with exactly {"ok":true}' --output-format json --max-turns 1
+```
+
+One timeout refused the whole run with `Backend preflight failed for claude`.
 
 This PR retries the probe a bounded number of times (default 3 attempts,
 2 s pause between failed attempts, both operator-tunable), logs every

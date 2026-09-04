@@ -31,6 +31,11 @@
 
 ;------------------------------------------------------------------------------ Layer 0
 
+(def ^{:stratum 0} ^:private nanos-per-ms
+  "Nanoseconds in one millisecond; converts `System/nanoTime` deltas to
+   the millisecond unit the retry log reports."
+  1000000)
+
 (defn ^{:stratum 0} stderr-logger
   "Fallback logger for a runtime context that carries no `:logger`:
    warn-and-above to stderr, so retry diagnostics survive `quiet` mode
@@ -60,7 +65,15 @@
 
 ;------------------------------------------------------------------------------ Layer 1
 
-(defn ^{:stratum 1} probe-backend-with-retries
+(defn- ^{:stratum 1} elapsed-ms-since
+  "Milliseconds since a `System/nanoTime` reading. Monotonic, so a wall
+   clock adjustment mid-probe cannot log a negative duration."
+  [started-nanos]
+  (quot (- (System/nanoTime) started-nanos) nanos-per-ms))
+
+;------------------------------------------------------------------------------ Layer 2
+
+(defn ^{:stratum 2} probe-backend-with-retries
   "Run the health probe up to the configured attempt count, pausing
    between failed attempts. Returns the first successful probe response,
    or the last failure when every attempt failed."
@@ -68,9 +81,9 @@
   (let [attempts (support/backend-preflight-attempts)
         pause-ms (support/backend-preflight-retry-pause-ms)]
     (loop [attempt 1]
-      (let [started-ms (System/currentTimeMillis)
+      (let [started-nanos (System/nanoTime)
             probe-response (probe/run-backend-probe llm-client stamp workdir)
-            elapsed-ms (- (System/currentTimeMillis) started-ms)]
+            elapsed-ms (elapsed-ms-since started-nanos)]
         (if (support/response-succeeded? probe-response)
           probe-response
           (do

@@ -142,8 +142,12 @@
 (defn ^{:stratum 2} backend-version-timeout-ms []
   (:version-timeout-ms (backend-preflight-config)))
 
-(defn ^{:stratum 2} backend-preflight-attempts []
-  (get (backend-preflight-config) :attempts default-preflight-attempts))
+(defn ^{:stratum 2} backend-preflight-attempts
+  "Configured probe attempts, clamped to at least one: the probe always
+   runs once, so a zero or negative setting would make the logged
+   `:attempts` disagree with what happened."
+  []
+  (max 1 (get (backend-preflight-config) :attempts default-preflight-attempts)))
 
 (defn ^{:stratum 2} backend-preflight-retry-pause-ms []
   (get (backend-preflight-config) :retry-pause-ms default-preflight-retry-pause-ms))
