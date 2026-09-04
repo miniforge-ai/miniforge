@@ -56,21 +56,38 @@
 (defn ^{:stratum 0} drain-stream
   "Copy `stream` into a growable byte buffer on a background thread and
    close it at end-of-stream. Returns {:buffer ByteArrayOutputStream
-   :future f}. Unlike
-   `read-stream-future`, the bytes copied so far can be read at any time
-   via `drained-text`, so a caller that kills the process at its deadline
-   can still surface the partial stdout/stderr the child managed to write.
-   `ByteArrayOutputStream` synchronizes its methods, so sampling from
-   another thread while the copy is still running is safe."
+   :future f :stream InputStream}. Unlike `read-stream-future`, the bytes
+   copied so far can be read at any time via `drained-text`, so a caller
+   that kills the process at its deadline can still surface the partial
+   stdout/stderr the child managed to write. `ByteArrayOutputStream`
+   synchronizes its methods, so sampling from another thread while the
+   copy is still running is safe. Stop an unfinished drain with
+   `cancel-drain!`, not bare `future-cancel`."
   [^InputStream stream]
   (let [buffer (ByteArrayOutputStream.)]
     {:buffer buffer
+     :stream stream
      :future (future (with-open [s stream] (.transferTo s buffer)))}))
 
 (defn ^{:stratum 0} drained-text
   "UTF-8 text copied so far by a `drain-stream` handle."
   [{:keys [^ByteArrayOutputStream buffer]}]
   (.toString buffer "UTF-8"))
+
+(defn ^{:stratum 0} cancel-drain!
+  "Stop a `drain-stream` handle that has not reached end-of-stream. A
+   thread parked in a pipe read ignores interrupts, so `future-cancel`
+   alone would leave it blocked for as long as some orphan grandchild
+   holds the write end open; closing the stream first makes the pending
+   read fail and lets the thread exit. Both steps are no-ops on a drain
+   that already finished."
+  [{:keys [^InputStream stream future]}]
+  (try
+    (.close stream)
+    (catch java.io.IOException _
+      ;; Already closed by the drain's own with-open, or the pipe is gone.
+      nil))
+  (future-cancel future))
 
 ;------------------------------------------------------------------------------ Layer 1
 

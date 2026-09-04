@@ -223,16 +223,16 @@
 
 ;------------------------------------------------------------------------------ Layer 1
 
-(defn- ^{:stratum 1} kill-and-collect!
-  "Destroy `process` and its descendants, give the drain threads a bounded
-   chance to hit end-of-stream, then cancel them so no reader sits on a
-   dead pipe."
-  [^Process process stdout-drain stderr-drain]
-  (runtime-process/destroy-process-tree! process)
+(defn- ^{:stratum 1} settle-drains!
+  "Wait up to `partial-output-drain-ms` for both drains to reach
+   end-of-stream, then close and cancel whatever is still running. The
+   cancel is a no-op on a finished drain; on an unfinished one it frees
+   the reader thread instead of leaking it on a pipe an orphan holds open."
+  [stdout-drain stderr-drain]
   (deref (:future stdout-drain) partial-output-drain-ms nil)
   (deref (:future stderr-drain) partial-output-drain-ms nil)
-  (future-cancel (:future stdout-drain))
-  (future-cancel (:future stderr-drain)))
+  (runtime-process/cancel-drain! stdout-drain)
+  (runtime-process/cancel-drain! stderr-drain))
 
 (defn ^{:stratum 1} default-base-path
   "Default location for git worktrees acquired by the worktree executor.
@@ -585,72 +585,12 @@
 
 ;------------------------------------------------------------------------------ Layer 2
 
-(defn ^{:stratum 2} execute-command
-  "Execute a command in a directory using ProcessBuilder.
-
-   Accepts either a string (passed to sh -c, suitable for shell builtins and
-   pipelines) or a vector of strings (exec'd directly without a shell —
-   preferred for user-supplied values to avoid shell injection).
-
-   stdout and stderr are drained on separate threads while the child runs,
-   so a child that fills the OS pipe buffer (64 KB) on one stream before
-   closing the other cannot deadlock the parent.
-
-   When `timeout-ms` is a positive number the wait is bounded: on expiry
-   the whole process tree is destroyed and the result carries exit
-   `timeout-exit-code`, the partial output, and `:timed-out? true`. A nil
-   or non-positive `timeout-ms` waits without a deadline."
-  ([workdir command env-map]
-   (execute-command workdir command env-map nil))
-  ([workdir command env-map timeout-ms]
-   (let [cmd-args (if (string? command)
-                    ["sh" "-c" command]
-                    (vec command))
-         start-time (System/currentTimeMillis)]
-     (try
-       (let [pb (ProcessBuilder. ^java.util.List cmd-args)
-             _ (.directory pb (File. ^String workdir))
-             _ (when (seq env-map)
-                 (let [pb-env (.environment pb)]
-                   (doseq [[k v] env-map]
-                     (.put pb-env (name k) (str v)))))
-             process      (.start pb)
-             stdout-drain (runtime-process/drain-stream (.getInputStream process))
-             stderr-drain (runtime-process/drain-stream (.getErrorStream process))]
-         (try
-           (let [timed?     (and (number? timeout-ms) (pos? timeout-ms))
-                 completed? (if timed?
-                              (.waitFor process (long timeout-ms) TimeUnit/MILLISECONDS)
-                              (do (.waitFor process) true))]
-             (if completed?
-               (do
-                 ;; Wait for end-of-stream so the last pipe-buffered bytes land.
-                 ;; Bounded when a deadline was given: an orphan grandchild
-                 ;; holding the pipe must not outlive the caller's deadline.
-                 (if timed?
-                   (do (deref (:future stdout-drain) partial-output-drain-ms nil)
-                       (deref (:future stderr-drain) partial-output-drain-ms nil)
-                       ;; No-ops when the drains finished; otherwise frees the
-                       ;; reader threads instead of leaking them on an open pipe.
-                       (future-cancel (:future stdout-drain))
-                       (future-cancel (:future stderr-drain)))
-                   (do @(:future stdout-drain)
-                       @(:future stderr-drain)))
-                 (result/ok {:exit-code   (.exitValue process)
-                             :stdout      (runtime-process/drained-text stdout-drain)
-                             :stderr      (runtime-process/drained-text stderr-drain)
-                             :duration-ms (- (System/currentTimeMillis) start-time)}))
-               (do
-                 (kill-and-collect! process stdout-drain stderr-drain)
-                 (timed-out-result start-time stdout-drain stderr-drain))))
-           (catch InterruptedException e
-             ;; The caller's thread was interrupted mid-wait: do not leak the
-             ;; child, and keep the interrupt visible to whoever is unwinding.
-             (kill-and-collect! process stdout-drain stderr-drain)
-             (.interrupt (Thread/currentThread))
-             (result/err :exec-interrupted (.getMessage e)))))
-       (catch Exception e
-         (result/err :exec-failed (.getMessage e)))))))
+(defn- ^{:stratum 2} kill-and-collect!
+  "Destroy `process` and its descendants, then settle the drains so no
+   reader sits on a pipe an orphan still holds open."
+  [^Process process stdout-drain stderr-drain]
+  (runtime-process/destroy-process-tree! process)
+  (settle-drains! stdout-drain stderr-drain))
 
 (defn ^{:stratum 2} check-legacy-tmp-worktrees!
   "Warn once per JVM session when the legacy /tmp/miniforge-worktrees directory
@@ -811,6 +751,68 @@
   (remove-worktree worktree-path))
 
 ;------------------------------------------------------------------------------ Layer 3
+
+(defn ^{:stratum 3} execute-command
+  "Execute a command in a directory using ProcessBuilder.
+
+   Accepts either a string (passed to sh -c, suitable for shell builtins and
+   pipelines) or a vector of strings (exec'd directly without a shell —
+   preferred for user-supplied values to avoid shell injection).
+
+   stdout and stderr are drained on separate threads while the child runs,
+   so a child that fills the OS pipe buffer (64 KB) on one stream before
+   closing the other cannot deadlock the parent.
+
+   When `timeout-ms` is a positive number the wait is bounded: on expiry
+   the whole process tree is destroyed and the result carries exit
+   `timeout-exit-code`, the partial output, and `:timed-out? true`. A nil
+   or non-positive `timeout-ms` waits without a deadline."
+  ([workdir command env-map]
+   (execute-command workdir command env-map nil))
+  ([workdir command env-map timeout-ms]
+   (let [cmd-args (if (string? command)
+                    ["sh" "-c" command]
+                    (vec command))
+         start-time (System/currentTimeMillis)]
+     (try
+       (let [pb (ProcessBuilder. ^java.util.List cmd-args)
+             _ (.directory pb (File. ^String workdir))
+             _ (when (seq env-map)
+                 (let [pb-env (.environment pb)]
+                   (doseq [[k v] env-map]
+                     (.put pb-env (name k) (str v)))))
+             process      (.start pb)
+             stdout-drain (runtime-process/drain-stream (.getInputStream process))
+             stderr-drain (runtime-process/drain-stream (.getErrorStream process))]
+         (try
+           (let [timed?     (and (number? timeout-ms) (pos? timeout-ms))
+                 completed? (if timed?
+                              (.waitFor process (long timeout-ms) TimeUnit/MILLISECONDS)
+                              (do (.waitFor process) true))]
+             (if completed?
+               (do
+                 ;; Wait for end-of-stream so the last pipe-buffered bytes land.
+                 ;; Bounded when a deadline was given: an orphan grandchild
+                 ;; holding the pipe must not outlive the caller's deadline.
+                 (if timed?
+                   (settle-drains! stdout-drain stderr-drain)
+                   (do @(:future stdout-drain)
+                       @(:future stderr-drain)))
+                 (result/ok {:exit-code   (.exitValue process)
+                             :stdout      (runtime-process/drained-text stdout-drain)
+                             :stderr      (runtime-process/drained-text stderr-drain)
+                             :duration-ms (- (System/currentTimeMillis) start-time)}))
+               (do
+                 (kill-and-collect! process stdout-drain stderr-drain)
+                 (timed-out-result start-time stdout-drain stderr-drain))))
+           (catch InterruptedException e
+             ;; The caller's thread was interrupted mid-wait: do not leak the
+             ;; child, and keep the interrupt visible to whoever is unwinding.
+             (kill-and-collect! process stdout-drain stderr-drain)
+             (.interrupt (Thread/currentThread))
+             (result/err :exec-interrupted (.getMessage e)))))
+       (catch Exception e
+         (result/err :exec-failed (.getMessage e)))))))
 
 (defn ^{:stratum 3} create-worktree
   "Create a git worktree for the task.
