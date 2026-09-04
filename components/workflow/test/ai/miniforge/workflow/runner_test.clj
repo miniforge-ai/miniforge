@@ -20,6 +20,7 @@
    Tests that execute real phase pipelines (plan, implement, etc.)
    live in runner-integration-test under project tests."
   (:require
+   [ai.miniforge.workflow.isolation-test-support :as isolation]
    [clojure.java.io :as io]
    [clojure.test :refer [deftest is testing use-fixtures]]
    [ai.miniforge.event-stream.interface :as es]
@@ -607,3 +608,8 @@
 (use-fixtures :each
   phase-test-support/with-workflow-phase-test-support
   with-stubbed-acquire-environment)
+
+;; Every pipeline this namespace runs acquires its worktree from a
+;; throwaway host repository and checkpoints into a throwaway root — never
+;; the checkout the test JVM was launched in, never `~/.miniforge`.
+(clojure.test/use-fixtures :once isolation/with-isolated-host)

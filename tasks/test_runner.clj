@@ -18,6 +18,7 @@
 (ns test-runner
   (:require
    [ai.miniforge.bb-proc.interface :as proc]
+   [ai.miniforge.bb-test-runner.interface :as bb-test-runner]
    [babashka.process :as p]
    [clojure.edn :as edn]
    [clojure.java.io :as io]
@@ -177,7 +178,13 @@
         expr (str "(require 'clojure.test" ns-args ") "
                   "(let [r (clojure.test/run-tests" ns-args ")] "
                   "  (System/exit (if (zero? (+ (:fail r 0) (:error r 0))) 0 1)))")
-        exit (run-stream! clojure-cmd "-M:test:dev" "-e" expr)]
+        ;; `git commit` exports GIT_DIR and GIT_INDEX_FILE to its hooks. A
+        ;; test JVM that inherits them points every `git init` at the hook's
+        ;; own repository — which, with no work tree named, comes back bare
+        ;; (core.bare = true in the shared config, 2026-09-03). Same strip
+        ;; `bb test` applies before spawning `poly test`.
+        env  (bb-test-runner/sanitize-git-worktree-env (into {} (System/getenv)))
+        exit (run-stream! {:env env} clojure-cmd "-M:test:dev" "-e" expr)]
     (when-not (zero? exit)
       (println "❌ Pre-commit smoke tests failed with exit code:" exit)
       (System/exit exit))

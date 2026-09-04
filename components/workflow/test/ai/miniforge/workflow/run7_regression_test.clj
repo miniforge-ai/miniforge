@@ -23,6 +23,7 @@
    4. Stale phase transition request cleared between phases
    5. Review feedback lost during phase clearing (Run 9)"
   (:require
+   [ai.miniforge.workflow.isolation-test-support :as isolation]
    [ai.miniforge.phase.interface :as phase]
    [ai.miniforge.phase.loader :as loader]
    [clojure.test :refer [deftest testing is use-fixtures]]
@@ -234,3 +235,8 @@
     (binding [loader/phase-loader-config-resource phase-test-config-resource]
       (f))
     (phase/reset-phase-loader!)))
+
+;; Every pipeline this namespace runs acquires its worktree from a
+;; throwaway host repository and checkpoints into a throwaway root — never
+;; the checkout the test JVM was launched in, never `~/.miniforge`.
+(clojure.test/use-fixtures :once isolation/with-isolated-host)

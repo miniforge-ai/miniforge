@@ -1,0 +1,176 @@
+;; Title: Miniforge.ai
+;; Subtitle: An agentic SDLC / fleet-control platform
+;; Author: Christopher Lester
+;; Line: Founder, Miniforge.ai (project)
+;; Copyright 2025-2026 Christopher Lester (christopher@miniforge.ai)
+;;
+;; Licensed under the Apache License, Version 2.0 (the "License");
+;; you may not use this file except in compliance with the License.
+;; You may obtain a copy of the License at
+;;
+;;     http://www.apache.org/licenses/LICENSE-2.0
+;;
+;; Unless required by applicable law or agreed to in writing, software
+;; distributed under the License is distributed on an "AS IS" BASIS,
+;; WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+;; See the License for the specific language governing permissions and
+;; limitations under the License.
+(ns ai.miniforge.workflow.isolation-test-support
+  "Keeps pipeline-running tests off the developer's checkout and home.
+
+   `runner/run-pipeline` defaults `:repo-path` to \".\" and, in :local
+   mode, acquires a real git worktree from it: `git worktree add -b
+   task-<8hex>` against whatever repository the test JVM was launched in.
+   The worktree is removed on release; the branch is not. Checkpoints land
+   under `~/.miniforge/checkpoints`, and persisted task bundles under the
+   same root. Observed 2026-09-03 on the trap bench: one `bb test` inside
+   a linked worktree left 108 `task-*` branches on the enclosing
+   repository within a minute, and the developer checkout was carrying
+   38k of them.
+
+   `with-isolated-host` redirects every one of those sinks into a single
+   throwaway tree for the duration of a fixture:
+
+   - repo-path \".\" or absent  -> a fresh throwaway host repository
+   - worktree base path          -> <root>/worktrees
+   - persisted-bundle archive    -> <root>/archives
+   - default checkpoint root     -> <root>/checkpoints
+
+   An explicit non-\".\" repo-path and an explicit `:checkpoint/root`
+   execution option still win: a test that names its own target keeps
+   it. The tree is deleted when the fixture unwinds.
+
+   Registered as a `:once` fixture — one host repository per namespace is
+   enough, and `with-redefs` must wrap the whole run of that namespace."
+  (:require
+   [ai.miniforge.workflow.checkpoint-store-paths :as checkpoint-paths]
+   [ai.miniforge.workflow.runner-environment :as env]
+   [clojure.java.shell :as shell])
+  (:import
+   [java.io File]
+   [java.nio.file Files]
+   [java.nio.file.attribute FileAttribute]))
+
+;------------------------------------------------------------------------------ Layer 0
+
+(def ^{:stratum 0} host-branch
+  "Branch the throwaway host repository is seeded on. Matches the
+   `:branch` default `run-pipeline` acquires from."
+  "main")
+
+(defn ^{:stratum 0} temp-root!
+  []
+  (str (Files/createTempDirectory "miniforge-isolated-host"
+                                  (make-array FileAttribute 0))))
+
+(defn ^{:stratum 0} delete-tree!
+  [path]
+  (let [f (File. (str path))]
+    (when (.exists f)
+      (when (.isDirectory f)
+        (doseq [child (.listFiles f)] (delete-tree! child)))
+      (.delete f))))
+
+(def ^{:stratum 0} inherited-git-env-keys
+  "Environment variables a git hook exports to its children. A `git init`
+   or `git commit` that inherits them acts on the hook's repository, not
+   the directory it was pointed at: under the pre-commit hook this fixture's
+   `git init` re-initialised the launch repository as bare
+   (`core.bare = true` in its shared config, 2026-09-03)."
+  ["GIT_INDEX_FILE" "GIT_DIR" "GIT_WORK_TREE" "GIT_COMMON_DIR"
+   ;; `git -c k=v` travels to child processes as GIT_CONFIG_PARAMETERS; a
+   ;; core.worktree override from the launching command would point the
+   ;; throwaway repository's commands back at the launch checkout.
+   "GIT_CONFIG_PARAMETERS"])
+
+(defn ^{:stratum 0} redirect-repo-path
+  "`env-config` with a \".\" or absent `:repo-path` pointed at `host`.
+   Any other explicit path is left alone."
+  [env-config host]
+  (let [repo-path (get env-config :repo-path)]
+    (if (or (nil? repo-path) (= "." (str repo-path)))
+      (assoc env-config :repo-path host)
+      env-config)))
+
+(defn ^{:stratum 0} worktree-config
+  "Executor config that keeps worktrees and bundle archives under `root`."
+  [root]
+  {:base-path   (str root "/worktrees")
+   :archive-dir (str root "/archives")})
+
+;------------------------------------------------------------------------------ Layer 1
+
+(defn ^{:stratum 1} hermetic-git-env
+  "The current environment without `inherited-git-env-keys`."
+  []
+  (apply dissoc (into {} (System/getenv)) inherited-git-env-keys))
+
+(defn ^{:stratum 1} isolated-registry-config
+  "`registry-config-for-mode` with the worktree entry rooted under `root`.
+   Only the :local shape carries a worktree entry; governed configs pass
+   through untouched."
+  [original root]
+  (fn [mode executor-config]
+    (let [config (original mode executor-config)]
+      (cond-> config
+        (contains? config :worktree)
+        (update :worktree merge (worktree-config root))))))
+
+(defn ^{:stratum 1} isolated-acquire
+  "`acquire-execution-environment!` with a \".\" repo-path redirected to
+   `host`."
+  [original host]
+  (fn [workflow-id env-config]
+    (original workflow-id (redirect-repo-path env-config host))))
+
+;------------------------------------------------------------------------------ Layer 2
+
+(defn ^{:stratum 2} git!
+  "Run git in `dir` with a hermetic environment; throw on a non-zero exit.
+   Fixture setup that fails must fail here, not later as a confusing
+   acquisition warning."
+  [dir & args]
+  (let [{:keys [exit err] :as result}
+        (apply shell/sh "git" "-C" (str dir) (concat args [:env (hermetic-git-env)]))]
+    (when-not (zero? exit)
+      (throw (ex-info "isolation fixture git command failed"
+                      {:dir (str dir) :args (vec args) :exit exit :err err})))
+    result))
+
+;------------------------------------------------------------------------------ Layer 3
+
+(defn ^{:stratum 3} init-host-repo!
+  "A stand-in for the checkout the test JVM was launched from: one commit
+   on `host-branch`, signing off, no remote."
+  [dir]
+  (.mkdirs (File. (str dir)))
+  (git! dir "init" "--quiet" "-b" host-branch)
+  (git! dir "config" "user.email" "isolation-test@example.invalid")
+  (git! dir "config" "user.name" "Isolation Test")
+  (git! dir "config" "commit.gpgsign" "false")
+  (spit (str (File. (str dir) "seed.txt")) "seed\n")
+  (git! dir "add" "seed.txt")
+  (git! dir "commit" "--quiet" "--no-verify" "-m" "seed")
+  (str dir))
+
+;------------------------------------------------------------------------------ Layer 4
+
+(defn ^{:stratum 4} with-isolated-host
+  "clojure.test fixture: run `f` with every pipeline side effect that
+   would otherwise reach the developer's checkout or `~/.miniforge`
+   redirected into a throwaway tree, then delete the tree."
+  [f]
+  (let [root (temp-root!)
+        host (init-host-repo! (str root "/host"))]
+    (doseq [sub ["worktrees" "archives" "checkpoints"]]
+      (.mkdirs (File. (str root "/" sub))))
+    (try
+      (with-redefs [checkpoint-paths/default-checkpoint-root
+                    (fn [] (str root "/checkpoints"))
+                    env/registry-config-for-mode
+                    (isolated-registry-config env/registry-config-for-mode root)
+                    env/acquire-execution-environment!
+                    (isolated-acquire env/acquire-execution-environment! host)]
+        (f))
+      (finally
+        (delete-tree! root)))))

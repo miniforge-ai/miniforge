@@ -34,6 +34,7 @@
    [ai.miniforge.anomaly.interface :as anomaly]
    [ai.miniforge.event-stream.interface :as es]
    [ai.miniforge.logging.interface :as log]
+   [ai.miniforge.phase-software-factory.codex-pin :as codex-pin]
    [ai.miniforge.phase-software-factory.release :as release]
    [ai.miniforge.phase.interface :as phase]
    [ai.miniforge.phase.loader :as loader]
@@ -42,6 +43,21 @@
 ;------------------------------------------------------------------------------ Layer 0
 
 ;------------------------------------------------------------------------------ Test Fixtures
+(defn ^{:stratum 0} with-unconfigured-codex
+  "Run `f` with no codex configured.
+
+   `build-executor-context` consults the codex for the release situation
+   and appends the rendered landings to `:task/behavior-addendum`. The
+   codex location comes from the environment (`MINIFORGE_CODEX_PATH`),
+   so on a machine with one exported — the trap bench treated arm,
+   2026-09-03 — the addendum assertions below saw pack text plus codex
+   text where the test had stubbed only the pack. Nothing in this
+   namespace is about the consultation itself; the pinning contract lives
+   in codex-pin-test."
+  [f]
+  (with-redefs [codex-pin/configured-codex-dir (constantly nil)]
+    (f)))
+
 (def ^{:stratum 0} phase-test-config-resource
   "config/phase/test-support-namespaces.edn")
 
@@ -855,6 +871,7 @@
                   "every rehydrated file must carry content read from disk"))))))))
 
 (use-fixtures :each
+  with-unconfigured-codex
   (fn [f]
     (phase/reset-phase-loader!)
     (try

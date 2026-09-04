@@ -25,7 +25,8 @@
    `:invalid-input`. `run-pipeline` converts that anomaly to a failed
    execution context so callers receive the runner's normal result
    shape."
-  (:require [clojure.test :refer [deftest is testing]]
+  (:require [ai.miniforge.workflow.isolation-test-support :as isolation]
+            [clojure.test :refer [deftest is testing]]
             [ai.miniforge.anomaly.interface :as anomaly]
             [ai.miniforge.workflow.runner :as runner]))
 
@@ -99,3 +100,8 @@
                     (:execution/errors result)))
           (is (= :governed
                  (-> result :execution/errors first :data :execution-mode))))))))
+
+;; Every pipeline this namespace runs acquires its worktree from a
+;; throwaway host repository and checkpoints into a throwaway root — never
+;; the checkout the test JVM was launched in, never `~/.miniforge`.
+(clojure.test/use-fixtures :once isolation/with-isolated-host)

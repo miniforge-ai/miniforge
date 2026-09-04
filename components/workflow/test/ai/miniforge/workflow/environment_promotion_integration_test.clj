@@ -27,6 +27,7 @@
    No Docker or network access required: dag-executor and agent/invoke are
    mocked; verify/run-tests! is mocked to return passing results."
   (:require
+   [ai.miniforge.workflow.isolation-test-support :as isolation]
    [clojure.test :refer [deftest testing is use-fixtures]]
    [clojure.java.io :as io]
    [babashka.fs :as fs]
@@ -316,6 +317,11 @@
 (register-env-promotion-phase! env-promotion-implement)
 
 (register-env-promotion-phase! env-promotion-verify)
+
+;; Every pipeline this namespace runs acquires its worktree from a
+;; throwaway host repository and checkpoints into a throwaway root — never
+;; the checkout the test JVM was launched in, never `~/.miniforge`.
+(clojure.test/use-fixtures :once isolation/with-isolated-host)
 
 ;------------------------------------------------------------------------------ Rich Comment
 (comment

@@ -22,6 +22,7 @@
    and integration points. For true end-to-end tests with real LLM backends,
    see the e2e/ directory."
   (:require
+   [ai.miniforge.workflow.isolation-test-support :as isolation]
    [clojure.test :refer [deftest is testing]]
    [ai.miniforge.workflow.runner :as runner]
    [ai.miniforge.agent.interface :as agent]))
@@ -329,3 +330,8 @@
       ;; Should have artifacts vector
       (is (vector? (:execution/artifacts result))
           "Should have artifacts vector"))))
+
+;; Every pipeline this namespace runs acquires its worktree from a
+;; throwaway host repository and checkpoints into a throwaway root — never
+;; the checkout the test JVM was launched in, never `~/.miniforge`.
+(clojure.test/use-fixtures :once isolation/with-isolated-host)

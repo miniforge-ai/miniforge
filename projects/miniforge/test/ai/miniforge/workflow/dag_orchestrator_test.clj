@@ -18,6 +18,7 @@
 (ns ai.miniforge.workflow.dag-orchestrator-test
   "Tests for DAG orchestration of multi-task plans."
   (:require
+   [ai.miniforge.workflow.isolation-test-support :as isolation]
    [clojure.test :refer [deftest testing is]]
    [ai.miniforge.workflow.dag-orchestrator :as dag-orch]
    [ai.miniforge.workflow.dag-plan :as dag-plan]
@@ -578,3 +579,8 @@
                            (make-task :c [:a])])
           result (dag-orch/execute-plan-as-dag plan {})]
       (is (= 0 (:tasks-unreached result))))))
+
+;; Every pipeline this namespace runs acquires its worktree from a
+;; throwaway host repository and checkpoints into a throwaway root — never
+;; the checkout the test JVM was launched in, never `~/.miniforge`.
+(clojure.test/use-fixtures :once isolation/with-isolated-host)

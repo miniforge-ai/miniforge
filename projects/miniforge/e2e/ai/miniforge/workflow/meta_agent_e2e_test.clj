@@ -25,6 +25,7 @@
 
    Run locally only, not in CI (for now)."
   (:require
+   [ai.miniforge.workflow.isolation-test-support :as isolation]
    [clojure.test :refer [deftest is testing use-fixtures]]
    [ai.miniforge.workflow.runner :as runner]
    [ai.miniforge.agent.interface :as agent]
@@ -230,6 +231,11 @@
 (use-fixtures :each skip-if-no-cli)
 
 ;------------------------------------------------------------------------------ Test summary comment
+;; Every pipeline this namespace runs acquires its worktree from a
+;; throwaway host repository and checkpoints into a throwaway root — never
+;; the checkout the test JVM was launched in, never `~/.miniforge`.
+(clojure.test/use-fixtures :once isolation/with-isolated-host)
+
 (comment
   ;; How to run these E2E tests locally:
   ;;
