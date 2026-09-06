@@ -41,17 +41,30 @@
 
 (def ^{:stratum 0} ^:private repo-config-path ".miniforge/config.edn")
 
+(defn- ^{:stratum 0} safe-read-edn
+  "Read and parse an EDN string; returns nil and prints an error on failure.
+   Use at CLI boundaries where malformed user-supplied EDN should produce a
+   friendly message rather than an opaque Clojure exception."
+  [source-label content]
+  (try
+    (edn/read-string content)
+    (catch Exception e
+      (display/print-error (messages/t :scan/edn-parse-error
+                                       {:source  source-label
+                                        :message (ex-message e)}))
+      nil)))
+
 (defn- ^{:stratum 0} resolve-pack
   "Resolve a pack by name or path. Returns the loaded pack map or nil."
   [pack-ref]
   (cond
     (fs/exists? pack-ref)
-    (edn/read-string (slurp (str pack-ref)))
+    (safe-read-edn (str pack-ref) (slurp (str pack-ref)))
 
     :else
     (let [resource-path (str "policy_pack/packs/" pack-ref ".pack.edn")]
       (when-let [url (io/resource resource-path)]
-        (edn/read-string (slurp url))))))
+        (safe-read-edn resource-path (slurp url))))))
 
 (defn- ^{:stratum 0} resolve-rules-selector
   "Parse the --rules option into a selector value."
@@ -166,11 +179,11 @@
 ;------------------------------------------------------------------------------ Layer 1
 
 (defn- ^{:stratum 1} load-repo-config
-  "Load .miniforge/config.edn from the repo root. Returns nil if absent."
+  "Load .miniforge/config.edn from the repo root. Returns nil if absent or unparseable."
   [repo-path]
   (let [path (fs/path repo-path repo-config-path)]
     (when (fs/exists? path)
-      (edn/read-string (slurp (str path))))))
+      (safe-read-edn (str path) (slurp (str path))))))
 
 (defn- ^{:stratum 1} resolve-packs-from-config
   "Load all packs declared in :repo/packs. Returns merged pack or nil."

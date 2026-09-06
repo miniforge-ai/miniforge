@@ -785,6 +785,7 @@
   ;; ---------- `mf scan` — compliance scanner pipeline ----------
   :scan/repo-not-found       "Repository not found: {path}"
   :scan/scan-failed          "Scan failed: {message}"
+  :scan/edn-parse-error      "Failed to parse EDN from {source}: {message}"
   :scan/banner               "Scanning {path} ..."
   :scan/policy-summary       "Found {count} violation(s) across {files} files ({duration-ms}ms)"
   :scan/classification       "  Auto-fixable: {auto-count}  Needs review: {review-count}"
