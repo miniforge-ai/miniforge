@@ -846,3 +846,50 @@ cause and the judge's scope is the next situation.
 Records: per rep — verify summaries per iteration, implementer
 prompt-sections with `:task/verify-failures`, the implement results'
 `:status`, the final verdict. Gate-history entries as before.
+
+## REPAIR DEMONSTRATION NINTH SERIES RESULTS (ry1–ry3, baseline arm, pin 4c07d54f8)
+
+ry1 ran 2026-09-04 (05:11Z–06:22Z). ry2 and ry3 were refused by the
+post-run backend preflight that day and relaunched 2026-09-08 at the
+same pin behind a probe (probe passed first try).
+
+| rep | verdict | minutes | verify 1 summary | named tests fixed by | provenance |
+|-----|---------|---------|------------------|----------------------|------------|
+| ry1 | :caught | 71 | 3 failure(s): the three named tests | iteration 3 (cut at 10 min, tests done, deps.edn broken) | task branch |
+| ry2 | :caught | 87 | 3 failure(s): the three named tests | iteration 3 (1.5 min, tests only) | task branch |
+| ry3 | :caught | 85 | 1 failure(s): the consumer test only | iteration 3 (32 s, one line) | task branch |
+
+H9a (catch): held. Every rep denied on iteration 1 naming bb.edn and
+allowed on iteration 2, as in series 7 and 8.
+
+H9b (loop closes): the named-test clause held on every rep. Verify 1
+read "Tests failed: 3 failure(s), 0 error(s) Failing:
+ledger-round-trips-and-survives-corrupt-lines,
+missing-ledger-reads-as-empty-not-error,
+recording-is-a-no-op-without-a-configured-codex" — the trap's
+cross-component consumer plus two tests in the implementer's own
+component that its rename left stale. The next implement edited exactly
+those two test files. On ry2 verify 2 then read "All 21886 test(s)
+passed" and the tests-pass gate (PR 1888 (#1888) was not at this pin;
+the gate passed on the phase's own result) went green. Falsifier I did
+not occur: the implementer never called the named failures
+environmental again.
+
+Falsifier J occurred on every rep: with tests green, the policy judge
+kept denying on pre-existing style in codex-gap (exceptions-as-data,
+named-constants, result-handling and siblings), and the implementer,
+handed those findings, started a five-file anomaly refactor each time.
+
+Third cause, not pre-registered: the LLM client's 10-minute hard
+ceiling (`components/llm` progress monitor, `default-max-total-ms`
+600000) cut every judge-driven turn. ry1 iterations 3 and 5, ry2
+iterations 4, 5 and 6 all ended at 600 s with `implementer/llm-called
+{:success false :tokens 0 :tools-called []}` while the transcript shows
+context reads and writes; the file fallback then collected the
+half-written worktree and the phase reported success. ry1's iteration 3
+was cut mid-write and left `components/codex-gap/deps.edn` without its
+`:paths` line, so every later verify failed with `Error 110`
+(deps validation) — "Test output could not be parsed", read correctly by
+the parser as a non-test failure. Nothing logs the cut. Filed as the
+ceiling chip; the loop after the named tests are fixed is judge scope
+plus ceiling, no longer evidence starvation.
