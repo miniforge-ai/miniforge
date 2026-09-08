@@ -24,6 +24,7 @@
             [ai.miniforge.llm.protocols.records.llm-client]
             [ai.miniforge.llm.protocols.impl.llm-client :as impl]
             [ai.miniforge.llm.progress-monitor :as pm]
+            [ai.miniforge.logging.interface :as log]
             [cheshire.core :as json]))
 
 ;------------------------------------------------------------------------------ Layer 0
@@ -1403,6 +1404,179 @@
                                        :is_error    false}]}}))
       (is (< before (:last-activity-at @monitor))
           ":tool-result must advance :last-activity-at to keep monitor alive"))))
+
+;------------------------------------------------------------------------------ Ceiling cut bookkeeping (2026-09-04 trap-bench series 9)
+;;
+;; Two implement turns hit the 10-minute :max-total ceiling mid-work. The
+;; error response carried neither the tools the model had called nor the
+;; tokens it had consumed, and no marker said the CLIENT cut the run. These
+;; pin the response shape a cut run must carry.
+(deftest ^{:stratum 0} terminated-by-maps-adaptive-timeout-types-test
+  (testing "hard-limit is reported as :max-total — the knob operators tune"
+    (is (= :max-total (impl/terminated-by {:type :hard-limit :elapsed-ms 600001}))))
+  (testing "other adaptive-timeout types keep their canonical name"
+    (is (= :stream-idle (impl/terminated-by {:type :stream-idle})))
+    (is (= :stagnation (impl/terminated-by {:type :stagnation})))
+    (is (= :network-drop (impl/terminated-by {:type :network-drop}))))
+  (testing "no envelope / unknown type → nil (the model finished on its own)"
+    (is (nil? (impl/terminated-by nil)))
+    (is (nil? (impl/terminated-by {:type :something-else})))))
+
+(deftest ^{:stratum 0} streaming-error-response-carries-cut-run-bookkeeping-test
+  (testing "usage on a cut run lands as :usage + :tokens, same shape as llm-success"
+    (let [usage {:input-tokens 1200 :output-tokens 300}
+          resp (impl/streaming-error-response "" -1 "timed out" ""
+                                              {:type :hard-limit :message "Hard timeout"
+                                               :elapsed-ms 600001 :max-ms 600000}
+                                              nil 7 12 nil usage 200000)]
+      (is (not (:success resp)))
+      (is (= usage (:usage resp)))
+      (is (= 1500 (:tokens resp)))
+      (is (= 12 (:tool-call-count resp)))))
+
+  (testing "hard-limit envelope stamps :llm/terminated-by :max-total on the response"
+    (let [resp (impl/streaming-error-response "" -1 "timed out" ""
+                                              {:type :hard-limit :message "Hard timeout"
+                                               :elapsed-ms 600001 :max-ms 600000}
+                                              nil nil nil nil)]
+      (is (= :max-total (:llm/terminated-by resp)))
+      (is (= :hard-limit (get-in resp [:error :timeout :type])))))
+
+  (testing "no timeout envelope → no marker, no usage keys"
+    (let [resp (impl/streaming-error-response "" 1 "process died" "" nil nil nil nil nil)]
+      (is (not (contains? resp :llm/terminated-by)))
+      (is (not (contains? resp :usage)))
+      (is (not (contains? resp :tokens))))))
+
+(deftest ^{:stratum 0} log-streaming-result-warns-with-elapsed-and-call-count-test
+  (testing "a cut run logs at warn with elapsed time, ceiling, and tool-call count"
+    (let [[logger entries] (log/collecting-logger {:min-level :trace})]
+      (impl/log-streaming-result logger
+                                 {:type :hard-limit :message "Hard timeout: exceeded 600000ms limit"
+                                  :elapsed-ms 600123 :max-ms 600000
+                                  :stats {:chunks 40}}
+                                 0 14)
+      (let [entry (some #(when (= :agent/streaming-timeout (:log/event %)) %) @entries)]
+        (is (some? entry) "streaming-timeout must be logged")
+        (is (= :warn (:log/level entry)))
+        (is (= :max-total (get-in entry [:data :terminated-by])))
+        (is (= 600123 (get-in entry [:data :elapsed-ms])))
+        (is (= 600000 (get-in entry [:data :max-ms])))
+        (is (= 14 (get-in entry [:data :tool-call-count]))))))
+
+  (testing "a finished run logs at debug only"
+    (let [[logger entries] (log/collecting-logger {:min-level :trace})]
+      (impl/log-streaming-result logger nil 120 3)
+      (is (nil? (some #(when (= :agent/streaming-timeout (:log/event %)) %) @entries)))
+      (is (some #(when (= :agent/streaming-complete (:log/event %)) %) @entries)))))
+
+(deftest ^{:stratum 0} complete-stream-hard-limit-cut-reports-tools-and-tokens-test
+  (testing "a stream cut by the max-total ceiling still reports the tools called and tokens used"
+    ;; The fake stream-exec-fn replays what the Claude CLI had emitted
+    ;; before the cut — two tool_use events and a per-message usage
+    ;; envelope — then returns the hard-limit timeout-result shape that
+    ;; `stream-exec-fn` produces when `pm/check-timeout` fires.
+    (let [[logger entries] (log/collecting-logger {:min-level :trace})
+          tool-line (fn [tool]
+                      (json/generate-string
+                       {:type "assistant"
+                        :message {:content [{:type "tool_use" :name tool :id "t1" :input {}}]
+                                  :stop_reason "tool_use"
+                                  :usage {:input_tokens 1000 :output_tokens 250}}}))
+          timeout {:type :hard-limit
+                   :message "Hard timeout: exceeded 600000ms limit"
+                   :elapsed-ms 600042 :max-ms 600000
+                   :stats {:chunks 2 :unique-chunks 2 :files-written 0 :stagnant-cycles 0}}
+          client (ai.miniforge.llm.protocols.records.llm-client/create-client
+                  {:backend :claude
+                   :logger logger
+                   :stream-exec-fn (fn [_cmd on-line _opts]
+                                     (on-line (tool-line "mcp__context__context_read"))
+                                     (on-line (tool-line "mcp__context__context_write"))
+                                     (impl/timeout-result [] timeout))})
+          resp (llm/complete-stream client {:prompt "test"} (fn [_] nil))]
+      (is (not (:success resp)))
+      (is (= :max-total (:llm/terminated-by resp)))
+      (is (= :hard-limit (get-in resp [:error :timeout :type])))
+      (is (= 600042 (get-in resp [:error :timeout :elapsed-ms])))
+      (is (= ["mcp__context__context_read" "mcp__context__context_write"]
+             (:tools-called resp)))
+      (is (= 2 (:tool-call-count resp)))
+      (is (pos? (:tokens resp)) "tokens consumed before the cut are reported")
+      (is (contains? resp :cost-usd) "cost of the cut run is reported")
+      (let [entry (some #(when (= :agent/streaming-timeout (:log/event %)) %) @entries)]
+        (is (= :warn (:log/level entry)))
+        (is (= 2 (get-in entry [:data :tool-call-count])))
+        (is (= :max-total (get-in entry [:data :terminated-by])))))))
+
+(deftest ^{:stratum 0} parse-claude-stream-line-carries-per-message-usage-test
+  (testing "assistant events surface :message-usage + :message-id"
+    (let [parse-line (:stream-parser (get impl/backends :claude))
+          parsed (parse-line (json/generate-string
+                              {:type "assistant"
+                               :message {:id "msg_1"
+                                         :content [{:type "text" :text "hello"}]
+                                         :usage {:input_tokens 100 :output_tokens 5
+                                                 :cache_read_input_tokens 40}}}))]
+      (is (= {:input-tokens 100 :output-tokens 5 :cache-read-input-tokens 40}
+             (:message-usage parsed)))
+      (is (= "msg_1" (:message-id parsed)))))
+  (testing "no usage on the event → no usage keys"
+    (let [parse-line (:stream-parser (get impl/backends :claude))
+          parsed (parse-line (json/generate-string
+                              {:type "assistant"
+                               :message {:id "msg_2" :content [{:type "text" :text "hi"}]}}))]
+      (is (not (contains? parsed :message-usage)))
+      (is (not (contains? parsed :message-id))))))
+
+(deftest ^{:stratum 0} fold-message-usage-test
+  (testing "input-side counts take the latest call; output tokens accumulate"
+    (let [folded (-> nil
+                     (impl/fold-message-usage "m1" {:input-tokens 1000 :output-tokens 50
+                                                    :cache-read-input-tokens 200})
+                     (impl/fold-message-usage "m2" {:input-tokens 1300 :output-tokens 70
+                                                    :cache-read-input-tokens 900}))]
+      (is (= {:input-tokens 1300 :output-tokens 120 :cache-read-input-tokens 900} folded))))
+  (testing "one message emitted as several content-block events folds once"
+    (let [usage {:input-tokens 500 :output-tokens 30}
+          folded (-> nil
+                     (impl/fold-message-usage "m1" usage)
+                     (impl/fold-message-usage "m1" usage)
+                     (impl/fold-message-usage "m1" usage))]
+      (is (= {:input-tokens 500 :output-tokens 30} folded))))
+  (testing "events without a message id always fold"
+    (let [folded (-> nil
+                     (impl/fold-message-usage nil {:output-tokens 10})
+                     (impl/fold-message-usage nil {:output-tokens 10}))]
+      (is (= {:output-tokens 20} folded))))
+  (testing "the usage map stays plain — the dedupe id is metadata only"
+    (let [folded (impl/fold-message-usage nil "m1" {:input-tokens 1 :output-tokens 1})]
+      (is (= #{:input-tokens :output-tokens} (set (keys folded)))))))
+
+(deftest ^{:stratum 0} stream-with-parser-folds-message-usage-then-result-replaces-test
+  (let [monitor (pm/create-progress-monitor {:min-activity-interval-ms 1})
+        accumulated-usage (atom nil)
+        parse-line (:stream-parser (get impl/backends :claude))
+        on-line (impl/stream-with-parser parse-line (fn [_] nil) monitor
+                                         (atom "") accumulated-usage (atom nil) (atom [])
+                                         (atom nil) (atom nil) (atom nil))
+        assistant (fn [id usage]
+                    (json/generate-string
+                     {:type "assistant"
+                      :message {:id id
+                                :content [{:type "tool_use" :name "Bash" :id "t" :input {}}]
+                                :stop_reason "tool_use"
+                                :usage usage}}))]
+    (testing "usage accumulates across messages before any result frame"
+      (on-line (assistant "m1" {:input_tokens 1000 :output_tokens 40}))
+      (on-line (assistant "m1" {:input_tokens 1000 :output_tokens 40}))
+      (on-line (assistant "m2" {:input_tokens 1400 :output_tokens 60}))
+      (is (= {:input-tokens 1400 :output-tokens 100} @accumulated-usage)))
+    (testing "the result frame's totals replace the folded counts"
+      (on-line (json/generate-string
+                {:type "result" :result "done"
+                 :usage {:input_tokens 2400 :output_tokens 100}}))
+      (is (= {:input-tokens 2400 :output-tokens 100} @accumulated-usage)))))
 
 ;------------------------------------------------------------------------------ Layer 1
 
