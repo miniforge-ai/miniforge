@@ -1507,7 +1507,23 @@
       (let [entry (some #(when (= :agent/streaming-timeout (:log/event %)) %) @entries)]
         (is (= :warn (:log/level entry)))
         (is (= 2 (get-in entry [:data :tool-call-count])))
-        (is (= :max-total (get-in entry [:data :terminated-by])))))))
+        (is (= :max-total (get-in entry [:data :terminated-by]))))))
+
+  (testing "a backend-reported cost survives the cut even when no usage map arrived"
+    ;; Copilot review on #1897: the error branch used to attach :cost-usd
+    ;; only when usage was present, dropping a known total_cost_usd.
+    (let [timeout {:type :hard-limit :message "Hard timeout" :elapsed-ms 600042
+                   :max-ms 600000 :stats {}}
+          client (ai.miniforge.llm.protocols.records.llm-client/create-client
+                  {:backend :claude
+                   :stream-exec-fn (fn [_cmd on-line _opts]
+                                     (on-line (json/generate-string
+                                               {:type "result" :result "" :total_cost_usd 0.42}))
+                                     (impl/timeout-result [] timeout))})
+          resp (llm/complete-stream client {:prompt "test"} (fn [_] nil))]
+      (is (not (:success resp)))
+      (is (nil? (:usage resp)))
+      (is (= 0.42 (:cost-usd resp))))))
 
 (deftest ^{:stratum 0} parse-claude-stream-line-carries-per-message-usage-test
   (testing "assistant events surface :message-usage + :message-id"

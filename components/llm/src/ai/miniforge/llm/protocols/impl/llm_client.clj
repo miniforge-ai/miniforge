@@ -2240,7 +2240,11 @@
                                                 (model-registry/context-window-for-model-id
                                                  (:model request-with-model)))
                 (seq tools)   (assoc :tools-called tools)
-                (some? usage) (assoc :cost-usd resolved-cost)
+                ;; Cost is known when the backend reported one
+                ;; (total_cost_usd) or usage lets us estimate it —
+                ;; same two sources the success branch draws on.
+                (or (some? @accumulated-cost) (some? usage))
+                (assoc :cost-usd resolved-cost)
                 session-id    (assoc :session-id session-id)))))))))
 
 ;------------------------------------------------------------------------------ Layer 10
