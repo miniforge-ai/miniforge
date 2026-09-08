@@ -825,6 +825,43 @@
       (is (= ["mcp__context__context_read" "mcp__context__context_write"]
              (get-in called-log [:data :tools-called]))))))
 
+(deftest ^{:stratum 1} implementer-max-total-cut-before-any-write-test
+  (testing "a cut before the first write (nothing on disk) is still a failed result"
+    ;; Iteration 5 of the 2026-09-04 run: ten context_read calls, cut
+    ;; before any write. No file artifact at all — the partial-files
+    ;; derivation and the cut log must handle a nil artifact.
+    (let [[logger entries] (log/collecting-logger {:min-level :trace})
+          recovery-calls (atom 0)
+          result (with-redefs [artifact-session/create-session!
+                               (fn [& _] (session-map))
+                               artifact-session/write-mcp-config!
+                               identity
+                               artifact-session/read-artifact
+                               (constantly nil)
+                               artifact-session/read-context-misses
+                               (constantly nil)
+                               artifact-session/cleanup-session!
+                               (constantly nil)
+                               budget/resolve-cost-budget-usd
+                               (fn [& _] 1.0)
+                               llm/chat
+                               (fn [& _] (cut-response))
+                               submission-recovery/run-recovery-session
+                               (fn [& _] (swap! recovery-calls inc) nil)
+                               file-artifacts/collect-written-files
+                               (fn [_ _] nil)
+                               file-artifacts/collect-worktree-files
+                               (fn [_ _] nil)]
+                   (@#'implementer/invoke-with-llm
+                    nil "prompt" "system" {} {} nil logger [] {}))
+          cut-log (find-log-entry entries :implementer/llm-max-total-exceeded)]
+      (is (response/error? result))
+      (is (= :hard-limit (get-in result [:error :data :timeout :type])))
+      (is (= :max-total (get-in result [:error :data :llm/terminated-by])))
+      (is (= [] (get-in result [:error :data :partial-files])))
+      (is (= 0 (get-in cut-log [:data :partial-file-count])))
+      (is (= 0 @recovery-calls)))))
+
 (deftest ^{:stratum 1} implementer-stream-idle-cut-keeps-file-promotion-test
   (testing "a stream-idle after successful writes still promotes the files (iter-20 precedence)"
     ;; Only :max-total refuses promotion: there the client cut a turn that
