@@ -49,11 +49,6 @@
   [workflows status]
   (count (filter #(= status (:workflow/status %)) workflows)))
 
-;; Note: Keep for future phase-based filtering
-#_(defn count-by-phase
-    "Count workflows by phase."
-    [workflows phase]
-    (count (filter #(= phase (:workflow/phase %)) workflows)))
 ;; Subscription management (polling-based for BB compatibility)
 (defn ^{:stratum 0} create-subscription
   "Create a new subscription record."
@@ -88,13 +83,6 @@
 
 ;------------------------------------------------------------------------------ Layer 1
 
-;; Note: Keep for future event broadcasting support
-#_(defn add-event-to-subscriptions
-    "Add event to relevant subscriptions."
-    [subscriptions event]
-    (doseq [[_id sub] @subscriptions]
-      (when (contains? (:subscription/topics sub) (:event/topic event))
-        (swap! (:subscription/event-queue sub) conj event))))
 ;; System status aggregation
 (defn ^{:stratum 1} aggregate-workflow-stats
   "Aggregate workflow statistics."
@@ -246,14 +234,14 @@
 
   (poll-events [_this subscription-id]
     (if-let [sub (get @subscriptions subscription-id)]
-      (let [queue (:subscription/event-queue sub)
-            events @queue
-            callback (:subscription/callback sub)]
-        ;; Reset queue and update last poll time
-        (reset! queue [])
+      (let [queue     (:subscription/event-queue sub)
+            ;; swap-vals! atomically drains the queue, returning [old new].
+            ;; A plain @queue + reset! pair has a TOCTOU gap: events arriving
+            ;; between the deref and the reset! are silently dropped.
+            [events _] (swap-vals! queue (constantly []))
+            callback  (:subscription/callback sub)]
         (swap! subscriptions assoc-in [subscription-id :subscription/last-poll]
                (System/currentTimeMillis))
-        ;; Invoke callback for each event
         (doseq [event events]
           (try
             (callback event)
