@@ -330,7 +330,7 @@
   [session]
   (try
     ((:exec! session) (:executor session) (:environment-id session)
-                      (str "rm -rf " (:dir session)) {:workdir (:workdir session)})
+                      (str "rm -rf " (file-artifacts/shell-quote (:dir session))) {:workdir (:workdir session)})
     (catch Exception _ nil)))
 
 ;------------------------------------------------------------------------------ Layer 2.75
@@ -615,7 +615,7 @@
   ([executor env-id workdir execute-fn]
    (let [exec!       execute-fn
          session-dir (str workdir "/.miniforge-session")
-         _           (exec! executor env-id (str "mkdir -p " session-dir) {:workdir workdir})]
+         _           (exec! executor env-id (str "mkdir -p " (file-artifacts/shell-quote session-dir)) {:workdir workdir})]
      {:dir               session-dir
       :mcp-config-path   (str session-dir "/mcp-config.json")
       :artifact-path     (str session-dir "/artifact.edn")
@@ -651,9 +651,9 @@
                      {"hooks" {"PreToolUse" [{"type" "command" "command" hook-cmd}]}}
                      {:pretty true})]
     ;; Write configs inside capsule
-    (exec! executor env-id (str "cat > " (:mcp-config-path session) " << 'MCPEOF'\n" mcp-config "\nMCPEOF")
+    (exec! executor env-id (str "cat > " (file-artifacts/shell-quote (:mcp-config-path session)) " << 'MCPEOF'\n" mcp-config "\nMCPEOF")
            {:workdir (:workdir session)})
-    (exec! executor env-id (str "cat > " session-dir "/claude-settings.json << 'SETTINGSEOF'\n" settings "\nSETTINGSEOF")
+    (exec! executor env-id (str "cat > " (file-artifacts/shell-quote (str session-dir "/claude-settings.json")) " << 'SETTINGSEOF'\n" settings "\nSETTINGSEOF")
            {:workdir (:workdir session)})
     (assoc session
            :mcp-allowed-tools mcp-tools
@@ -786,7 +786,7 @@
   [session]
   (let [exec!    (:exec! session)
         result   (exec! (:executor session) (:environment-id session)
-                        (str "cat " (:artifact-path session)) {:workdir (:workdir session)})
+                        (str "cat " (file-artifacts/shell-quote (:artifact-path session))) {:workdir (:workdir session)})
         content  (get-in result [:data :stdout] "")]
     (when (seq content)
       (try

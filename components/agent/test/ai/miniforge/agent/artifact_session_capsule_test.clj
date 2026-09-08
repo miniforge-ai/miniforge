@@ -23,6 +23,7 @@
    [clojure.test :refer [deftest testing is]]
    [clojure.string :as str]
    [ai.miniforge.agent.artifact-session :as session]
+   [ai.miniforge.agent.file-artifacts :as file-artifacts]
    [ai.miniforge.dag-executor.result :as result]))
 
 ;------------------------------------------------------------------------------ Layer 0
@@ -225,7 +226,7 @@
 ;------------------------------------------------------------------------------ Layer 2
 
 (def ^{:stratum 2} ^:private capsule-cleanup-command
-  (str "rm -rf " capsule-session-dir))
+  (str "rm -rf " (file-artifacts/shell-quote capsule-session-dir)))
 
 (deftest ^{:stratum 2} with-session-governed-mode-test
   (testing "governed mode with executor uses capsule session"
