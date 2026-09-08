@@ -54,6 +54,7 @@
   ;; Error messages
   :error/parse-failed             "LLM response could not be parsed as code artifact"
   :error/llm-failed               "LLM call failed"
+  :error/llm-max-total-exceeded   "Implement turn was cut at the LLM run ceiling (:max-total-ms) before it finished; files written before the cut were not promoted"
   :error/no-llm-backend           "No LLM backend provided"
   :error/unverified-already-implemented
   "Implementer claimed :already-implemented without artifact evidence after prior review or verify failures"

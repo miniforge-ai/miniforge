@@ -9,6 +9,12 @@
  {:anthropic {:api-version "2023-06-01"
               :default-max-tokens 16000}}
 
+ ;; Framework defaults for a monitored streaming run. A role overrides
+ ;; them per turn through its prompt config's :prompt/progress-monitor
+ ;; block (components/agent/resources/prompts/{planner,reviewer,implementer}.edn);
+ ;; the implementer carries a 30-minute :max-total-ms because its turns
+ ;; write many files (2026-09-04 trap-bench series 9 cut two of them at
+ ;; this 10-minute default).
  :stream
  {:default-stagnation-threshold-ms 120000
   :default-max-total-ms 600000

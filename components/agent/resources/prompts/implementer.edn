@@ -9,6 +9,23 @@
  :prompt/agent :implementer
  :prompt/max-turns 40
 
+ ;; Main-turn progress monitor (loaded by prompts/load-progress-monitor).
+ ;; :max-total-ms is the hard ceiling on ONE implement turn; the LLM
+ ;; client cuts the subprocess when it is exceeded. The framework default
+ ;; is 10 minutes (components/llm/resources/llm/client-defaults.edn). On
+ ;; 2026-09-04 (trap bench series 9, run `baseline-trap-a-ry1`) two
+ ;; implement turns given 35-40k-char verify-failure prompts hit that
+ ;; ceiling: one was cut mid-write and left components/codex-gap/deps.edn
+ ;; without its :paths line, which failed every later verify; the other
+ ;; was cut after ten context_read calls before any write. Implement
+ ;; turns write many files and re-read context between writes, so they
+ ;; get 30 minutes. Stagnation and activity spacing stay at the framework
+ ;; defaults — the stream keepalive covers legitimate model silence.
+ :prompt/progress-monitor
+ {:stagnation-threshold-ms     120000
+  :max-total-ms                1800000
+  :min-activity-interval-ms    5000}
+
  :prompt/system
  "You are an Implementation Agent for an autonomous software development team.
 
@@ -201,6 +218,13 @@ are what they review — what you say in chat is just narration."
  ;; useful implementation analysis but wrote NO files and submitted no
  ;; artifact. Re-feeds the prior output and asks only for the Write.
  :prompt/submission-retry-max-turns 6
+
+ ;; The recovery turn only re-issues writes, so it keeps the framework's
+ ;; 10-minute ceiling rather than the main turn's 30.
+ :prompt/submission-retry-monitor
+ {:stagnation-threshold-ms     120000
+  :max-total-ms                600000
+  :min-activity-interval-ms    5000}
 
  :prompt/submission-retry-template
  "You already worked out the implementation for this task.

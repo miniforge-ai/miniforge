@@ -34,7 +34,9 @@
 (def ^{:stratum 0} ^:private default-max-total-ms
   "Hard ceiling on a single monitored run regardless of progress. 10 minutes —
    a backstop for an agent that keeps emitting just enough to look active but
-   never actually finishes."
+   never actually finishes. Roles override it per turn via their prompt
+   config's :prompt/progress-monitor block (the implementer runs 30 minutes);
+   a run that hits it is reported with `:llm/terminated-by :max-total`."
   600000)
 
 (def ^{:stratum 0} ^:private default-min-activity-interval-ms

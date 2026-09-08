@@ -26,6 +26,7 @@
    [ai.miniforge.agent.core :as core]
    [ai.miniforge.agent.file-artifacts :as file-artifacts]
    [ai.miniforge.agent.implementer :as implementer]
+   [ai.miniforge.agent.submission-recovery :as submission-recovery]
    [ai.miniforge.llm.interface :as llm]
    [ai.miniforge.logging.interface :as log]
    [ai.miniforge.repo-index.interface :as messages]
@@ -429,6 +430,37 @@
       (is (= "found in worktree metadata" (:summary result)))
       (is (= [] (get-in result [:output :code/files]))))))
 
+;------------------------------------------------------------------------------ Ceiling cut (2026-09-04 trap-bench series 9)
+;;
+;; Two implement turns hit the LLM client's :max-total ceiling mid-work.
+;; The implementer promoted whatever was on disk (one file was a deps.edn
+;; missing its :paths line), logged `:tokens 0 :tools-called []`, and the
+;; phase reported success. A ceiling cut must be a failed result that
+;; carries the timeout envelope, and the log must say what was cut.
+(def ^{:stratum 0} ^:private min-implement-total-budget-ms
+  "Floor for the implementer main-turn :max-total-ms — 30 minutes. Implement
+   turns write many files and re-read context between writes; the 10-minute
+   framework default cut two of them mid-work on 2026-09-04."
+  1800000)
+
+(defn- ^{:stratum 0} cut-response
+  "LLM response shape `streaming-error-response` emits when the run hits
+   the :max-total ceiling: timeout envelope + marker + the bookkeeping the
+   client now carries for a cut run."
+  []
+  {:success false
+   :error {:type "adaptive_timeout"
+           :message "Adaptive timeout: Hard timeout: exceeded 600000ms limit (type: hard-limit, elapsed: 600042ms)"
+           :timeout {:type :hard-limit :elapsed-ms 600042 :max-ms 600000}
+           :stdout "Now let me write all the files"
+           :exit-code -1}
+   :anomaly {}
+   :llm/terminated-by :max-total
+   :tools-called ["mcp__context__context_read" "mcp__context__context_write"]
+   :tool-call-count 2
+   :tokens 8000
+   :stop-reason "tool_use"})
+
 ;------------------------------------------------------------------------------ Layer 1
 
 ;; Invoke tests
@@ -730,6 +762,180 @@
       (is (map? (:actions summary)))
       (is (string? (:language summary)))
       (is (boolean? (:tests-needed? summary))))))
+
+(deftest ^{:stratum 1} implementer-max-total-cut-is-a-failed-result-test
+  (testing "a run cut by :max-total fails even with files on disk, and logs the cut"
+    (let [[logger entries] (log/collecting-logger {:min-level :trace})
+          partial-artifact {:code/files [{:path "components/codex-gap/deps.edn"
+                                          :content "{:deps {}}"
+                                          :action :create}
+                                         {:path "src/partial.clj"
+                                          :content "(ns partial)"
+                                          :action :create}]
+                            :code/summary "written before the cut"
+                            :code/language "clojure"
+                            :code/tests-needed? true}
+          recovery-calls (atom 0)
+          result (with-redefs [artifact-session/create-session!
+                               (fn [& _] (session-map))
+                               artifact-session/write-mcp-config!
+                               identity
+                               artifact-session/read-artifact
+                               (constantly nil)
+                               artifact-session/read-context-misses
+                               (constantly nil)
+                               artifact-session/cleanup-session!
+                               (constantly nil)
+                               budget/resolve-cost-budget-usd
+                               (fn [& _] 1.0)
+                               llm/chat
+                               (fn [& _] (cut-response))
+                               submission-recovery/run-recovery-session
+                               (fn [& _] (swap! recovery-calls inc) nil)
+                               file-artifacts/collect-written-files
+                               (fn [_ _] partial-artifact)
+                               file-artifacts/collect-worktree-files
+                               (fn [_ _] nil)]
+                   (@#'implementer/invoke-with-llm
+                    nil "prompt" "system" {} {} nil logger [] {}))
+          cut-log (find-log-entry entries :implementer/llm-max-total-exceeded)
+          called-log (find-log-entry entries :implementer/llm-called)]
+      (is (response/error? result)
+          "files on disk do not turn a ceiling cut into a success")
+      (is (nil? (get-in result [:output :code/files])))
+      (is (= :hard-limit (get-in result [:error :data :timeout :type]))
+          "timeout envelope survives so the phase routes it as a backend timeout")
+      (is (= :max-total (get-in result [:error :data :llm/terminated-by])))
+      (is (= ["components/codex-gap/deps.edn" "src/partial.clj"]
+             (get-in result [:error :data :partial-files])))
+      (is (= 8000 (get-in result [:metrics :tokens]))
+          "tokens the cut run consumed are reported")
+      (is (= 0 @recovery-calls) "no submission-recovery turn after a ceiling cut")
+      (is (nil? (find-log-entry entries :implementer/file-artifact-fallback))
+          "no silent file-artifact promotion")
+      (is (some? cut-log) "the cut is logged")
+      (is (= :warn (:log/level cut-log)))
+      (is (= 600042 (get-in cut-log [:data :elapsed-ms])))
+      (is (= 600000 (get-in cut-log [:data :max-ms])))
+      (is (= 2 (get-in cut-log [:data :tool-call-count])))
+      (is (= 2 (get-in cut-log [:data :partial-file-count])))
+      (is (= :max-total (get-in called-log [:data :terminated-by])))
+      (is (false? (get-in called-log [:data :success])))
+      (is (= 8000 (get-in called-log [:data :tokens])))
+      (is (= ["mcp__context__context_read" "mcp__context__context_write"]
+             (get-in called-log [:data :tools-called]))))))
+
+(deftest ^{:stratum 1} implementer-max-total-cut-before-any-write-test
+  (testing "a cut before the first write (nothing on disk) is still a failed result"
+    ;; Iteration 5 of the 2026-09-04 run: ten context_read calls, cut
+    ;; before any write. No file artifact at all — the partial-files
+    ;; derivation and the cut log must handle a nil artifact.
+    (let [[logger entries] (log/collecting-logger {:min-level :trace})
+          recovery-calls (atom 0)
+          result (with-redefs [artifact-session/create-session!
+                               (fn [& _] (session-map))
+                               artifact-session/write-mcp-config!
+                               identity
+                               artifact-session/read-artifact
+                               (constantly nil)
+                               artifact-session/read-context-misses
+                               (constantly nil)
+                               artifact-session/cleanup-session!
+                               (constantly nil)
+                               budget/resolve-cost-budget-usd
+                               (fn [& _] 1.0)
+                               llm/chat
+                               (fn [& _] (cut-response))
+                               submission-recovery/run-recovery-session
+                               (fn [& _] (swap! recovery-calls inc) nil)
+                               file-artifacts/collect-written-files
+                               (fn [_ _] nil)
+                               file-artifacts/collect-worktree-files
+                               (fn [_ _] nil)]
+                   (@#'implementer/invoke-with-llm
+                    nil "prompt" "system" {} {} nil logger [] {}))
+          cut-log (find-log-entry entries :implementer/llm-max-total-exceeded)]
+      (is (response/error? result))
+      (is (= :hard-limit (get-in result [:error :data :timeout :type])))
+      (is (= :max-total (get-in result [:error :data :llm/terminated-by])))
+      (is (= [] (get-in result [:error :data :partial-files])))
+      (is (= 0 (get-in cut-log [:data :partial-file-count])))
+      (is (= 0 @recovery-calls)))))
+
+(deftest ^{:stratum 1} implementer-stream-idle-cut-keeps-file-promotion-test
+  (testing "a stream-idle after successful writes still promotes the files (iter-20 precedence)"
+    ;; Only :max-total refuses promotion: there the client cut a turn that
+    ;; was still writing. Stream-idle / stagnation mean the model finished
+    ;; and hung, so the work on disk is the work.
+    (let [[logger _] (log/collecting-logger {:min-level :trace})
+          fallback-artifact {:code/files [{:path "src/done.clj"
+                                           :content "(ns done)"
+                                           :action :create}]
+                             :code/summary "written before the hang"
+                             :code/language "clojure"
+                             :code/tests-needed? true}
+          idle-response (-> (cut-response)
+                            (assoc :llm/terminated-by :stream-idle)
+                            (assoc-in [:error :timeout] {:type :stream-idle :elapsed-ms 420000}))
+          result (with-redefs [artifact-session/create-session!
+                               (fn [& _] (session-map))
+                               artifact-session/write-mcp-config!
+                               identity
+                               artifact-session/read-artifact
+                               (constantly nil)
+                               artifact-session/read-context-misses
+                               (constantly nil)
+                               artifact-session/cleanup-session!
+                               (constantly nil)
+                               budget/resolve-cost-budget-usd
+                               (fn [& _] 1.0)
+                               llm/chat
+                               (fn [& _] idle-response)
+                               file-artifacts/collect-written-files
+                               (fn [_ _] fallback-artifact)
+                               file-artifacts/collect-worktree-files
+                               (fn [_ _] nil)]
+                   (@#'implementer/invoke-with-llm
+                    nil "prompt" "system" {} {} nil logger [] {}))]
+      (is (response/success? result))
+      (is (= [{:path "src/done.clj" :content "(ns done)" :action :create}]
+             (get-in result [:output :code/files]))))))
+
+(deftest ^{:stratum 1} implementer-progress-monitor-thresholds-loaded-test
+  ;; Mirrors planner-progress-monitor-thresholds-loaded-test: guards the
+  ;; implementer.edn ceiling at the LLM boundary so a prompt-loading
+  ;; regression cannot silently drop the implementer back to the
+  ;; 10-minute framework default.
+  (testing ":progress-monitor passed to the LLM reflects implementer.edn's ceiling"
+    (let [[logger _] (log/collecting-logger {:min-level :trace})
+          captured (atom nil)
+          _ (with-redefs [artifact-session/create-session!
+                          (fn [& _] (session-map))
+                          artifact-session/write-mcp-config!
+                          identity
+                          artifact-session/read-artifact
+                          (constantly nil)
+                          artifact-session/read-context-misses
+                          (constantly nil)
+                          artifact-session/cleanup-session!
+                          (constantly nil)
+                          budget/resolve-cost-budget-usd
+                          (fn [& _] 1.0)
+                          llm/chat
+                          (fn [_client _prompt opts]
+                            (reset! captured opts)
+                            (llm-response :content "" :tokens 1))
+                          file-artifacts/collect-written-files
+                          (fn [_ _] nil)
+                          file-artifacts/collect-worktree-files
+                          (fn [_ _] nil)]
+              (@#'implementer/invoke-with-llm
+               nil "prompt" "system" {} {} nil logger [] {}))
+          monitor (:progress-monitor @captured)]
+      (is (some? @captured) "LLM client should have been called")
+      (is (some? monitor) ":progress-monitor opt must reach the LLM client")
+      (is (>= (:max-total-ms @monitor) min-implement-total-budget-ms)
+          "implement turns write many files; the ceiling must be ≥ 30 minutes"))))
 
 ;------------------------------------------------------------------------------ Rich Comment
 (comment

@@ -535,6 +535,22 @@
                    (str "origin/" base-branch)
                    (str "refs/heads/" base-branch)])))))
 
+(defn- ^{:stratum 1} create-implementer-progress-monitor
+  "Implementer main-turn progress monitor. Thresholds live in
+   resources/prompts/implementer.edn (:prompt/progress-monitor) — the
+   ceiling an implement turn gets before the LLM client cuts it
+   (`:max-total-ms`). Returns nil when the block is absent so the LLM
+   client's framework default applies. Mirrors the planner/reviewer
+   factories."
+  []
+  (prompts/load-progress-monitor @implementer-prompt-data :prompt/progress-monitor))
+
+(defn- ^{:stratum 1} create-implementer-retry-progress-monitor
+  "Progress monitor for the short submission-only recovery turn
+   (:prompt/submission-retry-monitor in implementer.edn); nil when absent."
+  []
+  (prompts/load-progress-monitor @implementer-prompt-data :prompt/submission-retry-monitor))
+
 (defn- ^{:stratum 1} submission-retry-prompt
   "Submission-only retry prompt: re-feed the task + the prior (prose) output
    and ask the implementer to deliver the actual file writes now."
@@ -618,10 +634,12 @@
   (let [budget-usd (budget/resolve-cost-budget-usd :implementer config context)
         max-turns (get @implementer-prompt-data :prompt/max-turns 10)
         resume-id (read-session-checkpoint working-dir)
+        monitor (create-implementer-progress-monitor)
         mcp-opts (cond-> (artifact-session/session->mcp-opts session budget-usd max-turns)
                    true        (assoc :disallowed-tools implementer-disallowed-tools)
                    working-dir (assoc :workdir working-dir)
-                   resume-id   (assoc :resume resume-id))
+                   resume-id   (assoc :resume resume-id)
+                   monitor     (assoc :progress-monitor monitor))
         result (if on-chunk
                  (llm/chat-stream llm-client user-prompt on-chunk
                                   (merge {:system effective-system-prompt} mcp-opts))
@@ -859,11 +877,13 @@
                                   (let [budget-usd      (budget/resolve-cost-budget-usd
                                                          :implementer config context)
                                         retry-max-turns (get @implementer-prompt-data
-                                                             :prompt/submission-retry-max-turns 6)]
+                                                             :prompt/submission-retry-max-turns 6)
+                                        retry-monitor   (create-implementer-retry-progress-monitor)]
                                     (cond-> (artifact-session/session->mcp-opts
                                              session budget-usd retry-max-turns)
-                                      true        (assoc :disallowed-tools implementer-disallowed-tools)
-                                      working-dir (assoc :workdir working-dir))))})
+                                      true          (assoc :disallowed-tools implementer-disallowed-tools)
+                                      working-dir   (assoc :workdir working-dir)
+                                      retry-monitor (assoc :progress-monitor retry-monitor))))})
         recovered (normalize-implementer-result raw context working-dir)]
     (when (or (:structured-artifact recovered)
               (:parsed-content recovered)
@@ -883,6 +903,17 @@
           #(invoke-implementer-session % llm-client user-prompt effective-system-prompt
                                        config context on-chunk existing-files working-dir))
         response llm-result
+        ;; The LLM client cut the run at its `:max-total-ms` ceiling. The
+        ;; files on disk are whatever the agent had written when the clock
+        ;; ran out — mid-write on the 2026-09-04 trap-bench series 9 run,
+        ;; which left a deps.edn without its :paths line and failed every
+        ;; later verify. Such a turn is NOT promoted from the working tree;
+        ;; it fails with the timeout envelope so the phase routes it as a
+        ;; backend timeout (retry from the session checkpoint within the
+        ;; iteration budget, then the terminal :implement/backend-timeout
+        ;; verdict). Stream-idle / stagnation keep the container-promotion
+        ;; precedence below: there the model finished writing and hung.
+        cut-by-ceiling? (= :max-total (:llm/terminated-by response))
         file-artifact (collect-session-artifact context
                                                 session-mode
                                                 working-dir
@@ -892,14 +923,25 @@
                      :response response
                      :worktree-artifacts worktree-artifacts
                      :artifact artifact
-                     :fallback-artifact file-artifact
+                     :fallback-artifact (when-not cut-by-ceiling? file-artifact)
                      :parse-response parse-code-response
-                     :derive-artifact code-from-blocks})]
+                     :derive-artifact code-from-blocks})
+        partial-files (mapv :path (:code/files file-artifact))]
     (when (seq context-misses)
       (log/info logger :implementer :implementer/context-cache-misses
                 {:data {:miss-count (count context-misses)
                         :misses context-misses}}))
-    (when file-artifact
+    (when cut-by-ceiling?
+      (log/warn logger :implementer :implementer/llm-max-total-exceeded
+                {:data {:elapsed-ms (get-in response [:error :timeout :elapsed-ms])
+                        :max-ms (get-in response [:error :timeout :max-ms])
+                        :tool-call-count (get response :tool-call-count
+                                              (count (get response :tools-called [])))
+                        :tools-called (get response :tools-called [])
+                        :partial-file-count (count partial-files)
+                        :partial-files partial-files
+                        :working-dir working-dir}}))
+    (when (and file-artifact (not cut-by-ceiling?))
       (log/warn logger :implementer :implementer/file-artifact-fallback
                 {:data {:file-count (count (:code/files file-artifact))
                         :tools-called (get response :tools-called [])}}))
@@ -913,6 +955,8 @@
                               ;; a write/scan dir mismatch is diagnosable.
                               :working-dir working-dir
                               :tools-called (:tools-called normalized)}
+                       (:llm/terminated-by response)
+                       (assoc :terminated-by (:llm/terminated-by response))
                        (:stop-reason response)
                        (assoc :stop-reason (:stop-reason response))
                        (:num-turns response)
@@ -937,36 +981,55 @@
           ;; produced usable code blocks does NOT trigger an unnecessary
           ;; recovery LLM call.
           parsed    (or (:parsed-content normalized) (:derived-artifact normalized))
-          recovered (when (submission-recovery/submission-retry?
-                           response submitted parsed (:content normalized))
+          ;; No recovery turn after a ceiling cut: the turn was still
+          ;; working, not narrating; the phase-level retry resumes the
+          ;; session instead.
+          recovered (when (and (not cut-by-ceiling?)
+                               (submission-recovery/submission-retry?
+                                response submitted parsed (:content normalized)))
                       (recover-implementer-submission
                        {:llm-client llm-client :config config :context context
                         :on-chunk on-chunk :working-dir working-dir
                         :effective-system-prompt effective-system-prompt
                         :input input :normalized normalized :logger logger}))
-          final     (or recovered normalized)]
-      ;; Container-promotion precedence: if the agent wrote files into
-      ;; the worktree (file-artifact via collect-written-files) or
-      ;; submitted via the MCP artifact path, honor that even when the
-      ;; CLI itself terminated with a timeout/error. Iter-20 of the
-      ;; planner-convergence dogfood showed Claude stalling AFTER a
-      ;; successful stream of edits; the old path discarded a real
-      ;; artifact because the LLM response was classified as failure.
-      (let [result (if (result-boundary/usable-content? final)
-                     (process-llm-response final context logger input)
-                     ;; LLM call failed, no artifact (even after recovery) —
-                     ;; preserve the full llm-error shape into :data so the
-                     ;; phase-completed event carries :type / :stderr /
-                     ;; :stdout / :timeout / :exit-code for post-mortem.
-                     (result-boundary/error-response final
-                                                     (messages/t :error/llm-failed)))]
-        ;; Session channel: which files the agent actually read (Codex SPEC
-        ;; §7.4.2). The phase layer turns this into consultation provenance.
-        ;; some?, not seq: an EMPTY reads log is "known: nothing was read",
-        ;; which is a different fact from "no log surfaced" (capsule mode) —
-        ;; dropping it would turn a real unread into unknown downstream.
-        (cond-> result
-          (some? context-reads) (assoc :context-reads context-reads))))))
+          final     (or recovered normalized)
+          ;; Container-promotion precedence: if the agent wrote files into
+          ;; the worktree (file-artifact via collect-written-files) or
+          ;; submitted via the MCP artifact path, honor that even when the
+          ;; CLI itself terminated with a timeout/error. Iter-20 of the
+          ;; planner-convergence dogfood showed Claude stalling AFTER a
+          ;; successful stream of edits; the old path discarded a real
+          ;; artifact because the LLM response was classified as failure.
+          result    (cond
+                      cut-by-ceiling?
+                      ;; Ceiling cut: always a failed result, whatever is on
+                      ;; disk. `:data` keeps the llm-error (with its
+                      ;; `:timeout` envelope, which the phase classifies as
+                      ;; a backend timeout) plus the marker and the partial
+                      ;; files for post-mortem.
+                      (result-boundary/error-response
+                       final
+                       (messages/t :error/llm-max-total-exceeded)
+                       {:data {:llm/terminated-by :max-total
+                               :partial-files partial-files}})
+
+                      (result-boundary/usable-content? final)
+                      (process-llm-response final context logger input)
+
+                      :else
+                      ;; LLM call failed, no artifact (even after recovery) —
+                      ;; preserve the full llm-error shape into :data so the
+                      ;; phase-completed event carries :type / :stderr /
+                      ;; :stdout / :timeout / :exit-code for post-mortem.
+                      (result-boundary/error-response final
+                                                      (messages/t :error/llm-failed)))]
+      ;; Session channel: which files the agent actually read (Codex SPEC
+      ;; §7.4.2). The phase layer turns this into consultation provenance.
+      ;; some?, not seq: an EMPTY reads log is "known: nothing was read",
+      ;; which is a different fact from "no log surfaced" (capsule mode) —
+      ;; dropping it would turn a real unread into unknown downstream.
+      (cond-> result
+        (some? context-reads) (assoc :context-reads context-reads)))))
 
 ;------------------------------------------------------------------------------ Layer 7
 
