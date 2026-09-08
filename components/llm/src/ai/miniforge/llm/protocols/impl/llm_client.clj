@@ -120,6 +120,29 @@
         (number? cache-creation) (assoc :cache-creation-input-tokens cache-creation)
         (number? cache-read)     (assoc :cache-read-input-tokens cache-read)))))
 
+(defn ^{:stratum 0} fold-message-usage
+  "Fold one assistant message's usage into the running usage map.
+
+   - Input-side counts (:input-tokens, :cache-*-input-tokens) describe
+     that API call's whole context, so the LATEST one is the run's
+     current context size. Summing them would inflate
+     `context-overflow-by-usage?` into a false overflow on any long run
+     that was cut before its result frame.
+   - :output-tokens is per call and accumulates.
+   - Claude Code emits one `assistant` event per content block, each
+     carrying the same message `usage`; `message-id` dedupes those so a
+     text + tool_use message folds once. The id rides as metadata so the
+     usage map keeps the plain `{:input-tokens .. :output-tokens ..}`
+     shape callers compare and serialize."
+  [prev message-id usage]
+  (let [prev (or prev {})]
+    (if (and message-id (= message-id (::message-id (meta prev))))
+      prev
+      (-> (merge prev (dissoc usage :output-tokens))
+          (cond-> (contains? usage :output-tokens)
+            (update :output-tokens (fnil + 0) (:output-tokens usage)))
+          (vary-meta assoc ::message-id message-id)))))
+
 (defn- ^{:stratum 0} normalize-codex-finish-reason
   "Normalize a Codex finish_reason string to the canonical stop-reason strings
    used across all backends.
@@ -567,16 +590,17 @@
     :else
     (pm/record-chunk! progress-monitor @accumulated-content)))
 
-(defn ^{:stratum 0} log-streaming-result [logger timeout-info content-length]
-  (when logger
-    (if timeout-info
-      (log/warn logger :system :agent/streaming-timeout
-                {:message (:message timeout-info)
-                 :data {:type (:type timeout-info)
-                        :elapsed-ms (:elapsed-ms timeout-info)
-                        :stats (:stats timeout-info)}})
-      (log/debug logger :system :agent/streaming-complete
-                 {:data {:response-length content-length}}))))
+(def ^{:stratum 0} ^:private timeout-type->terminated-by
+  "Adaptive-timeout `:type` → the `:llm/terminated-by` marker a cut run
+   carries on its response. The marker names the CLIENT-SIDE reason the
+   run ended before the model finished, so a role can branch on it
+   without re-parsing the timeout envelope. `:hard-limit` is renamed to
+   `:max-total` because that is the knob (`:max-total-ms`) an operator
+   turns to change it."
+  {:hard-limit   :max-total
+   :stagnation   :stagnation
+   :stream-idle  :stream-idle
+   :network-drop :network-drop})
 
 (defn- ^{:stratum 0} message-preview
   "Return the last up-to-500 characters of content for post-mortem diagnostics.
@@ -659,6 +683,13 @@
 
 ;------------------------------------------------------------------------------ Layer 1
 
+(defn ^{:stratum 1} terminated-by
+  "Return the `:llm/terminated-by` marker for an adaptive-timeout envelope,
+   or nil when the run was not cut by the client (no envelope, or an
+   envelope type outside the known taxonomy)."
+  [timeout-info]
+  (get timeout-type->terminated-by (:type timeout-info)))
+
 (def ^{:stratum 1} ^:private client-defaults
   (delay (load-client-defaults)))
 
@@ -730,12 +761,25 @@
                 ;; "tool_use" | "max_turns" (Claude Code adds the last).
                 ;; The accumulator tracks the LATEST — that's the reason
                 ;; the overall turn ended.
-                stop-reason (get-in data [:message :stop_reason])]
+                stop-reason (get-in data [:message :stop_reason])
+                ;; Per-message usage. The authoritative totals arrive on
+                ;; the final `result` frame — which a run cut by an
+                ;; adaptive timeout never sees. Carrying each message's
+                ;; usage lets the accumulator report what a cut run
+                ;; consumed (2026-09-04 trap-bench series 9: two cut
+                ;; implement turns logged `:tokens 0`).
+                message-usage (parsed-usage (get-in data [:message :usage]))
+                message-id (get-in data [:message :id])
+                with-usage (fn [parsed]
+                             (cond-> parsed
+                               message-usage (assoc :message-usage message-usage)
+                               (and message-usage message-id)
+                               (assoc :message-id message-id)))]
             (cond
               (seq tool-names)
               (let [first-tool (first tool-blocks)]
-                (cond-> {:delta (or text "") :done? false
-                         :tool-use true :tool-names tool-names}
+                (cond-> (with-usage {:delta (or text "") :done? false
+                                     :tool-use true :tool-names tool-names})
                   stop-reason               (assoc :stop-reason stop-reason)
                   ;; Additive: :tool-call-id and :tool-input from the first
                   ;; tool_use block. Present only when the fields are
@@ -745,13 +789,13 @@
                   (some? (:input first-tool)) (assoc :tool-input (:input first-tool))))
 
               (not (str/blank? text))
-              (cond-> {:delta text :done? false}
+              (cond-> (with-usage {:delta text :done? false})
                 stop-reason (assoc :stop-reason stop-reason))
 
               ;; No text + no tool calls — still carry stop-reason if
               ;; present so "empty turn" shows a reason.
               stop-reason
-              {:delta "" :done? false :stop-reason stop-reason}))
+              (with-usage {:delta "" :done? false :stop-reason stop-reason})))
 
           ;; Legacy format support
           "stream_event"
@@ -1109,6 +1153,12 @@
   [stream-parser on-chunk progress-monitor accumulated-content accumulated-usage accumulated-cost accumulated-tools accumulated-session-id accumulated-stop-reason accumulated-turns]
   (fn [line]
     (when-let [parsed (stream-parser line)]
+      ;; Per-message usage folds as it streams (see `fold-message-usage`)
+      ;; so a run cut before its result frame still reports what it
+      ;; consumed; the result frame's `:usage` then REPLACES those keys
+      ;; with the backend's authoritative totals.
+      (when-let [message-usage (:message-usage parsed)]
+        (swap! accumulated-usage fold-message-usage (:message-id parsed) message-usage))
       (when-let [usage (:usage parsed)]
         (swap! accumulated-usage (fn [prev] (merge prev usage))))
       (when-let [cost (:cost-usd parsed)]
@@ -1174,6 +1224,27 @@
                                    chars-per-token-estimate)}))
 
 ;------------------------------------------------------------------------------ Layer 2
+
+(defn ^{:stratum 2} log-streaming-result
+  "Log the outcome of a streamed run. A cut run (any adaptive timeout)
+   logs at warn with the elapsed time, the ceiling it hit, and the number
+   of tool calls the model had already made — the 2026-09-04 trap-bench
+   series 9 run (`baseline-trap-a-ry1`) hit the 10-minute `:max-total`
+   ceiling twice mid-write and nothing in the run log said so."
+  [logger timeout-info content-length tool-call-count]
+  (when logger
+    (if timeout-info
+      (log/warn logger :system :agent/streaming-timeout
+                {:message (:message timeout-info)
+                 :data (cond-> {:type (:type timeout-info)
+                                :terminated-by (terminated-by timeout-info)
+                                :elapsed-ms (:elapsed-ms timeout-info)
+                                :tool-call-count tool-call-count
+                                :stats (:stats timeout-info)}
+                         (:max-ms timeout-info)
+                         (assoc :max-ms (:max-ms timeout-info)))})
+      (log/debug logger :system :agent/streaming-complete
+                 {:data {:response-length content-length}}))))
 
 (defn- ^{:stratum 2} client-default
   [path]
@@ -1483,7 +1554,15 @@
    - :final-message-preview — last 500 chars of accumulated content (post-mortem aid)
 
    `usage` + `context-window` drive context-overflow classification (N12 §4);
-   optional — the 9-arity form skips it (for callers without them)."
+   optional — the 9-arity form skips it (for callers without them). When
+   `usage` is present it is also carried on the response as `:usage` /
+   `:tokens` (same shape `llm-success` emits) so a run that was cut still
+   reports the tokens it consumed.
+
+   `:llm/terminated-by` is set whenever `timeout-info` carries a known
+   adaptive-timeout type (see `terminated-by`) — `:max-total` for the
+   hard ceiling — so roles can refuse to promote partial work from a run
+   the client cut, instead of treating it like a model that finished."
   ([content exit-code err-result raw-stdout timeout-info stop-reason num-turns
     tool-call-count final-message-preview]
    (streaming-error-response content exit-code err-result raw-stdout timeout-info
@@ -1506,6 +1585,10 @@
                          :stdout content
                          :raw-stdout raw-stdout
                          :timeout timeout-info})
+       (terminated-by timeout-info) (assoc :llm/terminated-by (terminated-by timeout-info))
+       (some? usage)               (assoc :usage usage
+                                          :tokens (+ (get usage :input-tokens 0)
+                                                     (get usage :output-tokens 0)))
        stop-reason                 (assoc :stop-reason stop-reason)
        num-turns                   (assoc :num-turns num-turns)
        (some? tool-call-count)     (assoc :tool-call-count tool-call-count)
@@ -2114,7 +2197,7 @@
                      :done? true
                      :content final-content
                      :timeout timeout-info})
-          (log-streaming-result logger timeout-info (count final-content))
+          (log-streaming-result logger timeout-info (count final-content) tool-call-count)
           (when (and logger (seq tools))
             (log/info logger :system :agent/tools-called
                       {:data {:tools tools :count (count tools)}}))
@@ -2122,36 +2205,43 @@
             (log/info logger :system :agent/stop-reason
                       {:data {:stop-reason stop-reason :num-turns num-turns
                               :content-length (count final-content)}}))
-          (if (zero? exit-code)
-            ;; Cost fallback: some backends (e.g. older Claude Code
-            ;; CLI versions, codex stream parser) don't surface
-            ;; total_cost_usd in the result frame, so
-            ;; @accumulated-cost stays nil and the runner banner
-            ;; reports $0.0000 despite real backend costs. When
-            ;; cost is nil but usage carries tokens, compute the
-            ;; fallback estimate from the model + usage via
-            ;; cost/estimate-cost. Models without pricing in the
-            ;; table return 0.0 (no false-positive cost), so this
-            ;; is a non-decreasing fix — never produces a wrong-
-            ;; direction value.
-            (let [resolved-cost (or @accumulated-cost
-                                    (cost/estimate-cost usage model))]
+          ;; Cost fallback: some backends (e.g. older Claude Code
+          ;; CLI versions, codex stream parser) don't surface
+          ;; total_cost_usd in the result frame, so
+          ;; @accumulated-cost stays nil and the runner banner
+          ;; reports $0.0000 despite real backend costs. When
+          ;; cost is nil but usage carries tokens, compute the
+          ;; fallback estimate from the model + usage via
+          ;; cost/estimate-cost. Models without pricing in the
+          ;; table return 0.0 (no false-positive cost), so this
+          ;; is a non-decreasing fix — never produces a wrong-
+          ;; direction value.
+          (let [resolved-cost (or @accumulated-cost
+                                  (cost/estimate-cost usage model))]
+            (if (zero? exit-code)
               (cond-> (streaming-success-response final-content exit-code
                                                   usage resolved-cost
                                                   stop-reason num-turns
                                                   tool-call-count final-message-preview
                                                   (:err result))
                 (seq tools) (assoc :tools-called tools)
-                session-id  (assoc :session-id session-id)))
-            (cond-> (streaming-error-response final-content exit-code (:err result)
-                                              diagnostic-content
-                                              timeout-info stop-reason num-turns
-                                              tool-call-count final-message-preview
-                                              usage
-                                              ;; effective model actually invoked (honors per-request :model)
-                                              (model-registry/context-window-for-model-id
-                                               (:model request-with-model)))
-              session-id (assoc :session-id session-id))))))))
+                session-id  (assoc :session-id session-id))
+              ;; A run that was cut (timeout) or died still consumed
+              ;; tokens and made tool calls; carry them so the role's
+              ;; bookkeeping (`implementer/llm-called`) reports what
+              ;; actually happened instead of `:tokens 0 :tools-called []`
+              ;; (2026-09-04 trap-bench series 9).
+              (cond-> (streaming-error-response final-content exit-code (:err result)
+                                                diagnostic-content
+                                                timeout-info stop-reason num-turns
+                                                tool-call-count final-message-preview
+                                                usage
+                                                ;; effective model actually invoked (honors per-request :model)
+                                                (model-registry/context-window-for-model-id
+                                                 (:model request-with-model)))
+                (seq tools)   (assoc :tools-called tools)
+                (some? usage) (assoc :cost-usd resolved-cost)
+                session-id    (assoc :session-id session-id)))))))))
 
 ;------------------------------------------------------------------------------ Layer 10
 
