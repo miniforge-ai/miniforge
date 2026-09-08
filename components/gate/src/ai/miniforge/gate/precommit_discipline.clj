@@ -142,21 +142,30 @@
      branch - Branch to check (default HEAD)
      
    Returns:
-     Vector of {:hash string :message string :author string :date string}"
+     Vector of {:hash string :subject string :body string :message string :author string :date string}"
   [& {:keys [limit branch] :or {limit 50 branch "HEAD"}}]
   (let [format "%H|||%s|||%b|||%an|||%ai"
-        result (exec-git ["log" (str "-" limit) "--format=" format branch])]
+        result (exec-git ["log" (str "-" limit) (str "--format=" format) branch])]
     (if (zero? (:exit result))
-      (->> (str/split (:out result) #"\n(?=[0-9a-f]{40}|||)")
+      ;; Split only at lines that begin a new commit record (hex hash then |||).
+      ;; The unescaped ||| in a lookahead is a regex alternation with empty alternatives,
+      ;; which always matches — so we must escape the pipes to match literal |||.
+      ;; {40,64} covers both SHA-1 (40-hex) and SHA-256 (64-hex) repositories.
+      (->> (str/split (:out result) #"\n(?=[0-9a-f]{40,64}\|\|\|)")
            (keep (fn [commit-str]
                    (when-not (str/blank? commit-str)
-                     (let [[hash subject body author date] (str/split commit-str #"\|\|\|" 5)]
-                       {:hash hash
-                        :subject (str/trim subject)
-                        :body (str/trim (or body ""))
-                        :message (str/trim (str subject "\n" (or body "")))
-                        :author (str/trim author)
-                        :date (str/trim date)}))))
+                     (let [[hash subject body author date] (str/split commit-str #"\|\|\|" 5)
+                           hash-val (str/trim (or hash ""))]
+                       ;; Accept only entries whose first field is a valid hex commit hash
+                       ;; (40-hex for SHA-1 repos, 64-hex for SHA-256 repos).
+                       ;; Body lines from multi-line commit messages are rejected here.
+                       (when (re-matches #"[0-9a-f]{40,64}" hash-val)
+                         {:hash hash-val
+                          :subject (str/trim (or subject ""))
+                          :body (str/trim (or body ""))
+                          :message (str/trim (str (or subject "") "\n" (or body "")))
+                          :author (str/trim (or author ""))
+                          :date (str/trim (or date ""))})))))
            vec)
       [])))
 
