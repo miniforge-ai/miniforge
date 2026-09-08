@@ -54,8 +54,8 @@
 (defn ^{:stratum 0} create-bundle-impl
   "Create evidence bundle from workflow state.
    Merges N11 §9.1 execution evidence fields from :execution/output.
-   Returns [bundle updated-bundles-atom-value]"
-  [bundles artifact-store logger workflow-id opts]
+   Returns the assembled bundle map (caller is responsible for persisting it)."
+  [_bundles artifact-store logger workflow-id opts]
   (let [workflow-state (:workflow-state opts)
         bundle-id (random-uuid)
         assembled (collector/assemble-evidence-bundle workflow-id workflow-state artifact-store opts)
@@ -70,14 +70,13 @@
                  (assoc :evidence/policy-checks (:policy-checks opts))
 
                  (:outcome opts)
-                 (assoc :evidence/outcome (:outcome opts)))
-        new-bundles (assoc @bundles bundle-id bundle)]
+                 (assoc :evidence/outcome (:outcome opts)))]
 
     (log/info logger :evidence-bundle :bundle/created
               {:data {:bundle-id bundle-id
                       :workflow-id workflow-id}})
 
-    [bundle new-bundles]))
+    bundle))
 
 (defn ^{:stratum 0} get-bundle-impl
   "Retrieve bundle by ID."
