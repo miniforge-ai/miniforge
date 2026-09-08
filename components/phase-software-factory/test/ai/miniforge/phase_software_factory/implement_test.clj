@@ -1087,6 +1087,40 @@
       (is (clojure.string/includes? text "[stale-references]"))
       (is (clojure.string/includes? text "bb.edn")))))
 
+(deftest ^{:stratum 2} leave-implement-max-total-cut-routes-as-backend-timeout-test
+  ;; 2026-09-04 trap-bench series 9: the implementer used to promote files
+  ;; written before a :max-total cut and the phase reported success. The
+  ;; implementer now fails such a turn with the timeout envelope intact;
+  ;; this pins the phase side — retriable within the iteration budget,
+  ;; then the terminal :implement/backend-timeout verdict.
+  (let [cut-result {:status :error
+                    :error {:message "Adaptive timeout: Hard timeout: exceeded 1800000ms limit (type: hard-limit, elapsed: 1800042ms)"
+                            :data {:type "adaptive_timeout"
+                                   :timeout {:type :hard-limit
+                                             :elapsed-ms 1800042
+                                             :max-ms 1800000}
+                                   :llm/terminated-by :max-total
+                                   :partial-files ["components/codex-gap/deps.edn"]}}
+                    :metrics {:tokens 8000 :duration-ms 1800042}}
+        ctx-at (fn [iterations]
+                 (-> (create-base-context)
+                     (assoc :phase {:name :implement
+                                    :agent :implementer
+                                    :status :running
+                                    :iterations iterations
+                                    :budget {:iterations 3}
+                                    :started-at (System/currentTimeMillis)
+                                    :result cut-result})))]
+    (testing "within the iteration budget the cut is retriable — never a success"
+      (let [final-ctx (implement/leave-implement (ctx-at 1))]
+        (is (not= :completed (get-in final-ctx [:phase :status])))
+        (is (not= :failed (get-in final-ctx [:phase :status])))
+        (is (nil? (get-in final-ctx [:phase :verdict])))))
+    (testing "at the iteration budget the cut is the terminal :implement/backend-timeout"
+      (let [final-ctx (implement/leave-implement (ctx-at 3))]
+        (is (= :failed (get-in final-ctx [:phase :status])))
+        (is (= :implement/backend-timeout (get-in final-ctx [:phase :verdict])))))))
+
 (use-fixtures :each
   (fn [f]
     (phase/reset-phase-loader!)
