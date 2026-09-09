@@ -101,12 +101,9 @@ Discover scaling + budget signals via governed experiments, synthesize
 
 | tier | r | theme | spec | axes |
 |---|---|---|---|---|
-| blocker | ● | operational-policy-synthesis | `n07-opsv-contracts.spec.edn` — Implement canonical OPSV domain contracts | correctness+dogfoodenabler |
-| blocker | ○ | operational-policy-synthesis | `n07-opsv-domain-policy.spec.edn` — Implement OPSV risk, convergence, verification, and authority decisions | correctness+dogfoodenabler |
-| blocker | ○ | operational-policy-synthesis | `n07-opsv-workflow.spec.edn` — Implement the seven-phase OPSV workflow and staging MCI | correctness+scale+dogfoodenabler |
+| high | ● | operational-policy-synthesis | `n07-opsv-governed-actuation.spec.edn` — Implement governed OPSV PR, Kubernetes apply, and rollback effects | correctness+scale |
 | high | ○ | operational-policy-synthesis | `n07-opsv-agent-budgets.spec.edn` — Dogfood OPSV on agent invocation and phase budgets | correctness+observation+tokenconservation+dogfoodenabler |
 | high | ○ | operational-policy-synthesis | `n07-opsv-cli-tui-drift.spec.edn` — Implement OPSV CLI, TUI drill-down, and drift detection | observation+ux+dogfoodenabler |
-| high | ○ | operational-policy-synthesis | `n07-opsv-governed-actuation.spec.edn` — Implement governed OPSV PR, Kubernetes apply, and rollback effects | correctness+scale |
 | medium | ○ | operational-policy-synthesis | `workflow-policy-convergence.spec.edn` — Converge workflow-selection policy from governed outcomes | governance+workfloworchestration+reliability |
 
 ## Theme — Ariadne adoption - step 3: tenants, owners, and attested contracts (`ariadne-tenancy`, status: in-flight)

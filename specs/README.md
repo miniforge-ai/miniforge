@@ -25,6 +25,14 @@ The miniforge ecosystem comprises three products built on a shared kernel:
 
 The spec index is the authoritative map of all normative and informative documentation.
 
+## Specification Status
+
+The normative text for **N1–N7 is complete**. N8–N13 remain draft, and N14–N15
+contain draft or explicitly speculative contracts. “Complete” describes the
+contract text, not blanket implementation conformance: each normative spec's
+informative Annex A records known implementation gaps. [SPEC_INDEX.md](SPEC_INDEX.md)
+is authoritative for current status and applicability.
+
 ## Directory Structure
 
 ```text
@@ -32,13 +40,8 @@ specs/
 ├── SPEC_INDEX.md              # START HERE - Complete spec catalog
 ├── README.md                  # This file
 ├── normative/                 # Contractual requirements (MUST/SHALL)
-│   ├── N1-architecture.md
-│   ├── N2-workflows.md
-│   ├── N3-event-stream.md    # ✅ Complete
-│   ├── N4-policy-packs.md
-│   ├── N5-cli-tui-api.md
-│   ├── N6-evidence-provenance.md  # ✅ Complete
-│   ├── N7-... through N15-...     # Indexed extension specs
+│   ├── N1-... through N7-...      # Complete normative specs
+│   ├── N8-... through N15-...     # Draft extension specs
 │   └── N*-delta-*.md              # Indexed amendments to a named base spec
 ├── informative/               # Guidance & references (non-normative)
 │   ├── ux-tui-mockups.md
@@ -163,5 +166,5 @@ that implement each contract.
 
 ---
 
-**Version:** 0.2.0-draft
-**Last Updated:** 2026-08-04
+**Version:** 0.24.0-draft
+**Last Updated:** 2026-09-08

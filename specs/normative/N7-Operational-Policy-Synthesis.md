@@ -6,8 +6,8 @@
 
 # N7 — Operational Policy Synthesis With Verification
 
-**Version:** 0.3.0-draft
-**Date:** 2026-08-10
+**Version:** 0.3.1-draft
+**Date:** 2026-09-08
 **Status:** Complete
 **Conformance:** MUST
 **Class:** Extension spec (N7+)
@@ -434,7 +434,7 @@ A minimal compliant OPSV implementation MUST:
 
 ## Annex A — Implementation Conformance Status (informative)
 
-This annex is **informative**, recording implementation state as of 2026-08-10.
+This annex is **informative**, recording implementation state as of 2026-09-08.
 
 ### A.1 Implemented
 
@@ -445,18 +445,31 @@ others: **its event family is both registered and emitted.** The nine
 `event-stream`. Every other extension spec reviewed in this pass declared event
 types that were never registered.
 
-`components/opsv` implements risk scoring, convergence, actuation, verification,
-and schema; `components/opsv-adapter-simulated` provides a simulated substrate.
+`components/opsv` implements canonical contracts and hashing, risk scoring,
+bounded convergence, verification, and effective-actuation decisions. The
+effective-actuation tests prove that direct apply is refused unless
+verification, gates, capability, rollback, and postcondition prerequisites are
+all present.
+
+The `opsv` 1.0.0 workflow registers and executes all seven phases through the
+shared N2 lifecycle. Its deterministic staging MCI discovers CPU and backlog
+drivers, synthesizes an HPA/KEDA-compatible proposal, assembles evidence, emits
+the required lifecycle and domain events, and completes in `:recommend-only`
+mode with no external effects. `components/opsv-adapter-simulated` supplies the
+simulation boundary.
 
 ### A.2 Specified, Not Verified
 
-- **Guardrail abort and rollback (N7.EX.2).** `convergence.clj` references
-  guardrails, but nothing verifies that a breach triggers the declared rollback
-  end to end.
-- **Actuation gating (N7.AC.1).** `actuation.clj` exists; whether
-  `APPLY_ALLOWED` is refused absent the §5.4 gate is untested.
-- **Drift detection (§3).** No implementation — `opsv.drift/detected` is
-  registered in N3 §3.14 with no producer.
+- **Guardrail rollback (N7.EX.2).** Convergence terminates on a guardrail abort,
+  and event projection preserves the declared rollback action, but no
+  end-to-end adapter test executes and verifies that rollback.
+- **External actuation (N7.AC.2–N7.AC.4).** Pure authorization decisions and
+  Ariadne correlation records exist, but OPSV has no real PR or Kubernetes
+  actuation adapter.
+- **CLI/TUI and drift (§3, §8).** The six canonical commands, Fleet drill-down,
+  policy-state projection, and drift producer are not implemented.
+- **Agent-budget use case.** The second OPSV domain and its pinned experiment
+  fixture are not implemented.
 
 ### A.3 Structural
 
@@ -469,6 +482,11 @@ depends on machinery that is not there.
 
 **Version History:**
 
+- 0.3.1-draft (2026-09-08): Reconciled the informative implementation annex
+  after canonical contracts, pure domain policy, the seven-phase workflow,
+  event projection, and the deterministic staging MCI landed
+- 0.3.0-draft (2026-08-10): Added stable conformance requirement IDs, test
+  obligations, and the informative implementation-conformance annex
 - 0.2.1-draft (2026-08-06): Replaced stale N10 intent/OIR/capability
   correlation with the adopted Ariadne DecisionEnvelope, ExecutionGrant, and
   EffectTransaction contracts
