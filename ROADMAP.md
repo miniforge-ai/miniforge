@@ -6,124 +6,60 @@
 
 # Roadmap
 
-Last updated: 2026-04-13
+Last updated: 2026-09-08
 
 ## Current Status
 
-**Alpha** -- actively developed and dogfooded daily. The core SDLC pipeline
-(spec in, PR out) works end-to-end for Clojure projects. 530 PRs merged,
-87 components, 187k LOC, 71k LOC of tests, 313 test files.
+**Open source and in active use.** Miniforge is actively developed and
+dogfooded on its own repository. The Clojure SDLC pipeline runs from a work
+spec through implementation, verification, review, PR creation, review
+monitoring, and merge.
 
-What works today:
+## Specification Status
 
-- Full pipeline: spec -> explore -> plan -> implement -> verify -> review -> release -> PR
-- DAG orchestration with parallel task execution and resumability
-- Intelligent model selection (16 models, 4 providers)
-- Policy gates at every phase transition (syntax, lint, no-secrets, tests-pass, coverage)
-- Evidence bundles with provenance chains for traceability
-- Meta-agent learning loop (miniforge improving its own codebase)
-- CLI (`mf run`, `mf workflow`, `mf tui`) via Babashka
+[SPEC_INDEX.md](specs/SPEC_INDEX.md) is the authoritative specification map.
+The normative text for N1–N7 is complete; N8–N13 are draft, and N14–N15
+contain draft or explicitly speculative contracts.
 
-## Normative Spec Progress
+“Complete” describes a contract document, not blanket implementation
+conformance. Each normative spec's informative Annex A records known
+implementation gaps. This roadmap does not maintain a second set of percentage
+estimates because they quickly diverge from the code and conformance evidence.
 
-The system is defined by 11 normative specs (N1-N11). Current overall
-completion: approximately 45-50%.
+## N7 Implementation Status
 
-| Spec | Area | Complete | What's Working | Key Gaps |
-|------|------|----------|----------------|----------|
-| N1 | Core Architecture | ~80% | Structure, state machine, agents | Event wiring gaps; trust enforcement unverified end-to-end |
-| N2 | Workflow Execution | ~85% | Phases, inner loop, DAG, gates | Budget enforcement, capability contracts, resumption completeness |
-| N3 | Event Stream | ~50% | Core infra, append-only, subscriptions | Many event types not emitted (gate, tool, inter-agent, milestone, OPSV, ETL) |
-| N4 | Policy Packs & Gates | ~55% | Pack schema, check/repair, severity | K8s diff parsing, knowledge-safety pack, pack dependency graph |
-| N5 | CLI / TUI / API | ~45% | CLI base, TUI engine | Many commands not wired; transport decision (WebSocket vs REST+SSE) pending |
-| N6 | Evidence & Provenance | ~60% | Core bundles, provenance chain | Sensitive data scanning, compliance metadata, OPSV evidence types |
-| N7 | OPSV | ~0% | Infrastructure exists to support it | Entirely unimplemented: experiment packs, convergence, verification |
-| N8 | Observability Control | ~10% | Event subscription | No RBAC, multi-party approval, privacy levels, OTel, W3C Trace Context |
-| N9 | External PR Integration | ~35% | PR trains, repo DAG foundations | PR Work Item model, automation tiers, provider-native checks, credentials |
-| N10 | Governed Tool Execution | ~50% | Tool registry | Sandboxing, approval flows, audit logging for invocations |
-| N11 | Task Capsule Isolation | ~50% | DAG executor isolation primitives | Artifact export, cleanup reliability, timeout enforcement (4 active specs) |
+Implemented and verified:
 
-## Near-Term Priorities (Next 4-8 Weeks)
+- canonical OPSV contracts and content hashing
+- pure risk, convergence, verification, and effective-actuation decisions
+- the registered seven-phase `opsv` 1.0.0 workflow
+- required lifecycle/domain event projection and evidence assembly
+- a deterministic staging path that discovers CPU and backlog signals and
+  emits an HPA/KEDA-compatible proposal without external mutation
 
-These are the Tier 1 items from the progress review. All have corresponding
-work specs in `work/`.
+Remaining delivery work:
 
-1. **Integration test coverage** (`oss-integration-test-coverage.spec.edn`)
-   -- PR lifecycle (currently zero tests), release executor, gate pipeline,
-   agent response parsing, metrics accumulation, evidence bundle assembly.
-   Primary OSS readiness blocker.
+1. Governed PR and Kubernetes actuation, rollback, and postcondition effects.
+2. The six canonical CLI commands, Fleet TUI drill-down, policy-state
+   projection, and drift detection.
+3. The agent-invocation and phase-budget dogfood experiment.
 
-2. **Event type completeness** (`n03-event-type-completeness.spec.edn`)
-   -- Emit all N3-specified event types (gate, tool, inter-agent, milestone,
-   ETL, listener). Unblocks N8 observability and full event-driven workflows.
+The Ariadne deployment authority path is implemented, but OPSV still needs its
+own real provider and Kubernetes adapters before N7 is end-to-end conformant.
 
-3. **CLI wiring audit** (`n05-cli-command-wiring.spec.edn`)
-   -- Audit all N5-specified commands and wire them to existing components.
-   Many components exist but lack CLI exposure.
+## Active Delivery Priorities
 
-4. **Capsule isolation** (4 in-progress specs)
-   -- Artifact export before destroy, cleanup reliability on failure paths,
-   timeout enforcement, execution mode evidence. Currently in progress.
-
-5. **Workflow redesign** (`workflow-redesign-use-case-targeted.spec.edn`)
-   -- Replace complexity-based workflow selection (simple/lean/canonical) with
-   use-case targeted workflows that include safety gates by default.
-
-## Medium-Term Goals (3-6 Months)
-
-### Production Readiness
-
-- **Sensitive data scanning** (`n06-sensitive-data-scanning.spec.edn`)
-  -- Detect credentials and PII in evidence bundles before storage.
-- **OCI governance foundation** (`n08-oci-governance.spec.edn`)
-  -- RBAC roles/permissions and control action audit logging.
-- **PR Work Item model** (`n09-pr-work-item-model.spec.edn`)
-  -- Deterministic readiness, risk assessment, automation tiers (0-3).
-- **Knowledge-safety pack** (`n04-knowledge-safety-pack.spec.edn`)
-  -- Prompt injection detection, tripwire system, trust enforcement.
-
-### Reliability
-
-- **Reliability network** (RN-01 through RN-16)
-  -- Failure taxonomy, SLI/SLO engine, degradation modes, autonomy model,
-  compensation protocol, safe-mode, tool semantics, evaluation pipeline.
-
-### TUI Supervisory Surface
-
-- **TUI workstreams** (WS1-WS5)
-  -- Supervisory domain model, durable startup, monitor mode, governance
-  surface, attention/intervention. Monitor-first paradigm over command interface.
-
-### Ecosystem
-
-- **GitLab support** (`gitlab-support.spec.edn`)
-  -- Merge request lifecycle parity with GitHub PR support.
-- **Backend failover** (`backend-failover.spec.edn`)
-  -- LLM rate-limit failover across providers.
-- **Policy pack extensibility** (`policy-pack-extensibility.spec.edn`)
-  -- Policy packs as the sole extension point for customization.
-
-### Vision Completion
-
-- **OPSV** (`n07-opsv-contracts.spec.edn`; full sequence in `work/QUEUE.md`)
-  -- Seven-phase Operational Policy Synthesis, governed actuation, and the
-  HPA/KEDA staging MCI followed by agent-budget dogfood.
-- **OTel alignment** (`n08-otel-trace-context.spec.edn`)
-  -- OpenTelemetry and W3C Trace Context propagation.
-- **Provider-native checks** (`n09-provider-native-checks.spec.edn`)
-  -- Publish GitHub Check Runs from policy evaluation results.
+[work/QUEUE.md](work/QUEUE.md) is the generated, authoritative delivery queue.
+It derives readiness and ordering from active work specs and their dependency
+metadata. [work/themes.edn](work/themes.edn) describes the current initiatives.
 
 ## How to Contribute
 
-All roadmap items are backed by work specs in the `work/` directory. Each
-`.spec.edn` file describes the problem, acceptance criteria, and tasks.
+Active roadmap items are backed by work specs in `work/`. Each `.spec.edn` file
+describes its scope, constraints, acceptance criteria, priority, and
+dependencies.
 
 1. Read [CONTRIBUTING.md](CONTRIBUTING.md) for setup, conventions, and the PR process.
-2. Pick a work spec from `work/` that interests you. Specs prefixed with
-   `n03-`, `n04-`, etc. map to normative spec areas. `oss-` and `rn-` prefixes
-   indicate OSS readiness and reliability work respectively.
+2. Pick a ready work spec from [work/QUEUE.md](work/QUEUE.md).
 3. Check `work/in-progress/` to avoid duplicating active work.
 4. Open an issue or discussion referencing the spec before starting large items.
-
-Priority labels in specs: `:high`, `:medium`, `:low`. Start with high-priority
-items from the near-term list above if you want maximum impact.

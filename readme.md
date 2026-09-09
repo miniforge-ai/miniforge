@@ -291,8 +291,8 @@ dogfooded daily. The full pipeline (spec → PR → monitor → merge) works
 end-to-end for Clojure projects, with hundreds of PRs merged using Miniforge
 on itself.
 
-See [ROADMAP.md](ROADMAP.md) for normative spec progress (N1-N15) and
-upcoming priorities.
+See [SPEC_INDEX.md](specs/SPEC_INDEX.md) for normative specification status
+and [ROADMAP.md](ROADMAP.md) for delivery priorities.
 
 ## Documentation
 
