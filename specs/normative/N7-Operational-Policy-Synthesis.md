@@ -441,9 +441,9 @@ This annex is **informative**, recording implementation state as of 2026-09-08.
 N7 is the best-served spec in the set on the dimension that has defeated the
 others: **its event family is both registered and emitted.** The nine
 `opsv.*` types of N3 §3.14 appear in N3's registry, and
-`event-stream/opsv.clj` emits them with tests in `phase-opsv` and
-`event-stream`. Every other extension spec reviewed in this pass declared event
-types that were never registered.
+`components/event-stream/src/ai/miniforge/event_stream/opsv.clj` emits them with
+tests in `phase-opsv` and `event-stream`. Every other extension spec reviewed in
+this pass declared event types that were never registered.
 
 `components/opsv` implements canonical contracts and hashing, risk scoring,
 bounded convergence, verification, and effective-actuation decisions. The

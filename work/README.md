@@ -66,7 +66,7 @@ the inventory in this README.
 ### Run a workflow spec
 
 ```bash
-bb miniforge run work/finish-event-telemetry.spec.edn
+bb miniforge run work/n07-opsv-governed-actuation.spec.edn
 ```
 
 ### Archive completed work
