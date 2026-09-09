@@ -286,12 +286,13 @@ See [Normative Specs](specs/normative/) for the full specification.
 
 ## Project Status
 
-**Alpha** — actively developed, dogfooded daily. The full pipeline (spec → PR →
-monitor → merge) works end-to-end for Clojure projects. 530+ PRs merged using
-miniforge on itself.
+**Open source and in active use.** Miniforge is actively developed and
+dogfooded daily. The full pipeline (spec → PR → monitor → merge) works
+end-to-end for Clojure projects, with hundreds of PRs merged using Miniforge
+on itself.
 
-See [ROADMAP.md](ROADMAP.md) for normative spec progress (N1-N11) and
-upcoming priorities.
+See [SPEC_INDEX.md](specs/SPEC_INDEX.md) for normative specification status
+and [ROADMAP.md](ROADMAP.md) for delivery priorities.
 
 ## Documentation
 
