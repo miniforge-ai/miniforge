@@ -197,7 +197,7 @@
    failure records as data rather than aborting the run on deref."
   [judge-fn rules fixture]
   (try (judge-fn rules fixture)
-       (catch Throwable e
+       (catch Exception e
          (backend-error "judge threw" {:error (ex-message e)}))))
 
 (defn- judge-cell
