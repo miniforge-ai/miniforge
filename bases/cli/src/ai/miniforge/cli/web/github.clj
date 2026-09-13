@@ -53,7 +53,12 @@
       (try
         (->> (json/parse-string (:out result) true)
              (mapv #(assoc % :repo repo :analysis (risk/analyze-pr %))))
-        (catch Exception _ [])))))
+        (catch Exception e
+          ;; gh succeeded (exit 0) but returned unparseable output — log
+          ;; so operators can diagnose format changes or partial writes.
+          (binding [*out* *err*]
+            (println (str "[warn] fetch-prs: JSON parse failed for repo " repo ": " (ex-message e))))
+          [])))))
 
 (defn ^{:stratum 1} fetch-pr-diff [repo number]
   (let [result (process/sh "gh" "pr" "diff" (str number) "--repo" repo)]
@@ -63,7 +68,12 @@
   (let [result (process/sh "gh" "pr" "view" (str number) "--repo" repo "--json" "body,title,labels")]
     (when (sh-success? result)
       (try (json/parse-string (:out result) true)
-           (catch Exception _ nil)))))
+           (catch Exception e
+             ;; Log so a format change in gh's output surface rather than silently
+             ;; yielding nil (which callers treat as "no PR info available").
+             (binding [*out* *err*]
+               (println (str "[warn] fetch-pr-body: JSON parse failed for " repo " #" number ": " (ex-message e))))
+             nil)))))
 
 (defn ^{:stratum 1} fetch-workflow-runs [repo]
   (let [result (process/sh "gh" "run" "list" "--repo" repo
@@ -71,7 +81,12 @@
                            "--limit" "10")]
     (if (sh-success? result)
       (try (json/parse-string (:out result) true)
-           (catch Exception _ []))
+           (catch Exception e
+             ;; Log so a format change in gh's output surfaces rather than
+             ;; silently returning an empty run list.
+             (binding [*out* *err*]
+               (println (str "[warn] fetch-workflow-runs: JSON parse failed for repo " repo ": " (ex-message e))))
+             []))
       [])))
 
 (defn ^{:stratum 1} approve-pr! [repo number]
