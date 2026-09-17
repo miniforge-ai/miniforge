@@ -112,3 +112,34 @@
       ;; Values should be present (either from env or defaults)
       (is (some? (get-in cfg [:llm :backend])))
       (is (some? (get-in cfg [:llm :timeout-ms]))))))
+
+(deftest ^{:stratum 0} parse-config-value-rejects-reader-eval-test
+  (testing "parse-config-value returns the raw string for #=() reader-eval forms"
+    ;; edn/read-string rejects #=(...) — the catch block returns the literal
+    ;; string unchanged, not the result of evaluating the form.
+    ;; If this assertion fails (returns a number), read-string regressed to
+    ;; clojure.core/read-string which executes reader-eval at parse time.
+    (is (= "#=(identity 42)" (config/parse-config-value "#=(identity 42)")))
+    (is (string? (config/parse-config-value "#=(java.lang.Runtime/getRuntime)"))))
+
+  (testing "parse-config-value still parses safe EDN correctly"
+    (is (= :foo (config/parse-config-value ":foo")))
+    (is (= 42 (config/parse-config-value "42")))
+    (is (= {:a 1} (config/parse-config-value "{:a 1}")))))
+
+(deftest ^{:stratum 0} read-config-file-rejects-reader-eval-test
+  (testing "read-config-file returns nil and does not execute reader-eval forms"
+    (let [tmp (java.io.File/createTempFile "reader-eval-guard" ".edn")]
+      (try
+        (spit tmp "#=(identity 42)")
+        ;; edn/read-string throws on #= — read-config-file catches and returns nil.
+        ;; A regression to clojure.core/read-string would return 42 here.
+        (is (nil? (config/read-config-file (.toPath tmp))))
+        (finally (.delete tmp)))))
+
+  (testing "read-config-file correctly parses safe EDN maps"
+    (let [tmp (java.io.File/createTempFile "safe-edn-config" ".edn")]
+      (try
+        (spit tmp "{:llm {:backend :anthropic}}")
+        (is (= {:llm {:backend :anthropic}} (config/read-config-file (.toPath tmp))))
+        (finally (.delete tmp))))))
