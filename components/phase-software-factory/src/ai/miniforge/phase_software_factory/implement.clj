@@ -99,7 +99,7 @@
          (keep (fn [path]
                  (try
                    (let [full-path (str worktree-path "/" path)
-                         result (execute-fn executor env-id (str "cat " full-path)
+                         result (execute-fn executor env-id (str "cat " (agent/shell-quote full-path))
                                            {:workdir worktree-path})
                          content (get-in result [:data :stdout])]
                      (when (and content (zero? (get-in result [:data :exit-code] 1)))
