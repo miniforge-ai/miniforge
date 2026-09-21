@@ -175,7 +175,7 @@
           (is (false? (:passed? result))
               "Gate must fail when a bypass commit has no [BYPASS-HOOKS:] marker")
           (is (seq (:errors result))
-              "Gate must produce at least one error for an undocumented bypass")))))
+              "Gate must produce at least one error for an undocumented bypass"))))))
 
 (deftest ^{:stratum 1} get-recent-commits-pipe-delimiter-in-body-test
   (testing "||| in body does not shift fields or produce a false-negative gate result"
