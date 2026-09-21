@@ -921,6 +921,79 @@
       (is (= "max_turns" (get-in called-log [:data :stop-reason])))
       (is (= 40 (get-in called-log [:data :num-turns]))))))
 
+(deftest ^{:stratum 1} implementer-recovery-max-turns-cut-is-a-failed-result-test
+  (testing "recovery turn exhausting max_turns does not promote partial files"
+    ;; Regression: the primary-turn guard (cut-by-max-turns?) only covered the
+    ;; first LLM call. When the primary turn produced prose (triggering recovery)
+    ;; and the recovery turn returned {:success true :stop-reason "max_turns"},
+    ;; normalize-implementer-result received the full file-artifact as fallback
+    ;; and usable-content? returned true — silently promoting the partial files.
+    (let [[logger entries] (log/collecting-logger {:min-level :trace})
+          recovery-partial {:code/files [{:path "src/recovery-partial.clj"
+                                          :content "(ns recovery-partial)"
+                                          :action :create}]
+                            :code/summary "written during recovery before turns ran out"
+                            :code/language "clojure"
+                            :code/tests-needed? true}
+          prose-response   {:success     true
+                            :stop-reason "end_turn"
+                            :num-turns   5
+                            :tokens      1500
+                            :content     "Here is my analysis of what needs to change."
+                            :tools-called []}
+          collect-calls    (atom 0)
+          result (with-redefs [artifact-session/create-session!
+                               (fn [& _] (session-map))
+                               artifact-session/write-mcp-config!
+                               identity
+                               artifact-session/read-artifact
+                               (constantly nil)
+                               artifact-session/read-context-misses
+                               (constantly nil)
+                               artifact-session/cleanup-session!
+                               (constantly nil)
+                               budget/resolve-cost-budget-usd
+                               (fn [& _] 1.0)
+                               llm/chat
+                               (fn [& _] prose-response)
+                               submission-recovery/run-recovery-session
+                               (fn [& _]
+                                 {:llm-result        {:success     true
+                                                      :stop-reason "max_turns"
+                                                      :num-turns   6
+                                                      :tokens      2000
+                                                      :tools-called ["mcp__context__context_read"]}
+                                  :artifact           nil
+                                  :worktree-artifacts nil
+                                  :context-misses     nil
+                                  :pre-session-snapshot nil
+                                  :session-mode       :worktree})
+                               file-artifacts/collect-written-files
+                               (fn [_ _]
+                                 ;; First call (primary session): no files written yet.
+                                 ;; Second call (recovery collect-session-artifact): partial files.
+                                 (when (> (swap! collect-calls inc) 1)
+                                   recovery-partial))
+                               file-artifacts/collect-worktree-files
+                               (fn [_ _] nil)]
+                   (@#'implementer/invoke-with-llm
+                    nil "prompt" "system" {} {} nil logger [] {}))
+          cut-log (find-log-entry entries :implementer/llm-max-turns-exceeded)]
+      (is (response/error? result)
+          "partial files from a recovery-turn max-turns cut must not be promoted")
+      (is (nil? (get-in result [:output :code/files])))
+      (is (= "max_turns" (get-in result [:error :data :stop-reason])))
+      (is (= 6 (get-in result [:error :data :num-turns])))
+      (is (= ["src/recovery-partial.clj"] (get-in result [:error :data :partial-files])))
+      (is (true? (get-in result [:error :data :recovery-turn?])))
+      (is (nil? (find-log-entry entries :implementer/file-artifact-fallback))
+          "no silent file-artifact promotion")
+      (is (some? cut-log) "the recovery max-turns cut is logged")
+      (is (= :warn (:log/level cut-log)))
+      (is (= 6 (get-in cut-log [:data :num-turns])))
+      (is (= 1 (get-in cut-log [:data :partial-file-count])))
+      (is (true? (get-in cut-log [:data :recovery-turn?]))))))
+
 (deftest ^{:stratum 1} implementer-stream-idle-cut-keeps-file-promotion-test
   (testing "a stream-idle after successful writes still promotes the files (iter-20 precedence)"
     ;; Only :max-total refuses promotion: there the client cut a turn that

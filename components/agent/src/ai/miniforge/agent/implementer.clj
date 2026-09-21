@@ -858,7 +858,13 @@
   "When the main turn produced usable analysis but NO artifact, run one short
    submission-only retry that asks the implementer to write the files now, then
    re-normalize. Returns the recovered normalized map, or nil when recovery
-   produced no artifact either. Generalizes PR #997's planner recovery."
+   produced no artifact either.
+
+   When the recovery turn itself is cut by max_turns (exit-0 with
+   stop_reason=max_turns), returns a sentinel
+   `{::recovery-cut-by-max-turns? true :num-turns N :partial-files [...]}` so
+   the caller can emit a typed error rather than silently promoting partial files.
+   Generalizes PR #997's planner recovery."
   [{:keys [llm-client config context on-chunk working-dir effective-system-prompt
            input normalized logger]}]
   (log/info logger :implementer :implementer/submission-retry
@@ -884,11 +890,31 @@
                                       true          (assoc :disallowed-tools implementer-disallowed-tools)
                                       working-dir   (assoc :workdir working-dir)
                                       retry-monitor (assoc :progress-monitor retry-monitor))))})
-        recovered (normalize-implementer-result raw context working-dir)]
-    (when (or (:structured-artifact recovered)
-              (:parsed-content recovered)
-              (:derived-artifact recovered))
-      recovered)))
+        recovery-response   (:llm-result raw)
+        recovery-cut?       (and (llm/success? recovery-response)
+                                 (= "max_turns" (:stop-reason recovery-response)))]
+    (if recovery-cut?
+      (let [partial-artifact (collect-session-artifact
+                              context (:session-mode raw) working-dir
+                              (:pre-session-snapshot raw))
+            partial-files    (mapv :path (:code/files partial-artifact))]
+        (log/warn logger :implementer :implementer/llm-max-turns-exceeded
+                  {:data {:num-turns       (:num-turns recovery-response)
+                          :tool-call-count (get recovery-response :tool-call-count
+                                               (count (get recovery-response :tools-called [])))
+                          :tools-called    (get recovery-response :tools-called [])
+                          :partial-file-count (count partial-files)
+                          :partial-files   partial-files
+                          :working-dir     working-dir
+                          :recovery-turn?  true}})
+        {::recovery-cut-by-max-turns? true
+         :num-turns    (:num-turns recovery-response)
+         :partial-files partial-files})
+      (let [recovered (normalize-implementer-result raw context working-dir)]
+        (when (or (:structured-artifact recovered)
+                  (:parsed-content recovered)
+                  (:derived-artifact recovered))
+          recovered)))))
 
 ;------------------------------------------------------------------------------ Layer 6
 
@@ -1015,7 +1041,12 @@
                         :on-chunk on-chunk :working-dir working-dir
                         :effective-system-prompt effective-system-prompt
                         :input input :normalized normalized :logger logger}))
-          final     (or recovered normalized)
+          ;; recover-implementer-submission returns a sentinel map when the
+          ;; recovery turn itself hits the max-turns budget.
+          recovery-cut-by-max-turns? (::recovery-cut-by-max-turns? recovered)
+          final     (if recovery-cut-by-max-turns?
+                      normalized
+                      (or recovered normalized))
           ;; Container-promotion precedence: if the agent wrote files into
           ;; the worktree (file-artifact via collect-written-files) or
           ;; submitted via the MCP artifact path, honor that even when the
@@ -1046,6 +1077,18 @@
                        {:data {:stop-reason "max_turns"
                                :num-turns (:num-turns response)
                                :partial-files partial-files}})
+
+                      recovery-cut-by-max-turns?
+                      ;; Recovery turn exhausted its own turn budget. Applies the
+                      ;; same refusal as the primary-turn guard: partial files
+                      ;; written by the recovery agent are not promoted.
+                      (result-boundary/error-response
+                       final
+                       (messages/t :error/llm-max-turns-exceeded)
+                       {:data {:stop-reason   "max_turns"
+                               :num-turns     (:num-turns recovered)
+                               :partial-files (:partial-files recovered)
+                               :recovery-turn? true}})
 
                       (result-boundary/usable-content? final)
                       (process-llm-response final context logger input)
