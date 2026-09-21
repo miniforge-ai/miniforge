@@ -134,12 +134,13 @@
         (spit tmp "#=(identity 42)")
         ;; edn/read-string throws on #= — read-config-file catches and returns nil.
         ;; A regression to clojure.core/read-string would return 42 here.
-        (is (nil? (config/read-config-file (.toPath tmp))))
+        ;; Pass a String path — slurp cannot open java.nio.file.Path on the JVM.
+        (is (nil? (config/read-config-file (.getPath tmp))))
         (finally (.delete tmp)))))
 
   (testing "read-config-file correctly parses safe EDN maps"
     (let [tmp (java.io.File/createTempFile "safe-edn-config" ".edn")]
       (try
         (spit tmp "{:llm {:backend :anthropic}}")
-        (is (= {:llm {:backend :anthropic}} (config/read-config-file (.toPath tmp))))
+        (is (= {:llm {:backend :anthropic}} (config/read-config-file (.getPath tmp))))
         (finally (.delete tmp))))))
