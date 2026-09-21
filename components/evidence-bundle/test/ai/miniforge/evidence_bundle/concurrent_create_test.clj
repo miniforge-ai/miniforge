@@ -42,17 +42,25 @@
    (log/create-logger {:min-level :warn})))
 
 (deftest concurrent-create-bundle-retains-all-bundles
-  (let [manager (make-manager)
+  (let [manager     (make-manager)
         workflow-id (random-uuid)
-        n 20
-        ;; Fire n concurrent create-bundle calls and collect all returned bundles.
-        futures (mapv (fn [_]
-                        (future
-                          (p/create-bundle manager workflow-id {:workflow-state {}})))
-                      (range n))
-        bundles (mapv deref futures)]
-    ;; Every bundle returned by create-bundle must still be retrievable.
-    ;; A single lost write proves the race still exists.
+        n           20
+        ;; Start gate: all futures block on @gate until deliver fires, so all
+        ;; n create-bundle calls begin within the same JVM scheduling window.
+        ;; Without this, futures created early may complete before the last ones
+        ;; start, eliminating the contention the test is meant to exercise.
+        gate        (promise)
+        futures     (mapv (fn [_]
+                            (future
+                              @gate
+                              (p/create-bundle manager workflow-id {:workflow-state {}})))
+                          (range n))
+        _           (deliver gate :go)
+        ;; 5 s per future; a timeout means a deadlock, not a slow runner.
+        bundles     (mapv #(deref % 5000 ::timeout) futures)]
     (doseq [b bundles]
-      (is (some? (p/get-bundle manager (:evidence-bundle/id b)))
-          (str "bundle " (:evidence-bundle/id b) " was lost under concurrent creates")))))
+      (is (not= ::timeout b)
+          "create-bundle timed out — possible deadlock in swap! retry loop")
+      (when (not= ::timeout b)
+        (is (some? (p/get-bundle manager (:evidence-bundle/id b)))
+            (str "bundle " (:evidence-bundle/id b) " was lost under concurrent creates"))))))
