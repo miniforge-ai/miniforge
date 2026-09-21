@@ -155,6 +155,24 @@
       (is (= [:before] drained)    "first drain got only pre-CAS events")
       (is (= [:concurrent] @q)     ":concurrent is in queue for next poll"))))
 
+(deftest ^{:stratum 0} test-poll-events-drains-production-queue-atomically
+  ;; Integration test: seeds the live event-queue of a subscribed service and
+  ;; asserts that poll-events returns all seeded events exactly once, leaving
+  ;; the queue empty for the following poll.  Exercises the production
+  ;; poll-events path (swap-vals! drain) rather than atom semantics in isolation.
+  (testing "poll-events returns all seeded events and leaves queue empty"
+    (let [svc    (reporting/create-reporting-service {})
+          sub-id (reporting/subscribe svc #{:test} (constantly nil))
+          queue  (get-in @(:subscriptions svc) [sub-id :subscription/event-queue])
+          e1     {:event/type :test :event/n 1}
+          e2     {:event/type :test :event/n 2}]
+      (swap! queue conj e1)
+      (swap! queue conj e2)
+      (let [batch (reporting/poll-events svc sub-id)]
+        (is (= [e1 e2] batch) "first poll returns all seeded events in order"))
+      (is (empty? (reporting/poll-events svc sub-id))
+          "second poll returns empty after drain"))))
+
 ;------------------------------------------------------------------------------ Layer 1
 
 ;; System status tests
