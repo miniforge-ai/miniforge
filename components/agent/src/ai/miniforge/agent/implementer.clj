@@ -862,8 +862,9 @@
 
    When the recovery turn itself is cut by max_turns (exit-0 with
    stop_reason=max_turns), returns a sentinel
-   `{::recovery-cut-by-max-turns? true :num-turns N :partial-files [...]}` so
-   the caller can emit a typed error rather than silently promoting partial files.
+   `{::recovery-cut-by-max-turns? true :num-turns N :partial-files [...]
+     :recovery-normalized {recovery LLM metadata}}` so the caller can emit a
+   typed error that preserves the recovery turn's token/cost provenance.
    Generalizes PR #997's planner recovery."
   [{:keys [llm-client config context on-chunk working-dir effective-system-prompt
            input normalized logger]}]
@@ -909,7 +910,15 @@
                           :recovery-turn?  true}})
         {::recovery-cut-by-max-turns? true
          :num-turns    (:num-turns recovery-response)
-         :partial-files partial-files})
+         :partial-files partial-files
+         ;; Recovery LLM metadata for error-response: tokens/cost from the
+         ;; recovery turn, NOT the primary session, so phase accounting sees
+         ;; the right usage. stop-reason and num-turns come from the recovery
+         ;; response so they flow into :data without needing to be duplicated.
+         :recovery-normalized {:stop-reason (:stop-reason recovery-response)
+                               :num-turns   (:num-turns recovery-response)
+                               :tokens      (:tokens recovery-response)
+                               :cost-usd    (:cost-usd recovery-response)}})
       (let [recovered (normalize-implementer-result raw context working-dir)]
         (when (or (:structured-artifact recovered)
                   (:parsed-content recovered)
@@ -1082,17 +1091,15 @@
                       ;; Recovery turn exhausted its own turn budget. Applies the
                       ;; same refusal as the primary-turn guard: partial files
                       ;; written by the recovery agent are not promoted.
-                      ;; Pass {} as the normalized arg: the sentinel carries the
-                      ;; authoritative stop-reason and num-turns for the recovery
-                      ;; turn; passing `final` (the primary session's normalized
-                      ;; result) would let error-response overwrite those fields
-                      ;; with the primary session's "end_turn" / lower turn count.
+                      ;; Use :recovery-normalized (recovery LLM metadata) as the
+                      ;; first arg so error-response picks up the recovery turn's
+                      ;; tokens/cost for phase accounting and propagates the
+                      ;; recovery stop-reason / num-turns into :data without
+                      ;; the primary session's values clobbering them.
                       (result-boundary/error-response
-                       {}
+                       (:recovery-normalized recovered)
                        (messages/t :error/llm-max-turns-exceeded)
-                       {:data {:stop-reason   "max_turns"
-                               :num-turns     (:num-turns recovered)
-                               :partial-files (:partial-files recovered)
+                       {:data {:partial-files  (:partial-files recovered)
                                :recovery-turn? true}})
 
                       (result-boundary/usable-content? final)

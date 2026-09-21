@@ -986,6 +986,11 @@
       (is (= 6 (get-in result [:error :data :num-turns])))
       (is (= ["src/recovery-partial.clj"] (get-in result [:error :data :partial-files])))
       (is (true? (get-in result [:error :data :recovery-turn?])))
+      ;; Token/cost provenance: the error must reflect the RECOVERY turn's
+      ;; usage (2000 tokens), not the primary session's (1500) or zero.
+      ;; Validates that :recovery-normalized flows through error-response.
+      (is (= 2000 (get-in result [:metrics :tokens]))
+          "recovery turn token usage must be preserved in the error metrics")
       (is (nil? (find-log-entry entries :implementer/file-artifact-fallback))
           "no silent file-artifact promotion")
       (is (some? cut-log) "the recovery max-turns cut is logged")
