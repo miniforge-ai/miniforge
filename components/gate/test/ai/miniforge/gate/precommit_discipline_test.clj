@@ -128,13 +128,12 @@
 
 (deftest ^{:stratum 1} get-recent-commits-multiline-body-test
   (testing "A commit with a multi-line body is parsed as one commit, not split"
-    ;; Fields are NUL-separated (\u0000); records are RS-separated (\u001e).
-    ;; Neither byte is legal in git commit messages, so newlines inside a body
-    ;; cannot create false record boundaries.
+    ;; Each commit is five NUL-terminated fields. NUL cannot appear in git
+    ;; commit messages, so newlines in a body cannot create false boundaries.
     (let [hash    "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
           fake-out (str hash "\u0000" "feat: multi-line" "\u0000"
                         "Line 1 of body\nLine 2 of body" "\u0000"
-                        "Author" "\u0000" "2026-08-30 10:00:00 +0000" "\u001e")]
+                        "Author" "\u0000" "2026-08-30 10:00:00 +0000" "\u0000")]
       (with-redefs [ai.miniforge.gate.precommit-discipline/exec-git
                     (fn [_args] {:exit 0 :out fake-out :err ""})]
         (let [commits (discipline/get-recent-commits :limit 5 :branch "HEAD")]
@@ -160,7 +159,7 @@
         (is (not (some #(= "--format=" %) @received-args))
             "exec-git must not receive --format= as a bare argument with no value")
         ;; Java rejects NUL bytes in process arguments; the format string must use
-        ;; git's %xNN escape sequences (%x00, %x1e) rather than literal NUL/RS.
+        ;; git's %x00 escape rather than a literal NUL byte.
         (is (not (some #(str/includes? % "\u0000") @received-args))
             "exec-git args must not contain literal NUL bytes — use %x00 in the format string")))))
 
@@ -172,7 +171,7 @@
     (let [fake-commit (str "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
                            "\u0000" "fix: skip hooks" "\u0000"
                            "Used --no-verify because I was in a hurry"
-                           "\u0000" "Test Author" "\u0000" "2026-08-30 10:00:00 +0000" "\u001e")]
+                           "\u0000" "Test Author" "\u0000" "2026-08-30 10:00:00 +0000" "\u0000")]
       (with-redefs [ai.miniforge.gate.precommit-discipline/exec-git
                     (fn [_args] {:exit 0 :out fake-commit :err ""})]
         (let [result (discipline/check-precommit-discipline {} {:config {:commits-to-check 5}})]
@@ -193,7 +192,7 @@
                         "fix: something" "\u0000"
                         "Copied syntax: |||\nUsed --no-verify without documentation" "\u0000"
                         "Test Author" "\u0000"
-                        "2026-08-30 10:00:00 +0000" "\u001e")]
+                        "2026-08-30 10:00:00 +0000" "\u0000")]
       (with-redefs [ai.miniforge.gate.precommit-discipline/exec-git
                     (fn [_args] {:exit 0 :out fake-out :err ""})]
         (let [commits (discipline/get-recent-commits :limit 5 :branch "HEAD")]
@@ -211,7 +210,7 @@
   (testing "SHA-256 (64-hex) hash is accepted"
     (let [hash     (apply str (repeat 64 "c"))
           fake-out (str hash "\u0000" "feat: sha256" "\u0000" "" "\u0000"
-                        "Author" "\u0000" "2026-08-30 10:00:00 +0000" "\u001e")]
+                        "Author" "\u0000" "2026-08-30 10:00:00 +0000" "\u0000")]
       (with-redefs [ai.miniforge.gate.precommit-discipline/exec-git
                     (fn [_args] {:exit 0 :out fake-out :err ""})]
         (let [commits (discipline/get-recent-commits :limit 5 :branch "HEAD")]
@@ -224,7 +223,7 @@
     ;; The alternation (?:[0-9a-f]{40}|[0-9a-f]{64}) is exact.
     (let [hash     (apply str (repeat 41 "d"))
           fake-out (str hash "\u0000" "feat: bad" "\u0000" "" "\u0000"
-                        "Author" "\u0000" "2026-08-30 10:00:00 +0000" "\u001e")]
+                        "Author" "\u0000" "2026-08-30 10:00:00 +0000" "\u0000")]
       (with-redefs [ai.miniforge.gate.precommit-discipline/exec-git
                     (fn [_args] {:exit 0 :out fake-out :err ""})]
         (let [commits (discipline/get-recent-commits :limit 5 :branch "HEAD")]
@@ -232,17 +231,47 @@
               "41-hex intermediate-length hash must be rejected"))))))
 
 (deftest ^{:stratum 1} get-recent-commits-malformed-record-test
-  (testing "Records with fewer than 5 fields are dropped without crashing"
-    ;; A truncated record (e.g. missing date) must be dropped; the following
-    ;; valid record must still be returned.
-    (let [bad-rec  (str (apply str (repeat 40 "e"))
-                        "\u0000" "feat: truncated" "\u0000" "body" "\u001e")
+  (testing "Records with an invalid hash are dropped without crashing"
+    ;; A record whose first field fails the 40/64-hex hash check must be
+    ;; dropped; the following valid record must still be returned.
+    ;; bad-rec carries 5 NUL-terminated fields (keeping the stream aligned)
+    ;; but its hash is 39 hex chars — one short of the required 40.
+    ;; partition groups it into its own 5-token slice, and keep's when
+    ;; guard rejects it; good-rec occupies the next slice and is returned.
+    (let [bad-rec  (str (apply str (repeat 39 "e"))
+                        "\u0000" "feat: bad-hash" "\u0000" "body" "\u0000"
+                        "Author" "\u0000" "2026-08-30 10:00:00 +0000" "\u0000")
           good-rec (str (apply str (repeat 40 "f"))
                         "\u0000" "feat: good" "\u0000" "" "\u0000"
-                        "Author" "\u0000" "2026-08-30 10:00:00 +0000" "\u001e")]
+                        "Author" "\u0000" "2026-08-30 10:00:00 +0000" "\u0000")]
       (with-redefs [ai.miniforge.gate.precommit-discipline/exec-git
                     (fn [_args] {:exit 0 :out (str bad-rec good-rec) :err ""})]
         (let [commits (discipline/get-recent-commits :limit 5 :branch "HEAD")]
           (is (= 1 (count commits))
               "Malformed record must be dropped; valid record must survive")
           (is (= (apply str (repeat 40 "f")) (:hash (first commits)))))))))
+
+(deftest ^{:stratum 1} get-recent-commits-rs-in-body-test
+  (testing "ASCII RS (U+001E) in commit body does not split the record or cause fail-open gate"
+    ;; ASCII RS (\x1e) is not forbidden in git commit messages — only NUL is.
+    ;; With the old RS-delimited approach, a body containing \x1e shifted the
+    ;; subsequent fields out of position, making bypass detection fail open.
+    ;; With NUL-delimited framing, RS is treated as inert body text.
+    (let [hash     (apply str (repeat 40 "a"))
+          fake-out (str hash "\u0000"
+                        "fix: something" "\u0000"
+                        "context: foo\u001ebar\nUsed --no-verify" "\u0000"
+                        "Test Author" "\u0000"
+                        "2026-08-30 10:00:00 +0000" "\u0000")]
+      (with-redefs [ai.miniforge.gate.precommit-discipline/exec-git
+                    (fn [_args] {:exit 0 :out fake-out :err ""})]
+        (let [commits (discipline/get-recent-commits :limit 5 :branch "HEAD")]
+          (is (= 1 (count commits))
+              "RS in body must yield exactly one commit")
+          (is (= "Test Author" (:author (first commits)))
+              ":author must not be polluted by body text after RS")
+          (is (str/includes? (:body (first commits)) "Used --no-verify")
+              "Body must retain --no-verify text even when body contains RS"))
+        (let [result (discipline/check-precommit-discipline {} {:config {:commits-to-check 5}})]
+          (is (false? (:passed? result))
+              "Gate must fail: --no-verify in body must be detected even when body contains RS"))))))
