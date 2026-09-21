@@ -21,7 +21,4 @@
         ;; Web server dependencies (BB-compatible)
         ;; http-kit and hiccup are bundled with Babashka
         http-kit/http-kit {:mvn/version "2.8.0"}
-        hiccup/hiccup     {:mvn/version "2.0.0-RC3"}
-
-        ;; Canonical anomaly data (rules 003/005)
-        ai.miniforge/anomaly {:local/root "../../components/anomaly"}}}
+        hiccup/hiccup     {:mvn/version "2.0.0-RC3"}}}
