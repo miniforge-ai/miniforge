@@ -144,28 +144,32 @@
    Returns:
      Vector of {:hash string :subject string :body string :message string :author string :date string}"
   [& {:keys [limit branch] :or {limit 50 branch "HEAD"}}]
-  (let [format "%H|||%s|||%b|||%an|||%ai"
-        result (exec-git ["log" (str "-" limit) (str "--format=" format) branch])]
+  ;; NUL (\x00) separates fields; ASCII RS (\x1e) separates records.
+  ;; Neither byte is legal in git commit messages, so they cannot appear in
+  ;; subject or body text and cannot shift fields — unlike printable delimiters.
+  (let [fs     "\u0000"
+        rs     "\u001e"
+        fmt    (str "%H" fs "%s" fs "%b" fs "%an" fs "%ai" rs)
+        result (exec-git ["log" (str "-" limit) (str "--format=" fmt) branch])]
     (if (zero? (:exit result))
-      ;; Split only at lines that begin a new commit record (hex hash then |||).
-      ;; The unescaped ||| in a lookahead is a regex alternation with empty alternatives,
-      ;; which always matches — so we must escape the pipes to match literal |||.
-      ;; {40,64} covers both SHA-1 (40-hex) and SHA-256 (64-hex) repositories.
-      (->> (str/split (:out result) #"\n(?=[0-9a-f]{40,64}\|\|\|)")
-           (keep (fn [commit-str]
-                   (when-not (str/blank? commit-str)
-                     (let [[hash subject body author date] (str/split commit-str #"\|\|\|" 5)
-                           hash-val (str/trim (or hash ""))]
-                       ;; Accept only entries whose first field is a valid hex commit hash
-                       ;; (40-hex for SHA-1 repos, 64-hex for SHA-256 repos).
-                       ;; Body lines from multi-line commit messages are rejected here.
-                       (when (re-matches #"[0-9a-f]{40,64}" hash-val)
-                         {:hash hash-val
-                          :subject (str/trim (or subject ""))
-                          :body (str/trim (or body ""))
-                          :message (str/trim (str (or subject "") "\n" (or body "")))
-                          :author (str/trim (or author ""))
-                          :date (str/trim (or date ""))})))))
+      (->> (str/split (:out result) (re-pattern rs))
+           (keep (fn [rec]
+                   (when-not (str/blank? rec)
+                     (let [parts (str/split rec (re-pattern fs) 5)]
+                       ;; Require exactly 5 fields; partial records from git output
+                       ;; edge cases are silently dropped.
+                       (when (= 5 (count parts))
+                         (let [[hash subject body author date] parts
+                               hash-val (str/trim hash)]
+                           ;; Exact lengths only: SHA-1 = 40 hex, SHA-256 = 64 hex.
+                           ;; {40,64} would accept intermediate lengths that git never produces.
+                           (when (re-matches #"(?:[0-9a-f]{40}|[0-9a-f]{64})" hash-val)
+                             {:hash    hash-val
+                              :subject (str/trim subject)
+                              :body    (str/trim body)
+                              :message (str/trim (str subject "\n" body))
+                              :author  (str/trim author)
+                              :date    (str/trim date)})))))))
            vec)
       [])))
 

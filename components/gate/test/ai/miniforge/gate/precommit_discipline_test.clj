@@ -128,14 +128,13 @@
 
 (deftest ^{:stratum 1} get-recent-commits-multiline-body-test
   (testing "A commit with a multi-line body is parsed as one commit, not split"
-    ;; The split regex must use escaped \|\|\| so the lookahead only fires at
-    ;; lines that actually start a new commit record (40-hex hash + |||).
-    ;; Before the fix the unescaped ||| was a regex alternation with empty
-    ;; alternatives (always-match), so every \n split the output and lines
-    ;; inside a multi-line body were handed to the parser as if they were
-    ;; standalone records — producing nil fields and str/trim NPEs.
-    (let [hash "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
-          fake-out (str hash "|||feat: multi-line|||Line 1 of body\nLine 2 of body|||Author|||2026-08-30 10:00:00 +0000")]
+    ;; Fields are NUL-separated (\u0000); records are RS-separated (\u001e).
+    ;; Neither byte is legal in git commit messages, so newlines inside a body
+    ;; cannot create false record boundaries.
+    (let [hash    "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+          fake-out (str hash "\u0000" "feat: multi-line" "\u0000"
+                        "Line 1 of body\nLine 2 of body" "\u0000"
+                        "Author" "\u0000" "2026-08-30 10:00:00 +0000" "\u001e")]
       (with-redefs [ai.miniforge.gate.precommit-discipline/exec-git
                     (fn [_args] {:exit 0 :out fake-out :err ""})]
         (let [commits (discipline/get-recent-commits :limit 5 :branch "HEAD")]
@@ -167,13 +166,79 @@
     ;; required [BYPASS-HOOKS: reason] marker so the gate exercises the full
     ;; detection + validation path.
     (let [fake-commit (str "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
-                           "|||fix: skip hooks|||"
+                           "\u0000" "fix: skip hooks" "\u0000"
                            "Used --no-verify because I was in a hurry"
-                           "|||Test Author|||2026-08-30 10:00:00 +0000")]
+                           "\u0000" "Test Author" "\u0000" "2026-08-30 10:00:00 +0000" "\u001e")]
       (with-redefs [ai.miniforge.gate.precommit-discipline/exec-git
                     (fn [_args] {:exit 0 :out fake-commit :err ""})]
         (let [result (discipline/check-precommit-discipline {} {:config {:commits-to-check 5}})]
           (is (false? (:passed? result))
               "Gate must fail when a bypass commit has no [BYPASS-HOOKS:] marker")
           (is (seq (:errors result))
-              "Gate must produce at least one error for an undocumented bypass"))))))
+              "Gate must produce at least one error for an undocumented bypass")))))
+
+(deftest ^{:stratum 1} get-recent-commits-pipe-delimiter-in-body-test
+  (testing "||| in body does not shift fields or produce a false-negative gate result"
+    ;; Regression for the fail-open parser case reported in review:
+    ;; with the old ||| field separator, a body containing ||| shifted subsequent
+    ;; fields — the --no-verify text ended up in :author, :message was truncated,
+    ;; and check-precommit-discipline returned {:passed? true}.
+    ;; With NUL-delimited framing ||| is inert body text.
+    (let [hash     (apply str (repeat 40 "a"))
+          fake-out (str hash "\u0000"
+                        "fix: something" "\u0000"
+                        "Copied syntax: |||\nUsed --no-verify without documentation" "\u0000"
+                        "Test Author" "\u0000"
+                        "2026-08-30 10:00:00 +0000" "\u001e")]
+      (with-redefs [ai.miniforge.gate.precommit-discipline/exec-git
+                    (fn [_args] {:exit 0 :out fake-out :err ""})]
+        (let [commits (discipline/get-recent-commits :limit 5 :branch "HEAD")]
+          (is (= 1 (count commits))
+              "||| in body must not split the record")
+          (is (str/includes? (:body (first commits)) "Used --no-verify")
+              "Body must retain --no-verify text that follows ||| in body")
+          (is (= "Test Author" (:author (first commits)))
+              ":author must not be polluted with body text after |||"))
+        (let [result (discipline/check-precommit-discipline {} {:config {:commits-to-check 5}})]
+          (is (false? (:passed? result))
+              "Gate must fail: --no-verify in body must be detected even when body contains |||"))))))
+
+(deftest ^{:stratum 1} get-recent-commits-hash-length-test
+  (testing "SHA-256 (64-hex) hash is accepted"
+    (let [hash     (apply str (repeat 64 "c"))
+          fake-out (str hash "\u0000" "feat: sha256" "\u0000" "" "\u0000"
+                        "Author" "\u0000" "2026-08-30 10:00:00 +0000" "\u001e")]
+      (with-redefs [ai.miniforge.gate.precommit-discipline/exec-git
+                    (fn [_args] {:exit 0 :out fake-out :err ""})]
+        (let [commits (discipline/get-recent-commits :limit 5 :branch "HEAD")]
+          (is (= 1 (count commits))
+              "SHA-256 64-hex hash must be accepted")
+          (is (= hash (:hash (first commits))))))))
+
+  (testing "Intermediate-length hash (41 hex) is rejected"
+    ;; {40,64} accepted 41-63 char strings that git never produces.
+    ;; The alternation (?:[0-9a-f]{40}|[0-9a-f]{64}) is exact.
+    (let [hash     (apply str (repeat 41 "d"))
+          fake-out (str hash "\u0000" "feat: bad" "\u0000" "" "\u0000"
+                        "Author" "\u0000" "2026-08-30 10:00:00 +0000" "\u001e")]
+      (with-redefs [ai.miniforge.gate.precommit-discipline/exec-git
+                    (fn [_args] {:exit 0 :out fake-out :err ""})]
+        (let [commits (discipline/get-recent-commits :limit 5 :branch "HEAD")]
+          (is (empty? commits)
+              "41-hex intermediate-length hash must be rejected"))))))
+
+(deftest ^{:stratum 1} get-recent-commits-malformed-record-test
+  (testing "Records with fewer than 5 fields are dropped without crashing"
+    ;; A truncated record (e.g. missing date) must be dropped; the following
+    ;; valid record must still be returned.
+    (let [bad-rec  (str (apply str (repeat 40 "e"))
+                        "\u0000" "feat: truncated" "\u0000" "body" "\u001e")
+          good-rec (str (apply str (repeat 40 "f"))
+                        "\u0000" "feat: good" "\u0000" "" "\u0000"
+                        "Author" "\u0000" "2026-08-30 10:00:00 +0000" "\u001e")]
+      (with-redefs [ai.miniforge.gate.precommit-discipline/exec-git
+                    (fn [_args] {:exit 0 :out (str bad-rec good-rec) :err ""})]
+        (let [commits (discipline/get-recent-commits :limit 5 :branch "HEAD")]
+          (is (= 1 (count commits))
+              "Malformed record must be dropped; valid record must survive")
+          (is (= (apply str (repeat 40 "f")) (:hash (first commits)))))))))
