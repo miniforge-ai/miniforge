@@ -290,6 +290,27 @@
       (is (= :already-implemented (:status artifact)))
       (is (= "already there" (:summary artifact))))))
 
+(deftest ^{:stratum 2} shell-commands-quote-paths-with-spaces-test
+  (testing "lifecycle commands single-quote workdir paths containing spaces"
+    ;; Regression for the five unquoted-path sites fixed in this PR.
+    ;; A bare space in a workdir (common on macOS: ~/Documents/My Project/…)
+    ;; would cause the shell to split the path into separate tokens.
+    (let [log     (atom [])
+          exec!   (mock-execute! log)
+          workdir "/tmp/My Project"
+          context {:execution/mode           :governed
+                   :execution/executor       :mock
+                   :execution/environment-id "env-quote"
+                   :execution/worktree-path  workdir
+                   :execution/execute-fn     exec!}]
+      (session/with-session context (constantly :done))
+      ;; Every recorded command that embeds the workdir must wrap it in
+      ;; single-quotes.  An unquoted space would be split by sh -c.
+      (doseq [cmd @log]
+        (when (str/includes? cmd workdir)
+          (is (str/includes? cmd (str "'" workdir))
+              (str "workdir not quoted in command: " cmd)))))))
+
 ;------------------------------------------------------------------------------ Layer 3
 
 (deftest ^{:stratum 3} with-session-governed-cleanup-on-exception-test

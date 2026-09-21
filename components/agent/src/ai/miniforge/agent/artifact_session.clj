@@ -277,7 +277,7 @@
     (let [path    (str (:dir session) "/context-cache.edn")
           content (pr-str {:files files})]
       ((:exec! session) (:executor session) (:environment-id session)
-                        (str "cat > " path " << 'CACHEEOF'\n" content "\nCACHEEOF")
+                        (str "cat > " (file-artifacts/shell-quote path) " << 'CACHEEOF'\n" content "\nCACHEEOF")
                         {:workdir (:workdir session)})))
   session)
 
@@ -912,7 +912,7 @@
   (when (and session role)
     (let [path (.getPath (worktree-artifact-file (:workdir session) role))
           result ((:exec! session) (:executor session) (:environment-id session)
-                  (str "cat " path) {:workdir (:workdir session)})
+                  (str "cat " (file-artifacts/shell-quote path)) {:workdir (:workdir session)})
           content (get-in result [:data :stdout] "")]
       (when (seq content)
         (parse-edn-content content
