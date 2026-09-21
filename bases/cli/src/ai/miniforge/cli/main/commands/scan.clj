@@ -25,6 +25,7 @@
    [babashka.fs :as fs]
    [clojure.edn :as edn]
    [clojure.java.io :as io]
+   [ai.miniforge.anomaly.interface :as anomaly]
    [ai.miniforge.connector-linter.interface :as linter]
    [ai.miniforge.compliance-scanner.interface :as scanner]
    [ai.miniforge.cli.main.display :as display]
@@ -41,30 +42,23 @@
 
 (def ^{:stratum 0} ^:private repo-config-path ".miniforge/config.edn")
 
-(defn- ^{:stratum 0} parse-error
-  "Build a parse-error anomaly map. Keys: :anomaly/type, :anomaly/source, :anomaly/message."
-  [source message]
-  {:anomaly/type    :scan/edn-parse-error
-   :anomaly/source  source
-   :anomaly/message message})
-
-(defn- ^{:stratum 0} parse-error?
-  "True when v is a parse-error anomaly returned by safe-read-edn or its callers."
-  [v]
-  (= :scan/edn-parse-error (:anomaly/type v)))
-
 (defn- ^{:stratum 0} safe-read-edn
   "Read and parse an EDN string. Returns the parsed value on success,
-   or a parse-error anomaly on failure; does not print diagnostics."
+   or a canonical `:invalid-input` anomaly (subtype `:scan/edn-parse-error`)
+   on failure; does not print diagnostics. Source label is stored under
+   `:anomaly/data :source`."
   [source-label content]
   (try
     (edn/read-string content)
     (catch Exception e
-      (parse-error source-label (ex-message e)))))
+      (anomaly/sub-anomaly :invalid-input :scan/edn-parse-error
+                           (ex-message e)
+                           {:source source-label}))))
 
 (defn- ^{:stratum 0} resolve-pack
   "Resolve a pack by name or path. Returns the loaded pack map, nil when not
-   found, or a parse-error anomaly when the file exists but is malformed."
+   found, or a canonical `:invalid-input` anomaly (subtype `:scan/edn-parse-error`)
+   when the file exists but is malformed."
   [pack-ref]
   (cond
     (fs/exists? pack-ref)
@@ -189,7 +183,8 @@
 
 (defn- ^{:stratum 1} load-repo-config
   "Load .miniforge/config.edn from the repo root. Returns nil if absent,
-   or a parse-error anomaly if the file exists but is malformed."
+   or a canonical `:invalid-input` anomaly (subtype `:scan/edn-parse-error`)
+   if the file exists but is malformed."
   [repo-path]
   (let [path (fs/path repo-path repo-config-path)]
     (when (fs/exists? path)
@@ -203,7 +198,7 @@
   (let [pack-names (get repo-config :repo/packs [])]
     (when (seq pack-names)
       (let [results (mapv resolve-pack pack-names)]
-        (if-let [err (some #(when (parse-error? %) %) results)]
+        (if-let [err (some #(when (anomaly/anomaly? %) %) results)]
           err
           (let [rules (vec (mapcat :pack/rules (remove nil? results)))]
             (when (seq rules) {:pack/rules rules})))))))
@@ -245,19 +240,20 @@
 (defn- ^{:stratum 2} build-scan-opts
   "Build scan options from CLI opts and repo config.
    Priority: --pack flag > repo config :repo/packs > no pack.
-   Returns a scan-opts map on success, or a parse-error anomaly (with
-   :anomaly/source and :anomaly/message) when any input is malformed.
-   The caller renders the diagnostic; this function does not print."
+   Returns a scan-opts map on success, or a canonical `:invalid-input`
+   anomaly (subtype `:scan/edn-parse-error`; source in `:anomaly/data`)
+   when any input is malformed. The caller renders the diagnostic; this
+   function does not print."
   [opts repo-config]
   (let [pack-flag     (get opts :pack)
         explicit-pack (when pack-flag (resolve-pack pack-flag))
         config-pack   (when (and (nil? pack-flag)
                                  repo-config
-                                 (not (parse-error? repo-config)))
+                                 (not (anomaly/anomaly? repo-config)))
                         (resolve-packs-from-config repo-config))
-        err           (or (when (parse-error? explicit-pack) explicit-pack)
-                          (when (parse-error? repo-config)   repo-config)
-                          (when (parse-error? config-pack)   config-pack))]
+        err           (or (when (anomaly/anomaly? explicit-pack) explicit-pack)
+                          (when (anomaly/anomaly? repo-config)   repo-config)
+                          (when (anomaly/anomaly? config-pack)   config-pack))]
     (if err
       err
       (let [pack  (or explicit-pack config-pack)
@@ -271,7 +267,8 @@
 
 (defn- ^{:stratum 3} run-scan
   "Execute the scan→linters→semantic→classify→plan→execute pipeline.
-   Returns a parse-error anomaly when build-scan-opts fails; nil on success."
+   Returns a canonical `:invalid-input` anomaly when build-scan-opts fails;
+   nil on success."
   [repo-path opts]
   (let [standards   (get opts :standards default-standards-path)
         repo-config (load-repo-config repo-path)
@@ -281,7 +278,7 @@
         no-lint?    (get opts :no-lint false)
         semantic?   (get opts :semantic false)]
 
-    (if (parse-error? scan-opts)
+    (if (anomaly/anomaly? scan-opts)
       scan-opts
       (do
     ;; Phase 1: Policy pack scan
@@ -347,9 +344,9 @@
       :else
       (try
         (let [result (run-scan repo-path opts)]
-          (when (parse-error? result)
+          (when (anomaly/anomaly? result)
             (display/print-error (messages/t :scan/edn-parse-error
-                                             {:source  (:anomaly/source result)
+                                             {:source  (get-in result [:anomaly/data :source])
                                               :message (:anomaly/message result)}))))
         (catch Exception e
           (display/print-error (messages/t :scan/scan-failed
