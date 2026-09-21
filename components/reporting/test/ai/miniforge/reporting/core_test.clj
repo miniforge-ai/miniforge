@@ -81,3 +81,50 @@
       (swap! queue conj event)
       (proto/poll-events service sub-id)
       (is (= [] (proto/poll-events service sub-id))))))
+
+(deftest ^{:stratum 2} test-two-step-drain-loses-event-in-race-window
+  (testing "non-atomic @queue/reset! loses an event injected between deref and reset"
+    ;; Deterministic proof of the failure mode the swap-vals! fix addresses.
+    ;; Reproduce the OLD poll-events drain sequence with a concurrent event
+    ;; injected in the gap between @queue and (reset! queue []).
+    (let [queue (atom [])
+          e1    {:event/topic :topic :event/data "seeded"}
+          e2    {:event/topic :topic :event/data "injected-in-race"}]
+      (swap! queue conj e1)
+      (let [drained @queue                 ; OLD step 1: non-atomic read
+            _       (swap! queue conj e2)  ; concurrent write in the gap
+            _       (reset! queue [])]     ; OLD step 2: e2 cleared, not returned
+        (is (not (contains? (set drained) e2))
+            "e2 was not captured by the non-atomic deref")
+        (is (= [] @queue)
+            "e2 was also erased by reset! — permanently lost")))))
+
+(deftest ^{:stratum 2} test-swap-vals-drain-captures-event-written-during-cas-retry
+  (testing "swap-vals! retries the CAS after a concurrent write, capturing the injected event"
+    ;; Coordinate a concurrent enqueue inside the swap-vals! fn body.
+    ;; swap-vals! detects the atom changed between fn execution and CAS commit
+    ;; and retries, so the injected event is included in the returned old-value.
+    ;; poll-events uses this mechanism; reverting to @queue/reset! would lose
+    ;; the event proven missing in test-two-step-drain-loses-event-in-race-window.
+    (let [queue      (atom [])
+          e1         {:event/topic :topic :event/data "seeded"}
+          e2         {:event/topic :topic :event/data "concurrent"}
+          latch      (java.util.concurrent.CountDownLatch. 1)
+          ready      (java.util.concurrent.CountDownLatch. 1)
+          first-call (atom true)]
+      (swap! queue conj e1)
+      (let [injector (future
+                       (.await latch)
+                       (swap! queue conj e2)
+                       (.countDown ready))]
+        (let [[drained _] (swap-vals! queue
+                            (fn [q]
+                              (when @first-call
+                                (reset! first-call false)
+                                (.countDown latch) ; signal injector
+                                (.await ready))    ; wait for e2 to land
+                              []))]
+          @injector
+          (is (= [e1 e2] drained)
+              "swap-vals! captured both events after CAS retry on the concurrent write")
+          (is (= [] @queue) "queue is empty — no events remain"))))))
