@@ -156,6 +156,39 @@
       (session/write-context-cache-for-session! s {"src/foo.clj" "(ns foo)"})
       (is (some #(.contains (str %) "context-cache.edn") @log)))))
 
+(deftest ^{:stratum 1} write-capsule-context-cache-quotes-spaces-test
+  (testing "write-capsule-context-cache! fully single-quotes a dir path containing spaces"
+    ;; Regression for the unquoted write in write-capsule-context-cache!.
+    ;; A bare space would split the path token when sh -c executes the cat heredoc.
+    (let [log (atom [])
+          dir "/tmp/My Session/.miniforge-session"
+          s   {:dir            dir
+               :capsule?       true
+               :exec!          (mock-execute! log)
+               :executor       :mock
+               :environment-id "env-spaces"
+               :workdir        "/tmp/My Session"}]
+      (session/write-context-cache-for-session! s {"src/foo.clj" "(ns foo)"})
+      (let [expected-prefix (str "cat > '" dir "/context-cache.edn'")]
+        (is (some #(str/starts-with? (str %) expected-prefix) @log)
+            (str "cat > command must start with fully-quoted path; got: " (vec @log)))))))
+
+(deftest ^{:stratum 1} write-capsule-context-cache-quotes-dollar-sign-test
+  (testing "write-capsule-context-cache! single-quotes prevent $-expansion in path"
+    ;; Without quoting, a $ in a workdir path would be shell-expanded by the executor.
+    (let [log (atom [])
+          dir "/tmp/$SESSION/.miniforge-session"
+          s   {:dir            dir
+               :capsule?       true
+               :exec!          (mock-execute! log)
+               :executor       :mock
+               :environment-id "env-dollar"
+               :workdir        "/tmp/$SESSION"}]
+      (session/write-context-cache-for-session! s {"src/bar.clj" "(ns bar)"})
+      (let [expected-prefix (str "cat > '" dir "/context-cache.edn'")]
+        (is (some #(str/starts-with? (str %) expected-prefix) @log)
+            (str "cat > command must single-quote path containing $; got: " (vec @log)))))))
+
 ;; :explicit-workdir? flag and WARN suppression (artifact-warning-suppression PR)
 (deftest ^{:stratum 1} create-capsule-session-sets-explicit-workdir-test
   (testing "create-capsule-session! always sets :explicit-workdir? true"
