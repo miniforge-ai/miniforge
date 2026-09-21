@@ -18,6 +18,8 @@
 
 (def ^{:stratum 0} build-scan-opts (var-get #'sut/build-scan-opts))
 
+(def ^{:stratum 0} parse-error-sentinel (var-get #'sut/parse-error-sentinel))
+
 ;------------------------------------------------------------------------------ Layer 1
 
 ;; ============================================================================
@@ -83,16 +85,31 @@
     (let [opts (build-scan-opts {} {:repo/packs ["foundations-1.0.0"]})]
       (is (some? (:pack opts)))))
 
-  (testing "malformed explicit pack does not fall back to config-pack"
-    ;; safe-read-edn returns nil for a file with invalid EDN and prints a
-    ;; diagnostic. build-scan-opts must not substitute the config-pack in
-    ;; that case — the :pack key must be absent from the result.
+  (testing "malformed explicit pack stops the pipeline — build-scan-opts returns nil"
     (let [tmp (File/createTempFile "bad-pack" ".edn")
-          _   (do (.deleteOnExit tmp) (spit (.getPath tmp) "{:pack/rules [(:invalid"))]
-      (let [opts (build-scan-opts {:pack (.getPath tmp)}
-                                  {:repo/packs ["foundations-1.0.0"]})]
-        (is (nil? (:pack opts))
-            "malformed --pack file should not fall back to config packs")))))
+          _   (do (.deleteOnExit tmp) (spit (.getPath tmp) "{:pack/rules [(:invalid"))
+          opts (build-scan-opts {:pack (.getPath tmp)}
+                                {:repo/packs ["foundations-1.0.0"]})]
+      (is (nil? opts)
+          "malformed --pack returns nil to stop the entire scan pipeline")))
+
+  (testing "malformed repo config stops the pipeline — build-scan-opts returns nil"
+    (is (nil? (build-scan-opts {} parse-error-sentinel))
+        "sentinel repo-config returns nil to stop the pipeline")))
+
+;; ============================================================================
+;; scan-cmd pipeline regression
+;; ============================================================================
+(deftest ^{:stratum 1} scan-cmd-stops-on-malformed-pack-test
+  (testing "scanner/scan is never called when --pack file is malformed"
+    (let [tmp    (File/createTempFile "bad-pack" ".edn")
+          _      (do (.deleteOnExit tmp) (spit (.getPath tmp) "{:invalid"))
+          called (atom false)]
+      (with-redefs [compliance-scanner/scan (fn [& _] (reset! called true) {})]
+        (with-out-str
+          (sut/scan-cmd {:pack (.getPath tmp)})))
+      (is (false? @called)
+          "scanner/scan must not be called when explicit --pack is malformed"))))
 
 ;; ============================================================================
 ;; Negative-mode violation messages

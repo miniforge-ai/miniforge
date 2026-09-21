@@ -41,10 +41,15 @@
 
 (def ^{:stratum 0} ^:private repo-config-path ".miniforge/config.edn")
 
+;; Distinguishes a parse failure from legitimately absent data (nil).
+;; Callers that receive this value must stop the pipeline immediately;
+;; safe-read-edn has already printed the localized diagnostic.
+(def ^{:stratum 0} ^:private parse-error-sentinel ::edn-parse-failed)
+
 (defn- ^{:stratum 0} safe-read-edn
-  "Read and parse an EDN string; returns nil and prints an error on failure.
-   Use at CLI boundaries where malformed user-supplied EDN should produce a
-   friendly message rather than an opaque Clojure exception."
+  "Read and parse an EDN string. Returns the parsed value on success.
+   On failure prints a localized error and returns parse-error-sentinel so
+   callers can distinguish a failure from legitimately absent data (nil)."
   [source-label content]
   (try
     (edn/read-string content)
@@ -52,7 +57,7 @@
       (display/print-error (messages/t :scan/edn-parse-error
                                        {:source  source-label
                                         :message (ex-message e)}))
-      nil)))
+      parse-error-sentinel)))
 
 (defn- ^{:stratum 0} resolve-pack
   "Resolve a pack by name or path. Returns the loaded pack map or nil."
@@ -186,14 +191,17 @@
       (safe-read-edn (str path) (slurp (str path))))))
 
 (defn- ^{:stratum 1} resolve-packs-from-config
-  "Load all packs declared in :repo/packs. Returns merged pack or nil."
+  "Load all packs declared in :repo/packs.
+   Returns merged pack map, nil (no packs declared / no rules), or
+   parse-error-sentinel if any declared pack failed to parse."
   [repo-config]
   (let [pack-names (get repo-config :repo/packs [])]
     (when (seq pack-names)
-      (let [packs (keep resolve-pack pack-names)
-            rules (vec (mapcat :pack/rules packs))]
-        (when (seq rules)
-          {:pack/rules rules})))))
+      (let [results (mapv resolve-pack pack-names)]
+        (if (some #(= % parse-error-sentinel) results)
+          parse-error-sentinel
+          (let [rules (vec (mapcat :pack/rules (remove nil? results)))]
+            (when (seq rules) {:pack/rules rules})))))))
 
 (defn- ^{:stratum 1} run-semantic-analysis
   "Run LLM-based semantic analysis on behavioral rules in parallel.
@@ -232,23 +240,28 @@
 (defn- ^{:stratum 2} build-scan-opts
   "Build scan options from CLI opts and repo config.
    Priority: --pack flag > repo config :repo/packs > no pack.
-   repo-config must be pre-loaded by the caller (pass nil when absent) so that
-   a malformed config never prints its diagnostic twice."
+   Returns nil when any parse failure is detected so run-scan can stop the
+   pipeline before scanner/scan, linters, plan, or execute are called.
+   Callers must treat nil as 'do not proceed'; safe-read-edn has already
+   printed the localized diagnostic."
   [opts repo-config]
   (let [pack-flag     (get opts :pack)
         explicit-pack (when pack-flag (resolve-pack pack-flag))
-        ;; Guard: only consult repo config when the --pack flag was not supplied.
-        ;; When --pack is given but the file is malformed, explicit-pack is nil
-        ;; and safe-read-edn has already printed the error; do not silently fall
-        ;; back to configured packs.
-        config-pack   (when (and (nil? pack-flag) repo-config)
+        config-pack   (when (and (nil? pack-flag)
+                                 repo-config
+                                 (not= repo-config parse-error-sentinel))
                         (resolve-packs-from-config repo-config))
-        pack          (or explicit-pack config-pack)
-        rules         (resolve-rules-selector (get opts :rules))
-        since         (get opts :since)]
-    (cond-> {:rules rules}
-      pack  (assoc :pack pack)
-      since (assoc :since since))))
+        ;; Any sentinel in the chain means malformed input — stop.
+        parse-error?  (or (= explicit-pack parse-error-sentinel)
+                          (= repo-config   parse-error-sentinel)
+                          (= config-pack   parse-error-sentinel))]
+    (when-not parse-error?
+      (let [pack  (or explicit-pack config-pack)
+            rules (resolve-rules-selector (get opts :rules))
+            since (get opts :since)]
+        (cond-> {:rules rules}
+          pack  (assoc :pack pack)
+          since (assoc :since since))))))
 
 ;------------------------------------------------------------------------------ Layer 3
 
@@ -263,6 +276,8 @@
         no-lint?    (get opts :no-lint false)
         semantic?   (get opts :semantic false)]
 
+    ;; nil scan-opts means a parse failure occurred upstream; diagnostic already printed.
+    (when scan-opts
     ;; Phase 1: Policy pack scan
     (display/print-info (messages/t :scan/banner {:path repo-path}))
     (let [scan-result     (-> (scanner/scan repo-path standards scan-opts)
@@ -310,7 +325,7 @@
             (when (and repo-config (not no-lint?))
               (display/print-info (messages/t :scan/linter-fix-banner))
               (run-linter-fixes! repo-path repo-config))
-            (execute-if-requested plan-result repo-path true)))))))
+            (execute-if-requested plan-result repo-path true))))))))
 
 ;------------------------------------------------------------------------------ Layer 4
 
