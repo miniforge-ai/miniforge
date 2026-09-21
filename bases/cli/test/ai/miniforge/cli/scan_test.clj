@@ -91,12 +91,12 @@
                                 {:repo/packs ["foundations-1.0.0"]})]
       (is (anomaly/anomaly? opts)
           "malformed --pack returns a canonical anomaly")
-      (is (= :scan/edn-parse-error (anomaly/subtype opts))
-          "subtype is :scan/edn-parse-error")
+      (is (= :anomalies.scan/edn-parse-error (anomaly/subtype opts))
+          "subtype is :anomalies.scan/edn-parse-error")
       (is (string? (get-in opts [:anomaly/data :source])))))
 
   (testing "malformed repo config propagates anomaly through build-scan-opts"
-    (let [fake-err (anomaly/sub-anomaly :invalid-input :scan/edn-parse-error
+    (let [fake-err (anomaly/sub-anomaly :invalid-input :anomalies.scan/edn-parse-error
                                        "EOF while reading"
                                        {:source "test/.miniforge/config.edn"})
           opts     (build-scan-opts {} fake-err)]

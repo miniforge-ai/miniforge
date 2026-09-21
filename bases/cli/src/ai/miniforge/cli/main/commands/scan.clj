@@ -44,20 +44,20 @@
 
 (defn- ^{:stratum 0} safe-read-edn
   "Read and parse an EDN string. Returns the parsed value on success,
-   or a canonical `:invalid-input` anomaly (subtype `:scan/edn-parse-error`)
+   or a canonical `:invalid-input` anomaly (subtype `:anomalies.scan/edn-parse-error`)
    on failure; does not print diagnostics. Source label is stored under
    `:anomaly/data :source`."
   [source-label content]
   (try
     (edn/read-string content)
     (catch Exception e
-      (anomaly/sub-anomaly :invalid-input :scan/edn-parse-error
+      (anomaly/sub-anomaly :invalid-input :anomalies.scan/edn-parse-error
                            (ex-message e)
                            {:source source-label}))))
 
 (defn- ^{:stratum 0} resolve-pack
   "Resolve a pack by name or path. Returns the loaded pack map, nil when not
-   found, or a canonical `:invalid-input` anomaly (subtype `:scan/edn-parse-error`)
+   found, or a canonical `:invalid-input` anomaly (subtype `:anomalies.scan/edn-parse-error`)
    when the file exists but is malformed."
   [pack-ref]
   (cond
@@ -183,7 +183,7 @@
 
 (defn- ^{:stratum 1} load-repo-config
   "Load .miniforge/config.edn from the repo root. Returns nil if absent,
-   or a canonical `:invalid-input` anomaly (subtype `:scan/edn-parse-error`)
+   or a canonical `:invalid-input` anomaly (subtype `:anomalies.scan/edn-parse-error`)
    if the file exists but is malformed."
   [repo-path]
   (let [path (fs/path repo-path repo-config-path)]
@@ -241,7 +241,7 @@
   "Build scan options from CLI opts and repo config.
    Priority: --pack flag > repo config :repo/packs > no pack.
    Returns a scan-opts map on success, or a canonical `:invalid-input`
-   anomaly (subtype `:scan/edn-parse-error`; source in `:anomaly/data`)
+   anomaly (subtype `:anomalies.scan/edn-parse-error`; source in `:anomaly/data`)
    when any input is malformed. The caller renders the diagnostic; this
    function does not print."
   [opts repo-config]
