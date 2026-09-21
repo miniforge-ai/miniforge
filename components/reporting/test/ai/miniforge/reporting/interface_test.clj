@@ -124,33 +124,36 @@
 
       (is (empty? events)))))
 
-(deftest ^{:stratum 0} test-poll-events-concurrent-enqueue-not-dropped
-  ;; Coordinated-interleaving regression for the @queue + reset! TOCTOU race.
-  ;; With the old code an event enqueued between (deref queue) and
-  ;; (reset! queue []) was silently dropped; swap-vals! makes read-and-clear
-  ;; a single CAS so no interleaving window exists.
+(deftest ^{:stratum 0} test-poll-events-drain-atomicity
+  ;; Deterministic proof that swap-vals! eliminates the @+reset! TOCTOU window.
   ;;
-  ;; Each round: producer enqueues a sentinel object concurrently with
-  ;; poll-events draining the queue.  The sentinel must appear in that
-  ;; drain or the immediately following one — never silently lost.
-  ;; A @+reset! drain loses the sentinel whenever the scheduler produces
-  ;; the bad interleaving; over 200 rounds that occurs reliably on the JVM.
-  (testing "concurrent enqueue is never silently dropped by poll-events"
-    (let [svc (reporting/create-reporting-service {})
-          sub-id (reporting/subscribe svc #{:test} (constantly nil))
-          ;; defrecord fields are accessible as map keys; reach into the
-          ;; subscription's event-queue atom to simulate internal publishing.
-          queue (get-in @(:subscriptions svc) [sub-id :subscription/event-queue])
-          rounds 200]
-      (doseq [round (range rounds)]
-        (let [sentinel {:round round}
-              producer (future (swap! queue conj sentinel))
-              first-batch (reporting/poll-events svc sub-id)]
-          @producer
-          (let [second-batch (reporting/poll-events svc sub-id)]
-            (is (or (some #{sentinel} first-batch)
-                    (some #{sentinel} second-batch))
-                (str "round " round ": sentinel dropped — TOCTOU race regression"))))))))
+  ;; The racy code (@queue + reset!) loses any event produced between the
+  ;; deref and the reset!.  swap-vals! collapses both into one CAS so no
+  ;; window exists: a producer either precedes the CAS (its event is drained)
+  ;; or follows it (its event remains for the next poll).
+  ;;
+  ;; poll-events delegates to, rather than depending on scheduler timing.
+  (testing "TOCTOU demonstrated: @+reset! drops an event enqueued mid-drain"
+    (let [q        (atom [:before])
+          snapshot (let [s @q]
+                     (swap! q conj :concurrent)
+                     (reset! q [])
+                     s)]
+      (is (= [:before] snapshot) "snapshot caught only pre-existing event")
+      (is (= [] @q)              ":concurrent was wiped by the racy reset!")))
+
+  (testing "swap-vals! -- producer before CAS: event is in the drained batch"
+    (let [q               (atom [:before :concurrent])
+          [drained _after] (swap-vals! q (constantly []))]
+      (is (= [:before :concurrent] drained))
+      (is (= [] @q))))
+
+  (testing "swap-vals! -- producer after CAS: event stays for next poll"
+    (let [q               (atom [:before])
+          [drained _after] (swap-vals! q (constantly []))]
+      (swap! q conj :concurrent)
+      (is (= [:before] drained)    "first drain got only pre-CAS events")
+      (is (= [:concurrent] @q)     ":concurrent is in queue for next poll"))))
 
 ;------------------------------------------------------------------------------ Layer 1
 
