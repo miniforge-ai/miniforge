@@ -127,4 +127,32 @@
           @injector
           (is (= [e1 e2] drained)
               "swap-vals! captured both events after CAS retry on the concurrent write")
-          (is (= [] @queue) "queue is empty — no events remain"))))))
+          (is (= [] @queue) "queue is empty — no events remain")))))
+
+(deftest ^{:stratum 2} test-poll-events-atomic-drain-via-production-path
+  (testing "poll-events captures an event injected concurrently through the production call site"
+    ;; Uses the :before-drain-fn seam to inject e2 inside the swap-vals! body,
+    ;; forcing a CAS retry and proving the fix holds end-to-end through poll-events.
+    (let [latch      (java.util.concurrent.CountDownLatch. 1)
+          ready      (java.util.concurrent.CountDownLatch. 1)
+          first-call (atom true)
+          e1         {:event/topic :topic :event/data "seeded"}
+          e2         {:event/topic :topic :event/data "concurrent"}
+          service    (core/create-reporting-service
+                       {:before-drain-fn
+                        (fn []
+                          (when (compare-and-set! first-call true false)
+                            (.countDown latch)
+                            (.await ready)))})
+          sub-id     (proto/subscribe service [:topic] identity)
+          sub        (get @(:subscriptions service) sub-id)
+          queue      (:subscription/event-queue sub)]
+      (swap! queue conj e1)
+      (let [injector (future
+                       (.await latch)
+                       (swap! queue conj e2)
+                       (.countDown ready))]
+        (let [events (proto/poll-events service sub-id)]
+          @injector
+          (is (= [e1 e2] events)
+              "poll-events captured both seeded and concurrently injected events via the production code path"))))))

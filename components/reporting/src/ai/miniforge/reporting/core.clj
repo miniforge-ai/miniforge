@@ -167,7 +167,8 @@
                                   artifact-store
                                   logger
                                   subscriptions
-                                  config]
+                                  config
+                                  before-drain-fn]
   proto/ReportingService
 
   (get-system-status [_this]
@@ -247,7 +248,9 @@
   (poll-events [_this subscription-id]
     (if-let [sub (get @subscriptions subscription-id)]
       (let [queue (:subscription/event-queue sub)
-            events (first (swap-vals! queue (constantly [])))
+            events (first (swap-vals! queue (fn [_q]
+                                            (when before-drain-fn (before-drain-fn))
+                                            [])))
             callback (:subscription/callback sub)]
         ;; Update last poll time
         (swap! subscriptions assoc-in [subscription-id :subscription/last-poll]
@@ -273,7 +276,8 @@
             operator-component
             artifact-store
             logger
-            config]
+            config
+            before-drain-fn]
      :or {config {}}}]
    (->ReportingServiceImpl
     workflow-component
@@ -282,4 +286,5 @@
     artifact-store
     logger
     (atom {})  ; subscriptions
-    config)))
+    config
+    before-drain-fn)))
