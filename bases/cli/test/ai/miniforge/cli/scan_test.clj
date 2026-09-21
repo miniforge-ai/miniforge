@@ -18,8 +18,6 @@
 
 (def ^{:stratum 0} build-scan-opts (var-get #'sut/build-scan-opts))
 
-(def ^{:stratum 0} parse-error-sentinel (var-get #'sut/parse-error-sentinel))
-
 ;------------------------------------------------------------------------------ Layer 1
 
 ;; ============================================================================
@@ -85,31 +83,70 @@
     (let [opts (build-scan-opts {} {:repo/packs ["foundations-1.0.0"]})]
       (is (some? (:pack opts)))))
 
-  (testing "malformed explicit pack stops the pipeline — build-scan-opts returns nil"
-    (let [tmp (File/createTempFile "bad-pack" ".edn")
-          _   (do (.deleteOnExit tmp) (spit (.getPath tmp) "{:pack/rules [(:invalid"))
+  (testing "malformed explicit pack returns parse-error anomaly"
+    (let [tmp  (File/createTempFile "bad-pack" ".edn")
+          _    (do (.deleteOnExit tmp) (spit (.getPath tmp) "{:pack/rules [(:invalid"))
           opts (build-scan-opts {:pack (.getPath tmp)}
                                 {:repo/packs ["foundations-1.0.0"]})]
-      (is (nil? opts)
-          "malformed --pack returns nil to stop the entire scan pipeline")))
+      (is (= :scan/edn-parse-error (:anomaly/type opts))
+          "malformed --pack returns a parse-error anomaly")
+      (is (string? (:anomaly/source opts)))
+      (is (string? (:anomaly/message opts)))))
 
-  (testing "malformed repo config stops the pipeline — build-scan-opts returns nil"
-    (is (nil? (build-scan-opts {} parse-error-sentinel))
-        "sentinel repo-config returns nil to stop the pipeline")))
+  (testing "malformed repo config propagates parse-error anomaly through build-scan-opts"
+    (let [fake-err {:anomaly/type    :scan/edn-parse-error
+                    :anomaly/source  "test/.miniforge/config.edn"
+                    :anomaly/message "EOF while reading"}
+          opts     (build-scan-opts {} fake-err)]
+      (is (= :scan/edn-parse-error (:anomaly/type opts))
+          "parse-error repo-config propagates through build-scan-opts"))))
 
 ;; ============================================================================
 ;; scan-cmd pipeline regression
 ;; ============================================================================
 (deftest ^{:stratum 1} scan-cmd-stops-on-malformed-pack-test
-  (testing "scanner/scan is never called when --pack file is malformed"
+  (testing "scanner/scan is never called and error printed exactly once when --pack is malformed"
     (let [tmp    (File/createTempFile "bad-pack" ".edn")
           _      (do (.deleteOnExit tmp) (spit (.getPath tmp) "{:invalid"))
-          called (atom false)]
-      (with-redefs [compliance-scanner/scan (fn [& _] (reset! called true) {})]
-        (with-out-str
-          (sut/scan-cmd {:pack (.getPath tmp)})))
+          called (atom false)
+          output (with-out-str
+                   (with-redefs [compliance-scanner/scan (fn [& _] (reset! called true) {})]
+                     (sut/scan-cmd {:pack (.getPath tmp)})))]
       (is (false? @called)
-          "scanner/scan must not be called when explicit --pack is malformed"))))
+          "scanner/scan must not be called when explicit --pack is malformed")
+      (is (= 1 (count (re-seq #"Failed to parse EDN" output)))
+          "error diagnostic must appear exactly once"))))
+
+(deftest ^{:stratum 1} scan-cmd-stops-on-malformed-repo-config-test
+  (testing "scanner/scan never called and error printed once when .miniforge/config.edn is malformed"
+    (let [tmp-dir  (doto (File/createTempFile "test-repo" nil) (.delete) (.mkdirs))
+          cfg-dir  (doto (File. tmp-dir ".miniforge") (.mkdirs))
+          _        (spit (File. cfg-dir "config.edn") "{:invalid-edn")
+          called   (atom false)
+          output   (with-out-str
+                     (with-redefs [compliance-scanner/scan (fn [& _] (reset! called true) {})]
+                       (sut/scan-cmd {:repo (.getPath tmp-dir)})))]
+      (is (false? @called)
+          "scanner/scan must not be called when .miniforge/config.edn is malformed")
+      (is (= 1 (count (re-seq #"Failed to parse EDN" output)))
+          "error diagnostic must appear exactly once"))))
+
+(deftest ^{:stratum 1} scan-cmd-stops-on-malformed-configured-pack-test
+  (testing "scanner/scan never called and error printed once when a configured pack is malformed"
+    (let [tmp-dir  (doto (File/createTempFile "test-repo" nil) (.delete) (.mkdirs))
+          cfg-dir  (doto (File. tmp-dir ".miniforge") (.mkdirs))
+          bad-pack (doto (File/createTempFile "bad-pack" ".edn") (.deleteOnExit))
+          _        (spit bad-pack "{:invalid")
+          _        (spit (File. cfg-dir "config.edn")
+                         (str "{:repo/packs [\"" (.getPath bad-pack) "\"]}"))
+          called   (atom false)
+          output   (with-out-str
+                     (with-redefs [compliance-scanner/scan (fn [& _] (reset! called true) {})]
+                       (sut/scan-cmd {:repo (.getPath tmp-dir)})))]
+      (is (false? @called)
+          "scanner/scan must not be called when a configured pack is malformed")
+      (is (= 1 (count (re-seq #"Failed to parse EDN" output)))
+          "error diagnostic must appear exactly once"))))
 
 ;; ============================================================================
 ;; Negative-mode violation messages

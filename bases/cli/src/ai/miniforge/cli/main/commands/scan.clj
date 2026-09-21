@@ -41,27 +41,30 @@
 
 (def ^{:stratum 0} ^:private repo-config-path ".miniforge/config.edn")
 
-;; Distinguishes a parse failure from legitimately absent data (nil).
-;; Callers that receive this value must stop the pipeline immediately;
-;; safe-read-edn has already printed the localized diagnostic.
-(def ^{:stratum 0} ^:private parse-error-sentinel ::edn-parse-failed)
+(defn- ^{:stratum 0} parse-error
+  "Build a parse-error anomaly map. Keys: :anomaly/type, :anomaly/source, :anomaly/message."
+  [source message]
+  {:anomaly/type    :scan/edn-parse-error
+   :anomaly/source  source
+   :anomaly/message message})
+
+(defn- ^{:stratum 0} parse-error?
+  "True when v is a parse-error anomaly returned by safe-read-edn or its callers."
+  [v]
+  (= :scan/edn-parse-error (:anomaly/type v)))
 
 (defn- ^{:stratum 0} safe-read-edn
-  "Read and parse an EDN string. Returns the parsed value on success.
-   On failure prints a localized error and returns parse-error-sentinel so
-   callers can distinguish a failure from legitimately absent data (nil)."
+  "Read and parse an EDN string. Returns the parsed value on success,
+   or a parse-error anomaly on failure; does not print diagnostics."
   [source-label content]
   (try
     (edn/read-string content)
     (catch Exception e
-      (display/print-error (messages/t :scan/edn-parse-error
-                                       {:source  source-label
-                                        :message (ex-message e)}))
-      parse-error-sentinel)))
+      (parse-error source-label (ex-message e)))))
 
 (defn- ^{:stratum 0} resolve-pack
   "Resolve a pack by name or path. Returns the loaded pack map, nil when not
-   found, or parse-error-sentinel when the file exists but is malformed."
+   found, or a parse-error anomaly when the file exists but is malformed."
   [pack-ref]
   (cond
     (fs/exists? pack-ref)
@@ -186,7 +189,7 @@
 
 (defn- ^{:stratum 1} load-repo-config
   "Load .miniforge/config.edn from the repo root. Returns nil if absent,
-   or parse-error-sentinel if the file exists but is malformed."
+   or a parse-error anomaly if the file exists but is malformed."
   [repo-path]
   (let [path (fs/path repo-path repo-config-path)]
     (when (fs/exists? path)
@@ -195,13 +198,13 @@
 (defn- ^{:stratum 1} resolve-packs-from-config
   "Load all packs declared in :repo/packs.
    Returns merged pack map, nil (no packs declared / no rules), or
-   parse-error-sentinel if any declared pack failed to parse."
+   the first parse-error anomaly if any declared pack failed to parse."
   [repo-config]
   (let [pack-names (get repo-config :repo/packs [])]
     (when (seq pack-names)
       (let [results (mapv resolve-pack pack-names)]
-        (if (some #(= % parse-error-sentinel) results)
-          parse-error-sentinel
+        (if-let [err (some #(when (parse-error? %) %) results)]
+          err
           (let [rules (vec (mapcat :pack/rules (remove nil? results)))]
             (when (seq rules) {:pack/rules rules})))))))
 
@@ -242,22 +245,21 @@
 (defn- ^{:stratum 2} build-scan-opts
   "Build scan options from CLI opts and repo config.
    Priority: --pack flag > repo config :repo/packs > no pack.
-   Returns nil when any parse failure is detected so run-scan can stop the
-   pipeline before scanner/scan, linters, plan, or execute are called.
-   Callers must treat nil as 'do not proceed'; safe-read-edn has already
-   printed the localized diagnostic."
+   Returns a scan-opts map on success, or a parse-error anomaly (with
+   :anomaly/source and :anomaly/message) when any input is malformed.
+   The caller renders the diagnostic; this function does not print."
   [opts repo-config]
   (let [pack-flag     (get opts :pack)
         explicit-pack (when pack-flag (resolve-pack pack-flag))
         config-pack   (when (and (nil? pack-flag)
                                  repo-config
-                                 (not= repo-config parse-error-sentinel))
+                                 (not (parse-error? repo-config)))
                         (resolve-packs-from-config repo-config))
-        ;; Any sentinel in the chain means malformed input — stop.
-        parse-error?  (or (= explicit-pack parse-error-sentinel)
-                          (= repo-config   parse-error-sentinel)
-                          (= config-pack   parse-error-sentinel))]
-    (when-not parse-error?
+        err           (or (when (parse-error? explicit-pack) explicit-pack)
+                          (when (parse-error? repo-config)   repo-config)
+                          (when (parse-error? config-pack)   config-pack))]
+    (if err
+      err
       (let [pack  (or explicit-pack config-pack)
             rules (resolve-rules-selector (get opts :rules))
             since (get opts :since)]
@@ -268,7 +270,8 @@
 ;------------------------------------------------------------------------------ Layer 3
 
 (defn- ^{:stratum 3} run-scan
-  "Execute the scan→linters→semantic→classify→plan→execute pipeline."
+  "Execute the scan→linters→semantic→classify→plan→execute pipeline.
+   Returns a parse-error anomaly when build-scan-opts fails; nil on success."
   [repo-path opts]
   (let [standards   (get opts :standards default-standards-path)
         repo-config (load-repo-config repo-path)
@@ -278,8 +281,9 @@
         no-lint?    (get opts :no-lint false)
         semantic?   (get opts :semantic false)]
 
-    ;; nil scan-opts means a parse failure occurred upstream; diagnostic already printed.
-    (when scan-opts
+    (if (parse-error? scan-opts)
+      scan-opts
+      (do
     ;; Phase 1: Policy pack scan
     (display/print-info (messages/t :scan/banner {:path repo-path}))
     (let [scan-result     (-> (scanner/scan repo-path standards scan-opts)
@@ -327,7 +331,7 @@
             (when (and repo-config (not no-lint?))
               (display/print-info (messages/t :scan/linter-fix-banner))
               (run-linter-fixes! repo-path repo-config))
-            (execute-if-requested plan-result repo-path true))))))))
+            (execute-if-requested plan-result repo-path true)))))))))
 
 ;------------------------------------------------------------------------------ Layer 4
 
@@ -342,7 +346,11 @@
 
       :else
       (try
-        (run-scan repo-path opts)
+        (let [result (run-scan repo-path opts)]
+          (when (parse-error? result)
+            (display/print-error (messages/t :scan/edn-parse-error
+                                             {:source  (:anomaly/source result)
+                                              :message (:anomaly/message result)}))))
         (catch Exception e
           (display/print-error (messages/t :scan/scan-failed
                                            {:message (ex-message e)})))))))
