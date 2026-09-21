@@ -20,6 +20,7 @@
   (:require
    [clojure.test :refer [deftest testing is]]
    [ai.miniforge.reporting.core :as core]
+   [ai.miniforge.reporting.protocol :as proto]
    [ai.miniforge.logging.interface :as log]))
 
 ;------------------------------------------------------------------------------ Layer 0
@@ -56,3 +57,27 @@
   (testing "safe-get with nil logger behaves like no-logger variant"
     (is (nil? (core/safe-get nil (fn [] (throw (Exception. "boom"))))))
     (is (= 42 (core/safe-get nil (fn [] 42))))))
+
+;------------------------------------------------------------------------------ Layer 2
+
+(deftest ^{:stratum 2} test-poll-events-returns-seeded-events
+  (testing "poll-events returns all events queued before the call"
+    (let [service (core/create-reporting-service)
+          sub-id  (proto/subscribe service [:topic] identity)
+          sub     (get @(:subscriptions service) sub-id)
+          queue   (:subscription/event-queue sub)
+          e1      {:event/topic :topic :event/data "a"}
+          e2      {:event/topic :topic :event/data "b"}]
+      (swap! queue conj e1 e2)
+      (is (= [e1 e2] (proto/poll-events service sub-id))))))
+
+(deftest ^{:stratum 2} test-poll-events-clears-queue-after-drain
+  (testing "poll-events drains the queue atomically — subsequent call returns empty"
+    (let [service (core/create-reporting-service)
+          sub-id  (proto/subscribe service [:topic] identity)
+          sub     (get @(:subscriptions service) sub-id)
+          queue   (:subscription/event-queue sub)
+          event   {:event/topic :topic :event/data "x"}]
+      (swap! queue conj event)
+      (proto/poll-events service sub-id)
+      (is (= [] (proto/poll-events service sub-id))))))
