@@ -301,6 +301,23 @@
       (is (some? (:artifact result)))
       (is (uuid? (:code/id (:artifact result)))))))
 
+(deftest ^{:stratum 2} read-capsule-artifact-quotes-spaces-in-path-test
+  (testing "read-capsule-artifact single-quotes an artifact path containing spaces"
+    ;; Regression for the unquoted read-capsule-artifact site.
+    ;; A space in :artifact-path causes sh -c to split the path token without quoting.
+    (let [log           (atom [])
+          artifact-path "/tmp/My Workspace/.miniforge-session/artifact.edn"
+          s {:artifact-path artifact-path
+             :capsule?       true
+             :exec!          (mock-execute-with-artifact! log)
+             :executor       :mock
+             :environment-id "env-quote-artifact"
+             :workdir        "/tmp/My Workspace"}]
+      (session/read-capsule-artifact s)
+      (let [expected (str "cat '" artifact-path "'")]
+        (is (some #(= (str %) expected) @log)
+            (str "cat command must fully quote artifact path; got: " (vec @log)))))))
+
 ;; UUID parsing in capsule artifact
 (deftest ^{:stratum 2} read-capsule-artifact-parses-uuids-test
   (testing "UUID strings are converted to java.util.UUID"
