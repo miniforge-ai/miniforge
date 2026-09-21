@@ -178,6 +178,19 @@
     (is (nil? (#'implement/load-files-from-capsule
                (fn [& _] nil) :x :y "/w" [])))))
 
+(deftest ^{:stratum 0} load-files-from-capsule-shell-metacharacters-test
+  (testing "load-files-from-capsule shell-quotes paths with spaces, $, and embedded single quotes"
+    (let [captured-cmds (atom [])
+          execute-fn (fn [_executor _env-id cmd _opts]
+                       (swap! captured-cmds conj cmd)
+                       {:data {:stdout "content" :exit-code 0}})
+          _ (#'implement/load-files-from-capsule
+             execute-fn :mock-executor :mock-env-id "/w"
+             ["src/my file.clj" "src/$var.clj" "src/it's.clj"])]
+      (is (= "cat '/w/src/my file.clj'" (nth @captured-cmds 0)))
+      (is (= "cat '/w/src/$var.clj'" (nth @captured-cmds 1)))
+      (is (= "cat '/w/src/it'\"'\"'s.clj'" (nth @captured-cmds 2))))))
+
 (deftest ^{:stratum 0} resolve-existing-files-uses-capsule-in-governed-mode-test
   (testing "resolve-existing-files prefers capsule path when execute-fn is on context"
     (let [capsule-called (atom false)
