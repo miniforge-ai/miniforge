@@ -127,7 +127,7 @@
           @injector
           (is (= [e1 e2] drained)
               "swap-vals! captured both events after CAS retry on the concurrent write")
-          (is (= [] @queue) "queue is empty — no events remain")))))
+          (is (= [] @queue) "queue is empty — no events remain"))))))
 
 (deftest ^{:stratum 2} test-poll-events-atomic-drain-via-production-path
   (testing "poll-events captures an event injected concurrently through the production call site"
