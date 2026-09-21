@@ -21,6 +21,7 @@
    [babashka.process :as process]
    [clojure.string :as str]
    [cheshire.core :as json]
+   [ai.miniforge.cli.messages :as messages]
    [ai.miniforge.cli.web.risk :as risk]))
 
 ;------------------------------------------------------------------------------ Layer 0
@@ -56,7 +57,8 @@
                     ;; gh succeeded (exit 0) but returned unparseable output — log
                     ;; so operators can diagnose format changes or partial writes.
                     (binding [*out* *err*]
-                      (println (str "[warn] fetch-prs: JSON parse failed for repo " repo ": " (ex-message e))))
+                      (println (messages/t :web/github-fetch-prs-json-failed
+                                           {:repo repo :cause (ex-message e)})))
                     nil))]
         (if prs
           (mapv #(assoc % :repo repo :analysis (risk/analyze-pr %)) prs)
@@ -74,7 +76,8 @@
              ;; Log so a format change in gh's output surface rather than silently
              ;; yielding nil (which callers treat as "no PR info available").
              (binding [*out* *err*]
-               (println (str "[warn] fetch-pr-body: JSON parse failed for " repo " #" number ": " (ex-message e))))
+               (println (messages/t :web/github-fetch-pr-body-json-failed
+                                    {:repo repo :number number :cause (ex-message e)})))
              nil)))))
 
 (defn ^{:stratum 1} fetch-workflow-runs [repo]
@@ -87,7 +90,8 @@
              ;; Log so a format change in gh's output surfaces rather than
              ;; silently returning an empty run list.
              (binding [*out* *err*]
-               (println (str "[warn] fetch-workflow-runs: JSON parse failed for repo " repo ": " (ex-message e))))
+               (println (messages/t :web/github-fetch-runs-json-failed
+                                    {:repo repo :cause (ex-message e)})))
              []))
       [])))
 
