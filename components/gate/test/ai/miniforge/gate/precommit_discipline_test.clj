@@ -158,7 +158,11 @@
         (is (some #(str/starts-with? % "--format=") @received-args)
             "exec-git must receive --format=<value> as a single fused argument")
         (is (not (some #(= "--format=" %) @received-args))
-            "exec-git must not receive --format= as a bare argument with no value")))))
+            "exec-git must not receive --format= as a bare argument with no value")
+        ;; Java rejects NUL bytes in process arguments; the format string must use
+        ;; git's %xNN escape sequences (%x00, %x1e) rather than literal NUL/RS.
+        (is (not (some #(str/includes? % "\u0000") @received-args))
+            "exec-git args must not contain literal NUL bytes — use %x00 in the format string")))))
 
 (deftest ^{:stratum 1} check-precommit-discipline-rejects-undocumented-bypass-test
   (testing "Gate fails when a bypass commit lacks proper documentation"

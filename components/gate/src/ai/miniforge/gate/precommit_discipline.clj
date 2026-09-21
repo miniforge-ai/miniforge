@@ -147,9 +147,12 @@
   ;; NUL (\x00) separates fields; ASCII RS (\x1e) separates records.
   ;; Neither byte is legal in git commit messages, so they cannot appear in
   ;; subject or body text and cannot shift fields — unlike printable delimiters.
+  ;; Use git's %xNN escapes in the format template so the process argument
+  ;; contains no literal NUL bytes (Java rejects NUL in process args).
+  ;; Git writes the actual bytes to stdout; we parse those bytes below.
   (let [fs     "\u0000"
         rs     "\u001e"
-        fmt    (str "%H" fs "%s" fs "%b" fs "%an" fs "%ai" rs)
+        fmt    "%H%x00%s%x00%b%x00%an%x00%ai%x1e"
         result (exec-git ["log" (str "-" limit) (str "--format=" fmt) branch])]
     (if (zero? (:exit result))
       (->> (str/split (:out result) (re-pattern rs))
