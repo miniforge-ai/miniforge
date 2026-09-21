@@ -124,6 +124,34 @@
 
       (is (empty? events)))))
 
+(deftest ^{:stratum 0} test-poll-events-concurrent-enqueue-not-dropped
+  ;; Coordinated-interleaving regression for the @queue + reset! TOCTOU race.
+  ;; With the old code an event enqueued between (deref queue) and
+  ;; (reset! queue []) was silently dropped; swap-vals! makes read-and-clear
+  ;; a single CAS so no interleaving window exists.
+  ;;
+  ;; Each round: producer enqueues a sentinel object concurrently with
+  ;; poll-events draining the queue.  The sentinel must appear in that
+  ;; drain or the immediately following one — never silently lost.
+  ;; A @+reset! drain loses the sentinel whenever the scheduler produces
+  ;; the bad interleaving; over 200 rounds that occurs reliably on the JVM.
+  (testing "concurrent enqueue is never silently dropped by poll-events"
+    (let [svc (reporting/create-reporting-service {})
+          sub-id (reporting/subscribe svc #{:test} (constantly nil))
+          ;; defrecord fields are accessible as map keys; reach into the
+          ;; subscription's event-queue atom to simulate internal publishing.
+          queue (get-in @(:subscriptions svc) [sub-id :subscription/event-queue])
+          rounds 200]
+      (doseq [round (range rounds)]
+        (let [sentinel {:round round}
+              producer (future (swap! queue conj sentinel))
+              first-batch (reporting/poll-events svc sub-id)]
+          @producer
+          (let [second-batch (reporting/poll-events svc sub-id)]
+            (is (or (some #{sentinel} first-batch)
+                    (some #{sentinel} second-batch))
+                (str "round " round ": sentinel dropped — TOCTOU race regression"))))))))
+
 ;------------------------------------------------------------------------------ Layer 1
 
 ;; System status tests
