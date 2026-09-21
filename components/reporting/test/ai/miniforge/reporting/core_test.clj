@@ -143,13 +143,13 @@
                         (fn []
                           (when (compare-and-set! first-call true false)
                             (.countDown latch)
-                            (.await ready)))})
+                            (.await ready 5 java.util.concurrent.TimeUnit/SECONDS)))})
           sub-id     (proto/subscribe service [:topic] identity)
           sub        (get @(:subscriptions service) sub-id)
           queue      (:subscription/event-queue sub)]
       (swap! queue conj e1)
       (let [injector (future
-                       (.await latch)
+                       (.await latch 5 java.util.concurrent.TimeUnit/SECONDS)
                        (swap! queue conj e2)
                        (.countDown ready))]
         (let [events (proto/poll-events service sub-id)]
