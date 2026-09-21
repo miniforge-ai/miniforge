@@ -60,7 +60,8 @@
       parse-error-sentinel)))
 
 (defn- ^{:stratum 0} resolve-pack
-  "Resolve a pack by name or path. Returns the loaded pack map or nil."
+  "Resolve a pack by name or path. Returns the loaded pack map, nil when not
+   found, or parse-error-sentinel when the file exists but is malformed."
   [pack-ref]
   (cond
     (fs/exists? pack-ref)
@@ -184,7 +185,8 @@
 ;------------------------------------------------------------------------------ Layer 1
 
 (defn- ^{:stratum 1} load-repo-config
-  "Load .miniforge/config.edn from the repo root. Returns nil if absent or unparseable."
+  "Load .miniforge/config.edn from the repo root. Returns nil if absent,
+   or parse-error-sentinel if the file exists but is malformed."
   [repo-path]
   (let [path (fs/path repo-path repo-config-path)]
     (when (fs/exists? path)
