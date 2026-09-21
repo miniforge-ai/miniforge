@@ -50,14 +50,16 @@
                            "--json" "number,title,state,author,url,additions,deletions,changedFiles,createdAt,labels"
                            "--limit" "50")]
     (when (sh-success? result)
-      (try
-        (->> (json/parse-string (:out result) true)
-             (mapv #(assoc % :repo repo :analysis (risk/analyze-pr %))))
-        (catch Exception e
-          ;; gh succeeded (exit 0) but returned unparseable output — log
-          ;; so operators can diagnose format changes or partial writes.
-          (binding [*out* *err*]
-            (println (str "[warn] fetch-prs: JSON parse failed for repo " repo ": " (ex-message e))))
+      (let [prs (try
+                  (json/parse-string (:out result) true)
+                  (catch Exception e
+                    ;; gh succeeded (exit 0) but returned unparseable output — log
+                    ;; so operators can diagnose format changes or partial writes.
+                    (binding [*out* *err*]
+                      (println (str "[warn] fetch-prs: JSON parse failed for repo " repo ": " (ex-message e))))
+                    nil))]
+        (if prs
+          (mapv #(assoc % :repo repo :analysis (risk/analyze-pr %)) prs)
           [])))))
 
 (defn ^{:stratum 1} fetch-pr-diff [repo number]
