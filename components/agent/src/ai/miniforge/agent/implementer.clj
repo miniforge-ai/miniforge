@@ -914,6 +914,17 @@
         ;; verdict). Stream-idle / stagnation keep the container-promotion
         ;; precedence below: there the model finished writing and hung.
         cut-by-ceiling? (= :max-total (:llm/terminated-by response))
+        ;; Claude CLI exited with code 0 but stop_reason="max_turns" — the
+        ;; agent ran out of turns before finishing. Exit 0 makes the LLM
+        ;; client classify this as success and returns {:success true,
+        ;; :stop-reason "max_turns"}, so cut-by-ceiling? is false and the
+        ;; partial files on disk would be silently promoted without this guard.
+        ;; Mirrors the fix for :max-total (commit 2a2f9e7) but for the turns
+        ;; budget rather than the wall-clock ceiling. Guard on success? so a
+        ;; combined adaptive-timeout+max_turns failure ({:success false, ...})
+        ;; still falls through to the :else path and preserves the full error.
+        cut-by-max-turns? (and (llm/success? response)
+                               (= "max_turns" (:stop-reason response)))
         file-artifact (collect-session-artifact context
                                                 session-mode
                                                 working-dir
@@ -923,7 +934,9 @@
                      :response response
                      :worktree-artifacts worktree-artifacts
                      :artifact artifact
-                     :fallback-artifact (when-not cut-by-ceiling? file-artifact)
+                     :fallback-artifact (when-not (or cut-by-ceiling?
+                                                      cut-by-max-turns?)
+                                          file-artifact)
                      :parse-response parse-code-response
                      :derive-artifact code-from-blocks})
         partial-files (mapv :path (:code/files file-artifact))]
@@ -941,7 +954,16 @@
                         :partial-file-count (count partial-files)
                         :partial-files partial-files
                         :working-dir working-dir}}))
-    (when (and file-artifact (not cut-by-ceiling?))
+    (when cut-by-max-turns?
+      (log/warn logger :implementer :implementer/llm-max-turns-exceeded
+                {:data {:num-turns (:num-turns response)
+                        :tool-call-count (get response :tool-call-count
+                                              (count (get response :tools-called [])))
+                        :tools-called (get response :tools-called [])
+                        :partial-file-count (count partial-files)
+                        :partial-files partial-files
+                        :working-dir working-dir}}))
+    (when (and file-artifact (not (or cut-by-ceiling? cut-by-max-turns?)))
       (log/warn logger :implementer :implementer/file-artifact-fallback
                 {:data {:file-count (count (:code/files file-artifact))
                         :tools-called (get response :tools-called [])}}))
@@ -981,10 +1003,11 @@
           ;; produced usable code blocks does NOT trigger an unnecessary
           ;; recovery LLM call.
           parsed    (or (:parsed-content normalized) (:derived-artifact normalized))
-          ;; No recovery turn after a ceiling cut: the turn was still
-          ;; working, not narrating; the phase-level retry resumes the
+          ;; No recovery turn after a ceiling or max-turns cut: the turn was
+          ;; still working, not narrating; the phase-level retry resumes the
           ;; session instead.
           recovered (when (and (not cut-by-ceiling?)
+                               (not cut-by-max-turns?)
                                (submission-recovery/submission-retry?
                                 response submitted parsed (:content normalized)))
                       (recover-implementer-submission
@@ -1011,6 +1034,17 @@
                        final
                        (messages/t :error/llm-max-total-exceeded)
                        {:data {:llm/terminated-by :max-total
+                               :partial-files partial-files}})
+
+                      cut-by-max-turns?
+                      ;; Max-turns cut: exit code 0 but stop_reason="max_turns"
+                      ;; means the CLI exhausted the turn budget, not that the
+                      ;; agent finished. Partial files are not promoted.
+                      (result-boundary/error-response
+                       final
+                       (messages/t :error/llm-max-turns-exceeded)
+                       {:data {:stop-reason "max_turns"
+                               :num-turns (:num-turns response)
                                :partial-files partial-files}})
 
                       (result-boundary/usable-content? final)
