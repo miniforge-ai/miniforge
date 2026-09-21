@@ -6,7 +6,8 @@
   (:require
    [clojure.test :refer [deftest testing is]]
    [ai.miniforge.compliance-scanner.interface :as compliance-scanner]
-   [ai.miniforge.cli.main.commands.scan :as sut]))
+   [ai.miniforge.cli.main.commands.scan :as sut])
+  (:import [java.io File]))
 
 ;------------------------------------------------------------------------------ Layer 0
 
@@ -61,21 +62,37 @@
 ;; ============================================================================
 (deftest ^{:stratum 1} build-scan-opts-test
   (testing "defaults to :all rules"
-    (let [opts (build-scan-opts "." {})]
+    (let [opts (build-scan-opts {} nil)]
       (is (= :all (:rules opts)))))
 
   (testing "includes pack when provided"
-    (let [opts (build-scan-opts "." {:pack "foundations-1.0.0"})]
+    (let [opts (build-scan-opts {:pack "foundations-1.0.0"} nil)]
       (is (some? (:pack opts)))
       (is (= :all (:rules opts)))))
 
   (testing "includes since ref when provided"
-    (let [opts (build-scan-opts "." {:since "HEAD~5"})]
+    (let [opts (build-scan-opts {:since "HEAD~5"} nil)]
       (is (= "HEAD~5" (:since opts)))))
 
   (testing "passes rules selector through"
-    (let [opts (build-scan-opts "." {:rules "always-apply"})]
-      (is (= :always-apply (:rules opts))))))
+    (let [opts (build-scan-opts {:rules "always-apply"} nil)]
+      (is (= :always-apply (:rules opts)))))
+
+  (testing "config-pack used when no --pack flag and repo-config is present"
+    ;; repo-config with :repo/packs → config-pack is resolved and used
+    (let [opts (build-scan-opts {} {:repo/packs ["foundations-1.0.0"]})]
+      (is (some? (:pack opts)))))
+
+  (testing "malformed explicit pack does not fall back to config-pack"
+    ;; safe-read-edn returns nil for a file with invalid EDN and prints a
+    ;; diagnostic. build-scan-opts must not substitute the config-pack in
+    ;; that case — the :pack key must be absent from the result.
+    (let [tmp (File/createTempFile "bad-pack" ".edn")
+          _   (do (.deleteOnExit tmp) (spit (.getPath tmp) "{:pack/rules [(:invalid"))]
+      (let [opts (build-scan-opts {:pack (.getPath tmp)}
+                                  {:repo/packs ["foundations-1.0.0"]})]
+        (is (nil? (:pack opts))
+            "malformed --pack file should not fall back to config packs")))))
 
 ;; ============================================================================
 ;; Negative-mode violation messages

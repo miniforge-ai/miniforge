@@ -231,11 +231,18 @@
 ;; Pipeline steps
 (defn- ^{:stratum 2} build-scan-opts
   "Build scan options from CLI opts and repo config.
-   Priority: --pack flag > repo config :repo/packs > no pack."
-  [repo-path opts]
-  (let [explicit-pack (when-let [p (get opts :pack)] (resolve-pack p))
-        repo-config   (when-not explicit-pack (load-repo-config repo-path))
-        config-pack   (when repo-config (resolve-packs-from-config repo-config))
+   Priority: --pack flag > repo config :repo/packs > no pack.
+   repo-config must be pre-loaded by the caller (pass nil when absent) so that
+   a malformed config never prints its diagnostic twice."
+  [opts repo-config]
+  (let [pack-flag     (get opts :pack)
+        explicit-pack (when pack-flag (resolve-pack pack-flag))
+        ;; Guard: only consult repo config when the --pack flag was not supplied.
+        ;; When --pack is given but the file is malformed, explicit-pack is nil
+        ;; and safe-read-edn has already printed the error; do not silently fall
+        ;; back to configured packs.
+        config-pack   (when (and (nil? pack-flag) repo-config)
+                        (resolve-packs-from-config repo-config))
         pack          (or explicit-pack config-pack)
         rules         (resolve-rules-selector (get opts :rules))
         since         (get opts :since)]
@@ -249,12 +256,12 @@
   "Execute the scan→linters→semantic→classify→plan→execute pipeline."
   [repo-path opts]
   (let [standards   (get opts :standards default-standards-path)
-        scan-opts   (build-scan-opts repo-path opts)
+        repo-config (load-repo-config repo-path)
+        scan-opts   (build-scan-opts opts repo-config)
         report?     (get opts :report false)
         execute?    (get opts :execute false)
         no-lint?    (get opts :no-lint false)
-        semantic?   (get opts :semantic false)
-        repo-config (load-repo-config repo-path)]
+        semantic?   (get opts :semantic false)]
 
     ;; Phase 1: Policy pack scan
     (display/print-info (messages/t :scan/banner {:path repo-path}))
