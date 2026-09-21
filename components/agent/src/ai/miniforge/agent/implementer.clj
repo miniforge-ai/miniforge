@@ -1082,8 +1082,13 @@
                       ;; Recovery turn exhausted its own turn budget. Applies the
                       ;; same refusal as the primary-turn guard: partial files
                       ;; written by the recovery agent are not promoted.
+                      ;; Pass {} as the normalized arg: the sentinel carries the
+                      ;; authoritative stop-reason and num-turns for the recovery
+                      ;; turn; passing `final` (the primary session's normalized
+                      ;; result) would let error-response overwrite those fields
+                      ;; with the primary session's "end_turn" / lower turn count.
                       (result-boundary/error-response
-                       final
+                       {}
                        (messages/t :error/llm-max-turns-exceeded)
                        {:data {:stop-reason   "max_turns"
                                :num-turns     (:num-turns recovered)
