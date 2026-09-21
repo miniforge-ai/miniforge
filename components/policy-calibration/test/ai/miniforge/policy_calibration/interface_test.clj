@@ -237,6 +237,23 @@
       (is (= 1 (:failed-cells (get record :r/x))) "persistent failure records as data, not silently dropped")
       (is (not (get-in record [:r/x :gate-ready?])) "no successful evaluation -> not gate-ready"))))
 
+(deftest judge-jvm-error-propagates-test
+  ;; Regression for the catch-Throwable -> catch-Exception change:
+  ;; a JVM Error (OutOfMemoryError, AssertionError, etc.) is NOT an Exception, so
+  ;; catch-Exception lets it propagate through the future/deref path instead of
+  ;; swallowing it as a backend-error cell and allowing calibration to silently continue.
+  ;; If this is accidentally reverted to catch-Throwable the Error would be converted
+  ;; into a failed-cell record and this test would fail.
+  (testing "a JVM Error thrown by the judge propagates — it is not swallowed as a backend-error cell"
+    (let [judge-fn (fn [_ _] (throw (AssertionError. "simulated JVM error")))
+          run!     #(sut/calibrate {:rules    [{:rule/id :r/x}]
+                                    :fixtures [{:rel "f.clj" :seeded #{}}]
+                                    :judge-fn judge-fn
+                                    :runs 1 :trials 1 :max-parallel 1
+                                    :gate-bar bar})]
+      (is (thrown? AssertionError (run!))
+          "JVM Error escapes calibrate rather than being converted to a backend-error cell"))))
+
 ;; ---- build-time gate-readiness check ----
 
 (deftest gate-check-test
