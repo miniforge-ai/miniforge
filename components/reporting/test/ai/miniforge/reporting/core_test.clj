@@ -82,77 +82,33 @@
       (proto/poll-events service sub-id)
       (is (= [] (proto/poll-events service sub-id))))))
 
-(deftest ^{:stratum 2} test-two-step-drain-loses-event-in-race-window
-  (testing "non-atomic @queue/reset! loses an event injected between deref and reset"
-    ;; Deterministic proof of the failure mode the swap-vals! fix addresses.
-    ;; Reproduce the OLD poll-events drain sequence with a concurrent event
-    ;; injected in the gap between @queue and (reset! queue []).
-    (let [queue (atom [])
-          e1    {:event/topic :topic :event/data "seeded"}
-          e2    {:event/topic :topic :event/data "injected-in-race"}]
-      (swap! queue conj e1)
-      (let [drained @queue                 ; OLD step 1: non-atomic read
-            _       (swap! queue conj e2)  ; concurrent write in the gap
-            _       (reset! queue [])]     ; OLD step 2: e2 cleared, not returned
-        (is (not (contains? (set drained) e2))
-            "e2 was not captured by the non-atomic deref")
-        (is (= [] @queue)
-            "e2 was also erased by reset! — permanently lost")))))
-
-(deftest ^{:stratum 2} test-swap-vals-drain-captures-event-written-during-cas-retry
-  (testing "swap-vals! retries the CAS after a concurrent write, capturing the injected event"
-    ;; Coordinate a concurrent enqueue inside the swap-vals! fn body.
-    ;; swap-vals! detects the atom changed between fn execution and CAS commit
-    ;; and retries, so the injected event is included in the returned old-value.
-    ;; poll-events uses this mechanism; reverting to @queue/reset! would lose
-    ;; the event proven missing in test-two-step-drain-loses-event-in-race-window.
-    (let [queue      (atom [])
+(deftest ^{:stratum 2} test-poll-events-atomic-drain-no-loss-under-concurrent-enqueue
+  (testing "poll-events captures an event enqueued during the drain — none lost"
+    ;; An atom validator fires on every proposed transition to [].
+    ;; swap-vals! detects the concurrent write and retries, capturing e2 in the
+    ;; returned old-value; @queue/reset! unconditionally overwrites to [] after the
+    ;; validator fires, permanently losing e2.
+    (let [injected? (atom false)
+          callbacks  (atom [])
           e1         {:event/topic :topic :event/data "seeded"}
-          e2         {:event/topic :topic :event/data "concurrent"}
-          latch      (java.util.concurrent.CountDownLatch. 1)
-          ready      (java.util.concurrent.CountDownLatch. 1)
-          first-call (atom true)]
-      (swap! queue conj e1)
-      (let [injector (future
-                       (.await latch)
-                       (swap! queue conj e2)
-                       (.countDown ready))]
-        (let [[drained _] (swap-vals! queue
-                            (fn [q]
-                              (when @first-call
-                                (reset! first-call false)
-                                (.countDown latch) ; signal injector
-                                (.await ready))    ; wait for e2 to land
-                              []))]
-          @injector
-          (is (= [e1 e2] drained)
-              "swap-vals! captured both events after CAS retry on the concurrent write")
-          (is (= [] @queue) "queue is empty — no events remain"))))))
-
-(deftest ^{:stratum 2} test-poll-events-atomic-drain-via-production-path
-  (testing "poll-events captures an event injected concurrently through the production call site"
-    ;; Uses the :before-drain-fn seam to inject e2 inside the swap-vals! body,
-    ;; forcing a CAS retry and proving the fix holds end-to-end through poll-events.
-    (let [latch      (java.util.concurrent.CountDownLatch. 1)
-          ready      (java.util.concurrent.CountDownLatch. 1)
-          first-call (atom true)
-          e1         {:event/topic :topic :event/data "seeded"}
-          e2         {:event/topic :topic :event/data "concurrent"}
-          service    (core/create-reporting-service
-                       {:before-drain-fn
-                        (fn []
-                          (when (compare-and-set! first-call true false)
-                            (.countDown latch)
-                            (.await ready 5 java.util.concurrent.TimeUnit/SECONDS)))})
-          sub-id     (proto/subscribe service [:topic] identity)
+          e2         {:event/topic :topic :event/data "injected-during-drain"}
+          service    (core/create-reporting-service)
+          sub-id     (proto/subscribe service [:topic] #(swap! callbacks conj %))
           sub        (get @(:subscriptions service) sub-id)
           queue      (:subscription/event-queue sub)]
-      (swap! queue conj e1)
-      (let [injector (future
-                       (.await latch 5 java.util.concurrent.TimeUnit/SECONDS)
-                       (swap! queue conj e2)
-                       (.countDown ready))]
-        (let [events (proto/poll-events service sub-id)]
-          @injector
-          (is (= [e1 e2] events)
-              "poll-events captured both seeded and concurrently injected events via the production code path"))))))
+      (try
+        (swap! queue conj e1)
+        (set-validator! queue
+          (fn [new-value]
+            (when (and (empty? new-value)
+                       (compare-and-set! injected? false true))
+              (swap! queue conj e2))
+            true))
+        (let [round-1 (proto/poll-events service sub-id)
+              round-2 (proto/poll-events service sub-id)]
+          (is (= [e1 e2] (into round-1 round-2))
+              "both events captured — none lost to a non-atomic drain")
+          (is (= [e1 e2] @callbacks)
+              "callback invoked for every captured event in order"))
+        (finally
+          (set-validator! queue nil))))))
