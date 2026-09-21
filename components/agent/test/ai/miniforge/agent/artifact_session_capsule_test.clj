@@ -37,11 +37,15 @@
 
 (defn- ^{:stratum 0} local-cat-exec!
   "Stub exec! that reads 'cat <path>' from the local filesystem.
+   Handles single-quoted paths produced by shell-quote (e.g. cat '/tmp/foo').
    All other commands (mkdir, rm, git status, etc.) succeed with empty output.
    Used for tests that need a real workdir on disk without a live executor."
   [_executor _env-id cmd _opts]
   (if (str/starts-with? cmd "cat ")
-    (let [path (subs cmd 4)
+    (let [raw  (subs cmd 4)
+          path (if (and (str/starts-with? raw "'") (str/ends-with? raw "'"))
+                 (subs raw 1 (dec (count raw)))
+                 raw)
           f    (io/file path)]
       {:ok?  true
        :data {:exit-code (if (.exists f) 0 1)
