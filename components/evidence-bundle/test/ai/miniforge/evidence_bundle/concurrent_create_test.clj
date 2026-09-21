@@ -63,4 +63,6 @@
           "create-bundle timed out — possible deadlock in swap! retry loop")
       (when (not= ::timeout b)
         (is (some? (p/get-bundle manager (:evidence-bundle/id b)))
-            (str "bundle " (:evidence-bundle/id b) " was lost under concurrent creates"))))))
+            (str "bundle " (:evidence-bundle/id b) " was lost under concurrent creates"))))
+    (is (= n (count (p/query-bundles manager {})))
+        "manager must retain all n bundles after concurrent creates")))

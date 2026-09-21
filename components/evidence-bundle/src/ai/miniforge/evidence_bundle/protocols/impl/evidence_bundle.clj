@@ -55,7 +55,7 @@
   "Create evidence bundle from workflow state.
    Merges N11 §9.1 execution evidence fields from :execution/output.
    Returns the assembled bundle map (caller is responsible for persisting it)."
-  [_bundles artifact-store logger workflow-id opts]
+  [artifact-store logger workflow-id opts]
   (let [workflow-state (:workflow-state opts)
         bundle-id (random-uuid)
         assembled (collector/assemble-evidence-bundle workflow-id workflow-state artifact-store opts)

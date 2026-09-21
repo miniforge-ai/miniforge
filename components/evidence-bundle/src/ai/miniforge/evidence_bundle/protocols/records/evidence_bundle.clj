@@ -30,7 +30,7 @@
   p/EvidenceBundle
 
   (create-bundle [_this workflow-id opts]
-    (let [bundle (impl/create-bundle-impl bundles artifact-store logger workflow-id opts)]
+    (let [bundle (impl/create-bundle-impl artifact-store logger workflow-id opts)]
       ;; swap! is an atomic CAS — concurrent creates cannot lose each other's writes.
       (swap! bundles assoc (:evidence-bundle/id bundle) bundle)
       bundle))
