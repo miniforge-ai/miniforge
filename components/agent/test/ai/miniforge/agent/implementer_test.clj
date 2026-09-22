@@ -962,6 +962,7 @@
                                                       :stop-reason "max_turns"
                                                       :num-turns   6
                                                       :tokens      2000
+                                                      :cost-usd    0.003
                                                       :tools-called ["mcp__context__context_read"]}
                                   :artifact           nil
                                   :worktree-artifacts nil
@@ -987,10 +988,13 @@
       (is (= ["src/recovery-partial.clj"] (get-in result [:error :data :partial-files])))
       (is (true? (get-in result [:error :data :recovery-turn?])))
       ;; Token/cost provenance: the error must reflect the RECOVERY turn's
-      ;; usage (2000 tokens), not the primary session's (1500) or zero.
-      ;; Validates that :recovery-normalized flows through error-response.
+      ;; usage (2000 tokens / $0.003), not the primary session's (1500) or zero.
+      ;; Validates that :recovery-normalized flows through error-response and
+      ;; that result-boundary/error-response propagates both tokens and cost-usd.
       (is (= 2000 (get-in result [:metrics :tokens]))
           "recovery turn token usage must be preserved in the error metrics")
+      (is (= 0.003 (get-in result [:metrics :cost-usd]))
+          "recovery turn cost-usd must be preserved in the error metrics")
       (is (nil? (find-log-entry entries :implementer/file-artifact-fallback))
           "no silent file-artifact promotion")
       (is (some? cut-log) "the recovery max-turns cut is logged")

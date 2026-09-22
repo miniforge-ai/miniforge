@@ -184,6 +184,17 @@
       (is (= 3 (get-in result [:error :data :num-turns])))
       (is (= 17 (get-in result [:metrics :tokens]))))))
 
+(deftest error-response-propagates-cost-usd
+  (testing "error-response copies :cost-usd from normalized into [:metrics :cost-usd]"
+    (let [normalized {:tokens 500 :cost-usd 0.003}
+          result (sut/error-response normalized "LLM call failed")]
+      (is (= 0.003 (get-in result [:metrics :cost-usd])))
+      (is (= 500 (get-in result [:metrics :tokens])))))
+  (testing "nil :cost-usd leaves [:metrics :cost-usd] absent"
+    (let [normalized {:tokens 500 :cost-usd nil}
+          result (sut/error-response normalized "LLM call failed")]
+      (is (nil? (get-in result [:metrics :cost-usd]))))))
+
 ;; -------------------------------------------------------------------------- phase-result timeout predicates
 ;;
 ;; `stream-idle-in-result?` / `network-drop-in-result?` read fully-assembled
