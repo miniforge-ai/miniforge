@@ -193,7 +193,8 @@
   (testing "nil :cost-usd leaves [:metrics :cost-usd] absent"
     (let [normalized {:tokens 500 :cost-usd nil}
           result (sut/error-response normalized "LLM call failed")]
-      (is (nil? (get-in result [:metrics :cost-usd]))))))
+      (is (not (contains? (:metrics result) :cost-usd))))))
+
 
 ;; -------------------------------------------------------------------------- phase-result timeout predicates
 ;;
