@@ -150,12 +150,6 @@
   :web/kill-port-header "  2. Kill the process using port {port}:"
   :web/kill-port-command "     lsof -ti:{port} | xargs kill"
   :web/start-failed "Failed to start web dashboard: {error}"
-  :web/github-fetch-prs-json-failed
-  "[warn] fetch-prs: JSON parse failed for repo {repo}: {cause}"
-  :web/github-fetch-pr-body-json-failed
-  "[warn] fetch-pr-body: JSON parse failed for {repo} #{number}: {cause}"
-  :web/github-fetch-runs-json-failed
-  "[warn] fetch-workflow-runs: JSON parse failed for repo {repo}: {cause}"
 
   :tui/not-available "TUI not available in this runtime."
   :tui/requires-jvm "The TUI requires JVM/Lanterna which isn't available in Babashka."
