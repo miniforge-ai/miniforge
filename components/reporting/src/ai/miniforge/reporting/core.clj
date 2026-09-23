@@ -235,10 +235,9 @@
   (poll-events [_this subscription-id]
     (if-let [sub (get @subscriptions subscription-id)]
       (let [queue (:subscription/event-queue sub)
-            events @queue
+            events (first (swap-vals! queue (constantly [])))
             callback (:subscription/callback sub)]
-        ;; Reset queue and update last poll time
-        (reset! queue [])
+        ;; Update last poll time
         (swap! subscriptions assoc-in [subscription-id :subscription/last-poll]
                (System/currentTimeMillis))
         ;; Invoke callback for each event
