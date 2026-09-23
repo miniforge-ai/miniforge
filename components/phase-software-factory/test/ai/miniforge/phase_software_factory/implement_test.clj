@@ -145,10 +145,10 @@
   (testing "load-files-from-capsule reads files via execute-fn"
     (let [execute-fn (fn [_executor _env-id cmd _opts]
                        (cond
-                         (= cmd "cat /workspace/src/core.clj")
+                         (= cmd "cat '/workspace/src/core.clj'")
                          {:data {:stdout "(ns core)" :exit-code 0}}
 
-                         (= cmd "cat /workspace/src/util.clj")
+                         (= cmd "cat '/workspace/src/util.clj'")
                          {:data {:stdout "(ns util)" :exit-code 0}}
 
                          :else
@@ -164,7 +164,7 @@
 (deftest ^{:stratum 0} load-files-from-capsule-skips-missing-files-test
   (testing "load-files-from-capsule skips files that don't exist in capsule"
     (let [execute-fn (fn [_executor _env-id cmd _opts]
-                       (if (= cmd "cat /workspace/src/exists.clj")
+                       (if (= cmd "cat '/workspace/src/exists.clj'")
                          {:data {:stdout "(ns exists)" :exit-code 0}}
                          {:data {:stdout "" :exit-code 1}}))
           result (#'implement/load-files-from-capsule
@@ -177,6 +177,19 @@
   (testing "load-files-from-capsule returns nil when no files in scope"
     (is (nil? (#'implement/load-files-from-capsule
                (fn [& _] nil) :x :y "/w" [])))))
+
+(deftest ^{:stratum 0} load-files-from-capsule-shell-metacharacters-test
+  (testing "load-files-from-capsule shell-quotes paths with spaces, $, and embedded single quotes"
+    (let [captured-cmds (atom [])
+          execute-fn (fn [_executor _env-id cmd _opts]
+                       (swap! captured-cmds conj cmd)
+                       {:data {:stdout "content" :exit-code 0}})
+          _ (#'implement/load-files-from-capsule
+             execute-fn :mock-executor :mock-env-id "/w"
+             ["src/my file.clj" "src/$var.clj" "src/it's.clj"])]
+      (is (= "cat '/w/src/my file.clj'" (nth @captured-cmds 0)))
+      (is (= "cat '/w/src/$var.clj'" (nth @captured-cmds 1)))
+      (is (= "cat '/w/src/it'\"'\"'s.clj'" (nth @captured-cmds 2))))))
 
 (deftest ^{:stratum 0} resolve-existing-files-uses-capsule-in-governed-mode-test
   (testing "resolve-existing-files prefers capsule path when execute-fn is on context"

@@ -773,6 +773,13 @@
    paths-as-metadata and the worktree has since been committed clean."
   file-artifacts/rehydrate-files)
 
+(def ^{:stratum 0} shell-quote
+  "Quote a value for a POSIX shell command string.
+   Wraps the value in single quotes and escapes any embedded single
+   quotes so paths with spaces, $, or other shell metacharacters are
+   safe to use in commands passed to sh -c."
+  file-artifacts/shell-quote)
+
 ;; Tool supervision
 (def ^{:stratum 0} evaluate-tool-use
   "Evaluate a tool use request against policy.
