@@ -858,7 +858,14 @@
   "When the main turn produced usable analysis but NO artifact, run one short
    submission-only retry that asks the implementer to write the files now, then
    re-normalize. Returns the recovered normalized map, or nil when recovery
-   produced no artifact either. Generalizes PR #997's planner recovery."
+   produced no artifact either.
+
+   When the recovery turn itself is cut by max_turns (exit-0 with
+   stop_reason=max_turns), returns a sentinel
+   `{::recovery-cut-by-max-turns? true :num-turns N :partial-files [...]
+     :recovery-normalized {recovery LLM metadata}}` so the caller can emit a
+   typed error that preserves the recovery turn's token/cost provenance.
+   Generalizes PR #997's planner recovery."
   [{:keys [llm-client config context on-chunk working-dir effective-system-prompt
            input normalized logger]}]
   (log/info logger :implementer :implementer/submission-retry
@@ -884,11 +891,39 @@
                                       true          (assoc :disallowed-tools implementer-disallowed-tools)
                                       working-dir   (assoc :workdir working-dir)
                                       retry-monitor (assoc :progress-monitor retry-monitor))))})
-        recovered (normalize-implementer-result raw context working-dir)]
-    (when (or (:structured-artifact recovered)
-              (:parsed-content recovered)
-              (:derived-artifact recovered))
-      recovered)))
+        recovery-response   (:llm-result raw)
+        recovery-cut?       (and (llm/success? recovery-response)
+                                 (= "max_turns" (:stop-reason recovery-response)))]
+    (if recovery-cut?
+      (let [partial-artifact (collect-session-artifact
+                              context (:session-mode raw) working-dir
+                              (:pre-session-snapshot raw))
+            partial-files    (mapv :path (:code/files partial-artifact))]
+        (log/warn logger :implementer :implementer/llm-max-turns-exceeded
+                  {:data {:num-turns       (:num-turns recovery-response)
+                          :tool-call-count (get recovery-response :tool-call-count
+                                               (count (get recovery-response :tools-called [])))
+                          :tools-called    (get recovery-response :tools-called [])
+                          :partial-file-count (count partial-files)
+                          :partial-files   partial-files
+                          :working-dir     working-dir
+                          :recovery-turn?  true}})
+        {::recovery-cut-by-max-turns? true
+         :num-turns    (:num-turns recovery-response)
+         :partial-files partial-files
+         ;; Recovery LLM metadata for error-response: tokens/cost from the
+         ;; recovery turn, NOT the primary session, so phase accounting sees
+         ;; the right usage. stop-reason and num-turns come from the recovery
+         ;; response so they flow into :data without needing to be duplicated.
+         :recovery-normalized {:stop-reason (:stop-reason recovery-response)
+                               :num-turns   (:num-turns recovery-response)
+                               :tokens      (:tokens recovery-response)
+                               :cost-usd    (:cost-usd recovery-response)}})
+      (let [recovered (normalize-implementer-result raw context working-dir)]
+        (when (or (:structured-artifact recovered)
+                  (:parsed-content recovered)
+                  (:derived-artifact recovered))
+          recovered)))))
 
 ;------------------------------------------------------------------------------ Layer 6
 
@@ -914,6 +949,17 @@
         ;; verdict). Stream-idle / stagnation keep the container-promotion
         ;; precedence below: there the model finished writing and hung.
         cut-by-ceiling? (= :max-total (:llm/terminated-by response))
+        ;; Claude CLI exited with code 0 but stop_reason="max_turns" — the
+        ;; agent ran out of turns before finishing. Exit 0 makes the LLM
+        ;; client classify this as success and returns {:success true,
+        ;; :stop-reason "max_turns"}, so cut-by-ceiling? is false and the
+        ;; partial files on disk would be silently promoted without this guard.
+        ;; Mirrors the fix for :max-total (commit 2a2f9e7) but for the turns
+        ;; budget rather than the wall-clock ceiling. Guard on success? so a
+        ;; combined adaptive-timeout+max_turns failure ({:success false, ...})
+        ;; still falls through to the :else path and preserves the full error.
+        cut-by-max-turns? (and (llm/success? response)
+                               (= "max_turns" (:stop-reason response)))
         file-artifact (collect-session-artifact context
                                                 session-mode
                                                 working-dir
@@ -923,7 +969,9 @@
                      :response response
                      :worktree-artifacts worktree-artifacts
                      :artifact artifact
-                     :fallback-artifact (when-not cut-by-ceiling? file-artifact)
+                     :fallback-artifact (when-not (or cut-by-ceiling?
+                                                      cut-by-max-turns?)
+                                          file-artifact)
                      :parse-response parse-code-response
                      :derive-artifact code-from-blocks})
         partial-files (mapv :path (:code/files file-artifact))]
@@ -941,7 +989,16 @@
                         :partial-file-count (count partial-files)
                         :partial-files partial-files
                         :working-dir working-dir}}))
-    (when (and file-artifact (not cut-by-ceiling?))
+    (when cut-by-max-turns?
+      (log/warn logger :implementer :implementer/llm-max-turns-exceeded
+                {:data {:num-turns (:num-turns response)
+                        :tool-call-count (get response :tool-call-count
+                                              (count (get response :tools-called [])))
+                        :tools-called (get response :tools-called [])
+                        :partial-file-count (count partial-files)
+                        :partial-files partial-files
+                        :working-dir working-dir}}))
+    (when (and file-artifact (not (or cut-by-ceiling? cut-by-max-turns?)))
       (log/warn logger :implementer :implementer/file-artifact-fallback
                 {:data {:file-count (count (:code/files file-artifact))
                         :tools-called (get response :tools-called [])}}))
@@ -981,10 +1038,11 @@
           ;; produced usable code blocks does NOT trigger an unnecessary
           ;; recovery LLM call.
           parsed    (or (:parsed-content normalized) (:derived-artifact normalized))
-          ;; No recovery turn after a ceiling cut: the turn was still
-          ;; working, not narrating; the phase-level retry resumes the
+          ;; No recovery turn after a ceiling or max-turns cut: the turn was
+          ;; still working, not narrating; the phase-level retry resumes the
           ;; session instead.
           recovered (when (and (not cut-by-ceiling?)
+                               (not cut-by-max-turns?)
                                (submission-recovery/submission-retry?
                                 response submitted parsed (:content normalized)))
                       (recover-implementer-submission
@@ -992,7 +1050,12 @@
                         :on-chunk on-chunk :working-dir working-dir
                         :effective-system-prompt effective-system-prompt
                         :input input :normalized normalized :logger logger}))
-          final     (or recovered normalized)
+          ;; recover-implementer-submission returns a sentinel map when the
+          ;; recovery turn itself hits the max-turns budget.
+          recovery-cut-by-max-turns? (::recovery-cut-by-max-turns? recovered)
+          final     (if recovery-cut-by-max-turns?
+                      normalized
+                      (or recovered normalized))
           ;; Container-promotion precedence: if the agent wrote files into
           ;; the worktree (file-artifact via collect-written-files) or
           ;; submitted via the MCP artifact path, honor that even when the
@@ -1012,6 +1075,32 @@
                        (messages/t :error/llm-max-total-exceeded)
                        {:data {:llm/terminated-by :max-total
                                :partial-files partial-files}})
+
+                      cut-by-max-turns?
+                      ;; Max-turns cut: exit code 0 but stop_reason="max_turns"
+                      ;; means the CLI exhausted the turn budget, not that the
+                      ;; agent finished. Partial files are not promoted.
+                      (result-boundary/error-response
+                       final
+                       (messages/t :error/llm-max-turns-exceeded)
+                       {:data {:stop-reason "max_turns"
+                               :num-turns (:num-turns response)
+                               :partial-files partial-files}})
+
+                      recovery-cut-by-max-turns?
+                      ;; Recovery turn exhausted its own turn budget. Applies the
+                      ;; same refusal as the primary-turn guard: partial files
+                      ;; written by the recovery agent are not promoted.
+                      ;; Use :recovery-normalized (recovery LLM metadata) as the
+                      ;; first arg so error-response picks up the recovery turn's
+                      ;; tokens/cost for phase accounting and propagates the
+                      ;; recovery stop-reason / num-turns into :data without
+                      ;; the primary session's values clobbering them.
+                      (result-boundary/error-response
+                       (:recovery-normalized recovered)
+                       (messages/t :error/llm-max-turns-exceeded)
+                       {:data {:partial-files  (:partial-files recovered)
+                               :recovery-turn? true}})
 
                       (result-boundary/usable-content? final)
                       (process-llm-response final context logger input)

@@ -237,14 +237,15 @@
    common response metadata for post-mortem."
   ([normalized default-message]
    (error-response normalized default-message {}))
-  ([{:keys [llm-error stop-reason num-turns tokens]} default-message extra]
+  ([{:keys [llm-error stop-reason num-turns tokens cost-usd]} default-message extra]
    (let [error-msg (or (:message llm-error) default-message)
          data (cond-> (merge (or llm-error {}) (:data extra))
                 stop-reason (assoc :stop-reason stop-reason)
                 num-turns   (assoc :num-turns num-turns))]
      (response/error error-msg
                      (cond-> extra
-                       tokens (assoc :tokens tokens)
+                       tokens   (assoc :tokens tokens)
+                       cost-usd (update :metrics #(assoc (or % {}) :cost-usd cost-usd))
                        (seq data) (assoc :data data))))))
 
 (defn usable-content?
