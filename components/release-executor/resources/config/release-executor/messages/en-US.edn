@@ -33,6 +33,8 @@
   ;; pipeline steps
   :step/metadata-generation-failed "Releaser agent failed to generate release metadata"
   :step/no-files-to-stage "No modified files in executor environment to stage for release"
+  :step/diff-stats-unavailable
+  "Diff statistics unavailable for boundary-commit validation; refusing to proceed"
   :step/diff-net-negative-tests
   "Diff removes more tests than it adds ({removed} removed, {added} added)"
   :step/diff-heavily-destructive

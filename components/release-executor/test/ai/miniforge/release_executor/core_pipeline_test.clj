@@ -233,6 +233,34 @@
     (let [state {:failure {:type :prior :message "x"}}]
       (is (= state (sut/step-validate-diff state))))))
 
+(deftest ^{:stratum 0} step-validate-diff-nil-stats-fails
+  (testing "nil diff-stats causes destructive-diff failure instead of silent bypass"
+    (with-redefs [sandbox/diff-stats-range  (fn [& _] nil)
+                  sandbox/count-test-defs-range (fn [& _] {:added 1 :removed 0})]
+      (let [state {:host-mode? false
+                   :worktree-path "/tmp/fake"
+                   :executor :mock
+                   :environment-id "env-1"
+                   :base-branch "main"
+                   :write-metrics {:preexisting-commits true}}
+            result (sut/step-validate-diff state)]
+        (is (sut/failed? result))
+        (is (= :destructive-diff (get-in result [:failure :type])))))))
+
+(deftest ^{:stratum 0} step-validate-diff-nil-test-counts-fails
+  (testing "nil test-counts causes destructive-diff failure instead of silent bypass"
+    (with-redefs [sandbox/diff-stats-range  (fn [& _] {:additions 5 :deletions 2})
+                  sandbox/count-test-defs-range (fn [& _] nil)]
+      (let [state {:host-mode? false
+                   :worktree-path "/tmp/fake"
+                   :executor :mock
+                   :environment-id "env-1"
+                   :base-branch "main"
+                   :write-metrics {:preexisting-commits true}}
+            result (sut/step-validate-diff state)]
+        (is (sut/failed? result))
+        (is (= :destructive-diff (get-in result [:failure :type])))))))
+
 ;; ============================================================================
 ;; pipeline->result
 ;; ============================================================================
