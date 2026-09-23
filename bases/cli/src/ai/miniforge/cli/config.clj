@@ -20,6 +20,7 @@
 
    Provides commands for viewing, editing, and managing configuration."
   (:require
+   [clojure.edn :as edn]
    [clojure.string :as str]
    [clojure.pprint :as pprint]
    [babashka.fs :as fs]
@@ -72,7 +73,7 @@
   "Parse config value from string."
   [value-str]
   (try
-    (read-string value-str)
+    (edn/read-string value-str)
     (catch Exception _
       value-str)))
 
@@ -118,7 +119,7 @@
   [path]
   (when (fs/exists? path)
     (try
-      (read-string (slurp path))
+      (edn/read-string (slurp path))
       (catch Exception e
         (println (style (messages/t :config/warning-read-failed {:message (.getMessage e)}) :yellow))
         nil))))
