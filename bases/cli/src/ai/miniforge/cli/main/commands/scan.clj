@@ -25,6 +25,7 @@
    [babashka.fs :as fs]
    [clojure.edn :as edn]
    [clojure.java.io :as io]
+   [ai.miniforge.anomaly.interface :as anomaly]
    [ai.miniforge.connector-linter.interface :as linter]
    [ai.miniforge.compliance-scanner.interface :as scanner]
    [ai.miniforge.cli.main.display :as display]
@@ -41,17 +42,32 @@
 
 (def ^{:stratum 0} ^:private repo-config-path ".miniforge/config.edn")
 
+(defn- ^{:stratum 0} safe-read-edn
+  "Read and parse an EDN string. Returns the parsed value on success,
+   or a canonical `:invalid-input` anomaly (subtype `:anomalies.scan/edn-parse-error`)
+   on failure; does not print diagnostics. Source label is stored under
+   `:anomaly/data :source`."
+  [source-label content]
+  (try
+    (edn/read-string content)
+    (catch Exception e
+      (anomaly/sub-anomaly :invalid-input :anomalies.scan/edn-parse-error
+                           (ex-message e)
+                           {:source source-label}))))
+
 (defn- ^{:stratum 0} resolve-pack
-  "Resolve a pack by name or path. Returns the loaded pack map or nil."
+  "Resolve a pack by name or path. Returns the loaded pack map, nil when not
+   found, or a canonical `:invalid-input` anomaly (subtype `:anomalies.scan/edn-parse-error`)
+   when the file exists but is malformed."
   [pack-ref]
   (cond
     (fs/exists? pack-ref)
-    (edn/read-string (slurp (str pack-ref)))
+    (safe-read-edn (str pack-ref) (slurp (str pack-ref)))
 
     :else
     (let [resource-path (str "policy_pack/packs/" pack-ref ".pack.edn")]
       (when-let [url (io/resource resource-path)]
-        (edn/read-string (slurp url))))))
+        (safe-read-edn resource-path (slurp url))))))
 
 (defn- ^{:stratum 0} resolve-rules-selector
   "Parse the --rules option into a selector value."
@@ -166,21 +182,26 @@
 ;------------------------------------------------------------------------------ Layer 1
 
 (defn- ^{:stratum 1} load-repo-config
-  "Load .miniforge/config.edn from the repo root. Returns nil if absent."
+  "Load .miniforge/config.edn from the repo root. Returns nil if absent,
+   or a canonical `:invalid-input` anomaly (subtype `:anomalies.scan/edn-parse-error`)
+   if the file exists but is malformed."
   [repo-path]
   (let [path (fs/path repo-path repo-config-path)]
     (when (fs/exists? path)
-      (edn/read-string (slurp (str path))))))
+      (safe-read-edn (str path) (slurp (str path))))))
 
 (defn- ^{:stratum 1} resolve-packs-from-config
-  "Load all packs declared in :repo/packs. Returns merged pack or nil."
+  "Load all packs declared in :repo/packs.
+   Returns merged pack map, nil (no packs declared / no rules), or
+   the first parse-error anomaly if any declared pack failed to parse."
   [repo-config]
   (let [pack-names (get repo-config :repo/packs [])]
     (when (seq pack-names)
-      (let [packs (keep resolve-pack pack-names)
-            rules (vec (mapcat :pack/rules packs))]
-        (when (seq rules)
-          {:pack/rules rules})))))
+      (let [results (mapv resolve-pack pack-names)]
+        (if-let [err (some #(when (anomaly/anomaly? %) %) results)]
+          err
+          (let [rules (vec (mapcat :pack/rules (remove nil? results)))]
+            (when (seq rules) {:pack/rules rules})))))))
 
 (defn- ^{:stratum 1} run-semantic-analysis
   "Run LLM-based semantic analysis on behavioral rules in parallel.
@@ -218,31 +239,48 @@
 ;; Pipeline steps
 (defn- ^{:stratum 2} build-scan-opts
   "Build scan options from CLI opts and repo config.
-   Priority: --pack flag > repo config :repo/packs > no pack."
-  [repo-path opts]
-  (let [explicit-pack (when-let [p (get opts :pack)] (resolve-pack p))
-        repo-config   (when-not explicit-pack (load-repo-config repo-path))
-        config-pack   (when repo-config (resolve-packs-from-config repo-config))
-        pack          (or explicit-pack config-pack)
-        rules         (resolve-rules-selector (get opts :rules))
-        since         (get opts :since)]
-    (cond-> {:rules rules}
-      pack  (assoc :pack pack)
-      since (assoc :since since))))
+   Priority: --pack flag > repo config :repo/packs > no pack.
+   Returns a scan-opts map on success, or a canonical `:invalid-input`
+   anomaly (subtype `:anomalies.scan/edn-parse-error`; source in `:anomaly/data`)
+   when any input is malformed. The caller renders the diagnostic; this
+   function does not print."
+  [opts repo-config]
+  (let [pack-flag     (get opts :pack)
+        explicit-pack (when pack-flag (resolve-pack pack-flag))
+        config-pack   (when (and (nil? pack-flag)
+                                 repo-config
+                                 (not (anomaly/anomaly? repo-config)))
+                        (resolve-packs-from-config repo-config))
+        err           (or (when (anomaly/anomaly? explicit-pack) explicit-pack)
+                          (when (anomaly/anomaly? repo-config)   repo-config)
+                          (when (anomaly/anomaly? config-pack)   config-pack))]
+    (if err
+      err
+      (let [pack  (or explicit-pack config-pack)
+            rules (resolve-rules-selector (get opts :rules))
+            since (get opts :since)]
+        (cond-> {:rules rules}
+          pack  (assoc :pack pack)
+          since (assoc :since since))))))
 
 ;------------------------------------------------------------------------------ Layer 3
 
 (defn- ^{:stratum 3} run-scan
-  "Execute the scan→linters→semantic→classify→plan→execute pipeline."
+  "Execute the scan→linters→semantic→classify→plan→execute pipeline.
+   Returns a canonical `:invalid-input` anomaly when build-scan-opts fails;
+   nil on success."
   [repo-path opts]
   (let [standards   (get opts :standards default-standards-path)
-        scan-opts   (build-scan-opts repo-path opts)
+        repo-config (load-repo-config repo-path)
+        scan-opts   (build-scan-opts opts repo-config)
         report?     (get opts :report false)
         execute?    (get opts :execute false)
         no-lint?    (get opts :no-lint false)
-        semantic?   (get opts :semantic false)
-        repo-config (load-repo-config repo-path)]
+        semantic?   (get opts :semantic false)]
 
+    (if (anomaly/anomaly? scan-opts)
+      scan-opts
+      (do
     ;; Phase 1: Policy pack scan
     (display/print-info (messages/t :scan/banner {:path repo-path}))
     (let [scan-result     (-> (scanner/scan repo-path standards scan-opts)
@@ -290,7 +328,7 @@
             (when (and repo-config (not no-lint?))
               (display/print-info (messages/t :scan/linter-fix-banner))
               (run-linter-fixes! repo-path repo-config))
-            (execute-if-requested plan-result repo-path true)))))))
+            (execute-if-requested plan-result repo-path true)))))))))
 
 ;------------------------------------------------------------------------------ Layer 4
 
@@ -305,7 +343,11 @@
 
       :else
       (try
-        (run-scan repo-path opts)
+        (let [result (run-scan repo-path opts)]
+          (when (anomaly/anomaly? result)
+            (display/print-error (messages/t :scan/edn-parse-error
+                                             {:source  (get-in result [:anomaly/data :source])
+                                              :message (:anomaly/message result)}))))
         (catch Exception e
           (display/print-error (messages/t :scan/scan-failed
                                            {:message (ex-message e)})))))))
