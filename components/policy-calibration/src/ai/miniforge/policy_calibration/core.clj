@@ -193,11 +193,13 @@
   3)
 
 (defn- judge-once
-  "One judge call, turning any thrown error into a backend-error cell so a
-   failure records as data rather than aborting the run on deref."
+  "One judge call, turning any thrown Exception into a backend-error cell so a
+   transient application failure records as data rather than aborting the run on
+   deref. JVM Errors (OutOfMemoryError, StackOverflowError, etc.) are not caught
+   and propagate through the future to the caller."
   [judge-fn rules fixture]
   (try (judge-fn rules fixture)
-       (catch Throwable e
+       (catch Exception e
          (backend-error "judge threw" {:error (ex-message e)}))))
 
 (defn- judge-cell

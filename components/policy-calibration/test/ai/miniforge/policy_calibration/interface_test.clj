@@ -237,6 +237,40 @@
       (is (= 1 (:failed-cells (get record :r/x))) "persistent failure records as data, not silently dropped")
       (is (not (get-in record [:r/x :gate-ready?])) "no successful evaluation -> not gate-ready"))))
 
+(deftest judge-jvm-error-propagates-test
+  ;; Regression for the catch-Throwable -> catch-Exception change.
+  ;; AssertionError is java.lang.Error — not Exception — so judge-once's
+  ;; catch Exception does not intercept it.  The error escapes the future body;
+  ;; bounded-pmap's deref may surface it directly or wrapped in ExecutionException
+  ;; depending on the JVM / Clojure version, so we walk the cause chain to find it.
+  ;; Two discriminators prove the correct behaviour:
+  ;;   1. calibrate throws instead of returning (swallowing would silently produce a failed-cell record).
+  ;;   2. call-count = 1: the error is not retried.  With catch Throwable the error
+  ;;      would be absorbed as a backend-error cell and judge-cell would exhaust
+  ;;      judge-cell-max-attempts (3 retries), so call-count would be 3.
+  (testing "a JVM Error thrown by the judge propagates — not swallowed as a backend-error cell"
+    (let [call-count (atom 0)
+          sentinel   (AssertionError. "simulated JVM error")
+          judge-fn   (fn [_ _] (swap! call-count inc) (throw sentinel))
+          thrown     (try
+                       (sut/calibrate {:rules    [{:rule/id :r/x}]
+                                       :fixtures [{:rel "f.clj" :seeded #{}}]
+                                       :judge-fn judge-fn
+                                       :runs 1 :trials 1 :max-parallel 1
+                                       :gate-bar bar})
+                       nil
+                       (catch Throwable t t))]
+      (is (some? thrown)
+          "calibrate must throw, not return normally (returning means the Error became a failed-cell)")
+      (is (loop [t thrown]
+            (cond
+              (identical? sentinel t)              true
+              (some? (.getCause ^Throwable t))     (recur (.getCause ^Throwable t))
+              :else                                false))
+          "original AssertionError (identity-eq) appears in the thrown exception's cause chain")
+      (is (= 1 @call-count)
+          "JVM Error is not retried — judge called exactly once (Exception failures get up to 3 retries)"))))
+
 ;; ---- build-time gate-readiness check ----
 
 (deftest gate-check-test
