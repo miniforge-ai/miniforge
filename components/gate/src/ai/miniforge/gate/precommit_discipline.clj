@@ -142,21 +142,34 @@
      branch - Branch to check (default HEAD)
      
    Returns:
-     Vector of {:hash string :message string :author string :date string}"
+     Vector of {:hash string :subject string :body string :message string :author string :date string}"
   [& {:keys [limit branch] :or {limit 50 branch "HEAD"}}]
-  (let [format "%H|||%s|||%b|||%an|||%ai"
-        result (exec-git ["log" (str "-" limit) "--format=" format branch])]
+  ;; NUL (\x00) is the only byte git forbids in commit messages; RS (\x1e)
+  ;; can appear in bodies and cannot be used as a record separator.
+  ;; Format each commit as five NUL-terminated fields. The flat token stream
+  ;; from git's stdout is then grouped into five-field records via partition,
+  ;; making the field count the implicit record boundary.
+  ;; Use git's %x00 escape in the format template so the process argument
+  ;; contains no literal NUL bytes (Java rejects NUL in process args).
+  (let [fmt    "%H%x00%s%x00%b%x00%an%x00%ai%x00"
+        result (exec-git ["log" (str "-" limit) (str "--format=" fmt) branch])]
     (if (zero? (:exit result))
-      (->> (str/split (:out result) #"\n(?=[0-9a-f]{40}|||)")
-           (keep (fn [commit-str]
-                   (when-not (str/blank? commit-str)
-                     (let [[hash subject body author date] (str/split commit-str #"\|\|\|" 5)]
-                       {:hash hash
+      (->> (str/split (:out result) #"\u0000" -1)
+           ;; Group the flat NUL-separated token stream into five-field records.
+           ;; partition (not partition-all) silently drops any trailing partial
+           ;; group, e.g. the empty string from the final NUL terminator.
+           (partition 5)
+           (keep (fn [[hash subject body author date]]
+                   (let [hash-val (str/trim hash)]
+                     ;; Exact lengths only: SHA-1 = 40 hex, SHA-256 = 64 hex.
+                     ;; {40,64} would accept intermediate lengths git never produces.
+                     (when (re-matches #"(?:[0-9a-f]{40}|[0-9a-f]{64})" hash-val)
+                       {:hash    hash-val
                         :subject (str/trim subject)
-                        :body (str/trim (or body ""))
-                        :message (str/trim (str subject "\n" (or body "")))
-                        :author (str/trim author)
-                        :date (str/trim date)}))))
+                        :body    (str/trim body)
+                        :message (str/trim (str subject "\n" body))
+                        :author  (str/trim author)
+                        :date    (str/trim date)}))))
            vec)
       [])))
 
