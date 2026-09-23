@@ -23,6 +23,7 @@
    [clojure.test :refer [deftest testing is]]
    [clojure.string :as str]
    [ai.miniforge.agent.artifact-session :as session]
+   [ai.miniforge.agent.file-artifacts :as file-artifacts]
    [ai.miniforge.dag-executor.result :as result]))
 
 ;------------------------------------------------------------------------------ Layer 0
@@ -36,11 +37,15 @@
 
 (defn- ^{:stratum 0} local-cat-exec!
   "Stub exec! that reads 'cat <path>' from the local filesystem.
+   Handles single-quoted paths produced by shell-quote (e.g. cat '/tmp/foo').
    All other commands (mkdir, rm, git status, etc.) succeed with empty output.
    Used for tests that need a real workdir on disk without a live executor."
   [_executor _env-id cmd _opts]
   (if (str/starts-with? cmd "cat ")
-    (let [path (subs cmd 4)
+    (let [raw  (subs cmd 4)
+          path (if (and (str/starts-with? raw "'") (str/ends-with? raw "'"))
+                 (subs raw 1 (dec (count raw)))
+                 raw)
           f    (io/file path)]
       {:ok?  true
        :data {:exit-code (if (.exists f) 0 1)
@@ -151,6 +156,39 @@
       (session/write-context-cache-for-session! s {"src/foo.clj" "(ns foo)"})
       (is (some #(.contains (str %) "context-cache.edn") @log)))))
 
+(deftest ^{:stratum 1} write-capsule-context-cache-quotes-spaces-test
+  (testing "write-capsule-context-cache! fully single-quotes a dir path containing spaces"
+    ;; Regression for the unquoted write in write-capsule-context-cache!.
+    ;; A bare space would split the path token when sh -c executes the cat heredoc.
+    (let [log (atom [])
+          dir "/tmp/My Session/.miniforge-session"
+          s   {:dir            dir
+               :capsule?       true
+               :exec!          (mock-execute! log)
+               :executor       :mock
+               :environment-id "env-spaces"
+               :workdir        "/tmp/My Session"}]
+      (session/write-context-cache-for-session! s {"src/foo.clj" "(ns foo)"})
+      (let [expected-prefix (str "cat > '" dir "/context-cache.edn'")]
+        (is (some #(str/starts-with? (str %) expected-prefix) @log)
+            (str "cat > command must start with fully-quoted path; got: " (vec @log)))))))
+
+(deftest ^{:stratum 1} write-capsule-context-cache-quotes-dollar-sign-test
+  (testing "write-capsule-context-cache! single-quotes prevent $-expansion in path"
+    ;; Without quoting, a $ in a workdir path would be shell-expanded by the executor.
+    (let [log (atom [])
+          dir "/tmp/$SESSION/.miniforge-session"
+          s   {:dir            dir
+               :capsule?       true
+               :exec!          (mock-execute! log)
+               :executor       :mock
+               :environment-id "env-dollar"
+               :workdir        "/tmp/$SESSION"}]
+      (session/write-context-cache-for-session! s {"src/bar.clj" "(ns bar)"})
+      (let [expected-prefix (str "cat > '" dir "/context-cache.edn'")]
+        (is (some #(str/starts-with? (str %) expected-prefix) @log)
+            (str "cat > command must single-quote path containing $; got: " (vec @log)))))))
+
 ;; :explicit-workdir? flag and WARN suppression (artifact-warning-suppression PR)
 (deftest ^{:stratum 1} create-capsule-session-sets-explicit-workdir-test
   (testing "create-capsule-session! always sets :explicit-workdir? true"
@@ -225,7 +263,7 @@
 ;------------------------------------------------------------------------------ Layer 2
 
 (def ^{:stratum 2} ^:private capsule-cleanup-command
-  (str "rm -rf " capsule-session-dir))
+  (str "rm -rf " (file-artifacts/shell-quote capsule-session-dir)))
 
 (deftest ^{:stratum 2} with-session-governed-mode-test
   (testing "governed mode with executor uses capsule session"
@@ -263,6 +301,23 @@
       (is (some? (:artifact result)))
       (is (uuid? (:code/id (:artifact result)))))))
 
+(deftest ^{:stratum 2} read-capsule-artifact-quotes-spaces-in-path-test
+  (testing "read-capsule-artifact single-quotes an artifact path containing spaces"
+    ;; Regression for the unquoted read-capsule-artifact site.
+    ;; A space in :artifact-path causes sh -c to split the path token without quoting.
+    (let [log           (atom [])
+          artifact-path "/tmp/My Workspace/.miniforge-session/artifact.edn"
+          s {:artifact-path artifact-path
+             :capsule?       true
+             :exec!          (mock-execute-with-artifact! log)
+             :executor       :mock
+             :environment-id "env-quote-artifact"
+             :workdir        "/tmp/My Workspace"}]
+      (session/read-capsule-artifact s)
+      (let [expected (str "cat '" artifact-path "'")]
+        (is (some #(= (str %) expected) @log)
+            (str "cat command must fully quote artifact path; got: " (vec @log)))))))
+
 ;; UUID parsing in capsule artifact
 (deftest ^{:stratum 2} read-capsule-artifact-parses-uuids-test
   (testing "UUID strings are converted to java.util.UUID"
@@ -288,6 +343,27 @@
           artifact (session/read-capsule-worktree-artifact s :implement)]
       (is (= :already-implemented (:status artifact)))
       (is (= "already there" (:summary artifact))))))
+
+(deftest ^{:stratum 2} shell-commands-quote-paths-with-spaces-test
+  (testing "lifecycle commands single-quote workdir paths containing spaces"
+    ;; Regression for the five unquoted-path sites fixed in this PR.
+    ;; A bare space in a workdir (common on macOS: ~/Documents/My Project/…)
+    ;; would cause the shell to split the path into separate tokens.
+    (let [log     (atom [])
+          exec!   (mock-execute! log)
+          workdir "/tmp/My Project"
+          context {:execution/mode           :governed
+                   :execution/executor       :mock
+                   :execution/environment-id "env-quote"
+                   :execution/worktree-path  workdir
+                   :execution/execute-fn     exec!}]
+      (session/with-session context (constantly :done))
+      ;; Every recorded command that embeds the workdir must wrap it in
+      ;; single-quotes.  An unquoted space would be split by sh -c.
+      (doseq [cmd @log]
+        (when (str/includes? cmd workdir)
+          (is (str/includes? cmd (str "'" workdir))
+              (str "workdir not quoted in command: " cmd)))))))
 
 ;------------------------------------------------------------------------------ Layer 3
 
