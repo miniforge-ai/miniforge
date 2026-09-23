@@ -150,6 +150,7 @@
   :web/kill-port-header "  2. Kill the process using port {port}:"
   :web/kill-port-command "     lsof -ti:{port} | xargs kill"
   :web/start-failed "Failed to start web dashboard: {error}"
+
   :tui/not-available "TUI not available in this runtime."
   :tui/requires-jvm "The TUI requires JVM/Lanterna which isn't available in Babashka."
   :tui/install-package "To use the terminal UI, install the separate package:"

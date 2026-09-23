@@ -21,9 +21,13 @@
    [babashka.process :as process]
    [clojure.string :as str]
    [cheshire.core :as json]
+   [ai.miniforge.messages.interface :as messages]
    [ai.miniforge.cli.web.risk :as risk]))
 
 ;------------------------------------------------------------------------------ Layer 0
+
+(def ^{:stratum 0} ^:private system-message
+  (messages/create-translator "config/cli/messages/system.edn" :cli/system))
 
 (defn ^{:stratum 0} sh-success? [result]
   (zero? (:exit result)))
@@ -50,10 +54,18 @@
                            "--json" "number,title,state,author,url,additions,deletions,changedFiles,createdAt,labels"
                            "--limit" "50")]
     (when (sh-success? result)
-      (try
-        (->> (json/parse-string (:out result) true)
-             (mapv #(assoc % :repo repo :analysis (risk/analyze-pr %))))
-        (catch Exception _ [])))))
+      (let [prs (try
+                  (json/parse-string (:out result) true)
+                  (catch Exception e
+                    ;; gh succeeded (exit 0) but returned unparseable output — log
+                    ;; so operators can diagnose format changes or partial writes.
+                    (binding [*out* *err*]
+                      (println (system-message :log/github-fetch-prs-json-failed
+                                               {:repo repo :cause (ex-message e)})))
+                    nil))]
+        (if prs
+          (mapv #(assoc % :repo repo :analysis (risk/analyze-pr %)) prs)
+          [])))))
 
 (defn ^{:stratum 1} fetch-pr-diff [repo number]
   (let [result (process/sh "gh" "pr" "diff" (str number) "--repo" repo)]
@@ -63,7 +75,13 @@
   (let [result (process/sh "gh" "pr" "view" (str number) "--repo" repo "--json" "body,title,labels")]
     (when (sh-success? result)
       (try (json/parse-string (:out result) true)
-           (catch Exception _ nil)))))
+           (catch Exception e
+             ;; Log so a format change in gh's output surface rather than silently
+             ;; yielding nil (which callers treat as "no PR info available").
+             (binding [*out* *err*]
+               (println (system-message :log/github-fetch-pr-body-json-failed
+                                        {:repo repo :number number :cause (ex-message e)})))
+             nil)))))
 
 (defn ^{:stratum 1} fetch-workflow-runs [repo]
   (let [result (process/sh "gh" "run" "list" "--repo" repo
@@ -71,7 +89,13 @@
                            "--limit" "10")]
     (if (sh-success? result)
       (try (json/parse-string (:out result) true)
-           (catch Exception _ []))
+           (catch Exception e
+             ;; Log so a format change in gh's output surfaces rather than
+             ;; silently returning an empty run list.
+             (binding [*out* *err*]
+               (println (system-message :log/github-fetch-runs-json-failed
+                                        {:repo repo :cause (ex-message e)})))
+             []))
       [])))
 
 (defn ^{:stratum 1} approve-pr! [repo number]
