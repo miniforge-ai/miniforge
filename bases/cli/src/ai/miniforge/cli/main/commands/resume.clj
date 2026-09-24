@@ -95,9 +95,13 @@
 
 (defn- ^{:stratum 0} rewind-to-phase
   "`--from-phase`: the same rewind the operator's `:retry-from-phase` plan
-   describes. The FSM snapshot is dropped (restoring one parked after
-   `phase` would ignore the rewind) and only the completed phases before
-   `phase` stay completed, so `phase` and everything after it run again.
+   describes. Only the completed phases before `phase` stay completed, so
+   `phase` and everything after it run again, from those phases' state.
+
+   The FSM snapshot is dropped: it is parked after `phase`, and restoring
+   it would ignore the rewind. What the re-run keeps of it is the run's
+   input and acting authority; the runner starts a fresh machine at
+   `phase` holding only the kept phases' results.
 
    The old run's DAG work is dropped too. It is only ever consumed when
    the plan phase runs and executes its DAG: after a rewind to the plan
@@ -112,14 +116,18 @@
    phase there is nothing else to restore."
   [reconstructed phase checkpoints]
   (let [kept (vec (take-while (complement #{phase}) (:completed-phases reconstructed)))
-        workspace (last (filter (comp (set kept) :phase) checkpoints))]
+        workspace (last (filter (comp (set kept) :phase) checkpoints))
+        {:execution/keys [input acting]} (:machine-snapshot reconstructed)]
     (-> reconstructed
         (dissoc :machine-snapshot)
         (assoc :completed? false
                :completed-phases kept
+               :phase-results (select-keys (:phase-results reconstructed) kept)
                :completed-dag-tasks #{}
                :completed-dag-artifacts []
-               :workspace-checkpoint workspace))))
+               :workspace-checkpoint workspace)
+        (cond-> input (assoc :input input)
+                acting (assoc :acting acting)))))
 
 (defn- ^{:stratum 0} uuid-option
   "The UUID an option names, nil when it is absent; refused when present
@@ -285,8 +293,10 @@
                                               control-state
                                               event-stream)
           (let [result (run-pipeline resume-workflow
-                                     {}
+                                     ;; The run's input on a rewind; a restored snapshot carries its own.
+                                     (get reconstructed :input {})
                                      {:llm-backend llm-client
+                                      :acting (:acting reconstructed)
                                       ;; The id announced and registered
                                       ;; above; without it a snapshot-less
                                       ;; resume minted a second id.
