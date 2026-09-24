@@ -89,6 +89,9 @@
   :application/not-implemented
   "The intervention mechanism is not implemented"
 
+  :application/phase-results-not-checkpointed
+  "Cannot retry from that phase: the run has no checkpointed result for {phases}, which the re-run would build on"
+
   :application/policy-evaluation-readback-mismatch
   "No new policy evaluation was recorded for the target"
 

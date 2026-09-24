@@ -161,7 +161,8 @@
         record! #(record-resume-readback! stream dispatched events-dir verb plan run-id)]
     (cond
       (nil? launcher) (core/fail! stream dispatched :no-resume-launcher)
-      (:failure/code prepared) (core/fail! stream dispatched (:failure/code prepared))
+      (:failure/code prepared) (core/fail! stream dispatched (:failure/code prepared)
+                                           (dissoc prepared :failure/code))
       (nil? run-id) (apply core/fail! stream dispatched
                            (core/anomaly-failure launch :resume-not-dispatched))
       (:await-start! launcher) (core/submit-verification!

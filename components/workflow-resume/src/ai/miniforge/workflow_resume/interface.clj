@@ -35,7 +35,8 @@
        ;; :completed-dag-tasks / :completed-dag-artifacts threaded into
        ;; :pre-completed-dag-tasks / :pre-completed-artifacts"
   (:require
-   [ai.miniforge.workflow-resume.core :as core]))
+   [ai.miniforge.workflow-resume.core :as core]
+   [ai.miniforge.workflow-resume.rewind :as rewind]))
 
 ;------------------------------------------------------------------------------ Layer 0
 
@@ -140,3 +141,23 @@
    key), then `fallback-fn`. Returns a canonical anomaly if no source
    yields a loadable type or input args are invalid."
   core/resolve-workflow-identity)
+
+;; Rewind to a phase
+(def ^{:stratum 0} rewind-kept-phases
+  "The completed phases a rewind to a phase keeps: those before it.
+   Args: a `reconstruct-context` map and the phase. Returns a vector."
+  rewind/kept-phases)
+
+(def ^{:stratum 0} checkpointed-phase-results
+  "The phase results a phase can build on: those read from the run's
+   checkpoint. Arg: a `reconstruct-context` map. Returns nil when the run
+   has no checkpoint; its `:phase-results` are then telemetry rebuilt
+   from events."
+  rewind/checkpointed-results)
+
+(def ^{:stratum 0} rewind-refusal
+  "Why a rewind to a phase cannot run, or nil when it can. Args: a
+   `reconstruct-context` map and the phase. Returns
+   `{:resume/reason :phase-results-not-checkpointed :resume/phases [...]}`
+   naming the phases the rewind would keep with no checkpointed result."
+  rewind/refusal)

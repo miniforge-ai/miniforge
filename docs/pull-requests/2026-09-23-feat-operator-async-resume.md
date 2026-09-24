@@ -44,9 +44,15 @@ re-evaluation gave no verdict.
 - An evaluator anomaly fails `:policy-evaluation-refused` with its
   `:failure/reason`. `:invalid-policy-evaluation` is kept for results that are
   neither.
-- `fail!` merges `:failure/reason`, `:failure/log`, `:resume/run-id` and
-  `:resume/pid` into the intervention's details, and fills the localized
-  message from them.
+- `fail!` merges `:failure/reason`, `:failure/log`, `:resume/run-id`,
+  `:resume/pid` and `:resume/phases` into the intervention's details, and
+  fills the localized message from them.
+- `prepare-resume` refuses a `:retry-from-phase` whose rewind would keep
+  phases with no checkpointed result, before the launcher runs. It applies the
+  rule `mf resume --from-phase` applies (`workflow-resume`'s `rewind-refusal`,
+  PR 1): the failure code is `:phase-results-not-checkpointed` and
+  `:resume/phases` names the phases, so the failed chip says why instead of
+  "did not start" with the reason in a log.
 - The consumer writes its cursor after every file that changed it, and ends a
   pass before the next file once it is being stopped.
 - `stop-operator-consumer!` drains the poller, then the verification pool.
@@ -60,6 +66,9 @@ re-evaluation gave no verdict.
   unknown code, and an evaluator refusal. A stop interrupting a verification
   records nothing and settles nothing; after a restart the same launch is
   verified and settled.
+- `application-test`: a rewind of a run with no checkpointed results fails
+  `:phase-results-not-checkpointed`, names the phases, and never reaches the
+  launcher. The existing rewind tests stage a checkpoint for their target.
 - `consumer-test`: the cursor is on disk before the next file runs; a stop ends
   the pass; stop lets an in-flight pass finish.
 - `consumer-test`: a declined decision is left for a consumer that accepts it.
