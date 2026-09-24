@@ -102,14 +102,24 @@
    The old run's DAG work is dropped too. It is only ever consumed when
    the plan phase runs and executes its DAG: after a rewind to the plan
    (or earlier) it would skip the re-planned tasks that share an id,
-   and after a rewind past it the DAG does not run again."
-  [reconstructed phase]
-  (-> reconstructed
-      (dissoc :machine-snapshot)
-      (assoc :completed? false
-             :completed-dag-tasks #{}
-             :completed-dag-artifacts [])
-      (update :completed-phases #(vec (take-while (complement #{phase}) %)))))
+   and after a rewind past it the DAG does not run again.
+
+   The workspace restored is the latest of `checkpoints` (the run's
+   persisted workspaces) made by a phase that stays completed — never
+   one made by `phase` or later, which would start the re-run on its own
+   output. With none, the run starts from a fresh workspace: the only
+   recorded states are after the rewind point, and before the first
+   phase there is nothing else to restore."
+  [reconstructed phase checkpoints]
+  (let [kept (vec (take-while (complement #{phase}) (:completed-phases reconstructed)))
+        workspace (last (filter (comp (set kept) :phase) checkpoints))]
+    (-> reconstructed
+        (dissoc :machine-snapshot)
+        (assoc :completed? false
+               :completed-phases kept
+               :completed-dag-tasks #{}
+               :completed-dag-artifacts []
+               :workspace-checkpoint workspace))))
 
 (defn- ^{:stratum 0} uuid-option
   "The UUID an option names, nil when it is absent; refused when present
@@ -149,11 +159,12 @@
 
 (defn- ^{:stratum 1} apply-from-phase
   "Rewind to `from-phase` when one was requested. A phase the run never
-   recorded is refused, not guessed at."
-  [reconstructed from-phase]
+   recorded is refused, not guessed at. `checkpoints` is a thunk for the
+   run's persisted workspaces, read only for a rewind."
+  [reconstructed from-phase checkpoints]
   (cond
     (nil? from-phase) reconstructed
-    (recorded-phase? reconstructed from-phase) (rewind-to-phase reconstructed from-phase)
+    (recorded-phase? reconstructed from-phase) (rewind-to-phase reconstructed from-phase (checkpoints))
     :else (response/throw-anomaly! :anomalies/incorrect
                                    (messages/t :resume/unknown-phase {:phase (name from-phase)})
                                    {:from-phase from-phase})))
@@ -202,7 +213,8 @@
                                             {:workflow-id workflow-id})))
         recorded (wr/reconstruct-context events-dir (str workflow-id))
         _ (throw-resume-anomaly! recorded)
-        reconstructed (apply-from-phase recorded (:from-phase opts))
+        reconstructed (apply-from-phase recorded (:from-phase opts)
+                                        #(wr/extract-workspace-checkpoints (read-event-file workflow-id)))
         ;; Checked before a completed run is reported done: an invalid
         ;; request is refused, not answered "already completed".
         resume-run-id (run-id-for (:machine-snapshot reconstructed) (:run-id opts))

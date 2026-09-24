@@ -294,6 +294,24 @@
                                       {:from-phase :plan})]
       (is (= #{} (:pre-completed-dag-tasks opts)))
       (is (= [] (:pre-completed-artifacts opts)))))
+  (testing "a rewind restores only a workspace checkpoint from a phase before it"
+    (let [plan-checkpoint {:branch "after-plan" :commit-sha "p" :phase :plan}
+          implement-checkpoint {:branch "after-implement" :commit-sha "i" :phase :implement}
+          persisted (fn [{:keys [branch commit-sha phase]}]
+                      {:event/type :workspace/persisted :workspace/branch branch
+                       :workspace/commit-sha commit-sha :workflow/phase phase})
+          history {:completed-phases [:plan :implement]
+                   :phase-results {:plan {} :implement {}}
+                   :workspace-checkpoint implement-checkpoint}
+          workspace-after (fn [from-phase]
+                            (with-redefs [sut/read-event-file
+                                          (constantly (mapv persisted [plan-checkpoint implement-checkpoint]))]
+                              (get-in (resume-with history {:from-phase from-phase})
+                                      [:opts :resume-workspace])))]
+      (is (= "after-plan" (:branch (workspace-after :implement)))
+          "not the checkpoint the re-run phase itself produced")
+      (is (nil? (workspace-after :plan))
+          "no checkpoint before the rewind point: a fresh workspace")))
   (testing "a phase the run never recorded is refused"
     (is (thrown-with-msg? clojure.lang.ExceptionInfo #"never recorded"
                           (resume-with {:completed-phases [:plan]} {:from-phase :release})))))
