@@ -286,6 +286,14 @@
     (testing "the snapshot is dropped, so the run adopts the caller's run id"
       (is (nil? (:resume-machine-snapshot opts)))
       (is (= run-id (:workflow-id opts) registered))))
+  (testing "a rewind does not carry the old run's DAG work into the re-run"
+    (let [{:keys [opts]} (resume-with {:completed-phases [:plan :implement]
+                                       :phase-results {:plan {} :implement {}}
+                                       :completed-dag-tasks #{:task-a}
+                                       :completed-dag-artifacts [{:artifact/id "a"}]}
+                                      {:from-phase :plan})]
+      (is (= #{} (:pre-completed-dag-tasks opts)))
+      (is (= [] (:pre-completed-artifacts opts)))))
   (testing "a phase the run never recorded is refused"
     (is (thrown-with-msg? clojure.lang.ExceptionInfo #"never recorded"
                           (resume-with {:completed-phases [:plan]} {:from-phase :release})))))
@@ -303,15 +311,24 @@
                             (resume-with snapshotted {:run-id (str (random-uuid))})))
       (is (thrown-with-msg? clojure.lang.ExceptionInfo #"--run-id must be a UUID"
                             (resume-with {:completed-phases []} {:run-id "not-a-uuid"}))))
-    (testing "--correlation-id reaches the run; without it the snapshot's is kept"
-      (let [correlation-id (random-uuid)
-            kept (random-uuid)]
+    (testing "--correlation-id reaches the run; without it none is imposed"
+      (let [correlation-id (random-uuid)]
         (is (= correlation-id
                (get-in (resume-with snapshotted {:correlation-id (str correlation-id)})
                        [:opts :workflow-run/correlation-id])))
-        (is (= kept
-               (get-in (resume-with (assoc-in snapshotted [:machine-snapshot :workflow-run/correlation-id] kept) {})
-                       [:opts :workflow-run/correlation-id])))))))
+        (is (nil? (get-in (resume-with (assoc-in snapshotted [:machine-snapshot :workflow-run/correlation-id]
+                                                 (random-uuid))
+                                       {})
+                          [:opts :workflow-run/correlation-id]))
+            "the runner's default applies: the run's own id")))
+    (testing "the options are checked before a completed run is reported done"
+      (let [completed (assoc snapshotted :completed? true)]
+        (is (thrown-with-msg? clojure.lang.ExceptionInfo #"--run-id must be a UUID"
+                              (resume-with completed {:run-id "not-a-uuid"})))
+        (is (thrown-with-msg? clojure.lang.ExceptionInfo #"checkpoint restores run"
+                              (resume-with completed {:run-id (str (random-uuid))})))
+        (is (thrown-with-msg? clojure.lang.ExceptionInfo #"--correlation-id must be a UUID"
+                              (resume-with completed {:correlation-id "nope"})))))))
 
 (deftest ^{:stratum 1} read-event-file-reads-per-event-json-from-workflow-dir-test
   ;; Regression guard for the iter-20 resume bug. Before this fix,

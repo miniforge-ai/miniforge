@@ -97,11 +97,18 @@
   "`--from-phase`: the same rewind the operator's `:retry-from-phase` plan
    describes. The FSM snapshot is dropped (restoring one parked after
    `phase` would ignore the rewind) and only the completed phases before
-   `phase` stay completed, so `phase` and everything after it run again."
+   `phase` stay completed, so `phase` and everything after it run again.
+
+   The old run's DAG work is dropped too. It is only ever consumed when
+   the plan phase runs and executes its DAG: after a rewind to the plan
+   (or earlier) it would skip the re-planned tasks that share an id,
+   and after a rewind past it the DAG does not run again."
   [reconstructed phase]
   (-> reconstructed
       (dissoc :machine-snapshot)
-      (assoc :completed? false)
+      (assoc :completed? false
+             :completed-dag-tasks #{}
+             :completed-dag-artifacts [])
       (update :completed-phases #(vec (take-while (complement #{phase}) %)))))
 
 (defn- ^{:stratum 0} uuid-option
@@ -195,7 +202,15 @@
                                             {:workflow-id workflow-id})))
         recorded (wr/reconstruct-context events-dir (str workflow-id))
         _ (throw-resume-anomaly! recorded)
-        reconstructed (apply-from-phase recorded (:from-phase opts))]
+        reconstructed (apply-from-phase recorded (:from-phase opts))
+        ;; Checked before a completed run is reported done: an invalid
+        ;; request is refused, not answered "already completed".
+        resume-run-id (run-id-for (:machine-snapshot reconstructed) (:run-id opts))
+        ;; `--correlation-id` lands on the run's lifecycle events; the
+        ;; operator's launcher passes its intervention id and waits for
+        ;; it. Absent, none is imposed and the runner's default applies
+        ;; (the run's own id).
+        correlation-id (uuid-option "--correlation-id" (:correlation-id opts))]
 
     (if (:completed? reconstructed)
       (do (display/print-info (messages/t :resume/already-completed)) nil)
@@ -223,12 +238,6 @@
                               (wr/trim-pipeline workflow completed-phases))
             _ (throw-resume-anomaly! resume-workflow)
             remaining-pipeline (:workflow/pipeline resume-workflow)
-            resume-run-id (run-id-for machine-snapshot (:run-id opts))
-            ;; `--correlation-id` lands on the run's lifecycle events; the
-            ;; operator's launcher passes its intervention id and waits for
-            ;; it. Absent, the snapshot's own correlation id is kept.
-            correlation-id (or (uuid-option "--correlation-id" (:correlation-id opts))
-                               (:workflow-run/correlation-id machine-snapshot))
             _ (when-not quiet
                 (if machine-snapshot
                   (display/print-info
