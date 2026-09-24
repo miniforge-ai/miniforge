@@ -21,4 +21,6 @@
   :log/github-fetch-pr-body-json-failed
   "[warn] fetch-pr-body: JSON parse failed for {repo} #{number}: {cause}"
   :log/github-fetch-runs-json-failed
-  "[warn] fetch-workflow-runs: JSON parse failed for repo {repo}: {cause}"}}
+  "[warn] fetch-workflow-runs: JSON parse failed for repo {repo}: {cause}"
+  :anomaly/resume-refused
+  "Resume launch: {code}"}}
