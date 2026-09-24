@@ -8,7 +8,7 @@
 
 ## Overview
 
-First of five stacked PRs that let the operator console retry runs and run
+First of six stacked PRs that let the operator console retry runs and run
 interventions with no workflow active. This one gives `mf resume` the inputs
 the operator's resume launcher (PR 3) passes to the process it starts.
 
@@ -36,6 +36,8 @@ events of the child it started. `mf resume` accepted none of these.
 
 - `resume-test`: rewind, unknown phase, run id adoption and both refusals, and
   correlation id pass-through and preservation.
+- `runner-test`: a run's started event carries the correlation id its caller
+  passed, the evidence PR 3's launcher waits for.
 - Pre-commit hook per commit.
 
 ## Deployment Plan
@@ -45,7 +47,8 @@ No migration. The flags are optional; existing invocations behave as before.
 ## Related Issues/PRs
 
 Stack: this PR, then `feat/operator-async-resume`, `feat/resume-launcher`,
-`feat/shared-process-handles`, `feat/operator-serve`.
+`feat/resume-launcher-hardening`, `feat/shared-process-handles`,
+`feat/operator-serve`.
 
 ## Checklist
 

@@ -294,6 +294,20 @@
         (is (true? (supervisory/attached? stream)))
         (is (some #{:supervisory/workflow-upserted} event-types))))))
 
+(deftest ^{:stratum 1} run-pipeline-stamps-the-callers-correlation-id-test
+  (testing "the started event carries the caller's correlation id — what the
+            operator's resume launcher waits for from the `mf resume` it starts"
+    (let [correlation-id (random-uuid)
+          stream (es/create-event-stream {:sinks []})
+          workflow {:workflow/id :test
+                    :workflow/version "1.0.0"
+                    :workflow/pipeline [{:phase test-done-phase}]}]
+      (runner/run-pipeline workflow {:task "Test"} {:event-stream stream
+                                                    :workflow-run/correlation-id correlation-id})
+      (is (= correlation-id
+             (:workflow-run/correlation-id
+              (first (filter #(= :workflow/started (:event/type %)) (es/get-events stream)))))))))
+
 (deftest ^{:stratum 1} run-pipeline-persists-machine-snapshot-test
   (checkpoint-test-support/call-with-temp-checkpoint-root
     (fn [checkpoint-root]
