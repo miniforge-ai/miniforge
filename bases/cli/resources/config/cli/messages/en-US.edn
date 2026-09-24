@@ -715,6 +715,7 @@
   :operator-serve/already-running "An operator server is already running for {home} (pid {pid}). Stop it first, or set MINIFORGE_HOME to serve another home."
   :operator-serve/pid-unknown "unknown"
   :resume/unknown-phase "Cannot resume from phase {phase}: this run never recorded it."
+  :resume/rewind-without-results "Cannot resume from phase {phase}: the run has no checkpointed result for {phases}, which the re-run would build on."
   :resume/not-a-uuid "{flag} must be a UUID (got {value})."
   :resume/run-id-conflict "Cannot resume under run id {run-id}: the checkpoint restores run {snapshot-id}."
   :workflow-runner/previously-completed "   Previously completed: {count} tasks"
