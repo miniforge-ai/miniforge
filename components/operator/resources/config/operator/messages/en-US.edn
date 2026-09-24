@@ -95,8 +95,26 @@
   :application/policy-re-evaluated
   "Policy re-evaluated for {target}: {result}"
 
+  :application/policy-evaluation-refused
+  "The policy evaluator gave no verdict ({reason})"
+
+  :application/resume-in-flight
+  "A retry of this workflow is already running (pid {pid})"
+
   :application/resume-not-dispatched
   "The resume launcher reported no resumed run"
+
+  :application/resume-not-started
+  "The resumed run did not start ({reason}); its output is in {log}"
+
+  :application/resume-origin-unknown
+  "The run's working directory was not recorded, so there is nowhere to resume it"
+
+  :application/resume-target-live
+  "The workflow still has a live runner; retry it once that runner stops"
+
+  :application/resume-unverified
+  "Stopped before the resumed run could be verified; it may still be starting (output: {log})"
 
   :application/resume-readback-mismatch
   "The resumed run is not observable in the event history"

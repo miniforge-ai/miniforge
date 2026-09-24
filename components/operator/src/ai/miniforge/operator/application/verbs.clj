@@ -30,6 +30,7 @@
    [[ai.miniforge.operator.application.core]]. `application`'s
    `apply-intervention!` dispatches to these by verb."
   (:require
+   [ai.miniforge.anomaly.interface :as anomaly]
    [ai.miniforge.operator.application.core :as core]
    [ai.miniforge.operator.intervention :as intervention]
    [ai.miniforge.operator.mechanism :as mechanism]))
@@ -72,62 +73,68 @@
                           :safe-mode-readback-mismatch)))
     (core/fail! stream dispatched :no-degradation-manager)))
 
-(defn- ^{:stratum 1} dispatch-resume!
-  "Hand `plan` to the launcher, then read the run it reports back
-   through the resume machinery itself. The readback is deliberately
-   the resume component's view rather than the launcher's return value:
-   a launcher naming a run it never started must not buy a `verified`
-   chip."
-  [stream dispatched launcher events-dir verb plan]
-  (let [run-id (mechanism/launched-run-id ((:launch! launcher) plan))]
-    (if-not run-id
-      (core/fail! stream dispatched :resume-not-dispatched)
-      (let [readback {:verb verb
-                      :resume/run-id run-id
-                      :resume/from-phase (:resume/from-phase plan)
-                      :observed (mechanism/resume-observable? events-dir run-id)
-                      :expected true}]
-        (when-let [applied (core/advance! stream dispatched
-                                          intervention/apply-result readback)]
-          (verify-readback! stream applied readback
-                            :resume-readback-mismatch))))))
+(defn- ^{:stratum 1} record-resume-readback!
+  "Read the launched run back through the resume machinery itself. The
+   readback is the resume component's view, not the launcher's return
+   value: a launcher naming a run it never started must not buy a
+   `verified` chip."
+  [stream dispatched events-dir verb plan run-id]
+  (let [readback {:verb verb
+                  :resume/run-id run-id
+                  :resume/from-phase (:resume/from-phase plan)
+                  :observed (mechanism/resume-observable? events-dir run-id)
+                  :expected true}]
+    (when-let [applied (core/advance! stream dispatched
+                                      intervention/apply-result readback)]
+      (verify-readback! stream applied readback
+                        :resume-readback-mismatch))))
 
-(defn ^{:stratum 1} apply-re-evaluate-verb!
+(defn- ^{:stratum 1} record-policy-evaluation!
+  [stream dispatched interv evaluation]
+  (let [readback (mechanism/record-policy-evaluation! stream interv evaluation)]
+    (when-let [applied (core/advance! stream dispatched
+                                      intervention/apply-result readback)]
+      (verify-readback! stream applied readback
+                        :policy-evaluation-readback-mismatch))))
+
+;------------------------------------------------------------------------------ Layer 2
+
+(defn ^{:stratum 2} apply-re-evaluate-verb!
   "Run the registered evaluator, publish its verdict as a gate event,
    and read the materialized entity table back.
 
    `verified` means a PolicyEvaluation that did not exist before the
    publish exists after it — a new immutable record per N5-delta-1
-   §12.2, not a mutation of the evaluation being re-run."
+   §12.2, not a mutation of the evaluation being re-run. An evaluator
+   that declines to give a verdict returns an anomaly, and the failure
+   carries its reason; any other non-evaluation fails typed. Nothing is
+   published for either — a verdict nobody computed is never recorded."
   [stream dispatched evaluate interv]
-  (if-not evaluate
-    (core/fail! stream dispatched :no-policy-evaluator)
-    (let [evaluation (evaluate (mechanism/evaluation-request interv))]
-      ;; Validate BEFORE publishing: a nil/garbage result would otherwise
-      ;; coerce to `passed? false`, mint a bogus :gate/failed record, and
-      ;; verify — a verdict we never received. Fail typed, publish nothing.
-      (if-not (mechanism/valid-evaluation? evaluation)
-        (core/fail! stream dispatched :invalid-policy-evaluation)
-        (let [readback (mechanism/record-policy-evaluation! stream interv evaluation)]
-          (when-let [applied (core/advance! stream dispatched
-                                            intervention/apply-result readback)]
-            (verify-readback! stream applied readback
-                              :policy-evaluation-readback-mismatch)))))))
-
-;------------------------------------------------------------------------------ Layer 2
+  (let [evaluation (when evaluate (evaluate (mechanism/evaluation-request interv)))]
+    (cond
+      (nil? evaluate) (core/fail! stream dispatched :no-policy-evaluator)
+      (anomaly/anomaly? evaluation) (apply core/fail! stream dispatched
+                                           (core/anomaly-failure evaluation :policy-evaluation-refused))
+      (not (mechanism/valid-evaluation? evaluation)) (core/fail! stream dispatched :invalid-policy-evaluation)
+      :else (record-policy-evaluation! stream dispatched interv evaluation))))
 
 (defn ^{:stratum 2} apply-resume-verb!
-  "Rebuild resume state for a retry, then dispatch it.
+  "Rebuild resume state for a retry, then hand the plan to the launcher.
 
    Every rejection is typed and lands before the launcher runs — a
    request naming a phase the run never reached must not be guessed
-   into a plan and started."
+   into a plan and started. A launcher refusal fails with the code and
+   details it names."
   [stream dispatched launcher verb interv]
-  (if-not launcher
-    (core/fail! stream dispatched :no-resume-launcher)
-    (let [events-dir (core/resume-events-dir launcher)
-          prepared (mechanism/prepare-resume events-dir interv verb)]
-      (if-let [failure-code (:failure/code prepared)]
-        (core/fail! stream dispatched failure-code)
-        (dispatch-resume! stream dispatched launcher events-dir verb
-                          (:resume/plan prepared))))))
+  (let [events-dir (core/resume-events-dir launcher)
+        prepared (when launcher (mechanism/prepare-resume events-dir interv verb))
+        plan (:resume/plan prepared)
+        launch (when plan ((:launch! launcher) plan))
+        run-id (mechanism/launched-run-id launch)
+        record! #(record-resume-readback! stream dispatched events-dir verb plan run-id)]
+    (cond
+      (nil? launcher) (core/fail! stream dispatched :no-resume-launcher)
+      (:failure/code prepared) (core/fail! stream dispatched (:failure/code prepared))
+      (nil? run-id) (apply core/fail! stream dispatched
+                           (core/anomaly-failure launch :resume-not-dispatched))
+      :else (record!))))

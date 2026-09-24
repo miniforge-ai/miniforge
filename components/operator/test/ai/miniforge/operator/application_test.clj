@@ -723,3 +723,32 @@
         (is (= :application-error (failure-code result)))
         (is (empty? (policy-evals stream))
             "a throwing evaluator writes no PolicyEvaluation")))))
+
+;------------------------------------------------------------------------------ Typed launcher and evaluator refusals
+(deftest ^{:stratum 2} launcher-refusals-carry-their-code-and-details
+  (let [events-dir (temp-events-dir)
+        workflow-id (random-uuid)
+        refusal (fn [code] (anomaly/anomaly :conflict "refused" {:failure/code code
+                                                                 :resume/pid 42}))
+        run! (fn [launcher]
+               (with-resume-launcher
+                 (assoc launcher :events-dir events-dir)
+                 #(application/apply-intervention! (memory-stream) (approved :retry (str workflow-id)))))]
+    (stage-two-phase-run! events-dir workflow-id)
+    (testing "a refusal at launch names its code; one the lifecycle does not know is not trusted"
+      (is (= :resume-in-flight (failure-code (run! {:launch! (fn [_] (refusal :resume-in-flight))}))))
+      (is (= 42 (get-in (run! {:launch! (fn [_] (refusal :resume-in-flight))})
+                        [:intervention/details :resume/pid])))
+      (is (= :resume-not-dispatched (failure-code (run! {:launch! (fn [_] (refusal :made-up))})))))))
+
+(deftest ^{:stratum 2} an-evaluator-refusal-is-not-an-invalid-verdict
+  (with-policy-evaluator
+    (fn [_request] (anomaly/anomaly :not-found "no packs" {:failure/reason :no-policy-packs}))
+    (fn []
+      (let [stream (memory-stream)
+            result (application/apply-intervention!
+                    stream (approved :re-evaluate golden-pr-target-id))]
+        (is (= :policy-evaluation-refused (failure-code result)))
+        (is (= :no-policy-packs (get-in result [:intervention/details :failure/reason])))
+        (is (re-find #"no-policy-packs" (:intervention/reason result)))
+        (is (empty? (policy-evals stream)))))))
