@@ -93,30 +93,16 @@
       (contains? (:phase-results reconstructed) phase)
       (= phase (get-in reconstructed [:machine-snapshot :execution/current-phase]))))
 
-(defn- ^{:stratum 0} kept-phases
-  "The completed phases a rewind to `phase` keeps: those before it."
-  [reconstructed phase]
-  (vec (take-while (complement #{phase}) (:completed-phases reconstructed))))
-
-(defn- ^{:stratum 0} checkpointed-results
-  "The run's phase results that a phase can build on, nil when it has
-   none. `reconstruct-context` reads them from the run's checkpoint when
-   there is one, which is exactly when there is an FSM snapshot. Without
-   one it rebuilds only telemetry (outcome, duration) from events, and a
-   phase reading its predecessor's output finds nothing in that."
-  [reconstructed]
-  (when (:machine-snapshot reconstructed)
-    (:phase-results reconstructed)))
-
 (defn- ^{:stratum 0} rewind-to-phase
   "`--from-phase`: the same rewind the operator's `:retry-from-phase` plan
-   describes. Only the completed phases before `phase` stay completed, so
-   `phase` and everything after it run again, from those phases' state.
+   describes, to a phase `p`. Only `kept`, the completed phases before
+   `p`, stay completed, so `p` and everything after it run again, from
+   those phases' state.
 
-   The FSM snapshot is dropped: it is parked after `phase`, and restoring
-   it would ignore the rewind. What the re-run keeps of it is the run's
-   input and acting authority; the runner starts a fresh machine at
-   `phase` holding only the kept phases' results.
+   The FSM snapshot is dropped: it is parked after `p`, and restoring it
+   would ignore the rewind. What the re-run keeps of it is the run's
+   input and acting authority; the runner starts a fresh machine at `p`
+   holding only the kept phases' results.
 
    The old run's DAG work is dropped too. It is only ever consumed when
    the plan phase runs and executes its DAG: after a rewind to the plan
@@ -125,7 +111,7 @@
 
    The workspace restored is the latest of `checkpoints` (the run's
    persisted workspaces) made by a phase that stays completed — never
-   one made by `phase` or later, which would start the re-run on its own
+   one made by `p` or later, which would start the re-run on its own
    output. With none, the run starts from a fresh workspace: the only
    recorded states are after the rewind point, and before the first
    phase there is nothing else to restore."
@@ -181,28 +167,27 @@
 
 (defn- ^{:stratum 1} apply-from-phase
   "Rewind to `from-phase` when one was requested. A phase the run never
-   recorded is refused, not guessed at. So is a rewind keeping a phase
-   with no checkpointed result: the re-run would start without the output
-   it builds on. `checkpoints` is a thunk for the run's persisted
-   workspaces, read only for a rewind."
+   recorded is refused, not guessed at, and so is a rewind the shared
+   rule refuses (`wr/rewind-refusal`, as the operator's retry applies it).
+   `checkpoints` is a thunk for the run's persisted workspaces, read only
+   for a rewind."
   [reconstructed from-phase checkpoints]
-  (let [kept (kept-phases reconstructed from-phase)
-        unrecorded (vec (remove (set (keys (checkpointed-results reconstructed))) kept))]
+  (let [refusal (when from-phase (wr/rewind-refusal reconstructed from-phase))]
     (cond
       (nil? from-phase) reconstructed
       (not (recorded-phase? reconstructed from-phase))
       (response/throw-anomaly! :anomalies/incorrect
                                (messages/t :resume/unknown-phase {:phase (name from-phase)})
                                {:from-phase from-phase})
-      (seq unrecorded)
+      refusal
       (response/throw-anomaly! :anomalies/unsupported
                                (messages/t :resume/rewind-without-results
                                            {:phase (name from-phase)
-                                            :phases (str/join ", " (map name unrecorded))})
-                               {:from-phase from-phase
-                                :resume/reason :phase-results-not-checkpointed
-                                :resume/phases unrecorded})
-      :else (rewind-to-phase reconstructed kept (checkpoints)))))
+                                            :phases (str/join ", " (map name (:resume/phases refusal)))})
+                               (assoc refusal :from-phase from-phase))
+      :else (rewind-to-phase reconstructed
+                             (wr/rewind-kept-phases reconstructed from-phase)
+                             (checkpoints)))))
 
 (defn- ^{:stratum 1} run-id-for
   "The id the resumed run executes under: the restored snapshot's own id,
@@ -337,7 +322,7 @@
                                       :resume-reset-terminal? failed-checkpoint?
                                       ;; Never event telemetry; a rewind has
                                       ;; already cut them to the kept phases.
-                                      :resume-phase-results (when (checkpointed-results recorded)
+                                      :resume-phase-results (when (wr/checkpointed-phase-results recorded)
                                                               (:phase-results reconstructed))
                                       :resume-workspace (:workspace-checkpoint reconstructed)
                                       :skip-lifecycle-events false
