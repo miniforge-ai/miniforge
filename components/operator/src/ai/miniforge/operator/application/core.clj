@@ -35,7 +35,8 @@
    [ai.miniforge.operator.consumer :as consumer]
    [ai.miniforge.operator.intervention :as intervention]
    [ai.miniforge.operator.messages :as messages]
-   [ai.miniforge.reliability.interface :as reliability]))
+   [ai.miniforge.reliability.interface :as reliability]
+   [clojure.string :as str]))
 
 ;------------------------------------------------------------------------------ Layer 0
 
@@ -50,6 +51,7 @@
    :no-resume-context :application/no-resume-context
    :no-resume-launcher :application/no-resume-launcher
    :not-implemented :application/not-implemented
+   :phase-results-not-checkpointed :application/phase-results-not-checkpointed
    :policy-evaluation-readback-mismatch :application/policy-evaluation-readback-mismatch
    :policy-evaluation-refused :application/policy-evaluation-refused
    :resume-in-flight :application/resume-in-flight
@@ -65,7 +67,7 @@
 (def ^{:stratum 0} ^:private failure-detail-keys
   "What a mechanism may add to a failed intervention's details, beside
    `:failure/code`, so the operator sees why and where to look."
-  [:failure/reason :failure/log :resume/run-id :resume/pid])
+  [:failure/reason :failure/log :resume/run-id :resume/pid :resume/phases])
 
 (defonce ^{:stratum 0} ^:private verification-pool
   ;; Work that waits on something slow — a launched run becoming
@@ -125,7 +127,8 @@
                    :application/unknown-failure)
               {:reason (some-> (:failure/reason details) name)
                :log (:failure/log details)
-               :pid (:resume/pid details)}))
+               :pid (:resume/pid details)
+               :phases (some->> (:resume/phases details) (map name) (str/join ", "))}))
 
 (defn ^{:stratum 1} anomaly-failure
   "`[code details]` for a mechanism's anomaly: the `:failure/code` it
