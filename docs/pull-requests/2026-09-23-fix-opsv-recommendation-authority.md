@@ -29,12 +29,14 @@ N7 sections 1.4 and 5.4 require execution authority, not claimed permission.
 
 ## Testing Plan
 
-- OPSV and phase-OPSV: 34 tests, 233 assertions in each consuming project.
+- OPSV and phase-OPSV: 34 tests, 256 assertions in each consuming project.
 - OPSV lifecycle integration: 4 tests, 42 assertions, including persisted evidence.
 - Pre-commit: Polylith, kondo (zero warnings/errors), strata and formatting pass;
   347 smoke tests / 1,310 assertions and 8 compatibility tests / 667 assertions pass.
 - Adversarial review traced forged flags, every requested mode, safe mode,
   malformed intent, missing verification and upstream anomaly propagation.
+- Review follow-up pins missing/empty/nil verification in normal and safe modes
+  to the existing typed schema rejection. No redundant interior validation added.
 - Repository scan also found pre-existing findings outside this change. Those
   need separate review; this PR does not claim repository-wide standards closure.
 

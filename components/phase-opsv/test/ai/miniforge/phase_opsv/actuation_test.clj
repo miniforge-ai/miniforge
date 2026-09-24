@@ -55,9 +55,17 @@
     (is (anomaly/anomaly?
          (phase-opsv/actuate (requested-context :unknown false)))))
   (testing "missing verification cannot produce a successful record"
-    (let [ctx (dissoc (requested-context :apply-allowed false)
-                      :execution/phase-results)]
-      (is (anomaly/anomaly? (phase-opsv/actuate ctx))))))
+    (doseq [verified [nil {} {:opsv/verification-result {}}
+                      {:opsv/verification-result {:passed? nil}}]
+            safe-mode? [false true]]
+      (let [ctx (assoc-in (requested-context :apply-allowed safe-mode?)
+                          [:execution/phase-results :opsv/verify :result :output]
+                          verified)
+            result (phase-opsv/actuate ctx)]
+        (is (= :invalid-input (:anomaly/type result)))
+        (is (= :opsv/effective-actuation-input
+               (get-in result [:anomaly/data :anomaly/schema])))
+        (is (not (contains? result :opsv/actuation-record)))))))
 
 (comment
   (phase-opsv/actuate (requested-context :apply-allowed false)))
