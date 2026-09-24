@@ -26,6 +26,11 @@ events of the child it started. `mf resume` accepted none of these.
 - A rewind also drops the old run's DAG tasks and artifacts. They are only
   used when the plan phase runs its DAG, where they would skip re-planned
   tasks that share an id.
+- A rewind to `p` restores the latest workspace checkpoint made by a phase
+  that stays completed, never one made by `p` or a later phase. When there is
+  none, the run starts from a fresh workspace. Refusing instead would block
+  every rewind to the first phase, and the recorded states after `p` are
+  exactly what the rewind is meant to replace.
 - `--run-id <uuid>` names the run a snapshot-less resume executes under. A
   value that is not a UUID is refused, and so is one that disagrees with the
   restored snapshot's id. Each case has its own message.
@@ -39,9 +44,10 @@ events of the child it started. `mf resume` accepted none of these.
 
 ## Testing Plan
 
-- `resume-test`: rewind (DAG state dropped), unknown phase, run id adoption and
-  both refusals, correlation id pass-through, and option checks on a completed
-  run.
+- `resume-test`: rewind (DAG state dropped, workspace from an earlier phase or
+  none) and unknown phase.
+- `resume-test`: run id adoption and both refusals, correlation id
+  pass-through, and option checks on a completed run.
 - `runner-test`: a run's started event carries the correlation id its caller
   passed, the evidence PR 3's launcher waits for.
 - Pre-commit hook per commit.
