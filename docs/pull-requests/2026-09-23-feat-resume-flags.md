@@ -38,7 +38,10 @@ events of the child it started. `mf resume` accepted none of these.
 - A rewind that would keep a phase with no checkpointed result is refused
   (`:anomalies/unsupported`, `:resume/reason :phase-results-not-checkpointed`,
   naming the phases) instead of running it without its inputs. A rewind to
-  the first phase keeps nothing and always runs.
+  the first phase keeps nothing and always runs. The rule lives in the
+  `workflow-resume` component (`rewind-refusal`, with `rewind-kept-phases`
+  and `checkpointed-phase-results`), so the operator's `:retry-from-phase`
+  (PR 2) refuses the same rewinds with the same reason.
 - The workflow identity is resolved from the run as recorded, so a rewind of
   a run with no recorded spec still finds its workflow in the snapshot.
 - A rewind also drops the old run's DAG tasks and artifacts. They are only
@@ -72,6 +75,8 @@ events of the child it started. `mf resume` accepted none of these.
   event telemetry never reaches the run; a rewind keeping a phase with no
   checkpointed result is refused with its reason and phases; an events-only
   rewind to the first phase runs.
+- `rewind-test` (workflow-resume): kept phases, checkpointed results versus
+  event telemetry, and the refusal with its reason and phases.
 - `runner-test`: a run's started event carries the correlation id its caller
   passed, the evidence PR 3's launcher waits for.
 - `runner-test`: a resume without a snapshot starts at the pipeline's first
