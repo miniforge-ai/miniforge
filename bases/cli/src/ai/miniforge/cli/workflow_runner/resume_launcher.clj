@@ -22,19 +22,19 @@
    `:launch!` runs inside the consumer's pass and only spawns: the
    retried run is its own `mf resume` process, started in the directory
    the run was started from, with output in
-   `<home>/logs/resume-<run-id>.log`. It is started under `nohup` (and
-   `setsid` where installed) as an asynchronous `/bin/sh` command, so a
-   terminal Ctrl-C or hangup aimed at this process does not reach it,
-   and it keeps running when this process exits. What it refuses, and
-   why a redelivered intervention never spawns twice, is in
-   `resume-records`.
+   `<home>/logs/resume-<run-id>.log`, under `nohup` and in a session
+   (`setsid`) or process group (job control) of its own: a Ctrl-C, a
+   hangup or a signal to this process's group does not reach it, and it
+   outlives this process. What it refuses, and why a redelivered
+   intervention never spawns twice, is in `resume-records`.
 
    `:await-start!` runs on the operator's verification pool, off the
    pass: it waits (bounded) for an event from this child — one carrying
    the intervention id as its correlation id. A child that exits first
    did not start; one still silent at the deadline is killed and did not
    start; an interrupted wait (the process stopping) leaves the child
-   running and reports the start as unverified."
+   running and reports `:resume/pending?`, for the verification to be
+   finished after a restart."
   (:require
    [ai.miniforge.cli.workflow-runner.resume-records :as records]
    [clojure.java.io :as io]
@@ -50,15 +50,17 @@
 (def ^{:stratum 0} ^:private observe-poll-ms 250)
 
 (def ^{:stratum 0} ^:private spawn-script
-  ;; $1 is the log file; the rest is the command. `&` makes it an
-  ;; asynchronous list of a non-interactive shell, which POSIX starts
-  ;; with SIGINT/SIGQUIT ignored and stdin from /dev/null; `nohup`
-  ;; ignores SIGHUP; `setsid` (Linux) also leaves this process group.
+  ;; $1 is the log file; the rest is the command. `nohup` ignores
+  ;; SIGHUP; stdin of an asynchronous list is /dev/null. `setsid`
+  ;; (Linux) gives the command a session of its own; without it (macOS),
+  ;; `set -m` turns on job control so the background job gets a process
+  ;; group of its own. Never both: under job control the job leads its
+  ;; group, and setsid would then fork and `$!` name the wrong process.
   ;; `$!` is the command's own pid: setsid and nohup exec it in place.
   (str "log=$1; shift; "
        "if command -v setsid >/dev/null 2>&1; "
        "then setsid nohup \"$@\" >>\"$log\" 2>&1 & "
-       "else nohup \"$@\" >>\"$log\" 2>&1 & fi; echo $!"))
+       "else set -m; nohup \"$@\" >>\"$log\" 2>&1 & fi; echo $!"))
 
 (defn ^{:stratum 0} self-command
   "The argv prefix that runs this CLI again: `MINIFORGE_CMD` when set,
@@ -112,35 +114,37 @@
    intervention gets its recorded launch back and no second child; a
    retry is refused while another launch of the workflow is running,
    while the workflow has a live runner, or when its origin is unknown."
-  [{:keys [command spawn!]} plan]
+  [{:keys [command spawn! timeout-ms]} plan]
   (let [workflow-id (:resume/workflow-id plan)
         prior (records/launch-record workflow-id)
         origin (records/recorded-origin workflow-id)]
     (cond
       (= (str (:resume/intervention-id plan)) (:resume/intervention-id prior)) prior
-      (records/launch-running? prior) (records/failure :conflict :resume-in-flight
+      (records/launch-running? prior timeout-ms) (records/failure :conflict :resume-in-flight
                                                        {:resume/pid (:resume/pid prior)})
       (records/target-live? workflow-id) (records/failure :conflict :resume-target-live {})
       (nil? origin) (records/failure :not-found :resume-origin-unknown {})
       :else (records/start! plan #(spawn! (resume-argv command plan %1) %2 origin)))))
 
 (defn ^{:stratum 1} await-start!
-  "`:await-start!`: the launch once its child has shown itself, else a
-   failure anomaly naming why, with the child's log."
+  "`:await-start!`: the launch once its child has shown itself; a
+   failure anomaly naming why, with the child's log; or, when the wait
+   is interrupted, `{:resume/pending? true}`."
   [{:keys [alive? kill! timeout-ms poll-ms]} launch]
   (let [{:resume/keys [run-id pid pid-started intervention-id launched-at-ms log]} launch
         outcome (await-outcome
                  {:started? #(records/correlated-event? run-id intervention-id launched-at-ms)
                   ;; No pid recorded (a crash between spawn and record):
                   ;; only the evidence or the deadline can decide.
-                  :alive? #(or (nil? pid) (alive? pid pid-started))
+                  :alive? #(and (not (:resume/exited? launch))
+                                (or (nil? pid) (alive? pid pid-started)))
                   :deadline-ms (+ launched-at-ms timeout-ms)
                   :poll-ms poll-ms})
         details {:failure/reason outcome :failure/log log :resume/run-id run-id :resume/pid pid}]
     (when (= :timeout outcome) (kill! pid))
     (case outcome
       :observed launch
-      :interrupted (records/failure :unavailable :resume-unverified details)
+      :interrupted {:resume/pending? true}
       (records/failure :unavailable :resume-not-started details))))
 
 ;------------------------------------------------------------------------------ Layer 2
@@ -163,4 +167,5 @@
                   :timeout-ms observe-timeout-ms
                   :poll-ms observe-poll-ms}]
         {:launch! (partial launch! deps)
-         :await-start! (partial await-start! deps)}))))
+         :await-start! (partial await-start! deps)
+         :settle! records/settle!}))))

@@ -23,6 +23,7 @@
    [ai.miniforge.event-stream.interface :as es]
    [ai.miniforge.operator.interface :as operator]
    [clojure.java.io :as io]
+   [clojure.string :as str]
    [clojure.test :refer [deftest is testing]]))
 
 ;------------------------------------------------------------------------------ Layer 0
@@ -64,6 +65,11 @@
    :timeout-ms 200
    :poll-ms 10})
 
+(defn- ^{:stratum 0} process-group
+  [pid]
+  (let [p (.exec (Runtime/getRuntime) (into-array String ["ps" "-o" "pgid=" "-p" (str pid)]))]
+    (str/trim (slurp (.getInputStream p)))))
+
 (defn- ^{:stratum 0} failure-code
   [result]
   (get-in result [:anomaly/data :failure/code]))
@@ -97,6 +103,9 @@
             plan (retry-plan workflow-id)
             spawned (atom [])]
         (records/record-origin! workflow-id)
+        (is (= :resume-target-live (failure-code (sut/launch! (deps {:spawned spawned}) plan)))
+            "the run's recorded runner (this process) has not let go of it")
+        (records/release-origin! workflow-id)
         (let [launch (sut/launch! (deps {:spawned spawned}) plan)]
           (is (= (System/getProperty "user.dir") (second (first @spawned)))
               "the child runs in the directory the run was started from")
@@ -115,6 +124,7 @@
       (let [workflow-id (str (random-uuid))]
         (is (= :resume-origin-unknown (failure-code (sut/launch! (deps {}) (retry-plan workflow-id)))))
         (records/record-origin! workflow-id)
+        (records/release-origin! workflow-id)
         (with-redefs [operator/live-runner? (constantly true)]
           (is (= :resume-target-live
                  (failure-code (sut/launch! (deps {}) (retry-plan workflow-id))))))))))
@@ -161,7 +171,8 @@
         (.start waiter)
         (Thread/sleep 50)
         (.interrupt waiter)
-        (is (= :resume-unverified (failure-code (deref result 5000 nil))))
+        (is (= {:resume/pending? true} (deref result 5000 nil))
+            "left for a restart to finish, not reported as a failure")
         (is (empty? @killed))))))
 
 (deftest ^{:stratum 1} the-child-is-detached-and-gets-its-argv-verbatim-test
@@ -176,4 +187,6 @@
         (.waitFor (.exec (Runtime/getRuntime) (into-array String ["kill" "-HUP" (str sleeper)])))
         (Thread/sleep 200)
         (is (records/process-running? sleeper nil) "a hangup does not stop it")
+        (is (not= (process-group (.pid (java.lang.ProcessHandle/current))) (process-group sleeper))
+            "it is not in this process's group, so a signal to the group misses it")
         (records/destroy-process! sleeper)))))

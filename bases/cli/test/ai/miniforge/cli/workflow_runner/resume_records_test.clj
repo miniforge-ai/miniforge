@@ -23,7 +23,7 @@
    [ai.miniforge.operator.interface :as operator]
    [cheshire.core :as json]
    [clojure.java.io :as io]
-   [clojure.test :refer [deftest is]]))
+   [clojure.test :refer [deftest is testing]]))
 
 ;------------------------------------------------------------------------------ Layer 0
 
@@ -46,7 +46,15 @@
         (is (nil? (sut/recorded-origin workflow-id)) "unrecorded")
         (sut/record-origin! workflow-id)
         (is (= (System/getProperty "user.dir") (sut/recorded-origin workflow-id)))
-        (spit (io/file (sut/run-dir workflow-id) "origin.edn") (pr-str {:cwd "/no/such/dir"}))
+        (testing "the recorded runner is a live target until it lets go"
+          (is (sut/target-live? workflow-id))
+          (sut/release-origin! workflow-id)
+          (is (not (sut/target-live? workflow-id))))
+        (testing "an archived run keeps its origin"
+          (.renameTo (sut/run-dir workflow-id)
+                     (doto (io/file (es/default-events-dir) "archived" workflow-id) io/make-parents))
+          (is (= (System/getProperty "user.dir") (sut/recorded-origin workflow-id))))
+        (spit (io/file (es/default-events-dir) "archived" workflow-id "origin.edn") (pr-str {:cwd "/no/such/dir"}))
         (is (nil? (sut/recorded-origin workflow-id)) "an origin that no longer exists is unknown")))))
 
 (deftest ^{:stratum 1} a-launch-is-recorded-before-and-after-the-spawn-test
@@ -59,8 +67,22 @@
                                (fn [_run-id _log] (reset! at-spawn (sut/launch-record workflow-id)) this-pid))]
         (is (= [(str intervention-id) nil] ((juxt :resume/intervention-id :resume/pid) @at-spawn)))
         (is (= launch (sut/launch-record workflow-id)))
-        (is (sut/launch-running? launch) "the recorded pid is alive and is that process")
-        (is (not (sut/launch-running? (assoc launch :resume/pid-started "1970-01-01T00:00:00Z"))))))))
+        (is (sut/launch-running? launch 60000) "the recorded pid is alive and is that process")
+        (is (not (sut/launch-running? (assoc launch :resume/pid-started "1970-01-01T00:00:00Z") 60000)))))))
+
+(deftest ^{:stratum 1} a-launch-without-a-live-pid-test
+  (with-temp-home
+    (fn []
+      (let [now (System/currentTimeMillis)
+            dead-pid (let [p (.start (ProcessBuilder. ^java.util.List ["/usr/bin/true"]))] (.waitFor p) (.pid p))
+            launch (sut/start! {:resume/workflow-id (str (random-uuid)) :resume/intervention-id (random-uuid)}
+                               (constantly dead-pid))]
+        (testing "no pid recorded: in flight until the start timeout has passed"
+          (is (sut/launch-running? {:resume/launched-at-ms now} 60000))
+          (is (not (sut/launch-running? {:resume/launched-at-ms (- now 61000)} 60000))))
+        (testing "a child gone before it was recorded is recorded as exited, never running"
+          (is (:resume/exited? launch))
+          (is (not (sut/launch-running? launch 60000))))))))
 
 (deftest ^{:stratum 1} a-live-target-test
   (with-temp-home
@@ -94,3 +116,19 @@
         (is (not (sut/correlated-event? run-id intervention-id since)) "another child's event")
         (event! intervention-id)
         (is (sut/correlated-event? run-id intervention-id since))))))
+
+(deftest ^{:stratum 1} an-unsettled-launch-is-pending-until-settled-test
+  (with-temp-home
+    (fn []
+      (let [workflow-id (str (random-uuid))
+            dispatched {:intervention/id (random-uuid) :intervention/state :dispatched}
+            launch (sut/start! {:resume/workflow-id workflow-id
+                                :resume/intervention-id (:intervention/id dispatched)
+                                :resume/intervention dispatched}
+                               (constantly this-pid))]
+        (is (= [dispatched] (map :resume/intervention (sut/pending-launches))))
+        (sut/settle! (assoc launch :resume/intervention-id "a later launch") {:intervention/state :failed})
+        (is (= 1 (count (sut/pending-launches))) "settling another launch leaves this one pending")
+        (sut/settle! launch {:intervention/state :verified})
+        (is (empty? (sut/pending-launches)))
+        (is (= :verified (:resume/settled (sut/launch-record workflow-id))))))))
