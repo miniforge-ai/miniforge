@@ -1,3 +1,9 @@
+<!--
+  Title: Miniforge.ai
+  Author: Christopher Lester (christopher@miniforge.ai)
+  Copyright 2025-2026 Christopher Lester. Licensed under Apache 2.0.
+-->
+
 # fix: refuse operation payloads the validator cannot read
 
 ## Overview
@@ -16,8 +22,8 @@ The defects here are the same class — activation-controlled input reaching the
 engine as an exception rather than as a routable rejection — but they fail
 harder. A commit-time throw at least happens after `validate` returned, so a
 stage could in principle have caught the payload. These throw from inside the
-validation pipeline: no stage returns, `run/step` never receives an anomaly,
-and there is nothing for the scheduler to route or log.
+validation pipeline. No stage returns, so `run/step` receives no anomaly
+for the scheduler to route or log.
 
 Reproduced on 2026-08-29 and again on 2026-09-02 against `798d53b7b`, with
 the full stage list `(into validation/concurrency-stages guards/guard-stages)`:
@@ -58,9 +64,9 @@ the §3.2 payload vocabulary.
    shape rather than walked into characters. Total over arbitrary EDN.
 2. `id-listings` (Layer 0) — enumerates `[operation field value]` across a
    whole transaction. Operations that are not maps are skipped rather than
-   interpreted, for the reason `proposed-specs` skips a non-sequential
-   `:creates`: `contains?` throws on a scalar, and reading fields out of a
-   payload that is not a map moves the crash rather than removing it.
+   interpreted, matching `proposed-specs` on non-sequential `:creates`.
+   `contains?` throws on scalars. Reading fields from a non-map payload would
+   only move the crash.
 3. `check-id-fields` (Layer 1) — the stage, leading the payload stages.
 4. `validate` — `:tx/operations` must be nil or sequential.
 5. `concurrency-stages` — `check-id-fields` runs immediately after
@@ -74,39 +80,35 @@ with `creation-defect` and `link-defect`.
 ### `guards.clj`
 
 Docstring only. `backed?` reads `:evidence` and a sibling's `:discriminates`
-unscreened, and now says why that is safe: the concurrency stages establish
-the shape before any guard runs, which is why the guards must be composed onto
-that chain rather than run alone.
+unscreened. The concurrency stages establish their shape before guards run.
+Guards must therefore compose onto that chain, not run alone.
 
 ### Why the whole transaction is scanned, and why the sibling is blamed
 
 `backed?` consults a *sibling's* `:discriminates` while validating a
-challenge. Stages run operation-major — every stage for operation 1, then
-every stage for operation 2 — so a stage reading only its own operation would
-reach a malformed sibling field before the operation carrying it had a turn.
+challenge. Stages run operation-major: all stages for operation 1, then for
+operation 2. A stage checking only itself could reach a malformed sibling
+before that sibling was validated.
 The scan therefore covers `:siblings`, as `check-creates` already does for
 duplicate ids.
 
 This inverts #1852's blame convention, deliberately. There, `:op` records
 where the pipeline *noticed*, because a duplicate id is a property of the
 transaction and not of either operation. Here the malformed field belongs to
-one operation, `:tx/operations` is a vector so which one is fixed by the
-payload, and naming the operation that noticed would describe a fault it does
-not have: for the third repro row above, `:challenge` would be blamed for
-`:propose-experiment`'s `:discriminates`.
+one operation. The `:tx/operations` vector fixes which one in the payload.
+Naming the operation that noticed would misattribute the fault. In the third
+repro, `:challenge` would be blamed for `:propose-experiment`'s `:discriminates`.
 
-Left unfixed, the alternative — skipping the unreadable sibling and letting
-`backed?` return false — reports `:bare-challenge`, which is true but useless:
-it does not say that the experiment meant to back the challenge was
-unreadable.
+Skipping the unreadable sibling and letting `backed?` return false would report
+`:bare-challenge`. That omits the useful fact: the supporting experiment was unreadable.
 
 ### Why the transaction-level check is not a stage
 
 No stage can run until `validate` has iterated `:tx/operations`, so the check
-sits in `validate` itself. Sequential rather than merely a collection, for the
-reason `check-creates` requires it of `:creates`: a set has no first
-operation, so which one the pipeline reported would vary between runs over
-identical input. A transaction with no `:tx/operations` at all is empty, not
+sits in `validate` itself. It requires a sequence for the same reason
+`check-creates` does: sets have no first operation.
+Reports could otherwise vary between runs over identical input.
+A transaction with no `:tx/operations` at all is empty, not
 malformed, and still validates clean.
 
 ### Scope of the `:evidence` tightening
@@ -145,15 +147,15 @@ Added to `validation_test.clj`:
 
 Added to `guards_test.clj`:
 
-- `the-fields-the-backing-check-reads-are-routed-not-thrown` — both guard-side
-  shapes over the composed pipeline, and that the shape fault outranks the
-  `:bare-challenge` that would be read out of it.
+`the-fields-the-backing-check-reads-are-routed-not-thrown` covers both guard-side
+shapes over the composed pipeline. The shape fault outranks the resulting
+`:bare-challenge`.
 
 Added to `run_test.clj`:
 
-- `an-unreadable-id-field-is-routed-not-thrown` — the rejection reaches the
-  event log as `:transaction/rejected`, the clock does not advance, and a
-  valid create in an earlier operation is discarded with it.
+- `an-unreadable-id-field-is-routed-not-thrown` checks `:transaction/rejected`
+  in the event log. The clock does not advance; an earlier valid create is
+  discarded with the transaction.
 - `an-activation-returning-a-malformed-transaction-is-routed` — the same for
   the transaction-level shape.
 

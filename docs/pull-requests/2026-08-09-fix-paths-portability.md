@@ -1,3 +1,9 @@
+<!--
+  Title: Miniforge.ai
+  Author: Christopher Lester (christopher@miniforge.ai)
+  Copyright 2025-2026 Christopher Lester. Licensed under Apache 2.0.
+-->
+
 # fix(cli): platform PATH separator and absolute PATH-scan results
 
 ## Overview
@@ -13,9 +19,8 @@ move-only namespace split.
    and the CLI-resolution fallback silently found nothing.
 2. `resolve-cli-command-path` documents an absolute-path contract, but
    the PATH-scan fallback returned `entry/cmd` verbatim. A relative
-   entry in `$PATH` (`.`, `bin`, `../tools`) therefore produced a
-   relative result, which breaks once the runner executes the command
-   from a worktree with a different working directory than the JVM.
+   entry in `$PATH` (`.`, `bin`, `../tools`) therefore produced a relative result.
+   That breaks when the runner's worktree differs from the JVM's working directory.
 
 ## Changes in Detail
 
@@ -25,13 +30,11 @@ move-only namespace split.
   makes the separator behaviour testable without mutating the JVM
   environment.
 - `matching-command-path` is gone. The PATH scan in
-  `resolve-cli-command-path` now goes through `normalize-command-path`,
-  the same function the direct-path and `fs/which` branches already
-  used, so every branch absolutizes and the docstring's contract holds
-  everywhere. Removing the helper also keeps the file inside the
-  3-layer budget (SL003) — routing `matching-command-path` through
-  `normalize-command-path` at the same stratum would have pushed the
-  namespace to 4 layers.
+  `resolve-cli-command-path` now uses `normalize-command-path`, matching the
+  direct-path and `fs/which` branches. Every branch now fulfills the absolute-path
+  contract. Removing the helper also preserves the 3-layer budget (SL003).
+  Routing `matching-command-path` through `normalize-command-path` would have
+  pushed the namespace to 4 layers.
 - Docstring updated to state the absolutize guarantee explicitly.
 
 Behaviour note: results are absolutized, not canonicalized, matching
@@ -53,15 +56,13 @@ Run: `clojure -M:dev:test` over `paths-test` and `preflight-test`.
 pre-existing unrelated failure on main (the codex generic-path
 assertion, being fixed separately).
 
-The temp fixture sets the executable bit through `File/setExecutable` on
-Windows and POSIX permission bits elsewhere, and deletes its temp dir in
-a `finally` (both raised in review).
+The temp fixture uses `File/setExecutable` on Windows and POSIX permission
+bits elsewhere. It deletes its temp dir in `finally`; review raised both points.
 
 Regression check: reverting the absolutize fix makes
 `test-path-scan-fallback-returns-an-absolute-path` fail as expected.
-The separator test cannot fail on a POSIX runner — `File/pathSeparator`
-*is* `":"` there — so on Linux CI it pins intent rather than catching a
-revert; it becomes a live regression detector on Windows.
+The separator test cannot fail on POSIX: `File/pathSeparator` *is* `":"` there.
+On Linux CI it pins intent, not reversion detection. It detects regressions on Windows.
 
 ## Deployment Plan
 
@@ -69,7 +70,7 @@ No migration. Internal helper, no public API or wire-format change.
 
 ## Related Issues/PRs
 
-- #1662 — the move-only split that surfaced both comments.
+PR #1662 is the move-only split that surfaced both comments.
 
 ## Checklist
 

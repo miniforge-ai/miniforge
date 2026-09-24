@@ -1,3 +1,9 @@
+<!--
+  Title: Miniforge.ai
+  Author: Christopher Lester (christopher@miniforge.ai)
+  Copyright 2025-2026 Christopher Lester. Licensed under Apache 2.0.
+-->
+
 # refactor(cli): split workflow_runner/display.clj — extract display namespaces (rule 210, 1/2)
 
 ## Overview
@@ -58,23 +64,22 @@ Definitions moved verbatim except for:
 - `strip-ansi` and `humanize-keyword` change from `defn-` to `defn` — they are
   now consumed across a namespace boundary.
 - The `compact-*` line builders in `display-summary-lines` become public and
-  drop the `compact-` prefix (`compact-status-line` → `status-line`, and so on);
-  the namespace name now carries that qualifier, so `lines/status-line` reads
-  without stutter.
+  drop the `compact-` prefix (`compact-status-line` → `status-line`, and so on).
+  The namespace carries that qualifier, so `lines/status-line` reads without stutter.
 
 ## Testing Plan
 
 - `stratum-lint` (pin `bef8657`), plain and `--fix` on copies, over all ten new
-  files: clean, and `--fix` proposes **zero** changes — the hand-written
-  `^{:stratum n}` metadata and `Layer N` headings match the strata computed from
-  each file's reference graph, and every file is within the 3-stratum budget.
+  files: clean, and `--fix` proposes **zero** changes. The hand-written
+  `^{:stratum n}` metadata and `Layer N` headings match each file's reference graph.
+  Every file is within the 3-stratum budget.
 - `clj-kondo`: 0 errors, 0 warnings.
-- Behavioural equivalence harness: 152 paired comparisons of every moved public
-  function against its `display.clj` original — ANSI codes, `colorize` over 7
-  colors, `format-duration` at each boundary, `format-event-line` and
-  `format-demo-line` over 40 event shapes, the four extractors, compact-summary
-  assembly, all print functions captured via `with-out-str`, and
-  `start-progress!` driven over a real event stream. **0 mismatches.**
+- Behavioural equivalence harness: 152 paired comparisons against the
+  `display.clj` originals. Cases cover ANSI codes, 7 `colorize` colors,
+  `format-duration` boundaries, and 40 event shapes for `format-event-line` and
+  `format-demo-line`. They also cover the four extractors, compact-summary
+  assembly, all print functions via `with-out-str`, and `start-progress!` over
+  a real event stream. **0 mismatches.**
 - `display-test` + `display-output-test`: 74 tests, 168 assertions, 0 failures,
   0 errors. Neither namespace changes in this PR; the run proves the new files
   do not interfere.

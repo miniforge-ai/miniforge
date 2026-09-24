@@ -1,3 +1,9 @@
+<!--
+  Title: Miniforge.ai
+  Author: Christopher Lester (christopher@miniforge.ai)
+  Copyright 2025-2026 Christopher Lester. Licensed under Apache 2.0.
+-->
+
 # fix: retry the backend preflight probe before refusing the workflow
 
 ## Overview
@@ -11,10 +17,9 @@ claude -p 'Reply with exactly {"ok":true}' --output-format json --max-turns 1
 
 One timeout refused the whole run with `Backend preflight failed for claude`.
 
-This PR retries the probe a bounded number of times (default 3 attempts,
-2 s pause between failed attempts, both operator-tunable), logs every
-failed attempt as `:llm/preflight-retry` through the logging component,
-and keeps the anomaly data shape unchanged when every attempt fails.
+This PR adds bounded retries: 3 attempts with 2 s pauses by default, both
+operator-tunable. The logging component records every failed attempt as
+`:llm/preflight-retry`. Exhausting attempts preserves the anomaly data shape.
 
 Base branch: `main`. Depends on: nothing.
 
@@ -27,9 +32,8 @@ of a previous long run ending. A hand probe (`claude -p "reply ok"`)
 answered inside a minute every time.
 
 The failure mode is a CLI still releasing a prior session when the probe
-arrives. A single 30 s sample cannot distinguish that from a CLI that is
-down, so the preflight fails closed on a transient condition and the
-operator loses the run.
+arrives. A single 30 s sample cannot distinguish that from a stopped CLI.
+The preflight therefore fails closed on a transient condition, losing the run.
 
 ## Changes in Detail
 
@@ -53,13 +57,12 @@ because different hosts want different values.
 The retry loop pushed `preflight.clj` to a fourth layer (stratum-lint
 SL003), so it lives in its own namespace.
 
-1. Layer 0: `stderr-logger` (warn-and-above to stderr, used when the
-   runtime context carries no `:logger`; stderr so `quiet` callers that
-   parse stdout are not affected), `log-attempt-failed!` (one
-   `:llm/preflight-retry` warn entry with `:attempt`, `:attempts`,
-   `:elapsed-ms`, `:will-retry?`, `:backend`, `:cmd-path`, `:error-type`,
-   `:error-message`), and `pause-before-retry!` (an `InterruptedException`
-   during the pause is rethrown with the interrupt flag restored).
+1. Layer 0 has three primitives. `stderr-logger` supplies warn-and-above output
+   when the runtime lacks `:logger`; stderr preserves quiet callers' parsed stdout.
+   `log-attempt-failed!` emits a `:llm/preflight-retry` warning with `:attempt`,
+   `:attempts`, `:elapsed-ms`, `:will-retry?`, `:backend`, `:cmd-path`,
+   `:error-type`, and `:error-message`. `pause-before-retry!` rethrows
+   `InterruptedException` with the interrupt flag restored.
 2. Layer 1: `probe-backend-with-retries` runs `probe/run-backend-probe`
    up to the configured count, logs each failure, pauses between
    attempts, and returns the first success or the last failure.
@@ -74,10 +77,9 @@ SL003), so it lives in its own namespace.
    `context-logger`, which builds the stderr fallback only when the
    context carries none.
 
-Retries apply to every failed probe, not only timeouts. A non-timeout
-failure (non-zero exit, unexpected output) returns fast, so the extra
-cost is two short pauses; a timeout costs the full budget per attempt,
-which is the case the retry exists for.
+Retries apply to every failed probe, not only timeouts. Non-timeout failures
+(non-zero exit, unexpected output) return fast, adding two short pauses.
+Timeouts consume the full budget per attempt, motivating the retry.
 
 ### `preflight_test.clj`
 
@@ -89,10 +91,9 @@ which is the case the retry exists for.
    `:error-type "backend_preflight_timeout"`.
 2. New: `run-backend-preflight-succeeds-first-time-without-retry-log-test`.
    One call, no retry entries.
-3. Updated: `run-backend-preflight-fails-closed-on-bad-cli-health-test`
-   now stubs the process runner (production shape) instead of the probe
-   function, asserts all three attempts ran and were logged, and pins the
-   anomaly data key set.
+3. Updated: `run-backend-preflight-fails-closed-on-bad-cli-health-test` stubs
+   the process runner rather than the probe, matching production.
+   It checks three logged attempts and the anomaly data key set.
 4. The error-wrapper test pins the retry pause to zero so it stays fast
    now that a failed probe retries.
 

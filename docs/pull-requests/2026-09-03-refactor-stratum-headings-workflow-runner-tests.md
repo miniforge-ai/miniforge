@@ -1,3 +1,9 @@
+<!--
+  Title: Miniforge.ai
+  Author: Christopher Lester (christopher@miniforge.ai)
+  Copyright 2025-2026 Christopher Lester. Licensed under Apache 2.0.
+-->
+
 # refactor(workflow): stratum headings for the runner test namespaces (rule 210)
 
 ## Overview
@@ -30,11 +36,11 @@ Workflow brick (`components/workflow/test/ai/miniforge/workflow/`):
 
 Project `miniforge` (`projects/miniforge/test/ai/miniforge/workflow/`):
 
-1. `runner_integration_test.clj`
+`runner_integration_test.clj`.
 
-Verification that the diff is metadata and ordering only: for each file,
-the multiset of non-comment, non-blank lines with `^{:stratum n}` stripped
-is identical before and after.
+Verification compares each file's non-comment, non-blank line multiset with
+`^{:stratum n}` stripped. Identical multisets prove that only metadata and
+ordering changed.
 
 ## Testing Plan
 
