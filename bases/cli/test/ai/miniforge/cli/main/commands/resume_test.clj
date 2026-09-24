@@ -264,8 +264,8 @@
                                                   :workflow/pipeline [{:phase :plan}
                                                                       {:phase :implement}
                                                                       {:phase :verify}]}})
-                  sut/run-pipeline (fn [workflow _input run-opts]
-                                     (swap! captured assoc :workflow workflow :opts run-opts)
+                  sut/run-pipeline (fn [workflow input run-opts]
+                                     (swap! captured assoc :workflow workflow :input input :opts run-opts)
                                      {:execution/status :completed})]
       (sut/resume-workflow (random-uuid) (assoc opts :quiet true))
       @captured)))
@@ -286,6 +286,21 @@
     (testing "the snapshot is dropped, so the run adopts the caller's run id"
       (is (nil? (:resume-machine-snapshot opts)))
       (is (= run-id (:workflow-id opts) registered))))
+  (testing "the re-run starts from the earlier phases' results and the run's input"
+    (let [acting {:acting/principal "operator"}
+          {:keys [input opts]}
+          (resume-with {:completed-phases [:plan :implement :verify]
+                        :phase-results {:plan {:summary "plan"} :implement {:summary "old"}
+                                        :verify {:summary "old"}}
+                        :machine-snapshot {:execution/id (random-uuid)
+                                           :execution/input {:task "original"}
+                                           :execution/acting acting
+                                           :execution/current-phase :verify}}
+                       {:from-phase :implement})]
+      (is (= {:plan {:summary "plan"}} (:resume-phase-results opts))
+          "implement sees the plan; implement and verify start clean")
+      (is (= {:task "original"} input))
+      (is (= acting (:acting opts)))))
   (testing "a rewind does not carry the old run's DAG work into the re-run"
     (let [{:keys [opts]} (resume-with {:completed-phases [:plan :implement]
                                        :phase-results {:plan {} :implement {}}
