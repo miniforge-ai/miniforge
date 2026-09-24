@@ -8,8 +8,8 @@
 
 ## Overview
 
-Fourth of five stacked PRs. Adds the CLI policy evaluator. Every process that
-consumes operator interventions now registers the resume launcher (PR 3) and
+Fifth of six stacked PRs. Adds the CLI policy evaluator. Every process that
+consumes operator interventions now registers the resume launcher (PRs 3–4) and
 the evaluator. Before this, `:retry` and `:retry-from-phase` always failed
 `:no-resume-launcher`, and `:re-evaluate` failed `:no-policy-evaluator`.
 
@@ -26,7 +26,8 @@ both handles, or those verbs fail depending on which process won.
   runnerless `start-process-control!` both call it. A launcher that cannot be
   built on the calling thread is not registered, so it cannot clear one that
   was.
-- Each registered run records its origin, where a retry of it will run.
+- Each registered run records its origin, where a retry of it will run, with
+  its runner's pid; releasing the run drops the pid.
 - The consumer reads the same events root as the rest of the process. It is
   stopped at process exit, so a retry being verified records an outcome.
 - Policy evaluator: `evaluate-external-pr` over the packs installed under
@@ -41,9 +42,9 @@ both handles, or those verbs fail depending on which process won.
 
 - Evaluator: coordinates, every refusal, the real loader with a failing pack,
   and the real evaluator with a glob-scoped pack.
-- Wiring: both paths register the same handles, origin recording, the events
-  root, and a nil launcher not clearing a registered one.
-- Smoke against a temp `MINIFORGE_HOME` (with PR 5): a retry of a run with a
+- Wiring: both paths register the same handles, origin recording and release,
+  the events root, and a nil launcher not clearing a registered one.
+- Smoke against a temp `MINIFORGE_HOME` (with PR 6): a retry of a run with a
   recorded origin reached `verified`, the child running in the origin. A run
   without one failed `:resume-origin-unknown`. After the cursor was deleted,
   the redelivered retry reached `verified` again with the one child it had.
@@ -57,7 +58,8 @@ retry of them is refused `:resume-origin-unknown`.
 ## Related Issues/PRs
 
 Stack: `feat/resume-flags`, `feat/operator-async-resume`,
-`feat/resume-launcher`, this PR, `feat/operator-serve`.
+`feat/resume-launcher`, `feat/resume-launcher-hardening`, this PR,
+`feat/operator-serve`.
 
 ## Checklist
 

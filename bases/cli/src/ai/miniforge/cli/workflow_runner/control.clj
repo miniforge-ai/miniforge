@@ -76,11 +76,14 @@
     (agent/create-meta-loop-context operator-stream)))
 
 (defn ^{:stratum 0} release-workflow-control!
-  "Drop `workflow-id` from the live-runner registry. Interventions
-   aimed at it stop being applicable the moment the runner is gone —
-   which is the honest answer, not a silent no-op. Idempotent."
+  "Drop `workflow-id` from the live-runner registry, and this process
+   from its recorded origin. Interventions aimed at it stop being
+   applicable the moment the runner is gone — which is the honest
+   answer, not a silent no-op — and a retry no longer takes this process
+   for its live runner. Idempotent."
   [workflow-id]
-  (operator/deregister-live-runner! workflow-id))
+  (operator/deregister-live-runner! workflow-id)
+  (resume-records/release-origin! workflow-id))
 
 (defn- ^{:stratum 0} register-process-handles!
   "Register the process-scoped handles interventions act through. Called

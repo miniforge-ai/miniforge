@@ -48,6 +48,13 @@
         (reset! context-state original-context)
         (reset! consumer-state original-consumer)))))
 
+(deftest ^{:stratum 0} releasing-a-workflow-lets-go-of-its-origin
+  (let [calls (atom [])]
+    (with-redefs [operator/deregister-live-runner! #(swap! calls conj [:deregister %])
+                  resume-records/release-origin! #(swap! calls conj [:release-origin %])]
+      (sut/release-workflow-control! :workflow-a)
+      (is (= [[:deregister :workflow-a] [:release-origin :workflow-a]] @calls)))))
+
 ;------------------------------------------------------------------------------ Layer 1
 
 (deftest ^{:stratum 1} workflow-registration-starts-one-process-consumer
