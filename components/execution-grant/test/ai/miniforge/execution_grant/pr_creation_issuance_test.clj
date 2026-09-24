@@ -11,6 +11,10 @@
 
 (def ^{:stratum 0} now (Instant/parse "2026-09-23T00:00:00Z"))
 
+(def ^{:stratum 0} expected-ttl-seconds
+  "Pin the runtime-owned PR mutation window independently of the policy catalog."
+  (* 15 60))
+
 (def ^{:stratum 0} request
   {:workflow-run/id #uuid "b4bd9e4f-57ac-40fb-a724-26f4619a47fe"
    :workflow-run/status :running
@@ -48,7 +52,7 @@
            (:grant/principal g)))
     (is (= {:constraint/max-count 1} (:grant/constraints g)))
     (is (false? (:grant/delegable? g)))
-    (is (= (.plusSeconds now 900) (:grant/expires-at g)))))
+    (is (= (.plusSeconds now expected-ttl-seconds) (:grant/expires-at g)))))
 
 (deftest ^{:stratum 2} pr-issuance-refuses-incomplete-or-forged-input-test
   (testing "every scope binding is mandatory and nonempty"
@@ -71,12 +75,13 @@
 (deftest ^{:stratum 2} pr-grant-rechecks-scope-liveness-and-count-test
   (let [g (issue request)
         usage {:effect/scope scope :usage/count 1}
-        revoked (grant/revoke g :revocation/operator now)]
+        revoked (grant/revoke g :revocation/operator now)
+        after-expiry (.plusSeconds (:grant/expires-at g) 1)]
     (is (grant/authorized? (grant/authorize g usage now)))
     (is (= :absent (:grant/outcome (grant/authorize nil usage now))))
     (is (= :inactive (:grant/outcome (grant/authorize revoked usage now))))
     (is (= :inactive
-           (:grant/outcome (grant/authorize g usage (.plusSeconds now 901)))))
+           (:grant/outcome (grant/authorize g usage after-expiry))))
     (is (= :exceeded
            (:grant/outcome (grant/authorize g (assoc usage :usage/count 2) now))))
     (doseq [field (keys scope)]
