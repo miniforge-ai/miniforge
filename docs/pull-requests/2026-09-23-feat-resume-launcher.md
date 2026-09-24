@@ -8,8 +8,8 @@
 
 ## Overview
 
-Third of five stacked PRs. Adds the CLI resume launcher that `:retry` and
-`:retry-from-phase` interventions dispatch through. PR 4 registers it in every
+Third of six stacked PRs. Adds the CLI resume launcher that `:retry` and
+`:retry-from-phase` interventions dispatch through. PR 5 registers it in every
 consuming process.
 
 ## Motivation
@@ -23,7 +23,7 @@ and the launcher must know which events come from the child it started.
 
 - `resume_records.clj` keeps what the launcher needs on disk:
   - A run's origin (`origin.edn` beside its events), recorded when the run
-    registers for control (PR 4).
+    registers for control (PR 5).
   - The latest launch per workflow in
     `<events>/operator/.resume-launches/<workflow>.edn`: intervention, run id,
     pid and pid start instant. It is written before and after the spawn.
@@ -59,7 +59,7 @@ and the launcher must know which events come from the child it started.
 
 ## Deployment Plan
 
-Nothing is registered until PR 4. Runs started before PR 4 have no recorded
+Nothing is registered until PR 5. Runs started before PR 5 have no recorded
 origin, so a retry of them is refused `:resume-origin-unknown`.
 
 ## Known Limits
@@ -72,7 +72,8 @@ origin, so a retry of them is refused `:resume-origin-unknown`.
 ## Related Issues/PRs
 
 Stack: `feat/resume-flags`, `feat/operator-async-resume`, this PR,
-`feat/shared-process-handles`, `feat/operator-serve`.
+`feat/resume-launcher-hardening`, `feat/shared-process-handles`,
+`feat/operator-serve`.
 
 ## Checklist
 
