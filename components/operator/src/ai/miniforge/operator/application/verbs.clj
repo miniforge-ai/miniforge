@@ -50,16 +50,23 @@
 (defn- ^{:stratum 0} await-then-record!
   "On the verification pool: wait for the launched run to show itself
    (`:await-start!`), then `record!` the readback — or fail with what the
-   launcher reports. A throw here would vanish with the thread, so it is
-   recorded as `:application-error`."
+   launcher reports — and hand the outcome to the launcher's optional
+   `:settle!`. A wait the launcher reports as `:resume/pending?` (this
+   process is stopping) records nothing: the intervention stays
+   `:dispatched` for [[verify-launched-resume!]] to finish after a
+   restart. A throw here would vanish with the thread, so it is recorded
+   as `:application-error`."
   [stream dispatched launcher launch record!]
-  (try
-    (let [started ((:await-start! launcher) launch)]
-      (if (anomaly/anomaly? started)
-        (apply core/fail! stream dispatched (core/anomaly-failure started :resume-not-started))
-        (record!)))
-    (catch Exception _e
-      (core/fail! stream dispatched :application-error))))
+  (let [settle! (get launcher :settle! (constantly nil))]
+    (try
+      (let [started ((:await-start! launcher) launch)]
+        (cond
+          (:resume/pending? started) nil
+          (anomaly/anomaly? started) (settle! launch (apply core/fail! stream dispatched
+                                                            (core/anomaly-failure started :resume-not-started)))
+          :else (settle! launch (record!))))
+      (catch Exception _e
+        (settle! launch (core/fail! stream dispatched :application-error))))))
 
 (defn ^{:stratum 0} apply-no-effect-verb!
   "Verbs whose whole effect IS the supervisory record (Phase D mapping:
@@ -146,7 +153,9 @@
   [stream dispatched launcher verb interv]
   (let [events-dir (core/resume-events-dir launcher)
         prepared (when launcher (mechanism/prepare-resume events-dir interv verb))
-        plan (:resume/plan prepared)
+        ;; The dispatched intervention rides along so a launcher can keep
+        ;; it with its launch record and finish verifying after a restart.
+        plan (some-> (:resume/plan prepared) (assoc :resume/intervention dispatched))
         launch (when plan ((:launch! launcher) plan))
         run-id (mechanism/launched-run-id launch)
         record! #(record-resume-readback! stream dispatched events-dir verb plan run-id)]
@@ -159,3 +168,19 @@
                                 dispatched
                                 #(await-then-record! stream dispatched launcher launch record!))
       :else (record!))))
+
+(defn ^{:stratum 2} verify-launched-resume!
+  "Finish verifying a retry launched before this process (re)started:
+   `dispatched` is the intervention as it was left, `launch` what the
+   launcher recorded (with `:resume/run-id` and `:resume/from-phase`).
+   Runs on the verification pool like a fresh launch; nil when no
+   launcher that can wait is registered."
+  [stream dispatched launcher launch]
+  (when (:await-start! launcher)
+    (let [events-dir (core/resume-events-dir launcher)
+          verb (:intervention/type dispatched)
+          record! #(record-resume-readback! stream dispatched events-dir verb launch
+                                            (:resume/run-id launch))]
+      (core/submit-verification!
+       dispatched
+       #(await-then-record! stream dispatched launcher launch record!)))))

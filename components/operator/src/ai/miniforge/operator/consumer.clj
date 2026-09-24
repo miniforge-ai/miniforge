@@ -292,6 +292,17 @@
   ^java.io.File [operator-dir]
   (io/file operator-dir consumer-lock-file-name))
 
+(defn- ^{:stratum 1} declined-decision?
+  "True for a decision on an intervention this consumer parked but whose
+   ownership predicate now declines it (a retry, in a process that
+   leaves retries to a long-lived consumer). Left in place, like a
+   declined request, for a consumer that accepts it."
+  [acc accept? raw]
+  (when (= intervention-decision-event-type (:event/type raw))
+    (when-let [parked (get-in acc [:cursor :pending-interventions
+                                   (revive-uuid (:intervention/id raw))])]
+      (not (accept? parked)))))
+
 (defn- ^{:stratum 1} revive-request-event
   "Restore the typed identity fields `read-event-file`'s tag stripping
    flattened to strings. Without this, republishing the event would
@@ -537,6 +548,9 @@
                                                   {:file file-name})
                                       {:source/file file-name}))
                    (update remembered-file :anomalies inc))
+
+               (declined-decision? acc accept? raw)
+               acc
 
                (= intervention-decision-event-type (:event/type raw))
                (let [event (revive-request-event raw)]

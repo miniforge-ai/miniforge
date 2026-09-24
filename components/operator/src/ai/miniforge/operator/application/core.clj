@@ -58,7 +58,6 @@
    :resume-origin-unknown :application/resume-origin-unknown
    :resume-readback-mismatch :application/resume-readback-mismatch
    :resume-target-live :application/resume-target-live
-   :resume-unverified :application/resume-unverified
    :safe-mode-readback-mismatch :application/safe-mode-readback-mismatch
    :unknown-phase :application/unknown-phase
    :unresolved-workflow-type :application/unresolved-workflow-type})

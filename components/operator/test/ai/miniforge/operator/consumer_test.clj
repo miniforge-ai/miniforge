@@ -598,6 +598,23 @@
        "\"~:intervention/requested-by\":\"op@example.invalid\","
        "\"~:intervention/request-source\":\"~:tui\"}"))
 
+(deftest ^{:stratum 0} a-decision-on-a-declined-intervention-is-left-in-place
+  (let [events-dir (support/temp-events-dir)
+        stream (support/memory-stream)
+        intervention-id (random-uuid)
+        decline-meta-agent #(not= :meta-agent (:intervention/request-source %))]
+    (support/stage-operator-file! events-dir "a-request.json"
+                                  (es/serialize-event (support/meta-agent-request intervention-id)))
+    (consumer/consume-pass! {:events-dir events-dir :stream stream})
+    (support/stage-operator-file! events-dir "b-decision.json"
+                                  (es/serialize-event (support/decision-event intervention-id :approve)))
+    (is (= {:routed 0 :skipped 0 :anomalies 0}
+           (consumer/consume-pass! {:events-dir events-dir :stream stream :accept? decline-meta-agent}))
+        "a consumer that declines the parked intervention leaves its decision")
+    (is (= {:routed 1 :skipped 0 :anomalies 0}
+           (consumer/consume-pass! {:events-dir events-dir :stream stream}))
+        "one that accepts it decides it")))
+
 (deftest ^{:stratum 0} stop-lets-an-in-flight-pass-finish
   (let [executor (java.util.concurrent.Executors/newSingleThreadScheduledExecutor)
         finished (promise)]

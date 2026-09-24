@@ -108,10 +108,12 @@
    canonical target type is `:workflow`, but a retry restarts a run
    whose original runner is gone by definition — the live runner it
    would gate on is exactly the thing it will never have. So they are
-   process-global for ownership: whichever consumer sees one claims it,
-   and the application layer either dispatches through the registered
-   resume launcher or fails `:no-resume-launcher` — a visible red chip,
-   never a silent park."
+   process-global for ownership: whichever consumer accepts one claims
+   it, and the application layer either dispatches through the
+   registered resume launcher or fails `:no-resume-launcher` — a visible
+   red chip, never a silent park. A process owner that may exit while a
+   retry is being verified (a workflow runner) should not accept them:
+   see [[retry-intervention?]]."
   #{:retry :retry-from-phase})
 
 (def ^{:stratum 0} stop-verifications!
@@ -130,6 +132,17 @@
 (defn ^{:stratum 1} live-runner?
   [workflow-id]
   (contains? @live-runners (str workflow-id)))
+
+(defn ^{:stratum 1} retry-intervention?
+  "True for a request (or intervention) whose verb is a retry."
+  [event]
+  (contains? resume-ownership-verbs (:intervention/type event)))
+
+(defn ^{:stratum 1} verify-launched-resume!
+  "Finish verifying a retry launched before a restart, through the
+   registered resume launcher (see `verbs/verify-launched-resume!`)."
+  [stream dispatched launch]
+  (verbs/verify-launched-resume! stream dispatched @process-resume-launcher launch))
 
 (defn ^{:stratum 1} register-runner!
   "Register a live runner's control handles for `workflow-id`.
@@ -165,9 +178,11 @@
    the run id it started, or returns an anomaly whose data may name a
    `:failure/code`. Optional `:await-start!` — `(fn [launch] → launch
    or anomaly)` — blocks until the launched run shows itself; with it,
-   verification runs off the consumer's pass. `:events-dir` optionally
-   overrides the event root the resume context is reconstructed from
-   (default: `~/.miniforge/events`).
+   verification runs off the consumer's pass. Optional `:settle!` —
+   `(fn [launch final-intervention])` — is told the outcome, so a
+   launcher can tell a finished verification from one a restart must
+   resume. `:events-dir` optionally overrides the event root the resume
+   context is reconstructed from (default: `~/.miniforge/events`).
 
    Pass nil to clear. Without a registered launcher, retries fail
    `:no-resume-launcher` rather than parking."
@@ -179,7 +194,8 @@
   (if-not (or (nil? handles)
               (and (map? handles)
                    (fn? (:launch! handles))
-                   (or (nil? (:await-start! handles)) (fn? (:await-start! handles)))))
+                   (every? #(or (nil? (% handles)) (fn? (% handles)))
+                           [:await-start! :settle!])))
     (anomaly/anomaly
      :invalid-input
      (messages/t :application/invalid-resume-launcher)

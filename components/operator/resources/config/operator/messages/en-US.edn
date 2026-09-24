@@ -113,9 +113,6 @@
   :application/resume-target-live
   "The workflow still has a live runner; retry it once that runner stops"
 
-  :application/resume-unverified
-  "Stopped before the resumed run could be verified; it may still be starting (output: {log})"
-
   :application/resume-readback-mismatch
   "The resumed run is not observable in the event history"
 

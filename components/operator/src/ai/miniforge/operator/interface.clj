@@ -266,6 +266,17 @@
   "True when a live runner in this process owns `workflow-id`."
   application/live-runner?)
 
+(def ^{:stratum 0} retry-intervention?
+  "True for a request whose verb is a retry: an ownership predicate for
+   a process that may exit mid-verification can decline these."
+  application/retry-intervention?)
+
+(def ^{:stratum 0} verify-launched-resume!
+  "`(verify-launched-resume! stream dispatched launch)`: finish verifying
+   a retry launched before this process (re)started, on the verification
+   pool, through the registered resume launcher."
+  application/verify-launched-resume!)
+
 (def ^{:stratum 0} deregister-live-runner!
   "Remove a workflow id from the live-runner registry. Idempotent."
   application/deregister-runner!)

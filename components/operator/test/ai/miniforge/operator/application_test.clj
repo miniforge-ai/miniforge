@@ -772,29 +772,40 @@
         (is (= :exited (get-in failed [:intervention/details :failure/reason])))
         (is (re-find #"exited.*/tmp/r\.log" (:intervention/reason failed)))))))
 
-(deftest ^{:stratum 2} stopping-interrupts-a-pending-verification-and-records-it
+(deftest ^{:stratum 2} a-verification-cut-short-by-a-stop-is-finished-after-a-restart
   (let [events-dir (temp-events-dir)
         workflow-id (random-uuid)
-        waiting (promise)]
+        resumed-id (random-uuid)
+        waiting (promise)
+        settled (atom [])
+        launcher {:launch! (fn [_] {:resume/run-id resumed-id})
+                  :await-start! (fn [launch]
+                                  (deliver waiting true)
+                                  (try (Thread/sleep 60000) launch
+                                       (catch InterruptedException _ {:resume/pending? true})))
+                  :settle! (fn [_launch final] (swap! settled conj (:intervention/state final)))
+                  :events-dir events-dir}]
     (stage-two-phase-run! events-dir workflow-id)
+    (stage-two-phase-run! events-dir resumed-id)
     (with-redefs [consumer/stop-drain-ms 50]
       (with-resume-launcher
-        {:launch! (fn [_] {:resume/run-id (random-uuid)})
-         :await-start! (fn [_]
-                         (deliver waiting true)
-                         (try (Thread/sleep 60000) {:resume/started? true}
-                              (catch InterruptedException _
-                                (anomaly/anomaly :unavailable "interrupted"
-                                                 {:failure/code :resume-unverified}))))
-         :events-dir events-dir}
+        launcher
         (fn []
-          (let [stream (memory-stream)]
-            (application/apply-intervention! stream (approved :retry (str workflow-id)))
+          (let [stream (memory-stream)
+                dispatched (application/apply-intervention! stream (approved :retry (str workflow-id)))]
             @waiting
             (application/stop-verifications!)
-            (is (= :resume-unverified
-                   (failure-code (last (events-of-type stream consumer/state-changed-event-type))))
-                "the outcome is recorded before stop returns")))))))
+            (testing "a stop records nothing: the retry stays dispatched and unsettled"
+              (is (= [:dispatched] (state-trail stream)))
+              (is (empty? @settled)))
+            (testing "after a restart the recorded launch is verified and settled"
+              (with-resume-launcher
+                (assoc launcher :await-start! identity)
+                (fn []
+                  (application/verify-launched-resume! stream dispatched {:resume/run-id resumed-id})
+                  (application/stop-verifications!)
+                  (is (= [:dispatched :applied :verified] (state-trail stream)))
+                  (is (= [:verified] @settled)))))))))))
 
 (deftest ^{:stratum 2} an-evaluator-refusal-is-not-an-invalid-verdict
   (with-policy-evaluator
