@@ -31,8 +31,16 @@ events of the child it started. `mf resume` accepted none of these.
   result and PR infos) is not carried.
 - A fresh run context (`create-context`) now starts holding
   `:resume-phase-results`, so `run-pipeline` keeps them without a snapshot.
-  Before this it dropped them, so the rewind lost the plan result. A resume
-  of a run recorded only as events now also gets its recorded results.
+  Before this it dropped them, so the rewind lost the plan result.
+- Only checkpointed phase results reach the run. A run with no checkpoint
+  has only telemetry rebuilt from events (outcome, duration), which no phase
+  can build on, so a resume of it passes none, as before this change.
+- A rewind that would keep a phase with no checkpointed result is refused
+  (`:anomalies/unsupported`, `:resume/reason :phase-results-not-checkpointed`,
+  naming the phases) instead of running it without its inputs. A rewind to
+  the first phase keeps nothing and always runs.
+- The workflow identity is resolved from the run as recorded, so a rewind of
+  a run with no recorded spec still finds its workflow in the snapshot.
 - A rewind also drops the old run's DAG tasks and artifacts. They are only
   used when the plan phase runs its DAG, where they would skip re-planned
   tasks that share an id.
@@ -60,6 +68,10 @@ events of the child it started. `mf resume` accepted none of these.
   pass-through, and option checks on a completed run.
 - `resume-test`: a rewind hands the runner the input, acting authority and
   only the earlier phases' results.
+- `resume-test`: a rewound checkpoint-only run keeps its workflow identity;
+  event telemetry never reaches the run; a rewind keeping a phase with no
+  checkpointed result is refused with its reason and phases; an events-only
+  rewind to the first phase runs.
 - `runner-test`: a run's started event carries the correlation id its caller
   passed, the evidence PR 3's launcher waits for.
 - `runner-test`: a resume without a snapshot starts at the pipeline's first
