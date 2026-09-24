@@ -257,14 +257,31 @@
       (doto (Thread. ^Runnable runnable "miniforge-operator-consumer")
         (.setDaemon true)))))
 
-(defn ^{:stratum 0} stop!
-  "Stop a poller started by [[start!]]. Idempotent."
-  [{:keys [^ScheduledExecutorService executor]}]
-  (when executor
-    (.shutdownNow executor))
-  nil)
+(def ^{:stratum 0} stop-drain-ms
+  "How long [[stop!]] waits for an in-flight pass, before and again after
+   interrupting it."
+  10000)
+
+(defn ^{:stratum 0} drain-executor!
+  "Shut `executor` down: running work gets `drain-ms` to finish, is then
+   interrupted, and gets `drain-ms` again to record what the interrupt
+   cut short."
+  [^java.util.concurrent.ExecutorService executor drain-ms]
+  (.shutdown executor)
+  (when-not (.awaitTermination executor drain-ms TimeUnit/MILLISECONDS)
+    (.shutdownNow executor)
+    (.awaitTermination executor drain-ms TimeUnit/MILLISECONDS)))
 
 ;------------------------------------------------------------------------------ Layer 1
+
+(defn ^{:stratum 1} stop!
+  "Stop a poller started by [[start!]]: the pass in flight stops before
+   its next file and drains (see [[drain-executor!]]); no new pass
+   starts. Idempotent."
+  [{:keys [executor stopping]}]
+  (when stopping (reset! stopping true))
+  (when executor (drain-executor! executor stop-drain-ms))
+  nil)
 
 ;; ── Processed cursor — the idempotency manifest ────────────────────────────
 (defn- ^{:stratum 1} cursor-file
@@ -338,8 +355,8 @@
 (defn ^{:stratum 2} read-cursor
   "Read the processed cursor from `operator-dir`. A missing or
    unreadable cursor yields the empty cursor. Consumption is therefore
-   at-least-once: a crash between routing and the end-of-pass cursor
-   write re-delivers on the next pass. Downstream is built for that —
+   at-least-once: a crash between routing a file and its cursor write
+   re-delivers it on the next pass. Downstream is built for that —
    the accumulator upserts by intervention id, and D-3 application
    mechanisms are idempotent (pausing a paused workflow is a no-op)."
   [operator-dir]
@@ -429,6 +446,23 @@
 
 ;------------------------------------------------------------------------------ Layer 3
 
+;; Pass loop
+(defn- ^{:stratum 3} reduce-persisting
+  "`reduce` of `step` over `files`, writing the cursor after every file
+   that changed it — an effect a file triggered (a launched retry) is
+   recorded before the next file runs, not at the end of the pass — and
+   stopping before the next file once `stop?` is true."
+  [operator-dir stop? step init files]
+  (reduce (fn [acc f]
+            (if (stop?)
+              (reduced acc)
+              (let [next-acc (step acc f)]
+                (when (not= (:cursor acc) (:cursor next-acc))
+                  (write-cursor! operator-dir (:cursor next-acc)))
+                next-acc)))
+          init
+          files))
+
 (defn- ^{:stratum 3} route-decision!
   "Apply an operator verdict to a parked intervention.
 
@@ -482,13 +516,14 @@
 
 ;; Consumption pass
 (defn- ^{:stratum 4} consume-operator-dir!
-  [operator-dir stream apply! accept? stream-for]
+  [operator-dir stream apply! accept? stream-for stop?]
   (let [cursor (read-cursor operator-dir)
         files (->> (list-event-files operator-dir)
                    (remove #(contains? (:processed-files cursor)
                                        (.getName ^java.io.File %))))
         result
-        (reduce
+        (reduce-persisting
+         operator-dir stop?
          (fn [acc ^java.io.File f]
            (let [file-name (.getName f)
                  raw (es/read-event-file f)
@@ -577,8 +612,6 @@
                        (update remembered :anomalies inc))))))))
          {:routed 0 :skipped 0 :anomalies 0 :cursor cursor}
          files)]
-    (when (seq files)
-      (write-cursor! operator-dir (:cursor result)))
     (dissoc result :cursor)))
 
 ;------------------------------------------------------------------------------ Layer 5
@@ -599,12 +632,15 @@
    - :stream-for — optional `(fn [event] stream-or-nil)` router. A
                    returned stream receives the governed request and
                    lifecycle; nil falls back to :stream.
+   - :stop?      — optional `(fn [] bool)`; true ends the pass before
+                   its next file.
 
    The file lock serializes cursor read → effect → cursor write across
-   processes. Returns {:routed <n> :skipped <n> :anomalies <n>}.
-   Files and accepted intervention ids recorded in the cursor are never
-   routed twice across passes and process restarts."
-  [{:keys [events-dir stream apply! accept? stream-for]}]
+   processes; the cursor is written after each file. Returns
+   {:routed <n> :skipped <n> :anomalies <n>}. Files and accepted
+   intervention ids recorded in the cursor are never routed twice across
+   passes and process restarts."
+  [{:keys [events-dir stream apply! accept? stream-for stop?]}]
   (let [operator-dir (if events-dir
                        (es/operator-dir events-dir)
                        (es/operator-dir))
@@ -645,7 +681,8 @@
                                  stream
                                  apply!
                                  accept-request?
-                                 destination-for)
+                                 destination-for
+                                 (or stop? (constantly false)))
           empty-pass-result)
         (catch Exception e
           (if (overlapping-file-lock? e)
@@ -665,9 +702,10 @@
    control path for the rest of the process."
   [{:keys [interval-ms] :as opts}]
   (let [executor (Executors/newSingleThreadScheduledExecutor (daemon-thread-factory))
+        stopping (atom false)
         task (fn []
                (try
-                 (consume-pass! opts)
+                 (consume-pass! (assoc opts :stop? #(deref stopping)))
                  (catch Exception e
                    (binding [*out* *err*]
                      (println (str "WARNING: operator-event consumer pass failed: "
@@ -677,4 +715,4 @@
                              initial-poll-delay-ms
                              (long (or interval-ms default-poll-interval-ms))
                              TimeUnit/MILLISECONDS)
-    {:executor executor}))
+    {:executor executor :stopping stopping}))
