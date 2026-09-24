@@ -50,6 +50,17 @@
    [[:pr/repo NonBlankString]
     [:pr/number pos-int?]]))
 
+(def ^{:stratum 1} PrCreateRequest
+  "Closed request binding one PR's target, revision and serialized payload."
+  (request-schema
+   :effect/pr-create
+   :preflight/pr-create-readiness
+   [[:pr/repo NonBlankString]
+    [:pr/base NonBlankString]
+    [:pr/branch NonBlankString]
+    [:pr/head-sha [:re #"(?:[0-9a-f]{40}|[0-9a-f]{64})"]]
+    [:pr/payload-hash [:re #"[0-9a-f]{64}"]]]))
+
 (def ^{:stratum 1} DeployRequest
   "Closed request for one exact Kubernetes deployment.
 
@@ -71,5 +82,6 @@
   [:tuple
    [:multi {:dispatch :effect/class}
     [:effect/merge MergeRequest]
+    [:effect/pr-create PrCreateRequest]
     [:effect/deploy DeployRequest]]
    inst?])

@@ -49,6 +49,10 @@
   {:effect/merge
    (effect-policy (* 15 60) [:pr/repo :pr/number])
 
+   :effect/pr-create
+   (effect-policy (* 15 60)
+                  [:pr/repo :pr/base :pr/branch :pr/head-sha :pr/payload-hash])
+
    :effect/deploy
    (effect-policy (* 30 60)
                   [:kustomize-dir :context :namespace :deployment-name])})
