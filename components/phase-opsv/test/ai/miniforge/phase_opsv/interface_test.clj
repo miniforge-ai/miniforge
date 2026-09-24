@@ -70,8 +70,8 @@
       (is (= (content-hash/content-hash
               (:opsv/operational-policy verification))
              (:opsv/policy-hash verification))))
-    (testing "a promoted PR has no direct external effects"
-      (is (= :pr-only
+    (testing "a requested PR remains a recommendation without governed execution"
+      (is (= :recommend-only
              (get-in actuation
                      [:opsv/actuation-record :effective-actuation-mode])))
       (is (= [] (get-in actuation

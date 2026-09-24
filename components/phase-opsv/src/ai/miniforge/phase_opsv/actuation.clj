@@ -23,40 +23,53 @@
 
 ;------------------------------------------------------------------------------ Layer 0
 
-(defn- ^{:stratum 0} input-value
-  [ctx key]
-  (get-in ctx [:execution/input key]))
+(defn- ^{:stratum 0} closed-gate
+  [gate-id]
+  {:gate/id gate-id :gate/passed? false})
 
-(def ^{:stratum 0} ^:private default-gate-results
-  [{:gate/id :instrumentation :gate/passed? false}
-   {:gate/id :environment :gate/passed? false}
-   {:gate/id :blast-radius :gate/passed? false}
-   {:gate/id :abort :gate/passed? false}
-   {:gate/id :actuation :gate/passed? false}
-   {:gate/id :evidence-completeness :gate/passed? false}])
+(defn- ^{:stratum 0} actuation-record
+  [requested-mode effective-mode]
+  {:requested-actuation-mode requested-mode
+   :effective-actuation-mode effective-mode
+   :governed-effects []
+   :pr-refs []
+   :apply-refs []
+   :postcondition-artifact-refs []
+   :rollback {:status :not-required :artifact-refs []}})
+
+(defn- ^{:stratum 0} attach-record
+  [verified record]
+  (if (anomaly/anomaly? record)
+    record
+    (assoc verified :opsv/actuation-record record)))
 
 ;------------------------------------------------------------------------------ Layer 1
 
 (defn- ^{:stratum 1} decision-input
   [ctx verification]
-  (let [pack (input-value ctx :opsv/experiment-pack)]
-    {:requested-actuation-mode (:experiment-pack/actuation-intent pack)
+  (let [input (:execution/input ctx)
+        requested-mode (get-in input [:opsv/experiment-pack
+                                      :experiment-pack/actuation-intent])
+        gate-results (mapv closed-gate opsv/opsv-gate-ids)
+        safe-mode? (true? (:opsv/safe-mode? input))]
+    {:requested-actuation-mode requested-mode
      :verification-passed? (:passed? verification)
-     :gate-results (let [results (input-value ctx :opsv/gate-results)]
-                     (if (and (vector? results)
-                              (= (count opsv/opsv-gate-ids) (count results))
-                              (= (set opsv/opsv-gate-ids) (set (map :gate/id results)))
-                              (every? #(and (map? %)
-                                            (boolean? (:gate/passed? %)))
-                                      results))
-                       (mapv #(select-keys % [:gate/id :gate/passed?]) results)
-                       default-gate-results))
-     :safe-mode? (true? (input-value ctx :opsv/safe-mode?))
-     :pr-capability-valid? (true? (input-value ctx :opsv/pr-capability-valid?))
-     :apply-capability-valid? (true? (input-value ctx :opsv/apply-capability-valid?))
-     :rollback-verified? (true? (input-value ctx :opsv/rollback-verified?))
-     :postconditions-configured?
-     (true? (input-value ctx :opsv/postconditions-configured?))}))
+     :gate-results gate-results
+     :safe-mode? safe-mode?
+     ;; This executor cannot perform governed effects. Input flags are not grants.
+     :pr-capability-valid? false
+     :apply-capability-valid? false
+     :rollback-verified? false
+     :postconditions-configured? false}))
+
+(defn- ^{:stratum 1} recommendation
+  [decision]
+  (let [effective-mode (opsv/effective-actuation decision)
+        requested-mode (:requested-actuation-mode decision)]
+    (if (anomaly/anomaly? effective-mode)
+      effective-mode
+      (opsv/validate-actuation
+       (actuation-record requested-mode effective-mode)))))
 
 ;------------------------------------------------------------------------------ Layer 2
 
@@ -65,20 +78,9 @@
   (if (anomaly/anomaly? verified)
     verified
     (let [verification (:opsv/verification-result verified)
-          effective-mode (opsv/effective-actuation
-                          (decision-input ctx verification))]
-      (if (anomaly/anomaly? effective-mode)
-        effective-mode
-        (let [record {:requested-actuation-mode
-                      (get-in ctx [:execution/input :opsv/experiment-pack
-                                   :experiment-pack/actuation-intent])
-                      :effective-actuation-mode effective-mode
-                      :governed-effects []
-                      :pr-refs []
-                      :apply-refs []
-                      :postcondition-artifact-refs []
-                      :rollback {:status :not-required :artifact-refs []}}
-              validated (opsv/validate-actuation record)]
-          (if (anomaly/anomaly? validated)
-            validated
-            (assoc verified :opsv/actuation-record validated)))))))
+          decision (decision-input ctx verification)
+          record (recommendation decision)]
+      (attach-record verified record))))
+
+(comment
+  (closed-gate :actuation))
