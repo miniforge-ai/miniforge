@@ -27,6 +27,12 @@
    three-and-a-half times. `mf operator serve` runs the consumer half
    alone, so interventions are consumed while no run is active.
 
+   Retries are left to `mf operator serve`: a runner's consumer declines
+   them (and decisions on them), because a runner exits when its run
+   does and a retry it launched would lose its verification with it. A
+   serve that starts again finishes verifying the retries a previous one
+   launched but never saw through.
+
    Every consuming process registers the same process handles (the
    degradation manager, the resume launcher, the policy evaluator):
    retry verbs and process-global targets are claimed by whichever
@@ -96,6 +102,20 @@
     (operator/register-resume-launcher! launcher))
   (operator/register-policy-evaluator! policy-evaluator/evaluate))
 
+(defn- ^{:stratum 0} runner-accepts?
+  "The ownership predicate of a runner's consumer: the process-wide one,
+   without retries."
+  [event]
+  (and (operator/live-intervention-target? event)
+       (not (operator/retry-intervention? event))))
+
+(defn- ^{:stratum 0} resume-pending-verifications!
+  "Hand every retry launched here but never seen through back to the
+   verification pool."
+  [ctx]
+  (doseq [launch (resume-records/pending-launches)]
+    (operator/verify-launched-resume! (:event-stream ctx) (:resume/intervention launch) launch)))
+
 (defn- ^{:stratum 0} stop-at-exit!
   "Stop `consumer` when the process exits — a runner exits with its
    consumer running — so a retry still being verified records an outcome
@@ -123,7 +143,7 @@
 
 ;; Consumer lifecycle
 (defn- ^{:stratum 1} ensure-operator-consumer!
-  [ctx]
+  [ctx accept?]
   ;; Double-checked locking (see meta-loop-context!). The inner re-check
   ;; matters more here: without it a race would `start-operator-consumer!`
   ;; twice, leaving a second poller thread orphaned — its handle
@@ -136,7 +156,7 @@
                            {:events-dir (es/default-events-dir)
                             :stream (:event-stream ctx)
                             :apply! operator/apply-intervention!
-                            :accept? operator/live-intervention-target?
+                            :accept? accept?
                             :stream-for operator/live-intervention-stream})
                       stop-at-exit!))))))
 
@@ -166,7 +186,7 @@
     (register-process-handles! ctx)
     (operator/register-live-runner! workflow-id handles)
     (try
-      (ensure-operator-consumer! ctx)
+      (ensure-operator-consumer! ctx runner-accepts?)
       (catch Throwable e
         (operator/deregister-live-runner! workflow-id)
         (throw e)))))
@@ -175,9 +195,12 @@
   "Make this process an operator-channel consumer without a runner of its
    own (`mf operator serve`). Same context, process handles, and consumer
    options as [[register-workflow-control!]], so workflow-targeted
-   pause/resume/cancel are still left to the live runner that owns them.
-   Returns the consumer handle."
+   pause/resume/cancel are still left to the live runner that owns them —
+   except that this consumer takes retries, and first resumes verifying
+   the ones a previous server left `:dispatched`. Returns the consumer
+   handle."
   []
   (let [ctx (meta-loop-context!)]
     (register-process-handles! ctx)
-    (ensure-operator-consumer! ctx)))
+    (resume-pending-verifications! ctx)
+    (ensure-operator-consumer! ctx operator/live-intervention-target?)))

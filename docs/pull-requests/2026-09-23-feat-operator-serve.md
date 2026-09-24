@@ -8,7 +8,7 @@
 
 ## Overview
 
-Last of five stacked PRs. Adds `mf operator serve`, a long-lived headless
+Last of six stacked PRs. Adds `mf operator serve`, a long-lived headless
 consumer of `<home>/events/operator/`.
 
 ## Motivation
@@ -23,12 +23,16 @@ and re-evaluations sat unread.
 
 | Process | Consumer | Claims |
 |---|---|---|
-| A workflow runner (`mf run`, chain, plan executor, `mf resume`) | one per process, started with the first registered run, stopped at exit | its own runs' pause/resume/cancel; process-global verbs; retries |
-| `mf operator serve` | one per process, stopped on SIGINT/SIGTERM | process-global verbs; retries; never another process's pause/resume/cancel |
+| A workflow runner (`mf run`, chain, plan executor, `mf resume`) | one per process, started with the first registered run, stopped at exit | its own runs' pause/resume/cancel; process-global verbs except retries |
+| `mf operator serve` | one per process, stopped on SIGINT/SIGTERM | process-global verbs, retries included; never another process's pause/resume/cancel |
 
 Both go through `workflow-runner.control`: the same meta-loop context,
-degradation manager, resume launcher, policy evaluator and consumer options.
-Passes are serialized across processes by `<events>/operator/.consumer.lock`.
+degradation manager, resume launcher, policy evaluator and consumer options,
+except the ownership predicate. A runner's consumer declines retries, and
+decisions on parked retries. A runner exits when its run does, and a retry it
+launched would lose its verification. With no server running, a retry request
+is not picked up, which the console shows. Passes are serialized across
+processes by `<events>/operator/.consumer.lock`.
 
 ## Changes in Detail
 
@@ -47,6 +51,9 @@ Passes are serialized across processes by `<events>/operator/.consumer.lock`.
     stop.
   - `<home>` is `MINIFORGE_HOME`, else `~/.miniforge`: the home the consumer's
     events directory is under.
+  - On start it hands every launch record never settled back to the
+    verification pool. A server stopped or killed while a retry was starting
+    therefore finishes verifying it on its next start.
 - `mf operator` is its own group: `control-plane` is the dashboard's HTTP
   client.
 
@@ -56,10 +63,15 @@ Passes are serialized across processes by `<events>/operator/.consumer.lock`.
   server, clean stop, lock reuse.
 - Serve with its real consumer: an acknowledge request written with no run
   active reaches `verified`, and the stop the shutdown hook runs stops it.
+- Wiring: a runner's consumer declines retries, the server's takes them, and a
+  starting server resumes pending launches.
 - Smoke against a temp `MINIFORGE_HOME`: a retry of a run with a recorded origin
   reached `verified`, with the child running in the origin directory. A run
   without one failed `:resume-origin-unknown`. After the cursor was deleted,
   the redelivered retry reached `verified` again with the one child it had.
+  With a child slow to start, the server was killed mid-wait, and the retry
+  stayed `:dispatched`. On restart the same child's run was verified and its
+  launch record settled.
 - Pre-commit hook per commit.
 
 ## Deployment Plan
@@ -75,7 +87,8 @@ This is unchanged across processes.
 ## Related Issues/PRs
 
 Stack: `feat/resume-flags`, `feat/operator-async-resume`,
-`feat/resume-launcher`, `feat/shared-process-handles`, this PR.
+`feat/resume-launcher`, `feat/resume-launcher-hardening`,
+`feat/shared-process-handles`, this PR.
 
 ## Checklist
 
