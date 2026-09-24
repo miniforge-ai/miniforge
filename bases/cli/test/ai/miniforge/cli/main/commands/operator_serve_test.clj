@@ -19,6 +19,7 @@
   (:require
    [ai.miniforge.cli.main.commands.operator-serve :as sut]
    [ai.miniforge.cli.workflow-runner.control :as control]
+   [ai.miniforge.event-stream.interface :as es]
    [cheshire.core :as json]
    [clojure.java.io :as io]
    [clojure.string :as str]
@@ -34,6 +35,39 @@
 (defn- ^{:stratum 0} eventually
   [pred]
   (some true? (repeatedly 500 #(do (Thread/sleep 10) (boolean (pred))))))
+
+(def ^{:stratum 0} acknowledge-request
+  (str "{\"~:event/type\":\"~:supervisory/intervention-requested\","
+       "\"~:intervention/id\":\"~u" (random-uuid) "\","
+       "\"~:intervention/type\":\"~:acknowledge\","
+       "\"~:intervention/target-type\":\"~:attention\","
+       "\"~:intervention/target-id\":\"attention-1\","
+       "\"~:intervention/requested-by\":\"op@example.invalid\","
+       "\"~:intervention/request-source\":\"~:tui\"}"))
+
+(defn- ^{:stratum 0} intervention-states
+  [stream]
+  (keep :intervention/state (filter #(= :supervisory/intervention-state-changed (:event/type %))
+                                    (es/get-events stream))))
+
+(defn- ^{:stratum 0} with-fresh-process-control
+  "Fresh control singletons for `f`, events under `events-dir`, streams
+   without file sinks, and no exit hook left behind."
+  [events-dir f]
+  (let [context-state (var-get #'control/meta-loop-ctx)
+        consumer-state (var-get #'control/operator-consumer-handle)
+        originals [@context-state @consumer-state]
+        create-stream es/create-event-stream]
+    (reset! context-state nil)
+    (reset! consumer-state nil)
+    (try
+      (with-redefs [es/default-events-dir (constantly events-dir)
+                    es/create-event-stream (fn [& _] (create-stream {:sinks []}))
+                    control/stop-at-exit! (constantly nil)]
+        (f consumer-state))
+      (finally
+        (reset! context-state (first originals))
+        (reset! consumer-state (second originals))))))
 
 ;------------------------------------------------------------------------------ Layer 1
 
@@ -65,3 +99,25 @@
           (is (not (.exists discovery)))
           (is (= 0 (binding [*out* (java.io.StringWriter.)]
                      (sut/serve-cmd home (constantly nil))))))))))
+
+(deftest ^{:stratum 1} serve-consumes-with-its-real-consumer-test
+  (let [home (temp-home)
+        events-dir (io/file home "events")
+        release (promise)]
+    (with-fresh-process-control
+      events-dir
+      (fn [consumer-state]
+        (let [server (future (binding [*out* (java.io.StringWriter.)]
+                               (sut/serve-cmd home #(deref release))))]
+          (is (eventually #(some? @consumer-state)))
+          (spit (doto (io/file events-dir "operator" "ack.json") io/make-parents) acknowledge-request)
+          (testing "an intervention written with no run active is carried to verified"
+            (is (eventually #(= :verified (last (intervention-states
+                                                 (:event-stream (control/meta-loop-context!)))))))
+            (is (= [:approved :dispatched :applied :verified]
+                   (intervention-states (:event-stream (control/meta-loop-context!))))))
+          (testing "the same stop the shutdown hook runs stops the real consumer"
+            (deliver release :stop)
+            (is (= 0 (deref server 30000 :timeout)))
+            (is (nil? @consumer-state))
+            (is (not (.exists (io/file home sut/discovery-file-name))))))))))
