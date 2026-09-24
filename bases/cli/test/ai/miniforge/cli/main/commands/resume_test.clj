@@ -248,8 +248,7 @@
   [reconstructed opts]
   (let [captured (atom {})]
     (with-redefs [wr/reconstruct-context (fn [_ _] reconstructed)
-                  sut/resolve-resume-workflow (fn [_] {:workflow-type :canonical-sdlc
-                                                       :workflow-version "1.0.0"})
+                  selection-config/resolve-selection-profile (fn [_] :configured-default)
                   context/create-llm-client (fn [_ _ _] :llm-client)
                   es/create-event-stream (fn [] :event-stream)
                   supervisory/attach! (fn [_] nil)
@@ -258,7 +257,8 @@
                   control/release-workflow-control! (fn [_] nil)
                   main-display/print-info (fn [& _] nil)
                   main-display/print-error (fn [& _] nil)
-                  sut/load-workflow (fn [& _]
+                  sut/load-workflow (fn [workflow-type workflow-version _]
+                                      (swap! captured assoc :loaded [workflow-type workflow-version])
                                       {:workflow {:workflow/id :canonical-sdlc
                                                   :workflow/version "1.0.0"
                                                   :workflow/pipeline [{:phase :plan}
@@ -317,6 +317,7 @@
                        :workspace/commit-sha commit-sha :workflow/phase phase})
           history {:completed-phases [:plan :implement]
                    :phase-results {:plan {} :implement {}}
+                   :machine-snapshot {:execution/id (random-uuid)}
                    :workspace-checkpoint implement-checkpoint}
           workspace-after (fn [from-phase]
                             (with-redefs [sut/read-event-file
@@ -330,6 +331,33 @@
   (testing "a phase the run never recorded is refused"
     (is (thrown-with-msg? clojure.lang.ExceptionInfo #"never recorded"
                           (resume-with {:completed-phases [:plan]} {:from-phase :release})))))
+
+(deftest ^{:stratum 1} rewind-uses-only-checkpointed-state-test
+  (let [checkpointed {:completed-phases [:plan :implement]
+                      :phase-results {:plan {:status :completed} :implement {:status :completed}}
+                      :machine-snapshot {:execution/id (random-uuid)
+                                         :execution/workflow-id :snapshot-workflow
+                                         :execution/workflow-version "2.0.0"}}
+        events-only {:completed-phases [:plan :implement]
+                     :phase-results {:plan {:outcome :success} :implement {:outcome :success}}}
+        refusal (fn [reconstructed from-phase]
+                  (try+ (resume-with reconstructed {:from-phase from-phase})
+                        :ran
+                        (catch [:anomaly/category :anomalies/unsupported] refused
+                          (select-keys refused [:resume/reason :resume/phases]))))]
+    (testing "a rewound checkpoint-only run keeps its workflow identity"
+      (is (= [:snapshot-workflow "2.0.0"] (:loaded (resume-with checkpointed {:from-phase :implement})))))
+    (testing "results rebuilt from events are telemetry, never handed to the run"
+      (is (nil? (get-in (resume-with events-only {}) [:opts :resume-phase-results]))))
+    (testing "a rewind keeping a phase with no checkpointed result is refused"
+      (is (= {:resume/reason :phase-results-not-checkpointed :resume/phases [:plan]}
+             (refusal events-only :implement)))
+      (is (= {:resume/reason :phase-results-not-checkpointed :resume/phases [:plan]}
+             (refusal (update checkpointed :phase-results dissoc :plan) :implement))))
+    (testing "an events-only rewind to the first phase keeps nothing and runs"
+      (let [{:keys [workflow opts]} (resume-with events-only {:from-phase :plan})]
+        (is (= [{:phase :plan} {:phase :implement} {:phase :verify}] (:workflow/pipeline workflow)))
+        (is (nil? (:resume-phase-results opts)))))))
 
 (deftest ^{:stratum 1} run-id-option-test
   (let [snapshot-id (random-uuid)

@@ -334,7 +334,9 @@
            optionally :logger, adopted as :execution/logger, and
            optionally :resume-phase-results: a resume with no FSM
            snapshot, such as an `mf resume --from-phase` rewind, starts
-           holding the results of the phases already done)
+           holding the checkpointed results of the phases already done.
+           The caller passes only checkpointed results, never the
+           telemetry rebuilt from events, which no phase can build on)
 
    Returns execution context map with FSM state initialized."
   [workflow input opts]
