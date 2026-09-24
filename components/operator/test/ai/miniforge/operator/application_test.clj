@@ -724,22 +724,77 @@
         (is (empty? (policy-evals stream))
             "a throwing evaluator writes no PolicyEvaluation")))))
 
-;------------------------------------------------------------------------------ Typed launcher and evaluator refusals
-(deftest ^{:stratum 2} launcher-refusals-carry-their-code-and-details
+;------------------------------------------------------------------------------ Retry verification off the consumer's pass
+(deftest ^{:stratum 2} an-awaited-retry-is-verified-off-the-pass
+  (let [events-dir (temp-events-dir)
+        workflow-id (random-uuid)
+        resumed-id (random-uuid)
+        release (promise)]
+    (stage-two-phase-run! events-dir workflow-id)
+    (stage-two-phase-run! events-dir resumed-id)
+    (with-resume-launcher
+      {:launch! (fn [_plan] {:resume/run-id resumed-id})
+       :await-start! (fn [launch] @release launch)
+       :events-dir events-dir}
+      (fn []
+        (let [stream (memory-stream)
+              result (application/apply-intervention! stream (approved :retry (str workflow-id)))]
+          (is (= :dispatched (:intervention/state result)) "the pass is not held while the run starts")
+          (deliver release :started)
+          (application/stop-verifications!)
+          (is (= [:dispatched :applied :verified] (state-trail stream))))))))
+
+(deftest ^{:stratum 2} launcher-failures-carry-their-code-and-reason
   (let [events-dir (temp-events-dir)
         workflow-id (random-uuid)
         refusal (fn [code] (anomaly/anomaly :conflict "refused" {:failure/code code
+                                                                 :failure/reason :exited
+                                                                 :failure/log "/tmp/r.log"
                                                                  :resume/pid 42}))
         run! (fn [launcher]
                (with-resume-launcher
                  (assoc launcher :events-dir events-dir)
-                 #(application/apply-intervention! (memory-stream) (approved :retry (str workflow-id)))))]
+                 (fn []
+                   (let [stream (memory-stream)]
+                     (application/apply-intervention! stream (approved :retry (str workflow-id)))
+                     (application/stop-verifications!)
+                     (last (events-of-type stream consumer/state-changed-event-type))))))]
     (stage-two-phase-run! events-dir workflow-id)
     (testing "a refusal at launch names its code; one the lifecycle does not know is not trusted"
       (is (= :resume-in-flight (failure-code (run! {:launch! (fn [_] (refusal :resume-in-flight))}))))
       (is (= 42 (get-in (run! {:launch! (fn [_] (refusal :resume-in-flight))})
                         [:intervention/details :resume/pid])))
-      (is (= :resume-not-dispatched (failure-code (run! {:launch! (fn [_] (refusal :made-up))})))))))
+      (is (= :resume-not-dispatched (failure-code (run! {:launch! (fn [_] (refusal :made-up))})))))
+    (testing "a run that never starts fails with the launcher's reason and log"
+      (let [failed (run! {:launch! (fn [_] {:resume/run-id (random-uuid)})
+                          :await-start! (fn [_] (refusal :resume-not-started))})]
+        (is (= :resume-not-started (failure-code failed)))
+        (is (= :exited (get-in failed [:intervention/details :failure/reason])))
+        (is (re-find #"exited.*/tmp/r\.log" (:intervention/reason failed)))))))
+
+(deftest ^{:stratum 2} stopping-interrupts-a-pending-verification-and-records-it
+  (let [events-dir (temp-events-dir)
+        workflow-id (random-uuid)
+        waiting (promise)]
+    (stage-two-phase-run! events-dir workflow-id)
+    (with-redefs [consumer/stop-drain-ms 50]
+      (with-resume-launcher
+        {:launch! (fn [_] {:resume/run-id (random-uuid)})
+         :await-start! (fn [_]
+                         (deliver waiting true)
+                         (try (Thread/sleep 60000) {:resume/started? true}
+                              (catch InterruptedException _
+                                (anomaly/anomaly :unavailable "interrupted"
+                                                 {:failure/code :resume-unverified}))))
+         :events-dir events-dir}
+        (fn []
+          (let [stream (memory-stream)]
+            (application/apply-intervention! stream (approved :retry (str workflow-id)))
+            @waiting
+            (application/stop-verifications!)
+            (is (= :resume-unverified
+                   (failure-code (last (events-of-type stream consumer/state-changed-event-type))))
+                "the outcome is recorded before stop returns")))))))
 
 (deftest ^{:stratum 2} an-evaluator-refusal-is-not-an-invalid-verdict
   (with-policy-evaluator

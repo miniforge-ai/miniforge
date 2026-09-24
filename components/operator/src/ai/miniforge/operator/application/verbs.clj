@@ -47,6 +47,20 @@
     (core/advance! stream applied intervention/verify readback)
     (core/fail! stream applied mismatch-code)))
 
+(defn- ^{:stratum 0} await-then-record!
+  "On the verification pool: wait for the launched run to show itself
+   (`:await-start!`), then `record!` the readback — or fail with what the
+   launcher reports. A throw here would vanish with the thread, so it is
+   recorded as `:application-error`."
+  [stream dispatched launcher launch record!]
+  (try
+    (let [started ((:await-start! launcher) launch)]
+      (if (anomaly/anomaly? started)
+        (apply core/fail! stream dispatched (core/anomaly-failure started :resume-not-started))
+        (record!)))
+    (catch Exception _e
+      (core/fail! stream dispatched :application-error))))
+
 (defn ^{:stratum 0} apply-no-effect-verb!
   "Verbs whose whole effect IS the supervisory record (Phase D mapping:
    `supervisory-state only`). Dispatch → applied → verified with no
@@ -124,7 +138,11 @@
    Every rejection is typed and lands before the launcher runs — a
    request naming a phase the run never reached must not be guessed
    into a plan and started. A launcher refusal fails with the code and
-   details it names."
+   details it names. A launcher with `:await-start!` returns once the
+   run is spawned; the wait for the run to show itself, and the
+   readback, run on the verification pool so neither the consumer's
+   pass nor its cross-process lock is held. The intervention stays
+   `:dispatched` until then."
   [stream dispatched launcher verb interv]
   (let [events-dir (core/resume-events-dir launcher)
         prepared (when launcher (mechanism/prepare-resume events-dir interv verb))
@@ -137,4 +155,7 @@
       (:failure/code prepared) (core/fail! stream dispatched (:failure/code prepared))
       (nil? run-id) (apply core/fail! stream dispatched
                            (core/anomaly-failure launch :resume-not-dispatched))
+      (:await-start! launcher) (core/submit-verification!
+                                dispatched
+                                #(await-then-record! stream dispatched launcher launch record!))
       :else (record!))))

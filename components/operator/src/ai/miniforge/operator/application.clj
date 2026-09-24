@@ -71,6 +71,7 @@
    [ai.miniforge.anomaly.interface :as anomaly]
    [ai.miniforge.operator.application.core :as core]
    [ai.miniforge.operator.application.verbs :as verbs]
+   [ai.miniforge.operator.consumer :as consumer]
    [ai.miniforge.operator.intervention :as intervention]
    [ai.miniforge.operator.messages :as messages]))
 
@@ -113,6 +114,17 @@
    never a silent park."
   #{:retry :retry-from-phase})
 
+(def ^{:stratum 0} stop-verifications!
+  "Drain the retry-verification pool (see `application.core`)."
+  core/stop-verifications!)
+
+(defn ^{:stratum 0} stop-consumer!
+  "Stop a consumer started with this layer as its `:apply!`: its poller
+   drains first, then the retry verifications its passes started."
+  [handle]
+  (consumer/stop! handle)
+  (core/stop-verifications!))
+
 ;------------------------------------------------------------------------------ Layer 1
 
 (defn ^{:stratum 1} live-runner?
@@ -150,9 +162,12 @@
    `handles` must carry `:launch!` — `(fn [plan] → {:resume/run-id …})`
    — which starts a run from the resume plan
    [[ai.miniforge.operator.mechanism/resume-plan]] builds and reports
-   the run id it started. `:events-dir` optionally overrides the event
-   root the resume context is reconstructed from (default:
-   `~/.miniforge/events`).
+   the run id it started, or returns an anomaly whose data may name a
+   `:failure/code`. Optional `:await-start!` — `(fn [launch] → launch
+   or anomaly)` — blocks until the launched run shows itself; with it,
+   verification runs off the consumer's pass. `:events-dir` optionally
+   overrides the event root the resume context is reconstructed from
+   (default: `~/.miniforge/events`).
 
    Pass nil to clear. Without a registered launcher, retries fail
    `:no-resume-launcher` rather than parking."
@@ -162,7 +177,9 @@
   ;; and only surface later as `:resume-not-dispatched` — reject the
   ;; misconfiguration here, where the message names it.
   (if-not (or (nil? handles)
-              (and (map? handles) (fn? (:launch! handles))))
+              (and (map? handles)
+                   (fn? (:launch! handles))
+                   (or (nil? (:await-start! handles)) (fn? (:await-start! handles)))))
     (anomaly/anomaly
      :invalid-input
      (messages/t :application/invalid-resume-launcher)
@@ -220,9 +237,10 @@
    D-3b).
 
    Returns the final intervention map (state `:verified` or `:failed`),
-   or nil when a lifecycle step was itself rejected (never expected
-   from `:approved` input; nil keeps the caller honest rather than
-   fabricating a state)."
+   the `:dispatched` one when a retry is still being verified on the
+   verification pool, or nil when a lifecycle step was itself rejected
+   (never expected from `:approved` input; nil keeps the caller honest
+   rather than fabricating a state)."
   [stream interv]
   (let [verb (:intervention/type interv)
         entry (get @live-runners (str (:intervention/target-id interv)))]

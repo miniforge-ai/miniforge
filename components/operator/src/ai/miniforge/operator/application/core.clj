@@ -68,6 +68,11 @@
    `:failure/code`, so the operator sees why and where to look."
   [:failure/reason :failure/log :resume/run-id :resume/pid])
 
+(defonce ^{:stratum 0} ^:private verification-pool
+  ;; Work that waits on something slow — a launched run becoming
+  ;; observable — runs here, off the consumer's pass and its lock.
+  (atom nil))
+
 (def ^{:stratum 0} ^:private expected-degradation-mode-by-verb
   {:force-safe-mode :safe-mode
    :exit-safe-mode :nominal})
@@ -101,6 +106,16 @@
   [launcher]
   (or (:events-dir launcher) (es/default-events-dir)))
 
+(defn- ^{:stratum 0} new-verification-pool
+  "A cached pool of named daemon threads: pending verification never
+   keeps the process alive; the process owner drains it on the way out."
+  ^java.util.concurrent.ExecutorService []
+  (java.util.concurrent.Executors/newCachedThreadPool
+   (reify java.util.concurrent.ThreadFactory
+     (newThread [_ runnable]
+       (doto (Thread. ^Runnable runnable "miniforge-operator-verification")
+         (.setDaemon true))))))
+
 ;------------------------------------------------------------------------------ Layer 1
 
 (defn ^{:stratum 1} failure-message
@@ -122,6 +137,22 @@
         code (:failure/code data)]
     [(if (contains? failure-message-key-by-code code) code default-code)
      (select-keys data failure-detail-keys)]))
+
+(defn ^{:stratum 1} submit-verification!
+  "Run `f` on the verification pool and return `result` — the
+   intervention as it stands while `f` finishes it."
+  [result f]
+  (let [pool (swap! verification-pool #(or % (new-verification-pool)))]
+    (.execute ^java.util.concurrent.ExecutorService pool ^Runnable f)
+    result))
+
+(defn ^{:stratum 1} stop-verifications!
+  "Drain the verification pool like the consumer's poller (see
+   `consumer/drain-executor!`); a later submission starts a new pool.
+   Idempotent."
+  []
+  (when-let [pool (first (reset-vals! verification-pool nil))]
+    (consumer/drain-executor! pool consumer/stop-drain-ms)))
 
 (defn ^{:stratum 1} advance!
   "Apply lifecycle `step-fn` to `interv`, publish the transition, and
