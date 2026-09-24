@@ -4,4 +4,5 @@
   :pr/verification-heading "## Verification"
   :pr/verified "Verification passed. Normal review and policy checks still apply."
   :pr/ineligible "Verification failed or is incomplete. This draft candidate is ineligible for merge."
-  :pr/rollback-heading "## Rollback instructions"}}
+  :pr/rollback-heading "## Rollback instructions"
+  :pr/governance "## Governed effect\n\nWorkflow: {workflow-id}\n\nEffect transaction: {effect-id}\n\nConsult this transaction in the evidence bundle for its execution grant and allowing decision envelope."}}

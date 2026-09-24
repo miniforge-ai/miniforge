@@ -28,7 +28,9 @@
                (msg/t :pr/evidence {:bundle-id bundle-id})
                (msg/t :pr/verification-heading) (msg/t status-key)
                (content-hash/canonical-edn verification)
-               (msg/t :pr/rollback-heading) (:opsv/rollback-instructions input)])))
+               (msg/t :pr/rollback-heading) (:opsv/rollback-instructions input)
+               (msg/t :pr/governance {:workflow-id (:workflow-run/id input)
+                                      :effect-id (:effect/id input)})])))
 
 ;------------------------------------------------------------------------------ Layer 1
 

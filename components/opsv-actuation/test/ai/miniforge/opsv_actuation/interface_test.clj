@@ -50,7 +50,8 @@
     (is (= (:workflow-run/id candidate) (:workflow-run/id proposal)))
     (is (= (:effect/id candidate) (:effect/id proposal)))
     (is (= (:pr/title candidate) (:pr/title proposal)))
-    (doseq [field [:opsv/policy-diff :opsv/evidence-bundle-id
+    (doseq [field [:workflow-run/id :effect/id
+                  :opsv/policy-diff :opsv/evidence-bundle-id
                   :opsv/rollback-instructions]]
       (is (str/includes? body (str (get candidate field)))))
     (is (str/includes? body "latency"))
@@ -93,6 +94,14 @@
         (is (not (anomaly/anomaly? proposal)))
         (is (= sha (:pr/head-sha proposal)))
         (is (not= (:pr/payload-hash original) (:pr/payload-hash proposal)))))))
+
+(deftest ^{:stratum 1} governance-reference-is-part-of-the-authorized-payload-test
+  (let [original (actuation/prepare-pr candidate)]
+    (doseq [field [:workflow-run/id :effect/id]
+            :let [replacement #uuid "00000000-0000-0000-0000-000000000702"
+                  changed (actuation/prepare-pr (assoc candidate field replacement))]]
+      (is (str/includes? (:pr/body changed) (str replacement)))
+      (is (not= (:pr/payload-hash original) (:pr/payload-hash changed))))))
 
 (deftest ^{:stratum 1} payload-content-is-not-template-code-test
   (testing "operator content containing placeholder syntax is preserved"
