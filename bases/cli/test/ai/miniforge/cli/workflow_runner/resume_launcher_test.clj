@@ -35,16 +35,34 @@
                   app-config/logs-dir (constantly (str (io/file home "logs")))]
       (f))))
 
+(defn- ^{:stratum 0} write-event!
+  "An event under `run-id` carrying `correlation-id`, as the resumed run's
+   lifecycle events do."
+  [run-id correlation-id]
+  (let [f (io/file (records/run-dir run-id) (str (random-uuid) ".json"))]
+    (io/make-parents f)
+    (spit f (es/serialize-event {:event/id (random-uuid)
+                                 :event/type :workflow/started
+                                 :event/timestamp (java.util.Date.)
+                                 :event/sequence-number 0
+                                 :workflow/id run-id
+                                 :workflow-run/correlation-id correlation-id}))))
+
 (defn- ^{:stratum 0} retry-plan
   [workflow-id]
   {:resume/workflow-id workflow-id :resume/intervention-id (random-uuid)})
 
 (defn- ^{:stratum 0} deps
   "Launcher deps whose spawn records its call and reports this JVM's pid
-   (a live process)."
-  [{:keys [spawned] :or {spawned (atom [])}}]
+   (a live process), with a short deadline."
+  [{:keys [spawned alive? killed]
+    :or {spawned (atom []) alive? true killed (atom [])}}]
   {:command ["mf"]
-   :spawn! (fn [argv _log-file dir] (swap! spawned conj [argv dir]) (.pid (java.lang.ProcessHandle/current)))})
+   :spawn! (fn [argv _log-file dir] (swap! spawned conj [argv dir]) (.pid (java.lang.ProcessHandle/current)))
+   :alive? (constantly alive?)
+   :kill! #(swap! killed conj %)
+   :timeout-ms 200
+   :poll-ms 10})
 
 (defn- ^{:stratum 0} failure-code
   [result]
@@ -100,6 +118,51 @@
         (with-redefs [operator/live-runner? (constantly true)]
           (is (= :resume-target-live
                  (failure-code (sut/launch! (deps {}) (retry-plan workflow-id))))))))))
+
+(deftest ^{:stratum 1} only-this-childs-event-counts-as-started-test
+  (with-temp-home
+    (fn []
+      (let [run-id (random-uuid)
+            intervention-id (random-uuid)
+            launch {:resume/run-id run-id
+                    :resume/intervention-id (str intervention-id)
+                    :resume/pid 4242
+                    :resume/launched-at-ms (System/currentTimeMillis)
+                    :resume/log "/tmp/resume.log"}
+            killed (atom [])]
+        (write-event! run-id (random-uuid))
+        (testing "another child's event is not evidence; silent at the deadline is killed"
+          (let [result (sut/await-start! (deps {:killed killed}) launch)]
+            (is (= :resume-not-started (failure-code result)))
+            (is (= :timeout (get-in result [:anomaly/data :failure/reason])))
+            (is (= "/tmp/resume.log" (get-in result [:anomaly/data :failure/log])))
+            (is (= [4242] @killed))))
+        (testing "an exited child did not start and is not killed"
+          (reset! killed [])
+          (is (= :exited (get-in (sut/await-start! (deps {:alive? false :killed killed}) launch)
+                                 [:anomaly/data :failure/reason])))
+          (is (empty? @killed)))
+        (testing "an event carrying this intervention id is the start"
+          (write-event! run-id intervention-id)
+          (is (= launch (sut/await-start! (deps {}) launch))))))))
+
+(deftest ^{:stratum 1} an-interrupted-wait-leaves-the-child-running-test
+  (with-temp-home
+    (fn []
+      (let [killed (atom [])
+            launch {:resume/run-id (random-uuid)
+                    :resume/intervention-id (str (random-uuid))
+                    :resume/pid 4242
+                    :resume/launched-at-ms (System/currentTimeMillis)}
+            result (promise)
+            waiter (Thread. #(deliver result (sut/await-start!
+                                              (assoc (deps {:killed killed}) :timeout-ms 60000)
+                                              launch)))]
+        (.start waiter)
+        (Thread/sleep 50)
+        (.interrupt waiter)
+        (is (= :resume-unverified (failure-code (deref result 5000 nil))))
+        (is (empty? @killed))))))
 
 (deftest ^{:stratum 1} the-child-is-detached-and-gets-its-argv-verbatim-test
   (with-temp-home

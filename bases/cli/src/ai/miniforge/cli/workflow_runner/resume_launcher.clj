@@ -27,13 +27,27 @@
    terminal Ctrl-C or hangup aimed at this process does not reach it,
    and it keeps running when this process exits. What it refuses, and
    why a redelivered intervention never spawns twice, is in
-   `resume-records`."
+   `resume-records`.
+
+   `:await-start!` runs on the operator's verification pool, off the
+   pass: it waits (bounded) for an event from this child — one carrying
+   the intervention id as its correlation id. A child that exits first
+   did not start; one still silent at the deadline is killed and did not
+   start; an interrupted wait (the process stopping) leaves the child
+   running and reports the start as unverified."
   (:require
    [ai.miniforge.cli.workflow-runner.resume-records :as records]
    [clojure.java.io :as io]
    [clojure.string :as str]))
 
 ;------------------------------------------------------------------------------ Layer 0
+
+(def ^{:stratum 0} observe-timeout-ms
+  "How long a launched run gets, from its launch, to write its first
+   event (startup takes seconds)."
+  60000)
+
+(def ^{:stratum 0} ^:private observe-poll-ms 250)
 
 (def ^{:stratum 0} ^:private spawn-script
   ;; $1 is the log file; the rest is the command. `&` makes it an
@@ -63,6 +77,21 @@
                                  "--run-id" (str run-id)
                                  "--correlation-id" (str (:resume/intervention-id plan))])
       from-phase (into ["--from-phase" (name from-phase)]))))
+
+(defn- ^{:stratum 0} await-outcome
+  "Poll to `:observed`, `:exited`, `:timeout` (past `deadline-ms`), or
+   `:interrupted`."
+  [{:keys [started? alive? deadline-ms poll-ms]}]
+  (try
+    (loop []
+      (cond
+        (started?) :observed
+        ;; Re-check after death: a quick child can write and exit
+        ;; between the two reads.
+        (not (alive?)) (if (started?) :observed :exited)
+        (> (System/currentTimeMillis) deadline-ms) :timeout
+        :else (do (Thread/sleep ^long poll-ms) (recur))))
+    (catch InterruptedException _ :interrupted)))
 
 ;------------------------------------------------------------------------------ Layer 1
 
@@ -95,6 +124,25 @@
       (nil? origin) (records/failure :not-found :resume-origin-unknown {})
       :else (records/start! plan #(spawn! (resume-argv command plan %1) %2 origin)))))
 
+(defn ^{:stratum 1} await-start!
+  "`:await-start!`: the launch once its child has shown itself, else a
+   failure anomaly naming why, with the child's log."
+  [{:keys [alive? kill! timeout-ms poll-ms]} launch]
+  (let [{:resume/keys [run-id pid pid-started intervention-id launched-at-ms log]} launch
+        outcome (await-outcome
+                 {:started? #(records/correlated-event? run-id intervention-id launched-at-ms)
+                  ;; No pid recorded (a crash between spawn and record):
+                  ;; only the evidence or the deadline can decide.
+                  :alive? #(or (nil? pid) (alive? pid pid-started))
+                  :deadline-ms (+ launched-at-ms timeout-ms)
+                  :poll-ms poll-ms})
+        details {:failure/reason outcome :failure/log log :resume/run-id run-id :resume/pid pid}]
+    (when (= :timeout outcome) (kill! pid))
+    (case outcome
+      :observed launch
+      :interrupted (records/failure :unavailable :resume-unverified details)
+      (records/failure :unavailable :resume-not-started details))))
+
 ;------------------------------------------------------------------------------ Layer 2
 
 (defn ^{:stratum 2} launcher
@@ -108,4 +156,11 @@
                                     (.orElse (.command info) nil)
                                     arguments
                                     *command-line-args*)]
-      {:launch! (partial launch! {:command prefix :spawn! spawn-detached!})})))
+      (let [deps {:command prefix
+                  :spawn! spawn-detached!
+                  :alive? records/process-running?
+                  :kill! records/destroy-process!
+                  :timeout-ms observe-timeout-ms
+                  :poll-ms observe-poll-ms}]
+        {:launch! (partial launch! deps)
+         :await-start! (partial await-start! deps)}))))
