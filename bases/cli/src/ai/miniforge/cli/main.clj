@@ -630,7 +630,10 @@
     :fn resume-cmd
     :args->opts [:workflow-id]
     :spec {:workflow-id {:alias :w}
-           :quiet       {:coerce :boolean :alias :q}}}
+           :quiet       {:coerce :boolean :alias :q}
+           :run-id      {}
+           :correlation-id {}
+           :from-phase  {:coerce :keyword}}}
 
    ;; Status command
    {:cmds ["status"]

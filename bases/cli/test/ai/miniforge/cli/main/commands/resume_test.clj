@@ -241,7 +241,155 @@
         (is (= workflow-id
                (get-in @run-pipeline-opts [:resume-machine-snapshot :execution/id])))))))
 
+(defn- ^{:stratum 0} resume-with
+  "Run `resume-workflow` over `reconstructed` with every runtime seam
+   stubbed; returns what reached `run-pipeline` and the control
+   registration."
+  [reconstructed opts]
+  (let [captured (atom {})]
+    (with-redefs [wr/reconstruct-context (fn [_ _] reconstructed)
+                  selection-config/resolve-selection-profile (fn [_] :configured-default)
+                  context/create-llm-client (fn [_ _ _] :llm-client)
+                  es/create-event-stream (fn [] :event-stream)
+                  supervisory/attach! (fn [_] nil)
+                  correlator/attach! (fn [_] nil)
+                  control/register-workflow-control! (fn [id _ _] (swap! captured assoc :registered id))
+                  control/release-workflow-control! (fn [_] nil)
+                  main-display/print-info (fn [& _] nil)
+                  main-display/print-error (fn [& _] nil)
+                  sut/load-workflow (fn [workflow-type workflow-version _]
+                                      (swap! captured assoc :loaded [workflow-type workflow-version])
+                                      {:workflow {:workflow/id :canonical-sdlc
+                                                  :workflow/version "1.0.0"
+                                                  :workflow/pipeline [{:phase :plan}
+                                                                      {:phase :implement}
+                                                                      {:phase :verify}]}})
+                  sut/run-pipeline (fn [workflow input run-opts]
+                                     (swap! captured assoc :workflow workflow :input input :opts run-opts)
+                                     {:execution/status :completed})]
+      (sut/resume-workflow (random-uuid) (assoc opts :quiet true))
+      @captured)))
+
 ;------------------------------------------------------------------------------ Layer 1
+
+(deftest ^{:stratum 1} from-phase-rewinds-and-drops-the-snapshot-test
+  (let [snapshot-id (random-uuid)
+        reconstructed {:completed-phases [:plan :implement]
+                       :phase-results {:plan {} :implement {}}
+                       :machine-snapshot {:execution/id snapshot-id
+                                          :execution/current-phase :verify}}
+        run-id (random-uuid)
+        {:keys [workflow opts registered]}
+        (resume-with reconstructed {:from-phase :implement :run-id (str run-id)})]
+    (testing "the requested phase and everything after it run again"
+      (is (= [{:phase :implement} {:phase :verify}] (:workflow/pipeline workflow))))
+    (testing "the snapshot is dropped, so the run adopts the caller's run id"
+      (is (nil? (:resume-machine-snapshot opts)))
+      (is (= run-id (:workflow-id opts) registered))))
+  (testing "the re-run starts from the earlier phases' results and the run's input"
+    (let [acting {:acting/principal "operator"}
+          {:keys [input opts]}
+          (resume-with {:completed-phases [:plan :implement :verify]
+                        :phase-results {:plan {:summary "plan"} :implement {:summary "old"}
+                                        :verify {:summary "old"}}
+                        :machine-snapshot {:execution/id (random-uuid)
+                                           :execution/input {:task "original"}
+                                           :execution/acting acting
+                                           :execution/current-phase :verify}}
+                       {:from-phase :implement})]
+      (is (= {:plan {:summary "plan"}} (:resume-phase-results opts))
+          "implement sees the plan; implement and verify start clean")
+      (is (= {:task "original"} input))
+      (is (= acting (:acting opts)))))
+  (testing "a rewind does not carry the old run's DAG work into the re-run"
+    (let [{:keys [opts]} (resume-with {:completed-phases [:plan :implement]
+                                       :phase-results {:plan {} :implement {}}
+                                       :completed-dag-tasks #{:task-a}
+                                       :completed-dag-artifacts [{:artifact/id "a"}]}
+                                      {:from-phase :plan})]
+      (is (= #{} (:pre-completed-dag-tasks opts)))
+      (is (= [] (:pre-completed-artifacts opts)))))
+  (testing "a rewind restores only a workspace checkpoint from a phase before it"
+    (let [plan-checkpoint {:branch "after-plan" :commit-sha "p" :phase :plan}
+          implement-checkpoint {:branch "after-implement" :commit-sha "i" :phase :implement}
+          persisted (fn [{:keys [branch commit-sha phase]}]
+                      {:event/type :workspace/persisted :workspace/branch branch
+                       :workspace/commit-sha commit-sha :workflow/phase phase})
+          history {:completed-phases [:plan :implement]
+                   :phase-results {:plan {} :implement {}}
+                   :machine-snapshot {:execution/id (random-uuid)}
+                   :workspace-checkpoint implement-checkpoint}
+          workspace-after (fn [from-phase]
+                            (with-redefs [sut/read-event-file
+                                          (constantly (mapv persisted [plan-checkpoint implement-checkpoint]))]
+                              (get-in (resume-with history {:from-phase from-phase})
+                                      [:opts :resume-workspace])))]
+      (is (= "after-plan" (:branch (workspace-after :implement)))
+          "not the checkpoint the re-run phase itself produced")
+      (is (nil? (workspace-after :plan))
+          "no checkpoint before the rewind point: a fresh workspace")))
+  (testing "a phase the run never recorded is refused"
+    (is (thrown-with-msg? clojure.lang.ExceptionInfo #"never recorded"
+                          (resume-with {:completed-phases [:plan]} {:from-phase :release})))))
+
+(deftest ^{:stratum 1} rewind-uses-only-checkpointed-state-test
+  (let [checkpointed {:completed-phases [:plan :implement]
+                      :phase-results {:plan {:status :completed} :implement {:status :completed}}
+                      :machine-snapshot {:execution/id (random-uuid)
+                                         :execution/workflow-id :snapshot-workflow
+                                         :execution/workflow-version "2.0.0"}}
+        events-only {:completed-phases [:plan :implement]
+                     :phase-results {:plan {:outcome :success} :implement {:outcome :success}}}
+        refusal (fn [reconstructed from-phase]
+                  (try+ (resume-with reconstructed {:from-phase from-phase})
+                        :ran
+                        (catch [:anomaly/category :anomalies/unsupported] refused
+                          (select-keys refused [:resume/reason :resume/phases]))))]
+    (testing "a rewound checkpoint-only run keeps its workflow identity"
+      (is (= [:snapshot-workflow "2.0.0"] (:loaded (resume-with checkpointed {:from-phase :implement})))))
+    (testing "results rebuilt from events are telemetry, never handed to the run"
+      (is (nil? (get-in (resume-with events-only {}) [:opts :resume-phase-results]))))
+    (testing "a rewind keeping a phase with no checkpointed result is refused"
+      (is (= {:resume/reason :phase-results-not-checkpointed :resume/phases [:plan]}
+             (refusal events-only :implement)))
+      (is (= {:resume/reason :phase-results-not-checkpointed :resume/phases [:plan]}
+             (refusal (update checkpointed :phase-results dissoc :plan) :implement))))
+    (testing "an events-only rewind to the first phase keeps nothing and runs"
+      (let [{:keys [workflow opts]} (resume-with events-only {:from-phase :plan})]
+        (is (= [{:phase :plan} {:phase :implement} {:phase :verify}] (:workflow/pipeline workflow)))
+        (is (nil? (:resume-phase-results opts)))))))
+
+(deftest ^{:stratum 1} run-id-option-test
+  (let [snapshot-id (random-uuid)
+        snapshotted {:completed-phases [:plan]
+                     :phase-results {:plan {}}
+                     :machine-snapshot {:execution/id snapshot-id}}]
+    (testing "a snapshot resumes under its own id, which --run-id may repeat"
+      (is (= snapshot-id (:workflow-id (:opts (resume-with snapshotted {})))))
+      (is (= snapshot-id (:registered (resume-with snapshotted {:run-id (str snapshot-id)})))))
+    (testing "a --run-id that disagrees with the snapshot, or is not a UUID, is refused"
+      (is (thrown-with-msg? clojure.lang.ExceptionInfo #"checkpoint restores run"
+                            (resume-with snapshotted {:run-id (str (random-uuid))})))
+      (is (thrown-with-msg? clojure.lang.ExceptionInfo #"--run-id must be a UUID"
+                            (resume-with {:completed-phases []} {:run-id "not-a-uuid"}))))
+    (testing "--correlation-id reaches the run; without it none is imposed"
+      (let [correlation-id (random-uuid)]
+        (is (= correlation-id
+               (get-in (resume-with snapshotted {:correlation-id (str correlation-id)})
+                       [:opts :workflow-run/correlation-id])))
+        (is (nil? (get-in (resume-with (assoc-in snapshotted [:machine-snapshot :workflow-run/correlation-id]
+                                                 (random-uuid))
+                                       {})
+                          [:opts :workflow-run/correlation-id]))
+            "the runner's default applies: the run's own id")))
+    (testing "the options are checked before a completed run is reported done"
+      (let [completed (assoc snapshotted :completed? true)]
+        (is (thrown-with-msg? clojure.lang.ExceptionInfo #"--run-id must be a UUID"
+                              (resume-with completed {:run-id "not-a-uuid"})))
+        (is (thrown-with-msg? clojure.lang.ExceptionInfo #"checkpoint restores run"
+                              (resume-with completed {:run-id (str (random-uuid))})))
+        (is (thrown-with-msg? clojure.lang.ExceptionInfo #"--correlation-id must be a UUID"
+                              (resume-with completed {:correlation-id "nope"})))))))
 
 (deftest ^{:stratum 1} read-event-file-reads-per-event-json-from-workflow-dir-test
   ;; Regression guard for the iter-20 resume bug. Before this fix,

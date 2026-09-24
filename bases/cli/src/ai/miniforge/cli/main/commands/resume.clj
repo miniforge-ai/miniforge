@@ -85,6 +85,61 @@
         (some-> (:execution/current-phase machine-snapshot) name))
       (some-> (:phase (first remaining-pipeline)) name)))
 
+(defn- ^{:stratum 0} recorded-phase?
+  "True when the run recorded `phase`: completed it, has a result for it,
+   or its FSM snapshot parked on it."
+  [reconstructed phase]
+  (or (boolean (some #{phase} (:completed-phases reconstructed)))
+      (contains? (:phase-results reconstructed) phase)
+      (= phase (get-in reconstructed [:machine-snapshot :execution/current-phase]))))
+
+(defn- ^{:stratum 0} rewind-to-phase
+  "`--from-phase`: the same rewind the operator's `:retry-from-phase` plan
+   describes, to a phase `p`. Only `kept`, the completed phases before
+   `p`, stay completed, so `p` and everything after it run again, from
+   those phases' state.
+
+   The FSM snapshot is dropped: it is parked after `p`, and restoring it
+   would ignore the rewind. What the re-run keeps of it is the run's
+   input and acting authority; the runner starts a fresh machine at `p`
+   holding only the kept phases' results.
+
+   The old run's DAG work is dropped too. It is only ever consumed when
+   the plan phase runs and executes its DAG: after a rewind to the plan
+   (or earlier) it would skip the re-planned tasks that share an id,
+   and after a rewind past it the DAG does not run again.
+
+   The workspace restored is the latest of `checkpoints` (the run's
+   persisted workspaces) made by a phase that stays completed — never
+   one made by `p` or later, which would start the re-run on its own
+   output. With none, the run starts from a fresh workspace: the only
+   recorded states are after the rewind point, and before the first
+   phase there is nothing else to restore."
+  [reconstructed kept checkpoints]
+  (let [workspace (last (filter (comp (set kept) :phase) checkpoints))
+        {:execution/keys [input acting]} (:machine-snapshot reconstructed)]
+    (-> reconstructed
+        (dissoc :machine-snapshot)
+        (assoc :completed? false
+               :completed-phases kept
+               :phase-results (select-keys (:phase-results reconstructed) kept)
+               :completed-dag-tasks #{}
+               :completed-dag-artifacts []
+               :workspace-checkpoint workspace)
+        (cond-> input (assoc :input input)
+                acting (assoc :acting acting)))))
+
+(defn- ^{:stratum 0} uuid-option
+  "The UUID an option names, nil when it is absent; refused when present
+   but not a UUID."
+  [flag value]
+  (let [parsed (some-> value str parse-uuid)]
+    (if (and value (nil? parsed))
+      (response/throw-anomaly! :anomalies/incorrect
+                               (messages/t :resume/not-a-uuid {:flag flag :value value})
+                               {:flag flag})
+      parsed)))
+
 ;------------------------------------------------------------------------------ Layer 1
 
 (defn- ^{:stratum 1} throw-resume-anomaly!
@@ -109,6 +164,46 @@
   "True when `status` represents a finished workflow."
   [status]
   (contains? terminal-statuses status))
+
+(defn- ^{:stratum 1} apply-from-phase
+  "Rewind to `from-phase` when one was requested. A phase the run never
+   recorded is refused, not guessed at, and so is a rewind the shared
+   rule refuses (`wr/rewind-refusal`, as the operator's retry applies it).
+   `checkpoints` is a thunk for the run's persisted workspaces, read only
+   for a rewind."
+  [reconstructed from-phase checkpoints]
+  (let [refusal (when from-phase (wr/rewind-refusal reconstructed from-phase))]
+    (cond
+      (nil? from-phase) reconstructed
+      (not (recorded-phase? reconstructed from-phase))
+      (response/throw-anomaly! :anomalies/incorrect
+                               (messages/t :resume/unknown-phase {:phase (name from-phase)})
+                               {:from-phase from-phase})
+      refusal
+      (response/throw-anomaly! :anomalies/unsupported
+                               (messages/t :resume/rewind-without-results
+                                           {:phase (name from-phase)
+                                            :phases (str/join ", " (map name (:resume/phases refusal)))})
+                               (assoc refusal :from-phase from-phase))
+      :else (rewind-to-phase reconstructed
+                             (wr/rewind-kept-phases reconstructed from-phase)
+                             (checkpoints)))))
+
+(defn- ^{:stratum 1} run-id-for
+  "The id the resumed run executes under: the restored snapshot's own id,
+   else `--run-id`, else a fresh one. A `--run-id` that disagrees with the
+   snapshot is refused: the caller that passed it (the operator's resume
+   launcher) reports it as the run it started."
+  [machine-snapshot run-id-opt]
+  (let [snapshot-id (:execution/id machine-snapshot)
+        requested (uuid-option "--run-id" run-id-opt)]
+    (if (and snapshot-id requested (not= (str snapshot-id) (str requested)))
+      (response/throw-anomaly! :anomalies/incorrect
+                               (messages/t :resume/run-id-conflict
+                                           {:run-id run-id-opt
+                                            :snapshot-id (str snapshot-id)})
+                               {:run-id run-id-opt})
+      (or snapshot-id requested (random-uuid)))))
 
 ;------------------------------------------------------------------------------ Layer 2
 
@@ -136,8 +231,18 @@
         _ (when-not quiet
             (display/print-info (messages/t :resume/resuming
                                             {:workflow-id workflow-id})))
-        reconstructed (wr/reconstruct-context events-dir (str workflow-id))
-        _ (throw-resume-anomaly! reconstructed)]
+        recorded (wr/reconstruct-context events-dir (str workflow-id))
+        _ (throw-resume-anomaly! recorded)
+        reconstructed (apply-from-phase recorded (:from-phase opts)
+                                        #(wr/extract-workspace-checkpoints (read-event-file workflow-id)))
+        ;; Checked before a completed run is reported done: an invalid
+        ;; request is refused, not answered "already completed".
+        resume-run-id (run-id-for (:machine-snapshot reconstructed) (:run-id opts))
+        ;; `--correlation-id` lands on the run's lifecycle events; the
+        ;; operator's launcher passes its intervention id and waits for
+        ;; it. Absent, none is imposed and the runner's default applies
+        ;; (the run's own id).
+        correlation-id (uuid-option "--correlation-id" (:correlation-id opts))]
 
     (if (:completed? reconstructed)
       (do (display/print-info (messages/t :resume/already-completed)) nil)
@@ -153,7 +258,9 @@
                   (messages/t :resume/events-found
                               {:count (:event-count reconstructed)})))
 
-            identity (resolve-resume-workflow reconstructed)
+            ;; From the run as recorded: a rewind drops the snapshot, which
+            ;; names the workflow when no spec was recorded.
+            identity (resolve-resume-workflow recorded)
             _ (throw-resume-anomaly! identity)
             {:keys [workflow-type workflow-version]} identity
             {:keys [workflow]} (load-workflow workflow-type workflow-version {})
@@ -165,7 +272,6 @@
                               (wr/trim-pipeline workflow completed-phases))
             _ (throw-resume-anomaly! resume-workflow)
             remaining-pipeline (:workflow/pipeline resume-workflow)
-            resume-run-id (or (:execution/id machine-snapshot) (random-uuid))
             _ (when-not quiet
                 (if machine-snapshot
                   (display/print-info
@@ -201,13 +307,23 @@
                                               control-state
                                               event-stream)
           (let [result (run-pipeline resume-workflow
-                                     {}
+                                     ;; The run's input on a rewind; a restored snapshot carries its own.
+                                     (get reconstructed :input {})
                                      {:llm-backend llm-client
+                                      :acting (:acting reconstructed)
+                                      ;; The id announced and registered
+                                      ;; above; without it a snapshot-less
+                                      ;; resume minted a second id.
+                                      :workflow-id resume-run-id
+                                      :workflow-run/correlation-id correlation-id
                                       :event-stream event-stream
                                       :control-state control-state
                                       :resume-machine-snapshot machine-snapshot
                                       :resume-reset-terminal? failed-checkpoint?
-                                      :resume-phase-results (:phase-results reconstructed)
+                                      ;; Never event telemetry; a rewind has
+                                      ;; already cut them to the kept phases.
+                                      :resume-phase-results (when (wr/checkpointed-phase-results recorded)
+                                                              (:phase-results reconstructed))
                                       :resume-workspace (:workspace-checkpoint reconstructed)
                                       :skip-lifecycle-events false
                                       :pre-completed-dag-tasks (:completed-dag-tasks reconstructed)

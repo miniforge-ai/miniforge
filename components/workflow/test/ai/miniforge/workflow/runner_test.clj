@@ -294,6 +294,37 @@
         (is (true? (supervisory/attached? stream)))
         (is (some #{:supervisory/workflow-upserted} event-types))))))
 
+(deftest ^{:stratum 1} run-pipeline-stamps-the-callers-correlation-id-test
+  (testing "the started event carries the caller's correlation id — what the
+            operator's resume launcher waits for from the `mf resume` it starts"
+    (let [correlation-id (random-uuid)
+          stream (es/create-event-stream {:sinks []})
+          workflow {:workflow/id :test
+                    :workflow/version "1.0.0"
+                    :workflow/pipeline [{:phase test-done-phase}]}]
+      (runner/run-pipeline workflow {:task "Test"} {:event-stream stream
+                                                    :workflow-run/correlation-id correlation-id})
+      (is (= correlation-id
+             (:workflow-run/correlation-id
+              (first (filter #(= :workflow/started (:event/type %)) (es/get-events stream)))))))))
+
+(deftest ^{:stratum 1} run-pipeline-seeds-phase-results-without-a-snapshot-test
+  (testing "a resume with no FSM snapshot (an `mf resume --from-phase` rewind)
+            starts at the pipeline's first phase holding the earlier phases' results"
+    (let [workflow {:workflow/id :test
+                    :workflow/version "1.0.0"
+                    :workflow/pipeline [{:phase test-implement-phase} {:phase test-done-phase}]}
+          plan-result {:status :success :summary "plan from the rewound run"}
+          seen (atom nil)
+          result (runner/run-pipeline workflow {:task "Original"}
+                                      {:resume-phase-results {test-plan-phase plan-result}
+                                       :on-phase-start
+                                       (fn [ctx ic]
+                                         (when (= test-implement-phase (get-in ic [:config :phase]))
+                                           (reset! seen (:execution/phase-results ctx))))})]
+      (is (= :completed (:execution/status result)))
+      (is (= {test-plan-phase plan-result} @seen)))))
+
 (deftest ^{:stratum 1} run-pipeline-persists-machine-snapshot-test
   (checkpoint-test-support/call-with-temp-checkpoint-root
     (fn [checkpoint-root]

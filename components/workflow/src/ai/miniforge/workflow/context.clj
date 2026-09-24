@@ -330,8 +330,13 @@
    - input: Input data for the workflow
    - opts: Execution options (including :llm-backend, :artifact-store,
            callbacks, optionally :workflow-id — the caller's run id,
-           adopted as :execution/id so one run has one identity — and
-           optionally :logger, adopted as :execution/logger)
+           adopted as :execution/id so one run has one identity —
+           optionally :logger, adopted as :execution/logger, and
+           optionally :resume-phase-results: a resume with no FSM
+           snapshot, such as an `mf resume --from-phase` rewind, starts
+           holding the checkpointed results of the phases already done.
+           The caller passes only checkpointed results, never the
+           telemetry rebuilt from events, which no phase can build on)
 
    Returns execution context map with FSM state initialized."
   [workflow input opts]
@@ -351,7 +356,7 @@
        :execution/artifacts []
        :execution/errors []  ; DEPRECATED: Use :execution/response-chain instead
        :execution/response-chain (response/create (:workflow/id workflow))
-       :execution/phase-results {}
+       :execution/phase-results (into {} (:resume-phase-results opts))
        :execution/output nil
        :execution/metrics {:tokens 0 :cost-usd 0.0 :duration-ms 0}
        :execution/started-at (System/currentTimeMillis)
