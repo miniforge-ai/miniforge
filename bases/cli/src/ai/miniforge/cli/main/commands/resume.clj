@@ -85,6 +85,36 @@
         (some-> (:execution/current-phase machine-snapshot) name))
       (some-> (:phase (first remaining-pipeline)) name)))
 
+(defn- ^{:stratum 0} recorded-phase?
+  "True when the run recorded `phase`: completed it, has a result for it,
+   or its FSM snapshot parked on it."
+  [reconstructed phase]
+  (or (boolean (some #{phase} (:completed-phases reconstructed)))
+      (contains? (:phase-results reconstructed) phase)
+      (= phase (get-in reconstructed [:machine-snapshot :execution/current-phase]))))
+
+(defn- ^{:stratum 0} rewind-to-phase
+  "`--from-phase`: the same rewind the operator's `:retry-from-phase` plan
+   describes. The FSM snapshot is dropped (restoring one parked after
+   `phase` would ignore the rewind) and only the completed phases before
+   `phase` stay completed, so `phase` and everything after it run again."
+  [reconstructed phase]
+  (-> reconstructed
+      (dissoc :machine-snapshot)
+      (assoc :completed? false)
+      (update :completed-phases #(vec (take-while (complement #{phase}) %)))))
+
+(defn- ^{:stratum 0} uuid-option
+  "The UUID an option names, nil when it is absent; refused when present
+   but not a UUID."
+  [flag value]
+  (let [parsed (some-> value str parse-uuid)]
+    (if (and value (nil? parsed))
+      (response/throw-anomaly! :anomalies/incorrect
+                               (messages/t :resume/not-a-uuid {:flag flag :value value})
+                               {:flag flag})
+      parsed)))
+
 ;------------------------------------------------------------------------------ Layer 1
 
 (defn- ^{:stratum 1} throw-resume-anomaly!
@@ -109,6 +139,33 @@
   "True when `status` represents a finished workflow."
   [status]
   (contains? terminal-statuses status))
+
+(defn- ^{:stratum 1} apply-from-phase
+  "Rewind to `from-phase` when one was requested. A phase the run never
+   recorded is refused, not guessed at."
+  [reconstructed from-phase]
+  (cond
+    (nil? from-phase) reconstructed
+    (recorded-phase? reconstructed from-phase) (rewind-to-phase reconstructed from-phase)
+    :else (response/throw-anomaly! :anomalies/incorrect
+                                   (messages/t :resume/unknown-phase {:phase (name from-phase)})
+                                   {:from-phase from-phase})))
+
+(defn- ^{:stratum 1} run-id-for
+  "The id the resumed run executes under: the restored snapshot's own id,
+   else `--run-id`, else a fresh one. A `--run-id` that disagrees with the
+   snapshot is refused: the caller that passed it (the operator's resume
+   launcher) reports it as the run it started."
+  [machine-snapshot run-id-opt]
+  (let [snapshot-id (:execution/id machine-snapshot)
+        requested (uuid-option "--run-id" run-id-opt)]
+    (if (and snapshot-id requested (not= (str snapshot-id) (str requested)))
+      (response/throw-anomaly! :anomalies/incorrect
+                               (messages/t :resume/run-id-conflict
+                                           {:run-id run-id-opt
+                                            :snapshot-id (str snapshot-id)})
+                               {:run-id run-id-opt})
+      (or snapshot-id requested (random-uuid)))))
 
 ;------------------------------------------------------------------------------ Layer 2
 
@@ -136,8 +193,9 @@
         _ (when-not quiet
             (display/print-info (messages/t :resume/resuming
                                             {:workflow-id workflow-id})))
-        reconstructed (wr/reconstruct-context events-dir (str workflow-id))
-        _ (throw-resume-anomaly! reconstructed)]
+        recorded (wr/reconstruct-context events-dir (str workflow-id))
+        _ (throw-resume-anomaly! recorded)
+        reconstructed (apply-from-phase recorded (:from-phase opts))]
 
     (if (:completed? reconstructed)
       (do (display/print-info (messages/t :resume/already-completed)) nil)
@@ -165,7 +223,12 @@
                               (wr/trim-pipeline workflow completed-phases))
             _ (throw-resume-anomaly! resume-workflow)
             remaining-pipeline (:workflow/pipeline resume-workflow)
-            resume-run-id (or (:execution/id machine-snapshot) (random-uuid))
+            resume-run-id (run-id-for machine-snapshot (:run-id opts))
+            ;; `--correlation-id` lands on the run's lifecycle events; the
+            ;; operator's launcher passes its intervention id and waits for
+            ;; it. Absent, the snapshot's own correlation id is kept.
+            correlation-id (or (uuid-option "--correlation-id" (:correlation-id opts))
+                               (:workflow-run/correlation-id machine-snapshot))
             _ (when-not quiet
                 (if machine-snapshot
                   (display/print-info
@@ -203,6 +266,11 @@
           (let [result (run-pipeline resume-workflow
                                      {}
                                      {:llm-backend llm-client
+                                      ;; The id announced and registered
+                                      ;; above; without it a snapshot-less
+                                      ;; resume minted a second id.
+                                      :workflow-id resume-run-id
+                                      :workflow-run/correlation-id correlation-id
                                       :event-stream event-stream
                                       :control-state control-state
                                       :resume-machine-snapshot machine-snapshot
