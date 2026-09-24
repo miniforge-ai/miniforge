@@ -33,12 +33,20 @@ Validate required inputs, success and failed-verification payloads, stable hashe
 and digest changes when provider content changes. Run component tests, Polylith,
 lint and an adversarial standards review.
 
-Results: 5 component tests / 45 assertions pass in the Miniforge project.
+Results: 7 component tests / 67 assertions pass in the Miniforge project.
 Pre-commit passes kondo with zero warnings/errors, stratification, formatting,
 347 smoke tests / 1,310 assertions and 8 compatibility tests / 671 assertions.
 The adversarial pass covers failed, contradictory and empty verification, plus
 missing evidence or rollback instructions. It also checks stable serialization,
 changed provider fields and literal placeholder text in operator content.
+The review pass also rejects incomplete Git object IDs and non-portable
+verification values before serialization. Evidence accepts scalar EDN, vectors
+and string/keyword-keyed maps; functions, runtime objects and custom tags fail
+at the public boundary. Both 40- and 64-character lowercase object IDs pass.
+
+Stratification follows the per-file reference graph in the Clojure standard.
+The public wrapper has no same-file dependencies; cross-namespace stratum
+numbers are not global abstraction ranks. The stratification lint passes.
 
 ## Deployment Plan
 

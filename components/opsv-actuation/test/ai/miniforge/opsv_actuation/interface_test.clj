@@ -39,6 +39,10 @@
 
 ;------------------------------------------------------------------------------ Layer 1
 
+(defn- ^{:stratum 1} with-observation
+  [field value]
+  (assoc-in candidate [:opsv/verification-result :criteria-evaluation 0 field] value))
+
 (deftest ^{:stratum 1} proposal-carries-evidence-and-exact-payload-test
   (let [proposal (actuation/prepare-pr candidate)
         body (:pr/body proposal)]
@@ -75,9 +79,20 @@
         reordered (update candidate :opsv/verification-result reverse-map)]
     (is (= proposal (actuation/prepare-pr reordered)))
     (doseq [field [:pr/title :opsv/policy-diff :opsv/rollback-instructions
-                  :pr/repo :pr/base :pr/branch :pr/head-sha]]
+                  :pr/repo :pr/base :pr/branch]]
       (let [changed (actuation/prepare-pr (update candidate field str "-changed"))]
         (is (not= (:pr/payload-hash proposal) (:pr/payload-hash changed)))))))
+
+(deftest ^{:stratum 1} proposal-requires-a-full-git-object-id-test
+  (doseq [sha ["0123456" "ABCDEF0123456789012345678901234567890123"
+              "z123456789012345678901234567890123456789" "" nil]]
+    (is (anomaly/anomaly? (actuation/prepare-pr (assoc candidate :pr/head-sha sha)))))
+  (let [original (actuation/prepare-pr candidate)]
+    (doseq [sha [(apply str (repeat 40 "a")) (apply str (repeat 64 "b"))]]
+      (let [proposal (actuation/prepare-pr (assoc candidate :pr/head-sha sha))]
+        (is (not (anomaly/anomaly? proposal)))
+        (is (= sha (:pr/head-sha proposal)))
+        (is (not= (:pr/payload-hash original) (:pr/payload-hash proposal)))))))
 
 (deftest ^{:stratum 1} payload-content-is-not-template-code-test
   (testing "operator content containing placeholder syntax is preserved"
@@ -85,6 +100,21 @@
           input (assoc candidate :opsv/policy-diff literal)
           proposal (actuation/prepare-pr input)]
       (is (str/includes? (:pr/body proposal) literal)))))
+
+;------------------------------------------------------------------------------ Layer 2
+
+(deftest ^{:stratum 2} verification-must-be-portable-data-test
+  (doseq [field [:criterion/observed :criterion/expected]
+          value [(Object.) identity {:nested [(Object.)]} {(Object.) 1}
+                 (tagged-literal 'custom "value")]]
+    (is (anomaly/anomaly? (actuation/prepare-pr (with-observation field value)))))
+  (let [observed {:latency [175 175.5 175M 1/2 nil true :ok]
+                  "sample" (:opsv/evidence-bundle-id candidate)}
+        proposal (actuation/prepare-pr (with-observation :criterion/observed observed))
+        reordered (actuation/prepare-pr
+                   (with-observation :criterion/observed (reverse-map observed)))]
+    (is (not (anomaly/anomaly? proposal)))
+    (is (= proposal reordered))))
 
 (comment
   (actuation/prepare-pr candidate))

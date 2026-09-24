@@ -15,7 +15,8 @@
 
 (defn ^{:stratum 0} prepare-pr
   "Return an evidence-bearing, hashed PR payload, or an input anomaly.
-   Failed or incomplete verification forces a draft; no authority is issued."
+   Failed or incomplete verification forces a draft; no authority is issued.
+   Evidence accepts scalar EDN, vectors and string/keyword-keyed maps."
   [input]
   (if-let [errors (m/explain schema/PrProposalInput input)]
     (anomaly/validation-anomaly (msg/ts :proposal/invalid)
