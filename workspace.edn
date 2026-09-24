@@ -54,6 +54,9 @@
                                           ;; Deterministic staging MCI adapter, consumed by the
                                           ;; project integration suite rather than a runtime base.
                                           "opsv-adapter-simulated"
+                                          ;; Public proposal boundary, packaged for the governed
+                                          ;; actuation consumer in the next N7 application PR.
+                                          "opsv-actuation"
                                           "phase-opsv"
                                           "phase-software-factory"
                                           "phase-deployment"
