@@ -105,6 +105,14 @@
   [code]
   {:failure/code code})
 
+(defn- ^{:stratum 0} rewind-failure
+  "A rewind the shared rule refuses (`wr/rewind-refusal`, the one
+   `mf resume --from-phase` applies): its reason is the failure code,
+   and the phases it names ride along for the operator to see."
+  [{:resume/keys [reason phases]}]
+  {:failure/code reason
+   :resume/phases phases})
+
 (defn ^{:stratum 0} launched-run-id
   "The run id a launcher reported, or nil when it reported none. A
    launcher that returns an anomaly, nil, a map without a run id, or a
@@ -298,19 +306,26 @@
    - `:missing-phase`            — `:retry-from-phase` with no `phase` detail
    - `:no-resume-context`        — the target has no reconstructable history
    - `:unknown-phase`            — the requested phase never ran
+   - `:phase-results-not-checkpointed` — the rewind would keep phases with
+     no checkpointed result (named in `:resume/phases`); `mf resume`
+     would refuse it, so it is never spawned
    - `:unresolved-workflow-type` — no loadable workflow type in the history"
   [events-dir interv verb]
   (let [from-phase (when (= :retry-from-phase verb) (requested-phase interv))]
     (if (and (= :retry-from-phase verb) (nil? from-phase))
       (resume-failure :missing-phase)
       (let [context (wr/reconstruct-context events-dir
-                                            (str (:intervention/target-id interv)))]
+                                            (str (:intervention/target-id interv)))
+            refusal (some->> from-phase (wr/rewind-refusal context))]
         (cond
           (anomaly/anomaly? context)
           (resume-failure :no-resume-context)
 
           (and from-phase (not (contains? (known-phases context) from-phase)))
           (resume-failure :unknown-phase)
+
+          refusal
+          (rewind-failure refusal)
 
           :else
           (let [workflow-identity (wr/resolve-workflow-identity context
