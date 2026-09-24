@@ -22,6 +22,10 @@
 
 ;------------------------------------------------------------------------------ Layer 0
 
+(def ^{:stratum 0} pull-request-grant-ttl-seconds
+  "Fifteen minutes bounds PR mutation authority while allowing provider latency."
+  (* 15 60))
+
 (defn- ^{:stratum 0} workflow-principal
   "Derive the runtime principal; callers cannot choose a grant principal."
   [workflow-run-id]
@@ -47,7 +51,11 @@
 (def ^{:stratum 1} policies
   "Explicit issuance policy catalog keyed by irreversible effect class."
   {:effect/merge
-   (effect-policy (* 15 60) [:pr/repo :pr/number])
+   (effect-policy pull-request-grant-ttl-seconds [:pr/repo :pr/number])
+
+   :effect/pr-create
+   (effect-policy pull-request-grant-ttl-seconds
+                  [:pr/repo :pr/base :pr/branch :pr/head-sha :pr/payload-hash])
 
    :effect/deploy
    (effect-policy (* 30 60)
