@@ -20,9 +20,19 @@ events of the child it started. `mf resume` accepted none of these.
 
 ## Changes in Detail
 
-- `--from-phase <p>` drops the FSM snapshot and keeps only the completed phases
-  before `p`, the rewind the operator's `:retry-from-phase` plan describes. A
-  phase the run never recorded is refused.
+- `--from-phase <p>` keeps only the completed phases before `p`, the rewind
+  the operator's `:retry-from-phase` plan describes. A phase the run never
+  recorded is refused.
+- The rewind drops the FSM snapshot, which is parked after `p`. The re-run
+  keeps the run's input and acting authority from it, and starts a fresh
+  machine at `p` holding only the results of the phases before `p`: a rewind
+  to implement sees the plan result, and implement and later phases start
+  clean. Output the snapshot does not tie to a phase (artifacts, a DAG's
+  result and PR infos) is not carried.
+- A fresh run context (`create-context`) now starts holding
+  `:resume-phase-results`, so `run-pipeline` keeps them without a snapshot.
+  Before this it dropped them, so the rewind lost the plan result. A resume
+  of a run recorded only as events now also gets its recorded results.
 - A rewind also drops the old run's DAG tasks and artifacts. They are only
   used when the plan phase runs its DAG, where they would skip re-planned
   tasks that share an id.
@@ -48,8 +58,12 @@ events of the child it started. `mf resume` accepted none of these.
   none) and unknown phase.
 - `resume-test`: run id adoption and both refusals, correlation id
   pass-through, and option checks on a completed run.
+- `resume-test`: a rewind hands the runner the input, acting authority and
+  only the earlier phases' results.
 - `runner-test`: a run's started event carries the correlation id its caller
   passed, the evidence PR 3's launcher waits for.
+- `runner-test`: a resume without a snapshot starts at the pipeline's first
+  phase holding the seeded results.
 - Pre-commit hook per commit.
 
 ## Deployment Plan
