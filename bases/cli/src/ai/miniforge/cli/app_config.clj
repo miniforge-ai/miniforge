@@ -95,6 +95,8 @@
 
 (def ^{:stratum 0} logs-dir paths/logs-dir)
 
+(def ^{:stratum 0} packs-dir paths/packs-dir)
+
 (def ^{:stratum 0} dashboard-port-file paths/dashboard-port-file)
 
 (def ^{:stratum 0} state-file paths/state-file)
