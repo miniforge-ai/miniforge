@@ -27,6 +27,7 @@
             [ai.miniforge.event-stream.interface :as events]
             [ai.miniforge.fsm.interface :as fsm]
             [ai.miniforge.gate.interface :as gate]
+            [ai.miniforge.logging.interface :as log]
             [ai.miniforge.phase.interface :as phase]
             [ai.miniforge.response.interface :as response]
             [ai.miniforge.schema.interface :as schema]
@@ -206,22 +207,43 @@
 (defn- ^{:stratum 0} merge-sub-worktree-changes!
   "Copy changed files from DAG sub-worktrees into the parent worktree.
    Each sub-workflow wrote to its own isolated worktree. For the release
-   phase to find dirty files, we need to merge those changes back."
-  [parent-worktree sub-worktree-paths]
-  (doseq [sub-wt sub-worktree-paths]
-    (try
-      (let [{:keys [out]} (shell/sh
-                            "git" "diff" "--name-only" "HEAD"
-                            :dir sub-wt)
-            changed-files (remove str/blank?
-                                  (str/split-lines (or out "")))]
-        (doseq [f changed-files]
-          (let [src (io/file sub-wt f)
-                dst (io/file parent-worktree f)]
-            (when (.exists src)
-              (io/make-parents dst)
-              (io/copy src dst)))))
-      (catch Exception _e nil))))
+   phase to find dirty files, we need to merge those changes back.
+
+   Returns nil on full success, or an anomaly map on the first IO/git
+   failure (with the failing sub-worktree path in :anomaly/data).
+   The logger argument may be nil; the anomaly is always returned so
+   callers can detect partial syncs regardless of log availability."
+  [parent-worktree sub-worktree-paths logger]
+  (reduce
+   (fn [_ sub-wt]
+     (try
+       (let [{:keys [out]} (shell/sh
+                             "git" "diff" "--name-only" "HEAD"
+                             :dir sub-wt)
+             changed-files (remove str/blank?
+                                   (str/split-lines (or out "")))]
+         (doseq [f changed-files]
+           (let [src (io/file sub-wt f)
+                 dst (io/file parent-worktree f)]
+             (when (.exists src)
+               (io/make-parents dst)
+               (io/copy src dst))))
+         nil)
+       (catch Exception e
+         (let [a (anomaly/exception-anomaly
+                  :fault
+                  "Failed to sync sub-worktree changes into parent worktree"
+                  {:sub-worktree    sub-wt
+                   :parent-worktree parent-worktree}
+                  e)]
+           (log/error logger :workflow :workflow/sync-sub-worktree-failed
+                      {:message "merge-sub-worktree-changes! caught an exception"
+                       :data    {:sub-worktree    sub-wt
+                                 :parent-worktree parent-worktree
+                                 :ex-message      (ex-message e)}})
+           (reduced a)))))
+   nil
+   sub-worktree-paths))
 
 (defn- ^{:stratum 0} roll-dag-metrics-into-execution
   "Accumulate DAG sub-workflow tokens / cost / duration into top-line
@@ -657,44 +679,50 @@
    parent worktree, synthesizes an :implement phase result, and advances
    past implement to verify → review → release."
   [ctx dag-result pipeline transition-to-completed-fn transition-to-failed-fn]
-  (let [artifacts  (:artifacts dag-result)
-        task-count (count artifacts)
+  (let [artifacts    (:artifacts dag-result)
+        task-count   (count artifacts)
         ;; Merge sub-worktree changes into parent worktree so the release
         ;; phase can discover dirty files via git status.
-        parent-wt  (or (get ctx :execution/worktree-path)
-                       (System/getProperty "user.dir"))
+        parent-wt    (or (get ctx :execution/worktree-path)
+                         (System/getProperty "user.dir"))
         sub-wt-paths (:worktree-paths dag-result)
-        _  (when (and parent-wt (seq sub-wt-paths))
-             (merge-sub-worktree-changes! parent-wt sub-wt-paths))
-        ;; Synthesize new-style implement phase result.
-        synthesized-implement-result
-        {:name   :implement
-         :status :completed
-         :result {:status         :success
-                  :environment-id (get ctx :execution/environment-id)
-                  :summary        (messages/t :status/dag-executed-summary
-                                              {:task-count task-count})
-                  :metrics        (merge {:task-count task-count}
-                                         (:metrics dag-result))}}
-        ctx-with-dag (-> ctx
-                         (update :execution/artifacts into artifacts)
-                         (assoc :execution/dag-result dag-result)
-                         (assoc-in [:execution/phase-results :implement]
-                                   synthesized-implement-result)
-                         (roll-dag-metrics-into-execution dag-result))
-        ctx-after-plan
-        (apply-phase-transition ctx-with-dag
-                                :phase/succeed
-                                pipeline
-                                transition-to-completed-fn
-                                transition-to-failed-fn)]
-    (if (phase/failed? ctx-after-plan)
-      ctx-after-plan
-      (apply-phase-transition ctx-after-plan
-                              :phase/succeed
-                              pipeline
-                              transition-to-completed-fn
-                              transition-to-failed-fn))))
+        logger       (get ctx :execution/logger)
+        sync-result  (when (and parent-wt (seq sub-wt-paths))
+                       (merge-sub-worktree-changes! parent-wt sub-wt-paths logger))]
+    (if (anomaly/anomaly? sync-result)
+      ;; Anomaly already logged inside merge-sub-worktree-changes!; propagate
+      ;; it to the caller so the release phase does not start with a partial
+      ;; file tree.
+      sync-result
+      (let [;; Synthesize new-style implement phase result.
+            synthesized-implement-result
+            {:name   :implement
+             :status :completed
+             :result {:status         :success
+                      :environment-id (get ctx :execution/environment-id)
+                      :summary        (messages/t :status/dag-executed-summary
+                                                  {:task-count task-count})
+                      :metrics        (merge {:task-count task-count}
+                                             (:metrics dag-result))}}
+            ctx-with-dag (-> ctx
+                             (update :execution/artifacts into artifacts)
+                             (assoc :execution/dag-result dag-result)
+                             (assoc-in [:execution/phase-results :implement]
+                                       synthesized-implement-result)
+                             (roll-dag-metrics-into-execution dag-result))
+            ctx-after-plan
+            (apply-phase-transition ctx-with-dag
+                                    :phase/succeed
+                                    pipeline
+                                    transition-to-completed-fn
+                                    transition-to-failed-fn)]
+        (if (phase/failed? ctx-after-plan)
+          ctx-after-plan
+          (apply-phase-transition ctx-after-plan
+                                  :phase/succeed
+                                  pipeline
+                                  transition-to-completed-fn
+                                  transition-to-failed-fn))))))
 
 ;------------------------------------------------------------------------------ Layer 4
 
