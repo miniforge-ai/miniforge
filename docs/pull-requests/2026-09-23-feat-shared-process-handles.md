@@ -8,10 +8,11 @@
 
 ## Overview
 
-Fifth of six stacked PRs. Adds the CLI policy evaluator. Every process that
-consumes operator interventions now registers the resume launcher (PRs 3–4) and
-the evaluator. Before this, `:retry` and `:retry-from-phase` always failed
-`:no-resume-launcher`, and `:re-evaluate` failed `:no-policy-evaluator`.
+Seventh of eight stacked PRs. Adds the CLI policy evaluator. Every process that
+consumes operator interventions now registers the resume launcher (#1915, with
+fixes in #1923 and #1916) and the evaluator. Before this, `:retry` and
+`:retry-from-phase` always failed `:no-resume-launcher`, and `:re-evaluate`
+failed `:no-policy-evaluator`.
 
 ## Motivation
 
@@ -29,7 +30,9 @@ both handles, or those verbs fail depending on which process won.
 - Each registered run records its origin, where a retry of it will run, with
   its runner's pid; releasing the run drops the pid.
 - The consumer reads the same events root as the rest of the process. It is
-  stopped at process exit, so a retry being verified records an outcome.
+  stopped at process exit, so a retry being verified records an outcome. The
+  process installs one exit hook, with its first consumer; the hook stops
+  whichever consumer is current at exit, so a stop and restart adds no hook.
 - Policy evaluator: `evaluate-external-pr` over the packs installed under
   `<home>/packs`, against `gh pr diff`. It does not use the classpath
   built-ins `mf policy list` also shows. Changed files come from the diff, so
@@ -47,8 +50,9 @@ both handles, or those verbs fail depending on which process won.
 - `fetch-pr-diff`: a `gh` that does not answer is killed and yields nil; an
   answer in time is the diff.
 - Wiring: both paths register the same handles, origin recording and release,
-  the events root, and a nil launcher not clearing a registered one.
-- Smoke against a temp `MINIFORGE_HOME` (with PR 6): a retry of a run with a
+  the events root, a nil launcher not clearing a registered one, and one exit
+  hook across start, stop, start that stops the second consumer.
+- Smoke against a temp `MINIFORGE_HOME` (with #1918): a retry of a run with a
   recorded origin reached `verified`, the child running in the origin. A run
   without one failed `:resume-origin-unknown`. After the cursor was deleted,
   the redelivered retry reached `verified` again with the one child it had.
@@ -61,9 +65,16 @@ retry of them is refused `:resume-origin-unknown`.
 
 ## Related Issues/PRs
 
-Stack: `feat/resume-flags`, `feat/operator-async-resume`,
-`feat/resume-launcher`, `fix/resume-launcher-review`,
-`feat/resume-launcher-hardening`, this PR, `feat/operator-serve`.
+Stack, in merge order:
+
+1. `feat/resume-flags` (#1913, merged)
+2. `feat/operator-async-resume` (#1914, merged)
+3. `feat/operator-verification-pool` (#1920, merged)
+4. `feat/resume-launcher` (#1915, merged)
+5. `fix/resume-launcher-review` (#1923, merged)
+6. `feat/resume-launcher-hardening` (#1916)
+7. `feat/shared-process-handles` (#1917, this PR)
+8. `feat/operator-serve` (#1918)
 
 ## Checklist
 

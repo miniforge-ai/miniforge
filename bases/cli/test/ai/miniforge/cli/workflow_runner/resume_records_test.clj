@@ -18,6 +18,7 @@
 (ns ai.miniforge.cli.workflow-runner.resume-records-test
   (:require
    [ai.miniforge.cli.app-config :as app-config]
+   [ai.miniforge.cli.workflow-runner.posix-host :as posix]
    [ai.miniforge.cli.workflow-runner.resume-records :as sut]
    [ai.miniforge.event-stream.interface :as es]
    [ai.miniforge.operator.interface :as operator]
@@ -81,7 +82,7 @@
         (is (not (sut/launch-running? (assoc launch :resume/pid-started "1970-01-01T00:00:00Z") 60000)))))))
 
 (deftest ^{:stratum 1} a-launch-without-a-live-pid-test
-  (with-temp-home
+  (posix/on-posix-host with-temp-home
     (fn []
       (let [now (System/currentTimeMillis)
             dead-pid (let [p (.start (ProcessBuilder. ^java.util.List ["true"]))] (.waitFor p) (.pid p))
@@ -149,7 +150,7 @@
         (is (= :verified (:resume/settled (sut/launch-record workflow-id))))))))
 
 (deftest ^{:stratum 1} settling-a-launch-settles-its-lineage-record-test
-  (with-temp-home
+  (posix/on-posix-host with-temp-home
     (fn []
       (let [root (str (random-uuid))
             child (.exec (Runtime/getRuntime) (into-array String ["/bin/sleep" "30"]))
@@ -171,7 +172,7 @@
           (finally (.destroy child)))))))
 
 (deftest ^{:stratum 1} a-launch-without-a-recorded-pid-is-found-by-its-pid-file-test
-  (with-temp-home
+  (posix/on-posix-host with-temp-home
     (fn []
       (let [record {:resume/intervention-id "i"
                     :resume/pid-file (str (io/file (app-config/logs-dir) "resume-x.pid"))

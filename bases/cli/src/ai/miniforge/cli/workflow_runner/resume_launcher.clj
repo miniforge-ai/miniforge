@@ -179,9 +179,14 @@
         ;; launch handed back carries a pid recovered from the pid file,
         ;; so settlement records the child it actually found.
         found (records/with-child-pid launch)
-        pid (or pid (:resume/pid found))
+        ;; At the deadline, the pid file is read once more right at the
+        ;; kill: a child that renames it in just after the read above is
+        ;; still killed, not left running with its launch reported failed.
+        kill-pid (when (= :timeout outcome)
+                   (or pid (:resume/pid found) (:resume/pid (records/with-child-pid launch))))
+        pid (or pid kill-pid (:resume/pid found))
         details {:failure/reason outcome :failure/log log :resume/run-id run-id :resume/pid pid}]
-    (when (and pid (= :timeout outcome)) (kill! pid))
+    (some-> kill-pid kill!)
     (case outcome
       :observed found
       :interrupted {:resume/pending? true}
