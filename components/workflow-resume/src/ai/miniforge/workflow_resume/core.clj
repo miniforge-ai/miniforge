@@ -87,9 +87,11 @@
                (let [checkpoint {:branch (:workspace/branch event)
                                  :bundle-path (:workspace/bundle-path event)
                                  :commit-sha (:workspace/commit-sha event)
-                                 :persist-tier (:workspace/persist-tier event)
+                                 ;; The runner's event names these
+                                 ;; :workspace/tier and :workspace/phase.
+                                 :persist-tier (or (:workspace/tier event) (:workspace/persist-tier event))
                                  :env-id (:workspace/env-id event)
-                                 :phase (:workflow/phase event)
+                                 :phase (or (:workspace/phase event) (:workflow/phase event))
                                  :timestamp (:event/timestamp event)}]
                  (when (and (:branch checkpoint)
                             (or (:bundle-path checkpoint)

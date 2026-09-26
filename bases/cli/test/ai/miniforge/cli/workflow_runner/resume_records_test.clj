@@ -55,9 +55,19 @@
       (let [workflow-id (str (random-uuid))
             intervention-id (random-uuid)
             at-spawn (atom nil)
-            launch (sut/start! {:resume/workflow-id workflow-id :resume/intervention-id intervention-id}
-                               (fn [_run-id _log] (reset! at-spawn (sut/launch-record workflow-id)) this-pid))]
+            stale-pid-file (atom nil)
+            snapshot-id (random-uuid)
+            launch (sut/start! {:resume/workflow-id workflow-id :resume/intervention-id intervention-id
+                                :resume/machine-snapshot {:execution/id snapshot-id}}
+                               (fn [_run-id _log pid-file]
+                                 (reset! at-spawn (sut/launch-record workflow-id))
+                                 (reset! stale-pid-file (.exists (io/file pid-file)))
+                                 this-pid))]
         (is (= [(str intervention-id) nil] ((juxt :resume/intervention-id :resume/pid) @at-spawn)))
+        (is (= (:resume/pid-file launch) (:resume/pid-file @at-spawn)) "where the child writes its pid")
+        (is (false? @stale-pid-file))
+        (is (uuid? (:resume/run-id launch)))
+        (is (not= snapshot-id (:resume/run-id launch)) "a new attempt, not the snapshot's run")
         (is (= launch (sut/launch-record workflow-id)))
         (is (sut/launch-running? launch) "the recorded pid is alive and is that process")
         (is (not (sut/launch-running? (assoc launch :resume/pid-started "1970-01-01T00:00:00Z"))))))))
@@ -93,4 +103,25 @@
         (event! (random-uuid))
         (is (not (sut/correlated-event? run-id intervention-id since)) "another child's event")
         (event! intervention-id)
-        (is (sut/correlated-event? run-id intervention-id since))))))
+        (is (sut/correlated-event? run-id intervention-id since))
+        (is (not (sut/correlated-event? (random-uuid) intervention-id since)) "no run directory yet")))))
+
+(deftest ^{:stratum 1} a-launch-without-a-recorded-pid-is-found-by-its-pid-file-test
+  (with-temp-home
+    (fn []
+      (let [record {:resume/intervention-id "i"
+                    :resume/pid-file (str (io/file (app-config/logs-dir) "resume-x.pid"))
+                    :resume/launched-at-ms (System/currentTimeMillis)}
+            child (.exec (Runtime/getRuntime) (into-array String ["/bin/sleep" "30"]))
+            pid-file! #(spit (doto (io/file (:resume/pid-file record)) io/make-parents) %)]
+        (try
+          (is (= record (sut/with-child-pid record)) "no pid file yet: nothing is known")
+          (pid-file! "")
+          (is (= record (sut/with-child-pid record)) "a pid file still being written")
+          (pid-file! (str (.pid child) "\n"))
+          (is (= (.pid child) (:resume/pid (sut/with-child-pid record))))
+          (is (sut/launch-running? record))
+          (pid-file! (str this-pid "\n"))
+          (is (:resume/exited? (sut/with-child-pid record)) "a process older than the launch is not its child")
+          (is (not (sut/launch-running? record)))
+          (finally (.destroy child)))))))

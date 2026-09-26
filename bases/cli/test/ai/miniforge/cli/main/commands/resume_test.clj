@@ -29,6 +29,7 @@
    [ai.miniforge.cli.workflow-selection-config :as selection-config]
    [ai.miniforge.event-stream.interface :as es]
    [ai.miniforge.supervisory-state.interface :as supervisory]
+   [ai.miniforge.workflow.interface :as workflow]
    [ai.miniforge.workflow-resume.interface :as wr]
    [slingshot.slingshot :refer [try+]]))
 
@@ -246,11 +247,12 @@
    stubbed; returns what reached `run-pipeline` and the control
    registration."
   [reconstructed opts]
-  (let [captured (atom {})]
+  (let [captured (atom {})
+        create-stream es/create-event-stream]
     (with-redefs [wr/reconstruct-context (fn [_ _] reconstructed)
                   selection-config/resolve-selection-profile (fn [_] :configured-default)
                   context/create-llm-client (fn [_ _ _] :llm-client)
-                  es/create-event-stream (fn [] :event-stream)
+                  es/create-event-stream (fn [] (:stream (swap! captured assoc :stream (create-stream {:sinks []}))))
                   supervisory/attach! (fn [_] nil)
                   correlator/attach! (fn [_] nil)
                   control/register-workflow-control! (fn [id _ _] (swap! captured assoc :registered id))
@@ -367,9 +369,20 @@
     (testing "a snapshot resumes under its own id, which --run-id may repeat"
       (is (= snapshot-id (:workflow-id (:opts (resume-with snapshotted {})))))
       (is (= snapshot-id (:registered (resume-with snapshotted {:run-id (str snapshot-id)})))))
-    (testing "a --run-id that disagrees with the snapshot, or is not a UUID, is refused"
-      (is (thrown-with-msg? clojure.lang.ExceptionInfo #"checkpoint restores run"
-                            (resume-with snapshotted {:run-id (str (random-uuid))})))
+    (testing "another --run-id starts a new attempt: the snapshot's state under that id"
+      (let [run-id (random-uuid)
+            {:keys [opts registered]} (resume-with snapshotted {:run-id (str run-id)})]
+        (is (= run-id registered (:workflow-id opts)))
+        (is (= run-id (get-in opts [:resume-machine-snapshot :execution/id])))))
+    (testing "a --run-id naming a run that already has events or a checkpoint is refused"
+      (let [taken (random-uuid)]
+        (with-redefs [es/read-workflow-events-by-id #(when (= (str taken) (str %2)) [{:event/type :workflow/started}])]
+          (is (thrown-with-msg? clojure.lang.ExceptionInfo #"already exists"
+                                (resume-with snapshotted {:run-id (str taken)}))))
+        (with-redefs [workflow/load-checkpoint-data #(when (= (str taken) (str %)) {:machine-snapshot {}})]
+          (is (thrown-with-msg? clojure.lang.ExceptionInfo #"already exists"
+                                (resume-with snapshotted {:run-id (str taken)}))))))
+    (testing "a --run-id that is not a UUID is refused"
       (is (thrown-with-msg? clojure.lang.ExceptionInfo #"--run-id must be a UUID"
                             (resume-with {:completed-phases []} {:run-id "not-a-uuid"}))))
     (testing "--correlation-id reaches the run; without it none is imposed"
@@ -386,8 +399,6 @@
       (let [completed (assoc snapshotted :completed? true)]
         (is (thrown-with-msg? clojure.lang.ExceptionInfo #"--run-id must be a UUID"
                               (resume-with completed {:run-id "not-a-uuid"})))
-        (is (thrown-with-msg? clojure.lang.ExceptionInfo #"checkpoint restores run"
-                              (resume-with completed {:run-id (str (random-uuid))})))
         (is (thrown-with-msg? clojure.lang.ExceptionInfo #"--correlation-id must be a UUID"
                               (resume-with completed {:correlation-id "nope"})))))))
 
@@ -424,3 +435,27 @@
     (fn [base-dir]
       (with-redefs [sut/events-dir (.getPath base-dir)]
         (is (nil? (sut/read-event-file (str (random-uuid)))))))))
+
+(deftest ^{:stratum 1} a-new-attempt-carries-the-runs-workspaces-test
+  (let [persisted (fn [[branch phase]] {:event/type :workspace/persisted :workspace/branch branch
+                                        :workspace/commit-sha "c" :workspace/phase phase})
+        history {:completed-phases [:plan :implement :verify]
+                 :phase-results {:plan {} :implement {} :verify {}}
+                 :machine-snapshot {:execution/id (random-uuid) :execution/metrics {:tokens 9 :cost-usd 1.5}}}
+        resume (fn [events opts] (with-redefs [sut/read-event-file (constantly events)] (resume-with history opts)))
+        attempt-id (random-uuid)
+        {:keys [opts stream]} (resume (mapv persisted [["after-plan" :plan] ["after-implement" :implement]])
+                                      {:run-id (str attempt-id)})
+        attempt-events (es/get-events stream)]
+    (testing "a retry under a new id records the run's workspace checkpoints under that id, with their phases"
+      (is (= [["after-plan" :plan] ["after-implement" :implement]]
+             (map (juxt :branch :phase) (wr/extract-workspace-checkpoints attempt-events))))
+      (is (every? #(= attempt-id (:workflow/id %)) attempt-events)))
+    (testing "its cost counts only its own work"
+      (is (= 0 (get-in opts [:resume-machine-snapshot :execution/metrics :tokens]))))
+    (testing "a rewind of that attempt restores a workspace from a phase it keeps"
+      (is (= "after-implement" (:branch (:resume-workspace (:opts (resume attempt-events {:from-phase :verify})))))))
+    (testing "a resume under the run's own id records nothing and keeps its metrics"
+      (let [{:keys [opts stream]} (resume (mapv persisted [["after-plan" :plan]]) {})]
+        (is (empty? (es/get-events stream)))
+        (is (= 9 (get-in opts [:resume-machine-snapshot :execution/metrics :tokens])))))))

@@ -129,6 +129,12 @@
         (cond-> input (assoc :input input)
                 acting (assoc :acting acting)))))
 
+(defn- ^{:stratum 0} inherited-workspaces
+  "The workspace checkpoints a new attempt carries over from the run it
+   resumes: all of them, or on a rewind those of the phases it keeps."
+  [checkpoints from-phase kept]
+  (cond->> checkpoints from-phase (filter (comp (set kept) :phase))))
+
 (defn- ^{:stratum 0} uuid-option
   "The UUID an option names, nil when it is absent; refused when present
    but not a UUID."
@@ -190,20 +196,24 @@
                              (checkpoints)))))
 
 (defn- ^{:stratum 1} run-id-for
-  "The id the resumed run executes under: the restored snapshot's own id,
-   else `--run-id`, else a fresh one. A `--run-id` that disagrees with the
-   snapshot is refused: the caller that passed it (the operator's resume
-   launcher) reports it as the run it started."
-  [machine-snapshot run-id-opt]
-  (let [snapshot-id (:execution/id machine-snapshot)
-        requested (uuid-option "--run-id" run-id-opt)]
-    (if (and snapshot-id requested (not= (str snapshot-id) (str requested)))
-      (response/throw-anomaly! :anomalies/incorrect
-                               (messages/t :resume/run-id-conflict
-                                           {:run-id run-id-opt
-                                            :snapshot-id (str snapshot-id)})
+  "The id the resumed run executes under: `--run-id`, else the restored
+   snapshot's own id, else a fresh one. A `--run-id` other than the
+   snapshot's starts a new attempt: the snapshot's state under that id,
+   so its events never land beside the finished run's (archived) ones.
+   The operator's resume launcher passes a fresh one on every retry. A
+   `--run-id` naming another run that has events under `events-dir` or a
+   checkpoint is refused: the attempt would write into that run."
+  [events-dir workflow-id machine-snapshot run-id-opt]
+  (let [requested (uuid-option "--run-id" run-id-opt)
+        snapshot-id (:execution/id machine-snapshot)]
+    (if (and requested
+             (not (contains? #{(str workflow-id) (str snapshot-id)} (str requested)))
+             (or (seq (es/read-workflow-events-by-id events-dir (str requested)))
+                 (try (workflow/load-checkpoint-data (str requested)) (catch Exception _ true))))
+      (response/throw-anomaly! :anomalies/conflict
+                               (messages/t :resume/run-id-taken {:run-id run-id-opt})
                                {:run-id run-id-opt})
-      (or snapshot-id requested (random-uuid)))))
+      (or requested snapshot-id (random-uuid)))))
 
 ;------------------------------------------------------------------------------ Layer 2
 
@@ -237,7 +247,7 @@
                                         #(wr/extract-workspace-checkpoints (read-event-file workflow-id)))
         ;; Checked before a completed run is reported done: an invalid
         ;; request is refused, not answered "already completed".
-        resume-run-id (run-id-for (:machine-snapshot reconstructed) (:run-id opts))
+        resume-run-id (run-id-for events-dir workflow-id (:machine-snapshot reconstructed) (:run-id opts))
         ;; `--correlation-id` lands on the run's lifecycle events; the
         ;; operator's launcher passes its intervention id and waits for
         ;; it. Absent, none is imposed and the runner's default applies
@@ -265,7 +275,14 @@
             {:keys [workflow-type workflow-version]} identity
             {:keys [workflow]} (load-workflow workflow-type workflow-version {})
 
-            machine-snapshot (:machine-snapshot reconstructed)
+            restored-snapshot (:machine-snapshot reconstructed)
+            ;; Another id than the run's own: a new attempt, whose events
+            ;; and cost are its own.
+            new-attempt? (not= (str resume-run-id) (str (or (:execution/id restored-snapshot) workflow-id)))
+            machine-snapshot (some-> restored-snapshot
+                                     (assoc :execution/id resume-run-id)
+                                     (cond-> new-attempt? (assoc :execution/metrics {:tokens 0 :cost-usd 0.0
+                                                                                     :duration-ms 0})))
             failed-checkpoint? (and machine-snapshot (:failed? reconstructed))
             resume-workflow (if (and machine-snapshot (not failed-checkpoint?))
                               workflow
@@ -273,7 +290,7 @@
             _ (throw-resume-anomaly! resume-workflow)
             remaining-pipeline (:workflow/pipeline resume-workflow)
             _ (when-not quiet
-                (if machine-snapshot
+                (if (= (str resume-run-id) (str (:execution/id restored-snapshot)))
                   (display/print-info
                     (messages/t :resume/restored-workflow-id
                                 {:workflow-id resume-run-id}))
@@ -298,7 +315,15 @@
             ;; alongside the supervisory snapshots.
             _correlator (correlator/attach! event-stream)
             control-state (es/create-control-state)
-            llm-client (context/create-llm-client workflow nil quiet)]
+            llm-client (context/create-llm-client workflow nil quiet)
+            ;; A new attempt keeps the run's workspace checkpoints under its
+            ;; own id, so a retry or rewind of the attempt can restore them.
+            _ (when new-attempt?
+                (doseq [checkpoint (inherited-workspaces
+                                    (wr/extract-workspace-checkpoints (read-event-file workflow-id))
+                                    (:from-phase opts)
+                                    (:completed-phases reconstructed))]
+                  (es/publish! event-stream (es/workspace-persisted event-stream resume-run-id checkpoint))))]
 
         (try
           ;; Governed control path: the resumed run gets the same

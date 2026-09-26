@@ -59,6 +59,7 @@
    :resume-not-started :application/resume-not-started
    :resume-origin-unknown :application/resume-origin-unknown
    :resume-readback-mismatch :application/resume-readback-mismatch
+   :resume-superseded :application/resume-superseded
    :resume-target-live :application/resume-target-live
    :safe-mode-readback-mismatch :application/safe-mode-readback-mismatch
    :unknown-phase :application/unknown-phase
@@ -67,7 +68,7 @@
 (def ^{:stratum 0} ^:private failure-detail-keys
   "What a mechanism may add to a failed intervention's details, beside
    `:failure/code`, so the operator sees why and where to look."
-  [:failure/reason :failure/log :resume/run-id :resume/pid :resume/phases])
+  [:failure/reason :failure/log :resume/run-id :resume/pid :resume/phases :resume/latest-attempt])
 
 (def ^{:stratum 0} ^:private verification-threads
   "Verifications that wait at once. Each mostly sleeps between polls,
@@ -150,6 +151,7 @@
               {:reason (some-> (:failure/reason details) name)
                :log (:failure/log details)
                :pid (:resume/pid details)
+               :attempt (some-> (:resume/latest-attempt details) str)
                :phases (some->> (:resume/phases details) (map name) (str/join ", "))}))
 
 (defn ^{:stratum 1} anomaly-failure
