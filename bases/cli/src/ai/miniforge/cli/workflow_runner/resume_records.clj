@@ -217,15 +217,6 @@
                    (system-message :anomaly/resume-refused {:code (name code)})
                    (assoc details :failure/code code)))
 
-(defn ^{:stratum 1} settle!
-  "Mark `launch`'s record settled with its intervention's final state
-   (unless a later launch has replaced it): a restart leaves it alone."
-  [launch final]
-  (let [f (launch-file (:resume/workflow-id launch))
-        record (read-edn f)]
-    (when (= (:resume/intervention-id record) (:resume/intervention-id launch))
-      (write-edn! f (assoc record :resume/settled (get final :intervention/state :unrecorded))))))
-
 (defn ^{:stratum 1} start!
   "Record the launch, spawn it with `(spawn! run-id log-file pid-file)` →
    pid, and record the pid. Recorded before the spawn too, naming the pid
@@ -267,6 +258,18 @@
     recorded))
 
 ;------------------------------------------------------------------------------ Layer 2
+
+(defn ^{:stratum 2} settle!
+  "Mark `launch`'s record, under its lineage root, settled with its
+   intervention's final state (unless a later launch has replaced it): a
+   restart leaves it alone. The record keeps its child's pid (see
+   `with-child-pid`), and the child's pid file is removed."
+  [launch final]
+  (let [f (launch-file (get launch :resume/root (:resume/workflow-id launch)))
+        record (read-edn f)]
+    (when (= (:resume/intervention-id record) (:resume/intervention-id launch))
+      (write-edn! f (assoc (with-child-pid record) :resume/settled (get final :intervention/state :unrecorded)))
+      (some-> (:resume/pid-file record) io/file (io/delete-file true)))))
 
 (defn ^{:stratum 2} recorded-origin
   "The recorded origin directory of `workflow-id` when it still exists,

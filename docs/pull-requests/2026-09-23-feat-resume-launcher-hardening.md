@@ -40,7 +40,10 @@ before PR 5 registers it.
   `/bin/sh` job control. A signal to the consumer's group does not reach it.
 - The launch record keeps the dispatched intervention and its `from-phase`.
   `settle!` marks it with the final state, and `pending-launches` lists
-  records never settled. PR 6's server uses them to finish verifications a
+  records never settled. The record is the lineage's, under its root (see
+  `fix/resume-launcher-review`). Settling keeps the child's pid, read from
+  its pid file when the launcher died before recording it, and removes the
+  pid file. PR 6's server uses them to finish verifications a
   stopped server left.
 - An interrupted wait returns `{:resume/pending? true}`: nothing is recorded,
   and the child keeps running.
@@ -50,7 +53,9 @@ before PR 5 registers it.
 - Records: an archived run keeps its origin; the runner's pid is a live target
   until released.
 - Records: a pid-less launch within and past its window; a child gone before
-  it was recorded; settle and pending.
+  it was recorded; settle and pending; settling an attempt's launch
+  recorded only before its spawn settles the root's record, keeps the pid
+  its child wrote, and removes the pid file.
 - Launcher: a live recorded runner refuses the retry; the detached child is
   outside the consumer's process group; an interrupted wait is pending.
 - Pre-commit hook per commit.
