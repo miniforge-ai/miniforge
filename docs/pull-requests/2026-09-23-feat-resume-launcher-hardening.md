@@ -50,14 +50,17 @@ before PR 5 registers it.
 
 ## Testing Plan
 
-- Records: an archived run keeps its origin; the runner's pid is a live target
-  until released.
-- Records: a pid-less launch within and past its window; a child gone before
-  it was recorded; settle and pending; settling an attempt's launch
-  recorded only before its spawn settles the root's record, keeps the pid
-  its child wrote, and removes the pid file.
-- Launcher: a live recorded runner refuses the retry; the detached child is
-  outside the consumer's process group; an interrupted wait is pending.
+- Records: an archived run keeps its origin, and an archived attempt's
+  start event is still evidence; the runner's pid is a live target until
+  released.
+- Records: a pid-less launch within and past its window, also one whose
+  child has not written its pid file yet; a child gone before it was
+  recorded; settle and pending; settling an attempt's launch recorded only
+  before its spawn settles the root's record, keeps the pid its child
+  wrote, and removes the pid file.
+- Launcher: a live recorded runner refuses the retry; an archived attempt
+  still supersedes its root; the detached child is outside the consumer's
+  process group; an interrupted wait is pending.
 - Pre-commit hook per commit.
 
 ## Deployment Plan

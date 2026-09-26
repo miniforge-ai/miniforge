@@ -174,6 +174,11 @@
             (let [refused (sut/launch! finished (retry-plan root))]
               (is (= :resume-superseded (failure-code refused)))
               (is (= a1 (get-in refused [:anomaly/data :resume/latest-attempt])))))
+          (testing "and once that attempt's run is archived"
+            (.renameTo (records/run-dir a1)
+                       (doto (io/file (es/default-events-dir) "archived" a1) io/make-parents))
+            (is (= a1 (get-in (sut/launch! finished (retry-plan root))
+                              [:anomaly/data :resume/latest-attempt]))))
           (let [a2 (str (attempt-of a1))]
             (ran! a2)
             (is (= root (records/lineage-root a2)) "an attempt of an attempt keeps the root")
