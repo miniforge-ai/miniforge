@@ -146,6 +146,20 @@
                                {:flag flag})
       parsed)))
 
+(defn- ^{:stratum 0} checkpointed?
+  "True when `run-id` has a checkpoint. The loader answers nil for an id
+   with none. When it throws instead (ex-info for a checkpoint failing
+   its schema, or any other failure), whether the id is taken is unknown:
+   the resume is refused, naming the loader's error."
+  [run-id]
+  (try
+    (some? (workflow/load-checkpoint-data (str run-id)))
+    (catch Exception e
+      (let [error (or (ex-message e) (.getName (class e)))]
+        (response/throw-anomaly! :anomalies/fault
+                                 (messages/t :resume/run-id-unchecked {:run-id (str run-id) :error error})
+                                 {:run-id (str run-id) :error error})))))
+
 ;------------------------------------------------------------------------------ Layer 1
 
 (defn- ^{:stratum 1} throw-resume-anomaly!
@@ -209,7 +223,7 @@
     (if (and requested
              (not (contains? #{(str workflow-id) (str snapshot-id)} (str requested)))
              (or (seq (es/read-workflow-events-by-id events-dir (str requested)))
-                 (try (workflow/load-checkpoint-data (str requested)) (catch Exception _ true))))
+                 (checkpointed? requested)))
       (response/throw-anomaly! :anomalies/conflict
                                (messages/t :resume/run-id-taken {:run-id run-id-opt})
                                {:run-id run-id-opt})

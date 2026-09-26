@@ -68,9 +68,19 @@
    :poll-ms 10})
 
 (defn- ^{:stratum 0} process-group
+  "`pid`'s process group, as `ps -o pgid=` prints it. A `ps` that fails or
+   prints no group throws, naming its exit code and stderr, so a comparison
+   of two groups never runs on a missing one."
   [pid]
-  (let [p (.exec (Runtime/getRuntime) (into-array String ["ps" "-o" "pgid=" "-p" (str pid)]))]
-    (str/trim (slurp (.getInputStream p)))))
+  (let [p (.start (ProcessBuilder. ^java.util.List ["ps" "-o" "pgid=" "-p" (str pid)]))
+        out (str/trim (slurp (.getInputStream p)))
+        err (str/trim (slurp (.getErrorStream p)))
+        exit (.waitFor p)]
+    (if (and (zero? exit) (re-matches #"\d+" out))
+      out
+      (throw (ex-info (str "`ps -o pgid= -p " pid "` gave no process group (exit " exit "): "
+                           (if (str/blank? err) (pr-str out) err))
+                      {:pid pid :exit exit :out out :err err})))))
 
 (defn- ^{:stratum 0} failure-code
   [result]
@@ -78,7 +88,7 @@
 
 (defn- ^{:stratum 0} dead-pid
   []
-  (let [p (.start (ProcessBuilder. ^java.util.List ["/usr/bin/true"]))] (.waitFor p) (.pid p)))
+  (let [p (.start (ProcessBuilder. ^java.util.List ["true"]))] (.waitFor p) (.pid p)))
 
 (defn- ^{:stratum 0} origin!
   "The run's recorded origin: this directory, no runner pid."
