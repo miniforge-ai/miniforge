@@ -175,12 +175,15 @@
                   :alive? #(and (not exited?) (or (nil? pid) (alive? pid pid-started)))
                   :deadline-ms (+ launched-at-ms timeout-ms)
                   :poll-ms poll-ms})
-        ;; Read again at the deadline: a child may write its pid late.
-        pid (or pid (:resume/pid (records/with-child-pid launch)))
+        ;; Read again after the wait: a child may write its pid late. The
+        ;; launch handed back carries a pid recovered from the pid file,
+        ;; so settlement records the child it actually found.
+        found (records/with-child-pid launch)
+        pid (or pid (:resume/pid found))
         details {:failure/reason outcome :failure/log log :resume/run-id run-id :resume/pid pid}]
     (when (and pid (= :timeout outcome)) (kill! pid))
     (case outcome
-      :observed launch
+      :observed found
       :interrupted {:resume/pending? true}
       (records/failure :unavailable :resume-not-started details))))
 
