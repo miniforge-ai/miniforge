@@ -126,7 +126,11 @@
         (is (not (sut/correlated-event? run-id intervention-id since)) "another child's event")
         (event! intervention-id)
         (is (sut/correlated-event? run-id intervention-id since))
-        (is (not (sut/correlated-event? (random-uuid) intervention-id since)) "no run directory yet")))))
+        (is (not (sut/correlated-event? (random-uuid) intervention-id since)) "no run directory yet")
+        (testing "a run archived before the first poll is still evidence"
+          (.renameTo (sut/run-dir run-id)
+                     (doto (io/file (es/default-events-dir) "archived" (str run-id)) io/make-parents))
+          (is (sut/correlated-event? run-id intervention-id since)))))))
 
 (deftest ^{:stratum 1} an-unsettled-launch-is-pending-until-settled-test
   (with-temp-home
@@ -176,6 +180,8 @@
             pid-file! #(spit (doto (io/file (:resume/pid-file record)) io/make-parents) %)]
         (try
           (is (= record (sut/with-child-pid record)) "no pid file yet: nothing is known")
+          (is (sut/launch-running? record 60000) "so in flight while its start window lasts")
+          (is (not (sut/launch-running? (update record :resume/launched-at-ms - 61000) 60000)))
           (pid-file! "")
           (is (= record (sut/with-child-pid record)) "a pid file still being written")
           (pid-file! (str (.pid child) "\n"))
