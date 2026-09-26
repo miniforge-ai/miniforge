@@ -144,7 +144,10 @@
 (defn ^{:stratum 2} persist-execution-state!
   "Persist a machine snapshot, manifest, and current phase checkpoint,
    and append the phase's gate decision (if any) to the run's
-   append-only gate history."
+   append-only gate history. A resumed run also gets a checkpoint for
+   each result it was started holding (`:resume-phase-results`) that has
+   none under its id: a resume under a new run id (a retried attempt, a
+   rewind) can then itself be resumed with them."
   [ctx]
   (when-let [workflow-run-id (:execution/id ctx)]
     (let [checkpoint-root (checkpoint-paths/resolve-checkpoint-root ctx)
@@ -162,6 +165,10 @@
                            :phase-results (or (:execution/phase-results ctx) {})}]
       (schemas/validate-checkpoint-data! checkpoint-data)
       (try
+        (doseq [[resumed-phase resumed-result] (get-in ctx [:execution/opts :resume-phase-results])
+                :let [path (checkpoint-paths/phase-checkpoint-path checkpoint-root workflow-run-id resumed-phase)]
+                :when (and resumed-result (not (fs/exists? path)))]
+          (write-edn-atomically! path (checkpoint-records/build-phase-checkpoint ctx resumed-phase resumed-result)))
         (when (and phase-name phase-result)
           (write-edn-atomically!
            (checkpoint-paths/phase-checkpoint-path checkpoint-root

@@ -342,6 +342,25 @@
         (is (= [test-done-phase]
                (get-in checkpoint-data [:manifest :workflow/phases-completed])))))))
 
+(deftest ^{:stratum 1} a-resume-checkpoints-the-results-it-starts-with-test
+  (testing "a resume under a new run id can itself be resumed: with a snapshot or without (a rewind)"
+    (checkpoint-test-support/call-with-temp-checkpoint-root
+      (fn [checkpoint-root]
+        (let [workflow {:workflow/id :test
+                        :workflow/version "1.0.0"
+                        :workflow/pipeline [{:phase test-done-phase}]}
+              restored {test-plan-phase {:status :completed :summary "plan, from the earlier attempt"}
+                        test-implement-phase {:status :completed :summary "implement, from it too"}}
+              snapshot (checkpoint-records/build-machine-snapshot (ctx/create-context workflow {:task "Test"} {}))]
+          (doseq [opts [{:resume-machine-snapshot snapshot} {:workflow-id (random-uuid)}]]
+            (let [result (runner/run-pipeline workflow {:task "Test"}
+                                              (assoc opts
+                                                     :checkpoint/root checkpoint-root
+                                                     :resume-phase-results restored))]
+              (is (= restored (select-keys (:phase-results (checkpoint-store/load-checkpoint-data
+                                                            (:execution/id result) {:checkpoint/root checkpoint-root}))
+                                           (keys restored)))))))))))
+
 (deftest ^{:stratum 1} run-pipeline-callbacks-test
   (testing "run-pipeline invokes callbacks"
     (let [workflow {:workflow/id :test

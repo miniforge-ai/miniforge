@@ -84,7 +84,7 @@
   "The target workflow has no reconstructable resume context"
 
   :application/no-resume-launcher
-  "No process resume launcher is available"
+  "No resume launcher is available: retries do not run on native Windows, and elsewhere need the command that runs miniforge (set MINIFORGE_CMD)"
 
   :application/not-implemented
   "The intervention mechanism is not implemented"
