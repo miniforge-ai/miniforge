@@ -45,6 +45,7 @@
     (reset! hook-state false)
     (try
       (with-redefs [resume-records/record-origin! (constantly nil)
+                    resume-records/pending-launches (constantly [])
                     sut/stop-at-exit! (constantly nil)]
         (f))
       (finally
@@ -97,8 +98,10 @@
           (is (= [::stream-a ::stream-b]
                  (mapv #(get-in % [1 :event-stream]) @registrations)))
           (is (= ::operator-stream (:stream (first @starts))))
-          (is (identical? operator/live-intervention-target?
-                          (:accept? (first @starts))))
+          (testing "a runner's consumer leaves retries to a long-lived one"
+            (let [accept? (:accept? (first @starts))]
+              (is (not (accept? {:intervention/type :retry :intervention/target-id "w"})))
+              (is (accept? {:intervention/type :acknowledge :intervention/target-id "a"}))))
           (is (identical? operator/live-intervention-stream
                           (:stream-for (first @starts)))))))))
 
@@ -151,8 +154,9 @@
                       operator/register-live-runner! (constantly nil)
                       operator/start-operator-consumer! (fn [opts] (swap! starts conj opts) ::handle)
                       operator/stop-operator-consumer! #(swap! stops conj %)]
-          (testing "a runnerless consumer registers every process handle"
+          (testing "a runnerless consumer registers every process handle and takes retries"
             (is (= ::handle (sut/start-process-control!)))
+            (is (identical? operator/live-intervention-target? (:accept? (first @starts))))
             (is (= {:degradation ::degradation-manager
                     :launcher {:launch! identity}
                     :evaluator policy-evaluator/evaluate}
@@ -209,3 +213,21 @@
                       operator/start-operator-consumer! (constantly ::handle)]
           (sut/start-process-control!)
           (is (empty? @registered) "nothing — not nil — is registered"))))))
+
+(deftest ^{:stratum 1} a-starting-server-resumes-retries-left-dispatched
+  (with-clean-operator-state
+    (fn []
+      (let [resumed (atom [])
+            launch {:resume/run-id (random-uuid) :resume/intervention {:intervention/id 1}}]
+        (with-redefs [agent/create-meta-loop-context (constantly {:event-stream ::operator-stream})
+                      supervisory/attach! (constantly nil)
+                      correlator/attach! (constantly nil)
+                      es/create-event-stream (constantly ::operator-stream)
+                      resume-launcher/launcher (constantly nil)
+                      resume-records/pending-launches (constantly [launch])
+                      operator/register-degradation-manager! (constantly nil)
+                      operator/register-policy-evaluator! (constantly nil)
+                      operator/verify-launched-resume! (fn [& args] (swap! resumed conj args))
+                      operator/start-operator-consumer! (constantly ::handle)]
+          (sut/start-process-control!)
+          (is (= [[::operator-stream {:intervention/id 1} launch]] @resumed)))))))
