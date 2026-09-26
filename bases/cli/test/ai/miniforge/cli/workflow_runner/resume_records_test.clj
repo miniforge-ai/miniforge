@@ -93,4 +93,5 @@
         (event! (random-uuid))
         (is (not (sut/correlated-event? run-id intervention-id since)) "another child's event")
         (event! intervention-id)
-        (is (sut/correlated-event? run-id intervention-id since))))))
+        (is (sut/correlated-event? run-id intervention-id since))
+        (is (not (sut/correlated-event? (random-uuid) intervention-id since)) "no run directory yet")))))

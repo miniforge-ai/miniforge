@@ -18,6 +18,8 @@
 (ns ai.miniforge.cli.workflow-runner.resume-launcher-test
   (:require
    [ai.miniforge.cli.app-config :as app-config]
+   [ai.miniforge.cli.main :as main]
+   [ai.miniforge.cli.main.commands.resume :as cmd-resume]
    [ai.miniforge.cli.workflow-runner.resume-launcher :as sut]
    [ai.miniforge.cli.workflow-runner.resume-records :as records]
    [ai.miniforge.event-stream.interface :as es]
@@ -80,6 +82,12 @@
     (is (nil? (sut/self-command nil "bb" ["a" "b"] '("c"))))
     (is (nil? (sut/self-command nil "bb" ["a"] nil)))))
 
+(deftest ^{:stratum 0} there-is-no-launcher-on-native-windows-test
+  (let [facts {:env-command "/opt/mf" :arguments [] :cli-args nil}]
+    (is (some? (sut/launcher (assoc facts :os-name "Linux"))))
+    (is (some? (sut/launcher (assoc facts :os-name "Mac OS X"))))
+    (is (nil? (sut/launcher (assoc facts :os-name "Windows 11"))) "no /bin/sh to detach through")))
+
 (deftest ^{:stratum 0} resume-argv-test
   (let [intervention-id (random-uuid)
         plan {:resume/workflow-id "wf-1" :resume/intervention-id intervention-id}]
@@ -87,6 +95,17 @@
            (sut/resume-argv ["mf"] plan "r1")))
     (is (= ["--from-phase" "implement"]
            (take-last 2 (sut/resume-argv ["mf"] (assoc plan :resume/from-phase :implement) "r1"))))))
+
+(deftest ^{:stratum 0} the-cli-parses-the-child-argv-as-a-resume-test
+  (let [intervention-id (random-uuid)
+        run-id (random-uuid)
+        plan {:resume/workflow-id "wf-1" :resume/intervention-id intervention-id :resume/from-phase :implement}
+        resumed (atom nil)]
+    (with-redefs [cmd-resume/resume-workflow (fn [workflow-id opts] (reset! resumed [workflow-id opts]))]
+      (apply main/-main (rest (sut/resume-argv ["mf"] plan run-id))))
+    (is (= "wf-1" (first @resumed)))
+    (is (= {:from-phase :implement :run-id (str run-id) :correlation-id (str intervention-id)}
+           (select-keys (second @resumed) [:from-phase :run-id :correlation-id])))))
 
 ;------------------------------------------------------------------------------ Layer 1
 
@@ -163,6 +182,18 @@
         (.interrupt waiter)
         (is (= :resume-unverified (failure-code (deref result 5000 nil))))
         (is (empty? @killed))))))
+
+(deftest ^{:stratum 1} a-check-that-throws-is-one-bad-poll-test
+  (with-temp-home
+    (fn []
+      (let [polls (atom 0)
+            launch {:resume/run-id (random-uuid)
+                    :resume/intervention-id (str (random-uuid))
+                    :resume/pid 4242
+                    :resume/launched-at-ms (System/currentTimeMillis)}]
+        (with-redefs [records/correlated-event? (fn [& _] (or (< 1 (swap! polls inc))
+                                                              (throw (ex-info "unreadable" {}))))]
+          (is (= launch (sut/await-start! (deps {}) launch)) "the next poll sees the start"))))))
 
 (deftest ^{:stratum 1} the-child-is-detached-and-gets-its-argv-verbatim-test
   (with-temp-home

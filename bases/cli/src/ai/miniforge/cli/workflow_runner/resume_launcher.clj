@@ -29,6 +29,9 @@
    why a redelivered intervention never spawns twice, is in
    `resume-records`.
 
+   Native Windows has no `/bin/sh` to detach through, so there is no
+   launcher there: a retry fails `:no-resume-launcher`.
+
    `:await-start!` runs on the operator's verification pool, off the
    pass: it waits (bounded) for an event from this child — one carrying
    the intervention id as its correlation id. A child that exits first
@@ -60,6 +63,12 @@
        "then setsid nohup \"$@\" >>\"$log\" 2>&1 & "
        "else nohup \"$@\" >>\"$log\" 2>&1 & fi; echo $!"))
 
+(defn ^{:stratum 0} detachable-platform?
+  "True where a child can be detached through `/bin/sh`: not native
+   Windows."
+  [os-name]
+  (not (str/starts-with? (str/lower-case (str os-name)) "windows")))
+
 (defn ^{:stratum 0} self-command
   "The argv prefix that runs this CLI again: `MINIFORGE_CMD` when set,
    else this process's command line minus the CLI arguments it was given.
@@ -80,18 +89,26 @@
 
 (defn- ^{:stratum 0} await-outcome
   "Poll to `:observed`, `:exited`, `:timeout` (past `deadline-ms`), or
-   `:interrupted`."
+   `:interrupted`. A check that throws counts as no evidence and a live
+   child for that poll, so only the deadline ends a wait that keeps
+   failing."
   [{:keys [started? alive? deadline-ms poll-ms]}]
-  (try
-    (loop []
-      (cond
-        (started?) :observed
-        ;; Re-check after death: a quick child can write and exit
-        ;; between the two reads.
-        (not (alive?)) (if (started?) :observed :exited)
-        (> (System/currentTimeMillis) deadline-ms) :timeout
-        :else (do (Thread/sleep ^long poll-ms) (recur))))
-    (catch InterruptedException _ :interrupted)))
+  (let [poll (fn [check failed]
+               (try (check)
+                    (catch InterruptedException e (throw e))
+                    (catch Exception _ failed)))
+        started? #(poll started? false)
+        alive? #(poll alive? true)]
+    (try
+      (loop []
+        (cond
+          (started?) :observed
+          ;; Re-check after death: a quick child can write and exit
+          ;; between the two reads.
+          (not (alive?)) (if (started?) :observed :exited)
+          (> (System/currentTimeMillis) deadline-ms) :timeout
+          :else (do (Thread/sleep ^long poll-ms) (recur))))
+      (catch InterruptedException _ :interrupted))))
 
 ;------------------------------------------------------------------------------ Layer 1
 
@@ -146,21 +163,26 @@
 ;------------------------------------------------------------------------------ Layer 2
 
 (defn ^{:stratum 2} launcher
-  "The `operator/register-resume-launcher!` handle, or nil when this
-   process cannot name the command that re-runs it. Call on the thread
-   that got the CLI arguments: `*command-line-args*` is bound to it."
-  []
-  (let [info (.info (java.lang.ProcessHandle/current))
-        arguments (vec (.orElse (.arguments info) (into-array String [])))]
-    (when-let [prefix (self-command (System/getenv "MINIFORGE_CMD")
-                                    (.orElse (.command info) nil)
-                                    arguments
-                                    *command-line-args*)]
-      (let [deps {:command prefix
-                  :spawn! spawn-detached!
-                  :alive? records/process-running?
-                  :kill! records/destroy-process!
-                  :timeout-ms observe-timeout-ms
-                  :poll-ms observe-poll-ms}]
-        {:launch! (partial launch! deps)
-         :await-start! (partial await-start! deps)}))))
+  "The `operator/register-resume-launcher!` handle, or nil on native
+   Windows or when this process cannot name the command that re-runs it.
+   Call on the thread that got the CLI arguments: `*command-line-args*`
+   is bound to it. The one-arity form takes those facts as
+   `{:os-name :env-command :command :arguments :cli-args}`."
+  ([]
+   (let [info (.info (java.lang.ProcessHandle/current))]
+     (launcher {:os-name (System/getProperty "os.name")
+                :env-command (System/getenv "MINIFORGE_CMD")
+                :command (.orElse (.command info) nil)
+                :arguments (vec (.orElse (.arguments info) (into-array String [])))
+                :cli-args *command-line-args*})))
+  ([{:keys [os-name env-command command arguments cli-args]}]
+   (when-let [prefix (and (detachable-platform? os-name)
+                          (self-command env-command command arguments cli-args))]
+     (let [deps {:command prefix
+                 :spawn! spawn-detached!
+                 :alive? records/process-running?
+                 :kill! records/destroy-process!
+                 :timeout-ms observe-timeout-ms
+                 :poll-ms observe-poll-ms}]
+       {:launch! (partial launch! deps)
+        :await-start! (partial await-start! deps)}))))
