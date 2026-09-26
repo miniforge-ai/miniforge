@@ -15,7 +15,6 @@
 ;; WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 ;; See the License for the specific language governing permissions and
 ;; limitations under the License.
-
 (ns ai.miniforge.workflow.dag-activation-diagnostics-test
   "Unit tests for DAG activation skip-reason diagnostics.
 
@@ -25,7 +24,9 @@
    [clojure.test :refer [deftest is testing]]
    [ai.miniforge.workflow.execution :as exec]))
 
-(def ^:private valid-plan
+;------------------------------------------------------------------------------ Layer 0
+
+(def ^{:stratum 0} ^:private valid-plan
   {:plan/id #uuid "00000000-0000-0000-0000-000000000001"
    :plan/tasks [{:task/id #uuid "00000000-0000-0000-0000-000000000002"
                  :task/description "t1"}
@@ -33,26 +34,13 @@
                  :task/description "t2"}]
    :plan/name "test"})
 
-(defn- phase-result-with-plan [plan]
+(defn- ^{:stratum 0} phase-result-with-plan [plan]
   {:name :plan
    :agent :planner
    :result {:status :success :output plan}})
 
-(deftest skip-reason-not-plan-phase
-  (testing "Non-plan phases skip with :not-plan-phase"
-    (is (= :not-plan-phase
-           (exec/dag-skip-reason :implement (phase-result-with-plan valid-plan) {})))
-    (is (= :not-plan-phase
-           (exec/dag-skip-reason :verify {} {})))))
-
-(deftest skip-reason-disabled
-  (testing "When ctx has :disable-dag-execution, skip with :disabled"
-    (is (= :disabled
-           (exec/dag-skip-reason :plan
-                                 (phase-result-with-plan valid-plan)
-                                 {:disable-dag-execution true})))))
-
-(deftest skip-reason-no-plan-id
+;; dag-skip-reason
+(deftest ^{:stratum 0} skip-reason-no-plan-id
   (testing "Missing :plan/id in phase output skips with :no-plan-id"
     (is (= :no-plan-id
            (exec/dag-skip-reason :plan {:result {:status :success :output {}}} {})))
@@ -61,34 +49,8 @@
     (is (= :no-plan-id
            (exec/dag-skip-reason :plan {} {})))))
 
-(deftest skip-reason-no-tasks
-  (testing "Plan with :plan/id but empty :plan/tasks skips with :no-tasks"
-    (let [empty-plan {:plan/id (random-uuid) :plan/tasks []}]
-      (is (= :no-tasks
-             (exec/dag-skip-reason :plan (phase-result-with-plan empty-plan) {}))))))
-
-(deftest activates-with-tasks
-  (testing "Plan with :plan/id and at least one task returns nil (don't skip)"
-    (is (nil? (exec/dag-skip-reason :plan (phase-result-with-plan valid-plan) {})))
-    (let [one-task-plan {:plan/id (random-uuid)
-                         :plan/tasks [{:task/id (random-uuid)}]}]
-      (is (nil? (exec/dag-skip-reason :plan
-                                      (phase-result-with-plan one-task-plan)
-                                      {}))))))
-
-(deftest dag-applicable-backward-compatible
-  (testing "dag-applicable? preserves existing return semantics"
-    (is (= valid-plan
-           (exec/dag-applicable? :plan (phase-result-with-plan valid-plan) {})))
-    (is (nil? (exec/dag-applicable? :implement (phase-result-with-plan valid-plan) {})))
-    (is (nil? (exec/dag-applicable? :plan
-                                    (phase-result-with-plan valid-plan)
-                                    {:disable-dag-execution true})))))
-
-;;----------------------------------------------------------------------------
 ;; dag-skip-diagnostic — keys-only snapshot of what the plan phase returned
-
-(deftest diagnostic-success-output-missing-plan-id
+(deftest ^{:stratum 0} diagnostic-success-output-missing-plan-id
   (testing "planner succeeded but :output lacks :plan/id (the observed case)"
     (let [pr {:name :plan :result {:status :success :output {:some/other-key 1}}}
           d  (exec/dag-skip-diagnostic pr :no-plan-id)]
@@ -99,7 +61,7 @@
       (is (nil? (:plan/task-count d))
           ":no-plan-id reason should not include :plan/task-count"))))
 
-(deftest diagnostic-output-is-nil
+(deftest ^{:stratum 0} diagnostic-output-is-nil
   (testing "planner succeeded but :output is nil"
     (let [pr {:name :plan :result {:status :success :output nil}}
           d  (exec/dag-skip-diagnostic pr :no-plan-id)]
@@ -109,7 +71,7 @@
       (is (nil? (:output/has-plan-id? d))
           "no :output/has-plan-id? when output is not a map"))))
 
-(deftest diagnostic-result-is-failure
+(deftest ^{:stratum 0} diagnostic-result-is-failure
   (testing "planner failed — :result has no :output at all"
     (let [pr {:name :plan :result {:status :failure :error {:message "boom"}}}
           d  (exec/dag-skip-diagnostic pr :no-plan-id)]
@@ -117,7 +79,7 @@
       (is (= :nil (:output/type d)))
       (is (some #{:status :error} (:result/keys d))))))
 
-(deftest diagnostic-surfaces-result-error-on-error-status
+(deftest ^{:stratum 0} diagnostic-surfaces-result-error-on-error-status
   (testing "error status attaches :result/error with message and data-keys"
     (let [err {:message "planner MCP artifact not found"
                :data {:phase :plan
@@ -129,14 +91,14 @@
       (is (= "planner MCP artifact not found" (:error/message re)))
       (is (= [:llm-content-length :phase] (:error/data-keys re))))))
 
-(deftest diagnostic-surfaces-anomaly-keyword
+(deftest ^{:stratum 0} diagnostic-surfaces-anomaly-keyword
   (testing "anomaly keyword on error is preserved (trimmed to known category)"
     (let [err {:message "something" :anomaly :anomalies.agent/invoke-failed}
           pr  {:name :plan :result {:status :error :error err}}
           d   (exec/dag-skip-diagnostic pr :no-plan-id)]
       (is (= :anomalies.agent/invoke-failed (:anomaly (:result/error d)))))))
 
-(deftest diagnostic-truncates-long-error-message
+(deftest ^{:stratum 0} diagnostic-truncates-long-error-message
   (testing "error message > 500 chars is truncated (don't bloat the event)"
     (let [long-msg (apply str (repeat 1000 "x"))
           err {:message long-msg}
@@ -144,13 +106,55 @@
           d   (exec/dag-skip-diagnostic pr :no-plan-id)]
       (is (= 500 (count (:error/message (:result/error d))))))))
 
-(deftest diagnostic-no-result-error-when-success
+(deftest ^{:stratum 0} diagnostic-no-result-error-when-success
   (testing "when result status isn't error/failed/failure, no :result/error key"
     (let [pr {:name :plan :result {:status :success :output {:some/key 1}}}
           d  (exec/dag-skip-diagnostic pr :no-plan-id)]
       (is (nil? (:result/error d))))))
 
-(deftest diagnostic-no-tasks-includes-task-count
+;------------------------------------------------------------------------------ Layer 1
+
+;; dag-skip-reason, against a phase result built from a plan fixture
+(deftest ^{:stratum 1} skip-reason-not-plan-phase
+  (testing "Non-plan phases skip with :not-plan-phase"
+    (is (= :not-plan-phase
+           (exec/dag-skip-reason :implement (phase-result-with-plan valid-plan) {})))
+    (is (= :not-plan-phase
+           (exec/dag-skip-reason :verify {} {})))))
+
+(deftest ^{:stratum 1} skip-reason-disabled
+  (testing "When ctx has :disable-dag-execution, skip with :disabled"
+    (is (= :disabled
+           (exec/dag-skip-reason :plan
+                                 (phase-result-with-plan valid-plan)
+                                 {:disable-dag-execution true})))))
+
+(deftest ^{:stratum 1} skip-reason-no-tasks
+  (testing "Plan with :plan/id but empty :plan/tasks skips with :no-tasks"
+    (let [empty-plan {:plan/id (random-uuid) :plan/tasks []}]
+      (is (= :no-tasks
+             (exec/dag-skip-reason :plan (phase-result-with-plan empty-plan) {}))))))
+
+(deftest ^{:stratum 1} activates-with-tasks
+  (testing "Plan with :plan/id and at least one task returns nil (don't skip)"
+    (is (nil? (exec/dag-skip-reason :plan (phase-result-with-plan valid-plan) {})))
+    (let [one-task-plan {:plan/id (random-uuid)
+                         :plan/tasks [{:task/id (random-uuid)}]}]
+      (is (nil? (exec/dag-skip-reason :plan
+                                      (phase-result-with-plan one-task-plan)
+                                      {}))))))
+
+(deftest ^{:stratum 1} dag-applicable-backward-compatible
+  (testing "dag-applicable? preserves existing return semantics"
+    (is (= valid-plan
+           (exec/dag-applicable? :plan (phase-result-with-plan valid-plan) {})))
+    (is (nil? (exec/dag-applicable? :implement (phase-result-with-plan valid-plan) {})))
+    (is (nil? (exec/dag-applicable? :plan
+                                    (phase-result-with-plan valid-plan)
+                                    {:disable-dag-execution true})))))
+
+;; dag-skip-diagnostic, against a phase result built from a plan fixture
+(deftest ^{:stratum 1} diagnostic-no-tasks-includes-task-count
   (testing ":no-tasks skip includes :plan/task-count"
     (let [plan {:plan/id (random-uuid) :plan/tasks []}
           pr   (phase-result-with-plan plan)
@@ -158,7 +162,7 @@
       (is (= 0 (:plan/task-count d)))
       (is (true? (:output/has-plan-id? d))))))
 
-(deftest diagnostic-bounded-no-leakage
+(deftest ^{:stratum 1} diagnostic-bounded-no-leakage
   (testing "diagnostic doesn't leak full plan content — only keys"
     (let [large-plan {:plan/id (random-uuid)
                       :plan/tasks (vec (repeat 100 {:task/id (random-uuid)
