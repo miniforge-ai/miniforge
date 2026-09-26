@@ -93,6 +93,12 @@ A runner killed with SIGKILL never releases its origin. Its pid is dead, so
 the run is not taken for live, unless the pid is reused by a process with the
 same start instant.
 
+A child recovered without a recorded pid can still write its pid file after
+the launcher's last read, just before the timeout kill decision. The launcher
+reads the file again right at that decision, which narrows the window but does
+not close it. Closing it needs an atomic claim on the pid file, which would
+make every child's start depend on hard-link support.
+
 ## Related Issues/PRs
 
 Stack: `feat/resume-flags`, `feat/operator-async-resume`,
