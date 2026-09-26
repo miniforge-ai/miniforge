@@ -456,6 +456,10 @@
                           (git/count-test-defs worktree-path)
                           (sandbox/count-test-defs executor environment-id)))]
       (cond
+        (or (nil? diff-stats) (nil? test-counts))
+        (do (when logger (log/error logger :release-executor :diff/stats-unavailable {}))
+            (fail state :destructive-diff (msg/t :step/diff-stats-unavailable)))
+
         (net-negative-tests? test-counts)
         (let [data {:added (:added test-counts) :removed (:removed test-counts)}]
           (when logger (log/error logger :release-executor :diff/net-negative-tests {:data data}))
