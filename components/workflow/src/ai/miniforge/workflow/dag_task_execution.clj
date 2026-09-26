@@ -148,9 +148,10 @@
             task-branch  (task-result-branch result)]
         ;; `:execution/artifacts` accumulates across phases AND across repair
         ;; iterations (each `update :execution/artifacts into ...` in state.clj
-        ;; / execution.clj appends). When a task succeeds after one or more
-        ;; review:changes-requested cycles, the vector ends up holding the
-        ;; failing-iteration verifier output AHEAD of the succeeding one's.
+        ;; / execution_lifecycle.clj / execution_dag.clj appends). When a task
+        ;; succeeds after one or more review:changes-requested cycles, the
+        ;; vector ends up holding the failing-iteration verifier output
+        ;; AHEAD of the succeeding one's.
         ;; Picking `(first artifacts)` would make the task-completed event
         ;; report the EARLIEST iteration as the artifact-of-record — that's
         ;; what the 2026-05-12 dogfood showed for PR #861 (verifier said
