@@ -129,6 +129,58 @@
           (is (= 0 (binding [*out* (java.io.StringWriter.)]
                      (sut/serve-cmd {} (constantly nil))))))))))
 
+(deftest ^{:stratum 1} a-stop-that-throws-still-releases-the-home-test
+  (let [home (temp-home)
+        discovery (io/file home sut/discovery-file-name)]
+    (with-redefs [es/default-events-dir (constantly (io/file home "events"))
+                  control/start-process-control! (constantly nil)
+                  control/stop-process-control! #(throw (ex-info "consumer would not stop" {}))]
+      (testing "the consumer's stop throws: the discovery file is still removed"
+        (is (thrown-with-msg? clojure.lang.ExceptionInfo #"would not stop"
+                              (binding [*out* (java.io.StringWriter.)]
+                                (sut/serve-cmd {} #(is (.exists discovery))))))
+        (is (not (.exists discovery))))
+      (testing "and the lock released, so the next server for the same home is not refused"
+        (with-redefs [control/stop-process-control! (constantly nil)]
+          (is (= 0 (binding [*out* (java.io.StringWriter.)
+                             *err* (java.io.StringWriter.)]
+                     (sut/serve-cmd {} (constantly nil))))))))))
+
+(deftest ^{:stratum 1} a-stop-during-start-leaves-nothing-behind-test
+  (let [home (temp-home)
+        discovery (io/file home sut/discovery-file-name)
+        calls (atom [])
+        hook (promise)
+        starting (promise)
+        finish-start (promise)
+        out (java.io.StringWriter.)]
+    (with-redefs [es/default-events-dir (constantly (io/file home "events"))
+                  sut/add-shutdown-hook! #(deliver hook %)
+                  sut/remove-shutdown-hook! (constantly nil)
+                  control/start-process-control! #(do (deliver starting true)
+                                                      @finish-start
+                                                      (swap! calls conj :start))
+                  control/stop-process-control! #(swap! calls conj :stop)]
+      (let [server (future (binding [*out* out]
+                             (sut/serve-cmd {} #(swap! calls conj :await))))
+            _ (deref starting 5000 :timeout)
+            ;; What SIGTERM does: the JVM starts the hook thread.
+            stopper (doto ^Thread (deref hook 5000 nil) .start)]
+        (testing "a stop while the consumer is starting waits for it, then stops it"
+          (is (eventually #(contains? #{java.lang.Thread$State/BLOCKED java.lang.Thread$State/TERMINATED}
+                                      (.getState stopper))))
+          (deliver finish-start true)
+          (.join stopper 5000)
+          (is (= 0 (deref server 5000 :timeout)))
+          (is (= [:start :stop] @calls) "nothing runs after the stop")
+          (is (not (.exists discovery)))
+          (is (not (str/includes? (str out) "ready"))))
+        (testing "and releases the home"
+          (with-redefs [control/start-process-control! (constantly nil)]
+            (is (= 0 (binding [*out* (java.io.StringWriter.)
+                               *err* (java.io.StringWriter.)]
+                       (sut/serve-cmd {} (constantly nil)))))))))))
+
 (deftest ^{:stratum 1} serve-consumes-with-its-real-consumer-test
   (let [home (temp-home)
         events-dir (io/file home "events")

@@ -79,6 +79,17 @@
   []
   @(promise))
 
+(defn- ^{:stratum 0} add-shutdown-hook!
+  [^Thread hook]
+  (.addShutdownHook (Runtime/getRuntime) hook))
+
+(defn- ^{:stratum 0} remove-shutdown-hook!
+  "Removal throws once the JVM is shutting down; the hook then runs
+   instead, so the exception is dropped."
+  [^Thread hook]
+  (try (.removeShutdownHook (Runtime/getRuntime) hook)
+       (catch Exception _ nil)))
+
 ;------------------------------------------------------------------------------ Layer 1
 
 (defn- ^{:stratum 1} try-lock!
@@ -112,11 +123,17 @@
 
 (defn- ^{:stratum 1} stop-serving!
   "Stop the consumer (letting an in-flight pass finish), remove the
-   discovery file, release the lock."
+   discovery file, release the lock. The file is removed and the lock
+   released even when stopping the consumer throws or is interrupted:
+   the stop runs once, so a lock left held would refuse the home."
   [home ^FileChannel channel]
-  (control/stop-process-control!)
-  (io/delete-file (io/file home discovery-file-name) true)
-  (.close channel))
+  (try
+    (control/stop-process-control!)
+    (finally
+      (try
+        (io/delete-file (io/file home discovery-file-name) true)
+        (finally
+          (.close channel))))))
 
 (defn- ^{:stratum 1} running-pid
   [home]
@@ -130,7 +147,12 @@
    or SIGINT ends the process and the shutdown hook stops the consumer,
    removes the discovery file, and releases the lock — a clean stop that
    exits 143 (SIGTERM) or 130 (SIGINT). Returns the exit code otherwise:
-   0 after `await-stop!` returns, 1 when a server already holds the home.
+   0 after `await-stop!` returns or once a stop cuts the start short, 1
+   when a server already holds the home.
+
+   A stop during start does not race it: the step in progress (starting
+   the consumer, writing the discovery file, printing the ready line)
+   finishes, the stop then undoes it, and no later step runs.
 
    If starting or waiting throws, the same stop runs before the exception
    propagates: the lock is released and the hook removed, so the next
@@ -142,22 +164,23 @@
    (let [home (serve-home)]
      (if-let [channel (try-lock! home)]
        (let [info (server-info)
+             guard (Object.)
              stopped? (atom false)
+             ;; `stopped?` is set before `guard` is taken: a step already
+             ;; running finishes, is stopped, and no later step starts.
              stop! #(when (compare-and-set! stopped? false true)
-                      (stop-serving! home channel))
+                      (locking guard (stop-serving! home channel)))
+             step! (fn [f] (locking guard (when-not @stopped? (f) true)))
              hook (Thread. ^Runnable stop!)]
-         (.addShutdownHook (Runtime/getRuntime) hook)
+         (add-shutdown-hook! hook)
          (try
-           (control/start-process-control!)
-           (write-discovery! home info)
-           (println (json/generate-string (assoc info :ready true)))
-           (flush)
-           (await-stop!)
+           (when (and (step! control/start-process-control!)
+                      (step! #(write-discovery! home info))
+                      (step! #(do (println (json/generate-string (assoc info :ready true)))
+                                  (flush))))
+             (await-stop!))
            0
            (finally
-             ;; Throws when the JVM is already shutting down; the hook then
-             ;; runs `stop!` itself, and `stopped?` keeps it to one run.
-             (try (.removeShutdownHook (Runtime/getRuntime) hook)
-                  (catch Exception _ nil))
+             (remove-shutdown-hook! hook)
              (stop!))))
        (refuse! home (running-pid home))))))
