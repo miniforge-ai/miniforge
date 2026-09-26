@@ -252,12 +252,6 @@
       (is (= :failed (:_state out)) "terminal work verdict → :failed immediately")
       (is (= 0 (get out :infra-retry-count 0)) "no infra retry consumed"))))
 
-(defn- ^{:stratum 1} policy-pack
-  []
-  {:pack/id    "test-pack"
-   :pack/name  "Test Pack"
-   :pack/rules [(policy-rule)]})
-
 (deftest ^{:stratum 1} apply-phase-transition-self-redirect-is-a-valid-transition
   (testing "on-fail self-repair: a guarded :phase/fail whose redirect
             branch targets the CURRENT phase must return the advanced ctx,
@@ -321,6 +315,14 @@
       (is (= 1 (get (fsm/context (:execution/fsm-state out))
                     :infra-retry-count))
           "the infra counter moved — the guarded branch ran"))))
+
+(defn- ^{:stratum 1} policy-review-context
+  []
+  {:policy-packs [{:pack/id    "test-pack"
+                   :pack/name  "Test Pack"
+                   :pack/rules [(policy-rule)]}]
+   :execution/phase-results
+   {:implement {:artifact (implement-code-artifact)}}})
 
 ;------------------------------------------------------------------------------ Layer 2
 
@@ -386,15 +388,7 @@
       (is (not= prior-state (:execution/fsm-state out))
           "happy path must move the FSM forward"))))
 
-(defn- ^{:stratum 2} policy-review-context
-  []
-  {:policy-packs [(policy-pack)]
-   :execution/phase-results
-   {:implement {:artifact (implement-code-artifact)}}})
-
-;------------------------------------------------------------------------------ Layer 3
-
-(deftest ^{:stratum 3} apply-gate-validation-policy-review-uses-implement-artifact
+(deftest ^{:stratum 2} apply-gate-validation-policy-review-uses-implement-artifact
   (testing "policy-review runs through the normal gate path against implemented code"
     (let [phase-result {:result {:output {:review/decision :approved}}}
           out          (exec/apply-gate-validation
