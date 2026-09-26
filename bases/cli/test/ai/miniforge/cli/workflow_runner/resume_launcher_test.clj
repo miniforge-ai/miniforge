@@ -76,6 +76,16 @@
   [result]
   (get-in result [:anomaly/data :failure/code]))
 
+(defn- ^{:stratum 0} dead-pid
+  []
+  (let [p (.start (ProcessBuilder. ^java.util.List ["/usr/bin/true"]))] (.waitFor p) (.pid p)))
+
+(defn- ^{:stratum 0} origin!
+  "The run's recorded origin: this directory, no runner pid."
+  [workflow-id]
+  (spit (doto (io/file (records/run-dir workflow-id) "origin.edn") io/make-parents)
+        (pr-str {:cwd (System/getProperty "user.dir")})))
+
 (deftest ^{:stratum 0} self-command-test
   (testing "MINIFORGE_CMD wins"
     (is (= ["/opt/mf"] (sut/self-command "/opt/mf" "bb" ["serve"] ["serve"]))))
@@ -147,6 +157,37 @@
         (with-redefs [operator/live-runner? (constantly true)]
           (is (= :resume-target-live
                  (failure-code (sut/launch! (deps {}) (retry-plan workflow-id))))))))))
+
+(deftest ^{:stratum 1} a-lineage-retries-only-its-newest-attempt-test
+  (with-temp-home
+    (fn []
+      (let [root (str (random-uuid))
+            finished (assoc (deps {}) :spawn! (fn [& _] (dead-pid)))
+            ran! #(.mkdirs (records/run-dir %))
+            attempt-of #(:resume/run-id (sut/launch! finished (retry-plan %)))]
+        (origin! root)
+        (let [a1 (str (attempt-of root))]
+          (is (= root (records/lineage-root a1)))
+          (is (some? (attempt-of root)) "an attempt that never recorded a run does not supersede its run")
+          (ran! a1)
+          (testing "a retry of the run after an attempt of it ran is refused, naming the attempt"
+            (let [refused (sut/launch! finished (retry-plan root))]
+              (is (= :resume-superseded (failure-code refused)))
+              (is (= a1 (get-in refused [:anomaly/data :resume/latest-attempt])))))
+          (let [a2 (str (attempt-of a1))]
+            (ran! a2)
+            (is (= root (records/lineage-root a2)) "an attempt of an attempt keeps the root")
+            (is (= a2 (get-in (sut/launch! finished (retry-plan a1)) [:anomaly/data :resume/latest-attempt])))
+            (testing "one launch at a time per lineage, whichever member it targets"
+              (let [running (sut/launch! (deps {}) (retry-plan a2))]
+                (is (pos-int? (:resume/pid running)))
+                (is (= :resume-in-flight (failure-code (sut/launch! finished (retry-plan root)))))))
+            (testing "a live runner of any member refuses a retry of the lineage"
+              (with-redefs [records/launch-running? (constantly false)
+                            operator/live-runner? #(= root %)]
+                (is (= :resume-target-live
+                       (failure-code (sut/launch! finished (retry-plan (records/latest-attempt
+                                                                        (records/launch-record root)))))))))))))))
 
 (deftest ^{:stratum 1} only-this-childs-event-counts-as-started-test
   (with-temp-home

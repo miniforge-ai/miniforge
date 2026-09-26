@@ -25,7 +25,12 @@
    run id, pid and pid start instant), the pid file the child writes
    itself (`<home>/logs/resume-<run-id>.pid`, named in the launch before
    the spawn), and start evidence (an event under the run id carrying the
-   intervention id as its `:workflow-run/correlation-id`)."
+   intervention id as its `:workflow-run/correlation-id`).
+
+   Retries form a lineage: the run first retried (its root) and every
+   attempt a retry started, each named in
+   `.resume-launches/lineage/<attempt>.edn`. The latest launch is recorded
+   once per lineage, under its root, with the lineage's attempts."
   (:require
    [ai.miniforge.anomaly.interface :as anomaly]
    [ai.miniforge.cli.app-config :as app-config]
@@ -59,6 +64,12 @@
    (io/file (es/operator-dir (es/default-events-dir)) ".resume-launches"))
   (^java.io.File [workflow-id]
    (io/file (launch-file) (str workflow-id ".edn"))))
+
+(defn- ^{:stratum 0} lineage-file
+  "Where an attempt a retry started names its lineage's root."
+  ^java.io.File [run-id]
+  (io/file (es/operator-dir (es/default-events-dir)) ".resume-launches" "lineage"
+           (str run-id ".edn")))
 
 (defn- ^{:stratum 0} read-edn
   [^java.io.File f]
@@ -146,6 +157,18 @@
        (keep read-edn)
        (filter #(and (:resume/intervention %) (not (contains? % :resume/settled))))))
 
+(defn ^{:stratum 1} lineage-root
+  "The run `workflow-id`'s lineage descends from: the root recorded for an
+   attempt a retry started, else `workflow-id` itself."
+  [workflow-id]
+  (or (:resume/root (read-edn (lineage-file workflow-id))) (str workflow-id)))
+
+(defn ^{:stratum 1} latest-attempt
+  "The newest attempt in `record`'s lineage that has recorded a run (live
+   or archived): the only member a retry may start from."
+  [record]
+  (last (filter recorded-run-dir (:resume/attempts record))))
+
 (defn ^{:stratum 1} process-running?
   "True when `pid` is alive and still the process started at `started`."
   [pid started]
@@ -210,6 +233,7 @@
    redelivery spawn a second child, nor leave the child untracked."
   [plan spawn!]
   (let [workflow-id (:resume/workflow-id plan)
+        root (get plan :resume/root (str workflow-id))
         ;; A new attempt, never the retried run's own id: that run's events
         ;; may be archived, and the attempt's must not land beside them.
         run-id (random-uuid)
@@ -221,13 +245,17 @@
                 :resume/intervention-id intervention-id
                 :resume/intervention (:resume/intervention plan)
                 :resume/from-phase (:resume/from-phase plan)
+                :resume/root root
+                :resume/retry-of (str workflow-id)
+                :resume/attempts (conj (vec (:resume/attempts plan)) (str run-id))
                 :resume/run-id run-id
                 :resume/log log-file
                 :resume/pid-file (str pid-file)
                 :resume/launched-at-ms launched-at-ms}
         ;; Only this launch's child may be found by it.
         _ (io/delete-file pid-file true)
-        _ (write-edn! (launch-file workflow-id) launch)
+        _ (write-edn! (lineage-file run-id) (select-keys launch [:resume/root :resume/retry-of]))
+        _ (write-edn! (launch-file root) launch)
         pid (spawn! run-id log-file (str pid-file))
         handle (process-handle pid)
         ;; Read now or never: a child already gone leaves no start
@@ -235,7 +263,7 @@
         exited? (not (some-> handle .isAlive))
         recorded (cond-> (assoc launch :resume/pid pid :resume/pid-started (start-instant handle))
                    exited? (assoc :resume/exited? true))]
-    (write-edn! (launch-file workflow-id) recorded)
+    (write-edn! (launch-file root) recorded)
     recorded))
 
 ;------------------------------------------------------------------------------ Layer 2

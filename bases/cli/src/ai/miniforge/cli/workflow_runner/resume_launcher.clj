@@ -62,10 +62,11 @@
   ;; (macOS), `set -m` turns on job control so the background job gets a
   ;; process group of its own. Never both: under job control the job
   ;; leads its group, and setsid would then fork and `$!` name the wrong
-  ;; process. The inner shell writes its pid, then execs the command in
-  ;; place, so the pid file names the command. `$!` is the same pid:
+  ;; process. The inner shell writes its pid (whole: a temp file, then a
+  ;; rename), then execs the command in place, so the pid file names the
+  ;; command. `$!` is the same pid:
   ;; setsid and nohup exec in place too.
-  (str "log=$1; pidfile=$2; shift 2; child='echo $$ >\"$0\"; exec \"$@\"'; "
+  (str "log=$1; pidfile=$2; shift 2; child='echo $$ >\"$0.tmp\" && mv \"$0.tmp\" \"$0\"; exec \"$@\"'; "
        "if command -v setsid >/dev/null 2>&1; "
        "then setsid nohup /bin/sh -c \"$child\" \"$pidfile\" \"$@\" >>\"$log\" 2>&1 & "
        "else set -m; nohup /bin/sh -c \"$child\" \"$pidfile\" \"$@\" >>\"$log\" 2>&1 & fi; echo $!"))
@@ -136,20 +137,28 @@
 
 (defn ^{:stratum 1} launch!
   "`:launch!`: the launch for `plan`, or a failure anomaly. A redelivered
-   intervention gets its recorded launch back and no second child; a
-   retry is refused while another launch of the workflow is running,
-   while the workflow has a live runner, or when its origin is unknown."
+   intervention gets its recorded launch back and no second child. Checks
+   cover the workflow's whole lineage (see `resume-records`): a retry is
+   refused while any launch in it is running, when an attempt of the
+   workflow has since run (naming the newest, to retry instead), while
+   any member has a live runner, or when its origin is unknown."
   [{:keys [command spawn! timeout-ms]} plan]
-  (let [workflow-id (:resume/workflow-id plan)
-        prior (records/launch-record workflow-id)
-        origin (records/recorded-origin workflow-id)]
+  (let [workflow-id (str (:resume/workflow-id plan))
+        root (records/lineage-root workflow-id)
+        prior (records/launch-record root)
+        latest (records/latest-attempt prior)
+        origin (or (records/recorded-origin workflow-id) (records/recorded-origin root))]
     (cond
       (= (str (:resume/intervention-id plan)) (:resume/intervention-id prior)) prior
       (records/launch-running? prior timeout-ms) (records/failure :conflict :resume-in-flight
                                                        {:resume/pid (:resume/pid prior)})
-      (records/target-live? workflow-id) (records/failure :conflict :resume-target-live {})
+      (and latest (not= latest workflow-id)) (records/failure :conflict :resume-superseded
+                                                              {:resume/latest-attempt latest})
+      (some records/target-live? (cons root (:resume/attempts prior)))
+      (records/failure :conflict :resume-target-live {})
       (nil? origin) (records/failure :not-found :resume-origin-unknown {})
-      :else (records/start! plan #(spawn! (resume-argv command plan %1) %2 %3 origin)))))
+      :else (records/start! (assoc plan :resume/root root :resume/attempts (:resume/attempts prior))
+                            #(spawn! (resume-argv command plan %1) %2 %3 origin)))))
 
 (defn ^{:stratum 1} await-start!
   "`:await-start!`: the launch once its child has shown itself; a
