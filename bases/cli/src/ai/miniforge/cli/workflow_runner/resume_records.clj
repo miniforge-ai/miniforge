@@ -101,11 +101,6 @@
                (<= (- launched-at-ms 2000) started (+ (.lastModified f) 2000)))
       handle)))
 
-(defn ^{:stratum 0} plan-run-id
-  "The plan's snapshot id (what `mf resume` restores), else a fresh id."
-  [plan]
-  (or (get-in plan [:resume/machine-snapshot :execution/id]) (random-uuid)))
-
 ;------------------------------------------------------------------------------ Layer 1
 
 (defn ^{:stratum 1} record-origin!
@@ -178,7 +173,9 @@
    redelivery spawn a second child, nor leave the child untracked."
   [plan spawn!]
   (let [workflow-id (:resume/workflow-id plan)
-        run-id (plan-run-id plan)
+        ;; A new attempt, never the retried run's own id: that run's events
+        ;; may be archived, and the attempt's must not land beside them.
+        run-id (random-uuid)
         intervention-id (str (:resume/intervention-id plan))
         log-file (str (io/file (app-config/logs-dir) (str "resume-" run-id ".log")))
         pid-file (io/file (app-config/logs-dir) (str "resume-" run-id ".pid"))

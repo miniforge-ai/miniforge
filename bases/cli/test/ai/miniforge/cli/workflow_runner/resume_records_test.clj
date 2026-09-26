@@ -56,7 +56,9 @@
             intervention-id (random-uuid)
             at-spawn (atom nil)
             stale-pid-file (atom nil)
-            launch (sut/start! {:resume/workflow-id workflow-id :resume/intervention-id intervention-id}
+            snapshot-id (random-uuid)
+            launch (sut/start! {:resume/workflow-id workflow-id :resume/intervention-id intervention-id
+                                :resume/machine-snapshot {:execution/id snapshot-id}}
                                (fn [_run-id _log pid-file]
                                  (reset! at-spawn (sut/launch-record workflow-id))
                                  (reset! stale-pid-file (.exists (io/file pid-file)))
@@ -64,6 +66,8 @@
         (is (= [(str intervention-id) nil] ((juxt :resume/intervention-id :resume/pid) @at-spawn)))
         (is (= (:resume/pid-file launch) (:resume/pid-file @at-spawn)) "where the child writes its pid")
         (is (false? @stale-pid-file))
+        (is (uuid? (:resume/run-id launch)))
+        (is (not= snapshot-id (:resume/run-id launch)) "a new attempt, not the snapshot's run")
         (is (= launch (sut/launch-record workflow-id)))
         (is (sut/launch-running? launch) "the recorded pid is alive and is that process")
         (is (not (sut/launch-running? (assoc launch :resume/pid-started "1970-01-01T00:00:00Z"))))))))
