@@ -653,6 +653,28 @@
         (is (some #(= :workflow/sync-sub-worktree-failed (:log/event %)) @entries)
             "the failure is logged even when a caller ignores the result")))))
 
+(deftest ^{:stratum 2} apply-dag-success-fails-run-when-copy-throws-test
+  (testing "a disk or permission failure while copying fails the run instead of leaving a partial tree"
+    (let [root   (isolation/temp-root!)
+          sub-wt (str root "/sub")]
+      (try
+        (spit (doto (io/file sub-wt "src/changed.clj") io/make-parents) "changed")
+        (with-redefs [shell/sh (fn [& args]
+                                 {:exit 0 :err "" :out (if (some #{"ls-files"} args) "" "src/changed.clj\n")})
+                      io/copy  (fn [& _] (throw (java.io.IOException. "No space left on device")))]
+          (let [[logger entries] (log/collecting-logger)
+                result (apply-dag-success-with-sub-worktree
+                        (assoc (ctx/create-context minimal-rollup-test-workflow {:task "Test"} {})
+                               :execution/logger logger)
+                        sub-wt)
+                data   (get-in (first (:execution/errors result)) [:anomaly :anomaly/data])]
+            (is (= :failed (:execution/status result)))
+            (is (= "java.io.IOException" (:anomaly/ex-class data)))
+            (is (= "No space left on device" (:anomaly/ex-message data)))
+            (is (= sub-wt (:sub-worktree data)))
+            (is (some #(= :workflow/sync-sub-worktree-failed (:log/event %)) @entries))))
+        (finally (isolation/delete-tree! root))))))
+
 (deftest ^{:stratum 2} apply-dag-success-applies-changed-untracked-and-deleted-files-test
   (testing "tracked changes, untracked new files and deletions all reach the parent worktree"
     (let [root   (isolation/temp-root!)
