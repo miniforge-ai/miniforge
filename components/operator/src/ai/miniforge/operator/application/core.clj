@@ -35,7 +35,8 @@
    [ai.miniforge.operator.consumer :as consumer]
    [ai.miniforge.operator.intervention :as intervention]
    [ai.miniforge.operator.messages :as messages]
-   [ai.miniforge.reliability.interface :as reliability]))
+   [ai.miniforge.reliability.interface :as reliability]
+   [clojure.string :as str]))
 
 ;------------------------------------------------------------------------------ Layer 0
 
@@ -50,12 +51,28 @@
    :no-resume-context :application/no-resume-context
    :no-resume-launcher :application/no-resume-launcher
    :not-implemented :application/not-implemented
+   :phase-results-not-checkpointed :application/phase-results-not-checkpointed
    :policy-evaluation-readback-mismatch :application/policy-evaluation-readback-mismatch
+   :policy-evaluation-refused :application/policy-evaluation-refused
+   :resume-in-flight :application/resume-in-flight
    :resume-not-dispatched :application/resume-not-dispatched
+   :resume-not-started :application/resume-not-started
+   :resume-origin-unknown :application/resume-origin-unknown
    :resume-readback-mismatch :application/resume-readback-mismatch
+   :resume-target-live :application/resume-target-live
    :safe-mode-readback-mismatch :application/safe-mode-readback-mismatch
    :unknown-phase :application/unknown-phase
    :unresolved-workflow-type :application/unresolved-workflow-type})
+
+(def ^{:stratum 0} ^:private failure-detail-keys
+  "What a mechanism may add to a failed intervention's details, beside
+   `:failure/code`, so the operator sees why and where to look."
+  [:failure/reason :failure/log :resume/run-id :resume/pid :resume/phases])
+
+(defonce ^{:stratum 0} ^:private verification-pool
+  ;; Work that waits on something slow — a launched run becoming
+  ;; observable — runs here, off the consumer's pass and its lock.
+  (atom nil))
 
 (def ^{:stratum 0} ^:private expected-degradation-mode-by-verb
   {:force-safe-mode :safe-mode
@@ -90,13 +107,54 @@
   [launcher]
   (or (:events-dir launcher) (es/default-events-dir)))
 
+(defn- ^{:stratum 0} new-verification-pool
+  "A cached pool of named daemon threads: pending verification never
+   keeps the process alive; the process owner drains it on the way out."
+  ^java.util.concurrent.ExecutorService []
+  (java.util.concurrent.Executors/newCachedThreadPool
+   (reify java.util.concurrent.ThreadFactory
+     (newThread [_ runnable]
+       (doto (Thread. ^Runnable runnable "miniforge-operator-verification")
+         (.setDaemon true))))))
+
 ;------------------------------------------------------------------------------ Layer 1
 
 (defn ^{:stratum 1} failure-message
-  [reason-code]
+  "The localized reason for `reason-code`, filled from its `details`."
+  [reason-code details]
   (messages/t (get failure-message-key-by-code
                    reason-code
-                   :application/unknown-failure)))
+                   :application/unknown-failure)
+              {:reason (some-> (:failure/reason details) name)
+               :log (:failure/log details)
+               :pid (:resume/pid details)
+               :phases (some->> (:resume/phases details) (map name) (str/join ", "))}))
+
+(defn ^{:stratum 1} anomaly-failure
+  "`[code details]` for a mechanism's anomaly: the `:failure/code` it
+   names when the lifecycle knows that code, else `default-code`, with
+   the failure details it carries."
+  [result default-code]
+  (let [data (:anomaly/data result)
+        code (:failure/code data)]
+    [(if (contains? failure-message-key-by-code code) code default-code)
+     (select-keys data failure-detail-keys)]))
+
+(defn ^{:stratum 1} submit-verification!
+  "Run `f` on the verification pool and return `result` — the
+   intervention as it stands while `f` finishes it."
+  [result f]
+  (let [pool (swap! verification-pool #(or % (new-verification-pool)))]
+    (.execute ^java.util.concurrent.ExecutorService pool ^Runnable f)
+    result))
+
+(defn ^{:stratum 1} stop-verifications!
+  "Drain the verification pool like the consumer's poller (see
+   `consumer/drain-executor!`); a later submission starts a new pool.
+   Idempotent."
+  []
+  (when-let [pool (first (reset-vals! verification-pool nil))]
+    (consumer/drain-executor! pool consumer/stop-drain-ms)))
 
 (defn ^{:stratum 1} advance!
   "Apply lifecycle `step-fn` to `interv`, publish the transition, and
@@ -129,15 +187,16 @@
 ;------------------------------------------------------------------------------ Layer 2
 
 (defn ^{:stratum 2} fail!
-  "Stamp `reason-code` onto the intervention's failure details and
-   publish the `:failed` transition. Returns the failed intervention, or
-   nil when the lifecycle step is itself rejected."
-  [stream interv reason-code]
-  (let [with-failure-code (assoc-in interv
-                                    [:intervention/details :failure/code]
-                                    reason-code)]
-    (when-let [failed (advance! stream
-                                with-failure-code
-                                intervention/fail
-                                (failure-message reason-code))]
-      failed)))
+  "Stamp `reason-code` (and any `details`, see [[failure-detail-keys]])
+   onto the intervention's details and publish the `:failed` transition.
+   Returns the failed intervention, or nil when the lifecycle step is
+   itself rejected."
+  ([stream interv reason-code]
+   (fail! stream interv reason-code nil))
+  ([stream interv reason-code details]
+   (let [with-failure-code (update interv :intervention/details merge
+                                   details {:failure/code reason-code})]
+     (advance! stream
+               with-failure-code
+               intervention/fail
+               (failure-message reason-code details)))))

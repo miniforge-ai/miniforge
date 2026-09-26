@@ -36,6 +36,7 @@
    [ai.miniforge.operator.intervention :as intervention]
    [ai.miniforge.reliability.interface :as reliability]
    [ai.miniforge.supervisory-state.interface :as supervisory]
+   [ai.miniforge.workflow.interface.checkpoints :as checkpoints]
    [clojure.java.io :as io]
    [clojure.test :refer [deftest is testing]])
   (:import
@@ -146,6 +147,21 @@
             (es/serialize-event event)
             :encoding "UTF-8"))
     workflow-id))
+
+(defn- ^{:stratum 0} with-checkpoint
+  "Run `f` with `workflow-id` checkpointed, holding `phase-results`. A
+   rewind keeps only phases whose results a checkpoint holds: history
+   rebuilt from events is telemetry, not the output a re-run builds on."
+  [workflow-id phase-results f]
+  (let [load-checkpoint-data checkpoints/load-checkpoint-data]
+    (with-redefs [checkpoints/load-checkpoint-data
+                  (fn [run-id & opts]
+                    (if (= (str workflow-id) (str run-id))
+                      {:machine-snapshot {:execution/id workflow-id}
+                       :phase-results phase-results
+                       :manifest {}}
+                      (apply load-checkpoint-data run-id opts)))]
+      (f))))
 
 (defn- ^{:stratum 0} recording-launcher
   "A resume launcher that records the plan it was handed and reports
@@ -401,7 +417,8 @@
     ;; The launcher's run is observable in the event history the resume
     ;; machinery itself reads — that is what `verified` asserts.
     (stage-two-phase-run! events-dir resumed-id)
-    (with-resume-launcher
+    (with-checkpoint workflow-id {:explore {:status :success} :plan {:status :success}}
+     #(with-resume-launcher
       (assoc (recording-launcher captured resumed-id) :events-dir events-dir)
       (fn []
         (let [stream (memory-stream)
@@ -416,7 +433,7 @@
               "rewinding to :plan re-runs :plan and everything after it")
           (is (nil? (:resume/machine-snapshot @captured))
               "a rewind must not restore an FSM snapshot parked past the target")
-          (is (= :canonical-sdlc (:resume/workflow-type @captured))))))))
+          (is (= :canonical-sdlc (:resume/workflow-type @captured)))))))))
 
 (deftest ^{:stratum 2} injected-safe-mode-file-uses-the-process-degradation-manager
   (let [events-dir (temp-events-dir)
@@ -497,6 +514,28 @@
           (is (false? @launched)
               "an unvalidated phase must never reach the launcher"))))))
 
+(deftest ^{:stratum 2} retry-from-phase-refuses-a-rewind-without-checkpointed-results
+  (let [events-dir (temp-events-dir)
+        workflow-id (random-uuid)
+        launched (atom false)]
+    ;; History from events only: :explore's result is telemetry, not the
+    ;; output a re-run of :plan would build on.
+    (stage-two-phase-run! events-dir workflow-id)
+    (with-resume-launcher
+      {:launch! (fn [_plan] (reset! launched true) {:resume/run-id (random-uuid)})
+       :events-dir events-dir}
+      (fn []
+        (let [stream (memory-stream)
+              interv (assoc (approved :retry-from-phase (str workflow-id))
+                            :intervention/details {"phase" "plan"})
+              result (application/apply-intervention! stream interv)]
+          (is (= :failed (:intervention/state result)))
+          (is (= :phase-results-not-checkpointed (failure-code result)))
+          (is (= [:explore] (get-in result [:intervention/details :resume/phases])))
+          (is (re-find #"explore" (str (:intervention/reason result)))
+              "the failed chip names the phases, not a log to go and read")
+          (is (false? @launched) "refused before any mf resume is spawned"))))))
+
 (deftest ^{:stratum 2} retry-launcher-reporting-no-run-fails-typed
   (let [events-dir (temp-events-dir)
         workflow-id (random-uuid)]
@@ -558,7 +597,8 @@
         (workflow-event (parse-uuid golden-pause-target-id) :workflow/phase-completed
                         {:workflow/phase :implement :phase/outcome :failure})])
       (stage-two-phase-run! events-dir resumed-id)
-      (with-resume-launcher
+      (with-checkpoint golden-pause-target-id {:explore {:status :success} :implement {:status :failure}}
+       #(with-resume-launcher
         (assoc (recording-launcher captured resumed-id) :events-dir events-dir)
         (fn []
           (is (= {:routed 1 :skipped 0 :anomalies 0}
@@ -568,7 +608,7 @@
           (is (= :implement (:resume/from-phase @captured))
               "the fixture's `phase` detail survives the wire round-trip")
           (is (= [:approved :dispatched :applied :verified]
-                 (state-trail stream))))))))
+                 (state-trail stream)))))))))
 
 (deftest ^{:stratum 2} retry-passes-the-production-ownership-gate
   ;; Regression: the runner wires `:accept? live-intervention-target?`,
@@ -592,7 +632,8 @@
         (workflow-event (parse-uuid golden-pause-target-id) :workflow/phase-completed
                         {:workflow/phase :implement :phase/outcome :failure})])
       (stage-two-phase-run! events-dir resumed-id)
-      (with-resume-launcher
+      (with-checkpoint golden-pause-target-id {:explore {:status :success} :implement {:status :failure}}
+       #(with-resume-launcher
         (assoc (recording-launcher captured resumed-id) :events-dir events-dir)
         (fn []
           (is (= {:routed 1 :skipped 0 :anomalies 0}
@@ -603,7 +644,7 @@
                    :accept? application/live-intervention-target?}))
               "the ownership gate must claim the retry, not defer it")
           (is (= [:approved :dispatched :applied :verified]
-                 (state-trail stream)))))))
+                 (state-trail stream))))))))
   (testing "with no launcher the retry is still claimed and fails typed, never parks"
     (let [events-dir (temp-events-dir)
           stream (memory-stream)]
@@ -723,3 +764,98 @@
         (is (= :application-error (failure-code result)))
         (is (empty? (policy-evals stream))
             "a throwing evaluator writes no PolicyEvaluation")))))
+
+;------------------------------------------------------------------------------ Retry verification off the consumer's pass
+(deftest ^{:stratum 2} an-awaited-retry-is-verified-off-the-pass
+  (let [events-dir (temp-events-dir)
+        workflow-id (random-uuid)
+        resumed-id (random-uuid)
+        release (promise)]
+    (stage-two-phase-run! events-dir workflow-id)
+    (stage-two-phase-run! events-dir resumed-id)
+    (with-resume-launcher
+      {:launch! (fn [_plan] {:resume/run-id resumed-id})
+       :await-start! (fn [launch] @release launch)
+       :events-dir events-dir}
+      (fn []
+        (let [stream (memory-stream)
+              result (application/apply-intervention! stream (approved :retry (str workflow-id)))]
+          (is (= :dispatched (:intervention/state result)) "the pass is not held while the run starts")
+          (deliver release :started)
+          (application/stop-verifications!)
+          (is (= [:dispatched :applied :verified] (state-trail stream))))))))
+
+(deftest ^{:stratum 2} launcher-failures-carry-their-code-and-reason
+  (let [events-dir (temp-events-dir)
+        workflow-id (random-uuid)
+        refusal (fn [code] (anomaly/anomaly :conflict "refused" {:failure/code code
+                                                                 :failure/reason :exited
+                                                                 :failure/log "/tmp/r.log"
+                                                                 :resume/pid 42}))
+        run! (fn [launcher]
+               (with-resume-launcher
+                 (assoc launcher :events-dir events-dir)
+                 (fn []
+                   (let [stream (memory-stream)]
+                     (application/apply-intervention! stream (approved :retry (str workflow-id)))
+                     (application/stop-verifications!)
+                     (last (events-of-type stream consumer/state-changed-event-type))))))]
+    (stage-two-phase-run! events-dir workflow-id)
+    (testing "a refusal at launch names its code; one the lifecycle does not know is not trusted"
+      (is (= :resume-in-flight (failure-code (run! {:launch! (fn [_] (refusal :resume-in-flight))}))))
+      (is (= 42 (get-in (run! {:launch! (fn [_] (refusal :resume-in-flight))})
+                        [:intervention/details :resume/pid])))
+      (is (= :resume-not-dispatched (failure-code (run! {:launch! (fn [_] (refusal :made-up))})))))
+    (testing "a run that never starts fails with the launcher's reason and log"
+      (let [failed (run! {:launch! (fn [_] {:resume/run-id (random-uuid)})
+                          :await-start! (fn [_] (refusal :resume-not-started))})]
+        (is (= :resume-not-started (failure-code failed)))
+        (is (= :exited (get-in failed [:intervention/details :failure/reason])))
+        (is (re-find #"exited.*/tmp/r\.log" (:intervention/reason failed)))))))
+
+(deftest ^{:stratum 2} a-verification-cut-short-by-a-stop-is-finished-after-a-restart
+  (let [events-dir (temp-events-dir)
+        workflow-id (random-uuid)
+        resumed-id (random-uuid)
+        waiting (promise)
+        settled (atom [])
+        launcher {:launch! (fn [_] {:resume/run-id resumed-id})
+                  :await-start! (fn [launch]
+                                  (deliver waiting true)
+                                  (try (Thread/sleep 60000) launch
+                                       (catch InterruptedException _ {:resume/pending? true})))
+                  :settle! (fn [_launch final] (swap! settled conj (:intervention/state final)))
+                  :events-dir events-dir}]
+    (stage-two-phase-run! events-dir workflow-id)
+    (stage-two-phase-run! events-dir resumed-id)
+    (with-redefs [consumer/stop-drain-ms 50]
+      (with-resume-launcher
+        launcher
+        (fn []
+          (let [stream (memory-stream)
+                dispatched (application/apply-intervention! stream (approved :retry (str workflow-id)))]
+            @waiting
+            (application/stop-verifications!)
+            (testing "a stop records nothing: the retry stays dispatched and unsettled"
+              (is (= [:dispatched] (state-trail stream)))
+              (is (empty? @settled)))
+            (testing "after a restart the recorded launch is verified and settled"
+              (with-resume-launcher
+                (assoc launcher :await-start! identity)
+                (fn []
+                  (application/verify-launched-resume! stream dispatched {:resume/run-id resumed-id})
+                  (application/stop-verifications!)
+                  (is (= [:dispatched :applied :verified] (state-trail stream)))
+                  (is (= [:verified] @settled)))))))))))
+
+(deftest ^{:stratum 2} an-evaluator-refusal-is-not-an-invalid-verdict
+  (with-policy-evaluator
+    (fn [_request] (anomaly/anomaly :not-found "no packs" {:failure/reason :no-policy-packs}))
+    (fn []
+      (let [stream (memory-stream)
+            result (application/apply-intervention!
+                    stream (approved :re-evaluate golden-pr-target-id))]
+        (is (= :policy-evaluation-refused (failure-code result)))
+        (is (= :no-policy-packs (get-in result [:intervention/details :failure/reason])))
+        (is (re-find #"no-policy-packs" (:intervention/reason result)))
+        (is (empty? (policy-evals stream)))))))

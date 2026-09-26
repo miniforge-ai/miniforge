@@ -71,6 +71,7 @@
    [ai.miniforge.anomaly.interface :as anomaly]
    [ai.miniforge.operator.application.core :as core]
    [ai.miniforge.operator.application.verbs :as verbs]
+   [ai.miniforge.operator.consumer :as consumer]
    [ai.miniforge.operator.intervention :as intervention]
    [ai.miniforge.operator.messages :as messages]))
 
@@ -107,17 +108,41 @@
    canonical target type is `:workflow`, but a retry restarts a run
    whose original runner is gone by definition — the live runner it
    would gate on is exactly the thing it will never have. So they are
-   process-global for ownership: whichever consumer sees one claims it,
-   and the application layer either dispatches through the registered
-   resume launcher or fails `:no-resume-launcher` — a visible red chip,
-   never a silent park."
+   process-global for ownership: whichever consumer accepts one claims
+   it, and the application layer either dispatches through the
+   registered resume launcher or fails `:no-resume-launcher` — a visible
+   red chip, never a silent park. A process owner that may exit while a
+   retry is being verified (a workflow runner) should not accept them:
+   see [[retry-intervention?]]."
   #{:retry :retry-from-phase})
+
+(def ^{:stratum 0} stop-verifications!
+  "Drain the retry-verification pool (see `application.core`)."
+  core/stop-verifications!)
+
+(defn ^{:stratum 0} stop-consumer!
+  "Stop a consumer started with this layer as its `:apply!`: its poller
+   drains first, then the retry verifications its passes started."
+  [handle]
+  (consumer/stop! handle)
+  (core/stop-verifications!))
 
 ;------------------------------------------------------------------------------ Layer 1
 
 (defn ^{:stratum 1} live-runner?
   [workflow-id]
   (contains? @live-runners (str workflow-id)))
+
+(defn ^{:stratum 1} retry-intervention?
+  "True for a request (or intervention) whose verb is a retry."
+  [event]
+  (contains? resume-ownership-verbs (:intervention/type event)))
+
+(defn ^{:stratum 1} verify-launched-resume!
+  "Finish verifying a retry launched before a restart, through the
+   registered resume launcher (see `verbs/verify-launched-resume!`)."
+  [stream dispatched launch]
+  (verbs/verify-launched-resume! stream dispatched @process-resume-launcher launch))
 
 (defn ^{:stratum 1} register-runner!
   "Register a live runner's control handles for `workflow-id`.
@@ -150,9 +175,14 @@
    `handles` must carry `:launch!` — `(fn [plan] → {:resume/run-id …})`
    — which starts a run from the resume plan
    [[ai.miniforge.operator.mechanism/resume-plan]] builds and reports
-   the run id it started. `:events-dir` optionally overrides the event
-   root the resume context is reconstructed from (default:
-   `~/.miniforge/events`).
+   the run id it started, or returns an anomaly whose data may name a
+   `:failure/code`. Optional `:await-start!` — `(fn [launch] → launch
+   or anomaly)` — blocks until the launched run shows itself; with it,
+   verification runs off the consumer's pass. Optional `:settle!` —
+   `(fn [launch final-intervention])` — is told the outcome, so a
+   launcher can tell a finished verification from one a restart must
+   resume. `:events-dir` optionally overrides the event root the resume
+   context is reconstructed from (default: `~/.miniforge/events`).
 
    Pass nil to clear. Without a registered launcher, retries fail
    `:no-resume-launcher` rather than parking."
@@ -162,7 +192,10 @@
   ;; and only surface later as `:resume-not-dispatched` — reject the
   ;; misconfiguration here, where the message names it.
   (if-not (or (nil? handles)
-              (and (map? handles) (fn? (:launch! handles))))
+              (and (map? handles)
+                   (fn? (:launch! handles))
+                   (every? #(or (nil? (% handles)) (fn? (% handles)))
+                           [:await-start! :settle!])))
     (anomaly/anomaly
      :invalid-input
      (messages/t :application/invalid-resume-launcher)
@@ -220,9 +253,10 @@
    D-3b).
 
    Returns the final intervention map (state `:verified` or `:failed`),
-   or nil when a lifecycle step was itself rejected (never expected
-   from `:approved` input; nil keeps the caller honest rather than
-   fabricating a state)."
+   the `:dispatched` one when a retry is still being verified on the
+   verification pool, or nil when a lifecycle step was itself rejected
+   (never expected from `:approved` input; nil keeps the caller honest
+   rather than fabricating a state)."
   [stream interv]
   (let [verb (:intervention/type interv)
         entry (get @live-runners (str (:intervention/target-id interv)))]

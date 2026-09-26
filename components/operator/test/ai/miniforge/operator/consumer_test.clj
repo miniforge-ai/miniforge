@@ -587,3 +587,64 @@
         (is (contains? (:processed-files cursor) "already-seen.transit.json")
             "the v1 processed set must survive the upgrade")
         (is (contains? (:pending-interventions cursor) intervention-id))))))
+
+(defn- ^{:stratum 0} acknowledge-request
+  [intervention-id]
+  (str "{\"~:event/type\":\"~:supervisory/intervention-requested\","
+       "\"~:intervention/id\":\"~u" intervention-id "\","
+       "\"~:intervention/type\":\"~:acknowledge\","
+       "\"~:intervention/target-type\":\"~:attention\","
+       "\"~:intervention/target-id\":\"attention-1\","
+       "\"~:intervention/requested-by\":\"op@example.invalid\","
+       "\"~:intervention/request-source\":\"~:tui\"}"))
+
+(deftest ^{:stratum 0} a-decision-on-a-declined-intervention-is-left-in-place
+  (let [events-dir (support/temp-events-dir)
+        stream (support/memory-stream)
+        intervention-id (random-uuid)
+        decline-meta-agent #(not= :meta-agent (:intervention/request-source %))]
+    (support/stage-operator-file! events-dir "a-request.json"
+                                  (es/serialize-event (support/meta-agent-request intervention-id)))
+    (consumer/consume-pass! {:events-dir events-dir :stream stream})
+    (support/stage-operator-file! events-dir "b-decision.json"
+                                  (es/serialize-event (support/decision-event intervention-id :approve)))
+    (is (= {:routed 0 :skipped 0 :anomalies 0}
+           (consumer/consume-pass! {:events-dir events-dir :stream stream :accept? decline-meta-agent}))
+        "a consumer that declines the parked intervention leaves its decision")
+    (is (= {:routed 1 :skipped 0 :anomalies 0}
+           (consumer/consume-pass! {:events-dir events-dir :stream stream}))
+        "one that accepts it decides it")))
+
+(deftest ^{:stratum 0} stop-lets-an-in-flight-pass-finish
+  (let [executor (java.util.concurrent.Executors/newSingleThreadScheduledExecutor)
+        finished (promise)]
+    (.execute executor ^Runnable (fn [] (Thread/sleep 200) (deliver finished :done)))
+    (Thread/sleep 20)
+    (consumer/stop! {:executor executor})
+    (is (= :done (deref finished 0 :interrupted)))
+    (is (.isTerminated executor))))
+
+;------------------------------------------------------------------------------ Layer 1
+
+(deftest ^{:stratum 1} each-file-is-recorded-before-the-next-and-a-stop-ends-the-pass
+  (let [events-dir (support/temp-events-dir)
+        operator-dir (es/operator-dir events-dir)
+        [first-id second-id third-id] (repeatedly 3 random-uuid)
+        on-disk-when-second-ran (atom nil)
+        stopping (atom false)
+        apply! (fn [_stream interv]
+                 (when (= second-id (:intervention/id interv))
+                   (reset! on-disk-when-second-ran
+                           (:processed-intervention-ids (consumer/read-cursor operator-dir)))
+                   (reset! stopping true)))]
+    (doseq [[file-name id] [["a.json" first-id] ["b.json" second-id] ["c.json" third-id]]]
+      (support/stage-operator-file! events-dir file-name (acknowledge-request id)))
+    (is (= {:routed 2 :skipped 0 :anomalies 0}
+           (consumer/consume-pass! {:events-dir events-dir
+                                    :stream (support/memory-stream)
+                                    :apply! apply!
+                                    :stop? #(deref stopping)})))
+    (is (= #{first-id} @on-disk-when-second-ran)
+        "the first file's cursor write landed before the second file ran")
+    (is (= #{first-id second-id} (:processed-intervention-ids (consumer/read-cursor operator-dir)))
+        "the stop ended the pass before the third file")))

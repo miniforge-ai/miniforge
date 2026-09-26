@@ -221,8 +221,10 @@
   consumer/start!)
 
 (def ^{:stratum 0} stop-operator-consumer!
-  "Stop a poller started by [[start-operator-consumer!]]. Idempotent."
-  consumer/stop!)
+  "Stop a poller started by [[start-operator-consumer!]]: the pass in
+   flight stops before its next file and drains (bounded), then the
+   retry verifications its passes started drain. Idempotent."
+  application/stop-consumer!)
 
 (def ^{:stratum 0} auto-approve-request-sources
   "Request sources whose interventions are auto-approved (the human IS
@@ -245,9 +247,10 @@
 (def ^{:stratum 0} register-resume-launcher!
   "Register the process-scoped resume launcher used by `:retry` /
    `:retry-from-phase` (Phase D D-3b). Takes a handles map carrying
-   `:launch!` — `(fn [resume-plan] → {:resume/run-id …})` — and an
-   optional `:events-dir` override. Pass nil to clear. Unregistered,
-   retries fail `:no-resume-launcher`."
+   `:launch!` — `(fn [resume-plan] → {:resume/run-id …})` — and
+   optional `:await-start!` and `:events-dir` (see the application
+   namespace). Pass nil to clear. Unregistered, retries fail
+   `:no-resume-launcher`."
   application/register-resume-launcher!)
 
 (def ^{:stratum 0} register-policy-evaluator!
@@ -258,6 +261,21 @@
    `:no-policy-evaluator` — it never publishes a verdict it did not
    receive."
   application/register-policy-evaluator!)
+
+(def ^{:stratum 0} live-runner?
+  "True when a live runner in this process owns `workflow-id`."
+  application/live-runner?)
+
+(def ^{:stratum 0} retry-intervention?
+  "True for a request whose verb is a retry: an ownership predicate for
+   a process that may exit mid-verification can decline these."
+  application/retry-intervention?)
+
+(def ^{:stratum 0} verify-launched-resume!
+  "`(verify-launched-resume! stream dispatched launch)`: finish verifying
+   a retry launched before this process (re)started, on the verification
+   pool, through the registered resume launcher."
+  application/verify-launched-resume!)
 
 (def ^{:stratum 0} deregister-live-runner!
   "Remove a workflow id from the live-runner registry. Idempotent."
