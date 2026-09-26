@@ -49,8 +49,11 @@ processes by `<events>/operator/.consumer.lock`.
     removes the discovery file and releases the lock. The process then exits
     143 (SIGTERM) or 130 (SIGINT); a console should treat those as a clean
     stop.
-  - `<home>` is `MINIFORGE_HOME`, else `~/.miniforge`: the home the consumer's
-    events directory is under.
+  - `<home>` is `MINIFORGE_HOME`, else `~/.miniforge`: it is computed as the
+    parent of the events directory the consumer reads, so the lock, the
+    discovery file and the `operator-dir` it names cannot point at different
+    homes. The launch records are under that events directory too, and a
+    retried child inherits `MINIFORGE_HOME`.
   - On start it hands every launch record never settled back to the
     verification pool. A server stopped or killed while a retry was starting
     therefore finishes verifying it on its next start.
@@ -61,8 +64,12 @@ processes by `<events>/operator/.consumer.lock`.
 
 - Serve lifecycle: start, ready line, discovery file, refusal of a second
   server, clean stop, lock reuse.
-- Serve with its real consumer: an acknowledge request written with no run
+- Serve with its real consumer: the discovery file names the operator
+  directory the consumer reads; an acknowledge request written with no run
   active reaches `verified`, and the stop the shutdown hook runs stops it.
+- One home: with `MINIFORGE_HOME` at a temp directory, the lock, discovery
+  file, operator directory, consumer events root, launch records and the
+  retry log directory all resolve under it.
 - Wiring: a runner's consumer declines retries, the server's takes them, and a
   starting server resumes pending launches.
 - Smoke against a temp `MINIFORGE_HOME`: a retry of a run with a recorded origin
@@ -81,8 +88,15 @@ or `<home>/operator-serve.json`.
 
 ## Known Limits
 
-Safe-mode applies to the degradation manager of the process that claims it.
-This is unchanged across processes.
+- Safe-mode applies to the degradation manager of the process that claims
+  it. This is unchanged across processes.
+- Under an app profile with a home of its own (`miniforge-core`'s
+  `.miniforge-core`) and no `MINIFORGE_HOME`, the event stream, and so this
+  server and its launch records, use `~/.miniforge`, while the CLI's own
+  directories and `mf resume`'s event reads use the profile's home. A
+  retried child then reads the run's history from the wrong root and exits,
+  and the retry fails `:resume-not-started`. This split predates the stack;
+  set `MINIFORGE_HOME` when serving under such a profile.
 
 ## Related Issues/PRs
 

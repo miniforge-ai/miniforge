@@ -21,7 +21,10 @@
    intervention decisions, retries, and re-evaluations are acted on
    instead of waiting for the next run. Runs until SIGINT/SIGTERM.
 
-   One server per miniforge home. `<home>/operator-serve.lock` is held
+   One server per miniforge home: the home of the events directory the
+   consumer reads (`MINIFORGE_HOME`, else `~/.miniforge`), from which the
+   lock, the discovery file and the operator directory it names are all
+   resolved. `<home>/operator-serve.lock` is held
    for the process lifetime; the OS drops it when the process dies,
    however it dies. `<home>/operator-serve.json` (`pid`, `started`,
    `operator-dir`) names the running server and is removed on a clean
@@ -33,7 +36,6 @@
    [ai.miniforge.cli.main.display :as display]
    [ai.miniforge.cli.messages :as messages]
    [ai.miniforge.cli.workflow-runner.control :as control]
-   [ai.miniforge.config.interface :as config]
    [ai.miniforge.event-stream.interface :as es]
    [cheshire.core :as json]
    [clojure.java.io :as io])
@@ -53,11 +55,16 @@
   [e]
   (= "java.nio.channels.OverlappingFileLockException" (.getName (class e))))
 
+(defn- ^{:stratum 0} serve-home
+  "The home the consumer's events directory is in."
+  ^java.io.File []
+  (.getParentFile (io/file (es/default-events-dir))))
+
 (defn- ^{:stratum 0} server-info
   []
   {:pid (.pid (java.lang.ProcessHandle/current))
    :started (str (java.time.Instant/now))
-   :operator-dir (str (es/operator-dir))})
+   :operator-dir (str (es/operator-dir (es/default-events-dir)))})
 
 (defn- ^{:stratum 0} refuse!
   "Report the server already running for `home`; exit code 1."
@@ -123,21 +130,22 @@
    or SIGINT ends the process and the shutdown hook stops the consumer,
    removes the discovery file, and releases the lock — a clean stop that
    exits 143 (SIGTERM) or 130 (SIGINT). Returns the exit code otherwise:
-   0 after `await-stop!` returns, 1 when a server already holds `home`."
-  ([_opts]
-   (shared/exit! (serve-cmd (config/miniforge-home) block-forever!)))
-  ([home await-stop!]
-   (if-let [channel (try-lock! home)]
-     (let [info (server-info)
-           stop! #(stop-serving! home channel)
-           hook (Thread. ^Runnable stop!)]
-       (.addShutdownHook (Runtime/getRuntime) hook)
-       (control/start-process-control!)
-       (write-discovery! home info)
-       (println (json/generate-string (assoc info :ready true)))
-       (flush)
-       (await-stop!)
-       (.removeShutdownHook (Runtime/getRuntime) hook)
-       (stop!)
-       0)
-     (refuse! home (running-pid home)))))
+   0 after `await-stop!` returns, 1 when a server already holds the home."
+  ([opts]
+   (shared/exit! (serve-cmd opts block-forever!)))
+  ([_opts await-stop!]
+   (let [home (serve-home)]
+     (if-let [channel (try-lock! home)]
+       (let [info (server-info)
+             stop! #(stop-serving! home channel)
+             hook (Thread. ^Runnable stop!)]
+         (.addShutdownHook (Runtime/getRuntime) hook)
+         (control/start-process-control!)
+         (write-discovery! home info)
+         (println (json/generate-string (assoc info :ready true)))
+         (flush)
+         (await-stop!)
+         (.removeShutdownHook (Runtime/getRuntime) hook)
+         (stop!)
+         0)
+       (refuse! home (running-pid home))))))

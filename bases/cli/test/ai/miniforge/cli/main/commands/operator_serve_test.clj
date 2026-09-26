@@ -17,8 +17,12 @@
 ;; limitations under the License.
 (ns ai.miniforge.cli.main.commands.operator-serve-test
   (:require
+   [ai.miniforge.cli.app-config :as app-config]
+   [ai.miniforge.cli.app-config.profile :as profile]
    [ai.miniforge.cli.main.commands.operator-serve :as sut]
    [ai.miniforge.cli.workflow-runner.control :as control]
+   [ai.miniforge.cli.workflow-runner.resume-records :as records]
+   [ai.miniforge.config.interface :as config]
    [ai.miniforge.event-stream.interface :as es]
    [cheshire.core :as json]
    [clojure.java.io :as io]
@@ -78,9 +82,10 @@
         release (promise)
         out (java.io.StringWriter.)
         err (java.io.StringWriter.)]
-    (with-redefs [control/start-process-control! #(swap! calls conj :start)
+    (with-redefs [es/default-events-dir (constantly (io/file home "events"))
+                  control/start-process-control! #(swap! calls conj :start)
                   control/stop-process-control! #(swap! calls conj :stop)]
-      (let [first-server (future (binding [*out* out] (sut/serve-cmd home #(deref release))))]
+      (let [first-server (future (binding [*out* out] (sut/serve-cmd {} #(deref release))))]
         (testing "start: the consumer runs, then one JSON ready line and the discovery file"
           (is (eventually #(str/includes? (str out) "ready")))
           (let [ready (json/parse-string (str/trim (str out)) true)]
@@ -89,7 +94,7 @@
             (is (= (dissoc ready :ready) (json/parse-string (slurp discovery) true))))
           (is (= [:start] @calls)))
         (testing "a second server for the same home is refused with the running pid"
-          (is (= 1 (binding [*err* err] (sut/serve-cmd home #(throw (ex-info "ran" {}))))))
+          (is (= 1 (binding [*err* err] (sut/serve-cmd {} #(throw (ex-info "ran" {}))))))
           (is (str/includes? (str err) (str (.pid (java.lang.ProcessHandle/current)))))
           (is (= [:start] @calls)))
         (testing "clean stop: consumer stopped, discovery file gone, lock released"
@@ -98,7 +103,7 @@
           (is (= [:start :stop] @calls))
           (is (not (.exists discovery)))
           (is (= 0 (binding [*out* (java.io.StringWriter.)]
-                     (sut/serve-cmd home (constantly nil))))))))))
+                     (sut/serve-cmd {} (constantly nil))))))))))
 
 (deftest ^{:stratum 1} serve-consumes-with-its-real-consumer-test
   (let [home (temp-home)
@@ -108,8 +113,11 @@
       events-dir
       (fn [consumer-state]
         (let [server (future (binding [*out* (java.io.StringWriter.)]
-                               (sut/serve-cmd home #(deref release))))]
+                               (sut/serve-cmd {} #(deref release))))]
           (is (eventually #(some? @consumer-state)))
+          (is (= (str (io/file events-dir "operator"))
+                 (:operator-dir (json/parse-string (slurp (io/file home sut/discovery-file-name)) true)))
+              "the discovery file names the directory the consumer reads")
           (spit (doto (io/file events-dir "operator" "ack.json") io/make-parents) acknowledge-request)
           (testing "an intervention written with no run active is carried to verified"
             (is (eventually #(= :verified (last (intervention-states
@@ -121,3 +129,24 @@
             (is (= 0 (deref server 30000 :timeout)))
             (is (nil? @consumer-state))
             (is (not (.exists (io/file home sut/discovery-file-name))))))))))
+
+(deftest ^{:stratum 1} one-home-for-everything-serve-and-its-retries-touch-test
+  (let [home (temp-home)
+        release (promise)
+        discovery (io/file home sut/discovery-file-name)]
+    ;; What MINIFORGE_HOME sets: the event stream's home, and the CLI's own.
+    (with-redefs [config/miniforge-home (constantly (str home))
+                  profile/getenv #(when (= "MINIFORGE_HOME" %) (str home))
+                  control/start-process-control! (constantly nil)
+                  control/stop-process-control! (constantly nil)]
+      (let [server (future (binding [*out* (java.io.StringWriter.)] (sut/serve-cmd {} #(deref release))))]
+        (is (eventually #(.exists discovery)))
+        (is (.exists (io/file home sut/lock-file-name)))
+        (is (= (str (io/file home "events" "operator"))
+               (:operator-dir (json/parse-string (slurp discovery) true))))
+        (testing "the consumer's events, the launch records and a retried child's log"
+          (is (= (io/file home "events") (es/default-events-dir)))
+          (is (= (io/file home "events" "operator" ".resume-launches") (#'records/launch-file)))
+          (is (= (str (io/file home "logs")) (app-config/logs-dir))))
+        (deliver release :stop)
+        (is (= 0 (deref server 5000 :timeout)))))))
