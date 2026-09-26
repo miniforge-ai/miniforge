@@ -32,6 +32,7 @@
    [ai.miniforge.anomaly.interface :as anomaly]
    [ai.miniforge.event-stream.interface :as es]
    [ai.miniforge.operator.application :as application]
+   [ai.miniforge.operator.application.core :as core]
    [ai.miniforge.operator.consumer :as consumer]
    [ai.miniforge.operator.intervention :as intervention]
    [ai.miniforge.reliability.interface :as reliability]
@@ -359,6 +360,16 @@
     (application/deregister-runner! wid)
     (application/deregister-runner! wid)
     (is (false? (application/live-runner? wid)))))
+
+(defn- ^{:stratum 1} awaited-retry!
+  "Apply a `:retry` of `workflow-id` (staged in `events-dir`) on its own
+   stream through `launcher`; returns the stream."
+  [events-dir workflow-id launcher]
+  (let [stream (memory-stream)]
+    (with-mechanism-handle #'application/process-resume-launcher
+      (assoc launcher :events-dir events-dir)
+      #(application/apply-intervention! stream (approved :retry (str workflow-id))))
+    stream))
 
 ;------------------------------------------------------------------------------ Layer 2
 
@@ -859,3 +870,65 @@
         (is (= :no-policy-packs (get-in result [:intervention/details :failure/reason])))
         (is (re-find #"no-policy-packs" (:intervention/reason result)))
         (is (empty? (policy-evals stream)))))))
+
+;; -- The verification pool ------------------------------------------------
+(deftest ^{:stratum 2} the-launch-the-wait-returns-is-read-back-and-settled
+  (let [events-dir (temp-events-dir)
+        workflow-id (random-uuid)
+        resumed-id (random-uuid)
+        settled (promise)]
+    (stage-two-phase-run! events-dir workflow-id)
+    (stage-two-phase-run! events-dir resumed-id)
+    (let [stream (awaited-retry! events-dir workflow-id
+                                 {:launch! (fn [_] {:resume/run-id (random-uuid)})
+                                  :await-start! #(assoc % :resume/run-id resumed-id :resume/observed? true)
+                                  :settle! (fn [launch final] (deliver settled [launch (:intervention/state final)]))})]
+      (application/stop-verifications!)
+      (is (= [:dispatched :applied :verified] (state-trail stream))
+          "read back under the run id the wait observed, not the one first reported")
+      (is (= [{:resume/run-id resumed-id :resume/observed? true} :verified]
+             (deref settled 1000 nil))))))
+
+(deftest ^{:stratum 2} a-submission-racing-a-stop-never-fails-the-launched-retry
+  (testing "a submitter holding the pool a stop shut down lands on a fresh one"
+    (let [events-dir (temp-events-dir)
+          workflow-id (random-uuid)
+          resumed-id (random-uuid)]
+      (stage-two-phase-run! events-dir workflow-id)
+      (stage-two-phase-run! events-dir resumed-id)
+      (application/stop-verifications!)
+      (reset! (var-get #'core/verification-pool)
+              (doto ^java.util.concurrent.ExecutorService (#'core/new-verification-pool) .shutdown))
+      (let [stream (awaited-retry! events-dir workflow-id {:launch! (fn [_] {:resume/run-id resumed-id})
+                                               :await-start! identity})]
+        (application/stop-verifications!)
+        (is (= [:dispatched :applied :verified] (state-trail stream)))))))
+
+(deftest ^{:stratum 2} the-verification-pool-is-bounded
+  (with-redefs-fn {#'core/verification-threads 1
+                   #'core/verification-queue-size 1
+                   #'consumer/stop-drain-ms 50}
+    (fn []
+      (let [events-dir (temp-events-dir)
+            workflow-id (random-uuid)
+            resumed-id (random-uuid)
+            release (promise)
+            awaited (atom 0)
+            settled (atom [])
+            launcher {:launch! (fn [_] {:resume/run-id resumed-id})
+                      :await-start! (fn [launch]
+                                      (swap! awaited inc)
+                                      (try (deref release) launch
+                                           (catch InterruptedException _ {:resume/pending? true})))
+                      :settle! (fn [_ final] (swap! settled conj (:intervention/state final)))}]
+        (stage-two-phase-run! events-dir workflow-id)
+        (stage-two-phase-run! events-dir resumed-id)
+        (application/stop-verifications!)
+        (let [[running queued overflow] (vec (repeatedly 3 #(awaited-retry! events-dir workflow-id launcher)))]
+          (testing "past the pool and its queue, a retry is left dispatched and unsettled, never failed"
+            (is (= [:dispatched] (state-trail overflow))))
+          (testing "a stop runs no queued verification: it stays dispatched for the restart"
+            (application/stop-verifications!)
+            (is (= 1 @awaited))
+            (is (= [[:dispatched] [:dispatched]] (map state-trail [running queued])))
+            (is (empty? @settled))))))))
