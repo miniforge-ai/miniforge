@@ -53,7 +53,10 @@ processes by `<events>/operator/.consumer.lock`.
     parent of the events directory the consumer reads, so the lock, the
     discovery file and the `operator-dir` it names cannot point at different
     homes. The launch records are under that events directory too, and a
-    retried child inherits `MINIFORGE_HOME`.
+    retried child inherits `MINIFORGE_HOME`. Retry logs and pid files are
+    in the CLI's logs directory, which is the same home only when
+    `MINIFORGE_HOME` is set or the app profile's home is `~/.miniforge` (see
+    Known Limits).
   - On start it hands every launch record never settled back to the
     verification pool. A server stopped or killed while a retry was starting
     therefore finishes verifying it on its next start.
@@ -69,7 +72,8 @@ processes by `<events>/operator/.consumer.lock`.
   active reaches `verified`, and the stop the shutdown hook runs stops it.
 - One home: with `MINIFORGE_HOME` at a temp directory, the lock, discovery
   file, operator directory, consumer events root, launch records and the
-  retry log directory all resolve under it.
+  retry log directory all resolve under it. The test sets it; without it
+  the claim holds only under the default profile.
 - Wiring: a runner's consumer declines retries, the server's takes them, and a
   starting server resumes pending launches.
 - Smoke against a temp `MINIFORGE_HOME`: a retry of a run with a recorded origin
@@ -90,13 +94,18 @@ or `<home>/operator-serve.json`.
 
 - Safe-mode applies to the degradation manager of the process that claims
   it. This is unchanged across processes.
-- Under an app profile with a home of its own (`miniforge-core`'s
+- One home only when `MINIFORGE_HOME` is set, or under the default profile.
+  Under an app profile with a home of its own (`miniforge-core`'s
   `.miniforge-core`) and no `MINIFORGE_HOME`, the event stream, and so this
-  server and its launch records, use `~/.miniforge`, while the CLI's own
-  directories and `mf resume`'s event reads use the profile's home. A
-  retried child then reads the run's history from the wrong root and exits,
-  and the retry fails `:resume-not-started`. This split predates the stack;
-  set `MINIFORGE_HOME` when serving under such a profile.
+  server's lock, discovery file, operator directory and launch records, use
+  `~/.miniforge`. The CLI's own directories use the profile's home: retry
+  logs and pid files (`logs-dir`), policy packs, and `mf resume`'s event
+  reads. A retried child then reads the run's history from the wrong root
+  and exits, and the retry fails `:resume-not-started`. This split predates
+  the stack and is not fixed here; set `MINIFORGE_HOME` when serving under
+  such a profile.
+- The console does not yet link a retried attempt to the run it retried
+  (see `fix/resume-launcher-review`).
 
 ## Related Issues/PRs
 
