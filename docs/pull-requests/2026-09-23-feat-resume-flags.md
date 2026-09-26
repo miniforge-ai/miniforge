@@ -56,7 +56,9 @@ events of the child it started. `mf resume` accepted none of these.
   value that is not a UUID is refused, and so is one that disagrees with the
   restored snapshot's id. Each case has its own message.
   (Changed by `fix/resume-launcher-review`: a `--run-id` beside a snapshot
-  now runs the snapshot's state under that id, as a new attempt.)
+  now runs the snapshot's state under that id, as a new attempt; one
+  naming another existing run is refused. That PR also makes rewinds
+  restore workspaces: the checkpoint's phase was read from the wrong key.)
 - `--correlation-id <uuid>` is stamped on the run's lifecycle events as
   `:workflow-run/correlation-id`. Without it, none is imposed and the runner's
   default applies: the run's own id, as before this change.
