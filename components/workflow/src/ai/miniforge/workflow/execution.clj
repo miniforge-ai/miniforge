@@ -218,10 +218,11 @@
    (fn [_ sub-wt]
      (try
        (let [{:keys [out err exit]} (shell/sh
-                                     "git" "diff" "--name-only" "HEAD"
+                                     "git" "ls-files"
+                                     "--modified" "--others" "--exclude-standard"
                                      :dir sub-wt)
              _ (when (not= 0 exit)
-                 (throw (ex-info (str "git diff --name-only exited " exit)
+                 (throw (ex-info (str "git ls-files exited " exit)
                                  {:exit exit :stderr err :sub-worktree sub-wt})))
              changed-files (remove str/blank?
                                    (str/split-lines (or out "")))]
