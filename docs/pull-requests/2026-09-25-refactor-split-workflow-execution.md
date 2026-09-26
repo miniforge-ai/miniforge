@@ -98,8 +98,8 @@ Extraction first, flip last, so no commit staged an over-budget file:
 
 ## Related Issues/PRs
 
-- #1922: brings the four affected test files under the layer budget.
-  This PR is stacked on it.
+- #1922 (merged first): brought the four affected test files under the
+  layer budget, so this PR's test edits are only the re-pointing.
 - #1485, #1843: earlier splits under the same rule.
 
 ## Checklist
