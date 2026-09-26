@@ -20,6 +20,7 @@
    [ai.miniforge.cli.app-config :as app-config]
    [ai.miniforge.cli.main :as main]
    [ai.miniforge.cli.main.commands.resume :as cmd-resume]
+   [ai.miniforge.cli.workflow-runner.posix-host :as posix]
    [ai.miniforge.cli.workflow-runner.resume-launcher :as sut]
    [ai.miniforge.cli.workflow-runner.resume-records :as records]
    [ai.miniforge.event-stream.interface :as es]
@@ -169,7 +170,7 @@
                  (failure-code (sut/launch! (deps {}) (retry-plan workflow-id))))))))))
 
 (deftest ^{:stratum 1} a-lineage-retries-only-its-newest-attempt-test
-  (with-temp-home
+  (posix/on-posix-host with-temp-home
     (fn []
       (let [root (str (random-uuid))
             finished (assoc (deps {}) :spawn! (fn [& _] (dead-pid)))
@@ -263,7 +264,7 @@
           (is (= launch (sut/await-start! (deps {}) launch)) "the next poll sees the start"))))))
 
 (deftest ^{:stratum 1} a-child-recorded-only-before-its-spawn-is-found-by-its-pid-file-test
-  (with-temp-home
+  (posix/on-posix-host with-temp-home
     (fn []
       (let [killed (atom [])
             launched-at-ms (System/currentTimeMillis)
@@ -280,8 +281,35 @@
             (is (= [(.pid child)] @killed) "silent at the deadline, it is killed by the pid it wrote"))
           (finally (.destroy child)))))))
 
+(deftest ^{:stratum 1} a-child-whose-pid-file-lands-after-the-wait-is-still-killed-test
+  (posix/on-posix-host with-temp-home
+    (fn []
+      (let [killed (atom [])
+            launched-at-ms (System/currentTimeMillis)
+            child (.exec (Runtime/getRuntime) (into-array String ["/bin/sleep" "30"]))
+            pid-file (doto (io/file (app-config/logs-dir) "resume-late.pid") io/make-parents)
+            launch {:resume/run-id (random-uuid)
+                    :resume/intervention-id (str (random-uuid))
+                    :resume/pid-file (str pid-file)
+                    :resume/launched-at-ms launched-at-ms}
+            reads (atom 0)
+            with-child-pid records/with-child-pid]
+        (try
+          ;; The first read is before the wait and the second right after
+          ;; it; the child renames its pid file in just after that one.
+          (with-redefs [records/with-child-pid (fn [l]
+                                                 (let [found (with-child-pid l)]
+                                                   (when (= 2 (swap! reads inc))
+                                                     (spit pid-file (str (.pid child) "\n")))
+                                                   found))]
+            (let [result (sut/await-start! (deps {:killed killed}) launch)]
+              (is (= :timeout (get-in result [:anomaly/data :failure/reason])))
+              (is (= [(.pid child)] @killed) "read again at the kill, it is killed by the pid it wrote")
+              (is (= (.pid child) (get-in result [:anomaly/data :resume/pid])))))
+          (finally (.destroy child)))))))
+
 (deftest ^{:stratum 1} an-observed-child-found-by-its-pid-file-is-returned-with-its-pid-test
-  (with-temp-home
+  (posix/on-posix-host with-temp-home
     (fn []
       (let [launched-at-ms (System/currentTimeMillis)
             child (.exec (Runtime/getRuntime) (into-array String ["/bin/sleep" "30"]))
@@ -302,7 +330,7 @@
           (finally (.destroy child)))))))
 
 (deftest ^{:stratum 1} the-child-is-detached-and-gets-its-argv-verbatim-test
-  (with-temp-home
+  (posix/on-posix-host with-temp-home
     (fn []
       (let [log (io/file (app-config/logs-dir) "spawn.log")
             pid-file (io/file (app-config/logs-dir) "s.pid")
