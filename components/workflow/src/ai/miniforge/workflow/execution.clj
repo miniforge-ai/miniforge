@@ -217,9 +217,12 @@
   (reduce
    (fn [_ sub-wt]
      (try
-       (let [{:keys [out]} (shell/sh
-                             "git" "diff" "--name-only" "HEAD"
-                             :dir sub-wt)
+       (let [{:keys [out err exit]} (shell/sh
+                                     "git" "diff" "--name-only" "HEAD"
+                                     :dir sub-wt)
+             _ (when (not= 0 exit)
+                 (throw (ex-info (str "git diff --name-only exited " exit)
+                                 {:exit exit :stderr err :sub-worktree sub-wt})))
              changed-files (remove str/blank?
                                    (str/split-lines (or out "")))]
          (doseq [f changed-files]
@@ -690,10 +693,13 @@
         sync-result  (when (and parent-wt (seq sub-wt-paths))
                        (merge-sub-worktree-changes! parent-wt sub-wt-paths logger))]
     (if (anomaly/anomaly? sync-result)
-      ;; Anomaly already logged inside merge-sub-worktree-changes!; propagate
-      ;; it to the caller so the release phase does not start with a partial
-      ;; file tree.
-      sync-result
+      ;; Anomaly already logged inside merge-sub-worktree-changes!; transition
+      ;; the workflow to :failed so the runner loop receives a valid context map
+      ;; and the failure is recorded in :execution/errors.
+      (transition-to-failed-fn
+       (update ctx :execution/errors conj
+               {:type    :sync-sub-worktrees-failed
+                :anomaly sync-result}))
       (let [;; Synthesize new-style implement phase result.
             synthesized-implement-result
             {:name   :implement
