@@ -367,9 +367,12 @@
     (testing "a snapshot resumes under its own id, which --run-id may repeat"
       (is (= snapshot-id (:workflow-id (:opts (resume-with snapshotted {})))))
       (is (= snapshot-id (:registered (resume-with snapshotted {:run-id (str snapshot-id)})))))
-    (testing "a --run-id that disagrees with the snapshot, or is not a UUID, is refused"
-      (is (thrown-with-msg? clojure.lang.ExceptionInfo #"checkpoint restores run"
-                            (resume-with snapshotted {:run-id (str (random-uuid))})))
+    (testing "another --run-id starts a new attempt: the snapshot's state under that id"
+      (let [run-id (random-uuid)
+            {:keys [opts registered]} (resume-with snapshotted {:run-id (str run-id)})]
+        (is (= run-id registered (:workflow-id opts)))
+        (is (= run-id (get-in opts [:resume-machine-snapshot :execution/id])))))
+    (testing "a --run-id that is not a UUID is refused"
       (is (thrown-with-msg? clojure.lang.ExceptionInfo #"--run-id must be a UUID"
                             (resume-with {:completed-phases []} {:run-id "not-a-uuid"}))))
     (testing "--correlation-id reaches the run; without it none is imposed"
@@ -386,8 +389,6 @@
       (let [completed (assoc snapshotted :completed? true)]
         (is (thrown-with-msg? clojure.lang.ExceptionInfo #"--run-id must be a UUID"
                               (resume-with completed {:run-id "not-a-uuid"})))
-        (is (thrown-with-msg? clojure.lang.ExceptionInfo #"checkpoint restores run"
-                              (resume-with completed {:run-id (str (random-uuid))})))
         (is (thrown-with-msg? clojure.lang.ExceptionInfo #"--correlation-id must be a UUID"
                               (resume-with completed {:correlation-id "nope"})))))))
 
