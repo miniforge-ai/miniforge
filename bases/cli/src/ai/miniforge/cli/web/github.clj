@@ -29,6 +29,10 @@
 (def ^{:stratum 0} ^:private system-message
   (messages/create-translator "config/cli/messages/system.edn" :cli/system))
 
+(def ^{:stratum 0} gh-timeout-ms
+  "Longest a `gh` diff fetch may take before it is abandoned."
+  30000)
+
 (defn ^{:stratum 0} sh-success? [result]
   (zero? (:exit result)))
 
@@ -67,9 +71,16 @@
           (mapv #(assoc % :repo repo :analysis (risk/analyze-pr %)) prs)
           [])))))
 
-(defn ^{:stratum 1} fetch-pr-diff [repo number]
-  (let [result (process/sh "gh" "pr" "diff" (str number) "--repo" repo)]
-    (when (sh-success? result) (:out result))))
+(defn ^{:stratum 1} fetch-pr-diff
+  "The PR's diff, or nil when `gh` fails or does not answer within
+   `gh-timeout-ms` (then it is killed): an operator re-evaluation runs
+   inside the consumer pass other processes wait on."
+  [repo number]
+  (let [proc (process/process {:out :string :err :string}
+                              "gh" "pr" "diff" (str number) "--repo" repo)
+        result (deref proc gh-timeout-ms ::timed-out)]
+    (when (= ::timed-out result) (process/destroy-tree proc))
+    (when (and (map? result) (sh-success? result)) (:out result))))
 
 (defn ^{:stratum 1} fetch-pr-body [repo number]
   (let [result (process/sh "gh" "pr" "view" (str number) "--repo" repo "--json" "body,title,labels")]

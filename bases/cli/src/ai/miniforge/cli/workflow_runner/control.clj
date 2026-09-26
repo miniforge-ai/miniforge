@@ -17,14 +17,21 @@
 ;; limitations under the License.
 (ns ai.miniforge.cli.workflow-runner.control
   "Governed control-path wiring shared by every CLI runner path
-   (Phase D D-3/D-4).
+   (Phase D D-3/D-4) and by `mf operator serve`.
 
    A runner becomes controllable by doing two things: registering its
    in-process control handles under its workflow id, and making sure
    this process is running exactly one operator-event consumer. Every
    runner path in the CLI — spec runner, chain runner, plan executor,
    resume — needs the identical pair, so it lives here once rather than
-   three-and-a-half times.
+   three-and-a-half times. `mf operator serve` runs the consumer half
+   alone, so interventions are consumed while no run is active.
+
+   Every consuming process registers the same process handles (the
+   degradation manager, the resume launcher, the policy evaluator):
+   retry verbs and process-global targets are claimed by whichever
+   consumer sees them first, so a consumer without them would fail
+   those verbs depending on which process won.
 
    The meta-loop context is here too because the consumer publishes its
    lifecycle events onto that context's operator-level stream, and the
@@ -35,6 +42,9 @@
   (:require
    [ai.miniforge.agent.interface :as agent]
    [ai.miniforge.automation-edge-correlator.interface :as correlator]
+   [ai.miniforge.cli.workflow-runner.policy-evaluator :as policy-evaluator]
+   [ai.miniforge.cli.workflow-runner.resume-launcher :as resume-launcher]
+   [ai.miniforge.cli.workflow-runner.resume-records :as resume-records]
    [ai.miniforge.event-stream.interface :as es]
    [ai.miniforge.operator.interface :as operator]
    [ai.miniforge.supervisory-state.interface :as supervisory]))
@@ -43,7 +53,8 @@
 
 ;; Process-scoped singletons
 (defonce ^{:stratum 0} ^:private meta-loop-ctx
-  ;; Lazily initialized when the first governed workflow starts.
+  ;; Lazily initialized by the first consuming path: a governed
+  ;; workflow, or `mf operator serve`.
   ;; Uses a dedicated operator-level event stream (no workflow-id → operator.edn).
   (atom nil))
 
@@ -52,6 +63,12 @@
   ;; workflow races the shared on-disk cursor and can publish a target
   ;; workflow's audit trail through the wrong workflow stream.
   (atom nil))
+
+(defonce ^{:stratum 0} ^:private exit-hook-installed?
+  ;; One exit hook per process, installed with the first consumer. It
+  ;; stops whichever consumer is current at exit, so stopping and
+  ;; restarting the consumer reuses it instead of adding another.
+  (atom false))
 
 (defn- ^{:stratum 0} create-meta-loop-ctx!
   []
@@ -65,11 +82,38 @@
     (agent/create-meta-loop-context operator-stream)))
 
 (defn ^{:stratum 0} release-workflow-control!
-  "Drop `workflow-id` from the live-runner registry. Interventions
-   aimed at it stop being applicable the moment the runner is gone —
-   which is the honest answer, not a silent no-op. Idempotent."
+  "Drop `workflow-id` from the live-runner registry, and this process
+   from its recorded origin. Interventions aimed at it stop being
+   applicable the moment the runner is gone — which is the honest
+   answer, not a silent no-op — and a retry no longer takes this process
+   for its live runner. Idempotent."
   [workflow-id]
-  (operator/deregister-live-runner! workflow-id))
+  (operator/deregister-live-runner! workflow-id)
+  (resume-records/release-origin! workflow-id))
+
+(defn- ^{:stratum 0} register-process-handles!
+  "Register the process-scoped handles interventions act through. Called
+   by every consuming path; see the namespace doc for why. A launcher
+   that cannot be built on this thread (no CLI arguments visible) leaves
+   an already-registered one in place rather than clearing it."
+  [ctx]
+  (operator/register-degradation-manager! (:degradation-manager ctx))
+  (when-let [launcher (resume-launcher/launcher)]
+    (operator/register-resume-launcher! launcher))
+  (operator/register-policy-evaluator! policy-evaluator/evaluate))
+
+(defn- ^{:stratum 0} stop-held-consumer!
+  "Stop the consumer `holder` holds and clear it. Idempotent."
+  [holder]
+  (when-let [handle (first (reset-vals! holder nil))]
+    (operator/stop-operator-consumer! handle)))
+
+(defn- ^{:stratum 0} stop-at-exit!
+  "Run `stop!` when the process exits — a runner exits with its consumer
+   running — so a retry still being verified records an outcome rather
+   than staying `:dispatched`."
+  [stop!]
+  (.addShutdownHook (Runtime/getRuntime) (Thread. ^Runnable stop!)))
 
 ;------------------------------------------------------------------------------ Layer 1
 
@@ -98,12 +142,24 @@
   (or @operator-consumer-handle
       (locking operator-consumer-handle
         (or @operator-consumer-handle
-            (reset! operator-consumer-handle
-                    (operator/start-operator-consumer!
-                     {:stream (:event-stream ctx)
-                      :apply! operator/apply-intervention!
-                      :accept? operator/live-intervention-target?
-                      :stream-for operator/live-intervention-stream}))))))
+            (let [handle (operator/start-operator-consumer!
+                          {:events-dir (es/default-events-dir)
+                           :stream (:event-stream ctx)
+                           :apply! operator/apply-intervention!
+                           :accept? operator/live-intervention-target?
+                           :stream-for operator/live-intervention-stream})]
+              ;; The hook reads the holder at exit, so it also stops a
+              ;; consumer started after a stop-process-control!.
+              (when (compare-and-set! exit-hook-installed? false true)
+                (stop-at-exit! (partial stop-held-consumer! operator-consumer-handle)))
+              (reset! operator-consumer-handle handle))))))
+
+(defn ^{:stratum 1} stop-process-control!
+  "Stop this process's operator consumer and the retry verifications it
+   started (both drain; see `operator/stop-operator-consumer!`).
+   Idempotent."
+  []
+  (stop-held-consumer! operator-consumer-handle))
 
 ;------------------------------------------------------------------------------ Layer 2
 
@@ -113,15 +169,28 @@
    publish this runner's control handles and guarantee the process
    consumer is polling. Call inside the runner's `try`, after every
    binding that can throw, and pair with [[release-workflow-control!]]
-   in the matching `finally`."
+   in the matching `finally`. Also records the directory the run is
+   started from, where a retry of it will run."
   [workflow-id control-state event-stream]
   (let [ctx (meta-loop-context!)
         handles {:control-state control-state
                  :event-stream event-stream}]
-    (operator/register-degradation-manager! (:degradation-manager ctx))
+    (resume-records/record-origin! workflow-id)
+    (register-process-handles! ctx)
     (operator/register-live-runner! workflow-id handles)
     (try
       (ensure-operator-consumer! ctx)
       (catch Throwable e
         (operator/deregister-live-runner! workflow-id)
         (throw e)))))
+
+(defn ^{:stratum 2} start-process-control!
+  "Make this process an operator-channel consumer without a runner of its
+   own (`mf operator serve`). Same context, process handles, and consumer
+   options as [[register-workflow-control!]], so workflow-targeted
+   pause/resume/cancel are still left to the live runner that owns them.
+   Returns the consumer handle."
+  []
+  (let [ctx (meta-loop-context!)]
+    (register-process-handles! ctx)
+    (ensure-operator-consumer! ctx)))
