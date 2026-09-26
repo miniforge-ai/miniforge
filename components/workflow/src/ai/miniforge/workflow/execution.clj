@@ -27,6 +27,7 @@
             [ai.miniforge.event-stream.interface :as events]
             [ai.miniforge.fsm.interface :as fsm]
             [ai.miniforge.gate.interface :as gate]
+            [ai.miniforge.logging.interface :as log]
             [ai.miniforge.phase.interface :as phase]
             [ai.miniforge.response.interface :as response]
             [ai.miniforge.schema.interface :as schema]
@@ -34,7 +35,8 @@
             [ai.miniforge.workflow.dag-orchestrator :as dag-orch]
             [ai.miniforge.workflow.fsm :as workflow-fsm]
             [ai.miniforge.workflow.runner-defaults :as defaults]
-            [ai.miniforge.workflow.messages :as messages]))
+            [ai.miniforge.workflow.messages :as messages]
+            [slingshot.slingshot :refer [try+]]))
 
 ;------------------------------------------------------------------------------ Layer 0
 
@@ -203,25 +205,17 @@
 (def ^{:stratum 0} ^:private failure-statuses
   #{:error :failed :failure})
 
-(defn- ^{:stratum 0} merge-sub-worktree-changes!
-  "Copy changed files from DAG sub-worktrees into the parent worktree.
-   Each sub-workflow wrote to its own isolated worktree. For the release
-   phase to find dirty files, we need to merge those changes back."
-  [parent-worktree sub-worktree-paths]
-  (doseq [sub-wt sub-worktree-paths]
-    (try
-      (let [{:keys [out]} (shell/sh
-                            "git" "diff" "--name-only" "HEAD"
-                            :dir sub-wt)
-            changed-files (remove str/blank?
-                                  (str/split-lines (or out "")))]
-        (doseq [f changed-files]
-          (let [src (io/file sub-wt f)
-                dst (io/file parent-worktree f)]
-            (when (.exists src)
-              (io/make-parents dst)
-              (io/copy src dst)))))
-      (catch Exception _e nil))))
+(defn- ^{:stratum 0} git-output-lines
+  "Run `git args` in `dir`. Returns the non-blank output lines, or a :fault
+   anomaly carrying the exit code and stderr when git exits non-zero."
+  [dir args]
+  (let [{:keys [exit out err]} (apply shell/sh "git" (concat args [:dir dir]))]
+    (if (zero? exit)
+      (vec (remove str/blank? (str/split-lines (or out ""))))
+      (anomaly/anomaly :fault
+                       (messages/t :dag.sync/git-failed {:args (str/join " " args)
+                                                         :exit exit})
+                       {:exit exit :err (str/trim (or err ""))}))))
 
 (defn- ^{:stratum 0} roll-dag-metrics-into-execution
   "Accumulate DAG sub-workflow tokens / cost / duration into top-line
@@ -237,6 +231,31 @@
         (update-in [:execution/metrics :duration-ms] (fnil + 0)   (or duration-ms 0)))))
 
 ;------------------------------------------------------------------------------ Layer 1
+
+(defn- ^{:stratum 1} sync-sub-worktree!
+  "Apply a DAG sub-worktree's changes to `parent-worktree`: tracked files
+   that differ from HEAD, staged or not, and untracked files git does not
+   ignore. A listed path the sub-worktree no longer has was deleted there,
+   so it is deleted from the parent too. Returns nil on success, or a
+   :fault anomaly naming both worktrees when git exits non-zero or an IO
+   step throws."
+  [parent-worktree sub-wt]
+  (let [where {:sub-worktree sub-wt :parent-worktree parent-worktree}
+        result (try+
+                 (anomaly/let-ok
+                   [changed   (git-output-lines sub-wt ["diff" "--name-only" "HEAD"])
+                    untracked (git-output-lines sub-wt ["ls-files" "--others" "--exclude-standard"])]
+                   (doseq [f (distinct (concat changed untracked))]
+                     (let [src (io/file sub-wt f)
+                           dst (io/file parent-worktree f)]
+                       (cond
+                         (.exists src) (do (io/make-parents dst)
+                                           (io/copy src dst))
+                         (.exists dst) (io/delete-file dst)))))
+                 (catch Exception e
+                   (anomaly/exception-anomaly :fault (messages/t :dag.sync/apply-failed) {} e)))]
+    (when result
+      (update result :anomaly/data merge where))))
 
 (defn- ^{:stratum 1} emit-phase-decision!
   "Publish the :gate/decision event for a gated transition; never breaks
@@ -436,6 +455,25 @@
                 :dag-result dag-result}))))
 
 ;------------------------------------------------------------------------------ Layer 2
+
+(defn- ^{:stratum 2} merge-sub-worktree-changes!
+  "Copy changed files from DAG sub-worktrees into the parent worktree.
+   Each sub-workflow wrote to its own isolated worktree. For the release
+   phase to find dirty files, we need to merge those changes back.
+
+   Returns nil when every sub-worktree synced, or the anomaly for the first
+   one that did not, after logging it. Stops there: the parent tree is
+   already partial, so the caller must fail the run rather than release it."
+  [parent-worktree sub-worktree-paths logger]
+  (reduce
+   (fn [_ sub-wt]
+     (when-let [failure (sync-sub-worktree! parent-worktree sub-wt)]
+       (log/error logger :workflow :workflow/sync-sub-worktree-failed
+                  {:message (:anomaly/message failure)
+                   :data    (:anomaly/data failure)})
+       (reduced failure)))
+   nil
+   sub-worktree-paths))
 
 (defn ^{:stratum 2} apply-gate-validation
   "Apply gate validation to phase result.
@@ -657,44 +695,60 @@
    parent worktree, synthesizes an :implement phase result, and advances
    past implement to verify → review → release."
   [ctx dag-result pipeline transition-to-completed-fn transition-to-failed-fn]
-  (let [artifacts  (:artifacts dag-result)
-        task-count (count artifacts)
+  (let [artifacts    (:artifacts dag-result)
+        task-count   (count artifacts)
         ;; Merge sub-worktree changes into parent worktree so the release
         ;; phase can discover dirty files via git status.
-        parent-wt  (or (get ctx :execution/worktree-path)
-                       (System/getProperty "user.dir"))
+        parent-wt    (or (get ctx :execution/worktree-path)
+                         (System/getProperty "user.dir"))
         sub-wt-paths (:worktree-paths dag-result)
-        _  (when (and parent-wt (seq sub-wt-paths))
-             (merge-sub-worktree-changes! parent-wt sub-wt-paths))
-        ;; Synthesize new-style implement phase result.
-        synthesized-implement-result
-        {:name   :implement
-         :status :completed
-         :result {:status         :success
-                  :environment-id (get ctx :execution/environment-id)
-                  :summary        (messages/t :status/dag-executed-summary
-                                              {:task-count task-count})
-                  :metrics        (merge {:task-count task-count}
-                                         (:metrics dag-result))}}
-        ctx-with-dag (-> ctx
-                         (update :execution/artifacts into artifacts)
-                         (assoc :execution/dag-result dag-result)
-                         (assoc-in [:execution/phase-results :implement]
-                                   synthesized-implement-result)
-                         (roll-dag-metrics-into-execution dag-result))
-        ctx-after-plan
-        (apply-phase-transition ctx-with-dag
-                                :phase/succeed
-                                pipeline
-                                transition-to-completed-fn
-                                transition-to-failed-fn)]
-    (if (phase/failed? ctx-after-plan)
-      ctx-after-plan
-      (apply-phase-transition ctx-after-plan
-                              :phase/succeed
-                              pipeline
-                              transition-to-completed-fn
-                              transition-to-failed-fn))))
+        logger       (get ctx :execution/logger)
+        sync-result  (when (and parent-wt (seq sub-wt-paths))
+                       (merge-sub-worktree-changes! parent-wt sub-wt-paths logger))]
+    (if (anomaly/anomaly? sync-result)
+      ;; Anomaly already logged inside merge-sub-worktree-changes!; transition
+      ;; the workflow to :failed so the runner loop receives a valid context map
+      ;; and the failure is recorded in :execution/errors. The DAG finished
+      ;; before the sync failed, so its artifacts and spend are kept as on the
+      ;; success path: that work happened and the run summary must show it.
+      (transition-to-failed-fn
+       (-> ctx
+           (update :execution/artifacts into artifacts)
+           (assoc :execution/dag-result dag-result)
+           (roll-dag-metrics-into-execution dag-result)
+           (update :execution/errors conj
+                   {:type    :sync-sub-worktrees-failed
+                    :message (:anomaly/message sync-result)
+                    :anomaly sync-result})))
+      (let [;; Synthesize new-style implement phase result.
+            synthesized-implement-result
+            {:name   :implement
+             :status :completed
+             :result {:status         :success
+                      :environment-id (get ctx :execution/environment-id)
+                      :summary        (messages/t :status/dag-executed-summary
+                                                  {:task-count task-count})
+                      :metrics        (merge {:task-count task-count}
+                                             (:metrics dag-result))}}
+            ctx-with-dag (-> ctx
+                             (update :execution/artifacts into artifacts)
+                             (assoc :execution/dag-result dag-result)
+                             (assoc-in [:execution/phase-results :implement]
+                                       synthesized-implement-result)
+                             (roll-dag-metrics-into-execution dag-result))
+            ctx-after-plan
+            (apply-phase-transition ctx-with-dag
+                                    :phase/succeed
+                                    pipeline
+                                    transition-to-completed-fn
+                                    transition-to-failed-fn)]
+        (if (phase/failed? ctx-after-plan)
+          ctx-after-plan
+          (apply-phase-transition ctx-after-plan
+                                  :phase/succeed
+                                  pipeline
+                                  transition-to-completed-fn
+                                  transition-to-failed-fn))))))
 
 ;------------------------------------------------------------------------------ Layer 4
 
