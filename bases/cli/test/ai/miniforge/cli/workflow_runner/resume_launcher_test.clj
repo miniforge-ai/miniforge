@@ -20,11 +20,13 @@
    [ai.miniforge.cli.app-config :as app-config]
    [ai.miniforge.cli.main :as main]
    [ai.miniforge.cli.main.commands.resume :as cmd-resume]
+   [ai.miniforge.cli.workflow-runner.posix-host :as posix]
    [ai.miniforge.cli.workflow-runner.resume-launcher :as sut]
    [ai.miniforge.cli.workflow-runner.resume-records :as records]
    [ai.miniforge.event-stream.interface :as es]
    [ai.miniforge.operator.interface :as operator]
    [clojure.java.io :as io]
+   [clojure.string :as str]
    [clojure.test :refer [deftest is testing]]))
 
 ;------------------------------------------------------------------------------ Layer 0
@@ -66,13 +68,28 @@
    :timeout-ms 200
    :poll-ms 10})
 
+(defn- ^{:stratum 0} process-group
+  "`pid`'s process group, as `ps -o pgid=` prints it. A `ps` that fails or
+   prints no group throws, naming its exit code and stderr, so a comparison
+   of two groups never runs on a missing one."
+  [pid]
+  (let [p (.start (ProcessBuilder. ^java.util.List ["ps" "-o" "pgid=" "-p" (str pid)]))
+        out (str/trim (slurp (.getInputStream p)))
+        err (str/trim (slurp (.getErrorStream p)))
+        exit (.waitFor p)]
+    (if (and (zero? exit) (re-matches #"\d+" out))
+      out
+      (throw (ex-info (str "`ps -o pgid= -p " pid "` gave no process group (exit " exit "): "
+                           (if (str/blank? err) (pr-str out) err))
+                      {:pid pid :exit exit :out out :err err})))))
+
 (defn- ^{:stratum 0} failure-code
   [result]
   (get-in result [:anomaly/data :failure/code]))
 
 (defn- ^{:stratum 0} dead-pid
   []
-  (let [p (.start (ProcessBuilder. ^java.util.List ["/usr/bin/true"]))] (.waitFor p) (.pid p)))
+  (let [p (.start (ProcessBuilder. ^java.util.List ["true"]))] (.waitFor p) (.pid p)))
 
 (defn- ^{:stratum 0} origin!
   "The run's recorded origin: this directory, no runner pid."
@@ -126,6 +143,9 @@
             plan (retry-plan workflow-id)
             spawned (atom [])]
         (records/record-origin! workflow-id)
+        (is (= :resume-target-live (failure-code (sut/launch! (deps {:spawned spawned}) plan)))
+            "the run's recorded runner (this process) has not let go of it")
+        (records/release-origin! workflow-id)
         (let [launch (sut/launch! (deps {:spawned spawned}) plan)]
           (is (= (System/getProperty "user.dir") (second (first @spawned)))
               "the child runs in the directory the run was started from")
@@ -144,12 +164,13 @@
       (let [workflow-id (str (random-uuid))]
         (is (= :resume-origin-unknown (failure-code (sut/launch! (deps {}) (retry-plan workflow-id)))))
         (records/record-origin! workflow-id)
+        (records/release-origin! workflow-id)
         (with-redefs [operator/live-runner? (constantly true)]
           (is (= :resume-target-live
                  (failure-code (sut/launch! (deps {}) (retry-plan workflow-id))))))))))
 
 (deftest ^{:stratum 1} a-lineage-retries-only-its-newest-attempt-test
-  (with-temp-home
+  (posix/on-posix-host with-temp-home
     (fn []
       (let [root (str (random-uuid))
             finished (assoc (deps {}) :spawn! (fn [& _] (dead-pid)))
@@ -164,6 +185,11 @@
             (let [refused (sut/launch! finished (retry-plan root))]
               (is (= :resume-superseded (failure-code refused)))
               (is (= a1 (get-in refused [:anomaly/data :resume/latest-attempt])))))
+          (testing "and once that attempt's run is archived"
+            (.renameTo (records/run-dir a1)
+                       (doto (io/file (es/default-events-dir) "archived" a1) io/make-parents))
+            (is (= a1 (get-in (sut/launch! finished (retry-plan root))
+                              [:anomaly/data :resume/latest-attempt]))))
           (let [a2 (str (attempt-of a1))]
             (ran! a2)
             (is (= root (records/lineage-root a2)) "an attempt of an attempt keeps the root")
@@ -221,7 +247,8 @@
         (.start waiter)
         (Thread/sleep 50)
         (.interrupt waiter)
-        (is (= :resume-unverified (failure-code (deref result 5000 nil))))
+        (is (= {:resume/pending? true} (deref result 5000 nil))
+            "left for a restart to finish, not reported as a failure")
         (is (empty? @killed))))))
 
 (deftest ^{:stratum 1} a-check-that-throws-is-one-bad-poll-test
@@ -237,7 +264,7 @@
           (is (= launch (sut/await-start! (deps {}) launch)) "the next poll sees the start"))))))
 
 (deftest ^{:stratum 1} a-child-recorded-only-before-its-spawn-is-found-by-its-pid-file-test
-  (with-temp-home
+  (posix/on-posix-host with-temp-home
     (fn []
       (let [killed (atom [])
             launched-at-ms (System/currentTimeMillis)
@@ -254,8 +281,56 @@
             (is (= [(.pid child)] @killed) "silent at the deadline, it is killed by the pid it wrote"))
           (finally (.destroy child)))))))
 
+(deftest ^{:stratum 1} a-child-whose-pid-file-lands-after-the-wait-is-still-killed-test
+  (posix/on-posix-host with-temp-home
+    (fn []
+      (let [killed (atom [])
+            launched-at-ms (System/currentTimeMillis)
+            child (.exec (Runtime/getRuntime) (into-array String ["/bin/sleep" "30"]))
+            pid-file (doto (io/file (app-config/logs-dir) "resume-late.pid") io/make-parents)
+            launch {:resume/run-id (random-uuid)
+                    :resume/intervention-id (str (random-uuid))
+                    :resume/pid-file (str pid-file)
+                    :resume/launched-at-ms launched-at-ms}
+            reads (atom 0)
+            with-child-pid records/with-child-pid]
+        (try
+          ;; The first read is before the wait and the second right after
+          ;; it; the child renames its pid file in just after that one.
+          (with-redefs [records/with-child-pid (fn [l]
+                                                 (let [found (with-child-pid l)]
+                                                   (when (= 2 (swap! reads inc))
+                                                     (spit pid-file (str (.pid child) "\n")))
+                                                   found))]
+            (let [result (sut/await-start! (deps {:killed killed}) launch)]
+              (is (= :timeout (get-in result [:anomaly/data :failure/reason])))
+              (is (= [(.pid child)] @killed) "read again at the kill, it is killed by the pid it wrote")
+              (is (= (.pid child) (get-in result [:anomaly/data :resume/pid])))))
+          (finally (.destroy child)))))))
+
+(deftest ^{:stratum 1} an-observed-child-found-by-its-pid-file-is-returned-with-its-pid-test
+  (posix/on-posix-host with-temp-home
+    (fn []
+      (let [launched-at-ms (System/currentTimeMillis)
+            child (.exec (Runtime/getRuntime) (into-array String ["/bin/sleep" "30"]))
+            pid-file (doto (io/file (app-config/logs-dir) "resume-o.pid") io/make-parents)
+            run-id (random-uuid)
+            intervention-id (random-uuid)
+            launch {:resume/run-id run-id
+                    :resume/intervention-id intervention-id
+                    :resume/pid-file (str pid-file)
+                    :resume/launched-at-ms launched-at-ms}]
+        (spit pid-file (str (.pid child) "\n"))
+        (write-event! run-id intervention-id)
+        (try
+          (let [result (sut/await-start! (deps {}) launch)]
+            (is (= (.pid child) (:resume/pid result))
+                "the pid recovered from the pid file travels with the launch to settlement")
+            (is (some? (:resume/pid-started result))))
+          (finally (.destroy child)))))))
+
 (deftest ^{:stratum 1} the-child-is-detached-and-gets-its-argv-verbatim-test
-  (with-temp-home
+  (posix/on-posix-host with-temp-home
     (fn []
       (let [log (io/file (app-config/logs-dir) "spawn.log")
             pid-file (io/file (app-config/logs-dir) "s.pid")
@@ -269,4 +344,6 @@
         (.waitFor (.exec (Runtime/getRuntime) (into-array String ["kill" "-HUP" (str sleeper)])))
         (Thread/sleep 200)
         (is (records/process-running? sleeper nil) "a hangup does not stop it")
+        (is (not= (process-group (.pid (java.lang.ProcessHandle/current))) (process-group sleeper))
+            "it is not in this process's group, so a signal to the group misses it")
         (records/destroy-process! sleeper)))))

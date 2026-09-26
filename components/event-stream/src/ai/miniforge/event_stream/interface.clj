@@ -930,6 +930,11 @@
    Unparseable files are silently dropped."
   reader/read-workflow-events)
 
+(def ^{:stratum 0} workflow-events-dir
+  "`(workflow-events-dir base-dir workflow-id)`: the first existing of the
+   archived → live → legacy directories of a workflow, or nil."
+  reader/workflow-events-dir)
+
 (def ^{:stratum 0} read-workflow-events-by-id
   "Read events for a workflow id under a base events dir, probing the
    archived → live → legacy layouts and reading the first that exists.

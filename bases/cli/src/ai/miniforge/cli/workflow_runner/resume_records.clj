@@ -18,12 +18,14 @@
 (ns ai.miniforge.cli.workflow-runner.resume-records
   "What the resume launcher keeps on disk so a retry starts at most once
    per intervention, never over a live run, and only where the run began:
-   a run's origin (`origin.edn` beside its events), the latest launch per
-   workflow (`<events>/operator/.resume-launches/<workflow>.edn`: the
-   intervention, run id, pid and pid start instant), the pid file the
-   child writes itself (`<home>/logs/resume-<run-id>.pid`, named in the
-   launch before the spawn), and start evidence (an event under the run
-   id carrying the intervention id as its `:workflow-run/correlation-id`).
+   a run's origin (`origin.edn` beside its events, moving with them when
+   the run is archived: the directory and the runner's pid and start
+   instant), the latest launch per workflow
+   (`<events>/operator/.resume-launches/<workflow>.edn`: the intervention,
+   run id, pid and pid start instant), the pid file the child writes
+   itself (`<home>/logs/resume-<run-id>.pid`, named in the launch before
+   the spawn), and start evidence (an event under the run id carrying the
+   intervention id as its `:workflow-run/correlation-id`).
 
    Retries form a lineage: the run first retried (its root) and every
    attempt a retry started, each named in
@@ -51,10 +53,17 @@
   ^java.io.File [id]
   (es/workflow-dir (es/default-events-dir) (str id)))
 
+(defn- ^{:stratum 0} recorded-run-dir
+  "Where the run's events are now — archived, live, or legacy — or nil."
+  ^java.io.File [id]
+  (es/workflow-events-dir (es/default-events-dir) (str id)))
+
 (defn- ^{:stratum 0} launch-file
-  ^java.io.File [workflow-id]
-  (io/file (es/operator-dir (es/default-events-dir)) ".resume-launches"
-           (str workflow-id ".edn")))
+  "The launch records' directory, or the record of `workflow-id`."
+  (^java.io.File []
+   (io/file (es/operator-dir (es/default-events-dir)) ".resume-launches"))
+  (^java.io.File [workflow-id]
+   (io/file (launch-file) (str workflow-id ".edn"))))
 
 (defn- ^{:stratum 0} lineage-file
   "Where an attempt a retry started names its lineage's root."
@@ -115,20 +124,38 @@
 ;------------------------------------------------------------------------------ Layer 1
 
 (defn ^{:stratum 1} record-origin!
-  "Record the directory this process runs `workflow-id` from. Best
-   effort: when it cannot be written, a retry is refused instead."
+  "Record the directory this process runs `workflow-id` from, and this
+   process as its runner. Best effort: unrecorded, a retry is refused."
   [workflow-id]
-  (try (write-edn! (io/file (run-dir workflow-id) "origin.edn")
-                   {:cwd (System/getProperty "user.dir")})
-       (catch java.io.IOException _ nil)))
+  (let [self (java.lang.ProcessHandle/current)
+        origin {:cwd (System/getProperty "user.dir")
+                :pid (.pid self)
+                :pid-started (start-instant self)}]
+    (try (write-edn! (io/file (run-dir workflow-id) "origin.edn") origin)
+         (catch java.io.IOException _ nil))))
 
-(defn ^{:stratum 1} recorded-origin
-  "The recorded origin of `workflow-id` when it still exists, else nil."
+(defn ^{:stratum 1} release-origin!
+  "Drop the runner's pid from the origin once it lets go of the run, so a
+   process that runs on is not taken for this run's live runner."
   [workflow-id]
-  (let [cwd (:cwd (read-edn (io/file (run-dir workflow-id) "origin.edn")))]
-    (when (and cwd (.isDirectory (io/file cwd))) cwd)))
+  (when-let [f (some-> (recorded-run-dir workflow-id) (io/file "origin.edn"))]
+    (when-let [origin (read-edn f)]
+      (try (write-edn! f (dissoc origin :pid :pid-started))
+           (catch java.io.IOException _ nil)))))
+
+(defn ^{:stratum 1} origin-record
+  [workflow-id]
+  (some-> (recorded-run-dir workflow-id) (io/file "origin.edn") read-edn))
 
 (defn ^{:stratum 1} launch-record [workflow-id] (read-edn (launch-file workflow-id)))
+
+(defn ^{:stratum 1} pending-launches
+  "Launch records whose verification a stopped process never finished."
+  []
+  (->> (or (.listFiles (launch-file)) [])
+       (filter #(str/ends-with? (.getName ^java.io.File %) ".edn"))
+       (keep read-edn)
+       (filter #(and (:resume/intervention %) (not (contains? % :resume/settled))))))
 
 (defn ^{:stratum 1} lineage-root
   "The run `workflow-id`'s lineage descends from: the root recorded for an
@@ -137,10 +164,10 @@
   (or (:resume/root (read-edn (lineage-file workflow-id))) (str workflow-id)))
 
 (defn ^{:stratum 1} latest-attempt
-  "The newest attempt in `record`'s lineage that has recorded a run: the
-   only member a retry may start from."
+  "The newest attempt in `record`'s lineage that has recorded a run (live
+   or archived): the only member a retry may start from."
   [record]
-  (last (filter #(.exists (run-dir %)) (:resume/attempts record))))
+  (last (filter recorded-run-dir (:resume/attempts record))))
 
 (defn ^{:stratum 1} process-running?
   "True when `pid` is alive and still the process started at `started`."
@@ -165,7 +192,8 @@
   [run-id intervention-id since-ms]
   (boolean (some #(= (str intervention-id)
                      (str (:workflow-run/correlation-id (es/read-event-file %))))
-                 (filter (partial recent-event-file? since-ms) (.listFiles (run-dir run-id))))))
+                 (filter (partial recent-event-file? since-ms)
+                         (some-> (recorded-run-dir run-id) .listFiles)))))
 
 (defn ^{:stratum 1} with-child-pid
   "`launch` with its child's pid. The pid recorded after the spawn stands.
@@ -204,7 +232,10 @@
         log-file (str (io/file (app-config/logs-dir) (str "resume-" run-id ".log")))
         pid-file (io/file (app-config/logs-dir) (str "resume-" run-id ".pid"))
         launched-at-ms (System/currentTimeMillis)
-        launch {:resume/intervention-id intervention-id
+        launch {:resume/workflow-id workflow-id
+                :resume/intervention-id intervention-id
+                :resume/intervention (:resume/intervention plan)
+                :resume/from-phase (:resume/from-phase plan)
                 :resume/root root
                 :resume/retry-of (str workflow-id)
                 :resume/attempts (conj (vec (:resume/attempts plan)) (str run-id))
@@ -217,21 +248,55 @@
         _ (write-edn! (lineage-file run-id) (select-keys launch [:resume/root :resume/retry-of]))
         _ (write-edn! (launch-file root) launch)
         pid (spawn! run-id log-file (str pid-file))
-        started (start-instant (process-handle pid))
-        recorded (assoc launch :resume/pid pid :resume/pid-started started)]
+        handle (process-handle pid)
+        ;; Read now or never: a child already gone leaves no start
+        ;; instant, and its pid may later belong to anything.
+        exited? (not (some-> handle .isAlive))
+        recorded (cond-> (assoc launch :resume/pid pid :resume/pid-started (start-instant handle))
+                   exited? (assoc :resume/exited? true))]
     (write-edn! (launch-file root) recorded)
     recorded))
 
 ;------------------------------------------------------------------------------ Layer 2
 
+(defn ^{:stratum 2} settle!
+  "Mark `launch`'s record, under its lineage root, settled with its
+   intervention's final state (unless a later launch has replaced it): a
+   restart leaves it alone. The record keeps its child's pid (see
+   `with-child-pid`), and the child's pid file is removed."
+  [launch final]
+  (let [f (launch-file (get launch :resume/root (:resume/workflow-id launch)))
+        record (read-edn f)]
+    (when (= (:resume/intervention-id record) (:resume/intervention-id launch))
+      (write-edn! f (assoc (with-child-pid record) :resume/settled (get final :intervention/state :unrecorded)))
+      (some-> (:resume/pid-file record) io/file (io/delete-file true)))))
+
+(defn ^{:stratum 2} recorded-origin
+  "The recorded origin directory of `workflow-id` when it still exists,
+   else nil."
+  [workflow-id]
+  (let [cwd (:cwd (origin-record workflow-id))]
+    (when (and cwd (.isDirectory (io/file cwd))) cwd)))
+
 (defn ^{:stratum 2} launch-running?
-  "True while the launch's child (see `with-child-pid`) is alive."
-  [record]
-  (let [{:resume/keys [pid pid-started]} (some-> record with-child-pid)]
-    (boolean (and pid (process-running? pid pid-started)))))
+  "True while a launch may still be starting or running: its child (see
+   `with-child-pid`) is alive or, with no pid known yet (the child has not
+   written its pid file), until `timeout-ms` after the launch. A child
+   gone when recorded is not."
+  [record timeout-ms]
+  (let [{:resume/keys [pid pid-started exited? launched-at-ms]} (some-> record with-child-pid)]
+    (boolean
+     (and record
+          (not exited?)
+          (if pid
+            (process-running? pid pid-started)
+            (< (System/currentTimeMillis) (+ launched-at-ms timeout-ms)))))))
 
 (defn ^{:stratum 2} target-live?
-  "A live runner in this process, or a live manifest owner (JVM runners
-   only: a Babashka runner in another process is not seen)."
+  "The workflow has a live runner: in this process, the runner recorded
+   in its origin (any process on this host), or a live manifest owner."
   [workflow-id]
-  (or (operator/live-runner? workflow-id) (manifest-owner-alive? workflow-id)))
+  (let [origin (origin-record workflow-id)]
+    (or (operator/live-runner? workflow-id)
+        (process-running? (:pid origin) (:pid-started origin))
+        (manifest-owner-alive? workflow-id))))
