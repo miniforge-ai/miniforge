@@ -708,10 +708,12 @@
     (if (anomaly/anomaly? sync-result)
       ;; Anomaly already logged inside merge-sub-worktree-changes!; transition
       ;; the workflow to :failed so the runner loop receives a valid context map
-      ;; and the failure is recorded in :execution/errors. The DAG's spend is
-      ;; rolled up here too, as apply-dag-failure does: the tokens were spent.
+      ;; and the failure is recorded in :execution/errors. The DAG finished
+      ;; before the sync failed, so its artifacts and spend are kept as on the
+      ;; success path: that work happened and the run summary must show it.
       (transition-to-failed-fn
        (-> ctx
+           (update :execution/artifacts into artifacts)
            (assoc :execution/dag-result dag-result)
            (roll-dag-metrics-into-execution dag-result)
            (update :execution/errors conj

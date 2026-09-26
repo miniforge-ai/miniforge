@@ -497,7 +497,7 @@
   (let [parent (isolation/temp-root!)]
     (try
       (exec/apply-dag-success (assoc context :execution/worktree-path parent)
-                              {:artifacts      []
+                              {:artifacts      [{:artifact/id :dag-task-artifact}]
                                :worktree-paths [sub-wt]
                                :metrics        dag-success-fixture-metrics}
                               nil
@@ -634,7 +634,9 @@
           (is (= missing (get-in error [:anomaly :anomaly/data :sub-worktree])))
           (is (= (:tokens dag-success-fixture-metrics)
                  (get-in result [:execution/metrics :tokens]))
-              "the DAG's spend still rolls into the run's metrics"))
+              "the DAG's spend still rolls into the run's metrics")
+          (is (some #{{:artifact/id :dag-task-artifact}} (:execution/artifacts result))
+              "the finished DAG's artifacts are kept"))
         (finally (isolation/delete-tree! root))))))
 
 (deftest ^{:stratum 2} apply-dag-success-fails-run-when-git-exits-non-zero-test
