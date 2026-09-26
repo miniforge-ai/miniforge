@@ -15,7 +15,6 @@
 ;; WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 ;; See the License for the specific language governing permissions and
 ;; limitations under the License.
-
 (ns ai.miniforge.workflow.execute-enter-error-propagation-test
   "Phase-enter exceptions must populate `:execution/errors` so the
    downstream `workflow/failed` event surfaces the underlying message
@@ -28,43 +27,20 @@
    [ai.miniforge.response.interface :as response]
    [ai.miniforge.workflow.execution :as exec]))
 
-(def ^:private test-phase-name :phase-under-test)
-(def ^:private test-error-message "preflight check rejected input")
-(def ^:private test-error-data {:input-key :career/growth-framework-payload})
+;------------------------------------------------------------------------------ Layer 0
 
-(defn- throwing-enter-fn
-  []
-  (fn [_ctx]
-    (throw (ex-info test-error-message test-error-data))))
+(def ^{:stratum 0} ^:private test-phase-name :phase-under-test)
 
-(defn- interceptor-with-error-handler
-  "Build an interceptor that mimics the career-side `fail-phase`
-   convention: its `:error` handler only writes into the per-phase
-   `:phase` map. Before the G10 fix the workflow-level
-   `:execution/errors` accumulator stayed empty for this shape."
-  []
-  {:name :test
-   :config {:phase test-phase-name}
-   :enter (throwing-enter-fn)
-   :error (fn [ctx ex]
-            (-> ctx
-                (assoc-in [:phase :status] :failed)
-                (assoc-in [:phase :error]
-                          {:message (ex-message ex)
-                           :data (ex-data ex)})))})
+(def ^{:stratum 0} ^:private test-error-message "preflight check rejected input")
 
-(defn- interceptor-without-error-handler
-  []
-  {:name :test
-   :config {:phase test-phase-name}
-   :enter (throwing-enter-fn)})
+(def ^{:stratum 0} ^:private test-error-data {:input-key :career/growth-framework-payload})
 
-(defn- empty-execution-context
+(defn- ^{:stratum 0} empty-execution-context
   []
   {:execution/errors []
    :execution/response-chain (response/create :test-workflow)})
 
-(defn- chain-failure-entry-for
+(defn- ^{:stratum 0} chain-failure-entry-for
   "Locate the entry in `:execution/response-chain` whose operation
    matches `phase-name`. Returns nil when no matching entry exists,
    so tests can `(is (some? ...))` against it."
@@ -73,7 +49,33 @@
        (filter #(= phase-name (:operation %)))
        first))
 
-(deftest enter-throw-with-error-handler-populates-execution-errors-test
+;------------------------------------------------------------------------------ Layer 1
+
+(defn- ^{:stratum 1} interceptor-with-error-handler
+  "Build an interceptor that mimics the career-side `fail-phase`
+   convention: its `:error` handler only writes into the per-phase
+   `:phase` map. Before the G10 fix the workflow-level
+   `:execution/errors` accumulator stayed empty for this shape."
+  []
+  {:name :test
+   :config {:phase test-phase-name}
+   :enter (fn [_ctx] (throw (ex-info test-error-message test-error-data)))
+   :error (fn [ctx ex]
+            (-> ctx
+                (assoc-in [:phase :status] :failed)
+                (assoc-in [:phase :error]
+                          {:message (ex-message ex)
+                           :data (ex-data ex)})))})
+
+(defn- ^{:stratum 1} interceptor-without-error-handler
+  []
+  {:name :test
+   :config {:phase test-phase-name}
+   :enter (fn [_ctx] (throw (ex-info test-error-message test-error-data)))})
+
+;------------------------------------------------------------------------------ Layer 2
+
+(deftest ^{:stratum 2} enter-throw-with-error-handler-populates-execution-errors-test
   (testing "phase-enter throw appends to :execution/errors even when an :error handler is set"
     (let [interceptor (interceptor-with-error-handler)
           result (exec/execute-enter interceptor (empty-execution-context))
@@ -108,7 +110,7 @@
       (is (= test-error-data (get-in chain-entry [:response :data]))
           "the chain entry's :response should carry the thrown exception's ex-data under :data"))))
 
-(deftest enter-throw-without-error-handler-populates-execution-errors-test
+(deftest ^{:stratum 2} enter-throw-without-error-handler-populates-execution-errors-test
   (testing "phase-enter throw appends to :execution/errors when no :error handler is set"
     (let [interceptor (interceptor-without-error-handler)
           result (exec/execute-enter interceptor (empty-execution-context))
