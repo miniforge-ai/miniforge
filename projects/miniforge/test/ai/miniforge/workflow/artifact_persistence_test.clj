@@ -15,7 +15,6 @@
 ;; WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 ;; See the License for the specific language governing permissions and
 ;; limitations under the License.
-
 (ns ai.miniforge.workflow.artifact-persistence-test
   "Tests for artifact persistence flow.
 
@@ -46,11 +45,12 @@
    [ai.miniforge.workflow.execution :as execution]
    [ai.miniforge.workflow.runner :as runner]))
 
-;------------------------------------------------------------------------------ Test Fixtures
+;------------------------------------------------------------------------------ Layer 0
 
-(def ^:dynamic *test-worktree-path* nil)
+;; Test fixtures
+(def ^{:stratum 0} ^:dynamic *test-worktree-path* nil)
 
-(defn create-test-worktree
+(defn ^{:stratum 0} create-test-worktree
   "Create a temporary worktree directory with a real git repo for testing."
   []
   (let [temp-dir (io/file (System/getProperty "java.io.tmpdir")
@@ -66,7 +66,7 @@
     (process/shell {:dir (.getPath temp-dir)} "git commit -m" "initial")
     (.getPath temp-dir)))
 
-(defn cleanup-test-worktree
+(defn ^{:stratum 0} cleanup-test-worktree
   "Delete test worktree directory and all contents."
   [dir-path]
   (when dir-path
@@ -76,21 +76,8 @@
         ;; Ignore cleanup errors
         nil))))
 
-(defn worktree-fixture
-  "Test fixture that creates and cleans up a test worktree."
-  [f]
-  (let [worktree (create-test-worktree)]
-    (binding [*test-worktree-path* worktree]
-      (try
-        (f)
-        (finally
-          (cleanup-test-worktree worktree))))))
-
-(use-fixtures :each worktree-fixture)
-
-;------------------------------------------------------------------------------ Mock Data
-
-(def mock-code-artifact
+;; Mock data
+(def ^{:stratum 0} mock-code-artifact
   "Mock code artifact with multiple files."
   {:code/id (random-uuid)
    :code/files [{:path "src/feature.clj"
@@ -102,27 +89,115 @@
    :code/language "clojure"
    :code/summary "Implemented new feature"})
 
-(def mock-empty-artifact
+(def ^{:stratum 0} mock-empty-artifact
   "Mock artifact with no files."
   {:code/id (random-uuid)
    :code/files []
    :code/language "clojure"
    :code/summary "Empty implementation"})
 
-(def mock-plan-result
+(def ^{:stratum 0} mock-plan-result
   {:plan/id (random-uuid)
    :plan/tasks [{:task "Implement feature"
                  :file "src/feature.clj"}]})
 
-;------------------------------------------------------------------------------ Test Helpers
+;; Integration test that needs no worktree helpers
+(deftest ^{:stratum 0} test-verify-handles-missing-artifact
+  (testing "Verify phase fails fast when no execution environment is available"
+    ;; Create context WITHOUT execution environment — verify should throw
+    (let [ctx {:execution/id (random-uuid)
+               :execution/input {:description "Test"
+                                :title "Test"
+                                :intent "testing"}
+               :execution/metrics {:tokens 0 :duration-ms 0}
+               :execution/phase-results {}
+               :phase-config {:phase :verify}}
 
-(defn file-exists-in-worktree?
+          verify-interceptor (phase/get-phase-interceptor {:phase :verify})]
+
+      (is (thrown-with-msg? clojure.lang.ExceptionInfo
+                            #"Verify phase has no execution environment"
+                            ((:enter verify-interceptor) ctx))
+          "Verify should throw when no execution environment is available"))))
+
+;; Unit tests: artifact extraction
+(deftest ^{:stratum 0} test-record-phase-artifacts-extracts-nested-output
+  (testing "record-phase-artifacts extracts provenance metadata from :result"
+    (let [phase-result {:name :implement
+                        :status :completed
+                        :result {:status :success
+                                 :environment-id "env-001"
+                                 :summary "Implementation complete"
+                                 :metrics {:tokens 100}}}
+          ctx {:execution/artifacts []}
+          updated (execution/record-phase-artifacts ctx phase-result)]
+      (is (= 1 (count (:execution/artifacts updated)))
+          "Should extract one provenance artifact from result")
+      (is (= {:status :success
+              :environment-id "env-001"
+              :summary "Implementation complete"
+              :metrics {:tokens 100}}
+             (first (:execution/artifacts updated)))
+          "Artifact should contain provenance metadata"))))
+
+(deftest ^{:stratum 0} test-record-phase-artifacts-empty-when-no-output
+  (testing "record-phase-artifacts produces empty when result is not a map"
+    (let [phase-result {:name :plan
+                        :status :completed
+                        :result "plain string"}
+          ctx {:execution/artifacts []}
+          updated (execution/record-phase-artifacts ctx phase-result)]
+      (is (empty? (:execution/artifacts updated))
+          "Should not extract artifact from non-map result"))))
+
+(deftest ^{:stratum 0} test-track-phase-files-extracts-code-files
+  (testing "track-phase-files is a no-op in the environment model"
+    (let [phase-result {:name :implement
+                        :status :completed
+                        :result {:status :success
+                                 :environment-id "env-001"
+                                 :summary "Implementation complete"}}
+          ctx {:execution/files-written []}
+          updated (execution/track-phase-files ctx phase-result)]
+      (is (= [] (:execution/files-written updated))
+          "File tracking is a no-op; file discovery happens at release time via git diff"))))
+
+(deftest ^{:stratum 0} test-extract-output-includes-artifacts
+  (testing "extract-output returns non-empty artifacts after fix"
+    (let [code-output {:code/id (random-uuid)
+                       :code/files [{:path "src/foo.clj" :content "(ns foo)"}]}
+          ctx {:execution/artifacts [code-output]
+               :execution/phase-results {:implement {:status :completed
+                                                     :result {:status :ok :output code-output}}}
+               :execution/current-phase :implement
+               :execution/status :completed}
+          result (runner/extract-output ctx)]
+      (is (= 1 (count (get-in result [:execution/output :artifacts])))
+          "Output should contain the artifact")
+      (is (= :completed (get-in result [:execution/output :status]))
+          "Output status should be :completed"))))
+
+;------------------------------------------------------------------------------ Layer 1
+
+;; Test fixture: a fresh worktree per test
+(defn ^{:stratum 1} worktree-fixture
+  "Test fixture that creates and cleans up a test worktree."
+  [f]
+  (let [worktree (create-test-worktree)]
+    (binding [*test-worktree-path* worktree]
+      (try
+        (f)
+        (finally
+          (cleanup-test-worktree worktree))))))
+
+;; Test helpers
+(defn ^{:stratum 1} file-exists-in-worktree?
   "Check if a file exists in the test worktree."
   [relative-path]
   (when *test-worktree-path*
     (.exists (io/file *test-worktree-path* relative-path))))
 
-(defn read-worktree-file
+(defn ^{:stratum 1} read-worktree-file
   "Read content of a file from the test worktree."
   [relative-path]
   (when *test-worktree-path*
@@ -130,7 +205,7 @@
       (when (.exists file)
         (slurp file)))))
 
-(defn count-files-in-worktree
+(defn ^{:stratum 1} count-files-in-worktree
   "Count files in test worktree (excluding .git)."
   []
   (when *test-worktree-path*
@@ -139,7 +214,7 @@
          (remove #(str/includes? (.getPath %) ".git"))
          count)))
 
-(defn execute-phase-pipeline
+(defn ^{:stratum 1} execute-phase-pipeline
   "Execute a phase pipeline: plan -> implement -> verify -> release."
   [opts]
   (let [{:keys [implement-agent-fn verify-agent-fn release-opts]} opts
@@ -219,9 +294,10 @@
           ((:enter release-interceptor))
           ((:leave release-interceptor))))))
 
-;------------------------------------------------------------------------------ Integration Tests
+;------------------------------------------------------------------------------ Layer 2
 
-(deftest test-full-workflow-writes-files
+;; Integration tests
+(deftest ^{:stratum 2} test-full-workflow-writes-files
   (testing "Complete workflow writes files to filesystem"
     (with-redefs [agent/create-planner (fn [_] {:type :mock-planner})
                   agent/invoke (fn [agent _ _]
@@ -277,7 +353,7 @@
         (is (= :success (get-in result-ctx [:phase :result :status]))
             "Release result should be success")))))
 
-(deftest test-release-fails-with-zero-files-written
+(deftest ^{:stratum 2} test-release-fails-with-zero-files-written
   (testing "Release phase detects failure when release executor returns error"
     (let [result-ctx (execute-phase-pipeline
                      {:release-opts
@@ -299,25 +375,7 @@
       (is (false? (get-in result-ctx [:phase :result :success]))
           "Result should indicate failure when release executor fails"))))
 
-(deftest test-verify-handles-missing-artifact
-  (testing "Verify phase fails fast when no execution environment is available"
-    ;; Create context WITHOUT execution environment — verify should throw
-    (let [ctx {:execution/id (random-uuid)
-               :execution/input {:description "Test"
-                                :title "Test"
-                                :intent "testing"}
-               :execution/metrics {:tokens 0 :duration-ms 0}
-               :execution/phase-results {}
-               :phase-config {:phase :verify}}
-
-          verify-interceptor (phase/get-phase-interceptor {:phase :verify})]
-
-      (is (thrown-with-msg? clojure.lang.ExceptionInfo
-                            #"Verify phase has no execution environment"
-                            ((:enter verify-interceptor) ctx))
-          "Verify should throw when no execution environment is available"))))
-
-(deftest test-workflow-empty-artifact-handling
+(deftest ^{:stratum 2} test-workflow-empty-artifact-handling
   (testing "Release phase accepts an empty :code/files artifact when the worktree has dirty files from earlier phases"
     ;; Regression target: the release phase discovers files from git state,
     ;; not from the artifact's :code/files. An implement result with empty
@@ -355,7 +413,7 @@
         (is (= :success (get-in result-ctx [:phase :result :status]))
             "Release result should be success")))))
 
-(deftest test-artifact-content-verification
+(deftest ^{:stratum 2} test-artifact-content-verification
   (testing "Files written to disk have correct content"
     (let [_result-ctx (execute-phase-pipeline
                       {:release-opts
@@ -387,61 +445,4 @@
       (is (str/includes? test-content "clojure.test")
           "Test file should require clojure.test"))))
 
-;------------------------------------------------------------------------------ Unit Tests: Artifact Extraction
-
-
-(deftest test-record-phase-artifacts-extracts-nested-output
-  (testing "record-phase-artifacts extracts provenance metadata from :result"
-    (let [phase-result {:name :implement
-                        :status :completed
-                        :result {:status :success
-                                 :environment-id "env-001"
-                                 :summary "Implementation complete"
-                                 :metrics {:tokens 100}}}
-          ctx {:execution/artifacts []}
-          updated (execution/record-phase-artifacts ctx phase-result)]
-      (is (= 1 (count (:execution/artifacts updated)))
-          "Should extract one provenance artifact from result")
-      (is (= {:status :success
-              :environment-id "env-001"
-              :summary "Implementation complete"
-              :metrics {:tokens 100}}
-             (first (:execution/artifacts updated)))
-          "Artifact should contain provenance metadata"))))
-
-(deftest test-record-phase-artifacts-empty-when-no-output
-  (testing "record-phase-artifacts produces empty when result is not a map"
-    (let [phase-result {:name :plan
-                        :status :completed
-                        :result "plain string"}
-          ctx {:execution/artifacts []}
-          updated (execution/record-phase-artifacts ctx phase-result)]
-      (is (empty? (:execution/artifacts updated))
-          "Should not extract artifact from non-map result"))))
-
-(deftest test-track-phase-files-extracts-code-files
-  (testing "track-phase-files is a no-op in the environment model"
-    (let [phase-result {:name :implement
-                        :status :completed
-                        :result {:status :success
-                                 :environment-id "env-001"
-                                 :summary "Implementation complete"}}
-          ctx {:execution/files-written []}
-          updated (execution/track-phase-files ctx phase-result)]
-      (is (= [] (:execution/files-written updated))
-          "File tracking is a no-op; file discovery happens at release time via git diff"))))
-
-(deftest test-extract-output-includes-artifacts
-  (testing "extract-output returns non-empty artifacts after fix"
-    (let [code-output {:code/id (random-uuid)
-                       :code/files [{:path "src/foo.clj" :content "(ns foo)"}]}
-          ctx {:execution/artifacts [code-output]
-               :execution/phase-results {:implement {:status :completed
-                                                     :result {:status :ok :output code-output}}}
-               :execution/current-phase :implement
-               :execution/status :completed}
-          result (runner/extract-output ctx)]
-      (is (= 1 (count (get-in result [:execution/output :artifacts])))
-          "Output should contain the artifact")
-      (is (= :completed (get-in result [:execution/output :status]))
-          "Output status should be :completed"))))
+(use-fixtures :each worktree-fixture)
