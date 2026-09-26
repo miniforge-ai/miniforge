@@ -190,20 +190,13 @@
                              (checkpoints)))))
 
 (defn- ^{:stratum 1} run-id-for
-  "The id the resumed run executes under: the restored snapshot's own id,
-   else `--run-id`, else a fresh one. A `--run-id` that disagrees with the
-   snapshot is refused: the caller that passed it (the operator's resume
-   launcher) reports it as the run it started."
+  "The id the resumed run executes under: `--run-id`, else the restored
+   snapshot's own id, else a fresh one. A `--run-id` other than the
+   snapshot's starts a new attempt: the snapshot's state under that id,
+   so its events never land beside the finished run's (archived) ones.
+   The operator's resume launcher passes a fresh one on every retry."
   [machine-snapshot run-id-opt]
-  (let [snapshot-id (:execution/id machine-snapshot)
-        requested (uuid-option "--run-id" run-id-opt)]
-    (if (and snapshot-id requested (not= (str snapshot-id) (str requested)))
-      (response/throw-anomaly! :anomalies/incorrect
-                               (messages/t :resume/run-id-conflict
-                                           {:run-id run-id-opt
-                                            :snapshot-id (str snapshot-id)})
-                               {:run-id run-id-opt})
-      (or snapshot-id requested (random-uuid)))))
+  (or (uuid-option "--run-id" run-id-opt) (:execution/id machine-snapshot) (random-uuid)))
 
 ;------------------------------------------------------------------------------ Layer 2
 
@@ -265,7 +258,8 @@
             {:keys [workflow-type workflow-version]} identity
             {:keys [workflow]} (load-workflow workflow-type workflow-version {})
 
-            machine-snapshot (:machine-snapshot reconstructed)
+            restored-snapshot (:machine-snapshot reconstructed)
+            machine-snapshot (some-> restored-snapshot (assoc :execution/id resume-run-id))
             failed-checkpoint? (and machine-snapshot (:failed? reconstructed))
             resume-workflow (if (and machine-snapshot (not failed-checkpoint?))
                               workflow
@@ -273,7 +267,7 @@
             _ (throw-resume-anomaly! resume-workflow)
             remaining-pipeline (:workflow/pipeline resume-workflow)
             _ (when-not quiet
-                (if machine-snapshot
+                (if (= (str resume-run-id) (str (:execution/id restored-snapshot)))
                   (display/print-info
                     (messages/t :resume/restored-workflow-id
                                 {:workflow-id resume-run-id}))

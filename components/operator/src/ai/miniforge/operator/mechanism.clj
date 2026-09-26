@@ -238,11 +238,11 @@
    (`:resume-machine-snapshot`, `:resume-phase-results`,
    `:resume-workspace`, `:pre-completed-dag-tasks`, … — see
    `cli/main/commands/resume.clj`). The registered launcher turns this
-   payload into a run; the CLI's starts `mf resume` with the plan's
-   workflow id, from-phase, and run id, which rebuilds the same inputs
-   from the same history. Keeping the contract a stable `:resume/*` shape
-   is what lets the CLI's internal option names change without touching
-   this layer.
+   payload into a run: the CLI starts `mf resume` with the plan's
+   workflow id and from-phase, under a run id of its own, and that
+   process rebuilds the same inputs from the same history. Keeping the
+   contract a stable `:resume/*` shape is what lets the CLI's internal
+   option names change without touching this layer.
 
    `from-phase` nil (plain `:retry`) keeps the FSM machine snapshot: the
    mapping table's \"resume path with FSM snapshot dispatch\". A

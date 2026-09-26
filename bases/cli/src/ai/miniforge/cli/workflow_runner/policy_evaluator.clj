@@ -27,7 +27,8 @@
    no PolicyEvaluation is published: no PR in the request, a pack that
    failed to load (a verdict without it is not the verdict asked for),
    no packs installed (a pass over zero packs is a verdict nothing
-   computed), or no diff."
+   computed), or no diff, blank included (a PR with no changes: a pass
+   over zero files is no verdict either)."
   (:require
    [ai.miniforge.anomaly.interface :as anomaly]
    [ai.miniforge.cli.app-config :as app-config]
@@ -99,5 +100,5 @@
        (nil? pr) (refusal :invalid-input :no-pr request)
        (seq (:failed packs)) (refusal :fault :pack-load-failed request)
        (empty? (:loaded packs)) (refusal :not-found :no-policy-packs request)
-       (nil? diff) (refusal :unavailable :no-diff request)
+       (str/blank? diff) (refusal :unavailable :no-diff request)
        :else (evaluate-pr (vec (:loaded packs)) (pr-data pr diff))))))

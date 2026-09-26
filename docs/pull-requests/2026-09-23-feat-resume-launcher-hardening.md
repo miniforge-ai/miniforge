@@ -31,7 +31,9 @@ before PR 5 registers it.
 - The origin, and the start evidence, are found where the reader finds a run's
   events: archived, live or legacy. The event-stream interface gains
   `workflow-events-dir` for this.
-- A launch with no pid recorded counts as running until 60 s after it began.
+- A launch with no pid recorded, and no pid file from its child yet (see
+  `fix/resume-launcher-review`), counts as running until 60 s after it
+  began.
   A child gone when it is recorded is marked exited and never counts as
   running.
 - Without `setsid`, the child gets a process group of its own through
@@ -66,8 +68,8 @@ same start instant.
 ## Related Issues/PRs
 
 Stack: `feat/resume-flags`, `feat/operator-async-resume`,
-`feat/resume-launcher`, this PR, `feat/shared-process-handles`,
-`feat/operator-serve`.
+`feat/resume-launcher`, `fix/resume-launcher-review`, this PR,
+`feat/shared-process-handles`, `feat/operator-serve`.
 
 ## Checklist
 

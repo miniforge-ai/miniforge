@@ -72,6 +72,9 @@
              (reason (sut/evaluate (deps {:loaded [{}] :failed [{:path "bad"}]} diff) request))))
       (is (= :no-policy-packs (reason (sut/evaluate (deps {:loaded []} diff) request))))
       (is (= :no-diff (reason (sut/evaluate (deps {:loaded [{}]} nil) request))))
+      (is (= :no-diff (reason (sut/evaluate (deps {:loaded [{}]} "") request)))
+          "a PR with no changes: a pass over zero artifacts is no verdict")
+      (is (= :no-diff (reason (sut/evaluate (deps {:loaded [{}]} " \n") request))))
       (is (anomaly/anomaly? (sut/evaluate (deps {:loaded []} diff) request))))))
 
 (deftest ^{:stratum 1} evaluate-loads-installed-packs-and-fetches-the-diff-test
