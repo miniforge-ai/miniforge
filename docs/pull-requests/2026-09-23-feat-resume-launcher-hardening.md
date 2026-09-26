@@ -47,20 +47,40 @@ before PR 5 registers it.
   stopped server left.
 - An interrupted wait returns `{:resume/pending? true}`: nothing is recorded,
   and the child keeps running.
+- At the start deadline, a launch with no recorded pid reads its child's pid
+  file once more, right at the kill. A child that writes its pid just after
+  the wait is still killed.
+- `mf resume --run-id` refuses an id that has a run directory: archived, live
+  or legacy. It does so even when no event file in it parses. Before, the
+  reader dropped unreadable files, and the id counted as free.
+- A run whose events are archived, or in the legacy flat layout, resumes as
+  a new attempt under a fresh run id. A `--run-id` naming that run is
+  refused. Under its own id, the attempt would write to `live/<id>`. Beside
+  an archive, the reader and archival never see those events. Over a legacy
+  directory, they hide the run's own. A fresh id is used, not a refusal: the
+  archived run stays as it finished, and the launcher already passes one.
+- `mf resume <id> --run-id <new>` no longer throws `Duplicate key` when the
+  snapshot carries the run's own id. That is the launcher's usual call.
 
 ## Testing Plan
 
-- Records: an archived run keeps its origin, and an archived attempt's
-  start event is still evidence; the runner's pid is a live target until
-  released.
+- Records: an archived run keeps its origin. An archived attempt's start
+  event is still evidence. The runner's pid is a live target until released.
 - Records: a pid-less launch within and past its window, also one whose
-  child has not written its pid file yet; a child gone before it was
-  recorded; settle and pending; settling an attempt's launch recorded only
-  before its spawn settles the root's record, keeps the pid its child
-  wrote, and removes the pid file.
-- Launcher: a live recorded runner refuses the retry; an archived attempt
-  still supersedes its root; the detached child is outside the consumer's
-  process group; an interrupted wait is pending.
+  child has not written its pid file yet. A child gone before it was
+  recorded. Settle and pending. Settling an attempt's launch recorded only
+  before its spawn settles the root's record. It keeps the pid its child
+  wrote and removes the pid file.
+- Launcher: a live recorded runner refuses the retry. An archived attempt
+  still supersedes its root. The detached child is outside the consumer's
+  process group. An interrupted wait is pending. A pid file written just
+  after the wait still gets the child killed.
+- Resume: a `--run-id` whose run directory holds only unparseable event
+  files is refused, in each layout. An archived or legacy run resumes under
+  a fresh id and refuses its own. A live run keeps its id. A snapshot
+  carrying the run's own id takes a new `--run-id`.
+- Tests that start POSIX processes skip on native Windows
+  (`posix-host/on-posix-host`). They are unchanged on macOS and Linux.
 - Pre-commit hook per commit.
 
 ## Deployment Plan
