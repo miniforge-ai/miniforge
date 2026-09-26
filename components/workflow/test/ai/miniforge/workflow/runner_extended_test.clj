@@ -20,6 +20,8 @@
    and edge cases not covered by the main runner_test."
   (:require
    [ai.miniforge.workflow.isolation-test-support :as isolation]
+   [clojure.java.io :as io]
+   [clojure.java.shell :as shell]
    [clojure.test :refer [deftest testing is use-fixtures]]
    [ai.miniforge.dag-executor.interface :as dag-exec]
    [ai.miniforge.event-stream.interface :as es]
@@ -488,6 +490,21 @@
       (persist-fn context phase-ctx)
       @event-data)))
 
+(defn- ^{:stratum 1} apply-dag-success-with-sub-worktree
+  "Run apply-dag-success on `context` against one sub-worktree path, with
+   the parent worktree in a throwaway directory. Returns the result."
+  [context sub-wt]
+  (let [parent (isolation/temp-root!)]
+    (try
+      (exec/apply-dag-success (assoc context :execution/worktree-path parent)
+                              {:artifacts      []
+                               :worktree-paths [sub-wt]
+                               :metrics        dag-success-fixture-metrics}
+                              nil
+                              ctx/transition-to-completed
+                              ctx/transition-to-failed)
+      (finally (isolation/delete-tree! parent)))))
+
 ;------------------------------------------------------------------------------ Layer 2
 
 (deftest ^{:stratum 2} create-context-adopts-caller-run-id-test
@@ -601,6 +618,70 @@
                 {:execution/current-phase :implement})]
       (is (= :remote (:persist-tier data))
           "governed mode pushes to remote — remote tier label, not worktree"))))
+
+(deftest ^{:stratum 2} apply-dag-success-fails-run-when-sub-worktree-sync-throws-test
+  (testing "a sub-worktree that cannot be read fails the run with a context, not a bare anomaly"
+    (let [root    (isolation/temp-root!)
+          missing (str root "/no-such-sub-worktree")]
+      (try
+        (let [result (apply-dag-success-with-sub-worktree
+                      (ctx/create-context minimal-rollup-test-workflow {:task "Test"} {})
+                      missing)
+              error  (first (:execution/errors result))]
+          (is (= :failed (:execution/status result)))
+          (is (= :sync-sub-worktrees-failed (:type error)))
+          (is (seq (:message error)) "the error carries a message for run summaries")
+          (is (= missing (get-in error [:anomaly :anomaly/data :sub-worktree])))
+          (is (= (:tokens dag-success-fixture-metrics)
+                 (get-in result [:execution/metrics :tokens]))
+              "the DAG's spend still rolls into the run's metrics"))
+        (finally (isolation/delete-tree! root))))))
+
+(deftest ^{:stratum 2} apply-dag-success-fails-run-when-git-exits-non-zero-test
+  (testing "a non-zero git exit fails the run and logs it instead of reading as 'no changes'"
+    (with-redefs [shell/sh (fn [& _] {:exit 128 :out "" :err "fatal: not a git repository\n"})]
+      (let [[logger entries] (log/collecting-logger)
+            result (apply-dag-success-with-sub-worktree
+                    (assoc (ctx/create-context minimal-rollup-test-workflow {:task "Test"} {})
+                           :execution/logger logger)
+                    "/sub-worktree")
+            data   (get-in (first (:execution/errors result)) [:anomaly :anomaly/data])]
+        (is (= :failed (:execution/status result)))
+        (is (= 128 (:exit data)))
+        (is (= "fatal: not a git repository" (:err data)))
+        (is (= "/sub-worktree" (:sub-worktree data)))
+        (is (some #(= :workflow/sync-sub-worktree-failed (:log/event %)) @entries)
+            "the failure is logged even when a caller ignores the result")))))
+
+(deftest ^{:stratum 2} apply-dag-success-copies-changed-and-untracked-files-test
+  (testing "tracked changes and untracked new files both reach the parent worktree"
+    (let [root   (isolation/temp-root!)
+          sub-wt (str root "/sub")
+          parent (str root "/parent")]
+      (try
+        (spit (doto (io/file sub-wt "src/changed.clj") io/make-parents) "changed")
+        (spit (doto (io/file sub-wt "src/added.clj") io/make-parents) "added")
+        (.mkdirs (io/file parent))
+        (with-redefs [shell/sh (fn [& args]
+                                 {:exit 0
+                                  :err  ""
+                                  :out  (if (some #{"ls-files"} args)
+                                          "src/added.clj\n"
+                                          "src/changed.clj\n")})]
+          (let [result (exec/apply-dag-success
+                        (assoc (ctx/create-context minimal-rollup-test-workflow {:task "Test"} {})
+                               :execution/worktree-path parent)
+                        {:artifacts      []
+                         :worktree-paths [sub-wt]
+                         :metrics        dag-success-fixture-metrics}
+                        nil
+                        ctx/transition-to-completed
+                        ctx/transition-to-failed)]
+            (is (not= :failed (:execution/status result)))
+            (is (= "changed" (slurp (io/file parent "src/changed.clj"))))
+            (is (= "added" (slurp (io/file parent "src/added.clj")))
+                "an untracked file the task created is copied too")))
+        (finally (isolation/delete-tree! root))))))
 
 (use-fixtures :each
   phase-test-support/with-workflow-phase-test-support

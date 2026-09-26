@@ -86,6 +86,12 @@
   "Workflow {workflow-id} failed registration validation"
   :status/dag-executed-summary "DAG executed {task-count} task(s) successfully"
 
+  ;; DAG sub-worktree sync into the parent worktree
+  :dag.sync/git-failed
+  "Could not list a DAG sub-worktree's changes: git {args} exited {exit}"
+  :dag.sync/copy-failed
+  "Could not copy a DAG sub-worktree's changes into the parent worktree"
+
   ;; Configurable workflow execution
   :configurable/missing-phase-handler
   "No phase handler registered for {handler-key}"

@@ -35,7 +35,8 @@
             [ai.miniforge.workflow.dag-orchestrator :as dag-orch]
             [ai.miniforge.workflow.fsm :as workflow-fsm]
             [ai.miniforge.workflow.runner-defaults :as defaults]
-            [ai.miniforge.workflow.messages :as messages]))
+            [ai.miniforge.workflow.messages :as messages]
+            [slingshot.slingshot :refer [try+]]))
 
 ;------------------------------------------------------------------------------ Layer 0
 
@@ -204,50 +205,17 @@
 (def ^{:stratum 0} ^:private failure-statuses
   #{:error :failed :failure})
 
-(defn- ^{:stratum 0} merge-sub-worktree-changes!
-  "Copy changed files from DAG sub-worktrees into the parent worktree.
-   Each sub-workflow wrote to its own isolated worktree. For the release
-   phase to find dirty files, we need to merge those changes back.
-
-   Returns nil on full success, or an anomaly map on the first IO/git
-   failure (with the failing sub-worktree path in :anomaly/data).
-   The logger argument may be nil; the anomaly is always returned so
-   callers can detect partial syncs regardless of log availability."
-  [parent-worktree sub-worktree-paths logger]
-  (reduce
-   (fn [_ sub-wt]
-     (try
-       (let [{:keys [out err exit]} (shell/sh
-                                     "git" "ls-files"
-                                     "--modified" "--others" "--exclude-standard"
-                                     :dir sub-wt)
-             _ (when (not= 0 exit)
-                 (throw (ex-info (str "git ls-files exited " exit)
-                                 {:exit exit :stderr err :sub-worktree sub-wt})))
-             changed-files (remove str/blank?
-                                   (str/split-lines (or out "")))]
-         (doseq [f changed-files]
-           (let [src (io/file sub-wt f)
-                 dst (io/file parent-worktree f)]
-             (when (.exists src)
-               (io/make-parents dst)
-               (io/copy src dst))))
-         nil)
-       (catch Exception e
-         (let [a (anomaly/exception-anomaly
-                  :fault
-                  "Failed to sync sub-worktree changes into parent worktree"
-                  {:sub-worktree    sub-wt
-                   :parent-worktree parent-worktree}
-                  e)]
-           (log/error logger :workflow :workflow/sync-sub-worktree-failed
-                      {:message "merge-sub-worktree-changes! caught an exception"
-                       :data    {:sub-worktree    sub-wt
-                                 :parent-worktree parent-worktree
-                                 :ex-message      (ex-message e)}})
-           (reduced a)))))
-   nil
-   sub-worktree-paths))
+(defn- ^{:stratum 0} git-output-lines
+  "Run `git args` in `dir`. Returns the non-blank output lines, or a :fault
+   anomaly carrying the exit code and stderr when git exits non-zero."
+  [dir args]
+  (let [{:keys [exit out err]} (apply shell/sh "git" (concat args [:dir dir]))]
+    (if (zero? exit)
+      (vec (remove str/blank? (str/split-lines (or out ""))))
+      (anomaly/anomaly :fault
+                       (messages/t :dag.sync/git-failed {:args (str/join " " args)
+                                                         :exit exit})
+                       {:exit exit :err (str/trim (or err ""))}))))
 
 (defn- ^{:stratum 0} roll-dag-metrics-into-execution
   "Accumulate DAG sub-workflow tokens / cost / duration into top-line
@@ -263,6 +231,28 @@
         (update-in [:execution/metrics :duration-ms] (fnil + 0)   (or duration-ms 0)))))
 
 ;------------------------------------------------------------------------------ Layer 1
+
+(defn- ^{:stratum 1} sync-sub-worktree!
+  "Copy a DAG sub-worktree's changes into `parent-worktree`: tracked files
+   that differ from HEAD, staged or not, and untracked files git does not
+   ignore. Returns nil on success, or a :fault anomaly naming both
+   worktrees when git exits non-zero or an IO step throws."
+  [parent-worktree sub-wt]
+  (let [where {:sub-worktree sub-wt :parent-worktree parent-worktree}
+        result (try+
+                 (anomaly/let-ok
+                   [changed   (git-output-lines sub-wt ["diff" "--name-only" "HEAD"])
+                    untracked (git-output-lines sub-wt ["ls-files" "--others" "--exclude-standard"])]
+                   (doseq [f (distinct (concat changed untracked))]
+                     (let [src (io/file sub-wt f)
+                           dst (io/file parent-worktree f)]
+                       (when (.exists src)
+                         (io/make-parents dst)
+                         (io/copy src dst)))))
+                 (catch Exception e
+                   (anomaly/exception-anomaly :fault (messages/t :dag.sync/copy-failed) {} e)))]
+    (when result
+      (update result :anomaly/data merge where))))
 
 (defn- ^{:stratum 1} emit-phase-decision!
   "Publish the :gate/decision event for a gated transition; never breaks
@@ -462,6 +452,25 @@
                 :dag-result dag-result}))))
 
 ;------------------------------------------------------------------------------ Layer 2
+
+(defn- ^{:stratum 2} merge-sub-worktree-changes!
+  "Copy changed files from DAG sub-worktrees into the parent worktree.
+   Each sub-workflow wrote to its own isolated worktree. For the release
+   phase to find dirty files, we need to merge those changes back.
+
+   Returns nil when every sub-worktree synced, or the anomaly for the first
+   one that did not, after logging it. Stops there: the parent tree is
+   already partial, so the caller must fail the run rather than release it."
+  [parent-worktree sub-worktree-paths logger]
+  (reduce
+   (fn [_ sub-wt]
+     (when-let [failure (sync-sub-worktree! parent-worktree sub-wt)]
+       (log/error logger :workflow :workflow/sync-sub-worktree-failed
+                  {:message (:anomaly/message failure)
+                   :data    (:anomaly/data failure)})
+       (reduced failure)))
+   nil
+   sub-worktree-paths))
 
 (defn ^{:stratum 2} apply-gate-validation
   "Apply gate validation to phase result.
@@ -695,14 +704,16 @@
                        (merge-sub-worktree-changes! parent-wt sub-wt-paths logger))]
     (if (anomaly/anomaly? sync-result)
       ;; Anomaly already logged inside merge-sub-worktree-changes!; transition
-      ;; the workflow to :failed preserving dag-result and rolling up metrics
-      ;; (DAG work was completed, spend was real) so diagnostics are accurate.
+      ;; the workflow to :failed so the runner loop receives a valid context map
+      ;; and the failure is recorded in :execution/errors. The DAG's spend is
+      ;; rolled up here too, as apply-dag-failure does: the tokens were spent.
       (transition-to-failed-fn
        (-> ctx
            (assoc :execution/dag-result dag-result)
            (roll-dag-metrics-into-execution dag-result)
            (update :execution/errors conj
                    {:type    :sync-sub-worktrees-failed
+                    :message (:anomaly/message sync-result)
                     :anomaly sync-result})))
       (let [;; Synthesize new-style implement phase result.
             synthesized-implement-result
