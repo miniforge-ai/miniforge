@@ -25,6 +25,9 @@ Copilot's review of #1915:
 - A poll that throws ended the start wait with an exception. The
   verification pool records that as `:application-error`, and the child is
   never killed.
+- A launcher that died between the pre-spawn record and the pid record
+  left a detached child nothing could find: the wait after a restart had
+  no pid to watch or kill.
 
 ## Changes in Detail
 
@@ -38,6 +41,17 @@ Copilot's review of #1915:
 - A start-wait poll that throws counts as a poll without evidence, and the
   child as alive. Only the deadline ends a wait that keeps failing: the
   child is then killed and reported not started.
+- The child writes its own pid to `<home>/logs/resume-<run-id>.pid` before
+  it runs `mf resume`: an inner `/bin/sh` writes `$$` and execs the
+  command, so the pid is the command's. The launch record names the file
+  before the spawn, and a stale file of the same name is removed first.
+- `with-child-pid`: a record without a pid takes the one in its pid file,
+  while that process started between the launch and the file's writing (a
+  pid reused later, or a process older than the launch, is not the
+  child). A pid file naming no such process marks the launch
+  `:resume/exited?`. The start wait and the in-flight check use it, and the
+  wait reads the pid file again at the deadline, so a silent child is
+  killed.
 
 ## Testing Plan
 
@@ -45,6 +59,12 @@ Copilot's review of #1915:
   `--from-phase` coerced to a keyword. (Prepended, it would arrive as a
   string.)
 - No launcher on Windows; one on Linux and macOS.
+- A real detached spawn writes its pid file with the pid it returns.
+- A record without a pid: nothing known before the pid file, nor while it
+  is empty; the live child once written; a process older than the launch
+  marks it exited. The record written before the spawn names the pid file.
+- A launch recorded only before its spawn is killed at the deadline by
+  the pid its child wrote.
 - A throwing poll followed by the start evidence verifies the launch; no
   run directory yet is no evidence.
 - Pre-commit hook per commit.

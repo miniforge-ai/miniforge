@@ -25,9 +25,11 @@
    `<home>/logs/resume-<run-id>.log`. It is started under `nohup` (and
    `setsid` where installed) as an asynchronous `/bin/sh` command, so a
    terminal Ctrl-C or hangup aimed at this process does not reach it,
-   and it keeps running when this process exits. What it refuses, and
-   why a redelivered intervention never spawns twice, is in
-   `resume-records`.
+   and it keeps running when this process exits. Before it runs the
+   command, the child writes its own pid to
+   `<home>/logs/resume-<run-id>.pid`, so it can be found and killed even
+   when this process dies before recording it. What it refuses, and why
+   a redelivered intervention never spawns twice, is in `resume-records`.
 
    Native Windows has no `/bin/sh` to detach through, so there is no
    launcher there: a retry fails `:no-resume-launcher`.
@@ -53,15 +55,17 @@
 (def ^{:stratum 0} ^:private observe-poll-ms 250)
 
 (def ^{:stratum 0} ^:private spawn-script
-  ;; $1 is the log file; the rest is the command. `&` makes it an
-  ;; asynchronous list of a non-interactive shell, which POSIX starts
-  ;; with SIGINT/SIGQUIT ignored and stdin from /dev/null; `nohup`
-  ;; ignores SIGHUP; `setsid` (Linux) also leaves this process group.
-  ;; `$!` is the command's own pid: setsid and nohup exec it in place.
-  (str "log=$1; shift; "
+  ;; $1 is the log file, $2 the pid file; the rest is the command. `&`
+  ;; makes it an asynchronous list of a non-interactive shell, which
+  ;; POSIX starts with SIGINT/SIGQUIT ignored and stdin from /dev/null;
+  ;; `nohup` ignores SIGHUP; `setsid` (Linux) also leaves this process
+  ;; group. The inner shell writes its pid, then execs the command in
+  ;; place, so the pid file names the command. `$!` is the same pid:
+  ;; setsid and nohup exec in place too.
+  (str "log=$1; pidfile=$2; shift 2; child='echo $$ >\"$0\"; exec \"$@\"'; "
        "if command -v setsid >/dev/null 2>&1; "
-       "then setsid nohup \"$@\" >>\"$log\" 2>&1 & "
-       "else nohup \"$@\" >>\"$log\" 2>&1 & fi; echo $!"))
+       "then setsid nohup /bin/sh -c \"$child\" \"$pidfile\" \"$@\" >>\"$log\" 2>&1 & "
+       "else nohup /bin/sh -c \"$child\" \"$pidfile\" \"$@\" >>\"$log\" 2>&1 & fi; echo $!"))
 
 (defn ^{:stratum 0} detachable-platform?
   "True where a child can be detached through `/bin/sh`: not native
@@ -113,11 +117,14 @@
 ;------------------------------------------------------------------------------ Layer 1
 
 (defn- ^{:stratum 1} spawn-detached!
-  "Start `argv` detached in `dir`, output appended to `log-file`; its pid."
-  [argv log-file dir]
+  "Start `argv` detached in `dir`, output appended to `log-file`; its pid,
+   which the child also writes to `pid-file` before it runs `argv`."
+  [argv log-file pid-file dir]
   (io/make-parents (io/file log-file))
+  (io/make-parents (io/file pid-file))
   (let [builder (doto (ProcessBuilder. ^java.util.List
-                                       (into ["/bin/sh" "-c" spawn-script "sh" (str log-file)] argv))
+                                       (into ["/bin/sh" "-c" spawn-script "sh" (str log-file) (str pid-file)]
+                                             argv))
                   (.directory (io/file dir)))
         process (.start builder)
         out (slurp (.getInputStream process))]
@@ -139,22 +146,26 @@
                                                        {:resume/pid (:resume/pid prior)})
       (records/target-live? workflow-id) (records/failure :conflict :resume-target-live {})
       (nil? origin) (records/failure :not-found :resume-origin-unknown {})
-      :else (records/start! plan #(spawn! (resume-argv command plan %1) %2 origin)))))
+      :else (records/start! plan #(spawn! (resume-argv command plan %1) %2 %3 origin)))))
 
 (defn ^{:stratum 1} await-start!
   "`:await-start!`: the launch once its child has shown itself, else a
-   failure anomaly naming why, with the child's log."
+   failure anomaly naming why, with the child's log. A child whose pid
+   was never recorded is found by its pid file."
   [{:keys [alive? kill! timeout-ms poll-ms]} launch]
-  (let [{:resume/keys [run-id pid pid-started intervention-id launched-at-ms log]} launch
+  (let [{:resume/keys [run-id pid pid-started exited? intervention-id launched-at-ms log]}
+        (records/with-child-pid launch)
         outcome (await-outcome
                  {:started? #(records/correlated-event? run-id intervention-id launched-at-ms)
-                  ;; No pid recorded (a crash between spawn and record):
+                  ;; No pid known yet (the child has not written it):
                   ;; only the evidence or the deadline can decide.
-                  :alive? #(or (nil? pid) (alive? pid pid-started))
+                  :alive? #(and (not exited?) (or (nil? pid) (alive? pid pid-started)))
                   :deadline-ms (+ launched-at-ms timeout-ms)
                   :poll-ms poll-ms})
+        ;; Read again at the deadline: a child may write its pid late.
+        pid (or pid (:resume/pid (records/with-child-pid launch)))
         details {:failure/reason outcome :failure/log log :resume/run-id run-id :resume/pid pid}]
-    (when (= :timeout outcome) (kill! pid))
+    (when (and pid (= :timeout outcome)) (kill! pid))
     (case outcome
       :observed launch
       :interrupted (records/failure :unavailable :resume-unverified details)

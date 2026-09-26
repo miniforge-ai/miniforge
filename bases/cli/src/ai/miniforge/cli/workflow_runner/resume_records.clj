@@ -20,9 +20,10 @@
    per intervention, never over a live run, and only where the run began:
    a run's origin (`origin.edn` beside its events), the latest launch per
    workflow (`<events>/operator/.resume-launches/<workflow>.edn`: the
-   intervention, run id, pid and pid start instant), and start evidence
-   (an event under the run id carrying the intervention id as its
-   `:workflow-run/correlation-id`)."
+   intervention, run id, pid and pid start instant), the pid file the
+   child writes itself (`<home>/logs/resume-<run-id>.pid`, named in the
+   launch before the spawn), and start evidence (an event under the run
+   id carrying the intervention id as its `:workflow-run/correlation-id`)."
   (:require
    [ai.miniforge.anomaly.interface :as anomaly]
    [ai.miniforge.cli.app-config :as app-config]
@@ -84,6 +85,22 @@
   [^java.lang.ProcessHandle handle]
   (some-> handle .info .startInstant (.orElse nil) str))
 
+(defn- ^{:stratum 0} read-pid
+  "The pid in `f`, or nil while it is missing or still being written."
+  [^java.io.File f]
+  (try (some-> (slurp f) str/trim parse-long) (catch java.io.IOException _ nil)))
+
+(defn- ^{:stratum 0} pid-file-child
+  "The live process `pid` names, when it started between `launched-at-ms`
+   and the writing of `f`, as the child that wrote it did. A process that
+   took the pid later, or one older than the launch, is not that child."
+  ^java.lang.ProcessHandle [pid ^java.io.File f launched-at-ms]
+  (let [handle (.orElse (java.lang.ProcessHandle/of (long pid)) nil)
+        started (some-> handle .info .startInstant (.orElse nil) .toEpochMilli)]
+    (when (and handle (.isAlive handle) started
+               (<= (- launched-at-ms 2000) started (+ (.lastModified f) 2000)))
+      handle)))
+
 (defn ^{:stratum 0} plan-run-id
   "The plan's snapshot id (what `mf resume` restores), else a fresh id."
   [plan]
@@ -132,6 +149,21 @@
                      (str (:workflow-run/correlation-id (es/read-event-file %))))
                  (filter (partial recent-event-file? since-ms) (.listFiles (run-dir run-id))))))
 
+(defn ^{:stratum 1} with-child-pid
+  "`launch` with its child's pid. The pid recorded after the spawn stands.
+   Without one (this process died between the spawn and that record), it
+   is the pid the child wrote to `:resume/pid-file`, while that process
+   is still the child; a child gone by then marks the launch
+   `:resume/exited?`. With no pid written yet, `launch` as it is."
+  [{:resume/keys [pid pid-file launched-at-ms] :as launch}]
+  (let [f (some-> pid-file io/file)
+        child-pid (when (and f (nil? pid)) (read-pid f))
+        child (some-> child-pid (pid-file-child f launched-at-ms))]
+    (cond
+      (nil? child-pid) launch
+      child (assoc launch :resume/pid child-pid :resume/pid-started (start-instant child))
+      :else (assoc launch :resume/exited? true))))
+
 (defn ^{:stratum 1} failure
   "An anomaly naming the lifecycle failure `code` and its `details`."
   [anomaly-type code details]
@@ -140,21 +172,26 @@
                    (assoc details :failure/code code)))
 
 (defn ^{:stratum 1} start!
-  "Record the launch, spawn it with `(spawn! run-id log-file)` → pid, and
-   record the pid. Recorded before the spawn too: a crash between the two
-   must not let a redelivery spawn a second child."
+  "Record the launch, spawn it with `(spawn! run-id log-file pid-file)` →
+   pid, and record the pid. Recorded before the spawn too, naming the pid
+   file the child writes: a crash between the two must not let a
+   redelivery spawn a second child, nor leave the child untracked."
   [plan spawn!]
   (let [workflow-id (:resume/workflow-id plan)
         run-id (plan-run-id plan)
         intervention-id (str (:resume/intervention-id plan))
         log-file (str (io/file (app-config/logs-dir) (str "resume-" run-id ".log")))
+        pid-file (io/file (app-config/logs-dir) (str "resume-" run-id ".pid"))
         launched-at-ms (System/currentTimeMillis)
         launch {:resume/intervention-id intervention-id
                 :resume/run-id run-id
                 :resume/log log-file
+                :resume/pid-file (str pid-file)
                 :resume/launched-at-ms launched-at-ms}
+        ;; Only this launch's child may be found by it.
+        _ (io/delete-file pid-file true)
         _ (write-edn! (launch-file workflow-id) launch)
-        pid (spawn! run-id log-file)
+        pid (spawn! run-id log-file (str pid-file))
         started (start-instant (process-handle pid))
         recorded (assoc launch :resume/pid pid :resume/pid-started started)]
     (write-edn! (launch-file workflow-id) recorded)
@@ -163,8 +200,10 @@
 ;------------------------------------------------------------------------------ Layer 2
 
 (defn ^{:stratum 2} launch-running?
+  "True while the launch's child (see `with-child-pid`) is alive."
   [record]
-  (boolean (and record (process-running? (:resume/pid record) (:resume/pid-started record)))))
+  (let [{:resume/keys [pid pid-started]} (some-> record with-child-pid)]
+    (boolean (and pid (process-running? pid pid-started)))))
 
 (defn ^{:stratum 2} target-live?
   "A live runner in this process, or a live manifest owner (JVM runners
