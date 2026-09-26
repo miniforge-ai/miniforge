@@ -69,10 +69,25 @@
    `:failure/code`, so the operator sees why and where to look."
   [:failure/reason :failure/log :resume/run-id :resume/pid :resume/phases])
 
+(def ^{:stratum 0} ^:private verification-threads
+  "Verifications that wait at once. Each mostly sleeps between polls,
+   for no longer than its launcher's own deadline."
+  4)
+
+(def ^{:stratum 0} ^:private verification-queue-size
+  "Verifications that may wait for a thread; past that the pool refuses
+   work (see [[submit-verification!]])."
+  64)
+
 (defonce ^{:stratum 0} ^:private verification-pool
   ;; Work that waits on something slow — a launched run becoming
   ;; observable — runs here, off the consumer's pass and its lock.
   (atom nil))
+
+(defonce ^{:stratum 0} ^:private verification-lock
+  ;; Held by a submission and by a stop's swap, so no submission reaches
+  ;; a pool a stop is shutting down.
+  (Object.))
 
 (def ^{:stratum 0} ^:private expected-degradation-mode-by-verb
   {:force-safe-mode :safe-mode
@@ -107,17 +122,24 @@
   [launcher]
   (or (:events-dir launcher) (es/default-events-dir)))
 
-(defn- ^{:stratum 0} new-verification-pool
-  "A cached pool of named daemon threads: pending verification never
-   keeps the process alive; the process owner drains it on the way out."
-  ^java.util.concurrent.ExecutorService []
-  (java.util.concurrent.Executors/newCachedThreadPool
+;------------------------------------------------------------------------------ Layer 1
+
+(defn- ^{:stratum 1} new-verification-pool
+  "A fixed pool of named daemon threads with a bounded queue; when both
+   are full it discards work rather than growing (a discard policy, not
+   an exception: Babashka has no `RejectedExecutionException`). Pending
+   verification never keeps the process alive; the process owner drains
+   it on the way out."
+  ^java.util.concurrent.ThreadPoolExecutor []
+  (java.util.concurrent.ThreadPoolExecutor.
+   (int verification-threads) (int verification-threads)
+   0 java.util.concurrent.TimeUnit/MILLISECONDS
+   (java.util.concurrent.ArrayBlockingQueue. (int verification-queue-size))
    (reify java.util.concurrent.ThreadFactory
      (newThread [_ runnable]
        (doto (Thread. ^Runnable runnable "miniforge-operator-verification")
-         (.setDaemon true))))))
-
-;------------------------------------------------------------------------------ Layer 1
+         (.setDaemon true))))
+   (java.util.concurrent.ThreadPoolExecutor$DiscardPolicy.)))
 
 (defn ^{:stratum 1} failure-message
   "The localized reason for `reason-code`, filled from its `details`."
@@ -140,20 +162,17 @@
     [(if (contains? failure-message-key-by-code code) code default-code)
      (select-keys data failure-detail-keys)]))
 
-(defn ^{:stratum 1} submit-verification!
-  "Run `f` on the verification pool and return `result` — the
-   intervention as it stands while `f` finishes it."
-  [result f]
-  (let [pool (swap! verification-pool #(or % (new-verification-pool)))]
-    (.execute ^java.util.concurrent.ExecutorService pool ^Runnable f)
-    result))
-
 (defn ^{:stratum 1} stop-verifications!
-  "Drain the verification pool like the consumer's poller (see
-   `consumer/drain-executor!`); a later submission starts a new pool.
-   Idempotent."
+  "Stop the verification pool. Work not yet started is dropped; running
+   work is drained like the consumer's poller (see
+   `consumer/drain-executor!`). What a stop drops or cuts short records
+   nothing: the intervention stays `:dispatched` and its launch
+   unsettled, for the launcher's recovery at the next start. A later
+   submission starts a new pool. Idempotent."
   []
-  (when-let [pool (first (reset-vals! verification-pool nil))]
+  (when-let [^java.util.concurrent.ThreadPoolExecutor pool
+             (locking verification-lock (first (reset-vals! verification-pool nil)))]
+    (.clear (.getQueue pool))
     (consumer/drain-executor! pool consumer/stop-drain-ms)))
 
 (defn ^{:stratum 1} advance!
@@ -185,6 +204,23 @@
      :expected (get expected-degradation-mode-by-verb verb)}))
 
 ;------------------------------------------------------------------------------ Layer 2
+
+(defn ^{:stratum 2} submit-verification!
+  "Run `f` on the verification pool and return `result` — the
+   intervention as it stands while `f` finishes it.
+
+   A submission holds the lock a stop takes to swap the pool out, so it
+   never lands on a pool being shut down: after a stop, or on a pool
+   found shut down, it starts a fresh one. A full pool runs nothing: the
+   intervention stays `:dispatched` and its launch unsettled, for the
+   launcher's recovery at the next start ([[verify-launched-resume!]]).
+   A launched run is never failed for want of a thread."
+  [result f]
+  (locking verification-lock
+    (let [live (fn [^java.util.concurrent.ExecutorService pool]
+                 (if (and pool (not (.isShutdown pool))) pool (new-verification-pool)))]
+      (.execute ^java.util.concurrent.ExecutorService (swap! verification-pool live) ^Runnable f)))
+  result)
 
 (defn ^{:stratum 2} fail!
   "Stamp `reason-code` (and any `details`, see [[failure-detail-keys]])
