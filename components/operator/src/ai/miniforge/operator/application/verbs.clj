@@ -49,9 +49,10 @@
 
 (defn- ^{:stratum 0} await-then-record!
   "On the verification pool: wait for the launched run to show itself
-   (`:await-start!`), then `record!` the readback — or fail with what the
-   launcher reports — and hand the outcome to the launcher's optional
-   `:settle!`. A wait the launcher reports as `:resume/pending?` (this
+   (`:await-start!`), then `record!` the readback of the launch the wait
+   returns, which may carry what the wait learned — or fail with what
+   the launcher reports — and hand the outcome, with that launch, to the
+   launcher's optional `:settle!`. A wait the launcher reports as `:resume/pending?` (this
    process is stopping) records nothing: the intervention stays
    `:dispatched` for [[verify-launched-resume!]] to finish after a
    restart. A throw here would vanish with the thread, so it is recorded
@@ -64,7 +65,7 @@
           (:resume/pending? started) nil
           (anomaly/anomaly? started) (settle! launch (apply core/fail! stream dispatched
                                                             (core/anomaly-failure started :resume-not-started)))
-          :else (settle! launch (record!))))
+          :else (settle! started (record! started))))
       (catch Exception _e
         (settle! launch (core/fail! stream dispatched :application-error))))))
 
@@ -158,7 +159,8 @@
         plan (some-> (:resume/plan prepared) (assoc :resume/intervention dispatched))
         launch (when plan ((:launch! launcher) plan))
         run-id (mechanism/launched-run-id launch)
-        record! #(record-resume-readback! stream dispatched events-dir verb plan run-id)]
+        record! #(record-resume-readback! stream dispatched events-dir verb plan
+                                          (mechanism/launched-run-id %))]
     (cond
       (nil? launcher) (core/fail! stream dispatched :no-resume-launcher)
       (:failure/code prepared) (core/fail! stream dispatched (:failure/code prepared)
@@ -168,7 +170,7 @@
       (:await-start! launcher) (core/submit-verification!
                                 dispatched
                                 #(await-then-record! stream dispatched launcher launch record!))
-      :else (record!))))
+      :else (record! launch))))
 
 (defn ^{:stratum 2} verify-launched-resume!
   "Finish verifying a retry launched before this process (re)started:
@@ -181,7 +183,7 @@
     (let [events-dir (core/resume-events-dir launcher)
           verb (:intervention/type dispatched)
           record! #(record-resume-readback! stream dispatched events-dir verb launch
-                                            (:resume/run-id launch))]
+                                            (mechanism/launched-run-id %))]
       (core/submit-verification!
        dispatched
        #(await-then-record! stream dispatched launcher launch record!)))))
