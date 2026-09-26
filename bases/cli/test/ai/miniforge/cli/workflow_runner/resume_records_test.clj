@@ -144,6 +144,28 @@
         (is (empty? (sut/pending-launches)))
         (is (= :verified (:resume/settled (sut/launch-record workflow-id))))))))
 
+(deftest ^{:stratum 1} settling-a-launch-settles-its-lineage-record-test
+  (with-temp-home
+    (fn []
+      (let [root (str (random-uuid))
+            child (.exec (Runtime/getRuntime) (into-array String ["/bin/sleep" "30"]))
+            plan {:resume/workflow-id "attempt-1" :resume/root root
+                  :resume/intervention-id (random-uuid) :resume/intervention {:intervention/id 1}}]
+        (try
+          (try (sut/start! plan (fn [_run-id _log pid-file]
+                                  (spit (doto (io/file pid-file) io/make-parents) (str (.pid child)))
+                                  (throw (ex-info "the launcher died here" {}))))
+               (catch clojure.lang.ExceptionInfo _ nil))
+          (let [pre-spawn (sut/launch-record root)]
+            (is (nil? (:resume/pid pre-spawn)))
+            (sut/settle! pre-spawn {:intervention/state :verified})
+            (let [settled (sut/launch-record root)]
+              (is (= :verified (:resume/settled settled)) "the record is the lineage's, under its root")
+              (is (= (.pid child) (:resume/pid settled)) "the pid the child wrote is kept")
+              (is (not (.exists (io/file (:resume/pid-file settled)))) "and its pid file removed")
+              (is (sut/launch-running? settled 60000))))
+          (finally (.destroy child)))))))
+
 (deftest ^{:stratum 1} a-launch-without-a-recorded-pid-is-found-by-its-pid-file-test
   (with-temp-home
     (fn []
