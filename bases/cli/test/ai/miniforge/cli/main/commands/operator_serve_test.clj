@@ -105,6 +105,30 @@
           (is (= 0 (binding [*out* (java.io.StringWriter.)]
                      (sut/serve-cmd {} (constantly nil))))))))))
 
+(deftest ^{:stratum 1} a-failed-start-still-releases-the-home-test
+  (let [home (temp-home)
+        calls (atom [])]
+    (with-redefs [es/default-events-dir (constantly (io/file home "events"))
+                  control/start-process-control! #(throw (ex-info "consumer would not start" {}))
+                  control/stop-process-control! #(swap! calls conj :stop)]
+      (testing "a start that throws still stops the consumer once and releases the lock"
+        (is (thrown-with-msg? clojure.lang.ExceptionInfo #"would not start"
+                              (binding [*out* (java.io.StringWriter.)]
+                                (sut/serve-cmd {} (constantly nil)))))
+        (is (= [:stop] @calls))
+        (is (not (.exists (io/file home sut/discovery-file-name)))))
+      (testing "an await that throws after a clean start cleans up once too"
+        (reset! calls [])
+        (with-redefs [control/start-process-control! #(swap! calls conj :start)]
+          (is (thrown-with-msg? clojure.lang.ExceptionInfo #"await failed"
+                                (binding [*out* (java.io.StringWriter.)]
+                                  (sut/serve-cmd {} #(throw (ex-info "await failed" {}))))))
+          (is (= [:start :stop] @calls))))
+      (testing "so the next server for the same home is not refused"
+        (with-redefs [control/start-process-control! (constantly nil)]
+          (is (= 0 (binding [*out* (java.io.StringWriter.)]
+                     (sut/serve-cmd {} (constantly nil))))))))))
+
 (deftest ^{:stratum 1} serve-consumes-with-its-real-consumer-test
   (let [home (temp-home)
         events-dir (io/file home "events")

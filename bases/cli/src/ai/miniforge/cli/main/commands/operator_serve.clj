@@ -130,22 +130,34 @@
    or SIGINT ends the process and the shutdown hook stops the consumer,
    removes the discovery file, and releases the lock — a clean stop that
    exits 143 (SIGTERM) or 130 (SIGINT). Returns the exit code otherwise:
-   0 after `await-stop!` returns, 1 when a server already holds the home."
+   0 after `await-stop!` returns, 1 when a server already holds the home.
+
+   If starting or waiting throws, the same stop runs before the exception
+   propagates: the lock is released and the hook removed, so the next
+   server for this home is not refused. The stop runs at most once,
+   whether the hook or this function reaches it first."
   ([opts]
    (shared/exit! (serve-cmd opts block-forever!)))
   ([_opts await-stop!]
    (let [home (serve-home)]
      (if-let [channel (try-lock! home)]
        (let [info (server-info)
-             stop! #(stop-serving! home channel)
+             stopped? (atom false)
+             stop! #(when (compare-and-set! stopped? false true)
+                      (stop-serving! home channel))
              hook (Thread. ^Runnable stop!)]
          (.addShutdownHook (Runtime/getRuntime) hook)
-         (control/start-process-control!)
-         (write-discovery! home info)
-         (println (json/generate-string (assoc info :ready true)))
-         (flush)
-         (await-stop!)
-         (.removeShutdownHook (Runtime/getRuntime) hook)
-         (stop!)
-         0)
+         (try
+           (control/start-process-control!)
+           (write-discovery! home info)
+           (println (json/generate-string (assoc info :ready true)))
+           (flush)
+           (await-stop!)
+           0
+           (finally
+             ;; Throws when the JVM is already shutting down; the hook then
+             ;; runs `stop!` itself, and `stopped?` keeps it to one run.
+             (try (.removeShutdownHook (Runtime/getRuntime) hook)
+                  (catch Exception _ nil))
+             (stop!))))
        (refuse! home (running-pid home))))))
