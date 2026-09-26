@@ -153,6 +153,14 @@
       (is (= "task-a" (:branch (first checkpoints))))
       (is (= "/tmp/task-b.bundle" (:bundle-path (second checkpoints)))))))
 
+(deftest ^{:stratum 0} a-persisted-workspace-keeps-its-phase-test
+  (testing "the phase and tier are read from the event the runner publishes"
+    (let [stream (es/create-event-stream {:sinks []})
+          event (es/workspace-persisted stream (random-uuid) {:phase :implement :branch "b" :commit-sha "c"
+                                                             :persist-tier :worktree})]
+      (is (= {:phase :implement :persist-tier :worktree}
+             (select-keys (first (core/extract-workspace-checkpoints [event])) [:phase :persist-tier]))))))
+
 (deftest ^{:stratum 0} extract-dag-pause-info-last-pause-wins-test
   (testing "multiple pause events — latest one wins"
     (let [events [{:event/type :dag/paused
