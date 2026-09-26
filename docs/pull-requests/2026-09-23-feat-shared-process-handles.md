@@ -62,8 +62,8 @@ retry of them is refused `:resume-origin-unknown`.
 ## Related Issues/PRs
 
 Stack: `feat/resume-flags`, `feat/operator-async-resume`,
-`feat/resume-launcher`, `feat/resume-launcher-hardening`, this PR,
-`feat/operator-serve`.
+`feat/resume-launcher`, `fix/resume-launcher-review`,
+`feat/resume-launcher-hardening`, this PR, `feat/operator-serve`.
 
 ## Checklist
 
