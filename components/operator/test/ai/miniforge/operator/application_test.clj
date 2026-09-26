@@ -816,7 +816,12 @@
       (is (= :resume-in-flight (failure-code (run! {:launch! (fn [_] (refusal :resume-in-flight))}))))
       (is (= 42 (get-in (run! {:launch! (fn [_] (refusal :resume-in-flight))})
                         [:intervention/details :resume/pid])))
-      (is (= :resume-not-dispatched (failure-code (run! {:launch! (fn [_] (refusal :made-up))})))))
+      (is (= :resume-not-dispatched (failure-code (run! {:launch! (fn [_] (refusal :made-up))}))))
+      (let [superseded (run! {:launch! (fn [_] (anomaly/anomaly :conflict "refused"
+                                                                {:failure/code :resume-superseded
+                                                                 :resume/latest-attempt "attempt-2"}))})]
+        (is (= :resume-superseded (failure-code superseded)))
+        (is (re-find #"attempt-2" (:intervention/reason superseded)) "names the attempt to retry instead")))
     (testing "a run that never starts fails with the launcher's reason and log"
       (let [failed (run! {:launch! (fn [_] {:resume/run-id (random-uuid)})
                           :await-start! (fn [_] (refusal :resume-not-started))})]

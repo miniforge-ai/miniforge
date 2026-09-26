@@ -104,6 +104,9 @@
   :application/resume-in-flight
   "A retry of this workflow is already running (pid {pid})"
 
+  :application/resume-superseded
+  "This run was already retried as {attempt}: retry that attempt instead"
+
   :application/resume-not-dispatched
   "The resume launcher reported no resumed run"
 
