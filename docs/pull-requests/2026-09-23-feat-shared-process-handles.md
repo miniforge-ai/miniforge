@@ -34,14 +34,18 @@ both handles, or those verbs fail depending on which process won.
   `<home>/packs`, against `gh pr diff`. It does not use the classpath
   built-ins `mf policy list` also shows. Changed files come from the diff, so
   glob-scoped packs apply. It refuses when there is no PR, when a pack failed
-  to load, when no packs are installed, or when there is no diff.
-- `gh pr diff` is abandoned after 30 s: a re-evaluation runs inside the pass
-  other processes wait on.
+  to load, when no packs are installed, or when the diff is missing or empty
+  (a PR with no changes).
+- `gh pr diff` is abandoned after 30 s and its process tree killed: a
+  re-evaluation runs inside the pass other processes wait on.
 
 ## Testing Plan
 
-- Evaluator: coordinates, every refusal, the real loader with a failing pack,
-  and the real evaluator with a glob-scoped pack.
+- Evaluator: coordinates, every refusal (an empty diff included), the real
+  loader with a failing pack, and the real evaluator with a glob-scoped
+  pack.
+- `fetch-pr-diff`: a `gh` that does not answer is killed and yields nil; an
+  answer in time is the diff.
 - Wiring: both paths register the same handles, origin recording and release,
   the events root, and a nil launcher not clearing a registered one.
 - Smoke against a temp `MINIFORGE_HOME` (with PR 6): a retry of a run with a

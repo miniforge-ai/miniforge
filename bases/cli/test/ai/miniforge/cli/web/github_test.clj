@@ -23,25 +23,27 @@
      - malformed JSON → stderr warning (catalog-backed) + safe fallback value
      - (fetch-prs only) analysis failure → exception propagates to caller"
   (:require
+   [babashka.process]
    [clojure.test :refer [deftest testing is]]
    [clojure.string :as str]
    [ai.miniforge.cli.web.github :as sut]
    [ai.miniforge.cli.web.risk :as risk]))
 
-;------------------------------------------------------------------------------ Layer 0 — helpers
+;------------------------------------------------------------------------------ Layer 0
 
-(defn- fake-sh-success
+;; helpers
+(defn- ^{:stratum 0} fake-sh-success
   "Return a mock process/sh result that looks like a successful gh invocation
    with `body` as stdout."
   [body]
   {:exit 0 :out body :err ""})
 
-(defn- fake-sh-failure
+(defn- ^{:stratum 0} fake-sh-failure
   "Return a mock process/sh result that looks like a failed gh invocation."
   []
   {:exit 1 :out "" :err "gh: not found"})
 
-(defn- capture-stderr
+(defn- ^{:stratum 0} capture-stderr
   "Execute `(f)` with *err* rebound to a fresh StringWriter and return
    [return-value stderr-string].  The github functions emit diagnostics via
    (binding [*out* *err*] (println ...)), so the inner *out* is bound to
@@ -52,8 +54,9 @@
               (f))]
     [ret (.toString buf)]))
 
-;------------------------------------------------------------------------------ Layer 1 — fetch-prs
+;------------------------------------------------------------------------------ Layer 1
 
+;; fetch-prs
 (deftest ^{:stratum 1} fetch-prs-returns-analyzed-prs-on-valid-json-test
   (testing "valid JSON is parsed and each PR is enriched with :repo and :analysis"
     (with-redefs [babashka.process/sh (fn [& _] (fake-sh-success "[{\"number\":1}]"))
@@ -87,8 +90,23 @@
         (is (nil? result))
         (is (str/blank? stderr))))))
 
-;------------------------------------------------------------------------------ Layer 1 — fetch-pr-body
+;; fetch-pr-diff
+(deftest ^{:stratum 1} fetch-pr-diff-kills-a-gh-that-does-not-answer-test
+  (let [pending (promise)
+        destroyed (atom nil)]
+    (with-redefs [babashka.process/process (fn [& _] pending)
+                  babashka.process/destroy-tree #(reset! destroyed %)
+                  sut/gh-timeout-ms 10]
+      (is (nil? (sut/fetch-pr-diff "o/r" 7)))
+      (is (identical? pending @destroyed) "the hung gh is killed, not left running"))
+    (testing "an answer in time is the diff, and nothing is killed"
+      (reset! destroyed nil)
+      (with-redefs [babashka.process/process (fn [& _] (doto (promise) (deliver (fake-sh-success "d"))))
+                    babashka.process/destroy-tree #(reset! destroyed %)]
+        (is (= "d" (sut/fetch-pr-diff "o/r" 7)))
+        (is (nil? @destroyed))))))
 
+;; fetch-pr-body
 (deftest ^{:stratum 1} fetch-pr-body-returns-parsed-map-on-valid-json-test
   (testing "valid JSON is parsed into a map"
     (with-redefs [babashka.process/sh (fn [& _]
@@ -106,8 +124,7 @@
         (is (str/includes? stderr "org/repo"))
         (is (str/includes? stderr "42"))))))
 
-;------------------------------------------------------------------------------ Layer 1 — fetch-workflow-runs
-
+;; fetch-workflow-runs
 (deftest ^{:stratum 1} fetch-workflow-runs-returns-parsed-vec-on-valid-json-test
   (testing "valid JSON is returned as a vector of run maps"
     (with-redefs [babashka.process/sh (fn [& _]
