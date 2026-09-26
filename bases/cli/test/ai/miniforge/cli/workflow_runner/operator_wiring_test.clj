@@ -36,17 +36,21 @@
   [f]
   (let [context-state (var-get #'sut/meta-loop-ctx)
         consumer-state (var-get #'sut/operator-consumer-handle)
+        hook-state (var-get #'sut/exit-hook-installed?)
         original-context @context-state
-        original-consumer @consumer-state]
+        original-consumer @consumer-state
+        original-hook @hook-state]
     (reset! context-state nil)
     (reset! consumer-state nil)
+    (reset! hook-state false)
     (try
       (with-redefs [resume-records/record-origin! (constantly nil)
                     sut/stop-at-exit! (constantly nil)]
         (f))
       (finally
         (reset! context-state original-context)
-        (reset! consumer-state original-consumer)))))
+        (reset! consumer-state original-consumer)
+        (reset! hook-state original-hook)))))
 
 (deftest ^{:stratum 0} releasing-a-workflow-lets-go-of-its-origin
   (let [calls (atom [])]
@@ -165,6 +169,30 @@
             (sut/stop-process-control!)
             (sut/stop-process-control!)
             (is (= [::handle] @stops))))))))
+
+(deftest ^{:stratum 1} restarting-the-consumer-keeps-one-exit-hook
+  (with-clean-operator-state
+    (fn []
+      (let [hooks (atom [])
+            stops (atom [])
+            handles (atom [::first-handle ::second-handle])]
+        (with-redefs [agent/create-meta-loop-context (constantly {:event-stream ::operator-stream})
+                      supervisory/attach! (constantly nil)
+                      correlator/attach! (constantly nil)
+                      es/create-event-stream (constantly ::operator-stream)
+                      resume-launcher/launcher (constantly nil)
+                      operator/register-degradation-manager! (constantly nil)
+                      operator/register-policy-evaluator! (constantly nil)
+                      operator/start-operator-consumer! (fn [_opts] (ffirst (swap-vals! handles rest)))
+                      operator/stop-operator-consumer! #(swap! stops conj %)
+                      sut/stop-at-exit! #(swap! hooks conj %)]
+          (sut/start-process-control!)
+          (sut/stop-process-control!)
+          (sut/start-process-control!)
+          (is (= 1 (count @hooks)) "start, stop, start installs one exit hook")
+          (testing "the hook stops the consumer current at exit, not the first one"
+            ((first @hooks))
+            (is (= [::first-handle ::second-handle] @stops))))))))
 
 (deftest ^{:stratum 1} a-thread-without-cli-arguments-keeps-the-registered-launcher
   (with-clean-operator-state

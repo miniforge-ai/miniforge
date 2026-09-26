@@ -64,6 +64,12 @@
   ;; workflow's audit trail through the wrong workflow stream.
   (atom nil))
 
+(defonce ^{:stratum 0} ^:private exit-hook-installed?
+  ;; One exit hook per process, installed with the first consumer. It
+  ;; stops whichever consumer is current at exit, so stopping and
+  ;; restarting the consumer reuses it instead of adding another.
+  (atom false))
+
 (defn- ^{:stratum 0} create-meta-loop-ctx!
   []
   (let [operator-stream (es/create-event-stream)
@@ -96,13 +102,18 @@
     (operator/register-resume-launcher! launcher))
   (operator/register-policy-evaluator! policy-evaluator/evaluate))
 
+(defn- ^{:stratum 0} stop-held-consumer!
+  "Stop the consumer `holder` holds and clear it. Idempotent."
+  [holder]
+  (when-let [handle (first (reset-vals! holder nil))]
+    (operator/stop-operator-consumer! handle)))
+
 (defn- ^{:stratum 0} stop-at-exit!
-  "Stop `consumer` when the process exits — a runner exits with its
-   consumer running — so a retry still being verified records an outcome
-   rather than staying `:dispatched`."
-  [consumer]
-  (.addShutdownHook (Runtime/getRuntime)
-                    (Thread. ^Runnable (partial operator/stop-operator-consumer! consumer))))
+  "Run `stop!` when the process exits — a runner exits with its consumer
+   running — so a retry still being verified records an outcome rather
+   than staying `:dispatched`."
+  [stop!]
+  (.addShutdownHook (Runtime/getRuntime) (Thread. ^Runnable stop!)))
 
 ;------------------------------------------------------------------------------ Layer 1
 
@@ -131,22 +142,24 @@
   (or @operator-consumer-handle
       (locking operator-consumer-handle
         (or @operator-consumer-handle
-            (reset! operator-consumer-handle
-                    (doto (operator/start-operator-consumer!
-                           {:events-dir (es/default-events-dir)
-                            :stream (:event-stream ctx)
-                            :apply! operator/apply-intervention!
-                            :accept? operator/live-intervention-target?
-                            :stream-for operator/live-intervention-stream})
-                      stop-at-exit!))))))
+            (let [handle (operator/start-operator-consumer!
+                          {:events-dir (es/default-events-dir)
+                           :stream (:event-stream ctx)
+                           :apply! operator/apply-intervention!
+                           :accept? operator/live-intervention-target?
+                           :stream-for operator/live-intervention-stream})]
+              ;; The hook reads the holder at exit, so it also stops a
+              ;; consumer started after a stop-process-control!.
+              (when (compare-and-set! exit-hook-installed? false true)
+                (stop-at-exit! (partial stop-held-consumer! operator-consumer-handle)))
+              (reset! operator-consumer-handle handle))))))
 
 (defn ^{:stratum 1} stop-process-control!
   "Stop this process's operator consumer and the retry verifications it
    started (both drain; see `operator/stop-operator-consumer!`).
    Idempotent."
   []
-  (when-let [handle (first (reset-vals! operator-consumer-handle nil))]
-    (operator/stop-operator-consumer! handle)))
+  (stop-held-consumer! operator-consumer-handle))
 
 ;------------------------------------------------------------------------------ Layer 2
 
