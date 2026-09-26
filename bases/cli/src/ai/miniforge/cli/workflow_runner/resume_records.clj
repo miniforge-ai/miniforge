@@ -152,7 +152,7 @@
 (defn ^{:stratum 1} pending-launches
   "Launch records whose verification a stopped process never finished."
   []
-  (->> (.listFiles (launch-file))
+  (->> (or (.listFiles (launch-file)) [])
        (filter #(str/ends-with? (.getName ^java.io.File %) ".edn"))
        (keep read-edn)
        (filter #(and (:resume/intervention %) (not (contains? % :resume/settled))))))

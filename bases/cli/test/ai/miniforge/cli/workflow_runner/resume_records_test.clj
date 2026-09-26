@@ -84,7 +84,7 @@
   (with-temp-home
     (fn []
       (let [now (System/currentTimeMillis)
-            dead-pid (let [p (.start (ProcessBuilder. ^java.util.List ["/usr/bin/true"]))] (.waitFor p) (.pid p))
+            dead-pid (let [p (.start (ProcessBuilder. ^java.util.List ["true"]))] (.waitFor p) (.pid p))
             launch (sut/start! {:resume/workflow-id (str (random-uuid)) :resume/intervention-id (random-uuid)}
                                (constantly dead-pid))]
         (testing "no pid recorded: in flight until the start timeout has passed"

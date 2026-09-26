@@ -280,6 +280,27 @@
             (is (= [(.pid child)] @killed) "silent at the deadline, it is killed by the pid it wrote"))
           (finally (.destroy child)))))))
 
+(deftest ^{:stratum 1} an-observed-child-found-by-its-pid-file-is-returned-with-its-pid-test
+  (with-temp-home
+    (fn []
+      (let [launched-at-ms (System/currentTimeMillis)
+            child (.exec (Runtime/getRuntime) (into-array String ["/bin/sleep" "30"]))
+            pid-file (doto (io/file (app-config/logs-dir) "resume-o.pid") io/make-parents)
+            run-id (random-uuid)
+            intervention-id (random-uuid)
+            launch {:resume/run-id run-id
+                    :resume/intervention-id intervention-id
+                    :resume/pid-file (str pid-file)
+                    :resume/launched-at-ms launched-at-ms}]
+        (spit pid-file (str (.pid child) "\n"))
+        (write-event! run-id intervention-id)
+        (try
+          (let [result (sut/await-start! (deps {}) launch)]
+            (is (= (.pid child) (:resume/pid result))
+                "the pid recovered from the pid file travels with the launch to settlement")
+            (is (some? (:resume/pid-started result))))
+          (finally (.destroy child)))))))
+
 (deftest ^{:stratum 1} the-child-is-detached-and-gets-its-argv-verbatim-test
   (with-temp-home
     (fn []
