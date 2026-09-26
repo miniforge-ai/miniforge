@@ -29,10 +29,11 @@ Copilot's review of #1915:
   left a detached child nothing could find: the wait after a restart had
   no pid to watch or kill.
 - A retry with an FSM snapshot ran under the snapshot's run id. A finished
-  run's events are archived (`archived/<id>`), the resumed runner writes
-  `live/<id>`, and readers prefer `archived/`. So the attempt was invisible
-  to reconstruction and readback, the start evidence was never seen (a
-  timeout, then a duplicate retry), and archival could not merge the two.
+  run's events are archived (`archived/<id>`) and the resumed runner writes
+  `live/<id>`. Readers that prefer `archived/` never saw the attempt:
+  reconstruction and the readback here, and from #1916 also the start wait
+  (a timeout, then a duplicate retry) and the live-runner check. Archival
+  could not merge the two directories either.
 
 ## Changes in Detail
 

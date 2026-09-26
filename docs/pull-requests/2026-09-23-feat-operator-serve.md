@@ -101,8 +101,8 @@ or `<home>/operator-serve.json`.
 ## Related Issues/PRs
 
 Stack: `feat/resume-flags`, `feat/operator-async-resume`,
-`feat/resume-launcher`, `feat/resume-launcher-hardening`,
-`feat/shared-process-handles`, this PR.
+`feat/resume-launcher`, `fix/resume-launcher-review`,
+`feat/resume-launcher-hardening`, `feat/shared-process-handles`, this PR.
 
 ## Checklist
 
