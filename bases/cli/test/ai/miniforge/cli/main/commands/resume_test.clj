@@ -21,6 +21,7 @@
    [ai.miniforge.automation-edge-correlator.interface :as correlator]
    [clojure.test :refer [deftest is testing]]
    [clojure.java.io :as io]
+   [clojure.string :as str]
    [cheshire.core :as json]
    [ai.miniforge.cli.main.display :as main-display]
    [ai.miniforge.cli.workflow-runner.context :as context]
@@ -382,6 +383,19 @@
         (with-redefs [workflow/load-checkpoint-data #(when (= (str taken) (str %)) {:machine-snapshot {}})]
           (is (thrown-with-msg? clojure.lang.ExceptionInfo #"already exists"
                                 (resume-with snapshotted {:run-id (str taken)}))))))
+    (testing "the checkpoint loader answers nil for an id with no checkpoint, which is free"
+      (let [run-id (random-uuid)]
+        (is (nil? (workflow/load-checkpoint-data (str run-id))))
+        (is (= run-id (:registered (resume-with snapshotted {:run-id (str run-id)}))))))
+    (testing "a loader that throws refuses the resume naming its error, not as a taken id"
+      (doseq [failure [(ex-info "Invalid checkpoint data" {:errors [:schema]})
+                       (java.io.IOException. "Permission denied")]]
+        (let [refused (with-redefs [workflow/load-checkpoint-data (fn [_] (throw failure))]
+                        (try+ (resume-with snapshotted {:run-id (str (random-uuid))})
+                              (catch [:anomaly/category :anomalies/fault] anomaly anomaly)))]
+          (is (= (ex-message failure) (:error refused)))
+          (is (str/includes? (str (:anomaly/message refused)) (ex-message failure)))
+          (is (not (str/includes? (str (:anomaly/message refused)) "already exists"))))))
     (testing "a --run-id that is not a UUID is refused"
       (is (thrown-with-msg? clojure.lang.ExceptionInfo #"--run-id must be a UUID"
                             (resume-with {:completed-phases []} {:run-id "not-a-uuid"}))))
