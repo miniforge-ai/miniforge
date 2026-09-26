@@ -1,3 +1,9 @@
+<!--
+  Title: Miniforge.ai
+  Author: Christopher Lester (christopher@miniforge.ai)
+  Copyright 2025-2026 Christopher Lester. Licensed under Apache 2.0.
+-->
+
 # refactor(cli): split workflow_runner/display.clj — flip to extracted namespaces (rule 210, 2/2)
 
 ## Overview
@@ -5,18 +11,18 @@
 Second and final PR of the rule-210 split of
 `bases/cli/src/ai/miniforge/cli/workflow_runner/display.clj`. PR #1724 created
 the ten sibling namespaces holding the moved code without touching `display.clj`.
-This PR flips `display.clj` over to them: it now requires the nine namespaces its
-public surface draws from, the moved definitions are deleted, and the eighteen
-vars its callers and tests use are re-exported.
+This PR rewires `display.clj` to the nine namespaces its public surface uses.
+It deletes the moved definitions and re-exports the eighteen vars used by
+callers and tests.
 
 `display.clj` goes from **8 real strata to 1**, clearing its SL003 violation.
 
 ## Motivation
 
 `display.clj` was the worst remaining SL003 offender in `workflow_runner/`: 502
-lines, 8 strata against a budget of 3. The split had to be two PRs because SL003
-is a staged-file gate — a commit that stages `display.clj` must leave it inside
-the budget in that same commit, so extraction and flip could not be interleaved.
+lines, 8 strata against a budget of 3. SL003 checks staged files, so any commit
+touching `display.clj` must leave it within budget. Extraction and rewiring
+therefore needed separate PRs.
 
 ## Changes in Detail
 
@@ -35,10 +41,10 @@ namespace:
 | `print-workflow-header`, `print-workflow-summary`, `print-pretty-result`, `print-result` | `display-print` |
 | `print-error-header`, `print-namespace-resolution-help`, `print-babashka-fallback-help`, `print-general-debugging-help` | `display-error-help` |
 
-Those eighteen are exactly the vars referenced through the `display` alias
-anywhere in `bases/cli` — ten source namespaces (`workflow-runner`, `chain`,
-`context`, `dashboard`, `execution`, `lifecycle`, `listing`, `provenance`,
-`sandbox`, `setup`) plus `display_test.clj`, `display_output_test.clj` and
+Those eighteen are exactly the vars referenced through `display` in `bases/cli`.
+Ten source namespaces use them: `workflow-runner`, `chain`, `context`,
+`dashboard`, `execution`, `lifecycle`, `listing`, `provenance`, `sandbox`, and `setup`.
+Tests also use them: `display_test.clj`, `display_output_test.clj`, and
 `runner_control_wiring_test.clj`. Nothing else moves; no call site changes.
 
 `display-summary-lines` is not required here — none of its vars are part of the
@@ -46,9 +52,9 @@ public surface; it reaches callers through `display-summary`.
 
 ### with-redefs
 
-`(def x other/x)` creates a **new** var whose root is the current value of
-`other/x`, not an alias to the same var: `identical?` over the two var objects
-for `colorize` returns `false`. What matters for the tests is which var a
+`(def x other/x)` creates a **new** var rooted at the current value of `other/x`.
+It does not alias the original var. For `colorize`, `identical?` over the two
+var objects returns `false`. What matters for the tests is which var a
 caller resolves: `workflow_runner.clj`, `setup.clj` and `chain.clj` all call
 `display/start-progress!`, so `with-redefs [display/start-progress! …]` in
 `runner_control_wiring_test.clj` still intercepts them. The converse does not
@@ -67,8 +73,8 @@ so there is no second copy to drift.
 
 - stratum-lint (pin `bef8657`) on `display.clj`: plain clean, and `--fix` on a
   scratch copy proposes **no changes**, confirming **1 real stratum**. (Its only
-  suggestion during drafting was blank-line spacing between the defs; that is
-  already adopted in the committed file, so the dry run is now a no-op.)
+  suggestion during drafting was blank-line spacing between defs.
+  The committed file adopts that spacing, so the dry run is now a no-op.)
 - clj-kondo: 0 errors, 0 warnings.
 - `display-test` + `display-output-test` + `runner-control-wiring-test`: 79 tests,
   185 assertions, 0 failures, 0 errors.
@@ -78,9 +84,9 @@ so there is no second copy to drift.
 
 No behaviour change. Callers previously invoked the implementations defined in
 `display.clj`; this PR re-roots each var at the extracted namespace's copy of
-that implementation. The copies were moved verbatim in #1724 and checked there
-against the originals over 152 paired inputs with no mismatches, so this is
-behavioural equivalence, not object identity. Ships with the ordinary merge to
+that implementation. The copies moved verbatim in #1724.
+Comparison against the originals over 152 paired inputs found no mismatches.
+This proves behavioural equivalence, not object identity. Ships with the ordinary merge to
 `main`.
 
 ## Related Issues/PRs

@@ -1,3 +1,9 @@
+<!--
+  Title: Miniforge.ai
+  Author: Christopher Lester (christopher@miniforge.ai)
+  Copyright 2025-2026 Christopher Lester. Licensed under Apache 2.0.
+-->
+
 # fix(policy-pack): resolve pack signatures against configured trust roots
 
 MINIFORGE_PR_BUDGET_OVERRIDE: security fix; non-test change is 370 reportable
@@ -42,10 +48,10 @@ addressed for the trust-root store to be usable:
 2. **`verify-ed25519` could not decode a standard Ed25519 public key.** It read
    the key bytes as one big-endian magnitude and hardcoded `x-odd? = false`.
    RFC 8032 §5.1.2 stores y little-endian with the sign of x in the top bit of
-   the final byte. Measured against the old decoder over 200 generated
-   keypairs: the standard raw encoding verified 0 of 200; feeding it a
-   big-endian y instead verified 94 of 200 — exactly the 94 whose x was even,
-   and none of the 106 whose x was odd. A trust root holding real publisher
+   the final byte. The old decoder was tested over 200 generated keypairs.
+   The standard raw encoding verified 0 of 200. A big-endian y verified
+   exactly the 94 whose x was even, and none of the 106 whose x was odd.
+   A trust root holding real publisher
    keys is unusable against that decoder.
 
 ## Changes in Detail
@@ -83,15 +89,15 @@ and otherwise loads the configured store.
 
 ### Canonical serialization — `policy_pack/canonical_{order,edn}.clj` (new)
 
-`pack-signable-bytes` renders N4 §8.1.1 rather than deferring to `pr-str`:
-maps key-ordered at every depth, sets as sorted vectors, sequences in declared
-order, instants as millisecond-precision UTC, single spaces between entries,
-key comparison byte-wise over UTF-8 with an absent namespace sorting first.
+`pack-signable-bytes` renders N4 §8.1.1 rather than deferring to `pr-str`.
+Maps are key-ordered at every depth, sets become sorted vectors, and sequences
+retain declared order. Instants use millisecond-precision UTC, with single
+spaces between entries. Keys compare byte-wise over UTF-8; absent namespaces
+sort first.
 
 A value with no EDN reader form now throws instead of serializing an identity
-hash — a pack carrying a live `:rule/check-fn` rather than the symbol §8.1.1
-requires cannot produce a signature that verifies, and failing loudly beats
-failing mysteriously.
+hash. A live `:rule/check-fn` cannot produce a verifiable signature; §8.1.1
+requires a symbol. The failure now surfaces at serialization.
 
 `verify-ed25519` decodes the RFC 8032 raw encoding and rejects a key that is
 not 32 bytes. `crypto` keeps only the Ed25519 concern; the serialization moved
@@ -142,9 +148,9 @@ Run:
   failures, 0 errors
 - `bb poly:check` clean; `bb lint:clj:all` 0 errors, no policy-pack findings
 - `bb lint:stratum` clean on every file this PR adds. `registry.clj` still
-  reports SL003 (5 layers, max 3) — verified to report the same at
-  `bade0222f` before this change, is documented as a Wave 2 split in its own
-  namespace docstring, and appears in `work/stratum-lint-baseline-2026-07-24`.
+  reports SL003 (5 layers, max 3), as it did at `bade0222f` before this change.
+  Its namespace docstring documents a Wave 2 split. It also appears in
+  `work/stratum-lint-baseline-2026-07-24`.
   This PR adds one Layer 0 function to it and no new stratum, so the commits
   touching it were made with the documented
   `MINIFORGE_STRATUM_BUDGET_MODE=warn` opt-out.
@@ -160,15 +166,15 @@ Three Copilot rounds, all findings real and fixed:
    a caller holds, not only entries `->store` validated. A fail-closed path
    should not throw.
 2. The protocol docstring promised `:signer` and `:timestamp` unconditionally
-   while the unsigned branch omits both. The behaviour is right — reporting a
-   signer for an unsigned pack would imply something signed it — so the
-   docstring moved to match and the tests now assert both presence and absence.
+   while the unsigned branch omits both. Reporting a signer for an unsigned
+   pack would falsely imply something signed it. The docstring now matches;
+   tests assert both presence and absence.
 3. `verify-ed25519` returned a bare `{:verified? false}` when `.verify` said
    no: the one verification outcome an operator would read as blank. Added
    `:crypto/invalid-signature` and a test that every failure path carries a
    reason.
 4. Two follow-ons from (3): the catch-all used `(.getMessage e)`, which is nil
-   for some exceptions, and `:crypto/undecodable-signature` said "not valid
+   for some exceptions. Also, `:crypto/undecodable-signature` said "not valid
    base64" while `decode-signature` also rejects a non-string. Both fixed, with
    a test that forces the nil-message path.
 

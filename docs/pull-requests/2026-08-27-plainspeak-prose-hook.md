@@ -1,3 +1,9 @@
+<!--
+  Title: Miniforge.ai
+  Author: Christopher Lester (christopher@miniforge.ai)
+  Copyright 2025-2026 Christopher Lester. Licensed under Apache 2.0.
+-->
+
 # chore: lint staged prose with plainspeak in the pre-commit hook
 
 ## Overview
@@ -13,9 +19,9 @@ and LLM style artifacts, repo by repo, at the cheapest point.
 
 ## Changes in Detail
 
-- The hook lints only staged prose files, so legacy documents block
-  nothing until they are edited or renamed — a rename is a deliberate
-  touch, and per-line suppression covers grandfathered text.
+- The hook lints only staged prose files. Legacy documents block nothing
+  until edited or renamed. Renames are deliberate touches; per-line suppression
+  covers grandfathered text.
 - The step is skipped when the `plainspeak` binary is absent, so CI
   and fresh machines are unaffected.
 - Findings can be suppressed per line (`plainspeak:ignore`) or per

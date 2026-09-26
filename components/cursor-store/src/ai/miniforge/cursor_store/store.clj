@@ -139,7 +139,7 @@
           persisted-result (existing-cursors file)]
       (if (schema/failed? persisted-result)
         persisted-result
-        (let [persisted (merge (or (:cursors persisted-result) {}) normalized)]
+        (let [persisted (merge (:cursors persisted-result) normalized)]
           (if (empty? normalized)
             (do (when logger
                   (log/info logger :cursor-store :cursor-store/no-cursors

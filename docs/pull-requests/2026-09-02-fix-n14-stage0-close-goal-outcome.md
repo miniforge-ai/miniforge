@@ -1,3 +1,9 @@
+<!--
+  Title: Miniforge.ai
+  Author: Christopher Lester (christopher@miniforge.ai)
+  Copyright 2025-2026 Christopher Lester. Licensed under Apache 2.0.
+-->
+
 # fix: refuse a `close-goal` whose outcome the engine cannot impose
 
 ## Overview
@@ -26,9 +32,9 @@ carrying `:accepted`. `close-goal` is the exception, and
 ```
 
 `tx/goal-outcomes` is a set used as a function, so anything outside it yields
-nil. nil is also what the table yields for an operation with no status effect,
-and one line later the two are indistinguishable — the `(and status ...)`
-branch falls through to a plain `object/touch`.
+nil. The table also yields nil for operations with no status effect.
+The next line cannot distinguish them: `(and status ...)` falls through to
+a plain `object/touch`.
 
 Reproduced on 2026-09-02 against `798d53b7b`, with the full stage list
 `(into validation/concurrency-stages guards/guard-stages)`:
@@ -47,10 +53,10 @@ Here the transaction commits, the event log records a success, and only the
 object's status disagrees.
 
 It does not stay contained to the one operation.
-`termination/goals-terminal?` closes a run when every `:goal` object is
-terminal, so a synthesizer that believes it closed the last goal leaves the run
-to end on a budget boundary instead of on its §7 closing rule — and the log
-gives no reason why.
+`termination/goals-terminal?` closes a run when every `:goal` is terminal.
+A synthesizer may believe it closed the last goal, yet leave the run ending
+on a budget boundary instead of its §7 closing rule.
+The log gives no reason why.
 
 ## Changes in Detail
 
@@ -61,13 +67,12 @@ gives no reason why.
 routing, following the `invalid-creation` / `invalid-links` precedent:
 
 1. `:unknown-outcome` — a `close-goal` whose `:outcome` is not in
-   `tx/goal-outcomes`. An absent outcome is refused under the same reason as an
-   illegal one: both name a status the engine cannot impose, and both are
-   repaired by supplying one it can. The offending value is carried in
+   `tx/goal-outcomes`. Absent and illegal outcomes share a rejection reason.
+   Neither names an applicable status; supplying one repairs both.
+   The offending value is carried in
    `:outcome`, so an illegal one is legible as itself without splitting the
-   routing. An absent `:outcome` and an explicit nil both report `:outcome nil`,
-   which is the whole of the distinction between them — neither names a status,
-   and the repair does not differ.
+   routing. Absent `:outcome` and explicit nil both report `:outcome nil`.
+   Neither names a status, so the repair is identical.
 2. `:inapplicable-outcome` — the field on any other operation. `commit`
    ignores it there by design, which stops it taking effect but does not report
    it, leaving the same silence in the other direction. An explicit nil names
@@ -77,10 +82,10 @@ The stage is validated against `tx/goal-outcomes` rather than
 `object/status-model`'s `:goal` entry, because `goal-outcomes` is exactly what
 `apply-status` reads.
 
-It is placed last of the payload stages in `concurrency-stages`. Order among
-those is a preference rather than a constraint — the stage reads one scalar
-field of the operation it is handed — and it is last because it is the only one
-whose fault is silent absorption at commit rather than a crash there. It stays
+It is placed last of the payload stages in `concurrency-stages`.
+It reads one scalar field, so its order among those stages is a preference.
+It comes last because its fault is silently absorbed at commit rather than
+causing a crash. It stays
 after `check-schema`, so an operation outside the vocabulary is reported as an
 unknown operation rather than as a bad outcome.
 
@@ -92,10 +97,10 @@ them.
 ### `commit_test.clj`
 
 `closing-a-goal-requires-a-legal-outcome` already asserted the silent-absorption
-behavior as if it were the intended end state. The assertion is still right —
-commit must not invent a status for an outcome it cannot read — but the label
-now says validation refuses the payload before commit sees it, so the test reads
-as the layer beneath rather than as an endorsement.
+behavior as if it were intended. The assertion remains correct: commit must
+not invent a status for an unreadable outcome. The label now says validation
+refuses the payload before commit. The test describes the lower layer,
+not an endorsement of the outcome.
 
 ## Scope
 
@@ -104,9 +109,8 @@ as the layer beneath rather than as an endorsement.
 `object/legal-status?` and absorbed the same way. That is not a `close-goal`
 problem: every entry in `tx/status-effect` has it, so
 `{:op :answer-question :targets #{"claim-1"}}` absorbs identically. Closing it
-means deciding whether a graph-reading stage refuses the mismatch or
-`apply-status` throws on it, which is a larger change than this one and is
-tracked separately.
+requires choosing between graph-stage rejection and an `apply-status` exception.
+That larger change is tracked separately.
 
 ## Testing Plan
 
@@ -132,18 +136,18 @@ clojure -M:test -e "(require 'ai.miniforge.deliberation-workspace.validation-tes
   `:transaction/committed` event, the version unmoved, and the goal untouched
   rather than touched-but-still-open.
 
-Verified the tests fail without the fix: reverting the stage from
-`concurrency-stages` produces 20 failures across the two namespaces; with it,
-the component's 125 tests and 400 assertions pass. `bb lint:clj`,
+Reverting the stage from `concurrency-stages` produces 20 failures across
+the two namespaces. With the fix, 125 component tests and 400 assertions pass.
+`bb lint:clj`,
 `bb lint:stratum` and `bb commit-budget` (138/200) are clean;
 `validation.clj` stays at three strata.
 
 ## Deployment Plan
 
 Ships with the component. No migration: the component has no consumers outside
-its own tests yet, so nothing downstream changes shape. Runs that previously
-committed an unusable `close-goal` now log a rejection instead, which costs the
-same activation budget and surfaces a fault that was previously invisible.
+its own tests yet, so nothing downstream changes shape. Unusable `close-goal`
+operations now log rejections at the same activation cost. This exposes the
+previously invisible fault.
 
 ## Related Issues/PRs
 

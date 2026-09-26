@@ -1,13 +1,18 @@
+<!--
+  Title: Miniforge.ai
+  Author: Christopher Lester (christopher@miniforge.ai)
+  Copyright 2025-2026 Christopher Lester. Licensed under Apache 2.0.
+-->
+
 # fix(test): keep workflow tests out of the live checkpoint root
 
 ## Overview
 
 Workflow tests that run a pipeline with default options were writing
 their machine snapshots, manifests and phase checkpoints into the
-developer's real `~/.miniforge/checkpoints`. This PR adds one shared
-fixture that points the default checkpoint root at a fresh temp
-directory for the duration of a test and deletes it afterwards, and
-applies it to every test namespace that runs a pipeline unstubbed.
+developer's real `~/.miniforge/checkpoints`. This PR adds a shared fixture
+that redirects checkpoints to a fresh temp directory during each test and
+deletes it afterwards. It covers every test namespace running an unstubbed pipeline.
 
 Depends on `refactor/stratum-headings-workflow-runner-tests`, which
 lands the pre-commit stratum autofix's regroup of the same files so this
@@ -19,9 +24,9 @@ diff stays readable.
 execution state on every iteration. The root resolves through
 `checkpoint-store-paths/resolve-checkpoint-root`: an explicit
 `:checkpoint/root` in opts, else `[:workflow :checkpoint-root]` from
-merged config. A test that runs a pipeline with `{}` therefore lands in
-the same directory a real run uses, and the one that bench forensics
-(`eval/codex-traps`, `codex-gap` peg telemetry) read from.
+merged config. A pipeline test using `{}` therefore writes to the real run
+directory. Bench forensics also reads it (`eval/codex-traps` and `codex-gap`
+peg telemetry).
 
 On 2026-09-03 the live root on the reporting machine held ~187k run
 directories totalling 7.3 GB, the oldest from 2026-04-23. A 600-run
@@ -38,9 +43,9 @@ sample of the ones written that day, by manifest `:workflow/workflow-id`:
 
 The gate brick writes nothing (`clojure -M:poly test brick:gate`, 54
 namespaces, 0 directories against a canary root). The reported
-`brick:gate` observation coincided with other sessions in sibling
-worktrees running `bb pre-commit` and `bb test:integration`, which write
-to the same live root; a live-root count is not attributable to one run.
+`brick:gate` observation coincided with sibling sessions running `bb pre-commit`
+and `bb test:integration` against the same live root. That count cannot be
+attributed to one run.
 
 ## Changes in Detail
 
@@ -55,20 +60,18 @@ to the same live root; a live-root count is not attributable to one run.
    `use-fixtures`.
 
 The override is a `with-redefs` on the one resolution function, below
-config. Nothing above it works from inside a test. `MINIFORGE_HOME` is
-process environment a running JVM cannot change, and it would not move
+config. Nothing above it works from inside a test. A running JVM cannot
+change the `MINIFORGE_HOME` process environment. That variable would not move
 the root anyway: `config/default-user-config-fallback.edn` sets
-`[:workflow :checkpoint-root]` to `~/.miniforge/checkpoints`, so the
-merged config carries that value even under an empty home, and the
-home-derived fallback in `default-checkpoint-root` never runs. That is
-a separate defect, flagged for its own PR.
+`[:workflow :checkpoint-root]` to `~/.miniforge/checkpoints`.
+Merged config retains that value under an empty home, so the home-derived
+`default-checkpoint-root` fallback never runs. That separate defect needs its own PR.
 
 ### New: `projects/miniforge/test/.../checkpoint_root_support.clj`
 
-Project-level twin with an identical body. `bb test:integration` runs
-project tests with the project's own `deps.edn` as the classpath
-(project paths plus brick `src`), so a brick's `test` directory is not
-loadable from there.
+Project-level twin with an identical body. `bb test:integration` uses the
+project's `deps.edn`: project paths plus brick `src` directories.
+Brick `test` directories are therefore unavailable.
 
 ### Fixture applied
 

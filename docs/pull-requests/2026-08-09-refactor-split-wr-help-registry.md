@@ -1,12 +1,18 @@
+<!--
+  Title: Miniforge.ai
+  Author: Christopher Lester (christopher@miniforge.ai)
+  Copyright 2025-2026 Christopher Lester. Licensed under Apache 2.0.
+-->
+
 # refactor(cli): split workflow_runner/help/registry.clj — flag specs vs. subcommand registry (rule 210)
 
 ## Overview
 
 `bases/cli/src/ai/miniforge/cli/workflow_runner/help/registry.clj` measured 6
-real strata against the rule-210 budget of 3 (stratum-lint SL003). Move-only
-split into two namespaces along the seam the file already had: the flag-spec
-data that describes *what flags a subcommand takes*, and the registry that binds
-those specs to subcommand keys and derives the parent-level `--help` listings.
+real strata against the rule-210 budget of 3 (stratum-lint SL003).
+This move-only split follows the existing seam. Flag-spec data describes each
+subcommand's flags. The registry binds those specs to subcommand keys and
+derives parent-level `--help` listings.
 
 | Namespace | Vocabulary | Strata |
 |---|---|---|
@@ -29,8 +35,8 @@ wanted six. It was the last SL003 offender left in the `workflow_runner/help/`
 tree after #1719 extracted `help/flags.clj` and `help/usage.clj`.
 
 This also closes a finding deferred from #1719: `help-flag-keys` (in
-`help/flags.clj`) and `help-flag-spec` (in `registry.clj`) were two halves of one
-idea — what the `--help` flag *is*. They now sit together at Layer 0 of
+`help/flags.clj`) and `help-flag-spec` (in `registry.clj`) described the same flag.
+They now sit together at Layer 0 of
 `help/flags.clj`, alongside the two operations over it (`with-help-flag` adds it,
 `without-help-flag` strips it). `flags.clj` stays inside the 3-stratum budget,
 and `help-flag-spec` stays private — moving `with-help-flag` with it meant the
@@ -39,9 +45,9 @@ API surface did not have to widen.
 ## Changes in Detail
 
 **`help/flag_specs.clj` (new, 1 stratum).** The nine `*-flag-spec` defs, moved
-verbatim apart from `with-help-flag` becoming `flags/with-help-flag`. Because
-every def now references only a var in another namespace, they are all leaves of
-this file's reference graph and sit at a single Layer 0.
+verbatim apart from `with-help-flag` becoming `flags/with-help-flag`.
+Every def references only another namespace's var. They are leaves of this
+file's reference graph and sit at Layer 0.
 
 **`help/flags.clj` (3 strata, unchanged count).** Gains `help-flag-spec`
 (Layer 0, still `^:private`) and `with-help-flag` (Layer 1), both moved verbatim
@@ -65,9 +71,9 @@ grep over `bases/`, `components/`, `projects/`).
 ## Testing Plan
 
 - `stratum-lint` (pin `bef8657a`) plain: clean on all three files.
-- `stratum-lint --fix` dry run on scratch copies: zero changes to any of the
-  three, so the hand-written headings and metadata match the strata the linter
-  computes from each file's reference graph. (`--fix` behaviour on these files
+- `stratum-lint --fix` dry run on scratch copies: zero changes to all three.
+  The hand-written headings and metadata match the computed same-file strata.
+  (`--fix` behaviour on these files
   was itself sanity-checked against a deliberately mis-tagged probe copy, which
   it correctly collapsed.)
 - `clj-kondo`: 0 errors, 0 warnings on the touched files.
