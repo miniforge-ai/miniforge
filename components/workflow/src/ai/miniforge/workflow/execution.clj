@@ -233,10 +233,12 @@
 ;------------------------------------------------------------------------------ Layer 1
 
 (defn- ^{:stratum 1} sync-sub-worktree!
-  "Copy a DAG sub-worktree's changes into `parent-worktree`: tracked files
+  "Apply a DAG sub-worktree's changes to `parent-worktree`: tracked files
    that differ from HEAD, staged or not, and untracked files git does not
-   ignore. Returns nil on success, or a :fault anomaly naming both
-   worktrees when git exits non-zero or an IO step throws."
+   ignore. A listed path the sub-worktree no longer has was deleted there,
+   so it is deleted from the parent too. Returns nil on success, or a
+   :fault anomaly naming both worktrees when git exits non-zero or an IO
+   step throws."
   [parent-worktree sub-wt]
   (let [where {:sub-worktree sub-wt :parent-worktree parent-worktree}
         result (try+
@@ -246,11 +248,12 @@
                    (doseq [f (distinct (concat changed untracked))]
                      (let [src (io/file sub-wt f)
                            dst (io/file parent-worktree f)]
-                       (when (.exists src)
-                         (io/make-parents dst)
-                         (io/copy src dst)))))
+                       (cond
+                         (.exists src) (do (io/make-parents dst)
+                                           (io/copy src dst))
+                         (.exists dst) (io/delete-file dst)))))
                  (catch Exception e
-                   (anomaly/exception-anomaly :fault (messages/t :dag.sync/copy-failed) {} e)))]
+                   (anomaly/exception-anomaly :fault (messages/t :dag.sync/apply-failed) {} e)))]
     (when result
       (update result :anomaly/data merge where))))
 

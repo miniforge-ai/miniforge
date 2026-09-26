@@ -653,21 +653,21 @@
         (is (some #(= :workflow/sync-sub-worktree-failed (:log/event %)) @entries)
             "the failure is logged even when a caller ignores the result")))))
 
-(deftest ^{:stratum 2} apply-dag-success-copies-changed-and-untracked-files-test
-  (testing "tracked changes and untracked new files both reach the parent worktree"
+(deftest ^{:stratum 2} apply-dag-success-applies-changed-untracked-and-deleted-files-test
+  (testing "tracked changes, untracked new files and deletions all reach the parent worktree"
     (let [root   (isolation/temp-root!)
           sub-wt (str root "/sub")
           parent (str root "/parent")]
       (try
         (spit (doto (io/file sub-wt "src/changed.clj") io/make-parents) "changed")
         (spit (doto (io/file sub-wt "src/added.clj") io/make-parents) "added")
-        (.mkdirs (io/file parent))
+        (spit (doto (io/file parent "src/removed.clj") io/make-parents) "stale")
         (with-redefs [shell/sh (fn [& args]
                                  {:exit 0
                                   :err  ""
                                   :out  (if (some #{"ls-files"} args)
                                           "src/added.clj\n"
-                                          "src/changed.clj\n")})]
+                                          "src/changed.clj\nsrc/removed.clj\n")})]
           (let [result (exec/apply-dag-success
                         (assoc (ctx/create-context minimal-rollup-test-workflow {:task "Test"} {})
                                :execution/worktree-path parent)
@@ -680,7 +680,9 @@
             (is (not= :failed (:execution/status result)))
             (is (= "changed" (slurp (io/file parent "src/changed.clj"))))
             (is (= "added" (slurp (io/file parent "src/added.clj")))
-                "an untracked file the task created is copied too")))
+                "an untracked file the task created is copied too")
+            (is (not (.exists (io/file parent "src/removed.clj")))
+                "a tracked file the task deleted is deleted from the parent")))
         (finally (isolation/delete-tree! root))))))
 
 (use-fixtures :each

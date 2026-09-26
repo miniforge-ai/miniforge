@@ -89,8 +89,8 @@
   ;; DAG sub-worktree sync into the parent worktree
   :dag.sync/git-failed
   "Could not list a DAG sub-worktree's changes: git {args} exited {exit}"
-  :dag.sync/copy-failed
-  "Could not copy a DAG sub-worktree's changes into the parent worktree"
+  :dag.sync/apply-failed
+  "Could not apply a DAG sub-worktree's changes to the parent worktree"
 
   ;; Configurable workflow execution
   :configurable/missing-phase-handler
