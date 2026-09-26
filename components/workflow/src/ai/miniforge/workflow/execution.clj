@@ -694,12 +694,15 @@
                        (merge-sub-worktree-changes! parent-wt sub-wt-paths logger))]
     (if (anomaly/anomaly? sync-result)
       ;; Anomaly already logged inside merge-sub-worktree-changes!; transition
-      ;; the workflow to :failed so the runner loop receives a valid context map
-      ;; and the failure is recorded in :execution/errors.
+      ;; the workflow to :failed preserving dag-result and rolling up metrics
+      ;; (DAG work was completed, spend was real) so diagnostics are accurate.
       (transition-to-failed-fn
-       (update ctx :execution/errors conj
-               {:type    :sync-sub-worktrees-failed
-                :anomaly sync-result}))
+       (-> ctx
+           (assoc :execution/dag-result dag-result)
+           (roll-dag-metrics-into-execution dag-result)
+           (update :execution/errors conj
+                   {:type    :sync-sub-worktrees-failed
+                    :anomaly sync-result})))
       (let [;; Synthesize new-style implement phase result.
             synthesized-implement-result
             {:name   :implement
