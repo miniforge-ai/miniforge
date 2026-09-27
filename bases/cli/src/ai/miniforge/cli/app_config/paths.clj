@@ -65,6 +65,12 @@
 (defn ^{:stratum 2} logs-dir []
   (str (home-dir) "/logs"))
 
+(defn ^{:stratum 2} packs-dir
+  "Installed policy packs: what `mf policy install` writes and the
+   `:re-evaluate` evaluator loads."
+  []
+  (str (home-dir) "/packs"))
+
 (defn ^{:stratum 2} dashboard-port-file []
   (str (home-dir) "/dashboard.port"))
 

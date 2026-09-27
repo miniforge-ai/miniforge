@@ -23,4 +23,6 @@
   :log/github-fetch-runs-json-failed
   "[warn] fetch-workflow-runs: JSON parse failed for repo {repo}: {cause}"
   :anomaly/resume-refused
-  "Resume launch: {code}"}}
+  "Resume launch: {code}"
+  :anomaly/re-evaluate-refused
+  "Cannot re-evaluate {target}: {reason}"}}
