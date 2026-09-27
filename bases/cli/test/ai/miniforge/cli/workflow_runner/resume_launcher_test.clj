@@ -263,6 +263,19 @@
                                                               (throw (ex-info "unreadable" {}))))]
           (is (= launch (sut/await-start! (deps {}) launch)) "the next poll sees the start"))))))
 
+(deftest ^{:stratum 1} a-check-that-keeps-throwing-names-its-error-at-the-timeout-test
+  (with-temp-home
+    (fn []
+      (let [launch {:resume/run-id (random-uuid)
+                    :resume/intervention-id (str (random-uuid))
+                    :resume/pid 4242
+                    :resume/launched-at-ms (System/currentTimeMillis)}]
+        (with-redefs [records/correlated-event? (fn [& _] (throw (ex-info "events unreadable" {})))]
+          (let [data (:anomaly/data (sut/await-start! (deps {}) launch))]
+            (is (= :timeout (:failure/reason data)))
+            (is (= "events unreadable" (:failure/poll-error data))
+                "a timeout caused by a failing check says why")))))))
+
 (deftest ^{:stratum 1} a-child-recorded-only-before-its-spawn-is-found-by-its-pid-file-test
   (posix/on-posix-host with-temp-home
     (fn []
