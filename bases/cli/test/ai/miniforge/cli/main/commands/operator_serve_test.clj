@@ -60,10 +60,12 @@
   [events-dir f]
   (let [context-state (var-get #'control/meta-loop-ctx)
         consumer-state (var-get #'control/operator-consumer-handle)
-        originals [@context-state @consumer-state]
+        hook-state (var-get #'control/exit-hook-installed?)
+        originals [@context-state @consumer-state @hook-state]
         create-stream es/create-event-stream]
     (reset! context-state nil)
     (reset! consumer-state nil)
+    (reset! hook-state false)
     (try
       (with-redefs [es/default-events-dir (constantly events-dir)
                     es/create-event-stream (fn [& _] (create-stream {:sinks []}))
@@ -71,7 +73,10 @@
         (f consumer-state))
       (finally
         (reset! context-state (first originals))
-        (reset! consumer-state (second originals))))))
+        (reset! consumer-state (second originals))
+        ;; The stubbed stop-at-exit! installed no real hook, so a flag
+        ;; left true would stop later consumers in this JVM installing one.
+        (reset! hook-state (nth originals 2))))))
 
 ;------------------------------------------------------------------------------ Layer 1
 
