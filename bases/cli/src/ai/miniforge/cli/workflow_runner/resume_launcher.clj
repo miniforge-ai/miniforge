@@ -99,21 +99,24 @@
   "Poll to `:observed`, `:exited`, `:timeout` (past `deadline-ms`), or
    `:interrupted`. A check that throws counts as no evidence and a live
    child for that poll, so only the deadline ends a wait that keeps
-   failing."
-  [{:keys [started? alive? deadline-ms poll-ms]}]
+   failing; the last such error is kept in `last-error` (an atom) so a
+   timeout it caused can say why."
+  [{:keys [started? alive? deadline-ms poll-ms last-error]}]
   (let [poll (fn [check failed]
                (try (check)
                     (catch InterruptedException e (throw e))
-                    (catch Exception _ failed)))
-        started? #(poll started? false)
-        alive? #(poll alive? true)]
+                    (catch Exception e
+                      (some-> last-error (reset! (or (ex-message e) (.getName (class e)))))
+                      failed)))
+        safe-started? #(poll started? false)
+        safe-alive? #(poll alive? true)]
     (try
       (loop []
         (cond
-          (started?) :observed
+          (safe-started?) :observed
           ;; Re-check after death: a quick child can write and exit
           ;; between the two reads.
-          (not (alive?)) (if (started?) :observed :exited)
+          (not (safe-alive?)) (if (safe-started?) :observed :exited)
           (> (System/currentTimeMillis) deadline-ms) :timeout
           :else (do (Thread/sleep ^long poll-ms) (recur))))
       (catch InterruptedException _ :interrupted))))
@@ -168,13 +171,15 @@
   [{:keys [alive? kill! timeout-ms poll-ms]} launch]
   (let [{:resume/keys [run-id pid pid-started exited? intervention-id launched-at-ms log]}
         (records/with-child-pid launch)
+        last-error (atom nil)
         outcome (await-outcome
                  {:started? #(records/correlated-event? run-id intervention-id launched-at-ms)
                   ;; No pid known yet (the child has not written it):
                   ;; only the evidence or the deadline can decide.
                   :alive? #(and (not exited?) (or (nil? pid) (alive? pid pid-started)))
                   :deadline-ms (+ launched-at-ms timeout-ms)
-                  :poll-ms poll-ms})
+                  :poll-ms poll-ms
+                  :last-error last-error})
         ;; Read again after the wait: a child may write its pid late. The
         ;; launch handed back carries a pid recovered from the pid file,
         ;; so settlement records the child it actually found.
@@ -185,7 +190,8 @@
         kill-pid (when (= :timeout outcome)
                    (or pid (:resume/pid found) (:resume/pid (records/with-child-pid launch))))
         pid (or pid kill-pid (:resume/pid found))
-        details {:failure/reason outcome :failure/log log :resume/run-id run-id :resume/pid pid}]
+        details (cond-> {:failure/reason outcome :failure/log log :resume/run-id run-id :resume/pid pid}
+                  @last-error (assoc :failure/poll-error @last-error))]
     (some-> kill-pid kill!)
     (case outcome
       :observed found

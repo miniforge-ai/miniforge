@@ -198,6 +198,37 @@
             ((first @hooks))
             (is (= [::first-handle ::second-handle] @stops))))))))
 
+(deftest ^{:stratum 1} a-stop-during-a-start-stops-the-new-consumer
+  (with-clean-operator-state
+    (fn []
+      (let [stops (atom [])
+            starting (promise)
+            finish-start (promise)]
+        (with-redefs [agent/create-meta-loop-context (constantly {:event-stream ::operator-stream})
+                      supervisory/attach! (constantly nil)
+                      correlator/attach! (constantly nil)
+                      es/create-event-stream (constantly ::operator-stream)
+                      resume-launcher/launcher (constantly nil)
+                      operator/register-degradation-manager! (constantly nil)
+                      operator/register-policy-evaluator! (constantly nil)
+                      operator/start-operator-consumer! (fn [_opts]
+                                                          (deliver starting true)
+                                                          @finish-start
+                                                          ::handle)
+                      operator/stop-operator-consumer! #(swap! stops conj %)
+                      sut/stop-at-exit! (constantly nil)]
+          (let [starter (future (sut/start-process-control!))
+                _ (deref starting 5000 :timeout)
+                stopper (future (sut/stop-process-control!))]
+            (testing "the stop waits for the consumer being started"
+              (is (= :waiting (deref stopper 200 :waiting)))
+              (is (= [] @stops)))
+            (deliver finish-start true)
+            (deref starter 5000 :timeout)
+            (deref stopper 5000 :timeout)
+            (testing "then stops it, so nothing is left running"
+              (is (= [::handle] @stops)))))))))
+
 (deftest ^{:stratum 1} a-thread-without-cli-arguments-keeps-the-registered-launcher
   (with-clean-operator-state
     (fn []
