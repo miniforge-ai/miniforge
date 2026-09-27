@@ -146,6 +146,36 @@
                                {:flag flag})
       parsed)))
 
+(defn- ^{:stratum 0} run-recorded?
+  "True when `id` has a run directory under `events-dir`: archived, live
+   or legacy. Whether its event files parse does not matter; the reader
+   drops the ones that do not, but the run is there."
+  [events-dir id]
+  (some? (es/workflow-events-dir events-dir (str id))))
+
+(defn- ^{:stratum 0} resumable-in-place?
+  "True when a run resumed under `id` writes its events where readers of
+   `id` look: `id` has no run directory yet, or a live one. An archived
+   run's readers keep reading the archive, and a legacy run's are pointed
+   away from its own events by the new live directory."
+  [events-dir id]
+  (let [dir (es/workflow-events-dir events-dir (str id))]
+    (or (nil? dir) (= dir (es/workflow-dir events-dir (str id))))))
+
+(defn- ^{:stratum 0} checkpointed?
+  "True when `run-id` has a checkpoint. The loader answers nil for an id
+   with none. When it throws instead (ex-info for a checkpoint failing
+   its schema, or any other failure), whether the id is taken is unknown:
+   the resume is refused, naming the loader's error."
+  [run-id]
+  (try
+    (some? (workflow/load-checkpoint-data (str run-id)))
+    (catch Exception e
+      (let [error (or (ex-message e) (.getName (class e)))]
+        (response/throw-anomaly! :anomalies/fault
+                                 (messages/t :resume/run-id-unchecked {:run-id (str run-id) :error error})
+                                 {:run-id (str run-id) :error error})))))
+
 ;------------------------------------------------------------------------------ Layer 1
 
 (defn- ^{:stratum 1} throw-resume-anomaly!
@@ -200,20 +230,33 @@
    snapshot's own id, else a fresh one. A `--run-id` other than the
    snapshot's starts a new attempt: the snapshot's state under that id,
    so its events never land beside the finished run's (archived) ones.
-   The operator's resume launcher passes a fresh one on every retry. A
-   `--run-id` naming another run that has events under `events-dir` or a
-   checkpoint is refused: the attempt would write into that run."
+   The operator's resume launcher passes a fresh one on every retry.
+
+   A snapshot whose run is archived (or in the legacy layout) is not
+   resumed under its own id: it gets a fresh one, as a new attempt, and a
+   `--run-id` naming it is refused. Resumed in place, its events would go
+   to a live directory its readers do not read (see
+   `resumable-in-place?`). A `--run-id` naming another run that has a run
+   directory under `events-dir` or a checkpoint is refused: the attempt
+   would write into that run."
   [events-dir workflow-id machine-snapshot run-id-opt]
   (let [requested (uuid-option "--run-id" run-id-opt)
-        snapshot-id (:execution/id machine-snapshot)]
-    (if (and requested
-             (not (contains? #{(str workflow-id) (str snapshot-id)} (str requested)))
-             (or (seq (es/read-workflow-events-by-id events-dir (str requested)))
-                 (try (workflow/load-checkpoint-data (str requested)) (catch Exception _ true))))
-      (response/throw-anomaly! :anomalies/conflict
-                               (messages/t :resume/run-id-taken {:run-id run-id-opt})
-                               {:run-id run-id-opt})
-      (or requested snapshot-id (random-uuid)))))
+        snapshot-id (:execution/id machine-snapshot)
+        ;; Not a set literal: the two ids are usually equal, and a literal
+        ;; with duplicate elements throws.
+        own? (contains? (hash-set (str workflow-id) (str snapshot-id)) (str requested))
+        refuse! (fn [message-key]
+                  (response/throw-anomaly! :anomalies/conflict
+                                           (messages/t message-key {:run-id run-id-opt})
+                                           {:run-id run-id-opt}))]
+    (cond
+      (and requested own? (not (resumable-in-place? events-dir requested)))
+      (refuse! :resume/run-id-archived)
+      (and requested (not own?) (or (run-recorded? events-dir requested) (checkpointed? requested)))
+      (refuse! :resume/run-id-taken)
+      requested requested
+      (and snapshot-id (resumable-in-place? events-dir snapshot-id)) snapshot-id
+      :else (random-uuid))))
 
 ;------------------------------------------------------------------------------ Layer 2
 

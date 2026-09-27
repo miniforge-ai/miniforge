@@ -21,6 +21,7 @@
    [ai.miniforge.automation-edge-correlator.interface :as correlator]
    [clojure.test :refer [deftest is testing]]
    [clojure.java.io :as io]
+   [clojure.string :as str]
    [cheshire.core :as json]
    [ai.miniforge.cli.main.display :as main-display]
    [ai.miniforge.cli.workflow-runner.context :as context]
@@ -245,7 +246,7 @@
 (defn- ^{:stratum 0} resume-with
   "Run `resume-workflow` over `reconstructed` with every runtime seam
    stubbed; returns what reached `run-pipeline` and the control
-   registration."
+   registration. The workflow id is `::workflow-id` in `opts`, else fresh."
   [reconstructed opts]
   (let [captured (atom {})
         create-stream es/create-event-stream]
@@ -269,7 +270,7 @@
                   sut/run-pipeline (fn [workflow input run-opts]
                                      (swap! captured assoc :workflow workflow :input input :opts run-opts)
                                      {:execution/status :completed})]
-      (sut/resume-workflow (random-uuid) (assoc opts :quiet true))
+      (sut/resume-workflow (get opts ::workflow-id (random-uuid)) (assoc opts :quiet true))
       @captured)))
 
 ;------------------------------------------------------------------------------ Layer 1
@@ -374,14 +375,29 @@
             {:keys [opts registered]} (resume-with snapshotted {:run-id (str run-id)})]
         (is (= run-id registered (:workflow-id opts)))
         (is (= run-id (get-in opts [:resume-machine-snapshot :execution/id])))))
-    (testing "a --run-id naming a run that already has events or a checkpoint is refused"
+    (testing "a run whose snapshot carries the run's own id takes a new --run-id too"
+      (let [run-id (random-uuid)]
+        (is (= run-id (:registered (resume-with snapshotted {::workflow-id snapshot-id :run-id (str run-id)}))))
+        (is (= snapshot-id (:registered (resume-with snapshotted {::workflow-id snapshot-id
+                                                                  :run-id (str snapshot-id)}))))))
+    (testing "a --run-id naming a run that already has a checkpoint is refused"
       (let [taken (random-uuid)]
-        (with-redefs [es/read-workflow-events-by-id #(when (= (str taken) (str %2)) [{:event/type :workflow/started}])]
-          (is (thrown-with-msg? clojure.lang.ExceptionInfo #"already exists"
-                                (resume-with snapshotted {:run-id (str taken)}))))
         (with-redefs [workflow/load-checkpoint-data #(when (= (str taken) (str %)) {:machine-snapshot {}})]
           (is (thrown-with-msg? clojure.lang.ExceptionInfo #"already exists"
                                 (resume-with snapshotted {:run-id (str taken)}))))))
+    (testing "the checkpoint loader answers nil for an id with no checkpoint, which is free"
+      (let [run-id (random-uuid)]
+        (is (nil? (workflow/load-checkpoint-data (str run-id))))
+        (is (= run-id (:registered (resume-with snapshotted {:run-id (str run-id)}))))))
+    (testing "a loader that throws refuses the resume naming its error, not as a taken id"
+      (doseq [failure [(ex-info "Invalid checkpoint data" {:errors [:schema]})
+                       (java.io.IOException. "Permission denied")]]
+        (let [refused (with-redefs [workflow/load-checkpoint-data (fn [_] (throw failure))]
+                        (try+ (resume-with snapshotted {:run-id (str (random-uuid))})
+                              (catch [:anomaly/category :anomalies/fault] anomaly anomaly)))]
+          (is (= (ex-message failure) (:error refused)))
+          (is (str/includes? (str (:anomaly/message refused)) (ex-message failure)))
+          (is (not (str/includes? (str (:anomaly/message refused)) "already exists"))))))
     (testing "a --run-id that is not a UUID is refused"
       (is (thrown-with-msg? clojure.lang.ExceptionInfo #"--run-id must be a UUID"
                             (resume-with {:completed-phases []} {:run-id "not-a-uuid"}))))
@@ -401,6 +417,57 @@
                               (resume-with completed {:run-id "not-a-uuid"})))
         (is (thrown-with-msg? clojure.lang.ExceptionInfo #"--correlation-id must be a UUID"
                               (resume-with completed {:correlation-id "nope"})))))))
+
+(deftest ^{:stratum 1} a-run-id-with-a-run-directory-is-taken-test
+  (let [snapshotted {:completed-phases [:plan]
+                     :phase-results {:plan {}}
+                     :machine-snapshot {:execution/id (random-uuid)}}]
+    (with-temp-events-dir
+      (fn [base-dir]
+        (with-redefs [sut/events-dir (.getPath ^java.io.File base-dir)]
+          (doseq [[layout dir-of] [["live" #(io/file base-dir "live" %)]
+                                   ["archived" #(io/file base-dir "archived" %)]
+                                   ["legacy" #(io/file base-dir %)]]]
+            (testing (str "a " layout " run directory, even when no event file in it parses")
+              (let [taken (str (random-uuid))
+                    dir (doto ^java.io.File (dir-of taken) .mkdirs)]
+                (spit (io/file dir "20260420T000001Z-a.json") "{not transit")
+                (is (empty? (es/read-workflow-events-by-id base-dir taken)) "the reader drops it")
+                (is (thrown-with-msg? clojure.lang.ExceptionInfo #"already exists"
+                                      (resume-with snapshotted {:run-id taken})))))))))))
+
+(deftest ^{:stratum 1} an-archived-run-resumes-as-a-new-attempt-test
+  (with-temp-events-dir
+    (fn [base-dir]
+      (with-redefs [sut/events-dir (.getPath ^java.io.File base-dir)]
+        (let [snapshot-id (random-uuid)
+              snapshotted {:completed-phases [:plan]
+                           :phase-results {:plan {}}
+                           :machine-snapshot {:execution/id snapshot-id
+                                              :execution/metrics {:tokens 9 :cost-usd 1.5}}}
+              recorded! (fn [^java.io.File dir]
+                          (doseq [^java.io.File f (reverse (file-seq base-dir))
+                                  :when (not= f base-dir)]
+                            (.delete f))
+                          (.mkdirs dir)
+                          (spit (io/file dir "20260420T000001Z-a.json") "{}"))]
+          (doseq [[layout dir] [["archived" (io/file base-dir "archived" (str snapshot-id))]
+                                ["legacy" (io/file base-dir (str snapshot-id))]]]
+            (recorded! dir)
+            (testing (str "with no --run-id, a " layout " run resumes under a fresh id, where its readers will look")
+              (let [{:keys [opts registered]} (resume-with snapshotted {})]
+                (is (uuid? registered))
+                (is (not= snapshot-id registered))
+                (is (= registered (:workflow-id opts) (get-in opts [:resume-machine-snapshot :execution/id])))
+                (is (= 0 (get-in opts [:resume-machine-snapshot :execution/metrics :tokens]))
+                    "a new attempt: its cost is its own")))
+            (testing (str "a --run-id naming the " layout " run itself is refused")
+              (is (thrown-with-msg? clojure.lang.ExceptionInfo #"archived"
+                                    (resume-with snapshotted {:run-id (str snapshot-id)})))))
+          (testing "a live run still resumes under its own id"
+            (recorded! (io/file base-dir "live" (str snapshot-id)))
+            (is (= snapshot-id (:registered (resume-with snapshotted {}))))
+            (is (= snapshot-id (:registered (resume-with snapshotted {:run-id (str snapshot-id)}))))))))))
 
 (deftest ^{:stratum 1} read-event-file-reads-per-event-json-from-workflow-dir-test
   ;; Regression guard for the iter-20 resume bug. Before this fix,

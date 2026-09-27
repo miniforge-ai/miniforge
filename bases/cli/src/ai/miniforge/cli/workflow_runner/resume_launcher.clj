@@ -22,14 +22,14 @@
    `:launch!` runs inside the consumer's pass and only spawns: the
    retried run is its own `mf resume` process, started in the directory
    the run was started from, with output in
-   `<home>/logs/resume-<run-id>.log`. It is started under `nohup` (and
-   `setsid` where installed) as an asynchronous `/bin/sh` command, so a
-   terminal Ctrl-C or hangup aimed at this process does not reach it,
-   and it keeps running when this process exits. Before it runs the
-   command, the child writes its own pid to
-   `<home>/logs/resume-<run-id>.pid`, so it can be found and killed even
-   when this process dies before recording it. What it refuses, and why
-   a redelivered intervention never spawns twice, is in `resume-records`.
+   `<home>/logs/resume-<run-id>.log`, under `nohup` and in a session
+   (`setsid`) or process group (job control) of its own: a Ctrl-C, a
+   hangup or a signal to this process's group does not reach it, and it
+   outlives this process. Before it runs the command, the child writes
+   its own pid to `<home>/logs/resume-<run-id>.pid`, so it can be found
+   and killed even when this process dies before recording it. What it
+   refuses, and why a redelivered intervention never spawns twice, is in
+   `resume-records`.
 
    Native Windows has no `/bin/sh` to detach through, so there is no
    launcher there: a retry fails `:no-resume-launcher`.
@@ -39,7 +39,8 @@
    the intervention id as its correlation id. A child that exits first
    did not start; one still silent at the deadline is killed and did not
    start; an interrupted wait (the process stopping) leaves the child
-   running and reports the start as unverified."
+   running and reports `:resume/pending?`, for the verification to be
+   finished after a restart."
   (:require
    [ai.miniforge.cli.workflow-runner.resume-records :as records]
    [clojure.java.io :as io]
@@ -55,18 +56,20 @@
 (def ^{:stratum 0} ^:private observe-poll-ms 250)
 
 (def ^{:stratum 0} ^:private spawn-script
-  ;; $1 is the log file, $2 the pid file; the rest is the command. `&`
-  ;; makes it an asynchronous list of a non-interactive shell, which
-  ;; POSIX starts with SIGINT/SIGQUIT ignored and stdin from /dev/null;
-  ;; `nohup` ignores SIGHUP; `setsid` (Linux) also leaves this process
-  ;; group. The inner shell writes its pid (whole: a temp file, then a
+  ;; $1 is the log file, $2 the pid file; the rest is the command.
+  ;; `nohup` ignores SIGHUP; stdin of an asynchronous list is /dev/null.
+  ;; `setsid` (Linux) gives the command a session of its own; without it
+  ;; (macOS), `set -m` turns on job control so the background job gets a
+  ;; process group of its own. Never both: under job control the job
+  ;; leads its group, and setsid would then fork and `$!` name the wrong
+  ;; process. The inner shell writes its pid (whole: a temp file, then a
   ;; rename), then execs the command in place, so the pid file names the
   ;; command. `$!` is the same pid:
   ;; setsid and nohup exec in place too.
   (str "log=$1; pidfile=$2; shift 2; child='echo $$ >\"$0.tmp\" && mv \"$0.tmp\" \"$0\"; exec \"$@\"'; "
        "if command -v setsid >/dev/null 2>&1; "
        "then setsid nohup /bin/sh -c \"$child\" \"$pidfile\" \"$@\" >>\"$log\" 2>&1 & "
-       "else nohup /bin/sh -c \"$child\" \"$pidfile\" \"$@\" >>\"$log\" 2>&1 & fi; echo $!"))
+       "else set -m; nohup /bin/sh -c \"$child\" \"$pidfile\" \"$@\" >>\"$log\" 2>&1 & fi; echo $!"))
 
 (defn ^{:stratum 0} detachable-platform?
   "True where a child can be detached through `/bin/sh`: not native
@@ -96,21 +99,24 @@
   "Poll to `:observed`, `:exited`, `:timeout` (past `deadline-ms`), or
    `:interrupted`. A check that throws counts as no evidence and a live
    child for that poll, so only the deadline ends a wait that keeps
-   failing."
-  [{:keys [started? alive? deadline-ms poll-ms]}]
+   failing; the last such error is kept in `last-error` (an atom) so a
+   timeout it caused can say why."
+  [{:keys [started? alive? deadline-ms poll-ms last-error]}]
   (let [poll (fn [check failed]
                (try (check)
                     (catch InterruptedException e (throw e))
-                    (catch Exception _ failed)))
-        started? #(poll started? false)
-        alive? #(poll alive? true)]
+                    (catch Exception e
+                      (some-> last-error (reset! (or (ex-message e) (.getName (class e)))))
+                      failed)))
+        safe-started? #(poll started? false)
+        safe-alive? #(poll alive? true)]
     (try
       (loop []
         (cond
-          (started?) :observed
+          (safe-started?) :observed
           ;; Re-check after death: a quick child can write and exit
           ;; between the two reads.
-          (not (alive?)) (if (started?) :observed :exited)
+          (not (safe-alive?)) (if (safe-started?) :observed :exited)
           (> (System/currentTimeMillis) deadline-ms) :timeout
           :else (do (Thread/sleep ^long poll-ms) (recur))))
       (catch InterruptedException _ :interrupted))))
@@ -139,7 +145,7 @@
    refused while any launch in it is running, when an attempt of the
    workflow has since run (naming the newest, to retry instead), while
    any member has a live runner, or when its origin is unknown."
-  [{:keys [command spawn!]} plan]
+  [{:keys [command spawn! timeout-ms]} plan]
   (let [workflow-id (str (:resume/workflow-id plan))
         root (records/lineage-root workflow-id)
         prior (records/launch-record root)
@@ -147,7 +153,7 @@
         origin (or (records/recorded-origin workflow-id) (records/recorded-origin root))]
     (cond
       (= (str (:resume/intervention-id plan)) (:resume/intervention-id prior)) prior
-      (records/launch-running? prior) (records/failure :conflict :resume-in-flight
+      (records/launch-running? prior timeout-ms) (records/failure :conflict :resume-in-flight
                                                        {:resume/pid (:resume/pid prior)})
       (and latest (not= latest workflow-id)) (records/failure :conflict :resume-superseded
                                                               {:resume/latest-attempt latest})
@@ -158,26 +164,38 @@
                             #(spawn! (resume-argv command plan %1) %2 %3 origin)))))
 
 (defn ^{:stratum 1} await-start!
-  "`:await-start!`: the launch once its child has shown itself, else a
-   failure anomaly naming why, with the child's log. A child whose pid
-   was never recorded is found by its pid file."
+  "`:await-start!`: the launch once its child has shown itself; a
+   failure anomaly naming why, with the child's log; or, when the wait
+   is interrupted, `{:resume/pending? true}`. A child whose pid was
+   never recorded is found by its pid file."
   [{:keys [alive? kill! timeout-ms poll-ms]} launch]
   (let [{:resume/keys [run-id pid pid-started exited? intervention-id launched-at-ms log]}
         (records/with-child-pid launch)
+        last-error (atom nil)
         outcome (await-outcome
                  {:started? #(records/correlated-event? run-id intervention-id launched-at-ms)
                   ;; No pid known yet (the child has not written it):
                   ;; only the evidence or the deadline can decide.
                   :alive? #(and (not exited?) (or (nil? pid) (alive? pid pid-started)))
                   :deadline-ms (+ launched-at-ms timeout-ms)
-                  :poll-ms poll-ms})
-        ;; Read again at the deadline: a child may write its pid late.
-        pid (or pid (:resume/pid (records/with-child-pid launch)))
-        details {:failure/reason outcome :failure/log log :resume/run-id run-id :resume/pid pid}]
-    (when (and pid (= :timeout outcome)) (kill! pid))
+                  :poll-ms poll-ms
+                  :last-error last-error})
+        ;; Read again after the wait: a child may write its pid late. The
+        ;; launch handed back carries a pid recovered from the pid file,
+        ;; so settlement records the child it actually found.
+        found (records/with-child-pid launch)
+        ;; At the deadline, the pid file is read once more right at the
+        ;; kill: a child that renames it in just after the read above is
+        ;; still killed, not left running with its launch reported failed.
+        kill-pid (when (= :timeout outcome)
+                   (or pid (:resume/pid found) (:resume/pid (records/with-child-pid launch))))
+        pid (or pid kill-pid (:resume/pid found))
+        details (cond-> {:failure/reason outcome :failure/log log :resume/run-id run-id :resume/pid pid}
+                  @last-error (assoc :failure/poll-error @last-error))]
+    (some-> kill-pid kill!)
     (case outcome
-      :observed launch
-      :interrupted (records/failure :unavailable :resume-unverified details)
+      :observed found
+      :interrupted {:resume/pending? true}
       (records/failure :unavailable :resume-not-started details))))
 
 ;------------------------------------------------------------------------------ Layer 2
@@ -205,4 +223,5 @@
                  :timeout-ms observe-timeout-ms
                  :poll-ms observe-poll-ms}]
        {:launch! (partial launch! deps)
-        :await-start! (partial await-start! deps)}))))
+        :await-start! (partial await-start! deps)
+        :settle! records/settle!}))))
