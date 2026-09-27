@@ -103,10 +103,15 @@
   (operator/register-policy-evaluator! policy-evaluator/evaluate))
 
 (defn- ^{:stratum 0} stop-held-consumer!
-  "Stop the consumer `holder` holds and clear it. Idempotent."
+  "Stop the consumer `holder` holds and clear it. Idempotent.
+
+   Takes the lock a starter holds while it creates and publishes a
+   consumer, so a stop that arrives mid-start waits for the new handle
+   and stops it rather than finding nil and leaving it running."
   [holder]
-  (when-let [handle (first (reset-vals! holder nil))]
-    (operator/stop-operator-consumer! handle)))
+  (locking holder
+    (when-let [handle (first (reset-vals! holder nil))]
+      (operator/stop-operator-consumer! handle))))
 
 (defn- ^{:stratum 0} stop-at-exit!
   "Run `stop!` when the process exits — a runner exits with its consumer
