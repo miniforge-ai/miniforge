@@ -24,11 +24,16 @@
 (defn- ^{:stratum 0} domain-result [id result]
   {:gate/id id :gate/passed? (true? (:passed? result))})
 
-(defn- ^{:stratum 0} decision [checks policy]
-  (gate/gates->envelope checks (nil? policy)
-                        {:pins/pack-revision (:policy/revision policy)
-                         :pins/rule-ids (mapv :gate (:results checks))
-                         :pins/event-watermark (:policy/event-watermark policy)}))
+(defn- ^{:stratum 0} decision [checks policy artifact-nil?]
+  (let [evaluated (cond-> checks
+                    (nil? policy)
+                    (update :results conj
+                            {:gate :opsv/runtime-policy :passed? false
+                             :errors [{:message (msg/ts :governance/missing-policy)}]}))]
+    (gate/gates->envelope evaluated artifact-nil?
+                          {:pins/pack-revision (:policy/revision policy)
+                           :pins/rule-ids (mapv :gate (:results checks))
+                           :pins/event-watermark (:policy/event-watermark policy)})))
 
 ;------------------------------------------------------------------------------ Layer 1
 
@@ -49,7 +54,7 @@
       (let [checks (evaluate-checks pack verified policy)]
         {:opsv/gate-checks checks
          :opsv/gate-results (mapv domain-result opsv/opsv-gate-ids (:results checks))
-         :opsv/decision-envelope (decision checks policy)}))))
+         :opsv/decision-envelope (decision checks policy (nil? pack))}))))
 
 (comment
   (evaluate {} {}))

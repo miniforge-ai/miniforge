@@ -4,6 +4,7 @@
 (ns ai.miniforge.phase-opsv.governance-test
   (:require [ai.miniforge.decision-envelope.interface :as envelope]
             [ai.miniforge.opsv.interface :as opsv]
+            [ai.miniforge.phase-opsv.governance :as governance]
             [ai.miniforge.phase-opsv.governance-fixtures :as fixture]
             [ai.miniforge.phase-opsv.interface :as phase]
             [clojure.test :refer [deftest is]]))
@@ -30,8 +31,8 @@
                 (assoc-in [:execution/input :opsv/governance] fixture/policy))
         output (phase/actuate ctx)]
     (is (= :deny (get-in output [:opsv/decision-envelope :envelope/decision])))
-    (is (some #(= :reason/missing-artifact (:reason/code %))
-              (get-in output [:opsv/decision-envelope :envelope/reasons])))
+    (is (not-any? #(= :reason/missing-artifact (:reason/code %))
+                  (get-in output [:opsv/decision-envelope :envelope/reasons])))
     (is (false? (get-in output [:opsv/gate-checks :passed?])))))
 
 (deftest ^{:stratum 0} malformed-runtime-policy-is-rejected-test
@@ -87,6 +88,18 @@
       (let [output (phase/actuate (fixture/context))]
         (is (= 1 (count @created)))
         (is (= (first @created) (:opsv/decision-envelope output)))))))
+
+(deftest ^{:stratum 0} missing-policy-and-missing-pack-have-distinct-reasons-test
+  (let [context (fixture/context)
+        missing-pack (governance/evaluate (update context :execution/input dissoc :opsv/experiment-pack)
+                                          fixture/verified)
+        missing-policy (governance/evaluate (update context :execution/opts dissoc :opsv/governance)
+                                            fixture/verified)]
+    (is (some #(= :reason/missing-artifact (:reason/code %))
+              (get-in missing-pack [:opsv/decision-envelope :envelope/reasons])))
+    (is (not-any? #(= :reason/missing-artifact (:reason/code %))
+                  (get-in missing-policy [:opsv/decision-envelope :envelope/reasons])))
+    (is (= :deny (get-in missing-policy [:opsv/decision-envelope :envelope/decision])))))
 
 (comment
   (phase/actuate (fixture/context)))

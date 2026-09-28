@@ -33,7 +33,8 @@ Provider and issuance wiring remain separate dependent changes.
 
 ## Testing plan
 
-All 19 phase tests / 179 assertions pass in both consuming projects.
+All 20 phase tests / 182 assertions pass in both consuming projects.
+Missing experiment artifacts and absent runtime policy have distinct reasons.
 Cover all-pass evaluation, independent gate failures, missing and malformed policy,
 caller policy spoofing, evidence replacement and retained recommendation semantics.
 The scoped standards scan reports zero findings across 28 files. Stratum and
