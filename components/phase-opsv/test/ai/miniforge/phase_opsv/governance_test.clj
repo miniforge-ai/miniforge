@@ -4,10 +4,12 @@
 (ns ai.miniforge.phase-opsv.governance-test
   (:require [ai.miniforge.decision-envelope.interface :as envelope]
             [ai.miniforge.event-stream.interface :as events]
+            [ai.miniforge.evidence-bundle.interface :as evidence]
             [ai.miniforge.opsv.interface :as opsv]
             [ai.miniforge.phase-opsv.governance :as governance]
             [ai.miniforge.phase-opsv.governance-fixtures :as fixture]
             [ai.miniforge.phase-opsv.interface :as phase]
+            [ai.miniforge.phase-opsv.lifecycle :as lifecycle]
             [clojure.test :refer [deftest is]]))
 
 ;------------------------------------------------------------------------------ Layer 0
@@ -116,6 +118,25 @@
       (is (= 12 (count published)))
       (is (every? #(= (:execution/id ctx) (:workflow/id %)) published))
       (is (empty? (events/get-events other))))))
+
+(deftest ^{:stratum 0} decision-event-is-correlated-in-durable-evidence-assembly-test
+  (let [ctx (fixture/context)
+        store (evidence/create-opsv-assembly-store)
+        assembly (evidence/allocate-opsv-assembly! store (:execution/id ctx))
+        bundle-id (:evidence-bundle/id assembly)
+        stream (events/create-event-stream {:sinks []})
+        configured (-> ctx
+                       (assoc :event-stream stream :opsv/evidence-assembly-store store)
+                       (assoc-in [:execution/input :opsv/evidence-bundle-id] bundle-id))
+        interceptor (lifecycle/interceptor {} :opsv/actuate phase/actuate)
+        result ((:leave interceptor) ((:enter interceptor) configured))
+        output (get-in result [:phase :result :output])
+        decision-event (first (filter #(= :gate/decision (:event/type %)) (events/get-events stream)))
+        durable (get-in result [:execution/input :opsv/evidence-assembly])]
+    (is (= :completed (get-in result [:phase :status])))
+    (is (= (:opsv/decision-envelope output) (:gate/decision-envelope decision-event)))
+    (is (= bundle-id (:opsv/evidence-bundle-id decision-event)))
+    (is (contains? (:opsv/event-refs durable) (:event/id decision-event)))))
 
 (comment
   (phase/actuate (fixture/context)))

@@ -19,14 +19,22 @@
   "Publish projected N3 events at successful OPSV phase boundaries."
   (:require
    [ai.miniforge.anomaly.interface :as anomaly]
+   [ai.miniforge.decision-envelope.interface :as envelope]
    [ai.miniforge.evidence-bundle.interface :as evidence]
    [ai.miniforge.event-stream.interface :as event-stream]
    [ai.miniforge.event-stream.interface.opsv :as opsv-event]
    [ai.miniforge.phase-opsv.event-projection :as projection]
    [ai.miniforge.phase-opsv.messages :as msg]
-   [ai.miniforge.phase-opsv.runtime-context :as context]))
+   [ai.miniforge.phase-opsv.runtime-context :as context]
+   [malli.core :as m]))
 
 ;------------------------------------------------------------------------------ Layer 0
+
+(def ^{:stratum 0} DecisionEvent
+  [:map [:event/type [:= :gate/decision]]
+   [:event/id :uuid] [:event/timestamp inst?] [:workflow/id :uuid]
+   [:opsv/evidence-bundle-id :uuid] [:gate/phase [:= :opsv/actuate]]
+   [:envelope/id :uuid] [:gate/decision-envelope envelope/DecisionEnvelope]])
 
 (defn- ^{:stratum 0} evidence-id
   [ctx]
@@ -67,13 +75,15 @@
                       :event/type (:event/type event)
                       :evidence/result assembly})))
 
-(defn- ^{:stratum 0} validation-anomaly
+;------------------------------------------------------------------------------ Layer 1
+
+(defn- ^{:stratum 1} validation-anomaly
   [event]
-  (when-let [explanation (opsv-event/explain-invalid-event event)]
+  (when-let [explanation (if (= :gate/decision (:event/type event))
+                          (m/explain DecisionEvent event)
+                          (opsv-event/explain-invalid-event event))]
     (anomaly/validation-anomaly
      (msg/ts :event/invalid) :opsv/event event explanation)))
-
-;------------------------------------------------------------------------------ Layer 1
 
 (defn- ^{:stratum 1} publish-event!
   [ctx stream-value event]
