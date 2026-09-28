@@ -37,6 +37,7 @@
    [:pr/head-sha GitObjectId]
    [:pr/title NonBlankString]
    [:opsv/policy-diff NonBlankString]
+   [:opsv/policy-hash {:optional true} [:re #"\A[0-9a-f]{64}\z"]]
    [:opsv/evidence-bundle-id :uuid]
    [:opsv/rollback-instructions NonBlankString]
    [:opsv/verification-result [:and opsv/VerificationResult EvidenceValue]]])

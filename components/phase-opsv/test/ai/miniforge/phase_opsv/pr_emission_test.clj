@@ -23,6 +23,8 @@
     (is (= :pr-only (:effective-actuation-mode record)))
     (is (= :succeeded (:effect/state transaction)))
     (is (= :granted (:effect/authority transaction)))
+    (is (= (get-in runtime [:target :opsv/policy-hash])
+           (get-in transaction [:effect/proposal :opsv/policy-hash])))
     (is (= (:grant/id issued) (:effect/grant-id transaction)))
     (is (= (get-in output [:opsv/decision-envelope :envelope/id]) (:effect/envelope-id transaction)))
     (is (= ["https://github.com/example/opsv/pull/17"] (:pr-refs record)))

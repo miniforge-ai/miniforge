@@ -8,7 +8,8 @@
             [ai.miniforge.opsv-actuation.interface :as actuation]
             [ai.miniforge.phase-opsv.flow :as flow]
             [ai.miniforge.phase-opsv.pr-audit :as audit]
-            [ai.miniforge.phase-opsv.pr-dispatch :as dispatch]))
+            [ai.miniforge.phase-opsv.pr-dispatch :as dispatch]
+            [ai.miniforge.phase-opsv.pr-stop :as stop]))
 
 ;------------------------------------------------------------------------------ Layer 0
 
@@ -35,8 +36,10 @@
 
 (defn ^{:stratum 2} execute! [runtime ctx candidate decision issued now]
   (flow/continue
-   (actuation/propose-pr! (:effects-directory runtime) candidate (:grant/id issued) decision now)
-   #(flow/continue (audit/record! ctx %) (partial commit! runtime ctx issued))))
+   (stop/abandon! runtime issued now
+                  (actuation/propose-pr! (:effects-directory runtime) candidate (:grant/id issued) decision now))
+   #(flow/continue (stop/abandon! runtime issued now (audit/record! ctx %))
+                   (partial commit! runtime ctx issued))))
 
 (comment
   (execute! {} {} {} {} {} nil))

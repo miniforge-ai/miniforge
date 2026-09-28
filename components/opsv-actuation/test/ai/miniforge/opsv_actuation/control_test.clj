@@ -41,10 +41,28 @@
 
 (deftest ^{:stratum 0} invalid-runtime-handles-do-not-invoke-the-operation-test
   (let [calls (atom 0)]
-    (doseq [fence [nil {} (atom {})]]
+    (doseq [fence [nil {} (atom {}) (Object.) {:state (atom {:stopped? false})}]]
       (is (anomaly/anomaly? (actuation/at-mutation-boundary! fence #(swap! calls inc))))
       (is (anomaly/anomaly? (actuation/stop-mutations! fence))))
     (is (zero? @calls))))
+
+(deftest ^{:stratum 0} handles-do-not-expose-mutable-state-test
+  (let [fence (actuation/create-mutation-fence)]
+    (is (not (associative? fence)))
+    (is (nil? (get fence :state)))
+    (actuation/stop-mutations! fence)
+    (is (false? (:stopped? (assoc (actuation/mutation-status fence) :stopped? false))))
+    (is (true? (:stopped? (actuation/mutation-status fence))))))
+
+(deftest ^{:stratum 0} interruption-preserves-thread-status-and-releases-admission-test
+  (let [fence (actuation/create-mutation-fence)]
+    (try
+      (let [result (actuation/at-mutation-boundary! fence #(throw (InterruptedException.)))
+            interrupted? (.isInterrupted (Thread/currentThread))]
+        (is (anomaly/anomaly? result))
+        (is interrupted?))
+      (is (= {:stopped? false :in-flight 0} (actuation/mutation-status fence)))
+      (finally (Thread/interrupted)))))
 
 (comment
   (actuation/mutation-status (actuation/create-mutation-fence)))

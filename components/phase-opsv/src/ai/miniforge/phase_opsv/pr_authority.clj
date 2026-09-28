@@ -28,16 +28,17 @@
               (assoc (decision/input ctx verified) :pr-capability-valid? (grant/authorized? checked)))]
     (cond
       (stop/stopped? runtime) (stop/revoke! runtime issued now)
-      (anomaly/anomaly? mode) mode
+      (anomaly/anomaly? mode) (stop/abandon! runtime issued now mode)
       (= :pr-only mode) (transaction/execute! runtime ctx candidate (:opsv/decision-envelope verified) issued now)
-      :else (anomaly/anomaly :unauthorized (msg/ts :pr/authority-refused) {}))))
+      :else (stop/abandon! runtime issued now
+                           (anomaly/anomaly :unauthorized (msg/ts :pr/authority-refused) {})))))
 
 ;------------------------------------------------------------------------------ Layer 1
 
 (defn- ^{:stratum 1} issue! [runtime ctx prepared now]
   (let [directory (:authority-directory runtime)
         issued (grant/issue-for-effect directory (request ctx prepared) now)]
-    (flow/continue issued (partial grant/register! directory))))
+    (flow/continue issued #(stop/abandon! runtime % now (grant/register! directory %)))))
 
 ;------------------------------------------------------------------------------ Layer 2
 

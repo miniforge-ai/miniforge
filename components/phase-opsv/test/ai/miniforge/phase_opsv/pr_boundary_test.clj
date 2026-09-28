@@ -112,5 +112,23 @@
     (is (= :failed (get-in result [:anomaly/data :effect/transaction :effect/state])))
     (is (= ["GET"] (mapv #(get-in % [:arguments 6]) @calls)))))
 
+(deftest ^{:stratum 0} stop-during-post-revokes-without-rewriting-provider-outcome-test
+  (doseq [uncertain? [false true]]
+    (let [{:keys [ctx runtime calls]} (fixture/setup)
+          command (fn [options args]
+                    (let [response (fixture/command calls options args)]
+                      (if (= "POST" (nth args 6))
+                        (do (actuation/stop-mutations! (:fence runtime))
+                            (if uncertain? {:exit 1} response))
+                        response)))
+          output (phase/actuate (assoc-in ctx [:execution/opts :opsv/pr-execution :provider :run-command]
+                                         command))
+          transaction (or (first (:opsv/effect-transactions output))
+                          (get-in output [:anomaly/data :effect/transaction]))
+          issued (grant/current (:authority-directory runtime) (:effect/grant-id transaction))]
+      (is (= (if uncertain? :unknown-outcome :succeeded) (:effect/state transaction)))
+      (is (some? (:grant/revoked-at issued)))
+      (is (= 2 (count @calls))))))
+
 (comment
   (phase/actuate (:ctx (fixture/setup))))
