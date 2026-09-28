@@ -35,10 +35,11 @@
       (finally (deliver settle :cleanup) (future-cancel running)))))
 
 (deftest ^{:stratum 0} callback-failure-does-not-leak-admission-test
-  (let [fence (actuation/create-mutation-fence)]
+  (doseq [failure [(ex-info "test failure" {}) (AssertionError. "test assertion")]]
+   (let [fence (actuation/create-mutation-fence)]
     (is (anomaly/anomaly?
-         (actuation/at-mutation-boundary! fence #(throw (ex-info "test failure" {})))))
-    (is (= {:stopped? false :in-flight 0} (actuation/mutation-status fence)))))
+         (actuation/at-mutation-boundary! fence #(throw failure))))
+    (is (= {:stopped? false :in-flight 0} (actuation/mutation-status fence))))))
 
 (deftest ^{:stratum 0} invalid-runtime-handles-do-not-invoke-the-operation-test
   (let [calls (atom 0)]

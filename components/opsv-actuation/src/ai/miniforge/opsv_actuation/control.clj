@@ -22,7 +22,7 @@
         (let [failure (boundary-failure)]
           (.interrupt (Thread/currentThread))
           failure))
-      (catch Exception _
+      (catch Throwable _
         (boundary-failure))
       (finally (fences/release! fence)))
     (anomaly/anomaly :unavailable (msg/ts :execution/stopped) {})))

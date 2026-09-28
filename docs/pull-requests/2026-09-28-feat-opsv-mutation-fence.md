@@ -28,7 +28,7 @@ validated public interface. No application or provider dependency is introduced.
 - Factory-owned opaque handles keep mutable state out of caller reach.
 - Weak-key storage releases abandoned handles; immutable snapshots cannot reopen them.
 - In-flight counts unwind in `finally`, including callback exceptions.
-- Exceptions return localized anomaly data without leaking callback details.
+- Thrown callback failures return localized anomaly data without leaking details.
 - Interrupted callbacks restore the thread interrupt flag after building the anomaly.
 - Stopping does not promise network cancellation or rollback.
 
@@ -36,7 +36,7 @@ validated public interface. No application or provider dependency is introduced.
 
 Seven fence tests cover admission, monotonic stop, in-flight completion, exceptions,
 opaque handles, interruption and coordinated admission/stop races.
-All 28 coordinator tests / 284 assertions pass.
+All 28 coordinator tests / 286 assertions pass, including JVM Error conversion.
 Polylith, kondo, strata, smoke tests and compatibility checks pass without overrides.
 Handle storage and operation execution occupy separate namespaces within three layers.
 
