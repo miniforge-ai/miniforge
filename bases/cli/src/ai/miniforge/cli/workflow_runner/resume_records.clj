@@ -100,8 +100,9 @@
   [pid]
   (when pid (.orElse (java.lang.ProcessHandle/of (long pid)) nil)))
 
-(defn- ^{:stratum 0} start-instant
-  "When the process started: a recycled pid is not the recorded process."
+(defn ^{:stratum 0} start-instant
+  "When the process started: a recycled pid is not the recorded process.
+   Nil when the platform does not report it."
   [^java.lang.ProcessHandle handle]
   (some-> handle .info .startInstant (.orElse nil) str))
 
@@ -113,7 +114,13 @@
 (defn- ^{:stratum 0} pid-file-child
   "The live process `pid` names, when it started between `launched-at-ms`
    and the writing of `f`, as the child that wrote it did. A process that
-   took the pid later, or one older than the launch, is not that child."
+   took the pid later, or one older than the launch, is not that child.
+
+   Both bounds allow 2 s for coarse clocks (file mtimes, start instants).
+   So a process that took the pid within 2 s of the child writing the file
+   and exiting would pass as the child. The window is narrow (the pid has
+   to be reused that fast), but an exact marker, such as the child writing
+   its own start instant, would close it; until then this is best effort."
   ^java.lang.ProcessHandle [pid ^java.io.File f launched-at-ms]
   (let [handle (.orElse (java.lang.ProcessHandle/of (long pid)) nil)
         started (some-> handle .info .startInstant (.orElse nil) .toEpochMilli)]
@@ -170,13 +177,23 @@
   (last (filter recorded-run-dir (:resume/attempts record))))
 
 (defn ^{:stratum 1} process-running?
-  "True when `pid` is alive and still the process started at `started`."
+  "True when `pid` is alive and still the process started at `started`.
+   False without a recorded `started`: a pid alone may name any process
+   by now, so it is no evidence the recorded one runs."
   [pid started]
   (let [handle (process-handle pid)]
-    (boolean (and handle (.isAlive handle)
-                  (or (nil? started) (= started (start-instant handle)))))))
+    (boolean (and started handle (.isAlive handle)
+                  (= started (start-instant handle))))))
 
-(defn ^{:stratum 1} destroy-process! [pid] (some-> (process-handle pid) .destroy))
+(defn ^{:stratum 1} destroy-process!
+  "Destroy the process at `pid` only while it is still the one started at
+   `started`, and never without a recorded `started`. It is destroyed
+   through the handle just checked, whose destroy the JDK re-checks
+   against that start instant, so a pid reused meanwhile is not hit."
+  [pid started]
+  (when-let [handle (and started (process-handle pid))]
+    (when (= started (start-instant handle))
+      (.destroy handle))))
 
 (defn ^{:stratum 1} manifest-owner-alive?
   "True when the run's manifest (JVM runners keep one) says it is active
@@ -281,16 +298,19 @@
 (defn ^{:stratum 2} launch-running?
   "True while a launch may still be starting or running: its child (see
    `with-child-pid`) is alive or, with no pid known yet (the child has not
-   written its pid file), until `timeout-ms` after the launch. A child
-   gone when recorded is not."
+   written its pid file) or no start instant to check it by, until
+   `timeout-ms` after the launch. A child gone when recorded is not, nor
+   is a record with no launch time: no version that recorded launches
+   left one out, so there is no window to wait out."
   [record timeout-ms]
   (let [{:resume/keys [pid pid-started exited? launched-at-ms]} (some-> record with-child-pid)]
     (boolean
      (and record
           (not exited?)
-          (if pid
+          (if (and pid pid-started)
             (process-running? pid pid-started)
-            (< (System/currentTimeMillis) (+ launched-at-ms timeout-ms)))))))
+            (and launched-at-ms
+                 (< (System/currentTimeMillis) (+ launched-at-ms timeout-ms))))))))
 
 (defn ^{:stratum 2} target-live?
   "The workflow has a live runner: in this process, the runner recorded

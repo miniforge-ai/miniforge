@@ -174,9 +174,10 @@
         last-error (atom nil)
         outcome (await-outcome
                  {:started? #(records/correlated-event? run-id intervention-id launched-at-ms)
-                  ;; No pid known yet (the child has not written it):
-                  ;; only the evidence or the deadline can decide.
-                  :alive? #(and (not exited?) (or (nil? pid) (alive? pid pid-started)))
+                  ;; No pid known yet (the child has not written it), or
+                  ;; no start instant to check it by: only the evidence or
+                  ;; the deadline can decide.
+                  :alive? #(and (not exited?) (or (nil? pid) (nil? pid-started) (alive? pid pid-started)))
                   :deadline-ms (+ launched-at-ms timeout-ms)
                   :poll-ms poll-ms
                   :last-error last-error})
@@ -187,12 +188,17 @@
         ;; At the deadline, the pid file is read once more right at the
         ;; kill: a child that renames it in just after the read above is
         ;; still killed, not left running with its launch reported failed.
-        kill-pid (when (= :timeout outcome)
-                   (or pid (:resume/pid found) (:resume/pid (records/with-child-pid launch))))
+        ;; The kill takes the pid with its start instant, and `kill!`
+        ;; checks the pair again: a pid reused since is not killed.
+        kill-target (when (= :timeout outcome)
+                      (->> [{:resume/pid pid :resume/pid-started pid-started} found (records/with-child-pid launch)]
+                           (filter :resume/pid)
+                           first))
+        kill-pid (:resume/pid kill-target)
         pid (or pid kill-pid (:resume/pid found))
         details (cond-> {:failure/reason outcome :failure/log log :resume/run-id run-id :resume/pid pid}
                   @last-error (assoc :failure/poll-error @last-error))]
-    (some-> kill-pid kill!)
+    (when kill-pid (kill! kill-pid (:resume/pid-started kill-target)))
     (case outcome
       :observed found
       :interrupted {:resume/pending? true}
