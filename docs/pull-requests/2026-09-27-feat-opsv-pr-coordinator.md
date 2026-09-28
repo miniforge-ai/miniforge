@@ -1,0 +1,71 @@
+<!--
+  Title: Miniforge.ai
+  Author: Christopher Lester (christopher@miniforge.ai)
+  Copyright 2025-2026 Christopher Lester. Licensed under Apache 2.0.
+-->
+
+# feat: Govern OPSV PR execution through durable transactions
+
+## Overview
+
+Add the application coordinator between prepared OPSV PRs and provider adapters.
+The API is class 1: trusted-process EDN, not a model-callable authority surface.
+
+## Motivation
+
+Prepared payloads and grants do not themselves execute governed effects. The
+runtime must persist their correlation, reload current authority, and execute
+only the exact durable payload while preserving uncertain provider outcomes.
+
+## Layer and dependencies
+
+Application layer, depending on merged PRs #1911, #1927, #1929 and #1931.
+The subsequent provider adapter and runtime wiring depend on this coordinator.
+
+## Changes in detail
+
+- Persist a prepared payload with its evidence bundle and allowing envelope.
+- Bind the complete governance receipt to `:pr/governance-hash` in the grant
+  scope, separate from the unchanged provider payload hash. The runtime calls
+  `prepare-governed-pr` before issuance. Old unbound PR grants are refused.
+- Reload durable grant authority at commit time and reject invalid stored payloads.
+- Require the runtime-retained issuance ID at commit, independently of the
+  transaction record. Refuse a substituted valid same-scope grant before claim.
+- Pass the claimed transaction and exact payload to the trusted provider port.
+- Never retry a claimed transaction or convert an uncertain response to success.
+- Persist the envelope timestamp at standard EDN `#inst` millisecond precision;
+  retain all decision fields and its UUID. Grant timing keeps its own precision.
+
+## Testing plan
+
+Exercise durable registration, proposal, commit, revocation, expiry, repeated
+execution, failed verification drafts, malformed records and uncertain outcomes.
+All 21 coordinator tests / 182 assertions pass, including governance-corruption
+and broad-grant regression coverage. Grant tests pass 65 tests / 401 assertions
+in each of Miniforge, Core and TUI.
+The component standards scan reports zero findings. The CLI builds successfully
+and packaged help runs. Polylith, kondo and stratum checks pass.
+
+## Deployment plan
+
+No external mode is enabled by this PR. Runtime wiring must supply evaluated
+policy envelopes, scoped grants, provider ports and safe-boundary fencing.
+The local stores require runtime-owned, trusted directories.
+Runtime must retain the returned issuance/registration ID in its own correlation
+state and pass it to commit. Reading the expected ID from the effect record would
+defeat substitution protection. This is a trusted-process contract, not protection
+against an attacker who can replace both runtime state and authority stores.
+Use separate effect and authority/breach directories, passed as nonblank string
+paths. The grant store requires a canonical root without symlinked components.
+Acceptance fixtures use that production layout. Exact digest constraints reject
+prefixes, suffixes and trailing newlines, not just malformed digest substrings.
+
+## Related issues/PRs
+
+N7 governed actuation; PRs #1911, #1927, #1929 and #1931.
+
+## Checklist
+
+- [x] Regression tests and standards pass
+- [ ] Signed commits and green CI
+- [ ] Review findings fixed and resolved

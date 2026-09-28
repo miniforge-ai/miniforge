@@ -86,7 +86,9 @@
 
 (deftest ^{:stratum 1} proposal-requires-a-full-git-object-id-test
   (doseq [sha ["0123456" "ABCDEF0123456789012345678901234567890123"
-              "z123456789012345678901234567890123456789" "" nil]]
+              "z123456789012345678901234567890123456789" "" nil
+              "0123456789012345678901234567890123456789suffix"
+              "0123456789012345678901234567890123456789\n"]]
     (is (anomaly/anomaly? (actuation/prepare-pr (assoc candidate :pr/head-sha sha)))))
   (let [original (actuation/prepare-pr candidate)]
     (doseq [sha [(apply str (repeat 40 "a")) (apply str (repeat 64 "b"))]]
