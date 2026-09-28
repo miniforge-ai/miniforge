@@ -1,5 +1,6 @@
 {:event-stream/messages
- {;; Supervisory intervention events
+ {:opsv/actuation-disposition "OPSV effect disposition: {state}"
+  ;; Supervisory intervention events
   :supervisory/intervention-requested
   "Intervention {type} requested"
 

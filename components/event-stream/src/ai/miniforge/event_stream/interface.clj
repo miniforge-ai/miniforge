@@ -237,6 +237,10 @@
   "Construct an N3 :opsv.drift/detected event."
   opsv/drift-detected)
 
+(def ^{:stratum 0} actuation-disposition
+  "Construct an N3 governed OPSV effect disposition event."
+  opsv/actuation-disposition)
+
 (def ^{:stratum 0} workflow-started
   "Build and return a :workflow/started event envelope map. Multi-arity
    for the legacy 2/3-arg call shape; the opts arity may carry
