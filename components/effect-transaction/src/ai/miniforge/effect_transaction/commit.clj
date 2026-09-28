@@ -40,7 +40,7 @@
     (if (anomaly/anomaly? committing)
       committing
       (record/advance! dir committing
-                       (call/changes (call/result effect-fn))
+                       (call/changes (call/result (partial effect-fn committing)))
                        now))))
 
 (defn- ^{:stratum 0} deny!
@@ -49,6 +49,18 @@
   (let [failure (msg/t :grant/recheck-failed
                        {:outcome (name (:grant/outcome auth))})]
     (record/advance! dir t {:effect/state :failed :effect/failure failure} now)))
+
+(defn ^{:stratum 0} read-proposed
+  "Load the only record eligible for a new effect attempt."
+  [dir id]
+  (let [t (store/read-record dir id)]
+    (cond
+      (anomaly/anomaly? t) t
+      (nil? t) (store/not-found id)
+      (not= :proposed (:effect/state t))
+      (record/wrong-state (msg/t :commit/not-proposed)
+                          (record/lifecycle-position t))
+      :else t)))
 
 ;------------------------------------------------------------------------------ Layer 1
 
@@ -63,28 +75,12 @@
 
 ;------------------------------------------------------------------------------ Layer 2
 
-(defn ^{:stratum 2} commit!
-  "Commit a proposed effect under its recorded grant.
+(defn ^{:stratum 2} commit-record!
+  "Authorize and claim this exact loaded record before invoking its consumer."
+  [dir t grant-record now effect-fn]
+  (if (= :authority/unenforced grant-record)
+    (execute! dir t :unenforced now effect-fn)
+    (authorized-commit! dir t grant-record now effect-fn)))
 
-   The durable proposal, not caller usage, supplies authorization scope and
-   the one-operation usage count.
-   Exceptions from the effect become `:unknown-outcome`; JVM Errors
-   propagate after the `:committing` record is durable."
-  [dir candidate grant-record _usage ^Instant now effect-fn]
-  (let [id (:effect/id candidate)
-        t (store/read-record dir id)]
-    (cond
-      (anomaly/anomaly? t) t
-
-      (nil? t)
-      (store/not-found id)
-
-      (not= :proposed (:effect/state t))
-      (record/wrong-state (msg/t :commit/not-proposed)
-                          (record/lifecycle-position t))
-
-      (= :authority/unenforced grant-record)
-      (execute! dir t :unenforced now effect-fn)
-
-      :else
-      (authorized-commit! dir t grant-record now effect-fn))))
+(comment
+  (read-proposed nil nil))

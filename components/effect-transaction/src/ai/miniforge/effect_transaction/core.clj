@@ -22,7 +22,7 @@
    throws has an unknown outcome, never a fabricated failure, and must
    be reconciled by asking the external system what actually happened."
   (:require
-   [ai.miniforge.effect-transaction.commit :as commit]
+   [ai.miniforge.effect-transaction.legacy-commit :as commit]
    [ai.miniforge.effect-transaction.reconcile :as reconcile]
    [ai.miniforge.effect-transaction.record :as record]))
 
