@@ -26,6 +26,7 @@ domain/coordinator/provider layers. The provider becomes a production dependency
 
 - Use one canonical effective-actuation input for recommendation and grant checks.
 - Bind the runtime target to the verified policy hash and runtime workflow ID.
+- Retain the policy hash in the durable, grant-bound governance receipt.
 - Derive a stable effect ID per workflow/repository and refuse every stored replay.
 - Issue exact PR-scoped authority and retain its identity independently of storage.
 - Use the governed coordinator; only confirmed success produces PR references.
@@ -34,6 +35,9 @@ domain/coordinator/provider layers. The provider becomes a production dependency
   an already admitted network operation. It cannot be reset by input data.
 - Recheck the fence and current grant immediately before the POST, after GitHub's
   read-only head preflight. Observed stop revokes the issued grant.
+- Revoke unused authority after proposal or registration failure.
+- Recheck stop after an admitted POST without rewriting its confirmed or uncertain outcome.
+- Retain cleanup failures alongside the actual provider observation.
 
 ## Testing plan
 
