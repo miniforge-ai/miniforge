@@ -16,10 +16,9 @@
 
 ### 0.1 Purpose
 
-This specification defines the normative requirements for **Operational Policy Synthesis**
-**with Verification** (OPSV): a Fleet Mode capability that discovers scaling signals and
-performance bottlenecks via governed experiments, synthesizes operational policies, verifies
-them against explicit acceptance criteria, and emits fixes as auditable artifacts.
+This specification defines **Operational Policy Synthesis with Verification** (OPSV).
+This Fleet Mode capability discovers scaling signals and performance bottlenecks via governed experiments.
+It synthesizes operational policies, verifies them against explicit acceptance criteria, and emits fixes as auditable artifacts.
 
 ### 0.2 Relationship to core and later extensions
 
@@ -81,8 +80,8 @@ Experiment Packs SHALL be hash-addressed and recorded in the event stream and ev
 
 ### 1.3 Verification
 
-**Verification** is the process of executing an Experiment Pack (or a verification subset) against a candidate Operational
- Policy and producing an evidence bundle showing whether success criteria are satisfied.
+**Verification** executes an Experiment Pack (or a verification subset) against a candidate Operational Policy.
+It produces an evidence bundle showing whether success criteria are satisfied.
 
 ### 1.4 Requested Actuation Mode
 
@@ -260,6 +259,8 @@ OPSV SHALL emit these event types with required minimal payloads:
 - `:opsv.policy/proposed` (policy hash, diff artifact refs, confidence)
 - `:opsv.verification/result` (pass/fail, criteria evaluation, confidence, caveats)
 - `:opsv.actuation/emitted` (requested/effective mode and correlated N10 effect records)
+- `:opsv.actuation/disposition` (durable effect state, allowing decision, authority
+  references, provider observations and failure detail)
 - `:opsv.drift/detected` (signal, deviation, suggested re-run)
 
 Every event MUST include `:opsv/evidence-bundle-id` for the preallocated OPSV
@@ -279,8 +280,8 @@ OPSV MUST compute a risk score for each run using at least:
 Risk score MUST determine required gates and approvals.
 
 The risk result MUST contain a normalized score in `[0.0, 1.0]`, a level in
-`:low`, `:medium`, `:high`, or `:critical`, and explainable factor records containing
-the input, contribution, and rationale. Policy packs map score/level thresholds
+`:low`, `:medium`, `:high`, or `:critical`, and explainable factor records.
+Each factor record MUST contain the input, contribution, and rationale. Policy packs map score/level thresholds
 to approvals; implementations MUST NOT hide approval selection in an opaque model.
 
 ### 5.2 Gates
@@ -303,15 +304,15 @@ If any gate fails, OPSV MUST produce remediation guidance as machine-readable ou
 - All OPSV runs MUST support a global emergency stop.
 
 An N8 emergency stop or safe-mode entry MUST prevent new OPSV effects, abort
-active experiments at the next safe boundary, revoke their mutation grants,
-invoke verified rollback through the separately authorized recovery path, and
+active experiments at the next safe boundary, and revoke their mutation grants.
+It MUST invoke verified rollback through the separately authorized recovery path and
 record the disposition in N3/N6. Safe mode MUST set effective actuation to
 `:none` per N8's A0 posture.
 
 ### 5.4 Effective actuation decision
 
-Before any external mutation, OPSV MUST compute an effective actuation decision
-from the requested mode, verification result, N4 gate results, N8 safe-mode
+Before any external mutation, OPSV MUST compute an effective actuation decision.
+It MUST use the requested mode, verification result, N4 gate results, N8 safe-mode
 state, and current Ariadne ExecutionGrant. The decision MAY reduce autonomy but MUST NOT
 promote beyond the requested mode.
 
@@ -453,8 +454,8 @@ all present.
 
 The `opsv` 1.0.0 workflow registers and executes all seven phases through the
 shared N2 lifecycle. Its deterministic staging MCI discovers CPU and backlog
-drivers, synthesizes an HPA/KEDA-compatible proposal, assembles evidence, emits
-the required lifecycle and domain events, and completes in `:recommend-only`
+drivers, synthesizes an HPA/KEDA-compatible proposal, and assembles evidence.
+It emits the required lifecycle and domain events and completes in `:recommend-only`
 mode with no external effects. `components/opsv-adapter-simulated` supplies the
 simulation boundary.
 

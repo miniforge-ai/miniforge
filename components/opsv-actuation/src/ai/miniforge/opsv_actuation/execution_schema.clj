@@ -13,12 +13,6 @@
 
 ;------------------------------------------------------------------------------ Layer 0
 
-(defn- ^{:stratum 0} allowing?
-  [decision]
-  (and (= :allow (:envelope/decision decision))
-       (= :allow (envelope/derive-decision (:envelope/reasons decision)
-                                         (:envelope/obligations decision)))))
-
 (defn- ^{:stratum 0} content-bound?
   [prepared]
   (and (= (:pr/payload-hash prepared)
@@ -37,19 +31,17 @@
 (def ^{:stratum 0} CommitArguments
   [:tuple schema/NonBlankString schema/NonBlankString :uuid :uuid fn? fn?])
 
+(def ^{:stratum 0} AllowingEnvelope
+  envelope/AllowingEnvelope)
+
 ;------------------------------------------------------------------------------ Layer 1
 
-(def ^{:stratum 1} AllowingEnvelope
-  [:and envelope/DecisionEnvelope [:fn allowing?]])
-
-;------------------------------------------------------------------------------ Layer 2
-
-(def ^{:stratum 2} ProposeArguments
+(def ^{:stratum 1} ProposeArguments
   [:tuple schema/NonBlankString schema/PrProposalInput :uuid AllowingEnvelope RuntimeInstant])
 
-(def ^{:stratum 2} GovernedArguments [:tuple schema/PrProposalInput AllowingEnvelope])
+(def ^{:stratum 1} GovernedArguments [:tuple schema/PrProposalInput AllowingEnvelope])
 
-(def ^{:stratum 2} ClaimedPr
+(def ^{:stratum 1} ClaimedPr
   [:and effect/EffectTransaction
    [:map
     [:effect/class [:= :effect/pr-create]]
@@ -77,4 +69,4 @@
    [:fn correlated?]])
 
 (comment
-  (allowing? {:envelope/decision :deny}))
+  (envelope/derive-decision [] []))
