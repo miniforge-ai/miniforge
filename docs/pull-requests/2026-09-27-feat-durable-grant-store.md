@@ -36,8 +36,8 @@ Test initial lookup, durable reload, duplicate registration, revocation,
 repeated revocation, corrupt records and malformed boundary inputs.
 Run component tests, standards checks, lint, hooks and CI.
 
-Local results: 64 tests and 384 assertions pass in each of Miniforge, Core
-and TUI. The store adds 22 tests and 139 assertions; the timestamp prerequisite
+Local results: 65 tests and 386 assertions pass in each of Miniforge, Core
+and TUI. The store adds 23 tests and 141 assertions; the timestamp prerequisite
 contributes two tests and nine assertions. The component standards
 scan covers all source and test files, including the file-boundary helpers.
 
@@ -56,6 +56,7 @@ It distinguishes absent files from failed reads and rejects trailing EDN,
 corrupt values, wrong IDs and marker fields that would widen authority.
 Record and ancestor-directory symlinks are rejected before I/O. Registration and reload
 require pristine issuance records: both revocation fields must be nil.
+Existing records must be regular files; FIFOs are rejected without opening them.
 Registration refuses existing or invalid orphaned revocation markers.
 UTF-8 decoding rejects malformed bytes rather than substituting characters.
 Encoding also rejects unpaired surrogates before publishing altered authority.

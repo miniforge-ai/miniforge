@@ -4,9 +4,11 @@
 (ns ai.miniforge.execution-grant.store-path
   "Reject linked filesystem components before authority I/O."
   (:import [java.io File]
-           [java.nio.file Files]))
+           [java.nio.file Files LinkOption]))
 
 ;------------------------------------------------------------------------------ Layer 0
+
+(def ^{:stratum 0} no-follow-options (into-array LinkOption [LinkOption/NOFOLLOW_LINKS]))
 
 (defn- ^{:stratum 0} parent [^File file] (.getParentFile file))
 
@@ -16,7 +18,9 @@
 
 (defn ^{:stratum 1} safe?
   [^File file]
-  (not-any? linked? (take-while some? (iterate parent (.getAbsoluteFile file)))))
+  (and (or (Files/notExists (.toPath file) no-follow-options)
+           (Files/isRegularFile (.toPath file) no-follow-options))
+       (not-any? linked? (take-while some? (iterate parent (.getAbsoluteFile file))))))
 
 (comment
   (safe? (File. "/private/tmp/example")))

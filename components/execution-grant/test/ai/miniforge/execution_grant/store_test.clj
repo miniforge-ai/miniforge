@@ -6,6 +6,7 @@
             [ai.miniforge.execution-grant.interface :as grant]
             [ai.miniforge.execution-grant.store-codec :as codec]
             [ai.miniforge.execution-grant.store-durability :as durability]
+            [ai.miniforge.execution-grant.store-path :as path]
             [clojure.java.io :as io]
             [clojure.test :refer [deftest is]])
   (:import [java.io File IOException]
@@ -85,6 +86,12 @@
     (is (= :not-found (:anomaly/type (grant/revoke-stored! dir id :revocation/operator now))))
     (is (empty? (seq (.listFiles (File. dir)))))
     (is (nil? (grant/current dir id)))))
+
+(deftest ^{:stratum 1} fifo-records-are-refused-before-opening-test
+  (when-not (.startsWith (System/getProperty "os.name") "Windows")
+    (let [file (io/file (tmp-dir) "record.edn")]
+      (is (zero? (.waitFor (.start (ProcessBuilder. ["mkfifo" (str file)])))))
+      (is (false? (path/safe? file))))))
 
 ;------------------------------------------------------------------------------ Layer 2
 
