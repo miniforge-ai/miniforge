@@ -106,6 +106,18 @@
   [^java.lang.ProcessHandle handle]
   (some-> handle .info .startInstant (.orElse nil) str))
 
+(defn- ^{:stratum 0} lease-fresh?
+  "True when a manifest `owner`'s lease was renewed within its TTL of
+   `now-ms`: a live JVM runner renews it on a heartbeat, a crashed one
+   stops, so its pid alone is not taken for it once the lease lapses.
+   Mirrors event-stream's `manifest/lease-fresh?`, which is JVM-only
+   behind its interface; this file reads manifest.json directly."
+  [owner now-ms]
+  (let [renewed (try (some-> (:lease_renewed_at owner) java.time.Instant/parse .toEpochMilli)
+                     (catch java.time.format.DateTimeParseException _ nil))
+        ttl-s (:lease_ttl_seconds owner)]
+    (boolean (and renewed (number? ttl-s) (<= (- now-ms renewed) (* 1000 ttl-s))))))
+
 (defn- ^{:stratum 0} read-pid
   "The pid in `f`, or nil while it is missing or still being written."
   [^java.io.File f]
@@ -196,12 +208,16 @@
       (.destroy handle))))
 
 (defn ^{:stratum 1} manifest-owner-alive?
-  "True when the run's manifest (JVM runners keep one) says it is active
-   and its owner pid is alive."
+  "True when the run's manifest (JVM runners keep one) says it is active,
+   its owner's lease is fresh, and the owner pid is alive. The manifest
+   records no start instant for the owner, so the lease is what tells a
+   crashed runner's reused pid from the runner."
   [workflow-id]
-  (let [manifest (read-json (io/file (run-dir workflow-id) "manifest.json"))]
+  (let [manifest (read-json (io/file (run-dir workflow-id) "manifest.json"))
+        owner (:owner manifest)]
     (boolean (and (= "active" (:status manifest))
-                  (some-> (get-in manifest [:owner :pid]) parse-long process-handle .isAlive)))))
+                  (lease-fresh? owner (System/currentTimeMillis))
+                  (some-> (:pid owner) parse-long process-handle .isAlive)))))
 
 (defn ^{:stratum 1} correlated-event?
   "True when an event under `run-id` since `since-ms` is correlated to

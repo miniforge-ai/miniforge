@@ -125,13 +125,22 @@
   (with-temp-home
     (fn []
       (let [workflow-id (str (random-uuid))
-            manifest! #(spit (doto (io/file (sut/run-dir workflow-id) "manifest.json") io/make-parents)
-                             (json/generate-string {:status % :owner {:pid (str this-pid)}}))]
+            manifest! (fn write-manifest!
+                        ([status] (write-manifest! status (java.time.Instant/now)))
+                        ([status renewed]
+                         (spit (doto (io/file (sut/run-dir workflow-id) "manifest.json") io/make-parents)
+                               (json/generate-string {:status status
+                                                      :owner {:pid (str this-pid)
+                                                              :lease_renewed_at (str renewed)
+                                                              :lease_ttl_seconds 30}}))))]
         (is (not (sut/target-live? workflow-id)))
         (with-redefs [operator/live-runner? (constantly true)]
           (is (sut/target-live? workflow-id) "a runner in this process"))
         (manifest! "active")
         (is (sut/target-live? workflow-id) "an active manifest whose owner is alive")
+        (manifest! "active" (.minusSeconds (java.time.Instant/now) 120))
+        (is (not (sut/target-live? workflow-id))
+            "a lapsed lease: the owner stopped renewing, so a live pid may be a reused one")
         (manifest! "completed")
         (is (not (sut/target-live? workflow-id)))
         (testing "an origin whose runner left no start instant does not claim a live pid"
