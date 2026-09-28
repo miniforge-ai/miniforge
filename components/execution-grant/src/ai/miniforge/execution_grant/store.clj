@@ -17,7 +17,12 @@
 
 (defn ^{:stratum 0} register!
   [dir grant-record]
-  (storage/create! dir (codec/normalize grant-record) :grant))
+  (let [id (:grant/id grant-record)
+        marker (storage/read-record dir id :revocation store-schema/Revocation)]
+    (cond
+      (anomaly/anomaly? marker) marker
+      marker (anomaly/anomaly :conflict (msg/t :store/id-conflict) {:grant/id id})
+      :else (storage/create! dir (codec/normalize grant-record) :grant))))
 
 (defn- ^{:stratum 0} current-record
   [grant-record marker id]

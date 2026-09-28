@@ -35,9 +35,9 @@ Test initial lookup, durable reload, duplicate registration, revocation,
 repeated revocation, corrupt records and malformed boundary inputs.
 Run component tests, standards checks, lint, hooks and CI.
 
-Local results: 63 tests and 350 assertions pass in each of Miniforge, Core
-and TUI. The store adds 21 tests and 109 assertions, with two timestamp
-regressions adding five assertions. The component standards
+Local results: 64 tests and 380 assertions pass in each of Miniforge, Core
+and TUI. The store adds 22 tests and 139 assertions; the timestamp prerequisite
+contributes two tests and five assertions. The component standards
 scan covers all source and test files, including the file-boundary helpers.
 
 ## Adversarial review
@@ -53,8 +53,9 @@ Lookup reads and validates both records before applying the marker. An orphaned
 marker without valid issuance is a storage fault, not clean absence.
 It distinguishes absent files from failed reads and rejects trailing EDN,
 corrupt values, wrong IDs and marker fields that would widen authority.
-Symlinks are rejected without following their targets. Registration and reload
+Record and ancestor-directory symlinks are rejected before I/O. Registration and reload
 require pristine issuance records: both revocation fields must be nil.
+Registration refuses existing or invalid orphaned revocation markers.
 UTF-8 decoding rejects malformed bytes rather than substituting characters.
 Encoding also rejects unpaired surrogates before publishing altered authority.
 Results normalize timestamps to Instant on the first call as well as reload.
@@ -73,6 +74,9 @@ authority composition. No generic replacement API or revocation removal exists.
 No existing caller changes. The OPSV coordinator will register runtime-issued
 grants and use current lookup. The store is trusted local authority state,
 not an authentication boundary against a user who can edit its files.
+The runtime must supply a canonical root path with no linked directory components.
+Path checks detect linked paths; they do not protect against a hostile process
+concurrently replacing directories. Exclusive trusted ownership is required.
 Grant records use the `grants` child directory so existing breach-history
 records can safely share the supplied root; coexistence is regression-tested.
 Storage requires a filesystem supporting hard links and file/directory force.

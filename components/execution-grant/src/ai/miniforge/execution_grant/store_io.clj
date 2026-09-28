@@ -7,6 +7,7 @@
             [ai.miniforge.execution-grant.messages :as msg]
             [ai.miniforge.execution-grant.store-codec :as codec]
             [ai.miniforge.execution-grant.store-durability :as durability]
+            [ai.miniforge.execution-grant.store-path :as path]
             [ai.miniforge.execution-grant.store-read :as reader]
             [clojure.edn :as edn]
             [clojure.java.io :as io])
@@ -27,6 +28,14 @@
 (defn- ^{:stratum 0} temp-file
   ^File [^File target]
   (io/file (.getParentFile target) (str (.getName target) "." (random-uuid) ".tmp")))
+
+(defn- ^{:stratum 0} write-record!
+  [^File target ^File tmp encoded record]
+  (io/make-parents target)
+  (durability/write! tmp encoded)
+  (Files/createLink (.toPath target) (.toPath tmp))
+  (durability/sync-ancestry! (.getParentFile target))
+  record)
 
 ;------------------------------------------------------------------------------ Layer 1
 
@@ -50,11 +59,9 @@
   (let [^File tmp (temp-file target)
         id (:grant/id record)]
     (try
-      (io/make-parents target)
-      (durability/write! tmp encoded)
-      (Files/createLink (.toPath target) (.toPath tmp))
-      (durability/sync-ancestry! (.getParentFile target))
-      record
+      (if (path/safe? target)
+        (write-record! target tmp encoded record)
+        (failure :fault :store/write-failed id kind))
       (catch FileAlreadyExistsException _
         (failure :conflict :store/id-conflict id kind))
       (catch Exception _
@@ -71,8 +78,10 @@
 (defn ^{:stratum 2} confirm!
   [dir record kind]
   (try
-    (durability/confirm! (record-file dir (:grant/id record) kind))
-    record
+    (let [file (record-file dir (:grant/id record) kind)]
+      (if (path/safe? file)
+        (do (durability/confirm! file) record)
+        (failure :fault :store/write-failed (:grant/id record) kind)))
     (catch Exception _
       (failure :fault :store/write-failed (:grant/id record) kind))))
 

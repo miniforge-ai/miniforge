@@ -180,6 +180,7 @@
    Create-only; a duplicate UUID returns conflict, never replaces authority.
    Both revocation fields must be nil. Results normalize timestamps to Instant.
    Records live under dir/grants, separate from breach-history files.
+   Use a canonical root path; linked directory components are refused.
    Scope must round-trip through EDN. This does not issue or authenticate grants."
   [dir grant-record]
   (let [args [dir grant-record]]

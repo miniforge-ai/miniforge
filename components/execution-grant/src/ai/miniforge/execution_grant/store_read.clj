@@ -4,6 +4,7 @@
 (ns ai.miniforge.execution-grant.store-read
   "Fail-closed file reads: reject symlinks, trailing data and invalid authority."
   (:require [ai.miniforge.execution-grant.store-codec :as codec]
+            [ai.miniforge.execution-grant.store-path :as path]
             [clojure.edn :as edn]
             [malli.core :as m])
   (:import [java.io File InputStreamReader PushbackReader StringReader]
@@ -45,10 +46,12 @@
 (defn ^{:stratum 2} read-record
   [file id record-schema on-error]
   (try
-    (let [value (decode-record (read-text file))]
-      (if (and (m/validate record-schema value) (= id (:grant/id value)))
-        value
-        (on-error)))
+    (if-not (path/safe? file)
+      (on-error)
+      (let [value (decode-record (read-text file))]
+        (if (and (m/validate record-schema value) (= id (:grant/id value)))
+          value
+          (on-error))))
     (catch NoSuchFileException _
       (if (absent? file) nil (on-error)))
     (catch Exception _ (on-error))))

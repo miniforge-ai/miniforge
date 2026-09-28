@@ -28,7 +28,7 @@
 (def ^{:stratum 0} timeout-ms 5000)
 
 (defn- ^{:stratum 0} tmp-dir []
-  (str (Files/createTempDirectory "grant-store" (into-array FileAttribute []))))
+  (.getCanonicalPath (.toFile (Files/createTempDirectory "grant-store" (into-array FileAttribute [])))))
 
 (defn- ^{:stratum 0} record-file
   [dir g suffix]
@@ -254,7 +254,23 @@
                       (Files/createSymbolicLink (.toPath marker) (.toPath (io/file dir "missing"))
                                                 (into-array FileAttribute []))))
       (is (= :fault (:anomaly/type (grant/current dir id))) (name kind))
+      (is (= (if (= :valid kind) :conflict :fault) (:anomaly/type (grant/register! dir g))))
+      (is (not (.exists (record-file dir g ".grant.edn"))))
       (is (= :fault (:anomaly/type (grant/revoke-stored! dir id :revocation/operator now)))))))
+
+(deftest ^{:stratum 2} linked-directory-components-refuse-all-authority-io-test
+  (doseq [location [:root :grants :ancestor] dangling? [false true]]
+    (let [base (tmp-dir)
+          outside (tmp-dir)
+          link (io/file base (if (= :grants location) "grants" "link"))
+          dir (case location :root link :grants base :ancestor (io/file link "nested"))
+          target (if dangling? (io/file outside "missing") (io/file outside))
+          g (issued)]
+      (Files/createSymbolicLink (.toPath link) (.toPath target) (into-array FileAttribute []))
+      (is (= :fault (:anomaly/type (grant/register! dir g))))
+      (is (= :fault (:anomaly/type (grant/current dir (:grant/id g)))))
+      (is (= :fault (:anomaly/type (grant/revoke-stored! dir (:grant/id g) :revocation/operator now))))
+      (is (empty? (seq (.listFiles (File. outside))))))))
 
 (deftest ^{:stratum 2} failed-publication-sync-cannot-acknowledge-revocation-test
   (let [dir (tmp-dir)
