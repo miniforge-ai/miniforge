@@ -43,5 +43,20 @@
     (is (= cleanup (get-in result [:anomaly/data :grant/revocation-failure])))
     (is (empty? @calls))))
 
+(deftest ^{:stratum 0} stop-cleanup-failure-keeps-confirmed-provider-observation-test
+  (let [{:keys [ctx runtime calls]} (fixture/setup)
+        command (fn [options args]
+                  (when (= "POST" (nth args 6)) (actuation/stop-mutations! (:fence runtime)))
+                  (fixture/command calls options args))
+        result (with-redefs [grant/revoke-stored!
+                            (constantly (anomaly/anomaly :unavailable "revocation unconfirmed" {}))]
+                 (phase/actuate (assoc-in ctx [:execution/opts :opsv/pr-execution :provider :run-command]
+                                         command)))
+        transaction (first (:opsv/effect-transactions result))]
+    (is (= :succeeded (:effect/state transaction)))
+    (is (= "https://github.com/example/opsv/pull/17" (get-in transaction [:effect/observed :pr/url])))
+    (is (= "revocation unconfirmed" (get-in transaction [:effect/observed :grant/revocation-failure])))
+    (is (string? (:effect/failure transaction)))))
+
 (comment
   (fixture/setup))

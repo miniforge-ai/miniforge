@@ -4,6 +4,7 @@
   :governance/missing-policy "Runtime-owned OPSV governance policy is missing."
   :pr/invalid-runtime "OPSV PR runtime configuration is invalid."
   :pr/stopped "OPSV PR execution was stopped before provider mutation."
+  :pr/revocation-unconfirmed "OPSV PR disposition is retained, but stop-time grant revocation is unconfirmed."
   :pr/policy-mismatch "Prepared PR target does not match the verified policy."
   :pr/existing-effect "OPSV PR effect already exists; inspect or reconcile it without creating another PR."
   :pr/authority-refused "OPSV PR authority was refused before provider mutation."

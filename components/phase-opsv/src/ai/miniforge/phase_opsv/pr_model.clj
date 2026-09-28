@@ -34,7 +34,7 @@
 (defn ^{:stratum 1} candidate [ctx verified target]
   (if (not= (:opsv/policy-hash verified) (:opsv/policy-hash target))
     (anomaly/anomaly :conflict (msg/ts :pr/policy-mismatch) {})
-    (assoc (dissoc target :opsv/policy-hash)
+    (assoc target
            :workflow-run/id (context/workflow-id ctx)
            :effect/id (effect-id (context/workflow-id ctx) (:pr/repo target))
            :opsv/evidence-bundle-id (get-in ctx [:execution/input :opsv/evidence-bundle-id])

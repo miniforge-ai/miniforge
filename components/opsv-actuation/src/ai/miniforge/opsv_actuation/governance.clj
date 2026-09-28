@@ -10,7 +10,7 @@
 ;------------------------------------------------------------------------------ Layer 0
 
 (def ^{:stratum 0} integrity-keys
-  [:workflow-run/id :effect/id :pr/payload-hash :opsv/evidence-bundle-id :opsv/envelope])
+  [:workflow-run/id :effect/id :pr/payload-hash :opsv/evidence-bundle-id :opsv/policy-hash :opsv/envelope])
 
 (defn- ^{:stratum 0} portable-time [timestamp]
   (Date. (inst-ms timestamp)))
@@ -21,7 +21,7 @@
   (hash/content-hash (select-keys prepared integrity-keys)))
 
 (defn- ^{:stratum 1} receipt [candidate decision]
-  (assoc (proposal/prepare-pr candidate)
+  (assoc (merge (proposal/prepare-pr candidate) (select-keys candidate [:opsv/policy-hash]))
          :opsv/evidence-bundle-id (:opsv/evidence-bundle-id candidate)
          :opsv/envelope (update decision :envelope/at portable-time)))
 

@@ -28,7 +28,7 @@
                    (stop/refusal :pr/authority-refused)))]
     (if (true? (get-in result [:anomaly/data :opsv/stopped?]))
       (stop/refuse! runtime issued)
-      result)))
+      (stop/settle! runtime issued result))))
 
 ;------------------------------------------------------------------------------ Layer 2
 

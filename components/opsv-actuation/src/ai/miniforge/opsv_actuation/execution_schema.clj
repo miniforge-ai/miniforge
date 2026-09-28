@@ -72,6 +72,7 @@
        [:pr/payload-hash [:re #"\A[0-9a-f]{64}\z"]]
        [:pr/governance-hash [:re #"\A[0-9a-f]{64}\z"]]
        [:opsv/evidence-bundle-id :uuid]
+       [:opsv/policy-hash {:optional true} [:re #"\A[0-9a-f]{64}\z"]]
        [:opsv/envelope AllowingEnvelope]]
       [:fn content-bound?]]]]
    [:fn correlated?]])

@@ -17,7 +17,7 @@
 
 (deftest ^{:stratum 0} policy-mismatch-is-refused-before-candidate-preparation-test
   (is (= :conflict (:anomaly/type (model/candidate {} {:opsv/policy-hash "verified"}
-                                                  {:opsv/policy-hash "other"})))) )
+                                                  {:opsv/policy-hash "other"})))))
 
 (deftest ^{:stratum 0} runtime-workflow-id-aliases-preserve-effect-identity-test
   (let [id (random-uuid)

@@ -65,6 +65,7 @@
 
 (deftest ^{:stratum 0} governance-corruption-is-refused-test
   (doseq [[path value] [[[:opsv/evidence-bundle-id] (random-uuid)]
+                        [[:opsv/policy-hash] (apply str (repeat 64 "c"))]
                         [[:opsv/envelope :envelope/pins :pins/pack-revision] "changed"]
                         [[:opsv/envelope :envelope/at] (Date. 0)]
                         [[:pr/governance-hash] (apply str (repeat 64 "b"))]]]
