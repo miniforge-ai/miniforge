@@ -276,6 +276,7 @@
                       resume-launcher/launcher (constantly nil)
                       operator/register-degradation-manager! (constantly nil)
                       operator/register-policy-evaluator! (constantly nil)
+                      resume-records/record-origin! (constantly nil)
                       operator/start-operator-consumer! (constantly ::handle)
                       operator/stop-operator-consumer! #(swap! stops conj %)
                       sut/stop-at-exit! #(if @refuse-hook?
@@ -283,8 +284,14 @@
                                            (swap! hooks conj %))]
           (testing "a hook refused because the JVM is shutting down fails the start"
             (is (thrown? IllegalStateException (sut/start-process-control!))))
-          (testing "but the consumer it started is published, so the caller's stop reaches it"
+          (testing "and stops the consumer it started, whatever the caller's cleanup does"
+            (is (= [::handle] @stops))
             (sut/stop-process-control!)
+            (is (= [::handle] @stops) "nothing is left for a later stop"))
+          (testing "a runner's start fails the same way and leaves no consumer either"
+            (reset! stops [])
+            (is (thrown? IllegalStateException
+                         (sut/register-workflow-control! :workflow-a (atom {}) ::stream-a)))
             (is (= [::handle] @stops)))
           (testing "and the next start still installs a hook"
             (reset! refuse-hook? false)
