@@ -60,6 +60,7 @@
    [ai.miniforge.cli.main.commands.pr-resume-dispatcher :as cmd-pr-resume]
    [ai.miniforge.cli.main.commands.pr-review-monitor :as cmd-pr-review-monitor]
    [ai.miniforge.cli.main.commands.control-plane :as cmd-cp]
+   [ai.miniforge.cli.main.commands.operator-serve :as cmd-operator-serve]
    [ai.miniforge.cli.main.commands.scan :as cmd-scan]
    [ai.miniforge.cli.main.commands.init :as cmd-init]
    [ai.miniforge.cli.main.commands.worktree :as cmd-worktree]
@@ -414,6 +415,9 @@
 (defn ^{:stratum 0} cp-resolve-cmd [m] (cmd-cp/resolve-cmd (util/get-opts m)))
 
 (defn ^{:stratum 0} cp-terminate-cmd [m] (cmd-cp/terminate-cmd (util/get-opts m)))
+
+;; Operator channel — the runnerless intervention consumer
+(defn ^{:stratum 0} operator-serve-cmd [m] (cmd-operator-serve/serve-cmd (util/get-opts m)))
 
 ;; Policy commands (N5)
 (defn ^{:stratum 0} policy-list-cmd    [m] (cmd-policy/policy-list-cmd    (util/get-opts m)))
@@ -806,6 +810,10 @@
     :spec {:comment {:alias :c}}}
    {:cmds ["control-plane" "terminate"] :fn cp-terminate-cmd
     :args->opts [:agent-id]}
+
+   ;; Operator channel — `control-plane` above is the dashboard's HTTP API
+   {:cmds ["operator"]          :fn help-cmd}
+   {:cmds ["operator" "serve"] :fn operator-serve-cmd}
 
    ;; Policy pack commands (N5)
    {:cmds ["policy"]           :fn help-cmd}

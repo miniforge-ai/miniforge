@@ -45,6 +45,7 @@
     (reset! hook-state false)
     (try
       (with-redefs [resume-records/record-origin! (constantly nil)
+                    resume-records/pending-launches (constantly [])
                     sut/stop-at-exit! (constantly nil)]
         (f))
       (finally
@@ -97,8 +98,10 @@
           (is (= [::stream-a ::stream-b]
                  (mapv #(get-in % [1 :event-stream]) @registrations)))
           (is (= ::operator-stream (:stream (first @starts))))
-          (is (identical? operator/live-intervention-target?
-                          (:accept? (first @starts))))
+          (testing "a runner's consumer leaves retries to a long-lived one"
+            (let [accept? (:accept? (first @starts))]
+              (is (not (accept? {:intervention/type :retry :intervention/target-id "w"})))
+              (is (accept? {:intervention/type :acknowledge :intervention/target-id "a"}))))
           (is (identical? operator/live-intervention-stream
                           (:stream-for (first @starts)))))))))
 
@@ -151,8 +154,9 @@
                       operator/register-live-runner! (constantly nil)
                       operator/start-operator-consumer! (fn [opts] (swap! starts conj opts) ::handle)
                       operator/stop-operator-consumer! #(swap! stops conj %)]
-          (testing "a runnerless consumer registers every process handle"
+          (testing "a runnerless consumer registers every process handle and takes retries"
             (is (= ::handle (sut/start-process-control!)))
+            (is (identical? operator/live-intervention-target? (:accept? (first @starts))))
             (is (= {:degradation ::degradation-manager
                     :launcher {:launch! identity}
                     :evaluator policy-evaluator/evaluate}
@@ -240,3 +244,110 @@
                       operator/start-operator-consumer! (constantly ::handle)]
           (sut/start-process-control!)
           (is (empty? @registered) "nothing — not nil — is registered"))))))
+
+(deftest ^{:stratum 1} a-starting-server-resumes-retries-left-dispatched
+  (with-clean-operator-state
+    (fn []
+      (let [resumed (atom [])
+            launch {:resume/run-id (random-uuid) :resume/intervention {:intervention/id 1}}]
+        (with-redefs [agent/create-meta-loop-context (constantly {:event-stream ::operator-stream})
+                      supervisory/attach! (constantly nil)
+                      correlator/attach! (constantly nil)
+                      es/create-event-stream (constantly ::operator-stream)
+                      resume-launcher/launcher (constantly nil)
+                      resume-records/pending-launches (constantly [launch])
+                      operator/register-degradation-manager! (constantly nil)
+                      operator/register-policy-evaluator! (constantly nil)
+                      operator/verify-launched-resume! (fn [& args] (swap! resumed conj args))
+                      operator/start-operator-consumer! (constantly ::handle)]
+          (sut/start-process-control!)
+          (is (= [[::operator-stream {:intervention/id 1} launch]] @resumed)))))))
+
+(deftest ^{:stratum 1} a-consumer-whose-exit-hook-cannot-be-installed-is-still-stopped
+  (with-clean-operator-state
+    (fn []
+      (let [stops (atom [])
+            hooks (atom [])
+            refuse-hook? (atom true)]
+        (with-redefs [agent/create-meta-loop-context (constantly {:event-stream ::operator-stream})
+                      supervisory/attach! (constantly nil)
+                      correlator/attach! (constantly nil)
+                      es/create-event-stream (constantly ::operator-stream)
+                      resume-launcher/launcher (constantly nil)
+                      operator/register-degradation-manager! (constantly nil)
+                      operator/register-policy-evaluator! (constantly nil)
+                      resume-records/record-origin! (constantly nil)
+                      operator/start-operator-consumer! (constantly ::handle)
+                      operator/stop-operator-consumer! #(swap! stops conj %)
+                      sut/stop-at-exit! #(if @refuse-hook?
+                                           (throw (IllegalStateException. "Shutdown in progress"))
+                                           (swap! hooks conj %))]
+          (testing "a hook refused because the JVM is shutting down fails the start"
+            (is (thrown? IllegalStateException (sut/start-process-control!))))
+          (testing "and stops the consumer it started, whatever the caller's cleanup does"
+            (is (= [::handle] @stops))
+            (sut/stop-process-control!)
+            (is (= [::handle] @stops) "nothing is left for a later stop"))
+          (testing "a runner's start fails the same way and leaves no consumer either"
+            (reset! stops [])
+            (is (thrown? IllegalStateException
+                         (sut/register-workflow-control! :workflow-a (atom {}) ::stream-a)))
+            (is (= [::handle] @stops)))
+          (testing "and the next start still installs a hook"
+            (reset! refuse-hook? false)
+            (sut/start-process-control!)
+            (is (= 1 (count @hooks)))))))))
+
+(deftest ^{:stratum 1} a-stop-during-a-start-waits-for-its-resumed-retries
+  (with-clean-operator-state
+    (fn []
+      (let [events (atom [])
+            resuming (promise)
+            finish-resume (promise)
+            launch {:resume/run-id (random-uuid) :resume/intervention {:intervention/id 1}}]
+        (with-redefs [agent/create-meta-loop-context (constantly {:event-stream ::operator-stream})
+                      supervisory/attach! (constantly nil)
+                      correlator/attach! (constantly nil)
+                      es/create-event-stream (constantly ::operator-stream)
+                      resume-launcher/launcher (constantly nil)
+                      resume-records/pending-launches (constantly [launch])
+                      operator/register-degradation-manager! (constantly nil)
+                      operator/register-policy-evaluator! (constantly nil)
+                      operator/verify-launched-resume! (fn [& _]
+                                                         (deliver resuming true)
+                                                         @finish-resume
+                                                         (swap! events conj :resumed))
+                      operator/start-operator-consumer! (constantly ::handle)
+                      operator/stop-operator-consumer! (fn [_] (swap! events conj :stopped))
+                      sut/stop-at-exit! (constantly nil)]
+          (let [starter (future (sut/start-process-control!))
+                _ (deref resuming 5000 :timeout)
+                stopper (future (sut/stop-process-control!))]
+            (testing "a stop arriving while retries are resumed waits for them"
+              (is (= :waiting (deref stopper 200 :waiting)))
+              (is (= [] @events)))
+            (deliver finish-resume true)
+            (deref starter 5000 :timeout)
+            (deref stopper 5000 :timeout)
+            (testing "so the stop that drains the pool comes after they land in it"
+              (is (= [:resumed :stopped] @events)))))))))
+
+(deftest ^{:stratum 1} a-server-whose-consumer-fails-to-start-resumes-no-retries
+  (with-clean-operator-state
+    (fn []
+      (let [resumed (atom [])
+            launch {:resume/run-id (random-uuid) :resume/intervention {:intervention/id 1}}]
+        (with-redefs [agent/create-meta-loop-context (constantly {:event-stream ::operator-stream})
+                      supervisory/attach! (constantly nil)
+                      correlator/attach! (constantly nil)
+                      es/create-event-stream (constantly ::operator-stream)
+                      resume-launcher/launcher (constantly nil)
+                      resume-records/pending-launches (constantly [launch])
+                      operator/register-degradation-manager! (constantly nil)
+                      operator/register-policy-evaluator! (constantly nil)
+                      operator/verify-launched-resume! (fn [& args] (swap! resumed conj args))
+                      operator/start-operator-consumer! (fn [_opts]
+                                                          (throw (ex-info "consumer would not start" {})))]
+          (is (thrown? clojure.lang.ExceptionInfo (sut/start-process-control!)))
+          (is (empty? @resumed)
+              "no verification is left running without a consumer whose stop drains it"))))))
