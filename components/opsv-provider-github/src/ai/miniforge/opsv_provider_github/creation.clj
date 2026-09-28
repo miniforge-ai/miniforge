@@ -34,12 +34,12 @@
 
 ;------------------------------------------------------------------------------ Layer 2
 
-(defn ^{:stratum 2} create! [runtime payload]
+(defn ^{:stratum 2} create! [runtime payload dispatch]
   (let [ref (transport/request! runtime "GET" (wire/head-path payload) nil false)]
     (cond
       (not (readable-head? ref))
       {:effect/outcome :failed :effect/failure (msg/t :create/preflight-unavailable)}
-      (current-head? payload ref) (create-once! runtime payload)
+      (current-head? payload ref) (dispatch #(create-once! runtime payload))
       :else {:effect/outcome :failed :effect/failure (msg/t :create/preflight-failed)})))
 
 (comment

@@ -25,5 +25,15 @@
     (is (= {:title (:pr/title f/payload) :body (:pr/body f/payload)
             :head (:pr/branch f/payload) :base (:pr/base f/payload) :draft true} body))))
 
+(deftest ^{:stratum 0} runtime-dispatch-can-refuse-after-preflight-without-post-test
+  (let [calls (atom [])
+        runtime (f/runtime calls [(f/head-response)])
+        refused {:effect/outcome :failed :effect/failure "runtime refused"}
+        result (provider/create-pr! runtime (f/transaction :committing) f/payload (constantly refused))]
+    (is (= refused result))
+    (is (= ["GET"] (mapv #(get-in % [:arguments 6]) @calls)))
+    (is (= :invalid-input
+           (:anomaly/type (provider/create-pr! runtime (f/transaction :committing) f/payload nil))))))
+
 (comment
   (f/pull-request))
