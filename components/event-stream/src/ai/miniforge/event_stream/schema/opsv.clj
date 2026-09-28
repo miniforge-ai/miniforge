@@ -26,6 +26,10 @@
 
 (def ^{:stratum 0} KeywordMap [:map-of :keyword :any])
 
+(defn- ^{:stratum 0} matching-envelope? [payload]
+  (= (get-in payload [:opsv/governed-effect :evidence/envelope-id])
+     (get-in payload [:opsv/decision-envelope :envelope/id])))
+
 (def ^{:stratum 0} Targets
   [:map {:closed true}
    [:services [:vector :string]]
@@ -69,6 +73,13 @@
    [:message string?]])
 
 ;------------------------------------------------------------------------------ Layer 1
+
+(def ^{:stratum 1} disposition-entries
+  [[:opsv/governed-effect GovernedEffect]
+   [:opsv/effect-state (into [:enum] effect/states)]
+   [:opsv/decision-envelope decision/AllowingEnvelope]
+   [:opsv/effect-observed KeywordMap]
+   [:opsv/effect-failure [:maybe :string]]])
 
 (def ^{:stratum 1} RiskResult
   [:map {:closed true}
@@ -154,12 +165,8 @@
 
 (def ^{:stratum 2} ActuationDisposition
   [:and
-   (opsv-event-schema
-    :opsv.actuation/disposition
-    [[:opsv/governed-effect GovernedEffect]
-     [:opsv/effect-state (into [:enum] effect/states)]
-     [:opsv/decision-envelope decision/AllowingEnvelope]
-     [:opsv/effect-observed KeywordMap]
-     [:opsv/effect-failure [:maybe :string]]])
-   [:fn #(= (get-in % [:opsv/governed-effect :evidence/envelope-id])
-            (get-in % [:opsv/decision-envelope :envelope/id]))]])
+   (opsv-event-schema :opsv.actuation/disposition disposition-entries)
+   [:fn matching-envelope?]])
+
+(def ^{:stratum 2} DispositionPayload
+  [:and (into [:map {:closed true}] disposition-entries) [:fn matching-envelope?]])

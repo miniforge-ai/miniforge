@@ -99,7 +99,7 @@
 (deftest ^{:stratum 1} disposition-requires-a-derived-allow-at-both-public-boundaries-test
   (let [stream (event-stream/create-event-stream)
         envelope (:opsv/decision-envelope disposition-payload)]
-    (doseq [invalid [nil 42]]
+    (doseq [invalid [nil 42 (assoc disposition-payload :unexpected true)]]
       (is (anomaly/anomaly? (event-stream/actuation-disposition stream workflow-id evidence-id invalid))))
     (doseq [invalid [(assoc envelope :envelope/decision :deny)
                      (assoc envelope :envelope/decision :allow-with-obligations)
@@ -113,6 +113,15 @@
       (is (m/validate opsv/ActuationDisposition
                       (event-stream/actuation-disposition stream workflow-id evidence-id
                                                           (assoc disposition-payload :opsv/effect-state state)))))))
+
+(deftest ^{:stratum 1} invalid-disposition-does-not-consume-event-sequence-test
+  (let [stream (event-stream/create-event-stream)
+        construct #(event-stream/actuation-disposition stream workflow-id evidence-id %)
+        before (construct disposition-payload)
+        invalid (construct (assoc disposition-payload :opsv/effect-state :invented))
+        after (construct disposition-payload)]
+    (is (anomaly/anomaly? invalid))
+    (is (= (inc (:event/sequence-number before)) (:event/sequence-number after)))))
 
 (deftest ^{:stratum 1} test-all-opsv-constructors-emit-canonical-events
   (let [stream (event-stream/create-event-stream)]
