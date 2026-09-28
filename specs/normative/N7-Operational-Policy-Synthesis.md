@@ -6,8 +6,8 @@
 
 # N7 — Operational Policy Synthesis With Verification
 
-**Version:** 0.3.1-draft
-**Date:** 2026-09-08
+**Version:** 0.3.2-draft
+**Date:** 2026-09-28
 **Status:** Complete
 **Conformance:** MUST
 **Class:** Extension spec (N7+)
@@ -485,6 +485,8 @@ depends on machinery that is not there.
 
 **Version History:**
 
+- 0.3.2-draft (2026-09-28): Added governed disposition events and emission timing
+  for proposed, terminal and uncertain outcomes; aligned the N3 event contract
 - 0.3.1-draft (2026-09-08): Reconciled the informative implementation annex
   after canonical contracts, pure domain policy, the seven-phase workflow,
   event projection, and the deterministic staging MCI landed

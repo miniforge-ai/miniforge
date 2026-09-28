@@ -30,6 +30,10 @@
   (= (get-in payload [:opsv/governed-effect :evidence/envelope-id])
      (get-in payload [:opsv/decision-envelope :envelope/id])))
 
+(defn- ^{:stratum 0} observations-after-confirmation? [payload]
+  (or (not (#{:proposed :committing} (:opsv/effect-state payload)))
+      (empty? (:opsv/effect-observed payload))))
+
 (def ^{:stratum 0} Targets
   [:map {:closed true}
    [:services [:vector :string]]
@@ -166,7 +170,10 @@
 (def ^{:stratum 2} ActuationDisposition
   [:and
    (opsv-event-schema :opsv.actuation/disposition disposition-entries)
-   [:fn matching-envelope?]])
+   [:fn matching-envelope?]
+   [:fn observations-after-confirmation?]])
 
 (def ^{:stratum 2} DispositionPayload
-  [:and (into [:map {:closed true}] disposition-entries) [:fn matching-envelope?]])
+  [:and (event-schema/with-identity (into [:map {:closed true}] disposition-entries))
+   [:fn matching-envelope?]
+   [:fn observations-after-confirmation?]])
