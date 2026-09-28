@@ -12,7 +12,7 @@
   [:and :string [:fn (complement str/blank?)]])
 
 (def ^{:stratum 0} GitObjectId
-  [:re #"(?:[0-9a-f]{40}|[0-9a-f]{64})"])
+  [:re #"\A(?:[0-9a-f]{40}|[0-9a-f]{64})\z"])
 
 (def ^{:stratum 0} EvidenceValue
   "Portable evidence: scalar EDN, vectors and string/keyword-keyed maps.

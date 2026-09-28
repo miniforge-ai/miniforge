@@ -61,10 +61,10 @@
       (is (empty? @calls)))))
 
 (deftest ^{:stratum 0} broad-grant-without-governance-binding-is-refused-test
-  (let [{:keys [dir calls] :as context} (setup)
+  (let [{:keys [grant-dir calls] :as context} (setup)
         broad (update (:grant context) :grant/scope dissoc :pr/governance-hash)
         distinct-grant (assoc broad :grant/id (random-uuid))
-        registered (grant/register! dir distinct-grant)
+        registered (grant/register! grant-dir distinct-grant)
         proposed (propose! (assoc context :grant registered))]
     (is (not (anomaly/anomaly? registered)))
     (is (= :proposed (:effect/state proposed)))
@@ -74,9 +74,9 @@
 ;------------------------------------------------------------------------------ Layer 1
 
 (deftest ^{:stratum 1} provider-exception-leaves-durable-uncertainty-test
-  (let [{:keys [dir candidate calls] :as context} (setup)
+  (let [{:keys [dir grant-dir candidate calls] :as context} (setup)
         proposed (propose! context)
-        result (actuation/commit-pr! dir dir (:effect/id candidate)
+        result (actuation/commit-pr! dir grant-dir (:effect/id candidate)
                                     clock (partial lost-response calls))]
     (is (= :proposed (:effect/state proposed)))
     (is (= :unknown-outcome (:effect/state result)))

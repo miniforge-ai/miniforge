@@ -9,6 +9,7 @@
             [ai.miniforge.execution-grant.interface :as grant]
             [ai.miniforge.opsv-actuation.interface :as actuation]
             [ai.miniforge.opsv-actuation.interface-test :as fixture]
+            [clojure.java.io :as io]
             [clojure.test :refer [is]])
   (:import [java.nio.file Files]
            [java.nio.file.attribute FileAttribute]
@@ -48,14 +49,16 @@
 (defn ^{:stratum 1} setup
   ([] (setup fixture/candidate))
   ([candidate]
-   (let [dir (tmp-dir)
+   (let [root (tmp-dir)
+         dir (str (io/file root "effects"))
+         grant-dir (str (io/file root "authority"))
          prepared (actuation/prepare-pr candidate)
          decision (allowing-envelope)
          governed (actuation/prepare-governed-pr candidate decision)
-         issued (grant/issue-for-effect dir (grant-request governed) now)
-         registered (grant/register! dir issued)]
+         issued (grant/issue-for-effect grant-dir (grant-request governed) now)
+         registered (grant/register! grant-dir issued)]
      (is (not (anomaly/anomaly? registered)))
-     {:dir dir :candidate candidate :prepared prepared
+     {:dir dir :grant-dir grant-dir :candidate candidate :prepared prepared
       :grant registered :decision decision :calls (atom [])})))
 
 (defn ^{:stratum 1} propose! [{:keys [dir candidate grant decision]}]
@@ -72,8 +75,8 @@
 
 ;------------------------------------------------------------------------------ Layer 2
 
-(defn ^{:stratum 2} commit! [{:keys [dir candidate calls]}]
-  (actuation/commit-pr! dir dir (:effect/id candidate) clock (partial effect-report calls)))
+(defn ^{:stratum 2} commit! [{:keys [dir grant-dir candidate calls]}]
+  (actuation/commit-pr! dir grant-dir (:effect/id candidate) clock (partial effect-report calls)))
 
 (comment
   (setup))

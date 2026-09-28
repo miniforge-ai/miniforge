@@ -71,7 +71,10 @@
                                         :deny)))))
   (doseq [field [:pr/head-sha :pr/payload-hash :pr/governance-hash]]
     (is (= :invalid-input
-           (:anomaly/type (issue (assoc request field "not-a-digest")))))))
+           (:anomaly/type (issue (assoc request field "not-a-digest")))))
+    (doseq [affix ["prefix" "\n" " "]]
+      (is (= :invalid-input
+             (:anomaly/type (issue (update request field str affix))))))))
 
 (deftest ^{:stratum 2} pr-grant-rechecks-scope-liveness-and-count-test
   (let [g (issue request)

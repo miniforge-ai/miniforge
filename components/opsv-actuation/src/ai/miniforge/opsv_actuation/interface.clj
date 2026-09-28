@@ -52,7 +52,9 @@
    The trusted provider receives [claimed-transaction exact-provider-payload].
    Return the durable transaction or anomaly; uncertain reports stay unknown.
    Clock must return Instant. Runtime must fence this call against emergency
-   stop; the grant lookup alone does not lock against concurrent revocation."
+   stop; the grant lookup alone does not lock against concurrent revocation.
+   Pass nonblank string paths. Use separate effect and authority directories;
+   the authority root must be canonical with no symlinked path components."
   [effect-dir grant-dir id clock provider]
   (let [args [effect-dir grant-dir id clock provider]]
     (if (m/validate execution-schema/CommitArguments args)
