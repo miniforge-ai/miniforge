@@ -123,6 +123,19 @@
     (is (anomaly/anomaly? invalid))
     (is (= (inc (:event/sequence-number before)) (:event/sequence-number after)))))
 
+(deftest ^{:stratum 1} disposition-preserves-identity-and-refuses-premature-observations-test
+  (let [stream (event-stream/create-event-stream)
+        identity {:org/id (random-uuid) :workspace/id (random-uuid)
+                  :repo/id "miniforge-ai/miniforge" :auth/context {:actor :test}}
+        payload (merge disposition-payload identity)
+        event (event-stream/actuation-disposition stream workflow-id evidence-id payload)]
+    (is (= identity (select-keys event (keys identity))))
+    (is (m/validate opsv/ActuationDisposition event))
+    (doseq [state [:proposed :committing]]
+      (let [invalid (assoc payload :opsv/effect-state state :opsv/effect-observed {:pr/number 1})]
+        (is (anomaly/anomaly? (event-stream/actuation-disposition stream workflow-id evidence-id invalid)))
+        (is (not (m/validate opsv/ActuationDisposition (merge event invalid))))))))
+
 (deftest ^{:stratum 1} test-all-opsv-constructors-emit-canonical-events
   (let [stream (event-stream/create-event-stream)]
     (doseq [[constructor schema event-type payload] constructor-cases]
