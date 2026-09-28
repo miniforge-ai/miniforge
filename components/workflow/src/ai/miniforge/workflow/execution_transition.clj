@@ -31,7 +31,6 @@
             [ai.miniforge.workflow.context :as context]
             [ai.miniforge.workflow.execution-events :as exec-events]
             [ai.miniforge.workflow.fsm :as workflow-fsm]
-            [ai.miniforge.workflow.runner-defaults :as defaults]
             [ai.miniforge.workflow.messages :as messages]))
 
 ;------------------------------------------------------------------------------ Layer 0
@@ -68,10 +67,6 @@
   (or (get-in phase-result [:result :output :phase/verdict])
       (get-in phase-result [:output :phase/verdict])
       (get phase-result :phase/verdict)))
-
-(def ^{:stratum 0} max-redirects
-  "Maximum number of phase redirects before failing to prevent infinite loops."
-  (defaults/max-redirects))
 
 ;------------------------------------------------------------------------------ Layer 1
 
@@ -199,7 +194,8 @@
 
    Phase 4b: dropped the parallel `is-redirect?` budget check. The
    FSM's `:budget/redirects-spent?` guard on the guarded `:phase/fail`
-   array enforces the same `max-redirects` ceiling, and the
+   array enforces the redirect ceiling from
+   `runner-defaults/max-redirects`, and the
    `:redirect/inc-count` action on the redirect branch is the SINGLE
    accounting site that bumps the counter. With Phase 4b's verdict-
    driven handle-error path, no event ever reaches this fn with the
