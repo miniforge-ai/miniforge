@@ -75,8 +75,9 @@
 
 ;------------------------------------------------------------------------------ Layer 2
 
-(defn ^{:stratum 2} commit! [{:keys [dir grant-dir candidate calls]}]
-  (actuation/commit-pr! dir grant-dir (:effect/id candidate) clock (partial effect-report calls)))
+(defn ^{:stratum 2} commit! [{:keys [dir grant-dir candidate grant calls]}]
+  (actuation/commit-pr! dir grant-dir (:effect/id candidate) (:grant/id grant)
+                        clock (partial effect-report calls)))
 
 (comment
   (setup))

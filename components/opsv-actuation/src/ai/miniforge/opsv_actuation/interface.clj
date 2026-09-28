@@ -49,14 +49,17 @@
 
 (defn ^{:stratum 0} commit-pr!
   "Commit by durable ID using current registered authority, never a snapshot.
+   Runtime must retain issued-grant-id from issuance/registration independently
+   of the effect transaction, not derive it from a reloaded transaction. This
+   rejects authority substitution before claiming, even for identical scopes.
    The trusted provider receives [claimed-transaction exact-provider-payload].
    Return the durable transaction or anomaly; uncertain reports stay unknown.
    Clock must return Instant. Runtime must fence this call against emergency
    stop; the grant lookup alone does not lock against concurrent revocation.
    Pass nonblank string paths. Use separate effect and authority directories;
    the authority root must be canonical with no symlinked path components."
-  [effect-dir grant-dir id clock provider]
-  (let [args [effect-dir grant-dir id clock provider]]
+  [effect-dir grant-dir id issued-grant-id clock provider]
+  (let [args [effect-dir grant-dir id issued-grant-id clock provider]]
     (if (m/validate execution-schema/CommitArguments args)
-      (execution/commit! effect-dir grant-dir id clock provider)
+      (execution/commit! effect-dir grant-dir id issued-grant-id clock provider)
       (anomaly/anomaly :invalid-input (msg/ts :execution/invalid-input) {}))))

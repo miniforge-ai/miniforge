@@ -29,6 +29,8 @@ The subsequent provider adapter and runtime wiring depend on this coordinator.
   scope, separate from the unchanged provider payload hash. The runtime calls
   `prepare-governed-pr` before issuance. Old unbound PR grants are refused.
 - Reload durable grant authority at commit time and reject invalid stored payloads.
+- Require the runtime-retained issuance ID at commit, independently of the
+  transaction record. Refuse a substituted valid same-scope grant before claim.
 - Pass the claimed transaction and exact payload to the trusted provider port.
 - Never retry a claimed transaction or convert an uncertain response to success.
 - Persist the envelope timestamp at standard EDN `#inst` millisecond precision;
@@ -38,7 +40,7 @@ The subsequent provider adapter and runtime wiring depend on this coordinator.
 
 Exercise durable registration, proposal, commit, revocation, expiry, repeated
 execution, failed verification drafts, malformed records and uncertain outcomes.
-All 20 coordinator tests / 173 assertions pass, including governance-corruption
+All 21 coordinator tests / 182 assertions pass, including governance-corruption
 and broad-grant regression coverage. Grant tests pass 65 tests / 401 assertions
 in each of Miniforge, Core and TUI.
 The component standards scan reports zero findings. The CLI builds successfully
@@ -49,6 +51,10 @@ and packaged help runs. Polylith, kondo and stratum checks pass.
 No external mode is enabled by this PR. Runtime wiring must supply evaluated
 policy envelopes, scoped grants, provider ports and safe-boundary fencing.
 The local stores require runtime-owned, trusted directories.
+Runtime must retain the returned issuance/registration ID in its own correlation
+state and pass it to commit. Reading the expected ID from the effect record would
+defeat substitution protection. This is a trusted-process contract, not protection
+against an attacker who can replace both runtime state and authority stores.
 Use separate effect and authority/breach directories, passed as nonblank string
 paths. The grant store requires a canonical root without symlinked components.
 Acceptance fixtures use that production layout. Exact digest constraints reject

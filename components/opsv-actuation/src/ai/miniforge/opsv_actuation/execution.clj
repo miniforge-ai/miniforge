@@ -34,8 +34,8 @@
 ;------------------------------------------------------------------------------ Layer 1
 
 (defn ^{:stratum 1} commit!
-  [effect-dir grant-dir id clock provider]
-  (effect/commit-current! effect-dir id (partial grant-boundary/current grant-dir)
+  [effect-dir grant-dir id issued-grant-id clock provider]
+  (effect/commit-current! effect-dir id (partial grant-boundary/current grant-dir issued-grant-id)
                           clock (partial execute-claimed! provider)))
 
 (comment

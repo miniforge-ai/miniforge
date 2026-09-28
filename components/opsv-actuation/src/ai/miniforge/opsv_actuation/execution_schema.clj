@@ -35,7 +35,7 @@
 (def ^{:stratum 0} RuntimeInstant [:fn #(instance? Instant %)])
 
 (def ^{:stratum 0} CommitArguments
-  [:tuple schema/NonBlankString schema/NonBlankString :uuid fn? fn?])
+  [:tuple schema/NonBlankString schema/NonBlankString :uuid :uuid fn? fn?])
 
 ;------------------------------------------------------------------------------ Layer 1
 
