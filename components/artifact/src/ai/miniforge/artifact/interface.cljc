@@ -21,10 +21,37 @@
    #?@(:bb []
        :default [[ai.miniforge.artifact.datalevin-store :as datalevin-store]])
    [ai.miniforge.artifact.core :as core]
+   [ai.miniforge.artifact.publication :as publication]
+   [ai.miniforge.artifact.publication-boundary :as publication-boundary]
+   [ai.miniforge.schema.interface :as schema]
+   [clojure.string :as str]
    [ai.miniforge.artifact.interface.protocols.artifact-store :as p]
    [ai.miniforge.artifact.protocols.records.transit-store :as transit-store]))
 
 ;------------------------------------------------------------------------------ Layer 0
+
+(defn ^{:stratum 0} publish!
+  "Synchronously publish an immutable artifact to an existing canonical directory.
+   Returns the artifact only after file and ancestor-directory durability barriers.
+   The same ID/content is retryable; different content is never overwritten.
+   Transit-round-trippable artifacts are limited to 16 MiB. Failures are anomalies;
+   an unconfirmed write may already exist and must be retried with identical data.
+   The host must exclusively control the directory and its ancestors; no symlinks.
+   Filesystems without hard links or directory force support fail closed.
+   This uncached store is separate from the mutable ArtifactStore protocol."
+  [directory artifact]
+  (if (and (string? directory) (not (str/blank? directory)) (schema/valid-artifact? artifact))
+    (publication-boundary/call-with-exception-handling
+     (:artifact/id artifact) #(publication/publish! directory artifact))
+    (publication/failure :invalid-input :publication/invalid (:artifact/id artifact))))
+
+(defn ^{:stratum 0} read-published
+  "Read and validate an immutable artifact without consulting a memory cache.
+   Returns nil only for an absent ID; corruption and unsafe paths are anomalies."
+  [directory id]
+  (if (and (string? directory) (not (str/blank? directory)) (uuid? id))
+    (publication-boundary/call-with-exception-handling id #(publication/read-record directory id))
+    (publication/failure :invalid-input :publication/invalid id)))
 
 ;; Re-export protocol for public API
 (def ^{:stratum 0} ArtifactStore

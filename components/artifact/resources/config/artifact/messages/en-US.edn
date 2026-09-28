@@ -1,4 +1,10 @@
 {:artifact/messages
- {:link/parent-not-found "Parent artifact not found"
+ {:publication/invalid "Immutable artifact publication requires a canonical directory and a valid artifact."
+  :publication/unsafe-path "Artifact publication requires an existing canonical, non-symlinked directory."
+  :publication/read-failed "Published artifact is corrupt or is not a regular file."
+  :publication/id-conflict "Artifact identity already names different content."
+  :publication/not-portable "Artifact must round-trip through Transit within the 16 MiB limit."
+  :publication/unconfirmed "Artifact persistence is unconfirmed; retain its identity and content for recovery."
+  :link/parent-not-found "Parent artifact not found"
   :link/child-not-found "Child artifact not found"
   :link/artifact-not-found "Artifact not found"}}

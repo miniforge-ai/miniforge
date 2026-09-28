@@ -1,0 +1,114 @@
+;; Title: Miniforge.ai
+;; Copyright 2025-2026 Christopher Lester (christopher@miniforge.ai)
+;; Licensed under the Apache License, Version 2.0.
+(ns ai.miniforge.artifact.publication-test
+  (:require [ai.miniforge.anomaly.interface :as anomaly]
+            [ai.miniforge.artifact.interface :as artifact]
+            [ai.miniforge.artifact.publication-codec :as codec]
+            [ai.miniforge.artifact.publication-files :as files]
+            [clojure.java.io :as io]
+            [clojure.test :refer [deftest is]])
+  (:import [java.nio.file Files]
+           [java.nio.file.attribute FileAttribute]))
+
+;------------------------------------------------------------------------------ Layer 0
+
+(defn- ^{:stratum 0} with-directory [f]
+  (let [root (.getCanonicalFile (.toFile (Files/createTempDirectory "artifact-publication-"
+                                                                 (make-array FileAttribute 0))))]
+    (try (f (.getPath root))
+         (finally (doseq [file (reverse (file-seq root))] (io/delete-file file))))))
+
+(defn- ^{:stratum 0} record []
+  (artifact/build-artifact {:id (random-uuid) :type :manifest :version "1.0.0"
+                            :content {:evidence/hash "verified"}}))
+
+;------------------------------------------------------------------------------ Layer 1
+
+(deftest ^{:stratum 1} publication-is-immutable-and-uncached-test
+  (with-directory
+    (fn [directory]
+      (let [value (record) id (:artifact/id value)]
+        (is (nil? (artifact/read-published directory id)))
+        (is (= value (artifact/publish! directory value)))
+        (is (= value (artifact/read-published directory id)))
+        (is (= value (artifact/publish! directory value)))
+        (is (= :conflict (:anomaly/type (artifact/publish! directory (assoc value :artifact/content {})))))
+        (is (= value (artifact/read-published directory id)))
+        (spit (files/target directory id) "corrupt")
+        (is (anomaly/anomaly? (artifact/read-published directory id)))))))
+
+(deftest ^{:stratum 1} invalid-input-and-unsafe-paths-refuse-publication-test
+  (with-directory
+    (fn [directory]
+      (let [value (record)]
+        (doseq [invalid [nil 42 {} (assoc value :artifact/id "not-a-uuid")]]
+          (is (= :invalid-input (:anomaly/type (artifact/publish! directory invalid)))))
+        (doseq [path [nil "" (str directory "/../" (.getName (io/file directory)))]]
+          (is (= :invalid-input (:anomaly/type (artifact/publish! path value)))))
+        (is (empty? (seq (.listFiles (io/file directory)))))))))
+
+(deftest ^{:stratum 1} unconfirmed-publication-is-recoverable-with-identical-content-test
+  (with-directory
+    (fn [directory]
+      (let [value (record) id (:artifact/id value)
+            unconfirmed (with-redefs [files/confirm! (fn [_] (throw (java.io.IOException. "force failed")))]
+                          (artifact/publish! directory value))]
+        (is (anomaly/anomaly? unconfirmed))
+        (is (= id (get-in unconfirmed [:anomaly/data :artifact/id])))
+        (is (= value (artifact/read-published directory id)))
+        (is (= value (artifact/publish! directory value)))
+        (is (= 1 (count (.listFiles (io/file directory)))))))))
+
+(deftest ^{:stratum 1} prepublication-failure-never-acknowledges-or-leaves-target-test
+  (with-directory
+    (fn [directory]
+      (let [value (record)
+            result (with-redefs [files/write! (fn [& _] (throw (AssertionError. "write failed")))]
+                     (artifact/publish! directory value))]
+        (is (anomaly/anomaly? result))
+        (is (nil? (artifact/read-published directory (:artifact/id value))))
+        (is (empty? (seq (.listFiles (io/file directory)))))))))
+
+(deftest ^{:stratum 1} codec-refuses-oversize-or-nonportable-content-test
+  (with-directory
+    (fn [directory]
+      (doseq [content [(Object.) (apply str (repeat 2048 "x"))]]
+        (let [result (with-redefs [codec/maximum-bytes 1024]
+                       (artifact/publish! directory (assoc (record) :artifact/content content)))]
+          (is (anomaly/anomaly? result))))
+      (is (empty? (seq (.listFiles (io/file directory))))))))
+
+(deftest ^{:stratum 1} concurrent-publishers-never-replace-a-winner-test
+  (with-directory
+    (fn [directory]
+      (let [value (record) start (promise)
+            candidates [value (assoc value :artifact/content {:other true})]
+            workers (mapv #(future @start (artifact/publish! directory %)) candidates)]
+        (deliver start true)
+        (let [results (mapv deref workers)]
+          (is (= 1 (count (filter anomaly/anomaly? results))))
+          (is (= (first (remove anomaly/anomaly? results))
+                 (artifact/read-published directory (:artifact/id value)))))))))
+
+(deftest ^{:stratum 1} interruption-is-preserved-at-publication-boundary-test
+  (with-directory
+    (fn [directory]
+      (let [[result interrupted?]
+            (with-redefs [files/write! (fn [& _] (throw (InterruptedException.)))]
+              (let [result (artifact/publish! directory (record))]
+                [result (Thread/interrupted)]))]
+        (is (anomaly/anomaly? result))
+        (is interrupted?)))))
+
+(deftest ^{:stratum 1} symlink-target-is-never-followed-test
+  (with-directory
+    (fn [directory]
+      (let [value (record) id (:artifact/id value)
+            outside (io/file directory "existing")
+            target (files/target directory id)]
+        (spit outside "untouched")
+        (Files/createSymbolicLink (.toPath target) (.toPath outside) (make-array FileAttribute 0))
+        (is (anomaly/anomaly? (artifact/read-published directory id)))
+        (is (anomaly/anomaly? (artifact/publish! directory value)))
+        (is (= "untouched" (slurp outside)))))))
