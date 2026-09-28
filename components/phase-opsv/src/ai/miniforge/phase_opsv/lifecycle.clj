@@ -49,7 +49,8 @@
     result
     (let [published (events/emit-phase-events! ctx phase-key (:output result))]
       (if (anomaly/anomaly? published)
-        (lifecycle-result/phase-result published)
+        (lifecycle-result/phase-result
+         (assoc-in published [:anomaly/data :opsv/phase-output] (:output result)))
         result))))
 
 ;------------------------------------------------------------------------------ Layer 1

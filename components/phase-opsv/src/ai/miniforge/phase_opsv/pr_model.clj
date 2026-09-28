@@ -16,19 +16,22 @@
    (.getBytes (pr-str [:opsv/pr-create workflow-id (str/lower-case (str repository))])
               StandardCharsets/UTF_8)))
 
-(defn ^{:stratum 0} outcome [record transaction]
+(defn ^{:stratum 0} governed-effect [transaction]
+  {:evidence/effect-id (:effect/id transaction)
+   :evidence/grant-id (:effect/grant-id transaction)
+   :evidence/envelope-id (:effect/envelope-id transaction)})
+
+;------------------------------------------------------------------------------ Layer 1
+
+(defn ^{:stratum 1} outcome [record transaction]
   (if (= :succeeded (:effect/state transaction))
     {:opsv/actuation-record
      (assoc record :effective-actuation-mode :pr-only
-            :governed-effects [{:evidence/effect-id (:effect/id transaction)
-                                :evidence/grant-id (:effect/grant-id transaction)
-                                :evidence/envelope-id (:effect/envelope-id transaction)}]
+            :governed-effects [(governed-effect transaction)]
             :pr-refs [(get-in transaction [:effect/observed :pr/url])])
      :opsv/effect-transactions [transaction]}
     (anomaly/anomaly :unavailable (msg/ts :pr/unconfirmed)
                      {:effect/transaction transaction})))
-
-;------------------------------------------------------------------------------ Layer 1
 
 (defn ^{:stratum 1} candidate [ctx verified target]
   (if (not= (:opsv/policy-hash verified) (:opsv/policy-hash target))

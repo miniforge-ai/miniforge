@@ -8,6 +8,7 @@
   :pr/existing-effect "OPSV PR effect already exists; inspect or reconcile it without creating another PR."
   :pr/authority-refused "OPSV PR authority was refused before proposal."
   :pr/unconfirmed "OPSV PR execution has no confirmed successful outcome."
+  :pr/audit-unavailable "OPSV PR execution requires a matching active evidence assembly and event stream."
   :adapter/invalid-result "The OPSV adapter returned an invalid result shape."
   :adapter/empty-ramp "The OPSV adapter returned no guarded ramp observations."
   :adapter/missing-fingerprint "The OPSV adapter returned no environment fingerprint."
