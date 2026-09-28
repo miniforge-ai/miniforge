@@ -262,3 +262,23 @@
                       operator/start-operator-consumer! (constantly ::handle)]
           (sut/start-process-control!)
           (is (= [[::operator-stream {:intervention/id 1} launch]] @resumed)))))))
+
+(deftest ^{:stratum 1} a-server-whose-consumer-fails-to-start-resumes-no-retries
+  (with-clean-operator-state
+    (fn []
+      (let [resumed (atom [])
+            launch {:resume/run-id (random-uuid) :resume/intervention {:intervention/id 1}}]
+        (with-redefs [agent/create-meta-loop-context (constantly {:event-stream ::operator-stream})
+                      supervisory/attach! (constantly nil)
+                      correlator/attach! (constantly nil)
+                      es/create-event-stream (constantly ::operator-stream)
+                      resume-launcher/launcher (constantly nil)
+                      resume-records/pending-launches (constantly [launch])
+                      operator/register-degradation-manager! (constantly nil)
+                      operator/register-policy-evaluator! (constantly nil)
+                      operator/verify-launched-resume! (fn [& args] (swap! resumed conj args))
+                      operator/start-operator-consumer! (fn [_opts]
+                                                          (throw (ex-info "consumer would not start" {})))]
+          (is (thrown? clojure.lang.ExceptionInfo (sut/start-process-control!)))
+          (is (empty? @resumed)
+              "no verification is left running without a consumer whose stop drains it"))))))

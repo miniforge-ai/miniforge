@@ -214,11 +214,14 @@
    own (`mf operator serve`). Same context, process handles, and consumer
    options as [[register-workflow-control!]], so workflow-targeted
    pause/resume/cancel are still left to the live runner that owns them —
-   except that this consumer takes retries, and first resumes verifying
-   the ones a previous server left `:dispatched`. Returns the consumer
-   handle."
+   except that this consumer takes retries, and resumes verifying the
+   ones a previous server left `:dispatched`. It resumes them only once
+   the consumer is running: stopping the consumer is what drains the
+   verification pool, so a start that fails earlier must leave no
+   verification behind. Returns the consumer handle."
   []
   (let [ctx (meta-loop-context!)]
     (register-process-handles! ctx)
-    (resume-pending-verifications! ctx)
-    (ensure-operator-consumer! ctx operator/live-intervention-target?)))
+    (let [handle (ensure-operator-consumer! ctx operator/live-intervention-target?)]
+      (resume-pending-verifications! ctx)
+      handle)))
