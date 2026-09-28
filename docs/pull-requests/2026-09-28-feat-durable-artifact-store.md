@@ -26,7 +26,8 @@ component supplies the integrity digest.
 
 - Validate artifact records and canonical, existing directory paths.
 - Encode round-trippable Transit data with a 16 MiB retained-output limit.
-- Store a versioned envelope with a canonical content digest. Verify the digest
+- Store a versioned envelope with a digest of the exact Transit wire string.
+  This preserves list/vector and other wire-type distinctions. Verify the digest
   on every read and retry; it detects corruption, not malicious writer replacement.
 - Force the complete temporary file, create an immutable hard link, then verify
   exact content and force the destination and ancestor directories.
@@ -61,6 +62,11 @@ The host must exclusively control the directory and its ancestors. Hard links an
 directory force support are required; unsupported filesystems fail closed.
 This API does not defend against a privileged process changing host-owned paths
 concurrently. No existing store is migrated or production configuration changed.
+Normal success and failure remove the attempt's temporary link in `finally`.
+A killed process can leave `.artifact-*.tmp` files. They are never evidence records
+and are never read by the public lookup. Cleanup requires stopping all writers
+before removing abandoned temporary links; age alone does not prove abandonment.
+There is no automatic scavenger that could unlink another active publisher's file.
 Application evidence assembly/finalization wiring follows separately.
 
 ## Related issues/PRs

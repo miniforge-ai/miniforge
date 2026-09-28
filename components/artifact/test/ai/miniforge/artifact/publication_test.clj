@@ -10,7 +10,8 @@
             [clojure.java.io :as io]
             [clojure.string :as str]
             [clojure.test :refer [deftest is]])
-  (:import [java.nio.file Files]
+  (:import [java.nio.charset StandardCharsets]
+           [java.nio.file Files]
            [java.nio.file.attribute FileAttribute]))
 
 ;------------------------------------------------------------------------------ Layer 0
@@ -149,5 +150,17 @@
             target (files/target directory id)]
         (is (= value (artifact/publish! directory value)))
         (spit target (str/replace (slurp target) "verified" "modified"))
+        (is (= :fault (:anomaly/type (artifact/read-published directory id))))
+        (is (= :fault (:anomaly/type (artifact/publish! directory value))))))))
+
+(deftest ^{:stratum 1} collection-type-corruption-fails-wire-integrity-test
+  (with-directory
+    (fn [directory]
+      (let [value (assoc (record) :artifact/content (list 1 2))
+            id (:artifact/id value) target (files/target directory id)]
+        (is (= value (artifact/publish! directory value)))
+        (let [envelope (codec/decode (files/read-bytes target))
+              changed (String. ^bytes (codec/encode (assoc value :artifact/content [1 2])) StandardCharsets/UTF_8)]
+          (files/write! target (codec/encode (assoc envelope :publication/wire changed))))
         (is (= :fault (:anomaly/type (artifact/read-published directory id))))
         (is (= :fault (:anomaly/type (artifact/publish! directory value))))))))
