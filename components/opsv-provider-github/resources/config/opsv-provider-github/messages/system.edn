@@ -1,0 +1,7 @@
+{:opsv-provider-github/system
+ {:input/invalid "Invalid governed GitHub PR provider input"
+  :transport/unavailable "GitHub API response could not be confirmed"
+  :create/preflight-failed "Remote branch does not match the authorized commit; no PR creation attempted"
+  :create/preflight-unavailable "Remote branch could not be verified; no PR creation attempted"
+  :create/unconfirmed "GitHub PR creation outcome could not be confirmed"
+  :observe/unresolved "No unique exact GitHub PR observation is available"}}
