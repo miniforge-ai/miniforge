@@ -265,6 +265,8 @@ OPSV SHALL emit these event types with required minimal payloads:
 
 Every event MUST include `:opsv/evidence-bundle-id` for the preallocated OPSV
 evidence bundle per N6 §2.8.
+Governed effects MUST publish the proposal disposition before provider mutation and the durable outcome afterward,
+including failure or uncertainty.
 
 ## 5. Governance and safety (N4 extension)
 

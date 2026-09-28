@@ -67,10 +67,9 @@
 (defn ^{:stratum 0} actuation-disposition
   "Construct a validated governed disposition, or return an input anomaly."
   [stream workflow-id evidence-id data]
-  (let [event (when (map? data) (opsv/actuation-disposition stream workflow-id evidence-id data))]
-    (if (m/validate schema/ActuationDisposition event)
-      event
-      (anomaly/anomaly :invalid-input (msg/t :opsv/invalid-disposition) {}))))
+  (if (and (uuid? workflow-id) (uuid? evidence-id) (m/validate schema/DispositionPayload data))
+    (opsv/actuation-disposition stream workflow-id evidence-id data)
+    (anomaly/anomaly :invalid-input (msg/t :opsv/invalid-disposition) {})))
 
 (def ^{:stratum 0} experiment-planned
   "Construct an experiment-planned event."
