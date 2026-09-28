@@ -20,6 +20,8 @@
   (:require
    [ai.miniforge.phase-opsv.actuation :as actuation]
    [ai.miniforge.phase-opsv.model :as model]
+   [ai.miniforge.phase-opsv.run-control :as run-control]
+   [ai.miniforge.phase-opsv.run-control-state :as control-state]
    [ai.miniforge.phase-opsv.protocol :as protocol]))
 
 ;------------------------------------------------------------------------------ Layer 0
@@ -29,6 +31,25 @@
 (def ^{:stratum 0} discover-signals protocol/discover-signals)
 
 (def ^{:stratum 0} run-guarded-ramp protocol/run-guarded-ramp)
+
+(defn ^{:stratum 0} create-run-supervisor
+  "Create a host-owned OPSV stop domain. Stopping it cannot be reversed."
+  [] (control-state/create))
+
+(defn ^{:stratum 0} register-run-control!
+  "Register a run before execution. Returns runtime control/fence handles or an anomaly.
+   request-abort! must acknowledge scheduling a safe-boundary load abort with true."
+  [supervisor workflow-id authority-directory request-abort!]
+  (run-control/register! supervisor workflow-id authority-directory request-abort!))
+
+(defn ^{:stratum 0} stop-supervised-runs!
+  "Close shared mutation admission first, then request aborts and revoke tracked grants.
+   Reports incomplete cleanup; admitted mutations may still settle or remain unknown."
+  [supervisor now] (run-control/stop! supervisor now))
+
+(defn ^{:stratum 0} retire-run-control!
+  "Stop and clean up a completed run. Retain it while cleanup or admitted effects remain."
+  [handle now] (run-control/retire! handle now))
 
 (def ^{:stratum 0} phase-keys
   [:opsv/discover :opsv/plan :opsv/execute :opsv/converge

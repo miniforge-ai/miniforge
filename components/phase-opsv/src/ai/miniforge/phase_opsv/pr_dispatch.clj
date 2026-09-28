@@ -7,6 +7,7 @@
             [ai.miniforge.execution-grant.interface :as grant]
             [ai.miniforge.opsv-actuation.interface :as actuation]
             [ai.miniforge.opsv-provider-github.interface :as provider]
+            [ai.miniforge.phase-opsv.run-control :as control]
             [ai.miniforge.phase-opsv.pr-stop :as stop]))
 
 ;------------------------------------------------------------------------------ Layer 0
@@ -18,13 +19,18 @@
           (grant/authorize current {:effect/scope (:effect/proposal record) :usage/count 1}
                            ((:clock runtime)))))))
 
+(defn- ^{:stratum 0} supervised-boundary! [runtime operation]
+  (if-let [handle (:control runtime)]
+    (control/at-boundary! handle operation)
+    (operation)))
+
 ;------------------------------------------------------------------------------ Layer 1
 
 (defn ^{:stratum 1} dispatch! [runtime issued record operation]
   (let [result (actuation/at-mutation-boundary!
                 (:fence runtime)
                 #(if (authorized? runtime issued record)
-                   (operation)
+                   (supervised-boundary! runtime operation)
                    (stop/refusal :pr/authority-refused)))]
     (if (true? (get-in result [:anomaly/data :opsv/stopped?]))
       (stop/refusal :pr/stopped)
