@@ -1,0 +1,9 @@
+{:paths ["src" "resources"]
+ :deps {ai.miniforge/anomaly {:local/root "../anomaly"}
+        ai.miniforge/content-hash {:local/root "../content-hash"}
+        ai.miniforge/effect-transaction {:local/root "../effect-transaction"}
+        ai.miniforge/messages {:local/root "../messages"}
+        babashka/process {:mvn/version "0.5.22"}
+        cheshire/cheshire {:mvn/version "5.13.0"}
+        metosin/malli {:mvn/version "0.16.4"}}
+ :aliases {:test {:extra-paths ["test"] :extra-deps {}}}}

@@ -212,6 +212,12 @@ jobs:
           fi
           echo "::endgroup::"
 
+      # The provider remains development-only until runtime integration lands.
+      - name: OPSV provider contracts and durable reconciliation
+        run: |
+          clojure -M:poly test brick:opsv-provider-github :dev
+          clojure -M:test:dev -e "(require 'ai.miniforge.opsv-provider-test) (let [r (clojure.test/run-tests 'ai.miniforge.opsv-provider-test)] (System/exit (+ (:fail r) (:error r))))"
+
       - name: Upload test logs
         if: always()
         uses: actions/upload-artifact@v4
