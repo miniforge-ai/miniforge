@@ -303,3 +303,17 @@
             (is (= ::store store))
             (is (= :implementer (:agent learning)))
             (is (string? (:title learning)))))))))
+
+;------------------------------------------------------------------------------ Layer 2
+
+;; ControlPlane — execute-workflow exception safety
+(deftest ^{:stratum 2} execute-workflow-cleans-up-atom-on-exception-test
+  (testing "active-workflows entry is removed even when run-workflow throws"
+    (let [cp    (sut/create-control-plane ::llm ::k-store ::a-store)
+          wf-id (random-uuid)]
+      (with-redefs [ai.miniforge.workflow.interface/start
+                    (fn [_mgr _spec _ctx] wf-id)
+                    ai.miniforge.workflow.interface/run-workflow
+                    (fn [_mgr _spec _ctx] (throw (ex-info "simulated failure" {})))]
+        (is (thrown? Exception (proto/execute-workflow cp {:title "regression"} {})))
+        (is (empty? @(:active-workflows cp)))))))
