@@ -19,13 +19,16 @@
   [dir grant-record]
   (storage/create! dir (codec/normalize grant-record) :grant))
 
-(defn- ^{:stratum 0} revoked-record
-  [dir grant-record]
-  (let [marker (storage/read-record dir (:grant/id grant-record)
-                                    :revocation store-schema/Revocation)]
-    (if (anomaly/anomaly? marker)
-      marker
-      (merge grant-record marker))))
+(defn- ^{:stratum 0} current-record
+  [grant-record marker id]
+  (cond
+    (anomaly/anomaly? grant-record) grant-record
+    (anomaly/anomaly? marker) marker
+    (nil? grant-record)
+    (when marker
+      (anomaly/anomaly :fault (msg/t :store/read-failed)
+                       {:grant/id id :record/kind :revocation}))
+    :else (merge grant-record marker)))
 
 ;------------------------------------------------------------------------------ Layer 1
 
@@ -38,10 +41,9 @@
 
 (defn ^{:stratum 1} current
   [dir id]
-  (let [grant-record (storage/read-record dir id :grant store-schema/IssuedGrant)]
-    (if (or (nil? grant-record) (anomaly/anomaly? grant-record))
-      grant-record
-      (revoked-record dir grant-record))))
+  (let [grant-record (storage/read-record dir id :grant store-schema/IssuedGrant)
+        marker (storage/read-record dir id :revocation store-schema/Revocation)]
+    (current-record grant-record marker id)))
 
 ;------------------------------------------------------------------------------ Layer 2
 

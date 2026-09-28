@@ -35,8 +35,8 @@ Test initial lookup, durable reload, duplicate registration, revocation,
 repeated revocation, corrupt records and malformed boundary inputs.
 Run component tests, standards checks, lint, hooks and CI.
 
-Local results: 57 tests and 326 assertions pass in each of Miniforge, Core
-and TUI. The store adds 17 tests and 90 assertions. The component standards
+Local results: 58 tests and 332 assertions pass in each of Miniforge, Core
+and TUI. The store adds 18 tests and 96 assertions. The component standards
 scan covers all source and test files, including the file-boundary helpers.
 
 ## Adversarial review
@@ -48,7 +48,8 @@ before acknowledging publication. Both competing writers and duplicate calls are
 tested. Revocation uses the same publication path, with a closed marker schema
 that cannot change scope or grant identity.
 
-Lookup reads and validates the issued record before applying the marker.
+Lookup reads and validates both records before applying the marker. An orphaned
+marker without valid issuance is a storage fault, not clean absence.
 It distinguishes absent files from failed reads and rejects trailing EDN,
 corrupt values, wrong IDs and marker fields that would widen authority.
 Symlinks are rejected without following their targets. Registration and reload

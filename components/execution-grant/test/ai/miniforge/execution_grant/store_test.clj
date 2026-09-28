@@ -191,6 +191,24 @@
     (is (nil? (grant/current dir (:grant/id g))))
     (is (empty? (seq (.listFiles (File. dir)))))))
 
+(deftest ^{:stratum 2} orphaned-revocation-markers-are-storage-faults-test
+  (doseq [kind [:valid :corrupt :dangling]]
+    (let [dir (tmp-dir)
+          g (issued)
+          id (:grant/id g)
+          marker (record-file dir g ".revocation.edn")]
+      (grant/register! dir g)
+      (grant/revoke-stored! dir id :revocation/operator now)
+      (Files/delete (.toPath (record-file dir g ".grant.edn")))
+      (case kind
+        :valid nil
+        :corrupt (spit marker "{")
+        :dangling (do (Files/delete (.toPath marker))
+                      (Files/createSymbolicLink (.toPath marker) (.toPath (io/file dir "missing"))
+                                                (into-array FileAttribute []))))
+      (is (= :fault (:anomaly/type (grant/current dir id))) (name kind))
+      (is (= :fault (:anomaly/type (grant/revoke-stored! dir id :revocation/operator now)))))))
+
 (deftest ^{:stratum 2} failed-publication-sync-cannot-acknowledge-revocation-test
   (let [dir (tmp-dir)
         g (issued)
