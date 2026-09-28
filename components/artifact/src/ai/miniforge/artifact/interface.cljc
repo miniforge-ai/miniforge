@@ -43,15 +43,16 @@
   (if (and (string? directory) (not (str/blank? directory)) (schema/valid-artifact? artifact))
     (publication-boundary/call-with-exception-handling
      (:artifact/id artifact) #(publication/publish! directory artifact))
-    (publication/failure :invalid-input :publication/invalid (:artifact/id artifact))))
+    (publication-boundary/failure :invalid-input :publication/invalid (:artifact/id artifact))))
 
 (defn ^{:stratum 0} read-published
   "Read and validate an immutable artifact without consulting a memory cache.
    Returns nil only for an absent ID; corruption and unsafe paths are anomalies."
   [directory id]
   (if (and (string? directory) (not (str/blank? directory)) (uuid? id))
-    (publication-boundary/call-with-exception-handling id #(publication/read-record directory id))
-    (publication/failure :invalid-input :publication/invalid id)))
+    (publication-boundary/call-with-exception-handling id :fault :publication/read-failed
+                                                     #(publication/read-record directory id))
+    (publication-boundary/failure :invalid-input :publication/invalid id)))
 
 ;; Re-export protocol for public API
 (def ^{:stratum 0} ArtifactStore

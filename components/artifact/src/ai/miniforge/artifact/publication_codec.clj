@@ -3,7 +3,9 @@
 ;; Licensed under the Apache License, Version 2.0.
 (ns ai.miniforge.artifact.publication-codec
   "Bounded Transit encoding for immutable artifact publication."
-  (:require [cognitect.transit :as transit])
+  (:require [cognitect.transit :as transit]
+            [cheshire.core :as json]
+            [clojure.java.io :as io])
   (:import [java.io ByteArrayInputStream ByteArrayOutputStream OutputStream]))
 
 ;------------------------------------------------------------------------------ Layer 0
@@ -11,8 +13,10 @@
 (def ^{:stratum 0} maximum-bytes (* 16 1024 1024))
 
 (defn ^{:stratum 0} decode [bytes]
-  (with-open [input (ByteArrayInputStream. bytes)]
-    (transit/read (transit/reader input :json))))
+  (with-open [json-input (io/reader (ByteArrayInputStream. bytes) :encoding "UTF-8")
+              transit-input (ByteArrayInputStream. bytes)]
+    (when (= 1 (count (take 2 (json/parsed-seq json-input))))
+      (transit/read (transit/reader transit-input :json)))))
 
 ;------------------------------------------------------------------------------ Layer 1
 

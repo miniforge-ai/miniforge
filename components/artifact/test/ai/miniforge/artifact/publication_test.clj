@@ -36,7 +36,7 @@
         (is (= :conflict (:anomaly/type (artifact/publish! directory (assoc value :artifact/content {})))))
         (is (= value (artifact/read-published directory id)))
         (spit (files/target directory id) "corrupt")
-        (is (anomaly/anomaly? (artifact/read-published directory id)))))))
+        (is (= :fault (:anomaly/type (artifact/read-published directory id))))))))
 
 (deftest ^{:stratum 1} invalid-input-and-unsafe-paths-refuse-publication-test
   (with-directory
@@ -66,7 +66,7 @@
       (let [value (record)
             result (with-redefs [files/write! (fn [& _] (throw (AssertionError. "write failed")))]
                      (artifact/publish! directory value))]
-        (is (anomaly/anomaly? result))
+        (is (= :fatal (:anomaly/type result)))
         (is (nil? (artifact/read-published directory (:artifact/id value))))
         (is (empty? (seq (.listFiles (io/file directory)))))))))
 
@@ -112,3 +112,13 @@
         (is (anomaly/anomaly? (artifact/read-published directory id)))
         (is (anomaly/anomaly? (artifact/publish! directory value)))
         (is (= "untouched" (slurp outside)))))))
+
+(deftest ^{:stratum 1} trailing-data-is-never-confirmed-test
+  (doseq [suffix ["{}" "garbage"]]
+    (with-directory
+      (fn [directory]
+        (let [value (record) id (:artifact/id value)]
+          (is (= value (artifact/publish! directory value)))
+          (spit (files/target directory id) suffix :append true)
+          (is (= :fault (:anomaly/type (artifact/read-published directory id))))
+          (is (= :fault (:anomaly/type (artifact/publish! directory value)))))))))
