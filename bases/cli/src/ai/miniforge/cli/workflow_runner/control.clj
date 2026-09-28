@@ -216,12 +216,17 @@
    pause/resume/cancel are still left to the live runner that owns them —
    except that this consumer takes retries, and resumes verifying the
    ones a previous server left `:dispatched`. It resumes them only once
-   the consumer is running: stopping the consumer is what drains the
-   verification pool, so a start that fails earlier must leave no
-   verification behind. Returns the consumer handle."
+   the consumer is running, and before letting go of the lock a stop
+   takes: stopping the consumer is what drains the verification pool, so
+   a start that fails earlier must leave no verification behind, and a
+   stop must not slip in between and drain the pool before they land.
+   Returns the consumer handle."
   []
   (let [ctx (meta-loop-context!)]
     (register-process-handles! ctx)
-    (let [handle (ensure-operator-consumer! ctx operator/live-intervention-target?)]
-      (resume-pending-verifications! ctx)
-      handle)))
+    ;; The holder's monitor is reentrant: ensure-operator-consumer! takes it
+    ;; again, and stop-held-consumer! waits for it.
+    (locking operator-consumer-handle
+      (let [handle (ensure-operator-consumer! ctx operator/live-intervention-target?)]
+        (resume-pending-verifications! ctx)
+        handle))))

@@ -263,6 +263,40 @@
           (sut/start-process-control!)
           (is (= [[::operator-stream {:intervention/id 1} launch]] @resumed)))))))
 
+(deftest ^{:stratum 1} a-stop-during-a-start-waits-for-its-resumed-retries
+  (with-clean-operator-state
+    (fn []
+      (let [events (atom [])
+            resuming (promise)
+            finish-resume (promise)
+            launch {:resume/run-id (random-uuid) :resume/intervention {:intervention/id 1}}]
+        (with-redefs [agent/create-meta-loop-context (constantly {:event-stream ::operator-stream})
+                      supervisory/attach! (constantly nil)
+                      correlator/attach! (constantly nil)
+                      es/create-event-stream (constantly ::operator-stream)
+                      resume-launcher/launcher (constantly nil)
+                      resume-records/pending-launches (constantly [launch])
+                      operator/register-degradation-manager! (constantly nil)
+                      operator/register-policy-evaluator! (constantly nil)
+                      operator/verify-launched-resume! (fn [& _]
+                                                         (deliver resuming true)
+                                                         @finish-resume
+                                                         (swap! events conj :resumed))
+                      operator/start-operator-consumer! (constantly ::handle)
+                      operator/stop-operator-consumer! (fn [_] (swap! events conj :stopped))
+                      sut/stop-at-exit! (constantly nil)]
+          (let [starter (future (sut/start-process-control!))
+                _ (deref resuming 5000 :timeout)
+                stopper (future (sut/stop-process-control!))]
+            (testing "a stop arriving while retries are resumed waits for them"
+              (is (= :waiting (deref stopper 200 :waiting)))
+              (is (= [] @events)))
+            (deliver finish-resume true)
+            (deref starter 5000 :timeout)
+            (deref stopper 5000 :timeout)
+            (testing "so the stop that drains the pool comes after they land in it"
+              (is (= [:resumed :stopped] @events)))))))))
+
 (deftest ^{:stratum 1} a-server-whose-consumer-fails-to-start-resumes-no-retries
   (with-clean-operator-state
     (fn []
