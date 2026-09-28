@@ -58,6 +58,14 @@
   "Schema for :opsv.drift/detected."
   schema/DriftDetected)
 
+(def ^{:stratum 0} ActuationDisposition
+  "Schema for proposed, settled and uncertain governed OPSV effects."
+  schema/ActuationDisposition)
+
+(def ^{:stratum 0} actuation-disposition
+  "Construct a governed effect disposition without implying success."
+  opsv/actuation-disposition)
+
 (def ^{:stratum 0} experiment-planned
   "Construct an experiment-planned event."
   opsv/experiment-planned)
@@ -97,7 +105,7 @@
 (def ^{:stratum 1} OPSVEvent
   (into [:or] [ExperimentPlanned ExperimentStarted LoadStep GuardrailAbort
                ConvergenceIteration PolicyProposed VerificationResult
-               ActuationEmitted DriftDetected]))
+               ActuationEmitted ActuationDisposition DriftDetected]))
 
 ;------------------------------------------------------------------------------ Layer 2
 

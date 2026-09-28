@@ -18,6 +18,8 @@
 (ns ai.miniforge.event-stream.schema.opsv
   "Canonical N3 section 3.14 OPSV event schemas."
   (:require
+   [ai.miniforge.decision-envelope.interface :as decision]
+   [ai.miniforge.effect-transaction.interface :as effect]
    [ai.miniforge.event-stream.schema :as event-schema]))
 
 ;------------------------------------------------------------------------------ Layer 0
@@ -149,3 +151,15 @@
    [[:opsv/signal :keyword]
     [:opsv/deviation KeywordMap]
     [:opsv/suggested-rerun? :boolean]]))
+
+(def ^{:stratum 2} ActuationDisposition
+  [:and
+   (opsv-event-schema
+    :opsv.actuation/disposition
+    [[:opsv/governed-effect GovernedEffect]
+     [:opsv/effect-state (into [:enum] effect/states)]
+     [:opsv/decision-envelope decision/DecisionEnvelope]
+     [:opsv/effect-observed KeywordMap]
+     [:opsv/effect-failure [:maybe :string]]])
+   [:fn #(= (get-in % [:opsv/governed-effect :evidence/envelope-id])
+            (get-in % [:opsv/decision-envelope :envelope/id]))]])

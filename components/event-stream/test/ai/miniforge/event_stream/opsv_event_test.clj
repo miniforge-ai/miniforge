@@ -19,6 +19,7 @@
   (:require
    [ai.miniforge.event-stream.interface :as event-stream]
    [ai.miniforge.event-stream.interface.opsv :as opsv]
+   [ai.miniforge.decision-envelope.interface :as decision]
    [clojure.test :refer [deftest is]]
    [malli.core :as m]))
 
@@ -30,7 +31,17 @@
 (def ^{:stratum 0} evidence-id
   #uuid "00000000-0000-0000-0000-000000000011")
 
-(def ^{:stratum 0} constructor-cases
+(def ^{:stratum 0} disposition-payload
+  (let [envelope (decision/envelope [] [] {:pins/pack-revision "test" :pins/rule-ids []
+                                         :pins/event-watermark 0})]
+    {:opsv/governed-effect {:evidence/effect-id (random-uuid)
+                            :evidence/grant-id (random-uuid) :evidence/envelope-id (:envelope/id envelope)}
+     :opsv/effect-state :unknown-outcome :opsv/effect-observed {} :opsv/effect-failure nil
+     :opsv/decision-envelope envelope}))
+
+;------------------------------------------------------------------------------ Layer 1
+
+(def ^{:stratum 1} constructor-cases
   [[event-stream/experiment-planned opsv/ExperimentPlanned
     :opsv.experiment/planned
     {:opsv/experiment-pack-hash "pack"
@@ -63,21 +74,11 @@
     {:opsv/requested-actuation-mode :recommend-only
      :opsv/effective-actuation-mode :recommend-only
      :opsv/governed-effects [] :opsv/pr-refs [] :opsv/apply-refs []}]
+   [event-stream/actuation-disposition opsv/ActuationDisposition :opsv.actuation/disposition
+    disposition-payload]
    [event-stream/drift-detected opsv/DriftDetected :opsv.drift/detected
     {:opsv/signal :latency :opsv/deviation {:ratio 1.1}
      :opsv/suggested-rerun? true}]])
-
-;------------------------------------------------------------------------------ Layer 1
-
-(deftest ^{:stratum 1} test-all-opsv-constructors-emit-canonical-events
-  (let [stream (event-stream/create-event-stream)]
-    (doseq [[constructor schema event-type payload] constructor-cases]
-      (let [event (constructor stream workflow-id evidence-id payload)]
-        (is (= event-type (:event/type event)))
-        (is (= workflow-id (:workflow/id event)))
-        (is (= evidence-id (:opsv/evidence-bundle-id event)))
-        (is (not-empty (:message event)))
-        (is (m/validate schema event) (str event-type " validates"))))))
 
 (deftest ^{:stratum 1} test-opsv-constructor-propagates-identity-without-overrides
   (let [stream (event-stream/create-event-stream)
@@ -93,3 +94,22 @@
     (is (= org-id (:org/id event)))
     (is (= :opsv.drift/detected (:event/type event)))
     (is (= evidence-id (:opsv/evidence-bundle-id event)))))
+
+(deftest ^{:stratum 1} disposition-rejects-unknown-state-and-substituted-decision-test
+  (let [stream (event-stream/create-event-stream)
+        event (event-stream/actuation-disposition stream workflow-id evidence-id disposition-payload)]
+    (is (not (m/validate opsv/ActuationDisposition (assoc event :opsv/effect-state :invented))))
+    (is (not (m/validate opsv/ActuationDisposition
+                        (assoc-in event [:opsv/governed-effect :evidence/envelope-id] (random-uuid)))))))
+
+;------------------------------------------------------------------------------ Layer 2
+
+(deftest ^{:stratum 2} test-all-opsv-constructors-emit-canonical-events
+  (let [stream (event-stream/create-event-stream)]
+    (doseq [[constructor schema event-type payload] constructor-cases]
+      (let [event (constructor stream workflow-id evidence-id payload)]
+        (is (= event-type (:event/type event)))
+        (is (= workflow-id (:workflow/id event)))
+        (is (= evidence-id (:opsv/evidence-bundle-id event)))
+        (is (not-empty (:message event)))
+        (is (m/validate schema event) (str event-type " validates"))))))

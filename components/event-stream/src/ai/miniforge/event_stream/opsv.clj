@@ -18,7 +18,8 @@
 (ns ai.miniforge.event-stream.opsv
   "N3 OPSV event constructors with preallocated N6 bundle correlation."
   (:require
-   [ai.miniforge.event-stream.core :as core]))
+   [ai.miniforge.event-stream.core :as core]
+   [ai.miniforge.event-stream.messages :as msg]))
 
 ;------------------------------------------------------------------------------ Layer 0
 
@@ -103,6 +104,13 @@
               (str "OPSV actuation emitted: "
                    (:opsv/effective-actuation-mode data))
               data))
+
+(defn ^{:stratum 2} actuation-disposition
+  [stream workflow-id evidence-id data]
+  (opsv-event stream workflow-id evidence-id :opsv.actuation/disposition
+              [:opsv/governed-effect :opsv/effect-state :opsv/decision-envelope
+               :opsv/effect-observed :opsv/effect-failure]
+              (msg/t :opsv/actuation-disposition {:state (:opsv/effect-state data)}) data))
 
 (defn ^{:stratum 2} drift-detected
   [stream workflow-id evidence-id data]
