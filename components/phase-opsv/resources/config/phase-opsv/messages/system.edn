@@ -1,5 +1,6 @@
 {:phase-opsv/system
  {:adapter/missing "The OPSV workflow requires an adapter implementing OPSVAdapter."
+  :control/unconfirmed "OPSV run control refused the operation or could not confirm stop cleanup. Inspect the retained run and grant results before recovery."
   :governance/invalid-policy "Runtime-owned OPSV governance policy is invalid."
   :governance/missing-policy "Runtime-owned OPSV governance policy is missing."
   :pr/invalid-runtime "OPSV PR runtime configuration is invalid."
