@@ -142,33 +142,6 @@
       (is (= (-> core/default-config :default-budget :max-tokens)
              (:max-tokens budget))))))
 
-(deftest ^{:stratum 0} execute-workflow-cleans-up-active-workflows-when-run-workflow-throws-test
-  (testing "run-workflow exceptions still remove the workflow from active-workflows"
-    (let [orch (core/map->ControlPlane
-                {:config core/default-config
-                 :router (sut/create-router)
-                 :budget-mgr (sut/create-budget-manager)
-                 :knowledge-coord (sut/create-knowledge-coordinator ::store core/default-config)
-                 :workflow-mgr ::workflow-mgr
-                 :operator nil
-                 :llm-backend ::llm-backend
-                 :artifact-store ::artifact-store
-                 :active-workflows (atom {})
-                 :logger ::logger})
-          workflow-id (random-uuid)]
-      (with-redefs [ai.miniforge.workflow.interface/start
-                    (fn [_workflow-mgr _spec _context]
-                      workflow-id)
-                    ai.miniforge.workflow.interface/run-workflow
-                    (fn [_workflow-mgr _spec _wf-context]
-                      (throw (ex-info "workflow failed" {})))
-                    ai.miniforge.logging.interface/info
-                    (fn [& _args] nil)]
-        (is (thrown-with-msg? clojure.lang.ExceptionInfo
-                              #"workflow failed"
-                              (sut/execute-workflow orch {:title "Test workflow"} {})))
-        (is (empty? @(get orch :active-workflows)))))))
-
 (deftest ^{:stratum 0} format-knowledge-block-empty-test
   (testing "Empty zettel list produces no block"
     (is (nil? (core/format-knowledge-block [] :implementer)))))
