@@ -30,13 +30,27 @@
     (is (empty? @calls))))
 
 (deftest ^{:stratum 0} malformed-runtime-arguments-never-invoke-provider-test
-  (let [{:keys [dir candidate calls]} (setup)
+  (let [{:keys [dir candidate grant calls]} (setup)
         provider (partial effect-report calls)]
     (testing "missing clock/provider and invalid identity fail at the API boundary"
-      (doseq [args [[dir dir nil clock provider]
-                    [dir dir (:effect/id candidate) nil provider]
-                    [dir dir (:effect/id candidate) clock nil]]]
+      (doseq [args [[dir dir nil (:grant/id grant) clock provider]
+                    [dir dir (:effect/id candidate) nil clock provider]
+                    [dir dir (:effect/id candidate) (:grant/id grant) nil provider]
+                    [dir dir (:effect/id candidate) (:grant/id grant) clock nil]]]
         (is (anomaly/anomaly? (apply actuation/commit-pr! args)))))
+    (is (empty? @calls))))
+
+(deftest ^{:stratum 0} substituted-valid-authority-is-refused-before-claim-test
+  (let [{:keys [dir grant-dir candidate grant calls] :as context} (setup)
+        duplicate (grant/register! grant-dir (assoc grant :grant/id (random-uuid)))
+        proposed (propose! (assoc context :grant duplicate))
+        result (commit! context)]
+    (is (not (anomaly/anomaly? duplicate)))
+    (is (not= (:grant/id grant) (:grant/id duplicate)))
+    (is (= (:grant/scope grant) (:grant/scope duplicate)))
+    (is (= :unauthorized (:anomaly/type result)))
+    (is (= :proposed (:effect/state proposed)))
+    (is (= proposed (effect/read-record dir (:effect/id candidate))))
     (is (empty? @calls))))
 
 (deftest ^{:stratum 0} malformed-durable-payload-never-reaches-provider-test
@@ -68,16 +82,16 @@
         proposed (propose! (assoc context :grant registered))]
     (is (not (anomaly/anomaly? registered)))
     (is (= :proposed (:effect/state proposed)))
-    (is (= :unauthorized (:anomaly/type (commit! context))))
+    (is (= :unauthorized (:anomaly/type (commit! (assoc context :grant registered)))))
     (is (empty? @calls))))
 
 ;------------------------------------------------------------------------------ Layer 1
 
 (deftest ^{:stratum 1} provider-exception-leaves-durable-uncertainty-test
-  (let [{:keys [dir grant-dir candidate calls] :as context} (setup)
+  (let [{:keys [dir grant-dir candidate grant calls] :as context} (setup)
         proposed (propose! context)
         result (actuation/commit-pr! dir grant-dir (:effect/id candidate)
-                                    clock (partial lost-response calls))]
+                                    (:grant/id grant) clock (partial lost-response calls))]
     (is (= :proposed (:effect/state proposed)))
     (is (= :unknown-outcome (:effect/state result)))
     (is (= "provider response lost" (:effect/failure result)))

@@ -14,13 +14,22 @@
 
 ;------------------------------------------------------------------------------ Layer 1
 
-(defn ^{:stratum 1} current [dir id]
+(defn- ^{:stratum 1} bound-authority [dir id]
   (let [authority (grant/current dir id)
         scope (:grant/scope authority)]
     (cond
       (or (nil? authority) (anomaly/anomaly? authority)) authority
       (every? #(contains? scope %) required-bindings) authority
       :else (anomaly/anomaly :unauthorized (msg/ts :execution/unbound-grant) {}))))
+
+;------------------------------------------------------------------------------ Layer 2
+
+(defn ^{:stratum 2} current
+  "Compare with runtime-retained issuance identity before loading authority."
+  [dir issued-id requested-id]
+  (if (= issued-id requested-id)
+    (bound-authority dir issued-id)
+    (anomaly/anomaly :unauthorized (msg/ts :execution/substituted-grant) {})))
 
 (comment
   required-bindings)

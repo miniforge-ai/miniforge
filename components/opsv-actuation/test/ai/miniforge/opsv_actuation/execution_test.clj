@@ -15,15 +15,16 @@
 ;------------------------------------------------------------------------------ Layer 0
 
 (deftest ^{:stratum 0} expired-and-missing-authority-prevent-provider-test
-  (let [{:keys [dir grant-dir candidate calls] :as context} (setup)
+  (let [{:keys [dir grant-dir candidate grant calls] :as context} (setup)
         expired-clock (constantly (.plusSeconds now 901))
         provider (partial effect-report calls)]
     (propose! context)
     (is (anomaly/anomaly?
-         (actuation/commit-pr! dir (tmp-dir) (:effect/id candidate) clock provider)))
+         (actuation/commit-pr! dir (tmp-dir) (:effect/id candidate) (:grant/id grant) clock provider)))
     (is (= :proposed (:effect/state (effect/read-record dir (:effect/id candidate)))))
     (is (= :failed (:effect/state
-                    (actuation/commit-pr! dir grant-dir (:effect/id candidate) expired-clock provider))))
+                    (actuation/commit-pr! dir grant-dir (:effect/id candidate) (:grant/id grant)
+                                          expired-clock provider))))
     (is (empty? @calls))))
 
 (deftest ^{:stratum 0} durable-pr-commit-correlates-exact-payload-test
@@ -57,11 +58,11 @@
     (is (empty? @calls))))
 
 (deftest ^{:stratum 0} uncertain-provider-outcome-is-not-retried-test
-  (let [{:keys [dir grant-dir candidate calls] :as context} (setup)]
+  (let [{:keys [dir grant-dir candidate grant calls] :as context} (setup)]
     (propose! context)
     (is (= :unknown-outcome
            (:effect/state (actuation/commit-pr! dir grant-dir (:effect/id candidate)
-                                                clock (partial uncertain-report calls)))))
+                                                (:grant/id grant) clock (partial uncertain-report calls)))))
     (is (anomaly/anomaly? (commit! context)))
     (is (= 1 (count @calls)))))
 
