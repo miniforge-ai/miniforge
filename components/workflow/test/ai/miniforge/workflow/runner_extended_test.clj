@@ -30,6 +30,7 @@
    [ai.miniforge.workflow.runner :as runner]
    [ai.miniforge.workflow.context :as ctx]
    [ai.miniforge.workflow.execution :as exec]
+   [ai.miniforge.workflow.execution-dag :as execution-dag]
    [ai.miniforge.workflow.messages :as messages]
    [ai.miniforge.workflow.phase-test-support :as phase-test-support]))
 
@@ -314,11 +315,11 @@
                       :worktree-paths []
                       :metrics {:tokens 0 :cost-usd 0.0}}
           result #_{:clj-kondo/ignore [:invalid-arity]}
-                 (exec/apply-dag-success context
-                                         dag-result
-                                         pipeline
-                                         ctx/transition-to-completed
-                                         ctx/transition-to-failed)]
+                 (execution-dag/apply-dag-success context
+                                                  dag-result
+                                                  pipeline
+                                                  ctx/transition-to-completed
+                                                  ctx/transition-to-failed)]
       (is (= :running (:execution/status result)))
       (is (= runner-test-verify (:execution/current-phase result)))
       (is (= 0 (:execution/redirect-count result))))))
@@ -496,13 +497,13 @@
   [context sub-wt]
   (let [parent (isolation/temp-root!)]
     (try
-      (exec/apply-dag-success (assoc context :execution/worktree-path parent)
-                              {:artifacts      [{:artifact/id :dag-task-artifact}]
-                               :worktree-paths [sub-wt]
-                               :metrics        dag-success-fixture-metrics}
-                              nil
-                              ctx/transition-to-completed
-                              ctx/transition-to-failed)
+      (execution-dag/apply-dag-success (assoc context :execution/worktree-path parent)
+                                       {:artifacts      [{:artifact/id :dag-task-artifact}]
+                                        :worktree-paths [sub-wt]
+                                        :metrics        dag-success-fixture-metrics}
+                                       nil
+                                       ctx/transition-to-completed
+                                       ctx/transition-to-failed)
       (finally (isolation/delete-tree! parent)))))
 
 ;------------------------------------------------------------------------------ Layer 2
@@ -534,9 +535,9 @@
                       :worktree-paths []
                       :metrics dag-success-fixture-metrics}
           result #_{:clj-kondo/ignore [:invalid-arity]}
-                 (exec/apply-dag-success context dag-result nil
-                                         ctx/transition-to-completed
-                                         ctx/transition-to-failed)]
+                 (execution-dag/apply-dag-success context dag-result nil
+                                                  ctx/transition-to-completed
+                                                  ctx/transition-to-failed)]
       (is (= (:tokens dag-success-fixture-metrics)
              (get-in result [:execution/metrics :tokens])))
       (is (= (:cost-usd dag-success-fixture-metrics)
@@ -549,7 +550,7 @@
     (let [context (ctx/create-context minimal-rollup-test-workflow {:task "Test"} {})
           dag-result {:artifacts []
                       :metrics dag-failure-fixture-metrics}
-          result (exec/apply-dag-failure context dag-result ctx/transition-to-failed)]
+          result (execution-dag/apply-dag-failure context dag-result ctx/transition-to-failed)]
       (is (= :failed (:execution/status result)))
       (is (= dag-failure-fixture-tokens
              (get-in result [:execution/metrics :tokens])))
@@ -692,7 +693,7 @@
                                   :out  (if (some #{"ls-files"} args)
                                           "src/added.clj\n"
                                           "src/changed.clj\nsrc/removed.clj\n")})]
-          (let [result (exec/apply-dag-success
+          (let [result (execution-dag/apply-dag-success
                         (assoc (ctx/create-context minimal-rollup-test-workflow {:task "Test"} {})
                                :execution/worktree-path parent)
                         {:artifacts      []
