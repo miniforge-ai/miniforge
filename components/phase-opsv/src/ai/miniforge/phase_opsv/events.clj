@@ -23,19 +23,10 @@
    [ai.miniforge.event-stream.interface :as event-stream]
    [ai.miniforge.event-stream.interface.opsv :as opsv-event]
    [ai.miniforge.phase-opsv.event-projection :as projection]
-   [ai.miniforge.phase-opsv.messages :as msg]))
+   [ai.miniforge.phase-opsv.messages :as msg]
+   [ai.miniforge.phase-opsv.runtime-context :as context]))
 
 ;------------------------------------------------------------------------------ Layer 0
-
-(defn- ^{:stratum 0} stream
-  [ctx]
-  (or (:event-stream ctx)
-      (:execution/event-stream ctx)
-      (get-in ctx [:execution/opts :event-stream])))
-
-(defn- ^{:stratum 0} workflow-id
-  [ctx]
-  (or (:execution/id ctx) (:workflow/id ctx) (:workflow-id ctx)))
 
 (defn- ^{:stratum 0} evidence-id
   [ctx]
@@ -100,9 +91,9 @@
 
 (defn ^{:stratum 2} emit-phase-events!
   [ctx phase-key output]
-  (when-let [stream-value (stream ctx)]
+  (when-let [stream-value (context/stream ctx)]
     (let [events (projection/phase-events
-                  stream-value (workflow-id ctx) (evidence-id ctx)
+                  stream-value (context/workflow-id ctx) (evidence-id ctx)
                   ctx phase-key output)]
       (reduce (fn [result event]
                 (if (anomaly/anomaly? result)

@@ -3,6 +3,7 @@
 ;; Licensed under the Apache License, Version 2.0.
 (ns ai.miniforge.phase-opsv.governance-test
   (:require [ai.miniforge.decision-envelope.interface :as envelope]
+            [ai.miniforge.event-stream.interface :as events]
             [ai.miniforge.opsv.interface :as opsv]
             [ai.miniforge.phase-opsv.governance :as governance]
             [ai.miniforge.phase-opsv.governance-fixtures :as fixture]
@@ -100,6 +101,21 @@
     (is (not-any? #(= :reason/missing-artifact (:reason/code %))
                   (get-in missing-policy [:opsv/decision-envelope :envelope/reasons])))
     (is (= :deny (get-in missing-policy [:opsv/decision-envelope :envelope/decision])))))
+
+(deftest ^{:stratum 0} runtime-telemetry-is-preserved-and-policy-cannot-replace-it-test
+  (doseq [path [[:event-stream] [:execution/event-stream] [:execution/opts :event-stream]]]
+    (let [stream (events/create-event-stream {:sinks []})
+          other (events/create-event-stream {:sinks []})
+          ctx (-> (fixture/context)
+                  (assoc-in path stream)
+                  (assoc-in [:execution/opts :opsv/governance :policy/context :event-stream] other)
+                  (assoc-in [:execution/opts :opsv/governance :policy/context :workflow/id] (random-uuid)))
+          output (phase/actuate ctx)
+          published (events/get-events stream)]
+      (is (= :allow (get-in output [:opsv/decision-envelope :envelope/decision])))
+      (is (= 12 (count published)))
+      (is (every? #(= (:execution/id ctx) (:workflow/id %)) published))
+      (is (empty? (events/get-events other))))))
 
 (comment
   (phase/actuate (fixture/context)))

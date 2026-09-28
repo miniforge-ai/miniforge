@@ -33,8 +33,10 @@ Provider and issuance wiring remain separate dependent changes.
 
 ## Testing plan
 
-All 20 phase tests / 182 assertions pass in both consuming projects.
+All 21 phase tests / 194 assertions pass in both consuming projects.
 Missing experiment artifacts and absent runtime policy have distinct reasons.
+Runtime gate telemetry retains the workflow identity and event stream across all
+supported context shapes; policy context cannot substitute either field.
 Cover all-pass evaluation, independent gate failures, missing and malformed policy,
 caller policy spoofing, evidence replacement and retained recommendation semantics.
 The scoped standards scan reports zero findings across 28 files. Stratum and
