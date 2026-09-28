@@ -4,6 +4,7 @@
 (ns ai.miniforge.opsv-provider-github.interface-test
   (:require [ai.miniforge.anomaly.interface :as anomaly]
             [ai.miniforge.opsv-provider-github.interface :as provider]
+            [ai.miniforge.opsv-provider-github.messages :as msg]
             [ai.miniforge.opsv-provider-github.fixtures :as f]
             [clojure.test :refer [deftest is]]))
 
@@ -28,6 +29,20 @@
       (is (= :unknown-outcome (:effect/outcome result)))
       (is (= 2 (count @calls)))
       (is (not (.contains (pr-str result) "secret"))))))
+
+(deftest ^{:stratum 0} preflight-unavailable-is-not-a-confirmed-mismatch-test
+  (doseq [[response diagnostic]
+          [[{:exit 1} :create/preflight-unavailable]
+           [(f/response {}) :create/preflight-unavailable]
+           [(f/response {:ref "refs/heads/opsv/scaling"
+                         :object {:type "commit" :sha (apply str (repeat 40 "f"))}})
+            :create/preflight-failed]]]
+    (let [calls (atom [])
+          result (provider/create-pr! (f/runtime calls [response])
+                                      (f/transaction :committing) f/payload)]
+      (is (= :failed (:effect/outcome result)))
+      (is (= (msg/t diagnostic) (:effect/failure result)))
+      (is (= 1 (count @calls))))))
 
 (deftest ^{:stratum 0} changed-provider-fields-never-report-success-test
   (doseq [path [[:title] [:body] [:draft] [:head :sha] [:head :ref]

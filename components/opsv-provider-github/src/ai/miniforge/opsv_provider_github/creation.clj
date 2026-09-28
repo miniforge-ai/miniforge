@@ -14,6 +14,11 @@
        (= "commit" (get-in ref [:object :type]))
        (= (:pr/head-sha payload) (get-in ref [:object :sha]))))
 
+(defn- ^{:stratum 0} readable-head? [ref]
+  (let [sha (get-in ref [:object :sha])]
+    (and (string? (:ref ref)) (= "commit" (get-in ref [:object :type]))
+         (string? sha) (re-matches #"(?:[0-9a-f]{40}|[0-9a-f]{64})" sha))))
+
 (defn- ^{:stratum 0} creation-result [payload response]
   (if (and (= "open" (:state response)) (wire/matching-pr? payload response))
     {:effect/outcome :succeeded :effect/observed (wire/observation response)}
@@ -31,9 +36,11 @@
 
 (defn ^{:stratum 2} create! [runtime payload]
   (let [ref (transport/request! runtime "GET" (wire/head-path payload) nil false)]
-    (if (current-head? payload ref)
-      (create-once! runtime payload)
-      {:effect/outcome :failed :effect/failure (msg/t :create/preflight-failed)})))
+    (cond
+      (not (readable-head? ref))
+      {:effect/outcome :failed :effect/failure (msg/t :create/preflight-unavailable)}
+      (current-head? payload ref) (create-once! runtime payload)
+      :else {:effect/outcome :failed :effect/failure (msg/t :create/preflight-failed)})))
 
 (comment
   (current-head? {} {}))

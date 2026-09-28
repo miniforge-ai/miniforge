@@ -34,9 +34,11 @@ Runtime wiring follows both PRs. Merge the coordinator first.
 
 Use a command port with deterministic GitHub response fixtures; assert exact
 arguments and stdin, refusal before POST, uncertain responses and reconciliation.
-All 12 component tests / 87 assertions pass. The durable coordinator/provider
+All 13 component tests / 96 assertions pass. The durable coordinator/provider
 acceptance test passes 9 assertions, including lost-response reconciliation.
 Tests never create a real provider PR. Deadline tests require process-tree access.
+Unavailable or malformed preflight responses have distinct diagnostics from a
+confirmed head mismatch. Both record failure because no mutation was attempted.
 Scoped standards scans, lint, stratum and Polylith pass. The existing CLI builds
 and packaged help runs. The adapter remains development-only until runtime wiring
 adds a production dependency; explicit CI steps cover its unit and acceptance tests.
