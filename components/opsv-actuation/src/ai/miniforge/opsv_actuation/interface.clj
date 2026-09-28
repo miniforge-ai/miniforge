@@ -5,6 +5,7 @@
   "API surface class 1: internal EDN OPSV actuation proposals.
    Preparing a PR does not emit it or confer execution authority."
   (:require [ai.miniforge.anomaly.interface :as anomaly]
+            [ai.miniforge.opsv-actuation.control :as control]
             [ai.miniforge.opsv-actuation.messages :as msg]
             [ai.miniforge.opsv-actuation.execution :as execution]
             [ai.miniforge.opsv-actuation.execution-schema :as execution-schema]
@@ -15,6 +16,38 @@
             [malli.error :as me]))
 
 ;------------------------------------------------------------------------------ Layer 0
+
+(defn ^{:stratum 0} create-mutation-fence
+  "Create a runtime-owned, run-local admission handle. Never restore this handle
+   from caller input. A stopped handle cannot be reopened; recovery uses separate
+   authority. Global N8 integration must stop every active run's handle."
+  []
+  (control/create))
+
+(defn ^{:stratum 0} mutation-status
+  "Return stopped/in-flight status, or an anomaly for an invalid runtime handle."
+  [fence]
+  (if (control/fence? fence)
+    (control/status fence)
+    (anomaly/anomaly :invalid-input (msg/ts :execution/invalid-input) {})))
+
+(defn ^{:stratum 0} stop-mutations!
+  "Atomically refuse subsequent admission; return the in-flight count.
+   Existing operations may settle or become uncertain. This does not revoke
+   grants, kill provider requests, or claim that an in-flight effect rolled back."
+  [fence]
+  (if (control/fence? fence)
+    (control/stop! fence)
+    (anomaly/anomaly :invalid-input (msg/ts :execution/invalid-input) {})))
+
+(defn ^{:stratum 0} at-mutation-boundary!
+  "Admit operation once unless stopped; always release its in-flight slot.
+   Admission and stop share one atomic state. This runtime handle is a fence,
+   not execution authority: operation must still validate current scoped grants."
+  [fence operation]
+  (if (and (control/fence? fence) (fn? operation))
+    (control/execute! fence operation)
+    (anomaly/anomaly :invalid-input (msg/ts :execution/invalid-input) {})))
 
 (defn ^{:stratum 0} prepare-pr
   "Return an evidence-bearing, hashed PR payload, or an input anomaly.
