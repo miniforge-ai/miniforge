@@ -54,7 +54,7 @@
                        (let [failure (unavailable)]
                          (.interrupt (Thread/currentThread))
                          failure))
-                     (catch Exception _
+                     (catch Throwable _
                        (unavailable)))]
     (if failure
       (assoc-in failure [:anomaly/data :effect/transaction] transaction)

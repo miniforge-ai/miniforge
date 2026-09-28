@@ -1357,8 +1357,10 @@ event types:
 
 #### opsv.actuation/disposition
 
-Governed OPSV effects emit a disposition after durable proposal and after outcome
-recording. This event does not imply success; unresolved outcomes remain explicit.
+Governed OPSV effects MUST emit a disposition after durable proposal, before provider mutation,
+and after recording each known terminal or uncertain outcome.
+Publication failure MUST prevent new mutation; failure after mutation MUST retain the durable outcome for recovery.
+This event does not imply success; unresolved outcomes remain explicit.
 Its decision and authority references are accumulated into the same N6 bundle.
 
 ```clojure

@@ -18,6 +18,7 @@
 (ns ai.miniforge.event-stream.opsv-schema-test
   (:require
    [ai.miniforge.event-stream.schema.opsv :as opsv-schema]
+   [ai.miniforge.event-stream.opsv-fixtures :as fixture]
    [clojure.test :refer [deftest is]]
    [malli.core :as m]))
 
@@ -67,6 +68,7 @@
        :evidence/grant-id #uuid "00000000-0000-0000-0000-000000000006"
        :evidence/envelope-id #uuid "00000000-0000-0000-0000-000000000007"}]
      :opsv/pr-refs ["https://example.test/pr/1"] :opsv/apply-refs []}]
+   [opsv-schema/ActuationDisposition :opsv.actuation/disposition fixture/disposition-payload]
    [opsv-schema/DriftDetected :opsv.drift/detected
     {:opsv/signal :latency :opsv/deviation {:ratio 1.2}
      :opsv/suggested-rerun? true}]])
