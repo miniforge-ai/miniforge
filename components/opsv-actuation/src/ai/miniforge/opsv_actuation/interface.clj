@@ -6,6 +6,7 @@
    Preparing a PR does not emit it or confer execution authority."
   (:require [ai.miniforge.anomaly.interface :as anomaly]
             [ai.miniforge.opsv-actuation.control :as control]
+            [ai.miniforge.opsv-actuation.fences :as fences]
             [ai.miniforge.opsv-actuation.messages :as msg]
             [ai.miniforge.opsv-actuation.execution :as execution]
             [ai.miniforge.opsv-actuation.execution-schema :as execution-schema]
@@ -22,13 +23,13 @@
    from caller input. A stopped handle cannot be reopened; recovery uses separate
    authority. Global N8 integration must stop every active run's handle."
   []
-  (control/create))
+  (fences/create))
 
 (defn ^{:stratum 0} mutation-status
   "Return stopped/in-flight status, or an anomaly for an invalid runtime handle."
   [fence]
-  (if (control/fence? fence)
-    (control/status fence)
+  (if (fences/fence? fence)
+    (fences/status fence)
     (anomaly/anomaly :invalid-input (msg/ts :execution/invalid-input) {})))
 
 (defn ^{:stratum 0} stop-mutations!
@@ -36,8 +37,8 @@
    Existing operations may settle or become uncertain. This does not revoke
    grants, kill provider requests, or claim that an in-flight effect rolled back."
   [fence]
-  (if (control/fence? fence)
-    (control/stop! fence)
+  (if (fences/fence? fence)
+    (fences/stop! fence)
     (anomaly/anomaly :invalid-input (msg/ts :execution/invalid-input) {})))
 
 (defn ^{:stratum 0} at-mutation-boundary!
@@ -45,7 +46,7 @@
    Admission and stop share one atomic state. This runtime handle is a fence,
    not execution authority: operation must still validate current scoped grants."
   [fence operation]
-  (if (and (control/fence? fence) (fn? operation))
+  (if (and (fences/fence? fence) (fn? operation))
     (control/execute! fence operation)
     (anomaly/anomaly :invalid-input (msg/ts :execution/invalid-input) {})))
 
