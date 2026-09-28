@@ -5,38 +5,16 @@
   (:require [ai.miniforge.anomaly.interface :as anomaly]
             [ai.miniforge.artifact.interface :as artifact]
             [ai.miniforge.evidence-bundle.interface :as evidence]
-            [ai.miniforge.event-stream.interface :as events]
+            [ai.miniforge.phase-opsv.artifact-test-support :refer [with-context step]]
             [ai.miniforge.phase-opsv.artifact-boundary :as boundary]
             [ai.miniforge.phase-opsv.evidence-runtime :as runtime]
-            [ai.miniforge.phase-opsv.lifecycle :as lifecycle]
             [ai.miniforge.phase-opsv.test-support :as support]
             [clojure.java.io :as io]
-            [clojure.test :refer [deftest is]])
-  (:import [java.nio.file Files]
-           [java.nio.file.attribute FileAttribute]))
+            [clojure.test :refer [deftest is]]))
 
 ;------------------------------------------------------------------------------ Layer 0
 
-(defn- ^{:stratum 0} with-context [f]
-  (let [root (.getCanonicalFile (.toFile (Files/createTempDirectory "opsv-artifacts-"
-                                                                 (make-array FileAttribute 0))))
-        ctx (-> (support/execution-context (support/test-adapter support/ramp-steps))
-                (update :execution/input dissoc :opsv/evidence-bundle-id :opsv/evidence-refs
-                        :opsv/metric-snapshot-artifact-refs :opsv/policy-diff-artifact-refs)
-                (assoc-in [:execution/opts :opsv/artifact-directory] (.getPath root))
-                (assoc :event-stream (events/create-event-stream {:sinks []})))]
-    (try (f ctx (.getPath root))
-         (finally (doseq [file (reverse (file-seq root))] (io/delete-file file))))))
-
-(defn- ^{:stratum 0} step [ctx [phase-key transform]]
-  (let [interceptor (lifecycle/interceptor {} phase-key transform)
-        completed ((:leave interceptor) ((:enter interceptor) ctx))]
-    (is (= :success (get-in completed [:phase :result :status])))
-    (assoc-in completed [:execution/phase-results phase-key :result] (get-in completed [:phase :result]))))
-
-;------------------------------------------------------------------------------ Layer 1
-
-(deftest ^{:stratum 1} lifecycle-publishes-real-content-before-evidence-references-test
+(deftest ^{:stratum 0} lifecycle-publishes-real-content-before-evidence-references-test
   (with-context
     (fn [ctx directory]
       (let [completed (reduce step ctx support/handlers)
@@ -54,7 +32,7 @@
                (:opsv/metric-snapshot-artifact-refs output)))
         (is (every? (set refs) (get-in output [:opsv/operational-policy :operational-policy/evidence-refs])))))))
 
-(deftest ^{:stratum 1} identical-phase-publication-is-idempotent-test
+(deftest ^{:stratum 0} identical-phase-publication-is-idempotent-test
   (with-context
     (fn [ctx directory]
       (let [prepared (runtime/ensure-assembly ctx)
@@ -64,7 +42,7 @@
         (is (= first retry))
         (is (= 1 (count (.listFiles (io/file directory)))))))))
 
-(deftest ^{:stratum 1} failed-publication-does-not-claim-a-reference-test
+(deftest ^{:stratum 0} failed-publication-does-not-claim-a-reference-test
   (with-context
     (fn [ctx _]
       (let [prepared (runtime/ensure-assembly ctx)
@@ -77,7 +55,7 @@
         (is (= output (get-in failed [:anomaly/data :opsv/phase-output])))
         (is (empty? (:opsv/artifact-refs assembly)))))))
 
-(deftest ^{:stratum 1} unavailable-assembly-refuses-before-artifact-write-test
+(deftest ^{:stratum 0} unavailable-assembly-refuses-before-artifact-write-test
   (with-context
     (fn [ctx directory]
       (is (anomaly/anomaly? (boundary/publish-with-exception-handling ctx :opsv/discover {})))
