@@ -19,9 +19,13 @@
    [:grant/revoked-at inst?]
    [:grant/revocation-reason (into [:enum] schema/revocation-reasons)]])
 
+(def ^{:stratum 0} IssuedGrant
+  [:and schema/ExecutionGrant
+   [:fn #(and (nil? (:grant/revoked-at %)) (nil? (:grant/revocation-reason %)))]])
+
 ;------------------------------------------------------------------------------ Layer 1
 
-(def ^{:stratum 1} RegisterArguments [:tuple Directory schema/ExecutionGrant])
+(def ^{:stratum 1} RegisterArguments [:tuple Directory IssuedGrant])
 
 (def ^{:stratum 1} LookupArguments [:tuple Directory :uuid])
 

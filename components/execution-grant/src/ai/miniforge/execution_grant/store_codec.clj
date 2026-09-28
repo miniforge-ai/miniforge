@@ -23,6 +23,12 @@
     (assoc record k (Instant/parse value))
     record))
 
+(defn- ^{:stratum 0} normalize-instant
+  [record k]
+  (if-some [value (get record k)]
+    (assoc record k (temporal/->instant value))
+    record))
+
 ;------------------------------------------------------------------------------ Layer 1
 
 (defn ^{:stratum 1} ->wire [record]
@@ -30,6 +36,9 @@
 
 (defn ^{:stratum 1} <-wire [record]
   (reduce decode-instant record instant-keys))
+
+(defn ^{:stratum 1} normalize [record]
+  (reduce normalize-instant record instant-keys))
 
 (comment
   (<-wire (->wire {:grant/revoked-at nil})))

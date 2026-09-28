@@ -178,6 +178,7 @@
 (defn ^{:stratum 1} register!
   "API surface class 1: register a runtime-issued grant in trusted local storage.
    Create-only; a duplicate UUID returns conflict, never replaces authority.
+   Both revocation fields must be nil. Results normalize timestamps to Instant.
    Scope must round-trip through EDN. This does not issue or authenticate grants."
   [dir grant-record]
   (let [args [dir grant-record]]

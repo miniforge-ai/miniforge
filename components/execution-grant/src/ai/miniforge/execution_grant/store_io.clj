@@ -6,12 +6,12 @@
   (:require [ai.miniforge.anomaly.interface :as anomaly]
             [ai.miniforge.execution-grant.messages :as msg]
             [ai.miniforge.execution-grant.store-codec :as codec]
+            [ai.miniforge.execution-grant.store-durability :as durability]
+            [ai.miniforge.execution-grant.store-read :as reader]
             [clojure.edn :as edn]
-            [clojure.java.io :as io]
-            [malli.core :as m])
-  (:import [java.io File PushbackReader StringReader]
-           [java.nio.charset StandardCharsets]
-           [java.nio.file FileAlreadyExistsException Files NoSuchFileException]))
+            [clojure.java.io :as io])
+  (:import [java.io File]
+           [java.nio.file FileAlreadyExistsException Files]))
 
 ;------------------------------------------------------------------------------ Layer 0
 
@@ -26,32 +26,11 @@
   ^File [^File target]
   (io/file (.getParentFile target) (str (.getName target) "." (random-uuid) ".tmp")))
 
-(defn- ^{:stratum 0} decode-record
-  [encoded]
-  (with-open [reader (PushbackReader. (StringReader. encoded))]
-    (let [value (edn/read reader)
-          eof (Object.)
-          tail (edn/read {:eof eof} reader)]
-      (when (identical? eof tail)
-        (codec/<-wire value)))))
-
 ;------------------------------------------------------------------------------ Layer 1
 
 (defn- ^{:stratum 1} record-file
   ^File [dir id kind]
   (io/file dir (str id (get suffixes kind))))
-
-(defn- ^{:stratum 1} read-file
-  [^File file id kind record-schema]
-  (try
-    (let [encoded (Files/readString (.toPath file) StandardCharsets/UTF_8)
-          value (decode-record encoded)]
-      (if (and (m/validate record-schema value) (= id (:grant/id value)))
-        value
-        (failure :fault :store/read-failed id kind)))
-    (catch NoSuchFileException _ nil)
-    (catch Exception _
-      (failure :fault :store/read-failed id kind))))
 
 (defn- ^{:stratum 1} encode-record
   [record kind]
@@ -70,8 +49,9 @@
         id (:grant/id record)]
     (try
       (io/make-parents target)
-      (spit tmp encoded :encoding "UTF-8")
+      (durability/write! tmp encoded)
       (Files/createLink (.toPath target) (.toPath tmp))
+      (durability/sync-ancestry! (.getParentFile target))
       record
       (catch FileAlreadyExistsException _
         (failure :conflict :store/id-conflict id kind))
@@ -83,7 +63,16 @@
 
 (defn ^{:stratum 2} read-record
   [dir id kind record-schema]
-  (read-file (record-file dir id kind) id kind record-schema))
+  (reader/read-record (record-file dir id kind) id record-schema
+                      (partial failure :fault :store/read-failed id kind)))
+
+(defn ^{:stratum 2} confirm!
+  [dir record kind]
+  (try
+    (durability/confirm! (record-file dir (:grant/id record) kind))
+    record
+    (catch Exception _
+      (failure :fault :store/write-failed (:grant/id record) kind))))
 
 (defn ^{:stratum 2} create!
   [dir record kind]
