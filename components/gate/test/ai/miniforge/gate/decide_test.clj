@@ -32,6 +32,15 @@
            :message "m"}
     severity (assoc-in [:rule :rule/severity] severity)))
 
+(deftest ^{:stratum 0} explicit-runtime-pins-are-retained-test
+  (let [runtime-pins {:pins/pack-revision "runtime@2"
+                      :pins/rule-ids [:opsv/actuation-gate]
+                      :pins/event-watermark 42}
+        checks {:results [{:gate :opsv/actuation-gate :passed? true}]}
+        result (decide/gates->envelope checks false runtime-pins)]
+    (is (= runtime-pins (:envelope/pins result)))
+    (is (= :allow (:envelope/decision result)))))
+
 (deftest ^{:stratum 0} missing-artifact-reason-test
   (is (= :reason/missing-artifact (:reason/code (decide/missing-artifact-reason)))))
 
