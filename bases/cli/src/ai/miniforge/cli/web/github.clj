@@ -22,7 +22,8 @@
    [clojure.string :as str]
    [cheshire.core :as json]
    [ai.miniforge.messages.interface :as messages]
-   [ai.miniforge.cli.web.risk :as risk]))
+   [ai.miniforge.cli.web.risk :as risk]
+   [slingshot.slingshot :refer [try+]]))
 
 ;------------------------------------------------------------------------------ Layer 0
 
@@ -72,15 +73,17 @@
           [])))))
 
 (defn ^{:stratum 1} fetch-pr-diff
-  "The PR's diff, or nil when `gh` fails or does not answer within
-   `gh-timeout-ms` (then it is killed): an operator re-evaluation runs
-   inside the consumer pass other processes wait on."
+  "The PR's diff, or nil when `gh` fails, cannot be started (not
+   installed), or does not answer within `gh-timeout-ms` (then it is
+   killed): an operator re-evaluation runs inside the consumer pass other
+   processes wait on, and nil is what it refuses as no diff."
   [repo number]
-  (let [proc (process/process {:out :string :err :string}
-                              "gh" "pr" "diff" (str number) "--repo" repo)
-        result (deref proc gh-timeout-ms ::timed-out)]
-    (when (= ::timed-out result) (process/destroy-tree proc))
-    (when (and (map? result) (sh-success? result)) (:out result))))
+  (when-let [proc (try+ (process/process {:out :string :err :string}
+                                         "gh" "pr" "diff" (str number) "--repo" repo)
+                        (catch java.io.IOException _ nil))]
+    (let [result (deref proc gh-timeout-ms ::timed-out)]
+      (when (= ::timed-out result) (process/destroy-tree proc))
+      (when (and (map? result) (sh-success? result)) (:out result)))))
 
 (defn ^{:stratum 1} fetch-pr-body [repo number]
   (let [result (process/sh "gh" "pr" "view" (str number) "--repo" repo "--json" "body,title,labels")]

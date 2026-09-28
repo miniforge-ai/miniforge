@@ -62,6 +62,27 @@
                             #"Invalid checkpoint data"
                             (workflow/load-checkpoint-data (random-uuid) {}))))))
 
+(deftest ^{:stratum 0} checkpoint-present-sees-what-the-loader-cannot-test
+  (checkpoint-test-support/call-with-temp-checkpoint-root
+    (fn [checkpoint-root]
+      (let [opts {:checkpoint/root checkpoint-root}
+            orphan (random-uuid)
+            unreadable (random-uuid)]
+        (spit (doto (io/file (checkpoint-paths/phase-checkpoint-path checkpoint-root orphan :plan))
+                io/make-parents)
+              (pr-str {:phase/result {:status :completed}}))
+        (spit (doto (io/file (checkpoint-paths/machine-snapshot-path checkpoint-root unreadable))
+                io/make-parents)
+              "{:not edn")
+        (testing "an id with nothing stored is free"
+          (is (false? (workflow/checkpoint-present? (random-uuid) opts))))
+        (testing "phase checkpoints written before the snapshot hold the id"
+          (is (nil? (workflow/load-checkpoint-data orphan opts)))
+          (is (true? (workflow/checkpoint-present? orphan opts))))
+        (testing "a snapshot the loader cannot read holds the id"
+          (is (nil? (workflow/load-checkpoint-data unreadable opts)))
+          (is (true? (workflow/checkpoint-present? unreadable opts))))))))
+
 (deftest ^{:stratum 0} persist-execution-state-validates-before-saving-test
   (checkpoint-test-support/call-with-temp-checkpoint-root
     (fn [checkpoint-root]

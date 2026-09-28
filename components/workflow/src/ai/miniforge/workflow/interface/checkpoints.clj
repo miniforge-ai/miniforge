@@ -15,14 +15,19 @@
 ;; WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 ;; See the License for the specific language governing permissions and
 ;; limitations under the License.
-
 (ns ai.miniforge.workflow.interface.checkpoints
   "Workflow checkpointing and resume data APIs."
   (:require
    [ai.miniforge.workflow.checkpoint-store :as checkpoint-store]
    [ai.miniforge.workflow.schemas :as schemas]))
 
-(defn load-checkpoint-data
+;------------------------------------------------------------------------------ Layer 0
+
+(def ^{:stratum 0} checkpoint-present?
+  "True when anything is stored under a run's checkpoint directory."
+  checkpoint-store/checkpoint-present?)
+
+(defn ^{:stratum 0} load-checkpoint-data
   "Load checkpoint data and validate it at the public boundary."
   ([workflow-run-id]
    (load-checkpoint-data workflow-run-id {}))

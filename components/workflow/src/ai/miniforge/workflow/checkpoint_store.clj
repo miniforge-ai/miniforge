@@ -70,6 +70,21 @@
    failed append cannot damage prior entries."
   "gate-history.edn")
 
+;; Existence
+(defn ^{:stratum 0} checkpoint-present?
+  "True when anything is stored under `workflow-run-id`'s checkpoint
+   directory. `load-checkpoint-data` answers nil for a run with none, but
+   also for phase checkpoints written before the machine snapshot (a run
+   that died between the two) and for files it cannot read or parse. An
+   id is free only when this is false."
+  ([workflow-run-id]
+   (checkpoint-present? workflow-run-id {}))
+  ([workflow-run-id opts]
+   (let [dir (checkpoint-paths/workflow-checkpoint-dir
+              (checkpoint-paths/resolve-checkpoint-root opts)
+              workflow-run-id)]
+     (boolean (and (fs/directory? dir) (seq (fs/list-dir dir)))))))
+
 ;------------------------------------------------------------------------------ Layer 1
 
 (defn- ^{:stratum 1} write-edn-atomically!
