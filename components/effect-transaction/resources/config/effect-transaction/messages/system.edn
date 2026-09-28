@@ -17,5 +17,7 @@
   :store/write-failed "EffectTransaction durable record could not be written"
   :store/lock-conflict "EffectTransaction durable record is being changed by another process"
   :commit/not-proposed "Only a :proposed record may be committed"
+  :commit/invalid-input "Runtime commit requires a store directory, effect UUID and three runtime functions"
+  :commit/runtime-unavailable "The runtime port did not return a valid value; no effect was attempted"
   :reconcile/not-reconcilable "Only :committing or :unknown-outcome records are reconcilable"
   :reconcile/no-answer "Reconciliation probe did not answer; record stays unresolved"}}
