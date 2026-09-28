@@ -9,7 +9,8 @@
             [clojure.java.io :as io]
             [clojure.test :refer [deftest is]])
   (:import [java.io File IOException]
-           [java.nio.file Files]
+           [java.nio.charset StandardCharsets]
+           [java.nio.file Files OpenOption]
            [java.nio.file.attribute FileAttribute]
            [java.time Instant]
            [java.util Date]))
@@ -31,7 +32,7 @@
 
 (defn- ^{:stratum 0} record-file
   [dir g suffix]
-  (io/file dir (str (:grant/id g) suffix)))
+  (io/file dir "grants" (str (:grant/id g) suffix)))
 
 (defn- ^{:stratum 0} register-after!
   [start dir g]
@@ -45,6 +46,14 @@
 (defn- ^{:stratum 0} sql-date
   [^Instant instant]
   (java.sql.Date. (.toEpochMilli instant)))
+
+(defn- ^{:stratum 0} corrupt-utf8!
+  [^File file]
+  (let [text (slurp file)
+        bytes (.getBytes ^String text StandardCharsets/UTF_8)
+        index (.indexOf ^String text "workflow:test")]
+    (aset-byte bytes index (unchecked-byte 255))
+    (Files/write (.toPath file) bytes (into-array OpenOption []))))
 
 ;------------------------------------------------------------------------------ Layer 1
 
@@ -61,7 +70,9 @@
 
 (defn- ^{:stratum 1} corrupt!
   [dir g suffix text]
-  (spit (record-file dir g suffix) text))
+  (let [file (record-file dir g suffix)]
+    (io/make-parents file)
+    (spit file text)))
 
 (defn- ^{:stratum 1} revoke-after!
   [start dir id reason]
@@ -194,7 +205,38 @@
     (with-redefs [durability/write! sync-failure!]
       (is (= :fault (:anomaly/type (grant/register! dir g)))))
     (is (nil? (grant/current dir (:grant/id g))))
-    (is (empty? (seq (.listFiles (File. dir)))))))
+    (is (empty? (seq (.listFiles (io/file dir "grants")))))))
+
+(deftest ^{:stratum 2} malformed-utf8-is-not-replaced-in-authority-test
+  (let [dir (tmp-dir)
+        g (issued)]
+    (grant/register! dir g)
+    (corrupt-utf8! (record-file dir g ".grant.edn"))
+    (is (= :fault (:anomaly/type (grant/current dir (:grant/id g)))))
+    (is (= :fault (:anomaly/type (grant/revoke-stored! dir (:grant/id g) :revocation/operator now))))))
+
+(deftest ^{:stratum 2} malformed-unicode-is-not-published-test
+  (let [dir (tmp-dir)
+        g (assoc (issued) :grant/principal (str "workflow:" (char 0xd800)))]
+    (is (= :fault (:anomaly/type (grant/register! dir g))))
+    (is (nil? (grant/current dir (:grant/id g))))))
+
+(deftest ^{:stratum 2} authority-records-coexist-with-breach-history-test
+  (let [dir (tmp-dir)
+        g (issued)
+        breach {:breach/id (random-uuid)
+                :breach/principal "workflow:other"
+                :breach/grant-id (random-uuid)
+                :breach/effect-class :effect/pr-create
+                :breach/axis :constraint/max-count
+                :breach/limit 1 :breach/observed 2
+                :breach/detection :detected :breach/at now}]
+    (is (= breach (grant/record-breach! dir breach)))
+    (grant/register! dir g)
+    (is (= [breach] (grant/breach-history dir)))
+    (grant/revoke-stored! dir (:grant/id g) :revocation/operator now)
+    (is (= [breach] (grant/breach-history dir)))
+    (is (= now (:grant/revoked-at (grant/current dir (:grant/id g)))))))
 
 (deftest ^{:stratum 2} orphaned-revocation-markers-are-storage-faults-test
   (doseq [kind [:valid :corrupt :dangling]]

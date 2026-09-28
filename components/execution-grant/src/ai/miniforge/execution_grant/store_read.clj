@@ -6,7 +6,8 @@
   (:require [ai.miniforge.execution-grant.store-codec :as codec]
             [clojure.edn :as edn]
             [malli.core :as m])
-  (:import [java.io File PushbackReader StringReader]
+  (:import [java.io File InputStreamReader PushbackReader StringReader]
+           [java.nio.charset CodingErrorAction StandardCharsets]
            [java.nio.file Files LinkOption NoSuchFileException OpenOption StandardOpenOption]))
 
 ;------------------------------------------------------------------------------ Layer 0
@@ -20,11 +21,11 @@
       (when (identical? eof tail)
         (codec/<-wire value)))))
 
-(defn- ^{:stratum 0} read-text
-  [^File file]
-  (let [options (into-array OpenOption [StandardOpenOption/READ LinkOption/NOFOLLOW_LINKS])]
-    (with-open [stream (Files/newInputStream (.toPath file) options)]
-      (slurp stream :encoding "UTF-8"))))
+(defn- ^{:stratum 0} utf8-decoder
+  []
+  (doto (.newDecoder StandardCharsets/UTF_8)
+    (.onMalformedInput CodingErrorAction/REPORT)
+    (.onUnmappableCharacter CodingErrorAction/REPORT)))
 
 (defn- ^{:stratum 0} absent?
   [^File file]
@@ -32,7 +33,16 @@
 
 ;------------------------------------------------------------------------------ Layer 1
 
-(defn ^{:stratum 1} read-record
+(defn- ^{:stratum 1} read-text
+  [^File file]
+  (let [options (into-array OpenOption [StandardOpenOption/READ LinkOption/NOFOLLOW_LINKS])]
+    (with-open [stream (Files/newInputStream (.toPath file) options)
+                reader (InputStreamReader. stream (utf8-decoder))]
+      (slurp reader))))
+
+;------------------------------------------------------------------------------ Layer 2
+
+(defn ^{:stratum 2} read-record
   [file id record-schema on-error]
   (try
     (let [value (decode-record (read-text file))]

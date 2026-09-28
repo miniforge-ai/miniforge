@@ -35,8 +35,8 @@ Test initial lookup, durable reload, duplicate registration, revocation,
 repeated revocation, corrupt records and malformed boundary inputs.
 Run component tests, standards checks, lint, hooks and CI.
 
-Local results: 60 tests and 342 assertions pass in each of Miniforge, Core
-and TUI. The store adds 18 tests and 101 assertions, with two timestamp
+Local results: 63 tests and 350 assertions pass in each of Miniforge, Core
+and TUI. The store adds 21 tests and 109 assertions, with two timestamp
 regressions adding five assertions. The component standards
 scan covers all source and test files, including the file-boundary helpers.
 
@@ -55,6 +55,8 @@ It distinguishes absent files from failed reads and rejects trailing EDN,
 corrupt values, wrong IDs and marker fields that would widen authority.
 Symlinks are rejected without following their targets. Registration and reload
 require pristine issuance records: both revocation fields must be nil.
+UTF-8 decoding rejects malformed bytes rather than substituting characters.
+Encoding also rejects unpaired surrogates before publishing altered authority.
 Results normalize timestamps to Instant on the first call as well as reload.
 SQL Date/Time normalize by epoch milliseconds; Timestamp keeps its precision.
 The tests pin preservation of the original issuance bytes and first revocation.
@@ -71,6 +73,8 @@ authority composition. No generic replacement API or revocation removal exists.
 No existing caller changes. The OPSV coordinator will register runtime-issued
 grants and use current lookup. The store is trusted local authority state,
 not an authentication boundary against a user who can edit its files.
+Grant records use the `grants` child directory so existing breach-history
+records can safely share the supplied root; coexistence is regression-tested.
 Storage requires a filesystem supporting hard links and file/directory force.
 Unsupported barriers fail closed; there is no fallback claiming durability.
 After a post-publication failure, a record may be visible despite the fault.

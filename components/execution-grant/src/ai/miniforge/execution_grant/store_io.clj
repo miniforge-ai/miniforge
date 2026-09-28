@@ -18,6 +18,8 @@
 (def ^{:stratum 0} suffixes
   {:grant ".grant.edn" :revocation ".revocation.edn"})
 
+(def ^{:stratum 0} records-directory "grants")
+
 (defn- ^{:stratum 0} failure
   [type message-key id kind]
   (anomaly/anomaly type (msg/t message-key) {:grant/id id :record/kind kind}))
@@ -30,7 +32,7 @@
 
 (defn- ^{:stratum 1} record-file
   ^File [dir id kind]
-  (io/file dir (str id (get suffixes kind))))
+  (io/file dir records-directory (str id (get suffixes kind))))
 
 (defn- ^{:stratum 1} encode-record
   [record kind]

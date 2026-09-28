@@ -4,20 +4,16 @@
 (ns ai.miniforge.execution-grant.store-durability
   "Filesystem primitives; the store I/O boundary converts their failures to data."
   (:import [java.io File]
-           [java.nio ByteBuffer]
+           [java.nio CharBuffer]
            [java.nio.channels FileChannel]
            [java.nio.charset StandardCharsets]
            [java.nio.file LinkOption OpenOption StandardOpenOption]))
 
 ;------------------------------------------------------------------------------ Layer 0
 
-(defn ^{:stratum 0} write!
-  [^File file ^String encoded]
-  (let [options (into-array OpenOption [StandardOpenOption/CREATE_NEW StandardOpenOption/WRITE])
-        bytes (ByteBuffer/wrap (.getBytes encoded StandardCharsets/UTF_8))]
-    (with-open [channel (FileChannel/open (.toPath file) options)]
-      (while (.hasRemaining bytes) (.write channel bytes))
-      (.force channel true))))
+(defn- ^{:stratum 0} utf8-bytes
+  [^String encoded]
+  (.encode (.newEncoder StandardCharsets/UTF_8) (CharBuffer/wrap encoded)))
 
 (defn- ^{:stratum 0} parent-file
   [^File file]
@@ -36,6 +32,14 @@
       (.force channel true))))
 
 ;------------------------------------------------------------------------------ Layer 1
+
+(defn ^{:stratum 1} write!
+  [^File file ^String encoded]
+  (let [options (into-array OpenOption [StandardOpenOption/CREATE_NEW StandardOpenOption/WRITE])
+        bytes (utf8-bytes encoded)]
+    (with-open [channel (FileChannel/open (.toPath file) options)]
+      (while (.hasRemaining bytes) (.write channel bytes))
+      (.force channel true))))
 
 (defn ^{:stratum 1} sync-ancestry!
   "Flush publication and any newly created ancestor directory entries."
