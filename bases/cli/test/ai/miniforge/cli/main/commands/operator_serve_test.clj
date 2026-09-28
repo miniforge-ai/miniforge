@@ -151,6 +151,48 @@
           (is (= 0 (binding [*out* (java.io.StringWriter.)]
                      (sut/serve-cmd {} (constantly nil))))))))))
 
+(deftest ^{:stratum 1} a-setup-step-that-throws-still-releases-the-home-test
+  (let [home (temp-home)]
+    (with-redefs [es/default-events-dir (constantly (io/file home "events"))
+                  sut/server-info #(throw (ex-info "operator layout unresolvable" {}))
+                  control/stop-process-control! (constantly nil)]
+      (is (thrown-with-msg? clojure.lang.ExceptionInfo #"unresolvable"
+                            (sut/serve-cmd {} (constantly nil)))))
+    (testing "the lock was released, so the next server for the home starts"
+      (with-redefs [es/default-events-dir (constantly (io/file home "events"))
+                    control/start-process-control! (constantly nil)
+                    control/stop-process-control! (constantly nil)]
+        (is (= 0 (binding [*out* (java.io.StringWriter.)]
+                   (sut/serve-cmd {} (constantly nil)))))))))
+
+(deftest ^{:stratum 1} a-second-stop-waits-for-the-first-to-finish-test
+  (let [home (temp-home)
+        hook (promise)
+        in-cleanup (promise)
+        finish-cleanup (promise)
+        serve-returned (atom false)]
+    (with-redefs [es/default-events-dir (constantly (io/file home "events"))
+                  sut/add-shutdown-hook! #(deliver hook %)
+                  sut/remove-shutdown-hook! (constantly nil)
+                  control/start-process-control! (constantly nil)
+                  control/stop-process-control! #(do (deliver in-cleanup true) @finish-cleanup)]
+      (let [release (promise)
+            server (future (let [code (binding [*out* (java.io.StringWriter.)]
+                                        (sut/serve-cmd {} #(deref release)))]
+                             (reset! serve-returned true)
+                             code))
+            ;; What SIGTERM does: the hook's stop wins and starts cleaning up.
+            signal (doto ^Thread (deref hook 5000 nil) .start)]
+        (deref in-cleanup 5000 :timeout)
+        (deliver release :stop)
+        (testing "the serve thread's own stop waits for the hook's cleanup"
+          (Thread/sleep 200)
+          (is (false? @serve-returned)))
+        (deliver finish-cleanup true)
+        (.join signal 5000)
+        (is (= 0 (deref server 5000 :timeout)))
+        (is (not (.exists (io/file home sut/discovery-file-name))))))))
+
 (deftest ^{:stratum 1} a-stop-that-throws-still-releases-the-home-test
   (let [home (temp-home)
         discovery (io/file home sut/discovery-file-name)]
@@ -223,7 +265,9 @@
         (testing "the hook is still registered while the serve's own stop cleans up"
           (is (false? @removed)))
         (testing "a signal then waits for that cleanup instead of cutting it short"
-          (is (eventually #(= java.lang.Thread$State/BLOCKED (.getState signal))))
+          (is (eventually #(contains? #{java.lang.Thread$State/BLOCKED java.lang.Thread$State/WAITING}
+                                      (.getState signal))))
+          (is (.isAlive signal))
           (is (.exists discovery)))
         (deliver finish-stop true)
         (.join signal 5000)

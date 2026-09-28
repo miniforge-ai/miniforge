@@ -165,25 +165,30 @@
   ([_opts await-stop!]
    (let [home (serve-home)]
      (if-let [channel (try-lock! home)]
-       (let [info (server-info)
-             guard (Object.)
+       (let [guard (Object.)
              stopped? (atom false)
+             stopped (promise)
              ;; `stopped?` is set before `guard` is taken: a step already
-             ;; running finishes, is stopped, and no later step starts.
-             ;; Every caller takes `guard`, so a second stop (the hook on a
-             ;; signal) waits for a cleanup in progress rather than
-             ;; returning and letting the JVM exit partway through it.
-             stop! #(let [first? (compare-and-set! stopped? false true)]
-                      (locking guard (when first? (stop-serving! home channel))))
+             ;; running finishes, is stopped, and no later step starts. The
+             ;; caller that sets it cleans up; any other (the hook on a
+             ;; signal, or this thread after one) waits until that cleanup
+             ;; is done, so the JVM cannot exit partway through it.
+             stop! #(if (compare-and-set! stopped? false true)
+                      (try (locking guard (stop-serving! home channel))
+                           (finally (deliver stopped true)))
+                      @stopped)
              step! (fn [f] (locking guard (when-not @stopped? (f) true)))
              hook (Thread. ^Runnable stop!)]
-         (add-shutdown-hook! hook)
+         ;; Everything after the lock is taken runs under this cleanup, so
+         ;; a setup step that throws still releases the home.
          (try
-           (when (and (step! #(write-discovery! home info))
-                      (step! control/start-process-control!)
-                      (step! #(do (println (json/generate-string (assoc info :ready true)))
-                                  (flush))))
-             (await-stop!))
+           (add-shutdown-hook! hook)
+           (let [info (server-info)]
+             (when (and (step! #(write-discovery! home info))
+                        (step! control/start-process-control!)
+                        (step! #(do (println (json/generate-string (assoc info :ready true)))
+                                    (flush))))
+               (await-stop!)))
            0
            (finally
              ;; The hook stays registered until the cleanup is done: a
