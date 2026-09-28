@@ -40,6 +40,8 @@
    [ai.miniforge.execution-grant.messages :as msg]
    [ai.miniforge.execution-grant.revocation :as revocation]
    [ai.miniforge.execution-grant.schema :as schema]
+   [ai.miniforge.execution-grant.store :as store]
+   [ai.miniforge.execution-grant.store-schema :as store-schema]
    [ai.miniforge.execution-grant.temporal :as temporal]
    [malli.core :as m]
    [malli.error :as me])
@@ -172,6 +174,35 @@
    {:explain (me/humanize (m/explain schema/ExecutionGrant value))}))
 
 ;------------------------------------------------------------------------------ Layer 1
+
+(defn ^{:stratum 1} register!
+  "API surface class 1: register a runtime-issued grant in trusted local storage.
+   Create-only; a duplicate UUID returns conflict, never replaces authority.
+   Scope must round-trip through EDN. This does not issue or authenticate grants."
+  [dir grant-record]
+  (let [args [dir grant-record]]
+    (if (valid-input? store-schema/RegisterArguments args)
+      (store/register! dir grant-record)
+      (invalid :store/invalid store-schema/RegisterArguments args))))
+
+(defn ^{:stratum 1} current
+  "API surface class 1: read current durable authority, nil when absent, or anomaly.
+   Includes revocation state; expiry is still evaluated by authorize at use time."
+  [dir id]
+  (let [args [dir id]]
+    (if (valid-input? store-schema/LookupArguments args)
+      (store/current dir id)
+      (invalid :store/invalid store-schema/LookupArguments args))))
+
+(defn ^{:stratum 1} revoke-stored!
+  "API surface class 1: persist revocation without changing issued scope.
+   Sequential retries return the first revocation. Concurrent writers may return
+   conflict; re-read current authority. Never restores a revoked grant."
+  [dir id reason now]
+  (let [args [dir id reason now]]
+    (if (valid-input? store-schema/RevokeArguments args)
+      (store/revoke! dir id reason now)
+      (invalid :store/invalid store-schema/RevokeArguments args))))
 
 (defn ^{:stratum 1} record-breach!
   "Append one breach to the history, or return an anomaly. One file per

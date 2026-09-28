@@ -35,6 +35,28 @@ Test initial lookup, durable reload, duplicate registration, revocation,
 repeated revocation, corrupt records and malformed boundary inputs.
 Run component tests, standards checks, lint, hooks and CI.
 
+Local results: 53 tests and 301 assertions pass in each of Miniforge, Core
+and TUI. The store adds 13 tests and 65 assertions. The component standards
+scan reports zero findings across 23 files.
+
+## Adversarial review
+
+Registration encodes and round-trips the record before creating any file.
+It writes a unique temporary file, then publishes a hard link that cannot
+replace an existing record. Both competing writers and duplicate calls are
+tested. Revocation uses the same publication path, with a closed marker schema
+that cannot change scope or grant identity.
+
+Lookup reads and validates the issued record before applying the marker.
+It distinguishes absent files from failed reads and rejects trailing EDN,
+corrupt values, wrong IDs and marker fields that would widen authority.
+The tests pin preservation of the original issuance bytes and first revocation.
+The clock still controls expiry through the existing authorization function.
+
+Source dependencies stay inside execution-grant or use component interfaces.
+The per-file strata separate wire conversion, file-boundary validation and
+authority composition. No generic replacement API or revocation removal exists.
+
 ## Deployment plan
 
 No existing caller changes. The OPSV coordinator will register runtime-issued
@@ -47,6 +69,6 @@ N7 section 5.4, N10's Ariadne profile, and PRs #1910 and #1927.
 
 ## Checklist
 
-- [ ] Implement and verify durable authority storage.
-- [ ] Complete adversarial standards review.
+- [x] Implement and verify durable authority storage.
+- [x] Complete adversarial standards review.
 - [ ] Settle review comments and pass CI before merge.
