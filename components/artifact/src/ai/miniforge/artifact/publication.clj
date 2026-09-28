@@ -4,7 +4,7 @@
 (ns ai.miniforge.artifact.publication
   "Synchronous immutable artifact publication, separate from mutable store caches."
   (:require [ai.miniforge.anomaly.interface :as anomaly]
-            [ai.miniforge.artifact.messages :as msg]
+            [ai.miniforge.artifact.publication-boundary :as boundary :refer [failure]]
             [ai.miniforge.artifact.publication-codec :as codec]
             [ai.miniforge.artifact.publication-files :as files]
             [ai.miniforge.schema.interface :as schema]
@@ -13,11 +13,9 @@
 
 ;------------------------------------------------------------------------------ Layer 0
 
-(defn ^{:stratum 0} failure [type key id]
-  (anomaly/anomaly type (msg/t key) {:artifact/id id}))
-
-(defn- ^{:stratum 0} decoded [file]
-  (some-> (files/read-bytes file) codec/decode))
+(defn- ^{:stratum 0} decoded [file id]
+  (boundary/call-with-exception-handling id :fault :publication/read-failed
+                                        #(some-> (files/read-bytes file) codec/decode)))
 
 (defn- ^{:stratum 0} publish-bytes! [file temporary bytes]
   (files/write! temporary bytes)
@@ -32,24 +30,30 @@
       (not (files/safe-directory? directory)) (failure :invalid-input :publication/unsafe-path id)
       (files/absent? file) nil
       (not (files/regular? file)) (failure :fault :publication/read-failed id)
-      :else (let [record (decoded file)]
-              (if (and (schema/valid-artifact? record) (= id (:artifact/id record)))
-                record
-                (failure :fault :publication/read-failed id))))))
+      :else (let [record (decoded file id)]
+              (cond
+                (anomaly/anomaly? record) record
+                (and (schema/valid-artifact? record) (= id (:artifact/id record))) record
+                :else (failure :fault :publication/read-failed id))))))
 
 (defn- ^{:stratum 1} confirm-record! [directory artifact]
   (let [id (:artifact/id artifact)
-        file (files/target directory id)]
-    (if (and (files/regular? file) (= artifact (decoded file)))
-      (do (files/confirm! file) artifact)
-      (failure :conflict :publication/id-conflict id))))
+        file (files/target directory id)
+        actual (when (files/regular? file) (decoded file id))]
+    (cond
+      (anomaly/anomaly? actual) actual
+      (nil? actual) (failure :fault :publication/read-failed id)
+      (= artifact actual) (do (files/confirm! file) artifact)
+      :else (failure :conflict :publication/id-conflict id))))
 
 ;------------------------------------------------------------------------------ Layer 2
 
 (defn ^{:stratum 2} publish! [directory artifact]
   (let [id (:artifact/id artifact)
-        bytes (codec/encode artifact)]
+        bytes (boundary/call-with-exception-handling id :invalid-input :publication/not-portable
+                                                    #(codec/encode artifact))]
     (cond
+      (anomaly/anomaly? bytes) bytes
       (nil? bytes) (failure :invalid-input :publication/not-portable id)
       (not (files/safe-directory? directory)) (failure :invalid-input :publication/unsafe-path id)
       :else
