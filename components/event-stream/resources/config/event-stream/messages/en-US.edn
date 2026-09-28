@@ -1,5 +1,7 @@
 {:event-stream/messages
- {;; Supervisory intervention events
+ {:opsv/actuation-disposition "OPSV effect disposition: {state}"
+  :opsv/invalid-disposition "OPSV disposition identity, state, authority or observation payload failed validation."
+  ;; Supervisory intervention events
   :supervisory/intervention-requested
   "Intervention {type} requested"
 
