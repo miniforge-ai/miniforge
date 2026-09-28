@@ -28,12 +28,16 @@ The subsequent provider adapter and runtime wiring depend on this coordinator.
 - Reload durable grant authority at commit time and reject invalid stored payloads.
 - Pass the claimed transaction and exact payload to the trusted provider port.
 - Never retry a claimed transaction or convert an uncertain response to success.
+- Persist the envelope timestamp at standard EDN `#inst` millisecond precision;
+  retain all decision fields and its UUID. Grant timing keeps its own precision.
 
 ## Testing plan
 
 Exercise durable registration, proposal, commit, revocation, expiry, repeated
 execution, failed verification drafts, malformed records and uncertain outcomes.
-Run component regressions, standards scan, lint, Polylith checks and the build.
+All 18 tests / 150 assertions pass, including boundary regression coverage.
+The component standards scan reports zero findings. The CLI builds successfully
+and packaged help runs. Polylith, kondo and stratum checks pass.
 
 ## Deployment plan
 
@@ -47,6 +51,6 @@ N7 governed actuation; PRs #1911, #1927, #1929 and #1931.
 
 ## Checklist
 
-- [ ] Regression tests and standards pass
+- [x] Regression tests and standards pass
 - [ ] Signed commits and green CI
 - [ ] Review findings fixed and resolved
