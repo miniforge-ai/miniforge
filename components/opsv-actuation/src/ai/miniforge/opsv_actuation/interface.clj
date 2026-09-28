@@ -33,7 +33,7 @@
     (anomaly/anomaly :invalid-input (msg/ts :execution/invalid-input) {})))
 
 (defn ^{:stratum 0} stop-mutations!
-  "Atomically refuse subsequent admission; return the in-flight count.
+  "Atomically refuse subsequent admission; return {:stopped? true :in-flight n}.
    Existing operations may settle or become uncertain. This does not revoke
    grants, kill provider requests, or claim that an in-flight effect rolled back."
   [fence]

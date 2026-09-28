@@ -34,8 +34,9 @@ validated public interface. No application or provider dependency is introduced.
 
 ## Testing plan
 
-Six fence tests cover admission, monotonic stop, in-flight completion, exceptions,
-opaque handles and interruption. All 27 coordinator tests / 214 assertions pass.
+Seven fence tests cover admission, monotonic stop, in-flight completion, exceptions,
+opaque handles, interruption and coordinated admission/stop races.
+All 28 coordinator tests / 284 assertions pass.
 Polylith, kondo, strata, smoke tests and compatibility checks pass without overrides.
 Handle storage and operation execution occupy separate namespaces within three layers.
 

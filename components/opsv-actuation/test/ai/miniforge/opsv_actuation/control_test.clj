@@ -4,7 +4,8 @@
 (ns ai.miniforge.opsv-actuation.control-test
   (:require [ai.miniforge.anomaly.interface :as anomaly]
             [ai.miniforge.opsv-actuation.interface :as actuation]
-            [clojure.test :refer [deftest is]]))
+            [clojure.test :refer [deftest is]])
+  (:import [java.util.concurrent CountDownLatch TimeUnit]))
 
 ;------------------------------------------------------------------------------ Layer 0
 
@@ -63,6 +64,31 @@
         (is interrupted?))
       (is (= {:stopped? false :in-flight 0} (actuation/mutation-status fence)))
       (finally (Thread/interrupted)))))
+
+(deftest ^{:stratum 0} coordinated-stop-and-admission-race-test
+  (dotimes [_ 10]
+    (let [fence (actuation/create-mutation-fence)
+          ready (CountDownLatch. 9)
+          start (promise)
+          calls (atom 0)
+          run #(future (.countDown ready) (deref start 5000 nil) (%))
+          workers (mapv (fn [_] (run #(actuation/at-mutation-boundary! fence
+                                       (fn [] (swap! calls inc) :admitted)))) (range 8))
+          stopper (run #(actuation/stop-mutations! fence))]
+      (try
+        (is (.await ready 5 TimeUnit/SECONDS))
+        (deliver start true)
+        (is (true? (:stopped? (deref stopper 5000 nil))))
+        (let [results (mapv #(deref % 5000 :timeout) workers)
+              admitted (count (filter #{:admitted} results))]
+          (is (not-any? #{:timeout} results))
+          (is (= admitted @calls))
+          (is (anomaly/anomaly? (actuation/at-mutation-boundary! fence #(swap! calls inc))))
+          (is (= admitted @calls))
+          (is (= {:stopped? true :in-flight 0} (actuation/mutation-status fence))))
+        (finally
+          (deliver start true)
+          (doseq [worker (conj workers stopper)] (future-cancel worker)))))))
 
 (comment
   (actuation/mutation-status (actuation/create-mutation-fence)))
