@@ -19,12 +19,15 @@ N6 evidence references need a confirmed durable record, not a cache hit.
 ## Layer and dependencies
 
 The artifact component owns filesystem and Transit publication primitives.
-Application callers use its validated public interface. No new component dependency.
+Application callers use its validated public interface. The shared content-hash
+component supplies the integrity digest.
 
 ## Changes in detail
 
 - Validate artifact records and canonical, existing directory paths.
 - Encode round-trippable Transit data with a 16 MiB retained-output limit.
+- Store a versioned envelope with a canonical content digest. Verify the digest
+  on every read and retry; it detects corruption, not malicious writer replacement.
 - Force the complete temporary file, create an immutable hard link, then verify
   exact content and force the destination and ancestor directories.
 - Never replace an existing ID. Identical retries repeat durability barriers;
@@ -35,14 +38,15 @@ Application callers use its validated public interface. No new component depende
 
 ## Testing plan
 
-All three artifact-consuming projects passed the initial 22 tests and 70 assertions each.
-The hardened publication suite passes nine tests and 39 assertions on both JVM and
-the packaged Babashka CLI. It covers disk rereads, conflicting and concurrent
+All three artifact-consuming projects pass 26 tests and 83 assertions each.
+The hardened publication suite passes 12 tests and 46 assertions on the JVM
+and packaged Babashka CLI. Tests cover disk rereads, conflicting and concurrent
 publication, pre-link failure, uncertain force, identical retry, invalid paths,
 symlinks, unsupported content, output limits and interrupted/error boundaries.
-The CLI build produced a 38,961,032-byte jar. Scoped standards report zero violations.
+The rebuilt CLI jar is 38,961,776 bytes. Scoped standards report zero violations across 19 files.
 Trailing JSON or malformed bytes are rejected on read and retry. Corrupt reads
 return faults; fatal runtime errors return non-retryable fatal anomalies.
+Relative directories, malformed UTF-8 and schema-valid content corruption are refused.
 
 ## Standards adversarial pass
 

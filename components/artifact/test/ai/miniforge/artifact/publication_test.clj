@@ -6,7 +6,9 @@
             [ai.miniforge.artifact.interface :as artifact]
             [ai.miniforge.artifact.publication-codec :as codec]
             [ai.miniforge.artifact.publication-files :as files]
+            [ai.miniforge.artifact.publication-record :as record-codec]
             [clojure.java.io :as io]
+            [clojure.string :as str]
             [clojure.test :refer [deftest is]])
   (:import [java.nio.file Files]
            [java.nio.file.attribute FileAttribute]))
@@ -122,3 +124,30 @@
           (spit (files/target directory id) suffix :append true)
           (is (= :fault (:anomaly/type (artifact/read-published directory id))))
           (is (= :fault (:anomaly/type (artifact/publish! directory value)))))))))
+
+(deftest ^{:stratum 1} malformed-utf8-is-never-replaced-test
+  (with-directory
+    (fn [directory]
+      (let [value (assoc (record) :artifact/content "x") id (:artifact/id value)
+            bytes (byte-array (map #(if (= (int \x) %) (unchecked-byte 255) %) (record-codec/encode value)))]
+        (with-open [output (io/output-stream (files/target directory id))] (.write output bytes))
+        (is (= :fault (:anomaly/type (artifact/read-published directory id))))
+        (is (= :fault (:anomaly/type (artifact/publish! directory value))))))))
+
+(deftest ^{:stratum 1} relative-directory-is-not-a-durability-root-test
+  (let [root (.toFile (Files/createTempDirectory (.toPath (io/file ".")) "artifact-relative-"
+                                                (make-array FileAttribute 0)))]
+    (try
+      (is (not (files/safe-directory? (.getName root))))
+      (is (= :invalid-input (:anomaly/type (artifact/publish! (.getName root) (record)))))
+      (finally (io/delete-file root)))))
+
+(deftest ^{:stratum 1} schema-valid-corruption-fails-integrity-confirmation-test
+  (with-directory
+    (fn [directory]
+      (let [value (record) id (:artifact/id value)
+            target (files/target directory id)]
+        (is (= value (artifact/publish! directory value)))
+        (spit target (str/replace (slurp target) "verified" "modified"))
+        (is (= :fault (:anomaly/type (artifact/read-published directory id))))
+        (is (= :fault (:anomaly/type (artifact/publish! directory value))))))))
