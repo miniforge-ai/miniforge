@@ -72,5 +72,5 @@ N7 sections 5.4 and 7.2; the governed-actuation work item; PRs #1910 and #1911.
 ## Checklist
 
 - [x] Implement and test the runtime commit boundary.
-- [ ] Complete the adversarial standards review and local checks.
+- [x] Complete the adversarial standards review and local checks.
 - [ ] Settle PR comments and pass CI before merge.
