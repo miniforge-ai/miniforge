@@ -29,9 +29,10 @@
     (flow/continue
      (stop/abandon! runtime issued now proposed)
      (fn [_]
-       (actuation/commit-pr! (:effects-directory runtime) (:authority-directory runtime)
+       (stop/commit-result! runtime issued (:effect/id candidate) now
+        (actuation/commit-pr! (:effects-directory runtime) (:authority-directory runtime)
                              (:effect/id candidate) (:grant/id issued) (:clock runtime)
-                             (partial dispatch/create! runtime issued))))))
+                             (partial dispatch/create! runtime issued)))))))
 
 ;------------------------------------------------------------------------------ Layer 1
 

@@ -11,14 +11,17 @@
 
 ;------------------------------------------------------------------------------ Layer 0
 
-(deftest ^{:stratum 0} proposal-failure-revokes-newly-issued-authority-test
-  (let [{:keys [ctx runtime calls]} (fixture/setup)
+(deftest ^{:stratum 0} pre-dispatch-failure-revokes-newly-issued-authority-test
+  (doseq [port [#'actuation/propose-pr! #'actuation/commit-pr!]]
+   (let [{:keys [ctx runtime calls]} (fixture/setup)
         refused (anomaly/anomaly :unavailable "proposal store failed" {})
-        result (with-redefs [actuation/propose-pr! (constantly refused)] (phase/actuate ctx))
+        result (with-redefs-fn {port (constantly refused)} #(phase/actuate ctx))
         issued (grant/current (:authority-directory runtime) (get-in result [:anomaly/data :grant/id]))]
     (is (= (:anomaly/message refused) (:anomaly/message result)))
     (is (= :revocation/superseded (:grant/revocation-reason issued)))
-    (is (empty? @calls))))
+    (when (= port #'actuation/commit-pr!)
+      (is (= :proposed (get-in result [:anomaly/data :effect/transaction :effect/state]))))
+    (is (empty? @calls)))))
 
 (deftest ^{:stratum 0} uncertain-registration-revokes-any-written-authority-test
   (let [{:keys [ctx runtime calls]} (fixture/setup)
