@@ -40,21 +40,16 @@
 
 (defn- ^{:stratum 0} publication-anomaly
   [event published]
-  (cond
-    (anomaly/anomaly? published) published
-    (or (:rejected? published) (anomaly/any-anomaly? published))
-    (anomaly/anomaly :unavailable
-                     (msg/ts :event/publication-failed)
-                     {:event/id (:event/id event)
-                      :event/type (:event/type event)
-                      :event-stream/result published})
-    (= (:event/id event) (:event/id published)) nil
-    :else (anomaly/anomaly
-           :conflict
-           (msg/ts :event/publication-failed)
-           {:event/id (:event/id event)
-            :event/type (:event/type event)
-            :event-stream/result published})))
+  (let [rejected? (or (:rejected? published) (anomaly/any-anomaly? published))]
+    (cond
+      (anomaly/anomaly? published) published
+      (and (not rejected?) (= (:event/id event) (:event/id published))) nil
+      :else (anomaly/anomaly
+             (if rejected? :unavailable :conflict)
+             (msg/ts :event/publication-failed)
+             {:event/id (:event/id event)
+              :event/type (:event/type event)
+              :event-stream/result published}))))
 
 (defn- ^{:stratum 0} evidence-anomaly
   [event assembly]

@@ -5,6 +5,7 @@
   (:require [ai.miniforge.anomaly.interface :as anomaly]
             [ai.miniforge.evidence-bundle.interface :as evidence]
             [ai.miniforge.event-stream.interface :as events]
+            [ai.miniforge.execution-grant.interface :as grant]
             [ai.miniforge.opsv-actuation.interface :as actuation]
             [ai.miniforge.phase-opsv.interface :as phase]
             [ai.miniforge.phase-opsv.lifecycle :as lifecycle]
@@ -21,10 +22,12 @@
                              (get-in ctx [:execution/input :opsv/evidence-bundle-id])))
 
 (deftest ^{:stratum 0} unavailable-audit-prevents-provider-io-test
-  (let [{:keys [ctx calls]} (fixture/setup)
-        result (phase/actuate (dissoc ctx :event-stream))]
+  (let [{:keys [ctx runtime calls]} (fixture/setup)
+        result (phase/actuate (dissoc ctx :event-stream))
+        issued (grant/current (:authority-directory runtime) (get-in result [:anomaly/data :grant/id]))]
     (is (anomaly/anomaly? result))
     (is (= :proposed (get-in result [:anomaly/data :effect/transaction :effect/state])))
+    (is (= :revocation/superseded (:grant/revocation-reason issued)))
     (is (empty? @calls))))
 
 (deftest ^{:stratum 0} post-mutation-publication-failure-preserves-confirmed-result-test
@@ -49,6 +52,16 @@
     (is (= :failed (get-in completed [:phase :status])))
     (is (= :succeeded (get-in output [:anomaly/data :opsv/phase-output :opsv/effect-transactions 0 :effect/state])))
     (is (seq (get-in completed [:execution/input :opsv/evidence-assembly :opsv/grant-refs])))))
+
+(deftest ^{:stratum 0} unconfirmed-evidence-accumulation-prevents-mutation-test
+  (doseq [accumulate [(constantly nil) (fn [& _] (throw (ex-info "test evidence failure" {})))]]
+    (let [{:keys [ctx runtime calls]} (fixture/setup)
+          result (with-redefs [evidence/accumulate-opsv-evidence! accumulate] (phase/actuate ctx))
+          issued (grant/current (:authority-directory runtime) (get-in result [:anomaly/data :grant/id]))]
+      (is (anomaly/anomaly? result))
+      (is (= :proposed (get-in result [:anomaly/data :effect/transaction :effect/state])))
+      (is (= :revocation/superseded (:grant/revocation-reason issued)))
+      (is (empty? @calls)))))
 
 ;------------------------------------------------------------------------------ Layer 1
 
@@ -93,6 +106,20 @@
     (is (= :succeeded (get-in result [:anomaly/data :effect/transaction :effect/state])))
     (is (= [:proposed :succeeded] (mapv :opsv/effect-state (dispositions ctx))))
     (is (= 2 (count @calls)))))
+
+(deftest ^{:stratum 1} incompatible-assembly-refuses-proposal-before-publication-test
+  (doseq [alter [#(assoc % :opsv.assembly/status :finalized)
+                 #(assoc % :evidence-bundle/workflow-id (random-uuid))
+                 (constantly nil)]]
+    (let [{:keys [ctx runtime calls]} (fixture/setup)
+          read-assembly evidence/get-opsv-assembly
+          result (with-redefs [evidence/get-opsv-assembly (fn [& args] (alter (apply read-assembly args)))]
+                   (phase/actuate ctx))
+          issued (grant/current (:authority-directory runtime) (get-in result [:anomaly/data :grant/id]))]
+      (is (anomaly/anomaly? result))
+      (is (= :revocation/superseded (:grant/revocation-reason issued)))
+      (is (empty? (dispositions ctx)))
+      (is (empty? @calls)))))
 
 (comment
   (dispositions (:ctx (fixture/setup))))
