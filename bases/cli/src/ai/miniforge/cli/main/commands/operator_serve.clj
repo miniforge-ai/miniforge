@@ -170,8 +170,11 @@
              stopped? (atom false)
              ;; `stopped?` is set before `guard` is taken: a step already
              ;; running finishes, is stopped, and no later step starts.
-             stop! #(when (compare-and-set! stopped? false true)
-                      (locking guard (stop-serving! home channel)))
+             ;; Every caller takes `guard`, so a second stop (the hook on a
+             ;; signal) waits for a cleanup in progress rather than
+             ;; returning and letting the JVM exit partway through it.
+             stop! #(let [first? (compare-and-set! stopped? false true)]
+                      (locking guard (when first? (stop-serving! home channel))))
              step! (fn [f] (locking guard (when-not @stopped? (f) true)))
              hook (Thread. ^Runnable stop!)]
          (add-shutdown-hook! hook)
@@ -183,6 +186,8 @@
              (await-stop!))
            0
            (finally
-             (remove-shutdown-hook! hook)
-             (stop!))))
+             ;; The hook stays registered until the cleanup is done: a
+             ;; signal meanwhile must still find it.
+             (try (stop!)
+                  (finally (remove-shutdown-hook! hook))))))
        (refuse! home (running-pid home))))))

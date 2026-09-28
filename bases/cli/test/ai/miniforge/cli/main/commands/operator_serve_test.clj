@@ -203,6 +203,35 @@
                                *err* (java.io.StringWriter.)]
                        (sut/serve-cmd {} (constantly nil)))))))))))
 
+(deftest ^{:stratum 1} a-signal-during-the-final-stop-waits-for-its-cleanup-test
+  (let [home (temp-home)
+        discovery (io/file home sut/discovery-file-name)
+        hook (promise)
+        removed (atom false)
+        stopping (promise)
+        finish-stop (promise)]
+    (with-redefs [es/default-events-dir (constantly (io/file home "events"))
+                  sut/add-shutdown-hook! #(deliver hook %)
+                  sut/remove-shutdown-hook! (fn [_] (reset! removed true))
+                  control/start-process-control! (constantly nil)
+                  control/stop-process-control! #(do (deliver stopping true) @finish-stop)]
+      (let [server (future (binding [*out* (java.io.StringWriter.)]
+                             (sut/serve-cmd {} (constantly nil))))
+            _ (deref stopping 5000 :timeout)
+            ;; What SIGTERM does: the JVM starts the hook thread.
+            signal (doto ^Thread (deref hook 5000 nil) .start)]
+        (testing "the hook is still registered while the serve's own stop cleans up"
+          (is (false? @removed)))
+        (testing "a signal then waits for that cleanup instead of cutting it short"
+          (is (eventually #(= java.lang.Thread$State/BLOCKED (.getState signal))))
+          (is (.exists discovery)))
+        (deliver finish-stop true)
+        (.join signal 5000)
+        (is (= 0 (deref server 5000 :timeout)))
+        (testing "the cleanup completed, then the hook was removed"
+          (is (not (.exists discovery)))
+          (is (true? @removed)))))))
+
 (deftest ^{:stratum 1} serve-consumes-with-its-real-consumer-test
   (let [home (temp-home)
         events-dir (io/file home "events")
