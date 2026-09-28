@@ -36,7 +36,7 @@
       (catch Exception _
         (anomaly/anomaly :unavailable (msg/ts :execution/boundary-unconfirmed) {}))
       (finally (swap! (:state fence) update :in-flight dec)))
-    (anomaly/anomaly :unavailable (msg/ts :execution/stopped) {})))
+    (anomaly/anomaly :unavailable (msg/ts :execution/stopped) {:opsv/stopped? true})))
 
 (comment
   (status (create)))

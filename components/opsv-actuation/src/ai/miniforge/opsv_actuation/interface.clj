@@ -17,6 +17,8 @@
 
 ;------------------------------------------------------------------------------ Layer 0
 
+(def ^{:stratum 0} MutationFence "Runtime-only mutation admission handle." [:fn control/fence?])
+
 (defn ^{:stratum 0} create-mutation-fence
   "Create a runtime-owned, run-local admission handle. Never restore this handle
    from caller input. A stopped handle cannot be reopened; recovery uses separate
