@@ -34,6 +34,11 @@
 
 ;------------------------------------------------------------------------------ Layer 1
 
+(defn ^{:stratum 1} provider-content
+  "The exact provider fields covered by the authorized payload digest."
+  [prepared]
+  (select-keys prepared (conj provider-target-keys :pr/body :pr/draft?)))
+
 (defn- ^{:stratum 1} provider-payload
   [input]
   (let [merge-eligible? (verified? (:opsv/verification-result input))
