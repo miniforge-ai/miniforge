@@ -54,12 +54,14 @@
     (is (true? (:draft body)))))
 
 (deftest ^{:stratum 0} expired-authority-prevents-provider-io-test
-  (let [{:keys [ctx calls]} (fixture/setup)
+  (let [{:keys [ctx runtime calls]} (fixture/setup)
         reads (atom 0)
         clock #(if (= 1 (swap! reads inc)) fixture/now (.plusSeconds fixture/now 901))
         result (phase/actuate (assoc-in ctx [:execution/opts :opsv/pr-execution :clock] clock))]
     (is (anomaly/anomaly? result))
     (is (= :failed (get-in result [:anomaly/data :effect/transaction :effect/state])))
+    (is (some? (:grant/revoked-at (grant/current (:authority-directory runtime)
+                                                (get-in result [:anomaly/data :grant/id])))))
     (is (empty? @calls))))
 
 (deftest ^{:stratum 0} stop-after-issuance-revokes-before-provider-io-test
@@ -119,16 +121,20 @@
     (is (= ["GET"] (mapv #(get-in % [:arguments 6]) @calls)))))
 
 (deftest ^{:stratum 0} stop-during-post-revokes-without-rewriting-provider-outcome-test
-  (doseq [uncertain? [false true]]
+  (doseq [uncertain? [false true] broken-clock? [false true]]
     (let [{:keys [ctx runtime calls]} (fixture/setup)
+          after-post? (atom false)
+          clock #(if (and broken-clock? @after-post?) (throw (ex-info "clock failed" {})) fixture/now)
           command (fn [options args]
                     (let [response (fixture/command calls options args)]
                       (if (= "POST" (nth args 6))
                         (do (actuation/stop-mutations! (:fence runtime))
+                            (reset! after-post? true)
                             (if uncertain? {:exit 1} response))
                         response)))
-          output (phase/actuate (assoc-in ctx [:execution/opts :opsv/pr-execution :provider :run-command]
-                                         command))
+          output (phase/actuate (-> ctx
+                                   (assoc-in [:execution/opts :opsv/pr-execution :provider :run-command] command)
+                                   (assoc-in [:execution/opts :opsv/pr-execution :clock] clock)))
           transaction (or (first (:opsv/effect-transactions output))
                           (get-in output [:anomaly/data :effect/transaction]))
           issued (grant/current (:authority-directory runtime) (:effect/grant-id transaction))]

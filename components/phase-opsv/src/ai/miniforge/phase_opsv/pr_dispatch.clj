@@ -33,7 +33,7 @@
 ;------------------------------------------------------------------------------ Layer 2
 
 (defn ^{:stratum 2} create! [runtime issued record payload]
-  (stop/settle! runtime issued
+  (stop/settle! runtime issued (:effect/updated-at record)
     (if (stop/stopped? runtime)
       (stop/refusal :pr/stopped)
       (provider/create-pr! (:provider runtime) record payload

@@ -7,6 +7,7 @@
             [ai.miniforge.effect-transaction.interface :as effect]
             [ai.miniforge.execution-grant.interface :as grant]
             [ai.miniforge.opsv-actuation.interface :as actuation]
+            [ai.miniforge.phase-opsv.pr-model :as model]
             [ai.miniforge.phase-opsv.messages :as msg]))
 
 ;------------------------------------------------------------------------------ Layer 0
@@ -37,19 +38,22 @@
                        {:opsv/stopped? true :grant/id (:grant/id issued)}))))
 
 (defn ^{:stratum 1} commit-result! [runtime issued id now result]
+  (let [result (if (= :failed (:effect/state result)) (model/outcome nil result) result)]
   (if-not (anomaly/anomaly? result)
     result
     (let [current (effect/read-record (:effects-directory runtime) id)
           key (if (anomaly/anomaly? current) :effect/read-failure :effect/transaction)]
       (abandon! runtime issued now
-                 (update result :anomaly/data assoc :effect/id id key current)))))
+                 (update result :anomaly/data assoc :effect/id id key current))))))
 
 ;------------------------------------------------------------------------------ Layer 2
 
-(defn ^{:stratum 2} settle! [runtime issued result]
+(defn ^{:stratum 2} settle!
+  "Revoke using the last validated pre-dispatch instant; cleanup must not reread a failed clock."
+  [runtime issued now result]
   (if-not (or (stopped? runtime) (= :failed (:effect/outcome result)))
     result
-    (let [revoked (revoke! runtime issued ((:clock runtime)))]
+    (let [revoked (revoke! runtime issued now)]
       (if (true? (get-in revoked [:anomaly/data :opsv/stopped?]))
         result
         (-> result
