@@ -19,6 +19,8 @@
   "Public schemas and constructors for the N3 OPSV event family."
   (:require
    [malli.core :as m]
+   [ai.miniforge.anomaly.interface :as anomaly]
+   [ai.miniforge.event-stream.messages :as msg]
    [ai.miniforge.event-stream.opsv :as opsv]
    [ai.miniforge.event-stream.schema.opsv :as schema]))
 
@@ -62,9 +64,13 @@
   "Schema for proposed, settled and uncertain governed OPSV effects."
   schema/ActuationDisposition)
 
-(def ^{:stratum 0} actuation-disposition
-  "Construct a governed effect disposition without implying success."
-  opsv/actuation-disposition)
+(defn ^{:stratum 0} actuation-disposition
+  "Construct a validated governed disposition, or return an input anomaly."
+  [stream workflow-id evidence-id data]
+  (let [event (when (map? data) (opsv/actuation-disposition stream workflow-id evidence-id data))]
+    (if (m/validate schema/ActuationDisposition event)
+      event
+      (anomaly/anomaly :invalid-input (msg/t :opsv/invalid-disposition) {}))))
 
 (def ^{:stratum 0} experiment-planned
   "Construct an experiment-planned event."

@@ -158,7 +158,7 @@
     :opsv.actuation/disposition
     [[:opsv/governed-effect GovernedEffect]
      [:opsv/effect-state (into [:enum] effect/states)]
-     [:opsv/decision-envelope decision/DecisionEnvelope]
+     [:opsv/decision-envelope decision/AllowingEnvelope]
      [:opsv/effect-observed KeywordMap]
      [:opsv/effect-failure [:maybe :string]]])
    [:fn #(= (get-in % [:opsv/governed-effect :evidence/envelope-id])

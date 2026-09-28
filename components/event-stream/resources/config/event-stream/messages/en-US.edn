@@ -1,5 +1,6 @@
 {:event-stream/messages
  {:opsv/actuation-disposition "OPSV effect disposition: {state}"
+  :opsv/invalid-disposition "OPSV disposition requires correlated authority and a derived allowing decision."
   ;; Supervisory intervention events
   :supervisory/intervention-requested
   "Intervention {type} requested"
