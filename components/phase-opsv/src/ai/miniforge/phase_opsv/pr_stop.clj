@@ -4,6 +4,7 @@
 (ns ai.miniforge.phase-opsv.pr-stop
   "Refuse and revoke when an admitted operation encounters a later stop."
   (:require [ai.miniforge.anomaly.interface :as anomaly]
+            [ai.miniforge.effect-transaction.interface :as effect]
             [ai.miniforge.execution-grant.interface :as grant]
             [ai.miniforge.opsv-actuation.interface :as actuation]
             [ai.miniforge.phase-opsv.messages :as msg]))
@@ -25,7 +26,7 @@
   (let [revoked (grant/revoke-stored! (:authority-directory runtime)
                                      (:grant/id issued) :revocation/operator now)]
     (if (anomaly/anomaly? revoked)
-      revoked
+      (assoc-in revoked [:anomaly/data :grant/id] (:grant/id issued))
       (anomaly/anomaly :unavailable (msg/ts :pr/stopped)
                        {:opsv/stopped? true :grant/id (:grant/id issued)}))))
 
@@ -33,6 +34,14 @@
   {:effect/outcome :failed :effect/failure (msg/ts reason)})
 
 ;------------------------------------------------------------------------------ Layer 1
+
+(defn ^{:stratum 1} commit-result! [runtime issued id now result]
+  (if-not (anomaly/anomaly? result)
+    result
+    (let [current (effect/read-record (:effects-directory runtime) id)
+          key (if (anomaly/anomaly? current) :effect/read-failure :effect/transaction)]
+      (abandon! runtime issued now
+                 (update result :anomaly/data assoc :effect/id id key current)))))
 
 (defn ^{:stratum 1} settle! [runtime issued result]
   (if-not (stopped? runtime)
