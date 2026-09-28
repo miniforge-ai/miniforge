@@ -263,6 +263,34 @@
           (sut/start-process-control!)
           (is (= [[::operator-stream {:intervention/id 1} launch]] @resumed)))))))
 
+(deftest ^{:stratum 1} a-consumer-whose-exit-hook-cannot-be-installed-is-still-stopped
+  (with-clean-operator-state
+    (fn []
+      (let [stops (atom [])
+            hooks (atom [])
+            refuse-hook? (atom true)]
+        (with-redefs [agent/create-meta-loop-context (constantly {:event-stream ::operator-stream})
+                      supervisory/attach! (constantly nil)
+                      correlator/attach! (constantly nil)
+                      es/create-event-stream (constantly ::operator-stream)
+                      resume-launcher/launcher (constantly nil)
+                      operator/register-degradation-manager! (constantly nil)
+                      operator/register-policy-evaluator! (constantly nil)
+                      operator/start-operator-consumer! (constantly ::handle)
+                      operator/stop-operator-consumer! #(swap! stops conj %)
+                      sut/stop-at-exit! #(if @refuse-hook?
+                                           (throw (IllegalStateException. "Shutdown in progress"))
+                                           (swap! hooks conj %))]
+          (testing "a hook refused because the JVM is shutting down fails the start"
+            (is (thrown? IllegalStateException (sut/start-process-control!))))
+          (testing "but the consumer it started is published, so the caller's stop reaches it"
+            (sut/stop-process-control!)
+            (is (= [::handle] @stops)))
+          (testing "and the next start still installs a hook"
+            (reset! refuse-hook? false)
+            (sut/start-process-control!)
+            (is (= 1 (count @hooks)))))))))
+
 (deftest ^{:stratum 1} a-stop-during-a-start-waits-for-its-resumed-retries
   (with-clean-operator-state
     (fn []

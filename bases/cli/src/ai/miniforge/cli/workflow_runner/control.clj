@@ -173,11 +173,20 @@
                            :apply! operator/apply-intervention!
                            :accept? accept?
                            :stream-for operator/live-intervention-stream})]
+              ;; Published before the hook is installed: installing one
+              ;; throws once the JVM is shutting down, and the caller's
+              ;; stop must then find this consumer to stop it.
+              (reset! operator-consumer-handle handle)
               ;; The hook reads the holder at exit, so it also stops a
               ;; consumer started after a stop-process-control!.
               (when (compare-and-set! exit-hook-installed? false true)
-                (stop-at-exit! (partial stop-held-consumer! operator-consumer-handle)))
-              (reset! operator-consumer-handle handle))))))
+                (let [installed? (volatile! false)]
+                  (try
+                    (stop-at-exit! (partial stop-held-consumer! operator-consumer-handle))
+                    (vreset! installed? true)
+                    (finally
+                      (when-not @installed? (reset! exit-hook-installed? false))))))
+              handle)))))
 
 (defn ^{:stratum 1} stop-process-control!
   "Stop this process's operator consumer and the retry verifications it
