@@ -22,9 +22,14 @@
    Record, durable store, and the propose/commit/reconcile coordinator.
    2d moves merge and deploy onto this path."
   (:require
+   [ai.miniforge.anomaly.interface :as anomaly]
    [ai.miniforge.effect-transaction.core :as core]
+   [ai.miniforge.effect-transaction.current-commit :as current]
+   [ai.miniforge.effect-transaction.current-schema :as current-schema]
+   [ai.miniforge.effect-transaction.messages :as msg]
    [ai.miniforge.effect-transaction.schema :as schema]
-   [ai.miniforge.effect-transaction.store :as store]))
+   [ai.miniforge.effect-transaction.store :as store]
+   [malli.core :as m]))
 
 ;------------------------------------------------------------------------------ Layer 0
 
@@ -71,3 +76,18 @@
   "Reload a durable unsettled record, ask the external system what happened,
    and record the answer, mismatch included."
   core/reconcile!)
+
+(defn ^{:stratum 0} commit-current!
+  "API surface class 1: trusted-process runtime commit, returning EDN or anomaly.
+   Load by UUID, resolve its named grant, then read the clock and authorize.
+   lookup-grant (UUID -> current grant) and clock (() -> Instant) are runtime
+   ports, never model-supplied functions. They must return anomalies on failure.
+   effect-fn receives the exact :committing record after its durable claim.
+   Unavailable authority leaves the proposal intact. Denied authority records
+   failure. No unenforced-authority path exists. Delegated grants fail closed.
+   This recheck does not lock the grant store against subsequent revocation."
+  [dir id lookup-grant clock effect-fn]
+  (let [arguments [dir id lookup-grant clock effect-fn]]
+    (if (m/validate current-schema/CommitArguments arguments)
+      (current/commit! dir id lookup-grant clock effect-fn)
+      (anomaly/anomaly :invalid-input (msg/t :commit/invalid-input) {}))))

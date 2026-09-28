@@ -25,7 +25,7 @@
   (:require
    [clojure.test :refer [deftest is testing]]
    [ai.miniforge.response.interface :as response]
-   [ai.miniforge.workflow.execution :as exec]))
+   [ai.miniforge.workflow.execution-lifecycle :as lifecycle]))
 
 ;------------------------------------------------------------------------------ Layer 0
 
@@ -78,7 +78,7 @@
 (deftest ^{:stratum 2} enter-throw-with-error-handler-populates-execution-errors-test
   (testing "phase-enter throw appends to :execution/errors even when an :error handler is set"
     (let [interceptor (interceptor-with-error-handler)
-          result (exec/execute-enter interceptor (empty-execution-context))
+          result (lifecycle/execute-enter interceptor (empty-execution-context))
           errors (:execution/errors result)
           first-error (first errors)
           chain-entry (chain-failure-entry-for result test-phase-name)]
@@ -113,7 +113,7 @@
 (deftest ^{:stratum 2} enter-throw-without-error-handler-populates-execution-errors-test
   (testing "phase-enter throw appends to :execution/errors when no :error handler is set"
     (let [interceptor (interceptor-without-error-handler)
-          result (exec/execute-enter interceptor (empty-execution-context))
+          result (lifecycle/execute-enter interceptor (empty-execution-context))
           errors (:execution/errors result)
           first-error (first errors)
           chain-entry (chain-failure-entry-for result test-phase-name)]

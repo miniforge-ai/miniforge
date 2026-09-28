@@ -29,7 +29,8 @@
    [ai.miniforge.workflow.checkpoint-test-support :as checkpoint-test-support]
    [ai.miniforge.workflow.phase-test-support :as phase-test-support]
    [ai.miniforge.workflow.runner :as runner]
-   [ai.miniforge.workflow.execution :as exec]))
+   [ai.miniforge.workflow.execution-lifecycle :as lifecycle]
+   [ai.miniforge.workflow.execution-transition :as transition]))
 
 (use-fixtures :each
   phase-test-support/with-workflow-phase-test-support
@@ -163,7 +164,7 @@
           interceptor (ai.miniforge.phase.interface/get-phase-interceptor
                        {:phase phase-test-support/runner-test-done})
           ;; execute-phase-lifecycle should clear :phase first
-          [ctx-after _result] (exec/execute-phase-lifecycle interceptor stale-ctx)]
+          [ctx-after _result] (lifecycle/execute-phase-lifecycle interceptor stale-ctx)]
       ;; The stale transition request should NOT be present.
       (is (nil? (get-in ctx-after [:phase :phase/transition-request]))
           "Stale phase transition request must not leak"))))
@@ -181,7 +182,7 @@
                        :error (fn [ctx ex]
                                 (assoc ctx :phase {:status :failed
                                                    :error (ex-message ex)}))}
-          [ctx-after phase-result] (exec/execute-phase-lifecycle interceptor {})]
+          [ctx-after phase-result] (lifecycle/execute-phase-lifecycle interceptor {})]
       (is (false? @leave-called?))
       (is (= {:status :failed
               :error "enter blew up"}
@@ -227,7 +228,7 @@
           "Should fall back to :review/issues when :review/feedback absent")))
 
   (testing "max-redirects is now 5"
-    (is (= 5 exec/max-redirects)
+    (is (= 5 transition/max-redirects)
         "Should allow 5 redirects for complex repair cycles")))
 
 ;; Every pipeline this namespace runs acquires its worktree from a
