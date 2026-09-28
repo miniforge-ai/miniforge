@@ -9,9 +9,10 @@
 ;------------------------------------------------------------------------------ Layer 0
 
 (deftest ^{:stratum 0} sql-date-and-time-use-epoch-milliseconds-test
-  (doseq [value [(java.sql.Date. 0) (java.sql.Time. 0)]]
+  (doseq [epoch-millis [-86400001 123456789]
+          value [(java.sql.Date. epoch-millis) (java.sql.Time. epoch-millis)]]
     (is (inst? value))
-    (is (= Instant/EPOCH (temporal/->instant value)))))
+    (is (= (Instant/ofEpochMilli epoch-millis) (temporal/->instant value)))))
 
 (deftest ^{:stratum 0} sql-timestamp-preserves-nanosecond-precision-test
   (let [instant (Instant/parse "2026-09-27T00:00:00.123456789Z")]
