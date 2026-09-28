@@ -3,10 +3,13 @@
 ;; Licensed under the Apache License, Version 2.0.
 (ns ai.miniforge.phase-opsv.governance-test
   (:require [ai.miniforge.decision-envelope.interface :as envelope]
+            [ai.miniforge.event-stream.interface :as events]
+            [ai.miniforge.evidence-bundle.interface :as evidence]
             [ai.miniforge.opsv.interface :as opsv]
             [ai.miniforge.phase-opsv.governance :as governance]
             [ai.miniforge.phase-opsv.governance-fixtures :as fixture]
             [ai.miniforge.phase-opsv.interface :as phase]
+            [ai.miniforge.phase-opsv.lifecycle :as lifecycle]
             [clojure.test :refer [deftest is]]))
 
 ;------------------------------------------------------------------------------ Layer 0
@@ -100,6 +103,40 @@
     (is (not-any? #(= :reason/missing-artifact (:reason/code %))
                   (get-in missing-policy [:opsv/decision-envelope :envelope/reasons])))
     (is (= :deny (get-in missing-policy [:opsv/decision-envelope :envelope/decision])))))
+
+(deftest ^{:stratum 0} runtime-telemetry-is-preserved-and-policy-cannot-replace-it-test
+  (doseq [path [[:event-stream] [:execution/event-stream] [:execution/opts :event-stream]]]
+    (let [stream (events/create-event-stream {:sinks []})
+          other (events/create-event-stream {:sinks []})
+          ctx (-> (fixture/context)
+                  (assoc-in path stream)
+                  (assoc-in [:execution/opts :opsv/governance :policy/context :event-stream] other)
+                  (assoc-in [:execution/opts :opsv/governance :policy/context :workflow/id] (random-uuid)))
+          output (phase/actuate ctx)
+          published (events/get-events stream)]
+      (is (= :allow (get-in output [:opsv/decision-envelope :envelope/decision])))
+      (is (= 12 (count published)))
+      (is (every? #(= (:execution/id ctx) (:workflow/id %)) published))
+      (is (empty? (events/get-events other))))))
+
+(deftest ^{:stratum 0} decision-event-is-correlated-in-durable-evidence-assembly-test
+  (let [ctx (fixture/context)
+        store (evidence/create-opsv-assembly-store)
+        assembly (evidence/allocate-opsv-assembly! store (:execution/id ctx))
+        bundle-id (:evidence-bundle/id assembly)
+        stream (events/create-event-stream {:sinks []})
+        configured (-> ctx
+                       (assoc :event-stream stream :opsv/evidence-assembly-store store)
+                       (assoc-in [:execution/input :opsv/evidence-bundle-id] bundle-id))
+        interceptor (lifecycle/interceptor {} :opsv/actuate phase/actuate)
+        result ((:leave interceptor) ((:enter interceptor) configured))
+        output (get-in result [:phase :result :output])
+        decision-event (first (filter #(= :gate/decision (:event/type %)) (events/get-events stream)))
+        durable (get-in result [:execution/input :opsv/evidence-assembly])]
+    (is (= :completed (get-in result [:phase :status])))
+    (is (= (:opsv/decision-envelope output) (:gate/decision-envelope decision-event)))
+    (is (= bundle-id (:opsv/evidence-bundle-id decision-event)))
+    (is (contains? (:opsv/event-refs durable) (:event/id decision-event)))))
 
 (comment
   (phase/actuate (fixture/context)))

@@ -7,6 +7,7 @@
             [ai.miniforge.gate.interface :as gate]
             [ai.miniforge.opsv.interface :as opsv]
             [ai.miniforge.phase-opsv.messages :as msg]
+            [ai.miniforge.phase-opsv.runtime-context :as context]
             [clojure.string :as str]
             [malli.core :as m]))
 
@@ -37,9 +38,12 @@
 
 ;------------------------------------------------------------------------------ Layer 1
 
-(defn- ^{:stratum 1} evaluate-checks [pack verified policy]
+(defn- ^{:stratum 1} evaluate-checks [ctx pack verified policy]
   (gate/check-gates (mapv registry-key opsv/opsv-gate-ids) pack
-                    (assoc (:policy/context policy) :opsv/evidence verified)))
+                    (assoc (:policy/context policy)
+                           :event-stream (context/stream ctx)
+                           :workflow/id (context/workflow-id ctx)
+                           :opsv/evidence verified)))
 
 ;------------------------------------------------------------------------------ Layer 2
 
@@ -51,7 +55,7 @@
         pack (get-in ctx [:execution/input :opsv/experiment-pack])]
     (if (and (some? policy) (not (m/validate RuntimePolicy policy)))
       (anomaly/anomaly :invalid-input (msg/ts :governance/invalid-policy) {})
-      (let [checks (evaluate-checks pack verified policy)]
+      (let [checks (evaluate-checks ctx pack verified policy)]
         {:opsv/gate-checks checks
          :opsv/gate-results (mapv domain-result opsv/opsv-gate-ids (:results checks))
          :opsv/decision-envelope (decision checks policy (nil? pack))}))))
