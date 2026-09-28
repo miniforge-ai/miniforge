@@ -3,7 +3,13 @@
 ;; Copyright 2025-2026 Christopher Lester. Licensed under Apache 2.0.
 
 {:execution-grant/messages
- {:grant/input-invalid "ExecutionGrant inputs failed validation"
+ {:store/invalid "Grant store inputs failed validation"
+  :store/read-failed "Durable grant authority could not be read or validated"
+  :store/write-failed "Durable grant authority could not be persisted"
+  :store/id-conflict "This authority record already exists and cannot be replaced"
+  :store/not-portable "Grant authority must round-trip through EDN before publication"
+  :store/not-found "No registered grant exists for this identity"
+  :grant/input-invalid "ExecutionGrant inputs failed validation"
   :grant/parent-invalid "Cannot delegate from a value that is not a valid ExecutionGrant"
   :grant/parent-not-delegable "Parent grant is not delegable"
   :grant/parent-inactive "Parent grant is revoked or expired"
