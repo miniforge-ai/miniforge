@@ -3,7 +3,8 @@
 ;; Licensed under the Apache License, Version 2.0.
 (ns ai.miniforge.phase-opsv.pr-model-test
   (:require [ai.miniforge.phase-opsv.pr-model :as model]
-            [clojure.test :refer [deftest is]]))
+            [clojure.test :refer [deftest is]])
+  (:import [java.util Locale]))
 
 ;------------------------------------------------------------------------------ Layer 0
 
@@ -27,6 +28,15 @@
                           [:execution/id :workflow/id :workflow-id])]
     (is (every? #(= id (:workflow-run/id %)) candidates))
     (is (apply = (map :effect/id candidates)))))
+
+(deftest ^{:stratum 0} replay-identity-does-not-depend-on-process-locale-test
+  (let [original (Locale/getDefault)
+        run (random-uuid)
+        expected (model/effect-id run "example/identity")]
+    (try
+      (Locale/setDefault (Locale/forLanguageTag "tr-TR"))
+      (is (= expected (model/effect-id run "EXAMPLE/IDENTITY")))
+      (finally (Locale/setDefault original)))))
 
 (comment
   (model/effect-id (random-uuid) "example/opsv"))

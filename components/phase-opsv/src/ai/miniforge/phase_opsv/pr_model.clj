@@ -5,16 +5,15 @@
   "Correlate one prepared target per run and project confirmed PR outcomes."
   (:require [ai.miniforge.anomaly.interface :as anomaly]
             [ai.miniforge.phase-opsv.messages :as msg]
-            [ai.miniforge.phase-opsv.runtime-context :as context]
-            [clojure.string :as str])
+            [ai.miniforge.phase-opsv.runtime-context :as context])
   (:import [java.nio.charset StandardCharsets]
-           [java.util UUID]))
+           [java.util Locale UUID]))
 
 ;------------------------------------------------------------------------------ Layer 0
 
 (defn ^{:stratum 0} effect-id [workflow-id repository]
   (UUID/nameUUIDFromBytes
-   (.getBytes (pr-str [:opsv/pr-create workflow-id (str/lower-case (str repository))])
+   (.getBytes (pr-str [:opsv/pr-create workflow-id (.toLowerCase (str repository) Locale/ROOT)])
               StandardCharsets/UTF_8)))
 
 (defn ^{:stratum 0} outcome [record transaction]
