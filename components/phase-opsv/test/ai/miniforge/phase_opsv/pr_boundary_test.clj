@@ -10,6 +10,7 @@
             [ai.miniforge.phase-opsv.interface :as phase]
             [ai.miniforge.phase-opsv.pr-fixtures :as fixture]
             [cheshire.core :as json]
+            [clojure.string :as str]
             [clojure.test :refer [deftest is]]))
 
 ;------------------------------------------------------------------------------ Layer 0
@@ -87,17 +88,22 @@
     (is (= 2 (count @calls)))))
 
 (deftest ^{:stratum 0} stop-during-provider-preflight-prevents-post-test
+  (doseq [[stop? preflight] [[true :valid] [true :unavailable] [false :unavailable] [false :mismatch]]]
   (let [{:keys [ctx runtime calls]} (fixture/setup)
         command (fn [options args]
-                  (actuation/stop-mutations! (:fence runtime))
-                  (fixture/command calls options args))
+                  (when stop? (actuation/stop-mutations! (:fence runtime)))
+                  (let [response (fixture/command calls options args)]
+                    (case preflight
+                      :unavailable {:exit 1}
+                      :mismatch (update response :out str/replace (:pr/head-sha fixture/target) (apply str (repeat 40 "c")))
+                      response)))
         result (phase/actuate (assoc-in ctx [:execution/opts :opsv/pr-execution :provider :run-command]
                                        command))
         transaction (get-in result [:anomaly/data :effect/transaction])
         issued (grant/current (:authority-directory runtime) (:effect/grant-id transaction))]
     (is (= :failed (:effect/state transaction)))
-    (is (some? (:grant/revoked-at issued)))
-    (is (= ["GET"] (mapv #(get-in % [:arguments 6]) @calls)))))
+    (is (= (if stop? :revocation/operator :revocation/superseded) (:grant/revocation-reason issued)))
+    (is (= ["GET"] (mapv #(get-in % [:arguments 6]) @calls))))))
 
 (deftest ^{:stratum 0} expiry-during-provider-preflight-prevents-post-test
   (let [{:keys [ctx calls]} (fixture/setup)

@@ -27,16 +27,17 @@
                    (operation)
                    (stop/refusal :pr/authority-refused)))]
     (if (true? (get-in result [:anomaly/data :opsv/stopped?]))
-      (stop/refuse! runtime issued)
-      (stop/settle! runtime issued result))))
+      (stop/refusal :pr/stopped)
+      result)))
 
 ;------------------------------------------------------------------------------ Layer 2
 
 (defn ^{:stratum 2} create! [runtime issued record payload]
-  (if (stop/stopped? runtime)
-    (stop/refuse! runtime issued)
-    (provider/create-pr! (:provider runtime) record payload
-                        (partial dispatch! runtime issued record))))
+  (stop/settle! runtime issued
+    (if (stop/stopped? runtime)
+      (stop/refusal :pr/stopped)
+      (provider/create-pr! (:provider runtime) record payload
+                          (partial dispatch! runtime issued record)))))
 
 (comment
   (stop/refusal :pr/stopped))
