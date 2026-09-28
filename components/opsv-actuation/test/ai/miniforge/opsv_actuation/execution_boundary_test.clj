@@ -4,10 +4,12 @@
 (ns ai.miniforge.opsv-actuation.execution-boundary-test
   (:require [ai.miniforge.anomaly.interface :as anomaly]
             [ai.miniforge.effect-transaction.interface :as effect]
+            [ai.miniforge.execution-grant.interface :as grant]
             [ai.miniforge.opsv-actuation.interface :as actuation]
             [ai.miniforge.opsv-actuation.execution-fixtures
              :refer [now clock setup propose! propose-altered! commit! effect-report]]
-            [clojure.test :refer [deftest is testing]]))
+            [clojure.test :refer [deftest is testing]])
+  (:import [java.util Date]))
 
 ;------------------------------------------------------------------------------ Layer 0
 
@@ -44,15 +46,37 @@
     (let [{:keys [calls] :as context} (setup)
           proposed (propose-altered! context #(assoc % field value))]
       (is (= :proposed (:effect/state proposed)))
-      (is (not= :succeeded (:effect/state (commit! context))) (str field))
+      (is (= :failed (:effect/state (commit! context))) (str field))
       (is (empty? @calls) (str field)))))
+
+(deftest ^{:stratum 0} governance-corruption-is-refused-test
+  (doseq [[path value] [[[:opsv/evidence-bundle-id] (random-uuid)]
+                        [[:opsv/envelope :envelope/pins :pins/pack-revision] "changed"]
+                        [[:opsv/envelope :envelope/at] (Date. 0)]
+                        [[:pr/governance-hash] (apply str (repeat 64 "b"))]]]
+    (let [{:keys [calls] :as context} (setup)
+          proposed (propose-altered! context #(assoc-in % path value))]
+      (is (= :proposed (:effect/state proposed)))
+      (is (= :failed (:effect/state (commit! context))) (str path))
+      (is (empty? @calls)))))
+
+(deftest ^{:stratum 0} broad-grant-without-governance-binding-is-refused-test
+  (let [{:keys [grant-dir calls] :as context} (setup)
+        broad (update (:grant context) :grant/scope dissoc :pr/governance-hash)
+        distinct-grant (assoc broad :grant/id (random-uuid))
+        registered (grant/register! grant-dir distinct-grant)
+        proposed (propose! (assoc context :grant registered))]
+    (is (not (anomaly/anomaly? registered)))
+    (is (= :proposed (:effect/state proposed)))
+    (is (= :unauthorized (:anomaly/type (commit! context))))
+    (is (empty? @calls))))
 
 ;------------------------------------------------------------------------------ Layer 1
 
 (deftest ^{:stratum 1} provider-exception-leaves-durable-uncertainty-test
-  (let [{:keys [dir candidate calls] :as context} (setup)
+  (let [{:keys [dir grant-dir candidate calls] :as context} (setup)
         proposed (propose! context)
-        result (actuation/commit-pr! dir dir (:effect/id candidate)
+        result (actuation/commit-pr! dir grant-dir (:effect/id candidate)
                                     clock (partial lost-response calls))]
     (is (= :proposed (:effect/state proposed)))
     (is (= :unknown-outcome (:effect/state result)))

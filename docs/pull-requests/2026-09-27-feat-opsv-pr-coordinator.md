@@ -25,6 +25,9 @@ The subsequent provider adapter and runtime wiring depend on this coordinator.
 ## Changes in detail
 
 - Persist a prepared payload with its evidence bundle and allowing envelope.
+- Bind the complete governance receipt to `:pr/governance-hash` in the grant
+  scope, separate from the unchanged provider payload hash. The runtime calls
+  `prepare-governed-pr` before issuance. Old unbound PR grants are refused.
 - Reload durable grant authority at commit time and reject invalid stored payloads.
 - Pass the claimed transaction and exact payload to the trusted provider port.
 - Never retry a claimed transaction or convert an uncertain response to success.
@@ -35,7 +38,9 @@ The subsequent provider adapter and runtime wiring depend on this coordinator.
 
 Exercise durable registration, proposal, commit, revocation, expiry, repeated
 execution, failed verification drafts, malformed records and uncertain outcomes.
-All 18 tests / 150 assertions pass, including boundary regression coverage.
+All 20 coordinator tests / 173 assertions pass, including governance-corruption
+and broad-grant regression coverage. Grant tests pass 65 tests / 401 assertions
+in each of Miniforge, Core and TUI.
 The component standards scan reports zero findings. The CLI builds successfully
 and packaged help runs. Polylith, kondo and stratum checks pass.
 
@@ -44,6 +49,10 @@ and packaged help runs. Polylith, kondo and stratum checks pass.
 No external mode is enabled by this PR. Runtime wiring must supply evaluated
 policy envelopes, scoped grants, provider ports and safe-boundary fencing.
 The local stores require runtime-owned, trusted directories.
+Use separate effect and authority/breach directories, passed as nonblank string
+paths. The grant store requires a canonical root without symlinked components.
+Acceptance fixtures use that production layout. Exact digest constraints reject
+prefixes, suffixes and trailing newlines, not just malformed digest substrings.
 
 ## Related issues/PRs
 
