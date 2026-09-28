@@ -44,11 +44,10 @@
             (assoc :effect/failure (msg/ts :pr/revocation-unconfirmed))
             (assoc-in [:effect/observed :grant/revocation-failure] (:anomaly/message revoked)))))))
 
-(defn ^{:stratum 1} refuse! [runtime issued]
-  (let [result (revoke! runtime issued ((:clock runtime)))]
-    (if (true? (get-in result [:anomaly/data :opsv/stopped?]))
-      (refusal :pr/stopped)
-      result)))
+;------------------------------------------------------------------------------ Layer 2
+
+(defn ^{:stratum 2} refuse! [runtime issued]
+  (settle! runtime issued (refusal :pr/stopped)))
 
 (comment
   (stopped? {}))
