@@ -19,7 +19,8 @@
         runtime {:directory root :hostname "github.com"
                  :run-command (partial fixture/simulated-github calls payload)}
         committed (actuation/commit-pr! effects authority (:effect/id fixture/candidate)
-                                        (constantly fixture/now) (partial provider/create-pr! runtime))
+                                        (:grant/id grant) (constantly fixture/now)
+                                        (partial provider/create-pr! runtime))
         reconciled (effect/reconcile! effects committed (partial fixture/observe runtime payload) fixture/now)]
     (is (not (anomaly/anomaly? grant)))
     (is (= :proposed (:effect/state proposed)))

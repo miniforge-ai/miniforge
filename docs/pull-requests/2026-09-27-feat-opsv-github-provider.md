@@ -34,8 +34,12 @@ Runtime wiring follows both PRs. Merge the coordinator first.
 
 Use a command port with deterministic GitHub response fixtures; assert exact
 arguments and stdin, refusal before POST, uncertain responses and reconciliation.
-Run component tests, standards checks, lint, Polylith and the packaged CLI build.
-Tests never create a real provider PR.
+All 10 component tests / 79 assertions pass. The durable coordinator/provider
+acceptance test passes 9 assertions, including lost-response reconciliation.
+Tests never create a real provider PR. Deadline tests require process-tree access.
+Scoped standards scans, lint, stratum and Polylith pass. The existing CLI builds
+and packaged help runs. The adapter remains development-only until runtime wiring
+adds a production dependency; explicit CI steps cover its unit and acceptance tests.
 
 ## Deployment plan
 
@@ -52,6 +56,6 @@ and [GitHub CLI API transport](https://cli.github.com/manual/gh_api).
 
 ## Checklist
 
-- [ ] Exact-payload and uncertain-outcome regression tests
-- [ ] Standards, lint and build checks
+- [x] Exact-payload and uncertain-outcome regression tests
+- [x] Standards, lint and build checks
 - [ ] Review settled and CI green
