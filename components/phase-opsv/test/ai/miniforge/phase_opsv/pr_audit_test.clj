@@ -54,7 +54,8 @@
     (is (seq (get-in completed [:execution/input :opsv/evidence-assembly :opsv/grant-refs])))))
 
 (deftest ^{:stratum 0} unconfirmed-evidence-accumulation-prevents-mutation-test
-  (doseq [accumulate [(constantly nil) (fn [& _] (throw (ex-info "test evidence failure" {})))]]
+  (doseq [accumulate [(constantly nil) (fn [& _] (throw (ex-info "test evidence failure" {})))
+                     (fn [& _] (throw (AssertionError. "test evidence failure")))]]
     (let [{:keys [ctx runtime calls]} (fixture/setup)
           result (with-redefs [evidence/accumulate-opsv-evidence! accumulate] (phase/actuate ctx))
           issued (grant/current (:authority-directory runtime) (get-in result [:anomaly/data :grant/id]))]
