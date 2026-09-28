@@ -21,6 +21,7 @@ Returning a captured grant from a lookup function does not meet that contract.
 
 Foundation, independent of PR #1927. The OPSV application layer will compose
 this store with that PR's current-authority commit boundary.
+Stacked on timestamp prerequisite #1931; merge it first and retarget this PR to main.
 
 ## Changes in detail
 
@@ -35,9 +36,9 @@ Test initial lookup, durable reload, duplicate registration, revocation,
 repeated revocation, corrupt records and malformed boundary inputs.
 Run component tests, standards checks, lint, hooks and CI.
 
-Local results: 64 tests and 380 assertions pass in each of Miniforge, Core
+Local results: 64 tests and 384 assertions pass in each of Miniforge, Core
 and TUI. The store adds 22 tests and 139 assertions; the timestamp prerequisite
-contributes two tests and five assertions. The component standards
+contributes two tests and nine assertions. The component standards
 scan covers all source and test files, including the file-boundary helpers.
 
 ## Adversarial review
