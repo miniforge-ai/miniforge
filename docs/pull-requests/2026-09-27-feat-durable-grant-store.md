@@ -35,8 +35,9 @@ Test initial lookup, durable reload, duplicate registration, revocation,
 repeated revocation, corrupt records and malformed boundary inputs.
 Run component tests, standards checks, lint, hooks and CI.
 
-Local results: 58 tests and 332 assertions pass in each of Miniforge, Core
-and TUI. The store adds 18 tests and 96 assertions. The component standards
+Local results: 60 tests and 342 assertions pass in each of Miniforge, Core
+and TUI. The store adds 18 tests and 101 assertions, with two timestamp
+regressions adding five assertions. The component standards
 scan covers all source and test files, including the file-boundary helpers.
 
 ## Adversarial review
@@ -55,6 +56,7 @@ corrupt values, wrong IDs and marker fields that would widen authority.
 Symlinks are rejected without following their targets. Registration and reload
 require pristine issuance records: both revocation fields must be nil.
 Results normalize timestamps to Instant on the first call as well as reload.
+SQL Date/Time normalize by epoch milliseconds; Timestamp keeps its precision.
 The tests pin preservation of the original issuance bytes and first revocation.
 Injected file and directory sync failures return faults. A sequential retry
 of an existing revocation repeats durability barriers before acknowledging it.

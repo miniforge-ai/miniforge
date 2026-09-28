@@ -42,6 +42,10 @@
   [& _]
   (throw (IOException. "Injected disk sync failure")))
 
+(defn- ^{:stratum 0} sql-date
+  [^Instant instant]
+  (java.sql.Date. (.toEpochMilli instant)))
+
 ;------------------------------------------------------------------------------ Layer 1
 
 (def ^{:stratum 1} usage {:effect/scope scope :usage/count 1})
@@ -150,15 +154,16 @@
       (is (nil? (grant/current dir (:grant/id g)))))))
 
 (deftest ^{:stratum 2} date-timestamps-normalize-on-reload-test
-  (let [dir (tmp-dir)
-        g (issued)
-        dated (assoc g :grant/issued-at (Date/from now) :grant/expires-at (Date/from later))]
-    (is (= g (grant/register! dir dated)))
-    (is (= g (grant/current dir (:grant/id g))))
-    (let [revoked (grant/revoke-stored! dir (:grant/id g) :revocation/operator (Date/from now))]
-      (is (= now (:grant/revoked-at revoked)))
-      (is (= revoked (grant/current dir (:grant/id g))))
-      (is (= revoked (grant/revoke-stored! dir (:grant/id g) :revocation/operator later))))))
+  (doseq [date-fn [#(Date/from %) sql-date]]
+    (let [dir (tmp-dir)
+          g (issued)
+          dated (assoc g :grant/issued-at (date-fn now) :grant/expires-at (date-fn later))]
+      (is (= g (grant/register! dir dated)))
+      (is (= g (grant/current dir (:grant/id g))))
+      (let [revoked (grant/revoke-stored! dir (:grant/id g) :revocation/operator (date-fn now))]
+        (is (= now (:grant/revoked-at revoked)))
+        (is (= revoked (grant/current dir (:grant/id g))))
+        (is (= revoked (grant/revoke-stored! dir (:grant/id g) :revocation/operator later)))))))
 
 (deftest ^{:stratum 2} registration-requires-pristine-issuance-test
   (doseq [state [{:grant/revocation-reason :revocation/operator}
