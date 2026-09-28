@@ -89,13 +89,6 @@
                           [StandardCopyOption/ATOMIC_MOVE
                            StandardCopyOption/REPLACE_EXISTING])))
 
-(defn- ^{:stratum 0} call-with-lock
-  [lock thunk]
-  (try
-    (thunk)
-    (finally
-      (.release lock))))
-
 ;------------------------------------------------------------------------------ Layer 1
 
 (defn- ^{:stratum 1} read-file
@@ -172,7 +165,9 @@
         (let [lock (attempt-lock channel file id)]
           (if (anomaly/anomaly? lock)
             lock
-            (call-with-lock lock thunk)))))))
+            ;; Closing this dedicated channel releases its lock on every exit.
+            ;; FileLockImpl.release is not exposed by Babashka.
+            (thunk)))))))
 
 (defn ^{:stratum 2} read-record
   [dir id]
