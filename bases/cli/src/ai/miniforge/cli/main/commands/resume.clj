@@ -163,13 +163,14 @@
     (or (nil? dir) (= dir (es/workflow-dir events-dir (str id))))))
 
 (defn- ^{:stratum 0} checkpointed?
-  "True when `run-id` has a checkpoint. The loader answers nil for an id
-   with none. When it throws instead (ex-info for a checkpoint failing
-   its schema, or any other failure), whether the id is taken is unknown:
-   the resume is refused, naming the loader's error."
+  "True when anything is stored under `run-id`'s checkpoint directory. Not
+   the loader: it answers nil for phase checkpoints written before the
+   snapshot and for files it cannot read, and an attempt run under that
+   id would overwrite them. When the check itself throws, whether the id
+   is taken is unknown: the resume is refused, naming the error."
   [run-id]
   (try
-    (some? (workflow/load-checkpoint-data (str run-id)))
+    (workflow/checkpoint-present? (str run-id))
     (catch Exception e
       (let [error (or (ex-message e) (.getName (class e)))]
         (response/throw-anomaly! :anomalies/fault

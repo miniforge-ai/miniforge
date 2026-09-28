@@ -240,6 +240,13 @@
    :artifacts, and :metrics."
   pipeline/execute-plan-as-dag)
 
+(def ^{:stratum 0} checkpoint-present?
+  "True when anything is stored under a run's checkpoint directory,
+   including phase checkpoints with no snapshot yet and files that do not
+   load. Args: [workflow-run-id] or [workflow-run-id opts]. The check that
+   a run id is free: `load-checkpoint-data` answers nil for all of those."
+  checkpoints/checkpoint-present?)
+
 (def ^{:stratum 0} load-checkpoint-data
   "Load durable checkpoint data for a run and validate it at the boundary.
    Args: [workflow-run-id] or [workflow-run-id opts]. Returns the validated
