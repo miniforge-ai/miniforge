@@ -4,6 +4,8 @@
 (ns ai.miniforge.phase-opsv.pr-fixtures
   "Trusted host configuration with real durable stores and a simulated provider."
   (:require [ai.miniforge.opsv-actuation.interface :as actuation]
+            [ai.miniforge.evidence-bundle.interface :as evidence]
+            [ai.miniforge.event-stream.interface :as events]
             [ai.miniforge.phase-opsv.governance-fixtures :as governance]
             [cheshire.core :as json]
             [clojure.java.io :as io])
@@ -31,6 +33,14 @@
 (defn- ^{:stratum 0} root []
   (.getCanonicalPath (.toFile (Files/createTempDirectory "opsv-runtime-" (make-array FileAttribute 0)))))
 
+(defn- ^{:stratum 0} audit-context [ctx]
+  (let [store (evidence/create-opsv-assembly-store)
+        assembly (evidence/allocate-opsv-assembly! store (:execution/id ctx))]
+    (-> ctx
+        (assoc :event-stream (events/create-event-stream {:sinks []})
+               :opsv/evidence-assembly-store store)
+        (assoc-in [:execution/input :opsv/evidence-bundle-id] (:evidence-bundle/id assembly)))))
+
 ;------------------------------------------------------------------------------ Layer 1
 
 (defn ^{:stratum 1} command [calls options arguments]
@@ -56,6 +66,7 @@
                  :provider {:directory directory :hostname "github.com"
                             :run-command (partial command calls)}}
         ctx (-> (governance/context)
+                audit-context
                 (assoc :execution/status :running)
                 (assoc-in [:execution/opts :opsv/pr-execution] runtime)
                 (update-in governance/output-path assoc
