@@ -5,7 +5,7 @@
   "Synchronous immutable artifact publication, separate from mutable store caches."
   (:require [ai.miniforge.anomaly.interface :as anomaly]
             [ai.miniforge.artifact.publication-boundary :as boundary :refer [failure]]
-            [ai.miniforge.artifact.publication-codec :as codec]
+            [ai.miniforge.artifact.publication-record :as record]
             [ai.miniforge.artifact.publication-files :as files]
             [ai.miniforge.schema.interface :as schema]
             [clojure.java.io :as io])
@@ -15,7 +15,7 @@
 
 (defn- ^{:stratum 0} decoded [file id]
   (boundary/call-with-exception-handling id :fault :publication/read-failed
-                                        #(some-> (files/read-bytes file) codec/decode)))
+                                        #(some-> (files/read-bytes file) record/decode)))
 
 (defn- ^{:stratum 0} publish-bytes! [file temporary bytes]
   (files/write! temporary bytes)
@@ -51,7 +51,7 @@
 (defn ^{:stratum 2} publish! [directory artifact]
   (let [id (:artifact/id artifact)
         bytes (boundary/call-with-exception-handling id :invalid-input :publication/not-portable
-                                                    #(codec/encode artifact))]
+                                                    #(record/encode artifact))]
     (cond
       (anomaly/anomaly? bytes) bytes
       (nil? bytes) (failure :invalid-input :publication/not-portable id)
