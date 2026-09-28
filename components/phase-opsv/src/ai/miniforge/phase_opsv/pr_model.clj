@@ -5,6 +5,7 @@
   "Correlate one prepared target per run and project confirmed PR outcomes."
   (:require [ai.miniforge.anomaly.interface :as anomaly]
             [ai.miniforge.phase-opsv.messages :as msg]
+            [ai.miniforge.phase-opsv.runtime-context :as context]
             [clojure.string :as str])
   (:import [java.nio.charset StandardCharsets]
            [java.util UUID]))
@@ -34,8 +35,8 @@
   (if (not= (:opsv/policy-hash verified) (:opsv/policy-hash target))
     (anomaly/anomaly :conflict (msg/ts :pr/policy-mismatch) {})
     (assoc (dissoc target :opsv/policy-hash)
-           :workflow-run/id (:execution/id ctx)
-           :effect/id (effect-id (:execution/id ctx) (:pr/repo target))
+           :workflow-run/id (context/workflow-id ctx)
+           :effect/id (effect-id (context/workflow-id ctx) (:pr/repo target))
            :opsv/evidence-bundle-id (get-in ctx [:execution/input :opsv/evidence-bundle-id])
            :opsv/verification-result (:opsv/verification-result verified))))
 

@@ -19,5 +19,14 @@
   (is (= :conflict (:anomaly/type (model/candidate {} {:opsv/policy-hash "verified"}
                                                   {:opsv/policy-hash "other"})))) )
 
+(deftest ^{:stratum 0} runtime-workflow-id-aliases-preserve-effect-identity-test
+  (let [id (random-uuid)
+        verified {:opsv/policy-hash "same"}
+        target {:pr/repo "example/opsv" :opsv/policy-hash "same"}
+        candidates (mapv #(model/candidate {% id} verified target)
+                          [:execution/id :workflow/id :workflow-id])]
+    (is (every? #(= id (:workflow-run/id %)) candidates))
+    (is (apply = (map :effect/id candidates)))))
+
 (comment
   (model/effect-id (random-uuid) "example/opsv"))

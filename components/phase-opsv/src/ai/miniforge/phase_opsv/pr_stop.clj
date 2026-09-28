@@ -13,6 +13,14 @@
 (defn ^{:stratum 0} stopped? [runtime]
   (true? (:stopped? (actuation/mutation-status (:fence runtime)))))
 
+(defn ^{:stratum 0} abandon! [runtime issued now result]
+  (if-not (anomaly/anomaly? result)
+    result
+    (let [revoked (grant/revoke-stored! (:authority-directory runtime)
+                                       (:grant/id issued) :revocation/superseded now)]
+      (cond-> (assoc-in result [:anomaly/data :grant/id] (:grant/id issued))
+        (anomaly/anomaly? revoked) (assoc-in [:anomaly/data :grant/revocation-failure] revoked)))))
+
 (defn ^{:stratum 0} revoke! [runtime issued now]
   (let [revoked (grant/revoke-stored! (:authority-directory runtime)
                                      (:grant/id issued) :revocation/operator now)]
