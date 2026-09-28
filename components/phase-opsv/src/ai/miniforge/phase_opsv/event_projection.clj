@@ -102,7 +102,9 @@
     stream workflow-id evidence-id
     {:opsv/policy-hash (:opsv/policy-hash output)
      :opsv/diff-artifact-refs
-     (get-in ctx [:execution/input :opsv/policy-diff-artifact-refs] [])
+     (if (contains? (:execution/opts ctx) :opsv/artifact-directory)
+       []
+       (get-in ctx [:execution/input :opsv/policy-diff-artifact-refs] []))
      :opsv/confidence (policy-confidence output)})])
 
 ;------------------------------------------------------------------------------ Layer 2

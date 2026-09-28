@@ -20,7 +20,8 @@
   (:require
    [ai.miniforge.anomaly.interface :as anomaly]
    [ai.miniforge.evidence-bundle.interface :as evidence]
-   [ai.miniforge.phase-opsv.messages :as msg]))
+   [ai.miniforge.phase-opsv.messages :as msg]
+   [ai.miniforge.phase-opsv.runtime-context :as context]))
 
 ;------------------------------------------------------------------------------ Layer 0
 
@@ -48,7 +49,7 @@
 (defn- ^{:stratum 0} allocate-assembly
   [ctx supplied-store]
   (let [store (or supplied-store (evidence/create-opsv-assembly-store))
-        assembly (evidence/allocate-opsv-assembly! store (:execution/id ctx))]
+        assembly (evidence/allocate-opsv-assembly! store (context/workflow-id ctx))]
     (-> ctx
         (assoc :opsv/evidence-assembly-store store)
         (assoc-in [:execution/input :opsv/evidence-bundle-id]
@@ -77,11 +78,11 @@
                             (evidence/get-opsv-assembly supplied-store
                                                        bundle-id))]
     (cond
-      (assembly-for-workflow? supplied-assembly (:execution/id ctx))
+      (assembly-for-workflow? supplied-assembly (context/workflow-id ctx))
       (with-supplied-assembly ctx supplied-store supplied-assembly)
 
       (and (= bundle-id (:evidence-bundle/id durable-assembly))
-           (assembly-for-workflow? durable-assembly (:execution/id ctx)))
+           (assembly-for-workflow? durable-assembly (context/workflow-id ctx)))
       (with-restored-assembly ctx durable-assembly)
 
       bundle-id (unmatched-evidence-id bundle-id)

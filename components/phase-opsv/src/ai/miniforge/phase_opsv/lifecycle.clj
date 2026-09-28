@@ -23,6 +23,8 @@
    [ai.miniforge.phase-opsv.artifact-boundary :as artifacts]
    [ai.miniforge.phase-opsv.evidence-runtime :as evidence-runtime]
    [ai.miniforge.phase-opsv.events :as events]
+   [ai.miniforge.phase-opsv.finalization-boundary :as finalization]
+   [ai.miniforge.phase-opsv.finalization-config :as finalization-config]
    [ai.miniforge.phase-opsv.lifecycle-result :as lifecycle-result]))
 
 ;------------------------------------------------------------------------------ Layer 0
@@ -52,7 +54,9 @@
       (if (anomaly/anomaly? published)
         (lifecycle-result/phase-result
          (assoc-in published [:anomaly/data :opsv/phase-output] (:output result)))
-        result))))
+        (if (and (= :opsv/actuate phase-key) (finalization-config/enabled? ctx))
+          (lifecycle-result/phase-result (finalization/finalize! ctx (:output result)))
+          result)))))
 
 ;------------------------------------------------------------------------------ Layer 1
 
@@ -71,7 +75,9 @@
 (defn- ^{:stratum 1} enter-phase
   [phase-key transform config ctx]
   (let [runtime-ctx (isolate-runtime-adapter ctx)
-        prepared-ctx (evidence-runtime/ensure-assembly runtime-ctx)
+        assembled-ctx (evidence-runtime/ensure-assembly runtime-ctx)
+        prepared-ctx (if (anomaly/anomaly? assembled-ctx) assembled-ctx
+                        (finalization/prepare assembled-ctx))
         start-time (System/currentTimeMillis)
         prepared? (not (anomaly/anomaly? prepared-ctx))
         output (if prepared?

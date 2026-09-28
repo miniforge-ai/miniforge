@@ -31,6 +31,7 @@
    [ai.miniforge.evidence-bundle.schema.domain :as domain]
    [ai.miniforge.evidence-bundle.schema.opsv :as opsv-schema]
    [ai.miniforge.evidence-bundle.interface.protocols.evidence-bundle :as p]
+   [ai.miniforge.evidence-bundle.protocols.impl.evidence-bundle :as bundle-impl]
    [ai.miniforge.evidence-bundle.protocols.records.evidence-bundle :as records]))
 
 ;------------------------------------------------------------------------------ Layer 0
@@ -160,9 +161,10 @@
 
 (defn ^{:stratum 0} validate-bundle
   "Validate evidence bundle structure and integrity.
+   One argument validates data without creating a storage manager.
    Returns {:valid? bool :errors [...]}"
-  [manager bundle]
-  (p/validate-bundle manager bundle))
+  ([bundle] (bundle-impl/validate-bundle-impl bundle))
+  ([manager bundle] (p/validate-bundle manager bundle)))
 
 (defn ^{:stratum 0} export-bundle
   "Export evidence bundle to file (EDN format).
