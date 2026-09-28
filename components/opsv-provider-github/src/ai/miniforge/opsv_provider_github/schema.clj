@@ -12,9 +12,9 @@
 
 (def ^{:stratum 0} NonBlank [:and :string [:fn (complement str/blank?)]])
 
-(def ^{:stratum 0} Repository [:re #"[A-Za-z0-9][A-Za-z0-9_.-]*/[A-Za-z0-9][A-Za-z0-9_.-]*"])
+(def ^{:stratum 0} Repository [:re #"\A[A-Za-z0-9][A-Za-z0-9_.-]*/[A-Za-z0-9][A-Za-z0-9_.-]*\z"])
 
-(def ^{:stratum 0} GitObjectId [:re #"(?:[0-9a-f]{40}|[0-9a-f]{64})"])
+(def ^{:stratum 0} GitObjectId [:re #"\A(?:[0-9a-f]{40}|[0-9a-f]{64})\z"])
 
 (defn- ^{:stratum 0} content-bound? [[_ record payload]]
   (and (= payload (select-keys (:effect/proposal record) wire/payload-keys))
@@ -33,7 +33,7 @@
 (def ^{:stratum 1} ProviderRuntime
   [:map {:closed true}
    [:directory NonBlank]
-   [:hostname [:re #"[A-Za-z0-9][A-Za-z0-9.-]*"]]
+   [:hostname [:re #"\A[A-Za-z0-9][A-Za-z0-9.-]*\z"]]
    [:run-command fn?]])
 
 (def ^{:stratum 1} Payload
