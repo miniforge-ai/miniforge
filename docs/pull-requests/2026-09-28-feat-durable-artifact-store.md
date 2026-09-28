@@ -35,12 +35,14 @@ Application callers use its validated public interface. No new component depende
 
 ## Testing plan
 
-All three artifact-consuming projects pass 22 tests and 70 assertions each.
-The publication suite passes eight tests and 33 assertions on both JVM and
+All three artifact-consuming projects passed the initial 22 tests and 70 assertions each.
+The hardened publication suite passes nine tests and 39 assertions on both JVM and
 the packaged Babashka CLI. It covers disk rereads, conflicting and concurrent
 publication, pre-link failure, uncertain force, identical retry, invalid paths,
 symlinks, unsupported content, output limits and interrupted/error boundaries.
-The CLI build produced a 38,960,714-byte jar. Scoped standards report zero violations.
+The CLI build produced a 38,961,032-byte jar. Scoped standards report zero violations.
+Trailing JSON or malformed bytes are rejected on read and retry. Corrupt reads
+return faults; fatal runtime errors return non-retryable fatal anomalies.
 
 ## Standards adversarial pass
 
