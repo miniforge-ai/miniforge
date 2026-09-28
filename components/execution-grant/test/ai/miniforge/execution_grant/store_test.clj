@@ -4,9 +4,11 @@
 (ns ai.miniforge.execution-grant.store-test
   (:require [ai.miniforge.anomaly.interface :as anomaly]
             [ai.miniforge.execution-grant.interface :as grant]
+            [ai.miniforge.execution-grant.store-codec :as codec]
+            [ai.miniforge.execution-grant.store-durability :as durability]
             [clojure.java.io :as io]
             [clojure.test :refer [deftest is]])
-  (:import [java.io File]
+  (:import [java.io File IOException]
            [java.nio.file Files]
            [java.nio.file.attribute FileAttribute]
            [java.time Instant]
@@ -35,6 +37,10 @@
   [start dir g]
   @start
   (grant/register! dir g))
+
+(defn- ^{:stratum 0} sync-failure!
+  [& _]
+  (throw (IOException. "Injected disk sync failure")))
 
 ;------------------------------------------------------------------------------ Layer 1
 
@@ -68,7 +74,7 @@
 ;------------------------------------------------------------------------------ Layer 2
 
 (deftest ^{:stratum 2} fresh-directory-and-reload-test
-  (let [dir (tmp-dir)
+  (let [dir (str (io/file (tmp-dir) "new-grants"))
         g (issued)
         id (:grant/id g)]
     (is (nil? (grant/current dir id)))
@@ -147,8 +153,57 @@
   (let [dir (tmp-dir)
         g (issued)
         dated (assoc g :grant/issued-at (Date/from now) :grant/expires-at (Date/from later))]
-    (is (not (anomaly/anomaly? (grant/register! dir dated))))
-    (is (= g (grant/current dir (:grant/id g))))))
+    (is (= g (grant/register! dir dated)))
+    (is (= g (grant/current dir (:grant/id g))))
+    (let [revoked (grant/revoke-stored! dir (:grant/id g) :revocation/operator (Date/from now))]
+      (is (= now (:grant/revoked-at revoked)))
+      (is (= revoked (grant/current dir (:grant/id g))))
+      (is (= revoked (grant/revoke-stored! dir (:grant/id g) :revocation/operator later))))))
+
+(deftest ^{:stratum 2} registration-requires-pristine-issuance-test
+  (doseq [state [{:grant/revocation-reason :revocation/operator}
+                {:grant/revoked-at now}
+                {:grant/revoked-at now :grant/revocation-reason :revocation/operator}]]
+    (let [dir (tmp-dir)
+          g (merge (issued) state)]
+      (is (= :invalid-input (:anomaly/type (grant/register! dir g))))
+      (is (empty? (seq (.listFiles (File. dir)))))
+      (corrupt! dir g ".grant.edn" (pr-str (codec/->wire g)))
+      (is (= :fault (:anomaly/type (grant/current dir (:grant/id g))))))))
+
+(deftest ^{:stratum 2} dangling-authority-symlinks-fail-closed-test
+  (doseq [suffix [".grant.edn" ".revocation.edn"]]
+    (let [dir (tmp-dir)
+          g (issued)
+          file (record-file dir g suffix)
+          missing (io/file dir "missing-target")]
+      (grant/register! dir g)
+      (Files/deleteIfExists (.toPath file))
+      (Files/createSymbolicLink (.toPath file) (.toPath missing) (into-array FileAttribute []))
+      (is (= :fault (:anomaly/type (grant/current dir (:grant/id g)))))
+      (is (= :fault (:anomaly/type (grant/revoke-stored! dir (:grant/id g) :revocation/operator now)))))))
+
+(deftest ^{:stratum 2} file-sync-failure-does-not-publish-test
+  (let [dir (tmp-dir)
+        g (issued)]
+    (with-redefs [durability/write! sync-failure!]
+      (is (= :fault (:anomaly/type (grant/register! dir g)))))
+    (is (nil? (grant/current dir (:grant/id g))))
+    (is (empty? (seq (.listFiles (File. dir)))))))
+
+(deftest ^{:stratum 2} failed-publication-sync-cannot-acknowledge-revocation-test
+  (let [dir (tmp-dir)
+        g (issued)
+        id (:grant/id g)]
+    (grant/register! dir g)
+    (with-redefs [durability/sync-ancestry! sync-failure!]
+      (is (= :fault (:anomaly/type (grant/revoke-stored! dir id :revocation/operator now))))
+      (is (= now (:grant/revoked-at (grant/current dir id))))
+      (is (= :fault (:anomaly/type (grant/revoke-stored! dir id :revocation/superseded later)))))
+    (let [confirmed (grant/revoke-stored! dir id :revocation/superseded later)]
+      (is (= now (:grant/revoked-at confirmed)))
+      (is (= :revocation/operator (:grant/revocation-reason confirmed)))
+      (is (= confirmed (grant/current dir id))))))
 
 (deftest ^{:stratum 2} invalid-input-cannot-address-outside-store-test
   (doseq [id [nil "../outside" 42]]

@@ -35,22 +35,28 @@ Test initial lookup, durable reload, duplicate registration, revocation,
 repeated revocation, corrupt records and malformed boundary inputs.
 Run component tests, standards checks, lint, hooks and CI.
 
-Local results: 53 tests and 301 assertions pass in each of Miniforge, Core
-and TUI. The store adds 13 tests and 65 assertions. The component standards
-scan reports zero findings across 23 files.
+Local results: 57 tests and 326 assertions pass in each of Miniforge, Core
+and TUI. The store adds 17 tests and 90 assertions. The component standards
+scan covers all source and test files, including the file-boundary helpers.
 
 ## Adversarial review
 
 Registration encodes and round-trips the record before creating any file.
-It writes a unique temporary file, then publishes a hard link that cannot
-replace an existing record. Both competing writers and duplicate calls are
+It writes and forces a unique temporary file, then publishes a hard link that
+cannot replace an existing record. It forces the directory and its ancestors
+before acknowledging publication. Both competing writers and duplicate calls are
 tested. Revocation uses the same publication path, with a closed marker schema
 that cannot change scope or grant identity.
 
 Lookup reads and validates the issued record before applying the marker.
 It distinguishes absent files from failed reads and rejects trailing EDN,
 corrupt values, wrong IDs and marker fields that would widen authority.
+Symlinks are rejected without following their targets. Registration and reload
+require pristine issuance records: both revocation fields must be nil.
+Results normalize timestamps to Instant on the first call as well as reload.
 The tests pin preservation of the original issuance bytes and first revocation.
+Injected file and directory sync failures return faults. A sequential retry
+of an existing revocation repeats durability barriers before acknowledging it.
 The clock still controls expiry through the existing authorization function.
 
 Source dependencies stay inside execution-grant or use component interfaces.
@@ -62,6 +68,10 @@ authority composition. No generic replacement API or revocation removal exists.
 No existing caller changes. The OPSV coordinator will register runtime-issued
 grants and use current lookup. The store is trusted local authority state,
 not an authentication boundary against a user who can edit its files.
+Storage requires a filesystem supporting hard links and file/directory force.
+Unsupported barriers fail closed; there is no fallback claiming durability.
+After a post-publication failure, a record may be visible despite the fault.
+The caller must treat that result as uncertain, not as successful persistence.
 
 ## Related work
 
