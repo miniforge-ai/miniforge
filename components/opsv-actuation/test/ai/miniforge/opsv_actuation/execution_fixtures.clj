@@ -12,8 +12,7 @@
             [clojure.test :refer [is]])
   (:import [java.nio.file Files]
            [java.nio.file.attribute FileAttribute]
-           [java.time Instant]
-           [java.util Date]))
+           [java.time Instant]))
 
 ;------------------------------------------------------------------------------ Layer 0
 
@@ -36,7 +35,7 @@
   {:effect/outcome :unknown-outcome})
 
 (defn ^{:stratum 0} grant-request [prepared]
-  (merge (dissoc prepared :pr/title :pr/body :pr/draft?)
+  (merge (dissoc prepared :pr/title :pr/body :pr/draft? :opsv/envelope :opsv/evidence-bundle-id)
          {:workflow-run/status :running
           :effect/class :effect/pr-create
           :effect/preflight {:preflight/type :preflight/pr-create-readiness
@@ -51,20 +50,19 @@
   ([candidate]
    (let [dir (tmp-dir)
          prepared (actuation/prepare-pr candidate)
-         issued (grant/issue-for-effect dir (grant-request prepared) now)
+         decision (allowing-envelope)
+         governed (actuation/prepare-governed-pr candidate decision)
+         issued (grant/issue-for-effect dir (grant-request governed) now)
          registered (grant/register! dir issued)]
      (is (not (anomaly/anomaly? registered)))
      {:dir dir :candidate candidate :prepared prepared
-      :grant registered :decision (allowing-envelope) :calls (atom [])})))
+      :grant registered :decision decision :calls (atom [])})))
 
 (defn ^{:stratum 1} propose! [{:keys [dir candidate grant decision]}]
   (actuation/propose-pr! dir candidate (:grant/id grant) decision now))
 
 (defn ^{:stratum 1} propose-altered! [{:keys [dir candidate grant decision]} alter]
-  (let [prepared (actuation/prepare-pr candidate)
-        portable-decision (update decision :envelope/at #(Date. (inst-ms %)))
-        payload (assoc prepared :opsv/envelope portable-decision
-                                :opsv/evidence-bundle-id (:opsv/evidence-bundle-id candidate))
+  (let [payload (actuation/prepare-governed-pr candidate decision)
         options {:effect-id (:effect/id candidate)
                  :effect-class :effect/pr-create
                  :grant-id (:grant/id grant)

@@ -4,12 +4,12 @@
 (ns ai.miniforge.opsv-actuation.execution
   "Compose durable proposals and fresh grant checks without issuing authority."
   (:require [ai.miniforge.effect-transaction.interface :as effect]
-            [ai.miniforge.execution-grant.interface :as grant]
+            [ai.miniforge.opsv-actuation.grant-boundary :as grant-boundary]
             [ai.miniforge.opsv-actuation.execution-schema :as schema]
+            [ai.miniforge.opsv-actuation.governance :as governance]
             [ai.miniforge.opsv-actuation.messages :as msg]
             [ai.miniforge.opsv-actuation.proposal :as proposal]
-            [malli.core :as m])
-  (:import [java.util Date]))
+            [malli.core :as m]))
 
 ;------------------------------------------------------------------------------ Layer 0
 
@@ -21,17 +21,9 @@
     {:effect/outcome :failed
      :effect/failure (msg/ts :execution/invalid-record)}))
 
-(defn- ^{:stratum 0} durable-proposal
-  [candidate decision]
-  (assoc (proposal/prepare-pr candidate)
-         :opsv/evidence-bundle-id (:opsv/evidence-bundle-id candidate)
-         :opsv/envelope (update decision :envelope/at #(Date. (inst-ms %)))))
-
-;------------------------------------------------------------------------------ Layer 1
-
-(defn ^{:stratum 1} propose!
+(defn ^{:stratum 0} propose!
   [dir candidate grant-id decision now]
-  (let [prepared (durable-proposal candidate decision)
+  (let [prepared (governance/prepare candidate decision)
         options {:effect-id (:effect/id candidate)
                  :effect-class :effect/pr-create
                  :grant-id grant-id
@@ -39,9 +31,11 @@
                  :proposal prepared}]
     (effect/propose! dir options now)))
 
+;------------------------------------------------------------------------------ Layer 1
+
 (defn ^{:stratum 1} commit!
   [effect-dir grant-dir id clock provider]
-  (effect/commit-current! effect-dir id (partial grant/current grant-dir)
+  (effect/commit-current! effect-dir id (partial grant-boundary/current grant-dir)
                           clock (partial execute-claimed! provider)))
 
 (comment

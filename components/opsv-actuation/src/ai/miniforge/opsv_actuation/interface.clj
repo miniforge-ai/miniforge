@@ -8,6 +8,7 @@
             [ai.miniforge.opsv-actuation.messages :as msg]
             [ai.miniforge.opsv-actuation.execution :as execution]
             [ai.miniforge.opsv-actuation.execution-schema :as execution-schema]
+            [ai.miniforge.opsv-actuation.governance :as governance]
             [ai.miniforge.opsv-actuation.proposal :as proposal]
             [ai.miniforge.opsv-actuation.schema :as schema]
             [malli.core :as m]
@@ -24,6 +25,15 @@
     (anomaly/validation-anomaly (msg/ts :proposal/invalid)
                                 :opsv/pr-proposal input (me/humanize errors))
     (proposal/prepare-pr input)))
+
+(defn ^{:stratum 0} prepare-governed-pr
+  "Prepare the exact provider payload and governance receipt for grant issuance.
+   Runtime must include both :pr/payload-hash and :pr/governance-hash in the
+   PR grant request. This pure preparation does not confer authority."
+  [candidate decision]
+  (if (m/validate execution-schema/GovernedArguments [candidate decision])
+    (governance/prepare candidate decision)
+    (anomaly/anomaly :invalid-input (msg/ts :execution/invalid-input) {})))
 
 (defn ^{:stratum 0} propose-pr!
   "Persist a prepared PR, evidence join and allowing runtime envelope.

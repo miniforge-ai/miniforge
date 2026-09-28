@@ -7,6 +7,7 @@
             [ai.miniforge.decision-envelope.interface :as envelope]
             [ai.miniforge.effect-transaction.interface :as effect]
             [ai.miniforge.opsv-actuation.proposal :as proposal]
+            [ai.miniforge.opsv-actuation.governance :as governance]
             [ai.miniforge.opsv-actuation.schema :as schema])
   (:import [java.time Instant]))
 
@@ -20,8 +21,9 @@
 
 (defn- ^{:stratum 0} content-bound?
   [prepared]
-  (= (:pr/payload-hash prepared)
-     (hash/content-hash (proposal/provider-content prepared))))
+  (and (= (:pr/payload-hash prepared)
+          (hash/content-hash (proposal/provider-content prepared)))
+       (= (:pr/governance-hash prepared) (governance/digest prepared))))
 
 (defn- ^{:stratum 0} correlated?
   [record]
@@ -45,6 +47,8 @@
 (def ^{:stratum 2} ProposeArguments
   [:tuple schema/NonBlankString schema/PrProposalInput :uuid AllowingEnvelope RuntimeInstant])
 
+(def ^{:stratum 2} GovernedArguments [:tuple schema/PrProposalInput AllowingEnvelope])
+
 (def ^{:stratum 2} ClaimedPr
   [:and effect/EffectTransaction
    [:map
@@ -66,6 +70,7 @@
        [:pr/body schema/NonBlankString]
        [:pr/draft? :boolean]
        [:pr/payload-hash [:re #"[0-9a-f]{64}"]]
+       [:pr/governance-hash [:re #"[0-9a-f]{64}"]]
        [:opsv/evidence-bundle-id :uuid]
        [:opsv/envelope AllowingEnvelope]]
       [:fn content-bound?]]]]
