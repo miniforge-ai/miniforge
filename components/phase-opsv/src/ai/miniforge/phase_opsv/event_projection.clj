@@ -74,13 +74,19 @@
 (defn- ^{:stratum 0} actuation-events
   [stream workflow-id evidence-id output]
   (let [actuation (:opsv/actuation-record output)]
-    [(event-stream/actuation-emitted
+    (cond-> []
+      (:opsv/decision-envelope output)
+      (conj (assoc (event-stream/phase-decision
+                    stream workflow-id :opsv/actuate (:opsv/decision-envelope output))
+                   :opsv/evidence-bundle-id evidence-id))
+      true
+      (conj (event-stream/actuation-emitted
       stream workflow-id evidence-id
       {:opsv/requested-actuation-mode (:requested-actuation-mode actuation)
        :opsv/effective-actuation-mode (:effective-actuation-mode actuation)
        :opsv/governed-effects (:governed-effects actuation)
        :opsv/pr-refs (:pr-refs actuation)
-       :opsv/apply-refs (:apply-refs actuation)})]))
+       :opsv/apply-refs (:apply-refs actuation)})))))
 
 ;------------------------------------------------------------------------------ Layer 1
 

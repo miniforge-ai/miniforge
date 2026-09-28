@@ -95,11 +95,13 @@
    envelope — their reasons and obligations merge in; a mechanical gate
    failure contributes a :reason/gate-check-failed; a nil artifact with
    gates configured contributes :reason/missing-artifact. Pins come
-   from the first policy envelope present (nil pins otherwise)."
-  [{:keys [results]} artifact-nil?]
-  (let [gate-envs (keep :envelope results)
+   from the first policy envelope present (nil pins otherwise). The 3-arity
+   form accepts runtime-owned pins before the single envelope is created."
+  ([checks artifact-nil?] (gates->envelope checks artifact-nil? nil))
+  ([{:keys [results]} artifact-nil? runtime-pins]
+   (let [gate-envs (keep :envelope results)
         mech-failures (remove :envelope (remove :passed? results))
-        pins (or (:envelope/pins (first gate-envs))
+        pins (or runtime-pins (:envelope/pins (first gate-envs))
                  {:pins/pack-revision nil
                   :pins/rule-ids []
                   :pins/event-watermark nil})]
@@ -108,7 +110,7 @@
              (mapcat mechanical-failure-reasons mech-failures)
              (when artifact-nil? [(missing-artifact-reason)]))
      (mapcat :envelope/obligations gate-envs)
-     pins)))
+     pins))))
 
 ;------------------------------------------------------------------------------ Layer 2
 

@@ -16,16 +16,13 @@
 ;; See the License for the specific language governing permissions and
 ;; limitations under the License.
 (ns ai.miniforge.phase-opsv.actuation
-  "Fail-closed OPSV authority reduction and recommend-only record assembly."
+  "Evaluate runtime policy, reduce authority and assemble actuation evidence."
   (:require
    [ai.miniforge.anomaly.interface :as anomaly]
-   [ai.miniforge.opsv.interface :as opsv]))
+   [ai.miniforge.opsv.interface :as opsv]
+   [ai.miniforge.phase-opsv.governance :as governance]))
 
 ;------------------------------------------------------------------------------ Layer 0
-
-(defn- ^{:stratum 0} closed-gate
-  [gate-id]
-  {:gate/id gate-id :gate/passed? false})
 
 (defn- ^{:stratum 0} actuation-record
   [requested-mode effective-mode]
@@ -43,14 +40,11 @@
     record
     (assoc verified :opsv/actuation-record record)))
 
-;------------------------------------------------------------------------------ Layer 1
-
-(defn- ^{:stratum 1} decision-input
-  [ctx verification]
+(defn- ^{:stratum 0} decision-input
+  [ctx verification gate-results]
   (let [input (:execution/input ctx)
         requested-mode (get-in input [:opsv/experiment-pack
                                       :experiment-pack/actuation-intent])
-        gate-results (mapv closed-gate opsv/opsv-gate-ids)
         safe-mode? (true? (:opsv/safe-mode? input))]
     {:requested-actuation-mode requested-mode
      :verification-passed? (:passed? verification)
@@ -61,6 +55,8 @@
      :apply-capability-valid? false
      :rollback-verified? false
      :postconditions-configured? false}))
+
+;------------------------------------------------------------------------------ Layer 1
 
 (defn- ^{:stratum 1} recommendation
   [decision]
@@ -77,10 +73,13 @@
   [ctx verified]
   (if (anomaly/anomaly? verified)
     verified
-    (let [verification (:opsv/verification-result verified)
-          decision (decision-input ctx verification)
-          record (recommendation decision)]
-      (attach-record verified record))))
+    (let [evaluated (governance/evaluate ctx verified)]
+      (if (anomaly/anomaly? evaluated)
+        evaluated
+        (let [verification (:opsv/verification-result verified)
+              decision (decision-input ctx verification (:opsv/gate-results evaluated))
+              record (recommendation decision)]
+          (attach-record (merge verified evaluated) record))))))
 
 (comment
-  (closed-gate :actuation))
+  (actuation-record :pr-only :recommend-only))
