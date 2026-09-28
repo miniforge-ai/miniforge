@@ -34,7 +34,7 @@ Runtime wiring follows both PRs. Merge the coordinator first.
 
 Use a command port with deterministic GitHub response fixtures; assert exact
 arguments and stdin, refusal before POST, uncertain responses and reconciliation.
-All 10 component tests / 79 assertions pass. The durable coordinator/provider
+All 12 component tests / 87 assertions pass. The durable coordinator/provider
 acceptance test passes 9 assertions, including lost-response reconciliation.
 Tests never create a real provider PR. Deadline tests require process-tree access.
 Scoped standards scans, lint, stratum and Polylith pass. The existing CLI builds
@@ -44,6 +44,10 @@ adds a production dependency; explicit CI steps cover its unit and acceptance te
 ## Deployment plan
 
 No external mode is enabled. Production must supply runtime-owned authority and
+the explicit host `github.com`. Grants currently bind owner/repository, not a
+provider hostname. Other hosts are refused until issuance can bind that hostname.
+Readback also requires the exact repository, PR number and github.com URL.
+Production must supply
 an exclusively controlled branch. GitHub PR creation is branch-based, not an
 atomic compare-and-create by object ID; readback detects a moved head but cannot
 undo an already created PR. Such outcomes must remain uncertain for reconciliation.

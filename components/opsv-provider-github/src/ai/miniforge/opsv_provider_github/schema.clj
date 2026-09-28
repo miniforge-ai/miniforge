@@ -33,7 +33,7 @@
 (def ^{:stratum 1} ProviderRuntime
   [:map {:closed true}
    [:directory NonBlank]
-   [:hostname [:re #"\A[A-Za-z0-9][A-Za-z0-9.-]*\z"]]
+   [:hostname [:= wire/github-hostname]]
    [:run-command fn?]])
 
 (def ^{:stratum 1} Payload

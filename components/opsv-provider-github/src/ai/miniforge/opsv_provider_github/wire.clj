@@ -10,6 +10,8 @@
 
 (def ^{:stratum 0} payload-keys [:pr/repo :pr/base :pr/branch :pr/head-sha :pr/title :pr/body :pr/draft?])
 
+(def ^{:stratum 0} github-hostname "github.com")
+
 (def ^{:stratum 0} provider-states #{"open" "closed"})
 
 (defn- ^{:stratum 0} segment [value]
@@ -36,19 +38,10 @@
 
 ;------------------------------------------------------------------------------ Layer 1
 
-(defn ^{:stratum 1} matching-pr? [payload observed]
-  (and (pos-int? (:number observed))
-       (string? (:html_url observed))
-       (str/starts-with? (:html_url observed) "https://")
-       (contains? provider-states (:state observed))
-       (same-repo? (:pr/repo payload) (get-in observed [:base :repo :full_name]))
-       (same-repo? (:pr/repo payload) (get-in observed [:head :repo :full_name]))
-       (= (:pr/base payload) (get-in observed [:base :ref]))
-       (= (:pr/branch payload) (get-in observed [:head :ref]))
-       (= (:pr/head-sha payload) (get-in observed [:head :sha]))
-       (= (:pr/title payload) (:title observed))
-       (= (:pr/body payload) (:body observed))
-       (= (:pr/draft? payload) (:draft observed))))
+(defn- ^{:stratum 1} matching-url? [payload observed]
+  (let [expected (str "https://" github-hostname "/" (:pr/repo payload) "/pull/" (:number observed))
+        actual (:html_url observed)]
+    (and (string? actual) (= (str/lower-case expected) (str/lower-case actual)))))
 
 (defn ^{:stratum 1} head-path [payload]
   (str (repository-path payload) "/git/ref/heads/" (segment (:pr/branch payload))))
@@ -61,6 +54,21 @@
         head (segment (str owner ":" (:pr/branch payload)))
         base (segment (:pr/base payload))]
     (str (repository-path payload) "/pulls?state=all&per_page=100&head=" head "&base=" base)))
+
+;------------------------------------------------------------------------------ Layer 2
+
+(defn ^{:stratum 2} matching-pr? [payload observed]
+  (and (pos-int? (:number observed))
+       (matching-url? payload observed)
+       (contains? provider-states (:state observed))
+       (same-repo? (:pr/repo payload) (get-in observed [:base :repo :full_name]))
+       (same-repo? (:pr/repo payload) (get-in observed [:head :repo :full_name]))
+       (= (:pr/base payload) (get-in observed [:base :ref]))
+       (= (:pr/branch payload) (get-in observed [:head :ref]))
+       (= (:pr/head-sha payload) (get-in observed [:head :sha]))
+       (= (:pr/title payload) (:title observed))
+       (= (:pr/body payload) (:body observed))
+       (= (:pr/draft? payload) (:draft observed))))
 
 (comment
   (create-body {}))

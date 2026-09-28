@@ -65,6 +65,21 @@
     (is (= ["--paginate" "--slurp"] (take-last 2 args)))
     (is (.contains (nth args 2) "head=example%3Aopsv%2Fscaling"))))
 
+(deftest ^{:stratum 0} unscoped-provider-host-is-refused-before-io-test
+  (let [calls (atom [])
+        runtime (assoc (f/runtime calls []) :hostname "github.example.com")]
+    (is (anomaly/anomaly? (provider/create-pr! runtime (f/transaction :committing) f/payload)))
+    (is (empty? @calls))))
+
+(deftest ^{:stratum 0} mismatched-provider-urls-stay-unknown-test
+  (doseq [url ["https://github.example.com/example/opsv/pull/17"
+               "https://github.com/example/other/pull/17"
+               "https://github.com/example/opsv/pull/18"]]
+    (let [runtime (f/runtime (atom []) [(f/head-response)
+                                        (f/response (assoc (f/pull-request) :html_url url))])]
+      (is (= :unknown-outcome
+             (:effect/outcome (provider/create-pr! runtime (f/transaction :committing) f/payload)))))))
+
 (deftest ^{:stratum 0} missing-mismatched-ambiguous-or-unavailable-observations-stay-unresolved-test
   (doseq [response [(f/response [[]])
                     (f/response [[(assoc (f/pull-request) :body "other")]])

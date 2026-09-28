@@ -13,7 +13,8 @@
     (is (m/validate provider/ProviderRuntime runtime))
     (doseq [field (keys runtime)]
       (is (not (m/validate provider/ProviderRuntime (dissoc runtime field)))))
-    (doseq [host ["" " " "https://github.com" "-bad"]]
+    (doseq [host ["" " " "https://github.com" "-bad" "github.example.com"
+                 "github.com.evil.example" "github.com\n"]]
       (is (not (m/validate provider/ProviderRuntime (assoc runtime :hostname host)))))))
 
 (comment
