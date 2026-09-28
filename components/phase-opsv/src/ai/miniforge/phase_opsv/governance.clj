@@ -4,7 +4,6 @@
 (ns ai.miniforge.phase-opsv.governance
   "Evaluate OPSV gates from trusted runtime policy, never caller verdicts."
   (:require [ai.miniforge.anomaly.interface :as anomaly]
-            [ai.miniforge.decision-envelope.interface :as envelope]
             [ai.miniforge.gate.interface :as gate]
             [ai.miniforge.opsv.interface :as opsv]
             [ai.miniforge.phase-opsv.messages :as msg]
@@ -17,7 +16,7 @@
   [:map {:closed true}
    [:policy/context [:map-of :keyword any?]]
    [:policy/revision [:and :string [:fn #(not (str/blank? %))]]]
-   [:policy/event-watermark [:maybe [:int {:min 0}]]]])
+   [:policy/event-watermark [:int {:min 0}]]])
 
 (defn- ^{:stratum 0} registry-key [id]
   (keyword "opsv" (str (name id) "-gate")))
@@ -26,15 +25,10 @@
   {:gate/id id :gate/passed? (true? (:passed? result))})
 
 (defn- ^{:stratum 0} decision [checks policy]
-  (let [mechanical (gate/gates->envelope checks false)
-        reasons (cond-> (:envelope/reasons mechanical)
-                  (nil? policy)
-                  (conj {:reason/code :reason/missing-artifact
-                         :reason/detail (msg/ts :governance/missing-policy)}))]
-    (envelope/envelope reasons (:envelope/obligations mechanical)
-                       {:pins/pack-revision (:policy/revision policy)
-                        :pins/rule-ids (mapv :gate (:results checks))
-                        :pins/event-watermark (:policy/event-watermark policy)})))
+  (gate/gates->envelope checks (nil? policy)
+                        {:pins/pack-revision (:policy/revision policy)
+                         :pins/rule-ids (mapv :gate (:results checks))
+                         :pins/event-watermark (:policy/event-watermark policy)}))
 
 ;------------------------------------------------------------------------------ Layer 1
 

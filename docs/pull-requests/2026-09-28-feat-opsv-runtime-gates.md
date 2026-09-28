@@ -27,12 +27,13 @@ Provider and issuance wiring remain separate dependent changes.
 - Evaluate every required gate and preserve both diagnostics and domain verdicts.
 - Bind the decision to the supplied revision, actual gate IDs and watermark.
 - Deny missing runtime policy and reject malformed policy contracts.
+- Require a non-null, nonnegative watermark and create exactly one envelope.
 - Use verified pipeline evidence, ignoring replacement evidence in policy context.
 - Keep execution capabilities disabled until governed runtime wiring lands.
 
 ## Testing plan
 
-All 18 phase tests / 176 assertions pass in both consuming projects.
+All 19 phase tests / 179 assertions pass in both consuming projects.
 Cover all-pass evaluation, independent gate failures, missing and malformed policy,
 caller policy spoofing, evidence replacement and retained recommendation semantics.
 The scoped standards scan reports zero findings across 28 files. Stratum and

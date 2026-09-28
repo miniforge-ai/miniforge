@@ -38,6 +38,7 @@
   (doseq [policy [false {} (dissoc fixture/policy :policy/revision)
                    (assoc fixture/policy :policy/revision " ")
                    (assoc fixture/policy :policy/context nil)
+                   (assoc fixture/policy :policy/event-watermark nil)
                    (assoc fixture/policy :policy/event-watermark -1)]]
     (is (= :invalid-input
            (:anomaly/type (phase/actuate
@@ -74,6 +75,18 @@
       (is (= [id] (mapv :gate/id failed)) (str id))
       (is (= :deny (get-in output [:opsv/decision-envelope :envelope/decision])) (str id))
       (is (= :recommend-only (get-in output [:opsv/actuation-record :effective-actuation-mode]))))))
+
+(deftest ^{:stratum 0} exactly-one-envelope-is-created-per-evaluation-test
+  (let [factory envelope/envelope
+        created (atom [])]
+    (with-redefs [envelope/envelope
+                  (fn [reasons obligations pins]
+                    (let [decision (factory reasons obligations pins)]
+                      (swap! created conj decision)
+                      decision))]
+      (let [output (phase/actuate (fixture/context))]
+        (is (= 1 (count @created)))
+        (is (= (first @created) (:opsv/decision-envelope output)))))))
 
 (comment
   (phase/actuate (fixture/context)))
