@@ -30,7 +30,7 @@
    [ai.miniforge.workflow.phase-test-support :as phase-test-support]
    [ai.miniforge.workflow.runner :as runner]
    [ai.miniforge.workflow.execution-lifecycle :as lifecycle]
-   [ai.miniforge.workflow.execution-transition :as transition]))
+   [ai.miniforge.workflow.runner-defaults :as runner-defaults]))
 
 (use-fixtures :each
   phase-test-support/with-workflow-phase-test-support
@@ -228,7 +228,7 @@
           "Should fall back to :review/issues when :review/feedback absent")))
 
   (testing "max-redirects is now 5"
-    (is (= 5 transition/max-redirects)
+    (is (= 5 (runner-defaults/max-redirects))
         "Should allow 5 redirects for complex repair cycles")))
 
 ;; Every pipeline this namespace runs acquires its worktree from a
