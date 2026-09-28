@@ -58,8 +58,7 @@
 
 (defn- ^{:stratum 0} synthesized-output
   [ctx converged]
-  (let [proposal (policy/operational-policy
-                  ctx (:opsv/convergence-result converged))
+  (let [proposal (policy/operational-policy ctx converged)
         validated (opsv/validate-operational-policy proposal)]
     (if (anomaly/anomaly? validated)
       validated

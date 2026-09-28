@@ -20,6 +20,7 @@
   (:require
    [ai.miniforge.anomaly.interface :as anomaly]
    [ai.miniforge.phase.interface :as phase]
+   [ai.miniforge.phase-opsv.artifact-boundary :as artifacts]
    [ai.miniforge.phase-opsv.evidence-runtime :as evidence-runtime]
    [ai.miniforge.phase-opsv.events :as events]
    [ai.miniforge.phase-opsv.lifecycle-result :as lifecycle-result]))
@@ -73,7 +74,9 @@
         prepared-ctx (evidence-runtime/ensure-assembly runtime-ctx)
         start-time (System/currentTimeMillis)
         prepared? (not (anomaly/anomaly? prepared-ctx))
-        output (if prepared? (transform prepared-ctx) prepared-ctx)
+        output (if prepared?
+                 (artifacts/publish-with-exception-handling prepared-ctx phase-key (transform prepared-ctx))
+                 prepared-ctx)
         result (lifecycle-result/phase-result output)]
     (phase/enter-context (if prepared? prepared-ctx runtime-ctx) phase-key
                          (:agent config)

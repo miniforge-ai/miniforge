@@ -50,8 +50,9 @@
              :opsv/operational-policy validated
              :opsv/policy-hash (content-hash/content-hash validated)
              :opsv/metric-snapshot-artifact-refs
-             (get-in ctx [:execution/input
-                          :opsv/metric-snapshot-artifact-refs])))))
+             (if-let [id (get-in synthesized [:opsv/phase-artifact-ids :metric-snapshot])]
+               [id]
+               (get-in ctx [:execution/input :opsv/metric-snapshot-artifact-refs]))))))
 
 ;------------------------------------------------------------------------------ Layer 1
 
