@@ -1,0 +1,36 @@
+;; Title: Miniforge.ai
+;; Copyright 2025-2026 Christopher Lester (christopher@miniforge.ai)
+;; Licensed under the Apache License, Version 2.0.
+(ns ai.miniforge.phase-opsv.pr-emission
+  "Keep recommendations unless runtime policy and configured execution permit PRs."
+  (:require [ai.miniforge.anomaly.interface :as anomaly]
+            [ai.miniforge.phase-opsv.pr-model :as model]
+            [ai.miniforge.phase-opsv.pr-runtime :as runtime]))
+
+;------------------------------------------------------------------------------ Layer 0
+
+(defn- ^{:stratum 0} eligible? [output]
+  (let [record (:opsv/actuation-record output)]
+    (and (contains? #{:pr-only :apply-allowed} (:requested-actuation-mode record))
+         (not= :none (:effective-actuation-mode record))
+         (= :allow (get-in output [:opsv/decision-envelope :envelope/decision]))
+         (every? :gate/passed? (:opsv/gate-results output)))))
+
+(defn- ^{:stratum 0} attach-outcome [output transaction]
+  (cond
+    (true? (get-in transaction [:anomaly/data :opsv/stopped?]))
+    (assoc-in output [:opsv/actuation-record :effective-actuation-mode] :none)
+    (anomaly/anomaly? transaction) transaction
+    :else (let [projected (model/outcome (:opsv/actuation-record output) transaction)]
+            (if (anomaly/anomaly? projected) projected (merge output projected)))))
+
+;------------------------------------------------------------------------------ Layer 1
+
+(defn ^{:stratum 1} emit! [ctx output]
+  (let [configured (get-in ctx [:execution/opts :opsv/pr-execution])]
+    (if (and (not (anomaly/anomaly? output)) configured (eligible? output))
+      (attach-outcome output (runtime/execute! configured ctx output))
+      output)))
+
+(comment
+  (eligible? {}))

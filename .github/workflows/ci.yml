@@ -212,7 +212,7 @@ jobs:
           fi
           echo "::endgroup::"
 
-      # The provider remains development-only until runtime integration lands.
+      # Keep provider boundary and durable reconciliation coverage explicit.
       - name: OPSV provider contracts and durable reconciliation
         run: |
           clojure -M:poly test brick:opsv-provider-github :dev
