@@ -27,10 +27,12 @@
    resolved. `<home>/operator-serve.lock` is held
    for the process lifetime; the OS drops it when the process dies,
    however it dies. `<home>/operator-serve.json` (`pid`, `started`,
-   `operator-dir`) names the running server and is removed on a clean
-   stop; a SIGKILLed server leaves it behind, so readers check the pid
-   is alive. The same JSON, plus `\"ready\": true`, is the single line
-   printed to stdout once the consumer is polling."
+   `operator-dir`) names the running server: written as soon as the lock
+   is held, before the consumer starts, so a server refused meanwhile can
+   name the owner. It is removed on a clean stop; a SIGKILLed server
+   leaves it behind, so readers check the pid is alive. The same JSON,
+   plus `\"ready\": true`, is the single line printed to stdout once the
+   consumer is polling: that line, not the file, says the server is ready."
   (:require
    [ai.miniforge.cli.main.commands.shared :as shared]
    [ai.miniforge.cli.main.display :as display]
@@ -150,8 +152,8 @@
    0 after `await-stop!` returns or once a stop cuts the start short, 1
    when a server already holds the home.
 
-   A stop during start does not race it: the step in progress (starting
-   the consumer, writing the discovery file, printing the ready line)
+   A stop during start does not race it: the step in progress (writing
+   the discovery file, starting the consumer, printing the ready line)
    finishes, the stop then undoes it, and no later step runs.
 
    If starting or waiting throws, the same stop runs before the exception
@@ -174,8 +176,8 @@
              hook (Thread. ^Runnable stop!)]
          (add-shutdown-hook! hook)
          (try
-           (when (and (step! control/start-process-control!)
-                      (step! #(write-discovery! home info))
+           (when (and (step! #(write-discovery! home info))
+                      (step! control/start-process-control!)
                       (step! #(do (println (json/generate-string (assoc info :ready true)))
                                   (flush))))
              (await-stop!))

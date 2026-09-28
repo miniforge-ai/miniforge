@@ -110,6 +110,23 @@
           (is (= 0 (binding [*out* (java.io.StringWriter.)]
                      (sut/serve-cmd {} (constantly nil))))))))))
 
+(deftest ^{:stratum 1} a-server-refused-during-a-start-names-the-owner-test
+  (let [home (temp-home)
+        starting (promise)
+        finish-start (promise)
+        err (java.io.StringWriter.)]
+    (with-redefs [es/default-events-dir (constantly (io/file home "events"))
+                  control/start-process-control! #(do (deliver starting true) @finish-start)
+                  control/stop-process-control! (constantly nil)]
+      (let [first-server (future (binding [*out* (java.io.StringWriter.)]
+                                   (sut/serve-cmd {} (constantly nil))))]
+        (deref starting 5000 :timeout)
+        (testing "the discovery file names the owner before its consumer has started"
+          (is (= 1 (binding [*err* err] (sut/serve-cmd {} (constantly nil)))))
+          (is (str/includes? (str err) (str (.pid (java.lang.ProcessHandle/current))))))
+        (deliver finish-start true)
+        (is (= 0 (deref first-server 5000 :timeout)))))))
+
 (deftest ^{:stratum 1} a-failed-start-still-releases-the-home-test
   (let [home (temp-home)
         calls (atom [])]
