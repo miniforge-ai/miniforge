@@ -17,6 +17,7 @@
 ;; limitations under the License.
 (ns ai.miniforge.gate.decide-test
   (:require
+   [clojure.string :as str]
    [clojure.test :refer [deftest is testing]]
    [ai.miniforge.gate.decide :as decide]
    [ai.miniforge.policy-pack.interface :as policy-pack]))
@@ -211,9 +212,9 @@
       (is (= 2 (count (:envelope/reasons phase-env))))
       (is (every? #(= :reason/gate-check-failed (:reason/code %))
                   (:envelope/reasons phase-env)))
-      (is (some #(clojure.string/includes? (:reason/detail %) ":skipped")
+      (is (some #(str/includes? (:reason/detail %) ":skipped")
                 (:envelope/reasons phase-env)))
-      (is (some #(clojure.string/includes? (:reason/detail %) "read-ledger")
+      (is (some #(str/includes? (:reason/detail %) "read-ledger")
                 (:envelope/reasons phase-env)))))
   (testing "a mechanical failure contributes :reason/gate-check-failed"
     (let [phase-env (decide/gates->envelope
