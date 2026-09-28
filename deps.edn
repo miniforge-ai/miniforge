@@ -379,6 +379,7 @@
                      ai.miniforge/bb-etl-runner    {:local/root "components/bb-etl-runner"}}}
 
   :test {:extra-paths ["development/test"
+                       "projects/miniforge/test-provider"
                        ;; bb task namespaces, so their tests can `require`
                        ;; them instead of `load-file` (which cannot resolve
                        ;; a task ns that requires a sibling task ns).
