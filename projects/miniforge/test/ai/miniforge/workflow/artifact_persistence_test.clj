@@ -18,12 +18,12 @@
 (ns ai.miniforge.workflow.artifact-persistence-test
   "Tests for artifact persistence flow.
 
-  Unit tests for execution namespace artifact/file extraction, plus
+  Unit tests for execution-lifecycle artifact/file extraction, plus
   integration tests that validate files are actually written to disk.
 
   These tests validate:
-  - execution/record-phase-artifacts extracts from nested [:result :output]
-  - execution/track-phase-files extracts :code/files paths from output
+  - lifecycle/record-phase-artifacts extracts from nested [:result :output]
+  - lifecycle/track-phase-files extracts :code/files paths from output
   - runner/extract-output returns non-empty artifacts
   - Files are written to filesystem
   - Zero-file writes are detected and fail
@@ -42,7 +42,7 @@
    [ai.miniforge.agent.interface :as agent]
    [ai.miniforge.response.interface :as response]
    [ai.miniforge.release-executor.interface :as release-executor]
-   [ai.miniforge.workflow.execution :as execution]
+   [ai.miniforge.workflow.execution-lifecycle :as lifecycle]
    [ai.miniforge.workflow.runner :as runner]))
 
 ;------------------------------------------------------------------------------ Layer 0
@@ -130,7 +130,7 @@
                                  :summary "Implementation complete"
                                  :metrics {:tokens 100}}}
           ctx {:execution/artifacts []}
-          updated (execution/record-phase-artifacts ctx phase-result)]
+          updated (lifecycle/record-phase-artifacts ctx phase-result)]
       (is (= 1 (count (:execution/artifacts updated)))
           "Should extract one provenance artifact from result")
       (is (= {:status :success
@@ -146,7 +146,7 @@
                         :status :completed
                         :result "plain string"}
           ctx {:execution/artifacts []}
-          updated (execution/record-phase-artifacts ctx phase-result)]
+          updated (lifecycle/record-phase-artifacts ctx phase-result)]
       (is (empty? (:execution/artifacts updated))
           "Should not extract artifact from non-map result"))))
 
@@ -158,7 +158,7 @@
                                  :environment-id "env-001"
                                  :summary "Implementation complete"}}
           ctx {:execution/files-written []}
-          updated (execution/track-phase-files ctx phase-result)]
+          updated (lifecycle/track-phase-files ctx phase-result)]
       (is (= [] (:execution/files-written updated))
           "File tracking is a no-op; file discovery happens at release time via git diff"))))
 

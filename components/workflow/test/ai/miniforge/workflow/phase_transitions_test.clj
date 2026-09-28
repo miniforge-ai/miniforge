@@ -30,7 +30,7 @@
   (:require
    [clojure.test :refer [deftest is testing]]
    [ai.miniforge.fsm.interface :as fsm]
-   [ai.miniforge.workflow.execution :as exec]
+   [ai.miniforge.workflow.execution-transition :as transition]
    [ai.miniforge.workflow.fsm :as workflow-fsm]
    [ai.miniforge.workflow.runner-defaults :as runner-defaults]
    ;; loaded for its eager guard/action registration (infra-retry guards)
@@ -55,24 +55,24 @@
 (deftest ^{:stratum 0} determine-phase-event-retrying-wins-over-success
   (testing "retrying status produces :phase/retry"
     (is (= :phase/retry
-           (exec/determine-phase-event {} {:status :retrying})))))
+           (transition/determine-phase-event {} {:status :retrying})))))
 
 (deftest ^{:stratum 0} determine-phase-event-already-done
   (testing ":already-implemented and :already-satisfied both produce :phase/already-done"
     (is (= :phase/already-done
-           (exec/determine-phase-event {} {:status :already-implemented})))
+           (transition/determine-phase-event {} {:status :already-implemented})))
     (is (= :phase/already-done
-           (exec/determine-phase-event {} {:status :already-satisfied})))))
+           (transition/determine-phase-event {} {:status :already-satisfied})))))
 
 (deftest ^{:stratum 0} determine-phase-event-success
   (testing "a :completed result with no transition request produces :phase/succeed"
     (is (= :phase/succeed
-           (exec/determine-phase-event {} {:status :completed})))))
+           (transition/determine-phase-event {} {:status :completed})))))
 
 (deftest ^{:stratum 0} determine-phase-event-failure-without-redirect-target
   (testing "a failed result with NO redirect target produces :phase/fail"
     (is (= :phase/fail
-           (exec/determine-phase-event {} {:status :failed})))))
+           (transition/determine-phase-event {} {:status :failed})))))
 
 (deftest ^{:stratum 0} determine-phase-event-verdict-failure-emits-map-event
   (testing "Phase 4a (superseding the deleted :phase/terminal-fail
@@ -93,11 +93,11 @@
                    :result {:status :failed
                             :output {:phase/verdict verdict}}})]
       (is (= {:type :phase/fail :phase/verdict :stagnated}
-             (exec/determine-phase-event {} (shape :stagnated))))
+             (transition/determine-phase-event {} (shape :stagnated))))
       (is (= {:type :phase/fail :phase/verdict :needs-decomposition}
-             (exec/determine-phase-event {} (shape :needs-decomposition))))
+             (transition/determine-phase-event {} (shape :needs-decomposition))))
       (is (= {:type :phase/fail :phase/verdict :verify/timeout}
-             (exec/determine-phase-event {} (shape :verify/timeout)))))))
+             (transition/determine-phase-event {} (shape :verify/timeout)))))))
 
 (deftest ^{:stratum 0} determine-phase-event-catchall-defaults-to-succeed
   (testing "an unrecognised status falls through to :phase/succeed (catch-all branch)"
@@ -105,9 +105,9 @@
     ;; match any of the predicates. Pin it explicitly — silent change
     ;; in the catch-all has caused real dogfood incidents before.
     (is (= :phase/succeed
-           (exec/determine-phase-event {} {:status :unknown-status})))
+           (transition/determine-phase-event {} {:status :unknown-status})))
     (is (= :phase/succeed
-           (exec/determine-phase-event {} {}))
+           (transition/determine-phase-event {} {}))
         "empty result also catch-alls to :phase/succeed — preserves the runner-test fixture path")))
 
 ;; -------------------------------------------------------------------------- apply-phase-transition
@@ -133,9 +133,9 @@
   ;; This is the safety constant that prevents an infinite redirect loop.
   ;; Keep it numeric-pinned so a refactor to `nil` or a string doesn't
   ;; silently disable the guard.
-  (is (pos-int? exec/max-redirects)
+  (is (pos-int? transition/max-redirects)
       "max-redirects must be a positive integer")
-  (is (<= exec/max-redirects 100)
+  (is (<= transition/max-redirects 100)
       "max-redirects must stay small enough that an unhappy loop ends fast"))
 
 ;; -------------------------------------------------------------------------- infra-retry (Fable §2.4 PR-B)
@@ -163,8 +163,8 @@
 ;; runner turns a nil artifact into a failed gate result.
 (deftest ^{:stratum 0} apply-gate-validation-fails-closed-on-missing-output
   (testing "gates configured + no canonical :output → phase fails (not skipped)"
-    (let [out (exec/apply-gate-validation {:config {:gates [:review-approved]}}
-                                          {:result {}} {})]
+    (let [out (transition/apply-gate-validation {:config {:gates [:review-approved]}}
+                                                {:result {}} {})]
       (is (= :failed (:phase/status out)))
       ;; The gate actually RAN on the nil artifact and emitted an error — proof
       ;; the fail-closed branch engaged rather than the old fail-open skip
@@ -173,21 +173,21 @@
   (testing "gates configured + approved verdict → pass attaches ONLY the
             :allow decision envelope (Ariadne 1d); nothing else changes"
     (let [pr  {:result {:output {:review/decision :approved}}}
-          out (exec/apply-gate-validation {:config {:gates [:review-approved]}} pr {})]
+          out (transition/apply-gate-validation {:config {:gates [:review-approved]}} pr {})]
       (is (= pr (dissoc out :phase/decision-envelope)) "unchanged on pass, envelope aside")
       (is (= :allow (get-in out [:phase/decision-envelope :envelope/decision])))
       (is (not (contains? out :phase/status)))
       (is (not (contains? out :phase/gate-errors)))))
   (testing "deny also attaches the STRUCTURED :phase/gate-failures the
             repair loop reads (Reasons are schema-bound strings)"
-    (let [out (exec/apply-gate-validation {:config {:gates [:review-approved]}}
-                                          {:result {}} {})]
+    (let [out (transition/apply-gate-validation {:config {:gates [:review-approved]}}
+                                                {:result {}} {})]
       (is (vector? (:phase/gate-failures out)))
       (is (= [:review-approved] (mapv :gate (:phase/gate-failures out))))
       (is (every? #(contains? % :errors) (:phase/gate-failures out)))))
   (testing "no gates configured → unchanged (nothing to validate)"
     (let [pr {:result {}}]
-      (is (= pr (exec/apply-gate-validation {:config {:gates []}} pr {}))))))
+      (is (= pr (transition/apply-gate-validation {:config {:gates []}} pr {}))))))
 
 (defn- ^{:stratum 0} policy-rule
   []
@@ -273,7 +273,7 @@
                :execution/errors []
                :execution/response-chain {:operation :self-redirect-test
                                           :responses []}}
-          out (exec/apply-phase-transition
+          out (transition/apply-phase-transition
                ctx {:type :phase/fail :phase/verdict :repair-requested}
                [] identity always-fail)]
       (is (nil? (:test/transition-to-failed-called? out))
@@ -304,7 +304,7 @@
                :execution/errors []
                :execution/response-chain {:operation :infra-self-retry-test
                                           :responses []}}
-          out (exec/apply-phase-transition
+          out (transition/apply-phase-transition
                ctx {:type :phase/fail :phase/verdict :verify/timeout}
                [] identity always-fail)]
       (is (nil? (:test/transition-to-failed-called? out))
@@ -337,7 +337,7 @@
   (testing "a valid event that moves the FSM forward returns the advanced ctx (no failure routing)"
     (let [ctx (ctx-at-plan-active)
           prior-state (:execution/fsm-state ctx)
-          out (exec/apply-phase-transition ctx :phase/succeed [] identity always-fail)]
+          out (transition/apply-phase-transition ctx :phase/succeed [] identity always-fail)]
       (is (nil? (:test/transition-to-failed-called? out))
           "happy-path transition must NOT call transition-to-failed-fn")
       (is (not= prior-state (:execution/fsm-state out))
@@ -352,7 +352,7 @@
     ;; and flip the workflow to :failed.
     (let [ctx (ctx-at-plan-active)
           prior-state (:execution/fsm-state ctx)
-          out (exec/apply-phase-transition ctx :phase/retry [] identity always-fail)]
+          out (transition/apply-phase-transition ctx :phase/retry [] identity always-fail)]
       (is (nil? (:test/transition-to-failed-called? out))
           ":phase/retry must NEVER route to transition-to-failed-fn even if state is unchanged")
       (is (= prior-state (:execution/fsm-state out))
@@ -361,7 +361,7 @@
 (deftest ^{:stratum 2} apply-phase-transition-invalid-event-without-state-change-fails-loud
   (testing "an undefined event that doesn't move the FSM is recognised as invalid"
     (let [ctx (ctx-at-plan-active)
-          out (exec/apply-phase-transition ctx :phase/no-such-event [] identity always-fail)]
+          out (transition/apply-phase-transition ctx :phase/no-such-event [] identity always-fail)]
       (is (true? (:test/transition-to-failed-called? out))
           "undefined event with no state change MUST route through transition-to-failed-fn — silently swallowing the event was the regression we're guarding")
       (is (some #(= :invalid-transition (:type %)) (:execution/errors out))
@@ -377,10 +377,10 @@
 (deftest ^{:stratum 2} determine-then-apply-success-path-advances-fsm
   (testing "running determine then apply on a clean success result advances the FSM"
     (let [result {:status :completed}
-          event (exec/determine-phase-event {} result)
+          event (transition/determine-phase-event {} result)
           ctx (ctx-at-plan-active)
           prior-state (:execution/fsm-state ctx)
-          out (exec/apply-phase-transition ctx event [] identity always-fail)]
+          out (transition/apply-phase-transition ctx event [] identity always-fail)]
       (is (= :phase/succeed event)
           "sanity: determine-phase-event picks :phase/succeed on :completed")
       (is (nil? (:test/transition-to-failed-called? out))
@@ -391,7 +391,7 @@
 (deftest ^{:stratum 2} apply-gate-validation-policy-review-uses-implement-artifact
   (testing "policy-review runs through the normal gate path against implemented code"
     (let [phase-result {:result {:output {:review/decision :approved}}}
-          out          (exec/apply-gate-validation
+          out          (transition/apply-gate-validation
                         {:config {:gates [:policy-review]}}
                         phase-result
                         (policy-review-context))]
