@@ -25,7 +25,8 @@ Runtime review fixes need complete regression coverage without exceeding the
 - Project confirmed PR observations and their grant, envelope and effect references.
 - Require a granted PR-create transaction, including for matched reconciliation.
 - Permit the validated policy correlation hash in the proposal input contract;
-  the dependent runtime binds it into the governance digest. Do not discard it.
+  retain it through the governed receipt and bind it into the governance digest.
+  Keep the provider payload hash unchanged. Do not discard policy correlation.
 - Retain failed or uncertain transactions as anomaly data.
 
 ## Standards adversarial pass
