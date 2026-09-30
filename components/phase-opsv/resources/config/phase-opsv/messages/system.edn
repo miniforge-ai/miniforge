@@ -1,5 +1,11 @@
 {:phase-opsv/system
  {:adapter/missing "The OPSV workflow requires an adapter implementing OPSVAdapter."
+  :adapter/invalid-callbacks "OPSV adapter callbacks must be functions."
+  :verification/missing "The runtime requires a fresh candidate verification adapter."
+  :verification/failed "The candidate verification adapter failed."
+  :verification/invalid "The candidate verification measurements are invalid."
+  :verification/mismatched "The verification measurements do not match this candidate execution."
+  :verification/environment-mismatch "The verification environment differs from the experiment environment."
   :pr/policy-mismatch "Prepared PR target does not match the verified policy."
   :pr/invalid-correlation "OPSV PR preparation requires a workflow UUID and a valid owner/repository identity."
   :pr/unconfirmed "OPSV PR execution has no confirmed successful outcome."

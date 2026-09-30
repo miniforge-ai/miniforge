@@ -22,9 +22,18 @@
 
 ;------------------------------------------------------------------------------ Layer 0
 
-(defn ^{:stratum 0} create-adapter
+(defn- ^{:stratum 0} replay-verification [scenario request]
+  (opsv/verification-receipt request (:opsv/verification-result scenario)))
+
+;------------------------------------------------------------------------------ Layer 1
+
+(defn ^{:stratum 1} create-adapter
   "Create an adapter that deterministically replays an immutable scenario."
   [scenario]
   (opsv/functional-adapter
    (constantly (:opsv/candidate-drivers scenario))
-   (constantly (:opsv/ramp-result scenario))))
+   (constantly (:opsv/ramp-result scenario))
+   (partial replay-verification scenario)))
+
+(comment
+  (create-adapter {}))
