@@ -21,9 +21,9 @@
    [ai.miniforge.content-hash.interface :as content-hash]
    [ai.miniforge.evidence-bundle.canonical-validation :as validation]
    [ai.miniforge.evidence-bundle.opsv-assembly :as assembly]
+   [ai.miniforge.evidence-bundle.opsv-finalization-references :as references]
    [ai.miniforge.evidence-bundle.schema.opsv :as schema]
    [ai.miniforge.response.interface :as response]
-   [clojure.set :as cset]
    [malli.core :as m]))
 
 ;------------------------------------------------------------------------------ Layer 0
@@ -34,85 +34,9 @@
                          {:opsv/evidence-bundle-id bundle-id
                           :opsv.validation/errors errors}))
 
-(defn- ^{:stratum 0} reference-set
-  [value]
-  (cond
-    (nil? value) #{}
-    (set? value) value
-    (sequential? value) (set value)
-    :else #{value}))
-
-(defn- ^{:stratum 0} detailed-artifact-refs
-  [evidence]
-  (set (concat
-        [(:opsv/experiment-pack-artifact-id evidence)]
-        (map :artifact-id (:opsv/policy-proposals evidence))
-        (get-in evidence [:opsv/actuation :postcondition-artifact-refs])
-        (get-in evidence [:opsv/actuation :rollback :artifact-refs])
-        (:opsv/metric-query-artifact-refs evidence)
-        (:opsv/metric-snapshot-artifact-refs evidence)
-        (:opsv/diff-artifact-refs evidence))))
-
-(def ^{:stratum 0} ^:private reference-paths
-  [[:opsv/event-refs]
-   [:opsv/artifact-refs]
-   [:opsv/grant-refs]
-   [:opsv/actuation :pr-refs]
-   [:opsv/actuation :apply-refs]
-   [:opsv/actuation :postcondition-artifact-refs]
-   [:opsv/actuation :rollback :artifact-refs]
-   [:opsv/metric-query-artifact-refs]
-   [:opsv/metric-snapshot-artifact-refs]
-   [:opsv/diff-artifact-refs]])
-
-(defn- ^{:stratum 0} governed-effect-sort-key
-  [effect]
-  [(str (:evidence/effect-id effect))
-   (str (:evidence/grant-id effect))
-   (str (:evidence/envelope-id effect))])
-
 ;------------------------------------------------------------------------------ Layer 1
 
-(defn- ^{:stratum 1} canonicalize-reference-order
-  [evidence]
-  (-> (reduce (fn [result path]
-                (update-in result path #(vec (sort %))))
-              evidence
-              reference-paths)
-      (update-in [:opsv/actuation :governed-effects]
-                 #(vec (sort-by governed-effect-sort-key %)))))
-
-(defn- ^{:stratum 1} reference-errors
-  [record evidence available-artifact-ids]
-  (let [event-refs (reference-set (:opsv/event-refs evidence))
-        artifact-refs (reference-set (:opsv/artifact-refs evidence))
-        grant-refs (reference-set (:opsv/grant-refs evidence))
-        available-artifact-refs (reference-set available-artifact-ids)
-        effects (reference-set (get-in evidence [:opsv/actuation
-                                                 :governed-effects]))
-        effect-grants (set (map :evidence/grant-id effects))]
-    (cond-> []
-      (not= (:opsv/event-refs record) event-refs)
-      (conj {:code :event-reference-mismatch})
-      (not= (:opsv/artifact-refs record) artifact-refs)
-      (conj {:code :artifact-reference-mismatch})
-      (not= (:opsv/grant-refs record) grant-refs)
-      (conj {:code :grant-reference-mismatch})
-      (not= (:opsv/governed-effects record) effects)
-      (conj {:code :governed-effect-mismatch})
-      (not (cset/subset? (detailed-artifact-refs evidence) artifact-refs))
-      (conj {:code :detailed-artifact-reference-missing})
-      (not (cset/subset? artifact-refs available-artifact-refs))
-      (conj {:code :referenced-artifact-not-found
-             :missing (vec (sort (cset/difference
-                                  artifact-refs
-                                  available-artifact-refs)))})
-      (not (cset/subset? effect-grants grant-refs))
-      (conj {:code :uncorrelated-governed-effect}))))
-
-;------------------------------------------------------------------------------ Layer 2
-
-(defn ^{:stratum 2} finalize!
+(defn ^{:stratum 1} finalize!
   "Publish one immutable N6 bundle using the preallocated identifier."
   [store bundle-id base-bundle evidence available-artifact-ids]
   (let [record (assembly/get-assembly store bundle-id)]
@@ -127,7 +51,7 @@
       (let [schema-valid? (m/validate schema/OpsvEvidence evidence)
             base-valid? (map? base-bundle)
             canonical-evidence (if schema-valid?
-                                 (canonicalize-reference-order evidence)
+                                 (references/canonicalize evidence)
                                  evidence)
             candidate (when base-valid?
                         (-> base-bundle
@@ -144,7 +68,7 @@
                                 (:evidence-bundle/workflow-id base-bundle)))
                      (conj {:code :workflow-reference-mismatch})
                      schema-valid?
-                     (into (reference-errors record canonical-evidence
+                     (into (references/errors record canonical-evidence
                                              available-artifact-ids))
                      candidate
                      (into (map #(assoc % :code :invalid-evidence-bundle)
