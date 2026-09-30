@@ -48,6 +48,11 @@ preflight, and lost responses. No test opens an external PR. Provider tests cove
 the new post-preflight dispatch boundary. Full project suites, hooks, scoped
 standards scans and a packaged CLI build are required before merge.
 
+The provider prerequisite (#1939) is now merged into main and integrated here.
+All CI checks, including Build, passed at `ed3688cc`. Final-head review remains
+required: unused grants are revoked after failed pre-dispatch transactions, and
+settlement uses the last validated timestamp rather than calling a fallible clock.
+
 ## Deployment plan
 
 Trusted `:execution/opts :opsv/pr-execution` configuration supplies separate
