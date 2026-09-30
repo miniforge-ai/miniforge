@@ -28,18 +28,18 @@
   (:require
    [ai.miniforge.fsm.interface :as fsm]
    [ai.miniforge.reliability.budget :as budget]
+   [ai.miniforge.reliability.degradation-config :as config]
+   [ai.miniforge.reliability.degradation-signal :as signals]
    [ai.miniforge.reliability.messages :as messages]
    [ai.miniforge.event-stream.interface.stream :as stream]
    [ai.miniforge.event-stream.interface.events :as events]
-   [clojure.edn :as edn]
-   [clojure.java.io :as io]
    [clojure.string :as str]))
 
 ;------------------------------------------------------------------------------ Layer 0
 
-;; Config
-(def ^{:stratum 0} ^:private defaults
-  (-> (io/resource "config/reliability/defaults.edn") slurp edn/read-string))
+(def ^{:stratum 0} default-config config/defaults)
+
+(def ^{:stratum 0} recommendation signals/recommendation)
 
 ;; FSM definition
 (def ^{:stratum 0} degradation-machine
@@ -82,92 +82,14 @@
    event-stream   ; event stream atom for emitting events
    config])  ; data-driven degradation policy
 
-(def ^{:stratum 0} ^:private mode-rank
-  {:nominal 0
-   :degraded 1
-   :safe-mode 2})
-
 (defn ^{:stratum 0} current-mode
   [manager]
   (fsm/current-state @(:fsm-state manager)))
 
-(defn- ^{:stratum 0} transition-signal
-  [mode event message & [opts]]
-  (cond-> {:mode mode
-           :event event
-           :message message}
-    opts (merge opts)))
-
-(defn- ^{:stratum 0} dependency-id-label
-  [dependency]
-  (some-> dependency :dependency/id name))
-
-(defn- ^{:stratum 0} active-dependencies
-  [dependency-health]
-  (->> dependency-health
-       vals
-       (remove #(= :healthy (:dependency/status %)))
-       vec))
-
-(defn- ^{:stratum 0} dependencies-with-status
-  [dependencies status]
-  (filterv #(= status (:dependency/status %)) dependencies))
-
-(defn- ^{:stratum 0} dependency-mode
-  [status {:keys [dependency-status->mode]}]
-  (get dependency-status->mode status))
-
-(defn- ^{:stratum 0} dependency-event
-  [status {:keys [dependency-status->event]}]
-  (get dependency-status->event status))
+(defn ^{:stratum 0} stop-result [manager]
+  (some-> (:safe-mode/stop-result manager) deref))
 
 ;------------------------------------------------------------------------------ Layer 1
-
-(def ^{:stratum 1} default-config
-  "Default degradation policy config."
-  (:degradation-policy defaults))
-
-(defn- ^{:stratum 1} dependency-labels
-  [dependencies]
-  (->> dependencies
-       (keep dependency-id-label)
-       sort
-       vec))
-
-(defn- ^{:stratum 1} prioritized-status
-  [dependencies {:keys [dependency-status-precedence]}]
-  (some (fn [status]
-          (when (seq (dependencies-with-status dependencies status))
-            status))
-        dependency-status-precedence))
-
-(defn- ^{:stratum 1} budget-signal
-  [budget-state]
-  (let [any-critical-exhausted? (budget/critical-budget-exhausted? budget-state)
-        any-critical-low? (budget/critical-budget-low? budget-state)]
-    (cond
-      any-critical-exhausted?
-      (transition-signal :safe-mode
-                         :emergency-stop
-                         (messages/t :degradation/critical-budget-exhausted)
-                         {:safe-mode-trigger :error-budget
-                          :safe-mode-details (messages/t :degradation/critical-budget-exhausted)})
-
-      any-critical-low?
-      (transition-signal :degraded
-                         :budget-critical
-                         (messages/t :degradation/critical-budget-low)))))
-
-(defn- ^{:stratum 1} stronger-signal
-  [left right]
-  (cond
-    (nil? left) right
-    (nil? right) left
-    (> (mode-rank (:mode right))
-       (mode-rank (:mode left))) right
-    (= (mode-rank (:mode right))
-       (mode-rank (:mode left))) right
-    :else left))
 
 (defn- ^{:stratum 1} transition!
   "Attempt a state transition, emit events if it succeeds.
@@ -190,15 +112,12 @@
                                                      safe-mode-details)))))
     new-mode))
 
+(defn ^{:stratum 1} create-manager
+  [event-stream & [config]]
+  (->DegradationManager (atom (fsm/initialize degradation-machine))
+                         event-stream (merge default-config config)))
+
 ;------------------------------------------------------------------------------ Layer 2
-
-(defn- ^{:stratum 2} merge-manager-config
-  [config]
-  (merge default-config config))
-
-(defn- ^{:stratum 2} dependency-list
-  [dependencies]
-  (str/join ", " (dependency-labels dependencies)))
 
 (defn ^{:stratum 2} enter-safe-mode!
   [manager trigger details]
@@ -212,7 +131,7 @@
                        :manual :manual
                        :emergency-stop)]
         (transition! manager
-                     (transition-signal :safe-mode
+                     (config/signal :safe-mode
                                         event-kw
                                         (or details (name trigger))
                                         {:safe-mode-trigger trigger
@@ -232,7 +151,7 @@
   (let [current (current-mode manager)]
     (when (= current :safe-mode)
       (let [new-mode (transition! manager
-                                  (transition-signal :nominal
+                                  (config/signal :nominal
                                                      :operator-exit
                                                      (messages/t :degradation/operator-exit-reason
                                                                  {:principal principal :justification justification})))]
@@ -241,66 +160,7 @@
                            (events/safe-mode-exited stream principal justification 0 0)))
         new-mode))))
 
-;------------------------------------------------------------------------------ Layer 3
-
-(defn ^{:stratum 3} create-manager
-  [event-stream & [config]]
-  (->DegradationManager
-   (atom (fsm/initialize degradation-machine))
-   event-stream
-   (merge-manager-config config)))
-
-(defn- ^{:stratum 3} dependency-message
-  [status dependencies]
-  (let [dependency-listing (dependency-list dependencies)
-        params {:dependencies dependency-listing}]
-    (case status
-      :operator-action-required (messages/t :degradation/dependency-operator-action params)
-      :misconfigured (messages/t :degradation/dependency-operator-action params)
-      :unavailable (messages/t :degradation/dependency-unavailable params)
-      :degraded (messages/t :degradation/dependency-degraded params)
-      (messages/t :degradation/dependency-degraded params))))
-
-;------------------------------------------------------------------------------ Layer 4
-
-(defn- ^{:stratum 4} dependency-signal
-  [dependency-health config]
-  (let [dependencies (active-dependencies dependency-health)
-        status (prioritized-status dependencies config)
-        mode (dependency-mode status config)
-        event (dependency-event status config)]
-    (when (and status mode event)
-      (transition-signal mode
-                         event
-                         (dependency-message status dependencies)
-                         {:dependency/status status
-                          :dependency/ids (dependency-labels dependencies)
-                          :safe-mode-trigger (when (= mode :safe-mode) event)
-                          :safe-mode-details (when (= mode :safe-mode)
-                                               (dependency-message status dependencies))}))))
-
-;------------------------------------------------------------------------------ Layer 5
-
-(defn ^{:stratum 5} recommendation
-  "Pure degradation recommendation from budgets and dependency health.
-
-   Returns a signal map with:
-   - :mode    target mode
-   - :event   FSM transition event
-   - :message localized degradation trigger description"
-  ([budget-state]
-   (recommendation budget-state {} default-config))
-  ([budget-state dependency-health]
-   (recommendation budget-state dependency-health default-config))
-  ([budget-state dependency-health config]
-   (let [budget-derived-signal (budget-signal budget-state)
-         dependency-derived-signal (dependency-signal dependency-health config)]
-     (or (stronger-signal budget-derived-signal dependency-derived-signal)
-         (transition-signal :nominal nil (messages/t :degradation/dependency-recovered))))))
-
-;------------------------------------------------------------------------------ Layer 6
-
-(defn ^{:stratum 6} evaluate-and-transition!
+(defn ^{:stratum 2} evaluate-and-transition!
   "Evaluate budget state and trigger mode transition if warranted.
 
    Arguments:
@@ -349,7 +209,7 @@
         ;; non-empty budget-state means budgets are being evaluated;
         ;; otherwise the recovery is the dependency clearing.
         (transition! manager
-                     (transition-signal
+                     (config/signal
                       :nominal
                       :budget-recovered
                       (messages/t (if (seq budget-state)
