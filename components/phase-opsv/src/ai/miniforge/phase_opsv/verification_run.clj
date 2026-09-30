@@ -23,7 +23,7 @@
    [:environment-fingerprint [:map-of :keyword :any]]
    [:observations [:map-of :string :any]]
    [:confidence [:and number? [:fn #(<= 0 % 1)]]]
-   [:metric-snapshot-artifact-refs [:vector :uuid]]])
+   [:metric-snapshot-artifact-refs [:vector {:min 1} :uuid]]])
 
 (defn- ^{:stratum 0} request-values [policy pack]
   (let [policy-hash (hash/content-hash policy)
