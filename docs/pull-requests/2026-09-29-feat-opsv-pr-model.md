@@ -37,6 +37,8 @@ authority issuance or new library dependencies are introduced. The provider's
 repository schema moves to the shared OPSV domain contract so candidate creation,
 governed proposal validation and provider dispatch use the same shape. The provider
 depends on the domain interface; the application does not depend on adapter internals.
+The policy-hash contract is also shared by candidate, proposal and durable receipt
+validation, preventing malformed correlation from receiving an effect identity.
 
 ## Testing
 
