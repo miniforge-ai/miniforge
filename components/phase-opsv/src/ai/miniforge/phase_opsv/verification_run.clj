@@ -6,7 +6,9 @@
   (:require [ai.miniforge.anomaly.interface :as anomaly]
             [ai.miniforge.content-hash.interface :as hash]
             [ai.miniforge.opsv.interface :as opsv]
+            [ai.miniforge.phase-opsv.artifact-confirmation :as confirmation]
             [ai.miniforge.phase-opsv.messages :as msg]
+            [ai.miniforge.phase-opsv.policy :as policy]
             [ai.miniforge.phase-opsv.protocol :as port]
             [ai.miniforge.phase-opsv.runtime-context :as context]
             [malli.core :as m]))
@@ -87,6 +89,8 @@
         request (request synthesized)]
     (cond
       (anomaly/anomaly? request) request
+      (not (policy/confirmed-evidence? ctx (:opsv/operational-policy synthesized)))
+      (confirmation/failure synthesized)
       (satisfies? port/VerificationAdapter adapter)
       (validate-receipt request (:opsv/environment-fingerprint synthesized)
                         (invoke-with-exception-handling adapter request))
