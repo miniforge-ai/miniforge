@@ -27,23 +27,34 @@
 
 ;------------------------------------------------------------------------------ Layer 1
 
-(defn ^{:stratum 1} candidate [ctx verified target]
-  (if-not (and (nonblank? (:opsv/policy-hash verified))
-               (= (:opsv/policy-hash verified) (:opsv/policy-hash target)))
-    (anomaly/anomaly :conflict (msg/ts :pr/policy-mismatch) {})
-    (assoc target
-           :workflow-run/id (context/workflow-id ctx)
-           :effect/id (effect-id (context/workflow-id ctx) (:pr/repo target))
-           :opsv/evidence-bundle-id (get-in ctx [:execution/input :opsv/evidence-bundle-id])
-           :opsv/verification-result (:opsv/verification-result verified))))
+(defn- ^{:stratum 1} prepared-candidate [ctx workflow-id verified target]
+  (assoc target
+         :workflow-run/id workflow-id
+         :effect/id (effect-id workflow-id (:pr/repo target))
+         :opsv/evidence-bundle-id (get-in ctx [:execution/input :opsv/evidence-bundle-id])
+         :opsv/verification-result (:opsv/verification-result verified)))
 
 (defn- ^{:stratum 1} confirmed? [transaction]
-  (and (or (= :succeeded (:effect/state transaction))
+  (and (= :effect/pr-create (:effect/class transaction))
+       (= :granted (:effect/authority transaction))
+       (or (= :succeeded (:effect/state transaction))
            (and (= :reconciled (:effect/state transaction)) (true? (:effect/matched? transaction))))
        (every? uuid? (vals (governed-effect transaction)))
        (nonblank? (get-in transaction [:effect/observed :pr/url]))))
 
 ;------------------------------------------------------------------------------ Layer 2
+
+(defn ^{:stratum 2} candidate [ctx verified target]
+  (let [workflow-id (context/workflow-id ctx)]
+    (cond
+      (not (and (nonblank? (:opsv/policy-hash verified))
+                (= (:opsv/policy-hash verified) (:opsv/policy-hash target))))
+      (anomaly/anomaly :conflict (msg/ts :pr/policy-mismatch) {})
+
+      (not (and (uuid? workflow-id) (nonblank? (:pr/repo target))))
+      (anomaly/anomaly :invalid-input (msg/ts :pr/invalid-correlation) {})
+
+      :else (prepared-candidate ctx workflow-id verified target))))
 
 (defn ^{:stratum 2} outcome [record transaction]
   (if (confirmed? transaction)

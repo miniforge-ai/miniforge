@@ -11,6 +11,7 @@
 (defn- ^{:stratum 0} confirmed-transaction []
   {:effect/id (random-uuid) :effect/grant-id (random-uuid)
    :effect/envelope-id (random-uuid) :effect/state :succeeded
+   :effect/class :effect/pr-create :effect/authority :granted
    :effect/observed {:pr/url "https://github.com/example/opsv/pull/17"}})
 
 (deftest ^{:stratum 0} one-effect-identity-per-run-and-repository-test
@@ -34,6 +35,15 @@
                           [:execution/id :workflow/id :workflow-id])]
     (is (every? #(= id (:workflow-run/id %)) candidates))
     (is (apply = (map :effect/id candidates)))))
+
+(deftest ^{:stratum 0} malformed-correlation-inputs-cannot-produce-replay-identities-test
+  (doseq [[run repository] [[nil "example/opsv"] ["not-a-uuid" "example/opsv"]
+                            [(random-uuid) nil] [(random-uuid) ""]
+                            [(random-uuid) " "] [(random-uuid) 42]]]
+    (let [output (model/candidate {:execution/id run} {:opsv/policy-hash "same"}
+                                  {:pr/repo repository :opsv/policy-hash "same"})]
+      (is (= :invalid-input (:anomaly/type output)))
+      (is (nil? (:effect/id output))))))
 
 (deftest ^{:stratum 0} replay-identity-does-not-depend-on-process-locale-test
   (let [original (Locale/getDefault)
@@ -68,9 +78,12 @@
 
 (deftest ^{:stratum 1} incomplete-success-or-unmatched-reconciliation-does-not-project-a-pr-test
   (let [transaction (confirmed-transaction)
-        missing (mapv #(dissoc transaction %) [:effect/id :effect/grant-id :effect/envelope-id :effect/observed])
+        missing (mapv #(dissoc transaction %) [:effect/id :effect/grant-id :effect/envelope-id
+                                               :effect/observed :effect/class :effect/authority])
         invalid (into missing [(assoc transaction :effect/grant-id "not-a-uuid")
                                (assoc-in transaction [:effect/observed :pr/url] " ")
+                               (assoc transaction :effect/class :effect/deploy)
+                               (assoc transaction :effect/authority :unenforced)
                                (assoc transaction :effect/state :reconciled :effect/matched? false)])]
     (doseq [value invalid]
       (let [output (model/outcome {} value)]

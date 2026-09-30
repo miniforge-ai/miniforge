@@ -21,7 +21,9 @@ Runtime review fixes need complete regression coverage without exceeding the
 - Derive one stable effect identity per workflow and case-insensitive repository.
 - Use locale-independent repository normalization and the shared workflow-ID resolver.
 - Reject a prepared target that does not match the verified policy hash.
+- Reject malformed workflow IDs and repositories before deriving replay identities.
 - Project confirmed PR observations and their grant, envelope and effect references.
+- Require a granted PR-create transaction, including for matched reconciliation.
 - Retain failed or uncertain transactions as anomaly data.
 
 ## Standards adversarial pass
