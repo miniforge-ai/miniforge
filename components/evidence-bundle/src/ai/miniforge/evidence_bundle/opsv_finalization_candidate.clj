@@ -26,7 +26,7 @@
   (cond-> []
     (not schema-valid?) (conj {:code :invalid-opsv-evidence})
     (not (map? base)) (conj {:code :invalid-base-bundle})
-    (some #(contains? base %) [:evidence/content-hash :evidence/signature :evidence/sealed-at])
+    (and (map? base) (some #(contains? base %) [:evidence/content-hash :evidence/signature :evidence/sealed-at]))
     (conj {:code :sealed-base-bundle})
     (and (map? base) (not= (:evidence-bundle/workflow-id record) (:evidence-bundle/workflow-id base)))
     (conj {:code :workflow-reference-mismatch})
