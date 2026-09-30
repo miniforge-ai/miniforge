@@ -60,3 +60,14 @@
     (fn [ctx directory]
       (is (anomaly/anomaly? (boundary/publish-with-exception-handling ctx :opsv/discover {})))
       (is (empty? (seq (.listFiles (io/file directory))))))))
+
+(deftest ^{:stratum 1} fatal-publication-error-is-not-retryable-test
+  (with-context
+    (fn [ctx _]
+      (let [prepared (runtime/ensure-assembly ctx)
+            output {:opsv/actuation-record {:effective-actuation-mode :none}}
+            fail! (fn [& _] (throw (AssertionError. "fatal publication")))
+            result (with-redefs [artifact/publish! fail!]
+                     (boundary/publish-with-exception-handling prepared :opsv/actuate output))]
+        (is (= :fatal (:anomaly/type result)))
+        (is (= output (get-in result [:anomaly/data :opsv/phase-output])))))))
