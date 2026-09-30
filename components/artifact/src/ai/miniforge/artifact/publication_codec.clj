@@ -15,6 +15,9 @@
 
 (def ^{:stratum 0} maximum-bytes (* 16 1024 1024))
 
+(def ^{:stratum 0} read-options
+  {:handlers {"list" (transit/read-handler #(apply list %))}})
+
 (defn- ^{:stratum 0} utf8-decoder []
   (doto (.newDecoder StandardCharsets/UTF_8)
     (.onMalformedInput CodingErrorAction/REPORT)
@@ -26,7 +29,7 @@
   (with-open [json-input (io/reader (InputStreamReader. (ByteArrayInputStream. bytes) (utf8-decoder)))
               transit-input (ByteArrayInputStream. bytes)]
     (when (= 1 (count (take 2 (json/parsed-seq json-input))))
-      (transit/read (transit/reader transit-input :json)))))
+      (transit/read (transit/reader transit-input :json read-options)))))
 
 ;------------------------------------------------------------------------------ Layer 2
 

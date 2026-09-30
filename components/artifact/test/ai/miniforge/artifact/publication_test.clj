@@ -191,6 +191,7 @@
       (let [value (assoc (record) :artifact/content (list 1 2))
             id (:artifact/id value) target (files/target directory id)]
         (is (= value (artifact/publish! directory value)))
+        (is (= value (artifact/publish! directory (artifact/read-published directory id))))
         (let [envelope (codec/decode (files/read-bytes target))
               changed (String. ^bytes (codec/encode (assoc value :artifact/content [1 2])) StandardCharsets/UTF_8)
               corrupted (assoc envelope :publication/wire changed)]
