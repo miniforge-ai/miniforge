@@ -13,6 +13,39 @@
 
 ;------------------------------------------------------------------------------ Layer 0
 
+(defn- ^{:stratum 0} record-abort [observed value]
+  (swap! observed conj value)
+  true)
+
+(defn- ^{:stratum 0} record-fenced-abort [observed run]
+  (swap! observed conj (:stopped? (actuation/mutation-status (:fence run))))
+  true)
+
+(defn- ^{:stratum 0} failing-abort [fail?]
+  (if @fail? (throw (AssertionError. "abort failed")) true))
+
+(defn- ^{:stratum 0} count-abort [calls]
+  (swap! calls inc)
+  true)
+
+(defn- ^{:stratum 0} await-work [entered finish]
+  (deliver entered true)
+  @finish)
+
+(defn- ^{:stratum 0} preflight-then-stop [supervisor calls options arguments]
+  (let [response (f/command calls options arguments)]
+    (opsv/stop-supervised-runs! supervisor f/now)
+    response))
+
+(defn- ^{:stratum 0} register-then-stop [register supervisor issued-id directory issued]
+  (let [result (register directory issued)]
+    (reset! issued-id (:grant/id issued))
+    (opsv/stop-supervised-runs! supervisor f/now)
+    result))
+
+(defn- ^{:stratum 0} refuse-revocation [& _]
+  (anomaly/anomaly :unavailable "disk failed" {}))
+
 (defn- ^{:stratum 0} with-run [supervisor abort! test-fn]
   (let [{:keys [ctx runtime calls]} (f/setup)
         handles (opsv/register-run-control! supervisor (:execution/id ctx)
@@ -22,12 +55,14 @@
          (finally (doseq [file (reverse (file-seq (io/file (get-in runtime [:provider :directory]))))]
                     (io/delete-file file))))))
 
-(deftest ^{:stratum 0} stop-closes-all-fences-before-abort-callbacks-test
+;------------------------------------------------------------------------------ Layer 1
+
+(deftest ^{:stratum 1} stop-closes-all-fences-before-abort-callbacks-test
   (let [supervisor (opsv/create-run-supervisor) observed (atom [])
         first (opsv/register-run-control! supervisor (random-uuid) "/tmp/authority-a"
-                (fn [] (swap! observed conj :first) true))
+                (partial record-abort observed :first))
         second (opsv/register-run-control! supervisor (random-uuid) "/tmp/authority-b"
-                 (fn [] (swap! observed conj (:stopped? (actuation/mutation-status (:fence first)))) true))
+                 (partial record-fenced-abort observed first))
         result (opsv/stop-supervised-runs! supervisor f/now)]
     (is (:cleanup-confirmed? result))
     (is (:effects-settled? result))
@@ -36,11 +71,11 @@
     (is (anomaly/anomaly? (opsv/register-run-control! supervisor (random-uuid) "/tmp/c" (constantly true))))
     (is (anomaly/anomaly? (opsv/stop-supervised-runs! (Object.) f/now)))))
 
-(deftest ^{:stratum 0} failed-abort-does-not-skip-other-runs-or-reopen-admission-test
+(deftest ^{:stratum 1} failed-abort-does-not-skip-other-runs-or-reopen-admission-test
   (let [supervisor (opsv/create-run-supervisor) fail? (atom true) other (atom 0)
         first (opsv/register-run-control! supervisor (random-uuid) "/tmp/a"
-                #(if @fail? (throw (AssertionError. "abort failed")) true))]
-    (opsv/register-run-control! supervisor (random-uuid) "/tmp/b" #(do (swap! other inc) true))
+                (partial failing-abort fail?))]
+    (opsv/register-run-control! supervisor (random-uuid) "/tmp/b" (partial count-abort other))
     (is (false? (:cleanup-confirmed? (opsv/stop-supervised-runs! supervisor f/now))))
     (is (= 1 @other))
     (is (anomaly/anomaly? (control/at-boundary! (:control first) (constantly :unexpected))))
@@ -49,11 +84,11 @@
     (is (:cleanup-confirmed? (opsv/stop-supervised-runs! supervisor f/now)))
     (is (= 1 @other))))
 
-(deftest ^{:stratum 0} admitted-work-can-settle-but-cannot-retire-early-test
+(deftest ^{:stratum 1} admitted-work-can-settle-but-cannot-retire-early-test
   (let [supervisor (opsv/create-run-supervisor)
         run (opsv/register-run-control! supervisor (random-uuid) "/tmp/a" (constantly true))
         entered (promise) finish (promise)
-        work (future (control/at-boundary! (:control run) #(do (deliver entered true) @finish)))]
+        work (future (control/at-boundary! (:control run) (partial await-work entered finish)))]
     (try
       (is (= true (deref entered 2000 :timeout)))
       (is (false? (:effects-settled? (opsv/stop-supervised-runs! supervisor f/now))))
@@ -64,11 +99,9 @@
       (is (anomaly/anomaly? (control/at-boundary! (:control run) (constantly :unexpected))))
       (finally (deliver finish :settled) (future-cancel work)))))
 
-;------------------------------------------------------------------------------ Layer 1
-
 (deftest ^{:stratum 1} successful-pr-grant-is-revoked-by-global-stop-test
   (let [supervisor (opsv/create-run-supervisor) aborts (atom 0)]
-    (with-run supervisor #(do (swap! aborts inc) true)
+    (with-run supervisor (partial count-abort aborts)
       (fn [ctx runtime calls]
         (let [output (opsv/actuate ctx)
               id (get-in output [:opsv/actuation-record :governed-effects 0 :evidence/grant-id])
@@ -86,10 +119,7 @@
   (let [supervisor (opsv/create-run-supervisor)]
     (with-run supervisor (constantly true)
       (fn [ctx runtime calls]
-        (let [command (fn [options arguments]
-                        (let [response (f/command calls options arguments)]
-                          (opsv/stop-supervised-runs! supervisor f/now)
-                          response))
+        (let [command (partial preflight-then-stop supervisor calls)
               output (opsv/actuate (assoc-in ctx [:execution/opts :opsv/pr-execution :provider :run-command] command))]
           (is (not= :pr-only (get-in output [:opsv/actuation-record :effective-actuation-mode])))
           (is (= ["GET"] (mapv #(get-in % [:arguments 6]) @calls)))
@@ -101,11 +131,7 @@
     (with-run supervisor (constantly true)
       (fn [ctx runtime calls]
         (let [register grant/register! issued-id (atom nil)
-              output (with-redefs [grant/register! (fn [directory issued]
-                                                   (let [result (register directory issued)]
-                                                     (reset! issued-id (:grant/id issued))
-                                                     (opsv/stop-supervised-runs! supervisor f/now)
-                                                     result))]
+              output (with-redefs [grant/register! (partial register-then-stop register supervisor issued-id)]
                        (opsv/actuate ctx))]
           (is (= :none (get-in output [:opsv/actuation-record :effective-actuation-mode])))
           (is (empty? @calls))
@@ -126,7 +152,7 @@
       (fn [ctx runtime _]
         (let [output (opsv/actuate ctx)
               id (get-in output [:opsv/actuation-record :governed-effects 0 :evidence/grant-id])
-              unconfirmed (with-redefs [grant/revoke-stored! (fn [& _] (anomaly/anomaly :unavailable "disk failed" {}))]
+              unconfirmed (with-redefs [grant/revoke-stored! refuse-revocation]
                             (opsv/stop-supervised-runs! supervisor f/now))]
           (is (false? (:cleanup-confirmed? unconfirmed)))
           (is (nil? (:grant/revoked-at (grant/current (:authority-directory runtime) id))))
