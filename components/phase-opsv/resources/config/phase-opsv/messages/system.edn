@@ -1,5 +1,7 @@
 {:phase-opsv/system
  {:adapter/missing "The OPSV workflow requires an adapter implementing OPSVAdapter."
+  :pr/policy-mismatch "Prepared PR target does not match the verified policy."
+  :pr/unconfirmed "OPSV PR execution has no confirmed successful outcome."
   :governance/invalid-policy "Runtime-owned OPSV governance policy is invalid."
   :governance/missing-policy "Runtime-owned OPSV governance policy is missing."
   :adapter/invalid-result "The OPSV adapter returned an invalid result shape."
