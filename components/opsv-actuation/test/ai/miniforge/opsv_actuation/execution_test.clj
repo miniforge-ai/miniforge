@@ -73,5 +73,21 @@
     (is (= :succeeded (:effect/state (commit! context))))
     (is (true? (:pr/draft? (second (first @calls)))))))
 
+(deftest ^{:stratum 0} verified-policy-hash-is-bound-to-durable-governance-test
+  (let [hash (apply str (repeat 64 "a"))
+        candidate (assoc fixture/candidate :opsv/policy-hash hash)
+        {:keys [decision] :as context} (setup candidate)
+        prepared (actuation/prepare-governed-pr candidate decision)
+        altered (actuation/prepare-governed-pr
+                  (assoc candidate :opsv/policy-hash (apply str (repeat 64 "b"))) decision)
+        proposed (propose! context)
+        committed (commit! context)]
+    (is (= hash (:opsv/policy-hash prepared)))
+    (is (= (:pr/payload-hash prepared) (:pr/payload-hash altered)))
+    (is (not= (:pr/governance-hash prepared) (:pr/governance-hash altered)))
+    (is (= hash (get-in proposed [:effect/proposal :opsv/policy-hash])))
+    (is (= :succeeded (:effect/state committed)))
+    (is (= hash (get-in committed [:effect/proposal :opsv/policy-hash])))))
+
 (comment
   (setup))
