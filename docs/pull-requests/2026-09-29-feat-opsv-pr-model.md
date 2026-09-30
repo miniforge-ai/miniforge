@@ -24,13 +24,18 @@ Runtime review fixes need complete regression coverage without exceeding the
 - Reject malformed workflow IDs and repositories before deriving replay identities.
 - Project confirmed PR observations and their grant, envelope and effect references.
 - Require a granted PR-create transaction, including for matched reconciliation.
+- Permit the validated policy correlation hash in the proposal input contract;
+  the dependent runtime binds it into the governance digest. Do not discard it.
 - Retain failed or uncertain transactions as anomaly data.
 
 ## Standards adversarial pass
 
 Keep candidate and outcome construction in one pure model namespace. Reuse the
 shared workflow identity and localized message catalogs. No external effects,
-authority issuance, extra dependencies or public component APIs are introduced.
+authority issuance or new library dependencies are introduced. The provider's
+repository schema moves to the shared OPSV domain contract so candidate creation,
+governed proposal validation and provider dispatch use the same shape. The provider
+depends on the domain interface; the application does not depend on adapter internals.
 
 ## Testing
 

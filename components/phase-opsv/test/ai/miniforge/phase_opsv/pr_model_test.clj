@@ -39,7 +39,9 @@
 (deftest ^{:stratum 0} malformed-correlation-inputs-cannot-produce-replay-identities-test
   (doseq [[run repository] [[nil "example/opsv"] ["not-a-uuid" "example/opsv"]
                             [(random-uuid) nil] [(random-uuid) ""]
-                            [(random-uuid) " "] [(random-uuid) 42]]]
+                            [(random-uuid) " "] [(random-uuid) 42]
+                            [(random-uuid) "example"] [(random-uuid) "example/opsv/extra"]
+                            [(random-uuid) "example/opsv "] [(random-uuid) "/opsv"]]]
     (let [output (model/candidate {:execution/id run} {:opsv/policy-hash "same"}
                                   {:pr/repo repository :opsv/policy-hash "same"})]
       (is (= :invalid-input (:anomaly/type output)))

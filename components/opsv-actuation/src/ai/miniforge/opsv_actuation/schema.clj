@@ -31,7 +31,7 @@
   [:map {:closed true}
    [:workflow-run/id :uuid]
    [:effect/id :uuid]
-   [:pr/repo NonBlankString]
+   [:pr/repo opsv/Repository]
    [:pr/base NonBlankString]
    [:pr/branch NonBlankString]
    [:pr/head-sha GitObjectId]
