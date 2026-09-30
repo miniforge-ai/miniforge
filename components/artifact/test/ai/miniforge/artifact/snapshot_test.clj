@@ -3,6 +3,7 @@
 ;; Licensed under the Apache License, Version 2.0.
 (ns ai.miniforge.artifact.snapshot-test
   (:require [ai.miniforge.artifact.interface :as artifact]
+            [ai.miniforge.artifact.messages :as msg]
             [ai.miniforge.artifact.publication-codec :as codec]
             [ai.miniforge.artifact.publication-record :as record]
             [clojure.string :as str]
@@ -34,7 +35,9 @@
                      (str/replace encoded "verified" "modified")]]
       (is (= :invalid-input (:anomaly/type (artifact/decode-snapshot invalid))))))
   (doseq [invalid [nil 42 {}]]
-    (is (= :invalid-input (:anomaly/type (artifact/encode-snapshot invalid)))))
+    (let [result (artifact/encode-snapshot invalid)]
+      (is (= :invalid-input (:anomaly/type result)))
+      (is (= (msg/t :snapshot/invalid) (:anomaly/message result)))))
   (let [invalid (String. ^bytes (record/encode {}) StandardCharsets/UTF_8)]
     (is (= :invalid-input (:anomaly/type (artifact/decode-snapshot invalid))))))
 
