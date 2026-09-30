@@ -97,6 +97,18 @@
         (is (= sha (:pr/head-sha proposal)))
         (is (not= (:pr/payload-hash original) (:pr/payload-hash proposal)))))))
 
+(deftest ^{:stratum 1} proposal-rejects-malformed-provider-repositories-test
+  (doseq [repository ["example" "example/opsv/extra" "example/opsv " "/opsv" nil]]
+    (is (= :invalid-input
+           (:anomaly/type (actuation/prepare-pr (assoc candidate :pr/repo repository)))))))
+
+(deftest ^{:stratum 1} proposal-accepts-validated-policy-correlation-test
+  (is (not (anomaly/anomaly?
+            (actuation/prepare-pr (assoc candidate :opsv/policy-hash (apply str (repeat 64 "a")))))))
+  (doseq [hash [nil "" "short" (apply str (repeat 64 "z"))]]
+    (is (= :invalid-input
+           (:anomaly/type (actuation/prepare-pr (assoc candidate :opsv/policy-hash hash)))))))
+
 (deftest ^{:stratum 1} governance-reference-is-part-of-the-authorized-payload-test
   (let [original (actuation/prepare-pr candidate)]
     (doseq [field [:workflow-run/id :effect/id]

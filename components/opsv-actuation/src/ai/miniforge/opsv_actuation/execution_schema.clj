@@ -6,6 +6,7 @@
   (:require [ai.miniforge.content-hash.interface :as hash]
             [ai.miniforge.decision-envelope.interface :as envelope]
             [ai.miniforge.effect-transaction.interface :as effect]
+            [ai.miniforge.opsv.interface :as opsv]
             [ai.miniforge.opsv-actuation.proposal :as proposal]
             [ai.miniforge.opsv-actuation.governance :as governance]
             [ai.miniforge.opsv-actuation.schema :as schema])
@@ -64,6 +65,7 @@
        [:pr/payload-hash [:re #"\A[0-9a-f]{64}\z"]]
        [:pr/governance-hash [:re #"\A[0-9a-f]{64}\z"]]
        [:opsv/evidence-bundle-id :uuid]
+       [:opsv/policy-hash {:optional true} opsv/PolicyHash]
        [:opsv/envelope AllowingEnvelope]]
       [:fn content-bound?]]]]
    [:fn correlated?]])
