@@ -72,8 +72,21 @@
                          [:experiment-pack/hash "old"] [:environment-fingerprint {}]
                          [:observations nil] [:confidence Double/NaN]
                          [:confidence Double/POSITIVE_INFINITY]
+                         [:metric-snapshot-artifact-refs []]
                          [:metric-snapshot-artifact-refs ["not-an-artifact"]]]]
       (is (anomaly/anomaly? (verify-with ctx (partial changed-receipt key value)))))))
+
+(deftest ^{:stratum 1} missing-nil-valued-observation-cannot-pass-verification-test
+  (let [ctx (synthesized-context)
+        calls (atom [])]
+    (doseq [declared [{:foo nil} {:criteria [{:criterion/id "foo" :criterion/expected nil}]}]]
+      (let [configured (assoc-in ctx [:execution/phase-results :opsv/synthesize :result :output
+                                     :opsv/experiment-pack :experiment-pack/success-criteria] declared)
+            missing (assoc support/verification-measurements :observations {"unrelated" nil})
+            observed (assoc missing :observations {"foo" nil})]
+        (is (anomaly/anomaly? (verify-with configured (partial measured calls missing))))
+        (is (true? (get-in (verify-with configured (partial measured calls observed))
+                          [:opsv/verification-result :passed?])))))))
 
 (deftest ^{:stratum 1} receipt-constructor-refuses-stale-correlation-test
   (let [ctx (synthesized-context)
