@@ -38,5 +38,26 @@
       (is (= expected (model/effect-id run "EXAMPLE/IDENTITY")))
       (finally (Locale/setDefault original)))))
 
+(deftest ^{:stratum 0} confirmed-outcome-preserves-governance-and-provider-identity-test
+  (let [transaction {:effect/id (random-uuid) :effect/grant-id (random-uuid)
+                     :effect/envelope-id (random-uuid) :effect/state :succeeded
+                     :effect/observed {:pr/url "https://github.com/example/opsv/pull/17"}}
+        output (model/outcome {:requested-actuation-mode :pr-only} transaction)
+        record (:opsv/actuation-record output)
+        joined (first (:governed-effects record))]
+    (is (= :pr-only (:effective-actuation-mode record)))
+    (is (= [transaction] (:opsv/effect-transactions output)))
+    (is (= [(get-in transaction [:effect/observed :pr/url])] (:pr-refs record)))
+    (is (= (mapv transaction [:effect/id :effect/grant-id :effect/envelope-id])
+           (mapv joined [:evidence/effect-id :evidence/grant-id :evidence/envelope-id])))))
+
+(deftest ^{:stratum 0} unconfirmed-outcomes-retain-transactions-without-pr-references-test
+  (doseq [state [:failed :unknown-outcome]]
+    (let [transaction {:effect/id (random-uuid) :effect/state state}
+          output (model/outcome {} transaction)]
+      (is (= :unavailable (:anomaly/type output)))
+      (is (= transaction (get-in output [:anomaly/data :effect/transaction])))
+      (is (nil? (:opsv/actuation-record output))))))
+
 (comment
   (model/effect-id (random-uuid) "example/opsv"))
