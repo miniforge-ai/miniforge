@@ -25,7 +25,7 @@
       (catch Throwable _
         (boundary-failure))
       (finally (fences/release! fence)))
-    (anomaly/anomaly :unavailable (msg/ts :execution/stopped) {})))
+    (anomaly/anomaly :unavailable (msg/ts :execution/stopped) {:opsv/stopped? true})))
 
 (comment
   (execute! (fences/create) (constantly :done)))
