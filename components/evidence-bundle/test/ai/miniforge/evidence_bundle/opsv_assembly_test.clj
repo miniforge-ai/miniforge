@@ -19,6 +19,7 @@
   (:require
    [ai.miniforge.evidence-bundle.interface :as evidence]
    [ai.miniforge.evidence-bundle.opsv-finalization-candidate :as candidate]
+   [ai.miniforge.evidence-bundle.opsv-finalization-publication :as publication]
    [ai.miniforge.evidence-bundle.opsv-test-fixtures :as f]
    [ai.miniforge.response.interface :as response]
    [clojure.test :refer [deftest is testing]]
@@ -31,6 +32,9 @@
     (evidence/accumulate-opsv-evidence!
       store (:evidence-bundle/id record) {:opsv/event-refs event-id})
     prepared))
+
+(defn- ^{:stratum 0} seal-at-fixed-time [seal bundle _]
+  (seal bundle #inst "2026-09-30T00:00:00Z"))
 
 (defn ^{:stratum 0} error-codes
   [result]
@@ -78,6 +82,8 @@
     (is (= bundle-id (:evidence-bundle/id result)))
     (is (= f/opsv-evidence (:evidence/opsv result)))
     (is (string? (:evidence/content-hash result)))
+    (is (inst? (:evidence/sealed-at result)))
+    (is (= (:evidence/sealed-at result) (:compliance/created-at result)))
     (is (:valid? (evidence/validate-canonical-bundle result)))
     (is (m/validate evidence/OpsvEvidence (:evidence/opsv result)))
     (is (= :finalized
@@ -110,6 +116,17 @@
       (is (response/anomaly-map? result))
       (is (contains? (error-codes result) :invalid-evidence-bundle))
       (is (= :assembling (:opsv.assembly/status (evidence/get-opsv-assembly store bundle-id)))))))
+
+(deftest ^{:stratum 1} finalize-refuses-to-repair-or-reseal-existing-evidence
+  (doseq [key [:evidence/content-hash :evidence/signature :evidence/sealed-at]]
+    (let [[store bundle-id] (accumulated-store f/opsv-evidence)
+          before @store
+          base (assoc f/base-bundle key nil)
+          result (evidence/finalize-opsv-evidence!
+                  store bundle-id base f/opsv-evidence (set f/artifact-ids))]
+      (is (response/anomaly-map? result))
+      (is (contains? (error-codes result) :sealed-base-bundle))
+      (is (= before @store)))))
 
 (deftest ^{:stratum 1} finalize-rejects-missing-artifact
   (let [[store bundle-id] (accumulated-store f/opsv-evidence)
@@ -229,5 +246,6 @@
                      (evidence/finalize-opsv-evidence!
                       store bundle-id f/base-bundle input
                       (set f/artifact-ids))))]
-    (with-redefs [random-uuid (constantly f/canonical-bundle-id)]
+    (with-redefs [random-uuid (constantly f/canonical-bundle-id)
+                  publication/sealed-bundle (partial seal-at-fixed-time publication/sealed-bundle)]
       (is (= (finalize evidence-value) (finalize reordered))))))
