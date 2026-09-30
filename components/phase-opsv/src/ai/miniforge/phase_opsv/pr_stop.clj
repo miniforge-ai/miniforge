@@ -8,12 +8,14 @@
             [ai.miniforge.execution-grant.interface :as grant]
             [ai.miniforge.opsv-actuation.interface :as actuation]
             [ai.miniforge.phase-opsv.pr-model :as model]
+            [ai.miniforge.phase-opsv.run-control :as control]
             [ai.miniforge.phase-opsv.messages :as msg]))
 
 ;------------------------------------------------------------------------------ Layer 0
 
 (defn ^{:stratum 0} stopped? [runtime]
-  (true? (:stopped? (actuation/mutation-status (:fence runtime)))))
+  (or (true? (:stopped? (actuation/mutation-status (:fence runtime))))
+      (when-let [handle (:control runtime)] (control/stopped? handle))))
 
 (defn ^{:stratum 0} abandon! [runtime issued now result]
   (if-not (anomaly/anomaly? result)

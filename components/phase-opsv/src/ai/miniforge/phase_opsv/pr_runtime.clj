@@ -11,6 +11,8 @@
             [ai.miniforge.phase-opsv.messages :as msg]
             [ai.miniforge.phase-opsv.pr-authority :as authority]
             [ai.miniforge.phase-opsv.pr-model :as model]
+            [ai.miniforge.phase-opsv.run-control :as control]
+            [ai.miniforge.phase-opsv.runtime-context :as context]
             [clojure.string :as str]
             [malli.core :as m])
   (:import [java.time Instant]))
@@ -37,6 +39,7 @@
    [:authority-directory NonBlank]
    [:clock fn?]
    [:fence actuation/MutationFence]
+   [:control {:optional true} [:fn control/run?]]
    [:provider provider/ProviderRuntime]
    [:target [:map [:opsv/policy-hash [:re #"\A[0-9a-f]{64}\z"]]]]])
 
@@ -47,7 +50,10 @@
 ;------------------------------------------------------------------------------ Layer 2
 
 (defn ^{:stratum 2} execute! [runtime ctx verified]
-  (if-not (m/validate PrRuntime runtime)
+  (if-not (and (m/validate PrRuntime runtime)
+               (or (not (contains? runtime :control))
+                   (control/bound-to? (:control runtime) (context/workflow-id ctx)
+                                   (:authority-directory runtime) (:fence runtime))))
     (anomaly/anomaly :invalid-input (msg/ts :pr/invalid-runtime) {})
     (actuation/at-mutation-boundary!
      (:fence runtime)
