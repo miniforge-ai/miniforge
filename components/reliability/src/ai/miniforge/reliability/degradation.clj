@@ -176,14 +176,15 @@
   (if-not (and (string? justification) (not (str/blank? justification))
                (string? principal) (not (str/blank? principal)))
     (anomaly/anomaly :invalid-input (messages/t :safe-mode/invalid-exit) {})
-    (locking (:fsm-state manager)
+    (let [state (:fsm-state manager)]
+      (locking state
       (when (= :safe-mode (current-mode manager))
         (let [message (messages/t :degradation/operator-exit-reason
                                  {:principal principal :justification justification})
               new-mode (transition! manager (config/signal :nominal :operator-exit message))]
           (when-let [stream (:event-stream manager)]
             (stream/publish! stream (events/safe-mode-exited stream principal justification 0 0)))
-          new-mode)))))
+          new-mode))))))
 
 (defn ^{:stratum 2} evaluate-and-transition!
   "Evaluate budget state and trigger mode transition if warranted.
