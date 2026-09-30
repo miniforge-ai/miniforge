@@ -65,6 +65,17 @@
       (is (= :error (get-in result [:phase :result :status])))
       (is (zero? @calls)))))
 
+(defn- ^{:stratum 1} assert-event-stream-preflight [ctx _directory]
+  (let [configured-ctx (configured ctx)
+        stream (:event-stream configured-ctx)
+        missing (dissoc configured-ctx :event-stream :execution/event-stream)]
+    (doseq [invalid [nil 42 {}]]
+      (f/assert-blocked-transform (assoc missing :event-stream invalid)))
+    (doseq [path [[:execution/event-stream] [:execution/opts :event-stream]]]
+      (let [aliased (assoc-in missing path stream)
+            completed (f/step aliased (first support/handlers))]
+        (is (= :success (get-in completed [:phase :result :status])))))))
+
 (defn- ^{:stratum 1} assert-publication-recovery [ctx directory]
   (let [ready (reduce f/step (configured ctx) (butlast support/handlers))
         refusal (constantly (anomaly/anomaly :unavailable "disk barrier failed" {}))
@@ -145,6 +156,9 @@
 
 (deftest ^{:stratum 2} invalid-host-evidence-refuses-before-transform-test
   (f/with-context assert-invalid-host-evidence))
+
+(deftest ^{:stratum 2} event-stream-is-required-before-finalizing-adapters-test
+  (f/with-context assert-event-stream-preflight))
 
 (deftest ^{:stratum 2} publication-failure-retains-bundle-and-recovers-without-actuation-test
   (f/with-context assert-publication-recovery))
