@@ -11,6 +11,7 @@
             [ai.miniforge.phase-opsv.finalization-config :as config]
             [ai.miniforge.phase-opsv.finalization-model :as model]
             [ai.miniforge.phase-opsv.lifecycle-result :as result]
+            [ai.miniforge.phase-opsv.runtime-context :as context]
             [ai.miniforge.phase-opsv.terminal-evidence :as terminal]))
 
 ;------------------------------------------------------------------------------ Layer 0
@@ -18,6 +19,7 @@
 (defn- ^{:stratum 0} recoverable? [ctx]
   (let [failure (get-in ctx [:phase :result :output])]
     (and (map? ctx) (map? (:execution/opts ctx)) (config/enabled? ctx)
+         (instance? clojure.lang.IAtom (context/stream ctx))
          (= :opsv/actuate (get-in ctx [:phase :name]))
          (= :error (get-in ctx [:phase :result :status]))
          (anomaly/anomaly? failure)

@@ -7,11 +7,17 @@
             [ai.miniforge.phase-opsv.events :as events]
             [ai.miniforge.phase-opsv.artifact-test-support :as f]
             [ai.miniforge.phase-opsv.governance-fixtures :as governance]
+            [ai.miniforge.phase-opsv.interface :as opsv]
             [ai.miniforge.phase-opsv.pr-fixtures :as pr]
             [ai.miniforge.phase-opsv.test-support :as support]
             [clojure.java.io :as io]))
 
 ;------------------------------------------------------------------------------ Layer 0
+
+(defn ^{:stratum 0} recovery-output [ctx]
+  (let [recovered (opsv/recover-actuation-evidence! ctx)]
+    (if (anomaly/anomaly? recovered) recovered
+      (get-in recovered [:phase :result :output :anomaly/data :opsv/phase-output]))))
 
 (defn- ^{:stratum 0} refuse-material [publish kind directory record]
   (if (= kind (get-in record [:artifact/metadata :opsv/material-kind]))

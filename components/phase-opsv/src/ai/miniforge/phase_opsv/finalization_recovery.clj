@@ -22,6 +22,8 @@
   (let [output (checkpoint/restore ctx)]
     (cond
       (anomaly/anomaly? output) output
+      (contains? (:execution/input ctx) :opsv/terminal-snapshot)
+      (model/failure output :terminal-recovery-required)
       (not (instance? clojure.lang.IAtom (context/stream ctx)))
       (model/failure output :invalid-recovery-context)
       (map? (:opsv/actuation-record output)) output

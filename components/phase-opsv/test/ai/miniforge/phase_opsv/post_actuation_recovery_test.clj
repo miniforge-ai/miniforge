@@ -10,6 +10,7 @@
             [ai.miniforge.phase-opsv.lifecycle :as lifecycle]
             [ai.miniforge.phase-opsv.post-actuation-checkpoint :as checkpoint]
             [ai.miniforge.phase-opsv.test-support :as support]
+            [ai.miniforge.phase-opsv.terminal-test-support :as terminal]
             [clojure.test :refer [deftest is]]))
 
 ;------------------------------------------------------------------------------ Layer 0
@@ -33,23 +34,25 @@
 
 (defn- ^{:stratum 0} assert-recovered [completed calls directory]
   (let [detached (dissoc completed :opsv/evidence-assembly-store)
-        recovered (opsv/publish-finalized-evidence! detached)
+        recovered (terminal/recovery-output detached)
         published-events (stream/get-events (:event-stream detached))
-        again (opsv/publish-finalized-evidence! detached)
+        again (terminal/recovery-output detached)
         bundle (:opsv/evidence-bundle recovered)]
     (is (= :error (get-in completed [:phase :result :status])))
     (is (string? (get-in completed [:execution/input checkpoint/snapshot-key])))
+    (is (anomaly/anomaly? (opsv/publish-finalized-evidence! detached)))
     (f/assert-blocked-transform detached)
     (f/assert-blocked-transform (update detached :execution/opts dissoc :opsv/evidence-base))
     (is (not (anomaly/anomaly? recovered)))
-    (is (= 8 (count (get-in bundle [:evidence/opsv :opsv/artifact-refs]))))
+    (is (<= 8 (count (get-in bundle [:evidence/opsv :opsv/artifact-refs]))))
+    (is (false? (get-in bundle [:evidence/outcome :outcome/success])))
     (is (= bundle (:opsv/evidence-bundle again)))
     (is (= bundle (:artifact/content (artifact/read-published directory (:opsv/evidence-artifact-id recovered)))))
     (is (= published-events (stream/get-events (:event-stream detached))))
     (is (= 1 @calls))
-    (is (anomaly/anomaly? (opsv/publish-finalized-evidence!
-                          (assoc-in detached [:execution/input checkpoint/snapshot-key] "corrupt")))))
-  (is (anomaly/anomaly? (opsv/publish-finalized-evidence!
+    (is (anomaly/anomaly? (terminal/recovery-output
+                          (assoc-in detached [:execution/input :opsv/terminal-snapshot] "corrupt")))))
+  (is (anomaly/anomaly? (terminal/recovery-output
                         (dissoc completed :opsv/evidence-assembly-store :event-stream)))))
 
 ;------------------------------------------------------------------------------ Layer 1

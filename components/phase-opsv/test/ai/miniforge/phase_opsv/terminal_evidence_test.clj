@@ -6,6 +6,7 @@
             [ai.miniforge.artifact.interface :as artifact]
             [ai.miniforge.coerce.interface :as coerce]
             [ai.miniforge.evidence-bundle.interface :as evidence]
+            [ai.miniforge.event-stream.interface :as stream]
             [ai.miniforge.phase-opsv.artifact-test-support :as f]
             [ai.miniforge.phase-opsv.interface :as opsv]
             [ai.miniforge.phase-opsv.pr-audit :as audit]
@@ -91,12 +92,16 @@
   (let [completed (terminal/run-with-publication-failure ready kind)
         retained (terminal-output completed)
         recovered (opsv/recover-actuation-evidence! (checkpoint-round-trip directory completed))
+        published (stream/get-events (:event-stream ready))
+        again (opsv/recover-actuation-evidence! (checkpoint-round-trip directory completed))
         output (terminal-output recovered)]
     (is (= :error (get-in completed [:phase :result :status])))
     (is (map? (:opsv/phase-failure retained)))
     (is (= :error (get-in recovered [:phase :result :status])))
     (is (map? (:opsv/evidence-bundle output)))
     (is (= (:opsv/effect-transactions retained) (:opsv/effect-transactions output)))
+    (is (= published (stream/get-events (:event-stream ready))))
+    (is (= (:opsv/evidence-bundle output) (:opsv/evidence-bundle (terminal-output again))))
     (is (= ["https://github.com/example/opsv/pull/17"]
            (get-in output [:opsv/actuation-record :pr-refs])))
     (is (= 2 (count @calls)))))
