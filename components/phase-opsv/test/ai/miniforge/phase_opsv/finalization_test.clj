@@ -34,31 +34,27 @@
 
 ;------------------------------------------------------------------------------ Layer 1
 
-(deftest ^{:stratum 1} lifecycle-finalizes-real-n6-and-publishes-preallocated-id-test
-  (f/with-context
-    (fn [ctx directory]
-      (let [completed (reduce f/step (configured ctx) support/handlers)
-            output (support/phase-output completed :opsv/actuate)
-            bundle (:opsv/evidence-bundle output)
-            assembly (get-in completed [:execution/input :opsv/evidence-assembly])]
-        (is (m/validate evidence/OpsvEvidence (:evidence/opsv bundle)))
-        (is (= :finalized (:opsv.assembly/status assembly)))
-        (is (= (:evidence-bundle/id assembly) (:opsv/evidence-artifact-id output)))
-        (is (= bundle (:artifact/content (artifact/read-published directory (:evidence-bundle/id bundle)))))
-        (is (= (hash/content-hash (dissoc bundle :evidence/content-hash)) (:evidence/content-hash bundle)))
-        (is (= (:opsv/event-refs assembly) (set (get-in bundle [:evidence/opsv :opsv/event-refs]))))
-        (is (= 8 (count (get-in bundle [:evidence/opsv :opsv/artifact-refs]))))))))
+(defn- ^{:stratum 1} assert-finalized-evidence [ctx directory]
+  (let [completed (reduce f/step (configured ctx) support/handlers)
+        output (support/phase-output completed :opsv/actuate)
+        bundle (:opsv/evidence-bundle output)
+        assembly (get-in completed [:execution/input :opsv/evidence-assembly])]
+    (is (m/validate evidence/OpsvEvidence (:evidence/opsv bundle)))
+    (is (= :finalized (:opsv.assembly/status assembly)))
+    (is (= (:evidence-bundle/id assembly) (:opsv/evidence-artifact-id output)))
+    (is (= bundle (:artifact/content (artifact/read-published directory (:evidence-bundle/id bundle)))))
+    (is (= (hash/content-hash (dissoc bundle :evidence/content-hash)) (:evidence/content-hash bundle)))
+    (is (= (:opsv/event-refs assembly) (set (get-in bundle [:evidence/opsv :opsv/event-refs]))))
+    (is (= 8 (count (get-in bundle [:evidence/opsv :opsv/artifact-refs]))))))
 
-(deftest ^{:stratum 1} invalid-host-evidence-refuses-before-transform-test
-  (f/with-context
-    (fn [ctx _]
-      (doseq [base [nil :invalid {} (assoc (get-in (configured ctx) [:execution/opts :opsv/evidence-base])
-                                          :evidence-bundle/workflow-id (random-uuid))]]
-        (let [calls (atom 0)
-              interceptor (lifecycle/interceptor {} :opsv/execute (fn [_] (swap! calls inc)))
-              result ((:enter interceptor) (assoc-in ctx [:execution/opts :opsv/evidence-base] base))]
-          (is (= :error (get-in result [:phase :result :status])))
-          (is (zero? @calls)))))))
+(defn- ^{:stratum 1} assert-invalid-host-evidence [ctx _]
+  (doseq [base [nil :invalid {} (assoc (get-in (configured ctx) [:execution/opts :opsv/evidence-base])
+                                      :evidence-bundle/workflow-id (random-uuid))]]
+    (let [calls (atom 0)
+          interceptor (lifecycle/interceptor {} :opsv/execute (fn [_] (swap! calls inc)))
+          result ((:enter interceptor) (assoc-in ctx [:execution/opts :opsv/evidence-base] base))]
+      (is (= :error (get-in result [:phase :result :status])))
+      (is (zero? @calls)))))
 
 (deftest ^{:stratum 1} publication-failure-retains-bundle-and-recovers-without-actuation-test
   (f/with-context
@@ -134,3 +130,11 @@
         (is (map? (get-in completed [:phase :result :output :anomaly/data :opsv/phase-output
                                      :opsv/actuation-record])))
         (is (not (anomaly/anomaly? (opsv/publish-finalized-evidence! completed))))))))
+
+;------------------------------------------------------------------------------ Layer 2
+
+(deftest ^{:stratum 2} lifecycle-finalizes-real-n6-and-publishes-preallocated-id-test
+  (f/with-context assert-finalized-evidence))
+
+(deftest ^{:stratum 2} invalid-host-evidence-refuses-before-transform-test
+  (f/with-context assert-invalid-host-evidence))
