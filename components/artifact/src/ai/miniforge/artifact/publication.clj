@@ -9,7 +9,7 @@
             [ai.miniforge.artifact.publication-files :as files]
             [ai.miniforge.schema.interface :as schema]
             [clojure.java.io :as io])
-  (:import [java.nio.file FileAlreadyExistsException Files]))
+  (:import [java.nio.file FileAlreadyExistsException]))
 
 ;------------------------------------------------------------------------------ Layer 0
 
@@ -30,7 +30,8 @@
 (defn ^{:stratum 1} read-record [directory id]
   (let [file (files/target directory id)]
     (cond
-      (not (files/safe-directory? directory)) (failure :invalid-input :publication/unsafe-path id)
+      (not (boundary/safe-path-with-exception-handling files/safe-directory? directory))
+      (failure :invalid-input :publication/unsafe-path id)
       (files/absent? file) nil
       (not (files/regular? file)) (failure :fault :publication/read-failed id)
       :else (decoded file id))))
@@ -54,13 +55,14 @@
     (cond
       (anomaly/anomaly? bytes) bytes
       (nil? bytes) (failure :invalid-input :publication/not-portable id)
-      (not (files/safe-directory? directory)) (failure :invalid-input :publication/unsafe-path id)
+      (not (boundary/safe-path-with-exception-handling files/safe-directory? directory))
+      (failure :invalid-input :publication/unsafe-path id)
       :else
       (let [temporary (files/temporary (io/file directory))]
-        (try
-          (publish-bytes! (files/target directory id) temporary bytes)
-          (confirm-record! directory artifact)
-          (finally (Files/deleteIfExists (.toPath temporary))))))))
+        (boundary/publish-with-cleanup id
+          (partial publish-bytes! (files/target directory id) temporary bytes)
+          (partial confirm-record! directory artifact)
+          (partial files/delete-temporary! temporary))))))
 
 (comment
   (read-record "/tmp" (random-uuid)))
