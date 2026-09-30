@@ -147,5 +147,20 @@
       (is (some? (:grant/revoked-at issued)))
       (is (= 2 (count @calls))))))
 
+(deftest ^{:stratum 0} authority-store-failure-preserves-diagnostics-and-refuses-post-test
+  (let [{:keys [ctx runtime calls]} (fixture/setup)
+        current grant/current
+        failure (anomaly/anomaly :unavailable "authority filesystem offline" {:store :authority})
+        output (with-redefs [grant/current (fn [directory id]
+                                            (if (seq @calls) failure (current directory id)))]
+                 (phase/actuate ctx))
+        transaction (get-in output [:anomaly/data :effect/transaction])
+        observed (get-in transaction [:effect/observed :pr/authority-failure])
+        issued (grant/current (:authority-directory runtime) (:effect/grant-id transaction))]
+    (is (= :failed (:effect/state transaction)))
+    (is (= (dissoc failure :anomaly/at) (dissoc observed :anomaly/at)))
+    (is (= :revocation/superseded (:grant/revocation-reason issued)))
+    (is (= ["GET"] (mapv #(get-in % [:arguments 6]) @calls)))))
+
 (comment
   (phase/actuate (:ctx (fixture/setup))))
