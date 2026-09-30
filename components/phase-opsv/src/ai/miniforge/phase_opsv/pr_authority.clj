@@ -10,8 +10,8 @@
             [ai.miniforge.phase-opsv.flow :as flow]
             [ai.miniforge.phase-opsv.messages :as msg]
             [ai.miniforge.phase-opsv.pr-transaction :as transaction]
-            [ai.miniforge.phase-opsv.pr-stop :as stop]
-            [ai.miniforge.phase-opsv.run-control :as control]))
+            [ai.miniforge.phase-opsv.pr-registration :as registration]
+            [ai.miniforge.phase-opsv.pr-stop :as stop]))
 
 ;------------------------------------------------------------------------------ Layer 0
 
@@ -22,12 +22,6 @@
            :effect/class :effect/pr-create
            :effect/preflight {:preflight/type :preflight/pr-create-readiness
                               :preflight/result :allow})))
-
-(defn- ^{:stratum 0} registered! [runtime issued now]
-  (flow/continue (grant/register! (:authority-directory runtime) issued)
-                 #(if-let [handle (:control runtime)]
-                    (control/track-grant! handle % now)
-                    %)))
 
 (defn- ^{:stratum 0} authorized-commit! [runtime ctx candidate verified prepared now issued]
   (let [checked (grant/authorize issued {:effect/scope prepared :usage/count 1} now)
@@ -45,7 +39,7 @@
 (defn- ^{:stratum 1} issue! [runtime ctx prepared now]
   (let [directory (:authority-directory runtime)
         issued (grant/issue-for-effect directory (request ctx prepared) now)]
-    (flow/continue issued #(stop/abandon! runtime % now (registered! runtime % now)))))
+    (flow/continue issued #(stop/abandon! runtime % now (registration/register! runtime % now)))))
 
 ;------------------------------------------------------------------------------ Layer 2
 
