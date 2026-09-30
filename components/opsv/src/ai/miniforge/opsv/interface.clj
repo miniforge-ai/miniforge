@@ -31,6 +31,10 @@
 ;------------------------------------------------------------------------------ Layer 0
 
 ;; Contract and vocabulary re-exports
+(def ^{:stratum 0} PolicyHash schema/PolicyHash)
+
+(def ^{:stratum 0} Repository schema/Repository)
+
 (def ^{:stratum 0} requested-actuation-modes
   "Canonical N7 intent modes, ordered from least to most autonomous."
   schema/requested-actuation-modes)
