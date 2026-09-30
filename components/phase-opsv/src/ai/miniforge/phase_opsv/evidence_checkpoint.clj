@@ -16,7 +16,8 @@
     ctx))
 
 (defn ^{:stratum 0} restore-terminal [ctx]
-  (if-not (contains? (:execution/input ctx) :opsv/terminal-snapshot)
+  (if-not (and (map? (:execution/input ctx))
+               (contains? (:execution/input ctx) :opsv/terminal-snapshot))
     ctx
     (let [phase (snapshot/decode ctx :terminal-checkpoint
                                  (get-in ctx [:execution/input :opsv/terminal-snapshot]))]

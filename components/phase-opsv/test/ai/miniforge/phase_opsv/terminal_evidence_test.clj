@@ -47,10 +47,13 @@
         checkpoint (coerce/stringify-instants
                     (select-keys completed [:execution/id :execution/input :execution/status]))]
     (spit file (pr-str checkpoint))
-    (assoc (edn/read-string (slurp file)) :execution/opts (:execution/opts completed))))
+    (assoc (edn/read-string (slurp file)) :execution/opts
+           (assoc (:execution/opts completed) :event-stream
+                  (or (:event-stream completed) (get-in completed [:execution/opts :event-stream]))))))
 
 (deftest ^{:stratum 0} recovery-rejects-nonterminal-contexts-test
-  (doseq [ctx [nil {} {:execution/opts 42} {:execution/opts :invalid} {:phase {:name :opsv/execute}}]]
+  (doseq [ctx [nil {} {:execution/input 42} {:execution/opts 42}
+               {:execution/opts :invalid} {:phase {:name :opsv/execute}}]]
     (is (= :invalid-input (:anomaly/type (opsv/recover-actuation-evidence! ctx))))))
 
 ;------------------------------------------------------------------------------ Layer 1
