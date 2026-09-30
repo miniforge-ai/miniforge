@@ -27,12 +27,15 @@
         current (if (anomaly/anomaly? result) (grant/current directory id) result)]
     (if (and (not (anomaly/any-anomaly? current)) (:grant/revoked-at current))
       {:grant/id id :revoked? true}
-      (assoc (failure :unavailable :revocation-unconfirmed) :grant/id id))))
+      (failure :unavailable :revocation-unconfirmed))))
 
 ;------------------------------------------------------------------------------ Layer 2
 
 (defn ^{:stratum 2} revoke-with-exception-handling [run id now]
-  (call-with-exception-handling #(revoke! run id now)))
+  (let [result (call-with-exception-handling #(revoke! run id now))]
+    (if (anomaly/anomaly? result)
+      (assoc-in result [:anomaly/data :grant/id] id)
+      result)))
 
 (defn ^{:stratum 2} abort-with-exception-handling [run]
   (call-with-exception-handling

@@ -39,11 +39,11 @@ durable-grant interfaces. No new component dependency is introduced.
 
 ## Validation
 
-Eight run-control tests and 38 assertions pass on JVM and packaged Babashka.
+Run-control regression tests cover canonical grant identity in ordinary and exceptional cleanup failures.
 Tests cover preflight/registration races, successful-effect grant cleanup,
 substituted runtime handles, failed aborts, failed revocation retry and in-flight
 retirement. No test calls a live provider.
-The phase standards scan reports no findings across 56 files. Kondo, strata and
+The scoped standards scan reports no findings. Kondo, strata and
 signed commit hooks pass. The CLI build succeeds.
 
 ## Standards adversarial pass
@@ -66,5 +66,5 @@ This change does not claim those acceptance requirements are complete.
 ## Checklist
 
 - [x] Focused and packaged tests, standards, kondo, strata and hooks pass
-- [x] Final consumer rerun: 62 tests and 402 assertions in both projects
+- [x] Consumer test suites pass in both projects
 - [ ] Final-head review settled, all CI green and conflict-free merge
