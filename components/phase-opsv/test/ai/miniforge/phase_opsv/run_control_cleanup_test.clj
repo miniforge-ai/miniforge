@@ -7,6 +7,7 @@
             [ai.miniforge.phase-opsv.interface :as opsv]
             [ai.miniforge.phase-opsv.pr-fixtures :as fixtures]
             [ai.miniforge.phase-opsv.run-control :as control]
+            [ai.miniforge.phase-opsv.run-control-boundary :as boundary]
             [clojure.test :refer [deftest is]]))
 
 ;------------------------------------------------------------------------------ Layer 0
@@ -26,7 +27,22 @@
   (deliver entered true)
   @release)
 
+(defn- ^{:stratum 0} throw-revocation [exception & _]
+  (throw exception))
+
 ;------------------------------------------------------------------------------ Layer 1
+
+(deftest ^{:stratum 1} revocation-failures-retain-canonical-grant-identity-test
+  (doseq [revoke [(constantly nil) (partial throw-revocation (java.io.IOException.))
+                  (partial throw-revocation (Error.))
+                  (partial throw-revocation (InterruptedException.))]]
+    (let [id (random-uuid)]
+      (try
+        (with-redefs [grant/revoke-stored! revoke grant/current (constantly nil)]
+          (let [result (boundary/revoke-with-exception-handling {} id fixtures/now)]
+            (is (anomaly/anomaly? result))
+            (is (= id (get-in result [:anomaly/data :grant/id])))))
+        (finally (Thread/interrupted))))))
 
 (deftest ^{:stratum 1} only-unconfirmed-cleanup-is-retried-test
   (let [supervisor (opsv/create-run-supervisor)
