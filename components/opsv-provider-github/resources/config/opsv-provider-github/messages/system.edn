@@ -4,4 +4,5 @@
   :create/preflight-failed "Remote branch does not match the authorized commit; no PR creation attempted"
   :create/preflight-unavailable "Remote branch could not be verified; no PR creation attempted"
   :create/unconfirmed "GitHub PR creation outcome could not be confirmed"
+  :create/dispatch-unconfirmed "Runtime dispatch did not confirm a provider result; inspect the effect before retrying"
   :observe/unresolved "No unique exact GitHub PR observation is available"}}

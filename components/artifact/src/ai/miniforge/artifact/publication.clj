@@ -5,7 +5,7 @@
   "Synchronous immutable artifact publication, separate from mutable store caches."
   (:require [ai.miniforge.anomaly.interface :as anomaly]
             [ai.miniforge.artifact.publication-boundary :as boundary :refer [failure]]
-            [ai.miniforge.artifact.publication-codec :as codec]
+            [ai.miniforge.artifact.publication-record :as record]
             [ai.miniforge.artifact.publication-files :as files]
             [ai.miniforge.schema.interface :as schema]
             [clojure.java.io :as io])
@@ -15,7 +15,10 @@
 
 (defn- ^{:stratum 0} decoded [file id]
   (boundary/call-with-exception-handling id :fault :publication/read-failed
-                                        #(some-> (files/read-bytes file) codec/decode)))
+    #(let [value (some-> (files/read-bytes file) record/decode)]
+       (if (and (schema/valid-artifact? value) (= id (:artifact/id value)))
+         value
+         (failure :fault :publication/read-failed id)))))
 
 (defn- ^{:stratum 0} publish-bytes! [file temporary bytes]
   (files/write! temporary bytes)
@@ -30,11 +33,7 @@
       (not (files/safe-directory? directory)) (failure :invalid-input :publication/unsafe-path id)
       (files/absent? file) nil
       (not (files/regular? file)) (failure :fault :publication/read-failed id)
-      :else (let [record (decoded file id)]
-              (cond
-                (anomaly/anomaly? record) record
-                (and (schema/valid-artifact? record) (= id (:artifact/id record))) record
-                :else (failure :fault :publication/read-failed id))))))
+      :else (decoded file id))))
 
 (defn- ^{:stratum 1} confirm-record! [directory artifact]
   (let [id (:artifact/id artifact)
@@ -51,7 +50,7 @@
 (defn ^{:stratum 2} publish! [directory artifact]
   (let [id (:artifact/id artifact)
         bytes (boundary/call-with-exception-handling id :invalid-input :publication/not-portable
-                                                    #(codec/encode artifact))]
+                                                    #(record/encode artifact))]
     (cond
       (anomaly/anomaly? bytes) bytes
       (nil? bytes) (failure :invalid-input :publication/not-portable id)

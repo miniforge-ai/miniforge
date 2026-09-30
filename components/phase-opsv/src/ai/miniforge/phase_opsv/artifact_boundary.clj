@@ -15,4 +15,5 @@
     (try (artifacts/publish! ctx phase-key output)
          (catch InterruptedException _
            (let [result (artifacts/failure output)] (.interrupt (Thread/currentThread)) result))
+         (catch Error _ (assoc (artifacts/failure output) :anomaly/type :fatal))
          (catch Throwable _ (artifacts/failure output)))))

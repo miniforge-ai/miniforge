@@ -27,11 +27,23 @@ The trusted callback receives an operation thunk and must call it at most once.
 - Validate the optional callback at the public interface.
 - Invoke it only after a successful exact-head preflight.
 - Return its refusal without provider mutation; retain direct dispatch by default.
+- Contain callback exceptions at a named boundary. Enforce one synchronous
+  attempt on the calling thread, close escaped thunks after dispatch, and retain
+  confirmed provider results. Other threads cannot invoke the provider operation.
+- Accept only refusal outcomes or anomalies when the callback never invokes the
+  operation. A callback cannot manufacture provider success or uncertainty.
+
+Callback arity cannot be probed safely without running trusted code, and JVM
+reflection is not portable to Babashka. Function shape is checked before the
+read-only preflight; a wrong arity becomes `:invalid-input` at dispatch, before POST.
 
 ## Testing plan
 
-Run the provider suites, scoped standards, hooks and packaged compatibility checks.
-The regression proves GET occurs, refusal prevents POST, and invalid callbacks fail.
+All provider suites pass 20 tests and 124 assertions. The creation suite passes
+eight tests and 35 assertions on JVM and Babashka using the built CLI plus provider
+source paths. This prerequisite has no product consumer yet. Regressions cover GET/POST
+ordering, refusal, successful dispatch, wrong arity, repeated invocation, escaped
+thunks and preservation of a provider result when the callback throws afterward.
 
 ## Standards adversarial pass
 
@@ -49,5 +61,5 @@ N7 runtime PR execution; prerequisite extracted from #1935.
 
 ## Checklist
 
-- [ ] Provider suites and standards pass
+- [x] Provider suites and standards pass
 - [ ] Final-head review settled and CI green
