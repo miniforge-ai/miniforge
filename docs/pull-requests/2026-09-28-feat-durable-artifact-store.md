@@ -19,12 +19,16 @@ N6 evidence references need a confirmed durable record, not a cache hit.
 ## Layer and dependencies
 
 The artifact component owns filesystem and Transit publication primitives.
-Application callers use its validated public interface. No new component dependency.
+Application callers use its validated public interface. The shared content-hash
+component supplies the integrity digest.
 
 ## Changes in detail
 
 - Validate artifact records and canonical, existing directory paths.
 - Encode round-trippable Transit data with a 16 MiB retained-output limit.
+- Store a versioned envelope with a digest of the exact Transit wire string.
+  This preserves list/vector and other wire-type distinctions. Verify the digest
+  on every read and retry; it detects corruption, not malicious writer replacement.
 - Force the complete temporary file, create an immutable hard link, then verify
   exact content and force the destination and ancestor directories.
 - Never replace an existing ID. Identical retries repeat durability barriers;
@@ -35,14 +39,17 @@ Application callers use its validated public interface. No new component depende
 
 ## Testing plan
 
-All three artifact-consuming projects passed the initial 22 tests and 70 assertions each.
-The hardened publication suite passes nine tests and 39 assertions on both JVM and
-the packaged Babashka CLI. It covers disk rereads, conflicting and concurrent
+All three artifact-consuming projects pass 28 tests and 93 assertions each.
+The hardened publication suite passes 14 tests and 56 assertions on the JVM
+and packaged Babashka CLI. Tests cover disk rereads, conflicting and concurrent
 publication, pre-link failure, uncertain force, identical retry, invalid paths,
 symlinks, unsupported content, output limits and interrupted/error boundaries.
-The CLI build produced a 38,961,032-byte jar. Scoped standards report zero violations.
+Scoped standards report zero violations across 20 files.
 Trailing JSON or malformed bytes are rejected on read and retry. Corrupt reads
 return faults; fatal runtime errors return non-retryable fatal anomalies.
+The collection-corruption regression truncates its replacement bytes and proves
+the altered envelope and inner Transit parse before asserting checksum rejection.
+Relative directories, malformed UTF-8 and schema-valid content corruption are refused.
 
 ## Standards adversarial pass
 
@@ -57,6 +64,11 @@ The host must exclusively control the directory and its ancestors. Hard links an
 directory force support are required; unsupported filesystems fail closed.
 This API does not defend against a privileged process changing host-owned paths
 concurrently. No existing store is migrated or production configuration changed.
+Normal success and failure remove the attempt's temporary link in `finally`.
+A killed process can leave `.artifact-*.tmp` files. They are never evidence records
+and are never read by the public lookup. Cleanup requires stopping all writers
+before removing abandoned temporary links; age alone does not prove abandonment.
+There is no automatic scavenger that could unlink another active publisher's file.
 Application evidence assembly/finalization wiring follows separately.
 
 ## Related issues/PRs
