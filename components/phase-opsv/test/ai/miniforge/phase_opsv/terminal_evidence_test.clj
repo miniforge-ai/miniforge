@@ -4,6 +4,7 @@
 (ns ai.miniforge.phase-opsv.terminal-evidence-test
   (:require [ai.miniforge.anomaly.interface :as anomaly]
             [ai.miniforge.artifact.interface :as artifact]
+            [ai.miniforge.coerce.interface :as coerce]
             [ai.miniforge.evidence-bundle.interface :as evidence]
             [ai.miniforge.phase-opsv.artifact-test-support :as f]
             [ai.miniforge.phase-opsv.governance-fixtures :as governance]
@@ -11,6 +12,7 @@
             [ai.miniforge.phase-opsv.pr-audit :as audit]
             [ai.miniforge.phase-opsv.pr-fixtures :as pr]
             [ai.miniforge.phase-opsv.test-support :as support]
+            [clojure.edn :as edn]
             [clojure.java.io :as io]
             [clojure.test :refer [deftest is]]
             [malli.core :as m]))
@@ -39,6 +41,13 @@
 (defn- ^{:stratum 0} unsuccessful-command [calls options arguments]
   (let [response (pr/command calls options arguments)]
     (if (= "POST" (get arguments 6)) {:exit 1 :out ""} response)))
+
+(defn- ^{:stratum 0} checkpoint-round-trip [directory completed]
+  (let [file (io/file directory "terminal-checkpoint.edn")
+        checkpoint (coerce/stringify-instants
+                    (select-keys completed [:execution/id :execution/input :execution/status]))]
+    (spit file (pr-str checkpoint))
+    (assoc (edn/read-string (slurp file)) :execution/opts (:execution/opts completed))))
 
 (deftest ^{:stratum 0} recovery-rejects-nonterminal-contexts-test
   (doseq [ctx [nil {} {:execution/opts 42} {:execution/opts :invalid} {:phase {:name :opsv/execute}}]]
@@ -125,4 +134,27 @@
         (is (= :success (get-in completed [:phase :result :status])))
         (is (true? (get-in output [:opsv/evidence-bundle :evidence/outcome :outcome/success])))
         (is (= (:opsv/effect-transactions output) (:artifact/content published)))
+        (is (= 2 (count @calls)))))))
+
+(deftest ^{:stratum 1} terminal-checkpoint-restores-exact-outcome-without-provider-replay-test
+  (with-ready
+    (fn [ready directory calls]
+      (let [record audit/record!
+            completed (with-redefs [audit/record!
+                                    (fn [ctx transaction]
+                                      (if (= :succeeded (:effect/state transaction))
+                                        (anomaly/anomaly :unavailable "audit failed" {:effect/transaction transaction})
+                                        (record ctx transaction)))]
+                        (f/run-last-phase ready))
+            saved (checkpoint-round-trip directory completed)
+            recovered (opsv/recover-actuation-evidence! saved)
+            again (opsv/recover-actuation-evidence! (checkpoint-round-trip directory recovered))
+            tampered (assoc-in saved [:execution/input :opsv/terminal-snapshot] "corrupt")]
+        (is (nil? (:phase saved)))
+        (is (= :error (get-in recovered [:phase :result :status])))
+        (is (= (:opsv/effect-transactions (terminal-output completed))
+               (:opsv/effect-transactions (terminal-output recovered))))
+        (is (false? (get-in (terminal-output recovered) [:opsv/evidence-bundle :evidence/outcome :outcome/success])))
+        (is (= (terminal-output recovered) (terminal-output again)))
+        (is (anomaly/anomaly? (opsv/recover-actuation-evidence! tampered)))
         (is (= 2 (count @calls)))))))

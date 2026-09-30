@@ -4,6 +4,7 @@
 (ns ai.miniforge.phase-opsv.evidence-recovery
   "Resume terminal evidence only, retaining the failed phase and its actual effects."
   (:require [ai.miniforge.anomaly.interface :as anomaly]
+            [ai.miniforge.phase-opsv.evidence-checkpoint :as checkpoint]
             [ai.miniforge.phase-opsv.evidence-runtime :as runtime]
             [ai.miniforge.phase-opsv.finalization :as finalization]
             [ai.miniforge.phase-opsv.finalization-boundary :as boundary]
@@ -45,7 +46,10 @@
 ;------------------------------------------------------------------------------ Layer 2
 
 (defn ^{:stratum 2} recover-with-exception-handling! [ctx]
-  (if (recoverable? ctx)
-    (boundary/call-with-exception-handling
-     (get-in ctx [:phase :result :output :anomaly/data :opsv/phase-output]) #(recover! ctx))
-    (assoc (model/failure {} :invalid-recovery-context) :anomaly/type :invalid-input)))
+  (let [restored (checkpoint/restore-terminal ctx)]
+    (cond
+      (anomaly/anomaly? restored) restored
+      (recoverable? restored)
+      (boundary/call-with-exception-handling
+       (get-in restored [:phase :result :output :anomaly/data :opsv/phase-output]) #(recover! restored))
+      :else (assoc (model/failure {} :invalid-recovery-context) :anomaly/type :invalid-input))))
