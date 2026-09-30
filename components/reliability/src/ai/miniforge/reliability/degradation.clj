@@ -176,8 +176,8 @@
   (if-not (and (string? justification) (not (str/blank? justification))
                (string? principal) (not (str/blank? principal)))
     (anomaly/anomaly :invalid-input (messages/t :safe-mode/invalid-exit) {})
-    (let [current (current-mode manager)]
-      (when (= current :safe-mode)
+    (locking (:fsm-state manager)
+      (when (= :safe-mode (current-mode manager))
         (let [message (messages/t :degradation/operator-exit-reason
                                  {:principal principal :justification justification})
               new-mode (transition! manager (config/signal :nominal :operator-exit message))]
