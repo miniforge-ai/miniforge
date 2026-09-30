@@ -3,10 +3,12 @@
 ;; Licensed under the Apache License, Version 2.0.
 (ns ai.miniforge.artifact.publication-codec
   "Bounded Transit encoding for immutable artifact publication."
-  (:require [cognitect.transit :as transit]
+  (:require [ai.miniforge.artifact.publication-boundary :as boundary]
+            [ai.miniforge.artifact.publication-shape :as shape]
+            [cognitect.transit :as transit]
             [cheshire.core :as json]
             [clojure.java.io :as io])
-  (:import [java.io ByteArrayInputStream ByteArrayOutputStream InputStreamReader OutputStream]
+  (:import [java.io ByteArrayInputStream ByteArrayOutputStream InputStreamReader]
            [java.nio.charset CodingErrorAction StandardCharsets]))
 
 ;------------------------------------------------------------------------------ Layer 0
@@ -26,24 +28,11 @@
     (when (= 1 (count (take 2 (json/parsed-seq json-input))))
       (transit/read (transit/reader transit-input :json)))))
 
-(defn- ^{:stratum 1} bounded-output [^ByteArrayOutputStream buffer overflow?]
-  (proxy [OutputStream] []
-    (write
-      ([value]
-       (if (< (.size buffer) maximum-bytes)
-         (.write buffer (int value))
-         (reset! overflow? true)))
-      ([bytes offset length]
-       (if (<= (+ (.size buffer) length) maximum-bytes)
-         (.write buffer bytes offset length)
-         (reset! overflow? true))))))
-
 ;------------------------------------------------------------------------------ Layer 2
 
 (defn ^{:stratum 2} encode [artifact]
-  (with-open [output (ByteArrayOutputStream.)]
-    (let [overflow? (atom false)]
-      (transit/write (transit/writer (bounded-output output overflow?) :json) artifact)
-      (when-not @overflow?
-        (let [bytes (.toByteArray output)]
-          (when (= artifact (decode bytes)) bytes))))))
+  (when (shape/bounded-data? artifact maximum-bytes)
+    (with-open [output (ByteArrayOutputStream.)]
+      (transit/write (transit/writer (boundary/bounded-output output maximum-bytes) :json) artifact)
+      (let [bytes (.toByteArray output)]
+        (when (= artifact (decode bytes)) bytes)))))

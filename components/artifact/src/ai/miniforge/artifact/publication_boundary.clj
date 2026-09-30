@@ -4,9 +4,24 @@
 (ns ai.miniforge.artifact.publication-boundary
   "Convert filesystem and codec failures at the artifact publication boundary."
   (:require [ai.miniforge.anomaly.interface :as anomaly]
-            [ai.miniforge.artifact.messages :as msg]))
+            [ai.miniforge.artifact.messages :as msg])
+  (:import [java.io ByteArrayOutputStream IOException OutputStream]))
 
 ;------------------------------------------------------------------------------ Layer 0
+
+(defn ^{:stratum 0} bounded-output [^ByteArrayOutputStream buffer limit]
+  ;; Java's void OutputStream callback cannot return an anomaly. Abort the codec
+  ;; here; the publication boundary converts its IOException into invalid-input.
+  (proxy [OutputStream] []
+    (write
+      ([value]
+       (if (< (.size buffer) limit)
+         (.write buffer (int value))
+         (throw (IOException. (msg/t :publication/not-portable)))))
+      ([bytes offset length]
+       (if (<= (+ (.size buffer) length) limit)
+         (.write buffer bytes offset length)
+         (throw (IOException. (msg/t :publication/not-portable))))))))
 
 (defn ^{:stratum 0} failure [type key id]
   (anomaly/anomaly type (msg/t key) {:artifact/id id}))
