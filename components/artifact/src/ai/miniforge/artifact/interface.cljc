@@ -23,12 +23,30 @@
    [ai.miniforge.artifact.core :as core]
    [ai.miniforge.artifact.publication :as publication]
    [ai.miniforge.artifact.publication-boundary :as publication-boundary]
+   [ai.miniforge.artifact.snapshot :as snapshot]
    [ai.miniforge.schema.interface :as schema]
    [clojure.string :as str]
    [ai.miniforge.artifact.interface.protocols.artifact-store :as p]
    [ai.miniforge.artifact.protocols.records.transit-store :as transit-store]))
 
 ;------------------------------------------------------------------------------ Layer 0
+
+(defn ^{:stratum 0} encode-snapshot
+  "Encode a validated artifact as a lossless, checksummed string of at most 16 MiB.
+   Returns an anomaly for invalid or nonportable data. Does not publish anything."
+  [value]
+  (if (schema/valid-artifact? value)
+    (snapshot/encode value)
+    (publication-boundary/failure :invalid-input :snapshot/invalid (:artifact/id value))))
+
+(defn ^{:stratum 0} decode-snapshot
+  "Decode a bounded snapshot and validate its artifact schema and checksum.
+   Returns an anomaly on corruption. Integrity is not writer authentication;
+   callers must validate domain ownership and must not derive authority from it."
+  [value]
+  (if (string? value)
+    (snapshot/decode value)
+    (publication-boundary/failure :invalid-input :snapshot/invalid nil)))
 
 (defn ^{:stratum 0} publish!
   "Synchronously publish an immutable artifact to an existing canonical directory.

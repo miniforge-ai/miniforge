@@ -5,6 +5,7 @@
   "Bounded Transit encoding for immutable artifact publication."
   (:require [ai.miniforge.artifact.boundary.codec :as boundary]
             [ai.miniforge.artifact.publication-shape :as shape]
+            [ai.miniforge.artifact.publication-types :as types]
             [cognitect.transit :as transit]
             [cheshire.core :as json]
             [clojure.java.io :as io])
@@ -14,9 +15,6 @@
 ;------------------------------------------------------------------------------ Layer 0
 
 (def ^{:stratum 0} maximum-bytes (* 16 1024 1024))
-
-(def ^{:stratum 0} read-options
-  {:handlers {"list" (transit/read-handler #(apply list %))}})
 
 (defn- ^{:stratum 0} utf8-decoder []
   (doto (.newDecoder StandardCharsets/UTF_8)
@@ -29,13 +27,13 @@
   (with-open [json-input (io/reader (InputStreamReader. (ByteArrayInputStream. bytes) (utf8-decoder)))
               transit-input (ByteArrayInputStream. bytes)]
     (when (= 1 (count (take 2 (json/parsed-seq json-input))))
-      (transit/read (transit/reader transit-input :json read-options)))))
+      (transit/read (transit/reader transit-input :json types/read-options)))))
 
 ;------------------------------------------------------------------------------ Layer 2
 
 (defn ^{:stratum 2} encode [artifact]
   (when (shape/bounded-data? artifact maximum-bytes)
     (with-open [output (ByteArrayOutputStream.)]
-      (transit/write (transit/writer (boundary/bounded-output output maximum-bytes) :json) artifact)
+      (transit/write (transit/writer (boundary/bounded-output output maximum-bytes) :json types/write-options) artifact)
       (let [bytes (.toByteArray output)]
         (when (= artifact (decode bytes)) bytes)))))
