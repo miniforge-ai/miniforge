@@ -114,6 +114,8 @@
         discovery (support/phase-output result :opsv/discover)
         policy (:opsv/operational-policy
                 (support/phase-output result :opsv/synthesize))
+        verification (support/phase-output result :opsv/verify)
+        verification-run (:opsv/verification-run verification)
         actuation (:opsv/actuation-record
                    (support/phase-output result :opsv/actuate))]
     (testing "the shared runner executes all registered phases"
@@ -150,7 +152,14 @@
              (get-in policy [:operational-policy/scaling :keda :trigger]))))
     (testing "the default posture remains side-effect free"
       (is (= :recommend-only (:effective-actuation-mode actuation)))
-      (is (= [] (:governed-effects actuation))))))
+      (is (= [] (:governed-effects actuation))))
+    (testing "verification has a separate candidate-bound measurement receipt"
+      (is (uuid? (:verification/id verification-run)))
+      (is (= (:opsv/policy-hash (support/phase-output result :opsv/synthesize))
+             (:candidate/hash verification-run)))
+      (is (= 2 (count (:observations verification-run))))
+      (is (not= (:opsv/metric-snapshot-artifact-refs (support/workflow-input))
+                (:opsv/metric-snapshot-artifact-refs verification))))))
 
 ;; Every pipeline this namespace runs acquires its worktree from a
 ;; throwaway host repository and checkpoints into a throwaway root — never

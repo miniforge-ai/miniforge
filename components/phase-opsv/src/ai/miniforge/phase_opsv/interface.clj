@@ -21,12 +21,20 @@
    [ai.miniforge.phase-opsv.actuation :as actuation]
    [ai.miniforge.phase-opsv.evidence-recovery :as recovery]
    [ai.miniforge.phase-opsv.finalization-boundary :as finalization]
+   [ai.miniforge.phase-opsv.adapter-factory :as adapter-factory]
    [ai.miniforge.phase-opsv.model :as model]
-   [ai.miniforge.phase-opsv.protocol :as protocol]))
+   [ai.miniforge.phase-opsv.protocol :as protocol]
+   [ai.miniforge.phase-opsv.verification-run :as verification-run]))
 
 ;------------------------------------------------------------------------------ Layer 0
 
 (def ^{:stratum 0} OPSVAdapter protocol/OPSVAdapter)
+
+(def ^{:stratum 0} VerificationAdapter protocol/VerificationAdapter)
+
+(def ^{:stratum 0} run-verification protocol/run-verification)
+
+(def ^{:stratum 0} verification-receipt verification-run/receipt)
 
 (def ^{:stratum 0} discover-signals protocol/discover-signals)
 
@@ -65,13 +73,12 @@
   (actuation/actuate
    ctx (get-in ctx [:execution/phase-results :opsv/verify :result :output])))
 
-;------------------------------------------------------------------------------ Layer 1
+(defn ^{:stratum 0} functional-adapter
+  "Build an adapter; a missing verification callback fails closed at VERIFY."
+  ([discover-fn guarded-ramp-fn]
+   (adapter-factory/create discover-fn guarded-ramp-fn))
+  ([discover-fn guarded-ramp-fn verify-fn]
+   (adapter-factory/create discover-fn guarded-ramp-fn verify-fn)))
 
-(defn ^{:stratum 1} functional-adapter
-  "Build an OPSV adapter from pure discovery and guarded-ramp functions."
-  [discover-fn guarded-ramp-fn]
-  (reify protocol/OPSVAdapter
-    (discover-signals [_ targets]
-      (discover-fn targets))
-    (run-guarded-ramp [_ experiment-pack]
-      (guarded-ramp-fn experiment-pack))))
+(comment
+  (functional-adapter identity identity))

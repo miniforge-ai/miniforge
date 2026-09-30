@@ -17,7 +17,8 @@
    :opsv/converge [[:convergence :review :opsv/convergence-result]]
    :opsv/synthesize [[:policy :manifest :opsv/operational-policy]]
    :opsv/verify [[:policy :manifest :opsv/operational-policy]
-                 [:verification :review :opsv/verification-result]]
+                 [:verification :review :opsv/verification-result]
+                 [:verification-measurements :telemetry :opsv/verification-run]]
    :opsv/actuate [[:actuation :review :opsv/actuation-record]]})
 
 (defn ^{:stratum 0} record [ctx output [kind type content-key]]
@@ -32,14 +33,20 @@
                   :content/hash digest}]
     (artifact/build-artifact {:id id :type type :version "1.0.0" :content content :metadata metadata})))
 
-(defn ^{:stratum 0} attach [output artifact]
-  (let [id (:artifact/id artifact)
-        kind (get-in artifact [:artifact/metadata :opsv/material-kind])]
-    (-> output
-        (assoc-in [:opsv/phase-artifact-ids kind] id)
-        (update :opsv/artifact-refs #(vec (distinct (conj (or % []) id)))))))
+(def ^{:stratum 0} snapshot-kinds [:metric-snapshot :verification-measurements])
+
+(defn- ^{:stratum 0} append-reference [references id]
+  (vec (distinct (conj references id))))
 
 ;------------------------------------------------------------------------------ Layer 1
+
+(defn- ^{:stratum 1} snapshot-references [output]
+  (vec (keep (:opsv/phase-artifact-ids output) snapshot-kinds)))
+
+(defn- ^{:stratum 1} attach-reference [output id kind]
+  (-> output
+      (assoc-in [:opsv/phase-artifact-ids kind] id)
+      (update :opsv/artifact-refs append-reference id)))
 
 (defn ^{:stratum 1} records [ctx phase-key output]
   (let [materials (cond-> (get phase-materials phase-key [])
@@ -48,6 +55,16 @@
                     (and (= :opsv/actuate phase-key) (contains? output :opsv/phase-failure))
                     (conj [:actuation-failure :review :opsv/phase-failure]))]
     (mapv (partial record ctx output) materials)))
+
+;------------------------------------------------------------------------------ Layer 2
+
+(defn ^{:stratum 2} attach [output artifact]
+  (let [id (:artifact/id artifact)
+        kind (get-in artifact [:artifact/metadata :opsv/material-kind])
+        attached (attach-reference output id kind)]
+    (if (some #{kind} snapshot-kinds)
+      (assoc attached :opsv/metric-snapshot-artifact-refs (snapshot-references attached))
+      attached)))
 
 (comment
   (records {} :opsv/plan {}))
