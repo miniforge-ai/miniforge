@@ -29,6 +29,27 @@
 
 ;------------------------------------------------------------------------------ Layer 1
 
+(deftest ^{:stratum 1} deferred-input-is-rejected-before-realization-test
+  (with-directory
+    (fn [directory]
+      (let [visited (atom 0)
+            content (map (fn [n] (swap! visited inc) n) (range 100000))
+            value (assoc (record) :artifact/content content)
+            result (with-redefs [codec/maximum-bytes 1024]
+                     (artifact/publish! directory value))]
+        (is (= :invalid-input (:anomaly/type result)))
+        (is (zero? @visited))
+        (is (empty? (seq (.listFiles (io/file directory)))))))))
+
+(deftest ^{:stratum 1} overflow-aborts-java-output-stream-test
+  (with-directory
+    (fn [directory]
+      (let [value (assoc (record) :artifact/content (apply str (repeat 10000 "x")))
+            result (with-redefs [codec/maximum-bytes 1024]
+                     (artifact/publish! directory value))]
+        (is (= :invalid-input (:anomaly/type result)))
+        (is (empty? (seq (.listFiles (io/file directory)))))))))
+
 (deftest ^{:stratum 1} publication-is-immutable-and-uncached-test
   (with-directory
     (fn [directory]
@@ -179,6 +200,7 @@
       (let [value (assoc (record) :artifact/content (list 1 2))
             id (:artifact/id value) target (files/target directory id)]
         (is (= value (artifact/publish! directory value)))
+        (is (= value (artifact/publish! directory (artifact/read-published directory id))))
         (let [envelope (codec/decode (files/read-bytes target))
               changed (String. ^bytes (codec/encode (assoc value :artifact/content [1 2])) StandardCharsets/UTF_8)
               corrupted (assoc envelope :publication/wire changed)]

@@ -25,7 +25,8 @@ component supplies the integrity digest.
 ## Changes in detail
 
 - Validate artifact records and canonical, existing directory paths.
-- Encode round-trippable Transit data with a 16 MiB retained-output limit.
+- Encode finite Transit data with a 16 MiB aborting-output limit and 128-level cap.
+  Reject deferred sequences before Transit counts them; decode lists eagerly.
 - Store a versioned envelope with a digest of the exact Transit wire string.
   This preserves list/vector and other wire-type distinctions. Verify the digest
   on every read and retry; it detects corruption, not malicious writer replacement.
@@ -39,12 +40,12 @@ component supplies the integrity digest.
 
 ## Testing plan
 
-All three artifact-consuming projects pass 30 tests and 106 assertions each.
-The hardened publication suite passes 16 tests and 69 assertions on the JVM
+All three artifact-consuming projects pass 32 tests and 112 assertions each.
+The hardened publication suite passes 18 tests and 75 assertions on the JVM
 and packaged Babashka CLI. Tests cover disk rereads, conflicting and concurrent
 publication, pre-link failure, uncertain force, identical retry, invalid paths,
 symlinks, unsupported content, output limits and interrupted/error boundaries.
-Scoped standards report zero violations across 20 files.
+Scoped standards are checked again after each codec-boundary change.
 Trailing JSON or malformed bytes are rejected on read and retry. Corrupt reads
 return faults; fatal runtime errors return non-retryable fatal anomalies.
 The collection-corruption regression truncates its replacement bytes and proves
