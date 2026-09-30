@@ -12,7 +12,8 @@
             [clojure.test :refer [deftest is]])
   (:import [java.nio.charset StandardCharsets]
            [java.nio.file Files]
-           [java.nio.file.attribute FileAttribute]))
+           [java.nio.file.attribute FileAttribute]
+           [java.time Instant]))
 
 ;------------------------------------------------------------------------------ Layer 0
 
@@ -51,14 +52,23 @@
           (is (= :fault (:anomaly/type (artifact/read-published directory id))))
           (is (= :fault (:anomaly/type (artifact/publish! directory value)))))))))
 
+(deftest ^{:stratum 1} instant-publication-preserves-type-and-nanoseconds-test
+  (with-directory
+    (fn [directory]
+      (let [value (assoc (record) :artifact/content
+                         {:effect/at (Instant/parse "2026-09-28T00:00:00.123456789Z")})]
+        (is (= value (artifact/publish! directory value)))
+        (is (= value (artifact/read-published directory (:artifact/id value))))))))
+
 (deftest ^{:stratum 1} invalid-input-and-unsafe-paths-refuse-publication-test
   (with-directory
     (fn [directory]
       (let [value (record)]
         (doseq [invalid [nil 42 {} (assoc value :artifact/id "not-a-uuid")]]
           (is (= :invalid-input (:anomaly/type (artifact/publish! directory invalid)))))
-        (doseq [path [nil "" (str directory "/../" (.getName (io/file directory)))]]
-          (is (= :invalid-input (:anomaly/type (artifact/publish! path value)))))
+        (doseq [path [nil "" (str directory "/../" (.getName (io/file directory))) (str directory (char 0))]]
+          (is (= :invalid-input (:anomaly/type (artifact/publish! path value))))
+          (is (= :invalid-input (:anomaly/type (artifact/read-published path (:artifact/id value))))))
         (is (empty? (seq (.listFiles (io/file directory)))))))))
 
 (deftest ^{:stratum 1} unconfirmed-publication-is-recoverable-with-identical-content-test
@@ -178,3 +188,29 @@
           (is (nil? (record-codec/decode (files/read-bytes target)))))
         (is (= :fault (:anomaly/type (artifact/read-published directory id))))
         (is (= :fault (:anomaly/type (artifact/publish! directory value))))))))
+
+(deftest ^{:stratum 1} cleanup-failure-retains-confirmed-publication-test
+  (with-directory
+    (fn [directory]
+      (let [value (record)
+            fail-cleanup! (fn [_] (throw (java.io.IOException. "cleanup failed")))
+            result (with-redefs [files/delete-temporary! fail-cleanup!]
+                     (artifact/publish! directory value))]
+        (is (= :unavailable (:anomaly/type result)))
+        (is (= value (get-in result [:anomaly/data :publication/confirmed-artifact])))
+        (is (= value (artifact/read-published directory (:artifact/id value))))))))
+
+(deftest ^{:stratum 1} cleanup-failure-never-masks-primary-failure-test
+  (with-directory
+    (fn [directory]
+      (let [value (record)
+            fail-cleanup! (fn [_] (throw (java.io.IOException. "cleanup failed")))
+            fail-write! (fn [& _] (throw (AssertionError. "fatal write")))]
+        (is (= value (artifact/publish! directory value)))
+        (with-redefs [files/delete-temporary! fail-cleanup!]
+          (let [conflict (artifact/publish! directory (assoc value :artifact/content {}))
+                fatal (with-redefs [files/write! fail-write!] (artifact/publish! directory value))]
+            (is (= :conflict (:anomaly/type conflict)))
+            (is (= :fatal (:anomaly/type fatal)))
+            (doseq [result [conflict fatal]]
+              (is (= :unavailable (get-in result [:anomaly/data :publication/cleanup-failure :anomaly/type]))))))))))

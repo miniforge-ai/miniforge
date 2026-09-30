@@ -3,7 +3,8 @@
 ;; Licensed under the Apache License, Version 2.0.
 (ns ai.miniforge.artifact.publication-codec
   "Bounded Transit encoding for immutable artifact publication."
-  (:require [cognitect.transit :as transit]
+  (:require [ai.miniforge.artifact.publication-types :as types]
+            [cognitect.transit :as transit]
             [cheshire.core :as json]
             [clojure.java.io :as io])
   (:import [java.io ByteArrayInputStream ByteArrayOutputStream InputStreamReader OutputStream]
@@ -20,12 +21,6 @@
 
 ;------------------------------------------------------------------------------ Layer 1
 
-(defn ^{:stratum 1} decode [bytes]
-  (with-open [json-input (io/reader (InputStreamReader. (ByteArrayInputStream. bytes) (utf8-decoder)))
-              transit-input (ByteArrayInputStream. bytes)]
-    (when (= 1 (count (take 2 (json/parsed-seq json-input))))
-      (transit/read (transit/reader transit-input :json)))))
-
 (defn- ^{:stratum 1} bounded-output [^ByteArrayOutputStream buffer overflow?]
   (proxy [OutputStream] []
     (write
@@ -38,12 +33,18 @@
          (.write buffer bytes offset length)
          (reset! overflow? true))))))
 
+(defn ^{:stratum 1} decode [bytes]
+  (with-open [json-input (io/reader (InputStreamReader. (ByteArrayInputStream. bytes) (utf8-decoder)))
+              transit-input (ByteArrayInputStream. bytes)]
+    (when (= 1 (count (take 2 (json/parsed-seq json-input))))
+      (transit/read (transit/reader transit-input :json types/read-options)))))
+
 ;------------------------------------------------------------------------------ Layer 2
 
 (defn ^{:stratum 2} encode [artifact]
   (with-open [output (ByteArrayOutputStream.)]
     (let [overflow? (atom false)]
-      (transit/write (transit/writer (bounded-output output overflow?) :json) artifact)
+      (transit/write (transit/writer (bounded-output output overflow?) :json types/write-options) artifact)
       (when-not @overflow?
         (let [bytes (.toByteArray output)]
           (when (= artifact (decode bytes)) bytes))))))
