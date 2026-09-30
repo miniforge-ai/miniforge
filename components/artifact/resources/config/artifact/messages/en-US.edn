@@ -8,6 +8,7 @@
   :publication/cleanup-failed "Artifact temporary-file cleanup failed; retain the reported publication outcome for recovery."
   :publication/fatal "Artifact operation encountered a fatal runtime failure; do not retry in this process."
   :snapshot/invalid "Artifact snapshot is invalid, corrupt, or exceeds the 16 MiB limit."
+  :digest/invalid "Content digests require supported value-semantic data that round-trips through Transit within 16 MiB and 128 levels."
   :link/parent-not-found "Parent artifact not found"
   :link/child-not-found "Child artifact not found"
   :link/artifact-not-found "Artifact not found"}}
