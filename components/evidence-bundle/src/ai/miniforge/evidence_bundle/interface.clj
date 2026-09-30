@@ -20,6 +20,7 @@
    Handles evidence collection, storage, and provenance tracing per N6 spec."
   (:require
    [ai.miniforge.content-hash.interface :as content-hash]
+   [ai.miniforge.evidence-bundle.canonical-validation :as canonical]
    [ai.miniforge.evidence-bundle.chain-evidence :as chain-evidence]
    [ai.miniforge.evidence-bundle.collector :as collector]
    [ai.miniforge.evidence-bundle.extraction :as extraction]
@@ -31,7 +32,6 @@
    [ai.miniforge.evidence-bundle.schema.domain :as domain]
    [ai.miniforge.evidence-bundle.schema.opsv :as opsv-schema]
    [ai.miniforge.evidence-bundle.interface.protocols.evidence-bundle :as p]
-   [ai.miniforge.evidence-bundle.protocols.impl.evidence-bundle :as bundle-impl]
    [ai.miniforge.evidence-bundle.protocols.records.evidence-bundle :as records]))
 
 ;------------------------------------------------------------------------------ Layer 0
@@ -160,11 +160,18 @@
   (p/query-bundles manager criteria))
 
 (defn ^{:stratum 0} validate-bundle
-  "Validate evidence bundle structure and integrity.
-   One argument validates data without creating a storage manager.
+  "Legacy required-field and intent validation; does not check canonical integrity.
+   Use validate-canonical-bundle for published evidence.
    Returns {:valid? bool :errors [...]}"
-  ([bundle] (bundle-impl/validate-bundle-impl bundle))
-  ([manager bundle] (p/validate-bundle manager bundle)))
+  [manager bundle]
+  (p/validate-bundle manager bundle))
+
+(defn ^{:stratum 0} validate-canonical-bundle
+  "Validate portable N6 schema, intent, outcome, policy checks and optional OPSV.
+   A declared content hash must match. An unsigned base bundle is allowed.
+   Returns {:valid? bool :errors [...]}; does not establish authenticity."
+  [bundle]
+  (canonical/validate-with-exception-handling bundle))
 
 (defn ^{:stratum 0} export-bundle
   "Export evidence bundle to file (EDN format).
