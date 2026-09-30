@@ -111,10 +111,16 @@
    :evidence/outcome map?
 
    ;; Compliance
+   (optional-key/optional-key :compliance/created-at) inst?
    (optional-key/optional-key :compliance/sensitive-data) boolean?
-   (optional-key/optional-key :compliance/pii-handling) keyword?
+   (optional-key/optional-key :compliance/pii-handling) compliance/valid-pii-handling?
    (optional-key/optional-key :compliance/retention-policy) keyword?
    (optional-key/optional-key :compliance/auditor-notes) string?
+
+   ;; Integrity metadata is optional for pre-finalization assembly inputs.
+   (optional-key/optional-key :evidence/content-hash) string?
+   (optional-key/optional-key :evidence/sealed-at) inst?
+   (optional-key/optional-key :evidence/signature) string?
 
    ;; Compliance Metadata (extended) — all optional for backwards compatibility.
    (optional-key/optional-key :evidence/data-classification) compliance/valid-data-classification?

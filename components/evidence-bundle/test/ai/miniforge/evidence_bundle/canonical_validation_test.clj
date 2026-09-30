@@ -3,6 +3,8 @@
 ;; Licensed under the Apache License, Version 2.0.
 (ns ai.miniforge.evidence-bundle.canonical-validation-test
   (:require [ai.miniforge.evidence-bundle.interface :as evidence]
+            [ai.miniforge.evidence-bundle.schema.compliance :as compliance]
+            [ai.miniforge.evidence-bundle.schema.validation :as validation]
             [clojure.test :refer [deftest is]]))
 
 ;------------------------------------------------------------------------------ Layer 0
@@ -30,6 +32,14 @@
    :policy-check/duration-ms 0
    :policy-check/envelope nil})
 
+(deftest ^{:stratum 0} schema-validation-reports-malformed-records-without-throwing-test
+  (doseq [value [nil 42 :invalid [] "record"]]
+    (is (false? (:valid? (validation/validate-schema {:field string?} value))))
+    (is (false? (compliance/valid-access-log-entry? value))))
+  (is (false? (:valid? (validation/validate-schema {:field seq} {:field 42}))))
+  (is (true? (:valid? (validation/validate-schema {:field nil?} {:field nil}))))
+  (is (false? (:valid? (validation/validate-schema {:field nil?} {})))))
+
 ;------------------------------------------------------------------------------ Layer 1
 
 (deftest ^{:stratum 1} canonical-validation-checks-required-types-and-domain-values-test
@@ -44,6 +54,8 @@
                           [[:evidence/intent :intent/constraints] 42]
                           [[:evidence/outcome :outcome/success] "true"]
                           [[:evidence/policy-checks] [{}]]
+                          [[:compliance/created-at] "yesterday"]
+                          [[:compliance/pii-handling] :unknown]
                           [[:evidence/opsv] {}]]]
       (is (false? (:valid? (evidence/validate-canonical-bundle (assoc-in bundle path value))))))))
 
@@ -58,6 +70,8 @@
     (doseq [altered [(assoc-in sealed [:evidence/outcome :outcome/success] false)
                      (assoc sealed :evidence/content-hash nil)
                      (assoc sealed :evidence/content-hash "wrong")
+                     (assoc sealed :evidence/signature 42)
+                     (assoc sealed :evidence/signature nil)
                      (dissoc sealed :evidence/sealed-at)
                      (dissoc sealed :compliance/created-at)
                      (dissoc sealed :evidence/content-hash)]]
