@@ -39,12 +39,12 @@ component supplies the integrity digest.
 
 ## Testing plan
 
-All three artifact-consuming projects pass 26 tests and 83 assertions each.
-The hardened publication suite passes 12 tests and 46 assertions on the JVM
+All three artifact-consuming projects pass 28 tests and 90 assertions each.
+The hardened publication suite passes 14 tests and 53 assertions on the JVM
 and packaged Babashka CLI. Tests cover disk rereads, conflicting and concurrent
 publication, pre-link failure, uncertain force, identical retry, invalid paths,
 symlinks, unsupported content, output limits and interrupted/error boundaries.
-The rebuilt CLI jar is 38,961,776 bytes. Scoped standards report zero violations across 19 files.
+Scoped standards report zero violations across 20 files.
 Trailing JSON or malformed bytes are rejected on read and retry. Corrupt reads
 return faults; fatal runtime errors return non-retryable fatal anomalies.
 Relative directories, malformed UTF-8 and schema-valid content corruption are refused.

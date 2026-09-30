@@ -41,6 +41,16 @@
         (spit (files/target directory id) "corrupt")
         (is (= :fault (:anomaly/type (artifact/read-published directory id))))))))
 
+(deftest ^{:stratum 1} malformed-existing-record-is-a-fault-not-a-conflict-test
+  (with-directory
+    (fn [directory]
+      (let [value (record) id (:artifact/id value)]
+        (doseq [invalid [{} (assoc value :artifact/id (random-uuid))]]
+          (with-open [output (io/output-stream (files/target directory id))]
+            (.write output (record-codec/encode invalid)))
+          (is (= :fault (:anomaly/type (artifact/read-published directory id))))
+          (is (= :fault (:anomaly/type (artifact/publish! directory value)))))))))
+
 (deftest ^{:stratum 1} invalid-input-and-unsafe-paths-refuse-publication-test
   (with-directory
     (fn [directory]
