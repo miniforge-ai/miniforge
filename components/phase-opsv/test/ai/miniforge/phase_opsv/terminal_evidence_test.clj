@@ -7,33 +7,16 @@
             [ai.miniforge.coerce.interface :as coerce]
             [ai.miniforge.evidence-bundle.interface :as evidence]
             [ai.miniforge.phase-opsv.artifact-test-support :as f]
-            [ai.miniforge.phase-opsv.governance-fixtures :as governance]
             [ai.miniforge.phase-opsv.interface :as opsv]
             [ai.miniforge.phase-opsv.pr-audit :as audit]
             [ai.miniforge.phase-opsv.pr-fixtures :as pr]
-            [ai.miniforge.phase-opsv.test-support :as support]
+            [ai.miniforge.phase-opsv.terminal-test-support :refer [with-ready]]
             [clojure.edn :as edn]
             [clojure.java.io :as io]
             [clojure.test :refer [deftest is]]
             [malli.core :as m]))
 
 ;------------------------------------------------------------------------------ Layer 0
-
-(defn- ^{:stratum 0} with-ready [test-fn]
-  (f/with-context
-    (fn [ctx directory]
-      (let [{:keys [runtime calls]} (pr/setup)
-            configured (-> (f/configured ctx)
-                           (assoc :execution/status :running)
-                           (assoc-in [:execution/opts :opsv/governance] governance/policy)
-                           (assoc-in [:execution/input :opsv/experiment-pack :experiment-pack/actuation-intent] :pr-only))]
-        (try
-          (let [ready (reduce f/step configured (butlast support/handlers))
-                hash (:opsv/policy-hash (support/phase-output ready :opsv/verify))]
-            (test-fn (assoc-in ready [:execution/opts :opsv/pr-execution]
-                               (assoc-in runtime [:target :opsv/policy-hash] hash)) directory calls))
-          (finally (doseq [file (reverse (file-seq (io/file (get-in runtime [:provider :directory]))))]
-                     (io/delete-file file))))))))
 
 (defn- ^{:stratum 0} terminal-output [ctx]
   (get-in ctx [:phase :result :output :anomaly/data :opsv/phase-output]))
@@ -55,6 +38,18 @@
   (doseq [ctx [nil {} {:execution/input 42} {:execution/opts 42}
                {:execution/opts :invalid} {:phase {:name :opsv/execute}}]]
     (is (= :invalid-input (:anomaly/type (opsv/recover-actuation-evidence! ctx))))))
+
+(deftest ^{:stratum 0} confirmed-provider-success-publishes-real-transaction-evidence-test
+  (with-ready
+    (fn [ready directory calls]
+      (let [completed (f/run-last-phase ready)
+            output (get-in completed [:phase :result :output])
+            id (get-in output [:opsv/phase-artifact-ids :effect-transactions])
+            published (artifact/read-published directory id)]
+        (is (= :success (get-in completed [:phase :result :status])))
+        (is (true? (get-in output [:opsv/evidence-bundle :evidence/outcome :outcome/success])))
+        (is (= (:opsv/effect-transactions output) (:artifact/content published)))
+        (is (= 2 (count @calls)))))))
 
 ;------------------------------------------------------------------------------ Layer 1
 
@@ -125,18 +120,6 @@
         (is (= :finalized (get-in recovered [:execution/input :opsv/evidence-assembly :opsv.assembly/status])))
         (is (nil? (get-in recovered [:phase :result :output :anomaly/data :opsv/evidence-failure])))
         (is (= (terminal-output recovered) (terminal-output again)))
-        (is (= 2 (count @calls)))))))
-
-(deftest ^{:stratum 1} confirmed-provider-success-publishes-real-transaction-evidence-test
-  (with-ready
-    (fn [ready directory calls]
-      (let [completed (f/run-last-phase ready)
-            output (get-in completed [:phase :result :output])
-            id (get-in output [:opsv/phase-artifact-ids :effect-transactions])
-            published (artifact/read-published directory id)]
-        (is (= :success (get-in completed [:phase :result :status])))
-        (is (true? (get-in output [:opsv/evidence-bundle :evidence/outcome :outcome/success])))
-        (is (= (:opsv/effect-transactions output) (:artifact/content published)))
         (is (= 2 (count @calls)))))))
 
 (deftest ^{:stratum 1} terminal-checkpoint-restores-exact-outcome-without-provider-replay-test
