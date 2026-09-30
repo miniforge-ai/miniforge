@@ -21,6 +21,10 @@
 ;------------------------------------------------------------------------------ Layer 0
 
 ;; Vocabularies and structural values
+(def ^{:stratum 0} PolicyHash
+  "Canonical SHA-256 correlation for a verified policy."
+  [:re #"\A[0-9a-f]{64}\z"])
+
 (def ^{:stratum 0} Repository
   "Provider-compatible owner/repository identity for governed OPSV proposals."
   [:re #"\A[A-Za-z0-9][A-Za-z0-9_.-]*/[A-Za-z0-9][A-Za-z0-9_.-]*\z"])
