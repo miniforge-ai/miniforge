@@ -5,6 +5,7 @@
   "Bind fresh candidate measurements to one verification invocation."
   (:require [ai.miniforge.anomaly.interface :as anomaly]
             [ai.miniforge.content-hash.interface :as hash]
+            [ai.miniforge.opsv.interface :as opsv]
             [ai.miniforge.phase-opsv.messages :as msg]
             [ai.miniforge.phase-opsv.protocol :as port]
             [malli.core :as m]))
@@ -24,10 +25,8 @@
    [:confidence [:and number? [:fn #(<= 0 % 1)]]]
    [:metric-snapshot-artifact-refs [:vector :uuid]]])
 
-(defn ^{:stratum 0} request [synthesized]
-  (let [policy (:opsv/operational-policy synthesized)
-        pack (:opsv/experiment-pack synthesized)
-        policy-hash (hash/content-hash policy)
+(defn- ^{:stratum 0} request-values [policy pack]
+  (let [policy-hash (hash/content-hash policy)
         pack-hash (hash/content-hash pack)]
     {:verification/id (random-uuid)
      :candidate/hash policy-hash
@@ -46,6 +45,17 @@
       (anomaly/anomaly :unavailable (msg/ts :verification/failed) {}))))
 
 ;------------------------------------------------------------------------------ Layer 1
+
+(defn- ^{:stratum 1} request [synthesized]
+  (let [policy (opsv/validate-operational-policy (:opsv/operational-policy synthesized))
+        pack (opsv/validate-experiment-pack (:opsv/experiment-pack synthesized))
+        fingerprint (:opsv/environment-fingerprint synthesized)]
+    (cond
+      (anomaly/anomaly? policy) policy
+      (anomaly/anomaly? pack) pack
+      (not (and (map? fingerprint) (seq fingerprint)))
+      (anomaly/anomaly :invalid-input (msg/ts :adapter/missing-fingerprint) {})
+      :else (request-values policy pack))))
 
 (defn- ^{:stratum 1} correlated-measurements
   [request measurements]
@@ -76,10 +86,12 @@
 (defn ^{:stratum 2} execute [ctx synthesized]
   (let [adapter (get-in ctx [:execution/opts :opsv/adapter])
         request (request synthesized)]
-    (if (satisfies? port/VerificationAdapter adapter)
+    (cond
+      (anomaly/anomaly? request) request
+      (satisfies? port/VerificationAdapter adapter)
       (validate-receipt request (:opsv/environment-fingerprint synthesized)
                         (invoke-with-exception-handling adapter request))
-      (anomaly/anomaly :unavailable (msg/ts :verification/missing) {}))))
+      :else (anomaly/anomaly :unavailable (msg/ts :verification/missing) {}))))
 
 (comment
   (m/validate Receipt {}))
