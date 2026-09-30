@@ -10,6 +10,7 @@
             [ai.miniforge.phase-opsv.flow :as flow]
             [ai.miniforge.phase-opsv.messages :as msg]
             [ai.miniforge.phase-opsv.pr-transaction :as transaction]
+            [ai.miniforge.phase-opsv.pr-registration :as registration]
             [ai.miniforge.phase-opsv.pr-stop :as stop]))
 
 ;------------------------------------------------------------------------------ Layer 0
@@ -38,7 +39,7 @@
 (defn- ^{:stratum 1} issue! [runtime ctx prepared now]
   (let [directory (:authority-directory runtime)
         issued (grant/issue-for-effect directory (request ctx prepared) now)]
-    (flow/continue issued #(stop/abandon! runtime % now (grant/register! directory %)))))
+    (flow/continue issued #(stop/abandon! runtime % now (registration/register! runtime % now)))))
 
 ;------------------------------------------------------------------------------ Layer 2
 

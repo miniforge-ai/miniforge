@@ -7,6 +7,7 @@
             [ai.miniforge.execution-grant.interface :as grant]
             [ai.miniforge.opsv-actuation.interface :as actuation]
             [ai.miniforge.opsv-provider-github.interface :as provider]
+            [ai.miniforge.phase-opsv.run-control :as control]
             [ai.miniforge.phase-opsv.messages :as msg]
             [ai.miniforge.phase-opsv.pr-stop :as stop]))
 
@@ -25,11 +26,16 @@
     (catch Exception _ false)
     (catch Error _ (anomaly/anomaly :fatal (msg/ts :pr/authority-refused) {}))))
 
+(defn- ^{:stratum 0} supervised-boundary! [runtime operation]
+  (if-let [handle (:control runtime)]
+    (control/at-boundary! handle operation)
+    (actuation/at-mutation-boundary! (:fence runtime) operation)))
+
 ;------------------------------------------------------------------------------ Layer 1
 
 (defn ^{:stratum 1} dispatch! [runtime issued record operation]
-  (let [result (actuation/at-mutation-boundary!
-                (:fence runtime)
+  (let [result (supervised-boundary!
+                runtime
                 (fn []
                   (let [allowed (authorized-with-exception-handling runtime issued record)]
                     (if (and (true? allowed) (not (stop/stopped? runtime)))
