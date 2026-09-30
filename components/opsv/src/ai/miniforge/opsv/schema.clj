@@ -21,6 +21,10 @@
 ;------------------------------------------------------------------------------ Layer 0
 
 ;; Vocabularies and structural values
+(def ^{:stratum 0} Repository
+  "Provider-compatible owner/repository identity for governed OPSV proposals."
+  [:re #"\A[A-Za-z0-9][A-Za-z0-9_.-]*/[A-Za-z0-9][A-Za-z0-9_.-]*\z"])
+
 (def ^{:stratum 0} requested-actuation-modes
   [:recommend-only :pr-only :apply-allowed])
 

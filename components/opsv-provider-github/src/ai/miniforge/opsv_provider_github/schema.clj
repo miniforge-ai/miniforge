@@ -5,6 +5,7 @@
   "Runtime configuration and exact authorized provider-call contracts."
   (:require [ai.miniforge.content-hash.interface :as hash]
             [ai.miniforge.effect-transaction.interface :as effect]
+            [ai.miniforge.opsv.interface :as opsv]
             [ai.miniforge.opsv-provider-github.wire :as wire]
             [clojure.string :as str]))
 
@@ -12,7 +13,7 @@
 
 (def ^{:stratum 0} NonBlank [:and :string [:fn (complement str/blank?)]])
 
-(def ^{:stratum 0} Repository [:re #"\A[A-Za-z0-9][A-Za-z0-9_.-]*/[A-Za-z0-9][A-Za-z0-9_.-]*\z"])
+(def ^{:stratum 0} Repository opsv/Repository)
 
 (def ^{:stratum 0} GitObjectId [:re #"\A(?:[0-9a-f]{40}|[0-9a-f]{64})\z"])
 
