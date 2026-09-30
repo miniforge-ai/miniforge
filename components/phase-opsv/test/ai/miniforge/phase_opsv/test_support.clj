@@ -24,6 +24,9 @@
 
 ;------------------------------------------------------------------------------ Layer 0
 
+(def ^{:stratum 0} ^:private fixture
+  (-> "opsv/application-fixture.edn" io/resource slurp edn/read-string))
+
 (def ^{:stratum 0} handlers
   [[:opsv/discover opsv-phase/discover]
    [:opsv/plan opsv-phase/plan]
@@ -32,20 +35,6 @@
    [:opsv/synthesize opsv-phase/synthesize]
    [:opsv/verify opsv-phase/verify]
    [:opsv/actuate opsv-phase/actuate]])
-
-(defn ^{:stratum 0} test-adapter
-  ([steps]
-   (test-adapter steps
-                 {:cluster "staging-1"
-                  :node-pools ["general"]
-                  :image-digests {"catalog" "sha256:abc"}
-                  :config-hash "config-1"}))
-  ([steps fingerprint]
-   (reify port/OPSVAdapter
-     (discover-signals [_ _targets]
-       [{:driver :cpu} {:driver :backlog}])
-     (run-guarded-ramp [_ _pack]
-       {:environment-fingerprint fingerprint :steps steps}))))
 
 (defn ^{:stratum 0} test-adapter-result
   [result]
@@ -70,10 +59,9 @@
 (def ^{:stratum 0} ^:private artifact-id
   #uuid "00000000-0000-0000-0000-000000000702")
 
-(def ^{:stratum 0} ^:private fixture
-  (-> "opsv/application-fixture.edn" io/resource slurp edn/read-string))
-
 ;------------------------------------------------------------------------------ Layer 1
+
+(def ^{:stratum 1} verification-measurements (:opsv/verification-result fixture))
 
 (def ^{:stratum 1} ramp-steps
   (get-in fixture [:opsv/ramp-result :steps]))
@@ -92,3 +80,22 @@
     :opsv/metric-snapshot-artifact-refs [artifact-id]
     :opsv/policy-diff-artifact-refs [artifact-id]}
    :execution/phase-results {}})
+
+;------------------------------------------------------------------------------ Layer 2
+
+(defn ^{:stratum 2} test-adapter
+  ([steps]
+   (test-adapter steps
+                 {:cluster "staging-1"
+                  :node-pools ["general"]
+                  :image-digests {"catalog" "sha256:abc"}
+                  :config-hash "config-1"}))
+  ([steps fingerprint]
+   (reify port/OPSVAdapter
+     (discover-signals [_ _targets]
+       [{:driver :cpu} {:driver :backlog}])
+     (run-guarded-ramp [_ _pack]
+       {:environment-fingerprint fingerprint :steps steps})
+     port/VerificationAdapter
+     (run-verification [_ request]
+       (opsv-phase/verification-receipt request verification-measurements)))))
