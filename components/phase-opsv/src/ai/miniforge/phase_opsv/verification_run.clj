@@ -11,6 +11,7 @@
             [ai.miniforge.phase-opsv.policy :as policy]
             [ai.miniforge.phase-opsv.protocol :as port]
             [ai.miniforge.phase-opsv.runtime-context :as context]
+            [ai.miniforge.phase-opsv.verification-drift :as drift]
             [malli.core :as m]))
 
 ;------------------------------------------------------------------------------ Layer 0
@@ -23,7 +24,7 @@
    [:verification/id :uuid]
    [:candidate/hash :string]
    [:experiment-pack/hash :string]
-   [:environment-fingerprint [:map-of :keyword :any]]
+   [:environment-fingerprint [:and [:map-of :keyword :any] [:fn seq]]]
    [:observations [:map-of :string :any]]
    [:confidence [:and number? [:fn #(<= 0 % 1)]]]
    [:metric-snapshot-artifact-refs [:vector {:min 1} :uuid]]])
@@ -73,7 +74,7 @@
     (not= (select-keys request correlation-keys) (select-keys result correlation-keys))
     (anomaly/anomaly :conflict (msg/ts :verification/mismatched) {})
     (not (and (seq fingerprint) (= fingerprint (:environment-fingerprint result))))
-    (anomaly/anomaly :conflict (msg/ts :verification/environment-mismatch) {})
+    (drift/mismatch fingerprint result)
     :else result))
 
 ;------------------------------------------------------------------------------ Layer 2
