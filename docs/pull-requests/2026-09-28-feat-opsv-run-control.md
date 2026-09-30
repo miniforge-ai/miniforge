@@ -66,5 +66,5 @@ This change does not claim those acceptance requirements are complete.
 ## Checklist
 
 - [x] Focused and packaged tests, standards, kondo, strata and hooks pass
-- [ ] Final consumer rerun after added race/cleanup regressions
+- [x] Final consumer rerun: 62 tests and 402 assertions in both projects
 - [ ] Final-head review settled, all CI green and conflict-free merge
