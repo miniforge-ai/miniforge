@@ -105,6 +105,18 @@
              (:anomaly/category
               (evidence/accumulate-opsv-evidence! store bundle-id {})))))))
 
+(deftest ^{:stratum 1} restore-adopts-the-existing-seal-without-resealing
+  (let [[store id] (accumulated-store f/opsv-evidence)
+        snapshot @store
+        bundle (evidence/finalize-opsv-evidence! store id f/base-bundle f/opsv-evidence (set f/artifact-ids))
+        restored (atom snapshot)
+        tampered (assoc-in bundle [:evidence/outcome :outcome/success] false)]
+    (is (response/anomaly-map? (evidence/restore-finalized-opsv-bundle! restored tampered (set f/artifact-ids))))
+    (is (= snapshot @restored))
+    (is (= bundle (evidence/restore-finalized-opsv-bundle! restored bundle (set f/artifact-ids))))
+    (is (= :finalized (:opsv.assembly/status (evidence/get-opsv-assembly restored id))))
+    (is (= bundle (evidence/restore-finalized-opsv-bundle! restored bundle (set f/artifact-ids))))))
+
 (deftest ^{:stratum 1} finalize-rejects-invalid-base-bundle
   (let [[store bundle-id] (accumulated-store f/opsv-evidence)
         result (evidence/finalize-opsv-evidence!
