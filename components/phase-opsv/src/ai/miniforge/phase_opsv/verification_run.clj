@@ -68,7 +68,8 @@
 
 (defn- ^{:stratum 1} validate-receipt [request fingerprint result]
   (cond
-    (anomaly/anomaly? result) result
+    (anomaly/anomaly? result)
+    (update result :anomaly/data dissoc :opsv/environment-drift :opsv/drift-publication-failure)
     (not (m/validate Receipt result))
     (anomaly/anomaly :invalid-input (msg/ts :verification/invalid) {})
     (not= (select-keys request correlation-keys) (select-keys result correlation-keys))

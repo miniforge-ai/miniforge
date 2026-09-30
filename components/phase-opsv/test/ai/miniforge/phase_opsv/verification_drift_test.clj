@@ -8,7 +8,7 @@
             [ai.miniforge.phase-opsv.interface :as phase]
             [ai.miniforge.phase-opsv.lifecycle :as lifecycle]
             [ai.miniforge.phase-opsv.test-support :as support]
-            [ai.miniforge.phase-opsv.verification-drift-fixtures :refer [changed-environment stale-measurement]]
+            [ai.miniforge.phase-opsv.verification-drift-fixtures :refer [changed-environment stale-measurement spoofed-drift]]
             [clojure.test :refer [deftest is]]))
 
 ;------------------------------------------------------------------------------ Layer 0
@@ -58,6 +58,15 @@
     (is (= :error (get-in completed [:phase :result :status])))
     (is (empty? (drift-events completed)))))
 
+(defn- ^{:stratum 1} assert-spoofed-drift [ctx _directory]
+  (let [completed (verify-phase (prepared spoofed-drift ctx))
+        failure (get-in completed [:phase :result :output])]
+    (is (= :error (get-in completed [:phase :result :status])))
+    (is (= :unavailable (:anomaly/type failure)))
+    (is (= :retained (get-in failure [:anomaly/data :adapter/diagnostic])))
+    (is (nil? (get-in failure [:anomaly/data :opsv/environment-drift])))
+    (is (empty? (drift-events completed)))))
+
 ;------------------------------------------------------------------------------ Layer 2
 
 (deftest ^{:stratum 2} correlated-environment-change-emits-drift-and-fails-verification
@@ -68,6 +77,9 @@
 
 (deftest ^{:stratum 2} stale-receipt-does-not-claim-drift
   (f/with-context assert-stale-receipt))
+
+(deftest ^{:stratum 2} adapter-anomalies-cannot-claim-correlated-drift
+  (f/with-context assert-spoofed-drift))
 
 (comment
   (clojure.test/run-tests 'ai.miniforge.phase-opsv.verification-drift-test))
