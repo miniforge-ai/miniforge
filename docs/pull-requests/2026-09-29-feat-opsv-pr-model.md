@@ -30,7 +30,10 @@ Runtime review fixes need complete regression coverage without exceeding the
 
 Keep candidate and outcome construction in one pure model namespace. Reuse the
 shared workflow identity and localized message catalogs. No external effects,
-authority issuance, extra dependencies or public component APIs are introduced.
+authority issuance or new library dependencies are introduced. The provider's
+repository schema moves to the shared OPSV domain contract so candidate creation,
+governed proposal validation and provider dispatch use the same shape. The provider
+depends on the domain interface; the application does not depend on adapter internals.
 
 ## Testing
 
