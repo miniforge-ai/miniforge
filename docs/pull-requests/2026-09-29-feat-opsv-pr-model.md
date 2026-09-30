@@ -24,6 +24,8 @@ Runtime review fixes need complete regression coverage without exceeding the
 - Reject malformed workflow IDs and repositories before deriving replay identities.
 - Project confirmed PR observations and their grant, envelope and effect references.
 - Require a granted PR-create transaction, including for matched reconciliation.
+- Permit the validated policy correlation hash in the proposal input contract;
+  the dependent runtime binds it into the governance digest. Do not discard it.
 - Retain failed or uncertain transactions as anomaly data.
 
 ## Standards adversarial pass
