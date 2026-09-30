@@ -49,7 +49,7 @@
                  :candidate/hash "candidate" :experiment-pack/hash "pack"}
         measurements {:environment-fingerprint {:cluster "verification-staging"}
                       :observations {"latency" 42} :confidence 0.95
-                      :metric-snapshot-artifact-refs []}
+                      :metric-snapshot-artifact-refs [#uuid "00000000-0000-0000-0000-000000000799"]}
         configured (assoc scenario :opsv/verification-result measurements)
         adapter (sut/create-adapter configured)]
     (is (satisfies? opsv/VerificationAdapter adapter))
