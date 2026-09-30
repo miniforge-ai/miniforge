@@ -47,7 +47,7 @@
         stored (artifact/read-published directory (:opsv/evidence-artifact-id recovered))]
     (is (= expected-status (:execution/status completed)))
     (is (= workflow-id (:execution/id completed) (:evidence-bundle/workflow-id bundle)))
-    (is (true? (:valid? (evidence/validate-bundle bundle))))
+    (is (true? (:valid? (evidence/validate-canonical-bundle bundle))))
     (is (= bundle (:artifact/content stored)))
     (is (= :finalized (:opsv.assembly/status assembly)))
     (is (= bundle (get-in completed [:execution/input :opsv/evidence-assembly :opsv.assembly/bundle])))

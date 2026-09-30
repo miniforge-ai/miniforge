@@ -51,7 +51,8 @@
     (every? (partial confirmed-record? ctx output) records)))
 
 (defn- ^{:stratum 1} publish-bundle! [ctx output bundle]
-  (if (anomaly/any-anomaly? bundle)
+  (if (or (anomaly/any-anomaly? bundle)
+          (not (:valid? (evidence/validate-canonical-bundle bundle))))
     (model/failure output :invalid-evidence)
     (publish-valid-bundle! ctx output bundle)))
 

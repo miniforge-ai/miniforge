@@ -35,6 +35,8 @@
         bundle (:opsv/evidence-bundle output)
         assembly (get-in completed [:execution/input :opsv/evidence-assembly])]
     (is (m/validate evidence/OpsvEvidence (:evidence/opsv bundle)))
+    (is (:valid? (evidence/validate-canonical-bundle bundle)))
+    (is (= [] (:evidence/policy-checks bundle)))
     (is (= :finalized (:opsv.assembly/status assembly)))
     (is (= (:evidence-bundle/id assembly) (:opsv/evidence-artifact-id output)))
     (is (= bundle (:artifact/content (artifact/read-published directory (:evidence-bundle/id bundle)))))
