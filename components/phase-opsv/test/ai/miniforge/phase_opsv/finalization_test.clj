@@ -56,80 +56,72 @@
       (is (= :error (get-in result [:phase :result :status])))
       (is (zero? @calls)))))
 
-(deftest ^{:stratum 1} publication-failure-retains-bundle-and-recovers-without-actuation-test
-  (f/with-context
-    (fn [ctx directory]
-      (let [ready (reduce f/step (configured ctx) (butlast support/handlers))
-            publish artifact/publish!
-            completed (with-redefs [artifact/publish!
-                                    (fn [root record]
-                                      (if (= :evidence-bundle (get-in record [:artifact/metadata :opsv/material-kind]))
-                                        (anomaly/anomaly :unavailable "disk barrier failed" {})
-                                        (publish root record)))]
-                        (run-last-phase ready))
-            failure (get-in completed [:phase :result :output])
-            assembly (get-in completed [:execution/input :opsv/evidence-assembly])
-            restored (runtime/ensure-assembly (dissoc completed :opsv/evidence-assembly-store))
-            recovered (opsv/publish-finalized-evidence! restored)
-            again (opsv/publish-finalized-evidence! restored)]
-        (is (= :error (get-in completed [:phase :result :status])))
-        (is (map? (get-in failure [:anomaly/data :opsv/phase-output :opsv/actuation-record])))
-        (is (= :finalized (:opsv.assembly/status assembly)))
-        (is (= (:opsv.assembly/bundle assembly) (:opsv/evidence-bundle recovered)))
-        (is (= recovered again))
-        (is (= (:opsv/evidence-bundle recovered)
-               (:artifact/content (artifact/read-published directory (:opsv/evidence-artifact-id recovered)))))))))
+(defn- ^{:stratum 1} assert-publication-recovery [ctx directory]
+  (let [ready (reduce f/step (configured ctx) (butlast support/handlers))
+        publish artifact/publish!
+        completed (with-redefs [artifact/publish!
+                                (fn [root record]
+                                  (if (= :evidence-bundle (get-in record [:artifact/metadata :opsv/material-kind]))
+                                    (anomaly/anomaly :unavailable "disk barrier failed" {})
+                                    (publish root record)))]
+                    (run-last-phase ready))
+        failure (get-in completed [:phase :result :output])
+        assembly (get-in completed [:execution/input :opsv/evidence-assembly])
+        restored (runtime/ensure-assembly (dissoc completed :opsv/evidence-assembly-store))
+        recovered (opsv/publish-finalized-evidence! restored)
+        again (opsv/publish-finalized-evidence! restored)]
+    (is (= :error (get-in completed [:phase :result :status])))
+    (is (map? (get-in failure [:anomaly/data :opsv/phase-output :opsv/actuation-record])))
+    (is (= :finalized (:opsv.assembly/status assembly)))
+    (is (= (:opsv.assembly/bundle assembly) (:opsv/evidence-bundle recovered)))
+    (is (= recovered again))
+    (is (= (:opsv/evidence-bundle recovered)
+           (:artifact/content (artifact/read-published directory (:opsv/evidence-artifact-id recovered)))))))
 
-(deftest ^{:stratum 1} missing-or-mismatched-material-refuses-finalization-test
-  (f/with-context
-    (fn [ctx _]
-      (let [completed (reduce f/step ctx support/handlers)
-            output (support/phase-output completed :opsv/actuate)
-            configured-ctx (configured completed)
-            missing (with-redefs [artifact/read-published (constantly nil)]
-                      (finalization/finalize! configured-ctx output))
-            changed (finalization/finalize! configured-ctx
-                      (assoc-in output [:opsv/actuation-record :pr-refs] ["invented-pr"]))]
-        (is (anomaly/anomaly? missing))
-        (is (anomaly/anomaly? changed))
-        (is (= output (get-in missing [:anomaly/data :opsv/phase-output])))
-        (is (= :assembling (:opsv.assembly/status
-                           (evidence/get-opsv-assembly (:opsv/evidence-assembly-store completed)
-                             (get-in completed [:execution/input :opsv/evidence-bundle-id])))))))))
+(defn- ^{:stratum 1} assert-material-integrity [ctx _]
+  (let [completed (reduce f/step ctx support/handlers)
+        output (support/phase-output completed :opsv/actuate)
+        configured-ctx (configured completed)
+        missing (with-redefs [artifact/read-published (constantly nil)]
+                  (finalization/finalize! configured-ctx output))
+        changed (finalization/finalize! configured-ctx
+                  (assoc-in output [:opsv/actuation-record :pr-refs] ["invented-pr"]))]
+    (is (anomaly/anomaly? missing))
+    (is (anomaly/anomaly? changed))
+    (is (= output (get-in missing [:anomaly/data :opsv/phase-output])))
+    (is (= :assembling (:opsv.assembly/status
+                       (evidence/get-opsv-assembly (:opsv/evidence-assembly-store completed)
+                         (get-in completed [:execution/input :opsv/evidence-bundle-id])))))))
 
-(deftest ^{:stratum 1} finalized-run-refuses-phase-replay-and-tampered-recovery-test
-  (f/with-context
-    (fn [ctx _]
-      (let [completed (reduce f/step (configured ctx) support/handlers)
-            calls (atom 0)
-            interceptor (lifecycle/interceptor {} :opsv/execute (fn [_] (swap! calls inc)))
-            replay ((:enter interceptor) completed)
-            altered (-> completed
-                        (dissoc :opsv/evidence-assembly-store)
-                        (assoc-in [:execution/input :opsv/evidence-snapshot] "corrupt"))
-            recovered (opsv/publish-finalized-evidence! (runtime/ensure-assembly altered))]
-        (is (= :error (get-in replay [:phase :result :status])))
-        (is (zero? @calls))
-        (is (anomaly/anomaly? recovered))))))
+(defn- ^{:stratum 1} assert-replay-refused [ctx _]
+  (let [completed (reduce f/step (configured ctx) support/handlers)
+        calls (atom 0)
+        interceptor (lifecycle/interceptor {} :opsv/execute (fn [_] (swap! calls inc)))
+        replay ((:enter interceptor) completed)
+        altered (-> completed
+                    (dissoc :opsv/evidence-assembly-store)
+                    (assoc-in [:execution/input :opsv/evidence-snapshot] "corrupt"))
+        recovered (opsv/publish-finalized-evidence! (runtime/ensure-assembly altered))]
+    (is (= :error (get-in replay [:phase :result :status])))
+    (is (zero? @calls))
+    (is (anomaly/anomaly? recovered))))
 
-(deftest ^{:stratum 1} exception-after-finalization-checkpoints-recovery-state-test
-  (f/with-context
-    (fn [ctx _]
-      (let [ready (reduce f/step (configured ctx) (butlast support/handlers))
-            publish artifact/publish!
-            completed (with-redefs [artifact/publish!
-                                    (fn [root record]
-                                      (if (= :evidence-bundle (get-in record [:artifact/metadata :opsv/material-kind]))
-                                        (throw (InterruptedException. "publication interrupted"))
-                                        (publish root record)))]
-                        (run-last-phase ready))
-            interrupted? (Thread/interrupted)]
-        (is interrupted?)
-        (is (= :error (get-in completed [:phase :result :status])))
-        (is (= :finalized (get-in completed [:execution/input :opsv/evidence-assembly :opsv.assembly/status])))
-        (is (map? (get-in completed [:phase :result :output :anomaly/data :opsv/phase-output
-                                     :opsv/actuation-record])))
-        (is (not (anomaly/anomaly? (opsv/publish-finalized-evidence! completed))))))))
+(defn- ^{:stratum 1} assert-interrupted-publication [ctx _]
+  (let [ready (reduce f/step (configured ctx) (butlast support/handlers))
+        publish artifact/publish!
+        completed (with-redefs [artifact/publish!
+                                (fn [root record]
+                                  (if (= :evidence-bundle (get-in record [:artifact/metadata :opsv/material-kind]))
+                                    (throw (InterruptedException. "publication interrupted"))
+                                    (publish root record)))]
+                    (run-last-phase ready))
+        interrupted? (Thread/interrupted)]
+    (is interrupted?)
+    (is (= :error (get-in completed [:phase :result :status])))
+    (is (= :finalized (get-in completed [:execution/input :opsv/evidence-assembly :opsv.assembly/status])))
+    (is (map? (get-in completed [:phase :result :output :anomaly/data :opsv/phase-output
+                                 :opsv/actuation-record])))
+    (is (not (anomaly/anomaly? (opsv/publish-finalized-evidence! completed))))))
 
 ;------------------------------------------------------------------------------ Layer 2
 
@@ -138,3 +130,18 @@
 
 (deftest ^{:stratum 2} invalid-host-evidence-refuses-before-transform-test
   (f/with-context assert-invalid-host-evidence))
+
+(deftest ^{:stratum 2} publication-failure-retains-bundle-and-recovers-without-actuation-test
+  (f/with-context assert-publication-recovery))
+
+(deftest ^{:stratum 2} missing-or-mismatched-material-refuses-finalization-test
+  (f/with-context assert-material-integrity))
+
+(deftest ^{:stratum 2} finalized-run-refuses-phase-replay-and-tampered-recovery-test
+  (f/with-context assert-replay-refused))
+
+(deftest ^{:stratum 2} exception-after-finalization-checkpoints-recovery-state-test
+  (f/with-context assert-interrupted-publication))
+
+(comment
+  (clojure.test/run-tests 'ai.miniforge.phase-opsv.finalization-test))
