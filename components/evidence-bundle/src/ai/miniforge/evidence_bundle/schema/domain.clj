@@ -32,6 +32,19 @@
 
 ;------------------------------------------------------------------------------ Layer 0
 
+(defn- ^{:stratum 0} constraint-records? [value]
+  (and (vector? value) (every? map? value)))
+
+(defn- ^{:stratum 0} artifact-ids? [value]
+  (and (vector? value) (every? uuid? value)))
+
+(def ^{:stratum 0} phase-output-schema
+  "Collected phase output is a projection, not the enclosing execution result.
+   Validate known fields when present; phase-specific output remains extensible."
+  {(optional-key/optional-key :environment-id) string?
+   (optional-key/optional-key :summary) string?
+   (optional-key/optional-key :metrics) map?})
+
 ;; Intent Schema
 (def ^{:stratum 0} intent-types
   "Valid intent types per N6 spec."
@@ -67,19 +80,6 @@
 (def ^{:stratum 0} phase-result-status-values
   "Valid status values for a phase result in the N6 environment model."
   #{:success :failure :already-implemented :retrying :completed})
-
-(def ^{:stratum 0} phase-evidence-schema
-  "Schema for individual phase evidence."
-  {:phase/name keyword?
-   :phase/agent keyword?
-   :phase/agent-instance-id uuid?
-   :phase/started-at inst?
-   :phase/completed-at inst?
-   :phase/duration-ms pos-int?
-   :phase/output map?
-   :phase/artifacts (fn [as] (every? uuid? as))
-   (optional-key/optional-key :phase/inner-loop-iterations) pos-int?
-   (optional-key/optional-key :phase/event-stream-range) map?})
 
 ;; Policy Check Schema
 (def ^{:stratum 0} policy-check-schema
@@ -122,20 +122,6 @@
 (def ^{:stratum 0} trust-levels
   "Valid trust levels for pack promotion per N6 spec."
   #{:untrusted :tainted :trusted})
-
-;; Artifact Provenance Schema
-(def ^{:stratum 0} provenance-schema
-  "Schema for artifact provenance per N6 section 3.2."
-  {:provenance/workflow-id uuid?
-   :provenance/phase keyword?
-   :provenance/agent keyword?
-   :provenance/agent-instance-id uuid?
-   :provenance/created-at inst?
-   (optional-key/optional-key :provenance/created-by-event-id) uuid?
-   (optional-key/optional-key :provenance/source-artifacts) (fn [as] (every? uuid? as))
-   (optional-key/optional-key :provenance/tool-executions) vector?
-   :provenance/content-hash string?
-   (optional-key/optional-key :provenance/signature) string?})
 
 (def ^{:stratum 0} tool-execution-schema
   "Schema for tool execution record."
@@ -180,12 +166,39 @@
 
 ;------------------------------------------------------------------------------ Layer 1
 
+(def ^{:stratum 1} phase-evidence-schema
+  "Schema for individual phase evidence."
+  {:phase/name keyword?
+   :phase/agent keyword?
+   :phase/agent-instance-id uuid?
+   :phase/started-at inst?
+   :phase/completed-at inst?
+   :phase/duration-ms nat-int?
+   :phase/output map?
+   :phase/artifacts artifact-ids?
+   (optional-key/optional-key :phase/inner-loop-iterations) nat-int?
+   (optional-key/optional-key :phase/event-stream-range) map?})
+
+;; Artifact Provenance Schema
+(def ^{:stratum 1} provenance-schema
+  "Schema for artifact provenance per N6 section 3.2."
+  {:provenance/workflow-id uuid?
+   :provenance/phase keyword?
+   :provenance/agent keyword?
+   :provenance/agent-instance-id uuid?
+   :provenance/created-at inst?
+   (optional-key/optional-key :provenance/created-by-event-id) uuid?
+   (optional-key/optional-key :provenance/source-artifacts) artifact-ids?
+   (optional-key/optional-key :provenance/tool-executions) vector?
+   :provenance/content-hash string?
+   (optional-key/optional-key :provenance/signature) string?})
+
 (def ^{:stratum 1} intent-schema
   "Schema for intent evidence."
   {:intent/type (fn [t] (contains? intent-types t))
    :intent/description string?
    :intent/business-reason string?
-   :intent/constraints (fn [cs] (every? map? cs))
+   :intent/constraints constraint-records?
    :intent/declared-at inst?
    (optional-key/optional-key :intent/author) string?})
 

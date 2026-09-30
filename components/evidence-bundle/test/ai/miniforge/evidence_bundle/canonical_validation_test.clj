@@ -3,6 +3,7 @@
 ;; Licensed under the Apache License, Version 2.0.
 (ns ai.miniforge.evidence-bundle.canonical-validation-test
   (:require [ai.miniforge.evidence-bundle.interface :as evidence]
+            [ai.miniforge.evidence-bundle.phases :as phases]
             [ai.miniforge.evidence-bundle.schema.compliance :as compliance]
             [ai.miniforge.evidence-bundle.schema.validation :as validation]
             [clojure.test :refer [deftest is]]))
@@ -52,6 +53,8 @@
                           [[:evidence-bundle/version] 1]
                           [[:evidence/intent :intent/type] :unknown]
                           [[:evidence/intent :intent/constraints] 42]
+                          [[:evidence/intent :intent/constraints] nil]
+                          [[:evidence/intent :intent/constraints] {}]
                           [[:evidence/outcome :outcome/success] "true"]
                           [[:evidence/policy-checks] [{}]]
                           [[:compliance/created-at] "yesterday"]
@@ -107,7 +110,20 @@
                   (assoc bundle :evidence/semantic-validation semantic
                                 :evidence/tool-invocations [tool] :evidence/implement phase))))
     (is (false? (:valid? (evidence/validate-canonical-bundle
-                         (assoc bundle :evidence/implement (assoc phase :phase/output {}))))))))
+                         (assoc-in (assoc bundle :evidence/implement phase)
+                                   [:evidence/implement :phase/output :summary] 42)))))))
+
+(deftest ^{:stratum 1} collector-phase-projections-pass-canonical-validation-test
+  (doseq [phase-name [:implement :verify :release]
+          input [{:output {:summary "Done." :metrics {}}}
+                 {:environment-id "test" :summary "Done." :metrics {}}]]
+    (let [phase (phases/build-phase-evidence phase-name :test (assoc input :duration-ms 0))
+          key (keyword "evidence" (name phase-name))
+          bundle (assoc (base-bundle) key phase)]
+      (is (zero? (:phase/inner-loop-iterations phase)))
+      (is (:valid? (evidence/validate-canonical-bundle bundle)))
+      (is (false? (:valid? (evidence/validate-canonical-bundle
+                           (assoc-in bundle [key :phase/artifacts] nil))))))))
 
 (deftest ^{:stratum 1} field-presence-is-distinct-from-nullability-test
   (let [check (policy-check)
