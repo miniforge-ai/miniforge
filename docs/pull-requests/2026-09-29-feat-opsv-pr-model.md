@@ -25,7 +25,8 @@ Runtime review fixes need complete regression coverage without exceeding the
 - Project confirmed PR observations and their grant, envelope and effect references.
 - Require a granted PR-create transaction, including for matched reconciliation.
 - Permit the validated policy correlation hash in the proposal input contract;
-  the dependent runtime binds it into the governance digest. Do not discard it.
+  retain it through the governed receipt and bind it into the governance digest.
+  Keep the provider payload hash unchanged. Do not discard policy correlation.
 - Retain failed or uncertain transactions as anomaly data.
 
 ## Standards adversarial pass
@@ -36,6 +37,8 @@ authority issuance or new library dependencies are introduced. The provider's
 repository schema moves to the shared OPSV domain contract so candidate creation,
 governed proposal validation and provider dispatch use the same shape. The provider
 depends on the domain interface; the application does not depend on adapter internals.
+The policy-hash contract is also shared by candidate, proposal and durable receipt
+validation, preventing malformed correlation from receiving an effect identity.
 
 ## Testing
 
