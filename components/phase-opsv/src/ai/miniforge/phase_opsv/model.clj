@@ -70,7 +70,8 @@
       invalid-adapter
       (let [ramp (port/run-guarded-ramp
                   runtime-adapter (:opsv/experiment-pack planned))
-            invalid-ramp (adapter/ramp-shape-anomaly ramp)]
+            invalid-ramp (adapter/ramp-shape-anomaly ramp
+                           (contains? (:execution/opts ctx) :opsv/artifact-directory))]
         (cond
           (anomaly/anomaly? ramp) ramp
           invalid-ramp invalid-ramp

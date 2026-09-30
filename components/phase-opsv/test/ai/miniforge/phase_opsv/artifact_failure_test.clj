@@ -27,7 +27,46 @@
   (swap! calls inc)
   ctx)
 
+(defn- ^{:stratum 0} fail-measurement [failure publish directory record]
+  (if (= :verification-measurements (get-in record [:artifact/metadata :opsv/material-kind]))
+    (throw failure)
+    (publish directory record)))
+
+(defn- ^{:stratum 0} assert-late-storage-evidence [ctx _directory]
+  (let [unconfirmed [(random-uuid)]
+        configured (assoc-in ctx [:execution/input :opsv/evidence-refs] unconfirmed)
+        converged (reduce support/run-transformation configured (take 4 support/handlers))
+        stored (phase/synthesize converged)
+        legacy (phase/synthesize (update converged :execution/opts dissoc :opsv/artifact-directory))]
+    (is (= [] (get-in stored [:opsv/operational-policy :operational-policy/evidence-refs])))
+    (is (= unconfirmed (get-in legacy [:opsv/operational-policy :operational-policy/evidence-refs])))))
+
 ;------------------------------------------------------------------------------ Layer 1
+
+(defn- ^{:stratum 1} assert-partial-publication-exceptions [ctx _directory]
+  (let [synthesized (reduce fixtures/step ctx (take 5 support/handlers))
+        verified (phase/verify synthesized)]
+    (doseq [failure [(java.io.IOException.) (AssertionError.) (InterruptedException.)]]
+      (let [publish (partial fail-measurement failure artifact/publish!)
+            result (with-redefs [artifact/publish! publish]
+                     (boundary/publish-with-exception-handling synthesized :opsv/verify verified))
+            interrupted? (Thread/interrupted)
+            retained (get-in result [:anomaly/data :opsv/phase-output])
+            assembly (evidence/get-opsv-assembly (:opsv/evidence-assembly-store synthesized)
+                       (get-in synthesized [:execution/input :opsv/evidence-bundle-id]))]
+        (is (= (instance? InterruptedException failure) interrupted?))
+        (is (= (if (instance? Error failure) :fatal :unavailable) (:anomaly/type result)))
+        (is (= (:opsv/artifact-refs assembly) (set (:opsv/artifact-refs retained))))
+        (is (uuid? (get-in retained [:opsv/phase-artifact-ids :verification])))))))
+
+(defn- ^{:stratum 1} assert-storage-preflight [ctx directory]
+  (let [calls (atom 0)
+        interceptor (lifecycle/interceptor {} :opsv/execute (partial record-transform calls))]
+    (doseq [invalid [nil "" "relative" (str directory "/missing") (str directory "/.")]]
+      (let [configured (assoc-in ctx [:execution/opts :opsv/artifact-directory] invalid)
+            result ((:enter interceptor) configured)]
+        (is (= :error (get-in result [:phase :result :status])))))
+    (is (zero? @calls))))
 
 (defn- ^{:stratum 1} assert-confirmed-failure-refs [ctx _directory]
   (let [synthesized (reduce fixtures/step ctx (take 5 support/handlers))
@@ -59,7 +98,16 @@
         ((:enter interceptor) memory-only))
       (is (= 1 @calls)))))
 
+(deftest ^{:stratum 1} enabling-storage-does-not-promote-caller-evidence-hints-test
+  (fixtures/with-context assert-late-storage-evidence))
+
 ;------------------------------------------------------------------------------ Layer 2
+
+(deftest ^{:stratum 2} late-write-exceptions-retain-every-acknowledged-reference-test
+  (fixtures/with-context assert-partial-publication-exceptions))
+
+(deftest ^{:stratum 2} invalid-storage-paths-refuse-before-execution-test
+  (fixtures/with-context assert-storage-preflight))
 
 (deftest ^{:stratum 2} failed-publication-retains-only-confirmed-metric-references-test
   (fixtures/with-context assert-confirmed-failure-refs))
