@@ -18,14 +18,18 @@
 
 ;------------------------------------------------------------------------------ Layer 1
 
-(defn ^{:stratum 1} publish! [store record candidate]
+(defn ^{:stratum 1} publish-sealed! [store record bundle]
   (let [bundle-id (:evidence-bundle/id record)
-        bundle (sealed-bundle candidate (java.time.Instant/now))
         transition (partial finalize-current record bundle)
         [old-state new-state] (swap-vals! store update bundle-id transition)]
     (if (= record (get old-state bundle-id))
       (get-in new-state [bundle-id :opsv.assembly/bundle])
       ::retry)))
+
+;------------------------------------------------------------------------------ Layer 2
+
+(defn ^{:stratum 2} publish! [store record candidate]
+  (publish-sealed! store record (sealed-bundle candidate (java.time.Instant/now))))
 
 (comment
   ::retry)

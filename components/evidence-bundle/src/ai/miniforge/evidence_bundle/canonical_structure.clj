@@ -45,9 +45,9 @@
 (defn- ^{:stratum 1} collection-errors [bundle [field field-schema]]
   (mapcat (partial field-errors field-schema) (get bundle field)))
 
-(defn- ^{:stratum 1} phase-output-errors [bundle [field output-schema]]
+(defn- ^{:stratum 1} phase-output-errors [bundle field]
   (when (contains? bundle field)
-    (field-errors output-schema (get-in bundle [field :phase/output]))))
+    (field-errors domain/phase-output-schema (get-in bundle [field :phase/output]))))
 
 (defn- ^{:stratum 1} policy-errors [check]
   (concat (field-errors domain/policy-check-schema check)
@@ -69,9 +69,7 @@
                (mapcat (partial structured-errors bundle) structured-fields)
                (mapcat (partial collection-errors bundle) collection-fields)
                (mapcat (partial phase-output-errors bundle)
-                       {:evidence/implement domain/implement-phase-result-schema
-                        :evidence/verify domain/verify-phase-result-schema
-                        :evidence/release domain/release-phase-result-schema})
+                       [:evidence/implement :evidence/verify :evidence/release])
                (opsv-errors bundle))))
 
 (comment
