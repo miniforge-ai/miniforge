@@ -112,6 +112,7 @@
   :runtime/doctor-override-hint "Override with :runtime-kind in config or {env-var}=docker|podman"
   :runtime/probed-available "{kind} ({runtime-version})"
   :runtime/probed-unavailable "{kind} — {reason}"
+  :runtime/opsv-unavailable "OPSV execution control is unavailable in this product runtime."
   :runtime/info-kind "Runtime:        {kind}"
   :runtime/info-executable "Executable:     {executable}"
   :runtime/info-runtime-version "Version:        {runtime-version}"
