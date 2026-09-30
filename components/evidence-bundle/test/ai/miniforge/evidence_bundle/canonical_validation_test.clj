@@ -8,12 +8,27 @@
 ;------------------------------------------------------------------------------ Layer 0
 
 (defn- ^{:stratum 0} base-bundle []
-  {:evidence-bundle/id (random-uuid) :evidence-bundle/workflow-id (random-uuid)
-   :evidence-bundle/created-at #inst "2026-09-30T00:00:00Z" :evidence-bundle/version "1.0.0"
-   :evidence/intent {:intent/type :update :intent/description "Adjust capacity."
-                     :intent/business-reason "Meet latency objectives." :intent/constraints []
+  {:evidence-bundle/id (random-uuid)
+   :evidence-bundle/workflow-id (random-uuid)
+   :evidence-bundle/created-at #inst "2026-09-30T00:00:00Z"
+   :evidence-bundle/version "1.0.0"
+   :evidence/intent {:intent/type :update
+                     :intent/description "Adjust capacity."
+                     :intent/business-reason "Meet latency objectives."
+                     :intent/constraints []
                      :intent/declared-at #inst "2026-09-30T00:00:00Z"}
-   :evidence/policy-checks [] :evidence/outcome {:outcome/success true}})
+   :evidence/policy-checks []
+   :evidence/outcome {:outcome/success true}})
+
+(defn- ^{:stratum 0} policy-check []
+  {:policy-check/pack-id "opsv"
+   :policy-check/pack-version "1.0.0"
+   :policy-check/phase :verify
+   :policy-check/checked-at #inst "2026-09-30T00:00:00Z"
+   :policy-check/violations []
+   :policy-check/passed? true
+   :policy-check/duration-ms 0
+   :policy-check/envelope nil})
 
 ;------------------------------------------------------------------------------ Layer 1
 
@@ -36,20 +51,15 @@
   (let [bundle (base-bundle)
         sealed (assoc bundle :evidence/content-hash (evidence/content-hash bundle))]
     (is (:valid? (evidence/validate-canonical-bundle sealed)))
+    (is (:valid? (evidence/validate-canonical-bundle
+                  (assoc sealed :evidence/signature "not-an-authenticity-check"))))
     (doseq [altered [(assoc-in sealed [:evidence/outcome :outcome/success] false)
                      (assoc sealed :evidence/content-hash nil)
                      (assoc sealed :evidence/content-hash "wrong")]]
       (is (false? (:valid? (evidence/validate-canonical-bundle altered)))))))
 
 (deftest ^{:stratum 1} field-presence-is-distinct-from-nullability-test
-  (let [check {:policy-check/pack-id "opsv"
-               :policy-check/pack-version "1.0.0"
-               :policy-check/phase :verify
-               :policy-check/checked-at #inst "2026-09-30T00:00:00Z"
-               :policy-check/violations []
-               :policy-check/passed? true
-               :policy-check/duration-ms 0
-               :policy-check/envelope nil}
+  (let [check (policy-check)
         bundle (assoc (base-bundle) :evidence/policy-checks [check])]
     (is (:valid? (evidence/validate-canonical-bundle bundle)))
     (is (false? (:valid? (evidence/validate-canonical-bundle
@@ -57,6 +67,20 @@
                                     dissoc :policy-check/envelope)))))
     (is (false? (:valid? (evidence/validate-canonical-bundle
                          (assoc-in bundle [:evidence/intent :intent/author] nil)))))))
+
+(deftest ^{:stratum 1} nested-domain-values-use-their-canonical-schemas-test
+  (let [bundle (assoc (base-bundle) :evidence/policy-checks [(policy-check)])
+        constraint {:constraint/type :latency
+                    :constraint/description "Keep latency below the objective."}
+        violation {:violation/rule-id "latency"
+                   :violation/severity :high
+                   :violation/message "Latency exceeded the objective."}]
+    (doseq [[path valid] [[[:evidence/intent :intent/constraints] constraint]
+                         [[:evidence/policy-checks 0 :policy-check/violations] violation]]]
+      (is (:valid? (evidence/validate-canonical-bundle (assoc-in bundle path [valid]))))
+      (doseq [invalid [{} 42 nil]]
+        (is (false? (:valid? (evidence/validate-canonical-bundle
+                             (assoc-in bundle path [invalid])))))))))
 
 (deftest ^{:stratum 1} nonportable-or-nonmap-input-is-rejected-before-hashing-test
   (doseq [value [nil [] 42 (assoc (base-bundle) :extension (Object.))
