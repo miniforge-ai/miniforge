@@ -18,6 +18,7 @@
 (ns ai.miniforge.evidence-bundle.opsv-finalization
   "Validate a candidate, then seal it against an unchanged assembly record."
   (:require [ai.miniforge.evidence-bundle.opsv-assembly :as assembly]
+            [ai.miniforge.evidence-bundle.opsv-diagnostics :as diagnostics]
             [ai.miniforge.evidence-bundle.opsv-finalization-candidate :as candidate]
             [ai.miniforge.evidence-bundle.opsv-finalization-publication :as publication]))
 
@@ -27,7 +28,7 @@
   (let [{:keys [bundle errors]} (candidate/prepare record base evidence available-ids)
         bundle-id (:evidence-bundle/id record)]
     (if (seq errors)
-      (publication/failure :anomalies/incorrect :finalization/invalid bundle-id errors)
+      (diagnostics/failure :anomalies/incorrect :finalization/invalid bundle-id errors)
       (publication/publish! store record bundle))))
 
 ;------------------------------------------------------------------------------ Layer 1
@@ -36,10 +37,10 @@
   (let [record (assembly/get-assembly store bundle-id)]
     (cond
       (nil? record)
-      (publication/failure :anomalies/not-found :finalization/not-found bundle-id
+      (diagnostics/failure :anomalies/not-found :finalization/not-found bundle-id
                            [{:code :assembly-not-found}])
       (not= :assembling (:opsv.assembly/status record))
-      (publication/immutable bundle-id)
+      (diagnostics/immutable bundle-id)
       :else (publish-candidate! store record base evidence available-ids))))
 
 ;------------------------------------------------------------------------------ Layer 2

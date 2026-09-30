@@ -44,16 +44,18 @@
    (str (:evidence/grant-id effect))
    (str (:evidence/envelope-id effect))])
 
+(defn- ^{:stratum 0} ordered [values] (vec (sort values)))
+
+(defn- ^{:stratum 0} missing-artifacts [referenced available]
+  (vec (sort (cset/difference referenced available))))
+
 ;------------------------------------------------------------------------------ Layer 1
 
-(defn ^{:stratum 1} canonicalize
-  [evidence]
-  (-> (reduce (fn [result path]
-                (update-in result path #(vec (sort %))))
-              evidence
-              reference-paths)
-      (update-in [:opsv/actuation :governed-effects]
-                 #(vec (sort-by governed-effect-sort-key %)))))
+(defn- ^{:stratum 1} order-path [evidence path]
+  (update-in evidence path ordered))
+
+(defn- ^{:stratum 1} ordered-effects [effects]
+  (vec (sort-by governed-effect-sort-key effects)))
 
 (defn ^{:stratum 1} errors
   [record evidence available-artifact-ids]
@@ -63,7 +65,8 @@
         available-artifact-refs (reference-set available-artifact-ids)
         effects (reference-set (get-in evidence [:opsv/actuation
                                                  :governed-effects]))
-        effect-grants (set (map :evidence/grant-id effects))]
+        effect-grants (set (map :evidence/grant-id effects))
+        missing (missing-artifacts artifact-refs available-artifact-refs)]
     (cond-> []
       (not= (:opsv/event-refs record) event-refs)
       (conj {:code :event-reference-mismatch})
@@ -77,11 +80,15 @@
       (conj {:code :detailed-artifact-reference-missing})
       (not (cset/subset? artifact-refs available-artifact-refs))
       (conj {:code :referenced-artifact-not-found
-             :missing (vec (sort (cset/difference
-                                  artifact-refs
-                                  available-artifact-refs)))})
+             :missing missing})
       (not (cset/subset? effect-grants grant-refs))
       (conj {:code :uncorrelated-governed-effect}))))
+
+;------------------------------------------------------------------------------ Layer 2
+
+(defn ^{:stratum 2} canonicalize [evidence]
+  (-> (reduce order-path evidence reference-paths)
+      (update-in [:opsv/actuation :governed-effects] ordered-effects)))
 
 (comment
   (canonicalize {}))
