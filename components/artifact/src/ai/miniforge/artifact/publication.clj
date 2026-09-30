@@ -6,6 +6,7 @@
   (:require [ai.miniforge.anomaly.interface :as anomaly]
             [ai.miniforge.artifact.publication-boundary :as boundary :refer [failure]]
             [ai.miniforge.artifact.publication-record :as record]
+            [ai.miniforge.artifact.publication-identity :as identity]
             [ai.miniforge.artifact.publication-files :as files]
             [ai.miniforge.schema.interface :as schema]
             [clojure.java.io :as io])
@@ -43,7 +44,7 @@
     (cond
       (anomaly/anomaly? actual) actual
       (nil? actual) (failure :fault :publication/read-failed id)
-      (= artifact actual) (do (files/confirm! file) artifact)
+      (identity/same-content? artifact actual) (do (files/confirm! file) artifact)
       :else (failure :conflict :publication/id-conflict id))))
 
 ;------------------------------------------------------------------------------ Layer 2
