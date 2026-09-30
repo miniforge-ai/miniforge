@@ -25,8 +25,10 @@ component supplies the integrity digest.
 ## Changes in detail
 
 - Validate artifact records and canonical, existing directory paths.
-- Encode finite Transit data with a 16 MiB aborting-output limit and 128-level cap.
+- Encode finite value-semantic data with a 16 MiB output limit and 128-level cap.
   Reject deferred sequences before Transit counts them; decode lists eagerly.
+  Reject Java arrays, whose decoded values fail Clojure equality; use vectors instead.
+  This API does not promise every type supported by Transit or change legacy stores.
 - Store a versioned envelope with a digest of the exact Transit wire string.
   This preserves list/vector and other wire-type distinctions. Verify the digest
   on every read and retry; it detects corruption, not malicious writer replacement.
@@ -40,8 +42,8 @@ component supplies the integrity digest.
 
 ## Testing plan
 
-All three artifact-consuming projects pass 33 tests and 117 assertions each.
-The hardened publication suite passes 19 tests and 80 assertions on the JVM
+All three artifact-consuming projects pass 33 tests and 118 assertions each.
+The hardened publication suite passes 19 tests and 81 assertions on the JVM
 and packaged Babashka CLI. Tests cover disk rereads, conflicting and concurrent
 publication, pre-link failure, uncertain force, identical retry, invalid paths,
 symlinks, unsupported content, output limits and interrupted/error boundaries.
