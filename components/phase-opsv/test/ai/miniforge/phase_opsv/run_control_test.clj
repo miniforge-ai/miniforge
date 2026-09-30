@@ -117,6 +117,7 @@
     (try
       (is (= true (deref entered 2000 :timeout)))
       (is (false? (:effects-settled? (opsv/stop-supervised-runs! supervisor f/now))))
+      (is (:cleanup-confirmed? (opsv/stop-supervised-runs! supervisor f/now)))
       (is (false? (:retired? (opsv/retire-run-control! (:control run) f/now))))
       (deliver finish :settled)
       (is (= :settled (deref work 2000 :timeout)))
@@ -159,6 +160,18 @@
             (is (:retired? (opsv/retire-run-control! (:control runtime) f/now))))
           (finally (deliver finish true) (future-cancel work)))))))
 
+(defn- ^{:stratum 1} assert-absent-registration [supervisor ctx runtime calls]
+  (with-redefs [grant/register! refuse-revocation]
+    (opsv/actuate ctx))
+  (is (empty? @calls))
+  (with-redefs [grant/current refuse-revocation]
+    (is (false? (:cleanup-confirmed? (opsv/stop-supervised-runs! supervisor f/now))))
+    (is (false? (:retired? (opsv/retire-run-control! (:control runtime) f/now)))))
+  (let [stopped (opsv/stop-supervised-runs! supervisor f/now)]
+    (is (:cleanup-confirmed? stopped))
+    (is (true? (get-in stopped [:runs 0 :grant-revocations 0 :absent?]))))
+  (is (:retired? (opsv/retire-run-control! (:control runtime) f/now))))
+
 (defn- ^{:stratum 1} assert-revocation-retry [supervisor ctx runtime _calls]
   (let [output (opsv/actuate ctx)
         id (get-in output [:opsv/actuation-record :governed-effects 0 :evidence/grant-id])
@@ -190,7 +203,9 @@
 
 (deftest ^{:stratum 2} pending-registration-prevents-cleanup-confirmation-and-retirement-test
   (let [supervisor (opsv/create-run-supervisor)]
-    (with-run supervisor (constantly true) (partial assert-pending-registration supervisor))))
+    (with-run supervisor (constantly true) (partial assert-pending-registration supervisor)))
+  (let [supervisor (opsv/create-run-supervisor)]
+    (with-run supervisor (constantly true) (partial assert-absent-registration supervisor))))
 
 (deftest ^{:stratum 2} failed-revocation-is-retained-for-cleanup-retry-test
   (let [supervisor (opsv/create-run-supervisor)]

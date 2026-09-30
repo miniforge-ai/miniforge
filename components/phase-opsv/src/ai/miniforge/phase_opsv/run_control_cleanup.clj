@@ -22,7 +22,7 @@
       (if-let [confirmed (get-in @state [:revocations id])]
         confirmed
         (let [result (boundary/revoke-with-exception-handling run id now)]
-          (when (:revoked? result) (swap! state assoc-in [:revocations id] result))
+          (when (or (:revoked? result) (:absent? result)) (swap! state assoc-in [:revocations id] result))
           result)))))
 
 (comment

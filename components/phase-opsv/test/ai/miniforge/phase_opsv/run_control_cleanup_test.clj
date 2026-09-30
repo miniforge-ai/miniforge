@@ -56,7 +56,7 @@
         revoke (partial revoke-counted revocations failures)]
     (doseq [id [first-id second-id]]
       (control/track-grant! (:control run) {:grant/id id} fixtures/now))
-    (with-redefs [grant/revoke-stored! revoke grant/current (constantly nil)]
+    (with-redefs [grant/revoke-stored! revoke grant/current (constantly {:grant/id second-id})]
       (is (false? (:cleanup-confirmed? (opsv/stop-supervised-runs! supervisor fixtures/now))))
       (reset! failures #{})
       (is (:cleanup-confirmed? (opsv/stop-supervised-runs! supervisor fixtures/now)))

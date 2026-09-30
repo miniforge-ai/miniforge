@@ -28,7 +28,9 @@
 
 (defn- ^{:stratum 0} stop-run! [now run]
   (actuation/stop-mutations! (:fence run))
+  (actuation/stop-mutations! (:registration-fence run))
   (let [status (actuation/mutation-status (:fence run))
+        registrations (actuation/mutation-status (:registration-fence run))
         abort (cleanup/abort! run)
         revocations (mapv #(cleanup/revoke! run % now) @(:grants run))]
     {:workflow/id (:workflow-id run)
@@ -36,8 +38,8 @@
      :abort-requested? (true? abort)
      :abort-failure (when (anomaly/any-anomaly? abort) abort)
      :grant-revocations revocations
-     :cleanup-confirmed? (and (zero? (:in-flight status))
-                              (true? abort) (every? :revoked? revocations))}))
+     :cleanup-confirmed? (and (zero? (:in-flight registrations))
+                              (true? abort) (every? #(or (:revoked? %) (:absent? %)) revocations))}))
 
 (defn ^{:stratum 0} register! [supervisor workflow-id directory request-abort!]
   (if-not (and (= :supervisor (:kind (state/record supervisor)))
@@ -82,3 +84,9 @@
           settled? (and (:cleanup-confirmed? report) (zero? (get-in report [:mutation-status :in-flight])))]
       (when settled? (state/forget! handle))
       (assoc report :retired? settled?))))
+
+;------------------------------------------------------------------------------ Layer 2
+
+(defn ^{:stratum 2} at-registration-boundary! [handle operation]
+  (at-boundary! handle
+    #(actuation/at-mutation-boundary! (:registration-fence (state/record handle)) operation)))
