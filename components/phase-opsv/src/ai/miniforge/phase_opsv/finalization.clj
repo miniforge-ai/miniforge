@@ -28,29 +28,36 @@
                                     [(get-in record [:artifact/metadata :opsv/material-kind])
                                      (:artifact/type record) ::content])))))
 
-(defn- ^{:stratum 0} confirmed-output? [ctx output]
-  (every? (fn [expected]
-            (let [id (:artifact/id expected)]
-              (and (= id (get-in output [:opsv/phase-artifact-ids
-                                         (get-in expected [:artifact/metadata :opsv/material-kind])]))
-                   (= expected (artifact/read-published
-                                (get-in ctx [:execution/opts :opsv/artifact-directory]) id)))))
-          (mapcat #(material/records ctx % output)
-                  [:opsv/discover :opsv/execute :opsv/converge :opsv/verify :opsv/actuate])))
+(defn- ^{:stratum 0} confirmed-record? [ctx output expected]
+  (let [id (:artifact/id expected)
+        kind (get-in expected [:artifact/metadata :opsv/material-kind])
+        directory (get-in ctx [:execution/opts :opsv/artifact-directory])]
+    (and (= id (get-in output [:opsv/phase-artifact-ids kind]))
+         (= expected (artifact/read-published directory id)))))
 
-(defn- ^{:stratum 0} publish-bundle! [ctx output bundle]
-  (if (anomaly/any-anomaly? bundle)
-    (model/failure output :invalid-evidence)
-    (let [expected (model/bundle-artifact bundle)
-          published (artifact/publish! (get-in ctx [:execution/opts :opsv/artifact-directory]) expected)]
-      (if (= expected published)
-        (assoc output :opsv/evidence-bundle bundle :opsv/evidence-artifact-id (:artifact/id published))
-        (assoc-in (model/failure output :bundle-publication)
-                  [:anomaly/data :opsv/evidence-bundle] bundle)))))
+(defn- ^{:stratum 0} publish-valid-bundle! [ctx output bundle]
+  (let [expected (model/bundle-artifact bundle)
+        directory (get-in ctx [:execution/opts :opsv/artifact-directory])
+        published (artifact/publish! directory expected)]
+    (if (= expected published)
+      (assoc output :opsv/evidence-bundle bundle :opsv/evidence-artifact-id (:artifact/id published))
+      (assoc-in (model/failure output :bundle-publication) [:anomaly/data :opsv/evidence-bundle] bundle))))
 
 ;------------------------------------------------------------------------------ Layer 1
 
-(defn ^{:stratum 1} finalize! [ctx output]
+(defn- ^{:stratum 1} confirmed-output? [ctx output]
+  (let [records (mapcat #(material/records ctx % output)
+                       [:opsv/discover :opsv/execute :opsv/converge :opsv/verify :opsv/actuate])]
+    (every? (partial confirmed-record? ctx output) records)))
+
+(defn- ^{:stratum 1} publish-bundle! [ctx output bundle]
+  (if (anomaly/any-anomaly? bundle)
+    (model/failure output :invalid-evidence)
+    (publish-valid-bundle! ctx output bundle)))
+
+;------------------------------------------------------------------------------ Layer 2
+
+(defn ^{:stratum 2} finalize! [ctx output]
   (let [record (assembly ctx)
         refs (:opsv/artifact-refs record)]
     (if-not (and (= :assembling (:opsv.assembly/status record))
@@ -62,7 +69,7 @@
          (:opsv/evidence-assembly-store ctx) (:evidence-bundle/id record)
          (config/base-bundle ctx) (model/evidence-section record output) refs)))))
 
-(defn ^{:stratum 1} publish-finalized! [ctx]
+(defn ^{:stratum 2} publish-finalized! [ctx]
   (let [record (assembly ctx)
         bundle (:opsv.assembly/bundle record)
         validation-store (evidence/restore-opsv-assembly-store
@@ -75,3 +82,6 @@
                             (:evidence/opsv bundle) (:opsv/artifact-refs record))))
       (model/failure {} :invalid-finalized-evidence)
       (publish-bundle! ctx {} bundle))))
+
+(comment
+  (assembly {}))
