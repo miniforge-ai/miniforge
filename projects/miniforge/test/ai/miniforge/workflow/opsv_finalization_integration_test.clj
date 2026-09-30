@@ -45,7 +45,7 @@
     (is (= :finalized (:opsv.assembly/status assembly)))
     (is (= bundle (get-in completed [:execution/input :opsv/evidence-assembly :opsv.assembly/bundle])))
     (is (= recovered (opsv/publish-finalized-evidence! snapshot)))
-    (is (= 7 (count (get-in bundle [:evidence/opsv :opsv/artifact-refs]))))
+    (is (= 8 (count (get-in bundle [:evidence/opsv :opsv/artifact-refs]))))
     (is (true? (get-in bundle [:evidence/outcome :outcome/success])))))
 
 ;------------------------------------------------------------------------------ Layer 1

@@ -47,7 +47,7 @@
         (is (= bundle (:artifact/content (artifact/read-published directory (:evidence-bundle/id bundle)))))
         (is (= (hash/content-hash (dissoc bundle :evidence/content-hash)) (:evidence/content-hash bundle)))
         (is (= (:opsv/event-refs assembly) (set (get-in bundle [:evidence/opsv :opsv/event-refs]))))
-        (is (= 7 (count (get-in bundle [:evidence/opsv :opsv/artifact-refs]))))))))
+        (is (= 8 (count (get-in bundle [:evidence/opsv :opsv/artifact-refs]))))))))
 
 (deftest ^{:stratum 1} invalid-host-evidence-refuses-before-transform-test
   (f/with-context

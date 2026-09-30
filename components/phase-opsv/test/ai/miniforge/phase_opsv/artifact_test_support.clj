@@ -12,19 +12,29 @@
 
 ;------------------------------------------------------------------------------ Layer 0
 
-(defn ^{:stratum 0} with-context [f]
-  (let [root (.getCanonicalFile (.toFile (Files/createTempDirectory "opsv-artifacts-"
-                                                                 (make-array FileAttribute 0))))
-        ctx (-> (support/execution-context (support/test-adapter support/ramp-steps))
-                (update :execution/input dissoc :opsv/evidence-bundle-id :opsv/evidence-refs
-                        :opsv/metric-snapshot-artifact-refs :opsv/policy-diff-artifact-refs)
-                (assoc-in [:execution/opts :opsv/artifact-directory] (.getPath root))
-                (assoc :event-stream (events/create-event-stream {:sinks []})))]
-    (try (f ctx (.getPath root))
-         (finally (doseq [file (reverse (file-seq root))] (io/delete-file file))))))
+(defn- ^{:stratum 0} temporary-directory []
+  (.getCanonicalFile (.toFile (Files/createTempDirectory "opsv-artifacts-" (make-array FileAttribute 0)))))
+
+(defn- ^{:stratum 0} configured-context [root]
+  (-> (support/execution-context (support/test-adapter support/ramp-steps))
+      (update :execution/input dissoc :opsv/evidence-bundle-id :opsv/evidence-refs
+              :opsv/metric-snapshot-artifact-refs :opsv/policy-diff-artifact-refs)
+      (assoc-in [:execution/opts :opsv/artifact-directory] (.getPath root))
+      (assoc :event-stream (events/create-event-stream {:sinks []}))))
 
 (defn ^{:stratum 0} step [ctx [phase-key transform]]
   (let [interceptor (lifecycle/interceptor {} phase-key transform)
         completed ((:leave interceptor) ((:enter interceptor) ctx))]
     (is (= :success (get-in completed [:phase :result :status])))
     (assoc-in completed [:execution/phase-results phase-key :result] (get-in completed [:phase :result]))))
+
+;------------------------------------------------------------------------------ Layer 1
+
+(defn ^{:stratum 1} with-context [f]
+  (let [root (temporary-directory)
+        ctx (configured-context root)]
+    (try (f ctx (.getPath root))
+         (finally (doseq [file (reverse (file-seq root))] (io/delete-file file))))))
+
+(comment
+  (with-context (fn [_ctx directory] directory)))

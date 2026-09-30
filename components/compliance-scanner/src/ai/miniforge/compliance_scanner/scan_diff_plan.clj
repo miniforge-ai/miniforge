@@ -45,6 +45,13 @@
                 (not (str/starts-with? ref "-"))
                 (re-matches #"[a-zA-Z0-9/_.\-~^@{}]+" ref))))
 
+(defn- ^{:stratum 0} start-diff-process [repo-path arguments]
+  ;; Failure selects the established fallback; diagnostics are not changed paths.
+  ;; Discard stderr at the OS boundary so it cannot fill an unread process pipe.
+  (.start (doto (ProcessBuilder. ^java.util.List arguments)
+            (.directory (io/file repo-path))
+            (.redirectError java.lang.ProcessBuilder$Redirect/DISCARD))))
+
 (defn- ^{:stratum 0} scan-plan-rule
   "Scan plan output for violations using a plan-output rule.
    Uses the policy-pack detect-violation dispatcher for resource-level analysis.
@@ -125,28 +132,22 @@
   [repo-path since-ref]
   (when (safe-git-ref? since-ref)
     (try
-      (let [pb (ProcessBuilder. ^java.util.List
-                ["git" "diff" (str since-ref "..HEAD")])
-            _  (.directory pb (io/file repo-path))
-            proc (.start pb)
+      (let [proc (start-diff-process repo-path ["git" "diff" (str since-ref "..HEAD")])
             out  (slurp (.getInputStream proc))]
         (.waitFor proc)
         (when-not (str/blank? out) out))
       (catch Exception _ nil))))
 
 (defn ^{:stratum 1} git-diff-name-only
-  "Run git diff --name-only and return set of changed file paths."
+  "Return changed paths, including an empty set for a successful empty diff.
+   Return nil when the ref is invalid or Git fails, preserving full-scan fallback."
   [repo-path since-ref]
   (when (safe-git-ref? since-ref)
     (try
-      (let [pb (ProcessBuilder. ^java.util.List
-                ["git" "diff" "--name-only" (str since-ref "..HEAD")])
-            _  (.directory pb (io/file repo-path))
-            proc (.start pb)
+      (let [proc (start-diff-process repo-path ["git" "diff" "--name-only" (str since-ref "..HEAD")])
             out  (slurp (.getInputStream proc))]
-        (.waitFor proc)
-        (when-not (str/blank? out)
-          (set (str/split-lines (str/trim out)))))
+        (when (zero? (.waitFor proc))
+          (into #{} (remove str/blank?) (str/split-lines out))))
       (catch Exception _ nil))))
 
 (defn ^{:stratum 1} run-exceptions-as-data
