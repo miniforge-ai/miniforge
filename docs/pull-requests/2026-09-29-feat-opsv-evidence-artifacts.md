@@ -26,18 +26,22 @@ and the governed runtime/audit stack; merge those prerequisites first.
 
 ## Changes in detail
 
-- Publish seven phase records through the immutable artifact API.
+- Publish eight phase records through the immutable artifact API, including the
+  fresh candidate measurement receipt introduced by PR #1953.
 - Use the shared artifact constructor and content-bound identifiers.
 - Record only confirmed artifact references in the evidence assembly.
 - Link metric and policy events to their actual published artifacts.
+- Bind metric references to confirmed baseline and candidate measurement artifacts.
+  Keep the exact receipt when publication fails; retry storage without executing
+  the candidate again.
 - Preserve completed output when storage fails; classify JVM errors as fatal.
 - Keep legacy callers unchanged unless trusted runtime options enable storage.
 
 ## Validation
 
-The artifact lifecycle suite passes five tests and 24 assertions. Both consuming
-projects pass 54 phase tests and 364 assertions each. The scoped standards scan
-reports no findings across 52 files. Polylith, kondo, strata and commit hooks pass.
+Run the artifact lifecycle suite and both consuming projects, including failed
+verification-receipt publication and evidence-only retry. Scoped standards,
+Polylith, kondo, strata and signed commit hooks remain required.
 
 ## Standards adversarial pass
 
@@ -45,6 +49,7 @@ Use the canonical artifact constructor instead of duplicating its record shape.
 Separate pure projection, durable publication and exception conversion. Preserve
 fatal classification at the application boundary and retain actual phase output.
 Cross-component calls use public interfaces; diagnostics use the message catalog.
+Named assertion helpers keep storage scenarios out of nested anonymous functions.
 
 ## Deployment and limitations
 

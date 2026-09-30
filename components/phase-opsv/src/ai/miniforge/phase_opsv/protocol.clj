@@ -20,6 +20,13 @@
 
 ;------------------------------------------------------------------------------ Layer 0
 
+(defprotocol ^{:stratum 0} VerificationAdapter
+  (run-verification
+    [adapter request]
+    "Execute a fresh, guarded verification of the request's candidate and pack.
+     Return a correlated measurement receipt or an anomaly. This port grants no
+     authority; effectful adapters must enforce runtime governance and aborts."))
+
 (defprotocol ^{:stratum 0} OPSVAdapter
   (discover-signals
     [adapter targets]
