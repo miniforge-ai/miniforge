@@ -35,5 +35,18 @@
     (is (= :invalid-input
            (:anomaly/type (provider/create-pr! runtime (f/transaction :committing) f/payload nil))))))
 
+(deftest ^{:stratum 0} runtime-dispatch-invokes-post-after-preflight-test
+  (let [calls (atom [])
+        dispatch-observations (atom [])
+        runtime (f/runtime calls [(f/head-response) (f/response (f/pull-request))])
+        dispatch (fn [operation]
+                   (swap! dispatch-observations conj (mapv #(get-in % [:arguments 6]) @calls))
+                   (operation))
+        result (provider/create-pr! runtime (f/transaction :committing) f/payload dispatch)]
+    (is (= [["GET"]] @dispatch-observations))
+    (is (= ["GET" "POST"] (mapv #(get-in % [:arguments 6]) @calls)))
+    (is (= :succeeded (:effect/outcome result)))
+    (is (= 17 (get-in result [:effect/observed :pr/number])))))
+
 (comment
   (f/pull-request))
