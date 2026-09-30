@@ -27,6 +27,7 @@
    [ai.miniforge.evidence-bundle.extraction-bulk :as extraction-bulk]
    [ai.miniforge.evidence-bundle.opsv-assembly :as opsv-assembly]
    [ai.miniforge.evidence-bundle.opsv-finalization :as opsv-finalization]
+   [ai.miniforge.evidence-bundle.publication-validation :as publication-validation]
    [ai.miniforge.evidence-bundle.schema :as schema]
    [ai.miniforge.evidence-bundle.schema.compliance :as compliance]
    [ai.miniforge.evidence-bundle.schema.domain :as domain]
@@ -172,6 +173,11 @@
    Returns {:valid? bool :errors [...]}; does not establish authenticity."
   [bundle]
   (canonical/validate-with-exception-handling bundle))
+
+(defn ^{:stratum 0} validate-published-bundle
+  "Validate canonical domain values and a required complete N6 seal. No authenticity claim."
+  [bundle]
+  (publication-validation/validate bundle))
 
 (defn ^{:stratum 0} export-bundle
   "Export evidence bundle to file (EDN format).
