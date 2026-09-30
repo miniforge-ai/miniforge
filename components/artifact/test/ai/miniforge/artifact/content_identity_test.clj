@@ -29,5 +29,15 @@
   (is (anomaly/anomaly? (artifact/content-digest (Object.))))
   (is (anomaly/anomaly? (artifact/content-digest (nth (iterate vector nil) 130)))))
 
+(deftest ^{:stratum 0} nested-map-key-order-does-not-change-content-identity-test
+  (let [left (array-map :a 1 :b 2)
+        right (array-map :b 2 :a 1)]
+    (doseq [[first-value second-value] [[{left :value} {right :value}]
+                                       [{[left] :value} {[right] :value}]
+                                       [#{left} #{right}]
+                                       [{#{left} [left]} {#{right} [right]}]]]
+      (is (string? (artifact/content-digest first-value)))
+      (is (= (artifact/content-digest first-value) (artifact/content-digest second-value))))))
+
 (comment
   (artifact/content-digest {:steps [1 2 3]}))

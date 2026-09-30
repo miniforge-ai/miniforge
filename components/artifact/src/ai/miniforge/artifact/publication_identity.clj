@@ -12,8 +12,8 @@
 
 (defn- ^{:stratum 0} identity-value [value]
   (cond
-    (map? value) [:map (into {} (map (fn [[key item]] [(identity-value key) (identity-value item)])) value)]
-    (set? value) [:set (into #{} (map identity-value) value)]
+    (map? value) [:map (vec (sort-by pr-str (map (fn [[key item]] [(identity-value key) (identity-value item)]) value)))]
+    (set? value) [:set (vec (sort-by pr-str (map identity-value value)))]
     (vector? value) [:vector (mapv identity-value value)]
     (seq? value) [:list (mapv identity-value value)]
     :else [:scalar (String. ^bytes (codec/encode value) StandardCharsets/UTF_8)]))
