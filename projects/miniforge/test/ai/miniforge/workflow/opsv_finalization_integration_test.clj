@@ -29,6 +29,11 @@
   (dissoc (support/workflow-input) :opsv/evidence-refs
           :opsv/metric-snapshot-artifact-refs :opsv/policy-diff-artifact-refs))
 
+(defn- ^{:stratum 0} publish-unless-bundle [publish fail-publication? directory record]
+  (if (and fail-publication? (= :evidence-bundle (get-in record [:artifact/metadata :opsv/material-kind])))
+    (throw (java.io.IOException. "publication interrupted"))
+    (publish directory record)))
+
 (defn- ^{:stratum 0} confirm-recovery! [root options completed expected-status]
   (let [directory (:opsv/artifact-directory options)
         workflow-id (:workflow-id options)
@@ -37,6 +42,8 @@
         assembly (get-in snapshot [:execution/input :opsv/evidence-assembly])
         recovered (opsv/publish-finalized-evidence! snapshot)
         bundle (:opsv/evidence-bundle recovered)
+        metric-refs (get-in bundle [:evidence/opsv :opsv/metric-snapshot-artifact-refs])
+        measurements (mapv (partial artifact/read-published directory) metric-refs)
         stored (artifact/read-published directory (:opsv/evidence-artifact-id recovered))]
     (is (= expected-status (:execution/status completed)))
     (is (= workflow-id (:execution/id completed) (:evidence-bundle/workflow-id bundle)))
@@ -46,6 +53,9 @@
     (is (= bundle (get-in completed [:execution/input :opsv/evidence-assembly :opsv.assembly/bundle])))
     (is (= recovered (opsv/publish-finalized-evidence! snapshot)))
     (is (= 8 (count (get-in bundle [:evidence/opsv :opsv/artifact-refs]))))
+    (is (= 2 (count metric-refs)))
+    (is (= #{:metric-snapshot :verification-measurements}
+           (set (map #(get-in % [:artifact/metadata :opsv/material-kind]) measurements))))
     (is (true? (get-in bundle [:evidence/outcome :outcome/success])))))
 
 ;------------------------------------------------------------------------------ Layer 1
@@ -58,13 +68,8 @@
                        :opsv/artifact-directory (.getCanonicalPath (io/file root))
                        :opsv/evidence-base (evidence-base workflow-id))
         config (:workflow (workflow/load-workflow :opsv "1.0.0" {:skip-cache? true}))
-        publish artifact/publish!
-        completed (with-redefs [artifact/publish!
-                                (fn [directory record]
-                                  (if (and fail-publication?
-                                           (= :evidence-bundle (get-in record [:artifact/metadata :opsv/material-kind])))
-                                    (throw (java.io.IOException. "publication interrupted"))
-                                    (publish directory record)))]
+        publish (partial publish-unless-bundle artifact/publish! fail-publication?)
+        completed (with-redefs [artifact/publish! publish]
                     (workflow/run-pipeline config (material-input) options))]
     (confirm-recovery! root options completed (if fail-publication? :failed :completed))))
 
@@ -77,3 +82,6 @@
   (checkpoint/call-with-temp-checkpoint-root (partial run-and-confirm! true)))
 
 (use-fixtures :once isolation/with-isolated-host)
+
+(comment
+  (clojure.test/run-tests 'ai.miniforge.workflow.opsv-finalization-integration-test))

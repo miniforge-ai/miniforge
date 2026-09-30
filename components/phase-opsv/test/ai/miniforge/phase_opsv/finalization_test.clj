@@ -28,9 +28,18 @@
                                :intent/constraints []
                                :intent/declared-at #inst "2026-09-28T10:00:00Z"}}))
 
-(defn- ^{:stratum 0} run-last-phase [ctx]
+(defn- ^{:stratum 0} actuate-with-publisher [ctx publish]
   (let [interceptor (lifecycle/interceptor {} :opsv/actuate opsv/actuate)]
-    ((:leave interceptor) ((:enter interceptor) ctx))))
+    (with-redefs [artifact/publish! publish]
+      ((:leave interceptor) ((:enter interceptor) ctx)))))
+
+(defn- ^{:stratum 0} interrupt-publication []
+  (throw (InterruptedException. "publication interrupted")))
+
+(defn- ^{:stratum 0} publish-unless-bundle [publish failure root record]
+  (if (= :evidence-bundle (get-in record [:artifact/metadata :opsv/material-kind]))
+    (failure)
+    (publish root record)))
 
 ;------------------------------------------------------------------------------ Layer 1
 
@@ -58,13 +67,9 @@
 
 (defn- ^{:stratum 1} assert-publication-recovery [ctx directory]
   (let [ready (reduce f/step (configured ctx) (butlast support/handlers))
-        publish artifact/publish!
-        completed (with-redefs [artifact/publish!
-                                (fn [root record]
-                                  (if (= :evidence-bundle (get-in record [:artifact/metadata :opsv/material-kind]))
-                                    (anomaly/anomaly :unavailable "disk barrier failed" {})
-                                    (publish root record)))]
-                    (run-last-phase ready))
+        refusal (constantly (anomaly/anomaly :unavailable "disk barrier failed" {}))
+        publish (partial publish-unless-bundle artifact/publish! refusal)
+        completed (actuate-with-publisher ready publish)
         failure (get-in completed [:phase :result :output])
         assembly (get-in completed [:execution/input :opsv/evidence-assembly])
         restored (runtime/ensure-assembly (dissoc completed :opsv/evidence-assembly-store))
@@ -108,13 +113,8 @@
 
 (defn- ^{:stratum 1} assert-interrupted-publication [ctx _]
   (let [ready (reduce f/step (configured ctx) (butlast support/handlers))
-        publish artifact/publish!
-        completed (with-redefs [artifact/publish!
-                                (fn [root record]
-                                  (if (= :evidence-bundle (get-in record [:artifact/metadata :opsv/material-kind]))
-                                    (throw (InterruptedException. "publication interrupted"))
-                                    (publish root record)))]
-                    (run-last-phase ready))
+        publish (partial publish-unless-bundle artifact/publish! interrupt-publication)
+        completed (actuate-with-publisher ready publish)
         interrupted? (Thread/interrupted)]
     (is interrupted?)
     (is (= :error (get-in completed [:phase :result :status])))
