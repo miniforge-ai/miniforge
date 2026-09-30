@@ -123,6 +123,21 @@
                                  :opsv/actuation-record])))
     (is (not (anomaly/anomaly? (opsv/publish-finalized-evidence! completed))))))
 
+(defn- ^{:stratum 1} assert-occupied-bundle-refused [ctx directory]
+  (let [prepared (runtime/ensure-assembly (configured ctx))
+        id (get-in prepared [:execution/input :opsv/evidence-bundle-id])
+        foreign (artifact/build-artifact {:id id :type :manifest :version "1.0.0" :content {}})]
+    (is (not (anomaly/anomaly? (artifact/publish! directory foreign))))
+    (f/assert-blocked-transform prepared)))
+
+(defn- ^{:stratum 1} assert-published-bundle-refuses-stale-checkpoint [ctx _directory]
+  (let [ready (reduce f/step (configured ctx) (butlast support/handlers))
+        completed (f/step ready (last support/handlers))
+        stale (runtime/ensure-assembly (dissoc ready :opsv/evidence-assembly-store))]
+    (is (= :assembling (get-in stale [:execution/input :opsv/evidence-assembly :opsv.assembly/status])))
+    (f/assert-blocked-transform stale)
+    (is (not (anomaly/anomaly? (opsv/publish-finalized-evidence! completed))))))
+
 ;------------------------------------------------------------------------------ Layer 2
 
 (deftest ^{:stratum 2} lifecycle-finalizes-real-n6-and-publishes-preallocated-id-test
@@ -142,6 +157,10 @@
 
 (deftest ^{:stratum 2} exception-after-finalization-checkpoints-recovery-state-test
   (f/with-context assert-interrupted-publication))
+
+(deftest ^{:stratum 2} occupied-bundle-id-refuses-before-actuation-test
+  (f/with-context assert-occupied-bundle-refused)
+  (f/with-context assert-published-bundle-refuses-stale-checkpoint))
 
 (comment
   (clojure.test/run-tests 'ai.miniforge.phase-opsv.finalization-test))

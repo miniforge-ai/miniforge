@@ -12,6 +12,9 @@
 
 ;------------------------------------------------------------------------------ Layer 0
 
+(defn- ^{:stratum 0} record-transform [calls _ctx]
+  (swap! calls inc))
+
 (defn- ^{:stratum 0} temporary-directory []
   (.getCanonicalFile (.toFile (Files/createTempDirectory "opsv-artifacts-" (make-array FileAttribute 0)))))
 
@@ -29,6 +32,13 @@
     (assoc-in completed [:execution/phase-results phase-key :result] (get-in completed [:phase :result]))))
 
 ;------------------------------------------------------------------------------ Layer 1
+
+(defn ^{:stratum 1} assert-blocked-transform [ctx]
+  (let [calls (atom 0)
+        interceptor (lifecycle/interceptor {} :opsv/actuate (partial record-transform calls))
+        result ((:enter interceptor) ctx)]
+    (is (= :error (get-in result [:phase :result :status])))
+    (is (zero? @calls))))
 
 (defn ^{:stratum 1} with-context [f]
   (let [root (temporary-directory)
