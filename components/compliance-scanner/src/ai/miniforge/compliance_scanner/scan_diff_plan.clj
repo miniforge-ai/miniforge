@@ -135,7 +135,8 @@
       (catch Exception _ nil))))
 
 (defn ^{:stratum 1} git-diff-name-only
-  "Run git diff --name-only and return set of changed file paths."
+  "Return changed paths, including an empty set for a successful empty diff.
+   Return nil when the ref is invalid or Git fails, preserving full-scan fallback."
   [repo-path since-ref]
   (when (safe-git-ref? since-ref)
     (try
@@ -144,9 +145,8 @@
             _  (.directory pb (io/file repo-path))
             proc (.start pb)
             out  (slurp (.getInputStream proc))]
-        (.waitFor proc)
-        (when-not (str/blank? out)
-          (set (str/split-lines (str/trim out)))))
+        (when (zero? (.waitFor proc))
+          (into #{} (remove str/blank?) (str/split-lines out))))
       (catch Exception _ nil))))
 
 (defn ^{:stratum 1} run-exceptions-as-data

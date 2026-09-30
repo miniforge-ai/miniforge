@@ -166,6 +166,16 @@
             (is (every? #(= :std/clojure (:rule/id %)) viols))
             (is (every? #(string? (:file %)) viols))
             (is (every? #(pos-int? (:line %)) viols))))
+        (testing "an empty committed diff stays empty rather than scanning legacy code"
+          (let [path (.getAbsolutePath tmp-dir)
+                result (scan/scan-repo path path {:rules #{:std/clojure}
+                                                  :pack test-pack :since "HEAD"})]
+            (is (= #{} (diff-plan/git-diff-name-only path "HEAD")))
+            (is (empty? (:violations result)))
+            (is (= #{"components/foo/src/ai/miniforge/foo/core.clj"}
+                   (diff-plan/git-diff-name-only path "HEAD~1")))
+            (is (nil? (diff-plan/git-diff-name-only path "missing-ref")))
+            (is (nil? (diff-plan/git-diff-name-only path "--invalid")))))
         (finally
           ;; Cleanup
           (doseq [f (reverse (file-seq tmp-dir))]
