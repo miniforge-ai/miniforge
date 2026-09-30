@@ -16,16 +16,34 @@
 ;; See the License for the specific language governing permissions and
 ;; limitations under the License.
 (ns ai.miniforge.phase-opsv.policy
-  "Construct an operational policy proposal from converged OPSV evidence.")
+  "Construct an operational policy proposal from converged OPSV evidence."
+  (:require [ai.miniforge.evidence-bundle.interface :as evidence]
+            [ai.miniforge.phase-opsv.runtime-context :as context]))
 
 ;------------------------------------------------------------------------------ Layer 0
 
-(defn ^{:stratum 0} operational-policy
-  [ctx convergence]
+(defn ^{:stratum 0} confirmed-evidence? [ctx policy]
+  (if-not (contains? (:execution/opts ctx) :opsv/artifact-directory)
+    true
+    (let [store (:opsv/evidence-assembly-store ctx)
+          assembly (when store (evidence/get-opsv-assembly store
+                                 (get-in ctx [:execution/input :opsv/evidence-bundle-id])))]
+      (and (= (context/workflow-id ctx) (:evidence-bundle/workflow-id assembly))
+           (every? (set (:opsv/artifact-refs assembly)) (:operational-policy/evidence-refs policy))))))
+
+(defn- ^{:stratum 0} evidence-refs [ctx converged]
+  (if (contains? (:execution/opts ctx) :opsv/artifact-directory)
+    (get converged :opsv/artifact-refs [])
+    (get converged :opsv/artifact-refs (get-in ctx [:execution/input :opsv/evidence-refs]))))
+
+;------------------------------------------------------------------------------ Layer 1
+
+(defn ^{:stratum 1} operational-policy
+  [ctx converged]
   (let [pack (get-in ctx [:execution/input :opsv/experiment-pack])
         targets (:experiment-pack/targets pack)
-        evidence-refs (get-in ctx [:execution/input :opsv/evidence-refs])
-        selected-step (get-in convergence [:state :selected-step])
+        evidence-refs (evidence-refs ctx converged)
+        selected-step (get-in converged [:opsv/convergence-result :state :selected-step])
         metrics (:step/metrics selected-step)]
     {:operational-policy/id (str (:experiment-pack/id pack) "-policy")
      :operational-policy/version "1.0.0"

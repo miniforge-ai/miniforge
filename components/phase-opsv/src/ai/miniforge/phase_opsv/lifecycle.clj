@@ -20,8 +20,10 @@
   (:require
    [ai.miniforge.anomaly.interface :as anomaly]
    [ai.miniforge.phase.interface :as phase]
+   [ai.miniforge.phase-opsv.artifact-boundary :as artifacts]
    [ai.miniforge.phase-opsv.evidence-runtime :as evidence-runtime]
    [ai.miniforge.phase-opsv.events :as events]
+   [ai.miniforge.phase-opsv.flow :as flow]
    [ai.miniforge.phase-opsv.lifecycle-result :as lifecycle-result]))
 
 ;------------------------------------------------------------------------------ Layer 0
@@ -70,10 +72,13 @@
 (defn- ^{:stratum 1} enter-phase
   [phase-key transform config ctx]
   (let [runtime-ctx (isolate-runtime-adapter ctx)
-        prepared-ctx (evidence-runtime/ensure-assembly runtime-ctx)
+        assembled-ctx (evidence-runtime/ensure-assembly runtime-ctx)
+        prepared-ctx (flow/continue assembled-ctx artifacts/prepare)
         start-time (System/currentTimeMillis)
         prepared? (not (anomaly/anomaly? prepared-ctx))
-        output (if prepared? (transform prepared-ctx) prepared-ctx)
+        output (if prepared?
+                 (artifacts/publish-with-exception-handling prepared-ctx phase-key (transform prepared-ctx))
+                 prepared-ctx)
         result (lifecycle-result/phase-result output)]
     (phase/enter-context (if prepared? prepared-ctx runtime-ctx) phase-key
                          (:agent config)
