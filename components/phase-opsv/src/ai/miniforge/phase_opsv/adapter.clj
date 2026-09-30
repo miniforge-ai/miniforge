@@ -39,11 +39,15 @@
 ;------------------------------------------------------------------------------ Layer 1
 
 (defn- ^{:stratum 1} invalid-ramp-anomaly
-  [ramp]
+  [ramp stored?]
   (cond
     (not (map? ramp))
     (anomaly/anomaly :invalid-input (msg/ts :adapter/invalid-result)
                      {:adapter/result-type (some-> ramp class .getName)})
+
+    (and stored? (not (or (vector? (:steps ramp)) (list? (:steps ramp)))))
+    (anomaly/anomaly :invalid-input (msg/ts :adapter/invalid-result)
+                     {:adapter/result-keys (result-keys ramp)})
 
     (not (seq (:steps ramp)))
     (anomaly/anomaly :invalid-input (msg/ts :adapter/empty-ramp)
@@ -57,6 +61,7 @@
 ;------------------------------------------------------------------------------ Layer 2
 
 (defn ^{:stratum 2} ramp-shape-anomaly
-  [ramp]
-  (when-not (anomaly/anomaly? ramp)
-    (invalid-ramp-anomaly ramp)))
+  ([ramp] (ramp-shape-anomaly ramp false))
+  ([ramp stored?]
+   (when-not (anomaly/anomaly? ramp)
+     (invalid-ramp-anomaly ramp stored?))))

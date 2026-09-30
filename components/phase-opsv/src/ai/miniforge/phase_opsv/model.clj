@@ -54,8 +54,7 @@
 
 (defn- ^{:stratum 0} synthesized-output
   [ctx converged]
-  (let [proposal (policy/operational-policy
-                  ctx (:opsv/convergence-result converged))
+  (let [proposal (policy/operational-policy ctx converged)
         validated (opsv/validate-operational-policy proposal)]
     (if (anomaly/anomaly? validated)
       validated
@@ -71,7 +70,8 @@
       invalid-adapter
       (let [ramp (port/run-guarded-ramp
                   runtime-adapter (:opsv/experiment-pack planned))
-            invalid-ramp (adapter/ramp-shape-anomaly ramp)]
+            invalid-ramp (adapter/ramp-shape-anomaly ramp
+                           (contains? (:execution/opts ctx) :opsv/artifact-directory))]
         (cond
           (anomaly/anomaly? ramp) ramp
           invalid-ramp invalid-ramp
