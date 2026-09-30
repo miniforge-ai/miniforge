@@ -63,6 +63,18 @@
         (spit (files/target directory id) "corrupt")
         (is (= :fault (:anomaly/type (artifact/read-published directory id))))))))
 
+(deftest ^{:stratum 1} retry-distinguishes-wire-kinds-but-not-map-order-test
+  (with-directory
+    (fn [directory]
+      (let [value (assoc (record) :artifact/content {:a (list 1 2) :b 1N})
+            reordered (assoc value :artifact/content (array-map :b 1N :a (list 1 2)))]
+        (is (= value (artifact/publish! directory value)))
+        (is (= reordered (artifact/publish! directory reordered)))
+        (doseq [changed [(assoc-in value [:artifact/content :a] [1 2])
+                         (assoc-in value [:artifact/content :b] 1)]]
+          (is (= :conflict (:anomaly/type (artifact/publish! directory changed)))))
+        (is (= value (artifact/read-published directory (:artifact/id value))))))))
+
 (deftest ^{:stratum 1} malformed-existing-record-is-a-fault-not-a-conflict-test
   (with-directory
     (fn [directory]
