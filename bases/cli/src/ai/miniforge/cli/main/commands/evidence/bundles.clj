@@ -40,27 +40,23 @@
 (defn ^{:stratum 0} evidence-dir []
   (str (app-config/home-dir) "/evidence"))
 
-(defn ^{:stratum 0} load-bundle-from-file
+(defn- ^{:stratum 0} load-with-exception-handling
   "Load an evidence bundle from an EDN file. Returns nil on failure."
   [file]
   (try
     (when (str/ends-with? (.getName file) ".edn")
       (edn/read-string (slurp file)))
+    (catch InterruptedException interrupted
+      (.interrupt (Thread/currentThread))
+      (throw interrupted))
     (catch Exception _ nil)))
 
-;; Display helpers
-(def ^{:stratum 0} bundle-detail-spec
-  {:header   :evidence/show-header
-   :fields   [[:bundle/workflow-id :evidence/show-workflow {:default "—"}]
-              [:bundle/status      :evidence/show-status   {:default "unknown"}]
-              [:bundle/created-at  :evidence/show-created  {:default "—"}]
-              [:bundle/failure-attribution :evidence/show-failure-attribution {:default "—"}]
-              [:bundle/dependency-issues :evidence/show-dependency-issues {:default 0}]]
-   :sections [{:key :bundle/artifacts :header :evidence/show-artifacts
-               :entry :evidence/show-artifact-entry :max 10
-               :entry-fn (fn [a] {:type (get a :artifact/type "unknown")
-                                   :id   (get a :artifact/id "")})}
-              {:key :bundle/phases :header :evidence/show-phases}]})
+(defn- ^{:stratum 0} artifact-entry [artifact]
+  {:type (get artifact :artifact/type "unknown")
+   :id (get artifact :artifact/id "")})
+
+(defn ^{:stratum 0} canonical-status [bundle]
+  (if (true? (get-in bundle [:evidence/outcome :outcome/success])) "completed" "failed"))
 
 (def ^{:stratum 0} ^:private phase-evidence-keys
   [:evidence/plan
@@ -100,6 +96,22 @@
 
 ;------------------------------------------------------------------------------ Layer 1
 
+;; Display helpers
+(def ^{:stratum 1} bundle-detail-spec
+  {:header   :evidence/show-header
+   :fields   [[:bundle/workflow-id :evidence/show-workflow {:default "—"}]
+              [:bundle/status      :evidence/show-status   {:default "unknown"}]
+              [:bundle/created-at  :evidence/show-created  {:default "—"}]
+              [:bundle/failure-attribution :evidence/show-failure-attribution {:default "—"}]
+              [:bundle/dependency-issues :evidence/show-dependency-issues {:default 0}]]
+   :sections [{:key :bundle/artifacts :header :evidence/show-artifacts
+               :entry :evidence/show-artifact-entry :max 10
+               :entry-fn artifact-entry}
+              {:key :bundle/phases :header :evidence/show-phases}]})
+
+(defn ^{:stratum 1} load-bundle-from-file [file]
+  (load-with-exception-handling file))
+
 (defn ^{:stratum 1} scan-evidence-dir []
   (let [dir (io/file (evidence-dir))]
     (when (.exists dir)
@@ -118,15 +130,13 @@
 (defn ^{:stratum 1} failure-attribution-summary
   [failure-attribution]
   (when (seq failure-attribution)
-    (let [source (or (:failure/source failure-attribution)
-                     (:dependency/source failure-attribution)
-                     :unknown)
+    (let [source (get failure-attribution :failure/source
+                      (get failure-attribution :dependency/source :unknown))
           vendor (or (:failure/vendor failure-attribution)
                      (:dependency/vendor failure-attribution)
                      (:dependency/id failure-attribution))
-          failure-class (or (:dependency/class failure-attribution)
-                            (:failure/class failure-attribution)
-                            :unknown)]
+          failure-class (get failure-attribution :dependency/class
+                             (get failure-attribution :failure/class :unknown))]
       (str (label source) " / " (label vendor) " / " (label failure-class)))))
 
 (defn ^{:stratum 1} canonical-phase-names
@@ -135,14 +145,16 @@
        (filter #(contains? bundle %))
        (mapv (comp keyword name))))
 
-(defn ^{:stratum 1} load-bundle-for-show
+;------------------------------------------------------------------------------ Layer 2
+
+(defn ^{:stratum 2} load-bundle-for-show
   "Load a bundle from the component interface or the filesystem."
   [id]
   (or (shared/call-optional-provider 'ai.miniforge.evidence-bundle.interface/get-bundle id)
       (let [f (io/file (str (evidence-dir) "/" id ".edn"))]
         (when (.exists f) (load-bundle-from-file f)))))
 
-(defn ^{:stratum 1} export-bundle-fallback
+(defn ^{:stratum 2} export-bundle-fallback
   "Load once and export only validated, sealed evidence as EDN."
   [id fmt]
   (let [src (io/file (str (evidence-dir) "/" id ".edn"))]

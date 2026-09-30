@@ -19,10 +19,12 @@
   "Unit tests for evidence bundle CLI commands."
   (:require
    [clojure.test :refer [deftest testing is use-fixtures]]
+   [clojure.edn :as edn]
    [babashka.fs :as fs]
    [ai.miniforge.cli.app-config :as app-config]
    [ai.miniforge.cli.main.commands.evidence :as sut]
    [ai.miniforge.cli.main.commands.evidence.bundles :as bundles]
+   [ai.miniforge.cli.main.commands.evidence-fixtures :as f]
    [ai.miniforge.cli.main.commands.shared :as shared]))
 
 ;------------------------------------------------------------------------------ Layer 0
@@ -44,12 +46,6 @@
   [& {:as overrides}]
   (merge {:artifact/type :code
           :artifact/id   "art-1"}
-         overrides))
-
-(defn- ^{:stratum 0} make-phase
-  "Factory for a phase entry under `:evidence/plan` or `:evidence/implement`."
-  [phase-name & {:as overrides}]
-  (merge {:phase/name phase-name}
          overrides))
 
 (defn- ^{:stratum 0} make-outcome
@@ -109,19 +105,10 @@
           :bundle/phases      [:plan :implement]}
          overrides))
 
-(defn- ^{:stratum 1} make-canonical-bundle
-  "Factory for a canonical-form evidence bundle including dependency-health
-   and failure-attribution. Pass overrides as kwargs."
-  [& {:as overrides}]
-  (merge {:evidence-bundle/id           "bundle-2"
-          :evidence-bundle/workflow-id  "wf-2"
-          :evidence-bundle/created-at   "2026-04-30T10:00:00Z"
-          :evidence/plan                (make-phase :plan)
-          :evidence/implement           (make-phase :implement)
-          :evidence/outcome             (make-outcome)
-          :evidence/dependency-health   {:anthropic (make-dependency-health)}
-          :evidence/failure-attribution (make-failure-attribution)}
-         overrides))
+(defn- ^{:stratum 1} make-canonical-bundle []
+  (f/bundle {:evidence/outcome (make-outcome)
+             :evidence/dependency-health {:anthropic (make-dependency-health)}
+             :evidence/failure-attribution (make-failure-attribution)}))
 
 ;; Tests
 (deftest ^{:stratum 1} evidence-list-cmd-no-component-empty-dir-test
@@ -166,9 +153,11 @@
       (fs/create-dirs evidence-path)
       (spit (str evidence-path "/test-bundle.edn") (pr-str (make-bundle)))
       (with-redefs [shared/call-optional-provider (constantly nil)
-                    app-config/home-dir (constantly *tmp-dir*)]
+                    app-config/home-dir (constantly *tmp-dir*)
+                    shared/exit! identity]
         (let [output (with-out-str (sut/evidence-show-cmd {:id "test-bundle"}))]
-          (is (.contains output "wf-1")))))))
+          (is (.contains output "unsealed"))
+          (is (not (.contains output "wf-1"))))))))
 
 (deftest ^{:stratum 2} evidence-show-cmd-with-canonical-bundle-test
   (testing "show command normalizes canonical evidence bundle fields"
@@ -178,9 +167,33 @@
       (with-redefs [shared/call-optional-provider (constantly nil)
                     app-config/home-dir (constantly *tmp-dir*)]
         (let [output (with-out-str (sut/evidence-show-cmd {:id "canonical-bundle"}))]
-          (is (.contains output "wf-2"))
+          (is (.contains output "00000000-0000-0000-0000-000000000002"))
           (is (.contains output "failed"))
           (is (.contains output "external-provider / anthropic / rate-limit"))
           (is (.contains output "Dependencies: 1")))))))
+
+(deftest ^{:stratum 2} evidence-boundaries-reject-tampering-and-preserve-export-destination
+  (let [directory (str *tmp-dir* "/evidence")
+        source (str directory "/checked.edn")
+        destination (str directory "/checked-export.edn")
+        sealed (make-canonical-bundle)]
+    (fs/create-dirs directory)
+    (with-redefs [shared/call-optional-provider (constantly nil)
+                  app-config/home-dir (constantly *tmp-dir*)
+                  shared/exit! identity]
+      (spit source (pr-str sealed))
+      (with-out-str (sut/evidence-export-cmd {:id "checked"}))
+      (is (= sealed (edn/read-string (slurp destination))))
+      (doseq [invalid [(assoc-in sealed [:evidence/outcome :outcome/success] true)
+                       (dissoc sealed :evidence/content-hash :evidence/sealed-at)]]
+        (spit source (pr-str invalid))
+        (spit destination "unchanged")
+        (is (.contains (with-out-str (sut/evidence-show-cmd {:id "checked"})) "refused"))
+        (is (.contains (with-out-str (sut/evidence-list-cmd {})) "refused"))
+        (is (.contains (with-out-str (sut/evidence-export-cmd {:id "checked"})) "refused"))
+        (is (= "unchanged" (slurp destination))))
+      (spit source (pr-str sealed))
+      (is (.contains (with-out-str (sut/evidence-export-cmd {:id "checked" :format "json"})) "Unsupported"))
+      (is (not (fs/exists? (str directory "/checked-export.json")))))))
 
 (use-fixtures :each tmp-dir-fixture)
