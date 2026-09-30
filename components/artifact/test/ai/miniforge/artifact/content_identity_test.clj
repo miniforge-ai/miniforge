@@ -4,6 +4,7 @@
 (ns ai.miniforge.artifact.content-identity-test
   (:require [ai.miniforge.anomaly.interface :as anomaly]
             [ai.miniforge.artifact.interface :as artifact]
+            [ai.miniforge.artifact.messages :as msg]
             [clojure.test :refer [deftest is]]))
 
 ;------------------------------------------------------------------------------ Layer 0
@@ -25,9 +26,20 @@
   (let [realized (atom 0)
         deferred (lazy-seq (swap! realized inc) (repeat 1))]
     (is (anomaly/anomaly? (artifact/content-digest {:steps deferred})))
+    (is (= (msg/t :digest/invalid) (:anomaly/message (artifact/content-digest {:steps deferred}))))
     (is (zero? @realized)))
   (is (anomaly/anomaly? (artifact/content-digest (Object.))))
   (is (anomaly/anomaly? (artifact/content-digest (nth (iterate vector nil) 130)))))
+
+(deftest ^{:stratum 0} nested-map-key-order-does-not-change-content-identity-test
+  (let [left (array-map :a 1 :b 2)
+        right (array-map :b 2 :a 1)]
+    (doseq [[first-value second-value] [[{left :value} {right :value}]
+                                       [{[left] :value} {[right] :value}]
+                                       [#{left} #{right}]
+                                       [{#{left} [left]} {#{right} [right]}]]]
+      (is (string? (artifact/content-digest first-value)))
+      (is (= (artifact/content-digest first-value) (artifact/content-digest second-value))))))
 
 (comment
   (artifact/content-digest {:steps [1 2 3]}))
