@@ -36,6 +36,9 @@
 (defn ^{:stratum 0} publish-link! [^File file ^File temporary]
   (Files/createLink (.toPath file) (.toPath temporary)))
 
+(defn ^{:stratum 0} delete-temporary! [^File temporary]
+  (Files/deleteIfExists (.toPath temporary)))
+
 (defn ^{:stratum 0} read-bytes [^File file]
   (with-open [channel (FileChannel/open (.toPath file)
                       (into-array OpenOption [StandardOpenOption/READ LinkOption/NOFOLLOW_LINKS]))]

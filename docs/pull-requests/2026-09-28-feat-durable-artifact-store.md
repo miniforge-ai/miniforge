@@ -25,7 +25,10 @@ component supplies the integrity digest.
 ## Changes in detail
 
 - Validate artifact records and canonical, existing directory paths.
-- Encode round-trippable Transit data with a 16 MiB retained-output limit.
+- Encode finite value-semantic data with a 16 MiB output limit and 128-level cap.
+  Reject deferred sequences before Transit counts them; decode lists eagerly.
+  Reject Java arrays, whose decoded values fail Clojure equality; use vectors instead.
+  This API does not promise every type supported by Transit or change legacy stores.
 - Store a versioned envelope with a digest of the exact Transit wire string.
   This preserves list/vector and other wire-type distinctions. Verify the digest
   on every read and retry; it detects corruption, not malicious writer replacement.
@@ -39,16 +42,19 @@ component supplies the integrity digest.
 
 ## Testing plan
 
-All three artifact-consuming projects pass 28 tests and 93 assertions each.
-The hardened publication suite passes 14 tests and 56 assertions on the JVM
+All three artifact-consuming projects pass 33 tests and 118 assertions each.
+The hardened publication suite passes 19 tests and 81 assertions on the JVM
 and packaged Babashka CLI. Tests cover disk rereads, conflicting and concurrent
 publication, pre-link failure, uncertain force, identical retry, invalid paths,
 symlinks, unsupported content, output limits and interrupted/error boundaries.
-Scoped standards report zero violations across 20 files.
+Scoped standards are checked again after each codec-boundary change.
 Trailing JSON or malformed bytes are rejected on read and retry. Corrupt reads
 return faults; fatal runtime errors return non-retryable fatal anomalies.
 The collection-corruption regression truncates its replacement bytes and proves
 the altered envelope and inner Transit parse before asserting checksum rejection.
+Malformed paths are invalid input before file creation. Temporary-file cleanup
+cannot replace a primary conflict or fatal failure; secondary cleanup failures
+retain either the original anomaly or the already-confirmed artifact as data.
 Relative directories, malformed UTF-8 and schema-valid content corruption are refused.
 
 ## Standards adversarial pass

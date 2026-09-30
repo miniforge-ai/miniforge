@@ -6,8 +6,8 @@
 
 # N7 — Operational Policy Synthesis With Verification
 
-**Version:** 0.3.2-draft
-**Date:** 2026-09-28
+**Version:** 0.3.3-draft
+**Date:** 2026-09-29
 **Status:** Complete
 **Conformance:** MUST
 **Class:** Extension spec (N7+)
@@ -301,6 +301,8 @@ If any gate fails, OPSV MUST produce remediation guidance as machine-readable ou
 
 ### 5.3 Default posture
 
+- Effective actuation MUST default to `:recommend-only`, as required by §9.
+  PR emission remains a required capability, not permission to mutate by default.
 - `APPLY_ALLOWED` MUST be disabled by default.
 - Production targets MUST require explicit allowlisting in policy packs.
 - All OPSV runs MUST support a global emergency stop.
@@ -401,7 +403,7 @@ IDs are never reused; a withdrawn requirement is marked withdrawn.
 | N7.EX.4 | MUST | Emit the §3.14 event family of N3 for every lifecycle transition. |
 | N7.VF.1 | MUST | Evaluate verification against pre-declared criteria, not criteria chosen after the run (§6). |
 | N7.VF.2 | MUST | Link every OPSV event and artifact to its evidence bundle per N6 (§4, §7.1). |
-| N7.AC.1 | MUST | Default to `PR_ONLY` actuation; `APPLY_ALLOWED` requires the §5.4 gate (§7.2, §7.3). |
+| N7.AC.1 | MUST | Default effective actuation to `:recommend-only`; PR emission and direct apply require the respective §5.4 authority checks (§5.3, §7.2, §7.3, §9). |
 | N7.AC.2 | MUST | Execute apply actions as N10-governed effects with verified rollback (§7.3). |
 | N7.AC.3 | MUST | Record both apply and rollback outcomes as artifacts, events, and evidence on postcondition failure (§7.3). |
 | N7.AC.4 | MUST | Include the evidence bundle reference and rollback instructions in every emitted PR body (§7.2). |
@@ -429,7 +431,8 @@ A minimal compliant OPSV implementation MUST:
 - synthesize an HPA/KEDA-compatible policy proposal
 - produce explainable risk and per-criterion verification results
 - emit the §4.3 events and a complete N6 §2.8 evidence bundle
-- emit PRs as N10-governed actions with provenance
+- support PR emission as N10-governed actions with provenance when the effective
+  actuation mode permits it; recommendation-only runs MUST NOT create PRs
 - default effective actuation to `:recommend-only`
 - honor N8 emergency stop and record rollback/disposition evidence
 
@@ -485,6 +488,8 @@ depends on machinery that is not there.
 
 **Version History:**
 
+- 0.3.3-draft (2026-09-29): Aligned N7.AC.1 and §5.3 with the §9 recommendation-only
+  default; retained mandatory governed PR capability and optional gated apply
 - 0.3.2-draft (2026-09-28): Added governed disposition events and emission timing
   for proposed, terminal and uncertain outcomes; aligned the N3 event contract
 - 0.3.1-draft (2026-09-08): Reconciled the informative implementation annex
