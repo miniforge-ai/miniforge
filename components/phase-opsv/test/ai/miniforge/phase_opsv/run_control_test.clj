@@ -46,6 +46,12 @@
 (defn- ^{:stratum 0} refuse-revocation [& _]
   (anomaly/anomaly :unavailable "disk failed" {}))
 
+(defn- ^{:stratum 0} pause-registration [register entered finish directory issued]
+  (let [result (register directory issued)]
+    (deliver entered (:grant/id issued))
+    @finish
+    result))
+
 (defn- ^{:stratum 0} with-run [supervisor abort! test-fn]
   (let [{:keys [ctx runtime calls]} (f/setup)
         handles (opsv/register-run-control! supervisor (:execution/id ctx)
@@ -134,6 +140,25 @@
     (is (empty? @calls))
     (is (some? (:grant/revoked-at (grant/current (:authority-directory runtime) @issued-id))))))
 
+(defn- ^{:stratum 1} assert-pending-registration [supervisor ctx runtime calls]
+  (let [entered (promise) finish (promise)
+        register (partial pause-registration grant/register! entered finish)]
+    (with-redefs [grant/register! register]
+      (let [work (future (opsv/actuate ctx))]
+        (try
+          (let [id (deref entered 5000 :timeout)
+                stopped (opsv/stop-supervised-runs! supervisor f/now)]
+            (is (uuid? id))
+            (is (false? (:cleanup-confirmed? stopped)))
+            (is (false? (:effects-settled? stopped)))
+            (is (false? (:retired? (opsv/retire-run-control! (:control runtime) f/now))))
+            (deliver finish true)
+            (is (not= :timeout (deref work 5000 :timeout)))
+            (is (empty? @calls))
+            (is (some? (:grant/revoked-at (grant/current (:authority-directory runtime) id))))
+            (is (:retired? (opsv/retire-run-control! (:control runtime) f/now))))
+          (finally (deliver finish true) (future-cancel work)))))))
+
 (defn- ^{:stratum 1} assert-revocation-retry [supervisor ctx runtime _calls]
   (let [output (opsv/actuate ctx)
         id (get-in output [:opsv/actuation-record :governed-effects 0 :evidence/grant-id])
@@ -162,6 +187,10 @@
 (deftest ^{:stratum 2} grant-registration-racing-stop-is-revoked-before-provider-test
   (let [supervisor (opsv/create-run-supervisor)]
     (with-run supervisor (constantly true) (partial assert-registration-race supervisor))))
+
+(deftest ^{:stratum 2} pending-registration-prevents-cleanup-confirmation-and-retirement-test
+  (let [supervisor (opsv/create-run-supervisor)]
+    (with-run supervisor (constantly true) (partial assert-pending-registration supervisor))))
 
 (deftest ^{:stratum 2} failed-revocation-is-retained-for-cleanup-retry-test
   (let [supervisor (opsv/create-run-supervisor)]

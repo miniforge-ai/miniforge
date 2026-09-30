@@ -28,14 +28,16 @@
 
 (defn- ^{:stratum 0} stop-run! [now run]
   (actuation/stop-mutations! (:fence run))
-  (let [abort (cleanup/abort! run)
+  (let [status (actuation/mutation-status (:fence run))
+        abort (cleanup/abort! run)
         revocations (mapv #(cleanup/revoke! run % now) @(:grants run))]
     {:workflow/id (:workflow-id run)
-     :mutation-status (actuation/mutation-status (:fence run))
+     :mutation-status status
      :abort-requested? (true? abort)
      :abort-failure (when (anomaly/any-anomaly? abort) abort)
      :grant-revocations revocations
-     :cleanup-confirmed? (and (true? abort) (every? :revoked? revocations))}))
+     :cleanup-confirmed? (and (zero? (:in-flight status))
+                              (true? abort) (every? :revoked? revocations))}))
 
 (defn ^{:stratum 0} register! [supervisor workflow-id directory request-abort!]
   (if-not (and (= :supervisor (:kind (state/record supervisor)))

@@ -20,13 +20,18 @@
 
 ;------------------------------------------------------------------------------ Layer 0
 
-(defn ^{:stratum 0} operational-policy
+(defn- ^{:stratum 0} evidence-refs [ctx converged]
+  (if (contains? (:execution/opts ctx) :opsv/artifact-directory)
+    (get converged :opsv/artifact-refs [])
+    (get converged :opsv/artifact-refs (get-in ctx [:execution/input :opsv/evidence-refs]))))
+
+;------------------------------------------------------------------------------ Layer 1
+
+(defn ^{:stratum 1} operational-policy
   [ctx converged]
   (let [pack (get-in ctx [:execution/input :opsv/experiment-pack])
         targets (:experiment-pack/targets pack)
-        evidence-refs (if (contains? converged :opsv/artifact-refs)
-                        (:opsv/artifact-refs converged)
-                        (get-in ctx [:execution/input :opsv/evidence-refs]))
+        evidence-refs (evidence-refs ctx converged)
         selected-step (get-in converged [:opsv/convergence-result :state :selected-step])
         metrics (:step/metrics selected-step)]
     {:operational-policy/id (str (:experiment-pack/id pack) "-policy")
