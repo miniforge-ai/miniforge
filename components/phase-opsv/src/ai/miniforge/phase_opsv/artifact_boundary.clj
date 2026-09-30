@@ -8,6 +8,8 @@
 
 ;------------------------------------------------------------------------------ Layer 0
 
+(def ^{:stratum 0} prepare artifacts/prepare)
+
 (defn ^{:stratum 0} publish-with-exception-handling [ctx phase-key output]
   (if (or (anomaly/anomaly? output)
           (not (contains? (:execution/opts ctx) :opsv/artifact-directory)))

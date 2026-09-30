@@ -13,7 +13,7 @@
 
 (defn ^{:stratum 0} failure [output]
   (anomaly/anomaly :unavailable (msg/t :evidence/artifact-publication-failed)
-                   {:opsv/phase-output output}))
+                   {:opsv/phase-output (model/confirmed-output output)}))
 
 (defn- ^{:stratum 0} acknowledge! [ctx id]
   (evidence/accumulate-opsv-evidence! (:opsv/evidence-assembly-store ctx)

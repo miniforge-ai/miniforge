@@ -33,10 +33,9 @@
     (:opsv.assembly/status
      (evidence/get-opsv-assembly store (get-in ctx [:execution/input :opsv/evidence-bundle-id])))))
 
-(defn- ^{:stratum 0} directory-readable? [ctx]
-  (not (anomaly/any-anomaly?
-        (artifact/read-published (get-in ctx [:execution/opts :opsv/artifact-directory])
-                                 (get-in ctx [:execution/input :opsv/evidence-bundle-id])))))
+(defn- ^{:stratum 0} bundle-id-available? [ctx]
+  (nil? (artifact/read-published (get-in ctx [:execution/opts :opsv/artifact-directory])
+                                 (get-in ctx [:execution/input :opsv/evidence-bundle-id]))))
 
 ;------------------------------------------------------------------------------ Layer 1
 
@@ -50,13 +49,13 @@
                (inst? (:evidence-bundle/created-at base))
                (string? (:evidence-bundle/version base))
          (:valid? (evidence/validate-bundle base))
-         (directory-readable? ctx))))
+         (bundle-id-available? ctx))))
 
 ;------------------------------------------------------------------------------ Layer 2
 
 (defn ^{:stratum 2} validate-context [ctx]
   (cond
-    (= :finalized (assembly-status ctx))
+    (and (enabled? ctx) (= :finalized (assembly-status ctx)))
     (anomaly/anomaly :invalid-input (msg/t :evidence/assembly-finalized) {})
     (and (enabled? ctx) (not (valid-base? ctx)))
     (anomaly/anomaly :invalid-input (msg/t :evidence/invalid-finalization-config) {})

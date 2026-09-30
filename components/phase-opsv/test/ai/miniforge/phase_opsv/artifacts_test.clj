@@ -99,6 +99,8 @@
         stored (artifact/read-published directory id)]
     (is (anomaly/anomaly? failed))
     (is (nil? (get-in retained [:opsv/phase-artifact-ids :verification-measurements])))
+    (is (= [(get-in retained [:opsv/phase-artifact-ids :metric-snapshot])]
+           (:opsv/metric-snapshot-artifact-refs retained)))
     (is (= (:opsv/verification-run verified) (:opsv/verification-run retained)))
     (is (= (:opsv/verification-run verified) (:artifact/content stored)))
     (is (some #{id} (:opsv/metric-snapshot-artifact-refs recovered)))))
