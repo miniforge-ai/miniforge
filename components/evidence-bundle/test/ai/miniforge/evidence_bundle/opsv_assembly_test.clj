@@ -85,6 +85,13 @@
     (is (inst? (:evidence/sealed-at result)))
     (is (= (:evidence/sealed-at result) (:compliance/created-at result)))
     (is (:valid? (evidence/validate-canonical-bundle result)))
+    (is (evidence/valid-finalized-opsv-bundle?
+          (evidence/get-opsv-assembly store bundle-id) result (set f/artifact-ids)))
+    (is (not (evidence/valid-finalized-opsv-bundle?
+               (evidence/get-opsv-assembly store bundle-id) result #{})))
+    (is (not (evidence/valid-finalized-opsv-bundle?
+               (assoc (evidence/get-opsv-assembly store bundle-id) :opsv/event-refs #{})
+               result (set f/artifact-ids))))
     (is (m/validate evidence/OpsvEvidence (:evidence/opsv result)))
     (is (= :finalized
            (:opsv.assembly/status (evidence/get-opsv-assembly store bundle-id))))
