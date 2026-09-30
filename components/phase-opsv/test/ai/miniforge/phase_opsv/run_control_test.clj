@@ -55,6 +55,25 @@
          (finally (doseq [file (reverse (file-seq (io/file (get-in runtime [:provider :directory]))))]
                     (io/delete-file file))))))
 
+(defn- ^{:stratum 0} assert-grant-revoked [supervisor aborts ctx runtime calls]
+  (let [output (opsv/actuate ctx)
+        id (get-in output [:opsv/actuation-record :governed-effects 0 :evidence/grant-id])
+        stopped (opsv/stop-supervised-runs! supervisor f/now)]
+    (is (= :pr-only (get-in output [:opsv/actuation-record :effective-actuation-mode])))
+    (is (:cleanup-confirmed? stopped))
+    (is (= 1 @aborts))
+    (is (some? (:grant/revoked-at (grant/current (:authority-directory runtime) id))))
+    (is (= 2 (count @calls)))
+    (is (:retired? (opsv/retire-run-control! (:control runtime) f/now)))
+    (is (= 1 @aborts))
+    (is (empty? (:runs (opsv/stop-supervised-runs! supervisor f/now))))))
+
+(defn- ^{:stratum 0} assert-mismatched-control [ctx _runtime calls]
+  (let [fence (actuation/create-mutation-fence)
+        output (opsv/actuate (assoc-in ctx [:execution/opts :opsv/pr-execution :fence] fence))]
+    (is (anomaly/anomaly? output))
+    (is (empty? @calls))))
+
 ;------------------------------------------------------------------------------ Layer 1
 
 (deftest ^{:stratum 1} stop-closes-all-fences-before-abort-callbacks-test
@@ -99,63 +118,54 @@
       (is (anomaly/anomaly? (control/at-boundary! (:control run) (constantly :unexpected))))
       (finally (deliver finish :settled) (future-cancel work)))))
 
+(defn- ^{:stratum 1} assert-preflight-stop [supervisor ctx runtime calls]
+  (let [command (partial preflight-then-stop supervisor calls)
+        output (opsv/actuate (assoc-in ctx [:execution/opts :opsv/pr-execution :provider :run-command] command))]
+    (is (not= :pr-only (get-in output [:opsv/actuation-record :effective-actuation-mode])))
+    (is (= ["GET"] (mapv #(get-in % [:arguments 6]) @calls)))
+    (is (control/stopped? (:control runtime)))
+    (is (:cleanup-confirmed? (opsv/stop-supervised-runs! supervisor f/now)))))
+
+(defn- ^{:stratum 1} assert-registration-race [supervisor ctx runtime calls]
+  (let [issued-id (atom nil)
+        register (partial register-then-stop grant/register! supervisor issued-id)
+        output (with-redefs [grant/register! register] (opsv/actuate ctx))]
+    (is (= :none (get-in output [:opsv/actuation-record :effective-actuation-mode])))
+    (is (empty? @calls))
+    (is (some? (:grant/revoked-at (grant/current (:authority-directory runtime) @issued-id))))))
+
+(defn- ^{:stratum 1} assert-revocation-retry [supervisor ctx runtime _calls]
+  (let [output (opsv/actuate ctx)
+        id (get-in output [:opsv/actuation-record :governed-effects 0 :evidence/grant-id])
+        unconfirmed (with-redefs [grant/revoke-stored! refuse-revocation]
+                      (opsv/stop-supervised-runs! supervisor f/now))]
+    (is (false? (:cleanup-confirmed? unconfirmed)))
+    (is (nil? (:grant/revoked-at (grant/current (:authority-directory runtime) id))))
+    (is (control/stopped? (:control runtime)))
+    (is (:cleanup-confirmed? (opsv/stop-supervised-runs! supervisor f/now)))
+    (is (some? (:grant/revoked-at (grant/current (:authority-directory runtime) id))))))
+
 (deftest ^{:stratum 1} successful-pr-grant-is-revoked-by-global-stop-test
   (let [supervisor (opsv/create-run-supervisor) aborts (atom 0)]
     (with-run supervisor (partial count-abort aborts)
-      (fn [ctx runtime calls]
-        (let [output (opsv/actuate ctx)
-              id (get-in output [:opsv/actuation-record :governed-effects 0 :evidence/grant-id])
-              stopped (opsv/stop-supervised-runs! supervisor f/now)]
-          (is (= :pr-only (get-in output [:opsv/actuation-record :effective-actuation-mode])))
-          (is (:cleanup-confirmed? stopped))
-          (is (= 1 @aborts))
-          (is (some? (:grant/revoked-at (grant/current (:authority-directory runtime) id))))
-          (is (= 2 (count @calls)))
-          (is (:retired? (opsv/retire-run-control! (:control runtime) f/now)))
-          (is (= 1 @aborts))
-          (is (empty? (:runs (opsv/stop-supervised-runs! supervisor f/now)))))))))
-
-(deftest ^{:stratum 1} stop-during-preflight-prevents-provider-post-test
-  (let [supervisor (opsv/create-run-supervisor)]
-    (with-run supervisor (constantly true)
-      (fn [ctx runtime calls]
-        (let [command (partial preflight-then-stop supervisor calls)
-              output (opsv/actuate (assoc-in ctx [:execution/opts :opsv/pr-execution :provider :run-command] command))]
-          (is (not= :pr-only (get-in output [:opsv/actuation-record :effective-actuation-mode])))
-          (is (= ["GET"] (mapv #(get-in % [:arguments 6]) @calls)))
-          (is (control/stopped? (:control runtime)))
-          (is (:cleanup-confirmed? (opsv/stop-supervised-runs! supervisor f/now))))))))
-
-(deftest ^{:stratum 1} grant-registration-racing-stop-is-revoked-before-provider-test
-  (let [supervisor (opsv/create-run-supervisor)]
-    (with-run supervisor (constantly true)
-      (fn [ctx runtime calls]
-        (let [register grant/register! issued-id (atom nil)
-              output (with-redefs [grant/register! (partial register-then-stop register supervisor issued-id)]
-                       (opsv/actuate ctx))]
-          (is (= :none (get-in output [:opsv/actuation-record :effective-actuation-mode])))
-          (is (empty? @calls))
-          (is (some? (:grant/revoked-at (grant/current (:authority-directory runtime) @issued-id)))))))))
+      (partial assert-grant-revoked supervisor aborts))))
 
 (deftest ^{:stratum 1} mismatched-runtime-control-is-refused-before-issuance-test
-  (let [supervisor (opsv/create-run-supervisor)]
-    (with-run supervisor (constantly true)
-      (fn [ctx _ calls]
-        (let [output (opsv/actuate (assoc-in ctx [:execution/opts :opsv/pr-execution :fence]
-                                             (actuation/create-mutation-fence)))]
-          (is (anomaly/anomaly? output))
-          (is (empty? @calls)))))))
+  (with-run (opsv/create-run-supervisor) (constantly true) assert-mismatched-control))
 
-(deftest ^{:stratum 1} failed-revocation-is-retained-for-cleanup-retry-test
+;------------------------------------------------------------------------------ Layer 2
+
+(deftest ^{:stratum 2} stop-during-preflight-prevents-provider-post-test
   (let [supervisor (opsv/create-run-supervisor)]
-    (with-run supervisor (constantly true)
-      (fn [ctx runtime _]
-        (let [output (opsv/actuate ctx)
-              id (get-in output [:opsv/actuation-record :governed-effects 0 :evidence/grant-id])
-              unconfirmed (with-redefs [grant/revoke-stored! refuse-revocation]
-                            (opsv/stop-supervised-runs! supervisor f/now))]
-          (is (false? (:cleanup-confirmed? unconfirmed)))
-          (is (nil? (:grant/revoked-at (grant/current (:authority-directory runtime) id))))
-          (is (control/stopped? (:control runtime)))
-          (is (:cleanup-confirmed? (opsv/stop-supervised-runs! supervisor f/now)))
-          (is (some? (:grant/revoked-at (grant/current (:authority-directory runtime) id)))))))))
+    (with-run supervisor (constantly true) (partial assert-preflight-stop supervisor))))
+
+(deftest ^{:stratum 2} grant-registration-racing-stop-is-revoked-before-provider-test
+  (let [supervisor (opsv/create-run-supervisor)]
+    (with-run supervisor (constantly true) (partial assert-registration-race supervisor))))
+
+(deftest ^{:stratum 2} failed-revocation-is-retained-for-cleanup-retry-test
+  (let [supervisor (opsv/create-run-supervisor)]
+    (with-run supervisor (constantly true) (partial assert-revocation-retry supervisor))))
+
+(comment
+  (clojure.test/run-tests 'ai.miniforge.phase-opsv.run-control-test))
