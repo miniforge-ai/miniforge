@@ -29,21 +29,25 @@ have separate responsibilities. No provider or schema dependency is duplicated.
 - Retain actual failed, uncertain and successful transactions on failed paths.
 - Publish transaction and failure artifacts alongside the actuation record.
 - Confirm terminal disposition events before finalizing a failed bundle.
-- Keep N6 outcome false when the phase failed or stopped. A confirmed PR remains
-  a confirmed PR; an uncertain POST does not invent a provider reference.
+- Record an unsuccessful N6 outcome for failures observed before finalization.
+  A confirmed or matched reconciled PR remains confirmed; an uncertain POST
+  does not invent a provider reference.
 - Recover from a saved failed checkpoint using only audit, artifact and bundle
   operations. Preserve the failed phase result and checkpoint the updated assembly.
 - Retry immutable publication once finalization has completed. Never reopen the
   assembly or invoke actuation during evidence recovery.
+- If publication fails after finalization, preserve the already sealed bundle's
+  original outcome. Retain the later publication failure in the failed phase
+  checkpoint; recovery never rewrites that immutable bundle or reports phase success.
 
 ## Testing plan
 
-The six terminal tests cover uncertain POST, confirmed success, and transient
-and persistent audit failure. They cover checkpoint recovery without a runtime
-store, repeated recovery, and refusal of nonterminal recovery inputs.
+The eight terminal tests cover uncertain POST, confirmed and reconciled success,
+and transient and persistent audit failure. They cover artifact, event and bundle
+publication failures, checkpoint recovery, repeated recovery, and invalid recovery inputs.
 Artifact tests also prove exact Instant type and nanosecond round trips.
 Both phase-consuming projects pass their complete OPSV suites. The rebuilt CLI passes
-14 checkpoint/terminal/finalization tests / 147 assertions. A disk round trip uses
+the checkpoint, terminal and finalization suites. A disk round trip uses
 the same public timestamp-normalization function as shared checkpoints.
 It removes runtime stores and phase state, then restores exact outcomes without provider replay.
 The coercion component is a test-only dependency. Runtime ports are supplied anew
