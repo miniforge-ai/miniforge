@@ -1,5 +1,6 @@
 {:paths ["src" "resources"]
  :deps {ai.miniforge/anomaly {:local/root "../anomaly"}
+        ai.miniforge/artifact {:local/root "../artifact"}
         ai.miniforge/content-hash {:local/root "../content-hash"}
         ai.miniforge/decision-envelope {:local/root "../decision-envelope"}
         ai.miniforge/effect-transaction {:local/root "../effect-transaction"}

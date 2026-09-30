@@ -24,6 +24,11 @@
 
 ;------------------------------------------------------------------------------ Layer 0
 
+(defn- ^{:stratum 0} diff-references [ctx]
+  (if (contains? (:execution/opts ctx) :opsv/artifact-directory)
+    []
+    (get-in ctx [:execution/input :opsv/policy-diff-artifact-refs] [])))
+
 (defn- ^{:stratum 0} policy-confidence
   [output]
   (confidence/level
@@ -101,8 +106,7 @@
   [(event-stream/policy-proposed
     stream workflow-id evidence-id
     {:opsv/policy-hash (:opsv/policy-hash output)
-     :opsv/diff-artifact-refs
-     (get-in ctx [:execution/input :opsv/policy-diff-artifact-refs] [])
+     :opsv/diff-artifact-refs (diff-references ctx)
      :opsv/confidence (policy-confidence output)})])
 
 ;------------------------------------------------------------------------------ Layer 2
