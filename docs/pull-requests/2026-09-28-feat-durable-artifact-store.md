@@ -39,14 +39,16 @@ component supplies the integrity digest.
 
 ## Testing plan
 
-All three artifact-consuming projects pass 28 tests and 90 assertions each.
-The hardened publication suite passes 14 tests and 53 assertions on the JVM
+All three artifact-consuming projects pass 28 tests and 93 assertions each.
+The hardened publication suite passes 14 tests and 56 assertions on the JVM
 and packaged Babashka CLI. Tests cover disk rereads, conflicting and concurrent
 publication, pre-link failure, uncertain force, identical retry, invalid paths,
 symlinks, unsupported content, output limits and interrupted/error boundaries.
 Scoped standards report zero violations across 20 files.
 Trailing JSON or malformed bytes are rejected on read and retry. Corrupt reads
 return faults; fatal runtime errors return non-retryable fatal anomalies.
+The collection-corruption regression truncates its replacement bytes and proves
+the altered envelope and inner Transit parse before asserting checksum rejection.
 Relative directories, malformed UTF-8 and schema-valid content corruption are refused.
 
 ## Standards adversarial pass
