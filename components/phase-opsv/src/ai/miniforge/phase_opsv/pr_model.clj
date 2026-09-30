@@ -49,7 +49,7 @@
 (defn ^{:stratum 2} candidate [ctx verified target]
   (let [workflow-id (context/workflow-id ctx)]
     (cond
-      (not (and (nonblank? (:opsv/policy-hash verified))
+      (not (and (m/validate opsv/PolicyHash (:opsv/policy-hash verified))
                 (= (:opsv/policy-hash verified) (:opsv/policy-hash target))))
       (anomaly/anomaly :conflict (msg/ts :pr/policy-mismatch) {})
 
