@@ -16,84 +16,40 @@
 ;; See the License for the specific language governing permissions and
 ;; limitations under the License.
 (ns ai.miniforge.evidence-bundle.opsv-finalization
-  "Validation and exactly-once publication of assembled N6 OPSV evidence."
-  (:require
-   [ai.miniforge.content-hash.interface :as content-hash]
-   [ai.miniforge.evidence-bundle.canonical-validation :as validation]
-   [ai.miniforge.evidence-bundle.opsv-assembly :as assembly]
-   [ai.miniforge.evidence-bundle.opsv-finalization-references :as references]
-   [ai.miniforge.evidence-bundle.schema.opsv :as schema]
-   [ai.miniforge.response.interface :as response]
-   [malli.core :as m]))
+  "Validate a candidate, then seal it against an unchanged assembly record."
+  (:require [ai.miniforge.evidence-bundle.opsv-assembly :as assembly]
+            [ai.miniforge.evidence-bundle.opsv-finalization-candidate :as candidate]
+            [ai.miniforge.evidence-bundle.opsv-finalization-publication :as publication]))
 
 ;------------------------------------------------------------------------------ Layer 0
 
-(defn- ^{:stratum 0} anomaly
-  [category message bundle-id errors]
-  (response/make-anomaly category message
-                         {:opsv/evidence-bundle-id bundle-id
-                          :opsv.validation/errors errors}))
+(defn- ^{:stratum 0} publish-candidate! [store record base evidence available-ids]
+  (let [{:keys [bundle errors]} (candidate/prepare record base evidence available-ids)
+        bundle-id (:evidence-bundle/id record)]
+    (if (seq errors)
+      (publication/failure :anomalies/incorrect :finalization/invalid bundle-id errors)
+      (publication/publish! store record bundle))))
 
 ;------------------------------------------------------------------------------ Layer 1
 
-(defn ^{:stratum 1} finalize!
-  "Publish one immutable N6 bundle using the preallocated identifier."
-  [store bundle-id base-bundle evidence available-artifact-ids]
+(defn- ^{:stratum 1} attempt! [store bundle-id base evidence available-ids]
   (let [record (assembly/get-assembly store bundle-id)]
     (cond
       (nil? record)
-      (anomaly :anomalies/not-found "OPSV evidence assembly not found"
-               bundle-id [{:code :assembly-not-found}])
+      (publication/failure :anomalies/not-found :finalization/not-found bundle-id
+                           [{:code :assembly-not-found}])
       (not= :assembling (:opsv.assembly/status record))
-      (anomaly :anomalies/conflict "OPSV evidence bundle is immutable"
-               bundle-id [{:code :bundle-already-finalized}])
-      :else
-      (let [schema-valid? (m/validate schema/OpsvEvidence evidence)
-            base-valid? (map? base-bundle)
-            canonical-evidence (if schema-valid?
-                                 (references/canonicalize evidence)
-                                 evidence)
-            candidate (when base-valid?
-                        (-> base-bundle
-                            (dissoc :evidence/content-hash :evidence/signature)
-                            (assoc :evidence-bundle/id bundle-id
-                                   :evidence/opsv canonical-evidence)))
-            errors (cond-> []
-                     (not schema-valid?)
-                     (conj {:code :invalid-opsv-evidence})
-                     (not base-valid?)
-                     (conj {:code :invalid-base-bundle})
-                     (and base-valid?
-                          (not= (:evidence-bundle/workflow-id record)
-                                (:evidence-bundle/workflow-id base-bundle)))
-                     (conj {:code :workflow-reference-mismatch})
-                     schema-valid?
-                     (into (references/errors record canonical-evidence
-                                             available-artifact-ids))
-                     candidate
-                     (into (map #(assoc % :code :invalid-evidence-bundle)
-                                (:errors (validation/validate-with-exception-handling
-                                          candidate)))))]
-        (if (seq errors)
-          (anomaly :anomalies/incorrect "OPSV evidence finalization failed"
-                   bundle-id errors)
-          (let [final-bundle (assoc candidate :evidence/content-hash
-                                    (content-hash/content-hash candidate))
-                [old-state new-state]
-                (swap-vals! store update bundle-id
-                            (fn [current]
-                              (if (= current record)
-                                (assoc current
-                                       :opsv.assembly/status :finalized
-                                       :opsv.assembly/bundle final-bundle)
-                                current)))]
-            (cond
-              (= record (get old-state bundle-id))
-              (get-in new-state [bundle-id :opsv.assembly/bundle])
-              (= :assembling
-                 (get-in old-state [bundle-id :opsv.assembly/status]))
-              (recur store bundle-id base-bundle evidence
-                     available-artifact-ids)
-              :else
-              (anomaly :anomalies/conflict "OPSV evidence bundle is immutable"
-                       bundle-id [{:code :bundle-already-finalized}]))))))))
+      (publication/immutable bundle-id)
+      :else (publish-candidate! store record base evidence available-ids))))
+
+;------------------------------------------------------------------------------ Layer 2
+
+(defn ^{:stratum 2} finalize!
+  "Publish one immutable N6 bundle using the preallocated identifier."
+  [store bundle-id base-bundle evidence available-artifact-ids]
+  (loop []
+    (let [result (attempt! store bundle-id base-bundle evidence available-artifact-ids)]
+      (if (= ::publication/retry result) (recur) result))))
+
+(comment
+  (finalize! (assembly/create-store) (random-uuid) {} {} #{}))
