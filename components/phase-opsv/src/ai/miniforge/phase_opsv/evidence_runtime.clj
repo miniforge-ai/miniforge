@@ -20,6 +20,7 @@
   (:require
    [ai.miniforge.anomaly.interface :as anomaly]
    [ai.miniforge.evidence-bundle.interface :as evidence]
+   [ai.miniforge.phase-opsv.evidence-checkpoint :as checkpoint]
    [ai.miniforge.phase-opsv.messages :as msg]
    [ai.miniforge.phase-opsv.runtime-context :as context]))
 
@@ -62,7 +63,7 @@
         bundle-id (get-in ctx [:execution/input :opsv/evidence-bundle-id])]
     (if-let [assembly (and store bundle-id
                            (evidence/get-opsv-assembly store bundle-id))]
-      (assoc-in ctx [:execution/input :opsv/evidence-assembly] assembly)
+      (checkpoint/persist ctx assembly)
       ctx)))
 
 ;------------------------------------------------------------------------------ Layer 1
@@ -70,7 +71,7 @@
 (defn ^{:stratum 1} ensure-assembly
   [ctx]
   (let [bundle-id (get-in ctx [:execution/input :opsv/evidence-bundle-id])
-        durable-assembly (get-in ctx [:execution/input :opsv/evidence-assembly])
+        durable-assembly (checkpoint/restore ctx)
         supplied-store (or (:opsv/evidence-assembly-store ctx)
                            (get-in ctx [:execution/opts
                                         :opsv/evidence-assembly-store]))
@@ -80,6 +81,8 @@
     (cond
       (assembly-for-workflow? supplied-assembly (context/workflow-id ctx))
       (with-supplied-assembly ctx supplied-store supplied-assembly)
+
+      (anomaly/anomaly? durable-assembly) durable-assembly
 
       (and (= bundle-id (:evidence-bundle/id durable-assembly))
            (assembly-for-workflow? durable-assembly (context/workflow-id ctx)))

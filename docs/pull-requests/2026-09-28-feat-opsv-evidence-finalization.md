@@ -41,8 +41,8 @@ using its existing validator. No storage manager is constructed for validation.
 
 ## Validation
 
-Both consuming projects pass 59 phase tests and 428 assertions each.
-The packaged artifact/finalization suites pass 10 tests and 88 assertions,
+Both consuming projects pass 60 phase tests and 430 assertions each.
+The packaged artifact/finalization suites pass 11 tests and 90 assertions,
 including an integration run with the pending checksummed artifact implementation.
 Regressions cover invalid host intent, mismatched workflow, unavailable material,
 changed material, uncertain publication, immutable retries, tampered recovery,
@@ -71,5 +71,5 @@ No real provider or load adapter is enabled by this change.
 ## Checklist
 
 - [x] Consumer tests, packaged tests, Polylith, kondo and strata pass
-- [ ] Signed commits and final hook run after signing becomes available
+- [x] Signed commits and repository hooks
 - [ ] Final-head review settled, all CI green and conflict-free merge

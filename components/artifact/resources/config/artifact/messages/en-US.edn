@@ -5,7 +5,9 @@
   :publication/id-conflict "Artifact identity already names different content."
   :publication/not-portable "Artifact must round-trip through Transit within the 16 MiB limit."
   :publication/unconfirmed "Artifact persistence is unconfirmed; retain its identity and content for recovery."
+  :publication/cleanup-failed "Artifact temporary-file cleanup failed; retain the reported publication outcome for recovery."
   :publication/fatal "Artifact operation encountered a fatal runtime failure; do not retry in this process."
+  :snapshot/invalid "Artifact snapshot is invalid, corrupt, or exceeds the 16 MiB limit."
   :link/parent-not-found "Parent artifact not found"
   :link/child-not-found "Child artifact not found"
   :link/artifact-not-found "Artifact not found"}}

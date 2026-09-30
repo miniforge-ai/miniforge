@@ -93,8 +93,7 @@
             replay ((:enter interceptor) completed)
             altered (-> completed
                         (dissoc :opsv/evidence-assembly-store)
-                        (assoc-in [:execution/input :opsv/evidence-assembly :opsv.assembly/bundle
-                                   :evidence/outcome :outcome/success] false))
+                        (assoc-in [:execution/input :opsv/evidence-snapshot] "corrupt"))
             recovered (opsv/publish-finalized-evidence! (runtime/ensure-assembly altered))]
         (is (= :error (get-in replay [:phase :result :status])))
         (is (zero? @calls))
