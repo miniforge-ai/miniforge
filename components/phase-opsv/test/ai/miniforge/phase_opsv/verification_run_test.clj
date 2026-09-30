@@ -76,6 +76,21 @@
                          [:metric-snapshot-artifact-refs ["not-an-artifact"]]]]
       (is (anomaly/anomaly? (verify-with ctx (partial changed-receipt key value)))))))
 
+(deftest ^{:stratum 1} verification-preserves-legacy-adapter-and-runtime-precedence-test
+  (let [legacy-calls (atom [])
+        runtime-calls (atom [])
+        legacy (phase/functional-adapter identity identity
+                 (partial measured legacy-calls support/verification-measurements))
+        runtime (phase/functional-adapter identity identity
+                  (partial measured runtime-calls support/verification-measurements))
+        ctx (-> (synthesized-context)
+                (update :execution/opts dissoc :opsv/adapter)
+                (assoc-in [:execution/input :opsv/adapter] legacy))]
+    (is (not (anomaly/anomaly? (phase/verify ctx))))
+    (is (not (anomaly/anomaly? (phase/verify (assoc-in ctx [:execution/opts :opsv/adapter] runtime)))))
+    (is (anomaly/anomaly? (phase/verify (assoc-in ctx [:execution/opts :opsv/adapter] :invalid))))
+    (is (= 1 (count @legacy-calls) (count @runtime-calls)))))
+
 (deftest ^{:stratum 1} missing-nil-valued-observation-cannot-pass-verification-test
   (let [ctx (synthesized-context)
         calls (atom [])]
