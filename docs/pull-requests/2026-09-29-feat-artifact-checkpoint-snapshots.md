@@ -30,8 +30,8 @@ Snapshot tests cover date/Instant round trips, collection kinds, modified payloa
 invalid schemas, byte limits, fatal errors and preserved thread interruption.
 Publication tests additionally cover Instant persistence and uncached disk reads.
 After integrating the bounded-codec fixes, all three artifact consumers pass
-37 tests and 135 assertions. The rebuilt packaged CLI passes 23 publication and
-snapshot tests with 98 assertions. The scoped standards scanner reports no
+38 tests and 140 assertions. The rebuilt packaged CLI passes 24 publication and
+snapshot tests with 103 assertions. The scoped standards scanner reports no
 violations; lint, Polylith and signed-commit hooks pass. PR budget: 116/600.
 
 ## Standards adversarial pass
