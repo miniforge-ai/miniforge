@@ -179,7 +179,11 @@
             id (:artifact/id value) target (files/target directory id)]
         (is (= value (artifact/publish! directory value)))
         (let [envelope (codec/decode (files/read-bytes target))
-              changed (String. ^bytes (codec/encode (assoc value :artifact/content [1 2])) StandardCharsets/UTF_8)]
-          (files/write! target (codec/encode (assoc envelope :publication/wire changed))))
+              changed (String. ^bytes (codec/encode (assoc value :artifact/content [1 2])) StandardCharsets/UTF_8)
+              corrupted (assoc envelope :publication/wire changed)]
+          (with-open [output (io/output-stream target)] (.write output (codec/encode corrupted)))
+          (is (= corrupted (codec/decode (files/read-bytes target))))
+          (is (= [1 2] (:artifact/content (codec/decode (.getBytes changed StandardCharsets/UTF_8)))))
+          (is (nil? (record-codec/decode (files/read-bytes target)))))
         (is (= :fault (:anomaly/type (artifact/read-published directory id))))
         (is (= :fault (:anomaly/type (artifact/publish! directory value))))))))

@@ -9,27 +9,39 @@
 ;------------------------------------------------------------------------------ Layer 0
 
 (defn- ^{:stratum 0} fallback [state]
-  (or (:result @state)
-      {:effect/outcome (if (:invoked? @state) :unknown-outcome :failed)
-       :effect/failure (msg/t :create/dispatch-unconfirmed)}))
+  (if-some [result (:result @state)]
+    result
+    (let [outcome (if (:invoked? @state) :unknown-outcome :failed)]
+      {:effect/outcome outcome
+       :effect/failure (msg/t :create/dispatch-unconfirmed)})))
 
-(defn- ^{:stratum 0} invoke-once! [owner state operation]
-  (let [same-thread? (identical? owner (Thread/currentThread))
-        [before _] (swap-vals! state #(cond
-                                      (not same-thread?) (assoc % :rejected? true)
-                                      (and (:open? %) (not (:invoked? %))) (assoc % :invoked? true)
-                                      :else %))]
-    (when (and same-thread? (:open? before) (not (:invoked? before)))
-      (let [result (operation)] (swap! state assoc :result result) result))))
+(defn- ^{:stratum 0} claim [same-thread? state]
+  (cond
+    (not same-thread?) (assoc state :rejected? true)
+    (and (:open? state) (not (:invoked? state))) (assoc state :invoked? true)
+    :else state))
 
 ;------------------------------------------------------------------------------ Layer 1
 
-(defn ^{:stratum 1} call-with-exception-handling [dispatch operation]
+(defn- ^{:stratum 1} invoke-once! [owner state operation]
+  (let [same-thread? (identical? owner (Thread/currentThread))
+        [before _] (swap-vals! state (partial claim same-thread?))]
+    (when (and same-thread? (:open? before) (not (:invoked? before)))
+      (let [result (operation)] (swap! state assoc :result result) result))))
+
+(defn- ^{:stratum 1} dispatch-result [state result]
+  (if (or (:invoked? @state) (:rejected? @state)
+          (not (or (anomaly/anomaly? result) (= :failed (:effect/outcome result)))))
+    (fallback state)
+    result))
+
+;------------------------------------------------------------------------------ Layer 2
+
+(defn ^{:stratum 2} call-with-exception-handling [dispatch operation]
   (let [state (atom {:open? true :invoked? false})
         owner (Thread/currentThread)]
     (try
-      (let [result (dispatch #(invoke-once! owner state operation))]
-        (if (or (:invoked? @state) (:rejected? @state)) (fallback state) result))
+      (dispatch-result state (dispatch #(invoke-once! owner state operation)))
       (catch clojure.lang.ArityException _
         (if (:invoked? @state) (fallback state)
             (anomaly/anomaly :invalid-input (msg/t :input/invalid) {})))

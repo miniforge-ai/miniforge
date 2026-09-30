@@ -3,7 +3,8 @@
 ;; Licensed under the Apache License, Version 2.0.
 (ns ai.miniforge.phase-opsv.artifact-model
   "Pure phase-material selection and content-bound artifact identity."
-  (:require [ai.miniforge.content-hash.interface :as hash]
+  (:require [ai.miniforge.artifact.interface :as artifact]
+            [ai.miniforge.content-hash.interface :as hash]
             [ai.miniforge.phase-opsv.runtime-context :as context])
   (:import [java.nio.charset StandardCharsets]
            [java.util UUID]))
@@ -23,11 +24,13 @@
   (let [workflow-id (context/workflow-id ctx)
         bundle-id (get-in ctx [:execution/input :opsv/evidence-bundle-id])
         content (get output content-key)
-        digest (hash/content-hash [workflow-id bundle-id kind content])]
-    {:artifact/id (UUID/nameUUIDFromBytes (.getBytes ^String digest StandardCharsets/UTF_8))
-     :artifact/type type :artifact/version "1.0.0" :artifact/content content
-     :artifact/metadata {:workflow/id workflow-id :opsv/evidence-bundle-id bundle-id
-                         :opsv/material-kind kind :content/hash digest}}))
+        digest (hash/content-hash [workflow-id bundle-id kind content])
+        id (UUID/nameUUIDFromBytes (.getBytes ^String digest StandardCharsets/UTF_8))
+        metadata {:workflow/id workflow-id
+                  :opsv/evidence-bundle-id bundle-id
+                  :opsv/material-kind kind
+                  :content/hash digest}]
+    (artifact/build-artifact {:id id :type type :version "1.0.0" :content content :metadata metadata})))
 
 (defn ^{:stratum 0} attach [output artifact]
   (let [id (:artifact/id artifact)

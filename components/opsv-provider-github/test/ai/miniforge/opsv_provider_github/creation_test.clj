@@ -81,5 +81,12 @@
     (is (= :failed (:effect/outcome result)))
     (is (= ["GET"] (mapv #(get-in % [:arguments 6]) @calls)))))
 
+(deftest ^{:stratum 0} dispatch-cannot-claim-unconfirmed-provider-outcomes-test
+  (doseq [returned [nil {} {:effect/outcome :succeeded} {:effect/outcome :unknown-outcome}]]
+    (let [calls (atom []) runtime (f/runtime calls [(f/head-response)])
+          result (provider/create-pr! runtime (f/transaction :committing) f/payload (constantly returned))]
+      (is (= :failed (:effect/outcome result)))
+      (is (= ["GET"] (mapv #(get-in % [:arguments 6]) @calls))))))
+
 (comment
   (f/pull-request))
