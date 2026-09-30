@@ -29,9 +29,7 @@
     (failure)
     (publish root record)))
 
-;------------------------------------------------------------------------------ Layer 1
-
-(defn- ^{:stratum 1} assert-finalized-evidence [ctx directory]
+(defn- ^{:stratum 0} assert-finalized-evidence [ctx directory]
   (let [completed (reduce f/step (f/configured ctx) support/handlers)
         output (support/phase-output completed :opsv/actuate)
         bundle (:opsv/evidence-bundle output)
@@ -44,7 +42,7 @@
     (is (= (:opsv/event-refs assembly) (set (get-in bundle [:evidence/opsv :opsv/event-refs]))))
     (is (= 8 (count (get-in bundle [:evidence/opsv :opsv/artifact-refs]))))))
 
-(defn- ^{:stratum 1} assert-invalid-host-evidence [ctx _]
+(defn- ^{:stratum 0} assert-invalid-host-evidence [ctx _]
   (doseq [base [nil :invalid {} (assoc (get-in (f/configured ctx) [:execution/opts :opsv/evidence-base])
                                       :evidence-bundle/workflow-id (random-uuid))]]
     (let [calls (atom 0)
@@ -53,8 +51,8 @@
       (is (= :error (get-in result [:phase :result :status])))
       (is (zero? @calls)))))
 
-(defn- ^{:stratum 1} assert-event-stream-preflight [ctx _directory]
-  (let [configured-ctx (configured ctx)
+(defn- ^{:stratum 0} assert-event-stream-preflight [ctx _directory]
+  (let [configured-ctx (f/configured ctx)
         stream (:event-stream configured-ctx)
         missing (dissoc configured-ctx :event-stream :execution/event-stream)]
     (doseq [invalid [nil 42 {}]]
@@ -63,6 +61,51 @@
       (let [aliased (assoc-in missing path stream)
             completed (f/step aliased (first support/handlers))]
         (is (= :success (get-in completed [:phase :result :status])))))))
+
+(defn- ^{:stratum 0} assert-material-integrity [ctx _]
+  (let [completed (reduce f/step ctx support/handlers)
+        output (support/phase-output completed :opsv/actuate)
+        configured-ctx (f/configured completed)
+        missing (with-redefs [artifact/read-published (constantly nil)]
+                  (finalization/finalize! configured-ctx output))
+        changed (finalization/finalize! configured-ctx
+                  (assoc-in output [:opsv/actuation-record :pr-refs] ["invented-pr"]))]
+    (is (anomaly/anomaly? missing))
+    (is (anomaly/anomaly? changed))
+    (is (= output (get-in missing [:anomaly/data :opsv/phase-output])))
+    (is (= :assembling (:opsv.assembly/status
+                       (evidence/get-opsv-assembly (:opsv/evidence-assembly-store completed)
+                         (get-in completed [:execution/input :opsv/evidence-bundle-id])))))))
+
+(defn- ^{:stratum 0} assert-replay-refused [ctx _]
+  (let [completed (reduce f/step (f/configured ctx) support/handlers)
+        calls (atom 0)
+        interceptor (lifecycle/interceptor {} :opsv/execute (fn [_] (swap! calls inc)))
+        replay ((:enter interceptor) completed)
+        altered (-> completed
+                    (dissoc :opsv/evidence-assembly-store)
+                    (assoc-in [:execution/input :opsv/evidence-snapshot] "corrupt"))
+        recovered (opsv/publish-finalized-evidence! (runtime/ensure-assembly altered))]
+    (is (= :error (get-in replay [:phase :result :status])))
+    (is (zero? @calls))
+    (is (anomaly/anomaly? recovered))))
+
+(defn- ^{:stratum 0} assert-occupied-bundle-refused [ctx directory]
+  (let [prepared (runtime/ensure-assembly (f/configured ctx))
+        id (get-in prepared [:execution/input :opsv/evidence-bundle-id])
+        foreign (artifact/build-artifact {:id id :type :manifest :version "1.0.0" :content {}})]
+    (is (not (anomaly/anomaly? (artifact/publish! directory foreign))))
+    (f/assert-blocked-transform prepared)))
+
+(defn- ^{:stratum 0} assert-published-bundle-refuses-stale-checkpoint [ctx _directory]
+  (let [ready (reduce f/step (f/configured ctx) (butlast support/handlers))
+        completed (f/step ready (last support/handlers))
+        stale (runtime/ensure-assembly (dissoc ready :opsv/evidence-assembly-store))]
+    (is (= :assembling (get-in stale [:execution/input :opsv/evidence-assembly :opsv.assembly/status])))
+    (f/assert-blocked-transform stale)
+    (is (not (anomaly/anomaly? (opsv/publish-finalized-evidence! completed))))))
+
+;------------------------------------------------------------------------------ Layer 1
 
 (defn- ^{:stratum 1} assert-publication-recovery [ctx directory]
   (let [ready (reduce f/step (f/configured ctx) (butlast support/handlers))
@@ -82,34 +125,6 @@
     (is (= (:opsv/evidence-bundle recovered)
            (:artifact/content (artifact/read-published directory (:opsv/evidence-artifact-id recovered)))))))
 
-(defn- ^{:stratum 1} assert-material-integrity [ctx _]
-  (let [completed (reduce f/step ctx support/handlers)
-        output (support/phase-output completed :opsv/actuate)
-        configured-ctx (f/configured completed)
-        missing (with-redefs [artifact/read-published (constantly nil)]
-                  (finalization/finalize! configured-ctx output))
-        changed (finalization/finalize! configured-ctx
-                  (assoc-in output [:opsv/actuation-record :pr-refs] ["invented-pr"]))]
-    (is (anomaly/anomaly? missing))
-    (is (anomaly/anomaly? changed))
-    (is (= output (get-in missing [:anomaly/data :opsv/phase-output])))
-    (is (= :assembling (:opsv.assembly/status
-                       (evidence/get-opsv-assembly (:opsv/evidence-assembly-store completed)
-                         (get-in completed [:execution/input :opsv/evidence-bundle-id])))))))
-
-(defn- ^{:stratum 1} assert-replay-refused [ctx _]
-  (let [completed (reduce f/step (f/configured ctx) support/handlers)
-        calls (atom 0)
-        interceptor (lifecycle/interceptor {} :opsv/execute (fn [_] (swap! calls inc)))
-        replay ((:enter interceptor) completed)
-        altered (-> completed
-                    (dissoc :opsv/evidence-assembly-store)
-                    (assoc-in [:execution/input :opsv/evidence-snapshot] "corrupt"))
-        recovered (opsv/publish-finalized-evidence! (runtime/ensure-assembly altered))]
-    (is (= :error (get-in replay [:phase :result :status])))
-    (is (zero? @calls))
-    (is (anomaly/anomaly? recovered))))
-
 (defn- ^{:stratum 1} assert-interrupted-publication [ctx _]
   (let [ready (reduce f/step (f/configured ctx) (butlast support/handlers))
         publish (partial publish-unless-bundle artifact/publish! interrupt-publication)
@@ -122,47 +137,32 @@
                                  :opsv/actuation-record])))
     (is (not (anomaly/anomaly? (opsv/publish-finalized-evidence! completed))))))
 
-(defn- ^{:stratum 1} assert-occupied-bundle-refused [ctx directory]
-  (let [prepared (runtime/ensure-assembly (f/configured ctx))
-        id (get-in prepared [:execution/input :opsv/evidence-bundle-id])
-        foreign (artifact/build-artifact {:id id :type :manifest :version "1.0.0" :content {}})]
-    (is (not (anomaly/anomaly? (artifact/publish! directory foreign))))
-    (f/assert-blocked-transform prepared)))
-
-(defn- ^{:stratum 1} assert-published-bundle-refuses-stale-checkpoint [ctx _directory]
-  (let [ready (reduce f/step (f/configured ctx) (butlast support/handlers))
-        completed (f/step ready (last support/handlers))
-        stale (runtime/ensure-assembly (dissoc ready :opsv/evidence-assembly-store))]
-    (is (= :assembling (get-in stale [:execution/input :opsv/evidence-assembly :opsv.assembly/status])))
-    (f/assert-blocked-transform stale)
-    (is (not (anomaly/anomaly? (opsv/publish-finalized-evidence! completed))))))
-
-;------------------------------------------------------------------------------ Layer 2
-
-(deftest ^{:stratum 2} lifecycle-finalizes-real-n6-and-publishes-preallocated-id-test
+(deftest ^{:stratum 1} lifecycle-finalizes-real-n6-and-publishes-preallocated-id-test
   (f/with-context assert-finalized-evidence))
 
-(deftest ^{:stratum 2} invalid-host-evidence-refuses-before-transform-test
+(deftest ^{:stratum 1} invalid-host-evidence-refuses-before-transform-test
   (f/with-context assert-invalid-host-evidence))
 
-(deftest ^{:stratum 2} event-stream-is-required-before-finalizing-adapters-test
+(deftest ^{:stratum 1} event-stream-is-required-before-finalizing-adapters-test
   (f/with-context assert-event-stream-preflight))
+
+(deftest ^{:stratum 1} missing-or-mismatched-material-refuses-finalization-test
+  (f/with-context assert-material-integrity))
+
+(deftest ^{:stratum 1} finalized-run-refuses-phase-replay-and-tampered-recovery-test
+  (f/with-context assert-replay-refused))
+
+(deftest ^{:stratum 1} occupied-bundle-id-refuses-before-actuation-test
+  (f/with-context assert-occupied-bundle-refused)
+  (f/with-context assert-published-bundle-refuses-stale-checkpoint))
+
+;------------------------------------------------------------------------------ Layer 2
 
 (deftest ^{:stratum 2} publication-failure-retains-bundle-and-recovers-without-actuation-test
   (f/with-context assert-publication-recovery))
 
-(deftest ^{:stratum 2} missing-or-mismatched-material-refuses-finalization-test
-  (f/with-context assert-material-integrity))
-
-(deftest ^{:stratum 2} finalized-run-refuses-phase-replay-and-tampered-recovery-test
-  (f/with-context assert-replay-refused))
-
 (deftest ^{:stratum 2} exception-after-finalization-checkpoints-recovery-state-test
   (f/with-context assert-interrupted-publication))
-
-(deftest ^{:stratum 2} occupied-bundle-id-refuses-before-actuation-test
-  (f/with-context assert-occupied-bundle-refused)
-  (f/with-context assert-published-bundle-refuses-stale-checkpoint))
 
 (comment
   (clojure.test/run-tests 'ai.miniforge.phase-opsv.finalization-test))
