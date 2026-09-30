@@ -37,7 +37,7 @@
   [value]
   (if (schema/valid-artifact? value)
     (snapshot/encode value)
-    (publication-boundary/failure :invalid-input :publication/invalid (:artifact/id value))))
+    (publication-boundary/failure :invalid-input :snapshot/invalid (:artifact/id value))))
 
 (defn ^{:stratum 0} decode-snapshot
   "Decode a bounded snapshot and validate its artifact schema and checksum.

@@ -30,8 +30,8 @@ Snapshot tests cover date/Instant round trips, collection kinds, modified payloa
 invalid schemas, byte limits, fatal errors and preserved thread interruption.
 Publication tests additionally cover Instant persistence and uncached disk reads.
 After integrating the bounded-codec fixes, all three artifact consumers pass
-38 tests and 141 assertions. The rebuilt packaged CLI passes 24 publication and
-snapshot tests with 104 assertions. The scoped standards scanner reports no
+38 tests and 144 assertions. The rebuilt packaged CLI passes 24 publication and
+snapshot tests with 107 assertions. The scoped standards scanner reports no
 violations; lint, Polylith and signed-commit hooks pass. PR budget: 116/600.
 
 ## Standards adversarial pass
@@ -42,5 +42,5 @@ Filesystem publication and in-memory snapshot encoding remain separate APIs.
 
 ## Prerequisite and scope
 
-Stacked on #1938. Retarget to main only after that PR merges. OPSV checkpoint
+The #1938 foundation is merged; this PR now targets main. OPSV checkpoint
 integration is a separate application change, not a claim of N7 completion.
