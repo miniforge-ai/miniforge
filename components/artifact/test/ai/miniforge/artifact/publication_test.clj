@@ -12,7 +12,8 @@
             [clojure.test :refer [deftest is]])
   (:import [java.nio.charset StandardCharsets]
            [java.nio.file Files]
-           [java.nio.file.attribute FileAttribute]))
+           [java.nio.file.attribute FileAttribute]
+           [java.time Instant]))
 
 ;------------------------------------------------------------------------------ Layer 0
 
@@ -50,6 +51,14 @@
             (.write output (record-codec/encode invalid)))
           (is (= :fault (:anomaly/type (artifact/read-published directory id))))
           (is (= :fault (:anomaly/type (artifact/publish! directory value)))))))))
+
+(deftest ^{:stratum 1} instant-publication-preserves-type-and-nanoseconds-test
+  (with-directory
+    (fn [directory]
+      (let [value (assoc (record) :artifact/content
+                         {:effect/at (Instant/parse "2026-09-28T00:00:00.123456789Z")})]
+        (is (= value (artifact/publish! directory value)))
+        (is (= value (artifact/read-published directory (:artifact/id value))))))))
 
 (deftest ^{:stratum 1} invalid-input-and-unsafe-paths-refuse-publication-test
   (with-directory
