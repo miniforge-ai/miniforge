@@ -4,6 +4,7 @@
 (ns ai.miniforge.phase-opsv.finalization-model
   "Project completed runtime material into the canonical N6 OPSV section."
   (:require [ai.miniforge.anomaly.interface :as anomaly]
+            [ai.miniforge.artifact.interface :as artifact]
             [ai.miniforge.phase-opsv.messages :as msg]))
 
 ;------------------------------------------------------------------------------ Layer 0
@@ -21,13 +22,13 @@
      :artifact-id (get-in output [:opsv/phase-artifact-ids :policy])}))
 
 (defn ^{:stratum 0} bundle-artifact [bundle]
-  {:artifact/id (:evidence-bundle/id bundle)
-   :artifact/type :review :artifact/version "1.0.0"
-   :artifact/content bundle
-   :artifact/metadata {:workflow/id (:evidence-bundle/workflow-id bundle)
+  (artifact/build-artifact
+   {:id (:evidence-bundle/id bundle)
+    :type :review :version "1.0.0" :content bundle
+    :metadata {:workflow/id (:evidence-bundle/workflow-id bundle)
                        :opsv/evidence-bundle-id (:evidence-bundle/id bundle)
                        :opsv/material-kind :evidence-bundle
-                       :content/hash (:evidence/content-hash bundle)}})
+               :content/hash (:evidence/content-hash bundle)}}))
 
 ;------------------------------------------------------------------------------ Layer 1
 
