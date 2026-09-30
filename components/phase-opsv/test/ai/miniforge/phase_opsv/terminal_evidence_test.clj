@@ -25,6 +25,15 @@
   (let [response (pr/command calls options arguments)]
     (if (= "POST" (get arguments 6)) {:exit 1 :out ""} response)))
 
+(defn- ^{:stratum 0} refuse-successful-audit [record refuse? ctx transaction]
+  (if (and (= :succeeded (:effect/state transaction)) (refuse?))
+    (anomaly/anomaly :unavailable "audit failed" {:effect/transaction transaction})
+    (record ctx transaction)))
+
+(defn- ^{:stratum 0} actuate-with-audit [ready record]
+  (with-redefs [audit/record! record]
+    (f/run-last-phase ready)))
+
 (defn- ^{:stratum 0} checkpoint-round-trip [directory completed]
   (let [file (io/file directory "terminal-checkpoint.edn")
         checkpoint (coerce/stringify-instants
@@ -69,15 +78,10 @@
     (is (= bundle (:opsv/evidence-bundle (opsv/publish-finalized-evidence! completed))))))
 
 (defn- ^{:stratum 1} assert-retryable-audit-failure [ready _ calls]
-  (let [record audit/record!
-        fail-once? (atom true)
-        completed (with-redefs [audit/record!
-                                (fn [ctx transaction]
-                                  (if (and (= :succeeded (:effect/state transaction))
-                                           (compare-and-set! fail-once? true false))
-                                    (anomaly/anomaly :unavailable "audit failed" {:effect/transaction transaction})
-                                    (record ctx transaction)))]
-                    (f/run-last-phase ready))
+  (let [fail-once? (atom true)
+        refuse? (partial compare-and-set! fail-once? true false)
+        record (partial refuse-successful-audit audit/record! refuse?)
+        completed (actuate-with-audit ready record)
         output (terminal-output completed)
         bundle (:opsv/evidence-bundle output)]
     (is (= :error (get-in completed [:phase :result :status])))
@@ -89,13 +93,8 @@
     (is (= 2 (count @calls)))))
 
 (defn- ^{:stratum 1} assert-persistent-audit-failure [ready _ calls]
-  (let [record audit/record!
-        completed (with-redefs [audit/record!
-                                (fn [ctx transaction]
-                                  (if (= :succeeded (:effect/state transaction))
-                                    (anomaly/anomaly :unavailable "audit failed" {:effect/transaction transaction})
-                                    (record ctx transaction)))]
-                    (f/run-last-phase ready))
+  (let [record (partial refuse-successful-audit audit/record! (constantly true))
+        completed (actuate-with-audit ready record)
         output (terminal-output completed)
         recovered (opsv/recover-actuation-evidence! (dissoc completed :opsv/evidence-assembly-store))
         again (opsv/recover-actuation-evidence! (dissoc recovered :opsv/evidence-assembly-store))]
@@ -115,13 +114,8 @@
     (is (= 2 (count @calls)))))
 
 (defn- ^{:stratum 1} assert-checkpoint-recovery [ready directory calls]
-  (let [record audit/record!
-        completed (with-redefs [audit/record!
-                                (fn [ctx transaction]
-                                  (if (= :succeeded (:effect/state transaction))
-                                    (anomaly/anomaly :unavailable "audit failed" {:effect/transaction transaction})
-                                    (record ctx transaction)))]
-                    (f/run-last-phase ready))
+  (let [record (partial refuse-successful-audit audit/record! (constantly true))
+        completed (actuate-with-audit ready record)
         saved (checkpoint-round-trip directory completed)
         recovered (opsv/recover-actuation-evidence! saved)
         again (opsv/recover-actuation-evidence! (checkpoint-round-trip directory recovered))
