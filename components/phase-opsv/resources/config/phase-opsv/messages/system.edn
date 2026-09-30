@@ -1,5 +1,6 @@
 {:phase-opsv/system
  {:adapter/missing "The OPSV workflow requires an adapter implementing OPSVAdapter."
+  :control/unconfirmed "OPSV run control refused the operation or could not confirm stop cleanup. Inspect the retained run and grant results before recovery."
   :adapter/invalid-callbacks "OPSV adapter callbacks must be functions."
   :verification/missing "The runtime requires a fresh candidate verification adapter."
   :verification/failed "The candidate verification adapter failed."
