@@ -20,6 +20,9 @@ Reuse canonical schema maps, OPSV Malli schema, bounded artifact input checks,
 and the established N6 content hash. Separate pure validation from its named
 exception boundary. Return structured diagnostics and construct reports once.
 No storage manager, network operation, or authority is created by validation.
+Split the existing nested finalizer into reference ordering/checks, candidate
+validation, atomic publication, and retry orchestration. Assembly and finalization
+share one localized failure constructor. Each namespace has at most three strata.
 
 ## Verification
 
@@ -28,4 +31,7 @@ content tampering, unsupported objects, and deferred unbounded sequences.
 Required nullable fields distinguish explicit nil from absence; optional fields
 still validate their values when present.
 Nested constraints and violations reuse their canonical domain schemas.
-Run evidence consumers, packaged regressions, and scoped standards checks before merge.
+Concurrent accumulation invalidates a prepared candidate instead of losing the
+new reference or sealing incomplete evidence. All three evidence consumers and
+the packaged canonical/assembly regressions pass. Polylith, kondo, strata and the
+component-wide standards scan pass; final-head review and CI remain merge gates.

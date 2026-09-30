@@ -18,12 +18,19 @@
 (ns ai.miniforge.evidence-bundle.opsv-assembly-test
   (:require
    [ai.miniforge.evidence-bundle.interface :as evidence]
+   [ai.miniforge.evidence-bundle.opsv-finalization-candidate :as candidate]
    [ai.miniforge.evidence-bundle.opsv-test-fixtures :as f]
    [ai.miniforge.response.interface :as response]
    [clojure.test :refer [deftest is testing]]
    [malli.core :as m]))
 
 ;------------------------------------------------------------------------------ Layer 0
+
+(defn- ^{:stratum 0} prepare-with-concurrent-event [prepare store event-id record base opsv available]
+  (let [prepared (prepare record base opsv available)]
+    (evidence/accumulate-opsv-evidence!
+      store (:evidence-bundle/id record) {:opsv/event-refs event-id})
+    prepared))
 
 (defn ^{:stratum 0} error-codes
   [result]
@@ -48,6 +55,20 @@
     (is (= #{event-id} (:opsv/event-refs result)))))
 
 ;------------------------------------------------------------------------------ Layer 1
+
+(deftest ^{:stratum 1} concurrent-accumulation-invalidates-the-prepared-candidate
+  (let [[store bundle-id] (accumulated-store f/opsv-evidence)
+        event-id (random-uuid)
+        prepare (partial prepare-with-concurrent-event candidate/prepare store event-id)
+        result (with-redefs [candidate/prepare prepare]
+                 (evidence/finalize-opsv-evidence!
+                   store bundle-id f/base-bundle f/opsv-evidence (set f/artifact-ids)))
+        assembly (evidence/get-opsv-assembly store bundle-id)]
+    (is (response/anomaly-map? result))
+    (is (contains? (error-codes result) :event-reference-mismatch))
+    (is (= :assembling (:opsv.assembly/status assembly)))
+    (is (contains? (:opsv/event-refs assembly) event-id))
+    (is (nil? (:opsv.assembly/bundle assembly)))))
 
 (deftest ^{:stratum 1} finalize-preserves-preallocated-identity-once
   (let [[store bundle-id] (accumulated-store f/opsv-evidence)
