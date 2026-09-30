@@ -16,6 +16,8 @@ full-repository scan. This surfaced during the N7 standards adversarial pass.
 - Return an empty set for a successful diff without changed paths.
 - Check the Git exit status before accepting output as a valid changed set.
 - Preserve the existing full-scan fallback for invalid references and Git errors.
+- Discard unused Git stderr at the process boundary so diagnostics cannot fill an
+  unread pipe and deadlock either diff query. Keep stdout reserved for diff data.
 
 ## Standards adversarial pass
 
@@ -27,7 +29,8 @@ This does not exempt existing violations from an explicitly requested full scan.
 ## Testing
 
 Exercise unchanged HEAD, a changed ancestor, a nonexistent reference and rejected
-option-like input. Confirm an unchanged incremental scan does not report the
+option-like input, including a long invalid ref whose error exceeds pipe capacity.
+Confirm an unchanged incremental scan does not report the
 fixture's deliberately noncompliant committed source. Run all scanner consumers,
 repository hooks and final-head CI before merge.
 

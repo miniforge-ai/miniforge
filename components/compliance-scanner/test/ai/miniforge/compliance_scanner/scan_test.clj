@@ -175,6 +175,7 @@
             (is (= #{"components/foo/src/ai/miniforge/foo/core.clj"}
                    (diff-plan/git-diff-name-only path "HEAD~1")))
             (is (nil? (diff-plan/git-diff-name-only path "missing-ref")))
+            (is (nil? (diff-plan/git-diff-name-only path (apply str (repeat 100000 "a")))))
             (is (nil? (diff-plan/git-diff-name-only path "--invalid")))))
         (finally
           ;; Cleanup
