@@ -13,7 +13,8 @@
 ;------------------------------------------------------------------------------ Layer 1
 
 (def ^{:stratum 1} read-options
-  {:handlers {instant-tag (transit/read-handler #(Instant/parse %))}})
+  {:handlers {instant-tag (transit/read-handler #(Instant/parse %))
+              "list" (transit/read-handler #(apply list %))}})
 
 (def ^{:stratum 1} write-options
   {:handlers {Instant (transit/write-handler (constantly instant-tag) str)}})
