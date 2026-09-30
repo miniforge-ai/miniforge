@@ -12,8 +12,8 @@
 
 (defn- ^{:stratum 0} identity-value [value]
   (cond
-    (map? value) [:map (into {} (map (fn [[key item]] [(identity-value key) (identity-value item)])) value)]
-    (set? value) [:set (into #{} (map identity-value) value)]
+    (map? value) [:map (vec (sort-by pr-str (map (fn [[key item]] [(identity-value key) (identity-value item)]) value)))]
+    (set? value) [:set (vec (sort-by pr-str (map identity-value value)))]
     (vector? value) [:vector (mapv identity-value value)]
     (seq? value) [:list (mapv identity-value value)]
     :else [:scalar (String. ^bytes (codec/encode value) StandardCharsets/UTF_8)]))
@@ -26,12 +26,12 @@
 (defn- ^{:stratum 1} content-digest [value]
   (if (codec/encode value)
     (hash/content-hash (identity-value value))
-    (boundary/failure :invalid-input :publication/invalid nil)))
+    (boundary/failure :invalid-input :digest/invalid nil)))
 
 ;------------------------------------------------------------------------------ Layer 2
 
 (defn ^{:stratum 2} digest-with-exception-handling [value]
-  (boundary/call-with-exception-handling nil :invalid-input :publication/invalid
+  (boundary/call-with-exception-handling nil :invalid-input :digest/invalid
                                         (partial content-digest value)))
 
 (comment
