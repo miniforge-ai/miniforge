@@ -92,5 +92,14 @@
           (is interrupted?)))
       (finally (Thread/interrupted)))))
 
+(deftest ^{:stratum 1} invalid-candidate-context-is-refused-before-adapter-invocation-test
+  (let [ctx (synthesized-context)
+        calls (atom [])
+        callback (partial measured calls support/verification-measurements)]
+    (doseq [missing [:opsv/operational-policy :opsv/experiment-pack :opsv/environment-fingerprint]]
+      (let [invalid (update-in ctx [:execution/phase-results :opsv/synthesize :result :output] dissoc missing)]
+        (is (anomaly/anomaly? (verify-with invalid callback)))))
+    (is (empty? @calls))))
+
 (comment
   (synthesized-context))
