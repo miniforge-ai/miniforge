@@ -14,5 +14,9 @@
 (defn ^{:stratum 0} workflow-id [ctx]
   (or (:execution/id ctx) (:workflow/id ctx) (:workflow-id ctx)))
 
+(defn ^{:stratum 0} adapter [ctx]
+  (or (get-in ctx [:execution/opts :opsv/adapter])
+      (get-in ctx [:execution/input :opsv/adapter])))
+
 (comment
   (workflow-id {}))

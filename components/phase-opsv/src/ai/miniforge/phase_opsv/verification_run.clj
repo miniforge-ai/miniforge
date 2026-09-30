@@ -8,6 +8,7 @@
             [ai.miniforge.opsv.interface :as opsv]
             [ai.miniforge.phase-opsv.messages :as msg]
             [ai.miniforge.phase-opsv.protocol :as port]
+            [ai.miniforge.phase-opsv.runtime-context :as context]
             [malli.core :as m]))
 
 ;------------------------------------------------------------------------------ Layer 0
@@ -82,7 +83,7 @@
     (validate-receipt request (:environment-fingerprint result) result)))
 
 (defn ^{:stratum 2} execute [ctx synthesized]
-  (let [adapter (get-in ctx [:execution/opts :opsv/adapter])
+  (let [adapter (context/adapter ctx)
         request (request synthesized)]
     (cond
       (anomaly/anomaly? request) request

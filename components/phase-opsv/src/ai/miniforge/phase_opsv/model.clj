@@ -27,6 +27,7 @@
    [ai.miniforge.phase-opsv.policy :as policy]
    [ai.miniforge.phase-opsv.protocol :as port]
    [ai.miniforge.phase-opsv.risk :as risk]
+   [ai.miniforge.phase-opsv.runtime-context :as context]
    [ai.miniforge.phase-opsv.verification :as verification]))
 
 ;------------------------------------------------------------------------------ Layer 0
@@ -38,11 +39,6 @@
 (defn- ^{:stratum 0} input-value
   [ctx key]
   (get-in ctx [:execution/input key]))
-
-(defn- ^{:stratum 0} adapter-value
-  [ctx]
-  (or (get-in ctx [:execution/opts :opsv/adapter])
-      (get-in ctx [:execution/input :opsv/adapter])))
 
 (defn- ^{:stratum 0} converged-output
   [executed]
@@ -66,6 +62,23 @@
              :opsv/operational-policy validated
              :opsv/policy-hash (content-hash/content-hash validated)))))
 
+(defn- ^{:stratum 0} executed-output
+  [ctx planned]
+  (let [runtime-adapter (context/adapter ctx)
+        invalid-adapter (adapter/adapter-anomaly runtime-adapter)]
+    (if invalid-adapter
+      invalid-adapter
+      (let [ramp (port/run-guarded-ramp
+                  runtime-adapter (:opsv/experiment-pack planned))
+            invalid-ramp (adapter/ramp-shape-anomaly ramp)]
+        (cond
+          (anomaly/anomaly? ramp) ramp
+          invalid-ramp invalid-ramp
+          :else (assoc planned
+                       :opsv/environment-fingerprint
+                       (:environment-fingerprint ramp)
+                       :opsv/ramp-steps (:steps ramp)))))))
+
 ;------------------------------------------------------------------------------ Layer 1
 
 (defn- ^{:stratum 1} planned-output
@@ -86,7 +99,7 @@
   [ctx]
   (let [pack (opsv/validate-experiment-pack
               (input-value ctx :opsv/experiment-pack))
-        runtime-adapter (adapter-value ctx)
+        runtime-adapter (context/adapter ctx)
         invalid-adapter (adapter/adapter-anomaly runtime-adapter)]
     (cond
       (anomaly/anomaly? pack) pack
@@ -98,23 +111,6 @@
           drivers
           {:opsv/experiment-pack pack
            :opsv/candidate-drivers drivers})))))
-
-(defn- ^{:stratum 1} executed-output
-  [ctx planned]
-  (let [runtime-adapter (adapter-value ctx)
-        invalid-adapter (adapter/adapter-anomaly runtime-adapter)]
-    (if invalid-adapter
-      invalid-adapter
-      (let [ramp (port/run-guarded-ramp
-                  runtime-adapter (:opsv/experiment-pack planned))
-            invalid-ramp (adapter/ramp-shape-anomaly ramp)]
-        (cond
-          (anomaly/anomaly? ramp) ramp
-          invalid-ramp invalid-ramp
-          :else (assoc planned
-                       :opsv/environment-fingerprint
-                       (:environment-fingerprint ramp)
-                       :opsv/ramp-steps (:steps ramp)))))))
 
 (defn ^{:stratum 1} converge
   [ctx]
@@ -130,14 +126,14 @@
   (flow/continue (phase-output ctx :opsv/synthesize)
                  (partial verification/output ctx)))
 
+(defn ^{:stratum 1} execute
+  [ctx]
+  (flow/continue (phase-output ctx :opsv/plan)
+                 (partial executed-output ctx)))
+
 ;------------------------------------------------------------------------------ Layer 2
 
 (defn ^{:stratum 2} plan
   [ctx]
   (flow/continue (phase-output ctx :opsv/discover)
                  (partial planned-output ctx)))
-
-(defn ^{:stratum 2} execute
-  [ctx]
-  (flow/continue (phase-output ctx :opsv/plan)
-                 (partial executed-output ctx)))
