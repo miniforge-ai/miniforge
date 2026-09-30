@@ -42,12 +42,13 @@ using its existing validator. No storage manager is constructed for validation.
 ## Validation
 
 Both consuming projects pass their complete OPSV phase suites.
-The packaged checkpoint/artifact/finalization suites pass 13 tests and 98 assertions.
+The packaged checkpoint/artifact/finalization suites pass 15 tests and 113 assertions.
 Real shared-workflow completion and failed-publication recovery both pass from
-disk (2 tests, 18 assertions); these are registered in integration tests and CI.
+disk (2 tests, 22 assertions); these are registered in integration tests and CI.
 Regressions cover invalid host intent, mismatched workflow, unavailable material,
 changed material, uncertain publication, immutable retries, tampered recovery,
 interruption and refusal to re-execute a finalized run.
+Recovery confirms both baseline and fresh candidate measurement artifacts.
 
 Polylith, kondo, strata and the scoped standards scan pass.
 The evidence scan found two missing documentation headers; this
