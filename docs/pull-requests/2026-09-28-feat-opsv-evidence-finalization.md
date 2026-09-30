@@ -41,7 +41,7 @@ using its existing validator. No storage manager is constructed for validation.
 
 ## Validation
 
-Both consuming projects pass 62 phase tests and 438 assertions each.
+Both consuming projects pass their complete OPSV phase suites.
 The packaged checkpoint/artifact/finalization suites pass 13 tests and 98 assertions.
 Real shared-workflow completion and failed-publication recovery both pass from
 disk (2 tests, 18 assertions); these are registered in integration tests and CI.
