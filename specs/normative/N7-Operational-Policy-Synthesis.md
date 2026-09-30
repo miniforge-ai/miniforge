@@ -431,7 +431,8 @@ A minimal compliant OPSV implementation MUST:
 - synthesize an HPA/KEDA-compatible policy proposal
 - produce explainable risk and per-criterion verification results
 - emit the §4.3 events and a complete N6 §2.8 evidence bundle
-- emit PRs as N10-governed actions with provenance
+- support PR emission as N10-governed actions with provenance when the effective
+  actuation mode permits it; recommendation-only runs MUST NOT create PRs
 - default effective actuation to `:recommend-only`
 - honor N8 emergency stop and record rollback/disposition evidence
 

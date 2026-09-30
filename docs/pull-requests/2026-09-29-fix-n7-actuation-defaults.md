@@ -22,6 +22,7 @@ must not imply automatic external mutation.
 Keep the stable requirement ID and all §5.4 authority checks. Preserve mandatory
 PR emission capability, disabled-by-default apply, and the optional apply contract.
 Increment the document version and record this consistency correction.
+Clarify the MCI capability bullet so it does not require PRs from recommendation-only runs.
 
 ## Verification and standards
 
