@@ -73,5 +73,13 @@
     (is (nil? (@retained)))
     (is (= ["GET"] (mapv #(get-in % [:arguments 6]) @calls)))))
 
+(deftest ^{:stratum 0} another-thread-cannot-post-even-before-dispatch-returns-test
+  (let [calls (atom [])
+        runtime (f/runtime calls [(f/head-response)])
+        result (provider/create-pr! runtime (f/transaction :committing) f/payload
+                                   (fn [operation] @(future (operation))))]
+    (is (= :failed (:effect/outcome result)))
+    (is (= ["GET"] (mapv #(get-in % [:arguments 6]) @calls)))))
+
 (comment
   (f/pull-request))

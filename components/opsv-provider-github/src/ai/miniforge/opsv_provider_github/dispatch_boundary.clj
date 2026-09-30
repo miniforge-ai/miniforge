@@ -13,19 +13,23 @@
       {:effect/outcome (if (:invoked? @state) :unknown-outcome :failed)
        :effect/failure (msg/t :create/dispatch-unconfirmed)}))
 
-(defn- ^{:stratum 0} invoke-once! [state operation]
-  (let [[before _] (swap-vals! state #(if (and (:open? %) (not (:invoked? %)))
-                                       (assoc % :invoked? true) %))]
-    (when (and (:open? before) (not (:invoked? before)))
+(defn- ^{:stratum 0} invoke-once! [owner state operation]
+  (let [same-thread? (identical? owner (Thread/currentThread))
+        [before _] (swap-vals! state #(cond
+                                      (not same-thread?) (assoc % :rejected? true)
+                                      (and (:open? %) (not (:invoked? %))) (assoc % :invoked? true)
+                                      :else %))]
+    (when (and same-thread? (:open? before) (not (:invoked? before)))
       (let [result (operation)] (swap! state assoc :result result) result))))
 
 ;------------------------------------------------------------------------------ Layer 1
 
 (defn ^{:stratum 1} call-with-exception-handling [dispatch operation]
-  (let [state (atom {:open? true :invoked? false})]
+  (let [state (atom {:open? true :invoked? false})
+        owner (Thread/currentThread)]
     (try
-      (let [result (dispatch #(invoke-once! state operation))]
-        (if (:invoked? @state) (fallback state) result))
+      (let [result (dispatch #(invoke-once! owner state operation))]
+        (if (or (:invoked? @state) (:rejected? @state)) (fallback state) result))
       (catch clojure.lang.ArityException _
         (if (:invoked? @state) (fallback state)
             (anomaly/anomaly :invalid-input (msg/t :input/invalid) {})))
