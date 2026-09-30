@@ -24,10 +24,16 @@
 
 ;------------------------------------------------------------------------------ Layer 1
 
+(defn ^{:stratum 1} prepare [ctx]
+  (if (or (not (contains? (:execution/opts ctx) :opsv/artifact-directory)) (ready? ctx))
+    ctx
+    (failure {})))
+
 (defn ^{:stratum 1} publish! [ctx phase-key output]
-  (if-not (ready? ctx)
-    (failure output)
-    (reduce (partial continue-publication ctx) output (model/records ctx phase-key output))))
+  (let [confirmed (model/confirmed-output output)]
+    (if-not (ready? ctx)
+      (failure confirmed)
+      (reduce (partial continue-publication ctx) confirmed (model/records ctx phase-key confirmed)))))
 
 (comment
   (publish! {} :opsv/plan {}))

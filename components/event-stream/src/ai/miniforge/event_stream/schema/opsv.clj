@@ -117,7 +117,8 @@
    :opsv/load-step
    [[:opsv/step-id :string]
     [:opsv/intended-load KeywordMap]
-    [:opsv/observed-load KeywordMap]]))
+    [:opsv/observed-load KeywordMap]
+    [:opsv/metric-snapshot-artifact-refs {:optional true} [:vector :uuid]]]))
 
 (def ^{:stratum 2} GuardrailAbort
   (opsv-event-schema
@@ -132,13 +133,15 @@
    :opsv.convergence/iteration
    [[:opsv/iteration-id :string]
     [:opsv/params KeywordMap]
-    [:opsv/observed-metrics-summary KeywordMap]]))
+    [:opsv/observed-metrics-summary KeywordMap]
+    [:opsv/metric-snapshot-artifact-refs {:optional true} [:vector :uuid]]]))
 
 (def ^{:stratum 2} PolicyProposed
   (opsv-event-schema
    :opsv.policy/proposed
    [[:opsv/policy-hash :string]
     [:opsv/diff-artifact-refs [:vector :uuid]]
+    [:opsv/policy-artifact-ref {:optional true} :uuid]
     [:opsv/confidence :keyword]]))
 
 (def ^{:stratum 2} VerificationResult
@@ -146,6 +149,7 @@
    :opsv.verification/result
    [[:opsv/passed? :boolean]
     [:opsv/criteria-evaluation [:vector CriterionResult]]
+    [:opsv/metric-snapshot-artifact-refs {:optional true} [:vector :uuid]]
     [:opsv/confidence :keyword]
     [:opsv/caveats [:vector :string]]]))
 
