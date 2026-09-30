@@ -21,8 +21,8 @@
    [ai.miniforge.anomaly.interface :as anomaly]
    [ai.miniforge.decision-envelope.interface :as envelope]
    [ai.miniforge.evidence-bundle.interface :as evidence]
-   [ai.miniforge.event-stream.interface :as event-stream]
    [ai.miniforge.event-stream.interface.opsv :as opsv-event]
+   [ai.miniforge.phase-opsv.event-replay :as replay]
    [ai.miniforge.phase-opsv.messages :as msg]
    [malli.core :as m]))
 
@@ -82,7 +82,7 @@
 
 (defn- ^{:stratum 1} publish-event!
   [ctx stream-value event]
-  (let [published (event-stream/publish! stream-value event)
+  (let [published (replay/publish! ctx stream-value event)
         store (:opsv/evidence-assembly-store ctx)
         failure (publication-anomaly event published)]
     (cond
@@ -95,4 +95,6 @@
 ;------------------------------------------------------------------------------ Layer 2
 
 (defn ^{:stratum 2} emit! [ctx stream-value event]
-  (or (validation-anomaly event) (publish-event! ctx stream-value event)))
+  (or (validation-anomaly event)
+      (let [identified (replay/identify event)]
+        (if (anomaly/anomaly? identified) identified (publish-event! ctx stream-value identified)))))

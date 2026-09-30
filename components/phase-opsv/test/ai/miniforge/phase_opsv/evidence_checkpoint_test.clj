@@ -12,20 +12,16 @@
 
 ;------------------------------------------------------------------------------ Layer 0
 
-(deftest ^{:stratum 0} checkpoint-corruption-cannot-fall-back-to-display-map-test
-  (f/with-context
-    (fn [ctx _]
+(defn- ^{:stratum 0} assert-corruption-rejected [ctx _directory]
       (let [completed (f/step ctx (first support/handlers))
             detached (dissoc completed :opsv/evidence-assembly-store)
             corrupt (assoc-in detached [:execution/input :opsv/evidence-snapshot] "corrupt")
             wrong-run (assoc detached :execution/id (random-uuid))]
         (is (anomaly/anomaly? (runtime/ensure-assembly corrupt)))
         (is (anomaly/anomaly? (runtime/ensure-assembly wrong-run)))
-        (is (not (anomaly/anomaly? (runtime/ensure-assembly detached))))))))
+        (is (not (anomaly/anomaly? (runtime/ensure-assembly detached))))))
 
-(deftest ^{:stratum 0} failed-snapshot-cannot-report-phase-success-test
-  (f/with-context
-    (fn [ctx _]
+(defn- ^{:stratum 0} assert-encoding-failure [ctx _directory]
       (let [failure (anomaly/anomaly :unavailable "snapshot unavailable" {})
             [phase-key transform] (first support/handlers)
             interceptor (lifecycle/interceptor {} phase-key transform)
@@ -34,4 +30,15 @@
         (is (= :failed (get-in completed [:phase :status])))
         (is (= :error (get-in completed [:phase :result :status])))
         (is (map? (get-in completed [:phase :result :output :anomaly/data :opsv/phase-output])))
-        (is (= failure (get-in completed [:execution/input :opsv/evidence-snapshot])))))))
+        (is (= failure (get-in completed [:execution/input :opsv/evidence-snapshot])))))
+
+;------------------------------------------------------------------------------ Layer 1
+
+(deftest ^{:stratum 1} checkpoint-corruption-cannot-fall-back-to-display-map-test
+  (f/with-context assert-corruption-rejected))
+
+(deftest ^{:stratum 1} failed-snapshot-cannot-report-phase-success-test
+  (f/with-context assert-encoding-failure))
+
+(comment
+  (clojure.test/run-tests 'ai.miniforge.phase-opsv.evidence-checkpoint-test))

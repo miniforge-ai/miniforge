@@ -7,6 +7,7 @@
             [ai.miniforge.artifact.interface :as artifact]
             [ai.miniforge.evidence-bundle.interface :as evidence]
             [ai.miniforge.phase-opsv.messages :as msg]
+            [ai.miniforge.phase-opsv.post-actuation-checkpoint :as checkpoint]
             [ai.miniforge.phase-opsv.runtime-context :as context]))
 
 ;------------------------------------------------------------------------------ Layer 0
@@ -56,6 +57,8 @@
 
 (defn ^{:stratum 2} validate-context [ctx]
   (cond
+    (checkpoint/pending? ctx)
+    (anomaly/anomaly :invalid-input (msg/t :evidence/actuation-recovery-required) {})
     (and (enabled? ctx) (= :finalized (assembly-status ctx)))
     (anomaly/anomaly :invalid-input (msg/t :evidence/assembly-finalized) {})
     (and (enabled? ctx) (not (valid-base? ctx)))

@@ -36,18 +36,23 @@ using its existing validator. No storage manager is constructed for validation.
   publication fails. The separate publication retry API never invokes actuation.
 - Refuse phase replay for finalized runs. Validate restored bundle integrity and
   referenced material before allowing an evidence-only publication retry.
+- Capture successful actuation output before publishing its artifacts or events.
+  Refuse ordinary execution from that checkpoint, even if evidence options are
+  removed. Resume only evidence publication; reuse confirmed actuation audit IDs.
 - Use shared workflow aliases and test fixtures; remove legacy input diff refs
   from artifact-backed policy events.
 
 ## Validation
 
 Both consuming projects pass their complete OPSV phase suites.
-The packaged checkpoint/artifact/finalization suites pass 15 tests and 113 assertions.
+The packaged recovery/checkpoint/finalization/audit suites pass 15 tests.
 Real shared-workflow completion and failed-publication recovery both pass from
 disk (2 tests, 22 assertions); these are registered in integration tests and CI.
 Regressions cover invalid host intent, mismatched workflow, unavailable material,
 changed material, uncertain publication, immutable retries, tampered recovery,
 interruption and refusal to re-execute a finalized run.
+Post-actuation regressions cover artifact failure, partial event publication,
+repeated recovery, missing runtime streams and snapshot encoding failure.
 Recovery confirms both baseline and fresh candidate measurement artifacts.
 
 Polylith, kondo, strata and the scoped standards scan pass.
@@ -76,6 +81,10 @@ display assembly. A corrupt snapshot cannot fall back to that display map.
 Failure to encode a snapshot fails the phase while retaining its actual output.
 The checksum detects corruption, not an untrusted writer; the host owns checkpoint
 storage and supplies fresh runtime ports on recovery.
+The post-actuation snapshot is retained in the returned context for the shared
+workflow checkpoint. External mutation and workflow checkpointing are not one
+atomic transaction. Durable effect reconciliation handles process failure in
+that interval.
 
 ## Checklist
 

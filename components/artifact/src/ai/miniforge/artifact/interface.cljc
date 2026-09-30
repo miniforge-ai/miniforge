@@ -23,6 +23,7 @@
    [ai.miniforge.artifact.core :as core]
    [ai.miniforge.artifact.publication :as publication]
    [ai.miniforge.artifact.publication-boundary :as publication-boundary]
+   [ai.miniforge.artifact.publication-identity :as publication-identity]
    [ai.miniforge.artifact.snapshot :as snapshot]
    [ai.miniforge.schema.interface :as schema]
    [clojure.string :as str]
@@ -30,6 +31,14 @@
    [ai.miniforge.artifact.protocols.records.transit-store :as transit-store]))
 
 ;------------------------------------------------------------------------------ Layer 0
+
+(defn ^{:stratum 0} content-digest
+  "Hash bounded portable content using immutable publication's type identity.
+   Map/set order is irrelevant; list/vector and scalar wire kinds remain distinct.
+   Returns an anomaly for unsupported, deferred, oversized, or overdeep values.
+   This integrity value is not authority or writer authentication."
+  [value]
+  (publication-identity/digest-with-exception-handling value))
 
 (defn ^{:stratum 0} encode-snapshot
   "Encode a validated artifact as a lossless, checksummed string of at most 16 MiB.
