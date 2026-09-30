@@ -29,6 +29,7 @@
   (:require
    [ai.miniforge.cli.app-config :as app-config]
    [ai.miniforge.cli.main.commands.evidence.bundles :as bundles]
+   [ai.miniforge.cli.main.commands.evidence.validation :as validation]
    [ai.miniforge.cli.main.commands.shared :as shared]
    [ai.miniforge.cli.main.display :as display]
    [ai.miniforge.cli.messages :as messages]))
@@ -57,45 +58,18 @@
                                   (:evidence/failure-attribution bundle))}))
 
 (defn- ^{:stratum 0} display-filesystem-bundles
-  "Render bundles discovered via filesystem scan."
+  "Validate and render discovered evidence."
   []
-  (let [files (bundles/scan-evidence-dir)]
-    (if (seq files)
-      (doseq [f files]
-        (let [bundle (bundles/load-bundle-from-file f)
-              id     (if bundle
-                       (or (some-> (:bundle/id bundle) str) (.getName f))
-                       (.getName f))]
-          (println (messages/t :evidence/bundle-entry
-                                {:id          (display/style id :bold true)
-                                :workflow-id (if (and bundle (:bundle/workflow-id bundle))
-                                               (str (:bundle/workflow-id bundle))
-                                               "—")
-                                :status      (if (and bundle (:bundle/status bundle))
-                                               (str (:bundle/status bundle))
-                                               "—")}))))
-      (do
-        (println (messages/t :evidence/none))
-        (println (messages/t :evidence/evidence-dir {:dir (bundles/evidence-dir)}))))))
+  (bundles/display-component-bundles
+    (map bundles/load-bundle-from-file (bundles/scan-evidence-dir))))
 
 (defn ^{:stratum 0} evidence-export-cmd
-  "Export an evidence bundle to a file in the requested format.
-
-   Supported formats: edn (default), json, html."
+  "Export a validated, sealed evidence bundle as EDN."
   [opts]
-  (let [{:keys [id format]} opts
-        fmt (or format "edn")]
+  (let [{:keys [id]} opts]
     (if-not id
-      (shared/usage-error! :evidence/export-usage "evidence export <id> <format>")
-      (let [result (shared/call-optional-provider
-                    'ai.miniforge.evidence-bundle.interface/export-bundle id fmt)]
-        (if result
-          (do
-            (display/print-success (messages/t :evidence/export-success {:id id}))
-            (println (messages/t :evidence/export-format {:format fmt}))
-            (when-let [path (:path result)]
-              (println (messages/t :evidence/export-path {:path path}))))
-          (bundles/export-bundle-fallback id fmt))))))
+      (shared/usage-error! :evidence/export-usage "evidence export <id> edn")
+      (bundles/export-bundle-fallback id (get opts :format "edn")))))
 
 ;------------------------------------------------------------------------------ Layer 1
 
@@ -136,7 +110,8 @@
                           {:id id
                            :command (app-config/command-string "evidence list")}))
               (shared/exit! 1))
-          (display-bundle-detail id bundle))))))
+          (when (validation/require-valid! id bundle)
+            (display-bundle-detail id bundle)))))))
 
 ;------------------------------------------------------------------------------ Rich Comment
 (comment

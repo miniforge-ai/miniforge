@@ -24,11 +24,12 @@
    optional component provider) and deriving their normalized/summary
    fields live here."
   (:require
-   [babashka.fs :as fs]
    [clojure.edn :as edn]
    [clojure.java.io :as io]
    [clojure.string :as str]
    [ai.miniforge.cli.app-config :as app-config]
+   [ai.miniforge.cli.main.commands.evidence.exporting :as exporting]
+   [ai.miniforge.cli.main.commands.evidence.validation :as validation]
    [ai.miniforge.cli.main.commands.shared :as shared]
    [ai.miniforge.cli.main.display :as display]
    [ai.miniforge.cli.messages :as messages]))
@@ -88,11 +89,13 @@
   "Render bundles returned from the evidence-bundle component interface."
   [bundles]
   (if (seq bundles)
-    (doseq [bundle bundles]
+    (doseq [bundle bundles
+            :let [id (str (or (:evidence-bundle/id bundle) (:bundle/id bundle)))]
+            :when (validation/accepted? id bundle)]
       (println (messages/t :evidence/bundle-entry
-                          {:id          (display/style (get bundle :bundle/id "unknown") :foreground :bold)
-                           :workflow-id (get bundle :bundle/workflow-id "—")
-                           :status      (get bundle :bundle/status "unknown")})))
+                          {:id          (display/style id :bold true)
+                           :workflow-id (:evidence-bundle/workflow-id bundle)
+                           :status      (get-in bundle [:evidence/outcome :outcome/success])})))
     (println (messages/t :evidence/none))))
 
 ;------------------------------------------------------------------------------ Layer 1
@@ -140,12 +143,12 @@
         (when (.exists f) (load-bundle-from-file f)))))
 
 (defn ^{:stratum 1} export-bundle-fallback
-  "Copy the raw EDN bundle file as-is when the export component is unavailable."
+  "Load once and export only validated, sealed evidence as EDN."
   [id fmt]
   (let [src (io/file (str (evidence-dir) "/" id ".edn"))]
     (if (.exists src)
-      (let [dest (str (evidence-dir) "/" id "-export." fmt)]
-        (fs/copy (str src) dest {:replace-existing true})
-        (display/print-success (messages/t :evidence/export-raw {:path dest})))
+      (let [dest (str (evidence-dir) "/" id "-export." fmt)
+            bundle (load-bundle-from-file src)]
+        (exporting/export! id bundle fmt dest))
       (do (display/print-error (messages/t :evidence/export-not-found {:id id}))
           (shared/exit! 1)))))
