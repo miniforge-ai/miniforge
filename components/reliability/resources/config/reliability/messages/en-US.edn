@@ -31,4 +31,7 @@
   :degradation/critical-budget-low  "Critical error budget below 25%"
   :degradation/operator-exit-reason "{principal}: {justification}"
   :safe-mode/entered    "Safe-mode entered: {trigger}"
+  :degradation/invalid-config "Invalid degradation policy or safe-mode callback."
+  :safe-mode/stop-unconfirmed "Safe-mode host cleanup could not be confirmed."
+  :safe-mode/invalid-exit "Safe-mode exit requires a nonblank justification and principal."
   :safe-mode/exited     "Safe-mode exited after {duration}ms: {justification}"}}
