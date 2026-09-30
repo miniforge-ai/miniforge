@@ -15,10 +15,10 @@
 
 (def ^{:stratum 0} failure confirmation/failure)
 
-(defn- ^{:stratum 0} directory-ready? [ctx]
-  (not (anomaly/any-anomaly?
-         (artifact/read-published (get-in ctx [:execution/opts :opsv/artifact-directory])
-           (get-in ctx [:execution/input :opsv/evidence-bundle-id])))))
+(defn- ^{:stratum 0} directory-failure [ctx]
+  (let [result (artifact/read-published (get-in ctx [:execution/opts :opsv/artifact-directory])
+                                       (get-in ctx [:execution/input :opsv/evidence-bundle-id]))]
+    (when (anomaly/any-anomaly? result) result)))
 
 (defn- ^{:stratum 0} ready? [ctx]
   (let [assembly (evidence/get-opsv-assembly (:opsv/evidence-assembly-store ctx)
@@ -32,10 +32,10 @@
 ;------------------------------------------------------------------------------ Layer 1
 
 (defn ^{:stratum 1} prepare [ctx]
-  (if (or (not (contains? (:execution/opts ctx) :opsv/artifact-directory))
-          (and (ready? ctx) (directory-ready? ctx)))
-    ctx
-    (failure {})))
+  (cond
+    (not (contains? (:execution/opts ctx) :opsv/artifact-directory)) ctx
+    (not (ready? ctx)) (failure {})
+    :else (or (directory-failure ctx) ctx)))
 
 (defn ^{:stratum 1} publish! [ctx phase-key output]
   (let [confirmed (model/confirmed-output output)]

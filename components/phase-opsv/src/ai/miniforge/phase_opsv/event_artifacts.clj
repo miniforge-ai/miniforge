@@ -17,7 +17,7 @@
         policy-id (:policy ids)
         event-type (:event/type event)]
     (cond-> event
-      (contains? measurement-events event-type)
+      (and (contains? measurement-events event-type) (seq metric-refs))
       (assoc :opsv/metric-snapshot-artifact-refs metric-refs)
       (and (= :opsv.policy/proposed event-type) policy-id)
       (assoc :opsv/policy-artifact-ref policy-id))))
