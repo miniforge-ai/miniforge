@@ -50,7 +50,7 @@
 (defn- ^{:stratum 0} result-after-publication
   [ctx phase-key result]
   (if-not (phase/result-succeeded? result)
-    (terminal/complete-failure! ctx phase-key result)
+    result
     (let [published (events/emit-phase-events! ctx phase-key (:output result))]
       (if (anomaly/anomaly? published)
         (lifecycle-result/phase-result
@@ -64,8 +64,8 @@
 (defn- ^{:stratum 1} leave-phase
   [ctx]
   (let [phase-key (get-in ctx [:phase :name])
-        result (result-after-publication
-                ctx phase-key (get-in ctx [:phase :result]))
+        published (result-after-publication ctx phase-key (get-in ctx [:phase :result]))
+        result (terminal/complete-failure! ctx phase-key published)
         completed-ctx (assoc-in ctx [:phase :result] result)
         success? (phase/result-succeeded? result)
         end-time (System/currentTimeMillis)

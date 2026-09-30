@@ -10,10 +10,11 @@
 ;------------------------------------------------------------------------------ Layer 0
 
 (defn- ^{:stratum 0} retained-output [output transaction]
-  (let [record (:opsv/actuation-record output)]
+  (let [record (:opsv/actuation-record output)
+        projected (model/outcome record transaction)]
     (if (effect/valid? transaction)
-      (if (= :succeeded (:effect/state transaction))
-        (merge output (model/outcome record transaction))
+      (if-not (anomaly/anomaly? projected)
+        (merge output projected)
         (assoc output :opsv/effect-transactions [transaction]
                       :opsv/actuation-record
                       (assoc record :effective-actuation-mode :none

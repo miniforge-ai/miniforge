@@ -10,7 +10,8 @@
             [ai.miniforge.phase-opsv.interface :as opsv]
             [ai.miniforge.phase-opsv.pr-audit :as audit]
             [ai.miniforge.phase-opsv.pr-fixtures :as pr]
-            [ai.miniforge.phase-opsv.terminal-test-support :refer [with-ready]]
+            [ai.miniforge.phase-opsv.pr-outcome :as outcome]
+            [ai.miniforge.phase-opsv.terminal-test-support :as terminal :refer [with-ready]]
             [clojure.edn :as edn]
             [clojure.java.io :as io]
             [clojure.test :refer [deftest is]]
@@ -58,7 +59,30 @@
     (is (= (:opsv/effect-transactions output) (:artifact/content published)))
     (is (= 2 (count @calls)))))
 
+(defn- ^{:stratum 0} assert-reconciled-outcome [ready _directory _calls]
+  (let [completed (f/run-last-phase ready)
+        output (get-in completed [:phase :result :output])
+        transaction (assoc (first (:opsv/effect-transactions output)) :effect/state :reconciled :effect/matched? true)
+        failure (anomaly/anomaly :unavailable "audit failed" {:effect/transaction transaction})
+        retained (get-in (outcome/retain-failure output failure) [:anomaly/data :opsv/phase-output])]
+    (is (= [transaction] (:opsv/effect-transactions retained)))
+    (is (= (:opsv/actuation-record output) (:opsv/actuation-record retained)))))
+
 ;------------------------------------------------------------------------------ Layer 1
+
+(defn- ^{:stratum 1} assert-late-publication-recovery [kind ready directory calls]
+  (let [completed (terminal/run-with-publication-failure ready kind)
+        retained (terminal-output completed)
+        recovered (opsv/recover-actuation-evidence! (checkpoint-round-trip directory completed))
+        output (terminal-output recovered)]
+    (is (= :error (get-in completed [:phase :result :status])))
+    (is (map? (:opsv/phase-failure retained)))
+    (is (= :error (get-in recovered [:phase :result :status])))
+    (is (map? (:opsv/evidence-bundle output)))
+    (is (= (:opsv/effect-transactions retained) (:opsv/effect-transactions output)))
+    (is (= ["https://github.com/example/opsv/pull/17"]
+           (get-in output [:opsv/actuation-record :pr-refs])))
+    (is (= 2 (count @calls)))))
 
 (defn- ^{:stratum 1} assert-unknown-outcome [ready directory calls]
   (let [completed (f/run-last-phase
@@ -132,7 +156,14 @@
 (deftest ^{:stratum 1} confirmed-provider-success-publishes-real-transaction-evidence-test
   (with-ready assert-confirmed-outcome))
 
+(deftest ^{:stratum 1} confirmed-reconciliation-survives-terminal-failure-test
+  (with-ready assert-reconciled-outcome))
+
 ;------------------------------------------------------------------------------ Layer 2
+
+(deftest ^{:stratum 2} post-actuation-publication-failures-recover-without-provider-replay-test
+  (doseq [kind [:actuation :effect-transactions :evidence-bundle :event]]
+    (with-ready (partial assert-late-publication-recovery kind))))
 
 (deftest ^{:stratum 2} unknown-provider-outcome-finalizes-failure-with-real-transaction-test
   (with-ready assert-unknown-outcome))

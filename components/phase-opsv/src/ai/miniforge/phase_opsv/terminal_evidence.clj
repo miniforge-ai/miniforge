@@ -7,12 +7,20 @@
             [ai.miniforge.phase-opsv.artifact-boundary :as artifacts]
             [ai.miniforge.phase-opsv.events :as events]
             [ai.miniforge.phase-opsv.finalization-boundary :as finalization]
+            [ai.miniforge.phase-opsv.finalization :as assembly]
             [ai.miniforge.phase-opsv.finalization-config :as config]
             [ai.miniforge.phase-opsv.flow :as flow]
             [ai.miniforge.phase-opsv.pr-audit :as audit]
             [ai.miniforge.phase-opsv.lifecycle-result :as result]))
 
 ;------------------------------------------------------------------------------ Layer 0
+
+(defn- ^{:stratum 0} classify-failure [failure]
+  (let [output (get-in failure [:anomaly/data :opsv/phase-output])]
+    (if (and (anomaly/anomaly? failure) (map? (:opsv/actuation-record output)))
+      (assoc-in failure [:anomaly/data :opsv/phase-output :opsv/phase-failure]
+                (get output :opsv/phase-failure (select-keys failure [:anomaly/type :anomaly/message])))
+      failure)))
 
 (defn- ^{:stratum 0} finalize-after-events! [ctx output]
   (let [publication (events/emit-phase-events! ctx :opsv/actuate output)]
@@ -41,12 +49,14 @@
 ;------------------------------------------------------------------------------ Layer 2
 
 (defn ^{:stratum 2} complete-failure! [ctx phase-key phase-result]
-  (let [failure (:output phase-result)
+  (let [failure (classify-failure (:output phase-result))
         retained (get-in failure [:anomaly/data :opsv/phase-output])]
     (if (and (= :opsv/actuate phase-key) (config/enabled? ctx)
              (anomaly/anomaly? failure) (:opsv/phase-failure retained))
-      (result/phase-result
-       (attach-evidence failure
-         (finalization/call-with-exception-handling retained
-           #(flow/continue (confirm-dispositions! ctx retained) (partial publish-terminal! ctx)))))
+      (if (= :finalized (:opsv.assembly/status (assembly/assembly ctx)))
+        (result/phase-result failure)
+        (result/phase-result
+         (attach-evidence failure
+           (finalization/call-with-exception-handling retained
+             #(flow/continue (confirm-dispositions! ctx retained) (partial publish-terminal! ctx))))))
       phase-result)))
