@@ -12,6 +12,22 @@
 
 ;------------------------------------------------------------------------------ Layer 0
 
+(defn ^{:stratum 0} configured [ctx]
+  (assoc-in ctx [:execution/opts :opsv/evidence-base]
+            {:evidence-bundle/workflow-id (:execution/id ctx)
+             :evidence-bundle/created-at #inst "2026-09-28T10:00:00Z"
+             :evidence-bundle/version "1.0.0"
+             :evidence/intent {:intent/type :update
+                               :intent/description "Evaluate catalog scaling."
+                               :intent/business-reason "Meet the declared latency objective."
+                               :intent/constraints []
+                               :intent/declared-at #inst "2026-09-28T10:00:00Z"}}))
+
+(defn ^{:stratum 0} run-last-phase [ctx]
+  (let [[phase-key transform] (last support/handlers)
+        interceptor (lifecycle/interceptor {} phase-key transform)]
+    ((:leave interceptor) ((:enter interceptor) ctx))))
+
 (defn ^{:stratum 0} with-context [f]
   (let [root (.getCanonicalFile (.toFile (Files/createTempDirectory "opsv-artifacts-"
                                                                  (make-array FileAttribute 0))))

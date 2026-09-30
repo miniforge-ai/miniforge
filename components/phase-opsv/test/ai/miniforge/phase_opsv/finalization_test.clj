@@ -6,7 +6,7 @@
             [ai.miniforge.artifact.interface :as artifact]
             [ai.miniforge.content-hash.interface :as hash]
             [ai.miniforge.evidence-bundle.interface :as evidence]
-            [ai.miniforge.phase-opsv.artifact-test-support :as f]
+            [ai.miniforge.phase-opsv.artifact-test-support :as f :refer [configured run-last-phase]]
             [ai.miniforge.phase-opsv.evidence-runtime :as runtime]
             [ai.miniforge.phase-opsv.finalization-boundary :as finalization]
             [ai.miniforge.phase-opsv.interface :as opsv]
@@ -17,24 +17,7 @@
 
 ;------------------------------------------------------------------------------ Layer 0
 
-(defn- ^{:stratum 0} configured [ctx]
-  (assoc-in ctx [:execution/opts :opsv/evidence-base]
-            {:evidence-bundle/workflow-id (:execution/id ctx)
-             :evidence-bundle/created-at #inst "2026-09-28T10:00:00Z"
-             :evidence-bundle/version "1.0.0"
-             :evidence/intent {:intent/type :update
-                               :intent/description "Evaluate catalog scaling."
-                               :intent/business-reason "Meet the declared latency objective."
-                               :intent/constraints []
-                               :intent/declared-at #inst "2026-09-28T10:00:00Z"}}))
-
-(defn- ^{:stratum 0} run-last-phase [ctx]
-  (let [interceptor (lifecycle/interceptor {} :opsv/actuate opsv/actuate)]
-    ((:leave interceptor) ((:enter interceptor) ctx))))
-
-;------------------------------------------------------------------------------ Layer 1
-
-(deftest ^{:stratum 1} lifecycle-finalizes-real-n6-and-publishes-preallocated-id-test
+(deftest ^{:stratum 0} lifecycle-finalizes-real-n6-and-publishes-preallocated-id-test
   (f/with-context
     (fn [ctx directory]
       (let [completed (reduce f/step (configured ctx) support/handlers)
@@ -49,7 +32,7 @@
         (is (= (:opsv/event-refs assembly) (set (get-in bundle [:evidence/opsv :opsv/event-refs]))))
         (is (= 7 (count (get-in bundle [:evidence/opsv :opsv/artifact-refs]))))))))
 
-(deftest ^{:stratum 1} invalid-host-evidence-refuses-before-transform-test
+(deftest ^{:stratum 0} invalid-host-evidence-refuses-before-transform-test
   (f/with-context
     (fn [ctx _]
       (doseq [base [nil :invalid {} (assoc (get-in (configured ctx) [:execution/opts :opsv/evidence-base])
@@ -60,7 +43,7 @@
           (is (= :error (get-in result [:phase :result :status])))
           (is (zero? @calls)))))))
 
-(deftest ^{:stratum 1} publication-failure-retains-bundle-and-recovers-without-actuation-test
+(deftest ^{:stratum 0} publication-failure-retains-bundle-and-recovers-without-actuation-test
   (f/with-context
     (fn [ctx directory]
       (let [ready (reduce f/step (configured ctx) (butlast support/handlers))
@@ -84,7 +67,7 @@
         (is (= (:opsv/evidence-bundle recovered)
                (:artifact/content (artifact/read-published directory (:opsv/evidence-artifact-id recovered)))))))))
 
-(deftest ^{:stratum 1} missing-or-mismatched-material-refuses-finalization-test
+(deftest ^{:stratum 0} missing-or-mismatched-material-refuses-finalization-test
   (f/with-context
     (fn [ctx _]
       (let [completed (reduce f/step ctx support/handlers)
@@ -101,7 +84,7 @@
                            (evidence/get-opsv-assembly (:opsv/evidence-assembly-store completed)
                              (get-in completed [:execution/input :opsv/evidence-bundle-id])))))))))
 
-(deftest ^{:stratum 1} finalized-run-refuses-phase-replay-and-tampered-recovery-test
+(deftest ^{:stratum 0} finalized-run-refuses-phase-replay-and-tampered-recovery-test
   (f/with-context
     (fn [ctx _]
       (let [completed (reduce f/step (configured ctx) support/handlers)
@@ -117,7 +100,7 @@
         (is (zero? @calls))
         (is (anomaly/anomaly? recovered))))))
 
-(deftest ^{:stratum 1} exception-after-finalization-checkpoints-recovery-state-test
+(deftest ^{:stratum 0} exception-after-finalization-checkpoints-recovery-state-test
   (f/with-context
     (fn [ctx _]
       (let [ready (reduce f/step (configured ctx) (butlast support/handlers))
