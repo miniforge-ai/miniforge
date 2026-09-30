@@ -10,7 +10,8 @@
             [clojure.java.io :as io]
             [clojure.string :as str]
             [clojure.test :refer [deftest is]])
-  (:import [java.nio.file Files]
+  (:import [java.nio.charset StandardCharsets]
+           [java.nio.file Files]
            [java.nio.file.attribute FileAttribute]
            [java.time Instant]))
 
@@ -48,6 +49,16 @@
                          {:effect/at (Instant/parse "2026-09-28T00:00:00.123456789Z")})]
         (is (= value (artifact/publish! directory value)))
         (is (= value (artifact/read-published directory (:artifact/id value))))))))
+
+(deftest ^{:stratum 1} malformed-existing-record-is-a-fault-not-a-conflict-test
+  (with-directory
+    (fn [directory]
+      (let [value (record) id (:artifact/id value)]
+        (doseq [invalid [{} (assoc value :artifact/id (random-uuid))]]
+          (with-open [output (io/output-stream (files/target directory id))]
+            (.write output (record-codec/encode invalid)))
+          (is (= :fault (:anomaly/type (artifact/read-published directory id))))
+          (is (= :fault (:anomaly/type (artifact/publish! directory value)))))))))
 
 (deftest ^{:stratum 1} invalid-input-and-unsafe-paths-refuse-publication-test
   (with-directory
@@ -158,5 +169,17 @@
             target (files/target directory id)]
         (is (= value (artifact/publish! directory value)))
         (spit target (str/replace (slurp target) "verified" "modified"))
+        (is (= :fault (:anomaly/type (artifact/read-published directory id))))
+        (is (= :fault (:anomaly/type (artifact/publish! directory value))))))))
+
+(deftest ^{:stratum 1} collection-type-corruption-fails-wire-integrity-test
+  (with-directory
+    (fn [directory]
+      (let [value (assoc (record) :artifact/content (list 1 2))
+            id (:artifact/id value) target (files/target directory id)]
+        (is (= value (artifact/publish! directory value)))
+        (let [envelope (codec/decode (files/read-bytes target))
+              changed (String. ^bytes (codec/encode (assoc value :artifact/content [1 2])) StandardCharsets/UTF_8)]
+          (files/write! target (codec/encode (assoc envelope :publication/wire changed))))
         (is (= :fault (:anomaly/type (artifact/read-published directory id))))
         (is (= :fault (:anomaly/type (artifact/publish! directory value))))))))
