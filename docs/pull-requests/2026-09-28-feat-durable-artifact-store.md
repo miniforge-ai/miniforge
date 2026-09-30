@@ -40,8 +40,8 @@ component supplies the integrity digest.
 
 ## Testing plan
 
-All three artifact-consuming projects pass 32 tests and 112 assertions each.
-The hardened publication suite passes 18 tests and 75 assertions on the JVM
+All three artifact-consuming projects pass 33 tests and 117 assertions each.
+The hardened publication suite passes 19 tests and 80 assertions on the JVM
 and packaged Babashka CLI. Tests cover disk rereads, conflicting and concurrent
 publication, pre-link failure, uncertain force, identical retry, invalid paths,
 symlinks, unsupported content, output limits and interrupted/error boundaries.
