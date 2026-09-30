@@ -29,8 +29,10 @@ artifact schemas. The Instant tag preserves nanoseconds on JVM and Babashka.
 Snapshot tests cover date/Instant round trips, collection kinds, modified payloads,
 invalid schemas, byte limits, fatal errors and preserved thread interruption.
 Publication tests additionally cover Instant persistence and uncached disk reads.
-All three artifact consumers passed before integrating the latest bounded-codec
-review fixes; final integrated JVM, packaged CLI and standards checks are required.
+After integrating the bounded-codec fixes, all three artifact consumers pass
+37 tests and 135 assertions. The rebuilt packaged CLI passes 23 publication and
+snapshot tests with 98 assertions. The scoped standards scanner reports no
+violations; lint, Polylith and signed-commit hooks pass. PR budget: 116/600.
 
 ## Standards adversarial pass
 
