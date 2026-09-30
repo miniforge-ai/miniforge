@@ -20,6 +20,7 @@
   (:require
    [ai.miniforge.anomaly.interface :as anomaly]
    [ai.miniforge.phase.interface :as phase]
+   [ai.miniforge.phase-opsv.evidence-checkpoint :as checkpoint]
    [ai.miniforge.phase-opsv.evidence-runtime :as evidence-runtime]
    [ai.miniforge.phase-opsv.lifecycle-outcome :as outcome]))
 
@@ -38,11 +39,13 @@
 
 (defn- ^{:stratum 0} persist-evidence [ctx]
   (let [persisted (evidence-runtime/persist ctx)
-        snapshot (get-in persisted [:execution/input :opsv/evidence-snapshot])]
+        snapshot (checkpoint/persistence-failure persisted)
+        output (get-in ctx [:phase :result :output])
+        retained (get-in output [:anomaly/data :opsv/phase-output] output)]
     (if (anomaly/anomaly? snapshot)
       (assoc-in persisted [:phase :result]
                 (outcome/phase-result (assoc-in snapshot [:anomaly/data :opsv/phase-output]
-                                   (get-in ctx [:phase :result :output]))))
+                                   retained)))
       persisted)))
 
 ;------------------------------------------------------------------------------ Layer 1

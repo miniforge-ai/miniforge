@@ -22,6 +22,11 @@
 (defn- ^{:stratum 0} terminal-output [ctx]
   (get-in ctx [:phase :result :output :anomaly/data :opsv/phase-output]))
 
+(defn- ^{:stratum 0} refuse-snapshot [encode kind record]
+  (if (= kind (get-in record [:artifact/metadata :opsv/material-kind]))
+    (anomaly/anomaly :unavailable "snapshot unavailable" {})
+    (encode record)))
+
 (defn- ^{:stratum 0} unsuccessful-command [calls options arguments]
   (let [response (pr/command calls options arguments)]
     (if (= "POST" (get arguments 6)) {:exit 1 :out ""} response)))
@@ -69,6 +74,18 @@
     (is (= (:opsv/actuation-record output) (:opsv/actuation-record retained)))))
 
 ;------------------------------------------------------------------------------ Layer 1
+
+(defn- ^{:stratum 1} assert-recovery-snapshot-failure [ready _directory calls]
+  (let [completed (terminal/run-with-publication-failure ready :evidence-bundle)]
+    (doseq [kind [:checkpoint :terminal-checkpoint]]
+      (let [encode (partial refuse-snapshot artifact/encode-snapshot kind)
+            recovered (with-redefs [artifact/encode-snapshot encode]
+                        (opsv/recover-actuation-evidence! completed))]
+        (is (anomaly/anomaly? recovered))
+        (is (= :unavailable (:anomaly/type recovered)))
+        (is (= (:opsv/effect-transactions (terminal-output completed))
+               (get-in recovered [:anomaly/data :opsv/phase-output :opsv/effect-transactions])))
+        (is (= 2 (count @calls)))))))
 
 (defn- ^{:stratum 1} assert-late-publication-recovery [kind ready directory calls]
   (let [completed (terminal/run-with-publication-failure ready kind)
@@ -164,6 +181,9 @@
 (deftest ^{:stratum 2} post-actuation-publication-failures-recover-without-provider-replay-test
   (doseq [kind [:actuation :effect-transactions :evidence-bundle :event]]
     (with-ready (partial assert-late-publication-recovery kind))))
+
+(deftest ^{:stratum 2} recovery-surfaces-unusable-snapshot-test
+  (with-ready assert-recovery-snapshot-failure))
 
 (deftest ^{:stratum 2} unknown-provider-outcome-finalizes-failure-with-real-transaction-test
   (with-ready assert-unknown-outcome))

@@ -31,6 +31,13 @@
        (assoc-in failure [:anomaly/data :opsv/evidence-failure] published)
        (update-in failure [:anomaly/data :opsv/phase-output] merge published)))))
 
+(defn- ^{:stratum 0} persist-result [ctx phase-result]
+  (let [persisted (runtime/persist (assoc-in ctx [:phase :result] phase-result))]
+    (if-let [failure (checkpoint/persistence-failure persisted)]
+      (assoc-in failure [:anomaly/data :opsv/phase-output]
+                (get-in phase-result [:output :anomaly/data :opsv/phase-output]))
+      persisted)))
+
 ;------------------------------------------------------------------------------ Layer 1
 
 (defn- ^{:stratum 1} recover! [ctx]
@@ -41,7 +48,7 @@
       (let [phase-result (if (= :finalized (:opsv.assembly/status (finalization/assembly restored)))
                            (publish-finalized-result! restored failure)
                            (terminal/complete-failure! restored :opsv/actuate (result/phase-result failure)))]
-        (runtime/persist (assoc-in restored [:phase :result] phase-result))))))
+        (persist-result restored phase-result)))))
 
 ;------------------------------------------------------------------------------ Layer 2
 

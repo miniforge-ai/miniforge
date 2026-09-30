@@ -8,6 +8,10 @@
 
 ;------------------------------------------------------------------------------ Layer 0
 
+(defn ^{:stratum 0} persistence-failure [ctx]
+  (some #(when (anomaly/anomaly? %) %)
+        (map (get ctx :execution/input {}) [:opsv/evidence-snapshot :opsv/terminal-snapshot])))
+
 (defn- ^{:stratum 0} persist-terminal [ctx]
   (if (and (= :opsv/actuate (get-in ctx [:phase :name]))
            (= :error (get-in ctx [:phase :result :status])))
