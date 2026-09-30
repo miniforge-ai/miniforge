@@ -43,7 +43,7 @@ does not prevent local fences and abort requests. Core starts without OPSV.
 All three reliability consumers pass 36 tests / 101 assertions, including budget
 and concurrent-entry regressions. The packaged host and boundary suites pass
 eight tests / 31 assertions. Polylith and kondo pass. Scoped reliability and CLI
-runner standards report no findings across 17 and 39 files respectively.
+runner standards report no findings across 22 and 40 files respectively.
 
 ## Standards adversarial pass
 
@@ -65,4 +65,5 @@ Fresh authority and a new run domain require a later explicit host workflow.
 - [x] JVM and packaged host integration checks
 - [x] Both product builds and Core-without-OPSV check
 - [x] Final all-consumer regression run
-- [ ] Signed commits, settled review and all CI green
+- [x] Signed commits and repository hooks
+- [ ] Settled review and all CI green
