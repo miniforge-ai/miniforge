@@ -26,12 +26,12 @@
 (defn- ^{:stratum 1} content-digest [value]
   (if (codec/encode value)
     (hash/content-hash (identity-value value))
-    (boundary/failure :invalid-input :publication/invalid nil)))
+    (boundary/failure :invalid-input :digest/invalid nil)))
 
 ;------------------------------------------------------------------------------ Layer 2
 
 (defn ^{:stratum 2} digest-with-exception-handling [value]
-  (boundary/call-with-exception-handling nil :invalid-input :publication/invalid
+  (boundary/call-with-exception-handling nil :invalid-input :digest/invalid
                                         (partial content-digest value)))
 
 (comment

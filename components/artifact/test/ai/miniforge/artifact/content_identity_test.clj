@@ -4,6 +4,7 @@
 (ns ai.miniforge.artifact.content-identity-test
   (:require [ai.miniforge.anomaly.interface :as anomaly]
             [ai.miniforge.artifact.interface :as artifact]
+            [ai.miniforge.artifact.messages :as msg]
             [clojure.test :refer [deftest is]]))
 
 ;------------------------------------------------------------------------------ Layer 0
@@ -25,6 +26,7 @@
   (let [realized (atom 0)
         deferred (lazy-seq (swap! realized inc) (repeat 1))]
     (is (anomaly/anomaly? (artifact/content-digest {:steps deferred})))
+    (is (= (msg/t :digest/invalid) (:anomaly/message (artifact/content-digest {:steps deferred}))))
     (is (zero? @realized)))
   (is (anomaly/anomaly? (artifact/content-digest (Object.))))
   (is (anomaly/anomaly? (artifact/content-digest (nth (iterate vector nil) 130)))))
