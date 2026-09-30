@@ -30,6 +30,8 @@ The trusted callback receives an operation thunk and must call it at most once.
 - Contain callback exceptions at a named boundary. Enforce one synchronous
   attempt on the calling thread, close escaped thunks after dispatch, and retain
   confirmed provider results. Other threads cannot invoke the provider operation.
+- Accept only refusal outcomes or anomalies when the callback never invokes the
+  operation. A callback cannot manufacture provider success or uncertainty.
 
 Callback arity cannot be probed safely without running trusted code, and JVM
 reflection is not portable to Babashka. Function shape is checked before the
@@ -37,8 +39,8 @@ read-only preflight; a wrong arity becomes `:invalid-input` at dispatch, before 
 
 ## Testing plan
 
-All provider suites pass 19 tests and 116 assertions. The creation suite passes
-seven tests and 27 assertions on JVM and Babashka using the built CLI plus provider
+All provider suites pass 20 tests and 124 assertions. The creation suite passes
+eight tests and 35 assertions on JVM and Babashka using the built CLI plus provider
 source paths. This prerequisite has no product consumer yet. Regressions cover GET/POST
 ordering, refusal, successful dispatch, wrong arity, repeated invocation, escaped
 thunks and preservation of a provider result when the callback throws afterward.
