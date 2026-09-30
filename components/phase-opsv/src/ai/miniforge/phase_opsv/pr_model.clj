@@ -22,7 +22,7 @@
 (defn- ^{:stratum 0} nonblank? [value]
   (and (string? value) (not (str/blank? value))))
 
-(defn- ^{:stratum 0} governed-effect [transaction]
+(defn ^{:stratum 0} governed-effect [transaction]
   {:evidence/effect-id (:effect/id transaction)
    :evidence/grant-id (:effect/grant-id transaction)
    :evidence/envelope-id (:effect/envelope-id transaction)})

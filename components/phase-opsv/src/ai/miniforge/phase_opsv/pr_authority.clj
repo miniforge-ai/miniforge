@@ -5,12 +5,11 @@
   "Issue scoped runtime authority and recheck it through the durable coordinator."
   (:require [ai.miniforge.anomaly.interface :as anomaly]
             [ai.miniforge.execution-grant.interface :as grant]
-            [ai.miniforge.opsv-actuation.interface :as actuation]
             [ai.miniforge.opsv.interface :as opsv]
             [ai.miniforge.phase-opsv.actuation-decision :as decision]
             [ai.miniforge.phase-opsv.flow :as flow]
             [ai.miniforge.phase-opsv.messages :as msg]
-            [ai.miniforge.phase-opsv.pr-dispatch :as dispatch]
+            [ai.miniforge.phase-opsv.pr-transaction :as transaction]
             [ai.miniforge.phase-opsv.pr-stop :as stop]))
 
 ;------------------------------------------------------------------------------ Layer 0
@@ -23,16 +22,16 @@
            :effect/preflight {:preflight/type :preflight/pr-create-readiness
                               :preflight/result :allow})))
 
-(defn- ^{:stratum 0} commit! [runtime candidate decision issued now]
-  (let [proposed (actuation/propose-pr! (:effects-directory runtime) candidate
-                                       (:grant/id issued) decision now)]
-    (flow/continue
-     (stop/abandon! runtime issued now proposed)
-     (fn [_]
-       (stop/commit-result! runtime issued (:effect/id candidate) now
-        (actuation/commit-pr! (:effects-directory runtime) (:authority-directory runtime)
-                             (:effect/id candidate) (:grant/id issued) (:clock runtime)
-                             (partial dispatch/create! runtime issued)))))))
+(defn- ^{:stratum 0} authorized-commit! [runtime ctx candidate verified prepared now issued]
+  (let [checked (grant/authorize issued {:effect/scope prepared :usage/count 1} now)
+        mode (opsv/effective-actuation
+              (assoc (decision/input ctx verified) :pr-capability-valid? (grant/authorized? checked)))]
+    (cond
+      (stop/stopped? runtime) (stop/revoke! runtime issued now)
+      (anomaly/anomaly? mode) (stop/abandon! runtime issued now mode)
+      (= :pr-only mode) (transaction/execute! runtime ctx candidate (:opsv/decision-envelope verified) issued now)
+      :else (stop/abandon! runtime issued now
+                           (anomaly/anomaly :unauthorized (msg/ts :pr/authority-refused) {})))))
 
 ;------------------------------------------------------------------------------ Layer 1
 
@@ -40,17 +39,6 @@
   (let [directory (:authority-directory runtime)
         issued (grant/issue-for-effect directory (request ctx prepared) now)]
     (flow/continue issued #(stop/abandon! runtime % now (grant/register! directory %)))))
-
-(defn- ^{:stratum 1} authorized-commit! [runtime ctx candidate verified prepared now issued]
-  (let [checked (grant/authorize issued {:effect/scope prepared :usage/count 1} now)
-        mode (opsv/effective-actuation
-              (assoc (decision/input ctx verified) :pr-capability-valid? (grant/authorized? checked)))]
-    (cond
-      (stop/stopped? runtime) (stop/revoke! runtime issued now)
-      (anomaly/anomaly? mode) (stop/abandon! runtime issued now mode)
-      (= :pr-only mode) (commit! runtime candidate (:opsv/decision-envelope verified) issued now)
-      :else (stop/abandon! runtime issued now
-                           (anomaly/anomaly :unauthorized (msg/ts :pr/authority-refused) {})))))
 
 ;------------------------------------------------------------------------------ Layer 2
 
