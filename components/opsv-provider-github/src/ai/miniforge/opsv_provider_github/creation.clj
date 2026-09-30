@@ -3,7 +3,8 @@
 ;; Licensed under the Apache License, Version 2.0.
 (ns ai.miniforge.opsv-provider-github.creation
   "Create once; only exact provider confirmation proves success."
-  (:require [ai.miniforge.opsv-provider-github.messages :as msg]
+  (:require [ai.miniforge.opsv-provider-github.dispatch-boundary :as dispatch-boundary]
+            [ai.miniforge.opsv-provider-github.messages :as msg]
             [ai.miniforge.opsv-provider-github.transport :as transport]
             [ai.miniforge.opsv-provider-github.wire :as wire]))
 
@@ -34,12 +35,13 @@
 
 ;------------------------------------------------------------------------------ Layer 2
 
-(defn ^{:stratum 2} create! [runtime payload]
+(defn ^{:stratum 2} create! [runtime payload dispatch]
   (let [ref (transport/request! runtime "GET" (wire/head-path payload) nil false)]
     (cond
       (not (readable-head? ref))
       {:effect/outcome :failed :effect/failure (msg/t :create/preflight-unavailable)}
-      (current-head? payload ref) (create-once! runtime payload)
+      (current-head? payload ref)
+      (dispatch-boundary/call-with-exception-handling dispatch #(create-once! runtime payload))
       :else {:effect/outcome :failed :effect/failure (msg/t :create/preflight-failed)})))
 
 (comment

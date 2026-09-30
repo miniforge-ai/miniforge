@@ -26,11 +26,16 @@
 (defn ^{:stratum 0} create-pr!
   "Provider callback: confirm the head, POST once, then match the response.
    Runtime owns directory, hostname and run-command. The remote branch must be
-   exclusively controlled; GitHub does not compare-and-create by expected SHA."
-  [runtime claimed payload]
-  (if (m/validate schema/CreateArguments [runtime claimed payload])
-    (creation/create! runtime payload)
-    (anomaly/anomaly :invalid-input (msg/t :input/invalid) {})))
+   exclusively controlled; GitHub does not compare-and-create by expected SHA.
+   The optional trusted dispatch function receives the POST thunk after preflight;
+   it must be unary and synchronous, invoking the thunk or returning a refusal.
+   The thunk admits at most one attempt and closes when dispatch returns. A malformed
+   callback returns an anomaly at dispatch; it never causes a second provider attempt."
+  ([runtime claimed payload] (create-pr! runtime claimed payload #(%)))
+  ([runtime claimed payload dispatch]
+   (if (and (fn? dispatch) (m/validate schema/CreateArguments [runtime claimed payload]))
+     (creation/create! runtime payload dispatch)
+     (anomaly/anomaly :invalid-input (msg/t :input/invalid) {}))))
 
 (defn ^{:stratum 0} observe-pr!
   "Read-only callback for an uncertain transaction; never retries a mutation.
