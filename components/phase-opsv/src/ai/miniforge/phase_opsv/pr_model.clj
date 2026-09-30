@@ -4,9 +4,11 @@
 (ns ai.miniforge.phase-opsv.pr-model
   "Correlate one prepared target per run and project confirmed PR outcomes."
   (:require [ai.miniforge.anomaly.interface :as anomaly]
+            [ai.miniforge.opsv.interface :as opsv]
             [ai.miniforge.phase-opsv.messages :as msg]
             [ai.miniforge.phase-opsv.runtime-context :as context]
-            [clojure.string :as str])
+            [clojure.string :as str]
+            [malli.core :as m])
   (:import [java.nio.charset StandardCharsets]
            [java.util Locale UUID]))
 
@@ -51,7 +53,7 @@
                 (= (:opsv/policy-hash verified) (:opsv/policy-hash target))))
       (anomaly/anomaly :conflict (msg/ts :pr/policy-mismatch) {})
 
-      (not (and (uuid? workflow-id) (nonblank? (:pr/repo target))))
+      (not (and (uuid? workflow-id) (m/validate opsv/Repository (:pr/repo target))))
       (anomaly/anomaly :invalid-input (msg/ts :pr/invalid-correlation) {})
 
       :else (prepared-candidate ctx workflow-id verified target))))
