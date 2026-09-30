@@ -103,6 +103,16 @@
         (is (true? (get-in (verify-with configured (partial measured calls observed))
                           [:opsv/verification-result :passed?])))))))
 
+(deftest ^{:stratum 1} malformed-explicit-criteria-fail-closed-test
+  (let [ctx (synthesized-context)
+        calls (atom [])
+        callback (partial measured calls support/verification-measurements)]
+    (doseq [declared [:invalid nil "invalid" {} #{} '() [:invalid] [nil] [{}]]]
+      (let [configured (assoc-in ctx [:execution/phase-results :opsv/synthesize :result :output
+                                     :opsv/experiment-pack :experiment-pack/success-criteria]
+                                 {:criteria declared})]
+        (is (= :invalid-input (:anomaly/type (verify-with configured callback))))))))
+
 (deftest ^{:stratum 1} receipt-constructor-refuses-stale-correlation-test
   (let [ctx (synthesized-context)
         calls (atom [])
