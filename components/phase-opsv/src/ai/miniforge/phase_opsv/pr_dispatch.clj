@@ -15,10 +15,12 @@
 (defn- ^{:stratum 0} authorized-with-exception-handling [runtime issued record]
   (try
     (let [current (grant/current (:authority-directory runtime) (:grant/id issued))]
-      (and (not (anomaly/anomaly? current)) current
-           (grant/authorized?
-            (grant/authorize current {:effect/scope (:effect/proposal record) :usage/count 1}
-                             ((:clock runtime))))))
+      (if (anomaly/anomaly? current)
+        current
+        (and current
+             (grant/authorized?
+              (grant/authorize current {:effect/scope (:effect/proposal record) :usage/count 1}
+                               ((:clock runtime)))))))
     (catch InterruptedException _ (.interrupt (Thread/currentThread)) false)
     (catch Exception _ false)
     (catch Error _ (anomaly/anomaly :fatal (msg/ts :pr/authority-refused) {}))))
