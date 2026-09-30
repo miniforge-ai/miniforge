@@ -42,6 +42,7 @@
 (defn- ^{:stratum 1} valid-base? [ctx]
   (let [base (base-bundle ctx)]
     (and (map? (get-in ctx [:execution/opts :opsv/evidence-base]))
+               (instance? clojure.lang.IAtom (context/stream ctx))
                (string? (get-in ctx [:execution/opts :opsv/artifact-directory]))
                (uuid? (:evidence-bundle/id base))
                (uuid? (context/workflow-id ctx))
