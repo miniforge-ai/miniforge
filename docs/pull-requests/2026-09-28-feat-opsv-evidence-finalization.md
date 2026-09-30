@@ -41,15 +41,16 @@ using its existing validator. No storage manager is constructed for validation.
 
 ## Validation
 
-Both consuming projects pass 60 phase tests and 430 assertions each.
-The packaged artifact/finalization suites pass 11 tests and 90 assertions,
-including an integration run with the pending checksummed artifact implementation.
+Both consuming projects pass 62 phase tests and 438 assertions each.
+The packaged checkpoint/artifact/finalization suites pass 13 tests and 98 assertions.
+Real shared-workflow completion and failed-publication recovery both pass from
+disk (2 tests, 18 assertions); these are registered in integration tests and CI.
 Regressions cover invalid host intent, mismatched workflow, unavailable material,
 changed material, uncertain publication, immutable retries, tampered recovery,
 interruption and refusal to re-execute a finalized run.
 
-Polylith, kondo and strata pass. The phase component standards scan has no findings
-across 52 files. The evidence scan found two missing documentation headers; this
+Polylith, kondo, strata and the scoped standards scan pass.
+The evidence scan found two missing documentation headers; this
 change fixes them and the prose-lint findings in those files.
 
 ## Standards adversarial pass
@@ -67,6 +68,13 @@ declared evidence base. Failed or uncertain actuation still retains its actual
 transaction and accumulated audit assembly; terminal failure bundle construction
 and host command/recovery wiring remain separate implementation work.
 No real provider or load adapter is enabled by this change.
+
+The shared checkpoint intentionally normalizes timestamps. An authoritative,
+bounded artifact snapshot preserves exact domain evidence alongside the legacy
+display assembly. A corrupt snapshot cannot fall back to that display map.
+Failure to encode a snapshot fails the phase while retaining its actual output.
+The checksum detects corruption, not an untrusted writer; the host owns checkpoint
+storage and supplies fresh runtime ports on recovery.
 
 ## Checklist
 
