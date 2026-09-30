@@ -30,12 +30,17 @@
 
 ;------------------------------------------------------------------------------ Layer 2
 
-(defn ^{:stratum 2} publish! [ctx value output]
-  (let [directory (get-in ctx [:execution/opts :opsv/artifact-directory])
-        published (artifact/publish! directory value)]
-    (if (anomaly/anomaly? published)
-      (assoc-in published [:anomaly/data :opsv/phase-output] output)
-      (attach-acknowledged! ctx output published))))
+(defn ^{:stratum 2} publish-with-exception-handling [ctx value output]
+  (try
+    (let [directory (get-in ctx [:execution/opts :opsv/artifact-directory])
+          published (artifact/publish! directory value)]
+      (if (anomaly/anomaly? published)
+        (assoc-in published [:anomaly/data :opsv/phase-output] output)
+        (attach-acknowledged! ctx output published)))
+    (catch InterruptedException _
+      (let [result (failure output)] (.interrupt (Thread/currentThread)) result))
+    (catch Error _ (assoc (failure output) :anomaly/type :fatal))
+    (catch Throwable _ (failure output))))
 
 (comment
   (failure {}))
