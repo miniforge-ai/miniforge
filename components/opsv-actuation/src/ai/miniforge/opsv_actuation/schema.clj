@@ -31,12 +31,13 @@
   [:map {:closed true}
    [:workflow-run/id :uuid]
    [:effect/id :uuid]
-   [:pr/repo NonBlankString]
+   [:pr/repo opsv/Repository]
    [:pr/base NonBlankString]
    [:pr/branch NonBlankString]
    [:pr/head-sha GitObjectId]
    [:pr/title NonBlankString]
    [:opsv/policy-diff NonBlankString]
+   [:opsv/policy-hash {:optional true} opsv/PolicyHash]
    [:opsv/evidence-bundle-id :uuid]
    [:opsv/rollback-instructions NonBlankString]
    [:opsv/verification-result [:and opsv/VerificationResult EvidenceValue]]])
