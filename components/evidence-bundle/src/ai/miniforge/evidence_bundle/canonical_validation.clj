@@ -20,6 +20,13 @@
                    (hash/content-hash (dissoc bundle :evidence/content-hash :evidence/signature))))
     [{:code :content-hash-mismatch}]))
 
+(defn- ^{:stratum 0} sealing-errors [bundle]
+  (when (some #(contains? bundle %) [:evidence/content-hash :evidence/signature :evidence/sealed-at])
+    (when-not (and (string? (:evidence/content-hash bundle))
+                   (inst? (:evidence/sealed-at bundle))
+                   (inst? (:compliance/created-at bundle)))
+      [{:code :incomplete-seal}])))
+
 ;------------------------------------------------------------------------------ Layer 1
 
 (defn- ^{:stratum 1} validate-portable [bundle]
@@ -27,7 +34,7 @@
     (cond
       (anomaly/anomaly? portable) (result [{:code :nonportable-evidence :anomaly portable}])
       (not (map? bundle)) (result [{:code :invalid-bundle}])
-      :else (result (into (structure/errors bundle) (hash-errors bundle))))))
+      :else (result (concat (structure/errors bundle) (sealing-errors bundle) (hash-errors bundle))))))
 
 ;------------------------------------------------------------------------------ Layer 2
 

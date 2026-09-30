@@ -48,15 +48,52 @@
       (is (false? (:valid? (evidence/validate-canonical-bundle (assoc-in bundle path value))))))))
 
 (deftest ^{:stratum 1} declared-hash-is-verified-without-claiming-authority-test
-  (let [bundle (base-bundle)
+  (let [bundle (assoc (base-bundle)
+                       :compliance/created-at #inst "2026-09-30T00:00:00Z"
+                       :evidence/sealed-at #inst "2026-09-30T00:00:00Z")
         sealed (assoc bundle :evidence/content-hash (evidence/content-hash bundle))]
     (is (:valid? (evidence/validate-canonical-bundle sealed)))
     (is (:valid? (evidence/validate-canonical-bundle
                   (assoc sealed :evidence/signature "not-an-authenticity-check"))))
     (doseq [altered [(assoc-in sealed [:evidence/outcome :outcome/success] false)
                      (assoc sealed :evidence/content-hash nil)
-                     (assoc sealed :evidence/content-hash "wrong")]]
+                     (assoc sealed :evidence/content-hash "wrong")
+                     (dissoc sealed :evidence/sealed-at)
+                     (dissoc sealed :compliance/created-at)
+                     (dissoc sealed :evidence/content-hash)]]
       (is (false? (:valid? (evidence/validate-canonical-bundle altered)))))))
+
+(deftest ^{:stratum 1} present-structured-fields-cannot-hide-empty-records-test
+  (doseq [field [:evidence/semantic-validation :evidence/plan :evidence/design
+                :evidence/implement :evidence/verify :evidence/review
+                :evidence/release :evidence/observe]]
+    (is (false? (:valid? (evidence/validate-canonical-bundle (assoc (base-bundle) field {}))))))
+  (doseq [field [:evidence/tool-invocations :evidence/pack-promotions
+                :evidence/supervision-decisions :evidence/control-actions :evidence/rules-applied]]
+    (is (:valid? (evidence/validate-canonical-bundle (assoc (base-bundle) field []))))
+    (is (false? (:valid? (evidence/validate-canonical-bundle (assoc (base-bundle) field [{}])))))))
+
+(deftest ^{:stratum 1} structured-records-accept-complete-domain-values-test
+  (let [at #inst "2026-09-30T00:00:00Z"
+        bundle (base-bundle)
+        semantic {:semantic-validation/declared-intent :update
+                  :semantic-validation/actual-behavior :update
+                  :semantic-validation/resource-creates 0
+                  :semantic-validation/resource-updates 1
+                  :semantic-validation/resource-destroys 0
+                  :semantic-validation/passed? true
+                  :semantic-validation/violations []
+                  :semantic-validation/checked-at at}
+        tool {:tool/id :read :tool/invoked-at at :tool/duration-ms 0 :tool/args {}}
+        output {:status :success :environment-id "test" :summary "Done." :metrics {}}
+        phase {:phase/name :implement :phase/agent :test :phase/agent-instance-id (random-uuid)
+               :phase/started-at at :phase/completed-at at :phase/duration-ms 1
+               :phase/output output :phase/artifacts []}]
+    (is (:valid? (evidence/validate-canonical-bundle
+                  (assoc bundle :evidence/semantic-validation semantic
+                                :evidence/tool-invocations [tool] :evidence/implement phase))))
+    (is (false? (:valid? (evidence/validate-canonical-bundle
+                         (assoc bundle :evidence/implement (assoc phase :phase/output {}))))))))
 
 (deftest ^{:stratum 1} field-presence-is-distinct-from-nullability-test
   (let [check (policy-check)
