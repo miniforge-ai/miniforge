@@ -25,6 +25,10 @@
         before (stream/get-events (:event-stream ctx))]
     (is (= transaction (audit/record! ctx transaction)))
     (is (= before (stream/get-events (:event-stream ctx))))
+    (let [next-event (stream/create-envelope (:event-stream ctx) :workflow/completed
+                                             (:execution/id ctx) "next occurrence")]
+      (is (> (:event/sequence-number next-event)
+             (apply max (map :event/sequence-number before)))))
     (is (= 2 (count @calls)))))
 
 (deftest ^{:stratum 0} failed-accumulation-retries-only-acknowledgment-test
