@@ -97,12 +97,11 @@
                  history)))
 
 (defn- ^{:stratum 1} policy-events
-  [stream workflow-id evidence-id ctx output]
+  [stream workflow-id evidence-id _ctx output]
   [(event-stream/policy-proposed
     stream workflow-id evidence-id
     {:opsv/policy-hash (:opsv/policy-hash output)
-     :opsv/diff-artifact-refs
-     (get-in ctx [:execution/input :opsv/policy-diff-artifact-refs] [])
+     :opsv/diff-artifact-refs []
      :opsv/confidence (policy-confidence output)})])
 
 ;------------------------------------------------------------------------------ Layer 2
