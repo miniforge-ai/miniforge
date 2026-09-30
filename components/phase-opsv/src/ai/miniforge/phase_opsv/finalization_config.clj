@@ -23,6 +23,7 @@
                        [:evidence-bundle/workflow-id :evidence-bundle/created-at
                         :evidence-bundle/version :evidence/intent])
           :evidence-bundle/id (get-in ctx [:execution/input :opsv/evidence-bundle-id])
+          :evidence/policy-checks []
           :evidence/outcome
           (cond-> {:outcome/success (not (or (:opsv/phase-failure output) (:opsv/stopped? output)))}
             (:opsv/phase-failure output)
@@ -50,7 +51,7 @@
                (= (context/workflow-id ctx) (:evidence-bundle/workflow-id base))
                (inst? (:evidence-bundle/created-at base))
                (string? (:evidence-bundle/version base))
-         (:valid? (evidence/validate-bundle base))
+         (:valid? (evidence/validate-canonical-bundle base))
          (bundle-id-available? ctx))))
 
 ;------------------------------------------------------------------------------ Layer 2

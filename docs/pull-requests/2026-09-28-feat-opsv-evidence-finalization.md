@@ -20,14 +20,15 @@ after an external mutation must retain the actual outcome and a recovery path.
 ## Layer and dependencies
 
 The application component composes public evidence and artifact interfaces.
-The evidence interface gains a pure, one-argument structural validation operation
-using its existing validator. No storage manager is constructed for validation.
+Use the canonical evidence validator from PR #1957 for both the trusted base
+and the completed bundle. No storage manager is constructed for validation.
 
 ## Changes in detail
 
 - Validate host-supplied `:opsv/evidence-base` before invoking phase adapters.
   Require declared intent, workflow identity, creation time, version and a readable
   artifact directory. Ignore caller-supplied outcome and OPSV evidence sections.
+  Supply the required policy-check vector and validate the complete result.
 - Project real runtime results into N6. Confirm every artifact from disk and check
   that selected phase material matches the output being finalized.
 - Use the assembly's exact event, artifact and grant references. No metric-query
@@ -56,8 +57,7 @@ repeated recovery, missing runtime streams and snapshot encoding failure.
 Recovery confirms both baseline and fresh candidate measurement artifacts.
 
 Polylith, kondo, strata and the scoped standards scan pass.
-The evidence scan found two missing documentation headers; this
-change fixes them and the prose-lint findings in those files.
+The prerequisite validator PR fixes the evidence documentation scan findings.
 
 ## Standards adversarial pass
 
