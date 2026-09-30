@@ -33,7 +33,7 @@
 (defn ^{:stratum 2} publish-with-exception-handling [ctx value output]
   (try
     (let [directory (get-in ctx [:execution/opts :opsv/artifact-directory])
-          published (artifact/publish! directory value)]
+          published (if (anomaly/anomaly? value) value (artifact/publish! directory value))]
       (if (anomaly/anomaly? published)
         (assoc-in published [:anomaly/data :opsv/phase-output] output)
         (attach-acknowledged! ctx output published)))
