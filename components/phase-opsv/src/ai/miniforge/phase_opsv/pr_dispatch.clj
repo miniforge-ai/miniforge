@@ -7,25 +7,33 @@
             [ai.miniforge.execution-grant.interface :as grant]
             [ai.miniforge.opsv-actuation.interface :as actuation]
             [ai.miniforge.opsv-provider-github.interface :as provider]
+            [ai.miniforge.phase-opsv.messages :as msg]
             [ai.miniforge.phase-opsv.pr-stop :as stop]))
 
 ;------------------------------------------------------------------------------ Layer 0
 
-(defn- ^{:stratum 0} authorized? [runtime issued record]
-  (let [current (grant/current (:authority-directory runtime) (:grant/id issued))]
-    (and (not (anomaly/anomaly? current)) current
-         (grant/authorized?
-          (grant/authorize current {:effect/scope (:effect/proposal record) :usage/count 1}
-                           ((:clock runtime)))))))
+(defn- ^{:stratum 0} authorized-with-exception-handling [runtime issued record]
+  (try
+    (let [current (grant/current (:authority-directory runtime) (:grant/id issued))]
+      (and (not (anomaly/anomaly? current)) current
+           (grant/authorized?
+            (grant/authorize current {:effect/scope (:effect/proposal record) :usage/count 1}
+                             ((:clock runtime))))))
+    (catch InterruptedException _ (.interrupt (Thread/currentThread)) false)
+    (catch Exception _ false)
+    (catch Error _ (anomaly/anomaly :fatal (msg/ts :pr/authority-refused) {}))))
 
 ;------------------------------------------------------------------------------ Layer 1
 
 (defn ^{:stratum 1} dispatch! [runtime issued record operation]
   (let [result (actuation/at-mutation-boundary!
                 (:fence runtime)
-                #(if (authorized? runtime issued record)
-                   (operation)
-                   (stop/refusal :pr/authority-refused)))]
+                (fn []
+                  (let [allowed (authorized-with-exception-handling runtime issued record)]
+                    (if (and (true? allowed) (not (stop/stopped? runtime)))
+                      (operation)
+                      (cond-> (stop/refusal :pr/authority-refused)
+                        (anomaly/anomaly? allowed) (assoc :effect/observed {:pr/authority-failure allowed}))))))]
     (if (true? (get-in result [:anomaly/data :opsv/stopped?]))
       (stop/refusal :pr/stopped)
       result)))
