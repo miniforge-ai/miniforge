@@ -3,7 +3,7 @@
 ;; Licensed under the Apache License, Version 2.0.
 (ns ai.miniforge.artifact.publication-codec
   "Bounded Transit encoding for immutable artifact publication."
-  (:require [ai.miniforge.artifact.publication-boundary :as boundary]
+  (:require [ai.miniforge.artifact.boundary.codec :as boundary]
             [ai.miniforge.artifact.publication-shape :as shape]
             [cognitect.transit :as transit]
             [cheshire.core :as json]
