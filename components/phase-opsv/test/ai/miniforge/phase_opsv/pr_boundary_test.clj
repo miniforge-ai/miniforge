@@ -108,17 +108,22 @@
     (is (= ["GET"] (mapv #(get-in % [:arguments 6]) @calls))))))
 
 (deftest ^{:stratum 0} expiry-during-provider-preflight-prevents-post-test
-  (let [{:keys [ctx calls]} (fixture/setup)
+  (doseq [clock-value [(.plusSeconds fixture/now 901) (ex-info "clock failed" {}) nil]]
+  (let [{:keys [ctx runtime calls]} (fixture/setup)
         now (atom fixture/now)
         command (fn [options args]
-                  (reset! now (.plusSeconds fixture/now 901))
+                  (reset! now clock-value)
                   (fixture/command calls options args))
         configured (-> ctx
-                       (assoc-in [:execution/opts :opsv/pr-execution :clock] #(deref now))
+                       (assoc-in [:execution/opts :opsv/pr-execution :clock]
+                                 #(if (instance? Throwable @now) (throw @now) @now))
                        (assoc-in [:execution/opts :opsv/pr-execution :provider :run-command] command))
-        result (phase/actuate configured)]
+        result (phase/actuate configured)
+        transaction (get-in result [:anomaly/data :effect/transaction])
+        issued (grant/current (:authority-directory runtime) (:effect/grant-id transaction))]
     (is (= :failed (get-in result [:anomaly/data :effect/transaction :effect/state])))
-    (is (= ["GET"] (mapv #(get-in % [:arguments 6]) @calls)))))
+    (is (= :revocation/superseded (:grant/revocation-reason issued)))
+    (is (= ["GET"] (mapv #(get-in % [:arguments 6]) @calls))))))
 
 (deftest ^{:stratum 0} stop-during-post-revokes-without-rewriting-provider-outcome-test
   (doseq [uncertain? [false true] broken-clock? [false true]]

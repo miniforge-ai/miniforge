@@ -5,6 +5,7 @@
   (:require [ai.miniforge.anomaly.interface :as anomaly]
             [ai.miniforge.effect-transaction.interface :as effect]
             [ai.miniforge.execution-grant.interface :as grant]
+            [ai.miniforge.opsv-actuation.interface :as actuation]
             [ai.miniforge.opsv.interface :as opsv]
             [ai.miniforge.phase-opsv.interface :as phase]
             [ai.miniforge.phase-opsv.pr-fixtures :as fixture]
@@ -14,11 +15,16 @@
 
 (deftest ^{:stratum 0} runtime-issues-and-executes-a-correlated-pr-test
   (let [{:keys [ctx runtime calls]} (fixture/setup)
-        output (phase/actuate ctx)
+        boundary actuation/at-mutation-boundary!
+        admissions (atom 0)
+        output (with-redefs [actuation/at-mutation-boundary!
+                            (fn [f op] (swap! admissions inc) (boundary f op))]
+                 (phase/actuate ctx))
         record (:opsv/actuation-record output)
         transaction (first (:opsv/effect-transactions output))
         issued (when transaction (grant/current (:authority-directory runtime) (:effect/grant-id transaction)))]
     (is (not (anomaly/anomaly? output)) (pr-str output))
+    (is (= 2 @admissions) "One run admission and one combined authority/POST admission")
     (is (= record (opsv/validate-actuation record)))
     (is (= :pr-only (:effective-actuation-mode record)))
     (is (= :succeeded (:effect/state transaction)))
