@@ -6,19 +6,25 @@
   (:require [cognitect.transit :as transit]
             [cheshire.core :as json]
             [clojure.java.io :as io])
-  (:import [java.io ByteArrayInputStream ByteArrayOutputStream OutputStream]))
+  (:import [java.io ByteArrayInputStream ByteArrayOutputStream InputStreamReader OutputStream]
+           [java.nio.charset CodingErrorAction StandardCharsets]))
 
 ;------------------------------------------------------------------------------ Layer 0
 
 (def ^{:stratum 0} maximum-bytes (* 16 1024 1024))
 
-(defn ^{:stratum 0} decode [bytes]
-  (with-open [json-input (io/reader (ByteArrayInputStream. bytes) :encoding "UTF-8")
+(defn- ^{:stratum 0} utf8-decoder []
+  (doto (.newDecoder StandardCharsets/UTF_8)
+    (.onMalformedInput CodingErrorAction/REPORT)
+    (.onUnmappableCharacter CodingErrorAction/REPORT)))
+
+;------------------------------------------------------------------------------ Layer 1
+
+(defn ^{:stratum 1} decode [bytes]
+  (with-open [json-input (io/reader (InputStreamReader. (ByteArrayInputStream. bytes) (utf8-decoder)))
               transit-input (ByteArrayInputStream. bytes)]
     (when (= 1 (count (take 2 (json/parsed-seq json-input))))
       (transit/read (transit/reader transit-input :json)))))
-
-;------------------------------------------------------------------------------ Layer 1
 
 (defn- ^{:stratum 1} bounded-output [^ByteArrayOutputStream buffer overflow?]
   (proxy [OutputStream] []

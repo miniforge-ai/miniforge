@@ -52,7 +52,8 @@
 
 (defn ^{:stratum 1} safe-directory? [directory]
   (let [file (io/file directory)]
-    (and (= (.getAbsolutePath file) (.getCanonicalPath file))
+    (and (.isAbsolute file)
+         (= (.getAbsolutePath file) (.getCanonicalPath file))
          (Files/isDirectory (.toPath file) no-follow))))
 
 (defn ^{:stratum 1} absent? [^File file]
