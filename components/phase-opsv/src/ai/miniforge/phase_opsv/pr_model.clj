@@ -5,7 +5,8 @@
   "Correlate one prepared target per run and project confirmed PR outcomes."
   (:require [ai.miniforge.anomaly.interface :as anomaly]
             [ai.miniforge.phase-opsv.messages :as msg]
-            [ai.miniforge.phase-opsv.runtime-context :as context])
+            [ai.miniforge.phase-opsv.runtime-context :as context]
+            [clojure.string :as str])
   (:import [java.nio.charset StandardCharsets]
            [java.util Locale UUID]))
 
@@ -16,28 +17,43 @@
    (.getBytes (pr-str [:opsv/pr-create workflow-id (.toLowerCase (str repository) Locale/ROOT)])
               StandardCharsets/UTF_8)))
 
-(defn ^{:stratum 0} outcome [record transaction]
-  (if (= :succeeded (:effect/state transaction))
-    {:opsv/actuation-record
-     (assoc record :effective-actuation-mode :pr-only
-            :governed-effects [{:evidence/effect-id (:effect/id transaction)
-                                :evidence/grant-id (:effect/grant-id transaction)
-                                :evidence/envelope-id (:effect/envelope-id transaction)}]
-            :pr-refs [(get-in transaction [:effect/observed :pr/url])])
-     :opsv/effect-transactions [transaction]}
-    (anomaly/anomaly :unavailable (msg/ts :pr/unconfirmed)
-                     {:effect/transaction transaction})))
+(defn- ^{:stratum 0} nonblank? [value]
+  (and (string? value) (not (str/blank? value))))
+
+(defn- ^{:stratum 0} governed-effect [transaction]
+  {:evidence/effect-id (:effect/id transaction)
+   :evidence/grant-id (:effect/grant-id transaction)
+   :evidence/envelope-id (:effect/envelope-id transaction)})
 
 ;------------------------------------------------------------------------------ Layer 1
 
 (defn ^{:stratum 1} candidate [ctx verified target]
-  (if (not= (:opsv/policy-hash verified) (:opsv/policy-hash target))
+  (if-not (and (nonblank? (:opsv/policy-hash verified))
+               (= (:opsv/policy-hash verified) (:opsv/policy-hash target)))
     (anomaly/anomaly :conflict (msg/ts :pr/policy-mismatch) {})
     (assoc target
            :workflow-run/id (context/workflow-id ctx)
            :effect/id (effect-id (context/workflow-id ctx) (:pr/repo target))
            :opsv/evidence-bundle-id (get-in ctx [:execution/input :opsv/evidence-bundle-id])
            :opsv/verification-result (:opsv/verification-result verified))))
+
+(defn- ^{:stratum 1} confirmed? [transaction]
+  (and (or (= :succeeded (:effect/state transaction))
+           (and (= :reconciled (:effect/state transaction)) (true? (:effect/matched? transaction))))
+       (every? uuid? (vals (governed-effect transaction)))
+       (nonblank? (get-in transaction [:effect/observed :pr/url]))))
+
+;------------------------------------------------------------------------------ Layer 2
+
+(defn ^{:stratum 2} outcome [record transaction]
+  (if (confirmed? transaction)
+    {:opsv/actuation-record
+     (assoc record :effective-actuation-mode :pr-only
+            :governed-effects [(governed-effect transaction)]
+            :pr-refs [(get-in transaction [:effect/observed :pr/url])])
+     :opsv/effect-transactions [transaction]}
+    (anomaly/anomaly :unavailable (msg/ts :pr/unconfirmed)
+                     {:effect/transaction transaction})))
 
 (comment
   (effect-id (random-uuid) "example/opsv"))
