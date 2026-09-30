@@ -57,6 +57,18 @@
   (is (anomaly/anomaly? (boundary/publish-with-exception-handling ctx :opsv/discover {})))
   (is (empty? (seq (.listFiles (io/file directory))))))
 
+(defn- ^{:stratum 0} assert-unacknowledged-artifact [ctx directory]
+  (let [prepared (runtime/ensure-assembly ctx)
+        output {:opsv/experiment-pack (get-in ctx [:execution/input :opsv/experiment-pack])}
+        refusal (constantly (anomaly/anomaly :unavailable "assembly unavailable" {}))
+        result (with-redefs [evidence/accumulate-opsv-evidence! refusal]
+                 (boundary/publish-with-exception-handling prepared :opsv/discover output))
+        id (get-in result [:anomaly/data :artifact/id])]
+    (is (anomaly/anomaly? result))
+    (is (= output (get-in result [:anomaly/data :opsv/phase-output])))
+    (is (= id (:artifact/id (artifact/read-published directory id))))
+    (is (nil? (get-in result [:anomaly/data :opsv/phase-output :opsv/artifact-refs])))))
+
 (defn- ^{:stratum 0} fatal-publication [& _]
   (throw (AssertionError. "fatal publication")))
 
@@ -102,6 +114,9 @@
 
 (deftest ^{:stratum 1} unavailable-assembly-refuses-before-artifact-write-test
   (with-context assert-unavailable-assembly))
+
+(deftest ^{:stratum 1} artifact-write-without-assembly-acknowledgment-retains-unclaimed-reference-test
+  (with-context assert-unacknowledged-artifact))
 
 ;------------------------------------------------------------------------------ Layer 2
 
