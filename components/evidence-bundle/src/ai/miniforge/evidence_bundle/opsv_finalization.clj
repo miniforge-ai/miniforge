@@ -19,8 +19,8 @@
   "Validation and exactly-once publication of assembled N6 OPSV evidence."
   (:require
    [ai.miniforge.content-hash.interface :as content-hash]
+   [ai.miniforge.evidence-bundle.canonical-validation :as validation]
    [ai.miniforge.evidence-bundle.opsv-assembly :as assembly]
-   [ai.miniforge.evidence-bundle.protocols.impl.evidence-bundle :as bundle]
    [ai.miniforge.evidence-bundle.schema.opsv :as schema]
    [ai.miniforge.response.interface :as response]
    [clojure.set :as cset]
@@ -131,7 +131,7 @@
                                  evidence)
             candidate (when base-valid?
                         (-> base-bundle
-                            (dissoc :evidence/content-hash)
+                            (dissoc :evidence/content-hash :evidence/signature)
                             (assoc :evidence-bundle/id bundle-id
                                    :evidence/opsv canonical-evidence)))
             errors (cond-> []
@@ -148,7 +148,7 @@
                                              available-artifact-ids))
                      candidate
                      (into (map #(assoc % :code :invalid-evidence-bundle)
-                                (:errors (bundle/validate-bundle-impl
+                                (:errors (validation/validate-with-exception-handling
                                           candidate)))))]
         (if (seq errors)
           (anomaly :anomalies/incorrect "OPSV evidence finalization failed"

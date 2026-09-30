@@ -57,6 +57,7 @@
     (is (= bundle-id (:evidence-bundle/id result)))
     (is (= f/opsv-evidence (:evidence/opsv result)))
     (is (string? (:evidence/content-hash result)))
+    (is (:valid? (evidence/validate-canonical-bundle result)))
     (is (m/validate evidence/OpsvEvidence (:evidence/opsv result)))
     (is (= :finalized
            (:opsv.assembly/status (evidence/get-opsv-assembly store bundle-id))))
@@ -77,6 +78,17 @@
                 (set f/artifact-ids))]
     (is (response/anomaly-map? result))
     (is (contains? (error-codes result) :invalid-base-bundle))))
+
+(deftest ^{:stratum 1} finalize-rejects-noncanonical-base-without-sealing
+  (doseq [base [(assoc-in f/base-bundle [:evidence/outcome :outcome/success] "true")
+                (assoc-in f/base-bundle [:evidence/intent :intent/constraints] [{}])
+                (dissoc f/base-bundle :evidence/policy-checks)]]
+    (let [[store bundle-id] (accumulated-store f/opsv-evidence)
+          result (evidence/finalize-opsv-evidence!
+                  store bundle-id base f/opsv-evidence (set f/artifact-ids))]
+      (is (response/anomaly-map? result))
+      (is (contains? (error-codes result) :invalid-evidence-bundle))
+      (is (= :assembling (:opsv.assembly/status (evidence/get-opsv-assembly store bundle-id)))))))
 
 (deftest ^{:stratum 1} finalize-rejects-missing-artifact
   (let [[store bundle-id] (accumulated-store f/opsv-evidence)

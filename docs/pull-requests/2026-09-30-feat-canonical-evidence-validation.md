@@ -11,6 +11,8 @@ valid inputs before finalization. Content integrity does not establish authority
 
 Keep the existing manager protocol compatible and document its limited legacy
 validation contract. Published-evidence consumers must use the new canonical API.
+OPSV finalization validates the candidate with that API before sealing or changing
+assembly state. Hash verification excludes both hash and signature per N6.
 
 ## Standards adversarial pass
 
@@ -25,4 +27,5 @@ Regressions cover required fields, invalid scalar and nested domain values,
 content tampering, unsupported objects, and deferred unbounded sequences.
 Required nullable fields distinguish explicit nil from absence; optional fields
 still validate their values when present.
+Nested constraints and violations reuse their canonical domain schemas.
 Run evidence consumers, packaged regressions, and scoped standards checks before merge.
