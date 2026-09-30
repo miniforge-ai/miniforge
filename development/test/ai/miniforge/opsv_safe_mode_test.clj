@@ -14,14 +14,28 @@
 
 ;------------------------------------------------------------------------------ Layer 0
 
-(deftest ^{:stratum 0} safe-mode-stops-registered-runs-even-if-event-delivery-throws-test
+(defn- ^{:stratum 0} acknowledge-abort [aborted]
+  (swap! aborted inc)
+  true)
+
+(defn- ^{:stratum 0} reject-event [& _]
+  (throw (ex-info "event storage unavailable" {})))
+
+(defn- ^{:stratum 0} stop-after-preflight [manager calls options arguments]
+  (let [response (f/command calls options arguments)]
+    (reliability/enter-safe-mode! manager :manual "stop during GET")
+    response))
+
+;------------------------------------------------------------------------------ Layer 1
+
+(deftest ^{:stratum 1} safe-mode-stops-registered-runs-even-if-event-delivery-throws-test
   (let [ctx (host/context (events/create-event-stream {:sinks []}))
         supervisor (:opsv/supervisor ctx)
         manager (:degradation-manager ctx)
         aborted (atom 0)
         run (host/register! supervisor (random-uuid) "/tmp/no-issued-grants"
-                             #(do (swap! aborted inc) true))]
-    (with-redefs [events/publish! (fn [& _] (throw (ex-info "event storage unavailable" {})))]
+                             (partial acknowledge-abort aborted))]
+    (with-redefs [events/publish! reject-event]
       (is (thrown? Exception (reliability/enter-safe-mode! manager :emergency-stop "stop"))))
     (is (= :safe-mode (reliability/degradation-mode manager)))
     (is (:stopped? (actuation/mutation-status (:fence run))))
@@ -30,16 +44,13 @@
     (reliability/exit-safe-mode! manager "recovered" "operator")
     (is (anomaly/anomaly? (host/register! supervisor (random-uuid) "/tmp/no-grants" (constantly true))))))
 
-(deftest ^{:stratum 0} host-safe-mode-during-preflight-prevents-post-test
+(deftest ^{:stratum 1} host-safe-mode-during-preflight-prevents-post-test
   (let [host-ctx (host/context (events/create-event-stream {:sinks []}))
         manager (:degradation-manager host-ctx)
         {:keys [ctx runtime calls]} (f/setup)
         handles (host/register! (:opsv/supervisor host-ctx) (:execution/id ctx)
                                 (:authority-directory runtime) (constantly true))
-        command (fn [options arguments]
-                  (let [response (f/command calls options arguments)]
-                    (reliability/enter-safe-mode! manager :manual "stop during GET")
-                    response))]
+        command (partial stop-after-preflight manager calls)]
     (try
       (let [output (opsv/actuate (assoc-in ctx [:execution/opts :opsv/pr-execution]
                                          (assoc-in (merge runtime handles) [:provider :run-command] command)))]
@@ -49,3 +60,6 @@
         (is (:cleanup-confirmed? (reliability/safe-mode-stop-result manager))))
       (finally (doseq [file (reverse (file-seq (io/file (get-in runtime [:provider :directory]))))]
                  (io/delete-file file))))))
+
+(comment
+  (clojure.test/run-tests 'ai.miniforge.opsv-safe-mode-test))
