@@ -46,7 +46,8 @@
     (is (anomaly/anomaly? (control/at-boundary! (:control first) (constantly :unexpected))))
     (is (false? (:retired? (opsv/retire-run-control! (:control first) f/now))))
     (reset! fail? false)
-    (is (:cleanup-confirmed? (opsv/stop-supervised-runs! supervisor f/now)))))
+    (is (:cleanup-confirmed? (opsv/stop-supervised-runs! supervisor f/now)))
+    (is (= 1 @other))))
 
 (deftest ^{:stratum 0} admitted-work-can-settle-but-cannot-retire-early-test
   (let [supervisor (opsv/create-run-supervisor)
@@ -78,6 +79,7 @@
           (is (some? (:grant/revoked-at (grant/current (:authority-directory runtime) id))))
           (is (= 2 (count @calls)))
           (is (:retired? (opsv/retire-run-control! (:control runtime) f/now)))
+          (is (= 1 @aborts))
           (is (empty? (:runs (opsv/stop-supervised-runs! supervisor f/now)))))))))
 
 (deftest ^{:stratum 1} stop-during-preflight-prevents-provider-post-test

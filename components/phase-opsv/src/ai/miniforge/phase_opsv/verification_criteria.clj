@@ -16,7 +16,9 @@
    :criterion/expected expected})
 
 (defn- ^{:stratum 0} complete-observations? [declared observations]
-  (every? (partial contains? observations) (map :criterion/id declared)))
+  (and (vector? declared)
+       (every? map? declared)
+       (every? (partial contains? observations) (map :criterion/id declared))))
 
 ;------------------------------------------------------------------------------ Layer 1
 

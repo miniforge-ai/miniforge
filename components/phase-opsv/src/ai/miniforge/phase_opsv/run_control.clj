@@ -6,6 +6,7 @@
   (:require [ai.miniforge.anomaly.interface :as anomaly]
             [ai.miniforge.opsv-actuation.interface :as actuation]
             [ai.miniforge.phase-opsv.run-control-boundary :as boundary]
+            [ai.miniforge.phase-opsv.run-control-cleanup :as cleanup]
             [ai.miniforge.phase-opsv.run-control-state :as state]
             [clojure.string :as str])
   (:import [java.time Instant]))
@@ -27,8 +28,8 @@
 
 (defn- ^{:stratum 0} stop-run! [now run]
   (actuation/stop-mutations! (:fence run))
-  (let [abort (boundary/abort-with-exception-handling run)
-        revocations (mapv #(boundary/revoke-with-exception-handling run % now) @(:grants run))]
+  (let [abort (cleanup/abort! run)
+        revocations (mapv #(cleanup/revoke! run % now) @(:grants run))]
     {:workflow/id (:workflow-id run)
      :mutation-status (actuation/mutation-status (:fence run))
      :abort-requested? (true? abort)
@@ -59,7 +60,7 @@
     (swap! (:grants run) conj (:grant/id issued))
     (if-not (stopped? handle)
       issued
-      (let [result (boundary/revoke-with-exception-handling run (:grant/id issued) now)]
+      (let [result (cleanup/revoke! run (:grant/id issued) now)]
         (if (anomaly/any-anomaly? result) result
             (assoc-in (boundary/failure :unavailable :stopped) [:anomaly/data :opsv/stopped?] true))))))
 

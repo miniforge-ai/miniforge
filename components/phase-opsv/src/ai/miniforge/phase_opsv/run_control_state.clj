@@ -31,6 +31,7 @@
                     (contains? (:runs @state) workflow-id))
         (let [run {:kind :run :parent state :workflow-id workflow-id
                    :authority-directory directory :request-abort! request-abort!
+                   :cleanup (atom {})
                    :fence (actuation/create-mutation-fence) :grants (atom #{})}]
           (swap! state assoc-in [:runs workflow-id] run)
           (handle-for run))))))
