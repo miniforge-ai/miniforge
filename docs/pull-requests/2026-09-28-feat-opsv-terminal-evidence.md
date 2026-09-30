@@ -42,8 +42,8 @@ The five terminal tests cover uncertain POST, confirmed success, and transient
 and persistent audit failure. They cover checkpoint recovery without a runtime
 store, repeated recovery, and refusal of nonterminal recovery inputs.
 Artifact tests also prove exact Instant type and nanosecond round trips.
-Both phase consumers pass 64 tests / 487 assertions. The rebuilt CLI passes
-24 terminal/finalization/publication tests / 173 assertions.
+Both phase consumers pass 65 tests / 489 assertions. The rebuilt CLI passes
+26 terminal/finalization/publication tests / 183 assertions.
 
 ## Standards adversarial pass
 
@@ -68,4 +68,5 @@ publication and the governed PR runtime/audit chain.
 
 - [x] Focused terminal regressions pass
 - [x] Final packaged and all-consumer verification
-- [ ] Signed commits, settled review and all CI green
+- [x] Signed commits and repository hooks
+- [ ] Settled review and all CI green
