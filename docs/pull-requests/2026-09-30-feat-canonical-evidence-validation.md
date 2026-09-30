@@ -5,6 +5,8 @@
 
 ## Scope
 
+Stacked on canonical contract #1959; retarget main after it merges.
+Consumer presentation/export enforcement is reviewed independently in #1960.
 Expose manager-free validation of portable N6 bundle structure, domain values,
 optional OPSV evidence, and declared content hashes. Unhashed base bundles remain
 valid inputs before finalization. Content integrity does not establish authority.
@@ -13,6 +15,10 @@ Keep the existing manager protocol compatible and document its limited legacy
 validation contract. Published-evidence consumers must use the new canonical API.
 OPSV finalization validates the candidate with that API before sealing or changing
 assembly state. Hash verification excludes both hash and signature per N6.
+Reject sealed base inputs instead of repairing or resealing them.
+Stamp compliance and sealing timestamps before calculating the content hash.
+Read-only recovery validates retained seals and reference correlation.
+Recovery can adopt an existing published seal without replacing its timestamps or digest.
 
 ## Standards adversarial pass
 
