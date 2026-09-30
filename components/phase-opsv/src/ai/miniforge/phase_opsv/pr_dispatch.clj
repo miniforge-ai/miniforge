@@ -21,11 +21,12 @@
 ;------------------------------------------------------------------------------ Layer 1
 
 (defn ^{:stratum 1} dispatch! [runtime issued record operation]
-  (let [result (actuation/at-mutation-boundary!
-                (:fence runtime)
-                #(if (authorized? runtime issued record)
-                   (operation)
-                   (stop/refusal :pr/authority-refused)))]
+  (let [allowed (actuation/at-mutation-boundary!
+                 (:fence runtime) #(authorized? runtime issued record))
+        result (if (true? allowed)
+                 (actuation/at-mutation-boundary! (:fence runtime) operation)
+                 (cond-> (stop/refusal :pr/authority-refused)
+                   (anomaly/anomaly? allowed) (assoc :effect/observed {:pr/authority-failure allowed})))]
     (if (true? (get-in result [:anomaly/data :opsv/stopped?]))
       (stop/refusal :pr/stopped)
       result)))
