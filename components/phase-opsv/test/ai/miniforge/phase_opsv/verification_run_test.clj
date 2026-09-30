@@ -72,8 +72,36 @@
                          [:experiment-pack/hash "old"] [:environment-fingerprint {}]
                          [:observations nil] [:confidence Double/NaN]
                          [:confidence Double/POSITIVE_INFINITY]
+                         [:metric-snapshot-artifact-refs []]
                          [:metric-snapshot-artifact-refs ["not-an-artifact"]]]]
       (is (anomaly/anomaly? (verify-with ctx (partial changed-receipt key value)))))))
+
+(deftest ^{:stratum 1} verification-preserves-legacy-adapter-and-runtime-precedence-test
+  (let [legacy-calls (atom [])
+        runtime-calls (atom [])
+        legacy (phase/functional-adapter identity identity
+                 (partial measured legacy-calls support/verification-measurements))
+        runtime (phase/functional-adapter identity identity
+                  (partial measured runtime-calls support/verification-measurements))
+        ctx (-> (synthesized-context)
+                (update :execution/opts dissoc :opsv/adapter)
+                (assoc-in [:execution/input :opsv/adapter] legacy))]
+    (is (not (anomaly/anomaly? (phase/verify ctx))))
+    (is (not (anomaly/anomaly? (phase/verify (assoc-in ctx [:execution/opts :opsv/adapter] runtime)))))
+    (is (anomaly/anomaly? (phase/verify (assoc-in ctx [:execution/opts :opsv/adapter] :invalid))))
+    (is (= 1 (count @legacy-calls) (count @runtime-calls)))))
+
+(deftest ^{:stratum 1} missing-nil-valued-observation-cannot-pass-verification-test
+  (let [ctx (synthesized-context)
+        calls (atom [])]
+    (doseq [declared [{:foo nil} {:criteria [{:criterion/id "foo" :criterion/expected nil}]}]]
+      (let [configured (assoc-in ctx [:execution/phase-results :opsv/synthesize :result :output
+                                     :opsv/experiment-pack :experiment-pack/success-criteria] declared)
+            missing (assoc support/verification-measurements :observations {"unrelated" nil})
+            observed (assoc missing :observations {"foo" nil})]
+        (is (anomaly/anomaly? (verify-with configured (partial measured calls missing))))
+        (is (true? (get-in (verify-with configured (partial measured calls observed))
+                          [:opsv/verification-result :passed?])))))))
 
 (deftest ^{:stratum 1} receipt-constructor-refuses-stale-correlation-test
   (let [ctx (synthesized-context)

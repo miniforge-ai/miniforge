@@ -8,6 +8,7 @@
             [ai.miniforge.opsv.interface :as opsv]
             [ai.miniforge.phase-opsv.messages :as msg]
             [ai.miniforge.phase-opsv.protocol :as port]
+            [ai.miniforge.phase-opsv.runtime-context :as context]
             [malli.core :as m]))
 
 ;------------------------------------------------------------------------------ Layer 0
@@ -23,7 +24,7 @@
    [:environment-fingerprint [:map-of :keyword :any]]
    [:observations [:map-of :string :any]]
    [:confidence [:and number? [:fn #(<= 0 % 1)]]]
-   [:metric-snapshot-artifact-refs [:vector :uuid]]])
+   [:metric-snapshot-artifact-refs [:vector {:min 1} :uuid]]])
 
 (defn- ^{:stratum 0} request-values [policy pack]
   (let [policy-hash (hash/content-hash policy)
@@ -82,7 +83,7 @@
     (validate-receipt request (:environment-fingerprint result) result)))
 
 (defn ^{:stratum 2} execute [ctx synthesized]
-  (let [adapter (get-in ctx [:execution/opts :opsv/adapter])
+  (let [adapter (context/adapter ctx)
         request (request synthesized)]
     (cond
       (anomaly/anomaly? request) request
