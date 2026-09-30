@@ -1,5 +1,11 @@
 {:phase-opsv/system
  {:adapter/missing "The OPSV workflow requires an adapter implementing OPSVAdapter."
+  :adapter/invalid-callbacks "OPSV adapter callbacks must be functions."
+  :verification/missing "The runtime requires a fresh candidate verification adapter."
+  :verification/failed "The candidate verification adapter failed."
+  :verification/invalid "The candidate verification measurements are invalid."
+  :verification/mismatched "The verification measurements do not match this candidate execution."
+  :verification/environment-mismatch "The verification environment differs from the experiment environment."
   :governance/invalid-policy "Runtime-owned OPSV governance policy is invalid."
   :governance/missing-policy "Runtime-owned OPSV governance policy is missing."
   :adapter/invalid-result "The OPSV adapter returned an invalid result shape."
