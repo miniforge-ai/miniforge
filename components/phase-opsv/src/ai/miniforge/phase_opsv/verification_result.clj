@@ -21,22 +21,10 @@
    [ai.miniforge.anomaly.interface :as anomaly]
    [ai.miniforge.content-hash.interface :as content-hash]
    [ai.miniforge.opsv.interface :as opsv]
-   [ai.miniforge.phase-opsv.confidence :as confidence]
-   [ai.miniforge.phase-opsv.evaluation :as evaluation]
+   [ai.miniforge.phase-opsv.verification-criteria :as criteria]
    [ai.miniforge.phase-opsv.flow :as flow]))
 
 ;------------------------------------------------------------------------------ Layer 0
-
-(defn- ^{:stratum 0} criteria
-  [pack]
-  (let [declared (:experiment-pack/success-criteria pack)]
-    (if (contains? declared :criteria)
-      (:criteria declared)
-      (->> declared
-           (sort-by (comp str key))
-           (mapv (fn [[criterion-id expected]]
-                   {:criterion/id (name criterion-id)
-                    :criterion/expected expected}))))))
 
 (defn- ^{:stratum 0} attach-verification
   [run synthesized verification]
@@ -56,21 +44,9 @@
 
 ;------------------------------------------------------------------------------ Layer 1
 
-(defn- ^{:stratum 1} verify-policy
-  [pack run]
-  (let [observations (:observations run)
-        score (:confidence run)
-        threshold (get-in pack [:experiment-pack/convergence
-                                :confidence-threshold])
-        confidence-level (confidence/level score threshold)]
-    (opsv/verify-policy (criteria pack) observations
-                        evaluation/criterion-evaluation confidence-level [])))
-
-;------------------------------------------------------------------------------ Layer 2
-
-(defn ^{:stratum 2} output [synthesized run]
-  (let [verification (verify-policy (:opsv/experiment-pack synthesized) run)]
+(defn ^{:stratum 1} output [synthesized run]
+  (let [verification (criteria/evaluate (:opsv/experiment-pack synthesized) run)]
     (flow/continue verification (partial attach-verification run synthesized))))
 
 (comment
-  (criteria {:experiment-pack/success-criteria {:latency 100}}))
+  (output {} {}))

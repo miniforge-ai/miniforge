@@ -47,14 +47,10 @@
 
 ;------------------------------------------------------------------------------ Layer 1
 
-(defn ^{:stratum 1} receipt
-  "Correlate measurements after an adapter executes this request; no authority."
+(defn- ^{:stratum 1} correlated-measurements
   [request measurements]
-  (let [result (when (and (map? request) (map? measurements))
-                 (merge measurements (select-keys request correlation-keys)))]
-    (if (m/validate Receipt result)
-      result
-      (anomaly/anomaly :invalid-input (msg/ts :verification/invalid) {}))))
+  (when (and (map? request) (map? measurements))
+    (merge measurements (select-keys request correlation-keys))))
 
 (defn- ^{:stratum 1} validate-receipt [request fingerprint result]
   (cond
@@ -68,6 +64,14 @@
     :else result))
 
 ;------------------------------------------------------------------------------ Layer 2
+
+(defn ^{:stratum 2} receipt
+  "Correlate measurements after an adapter executes this request; no authority."
+  [request measurements]
+  (let [result (correlated-measurements request measurements)]
+    (if (m/validate Receipt result)
+      result
+      (anomaly/anomaly :invalid-input (msg/ts :verification/invalid) {}))))
 
 (defn ^{:stratum 2} execute [ctx synthesized]
   (let [adapter (get-in ctx [:execution/opts :opsv/adapter])
