@@ -25,6 +25,7 @@
    [ai.miniforge.phase-opsv.events :as events]
    [ai.miniforge.phase-opsv.finalization-boundary :as finalization]
    [ai.miniforge.phase-opsv.finalization-config :as finalization-config]
+   [ai.miniforge.phase-opsv.terminal-evidence :as terminal]
    [ai.miniforge.phase-opsv.lifecycle-result :as lifecycle-result]))
 
 ;------------------------------------------------------------------------------ Layer 0
@@ -49,7 +50,7 @@
 (defn- ^{:stratum 0} result-after-publication
   [ctx phase-key result]
   (if-not (phase/result-succeeded? result)
-    result
+    (terminal/complete-failure! ctx phase-key result)
     (let [published (events/emit-phase-events! ctx phase-key (:output result))]
       (if (anomaly/anomaly? published)
         (lifecycle-result/phase-result

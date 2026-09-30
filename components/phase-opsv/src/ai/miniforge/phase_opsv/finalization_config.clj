@@ -14,13 +14,19 @@
 (defn ^{:stratum 0} enabled? [ctx]
   (contains? (:execution/opts ctx) :opsv/evidence-base))
 
-(defn ^{:stratum 0} base-bundle [ctx]
-  (assoc (select-keys (let [base (get-in ctx [:execution/opts :opsv/evidence-base])]
-                       (when (map? base) base))
-                      [:evidence-bundle/workflow-id :evidence-bundle/created-at
-                       :evidence-bundle/version :evidence/intent])
-         :evidence-bundle/id (get-in ctx [:execution/input :opsv/evidence-bundle-id])
-         :evidence/outcome {:outcome/success true}))
+(defn ^{:stratum 0} base-bundle
+  ([ctx] (base-bundle ctx nil))
+  ([ctx output]
+   (assoc (select-keys (let [base (get-in ctx [:execution/opts :opsv/evidence-base])]
+                        (when (map? base) base))
+                       [:evidence-bundle/workflow-id :evidence-bundle/created-at
+                        :evidence-bundle/version :evidence/intent])
+          :evidence-bundle/id (get-in ctx [:execution/input :opsv/evidence-bundle-id])
+          :evidence/outcome
+          (cond-> {:outcome/success (not (or (:opsv/phase-failure output) (:opsv/stopped? output)))}
+            (:opsv/phase-failure output)
+            (assoc :outcome/error-phase :opsv/actuate
+                   :outcome/error-message (get-in output [:opsv/phase-failure :anomaly/message]))))))
 
 (defn- ^{:stratum 0} assembly-status [ctx]
   (when-let [store (:opsv/evidence-assembly-store ctx)]

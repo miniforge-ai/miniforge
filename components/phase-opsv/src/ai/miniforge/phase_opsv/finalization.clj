@@ -60,7 +60,7 @@
       (publish-bundle! ctx output
         (evidence/finalize-opsv-evidence!
          (:opsv/evidence-assembly-store ctx) (:evidence-bundle/id record)
-         (config/base-bundle ctx) (model/evidence-section record output) refs)))))
+         (config/base-bundle ctx output) (model/evidence-section record output) refs)))))
 
 (defn ^{:stratum 1} publish-finalized! [ctx]
   (let [record (assembly ctx)
