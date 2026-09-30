@@ -30,7 +30,10 @@
   (throw failure))
 
 (deftest ^{:stratum 0} public-adapter-construction-validates-inputs-test
-  (is (anomaly/anomaly? (phase/functional-adapter nil identity identity)))
+  (doseq [callback [nil {} [] #{} :callback]]
+    (is (anomaly/anomaly? (phase/functional-adapter callback identity identity))))
+  (let [adapter (phase/functional-adapter #'identity #'identity #'identity)]
+    (is (= :request (phase/run-verification adapter :request))))
   (doseq [measurements [nil [] :not-measurements]]
     (is (anomaly/anomaly? (phase/verification-receipt {} measurements)))))
 
@@ -71,6 +74,18 @@
                          [:confidence Double/POSITIVE_INFINITY]
                          [:metric-snapshot-artifact-refs ["not-an-artifact"]]]]
       (is (anomaly/anomaly? (verify-with ctx (partial changed-receipt key value)))))))
+
+(deftest ^{:stratum 1} receipt-constructor-refuses-stale-correlation-test
+  (let [ctx (synthesized-context)
+        calls (atom [])
+        measured-run (verify-with ctx (partial measured calls support/verification-measurements))
+        request (first @calls)
+        receipt (:opsv/verification-run measured-run)]
+    (is (= receipt (phase/verification-receipt request receipt)))
+    (doseq [[key value] [[:verification/id (random-uuid)]
+                         [:candidate/hash "old"] [:experiment-pack/hash "old"]]]
+      (is (anomaly/anomaly? (phase/verification-receipt request (assoc receipt key value)))))
+    (is (anomaly/anomaly? (verify-with ctx (partial measured calls receipt))))))
 
 (deftest ^{:stratum 1} adapter-anomalies-and-fatal-outcomes-preserve-their-meaning-test
   (let [ctx (synthesized-context)

@@ -12,6 +12,10 @@
 (defn- ^{:stratum 0} missing-verification [_request]
   (anomaly/anomaly :unavailable (msg/ts :verification/missing) {}))
 
+(defn- ^{:stratum 0} callback? [value]
+  ;; Invokable collections are data, not executable adapter callbacks.
+  (or (fn? value) (and (var? value) (bound? value) (fn? @value))))
+
 (defn- ^{:stratum 0} callback-adapter [discover-fn ramp-fn verify-fn]
   (reify port/OPSVAdapter
     (discover-signals [_ targets] (discover-fn targets))
@@ -24,7 +28,7 @@
 (defn ^{:stratum 1} create
   ([discover-fn ramp-fn] (create discover-fn ramp-fn missing-verification))
   ([discover-fn ramp-fn verify-fn]
-   (if (every? fn? [discover-fn ramp-fn verify-fn])
+   (if (every? callback? [discover-fn ramp-fn verify-fn])
      (callback-adapter discover-fn ramp-fn verify-fn)
      (anomaly/anomaly :invalid-input (msg/ts :adapter/invalid-callbacks) {}))))
 

@@ -60,7 +60,7 @@
 (defn- ^{:stratum 1} correlated-measurements
   [request measurements]
   (when (and (map? request) (map? measurements))
-    (merge measurements (select-keys request correlation-keys))))
+    (merge (select-keys request correlation-keys) measurements)))
 
 (defn- ^{:stratum 1} validate-receipt [request fingerprint result]
   (cond
@@ -79,9 +79,7 @@
   "Correlate measurements after an adapter executes this request; no authority."
   [request measurements]
   (let [result (correlated-measurements request measurements)]
-    (if (m/validate Receipt result)
-      result
-      (anomaly/anomaly :invalid-input (msg/ts :verification/invalid) {}))))
+    (validate-receipt request (:environment-fingerprint result) result)))
 
 (defn ^{:stratum 2} execute [ctx synthesized]
   (let [adapter (get-in ctx [:execution/opts :opsv/adapter])
