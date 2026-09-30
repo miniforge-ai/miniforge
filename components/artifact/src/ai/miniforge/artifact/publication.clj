@@ -15,7 +15,10 @@
 
 (defn- ^{:stratum 0} decoded [file id]
   (boundary/call-with-exception-handling id :fault :publication/read-failed
-                                        #(some-> (files/read-bytes file) record/decode)))
+    #(let [value (some-> (files/read-bytes file) record/decode)]
+       (if (and (schema/valid-artifact? value) (= id (:artifact/id value)))
+         value
+         (failure :fault :publication/read-failed id)))))
 
 (defn- ^{:stratum 0} publish-bytes! [file temporary bytes]
   (files/write! temporary bytes)
@@ -30,11 +33,7 @@
       (not (files/safe-directory? directory)) (failure :invalid-input :publication/unsafe-path id)
       (files/absent? file) nil
       (not (files/regular? file)) (failure :fault :publication/read-failed id)
-      :else (let [record (decoded file id)]
-              (cond
-                (anomaly/anomaly? record) record
-                (and (schema/valid-artifact? record) (= id (:artifact/id record))) record
-                :else (failure :fault :publication/read-failed id))))))
+      :else (decoded file id))))
 
 (defn- ^{:stratum 1} confirm-record! [directory artifact]
   (let [id (:artifact/id artifact)
