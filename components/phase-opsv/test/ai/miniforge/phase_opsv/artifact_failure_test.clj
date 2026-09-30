@@ -9,6 +9,7 @@
             [ai.miniforge.phase-opsv.artifact-test-support :as fixtures]
             [ai.miniforge.phase-opsv.interface :as phase]
             [ai.miniforge.phase-opsv.lifecycle :as lifecycle]
+            [ai.miniforge.phase-opsv.protocol :as port]
             [ai.miniforge.phase-opsv.test-support :as support]
             [clojure.test :refer [deftest is]]))
 
@@ -41,7 +42,20 @@
     (is (= [] (get-in stored [:opsv/operational-policy :operational-policy/evidence-refs])))
     (is (= unconfirmed (get-in legacy [:opsv/operational-policy :operational-policy/evidence-refs])))))
 
+(defn- ^{:stratum 0} unexpected-verification [calls & _]
+  (swap! calls inc))
+
 ;------------------------------------------------------------------------------ Layer 1
+
+(defn- ^{:stratum 1} assert-late-verify-storage [ctx directory]
+  (let [legacy (-> ctx (update :execution/opts dissoc :opsv/artifact-directory)
+                   (assoc-in [:execution/input :opsv/evidence-refs] [(random-uuid)]))
+        synthesized (reduce fixtures/step legacy (take 5 support/handlers))
+        enabled (assoc-in synthesized [:execution/opts :opsv/artifact-directory] directory)
+        calls (atom 0)]
+    (with-redefs [port/run-verification (partial unexpected-verification calls)]
+      (is (anomaly/anomaly? (phase/verify enabled))))
+    (is (zero? @calls))))
 
 (defn- ^{:stratum 1} assert-partial-publication-exceptions [ctx _directory]
   (let [synthesized (reduce fixtures/step ctx (take 5 support/handlers))
@@ -98,10 +112,11 @@
         ((:enter interceptor) memory-only))
       (is (= 1 @calls)))))
 
-(deftest ^{:stratum 1} enabling-storage-does-not-promote-caller-evidence-hints-test
-  (fixtures/with-context assert-late-storage-evidence))
-
 ;------------------------------------------------------------------------------ Layer 2
+
+(deftest ^{:stratum 2} enabling-storage-does-not-promote-caller-evidence-hints-test
+  (fixtures/with-context assert-late-storage-evidence)
+  (fixtures/with-context assert-late-verify-storage))
 
 (deftest ^{:stratum 2} late-write-exceptions-retain-every-acknowledged-reference-test
   (fixtures/with-context assert-partial-publication-exceptions))
