@@ -46,12 +46,13 @@
     (doseq [[k validator] schema]
       (let [is-optional? (optional-key/optional-key? k)
             actual-key   (unwrap-key k)
+            present?     (contains? data actual-key)
             v            (get data actual-key)]
         (cond
-          (and (nil? v) (not is-optional?))
+          (and (not present?) (not is-optional?))
           (swap! errors conj {:key actual-key :error "Required key missing"})
 
-          (and (some? v) (fn? validator) (not (validator v)))
+          (and present? (fn? validator) (not (validator v)))
           (swap! errors conj {:key actual-key :error "Validation failed" :value v}))))
     {:valid? (empty? @errors)
      :errors @errors}))

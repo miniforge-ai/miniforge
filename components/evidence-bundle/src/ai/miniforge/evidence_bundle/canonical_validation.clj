@@ -6,31 +6,18 @@
   (:require [ai.miniforge.anomaly.interface :as anomaly]
             [ai.miniforge.artifact.interface :as artifact]
             [ai.miniforge.content-hash.interface :as hash]
-            [ai.miniforge.evidence-bundle.schema :as schema]
-            [ai.miniforge.evidence-bundle.schema.domain :as domain]
-            [ai.miniforge.evidence-bundle.schema.opsv :as opsv]
-            [ai.miniforge.evidence-bundle.schema.validation :as validation]
-            [malli.core :as m]))
+            [ai.miniforge.evidence-bundle.canonical-structure :as structure]))
 
 ;------------------------------------------------------------------------------ Layer 0
 
 (defn- ^{:stratum 0} result [errors]
-  {:valid? (empty? errors) :errors (vec errors)})
-
-(defn- ^{:stratum 0} structural-errors [bundle]
-  (let [checks (:evidence/policy-checks bundle)
-        reports (into [(validation/validate-schema schema/evidence-bundle-schema bundle)
-                       (validation/validate-schema domain/intent-schema (:evidence/intent bundle))
-                       (validation/validate-schema domain/outcome-schema (:evidence/outcome bundle))]
-                      (map (partial validation/validate-schema domain/policy-check-schema)
-                           (when (vector? checks) checks)))]
-    (cond-> (vec (mapcat :errors reports))
-      (and (contains? bundle :evidence/opsv) (not (m/validate opsv/OpsvEvidence (:evidence/opsv bundle))))
-      (conj {:code :invalid-opsv-evidence}))))
+  {:valid? (empty? errors)
+   :errors (vec errors)})
 
 (defn- ^{:stratum 0} hash-errors [bundle]
   (when (and (contains? bundle :evidence/content-hash)
-             (not= (:evidence/content-hash bundle) (hash/content-hash (dissoc bundle :evidence/content-hash))))
+             (not= (:evidence/content-hash bundle)
+                   (hash/content-hash (dissoc bundle :evidence/content-hash :evidence/signature))))
     [{:code :content-hash-mismatch}]))
 
 ;------------------------------------------------------------------------------ Layer 1
@@ -40,7 +27,7 @@
     (cond
       (anomaly/anomaly? portable) (result [{:code :nonportable-evidence :anomaly portable}])
       (not (map? bundle)) (result [{:code :invalid-bundle}])
-      :else (result (into (structural-errors bundle) (hash-errors bundle))))))
+      :else (result (into (structure/errors bundle) (hash-errors bundle))))))
 
 ;------------------------------------------------------------------------------ Layer 2
 
