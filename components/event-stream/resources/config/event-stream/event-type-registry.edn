@@ -402,5 +402,7 @@
   :json-string "opsv.verification/result" :browser? false}
  {:constructor "actuation-emitted" :event-type :opsv.actuation/emitted
   :json-string "opsv.actuation/emitted" :browser? false}
+ {:constructor "actuation-disposition" :event-type :opsv.actuation/disposition
+  :json-string "opsv.actuation/disposition" :browser? false}
  {:constructor "drift-detected" :event-type :opsv.drift/detected
   :json-string "opsv.drift/detected" :browser? false}]

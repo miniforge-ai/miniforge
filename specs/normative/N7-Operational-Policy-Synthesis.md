@@ -6,8 +6,8 @@
 
 # N7 — Operational Policy Synthesis With Verification
 
-**Version:** 0.3.1-draft
-**Date:** 2026-09-08
+**Version:** 0.3.3-draft
+**Date:** 2026-09-29
 **Status:** Complete
 **Conformance:** MUST
 **Class:** Extension spec (N7+)
@@ -16,10 +16,9 @@
 
 ### 0.1 Purpose
 
-This specification defines the normative requirements for **Operational Policy Synthesis**
-**with Verification** (OPSV): a Fleet Mode capability that discovers scaling signals and
-performance bottlenecks via governed experiments, synthesizes operational policies, verifies
-them against explicit acceptance criteria, and emits fixes as auditable artifacts.
+This specification defines **Operational Policy Synthesis with Verification** (OPSV).
+This Fleet Mode capability discovers scaling signals and performance bottlenecks via governed experiments.
+It synthesizes operational policies, verifies them against explicit acceptance criteria, and emits fixes as auditable artifacts.
 
 ### 0.2 Relationship to core and later extensions
 
@@ -81,8 +80,8 @@ Experiment Packs SHALL be hash-addressed and recorded in the event stream and ev
 
 ### 1.3 Verification
 
-**Verification** is the process of executing an Experiment Pack (or a verification subset) against a candidate Operational
- Policy and producing an evidence bundle showing whether success criteria are satisfied.
+**Verification** executes an Experiment Pack (or a verification subset) against a candidate Operational Policy.
+It produces an evidence bundle showing whether success criteria are satisfied.
 
 ### 1.4 Requested Actuation Mode
 
@@ -260,10 +259,14 @@ OPSV SHALL emit these event types with required minimal payloads:
 - `:opsv.policy/proposed` (policy hash, diff artifact refs, confidence)
 - `:opsv.verification/result` (pass/fail, criteria evaluation, confidence, caveats)
 - `:opsv.actuation/emitted` (requested/effective mode and correlated N10 effect records)
+- `:opsv.actuation/disposition` (durable effect state, allowing decision, authority
+  references, provider observations and failure detail)
 - `:opsv.drift/detected` (signal, deviation, suggested re-run)
 
 Every event MUST include `:opsv/evidence-bundle-id` for the preallocated OPSV
 evidence bundle per N6 §2.8.
+Governed effects MUST publish the proposal disposition before provider mutation and the durable outcome afterward,
+including failure or uncertainty.
 
 ## 5. Governance and safety (N4 extension)
 
@@ -279,8 +282,8 @@ OPSV MUST compute a risk score for each run using at least:
 Risk score MUST determine required gates and approvals.
 
 The risk result MUST contain a normalized score in `[0.0, 1.0]`, a level in
-`:low`, `:medium`, `:high`, or `:critical`, and explainable factor records containing
-the input, contribution, and rationale. Policy packs map score/level thresholds
+`:low`, `:medium`, `:high`, or `:critical`, and explainable factor records.
+Each factor record MUST contain the input, contribution, and rationale. Policy packs map score/level thresholds
 to approvals; implementations MUST NOT hide approval selection in an opaque model.
 
 ### 5.2 Gates
@@ -298,20 +301,22 @@ If any gate fails, OPSV MUST produce remediation guidance as machine-readable ou
 
 ### 5.3 Default posture
 
+- Effective actuation MUST default to `:recommend-only`, as required by §9.
+  PR emission remains a required capability, not permission to mutate by default.
 - `APPLY_ALLOWED` MUST be disabled by default.
 - Production targets MUST require explicit allowlisting in policy packs.
 - All OPSV runs MUST support a global emergency stop.
 
 An N8 emergency stop or safe-mode entry MUST prevent new OPSV effects, abort
-active experiments at the next safe boundary, revoke their mutation grants,
-invoke verified rollback through the separately authorized recovery path, and
+active experiments at the next safe boundary, and revoke their mutation grants.
+It MUST invoke verified rollback through the separately authorized recovery path and
 record the disposition in N3/N6. Safe mode MUST set effective actuation to
 `:none` per N8's A0 posture.
 
 ### 5.4 Effective actuation decision
 
-Before any external mutation, OPSV MUST compute an effective actuation decision
-from the requested mode, verification result, N4 gate results, N8 safe-mode
+Before any external mutation, OPSV MUST compute an effective actuation decision.
+It MUST use the requested mode, verification result, N4 gate results, N8 safe-mode
 state, and current Ariadne ExecutionGrant. The decision MAY reduce autonomy but MUST NOT
 promote beyond the requested mode.
 
@@ -398,7 +403,7 @@ IDs are never reused; a withdrawn requirement is marked withdrawn.
 | N7.EX.4 | MUST | Emit the §3.14 event family of N3 for every lifecycle transition. |
 | N7.VF.1 | MUST | Evaluate verification against pre-declared criteria, not criteria chosen after the run (§6). |
 | N7.VF.2 | MUST | Link every OPSV event and artifact to its evidence bundle per N6 (§4, §7.1). |
-| N7.AC.1 | MUST | Default to `PR_ONLY` actuation; `APPLY_ALLOWED` requires the §5.4 gate (§7.2, §7.3). |
+| N7.AC.1 | MUST | Default effective actuation to `:recommend-only`; PR emission and direct apply require the respective §5.4 authority checks (§5.3, §7.2, §7.3, §9). |
 | N7.AC.2 | MUST | Execute apply actions as N10-governed effects with verified rollback (§7.3). |
 | N7.AC.3 | MUST | Record both apply and rollback outcomes as artifacts, events, and evidence on postcondition failure (§7.3). |
 | N7.AC.4 | MUST | Include the evidence bundle reference and rollback instructions in every emitted PR body (§7.2). |
@@ -426,7 +431,8 @@ A minimal compliant OPSV implementation MUST:
 - synthesize an HPA/KEDA-compatible policy proposal
 - produce explainable risk and per-criterion verification results
 - emit the §4.3 events and a complete N6 §2.8 evidence bundle
-- emit PRs as N10-governed actions with provenance
+- support PR emission as N10-governed actions with provenance when the effective
+  actuation mode permits it; recommendation-only runs MUST NOT create PRs
 - default effective actuation to `:recommend-only`
 - honor N8 emergency stop and record rollback/disposition evidence
 
@@ -453,8 +459,8 @@ all present.
 
 The `opsv` 1.0.0 workflow registers and executes all seven phases through the
 shared N2 lifecycle. Its deterministic staging MCI discovers CPU and backlog
-drivers, synthesizes an HPA/KEDA-compatible proposal, assembles evidence, emits
-the required lifecycle and domain events, and completes in `:recommend-only`
+drivers, synthesizes an HPA/KEDA-compatible proposal, and assembles evidence.
+It emits the required lifecycle and domain events and completes in `:recommend-only`
 mode with no external effects. `components/opsv-adapter-simulated` supplies the
 simulation boundary.
 
@@ -482,6 +488,10 @@ depends on machinery that is not there.
 
 **Version History:**
 
+- 0.3.3-draft (2026-09-29): Aligned N7.AC.1 and §5.3 with the §9 recommendation-only
+  default; retained mandatory governed PR capability and optional gated apply
+- 0.3.2-draft (2026-09-28): Added governed disposition events and emission timing
+  for proposed, terminal and uncertain outcomes; aligned the N3 event contract
 - 0.3.1-draft (2026-09-08): Reconciled the informative implementation annex
   after canonical contracts, pure domain policy, the seven-phase workflow,
   event projection, and the deterministic staging MCI landed

@@ -43,6 +43,10 @@
   "Closed Malli schema for an envelope."
   schema/DecisionEnvelope)
 
+(def ^{:stratum 0} AllowingEnvelope
+  "Closed envelope contract requiring a derived, obligation-free allow decision."
+  core/AllowingEnvelope)
+
 (def ^{:stratum 0} envelope
   "Mint an envelope from reasons, obligations, and pins; the decision
    is derived worst-wins, never supplied."

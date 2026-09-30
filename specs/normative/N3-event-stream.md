@@ -6,16 +6,15 @@
 
 # N3 — Event Stream & Observability Contract
 
-**Version:** 0.10.1-draft
-**Date:** 2026-08-06
+**Version:** 0.10.2-draft
+**Date:** 2026-09-28
 **Status:** Draft
 **Conformance:** MUST
 
-_v0.10.1 aligns OPSV governed-effect correlation with the accepted Ariadne
-runtime contracts._
+_v0.10.2 adds explicit governed OPSV effect dispositions without implying success._
 
 _v0.10.0 closes the spec's structural gaps: a canonical event-type registry
-(§6), schema evolution and consumer compatibility rules (§7), sensitive-data
+(§6), schema evolution and consumer compatibility rules (§7). It adds sensitive-data
 and redaction rules (§8), emission-failure semantics (§9), and traceable
 conformance requirement IDs (§10.4)._
 
@@ -81,7 +80,7 @@ All events MUST conform to this base envelope:
 - **event/version** - MUST be semantic version string
 - **workflow/id** - REQUIRED and non-nil for Workflow-scoped events, where it
   MUST reference a valid workflow. MAY be nil only when the event's scope is not
-  Workflow (§2.3); where present on such an event it is a cross-reference and
+  Workflow (§2.3). On other scopes it is a cross-reference and
   MUST still reference a valid workflow.
 - **event/sequence-number** - MUST be monotonically increasing within the event's scope (§2.3)
 - **message** - MUST be a human-renderable summary (design principle 5, §1.1)
@@ -114,22 +113,22 @@ Envelope field types are fixed across every event family:
 key and writing `nil` mean the same thing, and implementations MAY do either.
 A consumer MUST treat them identically. So "`:workflow/id` is `uuid or nil`"
 and "a pack-scoped event carries no `:workflow/id`" describe the same event —
-the field is simply not populated.
+the field is not populated.
 
 A _Conditional_ field is REQUIRED whenever it is the event's scope key per
-§2.3. Where it is not the scope key it serves as a cross-reference and is
-OPTIONAL by default, but a family MAY raise it to REQUIRED for its own members
-— §3.10 does exactly this, requiring `:pr/id` on Workflow-scoped PR lifecycle
+§2.3. Where it is not the scope key it is a cross-reference. It is
+OPTIONAL by default, but a family MAY raise it to REQUIRED for its own members.
+Section 3.10 does this, requiring `:pr/id` on Workflow-scoped PR lifecycle
 events so they correlate with the N9 family (§3.16). A family MUST NOT lower a
 scope key below REQUIRED.
 
 Event families MUST NOT redefine an envelope field with a different type or
 meaning. This constrains the **top level** of the event map only. Keys nested
 inside a payload map belong to that payload's own namespace as defined by its
-owning spec, and are unrelated to the envelope field of the same name.
+owning spec. They are unrelated to the envelope field of the same name.
 
 `:agent/id` is the case to watch: at the top level it is the envelope's
-emitting-agent archetype (a keyword), while inside `:supervisory/entity` it is
+emitting-agent archetype (a keyword). Inside `:supervisory/entity` it is
 the AgentSession's identity (a uuid, per N5-delta-1 §3.1). Both may appear in
 one `supervisory/agent-upserted` event without conflict, because one is nested.
 The canonical-ID list in §3.19 names entity keys, not envelope keys.
@@ -173,7 +172,7 @@ consumer detect a stale snapshot for one entity without serializing every
 entity behind a single counter.
 
 `:deployment/id` identifies the emitting deployment. Reliability metrics
-describe the deployment rather than any workflow within it, and a fleet
+describe the deployment rather than any workflow within it. A fleet
 aggregating several deployments onto one stream cannot order or attribute them
 without it.
 
@@ -191,8 +190,8 @@ Rules:
   be present; the event remains Workflow-scoped.
 - A family that fits no row above MUST NOT be added to §3 until this table is
   amended. An event with no scope cannot be ordered, subscribed to, or replayed.
-- Some families take an **inherited** scope rather than a fixed one: the
-  `listener/*` lifecycle events take the scope of the stream they annotate, and
+- Some families take an **inherited** scope rather than a fixed one. The
+  `listener/*` lifecycle events take the scope of the stream they annotate.
   `annotation/created` and `control-action/*` take the scope of their target
   (§3.15). An inherited-scope event MUST carry `:scope/type` naming which row
   of this table it resolved to, plus that row's scope key. It resolves to
@@ -211,14 +210,14 @@ envelope is REQUIRED on every event regardless of whether an example repeats it.
 An example that omits `:event/id`, `:event/version`, or
 `:event/sequence-number` is eliding them, not waiving them.
 
-**Message placeholders.** `{foo}` inside an example `:message` is illustrative
-interpolation standing for a value the event carries — usually a field of the
+**Message placeholders.** `{foo}` in an example `:message` illustrates a value the event carries.
+It usually stands for a field of the
 event, abbreviated (`{reason}` for `:listener/reason`, `{previous}` for
-`:readiness/previous-state`), sometimes a value derived from one
+`:readiness/previous-state`). Sometimes it stands for a value derived from one
 (`{change-count}` from the length of `:schema/changes`).
 
 Placeholders are prose, not a schema. The contract on `:message` is only that
-it is human-renderable (§1.1 principle 5): no template is normative, a
+it is human-renderable (§1.1 principle 5). No template is normative. A
 placeholder is not a required field, and implementations MAY word messages
 differently or localize them. A conformance test MUST NOT assert on message
 text.
@@ -276,7 +275,7 @@ table says otherwise.
 `:phase/outcome` is the typed act of a phase boundary on the observed layer.
 `:success` / `:failure` / `:skipped` INFORM; `:blocked` is a REFUSE carrying a
 machine-readable `:phase/blocked-reason` (a RefusalReason — see
-`§3.7b meta-loop/halt-requested`); `:redirected` is a REQUEST to the pipeline,
+`§3.7b meta-loop/halt-requested`). The `:redirected` outcome is a REQUEST to the pipeline,
 detailed by `:phase/transition-request`. The internal phase-result `:status`
 stays a two-valued control flag; this field carries the full act vocabulary.
 
@@ -513,9 +512,9 @@ All subagent events MUST include `parent-agent/id` and `parent-agent/instance-id
 ### 3.7b Meta-Loop Halt
 
 The REFUSE act for meta-supervision. A meta-agent (progress monitor,
-test-quality, conflict detector) can stop the workflow; this event makes that
-refusal first-class on the stream with a machine-readable cause, rather than
-leaving it only in the coordinator's return value and the runner's error map.
+test-quality, conflict detector) can stop the workflow. This event makes that
+refusal first-class on the stream with a machine-readable cause. It does not
+leave it only in the coordinator's return value and the runner's error map.
 
 `:halt/reason-code` is a **RefusalReason** — the closed vocabulary shared with
 `:phase/blocked-reason`:
@@ -634,7 +633,7 @@ the §2 envelope:
 ```
 
 `:pr/id` is the PR Work Item UUID defined in §2.3 and used identically by the
-N9 family (§3.16), so a Miniforge-originated PR and its external provider
+N9 family (§3.16). A Miniforge-originated PR and its external provider
 events correlate on one key. The provider-assigned number is `:pr/number`.
 Event time is carried by the envelope's `:event/timestamp`; these events MUST
 NOT carry a bare `:timestamp` key.
@@ -1356,6 +1355,28 @@ event types:
  :message "OPSV actuation emitted: {effective-actuation-mode}"}
 ```
 
+#### opsv.actuation/disposition
+
+Governed OPSV effects MUST emit a disposition after durable proposal, before provider mutation,
+and after recording each known terminal or uncertain outcome.
+Publication failure MUST prevent new mutation; failure after mutation MUST retain the durable outcome for recovery.
+This event does not imply success; unresolved outcomes remain explicit.
+Its decision and authority references are accumulated into the same N6 bundle.
+
+```clojure
+{:event/type :opsv.actuation/disposition
+ :workflow/id uuid
+ :opsv/evidence-bundle-id uuid
+ :opsv/governed-effect {:evidence/effect-id uuid
+                        :evidence/grant-id uuid
+                        :evidence/envelope-id uuid}
+ :opsv/effect-state keyword ; Current N10 EffectTransaction state
+ :opsv/decision-envelope map ; Exact allowing DecisionEnvelope, with matching ID
+ :opsv/effect-observed map   ; Confirmed provider references only; empty before confirmation
+ :opsv/effect-failure string-or-nil
+ :message "OPSV effect disposition: {state}"}
+```
+
 #### opsv.drift/detected
 
 ```clojure
@@ -1391,7 +1412,7 @@ An inherited-scope event MUST carry:
   :deployment`, naming which §2.3 scope this emission resolved to; and
 - the scope key field that §2.3 pairs with that type, non-nil.
 
-`:workflow/id` keeps the meaning §2.1.1 gives it — a workflow uuid or nil — and
+`:workflow/id` keeps the meaning §2.1.1 gives it — a workflow uuid or nil. It
 MUST NOT be overloaded to carry a pack, repo, entity, or deployment
 identifier. A listener attached to `/api/streams/pack/acme-terraform` emits
 `listener/attached` with `:scope/type :pack` and `:pack/id
@@ -1585,7 +1606,7 @@ Emitted when PR readiness state changes (derived-state-change event).
 
 - Provider ingestion events MUST be idempotent per `:provider/dedupe-key`.
 - Derived-state-change events (`:pr.readiness/changed`, etc.) MUST only fire when
-  computed state actually changes.
+  computed state changes.
 - All events MUST conform to §2.2 ordering guarantees where a workflow scope exists.
   For external PRs (no workflow), events MUST be ordered per PR Work Item (§2.3).
 
@@ -1730,7 +1751,7 @@ component (N5-delta-supervisory-control-plane §3.4) emits every member except
 `:supervisory/automation-edge-upserted`, which the automation-edge-correlator
 owns; §3.19.1 is normative on emitter ownership. These events carry the
 **full entity** as specified in
-N5-delta-supervisory-control-plane §3 and serve as the single source of
+N5-delta-supervisory-control-plane §3. They are the single source of
 supervisory truth for external consumers (the Rust control console, native
 app, web dashboard).
 
@@ -1743,8 +1764,8 @@ Rules:
 
 - Each entity MUST be keyed by its canonical ID — the _value_ of
   `:workflow-run/id`, of `:agent/id`, of `:policy-eval/id`, of
-  `:attention/id`, and the composite `[repo number]` for PRs (typed
-  `[string long]`, encoded per §5.1.1).
+  `:attention/id`, and the composite `[repo number]` for PRs.
+  The PR key is typed `[string long]`, encoded per §5.1.1.
 - A `:supervisory/*` event SHOULD be emitted at most once per state-change
   burst (coalesce bursts within ≤ 100 ms into a single emission).
 - `:attention/resolved? = true` MUST be encoded as a standard upsert rather
@@ -1757,7 +1778,7 @@ Rules:
 - Every event in this family MUST carry `:supervisory/schema-version` (string,
   semantic version) alongside `:supervisory/entity`. Startup replay (§3.5
   invariant 3 of N5-delta-supervisory-control-plane) resolves snapshot
-  precedence across restarts spanning an entity-shape change; without a
+  precedence across restarts spanning an entity-shape change. Without a
   version discriminator on the snapshot itself, a consumer cannot tell an old
   shape from a new one. This version tracks the entity schema, and is
   independent of the envelope's `:event/version` (§7).
@@ -1788,7 +1809,7 @@ key, holding the entity's canonical ID). Where the entity belongs to a
 workflow, the event SHOULD also carry `:workflow/id` for cross-referencing;
 per §2.3 this does not change the event's scope.
 
-The "sole emitter" column is normative: per N5-delta-1 §3.5 invariant 6, no
+The "sole emitter" column is normative under N5-delta-1 §3.5 invariant 6. No
 other component MAY emit a snapshot event for an entity family it does not own.
 
 Adding a member to this family is an N3 change. A delta spec MAY define the
@@ -1934,7 +1955,7 @@ Unlike the other supervisory events, `:supervisory/policy-evaluated` is
 ```
 
 The supervisory-state component derives attention items from the other entity
-tables per N5-delta-supervisory-control-plane §5.1 and emits an upsert
+tables per N5-delta-supervisory-control-plane §5.1. It emits an upsert
 whenever an attention condition changes (including resolution via
 `:attention/resolved? = true`).
 
@@ -2268,7 +2289,7 @@ of the type, declared in the §6 registry.
 
 The right-hand column characterizes each class; it does not assign membership.
 The **§6 registry is the sole authority** for which class an event type belongs
-to, so that every type has exactly one class and no reader has to reconcile two
+to. Every type has exactly one class; no reader has to reconcile two
 lists.
 
 Implementations MUST NOT expire an event before its class minimum.
@@ -2282,7 +2303,7 @@ Expiring an event narrows the replay horizon. Implementations MUST:
 1. Track the oldest retained sequence number per scope and expose it as
    `:oldest-available` on the HTTP 410 response of §5.3.5.
 2. Never expire an event of class `:durable` or `:audit` while its scope
-   (§2.3) is still live — a non-terminal workflow, an open PR Work Item, an
+   (§2.3) is still live. This includes a non-terminal workflow, an open PR Work Item, an
    installed pack, a tracked repository, a current entity, a running
    deployment. Replay determinism (§2.2) is unachievable for a live scope
    whose own lifecycle events have been collected.
@@ -2292,8 +2313,8 @@ Expiring an event narrows the replay horizon. Implementations MUST:
 #### 4.3.3 Archival
 
 An implementation MAY move expired events to cold storage rather than deleting
-them. Archived events remain subject to the redaction rules of §8: archival is
-not an exemption from redaction, and an implementation MUST NOT archive a
+them. Archived events remain subject to the redaction rules of §8. Archival is
+not exempt from redaction. An implementation MUST NOT archive a
 payload it would have been required to redact on the wire.
 
 ---
@@ -2324,21 +2345,21 @@ Implementations MUST provide:
 ```
 
 Subscribing by scope is the only way to observe events with a nil
-`:workflow/id` — pack, repository, supervisory-entity, and deployment scopes
+`:workflow/id`. Pack, repository, supervisory-entity, and deployment scopes
 have no workflow to subscribe through.
 
 **Delivery is by scope, strictly.** A subscription on scope S receives exactly
-the events whose scope is S. A cross-reference key does not confer membership:
-a Workflow-scoped PR lifecycle event carrying `:pr/id` (§3.10) is delivered on
+the events whose scope is S. A cross-reference key does not confer membership.
+A Workflow-scoped PR lifecycle event carrying `:pr/id` (§3.10) is delivered on
 its workflow, not on the PR Work Item scope.
 
 This is a consequence of per-scope sequencing (§2.2), not a convenience.
-Sequence numbers are monotonic within a scope, so mixing another scope's events
+Sequence numbers are monotonic within a scope. Mixing another scope's events
 into a subscription would interleave two independent counters and make
 resume-by-sequence (§5.3.5) ambiguous for the receiving side.
 
 Cross-reference keys exist for correlation, and the query API is where they are
-used: §5.2 retrieves by scope, and §5.3.4's `pr-id` filter narrows a stream to
+used. Section 5.2 retrieves by scope; §5.3.4's `pr-id` filter narrows a stream to
 the events within it that mention a given PR. A consumer that wants both a
 workflow and its PR Work Item subscribes to both and correlates on `:pr/id`.
 
@@ -2346,23 +2367,23 @@ workflow and its PR Work Item subscribes to both and correlates on `:pr/id`.
 
 `scope-id` is the value of the scope key. Most are a uuid or a string. The
 supervisory-entity scope admits a composite key (`[repo number]` for PRs,
-§3.19.1), so a canonical string form is REQUIRED wherever a scope id crosses a
+§3.19.1). A canonical string form is REQUIRED wherever a scope id crosses a
 text boundary — an HTTP path, a query parameter, a log line:
 
 - A scalar id is its own printed form.
 - A composite id is its components joined by `:` in the order §3.19.1 lists
-  them, each component percent-encoded so that no component contains `:` or
+  them. Each component is percent-encoded so that no component contains `:` or
   `/`.
 
 Example: entity key `["miniforge-ai/miniforge" 1641]` encodes as
 `miniforge-ai%2Fminiforge:1641`.
 
 Decoding MUST coerce each component back to the type the entity's schema
-declares for it — the PR key is `[string long]`, so the second component parses
+declares for it. The PR key is `[string long]`, so the second component parses
 as a base-10 long, not as the string `"1641"`. Implementations MUST round-trip
 the encoding: a decoded id MUST be equal to the original key under the host
-language's value equality, which an uncoerced string component would fail. A
-component that does not parse as its declared type is a malformed scope id and
+language's value equality. An uncoerced string component would fail. A
+component that cannot parse as its declared type is malformed. It
 MUST be rejected rather than passed through as a string.
 
 ### 5.2 Query API
@@ -2419,7 +2440,7 @@ percent-encoded, never split across segments.
 
 Everything in the rest of §5.3 — authentication, the attach handshake,
 filters, resume, backpressure, wire formats, rate limits — applies to every
-scope type, not only to `workflow`. Resume (§5.3.5) is per scope, because
+scope type. It is not limited to `workflow`. Resume (§5.3.5) is per scope, because
 sequence numbers are (§2.2).
 
 #### 5.3.2 Authentication
@@ -2469,7 +2490,7 @@ The SSE/WebSocket connection IS the listener attach per N8 §2.1. On connection:
    `:disconnect | :timeout | :revoked`.
 
 `ADVISE` and `CONTROL` listeners MAY emit annotations or request control
-actions over a separate bidirectional channel (WebSocket), or via parallel
+actions over a separate bidirectional channel (WebSocket). They MAY instead use parallel
 HTTP POST requests to OCI endpoints (N8 §9). SSE is strictly server-to-client.
 
 #### 5.3.4 Subscription Filters
@@ -2581,7 +2602,7 @@ applies equally regardless of listener count.
 ## 6. Event Type Registry
 
 §3 defines event types family by family. This section is the flat, enumerable
-view of the same contract: the set of `:event/type` values an implementation
+view of the same contract. It lists `:event/type` values an implementation
 may emit, and the properties every consumer needs before it has parsed a
 payload.
 
@@ -2596,14 +2617,14 @@ unregistered type per the unknown-type rule of §7.3.
 **Columns.** _Scope_ is the scope key of §2.3. _Retention_ is the class of
 §4.3.1. Both are properties of the type, not of a particular emission.
 
-Every row carries exactly one scope and exactly one retention class, so a
+Every row carries exactly one scope and exactly one retention class. A
 type's class is readable without parsing prose (§4.3.1: every event type
 belongs to exactly one class). A family whose members differ in scope or class
 occupies more than one row — §3.12 and §3.15 span three each, §3.11 and §3.13
 two each.
 
 Two of the three §3.15 rows name an inherited scope (§2.3) rather than one of
-the six fixed scopes: the stream's for `listener/*`, the target's for
+the six fixed scopes. These are the stream's for `listener/*`, the target's for
 `annotation/created` and `control-action/*`. Each emission still resolves to
 exactly one scope, named by its `:scope/type` field.
 
@@ -2627,7 +2648,7 @@ exactly one scope, named by its `:scope/type` field.
 | 3.12 | Capability denial | Workflow | audit | `capability/denied` |
 | 3.13 | Task lifecycle | Workflow | operational | `task/frontier-entered`, `task/claimed`, `task/capability-bound`, `task/skip-propagated` |
 | 3.13 | Task scope violation | Workflow | audit | `task/scope-violation` |
-| 3.14 | OPSV (N7) | Workflow | durable | `opsv.experiment/planned`, `opsv.experiment/started`, `opsv/load-step`, `opsv.guardrail/abort`, `opsv.convergence/iteration`, `opsv.policy/proposed`, `opsv.verification/result`, `opsv.actuation/emitted`, `opsv.drift/detected` |
+| 3.14 | OPSV (N7) | Workflow | durable | `opsv.experiment/planned`, `opsv.experiment/started`, `opsv/load-step`, `opsv.guardrail/abort`, `opsv.convergence/iteration`, `opsv.policy/proposed`, `opsv.verification/result`, `opsv.actuation/emitted`, `opsv.actuation/disposition`, `opsv.drift/detected` |
 | 3.15 | Listener lifecycle (N8) | stream's scope | operational | `listener/attached`, `listener/detached`, `listener/overflow` |
 | 3.15 | Annotations (N8) | target's scope | operational | `annotation/created` |
 | 3.15 | Control actions (N8) | target's scope | audit | `control-action/requested`, `control-action/executed`, `control-action/approval-required` |
@@ -2702,12 +2723,12 @@ For a given event type:
 | Changing the meaning of a field without changing its name | — | **No.** Introduce a new field |
 
 The last row is not a versioning question. A field whose meaning silently
-changes defeats replay: a stream replayed under the new reading produces a
+changes defeats replay. A stream replayed under the new reading produces a
 different state than it did when emitted, violating §2.2. Retire the field and
 add a new one.
 
-`:halt/reason-code` (§3.7b) is the worked example of a closed vocabulary:
-adding a RefusalReason is a major bump for `:meta-loop/halt-requested` and a
+`:halt/reason-code` (§3.7b) is the worked example of a closed vocabulary.
+Adding a RefusalReason is a major bump for `:meta-loop/halt-requested` and a
 deliberate change to this spec.
 
 ### 7.3 Consumer Obligations
@@ -2742,7 +2763,7 @@ A major bump to an event type MUST:
 1. State the change in this spec's version history with the affected type.
 2. Keep the type's `:event/type` keyword stable. A payload change is a version
    change, not a new event type. Renaming the type instead of bumping it
-   converts a detectable break into a silent one — under §7.3 rule 1 every
+   converts a detectable break into a silent one. Under §7.3 rule 1 every
    consumer would ignore the renamed type and report no error.
 3. Ship the schema change and the registry (§6) update together.
 
@@ -2755,7 +2776,7 @@ and new payload shapes during a transition. Implementations cut over.
 
 The event stream carries agent context, tool arguments, LLM prompts, PR comment
 bodies, and file paths. §12.1 claims the stream as an audit trail for SOC 2 and
-FedRAMP; an audit trail that also functions as an exfiltration path for
+FedRAMP. An audit trail that also functions as an exfiltration path for
 credentials is worse than no audit trail. This section is the contract that
 makes the claim in §12.1 defensible.
 
@@ -2820,7 +2841,7 @@ needs the shape of a workflow MUST be able to obtain it without receiving any
 free text.
 
 `:restricted` fields MUST be suppressed per-recipient at delivery, not
-per-event at emission — two listeners on the same stream may be entitled to
+per-event at emission. Two listeners on the same stream may be entitled to
 different views of the same event.
 
 ### 8.5 Retention Interaction
@@ -2835,9 +2856,9 @@ archival never exempts one.
 ## 9. Emission Failure Semantics
 
 §4.1 says implementations MUST emit at defined points. What happens when the
-emission itself fails is a separate question, and answering it "log and
+emission itself fails is a separate question. Answering it "log and
 continue" for every case would make the guarantees in §2.2 and §10.2
-unenforceable — a stream missing `:gate/failed` replays into a state where the
+unenforceable. A stream missing `:gate/failed` replays into a state where the
 gate passed.
 
 ### 9.1 Fail-Closed Classes
@@ -2853,9 +2874,9 @@ be durably recorded, the implementation MUST:
 
 A workflow MUST NOT report success on a stream that is missing the events
 proving it. The specific hazard is `capability/denied` and
-`task/scope-violation` (§8 audit class): an implementation that blocks the
-operation but drops the event has enforced the policy and lost the evidence,
-which is indistinguishable from never having been asked.
+`task/scope-violation` (§8 audit class). An implementation that blocks the
+operation but drops the event has enforced the policy and lost the evidence.
+This is indistinguishable from never having been asked.
 
 ### 9.2 Fail-Open Classes
 
@@ -2876,7 +2897,7 @@ allocated on successful durable record, not on attempt.
 
 Allocating on attempt produces gaps that a consumer cannot distinguish from
 retention expiry (§4.3.2) or from events it declined to interpret (§7.3 rule
-5) — three different conditions collapsed into one unreadable symptom.
+5). Three different conditions share one unreadable symptom.
 
 ### 9.4 Backpressure Is Not Failure
 
@@ -2921,7 +2942,7 @@ Implementations MUST:
 ### 10.4 Conformance Requirements
 
 Requirement IDs are stable identifiers for the normative statements of this
-spec, so a conformance suite can cite what it tests and a gap analysis can cite
+spec. A conformance suite can cite what it tests and a gap analysis can cite
 what is missing. IDs are never reused; a withdrawn requirement is marked
 withdrawn, not deleted.
 
@@ -3030,8 +3051,8 @@ A conformance suite MUST cover, at minimum:
 5. **Retention-horizon behavior** — a request below the horizon returns 410
    with an accurate `:oldest-available` (N3.API.10, N3.ST.6).
 6. **Forward compatibility** — a consumer built against version N processes a
-   stream containing an unknown event type and an unknown field on a known type
-   without error and without losing sequence position (N3.CP.4, N3.CP.5,
+   stream with unknown event types and unknown fields on known types.
+   It does so without errors or sequence-position loss (N3.CP.4, N3.CP.5,
    N3.CP.7).
 7. **Redaction** — a workflow whose tool arguments contain a secret produces a
    stream with `"[REDACTED]"` and no occurrence of the secret in any field
@@ -3282,42 +3303,45 @@ resolution is an N3 amendment per §6.1, not silent acceptance.
 
 **Version History:**
 
+- 0.10.2-draft (2026-09-28): Added correlated OPSV effect dispositions for
+  proposed, failed, confirmed, and uncertain outcomes. Fixed prose lint without
+  changing existing normative obligations.
 - 0.10.1-draft (2026-08-06): Replaced stale OPSV intent/OIR/capability
   correlation with Ariadne effect, execution-grant, and decision-envelope IDs
 - 0.10.0-draft (2026-08-05): Spec-completion pass.
   **New normative sections:** event type registry (§6), schema evolution and
-  consumer compatibility (§7), sensitive data and redaction (§8), emission
+  consumer compatibility (§7), sensitive data and redaction (§8). Added emission
   failure semantics (§9), conformance requirement IDs and test obligations
   (§10.4–§10.5).
   **New event types:** workflow control and checkpoint family (§3.21 —
   `workflow/cancelled`, `workflow/checkpoint-written`,
   `workflow/checkpoint-write-failed`, `workflow/machine-snapshot-written`,
   `workflow/machine-snapshot-write-failed`, `workflow/resumed`,
-  `workflow/spec-hash-mismatch`), sourced from N2 §5 and N2-delta §9;
+  `workflow/spec-hash-mismatch`). These come from N2 §5 and N2-delta §9.
   `listener/overflow` (§3.15), previously referenced by §5.3.6 but never
-  defined; seven supervisory family members enumerated in §3.19.1.
+  defined. Seven supervisory family members are enumerated in §3.19.1.
   **Contract fixes:** `:pr/id` unified as the PR Work Item UUID across §3.10
-  and §3.16, with `:pr/number` for provider-assigned numbers; bare
-  `:timestamp` removed in favor of the envelope's `:event/timestamp`;
-  `:event/sequence-number` unified on `long`; §2.3 generalized from
-  PR-only to the full scope-key table (pack, repo, deployment scopes);
-  `:supervisory/schema-version` required on the supervisory family;
+  and §3.16, with `:pr/number` for provider-assigned numbers. Bare
+  `:timestamp` is replaced by the envelope's `:event/timestamp`.
+  `:event/sequence-number` is unified on `long`. Section 2.3 is generalized from
+  PR-only to the full scope-key table (pack, repo, deployment scopes).
+  `:supervisory/schema-version` is required on the supervisory family.
   retention expanded from one line to four classes with replay-horizon rules
-  (§4.3.1–§4.3.3); `:pr/id` subscription and query surfaces added to §5.1–§5.2
+  (§4.3.1–§4.3.3). The `:pr/id` subscription and query surfaces are added to §5.1–§5.2
   as §2.3 already required.
   **Structural:** duplicate §3.17 resolved — Data Foundry renumbered to §3.20
-  (Reliability keeps §3.17, which has existing inbound references); §2.2 and
-  §2.3 restored to numeric order; §6–§9 inserted, former §6–§10 renumbered to
-  §10–§14; stale N7/N8/N9 section cross-references in §14 corrected.
+  (Reliability keeps §3.17, which has existing inbound references). Sections 2.2 and
+  2.3 are restored to numeric order. Sections 6–9 are inserted; former §6–§10 become
+  §10–§14. Stale N7/N8/N9 section cross-references in §14 are corrected.
 - 0.9.0-draft (2026-08-04): OPSV events now share a preallocated evidence-bundle
   identifier, canonical Experiment Pack/environment/verification/risk shapes,
   requested/effective actuation modes, and correlated N10 governed-effect records
-- 0.8.0-draft (2026-04-23): Per-workflow streaming wire-contract amendments — §5.3
+- 0.8.0-draft (2026-04-23): Per-workflow streaming wire-contract amendments. Section 5.3
   expanded from a one-line SSE sketch to a complete contract for the per-workflow
   stream: authentication via bearer token (with browser-friendly query-param
-  fallback), listener attach handshake aligned with N8 §2.1, server-side
+  fallback). Added listener attach handshake aligned with N8 §2.1, server-side
   subscription filters, resume-from-sequence on reconnect, backpressure and
-  buffer-overflow behavior, SSE wire format (event/id/data/retry + heartbeats),
+  buffer-overflow behavior. Added SSE wire format (event/id/data/retry + heartbeats),
   optional WebSocket wire format, rate limiting. Cross-workflow aggregation
   endpoints remain out of OSS scope
 - 0.7.0-draft (2026-04-17): Added the §3.19 supervisory snapshot event family

@@ -38,6 +38,9 @@
         ai.miniforge/dag-primitives            {:local/root "../../components/dag-primitives"}
         ai.miniforge/data-quality              {:local/root "../../components/data-quality"}
         ai.miniforge/event-stream              {:local/root "../../components/event-stream"}
+        ai.miniforge/decision-envelope         {:local/root "../../components/decision-envelope"}
+        ai.miniforge/effect-transaction        {:local/root "../../components/effect-transaction"}
+        ai.miniforge/execution-grant           {:local/root "../../components/execution-grant"}
         ai.miniforge/knowledge                 {:local/root "../../components/knowledge"}
         ai.miniforge/logging                   {:local/root "../../components/logging"}
         ai.miniforge/messages                  {:local/root "../../components/messages"}

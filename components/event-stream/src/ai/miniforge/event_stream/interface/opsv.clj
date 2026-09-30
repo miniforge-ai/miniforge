@@ -19,6 +19,8 @@
   "Public schemas and constructors for the N3 OPSV event family."
   (:require
    [malli.core :as m]
+   [ai.miniforge.anomaly.interface :as anomaly]
+   [ai.miniforge.event-stream.messages :as msg]
    [ai.miniforge.event-stream.opsv :as opsv]
    [ai.miniforge.event-stream.schema.opsv :as schema]))
 
@@ -57,6 +59,17 @@
 (def ^{:stratum 0} DriftDetected
   "Schema for :opsv.drift/detected."
   schema/DriftDetected)
+
+(def ^{:stratum 0} ActuationDisposition
+  "Schema for proposed, settled and uncertain governed OPSV effects."
+  schema/ActuationDisposition)
+
+(defn ^{:stratum 0} actuation-disposition
+  "Construct a validated governed disposition, or return an input anomaly."
+  [stream workflow-id evidence-id data]
+  (if (and (uuid? workflow-id) (uuid? evidence-id) (m/validate schema/DispositionPayload data))
+    (opsv/actuation-disposition stream workflow-id evidence-id data)
+    (anomaly/anomaly :invalid-input (msg/t :opsv/invalid-disposition) {})))
 
 (def ^{:stratum 0} experiment-planned
   "Construct an experiment-planned event."
@@ -97,7 +110,7 @@
 (def ^{:stratum 1} OPSVEvent
   (into [:or] [ExperimentPlanned ExperimentStarted LoadStep GuardrailAbort
                ConvergenceIteration PolicyProposed VerificationResult
-               ActuationEmitted DriftDetected]))
+               ActuationEmitted ActuationDisposition DriftDetected]))
 
 ;------------------------------------------------------------------------------ Layer 2
 
