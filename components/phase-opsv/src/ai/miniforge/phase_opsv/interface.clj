@@ -56,7 +56,7 @@
 (def ^{:stratum 0} verify model/verify)
 
 (defn ^{:stratum 0} publish-finalized-evidence!
-  "Retry only durable N6 publication from a restored finalized assembly; never actuates."
+  "Resume retained post-actuation evidence or finalized N6 publication; never actuates."
   [ctx]
   (finalization/publish-finalized! ctx))
 
