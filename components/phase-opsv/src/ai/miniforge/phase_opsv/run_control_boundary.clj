@@ -5,12 +5,17 @@
   "Convert individual cleanup failures without skipping other active runs."
   (:require [ai.miniforge.anomaly.interface :as anomaly]
             [ai.miniforge.execution-grant.interface :as grant]
+            [ai.miniforge.opsv-actuation.interface :as actuation]
             [ai.miniforge.phase-opsv.messages :as msg]))
 
 ;------------------------------------------------------------------------------ Layer 0
 
 (defn ^{:stratum 0} failure [type reason]
   (anomaly/anomaly type (msg/ts :control/unconfirmed) {:opsv/control-reason reason}))
+
+(defn- ^{:stratum 0} registration-settled? [run]
+  (let [status (actuation/mutation-status (:registration-fence run))]
+    (and (:stopped? status) (zero? (:in-flight status)))))
 
 ;------------------------------------------------------------------------------ Layer 1
 
@@ -24,9 +29,10 @@
 (defn- ^{:stratum 1} revoke! [run id now]
   (let [directory (:authority-directory run)
         result (grant/revoke-stored! directory id :revocation/operator now)
-        current (if (anomaly/anomaly? result) (grant/current directory id) result)]
-    (if (and (not (anomaly/any-anomaly? current)) (:grant/revoked-at current))
-      {:grant/id id :revoked? true}
+        current (if (:grant/revoked-at result) result (grant/current directory id))]
+    (if (and (not (anomaly/any-anomaly? current))
+             (or (:grant/revoked-at current) (and (nil? current) (registration-settled? run))))
+      {:grant/id id :revoked? (boolean (:grant/revoked-at current)) :absent? (nil? current)}
       (failure :unavailable :revocation-unconfirmed))))
 
 ;------------------------------------------------------------------------------ Layer 2

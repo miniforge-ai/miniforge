@@ -25,7 +25,7 @@
 
 (defn ^{:stratum 2} register! [runtime issued now]
   (if-let [handle (:control runtime)]
-    (control/at-boundary! handle (partial register-tracked! runtime issued now))
+    (control/at-registration-boundary! handle (partial register-tracked! runtime issued now))
     (register-tracked! runtime issued now)))
 
 (comment

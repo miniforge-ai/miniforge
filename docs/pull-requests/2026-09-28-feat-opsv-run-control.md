@@ -36,6 +36,10 @@ durable-grant interfaces. No new component dependency is introduced.
   not skip other runs; reports retain abort and revocation failures for retry.
 - Separate cleanup confirmation from whether admitted effects have settled.
   Retirement retains the run until both are confirmed. No stop reopens a fence.
+- A separate registration fence accounts for durable grant writes before cleanup.
+  Track IDs before writing; confirm absence only after registration is stopped
+  and settled. Failed readback keeps cleanup unconfirmed, while confirmed absence
+  permits retirement without claiming a grant was revoked.
 
 ## Validation
 
