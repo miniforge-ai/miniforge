@@ -49,6 +49,14 @@ It removes runtime stores and phase state, then restores exact outcomes without 
 The coercion component is a test-only dependency. Runtime ports are supplied anew
 by the trusted host; snapshots cannot create provider authority.
 
+A separate shared-runner integration test passes 1 test / 10 assertions. It runs
+all seven phases, confirms simulated provider success, and forces terminal audit failure.
+It loads the real workflow checkpoint and recovers evidence with the provider runtime
+removed. The exact transaction and failed outcome survive; repeated recovery leaves
+the provider call count at one GET and one POST. CI executes this test explicitly.
+Only test-owned preparation binds the simulated diff; production host preparation
+remains a separate slice.
+
 ## Standards adversarial pass
 
 Share fixture constructors instead of repeating evidence-base maps. Keep pure
