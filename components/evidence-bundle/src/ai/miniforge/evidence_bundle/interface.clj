@@ -168,7 +168,7 @@
 
 (defn ^{:stratum 0} validate-canonical-bundle
   "Validate portable N6 schema, intent, outcome, policy checks and optional OPSV.
-   A declared content hash must match. An unsigned base bundle is allowed.
+   A declared content hash must match. Base bundles may omit the content hash.
    Returns {:valid? bool :errors [...]}; does not establish authenticity."
   [bundle]
   (canonical/validate-with-exception-handling bundle))

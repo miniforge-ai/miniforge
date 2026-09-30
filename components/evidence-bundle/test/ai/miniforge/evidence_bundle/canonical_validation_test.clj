@@ -41,6 +41,23 @@
                      (assoc sealed :evidence/content-hash "wrong")]]
       (is (false? (:valid? (evidence/validate-canonical-bundle altered)))))))
 
+(deftest ^{:stratum 1} field-presence-is-distinct-from-nullability-test
+  (let [check {:policy-check/pack-id "opsv"
+               :policy-check/pack-version "1.0.0"
+               :policy-check/phase :verify
+               :policy-check/checked-at #inst "2026-09-30T00:00:00Z"
+               :policy-check/violations []
+               :policy-check/passed? true
+               :policy-check/duration-ms 0
+               :policy-check/envelope nil}
+        bundle (assoc (base-bundle) :evidence/policy-checks [check])]
+    (is (:valid? (evidence/validate-canonical-bundle bundle)))
+    (is (false? (:valid? (evidence/validate-canonical-bundle
+                         (update-in bundle [:evidence/policy-checks 0]
+                                    dissoc :policy-check/envelope)))))
+    (is (false? (:valid? (evidence/validate-canonical-bundle
+                         (assoc-in bundle [:evidence/intent :intent/author] nil)))))))
+
 (deftest ^{:stratum 1} nonportable-or-nonmap-input-is-rejected-before-hashing-test
   (doseq [value [nil [] 42 (assoc (base-bundle) :extension (Object.))
                  (assoc (base-bundle) :extension (iterate inc 0))]]

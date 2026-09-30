@@ -6,7 +6,7 @@
 ## Scope
 
 Expose manager-free validation of portable N6 bundle structure, domain values,
-optional OPSV evidence, and declared content hashes. Unsigned base bundles remain
+optional OPSV evidence, and declared content hashes. Unhashed base bundles remain
 valid inputs before finalization. Content integrity does not establish authority.
 
 Keep the existing manager protocol compatible and document its limited legacy
@@ -23,4 +23,6 @@ No storage manager, network operation, or authority is created by validation.
 
 Regressions cover required fields, invalid scalar and nested domain values,
 content tampering, unsupported objects, and deferred unbounded sequences.
+Required nullable fields distinguish explicit nil from absence; optional fields
+still validate their values when present.
 Run evidence consumers, packaged regressions, and scoped standards checks before merge.
