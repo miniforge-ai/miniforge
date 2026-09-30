@@ -168,6 +168,11 @@
         tampered (assoc-in saved [:execution/input :opsv/terminal-snapshot] "corrupt")]
     (is (nil? (:phase saved)))
     (is (= :error (get-in recovered [:phase :result :status])))
+    (is (= :failed (get-in recovered [:phase :status])))
+    (doseq [key [:status :ended-at :duration-ms :metrics]]
+      (is (= (get-in completed [:phase key]) (get-in recovered [:phase key]))))
+    (is (= (get-in completed [:phase :result :metrics :duration-ms])
+           (get-in recovered [:phase :result :metrics :duration-ms])))
     (is (= (:opsv/effect-transactions (terminal-output completed))
            (:opsv/effect-transactions (terminal-output recovered))))
     (is (false? (get-in (terminal-output recovered) [:opsv/evidence-bundle :evidence/outcome :outcome/success])))

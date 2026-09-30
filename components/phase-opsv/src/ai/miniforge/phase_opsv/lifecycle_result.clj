@@ -50,15 +50,23 @@
 
 ;------------------------------------------------------------------------------ Layer 1
 
-(defn ^{:stratum 1} complete-phase
+(defn- ^{:stratum 1} with-completion-metadata [ctx success? end-time duration-ms]
+  (-> ctx
+      (assoc-in [:phase :ended-at] end-time)
+      (assoc-in [:phase :duration-ms] duration-ms)
+      (assoc-in [:phase :status] (if success? :completed :failed))
+      (assoc-in [:phase :metrics] (completed-metrics duration-ms))
+      (assoc-in [:phase :result :metrics :duration-ms] duration-ms)))
+
+;------------------------------------------------------------------------------ Layer 2
+
+(defn ^{:stratum 2} complete-phase
   [ctx phase-key success? end-time duration-ms]
-  (let [persisted (persist-evidence ctx)
+  (let [completed (with-completion-metadata ctx success? end-time duration-ms)
+        persisted (persist-evidence completed)
         success? (and success? (= :success (get-in persisted [:phase :result :status])))]
     (cond-> (-> persisted
-              (assoc-in [:phase :ended-at] end-time)
-              (assoc-in [:phase :duration-ms] duration-ms)
               (assoc-in [:phase :status] (if success? :completed :failed))
-              (assoc-in [:phase :metrics] (completed-metrics duration-ms))
               (assoc-in [:phase :result :metrics :duration-ms] duration-ms))
     success?
       (update-in [:execution :phases-completed] (fnil conj []) phase-key))))

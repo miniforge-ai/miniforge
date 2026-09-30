@@ -34,7 +34,8 @@
        (update-in failure [:anomaly/data :opsv/phase-output] merge published)))))
 
 (defn- ^{:stratum 0} persist-result [ctx phase-result]
-  (let [persisted (runtime/persist (assoc-in ctx [:phase :result] phase-result))]
+  (let [completed-result (assoc phase-result :metrics (get-in ctx [:phase :result :metrics]))
+        persisted (runtime/persist (assoc-in ctx [:phase :result] completed-result))]
     (if-let [failure (checkpoint/persistence-failure persisted)]
       (assoc-in failure [:anomaly/data :opsv/phase-output]
                 (get-in phase-result [:output :anomaly/data :opsv/phase-output]))

@@ -16,7 +16,9 @@
   (if (and (= :opsv/actuate (get-in ctx [:phase :name]))
            (= :error (get-in ctx [:phase :result :status])))
     (assoc-in ctx [:execution/input :opsv/terminal-snapshot]
-              (snapshot/encode ctx :terminal-checkpoint (select-keys (:phase ctx) [:name :result])))
+              (snapshot/encode ctx :terminal-checkpoint
+                               (select-keys (:phase ctx)
+                                            [:name :result :status :ended-at :duration-ms :metrics])))
     ctx))
 
 (defn ^{:stratum 0} restore-terminal [ctx]
