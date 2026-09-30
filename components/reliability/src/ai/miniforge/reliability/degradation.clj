@@ -149,19 +149,16 @@
 
 (defn ^{:stratum 2} enter-safe-mode!
   [manager trigger details]
-  (let [current (current-mode manager)]
-    (when (not= current :safe-mode)
-      (let [event-kw (case trigger
+  (let [event-kw (case trigger
                        :emergency-stop :emergency-stop
                        :unknown-failures :unknown-failures
                        :dependency-unavailable :dependency-unavailable
                        :dependency-operator-action :dependency-operator-action
                        :manual :manual
                        :emergency-stop)]
-        (transition! manager
-                     (config/signal :safe-mode event-kw (or details (name trigger))
-                                    {:safe-mode-trigger trigger :safe-mode-details details})))))
-  (current-mode manager))
+    (transition! manager
+                 (config/signal :safe-mode event-kw (or details (name trigger))
+                                {:safe-mode-trigger trigger :safe-mode-details details}))))
 
 (defn ^{:stratum 2} exit-safe-mode!
   "Exit safe-mode. Requires explicit justification per N8 §3.4.3.
@@ -199,10 +196,12 @@
   ([manager budget-state]
    (evaluate-and-transition! manager budget-state {}))
   ([manager budget-state dependency-health]
-   (let [current (current-mode manager)
-         proposed (recommendation budget-state dependency-health (:config manager))
-         signal (applicable-signal current budget-state proposed)]
-     (if signal (transition! manager signal) current))))
+   (let [state (:fsm-state manager)]
+     (locking state
+       (let [current (current-mode manager)
+             proposed (recommendation budget-state dependency-health (:config manager))
+             signal (applicable-signal current budget-state proposed)]
+         (if signal (transition! manager signal) current))))))
 
 ;------------------------------------------------------------------------------ Rich Comment
 (comment

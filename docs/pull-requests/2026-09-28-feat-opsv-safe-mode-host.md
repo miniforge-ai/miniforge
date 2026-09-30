@@ -40,9 +40,9 @@ product-provider boundary. MiniForge Core remains usable without OPSV installed.
 Both Miniforge and Core distributable builds pass. The packaged host tests prove
 that a stop during provider preflight prevents POST, and event publication failure
 does not prevent local fences and abort requests. Core starts without OPSV.
-All three reliability consumers pass 36 tests / 101 assertions, including budget
-and concurrent-entry regressions. The packaged host and boundary suites pass
-eight tests / 31 assertions. Polylith and kondo pass. Scoped reliability and CLI
+Reliability consumers cover budget and concurrent entry, evaluation, and exit
+regressions. Packaged host and boundary suites exercise serialized transitions.
+Polylith and kondo pass. Scoped reliability and CLI
 runner standards report no findings across 22 and 40 files respectively.
 
 ## Standards adversarial pass

@@ -20,7 +20,28 @@
 (defn- ^{:stratum 0} reenter! [manager]
   (reliability/enter-safe-mode! manager :manual "new incident"))
 
+(defn- ^{:stratum 0} evaluate-exhausted! [manager]
+  (reliability/evaluate-degradation! manager
+    {[:latency :critical :7d] {:error-budget/tier :critical :error-budget/remaining 0.0}}))
+
 ;------------------------------------------------------------------------------ Layer 1
+
+(deftest ^{:stratum 1} entry-decisions-wait-for-concurrent-exit-test
+  (doseq [operation [reenter! evaluate-exhausted!]]
+    (let [manager (reliability/create-degradation-manager nil)
+          state (:fsm-state manager)
+          started (promise)]
+      (reenter! manager)
+      (let [request (locking state
+                      (let [pending (future (deliver started true) (operation manager))]
+                        (is (= true (deref started 2000 :timeout)))
+                        (is (= :blocked (deref pending 100 :blocked)))
+                        (exit! manager)
+                        pending))]
+        (try
+          (is (= :safe-mode (deref request 2000 :timeout)))
+          (is (= :safe-mode (reliability/degradation-mode manager)))
+          (finally (future-cancel request)))))))
 
 (defn- ^{:stratum 1} assert-concurrent-operation [manager entered release operation]
   (let [exiting (future (exit! manager))]
