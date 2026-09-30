@@ -41,7 +41,7 @@
 ;------------------------------------------------------------------------------ Layer 1
 
 (defn- ^{:stratum 1} snapshot-references [output]
-  (vec (keep (:opsv/phase-artifact-ids output) snapshot-kinds)))
+  (vec (keep (get output :opsv/phase-artifact-ids {}) snapshot-kinds)))
 
 (defn- ^{:stratum 1} attach-reference [output id kind]
   (-> output
@@ -52,6 +52,11 @@
   (mapv (partial record ctx output) (get phase-materials phase-key [])))
 
 ;------------------------------------------------------------------------------ Layer 2
+
+(defn ^{:stratum 2} confirmed-output [output]
+  (if (contains? output :opsv/metric-snapshot-artifact-refs)
+    (assoc output :opsv/metric-snapshot-artifact-refs (snapshot-references output))
+    output))
 
 (defn ^{:stratum 2} attach [output artifact]
   (let [id (:artifact/id artifact)

@@ -49,7 +49,7 @@
 
 (defn ^{:stratum 2} validate-context [ctx]
   (cond
-    (= :finalized (assembly-status ctx))
+    (and (enabled? ctx) (= :finalized (assembly-status ctx)))
     (anomaly/anomaly :invalid-input (msg/t :evidence/assembly-finalized) {})
     (and (enabled? ctx) (not (valid-base? ctx)))
     (anomaly/anomaly :invalid-input (msg/t :evidence/invalid-finalization-config) {})

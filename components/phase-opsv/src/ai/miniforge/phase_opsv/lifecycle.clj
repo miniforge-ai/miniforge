@@ -25,6 +25,7 @@
    [ai.miniforge.phase-opsv.events :as events]
    [ai.miniforge.phase-opsv.finalization-boundary :as finalization]
    [ai.miniforge.phase-opsv.finalization-config :as finalization-config]
+   [ai.miniforge.phase-opsv.flow :as flow]
    [ai.miniforge.phase-opsv.lifecycle-result :as lifecycle-result]))
 
 ;------------------------------------------------------------------------------ Layer 0
@@ -76,8 +77,8 @@
   [phase-key transform config ctx]
   (let [runtime-ctx (isolate-runtime-adapter ctx)
         assembled-ctx (evidence-runtime/ensure-assembly runtime-ctx)
-        prepared-ctx (if (anomaly/anomaly? assembled-ctx) assembled-ctx
-                        (finalization/prepare assembled-ctx))
+        active-ctx (flow/continue assembled-ctx artifacts/prepare)
+        prepared-ctx (flow/continue active-ctx finalization/prepare)
         start-time (System/currentTimeMillis)
         prepared? (not (anomaly/anomaly? prepared-ctx))
         output (if prepared?
