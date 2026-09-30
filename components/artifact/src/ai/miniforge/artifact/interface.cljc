@@ -52,7 +52,8 @@
   "Synchronously publish an immutable artifact to an existing canonical directory.
    Returns the artifact only after file and ancestor-directory durability barriers.
    The same ID/content is retryable; different content is never overwritten.
-   Transit-round-trippable artifacts are limited to 16 MiB. Failures are anomalies;
+   Eager data collections and Transit scalars are limited to 16 MiB and 128 levels.
+   Deferred sequences are rejected before serialization. Failures are anomalies;
    an unconfirmed write may already exist and must be retried with identical data.
    The host must exclusively control the directory and its ancestors; no symlinks.
    Filesystems without hard links or directory force support fail closed.
