@@ -34,8 +34,10 @@
   "Synchronously publish an immutable artifact to an existing canonical directory.
    Returns the artifact only after file and ancestor-directory durability barriers.
    The same ID/content is retryable; different content is never overwritten.
-   Eager data collections and Transit scalars are limited to 16 MiB and 128 levels.
-   Deferred sequences are rejected before serialization. Failures are anomalies;
+   Accepts nil, booleans, strings, keywords, symbols, numbers, UUIDs, instants,
+   maps, vectors, sets and lists only when they round-trip with Clojure equality.
+   Java arrays and deferred sequences are refused; use vectors for binary values.
+   Encoding is limited to 16 MiB and 128 levels. Failures are anomalies;
    an unconfirmed write may already exist and must be retried with identical data.
    The host must exclusively control the directory and its ancestors; no symlinks.
    Filesystems without hard links or directory force support fail closed.

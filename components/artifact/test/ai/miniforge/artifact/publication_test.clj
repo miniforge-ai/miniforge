@@ -120,10 +120,10 @@
 (deftest ^{:stratum 1} codec-refuses-oversize-or-nonportable-content-test
   (with-directory
     (fn [directory]
-      (doseq [content [(Object.) (apply str (repeat 2048 "x"))]]
+      (doseq [content [(Object.) (byte-array [1 2 3]) (apply str (repeat 2048 "x"))]]
         (let [result (with-redefs [codec/maximum-bytes 1024]
                        (artifact/publish! directory (assoc (record) :artifact/content content)))]
-          (is (anomaly/anomaly? result))))
+          (is (= :invalid-input (:anomaly/type result)))))
       (is (empty? (seq (.listFiles (io/file directory))))))))
 
 (deftest ^{:stratum 1} concurrent-publishers-never-replace-a-winner-test
