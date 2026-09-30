@@ -42,7 +42,7 @@ The six terminal tests cover uncertain POST, confirmed success, and transient
 and persistent audit failure. They cover checkpoint recovery without a runtime
 store, repeated recovery, and refusal of nonterminal recovery inputs.
 Artifact tests also prove exact Instant type and nanosecond round trips.
-Both phase consumers pass 68 tests / 518 assertions. The rebuilt CLI passes
+Both phase-consuming projects pass their complete OPSV suites. The rebuilt CLI passes
 14 checkpoint/terminal/finalization tests / 147 assertions. A disk round trip uses
 the same public timestamp-normalization function as shared checkpoints.
 It removes runtime stores and phase state, then restores exact outcomes without provider replay.
