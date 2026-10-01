@@ -9,7 +9,6 @@
             [ai.miniforge.cli.messages :as messages]
             [ai.miniforge.event-stream.interface :as events]
             [ai.miniforge.workflow-resume.interface :as resume]
-            [babashka.fs :as fs]
             [clojure.test :refer [deftest is]]))
 
 ;------------------------------------------------------------------------------ Layer 0
@@ -46,13 +45,10 @@
 
 (deftest ^{:stratum 2} discovery-is-empty-on-first-run-and-skips-unreadable-workflows
   (with-redefs [app-config/events-dir (constantly "unused-fixture-directory")
-                fs/exists? (constantly false)]
+                events/stored-workflow-ids (constantly [])]
     (is (empty? (history/newest-first))))
   (with-redefs [app-config/events-dir (constantly "unused-fixture-directory")
-                fs/exists? (constantly true)
-                fs/list-dir (constantly ["old" "broken" "new"])
-                fs/directory? (constantly true)
-                fs/file-name identity
+                events/stored-workflow-ids (constantly ["old" "broken" "new"])
                 summary/read-workflow read-fixture]
     (is (= ["new" "old"] (mapv :workflow-id (history/newest-first))))))
 
