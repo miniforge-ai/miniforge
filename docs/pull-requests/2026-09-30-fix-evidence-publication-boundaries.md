@@ -12,6 +12,8 @@ Report invalid, tampered, and unsealed bundles without presenting their ordinary
 Do not silently repair legacy evidence or overwrite an export destination on validation failure.
 Distinguish existing unreadable files from absent sources; show/export refuse the
 former explicitly rather than reporting them as missing.
+Only EDN source files enter directory validation; JSON/HTML exports and unrelated
+files do not make an otherwise empty evidence directory appear invalid.
 Serialize the exact validated value instead of rereading a mutable source file.
 Use canonical EDN and preserve nanosecond instant precision when reading it back.
 Use the bounded public file reader from #1961; reject trailing forms and input
@@ -25,6 +27,9 @@ This implements the consumer-boundary finding from #1957.
 The shared publication validator also refuses correctly hashed evidence with
 exposed secrets or understated sensitivity, PII, or treatment declarations.
 It checks the policy from merged #1981 without modifying or resealing evidence.
+Shared redaction excludes plaintext SSNs from values, keys, and metadata, and
+recorded SSN findings require protected treatment. Truthful flags or a claimed
+redacted/encrypted treatment never authorize exporting an exposed SSN.
 
 ## Standards adversarial pass
 
@@ -39,9 +44,9 @@ Keep every namespace within three strata and every commit below its reportable b
 
 Packaged CLI and manager tests verify valid round trips and rejection before export writes.
 Tampering and missing seals leave existing destinations unchanged.
-Evidence consumers and a CLI build pass. CLI regressions pass 20 tests / 80
-assertions; packaged CLI and publication regressions pass 24 tests / 114 assertions.
-The repository-root standards scan covers 4,207 files with no violations.
+Evidence and redaction consumers and a CLI build pass. CLI regressions pass
+20 tests / 81 assertions; packaged CLI, publication, compliance and SSN coverage
+passes 31 tests / 199 assertions. The root standards scan reports no violations.
 Run normal hooks before each commit and refresh verification before merge.
 Current-head review and all CI, including Build, remain mandatory merge gates.
 Legacy nil/false detail fields retain canonical fallbacks, including status,

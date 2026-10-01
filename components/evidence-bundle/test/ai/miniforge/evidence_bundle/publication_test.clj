@@ -30,6 +30,10 @@
   (let [changed (merge (dissoc bundle :evidence/content-hash) overrides)]
     (assoc changed :evidence/content-hash (evidence/content-hash changed))))
 
+(defn- ^{:stratum 0} declared-ssn [handling]
+  {:test/text "000-00-0000" :compliance/sensitive-data true
+   :evidence/contains-pii? true :compliance/pii-handling handling})
+
 ;------------------------------------------------------------------------------ Layer 1
 
 (deftest ^{:stratum 1} manager-export-checks-seal-before-writing
@@ -75,10 +79,11 @@
   (let [sealed (sealed-bundle)
         file (java.io.File/createTempFile "evidence-compliance-" ".edn")]
     (try
-      (doseq [overrides [{:test/text "AKIAIOSFODNN7EXAMPLE"}
-                        {:test/text "000-00-0000"}
-                        {:compliance/sensitive-data true :evidence/contains-pii? true
-                         :compliance/sensitive-findings [{:finding/type :payment-card}]}]]
+      (doseq [overrides (concat (map declared-ssn [:none :redacted :encrypted])
+                               [{:test/text "AKIAIOSFODNN7EXAMPLE"}
+                                {:test/text "000-00-0000"}
+                                {:compliance/sensitive-data true :evidence/contains-pii? true
+                                 :compliance/sensitive-findings [{:finding/type :payment-card}]}])]
         (let [bundle (rehash-with sealed overrides)
               report (evidence/validate-published-bundle bundle)]
           (is (:valid? (evidence/validate-canonical-bundle bundle)))

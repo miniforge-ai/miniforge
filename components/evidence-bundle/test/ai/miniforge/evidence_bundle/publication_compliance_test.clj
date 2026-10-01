@@ -33,13 +33,14 @@
       :nested (assoc base :finding/context [(with-meta [] secret)]))))
 
 (deftest ^{:stratum 1} fresh-secrets-are-redacted-and-declared
-  (let [input (candidate :description synthetic-secret)
-        prepared (compliance/prepare input)]
-    (is (redaction/clean? prepared))
-    (is (true? (:compliance/sensitive-data prepared)))
-    (is (= :redacted (:compliance/pii-handling prepared)))
-    (is (compliance/accurate-declarations? prepared))
-    (is (= synthetic-secret (:description input)))))
+  (doseq [secret [synthetic-secret "000-00-0000"]]
+    (let [input (candidate :description secret)
+          prepared (compliance/prepare input)]
+      (is (redaction/clean? prepared))
+      (is (true? (:compliance/sensitive-data prepared)))
+      (is (= :redacted (:compliance/pii-handling prepared)))
+      (is (compliance/accurate-declarations? prepared))
+      (is (= secret (:description input))))))
 
 (deftest ^{:stratum 1} innocuous-content-retains-none-treatment
   (let [prepared (compliance/prepare (candidate))]
@@ -50,7 +51,7 @@
 ;------------------------------------------------------------------------------ Layer 2
 
 (deftest ^{:stratum 2} recorded-secrets-require-protected-treatment
-  (doseq [kind [:aws-access-key :embedded-secret :payment-card]]
+  (doseq [kind [:aws-access-key :embedded-secret :ssn :payment-card]]
     (let [prepared (compliance/prepare (recorded kind))]
       (is (= :redacted (:compliance/pii-handling prepared)))
       (is (compliance/accurate-declarations? prepared))

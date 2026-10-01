@@ -35,7 +35,7 @@
   #{:email :ssn :payment-card})
 
 (def ^{:stratum 0} ^:private secret-finding-types
-  #{:aws-access-key :embedded-secret :payment-card})
+  #{:aws-access-key :embedded-secret :ssn :payment-card})
 
 (defn- ^{:stratum 0} pattern-finding [bundle {:finding/keys [type pattern]}]
   (when (pattern-scan/present? pattern bundle)

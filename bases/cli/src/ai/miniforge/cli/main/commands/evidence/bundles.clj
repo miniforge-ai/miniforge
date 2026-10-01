@@ -34,16 +34,8 @@
 (defn ^{:stratum 0} evidence-dir []
   (str (app-config/home-dir) "/evidence"))
 
-(defn- ^{:stratum 0} load-with-exception-handling
-  "Load an evidence bundle from an EDN file. Returns nil on failure."
-  [file]
-  (try+
-    (when (str/ends-with? (.getName file) ".edn")
-      (evidence/read-bundle-edn file))
-    (catch InterruptedException interrupted
-      (.interrupt (Thread/currentThread))
-      (throw interrupted))
-    (catch Exception _ nil)))
+(defn- ^{:stratum 0} evidence-file? [file]
+  (and (.isFile file) (str/ends-with? (.getName file) ".edn")))
 
 (defn- ^{:stratum 0} artifact-entry [artifact]
   (let [type (get artifact :artifact/type (messages/t :evidence/unknown-value))
@@ -86,6 +78,17 @@
 
 ;------------------------------------------------------------------------------ Layer 1
 
+(defn ^{:stratum 1} load-bundle-from-file
+  "Load an evidence bundle from an EDN file. Returns nil on failure."
+  [file]
+  (try+
+    (when (evidence-file? file)
+      (evidence/read-bundle-edn file))
+    (catch InterruptedException interrupted
+      (.interrupt (Thread/currentThread))
+      (throw interrupted))
+    (catch Exception _ nil)))
+
 (defn- ^{:stratum 1} display-bundle! [diagnostic-id bundle]
   (when (validation/accepted? diagnostic-id bundle)
     (let [id (display/style (str (:evidence-bundle/id bundle)) :bold true)
@@ -109,14 +112,11 @@
                  :entry-fn artifact-entry}
                 {:key :bundle/phases :header :evidence/show-phases}]}))
 
-(defn ^{:stratum 1} load-bundle-from-file [file]
-  (load-with-exception-handling file))
-
 (defn ^{:stratum 1} scan-evidence-dir []
   (let [dir (io/file (evidence-dir))]
     (when (.exists dir)
       (->> (.listFiles dir)
-           (filter #(.isFile %))
+           (filter evidence-file?)
            (sort-by #(.lastModified %) >)
            vec))))
 
