@@ -27,6 +27,8 @@ comments and exception paths. Require kondo, Polylith, strata, normal hooks,
 settled current-head review and all CI checks before merge. No deployment step
 is required. Keep commits within 200 and this PR within 600 reportable lines.
 
-Focused JVM and rebuilt packaged checks pass 21 tests and 74 assertions each.
+Focused JVM and rebuilt packaged checks pass 22 tests and 75 assertions each.
 Tests cover deferred dashboard setup order, missing history, terminal status,
 shared reconstruction fixtures, and fatal/interruption propagation.
+Reconstruction anomalies retain their original human-readable message while
+preserving structured thrown data; a command-level regression pins this behavior.

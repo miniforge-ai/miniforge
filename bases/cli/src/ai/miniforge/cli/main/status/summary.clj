@@ -15,7 +15,7 @@
 (defn- ^{:stratum 0} reconstruct! [directory workflow-id]
   (let [context (resume/reconstruct-context directory workflow-id)]
     (if (anomaly/anomaly? context)
-      (throw+ context)
+      (throw+ context (:anomaly/message context))
       context)))
 
 (defn- ^{:stratum 0} stale-running? [last-updated]

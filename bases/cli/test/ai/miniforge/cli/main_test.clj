@@ -21,6 +21,8 @@
    [ai.miniforge.cli.app-config :as app-config]
    [ai.miniforge.cli.messages :as messages]
    [ai.miniforge.cli.main :as sut]
+   [ai.miniforge.cli.main.display :as display]
+   [ai.miniforge.anomaly.interface :as anomaly]
    [ai.miniforge.cli.main.launchers :as launchers]
    [ai.miniforge.cli.main.status.summary :as summary]
    [ai.miniforge.cli.main.util :as util]
@@ -108,6 +110,15 @@
       (is (= {:author {:alias :a} :poll-interval {:alias :p} :repo {}}
              (:spec (first entries)))
           "Spec includes --author, --poll-interval, and --repo"))))
+
+(deftest ^{:stratum 0} reconstruction-failure-preserves-the-human-readable-message
+  (let [message (messages/t :status/value-unknown)
+        failure (anomaly/anomaly :not-found message {})]
+    (with-redefs [es/read-workflow-events-by-id (constantly [])
+                  wr/reconstruct-context (constantly failure)
+                  display/print-error identity]
+      (is (= (messages/t :status/read-failed {:message message})
+             (sut/status-cmd {:workflow-id "missing"}))))))
 
 ;; pr-monitor-cmd helpers
 (def ^{:stratum 0} ^:private test-bounds {:min-poll-interval-s 5 :max-poll-interval-s 3600})
