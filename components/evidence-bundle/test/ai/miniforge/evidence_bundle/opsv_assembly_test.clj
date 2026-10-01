@@ -21,6 +21,7 @@
    [ai.miniforge.evidence-bundle.opsv-finalization-candidate :as candidate]
    [ai.miniforge.evidence-bundle.opsv-finalization-publication :as publication]
    [ai.miniforge.evidence-bundle.opsv-test-fixtures :as f]
+   [ai.miniforge.evidence-bundle.scanner :as scanner]
    [ai.miniforge.response.interface :as response]
    [clojure.test :refer [deftest is testing]]
    [malli.core :as m]))
@@ -35,6 +36,9 @@
 
 (defn- ^{:stratum 0} seal-at-fixed-time [seal bundle _]
   (seal bundle #inst "2026-09-30T00:00:00Z"))
+
+(defn- ^{:stratum 0} failed-scan [_]
+  (throw (IllegalStateException. "injected scanner failure")))
 
 (defn ^{:stratum 0} error-codes
   [result]
@@ -59,6 +63,21 @@
     (is (= #{event-id} (:opsv/event-refs result)))))
 
 ;------------------------------------------------------------------------------ Layer 1
+
+(deftest ^{:stratum 1} sealing-scans-redacts-and-records-compliance-before-hashing
+  (let [[store id] (accumulated-store f/opsv-evidence)
+        base (assoc-in f/base-bundle [:evidence/intent :intent/description] "AKIAABCDEFGHIJKLMNOP")
+        bundle (evidence/finalize-opsv-evidence! store id base f/opsv-evidence (set f/artifact-ids))]
+    (is (= "[REDACTED]" (get-in bundle [:evidence/intent :intent/description])))
+    (is (true? (:compliance/sensitive-data bundle)))
+    (is (= :redacted (:compliance/pii-handling bundle)))
+    (is (:valid? (evidence/validate-canonical-bundle bundle))))
+  (let [[store id] (accumulated-store f/opsv-evidence)
+        before @store
+        result (with-redefs [scanner/scan-artifact failed-scan]
+                 (evidence/finalize-opsv-evidence! store id f/base-bundle f/opsv-evidence (set f/artifact-ids)))]
+    (is (response/anomaly-map? result))
+    (is (= before @store))))
 
 (deftest ^{:stratum 1} concurrent-accumulation-invalidates-the-prepared-candidate
   (let [[store bundle-id] (accumulated-store f/opsv-evidence)
@@ -113,6 +132,7 @@
         tampered (assoc-in bundle [:evidence/outcome :outcome/success] false)]
     (is (response/anomaly-map? (evidence/restore-finalized-opsv-bundle! restored tampered (set f/artifact-ids))))
     (is (= snapshot @restored))
+    (swap! restored assoc-in [id :opsv.assembly/bundle] bundle)
     (is (= bundle (evidence/restore-finalized-opsv-bundle! restored bundle (set f/artifact-ids))))
     (is (= :finalized (:opsv.assembly/status (evidence/get-opsv-assembly restored id))))
     (is (= bundle (evidence/restore-finalized-opsv-bundle! restored bundle (set f/artifact-ids))))
