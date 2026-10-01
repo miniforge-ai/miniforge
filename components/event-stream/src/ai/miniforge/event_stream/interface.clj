@@ -691,8 +691,8 @@
    :control-action/requested before and :control-action/executed after.
    On RBAC denial returns {:status :denied :reason string :anomaly map}
    and runs no execution-fn. On authorization, runs execution-fn and
-   returns its result wrapped via response/success, or
-   response/failure on a thrown exception."
+   preserves structured success/failure results. Anomalies and thrown exceptions
+   become response/failure; only unstructured values use response/success."
   control/execute-control-action!)
 
 (def ^{:stratum 0} requires-approval?

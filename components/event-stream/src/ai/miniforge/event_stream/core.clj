@@ -928,14 +928,15 @@
 ;; Control action events (N8)
 (defn ^{:stratum 2} control-action-requested [stream workflow-id action-id action-type & [requester]]
   (-> (create-envelope stream :control-action/requested workflow-id
-                       (str "Control action " (name action-type) " requested"))
+                       (messages/t :control/requested
+                                   {:action-type (if (keyword? action-type) (name action-type) (pr-str action-type))}))
       (assoc :action/id action-id
              :action/type action-type)
       (cond-> requester (assoc :action/requester requester))))
 
 (defn ^{:stratum 2} control-action-executed [stream workflow-id action-id & [result]]
   (-> (create-envelope stream :control-action/executed workflow-id
-                       (str "Control action " action-id " executed"))
+                       (messages/t :control/executed {:action-id action-id}))
       (assoc :action/id action-id)
       (cond-> result (assoc :action/result result))))
 

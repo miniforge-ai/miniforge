@@ -1,4 +1,4 @@
-;; Copyright 2025 miniforge.ai
+;; Copyright 2025-2026 Christopher Lester (christopher@miniforge.ai)
 ;;
 ;; Licensed under the Apache License, Version 2.0 (the "License");
 ;; you may not use this file except in compliance with the License.
@@ -14,12 +14,13 @@
 (ns ai.miniforge.web-dashboard.server.handlers.control
   "Control-intervention chain for dashboard control actions: writes
    operator intervention events and routes an authorized control action
-   onto the governed operator channel. Depends only on the sibling
-   `support` namespace."
+   onto the governed operator channel. Uses public component contracts
+   and the dashboard's sibling support namespaces."
   (:require
    [ai.miniforge.anomaly.interface :as anomaly]
    [ai.miniforge.event-stream.interface :as event-stream]
    [ai.miniforge.response.interface :as response]
+   [ai.miniforge.web-dashboard.messages :as messages]
    [ai.miniforge.web-dashboard.server.responses :as responses]
    [ai.miniforge.web-dashboard.server.handlers.support :as support]))
 
@@ -46,11 +47,13 @@
         :intervention/requested-by requested-by
         :intervention/request-source :dashboard})
       (catch Exception e
+        (when (instance? InterruptedException e)
+          (.interrupt (Thread/currentThread)))
         (support/make-anomaly :anomalies/fault
-                              (str "Intervention request failed: " (ex-message e))
+                              (messages/t :control/intervention-failed {:error (ex-message e)})
                               {:workflow-id workflow-id :command command})))
     (support/make-anomaly :anomalies/incorrect
-                          (str "Unknown workflow command: " (pr-str command))
+                          (messages/t :control/unknown-command {:command (pr-str command)})
                           {:workflow-id workflow-id
                            :supported-commands (vec (sort (keys support/control-intervention-by-command)))})))
 
@@ -63,7 +66,23 @@
                              (:reason auth-result)
                              {:action-type action-type}))))
 
+(defn- ^{:stratum 0} failed-intervention? [result]
+  (or (anomaly/any-anomaly? result) (response/error? result)))
+
+(defn- ^{:stratum 0} http-result [result]
+  ;; Rich anomaly data stays in audit evidence, not the public JSON response.
+  (if (response/success? result)
+    result
+    (response/error (messages/t :control/execution-failed))))
+
 ;------------------------------------------------------------------------------ Layer 1
+
+(defn- ^{:stratum 1} execution-response [result]
+  (let [succeeded? (response/success? result)
+        http-status (if succeeded? 200 500)
+        action-status (if succeeded? :executed :failed)
+        public-result (http-result result)]
+    (assoc (responses/json-response {:status action-status :result public-result}) :status http-status)))
 
 (defn ^{:stratum 1} execute-via-command!
   "Execution function that routes an authorized control action onto the
@@ -75,18 +94,13 @@
   ;; the operator channel directly, without touching dashboard state.
   [_state workflow-id action]
   (let [cmd (name (:action/type action))
-        ;; Same server-side-only rule as command-requester: the action's
-        ;; requester came from the request body and is unauthenticated
-        ;; (miniforge#1460), so it must not become the governed
-        ;; intervention's recorded identity. Attribute to the surface.
+        ;; Both structured and legacy controls retain server-owned attribution.
         result (request-workflow-intervention!
                 workflow-id
                 cmd
                 (support/command-requester))]
-    (when (anomaly/anomaly? result)
-      (response/failure (:anomaly/message result)
-                        {:data (:anomaly/data result)}))
-    (when-not (anomaly/anomaly? result)
+    (if (failed-intervention? result)
+      result
       {:command cmd
        :workflow-id workflow-id
        :intervention-id (str (:intervention/id result))})))
@@ -99,4 +113,4 @@
   (let [es (:event-stream @state)
         result (event-stream/execute-control-action!
                 es action (partial execute-via-command! state workflow-id))]
-    (responses/json-response {:status "executed" :result result})))
+    (execution-response result)))

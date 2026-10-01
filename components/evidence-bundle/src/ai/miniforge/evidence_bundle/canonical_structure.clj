@@ -31,11 +31,12 @@
     [{:code :invalid-opsv-evidence}]))
 
 (defn- ^{:stratum 0} semantic-intent-errors [bundle]
-  (when-let [semantic (:evidence/semantic-validation bundle)]
-    (when-not (and (contains? domain/intent-types (:semantic-validation/declared-intent semantic))
-                  (contains? domain/intent-types (:semantic-validation/actual-behavior semantic))
-                  (= (get-in bundle [:evidence/intent :intent/type])
-                     (:semantic-validation/declared-intent semantic)))
+  (let [semantic (:evidence/semantic-validation bundle)]
+    (when (and semantic
+               (not (and (contains? domain/intent-types (:semantic-validation/declared-intent semantic))
+                         (contains? domain/intent-types (:semantic-validation/actual-behavior semantic))
+                         (= (get-in bundle [:evidence/intent :intent/type])
+                          (:semantic-validation/declared-intent semantic)))))
       [{:code :invalid-semantic-intent}])))
 
 (defn- ^{:stratum 0} semantic-count-errors [bundle]

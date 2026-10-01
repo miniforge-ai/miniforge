@@ -8,6 +8,7 @@
             [ai.miniforge.evidence-bundle.collector-projection :as projection]
             [ai.miniforge.evidence-bundle.producer-roundtrips :as roundtrips]
             [ai.miniforge.evidence-bundle.control-fixtures :as control-fixtures]
+            [ai.miniforge.evidence-bundle.governance-fixtures :as governance]
             [ai.miniforge.artifact.interface :as artifact]
             [ai.miniforge.evidence-bundle.phases :as phases]
             [ai.miniforge.evidence-bundle.schema.compliance :as compliance]
@@ -163,9 +164,20 @@
                  :evidence/release :evidence/observe]]
     (is (false? (valid? (assoc (base-bundle) field {})))))
   (doseq [field [:evidence/tool-invocations :evidence/pack-promotions
+                 :evidence/knowledge-inputs :evidence/gate-executions
                  :evidence/supervision-decisions :evidence/control-actions :evidence/rules-applied]]
     (is (valid? (assoc (base-bundle) field [])))
     (is (false? (valid? (assoc (base-bundle) field [{}]))))))
+
+(deftest ^{:stratum 1} canonical-governance-fields-reject-malformed-present-values
+  (doseq [field [:evidence/knowledge-inputs :evidence/gate-executions]
+          value [nil false 42 [nil] [{}]]]
+    (is (false? (valid? (assoc (base-bundle) field value))))))
+
+(deftest ^{:stratum 1} canonical-governance-records-accept-complete-values
+  (is (valid? (assoc (base-bundle)
+                     :evidence/knowledge-inputs [(governance/knowledge)]
+                     :evidence/gate-executions [(governance/gate)]))))
 
 (deftest ^{:stratum 1} structured-records-accept-complete-domain-values-test
   (let [at #inst "2026-09-30T00:00:00Z"
