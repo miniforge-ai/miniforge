@@ -17,6 +17,12 @@ OPSV finalization validates the candidate with that API before sealing or changi
 assembly state. Hash verification excludes both hash and signature per N6.
 Reject sealed base inputs instead of repairing or resealing them.
 Stamp compliance and sealing timestamps before calculating the content hash.
+Revalidate the actual scanned/redacted seal before CAS, including required
+event-scope links and outcome tier. Deferred artifact availability is rejected
+without realization. Scan failure cannot finalize the assembly.
+Shared card detection/redaction comes from merged #1963. Metadata-only changes
+also set redacted handling, and the seal regressions cover string/integral cards
+and metadata without relying on serialized scanning or ordinary map equality.
 Read-only recovery validates retained seals and reference correlation.
 Recovery can adopt an existing published seal without replacing its timestamps or digest.
 
@@ -41,3 +47,6 @@ Concurrent accumulation invalidates a prepared candidate instead of losing the
 new reference or sealing incomplete evidence. All three evidence consumers and
 the packaged canonical/assembly regressions pass. Polylith, kondo, strata and the
 component-wide standards scan pass; final-head review and CI remain merge gates.
+After integrating #1963 and the shared semantic rules, all three evidence consumers
+pass and the rebuilt packaged canonical/assembly suite passes 35 tests with 326
+assertions. The component standards scan reports zero findings across 62 files.

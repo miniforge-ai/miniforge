@@ -19,6 +19,13 @@ inside overlong digit groups. The public redaction interface remains the cross-c
 Walk original strings and integers for card findings, including numeric map keys;
 never combine separate numeric measurements into a card through serialization.
 Redaction removes integral PANs as well as text. Other numeric values retain their types.
+Cover 12–19 digit candidates and named card keys/values, including qualified names.
+Scalar keys and values share one shape-redaction path. Shared cleanliness checks inspect
+metadata throughout the value tree, including nested metadata, so scanner findings
+do not mistake metadata-only redaction for an unchanged value.
+Sorted maps and sets become hash collections during redaction: their comparators
+may only support the original scalar type, not the replacement string marker.
+Ordinary collection/record behavior and surviving values remain unchanged.
 
 ## Testing plan
 
@@ -26,7 +33,7 @@ Test known synthetic card numbers, invalid checksums, nesting, scanner labels,
 and redaction idempotency. Run redaction and evidence consumers serially, packaged
 Babashka tests, standards scans, normal hooks, review, and CI.
 All four redaction consumers and all three evidence consumers passed. The built
-CLI passed 51 tests / 647 assertions, including the collector regression that
+CLI passed 55 tests / 806 assertions, including the collector regression that
 initially exposed UUID false positives. Both component standards scans are clean.
 
 ## Deployment and related work

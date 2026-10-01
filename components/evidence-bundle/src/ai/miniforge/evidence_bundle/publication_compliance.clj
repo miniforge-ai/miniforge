@@ -11,7 +11,7 @@
 (defn ^{:stratum 0} prepare [bundle]
   (let [scan (scanner/scan-artifact bundle)
         redacted (redaction/redact bundle)
-        changed? (not= bundle redacted)
+        changed? (not (redaction/clean? bundle))
         sensitive? (boolean (or changed? (seq (:scan/findings scan)) (:compliance/sensitive-data bundle)))
         handling (if changed? :redacted (get bundle :compliance/pii-handling :none))]
     (-> redacted

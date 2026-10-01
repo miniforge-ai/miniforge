@@ -74,6 +74,15 @@
     (is (false? @realized?))
     (is (= before @store))))
 
+(deftest ^{:stratum 1} finalization-requires-published-fields-before-cas
+  (doseq [base [(dissoc f/base-bundle :evidence/event-links)
+                (update f/base-bundle :evidence/outcome dissoc :outcome/tier)]]
+    (let [[store id] (accumulated-store f/opsv-evidence)
+          before @store
+          result (evidence/finalize-opsv-evidence! store id base f/opsv-evidence (set f/artifact-ids))]
+      (is (response/anomaly-map? result))
+      (is (= before @store)))))
+
 (deftest ^{:stratum 1} redaction-cannot-publish-an-invalid-canonical-value
   (let [opsv (assoc-in f/opsv-evidence [:opsv/policy-proposals 0 :scaling :AKIAIOSFODNN7EXAMPLE] "test")
         [store id] (accumulated-store opsv)
@@ -96,6 +105,25 @@
                  (evidence/finalize-opsv-evidence! store id f/base-bundle f/opsv-evidence (set f/artifact-ids)))]
     (is (response/anomaly-map? result))
     (is (= before @store))))
+
+(deftest ^{:stratum 1} payment-cards-cannot-survive-the-published-seal
+  (doseq [card ["4111 1111 1111 1111" 4111111111111111 4111111111111111N]]
+    (let [[store id] (accumulated-store f/opsv-evidence)
+          base (assoc f/base-bundle :test/payment-card card)
+          bundle (evidence/finalize-opsv-evidence! store id base f/opsv-evidence (set f/artifact-ids))]
+      (is (= "[REDACTED]" (:test/payment-card bundle)))
+      (is (true? (:evidence/contains-pii? bundle)))
+      (is (= :redacted (:compliance/pii-handling bundle)))
+      (is (:valid? (evidence/validate-canonical-bundle bundle))))))
+
+(deftest ^{:stratum 1} metadata-only-redaction-is-recorded-in-the-seal
+  (let [[store id] (accumulated-store f/opsv-evidence)
+        base (assoc f/base-bundle :test/value (with-meta [] {:card 500000000009}))
+        bundle (evidence/finalize-opsv-evidence! store id base f/opsv-evidence (set f/artifact-ids))]
+    (is (= {:card "[REDACTED]"} (meta (:test/value bundle))))
+    (is (true? (:evidence/contains-pii? bundle)))
+    (is (= :redacted (:compliance/pii-handling bundle)))
+    (is (:valid? (evidence/validate-canonical-bundle bundle)))))
 
 (deftest ^{:stratum 1} concurrent-accumulation-invalidates-the-prepared-candidate
   (let [[store bundle-id] (accumulated-store f/opsv-evidence)

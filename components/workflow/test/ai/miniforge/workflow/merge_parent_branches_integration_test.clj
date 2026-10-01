@@ -15,7 +15,6 @@
 ;; WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 ;; See the License for the specific language governing permissions and
 ;; limitations under the License.
-
 (ns ai.miniforge.workflow.merge-parent-branches-integration-test
   "Integration tests for the v2 `merge-parent-branches!` orchestrator
    helper. Each test sets up a real git repo in a temp directory, runs
@@ -25,46 +24,26 @@
    histories, conflict surfacing)."
   (:require
    [babashka.fs :as fs]
-   [clojure.java.shell :as shell]
    [clojure.string :as str]
    [clojure.test :refer [deftest is testing use-fixtures]]
    [ai.miniforge.agent.interface :as agent]
    [ai.miniforge.dag-executor.interface :as dag]
    [ai.miniforge.response.interface :as response]
    [ai.miniforge.workflow.dag-orchestrator :as dag-orch]
-   [ai.miniforge.workflow.messages :as messages]))
+   [ai.miniforge.workflow.merge-parent-fixtures :refer [run-git! commit-file!]]
+   [ai.miniforge.workflow.dag-merge-anomaly :as merge-anomaly]))
+
+;------------------------------------------------------------------------------ Layer 0
 
 ;------------------------------------------------------------------------------ Fixture: temp git repo
+(def ^{:stratum 0} ^:dynamic *repo* nil)
 
-(def ^:dynamic *repo* nil)
+(def ^{:stratum 0} ^:dynamic *run-id* nil)
 
-(defn- run-git!
-  "Run a git command in `cwd`. Throws on non-zero exit so test setup
-   bugs surface immediately rather than as cryptic downstream failures.
-   The throw is dev-internal — it never reaches a user — but the
-   message is still routed through the workflow message catalog
-   (system-locale entries) so we have one place to audit / change
-   error wording."
-  [cwd & args]
-  (let [r (apply shell/sh "git" "-C" cwd args)]
-    (when-not (zero? (:exit r))
-      (throw (ex-info (messages/t :dag.merge.system/git-test-failure
-                                  {:args (str/join " " args)
-                                   :err  (:err r)})
-                      {:cwd cwd :args args :result r})))
-    r))
+(defn- ^{:stratum 0} branch-registry [entries]
+  (atom (reduce-kv dag/register-branch (dag/create-branch-registry) entries)))
 
-(defn- write-file! [cwd path content]
-  (let [f (java.io.File. ^String cwd ^String path)]
-    (.mkdirs (.getParentFile f))
-    (spit f content)))
-
-(defn- commit-file! [cwd path content message]
-  (write-file! cwd path content)
-  (run-git! cwd "add" path)
-  (run-git! cwd "commit" "-m" message))
-
-(defn temp-repo-fixture [f]
+(defn ^{:stratum 0} temp-repo-fixture [f]
   (let [repo (str (fs/create-temp-dir {:prefix "mpb-test-"}))]
     (try
       (run-git! repo "init" "-b" "main")
@@ -78,28 +57,27 @@
       (run-git! repo "config" "commit.gpgsign" "false")
       (run-git! repo "config" "tag.gpgsign" "false")
       (commit-file! repo "README.md" "initial\n" "init")
-      (binding [*repo* repo]
+      ;; Scratch paths are run-scoped; identical fixture inputs must not collide.
+      (binding [*repo* repo
+                *run-id* (str (random-uuid))]
         (f))
       (finally
         (try (fs/delete-tree repo) (catch Throwable _ nil))))))
 
-(use-fixtures :each temp-repo-fixture)
+;------------------------------------------------------------------------------ Layer 1
 
 ;------------------------------------------------------------------------------ Helpers
-
-(defn- ctx-with-registry
+(defn- ^{:stratum 1} ctx-with-registry
   "Build a context map shaped like the orchestrator's runtime context.
    Registers parents in the registry so resolve-multi-parent-base sees
    them, and points host-repo-path at *repo*."
   [parent-entries]
   {:execution/repo-path *repo*
    :execution/worktree-path *repo*
-   :workflow-id "test-run"
-   :dag/branch-registry (atom (reduce-kv dag/register-branch
-                                         (dag/create-branch-registry)
-                                         parent-entries))})
+   :workflow-id *run-id*
+   :dag/branch-registry (branch-registry parent-entries)})
 
-(defn- create-parent-branch!
+(defn- ^{:stratum 1} create-parent-branch!
   "Branch off main, commit a file, return to main. Used to set up
    parent branches with disjoint changes."
   [branch-name path content]
@@ -107,9 +85,36 @@
   (commit-file! *repo* path content (str "edit on " branch-name))
   (run-git! *repo* "checkout" "main"))
 
-;------------------------------------------------------------------------------ Tests: 2-parent happy path
+;------------------------------------------------------------------------------ Layer 2
 
-(deftest two-parent-disjoint-files-happy-path-test
+;------------------------------------------------------------------------------ Tests: branch unresolvable
+(deftest ^{:stratum 2} unregistered-branch-falls-back-to-default-test
+  (testing "When no parents are registered (orchestrator state shouldn't
+            allow this in production but defensive code is correct
+            anyway), merge-parent-branches! falls back to the spec
+            default branch."
+    (let [task-def {:task/id "task-c" :task/deps [:a :b]}
+          ;; Empty registry context
+          ctx (assoc (ctx-with-registry {}) :execution/opts {:branch "main"})
+          result (dag-orch/merge-parent-branches! ctx task-def)
+          data (:data result)]
+      (is (dag/ok? result))
+      (is (:single-parent? data))
+      (is (= :no-registered-parents (:fallback-reason data))))))
+
+;------------------------------------------------------------------------------ Tests: 2-parent happy path
+(deftest ^{:stratum 2} independent-fixtures-have-distinct-merge-scratch-paths-test
+  (let [first-id (:workflow-id (ctx-with-registry {}))
+        other-id (atom nil)
+        scratch-path #(merge-anomaly/temp-merge-worktree-path % "same-task" "same-input")]
+    (temp-repo-fixture #(reset! other-id (:workflow-id (ctx-with-registry {}))))
+    (is (uuid? (parse-uuid first-id)))
+    (is (uuid? (parse-uuid @other-id)))
+    (is (not= (scratch-path first-id) (scratch-path @other-id)))
+    (is (= first-id (:workflow-id (ctx-with-registry {})))
+        "replays within one fixture retain the same run identity")))
+
+(deftest ^{:stratum 2} two-parent-disjoint-files-happy-path-test
   (testing "Two parents touching disjoint files merge cleanly via -s ort.
             The result is a real merge commit; the namespaced ref points
             at it; the orchestrator returns dag/ok wrapping {:branch
@@ -124,7 +129,7 @@
           result (dag-orch/merge-parent-branches! ctx task-def)
           data (:data result)]
       (is (dag/ok? result))
-      (is (str/starts-with? (:branch data) "refs/miniforge/dag-base/test-run/"))
+      (is (str/starts-with? (:branch data) (str "refs/miniforge/dag-base/" *run-id* "/")))
       (is (string? (:commit-sha data)))
       (is (= 40 (count (:commit-sha data)))
           "commit SHA is full 40-char hex (rev-parse default)")
@@ -142,8 +147,7 @@
         (is (contains? files "src/b.txt"))))))
 
 ;------------------------------------------------------------------------------ Tests: ancestor collapse
-
-(deftest ancestor-collapses-to-single-parent-test
+(deftest ^{:stratum 2} ancestor-collapses-to-single-parent-test
   (testing "When parent A is an ancestor of parent B, A's contributions
             are already in B. The collapse algorithm drops A and
             returns single-parent fast path against B — no merge commit
@@ -170,8 +174,7 @@
           "and which surviving parent absorbed it"))))
 
 ;------------------------------------------------------------------------------ Tests: duplicate parent tips
-
-(deftest duplicate-tips-collapse-test
+(deftest ^{:stratum 2} duplicate-tips-collapse-test
   (testing "When two declared parents resolve to the same SHA (e.g.
             both branches advanced to the same commit), the duplicate
             collapses and the merge becomes single-parent."
@@ -189,8 +192,7 @@
           "duplicate tips collapse to one effective parent"))))
 
 ;------------------------------------------------------------------------------ Tests: unrelated histories
-
-(deftest unrelated-histories-anomaly-test
+(deftest ^{:stratum 2} unrelated-histories-anomaly-test
   (testing "When parents share no common ancestor (e.g. one came from a
             separate `git init`), v2 surfaces a typed anomaly rather than
             using `--allow-unrelated-histories`. This protects against
@@ -209,8 +211,7 @@
              (:anomaly/category result))))))
 
 ;------------------------------------------------------------------------------ Tests: conflict
-
-(deftest conflict-surfaces-unresolvable-via-resolution-loop-test
+(deftest ^{:stratum 2} conflict-surfaces-unresolvable-via-resolution-loop-test
   (testing "When two parents touch the same file with different content,
             the merge conflicts and Stage 2B routes to the resolution
             sub-workflow. With the default no-op stub agent (Stage 2C
@@ -235,7 +236,7 @@
           "no-op stub agent → curator finds the same conflict path on
            iteration 2 → recurring-conflict early-out per spec §6.1.2"))))
 
-(deftest conflict-resolves-end-to-end-via-injected-agent-test
+(deftest ^{:stratum 2} conflict-resolves-end-to-end-via-injected-agent-test
   (testing "Full end-to-end success path through merge-parent-branches!:
             a conflicted merge whose resolution-overrides inject a mock
             agent that resolves the markers should write the resolution
@@ -279,7 +280,7 @@
       (is (string? (:commit-sha data))
           "the resolution commit's SHA is the new merge base"))))
 
-(deftest auto-default-llm-backend-routes-through-agent-driven-edit-fn-test
+(deftest ^{:stratum 2} auto-default-llm-backend-routes-through-agent-driven-edit-fn-test
   (testing "Stage 2C wiring: when context has :llm-backend and no
             explicit :dag/resolution-overrides, the orchestrator's
             derive-resolution-overrides helper auto-builds an
@@ -324,26 +325,7 @@
           (is (true? (:resolved? (:data result))))
           (is (pos-int? (:resolution-iterations (:data result)))))))))
 
-;------------------------------------------------------------------------------ Tests: branch unresolvable
-
-(deftest unregistered-branch-falls-back-to-default-test
-  (testing "When no parents are registered (orchestrator state shouldn't
-            allow this in production but defensive code is correct
-            anyway), merge-parent-branches! falls back to the spec
-            default branch."
-    (let [task-def {:task/id "task-c" :task/deps [:a :b]}
-          ;; Empty registry context
-          ctx {:execution/repo-path *repo*
-               :execution/opts {:branch "main"}
-               :workflow-id "test-run"
-               :dag/branch-registry (atom (dag/create-branch-registry))}
-          result (dag-orch/merge-parent-branches! ctx task-def)
-          data (:data result)]
-      (is (dag/ok? result))
-      (is (:single-parent? data))
-      (is (= :no-registered-parents (:fallback-reason data))))))
-
-(deftest registered-branch-not-in-repo-anomaly-test
+(deftest ^{:stratum 2} registered-branch-not-in-repo-anomaly-test
   (testing "When a registered branch doesn't exist in the host repo
             (the registry is out of sync with reality), v2 surfaces a
             typed branch-unresolvable anomaly instead of crashing."
@@ -355,8 +337,7 @@
              (:anomaly/category result))))))
 
 ;------------------------------------------------------------------------------ Tests: idempotency cache
-
-(deftest idempotency-second-call-reuses-merge-ref-test
+(deftest ^{:stratum 2} idempotency-second-call-reuses-merge-ref-test
   (testing "Spec §7.2 idempotency: a second call to merge-parent-branches!
             with the same effective inputs reuses the existing namespaced
             ref instead of producing a fresh merge commit. Without the
@@ -388,8 +369,7 @@
           "first call sets up the cache; cache-hit? is false there"))))
 
 ;------------------------------------------------------------------------------ Tests: unsupported strategy
-
-(deftest unsupported-strategy-anomaly-test
+(deftest ^{:stratum 2} unsupported-strategy-anomaly-test
   (testing "Strategies not in supported-merge-strategies fail fast with
             a typed anomaly. As of Stage 4a, :git-merge and
             :sequential-merge are supported; any OTHER value still
@@ -414,8 +394,7 @@
           ":sequential-merge is now in the supported set"))))
 
 ;------------------------------------------------------------------------------ Tests: :sequential-merge
-
-(deftest sequential-merge-three-parent-disjoint-test
+(deftest ^{:stratum 2} sequential-merge-three-parent-disjoint-test
   (testing "Three parents touching disjoint files merge cleanly via the
             :sequential-merge strategy: TWO pairwise `ort` merges
             (N parents → N-1 merge invocations), each one a two-parent
@@ -453,7 +432,7 @@
         (is (= 3 (count parts))
             "final merge commit + 2 parents (sequential always 2-parent steps)")))))
 
-(deftest sequential-merge-conflict-on-the-merge-step-test
+(deftest ^{:stratum 2} sequential-merge-conflict-on-the-merge-step-test
   (testing "Two parents conflicting on the same file produce a conflict
             on the (single, since N=2 → N-1=1) merge step. The
             unresolvable anomaly's :merge/strategy preserves
@@ -478,6 +457,8 @@
              (:anomaly/category result)))
       (is (= :sequential-merge (:merge/strategy result))
           "strategy keyword preserved through resolution loop terminal"))))
+
+(use-fixtures :each temp-repo-fixture)
 
 ;------------------------------------------------------------------------------ Rich Comment
 (comment
