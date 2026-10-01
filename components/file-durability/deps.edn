@@ -1,0 +1,4 @@
+{:paths ["src" "resources"]
+ :deps {ai.miniforge/anomaly {:local/root "../anomaly"}
+        ai.miniforge/messages {:local/root "../messages"}}
+ :aliases {:test {:extra-paths ["test"] :extra-deps {}}}}
