@@ -26,6 +26,7 @@
   (:require
    [ai.miniforge.event-stream.core :as core]
    [ai.miniforge.event-stream.approval :as approval]
+   [ai.miniforge.event-stream.control-authorization :as authorization]
    [ai.miniforge.response.interface :as response]))
 
 ;------------------------------------------------------------------------------ Layer 0
@@ -100,24 +101,9 @@
     (:justification opts) (assoc :action/justification (:justification opts))
     (:parameters opts) (assoc :action/parameters (:parameters opts))))
 
-;; RBAC authorization
-(def ^{:stratum 0} target-type->category
-  "Map from target type to RBAC category keyword."
-  {:workflow :workflows
-   :agent    :agents
-   :fleet    :fleet})
-
-(defn ^{:stratum 0} authorization-granted
-  "Build a granted authorization result."
-  [reason]
-  {:authorized? true :reason reason})
-
-(defn ^{:stratum 0} authorization-denied
-  "Build a denied authorization result with anomaly."
-  [anomaly-category message context]
-  {:authorized? false
-   :reason message
-   :anomaly (response/make-anomaly anomaly-category message context)})
+(def ^{:stratum 0} authorize-action
+  "Check the requester's RBAC role against the action and target."
+  authorization/authorize-action)
 
 ;; Approval-aware control action execution
 (def ^{:stratum 0} actions-requiring-approval
@@ -126,53 +112,13 @@
 
 ;------------------------------------------------------------------------------ Layer 1
 
-(defn ^{:stratum 1} authorize-action
-  "Check RBAC authorization for a control action.
-
-   Arguments:
-   - roles: RBAC role definitions map (use default-roles or custom)
-   - action: Control action map from create-control-action
-   - requester: Map with :role keyword
-
-   Returns: {:authorized? bool :reason string :anomaly map?}"
-  [roles action requester]
-  (let [role (:role requester)
-        role-perms (get roles role)
-        target-type (get-in action [:action/target :target-type])
-        category (target-type->category target-type)
-        action-type (:action/type action)
-        permitted-actions (get role-perms category #{})]
-    (cond
-      (nil? role-perms)
-      (authorization-denied :anomalies/not-found
-                            (str "Unknown role: " role)
-                            {:role role})
-
-      (nil? category)
-      (authorization-denied :anomalies/incorrect
-                            (str "Unknown target type: " target-type)
-                            {:target-type target-type})
-
-      (contains? permitted-actions action-type)
-      (authorization-granted "Action permitted by role")
-
-      :else
-      (authorization-denied :anomalies/forbidden
-                            (str "Role " (name role) " cannot perform "
-                                 (name action-type) " on " (name target-type))
-                            {:role role
-                             :action-type action-type
-                             :target-type target-type}))))
-
 (defn ^{:stratum 1} requires-approval?
   "Check if a control action type requires multi-party approval."
   [action-type]
   (contains? actions-requiring-approval action-type))
 
-;------------------------------------------------------------------------------ Layer 2
-
 ;; Control action execution
-(defn ^{:stratum 2} execute-control-action!
+(defn ^{:stratum 1} execute-control-action!
   "Execute a control action with RBAC authorization.
 
    Calls authorize-action before executing. Returns authorization failure
@@ -222,9 +168,9 @@
                           stream workflow-id action-id result))
           result)))))
 
-;------------------------------------------------------------------------------ Layer 3
+;------------------------------------------------------------------------------ Layer 2
 
-(defn ^{:stratum 3} execute-control-action-with-approval!
+(defn ^{:stratum 2} execute-control-action-with-approval!
   "Execute a control action, checking approval requirements first.
 
    If the action type requires approval (:gate-override, :budget-escalation),
