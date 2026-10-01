@@ -203,6 +203,17 @@
               (evidence/restore-finalized-opsv-bundle! restored candidate (set f/artifact-ids))))
         (is (identical? snapshot @restored))))))
 
+(deftest ^{:stratum 1} idempotent-restoration-validates-the-stored-value
+  (let [[store id] (accumulated-store f/opsv-evidence)
+        bundle (evidence/finalize-opsv-evidence! store id f/base-bundle f/opsv-evidence (set f/artifact-ids))
+        retained (with-meta bundle {:secret "private-value"})]
+    (swap! store assoc-in [id :opsv.assembly/bundle] retained)
+    (let [before @store]
+      (is (= bundle retained))
+      (is (response/anomaly-map?
+            (evidence/restore-finalized-opsv-bundle! store bundle (set f/artifact-ids))))
+      (is (identical? before @store)))))
+
 (deftest ^{:stratum 1} restoration-rejects-false-sensitivity-declarations
   (let [[store id] (accumulated-store f/opsv-evidence)
         snapshot @store

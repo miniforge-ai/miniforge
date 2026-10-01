@@ -13,12 +13,14 @@
 (defn- ^{:stratum 0} attempt! [store bundle available-ids]
   (let [id (:evidence-bundle/id bundle)
         record (assembly/get-assembly store id)
+        retained (:opsv.assembly/bundle record)
         finalized (assoc record :opsv.assembly/status :finalized)]
     (cond
       (not (validation/valid-with-exception-handling? finalized bundle available-ids))
       (diagnostics/failure :anomalies/incorrect :finalization/invalid id [{:code :invalid-retained-seal}])
       (and (= :finalized (:opsv.assembly/status record))
-           (= bundle (:opsv.assembly/bundle record))) bundle
+           (= bundle retained)
+           (validation/valid-with-exception-handling? record retained available-ids)) retained
       (not= :assembling (:opsv.assembly/status record)) (diagnostics/immutable id)
       :else (publication/publish-sealed! store record bundle))))
 
