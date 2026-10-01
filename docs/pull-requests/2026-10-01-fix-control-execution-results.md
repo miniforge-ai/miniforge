@@ -35,6 +35,9 @@ All four event-stream consumer suites and the dashboard suite pass in serial.
 Expanded focused JVM and rebuilt packaged CLI regressions pass nine tests and
 92 assertions, including ordinary exceptions, thrown anomalies, and nil/false
 success payloads. Kondo and inferred namespace strata pass.
+The approval-alias integration and shared anomaly predicate are verified.
+JVM and rebuilt packaged tests pass 11 tests and 120 assertions.
+These include legacy anomaly returns from the intervention producer.
 
 ## Deployment Plan
 

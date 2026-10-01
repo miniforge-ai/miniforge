@@ -14,8 +14,8 @@
 (ns ai.miniforge.web-dashboard.server.handlers.control
   "Control-intervention chain for dashboard control actions: writes
    operator intervention events and routes an authorized control action
-   onto the governed operator channel. Depends only on the sibling
-   `support` namespace."
+   onto the governed operator channel. Uses public component contracts
+   and the dashboard's sibling support namespaces."
   (:require
    [ai.miniforge.anomaly.interface :as anomaly]
    [ai.miniforge.event-stream.interface :as event-stream]
@@ -65,7 +65,7 @@
                              {:action-type action-type}))))
 
 (defn- ^{:stratum 0} failed-intervention? [result]
-  (or (anomaly/anomaly? result) (response/error? result)))
+  (or (anomaly/any-anomaly? result) (response/error? result)))
 
 (defn- ^{:stratum 0} http-result [result]
   ;; Rich anomaly data stays in audit evidence, not the public JSON response.

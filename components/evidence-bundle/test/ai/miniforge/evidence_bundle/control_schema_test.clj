@@ -24,6 +24,10 @@
     (is (fixtures/valid-action? record))
     (is (fixtures/valid-action? (update record :action/approval
                                        set/rename-keys {:status :approval-status})))
+    (is (fixtures/valid-action? (assoc-in record [:action/approval :approval-status] :approved)))
+    (doseq [status [:rejected nil false]]
+      (is (false? (fixtures/valid-action? (assoc-in record [:action/approval :approval-status] status)))))
+    (is (false? (fixtures/valid-action? (update record :action/approval dissoc :status))))
     (doseq [path [[:action/id] [:action/type] [:action/timestamp]
                   [:action/requester :principal] [:action/requester :listener-id]
                   [:action/result :status] [:action/approval :approvers]

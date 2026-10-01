@@ -86,6 +86,7 @@
 (deftest ^{:stratum 2} failed-interventions-stay-failed-in-http-and-evidence
   (doseq [intervention [fail-intervention
                        (constantly (anomaly/anomaly :fault failure-message {}))
+                       (constantly (response/make-anomaly :anomalies/fault failure-message {}))
                        (constantly (response/failure failure-message))]]
     (let [stream (events/create-event-stream {:sinks []})
           dashboard-state (dashboard stream)

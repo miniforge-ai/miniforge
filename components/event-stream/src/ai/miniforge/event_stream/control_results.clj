@@ -20,7 +20,7 @@
 
 (defn- ^{:stratum 1} from-value [value]
   (cond
-    (or (anomaly/anomaly? value) (response/anomaly-map? value))
+    (anomaly/any-anomaly? value)
     (failure (:anomaly/message value) value)
 
     (or (response/error? value) (response/success? value)
