@@ -53,3 +53,5 @@ Merged control-records integration passes JVM and rebuilt packaged canonical,
 control-schema and lifecycle regressions: 22 tests and 327 assertions.
 Governance integration passes all three consumers and rebuilt packaged canonical
 and governance regressions: 22 tests and 371 assertions.
+The corrected resolution-trace and outcome contracts pass all three consumers
+and rebuilt packaged canonical/governance regressions: 25 tests and 385 assertions.

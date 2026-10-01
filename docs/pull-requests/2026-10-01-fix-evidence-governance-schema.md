@@ -29,9 +29,11 @@ handles prerelease identifiers and ignores build metadata, with explicit prerele
 opt-in. This does not reuse the separate workspace DateVer dependency rules.
 Waived rules must remain in the violations; waived gates cannot masquerade as passed.
 Keep legacy supervisory entities separate from the portable N6 record shape.
-Clarify the N6 wire example's omitted resolved-rule set, already required by
-N6.GE.1 and N4 section 5.5: retain owner, effective settings, selection and all
-post-expansion proposals. Record evaluation identity and override eligibility
+Clarify the omitted resolved-rule set required by N6.GE.1 and N4 section 5.5.
+Keep enabled rule IDs in the resolved set and all candidates in a separate trace.
+Join canonical keyword pack IDs directly.
+Trace entries retain owner, effective settings, selection and post-expansion proposals.
+Record evaluation identity and override eligibility
 so waiver joins can be checked without fabricating an authorization decision.
 
 ## Verification
@@ -40,10 +42,14 @@ Exercise complete records, missing fields, malformed collections and nested valu
 Run affected consumers and rebuilt packaged tests serially before publishing.
 Require adversarial standards review, normal hooks, current-head review and all CI.
 All three evidence consumers pass. Rebuilt packaged governance regressions pass
-10 tests and 135 assertions, including resolved proposals and version matching.
+15 tests and 177 assertions, including control compatibility and outcome coverage.
 Kondo and inferred namespace strata pass without warnings. The adversarial pass
 checks proposal precedence, waiver identity/eligibility and fail-closed parsing;
 separate pure namespaces keep the cross-record orchestration small.
+Outcome checks require complete blocking-finding coverage while preserving N4's
+nonblocking low/info findings. Proposals belong to bound packs after overlay expansion;
+the check-function owner may be an inherited, unbound base pack.
+Reject duplicate violation IDs and auto-fixable execution-failure records.
 Shared test factories support canonical boundary checks without copied record maps.
 Current-main and spec-prerequisite integration passes all three evidence consumers
 and rebuilt packaged governance/control regressions.

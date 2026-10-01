@@ -44,7 +44,7 @@
                      :rule/enabled? true}]})
 
 (defn- ^{:stratum 0} resolved-pack []
-  {:pack/id "example"
+  {:pack/id :example
    :pack/version "2.1.3"
    :pack/content-hash (hash/content-hash {})})
 
@@ -65,6 +65,7 @@
                               :binding/packs [{:pack/id :example
                                                :pack/version "^2.0.0"}]}
      :gate-execution/packs packs
-     :gate-execution/resolved-rules rules
+     :gate-execution/resolved-rules [:rule/example]
+     :gate-execution/resolution-trace rules
      :gate-execution/violations violations
      :gate-execution/waivers waivers}))

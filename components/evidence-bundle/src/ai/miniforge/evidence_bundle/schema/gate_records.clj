@@ -11,7 +11,7 @@
   [:map [:pack/id keyword?] [:pack/version [:fn values/nonblank?]]])
 
 (def ^{:stratum 0} resolved-pack
-  [:map [:pack/id [:fn values/nonblank?]] [:pack/version values/resolved-version]
+  [:map [:pack/id keyword?] [:pack/version values/resolved-version]
    [:pack/content-hash values/sha256]])
 
 (def ^{:stratum 0} rule-filter

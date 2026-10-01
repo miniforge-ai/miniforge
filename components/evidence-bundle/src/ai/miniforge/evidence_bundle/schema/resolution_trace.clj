@@ -1,7 +1,7 @@
 ;; Title: Miniforge.ai
 ;; Copyright 2025-2026 Christopher Lester (christopher@miniforge.ai)
 ;; Licensed under the Apache License, Version 2.0.
-(ns ai.miniforge.evidence-bundle.schema.resolved-rules
+(ns ai.miniforge.evidence-bundle.schema.resolution-trace
   "Portable rule-resolution decisions, including disabled and filtered rules."
   (:require [ai.miniforge.evidence-bundle.schema.governance-values :as values]
             [ai.miniforge.schema.interface :as shared]))

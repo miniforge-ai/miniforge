@@ -580,10 +580,11 @@ gate execution the bundle MUST record:
  :gate-execution/outcome keyword          ; :passed | :failed | :waived
  :gate-execution/binding {...}            ; the gate binding per N4 §5.4
  :gate-execution/packs
- [{:pack/id string
+ [{:pack/id keyword                      ; canonical N4 pack identity
    :pack/version string                   ; REQUIRED: exact resolved version
    :pack/content-hash string}]            ; REQUIRED: the bytes that ran
- :gate-execution/resolved-rules
+ :gate-execution/resolved-rules [keyword] ; enabled rule IDs before the binding filter
+ :gate-execution/resolution-trace
  [{:rule/id keyword
    :pack/id keyword                       ; owning pack, whose check function applies
    :rule/severity keyword                 ; effective canonical severity
@@ -612,10 +613,13 @@ implementations get wrong:
    that a violation was accepted, never that it was absent.
 3. A waiver with no `:waiver/reason` is not a waiver (N4 §6.3.1). A bundle
    carrying one is invalid, not merely incomplete.
-4. Resolved-rule IDs MUST be unique. The list includes disabled and filtered-out
-   rules so resolution decisions remain auditable. `:rule/selected? true`
-   identifies the enabled subset selected for evaluation. It does not claim that
-   every selected rule found a matching artifact. N4's `:skip` semantics still apply.
+4. Resolved-rule IDs MUST be unique and identify exactly the enabled trace entries,
+   after disabled rules are dropped as required by N4 §5.3.1.
+   The separate resolution trace MUST retain every candidate, including disabled
+   and filtered-out rules, with unique rule IDs.
+   `:rule/selected? true` identifies the enabled subset selected by the binding filter.
+   It does not claim that every selected rule found a matching artifact.
+   N4's `:skip` semantics still apply.
 5. Each owning and contributing pack MUST join an exact, hashed pack record.
    Proposals record each contributing pack's effective settings **after** its own
    overlay expansion (N4 §5.3.1), not competing raw settings from that expansion.
@@ -1179,6 +1183,11 @@ withdrawn requirement is marked withdrawn, not deleted.
 | N6.GE.3 | MUST | Record each pack's content hash (§2.13). |
 | N6.GE.4 | MUST | Retain waived violations in the violations list, marked waived (§2.13). |
 | N6.GE.5 | MUST | Reject a waiver with no `:waiver/reason` as invalid (§2.13, N4 §6.3.1). |
+| N6.GE.6 | MUST | Use canonical keyword pack IDs and join every owning/contributing pack to an exact, hashed pack record (§2.13). |
+| N6.GE.7 | MUST | Retain unique resolution-trace candidates, validate proposal precedence, and derive resolved IDs from enabled entries (§2.13). |
+| N6.GE.8 | MUST | Reject violations whose rule selection, effective severity, or owning pack disagrees with the resolution trace (§2.13). |
+| N6.GE.9 | MUST | Join each waiver to the recorded evaluation ID (§2.13). |
+| N6.GE.10 | MUST | Require captured override eligibility and retained medium-or-less violations for ordinary waivers (§2.13, N4 §6.3.1). |
 
 #### Sensitive data and retention
 
@@ -1220,6 +1229,14 @@ A conformance suite MUST cover, at minimum:
    The bundle seals only after that substitution (N6.SD.2, N6.SD.4, N6.EB.8).
 7. **Event-link integrity** — every sequence in a bundle's cited range is
    retrievable for as long as the bundle is retained (N6.EL.3).
+8. **Resolution consistency** — reproduce severity and enablement from multiple
+   proposals, retaining disabled candidates only in the trace (N6.GE.6–N6.GE.8).
+   Reject duplicate IDs, dangling pack references, incorrect resolved membership,
+   and mismatched or disabled-rule violations.
+9. **Waiver eligibility** — accept a justified medium-severity waiver with matching
+   evaluation identity and a captured true override setting (N6.GE.9–N6.GE.10).
+   Reject another evaluation's waiver, absent/false override settings, and
+   ordinary waivers for high or critical violations.
 
 ---
 

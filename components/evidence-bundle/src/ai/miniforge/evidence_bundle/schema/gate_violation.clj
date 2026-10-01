@@ -19,9 +19,12 @@
    [:replacement [:map [:type [:= :replacement]] [:file string?] [:line nat-int?]
                   [:old-value :any] [:new-value :any]]]])
 
+(defn ^{:stratum 0} execution-failure-consistent? [record]
+  (or (not (contains? record :failure/class)) (false? (:violation/auto-fixable? record))))
+
 ;------------------------------------------------------------------------------ Layer 1
 
-(def ^{:stratum 1} record-schema
+(def ^{:stratum 1} record-fields
   [:map
    [:violation/id uuid?] [:violation/rule-id keyword?]
    [:violation/pack-id keyword?] [:violation/gate-id keyword?]
@@ -33,3 +36,7 @@
    [:violation/context {:optional true} map?]
    [:violation/documentation-url {:optional true} string?]
    [:failure/class {:optional true} [:fn reliability/failure-class?]]])
+
+;------------------------------------------------------------------------------ Layer 2
+
+(def ^{:stratum 2} record-schema [:and record-fields [:fn execution-failure-consistent?]])

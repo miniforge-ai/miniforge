@@ -7,19 +7,15 @@
 
 ;------------------------------------------------------------------------------ Layer 0
 
-(defn ^{:stratum 0} pack-name [id] (subs (str id) 1))
-
 (defn ^{:stratum 0} unique-by? [field records]
   (= (count records) (count (set (map field records)))))
 
+(defn- ^{:stratum 0} bound-version? [resolved pack]
+  (version/satisfied? (:pack/version pack) (get resolved (:pack/id pack))))
+
 ;------------------------------------------------------------------------------ Layer 1
 
-(defn- ^{:stratum 1} bound-version? [resolved pack]
-  (version/satisfied? (:pack/version pack) (get resolved (pack-name (:pack/id pack)))))
-
-;------------------------------------------------------------------------------ Layer 2
-
-(defn ^{:stratum 2} consistent? [bound packs]
+(defn ^{:stratum 1} consistent? [bound packs]
   (let [resolved (zipmap (map :pack/id packs) (map :pack/version packs))]
     (and (unique-by? :pack/id bound) (unique-by? :pack/id packs)
          (every? (partial bound-version? resolved) bound))))
