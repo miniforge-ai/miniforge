@@ -29,7 +29,8 @@
    Based on N6 Evidence & Provenance Standard."
   (:require
    [ai.miniforge.evidence-bundle.schema.compliance :as compliance]
-   [ai.miniforge.evidence-bundle.schema.optional-key :as optional-key]))
+   [ai.miniforge.evidence-bundle.schema.optional-key :as optional-key]
+   [ai.miniforge.evidence-bundle.schema.outcome-reliability :as outcome]))
 
 ;------------------------------------------------------------------------------ Layer 0
 
@@ -108,7 +109,7 @@
    (optional-key/optional-key :evidence/failure-attribution) map?
 
    ;; Outcome
-   :evidence/outcome map?
+   :evidence/outcome outcome/consistent?
 
    ;; Compliance
    (optional-key/optional-key :compliance/created-at) inst?
