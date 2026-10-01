@@ -24,6 +24,14 @@
 
 ;------------------------------------------------------------------------------ Layer 0
 
+(deftest ^{:stratum 0} payment-card-scan-uses-shared-checksum-detector-test
+  (let [value {:description "Synthetic test card 4111 1111 1111 1111"}
+        findings (scanner/scan-artifact value)]
+    (is (= [{:finding/type :payment-card}] (:scan/findings findings)))
+    (is (true? (:evidence/contains-pii? (scanner/compliance-metadata findings))))
+    (is (= {:description "Synthetic test card [REDACTED]"} (redaction/redact value))))
+  (is (empty? (:scan/findings (scanner/scan-artifact {:description "4111111111111112"})))))
+
 (deftest ^{:stratum 0} scan-artifact-reports-finding-types-only
   (testing "sensitive values are detected but not copied into evidence"
     (let [result (scanner/scan-artifact

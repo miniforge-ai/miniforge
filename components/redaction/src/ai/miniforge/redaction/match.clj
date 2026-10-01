@@ -22,6 +22,7 @@
    detectable only by its key, an AWS access key only by its shape."
   (:require
    [clojure.string :as str]
+   [ai.miniforge.redaction.payment-card :as payment-card]
    [ai.miniforge.redaction.policy :as policy]))
 
 ;------------------------------------------------------------------------------ Layer 0
@@ -68,7 +69,8 @@
   [s]
   (boolean
    (when (string? s)
-     (some #(re-find % s) (:redaction/secret-value-patterns @policy/policy)))))
+     (or (payment-card/present? s)
+         (some #(re-find % s) (:redaction/secret-value-patterns @policy/policy))))))
 
 (defn ^{:stratum 0} redact-string
   "Replace every secret-looking substring in S with the marker.
@@ -83,9 +85,9 @@
   ;; use a literal-prefix optimization on each pattern separately and
   ;; loses it once they are combined.
   (let [marker (policy/marker)]
-    (reduce (fn [acc pattern] (str/replace acc pattern marker))
-            s
-            (:redaction/secret-value-patterns @policy/policy))))
+    (payment-card/redact
+      (reduce (fn [acc pattern] (str/replace acc pattern marker))
+              s (:redaction/secret-value-patterns @policy/policy)) marker)))
 
 ;------------------------------------------------------------------------------ Layer 1
 
