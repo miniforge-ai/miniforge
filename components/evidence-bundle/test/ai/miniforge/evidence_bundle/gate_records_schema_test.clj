@@ -17,7 +17,7 @@
     (is (not (m/validate values/resolved-version version)))))
 
 (deftest ^{:stratum 0} bindings-validate-optional-filters
-  (let [binding {:gate/id :review :binding/packs [{:pack/id :example :pack/version "^2.0.0"}]}]
+  (let [binding {:gate/id :review :binding/packs [{:pack/id :pack/example :pack/version "^2.0.0"}]}]
     (is (m/validate records/binding-schema binding))
     (doseq [value [nil false 42 {:filter/phase "review"} {:filter/categories [:security nil]}]]
       (is (not (m/validate records/binding-schema (assoc binding :binding/rule-filter value)))))))

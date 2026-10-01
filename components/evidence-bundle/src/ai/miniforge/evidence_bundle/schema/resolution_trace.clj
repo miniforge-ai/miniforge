@@ -13,11 +13,11 @@
 ;------------------------------------------------------------------------------ Layer 1
 
 (def ^{:stratum 1} proposal
-  [:map [:pack/id keyword?] [:rule/severity severity] [:rule/enabled? boolean?]])
+  [:map [:pack/id qualified-keyword?] [:rule/severity severity] [:rule/enabled? boolean?]])
 
 ;------------------------------------------------------------------------------ Layer 2
 
 (def ^{:stratum 2} record-schema
-  [:map [:rule/id keyword?] [:pack/id keyword?]
+  [:map [:rule/id qualified-keyword?] [:pack/id qualified-keyword?]
    [:rule/severity severity] [:rule/enabled? boolean?] [:rule/selected? boolean?]
    [:rule/proposals (values/record-vector proposal)]])

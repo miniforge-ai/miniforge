@@ -8,10 +8,10 @@
 ;------------------------------------------------------------------------------ Layer 0
 
 (def ^{:stratum 0} bound-pack
-  [:map [:pack/id keyword?] [:pack/version [:fn values/nonblank?]]])
+  [:map [:pack/id qualified-keyword?] [:pack/version [:fn values/nonblank?]]])
 
 (def ^{:stratum 0} resolved-pack
-  [:map [:pack/id keyword?] [:pack/version values/resolved-version]
+  [:map [:pack/id qualified-keyword?] [:pack/version values/resolved-version]
    [:pack/content-hash values/sha256]])
 
 (def ^{:stratum 0} rule-filter
@@ -23,7 +23,7 @@
 (def ^{:stratum 0} waiver
   [:map
    [:waiver/id uuid?] [:waiver/evaluation-id uuid?]
-   [:waiver/violations (values/record-vector keyword?)]
+   [:waiver/violations (values/record-vector qualified-keyword?)]
    [:waiver/actor [:fn values/nonblank?]] [:waiver/reason [:fn values/nonblank?]]
    [:waiver/timestamp inst?]])
 
