@@ -23,6 +23,8 @@
    [ai.miniforge.evidence-bundle.canonical-validation :as canonical]
    [ai.miniforge.evidence-bundle.chain-evidence :as chain-evidence]
    [ai.miniforge.evidence-bundle.collector :as collector]
+   [ai.miniforge.evidence-bundle.edn-codec :as edn-codec]
+   [ai.miniforge.evidence-bundle.edn-file :as edn-file]
    [ai.miniforge.evidence-bundle.extraction :as extraction]
    [ai.miniforge.evidence-bundle.extraction-bulk :as extraction-bulk]
    [ai.miniforge.evidence-bundle.opsv-assembly :as opsv-assembly]
@@ -187,6 +189,23 @@
      (export-bundle manager bundle-id \"/tmp/evidence.edn\")"
   [manager bundle-id output-path]
   (p/export-bundle manager bundle-id output-path))
+
+(defn ^{:stratum 0} encode-bundle-edn
+  "Serialize an already-validated bundle in its canonical N6 EDN form."
+  [bundle]
+  (edn-codec/encode bundle))
+
+(defn ^{:stratum 0} decode-bundle-edn
+  "Read one bounded EDN form preserving instant precision; nil on malformed input.
+   Validate the resulting bundle before presentation or export."
+  [text]
+  (edn-codec/decode-with-exception-handling text))
+
+(defn ^{:stratum 0} read-bundle-edn
+  "Read at most 16 MiB of UTF-8 file input; nil on oversize or malformed input.
+   Validate the resulting bundle before presentation or export."
+  [file]
+  (edn-file/read-with-exception-handling file))
 
 ;; Provenance Tracing
 (defn ^{:stratum 0} query-provenance
