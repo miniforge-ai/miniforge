@@ -16,6 +16,7 @@
         retained (:opsv.assembly/bundle record)
         finalized (assoc record :opsv.assembly/status :finalized)]
     (cond
+      (nil? record) (diagnostics/not-found id)
       (not (validation/valid-with-exception-handling? finalized bundle available-ids))
       (diagnostics/failure :anomalies/incorrect :finalization/invalid id [{:code :invalid-retained-seal}])
       (and (= :finalized (:opsv.assembly/status record))

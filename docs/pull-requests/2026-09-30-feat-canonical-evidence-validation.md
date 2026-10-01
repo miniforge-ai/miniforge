@@ -65,3 +65,6 @@ pass; rebuilt canonical and assembly tests pass 40 tests with 441 assertions.
 After shared compliance policy integration, all three consumers pass.
 Rebuilt assembly and compliance regressions pass 32 tests with 186 assertions.
 They cover rehashed understated treatment and identity-preserving rejection of restoration.
+Missing assemblies use the same not-found diagnostic in accumulation, finalization
+and recovery, before validating any retained seal. Refreshed consumers pass;
+rebuilt assembly/compliance checks pass 33 tests with 189 assertions.

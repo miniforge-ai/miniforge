@@ -190,6 +190,16 @@
     (is (response/anomaly-map? (evidence/restore-finalized-opsv-bundle! restored bundle #{})))
     (is (response/anomaly-map? (evidence/restore-finalized-opsv-bundle! (atom {}) nil #{})))))
 
+(deftest ^{:stratum 1} restoration-distinguishes-missing-assembly-from-corrupt-seal
+  (let [[store id] (accumulated-store f/opsv-evidence)
+        bundle (evidence/finalize-opsv-evidence! store id f/base-bundle f/opsv-evidence (set f/artifact-ids))
+        missing (atom {})
+        before @missing
+        result (evidence/restore-finalized-opsv-bundle! missing bundle (set f/artifact-ids))]
+    (is (= :anomalies/not-found (:anomaly/category result)))
+    (is (= #{:assembly-not-found} (error-codes result)))
+    (is (identical? before @missing))))
+
 (deftest ^{:stratum 1} restoration-rejects-sensitive-metadata-without-changing-retained-state
   (let [[store id] (accumulated-store f/opsv-evidence)
         snapshot @store

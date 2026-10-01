@@ -97,11 +97,9 @@
         old-assembly (get old-state bundle-id)]
     (cond
       (nil? old-assembly)
-      (diagnostics/failure :anomalies/not-found :finalization/not-found
-               bundle-id [{:code :assembly-not-found}])
+      (diagnostics/not-found bundle-id)
 
       (not= :assembling (:opsv.assembly/status old-assembly))
-      (diagnostics/failure :anomalies/conflict :finalization/immutable
-               bundle-id [{:code :bundle-already-finalized}])
+      (diagnostics/immutable bundle-id)
 
       :else (get new-state bundle-id))))

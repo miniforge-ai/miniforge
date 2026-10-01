@@ -37,8 +37,7 @@
   (let [record (assembly/get-assembly store bundle-id)]
     (cond
       (nil? record)
-      (diagnostics/failure :anomalies/not-found :finalization/not-found bundle-id
-                           [{:code :assembly-not-found}])
+      (diagnostics/not-found bundle-id)
       (not= :assembling (:opsv.assembly/status record))
       (diagnostics/immutable bundle-id)
       :else (publish-candidate! store record base evidence available-ids))))
