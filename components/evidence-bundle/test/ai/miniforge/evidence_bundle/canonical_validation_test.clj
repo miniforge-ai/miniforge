@@ -247,8 +247,11 @@
 
 (deftest ^{:stratum 1} collector-projects-nonempty-artifact-records-to-identifiers-test
   (let [id (random-uuid)
-        phase (phases/build-phase-evidence :implement :test {:artifacts [id {:artifact/id id}]})]
-    (is (= [id id] (:phase/artifacts phase)))
+        phase (phases/build-phase-evidence :implement :test {:artifacts [id {:artifact/id id} {:id id}]})]
+    (is (= [id id id] (:phase/artifacts phase)))
+    (doseq [value [nil false]]
+      (let [invalid (phases/build-phase-evidence :implement :test {:artifacts [{:artifact/id value :id id}]})]
+        (is (= [value] (:phase/artifacts invalid)))))
     (is (valid? (assoc (base-bundle) :evidence/implement phase)))))
 
 (deftest ^{:stratum 1} field-presence-is-distinct-from-nullability-test

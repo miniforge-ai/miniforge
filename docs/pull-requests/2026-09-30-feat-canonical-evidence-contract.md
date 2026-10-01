@@ -38,3 +38,6 @@ All three evidence consumers and dashboard tests pass after #1969 integration.
 Rebuilt packaged canonical/dashboard regressions pass 16 tests and 272 assertions.
 Optional phase status is validated when present. Canonical-keyed policy violations
 normalize keyword IDs and legacy severities just like legacy-keyed producer records.
+Legacy artifact maps retain their `:id` fallback; explicitly malformed canonical
+IDs are not replaced. JVM and rebuilt packaged canonical/approval regressions
+pass 16 tests and 288 assertions after the approval-alias integration.

@@ -23,7 +23,7 @@
     [:approval-status {:optional true} :keyword]
     [:required-approvers {:optional true} nat-int?]
     [:approvers [:vector [:map [:principal :string] [:timestamp inst?] [:decision :keyword]]]]]
-   [:fn #(or (contains? % :status) (contains? % :approval-status))]])
+   [:fn #(= 1 (count (set (vals (select-keys % [:status :approval-status])))))]])
 
 ;------------------------------------------------------------------------------ Layer 1
 
