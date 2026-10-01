@@ -33,15 +33,20 @@
 
 (defn- ^{:stratum 0} assert-recovered [completed calls directory]
   (let [detached (dissoc completed :opsv/evidence-assembly-store)
-        recovered (opsv/publish-finalized-evidence! detached)
+        restarted (update detached :execution/opts dissoc :opsv/evidence-base)
+        recovered (opsv/publish-finalized-evidence! restarted)
         published-events (stream/get-events (:event-stream detached))
-        again (opsv/publish-finalized-evidence! detached)
+        changed (assoc-in detached [:execution/opts :opsv/evidence-base :evidence-bundle/version] "changed")
+        again (opsv/publish-finalized-evidence! changed)
         bundle (:opsv/evidence-bundle recovered)]
     (is (= :error (get-in completed [:phase :result :status])))
     (is (string? (get-in completed [:execution/input checkpoint/snapshot-key])))
     (f/assert-blocked-transform detached)
     (f/assert-blocked-transform (update detached :execution/opts dissoc :opsv/evidence-base))
     (is (not (anomaly/anomaly? recovered)))
+    (is (= (get-in completed [:execution/opts :opsv/evidence-base :evidence/intent])
+           (:evidence/intent bundle)))
+    (is (= "1.0.0" (:evidence-bundle/version bundle)))
     (is (= 8 (count (get-in bundle [:evidence/opsv :opsv/artifact-refs]))))
     (is (= bundle (:opsv/evidence-bundle again)))
     (is (= bundle (:artifact/content (artifact/read-published directory (:opsv/evidence-artifact-id recovered)))))

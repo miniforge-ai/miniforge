@@ -19,7 +19,7 @@
     (if (anomaly/anomaly? published) published (finalization/finalize! ctx output))))
 
 (defn- ^{:stratum 0} retained-output [ctx]
-  (let [output (checkpoint/restore ctx)]
+  (let [output (:opsv/recovered-actuation-output ctx)]
     (cond
       (anomaly/anomaly? output) output
       (not (instance? clojure.lang.IAtom (context/stream ctx)))
@@ -29,12 +29,17 @@
 
 ;------------------------------------------------------------------------------ Layer 1
 
-(defn ^{:stratum 1} publish! [ctx]
+(defn- ^{:stratum 1} publish-restored! [ctx]
+  (-> (retained-output ctx)
+      (flow/continue (partial artifacts/publish-with-exception-handling ctx :opsv/actuate))
+      (flow/continue (partial finalize-after-events! ctx))))
+
+;------------------------------------------------------------------------------ Layer 2
+
+(defn ^{:stratum 2} publish! [ctx]
   (if (= :finalized (:opsv.assembly/status (finalization/assembly ctx)))
     (finalization/publish-finalized! ctx)
-    (-> (retained-output ctx)
-        (flow/continue (partial artifacts/publish-with-exception-handling ctx :opsv/actuate))
-        (flow/continue (partial finalize-after-events! ctx)))))
+    (flow/continue (checkpoint/restore ctx) publish-restored!)))
 
 (comment
   (retained-output {}))

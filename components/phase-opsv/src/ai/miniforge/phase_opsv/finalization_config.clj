@@ -6,6 +6,7 @@
   (:require [ai.miniforge.anomaly.interface :as anomaly]
             [ai.miniforge.artifact.interface :as artifact]
             [ai.miniforge.evidence-bundle.interface :as evidence]
+            [ai.miniforge.phase-opsv.evidence-base :as base]
             [ai.miniforge.phase-opsv.messages :as msg]
             [ai.miniforge.phase-opsv.post-actuation-checkpoint :as checkpoint]
             [ai.miniforge.phase-opsv.runtime-context :as context]))
@@ -16,13 +17,7 @@
   (contains? (:execution/opts ctx) :opsv/evidence-base))
 
 (defn ^{:stratum 0} base-bundle [ctx]
-  (assoc (select-keys (let [base (get-in ctx [:execution/opts :opsv/evidence-base])]
-                       (when (map? base) base))
-                      [:evidence-bundle/workflow-id :evidence-bundle/created-at
-                       :evidence-bundle/version :evidence/intent])
-         :evidence-bundle/id (get-in ctx [:execution/input :opsv/evidence-bundle-id])
-         :evidence/policy-checks []
-         :evidence/outcome {:outcome/success true}))
+  (base/bundle ctx))
 
 (defn- ^{:stratum 0} assembly-status [ctx]
   (when-let [store (:opsv/evidence-assembly-store ctx)]
