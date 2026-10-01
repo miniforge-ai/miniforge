@@ -45,13 +45,6 @@
   (and (map? value) (nat-int? (:start-seq value)) (nat-int? (:end-seq value))
        (<= (:start-seq value) (:end-seq value))))
 
-(def ^{:stratum 0} phase-output-schema
-  "Collected phase output is a projection, not the enclosing execution result.
-   Validate known fields when present; phase-specific output remains extensible."
-  {(optional-key/optional-key :environment-id) string?
-   (optional-key/optional-key :summary) string?
-   (optional-key/optional-key :metrics) map?})
-
 ;; Intent Schema
 (def ^{:stratum 0} intent-types
   "Valid intent types per N6 spec."
@@ -177,6 +170,14 @@
 
 ;------------------------------------------------------------------------------ Layer 1
 
+(def ^{:stratum 1} phase-output-schema
+  "Collected phase output is a projection, not the enclosing execution result.
+   Validate known fields when present; phase-specific output remains extensible."
+  {(optional-key/optional-key :environment-id) string?
+   (optional-key/optional-key :status) (partial contains? phase-result-status-values)
+   (optional-key/optional-key :summary) string?
+   (optional-key/optional-key :metrics) map?})
+
 (defn- ^{:stratum 1} failed-rule-ids [value]
   (let [failed (semantic/failed-rules (:semantic-validation/declared-intent value)
                                      (resource-counts value))]
@@ -298,7 +299,8 @@
         actual (:semantic-validation/actual-behavior value)
         inferred (semantic/inferred-behavior (resource-counts value))]
     (and (= (empty? failed) (:semantic-validation/passed? value))
-         (or (= inferred actual) (= [:import :refactor] [inferred actual]))
+         (or (= inferred actual)
+             (and (= :import inferred) (= :refactor actual (:semantic-validation/declared-intent value))))
          (= failed reported))))
 
 ;------------------------------------------------------------------------------ Rich Comment

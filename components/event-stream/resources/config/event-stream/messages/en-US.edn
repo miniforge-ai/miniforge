@@ -1,5 +1,9 @@
 {:event-stream/messages
- {:opsv/actuation-disposition "OPSV effect disposition: {state}"
+ {:control/permitted "Action permitted by role"
+  :control/unknown-role "Unknown role: {role}"
+  :control/unknown-target "Unknown target type: {target-type}"
+  :control/not-permitted "Role {role} cannot perform {action-type} on {target-type}"
+  :opsv/actuation-disposition "OPSV effect disposition: {state}"
   :opsv/invalid-disposition "OPSV disposition identity, state, authority or observation payload failed validation."
   ;; Supervisory intervention events
   :supervisory/intervention-requested

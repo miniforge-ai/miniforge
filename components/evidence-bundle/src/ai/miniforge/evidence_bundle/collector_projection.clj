@@ -20,13 +20,12 @@
 ;------------------------------------------------------------------------------ Layer 1
 
 (defn ^{:stratum 1} violation [record]
-  (if (contains? record :violation/rule-id)
-    record
-    (let [value (set/rename-keys (get record :violation record) violation-keys)
-          id (or (:violation/rule-id value) (get-in record [:rule :rule/id]))
-          rule-id (if (keyword? id) (str id) id)
-          severity (schema/normalize-severity (or (:violation/severity value) (get-in record [:rule :rule/severity])))]
-      (assoc value :violation/rule-id rule-id :violation/severity severity))))
+  (let [raw (get record :violation record)
+        value (merge (set/rename-keys raw violation-keys) (select-keys raw (vals violation-keys)))
+        id (get value :violation/rule-id (get-in record [:rule :rule/id]))
+        rule-id (if (keyword? id) (str id) id)
+        severity (schema/normalize-severity (get value :violation/severity (get-in record [:rule :rule/severity])))]
+    (assoc value :violation/rule-id rule-id :violation/severity severity)))
 
 (comment
   (semantic-evidence {:intent/type :import} []))

@@ -24,10 +24,12 @@
    [clojure.java.io :as io]
    [cheshire.core :as json]
    [ai.miniforge.web-dashboard.config :as dashboard-config]
+   [ai.miniforge.web-dashboard.control-identity :as control-identity]
    [ai.miniforge.web-dashboard.state :as state]
    [ai.miniforge.web-dashboard.views :as views]
    [ai.miniforge.web-dashboard.server.auth :as auth]
    [ai.miniforge.web-dashboard.server.responses :as responses]
+   [ai.miniforge.web-dashboard.server.shutdown :as shutdown]
    [ai.miniforge.web-dashboard.server.filters :as filters]
    [ai.miniforge.web-dashboard.server.websocket :as websocket]
    [ai.miniforge.web-dashboard.server.handlers :as handlers]
@@ -396,7 +398,7 @@
         _ (swap! state assoc :control-plane
                  {:registry (cp/create-registry)
                   :decision-manager (cp/create-decision-manager)})
-        handler (create-handler state)
+        handler (control-identity/ready-handler state (create-handler state))
         server (http/run-server handler {:port port :legacy-return-value? false})
         actual-port (http/server-port server)
         ;; Start file watcher to tail-follow event files
@@ -416,9 +418,6 @@
            (reset! loading? false)
            (println "Archive scan complete:" (count @archive-state) "workflows found")))))
 
-    ;; Write discovery file for auto-connect
-    (write-discovery-file! actual-port)
-
     (println "┌─────────────────────────────────────────────────────┐")
     (println "│ Miniforge Web Dashboard                             │")
     (println "│ Production-ready fleet control interface            │")
@@ -427,6 +426,10 @@
     (println  "│ WebSocket: ws://localhost:" actual-port "/ws" (apply str (repeat (- 21 (count (str actual-port))) " ")) "│")
     (println  "│ Events: " events-dir (apply str (repeat (max 1 (- 40 (count events-dir))) " ")) "│")
     (println "└─────────────────────────────────────────────────────┘")
+    ;; No fallible startup work follows listener acquisition.
+    (control-identity/attach! state)
+    ;; Discovery publication is best-effort and follows control readiness.
+    (write-discovery-file! actual-port)
     {:server server
      :port actual-port
      :state state
@@ -434,10 +437,8 @@
 
 (defn ^{:stratum 1} stop-server!
   "Stop HTTP server and watcher."
-  [{:keys [server watcher-cleanup]}]
-  (when watcher-cleanup
-    (watcher-cleanup))
-  (when server
-    (delete-discovery-file!)
-    (http/server-stop! server {:timeout 100})
-    (println "Web dashboard stopped")))
+  [{:keys [server] :as handle}]
+  (try
+    (shutdown/stop! handle)
+    (finally
+      (when server (delete-discovery-file!)))))

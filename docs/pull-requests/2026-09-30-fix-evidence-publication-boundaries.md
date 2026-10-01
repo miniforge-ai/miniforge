@@ -32,3 +32,5 @@ Packaged CLI and manager tests verify valid round trips and rejection before exp
 Tampering and missing seals leave existing destinations unchanged.
 Run evidence consumers, CLI regressions, normal hooks, and standards scans before merge.
 Current-head review and all CI, including Build, remain mandatory merge gates.
+After integrating canonical corrections through db3659d4, all three evidence
+consumers pass. JVM and rebuilt packaged boundary tests pass 26 tests and 124 assertions.
