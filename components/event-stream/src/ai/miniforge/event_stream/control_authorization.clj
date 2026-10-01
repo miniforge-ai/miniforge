@@ -2,9 +2,7 @@
 ;; Copyright 2025-2026 Christopher Lester (christopher@miniforge.ai)
 ;; Licensed under the Apache License, Version 2.0.
 (ns ai.miniforge.event-stream.control-authorization
-  "Pure RBAC decisions for structured control actions."
-  (:require [ai.miniforge.event-stream.messages :as messages]
-            [ai.miniforge.response.interface :as response]))
+  "Pure RBAC decisions for structured control actions.")
 
 ;------------------------------------------------------------------------------ Layer 0
 
@@ -12,15 +10,14 @@
   {:workflow :workflows :agent :agents :fleet :fleet})
 
 (defn- ^{:stratum 0} granted []
-  {:authorized? true :reason (messages/t :control/permitted)})
+  {:authorized? true :message-key :control/permitted :context {}})
 
-(defn- ^{:stratum 0} denied [category message context]
-  (let [anomaly (response/make-anomaly category message context)]
-    {:authorized? false :reason message :anomaly anomaly}))
+(defn- ^{:stratum 0} denied [category message-key context]
+  {:authorized? false :category category :message-key message-key :context context})
 
 ;------------------------------------------------------------------------------ Layer 1
 
-(defn ^{:stratum 1} authorize-action
+(defn ^{:stratum 1} decide
   "Decide whether the requester's role permits this action on its target."
   [roles action requester]
   (let [role (:role requester)
@@ -32,13 +29,13 @@
         context {:role role :action-type action-type :target-type target-type}]
     (cond
       (nil? role-perms)
-      (denied :anomalies/not-found (messages/t :control/unknown-role context) {:role role})
+      (denied :anomalies/not-found :control/unknown-role {:role role})
 
       (nil? category)
-      (denied :anomalies/incorrect (messages/t :control/unknown-target context) {:target-type target-type})
+      (denied :anomalies/incorrect :control/unknown-target {:target-type target-type})
 
-      (contains? permitted-actions action-type)
+      (and (keyword? action-type) (contains? permitted-actions action-type))
       (granted)
 
       :else
-      (denied :anomalies/forbidden (messages/t :control/not-permitted context) context))))
+      (denied :anomalies/forbidden :control/not-permitted context))))

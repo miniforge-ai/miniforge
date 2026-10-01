@@ -185,6 +185,18 @@
         (is (.contains (with-out-str (sut/evidence-export-cmd {:id "malformed"})) "refused"))
         (is (= "unchanged" (slurp destination)))))))
 
+(deftest ^{:stratum 1} falsey-legacy-fields-preserve-canonical-presentation
+  (doseq [legacy [nil false] [success status] [[true "completed"] [false "failed"]]]
+    (let [bundle (f/bundle {:bundle/status legacy :bundle/artifacts legacy :bundle/phases legacy
+                            :evidence/outcome (make-outcome :outcome/success success)
+                            :evidence/failure-attribution
+                            (make-failure-attribution :failure/source legacy :dependency/source :external-provider
+                                                      :dependency/class legacy :failure/class :rate-limit)})]
+      (with-redefs [shared/call-optional-provider (constantly bundle)]
+        (let [output (with-out-str (sut/evidence-show-cmd {:id "canonical-bundle"}))]
+          (is (.contains output status))
+          (is (.contains output "external-provider / anthropic / rate-limit")))))))
+
 ;------------------------------------------------------------------------------ Layer 2
 
 (deftest ^{:stratum 2} evidence-show-cmd-with-bundle-test

@@ -40,9 +40,9 @@
 (defn- ^{:stratum 0} normalize-bundle-detail
   [bundle]
   (let [dependency-health (get bundle :evidence/dependency-health {})
-        artifacts (get bundle :bundle/artifacts [])
-        phases (get bundle :bundle/phases (bundles/canonical-phase-names bundle))
-        status (get bundle :bundle/status (bundles/canonical-status bundle))]
+        artifacts (bundles/legacy-field-or bundle :bundle/artifacts [])
+        phases (bundles/legacy-field-or bundle :bundle/phases (bundles/canonical-phase-names bundle))
+        status (bundles/legacy-field-or bundle :bundle/status (bundles/canonical-status bundle))]
     {:bundle/workflow-id (or (:bundle/workflow-id bundle)
                              (:evidence-bundle/workflow-id bundle))
      :bundle/status status

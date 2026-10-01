@@ -57,6 +57,11 @@
 (defn ^{:stratum 0} canonical-status [bundle]
   (if (true? (get-in bundle [:evidence/outcome :outcome/success])) "completed" "failed"))
 
+(defn ^{:stratum 0} legacy-field-or
+  "Nil/false legacy presentation fields do not override canonical data."
+  [bundle field fallback]
+  (if-let [value (get bundle field)] value fallback))
+
 (def ^{:stratum 0} ^:private phase-evidence-keys
   [:evidence/plan
    :evidence/design
@@ -123,13 +128,9 @@
 (defn ^{:stratum 1} failure-attribution-summary
   [failure-attribution]
   (when (seq failure-attribution)
-    (let [source (get failure-attribution :failure/source
-                      (get failure-attribution :dependency/source :unknown))
-          vendor (or (:failure/vendor failure-attribution)
-                     (:dependency/vendor failure-attribution)
-                     (:dependency/id failure-attribution))
-          failure-class (get failure-attribution :dependency/class
-                             (get failure-attribution :failure/class :unknown))]
+    (let [source (some failure-attribution [:failure/source :dependency/source])
+          vendor (some failure-attribution [:failure/vendor :dependency/vendor :dependency/id])
+          failure-class (some failure-attribution [:dependency/class :failure/class])]
       (str (label source) " / " (label vendor) " / " (label failure-class)))))
 
 (defn ^{:stratum 1} canonical-phase-names

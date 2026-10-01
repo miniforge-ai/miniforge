@@ -34,3 +34,7 @@ Run evidence consumers, CLI regressions, normal hooks, and standards scans befor
 Current-head review and all CI, including Build, remain mandatory merge gates.
 After integrating canonical corrections through db3659d4, all three evidence
 consumers pass. JVM and rebuilt packaged boundary tests pass 26 tests and 124 assertions.
+Legacy nil/false detail fields retain canonical fallbacks, including status,
+phase names and artifacts. Failure attribution selects the first truthy source.
+After c16736f0 integration, all three consumers and JVM/rebuilt packaged boundary
+regressions pass (27 tests, 132 assertions).

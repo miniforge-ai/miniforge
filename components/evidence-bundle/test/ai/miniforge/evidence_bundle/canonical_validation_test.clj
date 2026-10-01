@@ -90,6 +90,7 @@
     (doseq [[path value] [[[:evidence-bundle/id] "not-a-uuid"]
                           [[:evidence-bundle/created-at] "not-an-instant"]
                           [[:evidence-bundle/version] 1]
+                          [[:evidence/execution-mode] :unknown]
                           [[:evidence/intent :intent/type] :unknown]
                           [[:evidence/intent :intent/constraints] 42]
                           [[:evidence/intent :intent/constraints] nil]
@@ -168,7 +169,7 @@
 
 (deftest ^{:stratum 1} structured-records-accept-complete-domain-values-test
   (let [at #inst "2026-09-30T00:00:00Z"
-        bundle (base-bundle)
+        bundle (assoc (base-bundle) :evidence/execution-mode :governed)
         semantic {:semantic-validation/declared-intent :update
                   :semantic-validation/actual-behavior :update
                   :semantic-validation/resource-creates 0

@@ -44,3 +44,6 @@ pass 16 tests and 288 assertions after the approval-alias integration.
 The zero-count refactor exception requires declared refactor intent. All three
 evidence consumers pass after readiness/N8 integration; rebuilt packaged canonical
 and control schema regressions pass 16 tests and 296 assertions.
+N11 execution modes use the shared root schema's local/governed allowlist.
+Canonical validation reuses one phase-field registry for structural and output checks.
+All three consumers pass; rebuilt canonical/execution regressions pass 28 tests and 300 assertions.

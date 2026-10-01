@@ -98,7 +98,7 @@
    (optional-key/optional-key :evidence/rules-applied) vector?
 
    ;; Execution Evidence (N11 §9.1)
-   (optional-key/optional-key :evidence/execution-mode) keyword?
+   (optional-key/optional-key :evidence/execution-mode) (partial contains? #{:local :governed})
    (optional-key/optional-key :evidence/runtime-class) keyword?
    (optional-key/optional-key :evidence/task-started-at) inst?
    (optional-key/optional-key :evidence/task-finished-at) inst?
