@@ -40,6 +40,9 @@ separate N8 implementation obligation.
 
 ## Testing Plan
 
+Cleanup failure aggregation preserves the first failure and suppresses later
+failures after attempting every release. Startup rollback uses the same boundary.
+
 Run focused JVM regressions, affected Polylith consumers, rebuilt packaged CLI
 tests, namespace strata checks, and a root incremental standards scan.
 
@@ -62,6 +65,8 @@ regressions pass eight tests and 60 assertions. Inferred strata and Kondo pass.
 Post-bind rollback and cleanup-error preservation regressions pass with the full
 dashboard consumer suite. Rebuilt packaged schema, lifecycle, identity, authorization
 and event-metadata regressions pass 13 tests and 104 assertions.
+After cleanup aggregation, the full dashboard suite passes again. Rebuilt packaged
+lifecycle and identity regressions pass eight tests and 47 assertions.
 
 ## Deployment Plan
 
