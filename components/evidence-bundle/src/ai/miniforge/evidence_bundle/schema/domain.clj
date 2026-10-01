@@ -38,6 +38,9 @@
 (defn- ^{:stratum 0} artifact-ids? [value]
   (and (vector? value) (every? uuid? value)))
 
+(defn- ^{:stratum 0} event-stream-range? [value]
+  (and (map? value) (integer? (:start-seq value)) (integer? (:end-seq value))))
+
 (def ^{:stratum 0} phase-output-schema
   "Collected phase output is a projection, not the enclosing execution result.
    Validate known fields when present; phase-specific output remains extensible."
@@ -151,7 +154,7 @@
    :supervision/timestamp inst?
    (optional-key/optional-key :supervision/reasoning) string?
    (optional-key/optional-key :supervision/meta-eval?) boolean?
-   (optional-key/optional-key :supervision/confidence) float?
+   (optional-key/optional-key :supervision/confidence) number?
    (optional-key/optional-key :supervision/phase) keyword?})
 
 (def ^{:stratum 0} control-action-evidence-schema
@@ -177,7 +180,7 @@
    :phase/output map?
    :phase/artifacts artifact-ids?
    (optional-key/optional-key :phase/inner-loop-iterations) nat-int?
-   (optional-key/optional-key :phase/event-stream-range) map?})
+   (optional-key/optional-key :phase/event-stream-range) event-stream-range?})
 
 ;; Artifact Provenance Schema
 (def ^{:stratum 1} provenance-schema
