@@ -6,12 +6,14 @@
 
 # N6 — Evidence & Provenance Standard
 
-**Version:** 0.8.0-draft
-**Date:** 2026-08-06
+**Version:** 0.8.1-draft
+**Date:** 2026-10-01
 **Status:** Draft
 **Conformance:** MUST
 
-_v0.8.0 supplies the sealing mechanism behind the spec's immutability claim (§2.14).
+_v0.8.1 clarifies the portable resolved-rule and waiver-join fields required by
+N4 §5.5 and N6.GE.1. v0.8.0 supplies the sealing mechanism behind the spec's
+immutability claim (§2.14).
 It adds event-stream linkage (§2.12), gate-execution evidence (§2.13), retention
 (§7.4), and conformance requirement IDs (§9.4–§9.5).
 It inherits N3 §8's redaction contract rather than defining a second marker._
@@ -1426,6 +1428,9 @@ backing (N6.EB.5).
 
 **Version History:**
 
+- 0.8.1-draft (2026-10-01): Clarify resolved-rule evidence, post-overlay proposals,
+  evaluation identity, and captured waiver eligibility in §2.13.
+  Fix prose lint without changing unrelated requirements or historical annex claims.
 - 0.8.0-draft (2026-08-06): Spec-completion pass.
   **New normative sections:** bundle sealing and integrity (§2.14).
   The spec previously asserted immutability without explaining verification.

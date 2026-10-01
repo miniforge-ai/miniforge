@@ -12,6 +12,8 @@ Add the missing N6 knowledge-input and gate-execution contracts to the shared
 root schema. This is a bounded prerequisite for canonical validation in #1959.
 Its canonical entry point consumes the shared schema; this prerequisite alone
 does not claim complete evidence enforcement or production gate capture.
+Stacked on the specification clarification in #1973. Retarget to main after that
+prerequisite merges; this PR must merge only into main.
 
 ## Design
 
@@ -42,3 +44,6 @@ All three evidence consumers pass. Rebuilt packaged governance regressions pass
 Kondo and inferred namespace strata pass without warnings. The adversarial pass
 checks proposal precedence, waiver identity/eligibility and fail-closed parsing;
 separate pure namespaces keep the cross-record orchestration small.
+Shared test factories support canonical boundary checks without copied record maps.
+Current-main and spec-prerequisite integration passes all three evidence consumers
+and rebuilt packaged governance/control regressions.
