@@ -22,13 +22,13 @@
     [{:code :content-hash-mismatch}]))
 
 (defn- ^{:stratum 0} sealing-errors [bundle]
-  (when (some #(contains? bundle %) [:evidence/content-hash :evidence/signature :evidence/sealed-at])
-    (when-not (and (string? (:evidence/content-hash bundle))
-                   (inst? (:evidence/sealed-at bundle))
-                   (contains? bundle :compliance/sensitive-data)
-                   (contains? bundle :compliance/pii-handling)
-                   (inst? (:compliance/created-at bundle)))
-      [{:code :incomplete-seal}])))
+  (when (and (some #(contains? bundle %) [:evidence/content-hash :evidence/signature :evidence/sealed-at])
+             (not (and (string? (:evidence/content-hash bundle))
+                       (inst? (:evidence/sealed-at bundle))
+                       (contains? bundle :compliance/sensitive-data)
+                       (contains? bundle :compliance/pii-handling)
+                       (inst? (:compliance/created-at bundle)))))
+    [{:code :incomplete-seal}]))
 
 ;------------------------------------------------------------------------------ Layer 1
 

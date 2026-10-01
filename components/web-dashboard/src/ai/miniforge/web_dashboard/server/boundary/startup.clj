@@ -3,7 +3,8 @@
 ;; Licensed under the Apache License, Version 2.0.
 (ns ai.miniforge.web-dashboard.server.boundary.startup
   "Legacy HTTP startup boundary: roll back resources before propagating library failures."
-  (:require [ai.miniforge.web-dashboard.server.shutdown :as shutdown]))
+  (:require [ai.miniforge.web-dashboard.server.shutdown :as shutdown]
+            [ai.miniforge.web-dashboard.server.boundary.cleanup :as cleanup]))
 
 ;------------------------------------------------------------------------------ Layer 0
 
@@ -14,9 +15,4 @@
     (try
       (start! resources)
       (catch Throwable failure
-        (try
-          (shutdown/stop! @resources)
-          (catch Throwable cleanup-failure
-            (when-not (identical? failure cleanup-failure)
-              (.addSuppressed failure cleanup-failure))))
-        (throw failure)))))
+        (cleanup/complete! failure [#(shutdown/stop! @resources)])))))

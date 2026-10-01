@@ -21,7 +21,7 @@
    decisions, control actions, and execution output."
   (:require
    [ai.miniforge.evidence-bundle.collector-projection :as collector-projection]
-    [ai.miniforge.evidence-bundle.control-projection :as control-projection]
+   [ai.miniforge.evidence-bundle.control-projection :as control-projection]
    [ai.miniforge.evidence-bundle.projection :as projection]
    [ai.miniforge.event-stream.interface :as event-stream]))
 

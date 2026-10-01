@@ -14,7 +14,9 @@ resource counts, passed status, and violation IDs must agree with the shared int
 Actual behavior uses shared inference; zero changes also permit code-only refactoring.
 Shared producer contracts cover semantic rules, reliability, optional metadata,
 and canonical controls without relaxing field presence. Policy envelopes are optional.
-Base: `fix/evidence-control-records` (#1969); retarget main after that prerequisite merges.
+Control-record prerequisite #1969 is merged. Governance record schemas from #1972
+are integrated and exercised through the canonical public API with shared fixtures.
+Retarget to main after prerequisites merge; this PR must merge only into main.
 Event counts must equal the
 inclusive scoped sequence range; missing events cannot be certified as complete.
 Unsealed assembly inputs remain valid here, but are not publishable evidence.
@@ -47,3 +49,9 @@ and control schema regressions pass 16 tests and 296 assertions.
 N11 execution modes use the shared root schema's local/governed allowlist.
 Canonical validation reuses one phase-field registry for structural and output checks.
 All three consumers pass; rebuilt canonical/execution regressions pass 28 tests and 300 assertions.
+Merged control-records integration passes JVM and rebuilt packaged canonical,
+control-schema and lifecycle regressions: 22 tests and 327 assertions.
+Governance integration passes all three consumers and rebuilt packaged canonical
+and governance regressions: 22 tests and 371 assertions.
+The corrected resolution-trace and outcome contracts pass all three consumers
+and rebuilt packaged canonical/governance regressions: 25 tests and 385 assertions.
