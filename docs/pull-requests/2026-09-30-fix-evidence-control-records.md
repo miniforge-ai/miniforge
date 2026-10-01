@@ -9,8 +9,7 @@
 ## Overview
 
 Align shared policy-check and control-action evidence with N6 sections 2.5 and 2.9.
-Authorization extraction is split into `fix/control-authorization-boundary`;
-depends on #1970. Retarget main after that prerequisite merges.
+Base branch: main. Authorization prerequisite #1970 is merged.
 
 ## Motivation
 
