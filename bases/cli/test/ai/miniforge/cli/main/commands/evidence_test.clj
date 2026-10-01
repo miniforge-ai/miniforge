@@ -23,6 +23,7 @@
    [babashka.fs :as fs]
    [ai.miniforge.cli.app-config :as app-config]
    [ai.miniforge.cli.messages :as messages]
+   [ai.miniforge.cli.main :as main]
    [ai.miniforge.cli.main.commands.evidence :as sut]
    [ai.miniforge.cli.main.commands.evidence.bundles :as bundles]
    [ai.miniforge.cli.main.commands.evidence.formats :as formats]
@@ -32,6 +33,9 @@
 ;------------------------------------------------------------------------------ Layer 0
 
 ;; Fixtures & factories
+(defn- ^{:stratum 0} export-options [format path]
+  {:id "provider" :format format :output-path path})
+
 (def ^{:stratum 0} ^:dynamic *tmp-dir* nil)
 
 (defn ^{:stratum 0} tmp-dir-fixture [f]
@@ -204,7 +208,15 @@
     (with-redefs [shared/call-optional-provider (constantly bundle)]
       (doseq [format ["edn" "json" "html"]]
         (let [destination (str *tmp-dir* "/requested/audit." format)]
-          (with-out-str (sut/evidence-export-cmd {:id "provider" :format format :output-path destination}))
+          (with-out-str (sut/evidence-export-cmd (export-options format destination)))
+          (is (= (formats/encode bundle format) (slurp destination :encoding "UTF-8"))))))))
+
+(deftest ^{:stratum 1} cli-parser-keeps-destination-separate-from-format
+  (let [bundle (f/bundle {:test/text "café 東京"})]
+    (with-redefs [shared/call-optional-provider (constantly bundle)]
+      (doseq [[format args] [["edn" []] ["json" ["--format" "json"]] ["html" ["--format" "html"]]]]
+        (let [destination (str *tmp-dir* "/requested by CLI/audit." format)]
+          (with-out-str (apply main/-main "evidence" "export" "provider" destination args))
           (is (= (formats/encode bundle format) (slurp destination :encoding "UTF-8"))))))))
 
 (deftest ^{:stratum 1} renderer-failure-does-not-write-or-create-directories
@@ -216,7 +228,7 @@
                   formats/encode (constantly nil)
                   shared/exit! identity]
       (doseq [path [destination absent]]
-        (is (.contains (with-out-str (sut/evidence-export-cmd {:id "provider" :format "json" :output-path path}))
+        (is (.contains (with-out-str (sut/evidence-export-cmd (export-options "json" path)))
                        (messages/t :evidence/export-failed {:path path}))))
       (is (= "unchanged" (slurp destination)))
       (is (not (fs/exists? (str *tmp-dir* "/not-created")))))))

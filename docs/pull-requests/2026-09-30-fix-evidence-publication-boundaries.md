@@ -39,5 +39,6 @@ Run evidence consumers, CLI regressions, normal hooks, and standards scans befor
 Current-head review and all CI, including Build, remain mandatory merge gates.
 Legacy nil/false detail fields retain canonical fallbacks, including status,
 phase names and artifacts. Failure attribution selects the first truthy source.
-Refresh consumer and packaged results after integrating the CLI entry-point
-strata prerequisite and positional parser regression. No deployment is required.
+CLI entry-point strata prerequisite #1980 enables the positional parser fix.
+Command-line regressions cover explicit paths (including spaces), the EDN
+default, and JSON/HTML format flags. No deployment is required.
