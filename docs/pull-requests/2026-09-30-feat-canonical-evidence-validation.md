@@ -6,6 +6,7 @@
 ## Scope
 
 Stacked on canonical contract #1959; retarget main after it merges.
+Also requires complete-value scanner PR #1979 before merge.
 Consumer presentation/export enforcement is reviewed independently in #1960.
 Use the manager-free canonical validation API from #1959 for OPSV finalization.
 That prerequisite validates portable N6 structure, domain values and declared hashes.
@@ -24,6 +25,7 @@ also set redacted handling, and the seal regressions cover string/integral cards
 and metadata without relying on serialized scanning or ordinary map equality.
 Read-only recovery validates retained seals and reference correlation.
 Recovery can adopt an existing published seal without replacing its timestamps or digest.
+Recovery rescans original values and rejects understated sensitivity or PII flags.
 Publication here is atomic in memory; this PR does not claim disk durability or
 the full N3 retention and replay contract.
 

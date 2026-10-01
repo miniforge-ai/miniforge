@@ -5,6 +5,7 @@
   "Read-only validation of an existing seal against its retained assembly references."
   (:require [ai.miniforge.evidence-bundle.canonical-validation :as canonical]
             [ai.miniforge.evidence-bundle.opsv-finalization-references :as references]
+            [ai.miniforge.evidence-bundle.publication-compliance :as compliance]
             [ai.miniforge.evidence-bundle.schema.opsv :as schema]
             [ai.miniforge.redaction.interface :as redaction]
             [malli.core :as m]))
@@ -23,6 +24,7 @@
 (defn- ^{:stratum 1} valid? [record bundle available-ids]
   (and (:valid? (canonical/validate-with-exception-handling bundle))
        (redaction/clean? bundle)
+       (compliance/accurate-declarations? bundle)
        (correlated? record bundle)
        (empty? (references/errors record (:evidence/opsv bundle) available-ids))))
 

@@ -8,6 +8,12 @@
 
 ;------------------------------------------------------------------------------ Layer 0
 
+(defn ^{:stratum 0} accurate-declarations? [bundle]
+  (let [scan (scanner/scan-artifact bundle)
+        metadata (scanner/compliance-metadata scan)]
+    (and (or (empty? (:scan/findings scan)) (true? (:compliance/sensitive-data bundle)))
+         (or (not (:evidence/contains-pii? metadata)) (true? (:evidence/contains-pii? bundle))))))
+
 (defn ^{:stratum 0} prepare [bundle]
   (let [scan (scanner/scan-artifact bundle)
         redacted (redaction/redact bundle)
