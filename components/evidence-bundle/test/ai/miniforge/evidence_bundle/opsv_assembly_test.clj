@@ -40,6 +40,11 @@
 (defn- ^{:stratum 0} failed-scan [_]
   (throw (IllegalStateException. "injected scanner failure")))
 
+(defn- ^{:stratum 0} altered-declaration [bundle field value]
+  (let [unsigned (dissoc bundle :evidence/content-hash :evidence/signature)
+        invalid (assoc unsigned field value)]
+    (assoc invalid :evidence/content-hash (evidence/content-hash invalid))))
+
 (defn ^{:stratum 0} error-codes
   [result]
   (set (map :code (:opsv.validation/errors result))))
@@ -64,6 +69,33 @@
 
 ;------------------------------------------------------------------------------ Layer 1
 
+(deftest ^{:stratum 1} finalization-does-not-realize-deferred-availability
+  (let [[store id] (accumulated-store f/opsv-evidence)
+        realized? (atom false)
+        available (lazy-seq (reset! realized? true) (seq f/artifact-ids))
+        before @store
+        result (evidence/finalize-opsv-evidence! store id f/base-bundle f/opsv-evidence available)]
+    (is (response/anomaly-map? result))
+    (is (false? @realized?))
+    (is (= before @store))))
+
+(deftest ^{:stratum 1} finalization-requires-published-fields-before-cas
+  (doseq [base [(dissoc f/base-bundle :evidence/event-links)
+                (update f/base-bundle :evidence/outcome dissoc :outcome/tier)]]
+    (let [[store id] (accumulated-store f/opsv-evidence)
+          before @store
+          result (evidence/finalize-opsv-evidence! store id base f/opsv-evidence (set f/artifact-ids))]
+      (is (response/anomaly-map? result))
+      (is (= before @store)))))
+
+(deftest ^{:stratum 1} redaction-cannot-publish-an-invalid-canonical-value
+  (let [opsv (assoc-in f/opsv-evidence [:opsv/policy-proposals 0 :scaling :AKIAIOSFODNN7EXAMPLE] "test")
+        [store id] (accumulated-store opsv)
+        before @store
+        result (evidence/finalize-opsv-evidence! store id f/base-bundle opsv (set f/artifact-ids))]
+    (is (response/anomaly-map? result))
+    (is (= before @store))))
+
 (deftest ^{:stratum 1} sealing-scans-redacts-and-records-compliance-before-hashing
   (let [[store id] (accumulated-store f/opsv-evidence)
         base (assoc-in f/base-bundle [:evidence/intent :intent/description] "AKIAABCDEFGHIJKLMNOP")
@@ -78,6 +110,25 @@
                  (evidence/finalize-opsv-evidence! store id f/base-bundle f/opsv-evidence (set f/artifact-ids)))]
     (is (response/anomaly-map? result))
     (is (= before @store))))
+
+(deftest ^{:stratum 1} payment-cards-cannot-survive-the-published-seal
+  (doseq [card ["4111 1111 1111 1111" 4111111111111111 4111111111111111N]]
+    (let [[store id] (accumulated-store f/opsv-evidence)
+          base (assoc f/base-bundle :test/payment-card card)
+          bundle (evidence/finalize-opsv-evidence! store id base f/opsv-evidence (set f/artifact-ids))]
+      (is (= "[REDACTED]" (:test/payment-card bundle)))
+      (is (true? (:evidence/contains-pii? bundle)))
+      (is (= :redacted (:compliance/pii-handling bundle)))
+      (is (:valid? (evidence/validate-canonical-bundle bundle))))))
+
+(deftest ^{:stratum 1} metadata-only-redaction-is-recorded-in-the-seal
+  (let [[store id] (accumulated-store f/opsv-evidence)
+        base (assoc f/base-bundle :test/value (with-meta [] {:card 500000000009}))
+        bundle (evidence/finalize-opsv-evidence! store id base f/opsv-evidence (set f/artifact-ids))]
+    (is (= {:card "[REDACTED]"} (meta (:test/value bundle))))
+    (is (true? (:evidence/contains-pii? bundle)))
+    (is (= :redacted (:compliance/pii-handling bundle)))
+    (is (:valid? (evidence/validate-canonical-bundle bundle)))))
 
 (deftest ^{:stratum 1} concurrent-accumulation-invalidates-the-prepared-candidate
   (let [[store bundle-id] (accumulated-store f/opsv-evidence)
@@ -138,6 +189,69 @@
     (is (= bundle (evidence/restore-finalized-opsv-bundle! restored bundle (set f/artifact-ids))))
     (is (response/anomaly-map? (evidence/restore-finalized-opsv-bundle! restored bundle #{})))
     (is (response/anomaly-map? (evidence/restore-finalized-opsv-bundle! (atom {}) nil #{})))))
+
+(deftest ^{:stratum 1} restoration-distinguishes-missing-assembly-from-corrupt-seal
+  (let [[store id] (accumulated-store f/opsv-evidence)
+        bundle (evidence/finalize-opsv-evidence! store id f/base-bundle f/opsv-evidence (set f/artifact-ids))
+        missing (atom {})
+        before @missing
+        result (evidence/restore-finalized-opsv-bundle! missing bundle (set f/artifact-ids))]
+    (is (= :anomalies/not-found (:anomaly/category result)))
+    (is (= #{:assembly-not-found} (error-codes result)))
+    (is (identical? before @missing))))
+
+(deftest ^{:stratum 1} restoration-rejects-sensitive-metadata-without-changing-retained-state
+  (let [[store id] (accumulated-store f/opsv-evidence)
+        snapshot @store
+        bundle (evidence/finalize-opsv-evidence! store id f/base-bundle f/opsv-evidence (set f/artifact-ids))]
+    (doseq [metadata [{:secret "private-value"} {:card 500000000009}]
+            candidate [(with-meta bundle metadata)
+                       (update bundle :evidence/outcome with-meta metadata)]]
+      (let [restored (atom snapshot)]
+        (is (:valid? (evidence/validate-canonical-bundle candidate)))
+        (is (response/anomaly-map?
+              (evidence/restore-finalized-opsv-bundle! restored candidate (set f/artifact-ids))))
+        (is (identical? snapshot @restored))))))
+
+(deftest ^{:stratum 1} idempotent-restoration-validates-the-stored-value
+  (let [[store id] (accumulated-store f/opsv-evidence)
+        bundle (evidence/finalize-opsv-evidence! store id f/base-bundle f/opsv-evidence (set f/artifact-ids))
+        retained (with-meta bundle {:secret "private-value"})]
+    (swap! store assoc-in [id :opsv.assembly/bundle] retained)
+    (let [before @store]
+      (is (= bundle retained))
+      (is (response/anomaly-map?
+            (evidence/restore-finalized-opsv-bundle! store bundle (set f/artifact-ids))))
+      (is (identical? before @store)))))
+
+(deftest ^{:stratum 1} restoration-rejects-false-sensitivity-declarations
+  (doseq [sensitive-value ["000-00-0000" "4111 1111 1111 1111"]]
+    (let [[store id] (accumulated-store f/opsv-evidence)
+          snapshot @store
+          base (assoc-in f/base-bundle [:evidence/intent :intent/description] sensitive-value)
+          bundle (evidence/finalize-opsv-evidence! store id base f/opsv-evidence (set f/artifact-ids))]
+      (is (true? (:compliance/sensitive-data bundle)))
+      (is (true? (:evidence/contains-pii? bundle)))
+      (doseq [field [:compliance/sensitive-data :evidence/contains-pii?]]
+        (let [candidate (altered-declaration bundle field false)
+              restored (atom snapshot)]
+          (is (:valid? (evidence/validate-canonical-bundle candidate)))
+          (is (response/anomaly-map?
+                (evidence/restore-finalized-opsv-bundle! restored candidate (set f/artifact-ids))))
+          (is (identical? snapshot @restored)))))))
+
+(deftest ^{:stratum 1} restoration-rejects-understated-treatment-without-changing-state
+  (let [[store id] (accumulated-store f/opsv-evidence)
+        snapshot @store
+        base (assoc-in f/base-bundle [:evidence/intent :intent/description] "4111 1111 1111 1111")
+        bundle (evidence/finalize-opsv-evidence! store id base f/opsv-evidence (set f/artifact-ids))
+        candidate (altered-declaration bundle :compliance/pii-handling :none)
+        restored (atom snapshot)]
+    (is (= :redacted (:compliance/pii-handling bundle)))
+    (is (:valid? (evidence/validate-canonical-bundle candidate)))
+    (is (response/anomaly-map?
+          (evidence/restore-finalized-opsv-bundle! restored candidate (set f/artifact-ids))))
+    (is (identical? snapshot @restored))))
 
 (deftest ^{:stratum 1} finalize-rejects-invalid-base-bundle
   (let [[store bundle-id] (accumulated-store f/opsv-evidence)

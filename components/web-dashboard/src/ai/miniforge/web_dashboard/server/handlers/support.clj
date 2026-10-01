@@ -1,4 +1,4 @@
-;; Copyright 2025 miniforge.ai
+;; Copyright 2025-2026 Christopher Lester (christopher@miniforge.ai)
 ;;
 ;; Licensed under the Apache License, Version 2.0 (the "License");
 ;; you may not use this file except in compliance with the License.
@@ -20,6 +20,7 @@
    [ai.miniforge.anomaly.interface :as anomaly]
    [ai.miniforge.event-stream.interface :as event-stream]
    [ai.miniforge.response.interface :as response]
+   [ai.miniforge.web-dashboard.control-identity :as control-identity]
    [ai.miniforge.web-dashboard.state :as state]
    [ai.miniforge.web-dashboard.filters-new :as filters-new]))
 
@@ -74,15 +75,9 @@
   200)
 
 (def ^{:stratum 0} default-dashboard-requester
-  "The requester identity the dashboard stamps on every control action.
-   NOT a fallback for a missing body field: a body-supplied requester is
-   ignored outright, never preferred — see `command-requester` and
-   `build-control-action` (miniforge#1460), where honouring it would let
-   an unauthenticated caller poison the audit trail or self-authorize.
-   The surface itself is the only honest attribution until an
-   authenticated session identity is threaded through, at which point
-   this constant gives way to that identity."
-  {:principal "dashboard" :role :operator})
+  "Server-owned surface identity. Structured controls add the dashboard
+   instance's registered listener ID; body-supplied identities are ignored."
+  control-identity/requester)
 
 (def ^{:stratum 0} control-intervention-by-command
   "The three run controls this console offers, mapped to the
@@ -141,6 +136,25 @@
   (if (string? artifact-id)
     (or (parse-uuid artifact-id) artifact-id)
     artifact-id))
+
+;; Structured control action builder (N8)
+(defn ^{:stratum 0} build-control-action
+  "Build a control action from request data and a server-owned requester.
+
+   The requester is derived SERVER-SIDE and the body's
+   `:action/requester` is ignored — same rule, and same reason, as
+   `command-requester` (miniforge#1460). Trusting it here would let a
+   caller both spoof the `:control-action/*` audit identity AND name the
+   role that `authorize-action` checks, so an unauthenticated request
+   could self-authorize. Until an authenticated session identity is
+   threaded through, the surface is the only honest requester."
+  [data workflow-id requester]
+  (event-stream/create-control-action
+   (keyword (:action/type data))
+   {:target-type :workflow :target-id workflow-id}
+   requester
+   {:justification (:action/justification data)
+    :parameters (:action/parameters data)}))
 
 ;------------------------------------------------------------------------------ Layer 1
 
@@ -203,25 +217,6 @@
    itself is the only honest attribution."
   []
   (:principal default-dashboard-requester))
-
-;; Structured control action builder (N8)
-(defn ^{:stratum 1} build-control-action
-  "Build a control action map from parsed request data.
-
-   The requester is derived SERVER-SIDE and the body's
-   `:action/requester` is ignored — same rule, and same reason, as
-   `command-requester` (miniforge#1460). Trusting it here would let a
-   caller both spoof the `:control-action/*` audit identity AND name the
-   role that `authorize-action` checks, so an unauthenticated request
-   could self-authorize. Until an authenticated session identity is
-   threaded through, the surface is the only honest requester."
-  [data workflow-id]
-  (event-stream/create-control-action
-   (keyword (:action/type data))
-   {:target-type :workflow :target-id workflow-id}
-   default-dashboard-requester
-   {:justification (:action/justification data)
-    :parameters (:action/parameters data)}))
 
 ;------------------------------------------------------------------------------ Layer 2
 

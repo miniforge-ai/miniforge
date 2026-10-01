@@ -496,7 +496,7 @@
 (defn ^{:stratum 0} handle-structured-control-action
   "Handle a structured control action request (has :action/type)."
   [state workflow-id data]
-  (let [action (support/build-control-action data workflow-id)
+  (let [action (support/build-control-action data workflow-id (:control/requester @state))
         requester (:action/requester action)
         auth-result (event-stream/authorize-action
                      event-stream/default-roles action requester)]

@@ -21,12 +21,12 @@
    [ai.miniforge.artifact.interface :as artifact]
    [ai.miniforge.content-hash.interface :as content-hash]
    [ai.miniforge.evidence-bundle.collectors :as collectors]
+   [ai.miniforge.evidence-bundle.collector-projection :as projection]
    [ai.miniforge.evidence-bundle.compliance-defaults :as compliance-defaults]
    [ai.miniforge.evidence-bundle.dependency-health :as dependency-health]
    [ai.miniforge.evidence-bundle.outcome :as outcome]
    [ai.miniforge.evidence-bundle.phases :as phases]
    [ai.miniforge.redaction.interface :as redaction]
-   [ai.miniforge.evidence-bundle.protocols.impl.semantic-validator :as semantic-validator]
    [ai.miniforge.evidence-bundle.scanner :as scanner]
    [ai.miniforge.evidence-bundle.schema :as schema]))
 
@@ -138,7 +138,7 @@
         impl-artifacts (filter #(= :implement (get-in % [:artifact/provenance :provenance/phase]))
                                artifacts)
         semantic-validation (when (seq impl-artifacts)
-                              (semantic-validator/validate-intent-impl intent impl-artifacts))
+                              (projection/semantic-evidence intent impl-artifacts))
 
         base-bundle (merge
                      (schema/create-evidence-bundle-template)

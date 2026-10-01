@@ -23,6 +23,7 @@
   (:require
    [cheshire.core :as json]
    [ai.miniforge.event-stream.interface :as event-stream]
+   [ai.miniforge.web-dashboard.control-identity :as control-identity]
    [ai.miniforge.web-dashboard.server.handlers :as sut]
    [ai.miniforge.web-dashboard.server.handlers.support :as support]
    [ai.miniforge.web-dashboard.state.core :as state-core]
@@ -47,16 +48,22 @@
 
 (deftest ^{:stratum 0} structured-action-ignores-a-body-supplied-requester
   (testing "build-control-action derives the requester server-side"
-    (let [action (support/build-control-action
+    (let [stream (event-stream/create-event-stream {:sinks []})
+          state (control-identity/attach! (state-core/create-state {:event-stream stream}))
+          action (support/build-control-action
                   {:action/type "cancel"
                    :action/requester {:principal "ceo@example.com" :role :admin}}
-                  "wf-1")
+                  "wf-1" (:control/requester @state))
           requester (:action/requester action)]
       ;; whatever the body claimed, the recorded/authorized requester is
       ;; the surface's, so it cannot spoof the audit event or self-grant
       ;; a role to authorize-action.
       (is (not= "ceo@example.com" (:principal requester)))
-      (is (= "dashboard" (:principal requester))))))
+      (is (= "dashboard" (:principal requester)))
+      (is (uuid? (:listener-id requester)))
+      (is (= :control (:capability requester)))
+      (is (some #(= (:listener-id requester) (:listener/id %))
+                (event-stream/list-listeners stream))))))
 
 ;------------------------------------------------------------------------------ Layer 1
 

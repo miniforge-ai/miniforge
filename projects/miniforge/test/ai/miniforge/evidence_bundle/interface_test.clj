@@ -15,7 +15,6 @@
 ;; WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 ;; See the License for the specific language governing permissions and
 ;; limitations under the License.
-
 (ns ai.miniforge.evidence-bundle.interface-test
   "Tests for evidence-bundle component public interface."
   (:require
@@ -23,14 +22,15 @@
    [ai.miniforge.evidence-bundle.interface :as evidence]
    [ai.miniforge.artifact.interface :as artifact]))
 
-;------------------------------------------------------------------------------ Test Helpers
+;------------------------------------------------------------------------------ Layer 0
 
-(defn create-test-artifact-store
+;------------------------------------------------------------------------------ Test Helpers
+(defn ^{:stratum 0} create-test-artifact-store
   "Create an in-memory artifact store for testing."
   []
   (artifact/create-transit-store {:dir nil}))
 
-(defn dependency-health-entry
+(defn ^{:stratum 0} dependency-health-entry
   [overrides]
   (merge {:dependency/id :anthropic
           :dependency/source :external-provider
@@ -44,7 +44,7 @@
           :dependency/retryability :retryable}
          overrides))
 
-(defn create-test-workflow-state
+(defn ^{:stratum 0} create-test-workflow-state
   "Create a test workflow state."
   [workflow-id status & {:keys [tool-invocations dependency-health failure-attribution]
                          :or {tool-invocations []}}]
@@ -75,9 +75,40 @@
                       :status :merged
                       :merged-at (java.time.Instant/now)}})
 
-;------------------------------------------------------------------------------ Layer 1: Evidence Manager Creation
+;; Evidence Collection Helpers
+(deftest ^{:stratum 0} extract-intent-test
+  (testing "Extracts intent from workflow spec"
+    (let [spec {:intent/type :create
+                :description "Create new resources"
+                :business-reason "Launch new feature"}
+          intent (evidence/extract-intent spec)]
 
-(deftest create-evidence-manager-test
+      (is (= :create (:intent/type intent)))
+      (is (= "Create new resources" (:intent/description intent)))
+      (is (= "Launch new feature" (:intent/business-reason intent)))
+      (is (inst? (:intent/declared-at intent))))))
+
+;; Schema Exports
+(deftest ^{:stratum 0} schema-exports-test
+  (testing "Exports intent types"
+    (is (set? evidence/intent-types))
+    (is (contains? evidence/intent-types :import))
+    (is (contains? evidence/intent-types :create)))
+
+  (testing "Exports semantic validation rules"
+    (is (map? evidence/semantic-validation-rules))
+    (is (contains? evidence/semantic-validation-rules :import)))
+
+  (testing "Creates evidence template"
+    (let [template (evidence/create-evidence-template)]
+      (is (uuid? (:evidence-bundle/id template)))
+      (is (inst? (:evidence-bundle/created-at template)))
+      (is (= "1.0.0" (:evidence-bundle/version template))))))
+
+;------------------------------------------------------------------------------ Layer 1
+
+;; Evidence Manager Creation
+(deftest ^{:stratum 1} create-evidence-manager-test
   (testing "Creates evidence manager with artifact store"
     (let [store (create-test-artifact-store)
           manager (evidence/create-evidence-manager {:artifact-store store})]
@@ -90,9 +121,8 @@
     (is (thrown? Exception
                  (evidence/create-evidence-manager {})))))
 
-;------------------------------------------------------------------------------ Layer 2: Bundle Creation
-
-(deftest create-bundle-test
+;; Bundle Creation
+(deftest ^{:stratum 1} create-bundle-test
   (testing "Creates evidence bundle from workflow state"
     (let [store (create-test-artifact-store)
           manager (evidence/create-evidence-manager {:artifact-store store})
@@ -171,9 +201,8 @@
       (is (= dependency-health (:evidence/dependency-health bundle)))
       (is (= failure-attribution (:evidence/failure-attribution bundle))))))
 
-;------------------------------------------------------------------------------ Layer 3: Bundle Retrieval
-
-(deftest get-bundle-test
+;; Bundle Retrieval
+(deftest ^{:stratum 1} get-bundle-test
   (testing "Retrieves bundle by ID"
     (let [store (create-test-artifact-store)
           manager (evidence/create-evidence-manager {:artifact-store store})
@@ -191,7 +220,7 @@
           manager (evidence/create-evidence-manager {:artifact-store store})]
       (is (nil? (evidence/get-bundle manager (random-uuid)))))))
 
-(deftest get-bundle-by-workflow-test
+(deftest ^{:stratum 1} get-bundle-by-workflow-test
   (testing "Retrieves bundle by workflow ID"
     (let [store (create-test-artifact-store)
           manager (evidence/create-evidence-manager {:artifact-store store})
@@ -203,9 +232,8 @@
       (is (= workflow-id (:evidence-bundle/workflow-id retrieved)))
       (is (= (:evidence-bundle/id bundle) (:evidence-bundle/id retrieved))))))
 
-;------------------------------------------------------------------------------ Layer 4: Bundle Querying
-
-(deftest query-bundles-test
+;; Bundle Querying
+(deftest ^{:stratum 1} query-bundles-test
   (testing "Queries bundles by intent type"
     (let [store (create-test-artifact-store)
           manager (evidence/create-evidence-manager {:artifact-store store})
@@ -236,9 +264,8 @@
       (let [all-bundles (evidence/query-bundles manager {})]
         (is (= 1 (count all-bundles)))))))
 
-;------------------------------------------------------------------------------ Layer 5: Bundle Validation
-
-(deftest validate-bundle-test
+;; Bundle Validation
+(deftest ^{:stratum 1} validate-bundle-test
   (testing "Validates valid bundle"
     (let [store (create-test-artifact-store)
           manager (evidence/create-evidence-manager {:artifact-store store})
@@ -259,27 +286,24 @@
       (is (not (:valid? validation)))
       (is (seq (:errors validation))))))
 
-;------------------------------------------------------------------------------ Layer 6: Bundle Export
-
-(deftest export-bundle-test
-  (testing "Exports bundle to file"
+;; Bundle Export
+(deftest ^{:stratum 1} export-bundle-test
+  (testing "Refuses legacy unsealed assembly without changing the destination"
     (let [store (create-test-artifact-store)
           manager (evidence/create-evidence-manager {:artifact-store store})
           workflow-id (random-uuid)
           state (create-test-workflow-state workflow-id :completed)
           bundle (evidence/create-bundle manager workflow-id {:workflow-state state})
           bundle-id (:evidence-bundle/id bundle)
-          output-path "/tmp/test-evidence.edn"]
+          output (java.io.File/createTempFile "evidence-rejected-" ".edn")]
+      (try
+        (spit output "unchanged")
+        (is (false? (evidence/export-bundle manager bundle-id (.getPath output))))
+        (is (= "unchanged" (slurp output)))
+        (finally (.delete output))))))
 
-      (is (true? (evidence/export-bundle manager bundle-id output-path)))
-      (is (.exists (java.io.File. output-path)))
-
-      ;; Clean up
-      (.delete (java.io.File. output-path)))))
-
-;------------------------------------------------------------------------------ Layer 7: Semantic Validation
-
-(deftest validate-intent-test
+;; Semantic Validation
+(deftest ^{:stratum 1} validate-intent-test
   (testing "Validates import intent with no changes"
     (let [store (create-test-artifact-store)
           manager (evidence/create-evidence-manager {:artifact-store store})
@@ -303,21 +327,7 @@
       (is (seq (:violations result)))
       (is (= 2 (:semantic-validation/resource-creates result))))))
 
-;------------------------------------------------------------------------------ Layer 8: Evidence Collection Helpers
-
-(deftest extract-intent-test
-  (testing "Extracts intent from workflow spec"
-    (let [spec {:intent/type :create
-                :description "Create new resources"
-                :business-reason "Launch new feature"}
-          intent (evidence/extract-intent spec)]
-
-      (is (= :create (:intent/type intent)))
-      (is (= "Create new resources" (:intent/description intent)))
-      (is (= "Launch new feature" (:intent/business-reason intent)))
-      (is (inst? (:intent/declared-at intent))))))
-
-(deftest auto-collect-evidence-test
+(deftest ^{:stratum 1} auto-collect-evidence-test
   (testing "Collects evidence for completed workflow"
     (let [store (create-test-artifact-store)
           workflow-id (random-uuid)
@@ -335,21 +345,3 @@
           bundle (evidence/auto-collect-evidence workflow-id state store)]
 
       (is (nil? bundle)))))
-
-;------------------------------------------------------------------------------ Layer 9: Schema Exports
-
-(deftest schema-exports-test
-  (testing "Exports intent types"
-    (is (set? evidence/intent-types))
-    (is (contains? evidence/intent-types :import))
-    (is (contains? evidence/intent-types :create)))
-
-  (testing "Exports semantic validation rules"
-    (is (map? evidence/semantic-validation-rules))
-    (is (contains? evidence/semantic-validation-rules :import)))
-
-  (testing "Creates evidence template"
-    (let [template (evidence/create-evidence-template)]
-      (is (uuid? (:evidence-bundle/id template)))
-      (is (inst? (:evidence-bundle/created-at template)))
-      (is (= "1.0.0" (:evidence-bundle/version template))))))

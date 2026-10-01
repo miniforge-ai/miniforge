@@ -1,5 +1,8 @@
 {:web-dashboard/messages
- {;; readiness-state-label
+ {:control/intervention-failed "Intervention request failed: {error}"
+  :control/execution-failed "Control execution failed."
+  :control/unknown-command "Unknown workflow command: {command}"
+  ;; readiness-state-label
   :readiness/merge-ready       "Ready"
   :readiness/ci-failing        "CI Failing"
   :readiness/changes-requested "Changes Requested"

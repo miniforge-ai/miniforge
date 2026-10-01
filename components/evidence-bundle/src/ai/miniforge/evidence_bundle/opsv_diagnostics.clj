@@ -20,6 +20,10 @@
 
 ;------------------------------------------------------------------------------ Layer 2
 
+(defn ^{:stratum 2} not-found [bundle-id]
+  (failure :anomalies/not-found :finalization/not-found bundle-id
+           [{:code :assembly-not-found}]))
+
 (defn ^{:stratum 2} immutable [bundle-id]
   (failure :anomalies/conflict :finalization/immutable bundle-id
            [{:code :bundle-already-finalized}]))

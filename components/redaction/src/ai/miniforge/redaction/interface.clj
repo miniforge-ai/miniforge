@@ -20,6 +20,7 @@
   (:require
    [ai.miniforge.redaction.core :as core]
    [ai.miniforge.redaction.match :as match]
+   [ai.miniforge.redaction.payment-card :as payment-card]
    [ai.miniforge.redaction.policy :as policy]))
 
 ;------------------------------------------------------------------------------ Layer 0
@@ -52,3 +53,8 @@
   "The redaction marker substituted for an excluded value."
   []
   (policy/marker))
+
+(defn ^{:stratum 0} payment-card?
+  "Whether original scalars, keys or metadata contain a card candidate."
+  [value]
+  (payment-card/present? value))

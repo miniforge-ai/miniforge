@@ -21,6 +21,7 @@
   (:require
    [ai.miniforge.evidence-bundle.collector :as collector]
    [ai.miniforge.evidence-bundle.collectors :as collectors]
+   [ai.miniforge.evidence-bundle.export-boundary :as export-boundary]
    [ai.miniforge.evidence-bundle.schema.domain :as domain]
    [ai.miniforge.evidence-bundle.schema.validation :as validation]
    [ai.miniforge.logging.interface :as log]))
@@ -151,21 +152,9 @@
 
 ;; Export Operations
 (defn ^{:stratum 0} export-bundle-impl
-  "Export bundle to file.
-   Returns true on success, false on error."
+  "Export only validated, sealed evidence; return false without writing on rejection."
   [bundles logger bundle-id output-path]
-  (try
-    (when-let [bundle (get @bundles bundle-id)]
-      (spit output-path (pr-str bundle))
-      (log/info logger :evidence-bundle :bundle/exported
-                {:data {:bundle-id bundle-id
-                        :output-path output-path}})
-      true)
-    (catch Exception e
-      (log/error logger :evidence-bundle :bundle/export-failed
-                 {:data {:bundle-id bundle-id
-                         :error (.getMessage e)}})
-      false)))
+  (export-boundary/export-with-exception-handling! bundles logger bundle-id output-path))
 
 ;------------------------------------------------------------------------------ Layer 1
 

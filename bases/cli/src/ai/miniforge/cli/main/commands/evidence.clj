@@ -16,96 +16,51 @@
 ;; See the License for the specific language governing permissions and
 ;; limitations under the License.
 (ns ai.miniforge.cli.main.commands.evidence
-  "Evidence bundle commands: show, export, list.
-
-   Delegates to ai.miniforge.evidence-bundle.interface when available.
-   Falls back to filesystem scanning of ~/.miniforge/evidence/.
-
-   Bundle discovery/loading and field-derivation helpers live in the
-   sibling `ai.miniforge.cli.main.commands.evidence.bundles` namespace
-   (rule 210: the combined namespace measured 5 real layers, max 3);
-   this namespace keeps the three command entry points and the
-   detail-view rendering they share."
+  "List, show, and export verified published evidence from providers or disk."
   (:require
    [ai.miniforge.cli.app-config :as app-config]
    [ai.miniforge.cli.main.commands.evidence.bundles :as bundles]
+   [ai.miniforge.cli.main.commands.evidence.exporting :as exporting]
+   [ai.miniforge.cli.main.commands.evidence.validation :as validation]
    [ai.miniforge.cli.main.commands.shared :as shared]
    [ai.miniforge.cli.main.display :as display]
    [ai.miniforge.cli.messages :as messages]))
 
 ;------------------------------------------------------------------------------ Layer 0
 
+(defn- ^{:stratum 0} show-not-found! [id]
+  (display/print-error
+    (messages/t :evidence/not-found
+                {:id id :command (app-config/command-string "evidence list")}))
+  (shared/exit! 1))
+
 (defn- ^{:stratum 0} normalize-bundle-detail
   [bundle]
-  (let [dependency-health (or (:evidence/dependency-health bundle) {})
-        artifacts (or (:bundle/artifacts bundle) [])
-        phases (or (:bundle/phases bundle)
-                   (bundles/canonical-phase-names bundle))
-        status (or (:bundle/status bundle)
-                   (if (true? (get-in bundle [:evidence/outcome :outcome/success]))
-                     "completed"
-                     "failed"))]
-    {:bundle/workflow-id (or (:bundle/workflow-id bundle)
-                             (:evidence-bundle/workflow-id bundle))
+  (let [dependency-health (get bundle :evidence/dependency-health {})
+        artifacts (bundles/legacy-field-or bundle :bundle/artifacts [])
+        phases (bundles/legacy-field-or bundle :bundle/phases (bundles/canonical-phase-names bundle))
+        status (bundles/legacy-field-or bundle :bundle/status (bundles/canonical-status bundle))
+        workflow-id (or (:bundle/workflow-id bundle) (:evidence-bundle/workflow-id bundle))
+        created-at (or (:bundle/created-at bundle) (:evidence-bundle/created-at bundle))
+        issues (bundles/dependency-issue-count dependency-health)
+        attribution (bundles/failure-attribution-summary (:evidence/failure-attribution bundle))]
+    {:bundle/workflow-id workflow-id
      :bundle/status status
-     :bundle/created-at (or (:bundle/created-at bundle)
-                            (:evidence-bundle/created-at bundle))
+     :bundle/created-at created-at
      :bundle/artifacts artifacts
      :bundle/phases phases
-     :bundle/dependency-issues (bundles/dependency-issue-count dependency-health)
-     :bundle/failure-attribution (bundles/failure-attribution-summary
-                                  (:evidence/failure-attribution bundle))}))
+     :bundle/dependency-issues issues
+     :bundle/failure-attribution attribution}))
 
-(defn- ^{:stratum 0} display-filesystem-bundles
-  "Render bundles discovered via filesystem scan."
-  []
-  (let [files (bundles/scan-evidence-dir)]
-    (if (seq files)
-      (doseq [f files]
-        (let [bundle (bundles/load-bundle-from-file f)
-              id     (if bundle
-                       (or (some-> (:bundle/id bundle) str) (.getName f))
-                       (.getName f))]
-          (println (messages/t :evidence/bundle-entry
-                                {:id          (display/style id :bold true)
-                                :workflow-id (if (and bundle (:bundle/workflow-id bundle))
-                                               (str (:bundle/workflow-id bundle))
-                                               "—")
-                                :status      (if (and bundle (:bundle/status bundle))
-                                               (str (:bundle/status bundle))
-                                               "—")}))))
-      (do
-        (println (messages/t :evidence/none))
-        (println (messages/t :evidence/evidence-dir {:dir (bundles/evidence-dir)}))))))
+(defn- ^{:stratum 0} export-bundle! [id fmt output-path]
+  (let [bundle (bundles/load-bundle-for-show id)
+        destination (if (nil? output-path) (str (bundles/evidence-dir) "/" id "-export." fmt) output-path)]
+    (if bundle
+      (exporting/export! id bundle fmt destination)
+      (do (display/print-error (messages/t :evidence/export-not-found {:id id}))
+          (shared/exit! 1)))))
 
-(defn ^{:stratum 0} evidence-export-cmd
-  "Export an evidence bundle to a file in the requested format.
-
-   Supported formats: edn (default), json, html."
-  [opts]
-  (let [{:keys [id format]} opts
-        fmt (or format "edn")]
-    (if-not id
-      (shared/usage-error! :evidence/export-usage "evidence export <id> <format>")
-      (let [result (shared/call-optional-provider
-                    'ai.miniforge.evidence-bundle.interface/export-bundle id fmt)]
-        (if result
-          (do
-            (display/print-success (messages/t :evidence/export-success {:id id}))
-            (println (messages/t :evidence/export-format {:format fmt}))
-            (when-let [path (:path result)]
-              (println (messages/t :evidence/export-path {:path path}))))
-          (bundles/export-bundle-fallback id fmt))))))
-
-;------------------------------------------------------------------------------ Layer 1
-
-(defn- ^{:stratum 1} display-bundle-detail
-  "Render the detail view for a single evidence bundle."
-  [id bundle]
-  (display/render-detail (assoc bundles/bundle-detail-spec :header-params {:id id})
-                         (normalize-bundle-detail bundle)))
-
-(defn ^{:stratum 1} evidence-list-cmd
+(defn ^{:stratum 0} evidence-list-cmd
   "List all available evidence bundles.
 
    Shows bundles from the evidence-bundle component if available,
@@ -118,25 +73,36 @@
                           'ai.miniforge.evidence-bundle.interface/list-bundles)]
     (if component-result
       (bundles/display-component-bundles component-result)
-      (display-filesystem-bundles)))
+      (bundles/display-filesystem-bundles)))
   (println))
+
+;------------------------------------------------------------------------------ Layer 1
+
+(defn ^{:stratum 1} evidence-export-cmd
+  "Export a validated seal to the requested path as EDN, Transit JSON, or HTML."
+  [opts]
+  (let [{:keys [id]} opts]
+    (if-not id
+      (shared/usage-error! :evidence/export-usage "evidence export <id> <output-path> [--format edn|json|html]")
+      (export-bundle! id (get opts :format "edn") (:output-path opts)))))
+
+(defn- ^{:stratum 1} display-bundle-detail
+  "Render the detail view for a single evidence bundle."
+  [id bundle]
+  (display/render-detail (assoc (bundles/bundle-detail-spec) :header-params {:id id})
+                         (normalize-bundle-detail bundle)))
 
 ;------------------------------------------------------------------------------ Layer 2
 
 (defn ^{:stratum 2} evidence-show-cmd
   "Show the contents of an evidence bundle by ID."
   [opts]
-  (let [{:keys [id]} opts]
-    (if-not id
-      (shared/usage-error! :evidence/show-usage "evidence show <id>")
-      (let [bundle (bundles/load-bundle-for-show id)]
-        (if-not bundle
-          (do (display/print-error
-               (messages/t :evidence/not-found
-                          {:id id
-                           :command (app-config/command-string "evidence list")}))
-              (shared/exit! 1))
-          (display-bundle-detail id bundle))))))
+  (let [id (:id opts)
+        bundle (when id (bundles/load-bundle-for-show id))]
+    (cond
+      (not id) (shared/usage-error! :evidence/show-usage "evidence show <id>")
+      (not bundle) (show-not-found! id)
+      (validation/require-valid! id bundle) (display-bundle-detail id bundle))))
 
 ;------------------------------------------------------------------------------ Rich Comment
 (comment

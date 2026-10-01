@@ -44,7 +44,6 @@
   "The redaction policy, patterns compiled.
 
    EDN has no regex literal, so the config holds pattern strings and
-   EDN has no regex literal, so the config holds pattern strings and
    they are compiled here — the policy stays inspectable data on disk
    (dewey 007) and becomes usable regexes exactly once.
 
@@ -63,10 +62,12 @@
                ;; would quietly change what gets redacted instead of
                ;; failing at the boundary.
                [:redaction/marker
+                :redaction/payment-card-pattern
                 :redaction/secret-key-patterns
                 :redaction/secret-key-exclusions
                 :redaction/secret-value-patterns])]
       (-> raw
+          (update :redaction/payment-card-pattern re-pattern)
           (update :redaction/secret-key-patterns #(mapv re-pattern %))
           (update :redaction/secret-key-exclusions #(mapv re-pattern %))
           (update :redaction/secret-value-patterns #(mapv re-pattern %))))))

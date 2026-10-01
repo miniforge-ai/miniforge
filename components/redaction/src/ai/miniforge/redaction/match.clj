@@ -22,6 +22,7 @@
    detectable only by its key, an AWS access key only by its shape."
   (:require
    [clojure.string :as str]
+   [ai.miniforge.redaction.payment-card :as payment-card]
    [ai.miniforge.redaction.policy :as policy]))
 
 ;------------------------------------------------------------------------------ Layer 0
@@ -46,11 +47,12 @@
 (defn ^{:stratum 0} redactable-value?
   "True when V is the kind of value that could carry a secret.
 
-   A credential is textual. A number, boolean, nil, or timestamp cannot
-   encode one, so redacting it under a secret-naming key destroys data
+   Key-name matching preserves numbers, booleans, nil, and timestamps.
+   Redacting every number under a secret-naming key destroys data
    for no gain — `{:metrics {:tokens 42}}` is an LLM token *count*, not
    a bearer token, and replacing 42 with a string breaks every consumer
-   that does arithmetic on it.
+   that does arithmetic on it. Numeric payment-card candidates are handled
+   separately by shape during the value walk.
 
    Collections stay redactable: a map under `:credentials` is replaced
    wholesale rather than walked, since its own key names may be
@@ -68,7 +70,8 @@
   [s]
   (boolean
    (when (string? s)
-     (some #(re-find % s) (:redaction/secret-value-patterns @policy/policy)))))
+     (or (payment-card/present? s)
+         (some #(re-find % s) (:redaction/secret-value-patterns @policy/policy))))))
 
 (defn ^{:stratum 0} redact-string
   "Replace every secret-looking substring in S with the marker.
@@ -83,9 +86,12 @@
   ;; use a literal-prefix optimization on each pattern separately and
   ;; loses it once they are combined.
   (let [marker (policy/marker)]
-    (reduce (fn [acc pattern] (str/replace acc pattern marker))
-            s
-            (:redaction/secret-value-patterns @policy/policy))))
+    (payment-card/redact
+      (reduce (fn [acc pattern] (str/replace acc pattern marker))
+              s (:redaction/secret-value-patterns @policy/policy)) marker)))
+
+(defn ^{:stratum 0} redact-number [value]
+  (if (payment-card/present? value) (policy/marker) value))
 
 ;------------------------------------------------------------------------------ Layer 1
 
@@ -120,6 +126,7 @@
               (when (or (not= n n*) (not= nm nm*))
                 (if n* (str n* "/" nm*) nm*))))]
     (cond
+      (integer? k) (redact-number k)
       (string? k)  (let [r (redact-string k)] (if (= r k) k r))
       (keyword? k) (or (qualified k) k)
       (symbol? k)  (or (qualified k) k)
