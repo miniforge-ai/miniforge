@@ -11,11 +11,13 @@ This documentation prerequisite keeps implementation PR #1972 bounded.
 
 ## Contract
 
-Retain rule ownership, effective severity and enablement, selection, and each
-contributor's post-overlay proposal. Refer to exact hashed pack artifacts for
-the remaining rule definition. Preserve disabled and filtered rules for auditing.
+Retain rule ownership, effective settings, selection, and post-overlay proposals
+in a separate resolution trace. The resolved set references only enabled rule IDs.
+Use canonical keyword pack IDs throughout. Refer to exact hashed pack artifacts
+for remaining rule definitions. Preserve disabled and filtered trace entries for auditing.
 Record evaluation identity and the captured gate override setting for waiver joins.
 Ordinary waivers remain restricted to retained medium-or-less violations.
+Stable N6.GE.6–N6.GE.10 requirements and matching conformance cases cover these joins.
 
 ## Standards and verification
 

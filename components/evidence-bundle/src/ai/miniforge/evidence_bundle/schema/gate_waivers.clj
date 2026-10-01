@@ -11,7 +11,7 @@
   (contains? #{:medium :low :info} (:violation/severity violation)))
 
 (defn- ^{:stratum 0} blocking? [violation]
-  (contains? #{:critical :high} (:violation/severity violation)))
+  (contains? #{:critical :high :medium} (:violation/severity violation)))
 
 (defn- ^{:stratum 0} waiver-matches? [evaluation eligible waiver]
   (let [waived (:waiver/violations waiver)]
@@ -20,7 +20,17 @@
 
 ;------------------------------------------------------------------------------ Layer 1
 
-(defn ^{:stratum 1} consistent? [record]
+(defn- ^{:stratum 1} outcome-consistent? [outcome violations waivers]
+  (let [blocking (set (map :violation/rule-id (filter blocking? violations)))
+        waived (set (mapcat :waiver/violations waivers))]
+    (case outcome
+      :failed true
+      :passed (and (empty? waivers) (empty? blocking))
+      :waived (and (seq waivers) (set/subset? blocking waived)))))
+
+;------------------------------------------------------------------------------ Layer 2
+
+(defn ^{:stratum 2} consistent? [record]
   (let [violations (:gate-execution/violations record)
         waivers (:gate-execution/waivers record)
         eligible (set (map :violation/rule-id (filter eligible? violations)))
@@ -28,6 +38,4 @@
         evaluation (:gate-execution/evaluation-id record)]
     (and (or (empty? waivers) (true? (:gate-execution/allow-override? record)))
          (every? (partial waiver-matches? evaluation eligible) waivers)
-         (or (not= :waived outcome) (seq waivers))
-         (not (and (= :passed outcome) (seq waivers)))
-         (or (= :failed outcome) (not-any? blocking? violations)))))
+         (outcome-consistent? outcome violations waivers))))
