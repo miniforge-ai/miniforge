@@ -24,6 +24,8 @@
   (when (some #(contains? bundle %) [:evidence/content-hash :evidence/signature :evidence/sealed-at])
     (when-not (and (string? (:evidence/content-hash bundle))
                    (inst? (:evidence/sealed-at bundle))
+                   (contains? bundle :compliance/sensitive-data)
+                   (contains? bundle :compliance/pii-handling)
                    (inst? (:compliance/created-at bundle)))
       [{:code :incomplete-seal}])))
 
