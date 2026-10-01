@@ -50,6 +50,11 @@
    [ai.miniforge.cli.observability :as observability]
    [ai.miniforge.cli.main.display :as display]
    [ai.miniforge.cli.main.util :as util]
+   [ai.miniforge.cli.main.launchers :as launchers]
+   [ai.miniforge.cli.main.status.history :as status-history]
+   [ai.miniforge.cli.main.status.presentation :as status-presentation]
+   [ai.miniforge.cli.main.status.summary :as status-summary]
+   [ai.miniforge.cli.main.version :as version]
    [ai.miniforge.cli.main.commands.run :as cmd-run]
    [ai.miniforge.cli.main.commands.resume :as cmd-resume]
    [ai.miniforge.cli.main.commands.shared :as cmd-shared]
@@ -74,13 +79,7 @@
    ;; GROUP 3b: timeline-based events show
    [ai.miniforge.cli.main.commands.events :as cmd-events]
    [ai.miniforge.agent.interface :as agent]
-   [ai.miniforge.anomaly.interface :as anomaly]
-   [ai.miniforge.event-stream.interface :as es]
-   [ai.miniforge.supervisory-state.interface :as supervisory]
    [ai.miniforge.mcp-context-server.interface :as mcp-context-server]
-   [ai.miniforge.pr-train.interface :as pr-train]
-   [ai.miniforge.repo-dag.interface :as repo-dag]
-   [ai.miniforge.workflow-resume.interface :as wr]
    [ai.miniforge.lsp-mcp-bridge.main :as lsp-bridge]
    [ai.miniforge.lsp-mcp-bridge.tasks :as lsp-tasks]
    [slingshot.slingshot :refer [try+]]))
@@ -88,11 +87,6 @@
 ;------------------------------------------------------------------------------ Layer 0
 
 ;; ── Constants and pure helpers ──────────────────────────────────────────────
-(def ^{:stratum 0} version-info
-  {:name (app-config/binary-name)
-   :version "2026.01.20.1"
-   :description (app-config/description)})
-
 (defn ^{:stratum 0} workflow-list-cmd [_m] (workflow-runner/list-workflows!))
 
 (defn ^{:stratum 0} chain-list-cmd [_m] (workflow-runner/list-chains!))
@@ -178,64 +172,11 @@
                        {:command (app-config/command-string "help")}))
   (System/exit 1))
 
-(defn- ^{:stratum 0} create-pr-train-manager
-  "Build the PR-train manager bound to `event-stream` so train
-   mutations (add-pr, complete-merge) publish governed events that
-   supervisory-state materializes for the consoles."
-  ([]
-   (create-pr-train-manager nil))
-  ([event-stream]
-   (try+
-     (if event-stream
-       (pr-train/create-manager {:event-stream event-stream})
-       (pr-train/create-manager))
-     (catch Object e
-       (println (messages/t :web/pr-train-warning
-                            {:error (util/caught-message e (:throwable &throw-context))}))
-       nil))))
-
-(defn- ^{:stratum 0} create-repo-dag-manager
-  []
-  (try+
-    (repo-dag/create-manager)
-    (catch Object e
-      (println (messages/t :web/repo-dag-warning
-                           {:error (util/caught-message e (:throwable &throw-context))}))
-      nil)))
-
 ;; TUI components loaded conditionally (only in JVM/jlink bundled runtime).
 ;; This is an optional composition seam: miniforge-core includes the CLI
 ;; without bundling the JVM TUI component.
 (def ^{:stratum 0} tui-launcher
   (util/optional-composition-var 'ai.miniforge.tui-views.interface 'start-standalone-tui!))
-
-(defn- ^{:stratum 0} stale-running?
-  [last-updated]
-  (when-let [last-updated-ms (util/timestamp->epoch-ms last-updated)]
-    (let [configured-threshold-ms (:running-stale-threshold-ms (app-config/status-config))
-          default-threshold-ms (:running-stale-threshold-ms app-config/default-status-config)
-          threshold-ms (if (nat-int? configured-threshold-ms)
-                         configured-threshold-ms
-                         default-threshold-ms)]
-      (> (- (util/current-time-ms) last-updated-ms)
-         threshold-ms))))
-
-(defn- ^{:stratum 0} print-workflow-status
-  [{:keys [workflow-id status spec-name event-count completed-phases
-           completed-dag-task-count last-updated]}]
-  (let [unknown (messages/t :status/value-unknown)
-        none    (messages/t :status/value-none)]
-    (display/print-info (messages/t :status/workflow {:workflow-id workflow-id}))
-    (println (messages/t :status/field-status {:value (util/status-label status)}))
-    (println (messages/t :status/field-spec {:value (or spec-name unknown)}))
-    (println (messages/t :status/field-events {:value event-count}))
-    (println (messages/t :status/field-last-updated {:value (or last-updated unknown)}))
-    (println (messages/t :status/field-completed-phases
-                         {:value (if (seq completed-phases)
-                                   (str/join ", " (map name completed-phases))
-                                   none)}))
-    (println (messages/t :status/field-completed-dag-tasks
-                         {:value completed-dag-task-count}))))
 
 (defn ^{:stratum 0} doctor-cmd
   [_m]
@@ -460,110 +401,31 @@
   (let [{:keys [artifact-dir source-root workdir]} (util/get-opts m)]
     (mcp-context-server/start-server artifact-dir source-root workdir)))
 
+(defn ^{:stratum 0} status-cmd [m]
+  (try+
+    (if-let [workflow-id (:workflow-id (util/get-opts m))]
+      (status-presentation/print-workflow (status-summary/read-workflow (str workflow-id)))
+      (status-presentation/print-all (status-history/newest-first)))
+    (catch InterruptedException interrupted
+      (.interrupt (Thread/currentThread))
+      (throw interrupted))
+    (catch Error fatal (throw fatal))
+    (catch Object failure
+      (display/print-error (messages/t :status/read-failed
+                            {:message (util/caught-message failure (:throwable &throw-context))})))))
+
+(defn ^{:stratum 0} version-cmd [_m] (version/print!))
+
+(def ^{:stratum 0} web-launcher (launchers/optional-web-launcher))
+
 ;------------------------------------------------------------------------------ Layer 1
 
-;; Command implementations
-(defn ^{:stratum 1} version-cmd
-  [_m]
-  (println (str (:name version-info) " " (:version version-info)))
-  (println (:description version-info)))
+(def ^{:stratum 1} tui-available? (some? tui-launcher))
 
-(defn- ^{:stratum 1} optional-web-launcher
-  "Compose the dashboard command when the product includes web-dashboard."
-  []
-  (when-let [start! (util/optional-composition-var
-                     'ai.miniforge.web-dashboard.interface
-                     'start!)]
-    (fn [{:keys [port]}]
-      (let [event-stream (es/create-event-stream)
-            _ (supervisory/ensure-attached! event-stream)
-            pr-train-manager (create-pr-train-manager event-stream)
-            repo-dag-manager (create-repo-dag-manager)]
-        (start! {:port port
-                 :event-stream event-stream
-                 :pr-train-manager pr-train-manager
-                 :repo-dag-manager repo-dag-manager})))))
-
-(def ^{:stratum 1} tui-available?
-  (some? tui-launcher))
-
-(defn- ^{:stratum 1} reconstructed-status
-  [reconstructed last-updated]
-  (cond
-    (wr/completed? reconstructed) :completed
-    (wr/failed? reconstructed) :failed
-    (wr/paused? reconstructed) :paused
-    (stale-running? last-updated) :stale
-    :else :running))
-
-;------------------------------------------------------------------------------ Layer 2
-
-(def ^{:stratum 2} web-launcher
-  (optional-web-launcher))
-
-(defn- ^{:stratum 2} workflow-status-summary
-  [workflow-id]
-  (let [events-dir (app-config/events-dir)
-        events (es/read-workflow-events-by-id events-dir workflow-id)
-        reconstructed (wr/reconstruct-context events-dir workflow-id)
-        last-event (last events)]
-    (when (anomaly/anomaly? reconstructed)
-      (throw (ex-info (:anomaly/message reconstructed) reconstructed)))
-    {:workflow-id workflow-id
-     :status (reconstructed-status reconstructed (:event/timestamp last-event))
-     :spec-name (some-> reconstructed :workflow-spec :name)
-     :event-count (:event-count reconstructed)
-     :completed-phases (:completed-phases reconstructed)
-     :completed-dag-task-count (count (:completed-dag-tasks reconstructed))
-     :last-updated (:event/timestamp last-event)}))
-
-;------------------------------------------------------------------------------ Layer 3
-
-(def ^{:stratum 3} web-available?
-  (some? web-launcher))
-
-(defn- ^{:stratum 3} all-workflow-summaries
-  []
-  (let [events-dir (app-config/events-dir)]
-    (if (fs/exists? events-dir)
-      (->> (fs/list-dir events-dir)
-           (filter fs/directory?)
-           (map #(fs/file-name %))
-           (keep (fn [workflow-id]
-                   (try
-                     (workflow-status-summary workflow-id)
-                     (catch Exception _ nil))))
-           (sort-by :last-updated #(compare %2 %1)))
-      [])))
-
-;------------------------------------------------------------------------------ Layer 4
-
-(defn ^{:stratum 4} status-cmd
-  [m]
-  (let [{:keys [workflow-id]} (util/get-opts m)]
-    (if workflow-id
-      (try
-        (print-workflow-status (workflow-status-summary (str workflow-id)))
-        (catch Exception e
-          (display/print-error (messages/t :status/read-failed
-                                           {:message (ex-message e)}))))
-      (let [unknown (messages/t :status/value-unknown)
-            none    (messages/t :status/value-none)]
-        (display/print-info (messages/t :status/all-workflows))
-        (if-let [summaries (seq (take 10 (all-workflow-summaries)))]
-          (doseq [{:keys [workflow-id status spec-name last-updated]} summaries]
-            (println (messages/t :status/summary-row
-                                 {:workflow-id (format "%-36s" workflow-id)
-                                  :status      (format "%-10s" (util/status-label status))
-                                  :spec-name   (or spec-name unknown)}))
-            (println (messages/t :status/summary-last-updated
-                                 {:value (or last-updated unknown)})))
-          (println (str "  " none)))))))
-
-;------------------------------------------------------------------------------ Layer 5
+(def ^{:stratum 1} web-available? (some? web-launcher))
 
 ;; CLI dispatch
-(def ^{:stratum 5} dispatch-table
+(def ^{:stratum 1} dispatch-table
   [{:cmds ["version"] :fn version-cmd}
    {:cmds ["doctor"]  :fn doctor-cmd}
    {:cmds ["help"]    :fn help-cmd}
@@ -840,9 +702,9 @@
    {:cmds ["etl" "validate"]  :fn etl-validate-cmd :args->opts [:pack]}
    {:cmds ["etl" "registry"]  :fn etl-registry-cmd}])
 
-;------------------------------------------------------------------------------ Layer 6
+;------------------------------------------------------------------------------ Layer 2
 
-(defn ^{:stratum 6} -main
+(defn ^{:stratum 2} -main
   "CLI entry point."
   [& args]
   (try+
