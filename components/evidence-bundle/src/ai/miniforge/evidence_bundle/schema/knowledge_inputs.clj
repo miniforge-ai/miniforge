@@ -21,4 +21,4 @@
 
 ;------------------------------------------------------------------------------ Layer 1
 
-(def ^{:stratum 1} valid? (m/validator (values/vector-of record-schema)))
+(def ^{:stratum 1} valid? (m/validator (values/record-vector record-schema)))

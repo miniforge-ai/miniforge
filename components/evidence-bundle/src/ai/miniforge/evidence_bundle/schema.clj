@@ -29,6 +29,7 @@
    Based on N6 Evidence & Provenance Standard."
   (:require
    [ai.miniforge.evidence-bundle.schema.compliance :as compliance]
+   [ai.miniforge.evidence-bundle.schema.gate-executions :as gate-executions]
    [ai.miniforge.evidence-bundle.schema.knowledge-inputs :as knowledge-inputs]
    [ai.miniforge.evidence-bundle.schema.optional-key :as optional-key]
    [ai.miniforge.evidence-bundle.schema.outcome-reliability :as outcome]))
@@ -98,6 +99,7 @@
    ;; Rules Applied (knowledge base rules injected into agents)
    (optional-key/optional-key :evidence/rules-applied) vector?
    (optional-key/optional-key :evidence/knowledge-inputs) knowledge-inputs/valid?
+   (optional-key/optional-key :evidence/gate-executions) gate-executions/valid?
 
    ;; Execution Evidence (N11 §9.1)
    (optional-key/optional-key :evidence/execution-mode) keyword?
