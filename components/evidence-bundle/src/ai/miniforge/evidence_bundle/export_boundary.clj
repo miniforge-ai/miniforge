@@ -10,7 +10,7 @@
 ;------------------------------------------------------------------------------ Layer 0
 
 (defn- ^{:stratum 0} write-bundle! [logger bundle-id bundle output-path]
-  (spit output-path (codec/encode bundle))
+  (spit output-path (codec/encode bundle) :encoding "UTF-8")
   (log/info logger :evidence-bundle :bundle/exported
             {:data {:bundle-id bundle-id :output-path output-path}})
   true)
