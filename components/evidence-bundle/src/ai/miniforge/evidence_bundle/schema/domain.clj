@@ -63,6 +63,21 @@
    :refactor {:creates 0 :updates 0 :destroys 0}
    :migrate {:creates :pos :updates 0 :destroys :pos}})
 
+(defn ^{:stratum 0} check-count-rule [rule-value actual-count]
+  (case rule-value
+    0 (= 0 actual-count)
+    :pos (> actual-count 0)
+    :any true
+    (= rule-value actual-count)))
+
+(defn ^{:stratum 0} inferred-behavior [creates updates destroys]
+  (cond
+    (and (pos? creates) (pos? destroys)) :migrate
+    (pos? creates) :create
+    (pos? updates) :update
+    (pos? destroys) :destroy
+    :else :import))
+
 (def ^{:stratum 0} semantic-validation-schema
   "Schema for semantic validation evidence."
   {:semantic-validation/declared-intent keyword?
@@ -170,6 +185,12 @@
 
 ;------------------------------------------------------------------------------ Layer 1
 
+(defn- ^{:stratum 1} failed-count-rule [value kind]
+  (let [rule (get-in semantic-validation-rules [(:semantic-validation/declared-intent value) kind])
+        field (keyword "semantic-validation" (str "resource-" (name kind)))]
+    (when-not (check-count-rule rule (get value field))
+      (str "semantic-" (name kind)))))
+
 (def ^{:stratum 1} phase-evidence-schema
   "Schema for individual phase evidence."
   {:phase/name keyword?
@@ -273,6 +294,19 @@
    :promotion-justification string?  ; REQUIRED: audit trail for trust decision
    :pack-hash string?
    (optional-key/optional-key :pack-signature) string?})
+
+;------------------------------------------------------------------------------ Layer 2
+
+(defn ^{:stratum 2} consistent-semantic-conclusion? [value]
+  (let [failed (set (keep (partial failed-count-rule value) [:creates :updates :destroys]))
+        reported (set (map :violation/rule-id (:semantic-validation/violations value)))
+        actual (:semantic-validation/actual-behavior value)
+        inferred (inferred-behavior (:semantic-validation/resource-creates value)
+                                   (:semantic-validation/resource-updates value)
+                                   (:semantic-validation/resource-destroys value))]
+    (and (= (empty? failed) (:semantic-validation/passed? value))
+         (or (= inferred actual) (= [:import :refactor] [inferred actual]))
+         (= failed reported))))
 
 ;------------------------------------------------------------------------------ Rich Comment
 (comment

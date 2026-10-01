@@ -106,6 +106,7 @@
                          [[:evidence/event-links 0 :event-links/from-sequence] -1]
                          [[:evidence/event-links 0 :event-links/to-sequence] 0]
                          [[:evidence/event-links 0 :event-links/event-count] 4]
+                         [[:evidence/event-links 0 :event-links/event-count] 1]
                          [[:evidence/outcome :outcome/tier] nil]
                          [[:evidence/outcome :outcome/tier] :unknown]]]
       (let [changed (assoc-in bundle path value)
@@ -163,13 +164,27 @@
     (is (:valid? (evidence/validate-canonical-bundle
                   (assoc bundle :evidence/semantic-validation semantic
                                 :evidence/tool-invocations [tool] :evidence/implement phase))))
+    (is (:valid? (evidence/validate-canonical-bundle
+                  (-> bundle
+                      (assoc-in [:evidence/intent :intent/type] :refactor)
+                      (assoc :evidence/semantic-validation
+                             (assoc semantic :semantic-validation/declared-intent :refactor
+                                             :semantic-validation/actual-behavior :refactor
+                                             :semantic-validation/resource-updates 0))))))
     (doseq [invalid [{} 42 nil]]
       (is (false? (:valid? (evidence/validate-canonical-bundle
                            (assoc bundle :evidence/semantic-validation
                                   (assoc semantic :semantic-validation/violations [invalid])))))))
     (doseq [[field value] [[:semantic-validation/declared-intent :destroy]
                           [:semantic-validation/declared-intent :unknown]
-                          [:semantic-validation/actual-behavior :unknown]]]
+                          [:semantic-validation/actual-behavior :unknown]
+                          [:semantic-validation/actual-behavior :destroy]
+                          [:semantic-validation/resource-creates 1]
+                          [:semantic-validation/resource-updates 0]
+                          [:semantic-validation/passed? false]
+                          [:semantic-validation/violations [{:violation/rule-id "semantic-creates"
+                                                             :violation/severity :critical
+                                                             :violation/message "Contradictory violation"}]]]]
       (is (false? (:valid? (evidence/validate-canonical-bundle
                            (assoc bundle :evidence/semantic-validation (assoc semantic field value)))))))
     (doseq [range [{} {:start-seq "0" :end-seq 1} {:start-seq 0} nil

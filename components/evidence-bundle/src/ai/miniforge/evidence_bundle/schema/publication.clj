@@ -29,7 +29,7 @@
   (and (m/validate EventLink link)
        (m/validate (get scope-id-schemas (:event-links/scope-type link)) (:event-links/scope-id link))
        (<= (:event-links/from-sequence link) (:event-links/to-sequence link))
-       (<= (:event-links/event-count link)
+       (= (:event-links/event-count link)
            (inc (- (:event-links/to-sequence link) (:event-links/from-sequence link))))
        (or (not= :workflow (:event-links/scope-type link))
            (= workflow-id (:event-links/scope-id link)))))
