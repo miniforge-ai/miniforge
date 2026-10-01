@@ -1,2 +1,3 @@
 {:file-durability/messages
- {:file/io-failed "File durability operation failed."}}
+ {:file/io-failed "File durability operation failed."
+  :file/invalid-input "File durability operation received invalid arguments."}}

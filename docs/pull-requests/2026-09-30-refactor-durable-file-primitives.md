@@ -1,3 +1,9 @@
+<!--
+  Title: Miniforge.ai
+  Author: Christopher Lester (christopher@miniforge.ai)
+  Copyright 2025-2026 Christopher Lester. Licensed under Apache 2.0.
+-->
+
 # refactor: share durable file primitives
 
 ## Overview
@@ -18,9 +24,13 @@ barriers. Preserve create-only grant writes, existing temporary artifact writes,
 and each store's domain-specific error contract. Keep filesystem effects outside
 domain code and public consumption through component interfaces.
 
+The adversarial standards pass added explicit input schemas at the public
+boundary. Invalid file and payload arguments return anomalies before filesystem
+operations. The component does not authorize paths; each store retains that duty.
+
 ## Testing Plan
 
-- Focused JVM and rebuilt packaged runtime: 49 tests, 258 assertions, all pass.
+- Focused JVM and rebuilt packaged runtime: 50 tests, 276 assertions, all pass.
 - Polylith: file-durability and execution-grant pass in all four consumers;
   artifact passes in all three consumers. All runs were serial.
 - CLI build succeeds; Polylith composition check and touched-file lint pass.

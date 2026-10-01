@@ -14,6 +14,10 @@
 
 ;------------------------------------------------------------------------------ Layer 1
 
+(defn ^{:stratum 1} invalid-input [operation]
+  (anomaly/anomaly :invalid-input (t :file/invalid-input)
+                   {:durability/operation operation}))
+
 (defn- ^{:stratum 1} failure [operation file]
   (anomaly/anomaly :fault (t :file/io-failed)
                    {:durability/operation operation :durability/path (str file)}))

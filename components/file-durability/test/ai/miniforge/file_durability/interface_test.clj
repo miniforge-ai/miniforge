@@ -4,6 +4,7 @@
 (ns ai.miniforge.file-durability.interface-test
   (:require [ai.miniforge.anomaly.interface :as anomaly]
             [ai.miniforge.file-durability.interface :as durability]
+            [ai.miniforge.file-durability.core :as core]
             [ai.miniforge.file-durability.io :as file-io]
             [clojure.test :refer [deftest is]])
   (:import [java.io File IOException]))
@@ -17,6 +18,21 @@
 (defn- ^{:stratum 0} fatal [& _] (throw (AssertionError.)))
 
 ;------------------------------------------------------------------------------ Layer 1
+
+(deftest ^{:stratum 1} invalid-input-never-reaches-filesystem-operations
+  (with-redefs [core/write-new-text! fatal
+                core/write-temporary-bytes! fatal
+                core/sync-ancestry! fatal
+                core/confirm! fatal]
+    (doseq [file [nil "not-a-file" {}]]
+      (doseq [result [(durability/write-new-text! file "text")
+                      (durability/write-temporary-bytes! file (byte-array 0))
+                      (durability/sync-ancestry! file)
+                      (durability/confirm! file)]]
+        (is (= :invalid-input (:anomaly/type result)))))
+    (doseq [payload [nil 42 []]]
+      (is (= :invalid-input (:anomaly/type (durability/write-new-text! (File. "unused") payload))))
+      (is (= :invalid-input (:anomaly/type (durability/write-temporary-bytes! (File. "unused") payload)))))))
 
 (deftest ^{:stratum 1} filesystem-failures-are-data-at-every-public-operation
   (let [file (File. "unused")]
