@@ -53,5 +53,29 @@
       (is (= {"[REDACTED]" :label} redacted))
       (is (false? (redaction/payment-card? redacted))))))
 
+(deftest ^{:stratum 0} named-card-values-are-redacted-test
+  (doseq [card [(keyword "500000000009") (symbol "500000000009")
+               (keyword "account" "500000000009") (symbol "account" "500000000009")
+               (keyword "500000000009" "account") (symbol "500000000009" "account")]
+          value [card {:value card} [card] (with-meta [] {:value card})]]
+    (let [redacted (redaction/redact value)]
+      (is (redaction/payment-card? value))
+      (is (false? (redaction/clean? value)))
+      (is (false? (redaction/payment-card? redacted)))
+      (is (redaction/clean? redacted))
+      (is (= redacted (redaction/redact redacted))))))
+
+(deftest ^{:stratum 0} numeric-sorted-collections-accept-redaction-markers
+  (doseq [value [(sorted-set 42 500000000009)
+                (sorted-set-by > 42 500000000009)]]
+    (let [redacted (redaction/redact value)]
+      (is (= #{42 "[REDACTED]"} redacted))
+      (is (redaction/clean? redacted))))
+  (doseq [value [(sorted-map 42 :measurement 500000000009 :card)
+                (sorted-map-by > 42 :measurement 500000000009 :card)]]
+    (let [redacted (redaction/redact value)]
+      (is (= {42 :measurement "[REDACTED]" :card} redacted))
+      (is (redaction/clean? redacted)))))
+
 (comment
   (clojure.test/run-tests 'ai.miniforge.redaction.payment-card-test))

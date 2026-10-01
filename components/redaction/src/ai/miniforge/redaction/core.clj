@@ -31,6 +31,13 @@
 (defn- ^{:stratum 0} metadata-values [value]
   (keep meta (tree-seq coll? seq value)))
 
+(defn- ^{:stratum 0} map-target [value]
+  ;; A redacted key can change type; its old comparator may reject the marker.
+  (if (sorted? value) (into {} value) value))
+
+(defn- ^{:stratum 0} set-target [value]
+  (if (sorted? value) #{} (empty value)))
+
 (defn- ^{:stratum 0} free-key
   "K, or K with a counter appended until it is absent from M.
 
@@ -96,7 +103,8 @@
           ;; Rebuilt onto X itself rather than (empty x): records throw
           ;; UnsupportedOperationException on empty, and a record in an event
           ;; payload would crash publish! on the hot path. Assoc'ing every key
-          ;; back onto X preserves the type — record, sorted map, or plain.
+          ;; back onto X preserves record/plain map types. Sorted collections
+          ;; become hash collections because markers can change key/value types.
           (map? x)
           (reduce-kv
            (fn [m k v]
@@ -135,11 +143,11 @@
                  (not (identical? k k*))
                  (-> (dissoc k)
                      (as-> m' (assoc m' (free-key m' k*) v*))))))
-           x
+           (map-target x)
            x)
 
           (vector? x) (mapv redact x)
-          (set? x)    (into (empty x) (map redact) x)
+          (set? x)    (into (set-target x) (map redact) x)
 
           ;; doall, not a bare map: a lazy seq would defer redaction and keep
           ;; the un-redacted value alive in the closure, so the secret would
@@ -152,8 +160,8 @@
           ;; concrete types, and enumerations of types leak.
           (coll? x)   (into (empty x) (map redact) x)
 
-          (integer? x) (match/redact-number x)
-          (string? x) (match/redact-string x)
+          (or (integer? x) (string? x) (keyword? x) (symbol? x))
+          (match/redact-key x)
           :else       x)]
     ;; Metadata is data. pr-str drops it, so a sink that serializes never
     ;; sees it — but the in-memory log and every in-process subscriber
