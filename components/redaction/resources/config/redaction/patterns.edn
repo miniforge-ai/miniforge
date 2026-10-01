@@ -22,6 +22,9 @@
 
 {:redaction/marker "[REDACTED]"
 
+ ;; Candidates still require a valid Luhn checksum before detection/redaction.
+ :redaction/payment-card-pattern "(?<![A-Za-z0-9-])(?<![0-9] )(?:[0-9][ -]?){11,18}[0-9](?![A-Za-z0-9-]| [0-9])"
+
  ;; Matched case-insensitively against the key's name.
  :redaction/secret-key-patterns
  ["(?i)pass(word|wd|phrase)"
@@ -49,7 +52,9 @@
 
  ;; Matched against string values anywhere they occur.
  :redaction/secret-value-patterns
- [;; AWS access key id
+ [;; Social Security numbers (N6 §7.2)
+  "\\b\\d{3}-\\d{2}-\\d{4}\\b"
+  ;; AWS access key id
   "\\bAKIA[0-9A-Z]{16}\\b"
   ;; Anthropic / OpenAI style bearer keys
   "\\bsk-[A-Za-z0-9_-]{16,}\\b"

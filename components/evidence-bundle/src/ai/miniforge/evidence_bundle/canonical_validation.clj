@@ -6,7 +6,9 @@
   (:require [ai.miniforge.anomaly.interface :as anomaly]
             [ai.miniforge.artifact.interface :as artifact]
             [ai.miniforge.content-hash.interface :as hash]
-            [ai.miniforge.evidence-bundle.canonical-structure :as structure]))
+            [ai.miniforge.evidence-bundle.canonical-structure :as structure]
+            [ai.miniforge.evidence-bundle.portable-metadata :as metadata]
+            [ai.miniforge.evidence-bundle.schema.publication :as publication]))
 
 ;------------------------------------------------------------------------------ Layer 0
 
@@ -21,13 +23,13 @@
     [{:code :content-hash-mismatch}]))
 
 (defn- ^{:stratum 0} sealing-errors [bundle]
-  (when (some #(contains? bundle %) [:evidence/content-hash :evidence/signature :evidence/sealed-at])
-    (when-not (and (string? (:evidence/content-hash bundle))
-                   (inst? (:evidence/sealed-at bundle))
-                   (contains? bundle :compliance/sensitive-data)
-                   (contains? bundle :compliance/pii-handling)
-                   (inst? (:compliance/created-at bundle)))
-      [{:code :incomplete-seal}])))
+  (when (and (some #(contains? bundle %) [:evidence/content-hash :evidence/signature :evidence/sealed-at])
+             (not (and (string? (:evidence/content-hash bundle))
+                       (inst? (:evidence/sealed-at bundle))
+                       (contains? bundle :compliance/sensitive-data)
+                       (contains? bundle :compliance/pii-handling)
+                       (inst? (:compliance/created-at bundle)))))
+    [{:code :incomplete-seal}]))
 
 ;------------------------------------------------------------------------------ Layer 1
 
@@ -35,8 +37,10 @@
   (let [portable (artifact/content-digest bundle)]
     (cond
       (anomaly/anomaly? portable) (result [{:code :nonportable-evidence :anomaly portable}])
+      (not (metadata/valid? bundle)) (result [{:code :nonportable-metadata}])
       (not (map? bundle)) (result [{:code :invalid-bundle}])
-      :else (result (concat (structure/errors bundle) (sealing-errors bundle) (hash-errors bundle))))))
+      :else (result (concat (structure/errors bundle) (publication/errors bundle)
+                            (sealing-errors bundle) (hash-errors bundle))))))
 
 ;------------------------------------------------------------------------------ Layer 2
 

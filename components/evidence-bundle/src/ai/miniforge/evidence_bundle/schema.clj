@@ -29,7 +29,12 @@
    Based on N6 Evidence & Provenance Standard."
   (:require
    [ai.miniforge.evidence-bundle.schema.compliance :as compliance]
-   [ai.miniforge.evidence-bundle.schema.optional-key :as optional-key]))
+   [ai.miniforge.evidence-bundle.schema.dag-evidence :as dag]
+   [ai.miniforge.evidence-bundle.schema.extended-evidence :as extended]
+   [ai.miniforge.evidence-bundle.schema.gate-executions :as gate-executions]
+   [ai.miniforge.evidence-bundle.schema.knowledge-inputs :as knowledge-inputs]
+   [ai.miniforge.evidence-bundle.schema.optional-key :as optional-key]
+   [ai.miniforge.evidence-bundle.schema.outcome-reliability :as outcome]))
 
 ;------------------------------------------------------------------------------ Layer 0
 
@@ -92,12 +97,21 @@
 
    ;; Control Action Evidence
    (optional-key/optional-key :evidence/control-actions) vector?
+   (optional-key/optional-key :evidence/annotations) extended/annotations?
+
+   ;; DAG and pack workflows supply these sections when applicable.
+   (optional-key/optional-key :evidence/dag-run) dag/run?
+   (optional-key/optional-key :evidence/task-workflows) dag/tasks?
+   (optional-key/optional-key :evidence/merge) dag/merge?
+   (optional-key/optional-key :evidence/pack-run) extended/pack-run?
 
    ;; Rules Applied (knowledge base rules injected into agents)
    (optional-key/optional-key :evidence/rules-applied) vector?
+   (optional-key/optional-key :evidence/knowledge-inputs) knowledge-inputs/valid?
+   (optional-key/optional-key :evidence/gate-executions) gate-executions/valid?
 
    ;; Execution Evidence (N11 §9.1)
-   (optional-key/optional-key :evidence/execution-mode) keyword?
+   (optional-key/optional-key :evidence/execution-mode) (partial contains? #{:local :governed})
    (optional-key/optional-key :evidence/runtime-class) keyword?
    (optional-key/optional-key :evidence/task-started-at) inst?
    (optional-key/optional-key :evidence/task-finished-at) inst?
@@ -108,7 +122,7 @@
    (optional-key/optional-key :evidence/failure-attribution) map?
 
    ;; Outcome
-   :evidence/outcome map?
+   :evidence/outcome outcome/consistent?
 
    ;; Compliance
    (optional-key/optional-key :compliance/created-at) inst?

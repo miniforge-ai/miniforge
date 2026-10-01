@@ -74,7 +74,10 @@
                      :intent/constraints []
                      :intent/declared-at #inst "2026-08-05T00:00:00.000Z"}
    :evidence/policy-checks []
-   :evidence/outcome {:outcome/success true}})
+   :evidence/event-links [{:event-links/scope-type :workflow :event-links/scope-id workflow-id
+                           :event-links/from-sequence 0 :event-links/to-sequence 1
+                           :event-links/event-count 2}]
+   :evidence/outcome {:outcome/success true :outcome/tier :standard}})
 
 ;------------------------------------------------------------------------------ Layer 2
 

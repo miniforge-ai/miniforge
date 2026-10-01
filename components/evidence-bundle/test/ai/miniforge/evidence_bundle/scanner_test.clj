@@ -24,6 +24,33 @@
 
 ;------------------------------------------------------------------------------ Layer 0
 
+(deftest ^{:stratum 0} payment-card-scan-uses-shared-checksum-detector-test
+  (let [value {:description "Synthetic test card 4111 1111 1111 1111"}
+        findings (scanner/scan-artifact value)]
+    (is (= [{:finding/type :payment-card}] (:scan/findings findings)))
+    (is (true? (:evidence/contains-pii? (scanner/compliance-metadata findings))))
+    (is (= {:description "Synthetic test card [REDACTED]"} (redaction/redact value))))
+  (is (empty? (:scan/findings (scanner/scan-artifact {:description "4111111111111112"})))))
+
+(deftest ^{:stratum 0} card-findings-do-not-cross-original-value-boundaries-test
+  (doseq [value [{:card 4111111111111111} {:card 4111111111111111N}]]
+    (is (= [{:finding/type :payment-card}] (:scan/findings (scanner/scan-artifact value))))
+    (is (empty? (:scan/findings (scanner/scan-artifact (redaction/redact value))))))
+  (let [separate {:measurements [4111 1111 1111 1111]}]
+    (is (empty? (:scan/findings (scanner/scan-artifact separate))))
+    (is (= separate (redaction/redact separate)))))
+
+(deftest ^{:stratum 0} metadata-only-secrets-match-the-shared-redaction-contract
+  (doseq [value [(with-meta [] {:note "AKIAIOSFODNN7EXAMPLE"})
+                {:nested [(with-meta [] {:note "AKIAIOSFODNN7EXAMPLE"})]}
+                {(with-meta 'key {:note "AKIAIOSFODNN7EXAMPLE"}) :value}
+                (with-meta [] (with-meta {} {:note "AKIAIOSFODNN7EXAMPLE"}))]]
+    (let [redacted (redaction/redact value)]
+      (is (false? (redaction/clean? value)))
+      (is (= [{:finding/type :aws-access-key}] (:scan/findings (scanner/scan-artifact value))))
+      (is (redaction/clean? redacted))
+      (is (empty? (:scan/findings (scanner/scan-artifact redacted)))))))
+
 (deftest ^{:stratum 0} scan-artifact-reports-finding-types-only
   (testing "sensitive values are detected but not copied into evidence"
     (let [result (scanner/scan-artifact
@@ -72,18 +99,14 @@
                    {:intent/description "Contact alice@example.com"}})]
       (is (= [{:finding/type :email}] (:scan/findings result))))))
 
-(deftest ^{:stratum 0} detection-is-bounded-but-redaction-is-not
-  (testing "a secret too deep to scan is still redacted"
-    ;; bundle-text is bounded by print-level, so detection sees a
-    ;; truncated view. That makes findings best-effort metadata rather
-    ;; than a security boundary — redaction walks the whole structure and
-    ;; does not share the limit. Asserted here so the asymmetry stays a
-    ;; documented property rather than an assumption.
+(deftest ^{:stratum 0} shared-detection-and-redaction-ignore-print-limits
+  (testing "named findings and redaction both inspect the original value"
     (let [deep (reduce (fn [acc _] {:n acc})
                        {:leaked "AKIAIOSFODNN7EXAMPLE"}
                        (range 30))]
-      (is (empty? (:scan/findings (scanner/scan-artifact deep)))
-          "the scan cannot see past its print-level bound")
+      (is (= [{:finding/type :aws-access-key}]
+             (:scan/findings (scanner/scan-artifact deep)))
+          "named patterns see past print bounds")
       (is (not (str/includes?
                 (binding [*print-level* nil *print-length* nil]
                   (pr-str (redaction/redact deep)))

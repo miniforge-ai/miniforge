@@ -20,6 +20,7 @@
    phase that produced it."
   (:require
    [ai.miniforge.anomaly.interface :as anomaly]
+   [ai.miniforge.evidence-bundle.projection :as projection]
    [ai.miniforge.response.interface :as response]))
 
 ;------------------------------------------------------------------------------ Layer 0
@@ -51,38 +52,20 @@
    :dependency/vendor
    :dependency/status])
 
+(defn- ^{:stratum 0} legacy-error-evidence [error-info]
+  (when (some? error-info)
+    {:outcome/error-message (:message error-info)
+     :outcome/error-phase (:phase error-info)
+     :outcome/error-details error-info}))
+
 ;------------------------------------------------------------------------------ Layer 1
 
-;; Outcome Evidence
-(defn ^{:stratum 1} build-outcome-evidence
-  "Build outcome evidence from workflow final state.
-   Uses anomaly->outcome-evidence when anomaly maps are available.
-   Returns outcome evidence per N6 spec."
-  [workflow-state]
-  (let [status (:workflow/status workflow-state)
-        pr-info (:workflow/pr-info workflow-state)
-        error-info (:workflow/error workflow-state)
-        ;; Check for anomaly map in error-info or workflow state
-        ;; (dual-shape during W2: matches both canonical and legacy)
-        anomaly-map (cond
-                      (any-anomaly? error-info) error-info
-                      (any-anomaly? (:anomaly error-info)) (:anomaly error-info)
-                      :else nil)]
-    (merge
-     {:outcome/success (= status :completed)}
-     (when pr-info
-       {:outcome/pr-number (:number pr-info)
-        :outcome/pr-url (:url pr-info)
-        :outcome/pr-status (:status pr-info)
-        :outcome/pr-merged-at (:merged-at pr-info)})
-     (if anomaly-map
-       ;; Use boundary translator for anomaly maps
-       (response/anomaly->outcome-evidence anomaly-map)
-       ;; Fall back to legacy error shape
-       (when error-info
-         {:outcome/error-message (:message error-info)
-          :outcome/error-phase (:phase error-info)
-          :outcome/error-details error-info})))))
+(defn- ^{:stratum 1} error-evidence [error-info]
+  (projection/present
+   (cond
+     (any-anomaly? error-info) (response/anomaly->outcome-evidence error-info)
+     (any-anomaly? (:anomaly error-info)) (response/anomaly->outcome-evidence (:anomaly error-info))
+     :else (legacy-error-evidence error-info))))
 
 (defn ^{:stratum 1} failure-attribution
   [failure]
@@ -91,6 +74,14 @@
       attribution)))
 
 ;------------------------------------------------------------------------------ Layer 2
+
+(defn ^{:stratum 2} build-outcome-evidence
+  "Project final workflow state into N6 outcome evidence without unavailable optional fields."
+  [workflow-state]
+  (let [success? (= :completed (:workflow/status workflow-state))]
+    (merge {:outcome/success success?}
+           (projection/pull-request (:workflow/pr-info workflow-state))
+           (error-evidence (:workflow/error workflow-state)))))
 
 (defn ^{:stratum 2} collect-failure-attribution
   [workflow-state opts]
