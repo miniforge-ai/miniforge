@@ -22,6 +22,9 @@ change requested-event metadata or implement approval enforcement.
 Keep role configuration in the controller; isolate pure decisions from execution.
 Use named grant/denial constructors and one shared diagnostic context. Retain
 public component interfaces. Verify inferred strata rather than headings alone.
+The decision layer returns only stable category/message-key/context data. A
+separate adapter performs message lookup and anomaly creation. Non-keyword action
+types remain denied even if malformed custom role data includes them in a grant.
 
 ## Verification
 
@@ -29,6 +32,9 @@ Run all four event-stream consumers serially, rebuild the CLI, run packaged
 authorization regressions, and run normal hooks plus a root standards scan.
 All four event-stream consumers pass serially. Rebuilt packaged authorization and
 control regressions pass 12 tests and 49 assertions; Kondo is clean.
+After review fixes, all four consumers pass again; rebuilt packaged regressions
+pass 13 tests and 63 assertions. Pure decisions are deterministic and malformed
+action types are denied even by custom allowlists containing those values.
 
 ## Merge criteria
 
