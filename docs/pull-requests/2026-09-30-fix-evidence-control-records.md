@@ -24,6 +24,8 @@ a lossy control-action projection. Valid portable records must remain valid.
 - Test actual control-event producers and portable record validation.
 - Register a server-owned dashboard listener per instance and retain its ID in
   control evidence; ignore body-supplied identities and release it on shutdown.
+- Acquire that identity only at successful startup; drain HTTP before releasing it,
+  even when cleanup fails. Preserve supplied request metadata at event publication.
 
 Approval is conditional under N8. The schema accepts N6 `:status` and N8
 `:approval-status` vocabulary. Missing states remain missing, not fabricated.
@@ -44,6 +46,8 @@ Dashboard producer regressions pass eight tests and 48 assertions, covering
 stable registered identity, body spoofing, assembled evidence, and listener cleanup.
 The full dashboard consumer suite passes. Rebuilt packaged dashboard and control
 record regressions pass 15 tests and 83 assertions.
+Final lifecycle/metadata regressions pass 24 tests and 123 assertions in the rebuilt
+CLI. All four event-stream consumer suites and the dashboard suite pass serially.
 
 ## Deployment Plan
 

@@ -36,3 +36,12 @@
                                :listener/identity identity
                                :listener/callback receive-event})]
       (assoc requester :listener-id listener-id))))
+
+;------------------------------------------------------------------------------ Layer 2
+
+(defn ^{:stratum 2} attach!
+  "Acquire the listener only when startup can hand ownership to its caller."
+  [state]
+  (let [requester (register! (:event-stream @state))]
+    (swap! state assoc :control/requester requester)
+    state))
