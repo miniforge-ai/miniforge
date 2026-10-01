@@ -20,7 +20,7 @@
    [:gate-execution/outcome [:enum :passed :failed :waived]]
    [:gate-execution/binding records/binding-schema]
    [:gate-execution/packs (values/record-vector records/resolved-pack)]
-   [:gate-execution/resolved-rules (values/record-vector keyword?)]
+   [:gate-execution/resolved-rules (values/record-vector qualified-keyword?)]
    [:gate-execution/resolution-trace (values/record-vector trace/record-schema)]
    [:gate-execution/violations (values/record-vector violation/record-schema)]
    [:gate-execution/waivers (values/record-vector records/waiver)]])

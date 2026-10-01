@@ -5,6 +5,7 @@
 
 ## Scope
 
+Base: main. Governance #1972 and publication schema #1974 are merged prerequisites.
 Extract the pure canonical validation API from #1957 to keep each review bounded.
 Validate portable root and nested domain records, optional OPSV evidence, and declared hashes.
 Declared seals require sealing and compliance timestamps; hashing excludes the hash and signature.
@@ -55,7 +56,7 @@ Governance integration passes all three consumers and rebuilt packaged canonical
 and governance regressions: 22 tests and 371 assertions.
 The corrected resolution-trace and outcome contracts pass all three consumers
 and rebuilt packaged canonical/governance regressions: 25 tests and 385 assertions.
-The pure domain and phase-link contracts are split into prerequisite #1974.
+The pure domain and phase-link contracts are merged through prerequisite #1974.
 Collected phases retain missing ranges as invalid values instead of inventing
 audit positions. Policy projections supply explicit location and repair fields.
 The shared phase registry joins every phase range to its workflow event link.

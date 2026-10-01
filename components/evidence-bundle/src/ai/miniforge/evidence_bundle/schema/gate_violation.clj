@@ -26,8 +26,8 @@
 
 (def ^{:stratum 1} record-fields
   [:map
-   [:violation/id uuid?] [:violation/rule-id keyword?]
-   [:violation/pack-id keyword?] [:violation/gate-id keyword?]
+   [:violation/id uuid?] [:violation/rule-id qualified-keyword?]
+   [:violation/pack-id qualified-keyword?] [:violation/gate-id keyword?]
    [:violation/severity (into [:enum] shared/severities)]
    [:violation/message string?] [:violation/auto-fixable? boolean?]
    [:violation/remediation string?]
