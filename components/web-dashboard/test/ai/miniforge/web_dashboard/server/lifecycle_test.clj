@@ -18,8 +18,6 @@
 
 (defn- ^{:stratum 0} fail! [& _] (throw (ex-info "Lifecycle failure" {})))
 
-(defn- ^{:stratum 0} completed-stop [_] (delay true))
-
 (defn- ^{:stratum 0} stop-after-signal [stopping stopped _server]
   (deliver stopping true)
   stopped)
@@ -92,13 +90,17 @@
         (is (empty? (events/list-listeners stream)))))))
 
 (deftest ^{:stratum 1} shutdown-failures-still-release-the-listener
-  (doseq [http-fails? [true false]]
+  (doseq [stages [[:http] [:watcher] [:http :watcher :identity]]]
     (let [stream (events/create-event-stream {:sinks []})
           dashboard-state (dashboard stream)
-          stop-http (if http-fails? fail! completed-stop)
-          stop-watcher (if http-fails? (constantly nil) fail!)]
-      (with-redefs [http/server-stop! stop-http
-                    server/delete-discovery-file! (constantly nil)]
-        (is (thrown? Exception (server/stop-server!
-                               {:server :fake :state dashboard-state :watcher-cleanup stop-watcher}))))
+          failures (zipmap stages (map #(ex-info (name %) {}) stages))
+          stop! (fn [stage] (when-let [failure (failures stage)] (throw failure)))
+          release! control-identity/release!]
+      (with-redefs [http/server-stop! (fn [_] (stop! :http))
+                    control-identity/release! (fn [s] (release! s) (stop! :identity))]
+        (let [failure (try (shutdown/stop! {:server :fake :state dashboard-state
+                                          :watcher-cleanup #(stop! :watcher)})
+                           (catch Throwable error error))]
+          (is (identical? (failures (first stages)) failure))
+          (is (= (mapv failures (rest stages)) (vec (.getSuppressed failure))))))
       (is (empty? (events/list-listeners stream))))))

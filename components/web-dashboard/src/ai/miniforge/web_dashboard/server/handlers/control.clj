@@ -73,7 +73,7 @@
   ;; Rich anomaly data stays in audit evidence, not the public JSON response.
   (if (response/success? result)
     result
-    (response/error (get-in result [:error :message] (messages/t :control/execution-failed)))))
+    (response/error (messages/t :control/execution-failed))))
 
 ;------------------------------------------------------------------------------ Layer 1
 

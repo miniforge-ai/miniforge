@@ -47,6 +47,10 @@ Interruption and startup-boundary regressions pass 14 tests and 90 assertions
 on the JVM and rebuilt packaged CLI; the worker retains its interrupt signal.
 The HTTP-handler interruption case is also covered. Combined JVM and rebuilt
 packaged control regressions pass 12 tests and 111 assertions.
+Public failures now expose only the generic localized message; audit evidence
+retains internal diagnostics. Both exported return-contract docstrings are updated.
+After cleanup integration, the dashboard suite and rebuilt packaged control and
+lifecycle regressions pass (18 tests, 145 assertions).
 
 ## Deployment Plan
 

@@ -3,12 +3,14 @@
 ;; Licensed under the Apache License, Version 2.0.
 (ns ai.miniforge.web-dashboard.control-evidence-test
   (:require [clojure.test :refer [deftest is]]
+            [clojure.string :as str]
             [cheshire.core :as json]
             [ai.miniforge.anomaly.interface :as anomaly]
             [ai.miniforge.evidence-bundle.interface :as evidence]
             [ai.miniforge.event-stream.interface :as events]
             [ai.miniforge.response.interface :as response]
             [ai.miniforge.web-dashboard.control-identity :as control-identity]
+            [ai.miniforge.web-dashboard.messages :as messages]
             [ai.miniforge.web-dashboard.server :as server]
             [ai.miniforge.web-dashboard.server.handlers :as handlers]
             [ai.miniforge.web-dashboard.state.core :as state]))
@@ -100,11 +102,12 @@
               result (:action/result (first records))]
           (is (= 500 (:status http)))
           (is (= "failed" (:status body)))
-          (is (string? (get-in body [:result :error :message])))
+          (is (= (messages/t :control/execution-failed) (get-in body [:result :error :message])))
+          (is (not (str/includes? (:body http) failure-message)))
           (is (= 1 (count records)))
           (is (= :failure (:status result)))
           (is (response/error? result))
-          (is (string? (get-in result [:error :message]))))))))
+          (is (str/includes? (get-in result [:error :message]) failure-message)))))))
 
 (deftest ^{:stratum 2} interrupted-interventions-retain-the-worker-signal
   (let [dashboard-state (dashboard (events/create-event-stream {:sinks []}))]
