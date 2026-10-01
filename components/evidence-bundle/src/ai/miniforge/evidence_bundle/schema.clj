@@ -111,7 +111,7 @@
    (optional-key/optional-key :evidence/gate-executions) gate-executions/valid?
 
    ;; Execution Evidence (N11 §9.1)
-   (optional-key/optional-key :evidence/execution-mode) keyword?
+   (optional-key/optional-key :evidence/execution-mode) (partial contains? #{:local :governed})
    (optional-key/optional-key :evidence/runtime-class) keyword?
    (optional-key/optional-key :evidence/task-started-at) inst?
    (optional-key/optional-key :evidence/task-finished-at) inst?
@@ -125,10 +125,16 @@
    :evidence/outcome outcome/consistent?
 
    ;; Compliance
+   (optional-key/optional-key :compliance/created-at) inst?
    (optional-key/optional-key :compliance/sensitive-data) boolean?
-   (optional-key/optional-key :compliance/pii-handling) keyword?
+   (optional-key/optional-key :compliance/pii-handling) compliance/valid-pii-handling?
    (optional-key/optional-key :compliance/retention-policy) keyword?
    (optional-key/optional-key :compliance/auditor-notes) string?
+
+   ;; Integrity metadata is optional for pre-finalization assembly inputs.
+   (optional-key/optional-key :evidence/content-hash) string?
+   (optional-key/optional-key :evidence/sealed-at) inst?
+   (optional-key/optional-key :evidence/signature) string?
 
    ;; Compliance Metadata (extended) — all optional for backwards compatibility.
    (optional-key/optional-key :evidence/data-classification) compliance/valid-data-classification?
