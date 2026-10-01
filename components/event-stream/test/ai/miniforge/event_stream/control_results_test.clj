@@ -86,3 +86,13 @@
       (is (zero? @calls))
       (is (= :denied (:status result)))
       (is (= [result] recorded)))))
+
+(deftest ^{:stratum 1} interruption-preserves-the-worker-signal
+  (let [{:keys [result interrupted?]}
+        @(future
+           (try
+             (assoc (execute (action) (fn [_] (throw (InterruptedException. failure-message))))
+                    :interrupted? (.isInterrupted (Thread/currentThread)))
+             (finally (Thread/interrupted))))]
+    (is interrupted?)
+    (is (response/error? result))))

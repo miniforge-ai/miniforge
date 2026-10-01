@@ -21,7 +21,7 @@ every return value in success. This made an unwritten intervention look executed
 
 - Separate result normalization from execution orchestration, keeping namespaces stratified.
 - Preserve response failures and anomaly details; wrap only unstructured successes.
-- Keep exception failures and fatal-error propagation at the invocation boundary.
+- Keep exception failures, interrupt signals, and fatal-error propagation at the invocation boundary.
 - Report failed dashboard controls as HTTP failures and retain failure evidence.
 - Localize touched execution and dashboard diagnostics.
 - Record malformed-action denials without crashing the event description builder;
@@ -43,6 +43,8 @@ These include legacy anomaly returns from the intervention producer.
 After full prerequisite integration, all four event-stream consumers and the
 dashboard suite pass again. Rebuilt packaged failure and malformed-dispatch
 regressions pass 10 tests and 108 assertions. Kondo and inferred strata are clean.
+Interruption and startup-boundary regressions pass 14 tests and 90 assertions
+on the JVM and rebuilt packaged CLI; the worker retains its interrupt signal.
 
 ## Deployment Plan
 

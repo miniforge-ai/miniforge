@@ -38,4 +38,6 @@
     (catch map? value
       (failure (get value :anomaly/message (:message &throw-context)) value))
     (catch Exception e
+      (when (instance? InterruptedException e)
+        (.interrupt (Thread/currentThread)))
       (failure (ex-message e) (ex-data e)))))
