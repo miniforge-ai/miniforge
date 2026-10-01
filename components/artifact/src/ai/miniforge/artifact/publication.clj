@@ -21,12 +21,23 @@
          value
          (failure :fault :publication/read-failed id)))))
 
-(defn- ^{:stratum 0} publish-bytes! [file temporary bytes]
-  (files/write! temporary bytes)
+(defn- ^{:stratum 0} link-bytes! [file temporary]
   (try (files/publish-link! file temporary)
        (catch FileAlreadyExistsException _ nil)))
 
+(defn- ^{:stratum 0} confirm-durability! [file artifact]
+  (let [confirmed (files/confirm! file)]
+    (if (anomaly/anomaly? confirmed)
+      (failure :unavailable :publication/unconfirmed (:artifact/id artifact))
+      artifact)))
+
 ;------------------------------------------------------------------------------ Layer 1
+
+(defn- ^{:stratum 1} publish-bytes! [id file temporary bytes]
+  (let [written (files/write! temporary bytes)]
+    (if (anomaly/anomaly? written)
+      (failure :unavailable :publication/unconfirmed id)
+      (link-bytes! file temporary))))
 
 (defn ^{:stratum 1} read-record [directory id]
   (let [file (files/target directory id)]
@@ -44,7 +55,7 @@
     (cond
       (anomaly/anomaly? actual) actual
       (nil? actual) (failure :fault :publication/read-failed id)
-      (identity/same-content? artifact actual) (do (files/confirm! file) artifact)
+      (identity/same-content? artifact actual) (confirm-durability! file artifact)
       :else (failure :conflict :publication/id-conflict id))))
 
 ;------------------------------------------------------------------------------ Layer 2
@@ -61,7 +72,7 @@
       :else
       (let [temporary (files/temporary (io/file directory))]
         (boundary/publish-with-cleanup id
-          (partial publish-bytes! (files/target directory id) temporary bytes)
+          (partial publish-bytes! id (files/target directory id) temporary bytes)
           (partial confirm-record! directory artifact)
           (partial files/delete-temporary! temporary))))))
 

@@ -6,6 +6,8 @@
             [ai.miniforge.evidence-bundle.collectors :as collectors]
             [ai.miniforge.evidence-bundle.collector :as collector]
             [ai.miniforge.evidence-bundle.collector-projection :as projection]
+            [ai.miniforge.evidence-bundle.producer-roundtrips :as roundtrips]
+            [ai.miniforge.evidence-bundle.control-fixtures :as control-fixtures]
             [ai.miniforge.artifact.interface :as artifact]
             [ai.miniforge.evidence-bundle.phases :as phases]
             [ai.miniforge.evidence-bundle.schema.compliance :as compliance]
@@ -13,6 +15,10 @@
             [clojure.test :refer [deftest is]]))
 
 ;------------------------------------------------------------------------------ Layer 0
+
+(deftest ^{:stratum 0} collected-optional-producer-fields-pass-canonical-validation
+  (doseq [bundle (roundtrips/collected-bundles)]
+    (is (:valid? (evidence/validate-canonical-bundle bundle)))))
 
 (defn- ^{:stratum 0} base-bundle []
   {:evidence-bundle/id (random-uuid)
@@ -36,16 +42,6 @@
       (assoc-in [:evidence/outcome :outcome/tier] :standard)
       (assoc-in [:evidence/outcome :outcome/sli-measurements]
                 [{:sli/name :SLI-1 :sli/value 1.0}])))
-
-(defn- ^{:stratum 0} policy-check []
-  {:policy-check/pack-id "opsv"
-   :policy-check/pack-version "1.0.0"
-   :policy-check/phase :verify
-   :policy-check/checked-at #inst "2026-09-30T00:00:00Z"
-   :policy-check/violations []
-   :policy-check/passed? true
-   :policy-check/duration-ms 0
-   :policy-check/envelope nil})
 
 (deftest ^{:stratum 0} schema-validation-reports-malformed-records-without-throwing-test
   (doseq [value [nil 42 :invalid [] "record"]]
@@ -247,24 +243,25 @@
     (is (:valid? (evidence/validate-canonical-bundle (assoc (base-bundle) :evidence/implement phase))))))
 
 (deftest ^{:stratum 1} field-presence-is-distinct-from-nullability-test
-  (let [check (policy-check)
+  (let [check (control-fixtures/policy-check)
         bundle (assoc (base-bundle) :evidence/policy-checks [check])]
     (is (:valid? (evidence/validate-canonical-bundle bundle)))
     (is (false? (:valid? (evidence/validate-canonical-bundle
                          (update-in bundle [:evidence/policy-checks 0]
-                                    dissoc :policy-check/envelope)))))
+                                    dissoc :policy-check/violations)))))
     (is (false? (:valid? (evidence/validate-canonical-bundle
                          (assoc-in bundle [:evidence/intent :intent/author] nil)))))))
 
 (deftest ^{:stratum 1} nested-domain-values-use-their-canonical-schemas-test
-  (let [bundle (assoc (base-bundle) :evidence/policy-checks [(policy-check)])
+  (let [bundle (assoc (base-bundle) :evidence/policy-checks [(control-fixtures/policy-check)])
         constraint {:constraint/type :latency
                     :constraint/description "Keep latency below the objective."}
         violation {:violation/rule-id "latency"
                    :violation/severity :high
                    :violation/message "Latency exceeded the objective."}]
     (doseq [[path valid] [[[:evidence/intent :intent/constraints] constraint]
-                         [[:evidence/policy-checks 0 :policy-check/violations] violation]]]
+                         [[:evidence/policy-checks 0 :policy-check/violations] violation]
+                         [[:evidence/control-actions] (control-fixtures/action)]]]
       (is (:valid? (evidence/validate-canonical-bundle (assoc-in bundle path [valid]))))
       (doseq [invalid [{} 42 nil]]
         (is (false? (:valid? (evidence/validate-canonical-bundle
