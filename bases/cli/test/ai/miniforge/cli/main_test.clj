@@ -21,6 +21,8 @@
    [ai.miniforge.cli.app-config :as app-config]
    [ai.miniforge.cli.messages :as messages]
    [ai.miniforge.cli.main :as sut]
+   [ai.miniforge.cli.main.launchers :as launchers]
+   [ai.miniforge.cli.main.status.summary :as summary]
    [ai.miniforge.cli.main.util :as util]
    [ai.miniforge.cli.main.commands.pr-monitor :as cmd-pr-monitor]
    [ai.miniforge.event-stream.interface :as es]
@@ -72,7 +74,7 @@
     (with-redefs [pr-train/create-manager
                   (fn [] (throw (ex-info "train boom" {})))]
       (let [output (with-out-str
-                     (is (nil? (#'sut/create-pr-train-manager))))]
+                     (is (nil? (launchers/create-pr-train-manager))))]
         (is (.contains output "train boom"))))))
 
 (deftest ^{:stratum 0} create-pr-train-manager-handles-non-throwable-sling-test
@@ -80,7 +82,7 @@
     (with-redefs [pr-train/create-manager
                   (fn [] (throw+ {:type :boom :message "train data boom"}))]
       (let [output (with-out-str
-                     (is (nil? (#'sut/create-pr-train-manager))))]
+                     (is (nil? (launchers/create-pr-train-manager))))]
         (is (.contains output "train data boom"))))))
 
 (deftest ^{:stratum 0} create-repo-dag-manager-handles-construction-errors-test
@@ -88,7 +90,7 @@
     (with-redefs [repo-dag/create-manager
                   (fn [] (throw (ex-info "dag boom" {})))]
       (let [output (with-out-str
-                     (is (nil? (#'sut/create-repo-dag-manager))))]
+                     (is (nil? (launchers/create-repo-dag-manager))))]
         (is (.contains output "dag boom"))))))
 
 ;; Dispatch table coverage
@@ -110,70 +112,14 @@
 ;; pr-monitor-cmd helpers
 (def ^{:stratum 0} ^:private test-bounds {:min-poll-interval-s 5 :max-poll-interval-s 3600})
 
+(defn- ^{:stratum 0} event-history [timestamp]
+  [{:event/type :workflow/phase-completed :event/timestamp timestamp}])
+
 ;------------------------------------------------------------------------------ Layer 1
 
-(deftest ^{:stratum 1} workflow-status-summary-marks-quiet-running-checkpoints-stale-test
-  (testing "running workflows with old last events are surfaced as stale"
-    (let [now-ms (.toEpochMilli (java.time.Instant/parse "2026-05-17T00:16:00Z"))
-          stale-ts "2026-05-17T00:10:59Z"]
-      (with-redefs [app-config/events-dir (constantly "/tmp/events")
-                    app-config/status-config
-                    (constantly {:running-stale-threshold-ms test-running-stale-threshold-ms})
-                    es/read-workflow-events-by-id
-                    (fn [_events-dir _workflow-id]
-                      [{:event/type :workflow/phase-completed
-                        :event/timestamp stale-ts}])
-                    wr/reconstruct-context
-                    (fn [_events-dir _workflow-id]
-                      {:completed? false
-                       :failed? false
-                       :dag-paused? false
-                       :event-count test-reconstructed-event-count})
-                    util/current-time-ms (constantly now-ms)]
-        (is (= :stale
-               (:status (#'sut/workflow-status-summary "workflow-id"))))))))
-
-(deftest ^{:stratum 1} workflow-status-summary-keeps-recent-running-checkpoints-running-test
-  (testing "running workflows with recent events remain running"
-    (let [now-ms (.toEpochMilli (java.time.Instant/parse "2026-05-17T00:16:00Z"))
-          recent-ts "2026-05-17T00:12:00Z"]
-      (with-redefs [app-config/events-dir (constantly "/tmp/events")
-                    app-config/status-config
-                    (constantly {:running-stale-threshold-ms test-running-stale-threshold-ms})
-                    es/read-workflow-events-by-id
-                    (fn [_events-dir _workflow-id]
-                      [{:event/type :workflow/phase-completed
-                        :event/timestamp recent-ts}])
-                    wr/reconstruct-context
-                    (fn [_events-dir _workflow-id]
-                      {:completed? false
-                       :failed? false
-                       :dag-paused? false
-                       :event-count test-reconstructed-event-count})
-                    util/current-time-ms (constantly now-ms)]
-        (is (= :running
-               (:status (#'sut/workflow-status-summary "workflow-id"))))))))
-
-(deftest ^{:stratum 1} workflow-status-summary-falls-back-for-invalid-stale-threshold-test
-  (testing "invalid stale threshold config falls back to the default threshold"
-    (let [now-ms (.toEpochMilli (java.time.Instant/parse "2026-05-17T00:16:00Z"))
-          stale-ts "2026-05-17T00:10:59Z"]
-      (with-redefs [app-config/events-dir (constantly "/tmp/events")
-                    app-config/status-config
-                    (constantly {:running-stale-threshold-ms test-invalid-running-stale-threshold})
-                    es/read-workflow-events-by-id
-                    (fn [_events-dir _workflow-id]
-                      [{:event/type :workflow/phase-completed
-                        :event/timestamp stale-ts}])
-                    wr/reconstruct-context
-                    (fn [_events-dir _workflow-id]
-                      {:completed? false
-                       :failed? false
-                       :dag-paused? false
-                       :event-count test-reconstructed-event-count})
-                    util/current-time-ms (constantly now-ms)]
-        (is (= :stale
-               (:status (#'sut/workflow-status-summary "workflow-id"))))))))
+(defn- ^{:stratum 1} running-context []
+  {:completed? false :failed? false :dag-paused? false
+   :event-count test-reconstructed-event-count})
 
 (deftest ^{:stratum 1} parse-poll-interval-test
   (testing "Valid interval returns milliseconds"
@@ -188,3 +134,50 @@
     (let [output (with-out-str
                    (is (nil? (#'cmd-pr-monitor/parse-poll-interval "abc" test-bounds))))]
       (is (re-find #"Invalid" output)))))
+
+;------------------------------------------------------------------------------ Layer 2
+
+(deftest ^{:stratum 2} workflow-status-summary-marks-quiet-running-checkpoints-stale-test
+  (testing "running workflows with old last events are surfaced as stale"
+    (let [now-ms (.toEpochMilli (java.time.Instant/parse "2026-05-17T00:16:00Z"))
+          stale-ts "2026-05-17T00:10:59Z"]
+      (with-redefs [app-config/events-dir (constantly "/tmp/events")
+                    app-config/status-config
+                    (constantly {:running-stale-threshold-ms test-running-stale-threshold-ms})
+                    es/read-workflow-events-by-id
+                    (constantly (event-history stale-ts))
+                    wr/reconstruct-context
+                    (constantly (running-context))
+                    util/current-time-ms (constantly now-ms)]
+        (is (= :stale
+               (:status (summary/read-workflow "workflow-id"))))))))
+
+(deftest ^{:stratum 2} workflow-status-summary-keeps-recent-running-checkpoints-running-test
+  (testing "running workflows with recent events remain running"
+    (let [now-ms (.toEpochMilli (java.time.Instant/parse "2026-05-17T00:16:00Z"))
+          recent-ts "2026-05-17T00:12:00Z"]
+      (with-redefs [app-config/events-dir (constantly "/tmp/events")
+                    app-config/status-config
+                    (constantly {:running-stale-threshold-ms test-running-stale-threshold-ms})
+                    es/read-workflow-events-by-id
+                    (constantly (event-history recent-ts))
+                    wr/reconstruct-context
+                    (constantly (running-context))
+                    util/current-time-ms (constantly now-ms)]
+        (is (= :running
+               (:status (summary/read-workflow "workflow-id"))))))))
+
+(deftest ^{:stratum 2} workflow-status-summary-falls-back-for-invalid-stale-threshold-test
+  (testing "invalid stale threshold config falls back to the default threshold"
+    (let [now-ms (.toEpochMilli (java.time.Instant/parse "2026-05-17T00:16:00Z"))
+          stale-ts "2026-05-17T00:10:59Z"]
+      (with-redefs [app-config/events-dir (constantly "/tmp/events")
+                    app-config/status-config
+                    (constantly {:running-stale-threshold-ms test-invalid-running-stale-threshold})
+                    es/read-workflow-events-by-id
+                    (constantly (event-history stale-ts))
+                    wr/reconstruct-context
+                    (constantly (running-context))
+                    util/current-time-ms (constantly now-ms)]
+        (is (= :stale
+               (:status (summary/read-workflow "workflow-id"))))))))
