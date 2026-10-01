@@ -31,56 +31,42 @@
     :finding/pattern #"\bAKIA[0-9A-Z]{16}\b"}])
 
 (def ^{:stratum 0} ^:private pii-finding-types
-  #{:email :ssn})
+  #{:email :ssn :payment-card})
 
 (def ^{:stratum 0} ^:private secret-finding-types
-  #{:aws-access-key :embedded-secret})
+  #{:aws-access-key :embedded-secret :payment-card})
 
 (defn- ^{:stratum 0} bundle-text
   "Render BUNDLE for pattern matching.
 
-   Bounded by print-length and print-level, so detection sees a truncated
-   view of a deep or wide bundle. That makes the findings best-effort
-   metadata, not a security boundary: redaction walks the whole structure
-   and does not share this limit, so a secret past level 20 is still
-   removed even when nothing reports it."
+   Legacy named patterns see a bounded view of deep or wide bundles.
+   Payment-card detection and the shared redaction fallback walk original
+   values independently of these print limits. Redaction, not these labels,
+   remains the publication security boundary."
   [bundle]
   (binding [*print-length* 1000
             *print-level* 20]
     (pr-str bundle)))
 
+(defn- ^{:stratum 0} pattern-finding [text {:finding/keys [type pattern]}]
+  (when (re-find pattern text)
+    {:finding/type type}))
+
 ;------------------------------------------------------------------------------ Layer 1
 
-(defn ^{:stratum 1} scan-artifact
-  "Scan an evidence bundle and return sensitive-data findings.
+(defn- ^{:stratum 1} named-findings [bundle text]
+  (let [labelled (into [] (keep (partial pattern-finding text)) sensitive-patterns)]
+    (cond-> labelled
+      (redaction/payment-card? bundle) (conj {:finding/type :payment-card}))))
 
-   The scanner reports finding types only; matched secret values are not
-   copied into evidence."
-  [bundle]
-  (let [text (bundle-text bundle)]
-    {:scan/findings
-     (let [labelled (vec
-                     (keep (fn [{:finding/keys [type pattern]}]
-                             (when (re-find pattern text)
-                               {:finding/type type}))
-                           sensitive-patterns))]
-       ;; N6.SD.3 requires the bundle to scan independently of the
-       ;; stream — not to hold a different definition of "secret". The
-       ;; patterns above name specific types worth reporting; this
-       ;; covers the rest of the N3 §8 set (private keys, connection
-       ;; strings, JWTs, provider tokens), so a bundle cannot report
-       ;; clean on a value the stream would have redacted.
-       ;;
-       ;; A fallback rather than an additional label, so one secret is
-       ;; not reported twice under two names. A bundle holding both a
-       ;; named and an unnamed secret reports only the named one, which
-       ;; costs nothing: the answer to "does this contain secrets" is
-       ;; unchanged, and redaction below is unconditional either way.
-       (cond-> labelled
-         (and (redaction/secret-string? text)
-              (not-any? #(contains? secret-finding-types (:finding/type %))
-                        labelled))
-         (conj {:finding/type :embedded-secret})))}))
+(defn- ^{:stratum 1} include-unnamed-secret [bundle labelled]
+  ;; N6.SD.3 shares N3's definition of a secret. This fallback avoids a
+  ;; duplicate label when a named finding already establishes sensitivity;
+  ;; redaction remains unconditional and walks the complete value.
+  (cond-> labelled
+    (and (not (redaction/clean? bundle))
+         (not-any? #(contains? secret-finding-types (:finding/type %)) labelled))
+    (conj {:finding/type :embedded-secret})))
 
 (defn ^{:stratum 1} compliance-metadata
   "Convert scan results into evidence compliance metadata."
@@ -91,3 +77,16 @@
       (cond-> {:compliance/sensitive-findings findings}
         contains-pii? (assoc :evidence/contains-pii? true))
       {})))
+
+;------------------------------------------------------------------------------ Layer 2
+
+(defn ^{:stratum 2} scan-artifact
+  "Scan an evidence bundle and return finding types, never matched values."
+  [bundle]
+  (let [text (bundle-text bundle)
+        labelled (named-findings bundle text)
+        findings (include-unnamed-secret bundle labelled)]
+    {:scan/findings findings}))
+
+(comment
+  (scan-artifact {}))
