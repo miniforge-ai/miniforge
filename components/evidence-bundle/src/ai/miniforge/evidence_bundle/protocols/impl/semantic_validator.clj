@@ -66,11 +66,7 @@
   "Check if actual count matches rule.
    Rule can be: 0 (must be zero), :pos (must be positive), :any (any value)"
   [rule-value actual-count]
-  (case rule-value
-    0 (= 0 actual-count)
-    :pos (> actual-count 0)
-    :any true
-    (= rule-value actual-count)))
+  (domain/check-count-rule rule-value actual-count))
 
 ;------------------------------------------------------------------------------ Layer 1
 
@@ -122,7 +118,8 @@
 
         creates (:creates total-changes)
         updates (:updates total-changes)
-        destroys (:destroys total-changes)]
+        destroys (:destroys total-changes)
+        behavior (domain/inferred-behavior creates updates destroys)]
 
     ;; Check each rule
     (when-not (check-rule (:creates rules) creates)
@@ -149,12 +146,7 @@
     {:passed? (empty? @violations)
      :violations @violations
      :semantic-validation/declared-intent intent-type
-     :semantic-validation/actual-behavior (cond
-                                            (and (> creates 0) (> destroys 0)) :migrate
-                                            (> creates 0) :create
-                                            (> updates 0) :update
-                                            (> destroys 0) :destroy
-                                            :else :import)
+     :semantic-validation/actual-behavior behavior
      :semantic-validation/resource-creates creates
      :semantic-validation/resource-updates updates
      :semantic-validation/resource-destroys destroys

@@ -44,7 +44,7 @@
   [file]
   (try
     (when (str/ends-with? (.getName file) ".edn")
-      (evidence/decode-bundle-edn (slurp file)))
+      (evidence/read-bundle-edn file))
     (catch InterruptedException interrupted
       (.interrupt (Thread/currentThread))
       (throw interrupted))

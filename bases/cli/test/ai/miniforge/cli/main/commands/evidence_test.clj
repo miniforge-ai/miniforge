@@ -51,7 +51,7 @@
 (defn- ^{:stratum 0} make-outcome
   "Factory for an `:evidence/outcome` value."
   [& {:as overrides}]
-  (merge {:outcome/success false}
+  (merge {:outcome/success false :outcome/tier :standard}
          overrides))
 
 (defn- ^{:stratum 0} make-dependency-health
@@ -144,6 +144,15 @@
     (let [f (java.io.File. (str *tmp-dir* "/test.json"))]
       (spit f "{}")
       (is (nil? (bundles/load-bundle-from-file f))))))
+
+(deftest ^{:stratum 1} file-loader-rejects-trailing-and-oversized-edn-test
+  (let [file (java.io.File. (str *tmp-dir* "/bounded.edn"))
+        over-limit (inc (* 16 1024 1024))]
+    (spit file "{} {}")
+    (is (nil? (bundles/load-bundle-from-file file)))
+    (with-open [output (java.io.RandomAccessFile. file "rw")]
+      (.setLength output over-limit))
+    (is (nil? (bundles/load-bundle-from-file file)))))
 
 (deftest ^{:stratum 1} list-reports-canonical-status-and-rejected-filenames-test
   (doseq [[success status] [[true "completed"] [false "failed"]]]

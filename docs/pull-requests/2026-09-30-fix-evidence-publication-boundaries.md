@@ -11,6 +11,8 @@ Report invalid, tampered, and unsealed bundles without presenting their ordinary
 Do not silently repair legacy evidence or overwrite an export destination on validation failure.
 Serialize the exact validated value instead of rereading a mutable source file.
 Use canonical EDN and preserve nanosecond instant precision when reading it back.
+Use the bounded public file reader from #1961; reject trailing forms and input
+larger than 16 MiB before parsing. Published fixtures include event links and tier.
 The CLI fallback supports EDN; reject unsupported formats instead of mislabeling raw EDN as JSON or HTML.
 This implements the consumer-boundary finding from #1957.
 
