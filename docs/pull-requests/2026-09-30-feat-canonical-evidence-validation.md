@@ -9,8 +9,10 @@ Expose manager-free validation of portable N6 bundle structure, domain values,
 optional OPSV evidence, and declared content hashes. Unhashed base bundles remain
 valid inputs before finalization. Content integrity does not establish authority.
 
-Keep the existing manager protocol compatible and document its limited legacy
-validation contract. Published-evidence consumers must use the new canonical API.
+Keep the existing manager protocol compatible and document its limited legacy validation contract.
+This document describes the validator prerequisite now tracked in #1959.
+Production finalization is implemented in #1957; presentation and export enforcement are implemented in #1960.
+Those integration PRs remain separate review and merge gates.
 
 ## Standards adversarial pass
 
