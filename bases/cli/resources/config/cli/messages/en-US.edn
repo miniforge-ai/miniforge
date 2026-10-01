@@ -411,6 +411,7 @@
 
   ;; ── Evidence ──────────────────────────────────────────────────────────
   :evidence/header "Evidence Bundles"
+  :evidence/document-language "en-US"
   :evidence/bundle-entry "  {id}  wf:{workflow-id}  ({status})"
   :evidence/none "  No evidence bundles found."
   :evidence/evidence-dir "  Evidence dir: {dir}"
