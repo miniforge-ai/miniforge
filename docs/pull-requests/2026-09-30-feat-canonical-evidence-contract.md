@@ -14,6 +14,8 @@ resource counts, passed status, and violation IDs must agree with the shared int
 Actual behavior uses shared inference; zero changes also permit code-only refactoring.
 Shared semantic rules from #1965 enforce balanced migration creates/destroys in
 both the producer and canonical validator; failed reports must identify that rule.
+The outcome reliability prerequisite supplies canonical failure/degradation domains
+and SLI measurement shapes; invalid optional values remain invalid after rehashing.
 Event counts must equal the
 inclusive scoped sequence range; missing events cannot be certified as complete.
 Unsealed assembly inputs remain valid here, but are not publishable evidence.

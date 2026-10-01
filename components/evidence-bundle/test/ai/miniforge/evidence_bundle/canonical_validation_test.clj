@@ -109,7 +109,14 @@
                          [[:evidence/event-links 0 :event-links/event-count] 4]
                          [[:evidence/event-links 0 :event-links/event-count] 1]
                          [[:evidence/outcome :outcome/tier] nil]
-                         [[:evidence/outcome :outcome/tier] :unknown]]]
+                         [[:evidence/outcome :outcome/tier] :unknown]
+                         [[:evidence/outcome :outcome/degradation-mode] :unknown]
+                         [[:evidence/outcome :outcome/degradation-mode] nil]
+                         [[:evidence/outcome :outcome/failure-class] :unknown]
+                         [[:evidence/outcome :outcome/failure-class] nil]
+                         [[:evidence/outcome :outcome/sli-measurements] 42]
+                         [[:evidence/outcome :outcome/sli-measurements] nil]
+                         [[:evidence/outcome :outcome/sli-measurements] [{}]]]]
       (let [changed (assoc-in bundle path value)
             rehashed (assoc changed :evidence/content-hash (evidence/content-hash changed))]
         (is (false? (:valid? (evidence/validate-canonical-bundle (dissoc changed :evidence/sealed-at)))))

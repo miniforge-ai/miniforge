@@ -29,6 +29,7 @@
   (:require
    [ai.miniforge.evidence-bundle.semantic-rules :as semantic]
    [ai.miniforge.evidence-bundle.schema.optional-key :as optional-key]
+   [ai.miniforge.evidence-bundle.schema.outcome-reliability :as outcome]
    [ai.miniforge.schema.interface :as shared]))
 
 ;------------------------------------------------------------------------------ Layer 0
@@ -259,6 +260,10 @@
 (def ^{:stratum 1} outcome-schema
   "Schema for workflow outcome."
   {:outcome/success boolean?
+   (optional-key/optional-key :outcome/failure-class) outcome/failure-class?
+   (optional-key/optional-key :outcome/tier) outcome/tier?
+   (optional-key/optional-key :outcome/degradation-mode) outcome/degradation-mode?
+   (optional-key/optional-key :outcome/sli-measurements) outcome/sli-measurements?
    (optional-key/optional-key :outcome/pr-number) pos-int?
    (optional-key/optional-key :outcome/pr-url) string?
    (optional-key/optional-key :outcome/pr-status) (fn [s] (contains? pr-statuses s))
