@@ -21,6 +21,7 @@
    #?@(:bb []
        :default [[ai.miniforge.artifact.datalevin-store :as datalevin-store]])
    [ai.miniforge.artifact.core :as core]
+   [ai.miniforge.artifact.content-json :as content-json]
    [ai.miniforge.artifact.publication :as publication]
    [ai.miniforge.artifact.publication-boundary :as publication-boundary]
    [ai.miniforge.artifact.publication-identity :as publication-identity]
@@ -39,6 +40,14 @@
    This integrity value is not authority or writer authentication."
   [value]
   (publication-identity/digest-with-exception-handling value))
+
+(defn ^{:stratum 0} encode-content-json
+  "Encode portable content as bounded lossless Transit JSON, or return an anomaly.
+   Preserves keyword/UUID identity, collection kinds and nanosecond instants via
+   the miniforge/instant tag. Metadata is not serialized. Serialization does not
+   validate evidence or authority."
+  [value]
+  (content-json/encode-with-exception-handling value))
 
 (defn ^{:stratum 0} encode-snapshot
   "Encode a validated artifact as a lossless, checksummed string of at most 16 MiB.

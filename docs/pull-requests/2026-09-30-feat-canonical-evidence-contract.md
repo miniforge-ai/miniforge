@@ -6,7 +6,7 @@
 ## Scope
 
 Base: main. Governance #1972 and publication schema #1974 are merged prerequisites.
-Optional-section schemas from #1978 are also required before this PR merges.
+Optional-section schemas from merged PR #1978 are integrated.
 They recursively validate DAG, task, merge, annotation and pack-run evidence when present.
 Extract the pure canonical validation API from #1957 to keep each review bounded.
 Validate portable root and nested domain records, optional OPSV evidence, and declared hashes.
