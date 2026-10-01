@@ -115,7 +115,9 @@
     (is (= snapshot @restored))
     (is (= bundle (evidence/restore-finalized-opsv-bundle! restored bundle (set f/artifact-ids))))
     (is (= :finalized (:opsv.assembly/status (evidence/get-opsv-assembly restored id))))
-    (is (= bundle (evidence/restore-finalized-opsv-bundle! restored bundle (set f/artifact-ids))))))
+    (is (= bundle (evidence/restore-finalized-opsv-bundle! restored bundle (set f/artifact-ids))))
+    (is (response/anomaly-map? (evidence/restore-finalized-opsv-bundle! restored bundle #{})))
+    (is (response/anomaly-map? (evidence/restore-finalized-opsv-bundle! (atom {}) nil #{})))))
 
 (deftest ^{:stratum 1} finalize-rejects-invalid-base-bundle
   (let [[store bundle-id] (accumulated-store f/opsv-evidence)

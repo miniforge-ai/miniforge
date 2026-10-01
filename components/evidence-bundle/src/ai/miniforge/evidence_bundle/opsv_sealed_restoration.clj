@@ -15,12 +15,11 @@
         record (assembly/get-assembly store id)
         finalized (assoc record :opsv.assembly/status :finalized)]
     (cond
+      (not (validation/valid-with-exception-handling? finalized bundle available-ids))
+      (diagnostics/failure :anomalies/incorrect :finalization/invalid id [{:code :invalid-retained-seal}])
       (= bundle (:opsv.assembly/bundle record)) bundle
       (not= :assembling (:opsv.assembly/status record)) (diagnostics/immutable id)
-      (validation/valid-with-exception-handling? finalized bundle available-ids)
-      (publication/publish-sealed! store record bundle)
-      :else (diagnostics/failure :anomalies/incorrect :finalization/invalid id
-                                 [{:code :invalid-retained-seal}]))))
+      :else (publication/publish-sealed! store record bundle))))
 
 ;------------------------------------------------------------------------------ Layer 1
 
