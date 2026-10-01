@@ -192,14 +192,16 @@
   (publication-validation/validate bundle))
 
 (defn ^{:stratum 0} export-bundle
-  "Export evidence bundle to file (EDN format).
+  "Export a valid, sealed evidence bundle to canonical EDN.
+   Unsealed create-bundle values must be finalized before export.
 
    Arguments:
    - manager: Evidence manager instance
    - bundle-id: UUID of the bundle to export
    - output-path: Path to output file
 
-   Returns true on success, false on error.
+   Returns true on success. Invalid, unsealed or missing evidence returns false
+   without touching the destination; filesystem errors also return false.
 
    Example:
      (export-bundle manager bundle-id \"/tmp/evidence.edn\")"

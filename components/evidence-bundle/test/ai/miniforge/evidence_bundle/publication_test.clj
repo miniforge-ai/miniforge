@@ -12,6 +12,7 @@
 (defn- ^{:stratum 0} sealed-bundle []
   (let [at #inst "2026-09-30T00:00:00Z"
         bundle (assoc f/base-bundle :evidence-bundle/id f/canonical-bundle-id
+                                    :compliance/sensitive-data false :compliance/pii-handling :none
                                     :evidence/sealed-at at :compliance/created-at at)]
     (assoc bundle :evidence/content-hash (evidence/content-hash bundle))))
 

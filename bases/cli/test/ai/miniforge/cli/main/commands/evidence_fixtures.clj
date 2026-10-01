@@ -20,6 +20,7 @@
               :evidence/policy-checks []
               :evidence/outcome {:outcome/success true}
               :compliance/created-at at
+              :compliance/sensitive-data false :compliance/pii-handling :none
               :evidence/sealed-at at}
         value (merge base overrides)]
     (assoc value :evidence/content-hash (evidence/content-hash value))))
