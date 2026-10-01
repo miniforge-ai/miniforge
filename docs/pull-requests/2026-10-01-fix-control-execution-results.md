@@ -24,6 +24,8 @@ every return value in success. This made an unwritten intervention look executed
 - Keep exception failures and fatal-error propagation at the invocation boundary.
 - Report failed dashboard controls as HTTP failures and retain failure evidence.
 - Localize touched execution and dashboard diagnostics.
+- Record malformed-action denials without crashing the event description builder;
+  preserve malformed input in the audit record and never invoke the executor.
 
 ## Testing Plan
 
@@ -38,6 +40,9 @@ success payloads. Kondo and inferred namespace strata pass.
 The approval-alias integration and shared anomaly predicate are verified.
 JVM and rebuilt packaged tests pass 11 tests and 120 assertions.
 These include legacy anomaly returns from the intervention producer.
+After full prerequisite integration, all four event-stream consumers and the
+dashboard suite pass again. Rebuilt packaged failure and malformed-dispatch
+regressions pass 10 tests and 108 assertions. Kondo and inferred strata are clean.
 
 ## Deployment Plan
 

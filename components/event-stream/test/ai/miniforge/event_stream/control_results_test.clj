@@ -17,9 +17,9 @@
                                 {:target-type :workflow :target-id (random-uuid)}
                                 {:principal "operator" :role :operator :listener-id (random-uuid)}))
 
-(defn- ^{:stratum 0} execute [action execution-fn]
+(defn- ^{:stratum 0} execute [action execution-fn & [opts]]
   (let [stream (events/create-event-stream {:sinks []})
-        result (events/execute-control-action! stream action execution-fn)
+        result (events/execute-control-action! stream action execution-fn opts)
         emitted (events/get-events stream {:event-type :control-action/executed})]
     {:result result :recorded (mapv :action/result emitted)}))
 
@@ -76,3 +76,13 @@
     (is (zero? @calls))
     (is (= :denied (:status result)))
     (is (= [result] recorded))))
+
+(deftest ^{:stratum 1} malformed-actions-record-denial-without-invoking-the-effect
+  (doseq [action-type [nil false "pause"]]
+    (let [calls (atom 0)
+          invalid (assoc (action) :action/type action-type)
+          opts {:roles {:operator {:workflows #{action-type}}}}
+          {:keys [result recorded]} (execute invalid (fn [_] (swap! calls inc)) opts)]
+      (is (zero? @calls))
+      (is (= :denied (:status result)))
+      (is (= [result] recorded)))))

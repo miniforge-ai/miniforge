@@ -26,7 +26,7 @@
   (:require
    [ai.miniforge.event-stream.core :as core]
    [ai.miniforge.event-stream.approval :as approval]
-   [ai.miniforge.event-stream.control-authorization :as authorization]
+   [ai.miniforge.event-stream.control-authorization-adapter :as authorization]
    [ai.miniforge.event-stream.control-events :as control-events]
    [ai.miniforge.event-stream.control-results :as results]))
 
