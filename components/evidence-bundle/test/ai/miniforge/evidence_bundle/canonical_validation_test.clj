@@ -114,7 +114,7 @@
                                    [:evidence/implement :phase/output :summary] 42)))))))
 
 (deftest ^{:stratum 1} collector-phase-projections-pass-canonical-validation-test
-  (doseq [phase-name [:implement :verify :release]
+  (doseq [phase-name [:plan :design :implement :verify :review :release :observe]
           input [{:output {:summary "Done." :metrics {}}}
                  {:environment-id "test" :summary "Done." :metrics {}}]]
     (let [phase (phases/build-phase-evidence phase-name :test (assoc input :duration-ms 0))
@@ -122,6 +122,8 @@
           bundle (assoc (base-bundle) key phase)]
       (is (zero? (:phase/inner-loop-iterations phase)))
       (is (:valid? (evidence/validate-canonical-bundle bundle)))
+      (is (false? (:valid? (evidence/validate-canonical-bundle
+                           (assoc-in bundle [key :phase/output :metrics] 42)))))
       (is (false? (:valid? (evidence/validate-canonical-bundle
                            (assoc-in bundle [key :phase/artifacts] nil))))))))
 
