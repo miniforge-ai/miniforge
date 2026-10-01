@@ -70,6 +70,14 @@
     :any true
     (= rule-value actual-count)))
 
+(defn ^{:stratum 0} inferred-behavior [creates updates destroys]
+  (cond
+    (and (pos? creates) (pos? destroys)) :migrate
+    (pos? creates) :create
+    (pos? updates) :update
+    (pos? destroys) :destroy
+    :else :import))
+
 (def ^{:stratum 0} semantic-validation-schema
   "Schema for semantic validation evidence."
   {:semantic-validation/declared-intent keyword?
@@ -291,8 +299,12 @@
 
 (defn ^{:stratum 2} consistent-semantic-conclusion? [value]
   (let [failed (set (keep (partial failed-count-rule value) [:creates :updates :destroys]))
-        reported (set (map :violation/rule-id (:semantic-validation/violations value)))]
+        reported (set (map :violation/rule-id (:semantic-validation/violations value)))
+        inferred (inferred-behavior (:semantic-validation/resource-creates value)
+                                   (:semantic-validation/resource-updates value)
+                                   (:semantic-validation/resource-destroys value))]
     (and (= (empty? failed) (:semantic-validation/passed? value))
+         (= inferred (:semantic-validation/actual-behavior value))
          (= failed reported))))
 
 ;------------------------------------------------------------------------------ Rich Comment

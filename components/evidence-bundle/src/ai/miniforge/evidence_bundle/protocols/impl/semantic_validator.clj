@@ -118,7 +118,8 @@
 
         creates (:creates total-changes)
         updates (:updates total-changes)
-        destroys (:destroys total-changes)]
+        destroys (:destroys total-changes)
+        behavior (domain/inferred-behavior creates updates destroys)]
 
     ;; Check each rule
     (when-not (check-rule (:creates rules) creates)
@@ -145,12 +146,7 @@
     {:passed? (empty? @violations)
      :violations @violations
      :semantic-validation/declared-intent intent-type
-     :semantic-validation/actual-behavior (cond
-                                            (and (> creates 0) (> destroys 0)) :migrate
-                                            (> creates 0) :create
-                                            (> updates 0) :update
-                                            (> destroys 0) :destroy
-                                            :else :import)
+     :semantic-validation/actual-behavior behavior
      :semantic-validation/resource-creates creates
      :semantic-validation/resource-updates updates
      :semantic-validation/resource-destroys destroys

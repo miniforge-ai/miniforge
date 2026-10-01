@@ -11,6 +11,8 @@ Declared seals require sealing and compliance timestamps; hashing excludes the h
 Seals also require the canonical workflow tier and unique, correlated event-scope
 links with valid sequence ranges and counts. Semantic declarations must match root intent;
 resource counts, passed status, and violation IDs must agree with the shared intent rules.
+Actual behavior uses the producer's shared inference. Event counts must equal the
+inclusive scoped sequence range; missing events cannot be certified as complete.
 Unsealed assembly inputs remain valid here, but are not publishable evidence.
 Legacy manager validation remains compatible and explicitly documents its limited contract.
 Production finalization wiring remains in #1957; CLI presentation and export enforcement follow separately.
