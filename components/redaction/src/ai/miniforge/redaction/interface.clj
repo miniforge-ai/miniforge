@@ -55,6 +55,6 @@
   (policy/marker))
 
 (defn ^{:stratum 0} payment-card?
-  "Whether original strings or integers in a nested value contain a card candidate."
+  "Whether original scalars, keys or metadata contain a card candidate."
   [value]
   (payment-card/present? value))

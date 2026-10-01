@@ -26,7 +26,7 @@
     (or (some-> value meta present?)
         (cond
           (string? value) (some valid-checksum? (re-seq (:redaction/payment-card-pattern @policy/policy) value))
-          (integer? value) (present? (str value))
+          (or (integer? value) (keyword? value) (symbol? value)) (present? (str value))
           (coll? value) (some present? value)
           :else false))))
 

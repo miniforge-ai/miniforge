@@ -9,7 +9,7 @@
 
 (deftest ^{:stratum 0} checksum-valid-cards-are-detected-and-redacted-test
   (doseq [card ["4111111111111111" "4111 1111 1111 1111" "4111-1111-1111-1111"
-               "378282246310005" "6011111111111117"]]
+               "378282246310005" "6011111111111117" "500000000009"]]
     (let [text (str "before " card " after")
           value {:nested [text]}
           redacted (redaction/redact value)]
@@ -29,7 +29,7 @@
     (is (= value (redaction/redact value)))))
 
 (deftest ^{:stratum 0} numeric-cards-are-redacted-at-original-value-boundaries-test
-  (doseq [card [4111111111111111 4111111111111111N]]
+  (doseq [card [4111111111111111 4111111111111111N 500000000009]]
     (let [value {:nested [card] card :label}
           redacted (redaction/redact value)]
       (is (redaction/payment-card? value))
@@ -44,6 +44,14 @@
     (is (redaction/payment-card? value))
     (is (false? (redaction/payment-card? redacted)))
     (is (= {:card "[REDACTED]"} (meta redacted)))))
+
+(deftest ^{:stratum 0} named-card-keys-are-pii-test
+  (doseq [key [(keyword "500000000009") (symbol "500000000009")]]
+    (let [value {key :label}
+          redacted (redaction/redact value)]
+      (is (redaction/payment-card? value))
+      (is (= {"[REDACTED]" :label} redacted))
+      (is (false? (redaction/payment-card? redacted))))))
 
 (comment
   (clojure.test/run-tests 'ai.miniforge.redaction.payment-card-test))

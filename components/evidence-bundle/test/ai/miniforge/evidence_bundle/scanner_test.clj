@@ -40,6 +40,17 @@
     (is (empty? (:scan/findings (scanner/scan-artifact separate))))
     (is (= separate (redaction/redact separate)))))
 
+(deftest ^{:stratum 0} metadata-only-secrets-match-the-shared-redaction-contract
+  (doseq [value [(with-meta [] {:note "AKIAIOSFODNN7EXAMPLE"})
+                {:nested [(with-meta [] {:note "AKIAIOSFODNN7EXAMPLE"})]}
+                {(with-meta 'key {:note "AKIAIOSFODNN7EXAMPLE"}) :value}
+                (with-meta [] (with-meta {} {:note "AKIAIOSFODNN7EXAMPLE"}))]]
+    (let [redacted (redaction/redact value)]
+      (is (false? (redaction/clean? value)))
+      (is (= [{:finding/type :embedded-secret}] (:scan/findings (scanner/scan-artifact value))))
+      (is (redaction/clean? redacted))
+      (is (empty? (:scan/findings (scanner/scan-artifact redacted)))))))
+
 (deftest ^{:stratum 0} scan-artifact-reports-finding-types-only
   (testing "sensitive values are detected but not copied into evidence"
     (let [result (scanner/scan-artifact

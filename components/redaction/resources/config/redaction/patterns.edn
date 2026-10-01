@@ -23,7 +23,7 @@
 {:redaction/marker "[REDACTED]"
 
  ;; Candidates still require a valid Luhn checksum before detection/redaction.
- :redaction/payment-card-pattern "(?<![A-Za-z0-9-])(?<![0-9] )(?:[0-9][ -]?){12,18}[0-9](?![A-Za-z0-9-]| [0-9])"
+ :redaction/payment-card-pattern "(?<![A-Za-z0-9-])(?<![0-9] )(?:[0-9][ -]?){11,18}[0-9](?![A-Za-z0-9-]| [0-9])"
 
  ;; Matched case-insensitively against the key's name.
  :redaction/secret-key-patterns

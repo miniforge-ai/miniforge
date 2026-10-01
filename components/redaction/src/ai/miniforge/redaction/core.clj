@@ -28,6 +28,9 @@
 
 ;------------------------------------------------------------------------------ Layer 0
 
+(defn- ^{:stratum 0} metadata-values [value]
+  (keep meta (tree-seq coll? seq value)))
+
 (defn- ^{:stratum 0} free-key
   "K, or K with a counter appended until it is absent from M.
 
@@ -172,8 +175,8 @@
   "True when X carries no value excluded by N3 §8.1. Redaction is
    idempotent, so this is `redact` reaching a fixed point.
 
-   Blind to metadata: `=` ignores it, so a secret carried only in
-   metadata reports clean here even though `redact` removes it. `redact`
-   is the security property; this is a convenience predicate."
+   Equality ignores metadata, so check metadata at every reachable node
+   separately, including metadata nested within other metadata."
   [x]
-  (= x (redact x)))
+  (and (= x (redact x))
+       (every? clean? (metadata-values x))))
