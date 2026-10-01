@@ -9,8 +9,8 @@
 ## Overview
 
 Keep failed governed interventions failed through HTTP, control events and N6
-evidence. Base: `fix/evidence-control-records`; depends on #1969 for the real
-dashboard requester and canonical evidence projection. Retarget main before merge.
+evidence. Base: main; #1969 is merged and supplies the real dashboard requester
+and canonical evidence projection.
 
 ## Motivation
 
