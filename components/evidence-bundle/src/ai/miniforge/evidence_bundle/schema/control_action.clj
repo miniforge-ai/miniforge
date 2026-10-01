@@ -9,7 +9,7 @@
 
 (def ^{:stratum 0} Requester
   [:map [:principal :string] [:listener-id :uuid]
-   [:capability {:optional true} :keyword]])
+   [:capability {:optional true} [:= :control]]])
 
 (def ^{:stratum 0} Result
   [:map [:status :keyword]
@@ -20,7 +20,7 @@
   [:and
    [:map
     [:status {:optional true} :keyword]
-    [:approval-status {:optional true} :keyword]
+    [:approval-status {:optional true} [:enum :pending :approved :rejected]]
     [:required-approvers {:optional true} nat-int?]
     [:approvers [:vector [:map [:principal :string] [:timestamp inst?] [:decision :keyword]]]]]
    [:fn #(= 1 (count (set (vals (select-keys % [:status :approval-status])))))]])
