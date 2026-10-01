@@ -9,9 +9,18 @@
             [ai.miniforge.phase-opsv.artifact-model :as material]
             [ai.miniforge.phase-opsv.finalization-config :as config]
             [ai.miniforge.phase-opsv.finalization-model :as model]
+            [ai.miniforge.phase-opsv.finalization-retained :as retained]
             [ai.miniforge.phase-opsv.runtime-context :as context]))
 
 ;------------------------------------------------------------------------------ Layer 0
+
+(defn- ^{:stratum 0} retained-or-finalized! [ctx record output]
+  (let [bundle (retained/restore! ctx record)]
+    (if (nil? bundle)
+      (evidence/finalize-opsv-evidence!
+        (:opsv/evidence-assembly-store ctx) (:evidence-bundle/id record)
+        (config/base-bundle ctx) (model/evidence-section record output) (:opsv/artifact-refs record))
+      bundle)))
 
 (defn ^{:stratum 0} assembly [ctx]
   (when-let [store (:opsv/evidence-assembly-store ctx)]
@@ -65,22 +74,15 @@
                  (every? (partial available? ctx) refs)
                  (confirmed-output? ctx output))
       (model/failure output :unavailable-material)
-      (publish-bundle! ctx output
-        (evidence/finalize-opsv-evidence!
-         (:opsv/evidence-assembly-store ctx) (:evidence-bundle/id record)
-         (config/base-bundle ctx) (model/evidence-section record output) refs)))))
+      (publish-bundle! ctx output (retained-or-finalized! ctx record output)))))
 
 (defn ^{:stratum 2} publish-finalized! [ctx]
   (let [record (assembly ctx)
-        bundle (:opsv.assembly/bundle record)
-        validation-store (evidence/restore-opsv-assembly-store
-                          (dissoc (assoc record :opsv.assembly/status :assembling) :opsv.assembly/bundle))]
+        bundle (:opsv.assembly/bundle record)]
     (if-not (and (= :finalized (:opsv.assembly/status record))
                  (= (context/workflow-id ctx) (:evidence-bundle/workflow-id bundle))
                  (every? (partial available? ctx) (:opsv/artifact-refs record))
-                 (= bundle (evidence/finalize-opsv-evidence!
-                            validation-store (:evidence-bundle/id record) bundle
-                            (:evidence/opsv bundle) (:opsv/artifact-refs record))))
+                 (evidence/valid-finalized-opsv-bundle? record bundle (:opsv/artifact-refs record)))
       (model/failure {} :invalid-finalized-evidence)
       (publish-bundle! ctx {} bundle))))
 
