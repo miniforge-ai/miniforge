@@ -28,7 +28,7 @@
    [ai.miniforge.event-stream.approval :as approval]
    [ai.miniforge.event-stream.control-authorization :as authorization]
    [ai.miniforge.event-stream.control-events :as control-events]
-   [ai.miniforge.response.interface :as response]))
+   [ai.miniforge.event-stream.control-results :as results]))
 
 ;------------------------------------------------------------------------------ Layer 0
 
@@ -139,31 +139,13 @@
         roles (get opts :roles default-roles)
         requester (:action/requester action)
         auth-result (authorize-action roles action requester)]
-    (if-not (:authorized? auth-result)
-      ;; RBAC denied
-      (do
-        (core/publish! stream
-                       (control-events/requested stream action))
-        (let [denial {:status :denied
-                      :reason (:reason auth-result)
-                      :anomaly (:anomaly auth-result)}]
-          (core/publish! stream
-                         (core/control-action-executed
-                          stream workflow-id action-id denial))
-          denial))
-      ;; RBAC authorized — execute
-      (do
-        (core/publish! stream
-                       (control-events/requested stream action))
-        (let [result (try
-                       (let [r (execution-fn action)]
-                         (response/success r))
-                       (catch Exception e
-                         (response/failure (.getMessage e) {:data (ex-data e)})))]
-          (core/publish! stream
-                         (core/control-action-executed
-                          stream workflow-id action-id result))
-          result)))))
+    (core/publish! stream
+                   (control-events/requested stream action))
+    (let [result (if (:authorized? auth-result)
+                   (results/invoke! execution-fn action)
+                   (results/denied auth-result))]
+      (core/publish! stream (core/control-action-executed stream workflow-id action-id result))
+      result)))
 
 ;------------------------------------------------------------------------------ Layer 2
 

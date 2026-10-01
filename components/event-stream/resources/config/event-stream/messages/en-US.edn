@@ -3,6 +3,7 @@
   :control/unknown-role "Unknown role: {role}"
   :control/unknown-target "Unknown target type: {target-type}"
   :control/not-permitted "Role {role} cannot perform {action-type} on {target-type}"
+  :control/execution-failed "Control execution failed."
   :opsv/actuation-disposition "OPSV effect disposition: {state}"
   :opsv/invalid-disposition "OPSV disposition identity, state, authority or observation payload failed validation."
   ;; Supervisory intervention events
