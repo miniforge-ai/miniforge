@@ -110,7 +110,16 @@
                          [[:evidence/outcome :outcome/tier] :unknown]]]
       (let [changed (assoc-in bundle path value)
             rehashed (assoc changed :evidence/content-hash (evidence/content-hash changed))]
+        (is (false? (:valid? (evidence/validate-canonical-bundle (dissoc changed :evidence/sealed-at)))))
         (is (false? (:valid? (evidence/validate-canonical-bundle rehashed))))))
+    (doseq [[scope id] [[:pr (random-uuid)] [:pack "pack"] [:repo "repo"] [:deployment "deploy"]
+                       [:supervisory-entity ["repo" 1]]]]
+      (let [linked (-> (publication-fields (base-bundle))
+                       (assoc-in [:evidence/event-links 0 :event-links/scope-type] scope)
+                       (assoc-in [:evidence/event-links 0 :event-links/scope-id] id))]
+        (is (:valid? (evidence/validate-canonical-bundle linked)))
+        (is (false? (:valid? (evidence/validate-canonical-bundle
+                             (assoc-in linked [:evidence/event-links 0 :event-links/scope-id] 42)))))))
     (is (:valid? (evidence/validate-canonical-bundle
                   (assoc sealed :evidence/signature "not-an-authenticity-check"))))
     (doseq [altered [(assoc-in sealed [:evidence/outcome :outcome/success] false)
@@ -187,6 +196,12 @@
                            (assoc-in bundle [key :phase/output :metrics] 42)))))
       (is (false? (:valid? (evidence/validate-canonical-bundle
                            (assoc-in bundle [key :phase/artifacts] nil))))))))
+
+(deftest ^{:stratum 1} collector-projects-nonempty-artifact-records-to-identifiers-test
+  (let [id (random-uuid)
+        phase (phases/build-phase-evidence :implement :test {:artifacts [id {:artifact/id id}]})]
+    (is (= [id id] (:phase/artifacts phase)))
+    (is (:valid? (evidence/validate-canonical-bundle (assoc (base-bundle) :evidence/implement phase))))))
 
 (deftest ^{:stratum 1} field-presence-is-distinct-from-nullability-test
   (let [check (policy-check)

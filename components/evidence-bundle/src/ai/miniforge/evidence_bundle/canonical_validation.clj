@@ -23,13 +23,12 @@
 
 (defn- ^{:stratum 0} sealing-errors [bundle]
   (when (some #(contains? bundle %) [:evidence/content-hash :evidence/signature :evidence/sealed-at])
-    (concat (publication/errors bundle)
-     (when-not (and (string? (:evidence/content-hash bundle))
+    (when-not (and (string? (:evidence/content-hash bundle))
                    (inst? (:evidence/sealed-at bundle))
                    (contains? bundle :compliance/sensitive-data)
                    (contains? bundle :compliance/pii-handling)
                    (inst? (:compliance/created-at bundle)))
-      [{:code :incomplete-seal}]))))
+      [{:code :incomplete-seal}])))
 
 ;------------------------------------------------------------------------------ Layer 1
 
@@ -38,7 +37,8 @@
     (cond
       (anomaly/anomaly? portable) (result [{:code :nonportable-evidence :anomaly portable}])
       (not (map? bundle)) (result [{:code :invalid-bundle}])
-      :else (result (concat (structure/errors bundle) (sealing-errors bundle) (hash-errors bundle))))))
+      :else (result (concat (structure/errors bundle) (publication/errors bundle)
+                            (sealing-errors bundle) (hash-errors bundle))))))
 
 ;------------------------------------------------------------------------------ Layer 2
 

@@ -19,10 +19,15 @@
 (defn- ^{:stratum 0} scope [link]
   ((juxt :event-links/scope-type :event-links/scope-id) link))
 
+(def ^{:stratum 0} scope-id-schemas
+  {:workflow :uuid :pr :uuid :pack :string :repo :string :deployment :string
+   :supervisory-entity [:or :uuid :string [:tuple :string pos-int?]]})
+
 ;------------------------------------------------------------------------------ Layer 1
 
 (defn- ^{:stratum 1} valid-link? [workflow-id link]
   (and (m/validate EventLink link)
+       (m/validate (get scope-id-schemas (:event-links/scope-type link)) (:event-links/scope-id link))
        (<= (:event-links/from-sequence link) (:event-links/to-sequence link))
        (<= (:event-links/event-count link)
            (inc (- (:event-links/to-sequence link) (:event-links/from-sequence link))))
@@ -35,12 +40,15 @@
 ;------------------------------------------------------------------------------ Layer 2
 
 (defn ^{:stratum 2} errors [bundle]
-  (let [links (:evidence/event-links bundle)]
+  (let [links (:evidence/event-links bundle)
+        sealed? (some #(contains? bundle %) [:evidence/content-hash :evidence/signature :evidence/sealed-at])]
     (cond-> []
-      (not (m/validate reliability/WorkflowTier (get-in bundle [:evidence/outcome :outcome/tier])))
+      (and (or sealed? (contains? (:evidence/outcome bundle) :outcome/tier))
+           (not (m/validate reliability/WorkflowTier (get-in bundle [:evidence/outcome :outcome/tier]))))
       (conj {:code :invalid-outcome-tier})
-      (not (and (vector? links) (seq links) (distinct-scopes? links)
-                (every? (partial valid-link? (:evidence-bundle/workflow-id bundle)) links)))
+      (and (or sealed? (contains? bundle :evidence/event-links))
+           (not (and (vector? links) (seq links) (distinct-scopes? links)
+                     (every? (partial valid-link? (:evidence-bundle/workflow-id bundle)) links))))
       (conj {:code :invalid-event-links}))))
 
 (comment
