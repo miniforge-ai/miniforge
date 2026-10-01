@@ -25,6 +25,9 @@ This implements the consumer-boundary finding from #1957.
 The shared publication validator also refuses correctly hashed evidence with
 exposed secrets or understated sensitivity, PII, or treatment declarations.
 It checks the policy from merged #1981 without modifying or resealing evidence.
+Shared redaction excludes plaintext SSNs from values, keys, and metadata, and
+recorded SSN findings require protected treatment. Truthful flags or a claimed
+redacted/encrypted treatment never authorize exporting an exposed SSN.
 
 ## Standards adversarial pass
 
@@ -41,6 +44,8 @@ Packaged CLI and manager tests verify valid round trips and rejection before exp
 Tampering and missing seals leave existing destinations unchanged.
 Evidence consumers and a CLI build pass. CLI regressions pass 20 tests / 80
 assertions; packaged CLI and publication regressions pass 24 tests / 114 assertions.
+The SSN follow-up also passes all redaction and evidence consumers; packaged
+CLI, publication, compliance and SSN coverage passes 31 tests / 198 assertions.
 The repository-root standards scan covers 4,207 files with no violations.
 Run normal hooks before each commit and refresh verification before merge.
 Current-head review and all CI, including Build, remain mandatory merge gates.
