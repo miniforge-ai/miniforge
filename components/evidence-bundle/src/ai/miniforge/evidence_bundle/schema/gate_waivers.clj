@@ -11,7 +11,8 @@
   (contains? #{:medium :low :info} (:violation/severity violation)))
 
 (defn- ^{:stratum 0} blocking? [violation]
-  (contains? #{:critical :high :medium} (:violation/severity violation)))
+  (or (contains? violation :failure/class)
+      (contains? #{:critical :high :medium} (:violation/severity violation))))
 
 (defn- ^{:stratum 0} waiver-matches? [evaluation eligible waiver]
   (let [waived (:waiver/violations waiver)]
@@ -24,7 +25,7 @@
   (let [blocking (set (map :violation/rule-id (filter blocking? violations)))
         waived (set (mapcat :waiver/violations waivers))]
     (case outcome
-      :failed true
+      :failed (or (empty? violations) (not (empty? blocking)))
       :passed (and (empty? waivers) (empty? blocking))
       :waived (and (seq waivers) (set/subset? blocking waived)))))
 

@@ -131,7 +131,9 @@
     (is (accepted? {:evidence/gate-executions [complete]}))
     (doseq [severity [:medium :low :info]]
       (let [passed (assoc (with-severity record severity) :gate-execution/outcome :passed :gate-execution/waivers [])]
-        (is (= (not= :medium severity) (accepted? {:evidence/gate-executions [passed]})))))))
+        (is (= (not= :medium severity) (accepted? {:evidence/gate-executions [passed]})))
+        (is (= (= :medium severity)
+               (accepted? {:evidence/gate-executions [(assoc passed :gate-execution/outcome :failed)]})))))))
 
 (deftest ^{:stratum 1} overlay-proposal-can-own-effective-settings-without-owning-check-function
   (let [expanded (with-overlay (fixtures/gate) :low true)
@@ -142,4 +144,8 @@
   (let [record (assoc-in (fixtures/gate) [:gate-execution/violations 0 :failure/class] :failure.class/tool-error)]
     (is (accepted? {:evidence/gate-executions [record]}))
     (is (not (accepted? {:evidence/gate-executions
-                         [(assoc-in record [:gate-execution/violations 0 :violation/auto-fixable?] true)]})))))
+                         [(assoc-in record [:gate-execution/violations 0 :violation/auto-fixable?] true)]})))
+    (let [failed (assoc (with-severity record :low) :gate-execution/outcome :failed :gate-execution/waivers [])]
+      (is (accepted? {:evidence/gate-executions [failed]}))
+      (is (not (accepted? {:evidence/gate-executions [(assoc failed :gate-execution/outcome :passed)]})))
+      (is (accepted? {:evidence/gate-executions [(assoc failed :gate-execution/violations [])]})))))

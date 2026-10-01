@@ -12,8 +12,7 @@ Add the missing N6 knowledge-input and gate-execution contracts to the shared
 root schema. This is a bounded prerequisite for canonical validation in #1959.
 Its canonical entry point consumes the shared schema; this prerequisite alone
 does not claim complete evidence enforcement or production gate capture.
-Stacked on the specification clarification in #1973. Retarget to main after that
-prerequisite merges; this PR must merge only into main.
+The specification clarification in #1973 is merged. This PR targets main.
 
 ## Design
 
@@ -42,7 +41,7 @@ Exercise complete records, missing fields, malformed collections and nested valu
 Run affected consumers and rebuilt packaged tests serially before publishing.
 Require adversarial standards review, normal hooks, current-head review and all CI.
 All three evidence consumers pass. Rebuilt packaged governance regressions pass
-15 tests and 177 assertions, including control compatibility and outcome coverage.
+15 tests and 183 assertions, including control compatibility and outcome coverage.
 Kondo and inferred namespace strata pass without warnings. The adversarial pass
 checks proposal precedence, waiver identity/eligibility and fail-closed parsing;
 separate pure namespaces keep the cross-record orchestration small.
