@@ -131,7 +131,12 @@
     (with-redefs [shared/call-optional-provider (constantly nil)
                   app-config/home-dir (constantly *tmp-dir*)]
       (let [output (with-out-str (sut/evidence-list-cmd {}))]
-        (is (re-find #"(?i)no evidence" output))))))
+        (is (re-find #"(?i)no evidence" output)))
+      (let [directory (str *tmp-dir* "/evidence")]
+        (fs/create-dirs directory)
+        (doseq [name ["export.json" "export.html" "notes.txt"]]
+          (spit (str directory "/" name) "export"))
+        (is (re-find #"(?i)no evidence" (with-out-str (sut/evidence-list-cmd {}))))))))
 
 (deftest ^{:stratum 1} evidence-list-cmd-component-results-test
   (testing "list command displays component results when available"
