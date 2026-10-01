@@ -13,8 +13,9 @@
 
 (defn- ^{:stratum 0} message-params [intent counts kind]
   (let [expected (get-in rules/rules [intent kind])
-        actual (get counts kind)]
-    {:intent intent :kind kind :expected expected :actual actual
+        actual (get counts kind)
+        kind-name (name kind)]
+    {:intent intent :kind kind-name :expected expected :actual actual
      :creates (:creates counts) :destroys (:destroys counts)}))
 
 ;------------------------------------------------------------------------------ Layer 1

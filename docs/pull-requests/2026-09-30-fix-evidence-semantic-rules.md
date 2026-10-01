@@ -26,6 +26,8 @@ hooks, review and all CI before merge.
 All three evidence consumers passed; rebuilt packaged tests passed 12 tests with
 72 assertions. Kondo and explicit strata checks passed; the component standards
 scan reported no findings. The refactor retains absent/nil-content behavior.
+Review added exact-message compatibility regressions for all three count kinds;
+catalog parameters preserve their existing unqualified names.
 
 ## Deployment and related work
 

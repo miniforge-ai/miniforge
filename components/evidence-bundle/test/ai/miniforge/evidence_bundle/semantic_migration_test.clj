@@ -3,6 +3,8 @@
 ;; Licensed under the Apache License, Version 2.0.
 (ns ai.miniforge.evidence-bundle.semantic-migration-test
   (:require [ai.miniforge.evidence-bundle.protocols.impl.semantic-validator :as validator]
+            [ai.miniforge.evidence-bundle.semantic-report :as report]
+            [ai.miniforge.evidence-bundle.semantic-rules :as rules]
             [clojure.string :as str]
             [clojure.test :refer [deftest is]]))
 
@@ -10,6 +12,14 @@
 
 (defn- ^{:stratum 0} change-lines [n action]
   (map #(str "resource_" % " will be " action) (range n)))
+
+(deftest ^{:stratum 0} localized-count-messages-preserve-existing-wording
+  (doseq [[kind expected] [[:creates "Intent ':import' expects 0 creates, found 1"]
+                           [:updates "Intent ':import' expects 0 updates, found 1"]
+                           [:destroys "Intent ':import' expects 0 destroys, found 1"]]]
+    (let [counts (assoc rules/empty-changes kind 1)
+          result (report/build :import counts #inst "2026-09-30")]
+      (is (= [expected] (mapv :violation/message (:violations result)))))))
 
 ;------------------------------------------------------------------------------ Layer 1
 
