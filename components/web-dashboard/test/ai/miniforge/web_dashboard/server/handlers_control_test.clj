@@ -23,6 +23,7 @@
   (:require
    [cheshire.core :as json]
    [ai.miniforge.event-stream.interface :as event-stream]
+   [ai.miniforge.web-dashboard.control-identity :as control-identity]
    [ai.miniforge.web-dashboard.server.handlers :as sut]
    [ai.miniforge.web-dashboard.server.handlers.support :as support]
    [ai.miniforge.web-dashboard.state.core :as state-core]
@@ -48,7 +49,7 @@
 (deftest ^{:stratum 0} structured-action-ignores-a-body-supplied-requester
   (testing "build-control-action derives the requester server-side"
     (let [stream (event-stream/create-event-stream {:sinks []})
-          state (state-core/create-state {:event-stream stream})
+          state (control-identity/attach! (state-core/create-state {:event-stream stream}))
           action (support/build-control-action
                   {:action/type "cancel"
                    :action/requester {:principal "ceo@example.com" :role :admin}}

@@ -12,8 +12,7 @@
 ;; See the License for the specific language governing permissions and
 ;; limitations under the License.
 (ns ai.miniforge.web-dashboard.state.core
-  "Utilities and dashboard state creation."
-  (:require [ai.miniforge.web-dashboard.control-identity :as control-identity]))
+  "Pure utilities and state atom creation.")
 
 ;------------------------------------------------------------------------------ Layer 0
 
@@ -44,8 +43,7 @@
                 :archived-workflows (atom {})
                 :archive-loading? (atom true)
                 :start-time (System/currentTimeMillis)}
-               opts
-               {:control/requester (control-identity/register! (:event-stream opts))})))
+               opts)))
 
 (defn ^{:stratum 0} get-uptime
   "Get server uptime in milliseconds."

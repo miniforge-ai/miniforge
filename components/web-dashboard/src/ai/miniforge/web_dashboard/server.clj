@@ -29,6 +29,7 @@
    [ai.miniforge.web-dashboard.views :as views]
    [ai.miniforge.web-dashboard.server.auth :as auth]
    [ai.miniforge.web-dashboard.server.responses :as responses]
+   [ai.miniforge.web-dashboard.server.shutdown :as shutdown]
    [ai.miniforge.web-dashboard.server.filters :as filters]
    [ai.miniforge.web-dashboard.server.websocket :as websocket]
    [ai.miniforge.web-dashboard.server.handlers :as handlers]
@@ -428,6 +429,8 @@
     (println  "│ WebSocket: ws://localhost:" actual-port "/ws" (apply str (repeat (- 21 (count (str actual-port))) " ")) "│")
     (println  "│ Events: " events-dir (apply str (repeat (max 1 (- 40 (count events-dir))) " ")) "│")
     (println "└─────────────────────────────────────────────────────┘")
+    ;; No fallible startup work follows listener acquisition.
+    (control-identity/attach! state)
     {:server server
      :port actual-port
      :state state
@@ -435,12 +438,8 @@
 
 (defn ^{:stratum 1} stop-server!
   "Stop HTTP server and watcher."
-  [{:keys [server watcher-cleanup state]}]
-  (when watcher-cleanup
-    (watcher-cleanup))
-  (when state
-    (control-identity/release! state))
-  (when server
-    (delete-discovery-file!)
-    (http/server-stop! server {:timeout 100})
-    (println "Web dashboard stopped")))
+  [{:keys [server] :as handle}]
+  (try
+    (shutdown/stop! handle)
+    (finally
+      (when server (delete-discovery-file!)))))
