@@ -4,6 +4,8 @@
 (ns ai.miniforge.evidence-bundle.canonical-validation-test
   (:require [ai.miniforge.evidence-bundle.interface :as evidence]
             [ai.miniforge.evidence-bundle.collectors :as collectors]
+            [ai.miniforge.evidence-bundle.collector :as collector]
+            [ai.miniforge.artifact.interface :as artifact]
             [ai.miniforge.evidence-bundle.phases :as phases]
             [ai.miniforge.evidence-bundle.schema.compliance :as compliance]
             [ai.miniforge.evidence-bundle.schema.validation :as validation]
@@ -24,6 +26,14 @@
    :evidence/policy-checks []
    :evidence/outcome {:outcome/success true}})
 
+(defn- ^{:stratum 0} publication-fields [bundle]
+  (-> bundle
+      (assoc :evidence/event-links [{:event-links/scope-type :workflow
+                                    :event-links/scope-id (:evidence-bundle/workflow-id bundle)
+                                    :event-links/from-sequence 0 :event-links/to-sequence 2
+                                    :event-links/event-count 3}])
+      (assoc-in [:evidence/outcome :outcome/tier] :standard)))
+
 (defn- ^{:stratum 0} policy-check []
   {:policy-check/pack-id "opsv"
    :policy-check/pack-version "1.0.0"
@@ -41,6 +51,24 @@
   (is (false? (:valid? (validation/validate-schema {:field seq} {:field 42}))))
   (is (true? (:valid? (validation/validate-schema {:field nil?} {:field nil}))))
   (is (false? (:valid? (validation/validate-schema {:field nil?} {})))))
+
+(deftest ^{:stratum 0} collected-semantic-and-policy-evidence-use-canonical-fields-test
+  (let [workflow-id (random-uuid)
+        material {:artifact/type :terraform-plan :artifact/content "resource will be created"
+                  :artifact/provenance {:provenance/workflow-id workflow-id :provenance/phase :implement}}
+        violation {:rule-id "example" :severity :high :message "Policy failed."}
+        wrapped {:rule {:rule/id "example" :rule/severity :high}
+                 :violation {:message "Policy failed."}}
+        state {:workflow/spec {:intent/type :import} :workflow/status :failed
+               :workflow/gate-results [{:passed? false :violations [violation wrapped]}]}]
+    (with-redefs [artifact/query (constantly [material])]
+      (let [bundle (dissoc (collector/assemble-evidence-bundle workflow-id state :test)
+                           :evidence/content-hash)
+            semantic (:evidence/semantic-validation bundle)]
+        (is (false? (:semantic-validation/passed? semantic)))
+        (is (seq (:semantic-validation/violations semantic)))
+        (is (false? (get-in bundle [:evidence/policy-checks 0 :policy-check/passed?])))
+        (is (:valid? (evidence/validate-canonical-bundle bundle)))))))
 
 ;------------------------------------------------------------------------------ Layer 1
 
@@ -64,12 +92,34 @@
       (is (false? (:valid? (evidence/validate-canonical-bundle (assoc-in bundle path value))))))))
 
 (deftest ^{:stratum 1} declared-hash-is-verified-without-claiming-authority-test
-  (let [bundle (assoc (base-bundle)
+  (let [bundle (assoc (publication-fields (base-bundle))
                        :compliance/sensitive-data false :compliance/pii-handling :none
                        :compliance/created-at #inst "2026-09-30T00:00:00Z"
                        :evidence/sealed-at #inst "2026-09-30T00:00:00Z")
         sealed (assoc bundle :evidence/content-hash (evidence/content-hash bundle))]
     (is (:valid? (evidence/validate-canonical-bundle sealed)))
+    (doseq [[path value] [[[:evidence/event-links] nil]
+                         [[:evidence/event-links] []]
+                         [[:evidence/event-links] [{}]]
+                         [[:evidence/event-links 0 :event-links/scope-type] :unknown]
+                         [[:evidence/event-links 0 :event-links/scope-id] (random-uuid)]
+                         [[:evidence/event-links 0 :event-links/from-sequence] -1]
+                         [[:evidence/event-links 0 :event-links/to-sequence] 0]
+                         [[:evidence/event-links 0 :event-links/event-count] 4]
+                         [[:evidence/outcome :outcome/tier] nil]
+                         [[:evidence/outcome :outcome/tier] :unknown]]]
+      (let [changed (assoc-in bundle path value)
+            rehashed (assoc changed :evidence/content-hash (evidence/content-hash changed))]
+        (is (false? (:valid? (evidence/validate-canonical-bundle (dissoc changed :evidence/sealed-at)))))
+        (is (false? (:valid? (evidence/validate-canonical-bundle rehashed))))))
+    (doseq [[scope id] [[:pr (random-uuid)] [:pack "pack"] [:repo "repo"] [:deployment "deploy"]
+                       [:supervisory-entity ["repo" 1]]]]
+      (let [linked (-> (publication-fields (base-bundle))
+                       (assoc-in [:evidence/event-links 0 :event-links/scope-type] scope)
+                       (assoc-in [:evidence/event-links 0 :event-links/scope-id] id))]
+        (is (:valid? (evidence/validate-canonical-bundle linked)))
+        (is (false? (:valid? (evidence/validate-canonical-bundle
+                             (assoc-in linked [:evidence/event-links 0 :event-links/scope-id] 42)))))))
     (is (:valid? (evidence/validate-canonical-bundle
                   (assoc sealed :evidence/signature "not-an-authenticity-check"))))
     (doseq [altered [(assoc-in sealed [:evidence/outcome :outcome/success] false)
@@ -117,6 +167,11 @@
       (is (false? (:valid? (evidence/validate-canonical-bundle
                            (assoc bundle :evidence/semantic-validation
                                   (assoc semantic :semantic-validation/violations [invalid])))))))
+    (doseq [[field value] [[:semantic-validation/declared-intent :destroy]
+                          [:semantic-validation/declared-intent :unknown]
+                          [:semantic-validation/actual-behavior :unknown]]]
+      (is (false? (:valid? (evidence/validate-canonical-bundle
+                           (assoc bundle :evidence/semantic-validation (assoc semantic field value)))))))
     (doseq [range [{} {:start-seq "0" :end-seq 1} {:start-seq 0} nil
                    {:start-seq -1 :end-seq 1} {:start-seq 10 :end-seq 1}]]
       (is (false? (:valid? (evidence/validate-canonical-bundle
@@ -141,6 +196,12 @@
                            (assoc-in bundle [key :phase/output :metrics] 42)))))
       (is (false? (:valid? (evidence/validate-canonical-bundle
                            (assoc-in bundle [key :phase/artifacts] nil))))))))
+
+(deftest ^{:stratum 1} collector-projects-nonempty-artifact-records-to-identifiers-test
+  (let [id (random-uuid)
+        phase (phases/build-phase-evidence :implement :test {:artifacts [id {:artifact/id id}]})]
+    (is (= [id id] (:phase/artifacts phase)))
+    (is (:valid? (evidence/validate-canonical-bundle (assoc (base-bundle) :evidence/implement phase))))))
 
 (deftest ^{:stratum 1} field-presence-is-distinct-from-nullability-test
   (let [check (policy-check)

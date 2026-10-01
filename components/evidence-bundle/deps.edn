@@ -6,6 +6,7 @@
         ai.miniforge/logging      {:local/root "../logging"}
         ai.miniforge/messages     {:local/root "../messages"}
         ai.miniforge/redaction    {:local/root "../redaction"}
+        ai.miniforge/reliability  {:local/root "../reliability"}
         ai.miniforge/response     {:local/root "../response"}
         ai.miniforge/schema       {:local/root "../schema"}
         ai.miniforge/workflow     {:local/root "../workflow"}
