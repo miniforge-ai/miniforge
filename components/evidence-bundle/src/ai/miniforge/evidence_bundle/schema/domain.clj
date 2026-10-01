@@ -39,7 +39,8 @@
   (and (vector? value) (every? uuid? value)))
 
 (defn- ^{:stratum 0} event-stream-range? [value]
-  (and (map? value) (integer? (:start-seq value)) (integer? (:end-seq value))))
+  (and (map? value) (nat-int? (:start-seq value)) (nat-int? (:end-seq value))
+       (<= (:start-seq value) (:end-seq value))))
 
 (def ^{:stratum 0} phase-output-schema
   "Collected phase output is a projection, not the enclosing execution result.

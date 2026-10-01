@@ -65,6 +65,7 @@
 
 (deftest ^{:stratum 1} declared-hash-is-verified-without-claiming-authority-test
   (let [bundle (assoc (base-bundle)
+                       :compliance/sensitive-data false :compliance/pii-handling :none
                        :compliance/created-at #inst "2026-09-30T00:00:00Z"
                        :evidence/sealed-at #inst "2026-09-30T00:00:00Z")
         sealed (assoc bundle :evidence/content-hash (evidence/content-hash bundle))]
@@ -78,6 +79,8 @@
                      (assoc sealed :evidence/signature nil)
                      (dissoc sealed :evidence/sealed-at)
                      (dissoc sealed :compliance/created-at)
+                     (dissoc sealed :compliance/sensitive-data)
+                     (dissoc sealed :compliance/pii-handling)
                      (dissoc sealed :evidence/content-hash)]]
       (is (false? (:valid? (evidence/validate-canonical-bundle altered)))))))
 
@@ -114,7 +117,8 @@
       (is (false? (:valid? (evidence/validate-canonical-bundle
                            (assoc bundle :evidence/semantic-validation
                                   (assoc semantic :semantic-validation/violations [invalid])))))))
-    (doseq [range [{} {:start-seq "0" :end-seq 1} {:start-seq 0} nil]]
+    (doseq [range [{} {:start-seq "0" :end-seq 1} {:start-seq 0} nil
+                   {:start-seq -1 :end-seq 1} {:start-seq 10 :end-seq 1}]]
       (is (false? (:valid? (evidence/validate-canonical-bundle
                            (assoc bundle :evidence/implement
                                   (assoc phase :phase/event-stream-range range)))))))
