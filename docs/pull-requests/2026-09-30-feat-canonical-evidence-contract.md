@@ -41,3 +41,6 @@ normalize keyword IDs and legacy severities just like legacy-keyed producer reco
 Legacy artifact maps retain their `:id` fallback; explicitly malformed canonical
 IDs are not replaced. JVM and rebuilt packaged canonical/approval regressions
 pass 16 tests and 288 assertions after the approval-alias integration.
+The zero-count refactor exception requires declared refactor intent. All three
+evidence consumers pass after readiness/N8 integration; rebuilt packaged canonical
+and control schema regressions pass 16 tests and 296 assertions.

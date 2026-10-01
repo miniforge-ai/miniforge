@@ -3,7 +3,8 @@
 ;; Licensed under the Apache License, Version 2.0.
 (ns ai.miniforge.web-dashboard.control-identity
   "Server-owned dashboard listener identity and its lifetime."
-  (:require [ai.miniforge.event-stream.interface :as events]))
+  (:require [ai.miniforge.event-stream.interface :as events]
+            [ai.miniforge.web-dashboard.server.responses :as responses]))
 
 ;------------------------------------------------------------------------------ Layer 0
 
@@ -15,6 +16,14 @@
 (defn- ^{:stratum 0} receive-event [_event]
   ;; The dashboard consumes events through its polling/WebSocket paths.
   nil)
+
+(defn ^{:stratum 0} ready-handler
+  "Gate every HTTP route until startup has attached its control identity."
+  [state handler]
+  (fn [request]
+    (if (:control/requester @state)
+      (handler request)
+      (assoc (responses/json-response {:status :starting}) :status 503))))
 
 ;------------------------------------------------------------------------------ Layer 1
 

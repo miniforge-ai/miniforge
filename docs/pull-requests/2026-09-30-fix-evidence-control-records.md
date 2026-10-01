@@ -9,7 +9,8 @@
 ## Overview
 
 Align shared policy-check and control-action evidence with N6 sections 2.5 and 2.9.
-Base branch: main. No unmerged prerequisites.
+Authorization extraction is split into `fix/control-authorization-boundary`;
+depends on #1970. Retarget main after that prerequisite merges.
 
 ## Motivation
 
@@ -26,6 +27,8 @@ a lossy control-action projection. Valid portable records must remain valid.
   control evidence; ignore body-supplied identities and release it on shutdown.
 - Acquire that identity only at successful startup; drain HTTP before releasing it,
   even when cleanup fails. Preserve supplied request metadata at event publication.
+- Gate all HTTP requests with 503 during startup and publish discovery only after
+  identity attachment. Validate supplied N8 capability and approval vocabularies.
 
 Approval is conditional under N8. The schema accepts N6 `:status` and N8
 `:approval-status` vocabulary; when both are supplied they must agree. Missing
@@ -51,6 +54,9 @@ Final lifecycle/metadata regressions pass 24 tests and 123 assertions in the reb
 CLI. All four event-stream consumer suites and the dashboard suite pass serially.
 Approval-alias regressions pass on the JVM and rebuilt packaged CLI: two tests,
 21 assertions, including agreement, contradiction, malformed and absent statuses.
+After the N8 vocabulary and HTTP readiness fixes, all three evidence consumers
+and the dashboard suite pass serially. Rebuilt packaged readiness/schema/evidence
+regressions pass eight tests and 60 assertions. Inferred strata and Kondo pass.
 
 ## Deployment Plan
 

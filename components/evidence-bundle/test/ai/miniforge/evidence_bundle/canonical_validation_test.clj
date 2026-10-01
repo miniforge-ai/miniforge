@@ -182,16 +182,15 @@
         phase {:phase/name :implement :phase/agent :test :phase/agent-instance-id (random-uuid)
                :phase/started-at at :phase/completed-at at :phase/duration-ms 1
                :phase/output output :phase/artifacts []}]
-    (is (valid?
-         (assoc bundle :evidence/semantic-validation semantic
-                :evidence/tool-invocations [tool] :evidence/implement phase)))
-    (is (valid?
-         (-> bundle
-             (assoc-in [:evidence/intent :intent/type] :refactor)
-             (assoc :evidence/semantic-validation
-                    (assoc semantic :semantic-validation/declared-intent :refactor
-                           :semantic-validation/actual-behavior :refactor
-                           :semantic-validation/resource-updates 0)))))
+    (is (valid? (assoc bundle :evidence/semantic-validation semantic
+                      :evidence/tool-invocations [tool] :evidence/implement phase)))
+    (doseq [intent [:refactor :import]]
+      (let [record (assoc semantic :semantic-validation/declared-intent intent
+                                  :semantic-validation/actual-behavior :refactor :semantic-validation/resource-updates 0)
+            candidate (-> bundle
+                          (assoc-in [:evidence/intent :intent/type] intent)
+                          (assoc :evidence/semantic-validation record))]
+        (is (= (= :refactor intent) (valid? candidate)))))
     (doseq [invalid [{} 42 nil]]
       (is (false? (valid?
                    (assoc bundle :evidence/semantic-validation
@@ -213,8 +212,7 @@
       (is (false? (valid?
                    (assoc bundle :evidence/implement
                           (assoc phase :phase/event-stream-range range))))))
-    (is (valid?
-         (assoc bundle :evidence/implement (update phase :phase/output dissoc :status))))
+    (is (valid? (assoc bundle :evidence/implement (update phase :phase/output dissoc :status))))
     (doseq [[field value] [[:summary 42] [:status :unknown] [:status nil] [:status false] [:status 42]]]
       (is (false? (valid?
                    (assoc-in (assoc bundle :evidence/implement phase)

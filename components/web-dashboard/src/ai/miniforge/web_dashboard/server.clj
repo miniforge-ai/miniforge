@@ -398,7 +398,7 @@
         _ (swap! state assoc :control-plane
                  {:registry (cp/create-registry)
                   :decision-manager (cp/create-decision-manager)})
-        handler (create-handler state)
+        handler (control-identity/ready-handler state (create-handler state))
         server (http/run-server handler {:port port :legacy-return-value? false})
         actual-port (http/server-port server)
         ;; Start file watcher to tail-follow event files
@@ -418,9 +418,6 @@
            (reset! loading? false)
            (println "Archive scan complete:" (count @archive-state) "workflows found")))))
 
-    ;; Write discovery file for auto-connect
-    (write-discovery-file! actual-port)
-
     (println "┌─────────────────────────────────────────────────────┐")
     (println "│ Miniforge Web Dashboard                             │")
     (println "│ Production-ready fleet control interface            │")
@@ -431,6 +428,8 @@
     (println "└─────────────────────────────────────────────────────┘")
     ;; No fallible startup work follows listener acquisition.
     (control-identity/attach! state)
+    ;; Discovery publication is best-effort and follows control readiness.
+    (write-discovery-file! actual-port)
     {:server server
      :port actual-port
      :state state

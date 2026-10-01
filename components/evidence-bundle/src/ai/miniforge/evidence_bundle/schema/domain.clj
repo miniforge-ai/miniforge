@@ -299,7 +299,8 @@
         actual (:semantic-validation/actual-behavior value)
         inferred (semantic/inferred-behavior (resource-counts value))]
     (and (= (empty? failed) (:semantic-validation/passed? value))
-         (or (= inferred actual) (= [:import :refactor] [inferred actual]))
+         (or (= inferred actual)
+             (and (= :import inferred) (= :refactor actual (:semantic-validation/declared-intent value))))
          (= failed reported))))
 
 ;------------------------------------------------------------------------------ Rich Comment

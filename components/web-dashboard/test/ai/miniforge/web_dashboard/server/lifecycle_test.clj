@@ -24,11 +24,24 @@
 (defn- ^{:stratum 0} dashboard [stream]
   (control-identity/attach! (state/create-state {:event-stream stream})))
 
+(deftest ^{:stratum 0} startup-gates-requests-until-identity-is-attached
+  (let [stream (events/create-event-stream {:sinks []})
+        dashboard-state (state/create-state {:event-stream stream})
+        calls (atom 0)
+        handler (control-identity/ready-handler dashboard-state (fn [_] (swap! calls inc)))]
+    (is (= 503 (:status (handler {}))))
+    (is (zero? @calls))
+    (control-identity/attach! dashboard-state)
+    (is (= 1 (handler {})))
+    (control-identity/release! dashboard-state)))
+
 ;------------------------------------------------------------------------------ Layer 1
 
 (deftest ^{:stratum 1} startup-failure-does-not-acquire-a-listener
   (let [stream (events/create-event-stream {:sinks []})]
-    (with-redefs [http/run-server fail!]
+    (with-redefs [http/run-server (fn [handler _opts]
+                                  (is (= 503 (:status (handler {}))))
+                                  (fail!))]
       (is (thrown? Exception (server/start-server! {:event-stream stream}))))
     (is (empty? (events/list-listeners stream)))))
 
