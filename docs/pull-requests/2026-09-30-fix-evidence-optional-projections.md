@@ -31,8 +31,8 @@ phaseless anomalies emit a nil phase. Projection must normalize these live shape
 - Final focused JVM and packaged suites: 28 tests, 94 assertions, all pass.
 - All three evidence consumers and CLI build pass.
 - Added assembled-producer fixtures for downstream canonical validation.
-- Kondo and explicit stratum lint pass. Root incremental standards scan and PR
-  review follow the signed commit.
+- Kondo and inferred stratum lint pass. The root incremental standards scan
+  indexes 4,107 files and reports zero changed-file findings. Normal signed hooks pass.
 - Adversarial trace verifies live release keys through the response accessor,
   legacy aliases, absent runtime metadata, and direct/nested phaseless anomalies.
   False values survive projection; opaque error details retain nested nils.
@@ -50,5 +50,7 @@ for canonical evidence publication (#1959), not a claim of spec completion.
 
 - [x] Shared projection policy and producer-shape regressions
 - [x] Final JVM and packaged-runtime verification
-- [ ] Root incremental standards verification
-- [ ] Settled current-head PR review and CI
+- [x] Root incremental standards verification
+
+Current-head Copilot review must have no new findings, and all CI checks,
+including Build, must pass before merge.
