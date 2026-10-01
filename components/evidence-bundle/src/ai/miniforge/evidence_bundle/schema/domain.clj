@@ -27,6 +27,7 @@
    Split out of the former `schema.clj` (SL003, Wave 2) — this was most of
    its Layer 0/1/2."
   (:require
+   [ai.miniforge.evidence-bundle.semantic-rules :as semantic]
    [ai.miniforge.evidence-bundle.schema.optional-key :as optional-key]
    [ai.miniforge.schema.interface :as shared]))
 
@@ -39,12 +40,7 @@
 
 (def ^{:stratum 0} semantic-validation-rules
   "Validation rules per N6 section 2.4.1."
-  {:import  {:creates 0 :updates 0 :destroys 0}
-   :create  {:creates :pos :updates :any :destroys 0}
-   :update  {:creates 0 :updates :pos :destroys 0}
-   :destroy {:creates 0 :updates 0 :destroys :pos}
-   :refactor {:creates 0 :updates 0 :destroys 0}
-   :migrate {:creates :pos :updates 0 :destroys :pos}})
+  semantic/rules)
 
 (def ^{:stratum 0} semantic-validation-schema
   "Schema for semantic validation evidence."
