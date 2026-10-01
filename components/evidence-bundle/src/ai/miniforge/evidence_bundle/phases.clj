@@ -68,8 +68,7 @@
      :phase/output              (build-phase-output phase-result)
      :phase/artifacts           (mapv #(if (map? %) (get % :artifact/id (:id %)) %) (get phase-result :artifacts []))
      :phase/inner-loop-iterations (get phase-result :inner-loop-iterations 0)
-     :phase/event-stream-range  (get phase-result :event-stream-range
-                                     {:start-seq 0 :end-seq 0})}))
+     :phase/event-stream-range  (:event-stream-range phase-result)}))
 
 ;------------------------------------------------------------------------------ Layer 2
 

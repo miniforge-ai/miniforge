@@ -7,6 +7,7 @@
             [ai.miniforge.artifact.interface :as artifact]
             [ai.miniforge.content-hash.interface :as hash]
             [ai.miniforge.evidence-bundle.canonical-structure :as structure]
+            [ai.miniforge.evidence-bundle.portable-metadata :as metadata]
             [ai.miniforge.evidence-bundle.schema.publication :as publication]))
 
 ;------------------------------------------------------------------------------ Layer 0
@@ -36,6 +37,7 @@
   (let [portable (artifact/content-digest bundle)]
     (cond
       (anomaly/anomaly? portable) (result [{:code :nonportable-evidence :anomaly portable}])
+      (not (metadata/valid? bundle)) (result [{:code :nonportable-metadata}])
       (not (map? bundle)) (result [{:code :invalid-bundle}])
       :else (result (concat (structure/errors bundle) (publication/errors bundle)
                             (sealing-errors bundle) (hash-errors bundle))))))

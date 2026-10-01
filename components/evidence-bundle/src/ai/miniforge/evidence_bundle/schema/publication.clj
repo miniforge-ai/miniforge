@@ -3,7 +3,8 @@
 ;; Licensed under the Apache License, Version 2.0.
 (ns ai.miniforge.evidence-bundle.schema.publication
   "Required published-evidence linkage and reliability values (N6 2.6/2.12)."
-  (:require [ai.miniforge.reliability.interface :as reliability]
+  (:require [ai.miniforge.evidence-bundle.schema.phase-linkage :as phase-linkage]
+            [ai.miniforge.reliability.interface :as reliability]
             [malli.core :as m]))
 
 ;------------------------------------------------------------------------------ Layer 0
@@ -46,9 +47,11 @@
       (and (or sealed? (contains? (:evidence/outcome bundle) :outcome/tier))
            (not (m/validate reliability/WorkflowTier (get-in bundle [:evidence/outcome :outcome/tier]))))
       (conj {:code :invalid-outcome-tier})
-      (and (or sealed? (contains? bundle :evidence/event-links))
+      (and (or sealed? (contains? bundle :evidence/event-links)
+               (some #(contains? bundle %) phase-linkage/phase-fields))
            (not (and (vector? links) (seq links) (distinct-scopes? links)
-                     (every? (partial valid-link? (:evidence-bundle/workflow-id bundle)) links))))
+                     (every? (partial valid-link? (:evidence-bundle/workflow-id bundle)) links)
+                     (phase-linkage/valid? bundle))))
       (conj {:code :invalid-event-links}))))
 
 (comment

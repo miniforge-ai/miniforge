@@ -25,7 +25,9 @@
         id (get value :violation/rule-id (get-in record [:rule :rule/id]))
         rule-id (if (keyword? id) (str id) id)
         severity (schema/normalize-severity (get value :violation/severity (get-in record [:rule :rule/severity])))]
-    (assoc value :violation/rule-id rule-id :violation/severity severity)))
+    (assoc value :violation/rule-id rule-id :violation/severity severity
+                :violation/location (get value :violation/location {})
+                :violation/auto-fixable? (get value :violation/auto-fixable? false))))
 
 (comment
   (semantic-evidence {:intent/type :import} []))
