@@ -36,6 +36,14 @@
              (not (m/validate opsv/OpsvEvidence (:evidence/opsv bundle))))
     [{:code :invalid-opsv-evidence}]))
 
+(defn- ^{:stratum 0} semantic-intent-errors [bundle]
+  (when-let [semantic (:evidence/semantic-validation bundle)]
+    (when-not (and (contains? domain/intent-types (:semantic-validation/declared-intent semantic))
+                  (contains? domain/intent-types (:semantic-validation/actual-behavior semantic))
+                  (= (get-in bundle [:evidence/intent :intent/type])
+                     (:semantic-validation/declared-intent semantic)))
+      [{:code :invalid-semantic-intent}])))
+
 ;------------------------------------------------------------------------------ Layer 1
 
 (defn- ^{:stratum 1} structured-errors [bundle [field field-schema]]
@@ -67,6 +75,7 @@
 (defn ^{:stratum 2} errors [bundle]
   (vec (concat (field-errors schema/evidence-bundle-schema bundle)
                (intent-errors (:evidence/intent bundle))
+               (semantic-intent-errors bundle)
                (field-errors domain/outcome-schema (:evidence/outcome bundle))
                (mapcat policy-errors (:evidence/policy-checks bundle))
                (mapcat (partial field-errors domain/violation-schema)

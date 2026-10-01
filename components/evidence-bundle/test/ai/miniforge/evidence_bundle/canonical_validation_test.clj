@@ -137,6 +137,11 @@
       (is (false? (:valid? (evidence/validate-canonical-bundle
                            (assoc bundle :evidence/semantic-validation
                                   (assoc semantic :semantic-validation/violations [invalid])))))))
+    (doseq [[field value] [[:semantic-validation/declared-intent :destroy]
+                          [:semantic-validation/declared-intent :unknown]
+                          [:semantic-validation/actual-behavior :unknown]]]
+      (is (false? (:valid? (evidence/validate-canonical-bundle
+                           (assoc bundle :evidence/semantic-validation (assoc semantic field value)))))))
     (doseq [range [{} {:start-seq "0" :end-seq 1} {:start-seq 0} nil
                    {:start-seq -1 :end-seq 1} {:start-seq 10 :end-seq 1}]]
       (is (false? (:valid? (evidence/validate-canonical-bundle
