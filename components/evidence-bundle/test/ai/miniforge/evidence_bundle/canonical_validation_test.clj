@@ -3,6 +3,7 @@
 ;; Licensed under the Apache License, Version 2.0.
 (ns ai.miniforge.evidence-bundle.canonical-validation-test
   (:require [ai.miniforge.evidence-bundle.interface :as evidence]
+            [ai.miniforge.evidence-bundle.collectors :as collectors]
             [ai.miniforge.evidence-bundle.phases :as phases]
             [ai.miniforge.evidence-bundle.schema.compliance :as compliance]
             [ai.miniforge.evidence-bundle.schema.validation :as validation]
@@ -109,12 +110,20 @@
     (is (:valid? (evidence/validate-canonical-bundle
                   (assoc bundle :evidence/semantic-validation semantic
                                 :evidence/tool-invocations [tool] :evidence/implement phase))))
+    (doseq [invalid [{} 42 nil]]
+      (is (false? (:valid? (evidence/validate-canonical-bundle
+                           (assoc bundle :evidence/semantic-validation
+                                  (assoc semantic :semantic-validation/violations [invalid])))))))
+    (doseq [range [{} {:start-seq "0" :end-seq 1} {:start-seq 0} nil]]
+      (is (false? (:valid? (evidence/validate-canonical-bundle
+                           (assoc bundle :evidence/implement
+                                  (assoc phase :phase/event-stream-range range)))))))
     (is (false? (:valid? (evidence/validate-canonical-bundle
                          (assoc-in (assoc bundle :evidence/implement phase)
                                    [:evidence/implement :phase/output :summary] 42)))))))
 
 (deftest ^{:stratum 1} collector-phase-projections-pass-canonical-validation-test
-  (doseq [phase-name [:implement :verify :release]
+  (doseq [phase-name [:plan :design :implement :verify :review :release :observe]
           input [{:output {:summary "Done." :metrics {}}}
                  {:environment-id "test" :summary "Done." :metrics {}}]]
     (let [phase (phases/build-phase-evidence phase-name :test (assoc input :duration-ms 0))
@@ -122,6 +131,8 @@
           bundle (assoc (base-bundle) key phase)]
       (is (zero? (:phase/inner-loop-iterations phase)))
       (is (:valid? (evidence/validate-canonical-bundle bundle)))
+      (is (false? (:valid? (evidence/validate-canonical-bundle
+                           (assoc-in bundle [key :phase/output :metrics] 42)))))
       (is (false? (:valid? (evidence/validate-canonical-bundle
                            (assoc-in bundle [key :phase/artifacts] nil))))))))
 
@@ -153,6 +164,18 @@
   (doseq [value [nil [] 42 (assoc (base-bundle) :extension (Object.))
                  (assoc (base-bundle) :extension (iterate inc 0))]]
     (is (false? (:valid? (evidence/validate-canonical-bundle value))))))
+
+(deftest ^{:stratum 1} collected-supervision-confidence-accepts-producer-numbers-test
+  (doseq [confidence [0 1 0.95 0.95M]]
+    (let [event {:tool/name "read" :supervision/decision "allow"
+                 :event/timestamp #inst "2026-09-30T00:00:00Z"
+                 :supervision/confidence confidence}]
+      (with-redefs [collectors/collect-event-stream-events (constantly [event])]
+        (let [bundle (base-bundle)
+              records (collectors/collect-supervision-decisions :test (:evidence-bundle/workflow-id bundle))]
+          (is (= confidence (:supervision/confidence (first records))))
+          (is (:valid? (evidence/validate-canonical-bundle
+                        (assoc bundle :evidence/supervision-decisions records)))))))))
 
 (comment
   (clojure.test/run-tests 'ai.miniforge.evidence-bundle.canonical-validation-test))

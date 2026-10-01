@@ -4,6 +4,7 @@
 (ns ai.miniforge.phase-opsv.evidence-checkpoint
   "Preserve domain values across the shared workflow's text-oriented checkpoints."
   (:require [ai.miniforge.anomaly.interface :as anomaly]
+            [ai.miniforge.phase-opsv.evidence-base :as base]
             [ai.miniforge.phase-opsv.evidence-snapshot :as snapshot]))
 
 ;------------------------------------------------------------------------------ Layer 0
@@ -12,13 +13,16 @@
   (some #(when (anomaly/anomaly? %) %)
         (map (get ctx :execution/input {}) [:opsv/evidence-snapshot :opsv/terminal-snapshot])))
 
-(defn- ^{:stratum 0} persist-terminal [ctx]
+(defn- ^{:stratum 0} terminal-record [ctx]
+  (assoc (select-keys (:phase ctx) [:name :result :status :ended-at :duration-ms :metrics])
+         :opsv/evidence-base (base/bundle ctx)))
+
+(defn- ^{:stratum 1} persist-terminal [ctx]
   (if (and (= :opsv/actuate (get-in ctx [:phase :name]))
            (= :error (get-in ctx [:phase :result :status])))
     (assoc-in ctx [:execution/input :opsv/terminal-snapshot]
               (snapshot/encode ctx :terminal-checkpoint
-                               (select-keys (:phase ctx)
-                                            [:name :result :status :ended-at :duration-ms :metrics])))
+                               (terminal-record ctx)))
     ctx))
 
 (defn ^{:stratum 0} restore-terminal [ctx]
@@ -27,7 +31,10 @@
     ctx
     (let [phase (snapshot/decode ctx :terminal-checkpoint
                                  (get-in ctx [:execution/input :opsv/terminal-snapshot]))]
-      (if (anomaly/anomaly? phase) phase (assoc ctx :phase phase)))))
+      (if (anomaly/anomaly? phase) phase
+        (-> ctx
+            (assoc :phase (dissoc phase :opsv/evidence-base))
+            (assoc-in [:execution/opts :opsv/evidence-base] (:opsv/evidence-base phase)))))))
 
 (defn ^{:stratum 0} restore [ctx]
   (let [input (:execution/input ctx)]
