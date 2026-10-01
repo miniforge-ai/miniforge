@@ -9,6 +9,8 @@ Stacked on the canonical contract prerequisite #1959; retarget main after it mer
 Require a complete verified seal before CLI list/show or CLI/manager export.
 Report invalid, tampered, and unsealed bundles without presenting their ordinary evidence details.
 Do not silently repair legacy evidence or overwrite an export destination on validation failure.
+Distinguish existing unreadable files from absent sources; show/export refuse the
+former explicitly rather than reporting them as missing.
 Serialize the exact validated value instead of rereading a mutable source file.
 Use canonical EDN and preserve nanosecond instant precision when reading it back.
 Use the bounded public file reader from #1961; reject trailing forms and input

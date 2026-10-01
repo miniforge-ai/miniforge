@@ -170,6 +170,21 @@
         (is (.contains output "missing-id.edn"))
         (is (.contains output "refused"))))))
 
+(deftest ^{:stratum 1} malformed-files-are-refused-rather-than-reported-missing
+  (let [directory (str *tmp-dir* "/evidence")
+        source (str directory "/malformed.edn")
+        destination (str directory "/malformed-export.edn")]
+    (fs/create-dirs directory)
+    (with-redefs [shared/call-optional-provider (constantly nil)
+                  app-config/home-dir (constantly *tmp-dir*)
+                  shared/exit! identity]
+      (doseq [text ["{" "{} {}" "nil" "false"]]
+        (spit source text)
+        (spit destination "unchanged")
+        (is (.contains (with-out-str (sut/evidence-show-cmd {:id "malformed"})) "refused"))
+        (is (.contains (with-out-str (sut/evidence-export-cmd {:id "malformed"})) "refused"))
+        (is (= "unchanged" (slurp destination)))))))
+
 ;------------------------------------------------------------------------------ Layer 2
 
 (deftest ^{:stratum 2} evidence-show-cmd-with-bundle-test

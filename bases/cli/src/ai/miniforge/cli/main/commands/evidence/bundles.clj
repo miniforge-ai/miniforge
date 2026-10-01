@@ -154,11 +154,11 @@
       (println (messages/t :evidence/none)))))
 
 (defn ^{:stratum 2} load-bundle-for-show
-  "Load a bundle from the component interface or the filesystem."
+  "Load a bundle; nil means absent, a sentinel means present but unreadable."
   [id]
   (or (shared/call-optional-provider 'ai.miniforge.evidence-bundle.interface/get-bundle id)
       (let [f (io/file (str (evidence-dir) "/" id ".edn"))]
-        (when (.exists f) (load-bundle-from-file f)))))
+        (when (.exists f) (or (load-bundle-from-file f) ::unreadable-bundle)))))
 
 (comment
   (scan-evidence-dir))
