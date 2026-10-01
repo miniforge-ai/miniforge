@@ -40,9 +40,9 @@
 (defn- ^{:stratum 0} failed-scan [_]
   (throw (IllegalStateException. "injected scanner failure")))
 
-(defn- ^{:stratum 0} false-declaration [bundle field]
+(defn- ^{:stratum 0} altered-declaration [bundle field value]
   (let [unsigned (dissoc bundle :evidence/content-hash :evidence/signature)
-        invalid (assoc unsigned field false)]
+        invalid (assoc unsigned field value)]
     (assoc invalid :evidence/content-hash (evidence/content-hash invalid))))
 
 (defn ^{:stratum 0} error-codes
@@ -223,12 +223,25 @@
       (is (true? (:compliance/sensitive-data bundle)))
       (is (true? (:evidence/contains-pii? bundle)))
       (doseq [field [:compliance/sensitive-data :evidence/contains-pii?]]
-        (let [candidate (false-declaration bundle field)
+        (let [candidate (altered-declaration bundle field false)
               restored (atom snapshot)]
           (is (:valid? (evidence/validate-canonical-bundle candidate)))
           (is (response/anomaly-map?
                 (evidence/restore-finalized-opsv-bundle! restored candidate (set f/artifact-ids))))
           (is (identical? snapshot @restored)))))))
+
+(deftest ^{:stratum 1} restoration-rejects-understated-treatment-without-changing-state
+  (let [[store id] (accumulated-store f/opsv-evidence)
+        snapshot @store
+        base (assoc-in f/base-bundle [:evidence/intent :intent/description] "4111 1111 1111 1111")
+        bundle (evidence/finalize-opsv-evidence! store id base f/opsv-evidence (set f/artifact-ids))
+        candidate (altered-declaration bundle :compliance/pii-handling :none)
+        restored (atom snapshot)]
+    (is (= :redacted (:compliance/pii-handling bundle)))
+    (is (:valid? (evidence/validate-canonical-bundle candidate)))
+    (is (response/anomaly-map?
+          (evidence/restore-finalized-opsv-bundle! restored candidate (set f/artifact-ids))))
+    (is (identical? snapshot @restored))))
 
 (deftest ^{:stratum 1} finalize-rejects-invalid-base-bundle
   (let [[store bundle-id] (accumulated-store f/opsv-evidence)

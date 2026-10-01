@@ -5,9 +5,9 @@
 
 ## Scope
 
-Stacked on canonical contract #1959; retarget main after it merges.
-Also requires complete-value scanner PR #1979 before merge.
-Consumer presentation/export enforcement is reviewed independently in #1960.
+Base: main. Canonical contract #1959, complete-value scanner #1979, and manager
+export enforcement #1977 are merged. Shared compliance policy #1981 is a
+prerequisite. CLI presentation/export enforcement is reviewed independently in #1960.
 Use the manager-free canonical validation API from #1959 for OPSV finalization.
 That prerequisite validates portable N6 structure, domain values and declared hashes.
 Unhashed base bundles remain valid assembly inputs. Content integrity does not establish authority.
@@ -25,7 +25,9 @@ also set redacted handling, and the seal regressions cover string/integral cards
 and metadata without relying on serialized scanning or ordinary map equality.
 Read-only recovery validates retained seals and reference correlation.
 Recovery can adopt an existing published seal without replacing its timestamps or digest.
-Recovery rescans original values and rejects understated sensitivity or PII flags.
+Recovery combines fresh and recorded findings and rejects understated sensitivity,
+PII flags, or protected treatment. Compliance metadata is assembled before shared
+redaction, preventing recorded finding fields or metadata from reintroducing secrets.
 Publication here is atomic in memory; this PR does not claim disk durability or
 the full N3 retention and replay contract.
 
@@ -60,3 +62,6 @@ after canonical portability checks. It rejects root and nested sensitive metadat
 without changing the retained assembly or repairing and resealing the input.
 After phase-link and bounded-metadata integration, all three evidence consumers
 pass; rebuilt canonical and assembly tests pass 40 tests with 441 assertions.
+After shared compliance policy integration, all three consumers pass.
+Rebuilt assembly and compliance regressions pass 32 tests with 186 assertions.
+They cover rehashed understated treatment and identity-preserving rejection of restoration.

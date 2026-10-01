@@ -31,6 +31,7 @@
    [ai.miniforge.evidence-bundle.opsv-finalization :as opsv-finalization]
    [ai.miniforge.evidence-bundle.opsv-sealed-validation :as opsv-sealed-validation]
    [ai.miniforge.evidence-bundle.opsv-sealed-restoration :as opsv-sealed-restoration]
+   [ai.miniforge.evidence-bundle.publication-validation :as publication-validation]
    [ai.miniforge.evidence-bundle.schema :as schema]
    [ai.miniforge.evidence-bundle.schema.compliance :as compliance]
    [ai.miniforge.evidence-bundle.schema.domain :as domain]
@@ -187,15 +188,22 @@
   [bundle]
   (canonical/validate-with-exception-handling bundle))
 
+(defn ^{:stratum 0} validate-published-bundle
+  "Validate canonical domain values and a required complete N6 seal. No authenticity claim."
+  [bundle]
+  (publication-validation/validate bundle))
+
 (defn ^{:stratum 0} export-bundle
-  "Export evidence bundle to file (EDN format).
+  "Export a valid, sealed evidence bundle to canonical EDN.
+   Unsealed create-bundle values must be finalized before export.
 
    Arguments:
    - manager: Evidence manager instance
    - bundle-id: UUID of the bundle to export
    - output-path: Path to output file
 
-   Returns true on success, false on error.
+   Returns true on success. Invalid, unsealed or missing evidence returns false
+   without touching the destination; filesystem errors also return false.
 
    Example:
      (export-bundle manager bundle-id \"/tmp/evidence.edn\")"
