@@ -6,6 +6,7 @@
             [ai.miniforge.evidence-bundle.collectors :as collectors]
             [ai.miniforge.evidence-bundle.collector :as collector]
             [ai.miniforge.evidence-bundle.collector-projection :as projection]
+            [ai.miniforge.evidence-bundle.producer-roundtrips :as roundtrips]
             [ai.miniforge.artifact.interface :as artifact]
             [ai.miniforge.evidence-bundle.phases :as phases]
             [ai.miniforge.evidence-bundle.schema.compliance :as compliance]
@@ -13,6 +14,10 @@
             [clojure.test :refer [deftest is]]))
 
 ;------------------------------------------------------------------------------ Layer 0
+
+(deftest ^{:stratum 0} collected-optional-producer-fields-pass-canonical-validation
+  (doseq [bundle (roundtrips/collected-bundles)]
+    (is (:valid? (evidence/validate-canonical-bundle bundle)))))
 
 (defn- ^{:stratum 0} base-bundle []
   {:evidence-bundle/id (random-uuid)
