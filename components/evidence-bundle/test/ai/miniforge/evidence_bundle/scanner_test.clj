@@ -47,7 +47,7 @@
                 (with-meta [] (with-meta {} {:note "AKIAIOSFODNN7EXAMPLE"}))]]
     (let [redacted (redaction/redact value)]
       (is (false? (redaction/clean? value)))
-      (is (= [{:finding/type :embedded-secret}] (:scan/findings (scanner/scan-artifact value))))
+      (is (= [{:finding/type :aws-access-key}] (:scan/findings (scanner/scan-artifact value))))
       (is (redaction/clean? redacted))
       (is (empty? (:scan/findings (scanner/scan-artifact redacted)))))))
 
@@ -100,13 +100,13 @@
       (is (= [{:finding/type :email}] (:scan/findings result))))))
 
 (deftest ^{:stratum 0} shared-detection-and-redaction-ignore-print-limits
-  (testing "a secret beyond the named-pattern scan is still detected and redacted"
+  (testing "named findings and redaction both inspect the original value"
     (let [deep (reduce (fn [acc _] {:n acc})
                        {:leaked "AKIAIOSFODNN7EXAMPLE"}
                        (range 30))]
-      (is (= [{:finding/type :embedded-secret}]
+      (is (= [{:finding/type :aws-access-key}]
              (:scan/findings (scanner/scan-artifact deep)))
-          "the original-value fallback sees past the named-pattern print bound")
+          "named patterns see past print bounds")
       (is (not (str/includes?
                 (binding [*print-level* nil *print-length* nil]
                   (pr-str (redaction/redact deep)))
