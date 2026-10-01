@@ -31,6 +31,7 @@ a lossy control-action projection. Valid portable records must remain valid.
   identity attachment. Validate supplied N8 capability and approval vocabularies.
 - Roll back acquired HTTP, watcher and listener resources when startup fails;
   retain the original exception and suppress any secondary cleanup failure.
+  This compatibility behavior lives at the HTTP startup boundary, not in domain logic.
 
 Approval is conditional under N8. The schema accepts N6 `:status` and N8
 `:approval-status` vocabulary; when both are supplied they must agree. Missing

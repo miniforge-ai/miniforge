@@ -30,7 +30,7 @@
    [ai.miniforge.web-dashboard.server.auth :as auth]
    [ai.miniforge.web-dashboard.server.responses :as responses]
    [ai.miniforge.web-dashboard.server.shutdown :as shutdown]
-   [ai.miniforge.web-dashboard.server.startup :as startup]
+   [ai.miniforge.web-dashboard.server.boundary.startup :as startup]
    [ai.miniforge.web-dashboard.server.filters :as filters]
    [ai.miniforge.web-dashboard.server.websocket :as websocket]
    [ai.miniforge.web-dashboard.server.handlers :as handlers]

@@ -8,7 +8,7 @@
             [ai.miniforge.web-dashboard.control-identity :as control-identity]
             [ai.miniforge.web-dashboard.server :as server]
             [ai.miniforge.web-dashboard.server.shutdown :as shutdown]
-            [ai.miniforge.web-dashboard.server.startup :as startup]
+            [ai.miniforge.web-dashboard.server.boundary.startup :as startup]
             [ai.miniforge.web-dashboard.watcher :as watcher]
             [ai.miniforge.web-dashboard.state.core :as state]))
 
