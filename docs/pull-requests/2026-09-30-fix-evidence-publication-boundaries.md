@@ -22,6 +22,9 @@ and preserve the default destination for existing programmatic callers. Encode
 before creating directories or writing files; renderer failure leaves existing
 destinations unchanged. Reject unsupported formats explicitly.
 This implements the consumer-boundary finding from #1957.
+The shared publication validator also refuses correctly hashed evidence with
+exposed secrets or understated sensitivity, PII, or treatment declarations.
+It checks the policy from merged #1981 without modifying or resealing evidence.
 
 ## Standards adversarial pass
 
@@ -29,13 +32,17 @@ Share the published-evidence predicate through the public component interface.
 Separate validation, diagnostics, and filesystem effects into named stages.
 Keep exception handling at named boundaries; preserve interruption and fatal errors.
 Reuse one test bundle constructor and remove anonymous display configuration callbacks.
+Construct display defaults from the active catalog and reuse common field options.
 Keep every namespace within three strata and every commit below its reportable budget.
 
 ## Verification
 
 Packaged CLI and manager tests verify valid round trips and rejection before export writes.
 Tampering and missing seals leave existing destinations unchanged.
-Run evidence consumers, CLI regressions, normal hooks, and standards scans before merge.
+Evidence consumers and a CLI build pass. CLI regressions pass 20 tests / 80
+assertions; packaged CLI and publication regressions pass 24 tests / 114 assertions.
+The repository-root standards scan covers 4,207 files with no violations.
+Run normal hooks before each commit and refresh verification before merge.
 Current-head review and all CI, including Build, remain mandatory merge gates.
 Legacy nil/false detail fields retain canonical fallbacks, including status,
 phase names and artifacts. Failure attribution selects the first truthy source.

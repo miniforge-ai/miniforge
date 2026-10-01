@@ -28,7 +28,8 @@
    [ai.miniforge.cli.main.commands.evidence.bundles :as bundles]
    [ai.miniforge.cli.main.commands.evidence.formats :as formats]
    [ai.miniforge.cli.main.commands.evidence-fixtures :as f]
-   [ai.miniforge.cli.main.commands.shared :as shared]))
+   [ai.miniforge.cli.main.commands.shared :as shared]
+   [slingshot.slingshot :refer [try+]]))
 
 ;------------------------------------------------------------------------------ Layer 0
 
@@ -41,7 +42,7 @@
 (defn ^{:stratum 0} tmp-dir-fixture [f]
   (let [dir (str (fs/create-temp-dir {:prefix "evidence-test-"}))]
     (binding [*tmp-dir* dir]
-      (try
+      (try+
         (f)
         (finally
           (fs/delete-tree dir))))))
@@ -98,6 +99,15 @@
         (with-out-str (sut/evidence-export-cmd {}))
         (is @exited?)))))
 
+;; Tests
+(deftest ^{:stratum 0} detail-defaults-follow-the-current-catalog
+  (let [catalog (assoc (messages/catalog) :evidence/unknown-value "inconnu"
+                                         :evidence/missing-value "absent")]
+    (with-redefs [messages/catalog (constantly catalog)]
+      (let [fields (:fields (bundles/bundle-detail-spec))]
+        (is (= "absent" (get-in fields [0 2 :default])))
+        (is (= "inconnu" (get-in fields [1 2 :default])))))))
+
 ;------------------------------------------------------------------------------ Layer 1
 
 (defn- ^{:stratum 1} make-bundle
@@ -116,7 +126,6 @@
              :evidence/dependency-health {:anthropic (make-dependency-health)}
              :evidence/failure-attribution (make-failure-attribution)}))
 
-;; Tests
 (deftest ^{:stratum 1} evidence-list-cmd-no-component-empty-dir-test
   (testing "list command shows 'no bundles' when dir is empty"
     (with-redefs [shared/call-optional-provider (constantly nil)
@@ -273,6 +282,7 @@
       (with-out-str (sut/evidence-export-cmd {:id "checked"}))
       (is (= sealed (edn/read-string (slurp destination))))
       (doseq [invalid [(assoc-in sealed [:evidence/outcome :outcome/success] true)
+                       (f/bundle {:test/text "AKIAIOSFODNN7EXAMPLE"})
                        (dissoc sealed :evidence/content-hash :evidence/sealed-at)]]
         (spit source (pr-str invalid))
         (spit destination "unchanged")

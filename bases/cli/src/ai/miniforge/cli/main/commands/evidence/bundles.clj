@@ -16,13 +16,7 @@
 ;; See the License for the specific language governing permissions and
 ;; limitations under the License.
 (ns ai.miniforge.cli.main.commands.evidence.bundles
-  "Evidence bundle discovery, loading, and field-derivation helpers.
-   Split out of `ai.miniforge.cli.main.commands.evidence` (rule 210:
-   the combined namespace measured 5 real layers, max 3) — the command
-   entry points and detail-view rendering stay in the parent
-   namespace; locating/loading bundle files (filesystem scan and the
-   optional component provider) and deriving their normalized/summary
-   fields live here."
+  "Discover evidence from providers or disk and derive verified presentation fields."
   (:require
    [clojure.java.io :as io]
    [clojure.string :as str]
@@ -31,7 +25,8 @@
    [ai.miniforge.cli.main.commands.shared :as shared]
    [ai.miniforge.cli.main.display :as display]
    [ai.miniforge.cli.messages :as messages]
-   [ai.miniforge.evidence-bundle.interface :as evidence]))
+   [ai.miniforge.evidence-bundle.interface :as evidence]
+   [slingshot.slingshot :refer [try+]]))
 
 ;------------------------------------------------------------------------------ Layer 0
 
@@ -42,7 +37,7 @@
 (defn- ^{:stratum 0} load-with-exception-handling
   "Load an evidence bundle from an EDN file. Returns nil on failure."
   [file]
-  (try
+  (try+
     (when (str/ends-with? (.getName file) ".edn")
       (evidence/read-bundle-edn file))
     (catch InterruptedException interrupted
@@ -51,11 +46,16 @@
     (catch Exception _ nil)))
 
 (defn- ^{:stratum 0} artifact-entry [artifact]
-  {:type (get artifact :artifact/type "unknown")
-   :id (get artifact :artifact/id "")})
+  (let [type (get artifact :artifact/type (messages/t :evidence/unknown-value))
+        id (get artifact :artifact/id "")]
+    {:type type :id id}))
+
+(def ^{:stratum 0} ^:private artifact-display-limit
+  "Maximum artifact entries in evidence details." 10)
 
 (defn ^{:stratum 0} canonical-status [bundle]
-  (if (true? (get-in bundle [:evidence/outcome :outcome/success])) "completed" "failed"))
+  (messages/t (if (true? (get-in bundle [:evidence/outcome :outcome/success]))
+                :status/value-completed :status/value-failed)))
 
 (defn ^{:stratum 0} legacy-field-or
   "Nil/false legacy presentation fields do not override canonical data."
@@ -81,7 +81,7 @@
   (cond
     (keyword? value) (name value)
     (string? value) value
-    (nil? value) "unknown"
+    (nil? value) (messages/t :evidence/unknown-value)
     :else (str value)))
 
 ;------------------------------------------------------------------------------ Layer 1
@@ -95,17 +95,19 @@
                           {:id id :workflow-id workflow-id :status status})))))
 
 ;; Display helpers
-(def ^{:stratum 1} bundle-detail-spec
-  {:header   :evidence/show-header
-   :fields   [[:bundle/workflow-id :evidence/show-workflow {:default "—"}]
-              [:bundle/status      :evidence/show-status   {:default "unknown"}]
-              [:bundle/created-at  :evidence/show-created  {:default "—"}]
-              [:bundle/failure-attribution :evidence/show-failure-attribution {:default "—"}]
-              [:bundle/dependency-issues :evidence/show-dependency-issues {:default 0}]]
-   :sections [{:key :bundle/artifacts :header :evidence/show-artifacts
-               :entry :evidence/show-artifact-entry :max 10
-               :entry-fn artifact-entry}
-              {:key :bundle/phases :header :evidence/show-phases}]})
+(defn ^{:stratum 1} bundle-detail-spec []
+  (let [missing {:default (messages/t :evidence/missing-value)}
+        unknown {:default (messages/t :evidence/unknown-value)}]
+    {:header   :evidence/show-header
+     :fields   [[:bundle/workflow-id :evidence/show-workflow missing]
+                [:bundle/status      :evidence/show-status unknown]
+                [:bundle/created-at  :evidence/show-created missing]
+                [:bundle/failure-attribution :evidence/show-failure-attribution missing]
+                [:bundle/dependency-issues :evidence/show-dependency-issues {:default 0}]]
+     :sections [{:key :bundle/artifacts :header :evidence/show-artifacts
+                 :entry :evidence/show-artifact-entry :max artifact-display-limit
+                 :entry-fn artifact-entry}
+                {:key :bundle/phases :header :evidence/show-phases}]}))
 
 (defn ^{:stratum 1} load-bundle-from-file [file]
   (load-with-exception-handling file))
