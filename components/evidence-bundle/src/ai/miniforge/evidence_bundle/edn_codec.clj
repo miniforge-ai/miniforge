@@ -5,7 +5,9 @@
   "Bounded single-form EDN with nanosecond-preserving instant reads."
   (:require [ai.miniforge.content-hash.interface :as hash]
             [clojure.edn :as edn])
-  (:import [java.io PushbackReader StringReader]))
+  (:import [java.io PushbackReader StringReader]
+           [java.nio CharBuffer]
+           [java.nio.charset StandardCharsets]))
 
 ;------------------------------------------------------------------------------ Layer 0
 
@@ -18,6 +20,11 @@
   (hash/canonical-edn bundle))
 
 ;------------------------------------------------------------------------------ Layer 1
+
+(defn- ^{:stratum 1} within-limit? [text]
+  (and (string? text) (<= (count text) maximum-bytes)
+       (<= (.remaining (.encode (.newEncoder StandardCharsets/UTF_8) (CharBuffer/wrap text)))
+           maximum-bytes)))
 
 (defn- ^{:stratum 1} read-single-form [text]
   (with-open [reader (PushbackReader. (StringReader. text))]
@@ -33,7 +40,7 @@
 (defn ^{:stratum 2} decode-with-exception-handling [text]
   ;; No slingshot dependency; this is the untrusted EDN parsing boundary.
   (try
-    (when (and (string? text) (<= (count text) maximum-bytes))
+    (when (within-limit? text)
       (read-single-form text))
     (catch InterruptedException interrupted
       (.interrupt (Thread/currentThread))

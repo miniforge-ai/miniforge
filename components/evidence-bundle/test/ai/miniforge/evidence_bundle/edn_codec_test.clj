@@ -24,7 +24,11 @@
     (is (nil? (evidence/decode-bundle-edn text))))
   (with-redefs [codec/maximum-bytes 2]
     (is (= {} (evidence/decode-bundle-edn "{}")))
-    (is (nil? (evidence/decode-bundle-edn "{} ")))))
+    (is (nil? (evidence/decode-bundle-edn "{} "))))
+  (with-redefs [codec/maximum-bytes 4]
+    (is (= "é" (evidence/decode-bundle-edn "\"é\"")))
+    (is (nil? (evidence/decode-bundle-edn "\"éé\""))))
+  (is (nil? (evidence/decode-bundle-edn (str \" (char 55296) \")))))
 
 (deftest ^{:stratum 0} file-read-limits-bytes-and-rejects-malformed-utf8-test
   (let [file (java.io.File/createTempFile "evidence-codec-" ".edn")]
