@@ -20,6 +20,7 @@
    invocations, rules, policy checks, pack promotions, supervision
    decisions, control actions, and execution output."
   (:require
+   [ai.miniforge.evidence-bundle.control-projection :as control-projection]
    [ai.miniforge.event-stream.interface :as event-stream]))
 
 ;------------------------------------------------------------------------------ Layer 0
@@ -188,31 +189,12 @@
 
    Returns vector of control action evidence maps."
   [event-stream workflow-id]
-  (try
-    (when event-stream
-      (let [requested (collect-event-stream-events event-stream
-                                                   {:workflow-id workflow-id
-                                                    :event-type :control-action/requested})
-            executed (collect-event-stream-events event-stream
-                                                  {:workflow-id workflow-id
-                                                   :event-type :control-action/executed})
-            executed-by-id (into {} (map (fn [e] [(:action/id e) e]) executed))]
-        (mapv (fn [req-event]
-                (let [action-id (:action/id req-event)
-                      exec-event (get executed-by-id action-id)]
-                  (cond-> {:control-action/id action-id
-                           :control-action/type (:action/type req-event)
-                           :control-action/requester (get req-event :action/requester {})
-                           :control-action/timestamp (get req-event :event/timestamp
-                                                         (java.util.Date.))
-                           :control-action/result (if exec-event :executed :pending)}
-                    (:action/justification req-event)
-                    (assoc :control-action/justification (:action/justification req-event))
-
-                    (:action/target req-event)
-                    (assoc :control-action/target (:action/target req-event)))))
-              requested)))
-    (catch Exception _e
-      [])))
+  (let [requested (collect-event-stream-events event-stream
+                                              {:workflow-id workflow-id
+                                               :event-type :control-action/requested})
+        executed (collect-event-stream-events event-stream
+                                             {:workflow-id workflow-id
+                                              :event-type :control-action/executed})]
+    (control-projection/from-events requested executed)))
 
 ;; Outcome Evidence
