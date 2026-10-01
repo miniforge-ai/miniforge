@@ -6,6 +6,7 @@
             [ai.miniforge.cli.main.status.presentation :as presentation]
             [ai.miniforge.cli.main.status.summary :as summary]
             [ai.miniforge.cli.app-config :as app-config]
+            [ai.miniforge.cli.messages :as messages]
             [ai.miniforge.event-stream.interface :as events]
             [ai.miniforge.workflow-resume.interface :as resume]
             [babashka.fs :as fs]
@@ -38,7 +39,7 @@
         (is (zero? (:completed-dag-task-count result)))))))
 
 (deftest ^{:stratum 1} presentation-handles-empty-and-partial-summaries
-  (is (.contains (with-out-str (presentation/print-all [])) "none"))
+  (is (.contains (with-out-str (presentation/print-all [])) (messages/t :status/value-none)))
   (is (.contains (with-out-str (presentation/print-workflow (row "test" nil))) "test")))
 
 ;------------------------------------------------------------------------------ Layer 2

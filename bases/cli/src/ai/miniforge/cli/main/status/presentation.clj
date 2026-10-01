@@ -24,7 +24,7 @@
 ;------------------------------------------------------------------------------ Layer 1
 
 (defn- ^{:stratum 1} field-values [{:keys [status spec-name event-count completed-phases
-                            completed-dag-task-count last-updated]}]
+                                        completed-dag-task-count last-updated]}]
   [[:status/field-status (util/status-label status)]
    [:status/field-spec (known-or-unknown spec-name)]
    [:status/field-events event-count]
