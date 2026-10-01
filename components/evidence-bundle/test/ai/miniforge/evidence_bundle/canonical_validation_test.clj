@@ -9,6 +9,7 @@
             [ai.miniforge.evidence-bundle.producer-roundtrips :as roundtrips]
             [ai.miniforge.evidence-bundle.control-fixtures :as control-fixtures]
             [ai.miniforge.evidence-bundle.governance-fixtures :as governance]
+            [ai.miniforge.evidence-bundle.domain-fixtures :as domain-fixtures]
             [ai.miniforge.artifact.interface :as artifact]
             [ai.miniforge.evidence-bundle.phases :as phases]
             [ai.miniforge.evidence-bundle.schema.compliance :as compliance]
@@ -181,7 +182,7 @@
 
 (deftest ^{:stratum 1} structured-records-accept-complete-domain-values-test
   (let [at #inst "2026-09-30T00:00:00Z"
-        bundle (assoc (base-bundle) :evidence/execution-mode :governed)
+        bundle (assoc (publication-fields (base-bundle)) :evidence/execution-mode :governed)
         semantic {:semantic-validation/declared-intent :update
                   :semantic-validation/actual-behavior :update
                   :semantic-validation/resource-creates 0
@@ -192,9 +193,8 @@
                   :semantic-validation/checked-at at}
         tool {:tool/id :read :tool/invoked-at at :tool/duration-ms 0 :tool/args {}}
         output {:status :success :environment-id "test" :summary "Done." :metrics {}}
-        phase {:phase/name :implement :phase/agent :test :phase/agent-instance-id (random-uuid)
-               :phase/started-at at :phase/completed-at at :phase/duration-ms 1
-               :phase/output output :phase/artifacts []}]
+        phase (assoc (domain-fixtures/phase) :phase/output output
+                     :phase/event-stream-range {:start-seq 0 :end-seq 2})]
     (is (valid? (assoc bundle :evidence/semantic-validation semantic
                       :evidence/tool-invocations [tool] :evidence/implement phase)))
     (doseq [intent [:refactor :import]]
@@ -220,7 +220,9 @@
                                                               :violation/message "Contradictory violation"}]]]]
       (is (false? (valid?
                    (assoc bundle :evidence/semantic-validation (assoc semantic field value))))))
+    (is (false? (valid? (assoc bundle :evidence/implement (dissoc phase :phase/event-stream-range)))))
     (doseq [range [{} {:start-seq "0" :end-seq 1} {:start-seq 0} nil
+                   {:start-seq 100 :end-seq 110}
                    {:start-seq -1 :end-seq 1} {:start-seq 10 :end-seq 1}]]
       (is (false? (valid?
                    (assoc bundle :evidence/implement
@@ -247,23 +249,27 @@
   (doseq [phase-name [:plan :design :implement :verify :review :release :observe]
           input [{:output {:summary "Done." :metrics {}}}
                  {:environment-id "test" :summary "Done." :metrics {}}]]
-    (let [phase (phases/build-phase-evidence phase-name :test (assoc input :duration-ms 0))
+    (let [result (assoc input :duration-ms 0 :event-stream-range {:start-seq 0 :end-seq 2})
+          phase (phases/build-phase-evidence phase-name :test result)
           key (keyword "evidence" (name phase-name))
-          bundle (assoc (base-bundle) key phase)]
+          bundle (assoc (publication-fields (base-bundle)) key phase)]
       (is (zero? (:phase/inner-loop-iterations phase)))
       (is (false? (valid? (assoc-in bundle [key :phase/name] :contradictory-phase))))
       (is (valid? bundle))
+      (is (false? (valid? (dissoc bundle :evidence/event-links))))
+      (is (false? (valid? (assoc bundle key (phases/build-phase-evidence phase-name :test input)))))
       (is (false? (valid? (assoc-in bundle [key :phase/output :metrics] 42))))
       (is (false? (valid? (assoc-in bundle [key :phase/artifacts] nil)))))))
 
 (deftest ^{:stratum 1} collector-projects-nonempty-artifact-records-to-identifiers-test
   (let [id (random-uuid)
-        phase (phases/build-phase-evidence :implement :test {:artifacts [id {:artifact/id id} {:id id}]})]
+        phase (phases/build-phase-evidence :implement :test
+                 {:artifacts [id {:artifact/id id} {:id id}] :event-stream-range {:start-seq 0 :end-seq 2}})]
     (is (= [id id id] (:phase/artifacts phase)))
     (doseq [value [nil false]]
       (let [invalid (phases/build-phase-evidence :implement :test {:artifacts [{:artifact/id value :id id}]})]
         (is (= [value] (:phase/artifacts invalid)))))
-    (is (valid? (assoc (base-bundle) :evidence/implement phase)))))
+    (is (valid? (assoc (publication-fields (base-bundle)) :evidence/implement phase)))))
 
 (deftest ^{:stratum 1} field-presence-is-distinct-from-nullability-test
   (let [check (control-fixtures/policy-check)
@@ -280,7 +286,11 @@
                     :constraint/description "Keep latency below the objective."}
         violation {:violation/rule-id "latency"
                    :violation/severity :high
-                   :violation/message "Latency exceeded the objective."}]
+                   :violation/message "Latency exceeded the objective."
+                   :violation/location {} :violation/auto-fixable? false}]
+    (doseq [field [:violation/location :violation/auto-fixable?]]
+      (is (false? (valid? (assoc-in bundle [:evidence/policy-checks 0 :policy-check/violations]
+                                   [(dissoc violation field)])))))
     (doseq [[path valid] [[[:evidence/intent :intent/constraints] constraint]
                           [[:evidence/policy-checks 0 :policy-check/violations] violation]
                           [[:evidence/control-actions] (control-fixtures/action)]]]
@@ -303,6 +313,17 @@
               records (collectors/collect-supervision-decisions :test (:evidence-bundle/workflow-id bundle))]
           (is (= confidence (:supervision/confidence (first records))))
           (is (valid? (assoc bundle :evidence/supervision-decisions records))))))))
+
+(deftest ^{:stratum 1} metadata-is-bounded-before-redaction-consumers-can-walk-it
+  (let [realized? (atom false)
+        deferred (lazy-seq (reset! realized? true) (repeat :never))
+        bundle (base-bundle)]
+    (is (valid? (with-meta bundle {:source :test})))
+    (doseq [metadata [{:value (Object.)} {:value deferred}
+                      {:value (with-meta [] {:nested deferred})}]]
+      (is (false? (valid? (with-meta bundle metadata))))
+      (is (false? (valid? (assoc bundle :extension (with-meta [] metadata))))))
+    (is (false? @realized?))))
 
 (comment
   (clojure.test/run-tests 'ai.miniforge.evidence-bundle.canonical-validation-test))
