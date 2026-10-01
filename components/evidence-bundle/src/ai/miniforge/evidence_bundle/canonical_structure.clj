@@ -66,10 +66,13 @@
                (intent-errors (:evidence/intent bundle))
                (field-errors domain/outcome-schema (:evidence/outcome bundle))
                (mapcat policy-errors (:evidence/policy-checks bundle))
+               (mapcat (partial field-errors domain/violation-schema)
+                       (get-in bundle [:evidence/semantic-validation :semantic-validation/violations]))
                (mapcat (partial structured-errors bundle) structured-fields)
                (mapcat (partial collection-errors bundle) collection-fields)
                (mapcat (partial phase-output-errors bundle)
-                       [:evidence/implement :evidence/verify :evidence/release])
+                       [:evidence/plan :evidence/design :evidence/implement :evidence/verify
+                        :evidence/review :evidence/release :evidence/observe])
                (opsv-errors bundle))))
 
 (comment

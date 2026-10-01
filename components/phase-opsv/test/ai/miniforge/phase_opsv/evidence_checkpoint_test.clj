@@ -6,6 +6,7 @@
             [ai.miniforge.artifact.interface :as artifact]
             [ai.miniforge.phase-opsv.artifact-test-support :as f]
             [ai.miniforge.phase-opsv.evidence-runtime :as runtime]
+            [ai.miniforge.phase-opsv.evidence-snapshot :as snapshot]
             [ai.miniforge.phase-opsv.lifecycle :as lifecycle]
             [ai.miniforge.phase-opsv.test-support :as support]
             [clojure.test :refer [deftest is]]))
@@ -19,9 +20,13 @@
       (let [completed (f/step ctx (first support/handlers))
             detached (dissoc completed :opsv/evidence-assembly-store)
             corrupt (assoc-in detached [:execution/input :opsv/evidence-snapshot] "corrupt")
-            wrong-run (assoc detached :execution/id (random-uuid))]
+            wrong-run (assoc detached :execution/id (random-uuid))
+            wrong-bundle (assoc-in detached [:execution/input :opsv/evidence-bundle-id] (random-uuid))
+            encoded (get-in detached [:execution/input :opsv/evidence-snapshot])]
         (is (anomaly/anomaly? (runtime/ensure-assembly corrupt)))
         (is (anomaly/anomaly? (runtime/ensure-assembly wrong-run)))
+        (is (anomaly/anomaly? (runtime/ensure-assembly wrong-bundle)))
+        (is (anomaly/anomaly? (snapshot/decode detached :wrong-material-kind encoded)))
         (is (not (anomaly/anomaly? (runtime/ensure-assembly detached))))))
 
 (defn- ^{:stratum 0} assert-encoding-failure [ctx _directory]
