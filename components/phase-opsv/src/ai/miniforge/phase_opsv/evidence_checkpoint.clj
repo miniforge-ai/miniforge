@@ -17,14 +17,6 @@
   (assoc (select-keys (:phase ctx) [:name :result :status :ended-at :duration-ms :metrics])
          :opsv/evidence-base (base/bundle ctx)))
 
-(defn- ^{:stratum 1} persist-terminal [ctx]
-  (if (and (= :opsv/actuate (get-in ctx [:phase :name]))
-           (= :error (get-in ctx [:phase :result :status])))
-    (assoc-in ctx [:execution/input :opsv/terminal-snapshot]
-              (snapshot/encode ctx :terminal-checkpoint
-                               (terminal-record ctx)))
-    ctx))
-
 (defn ^{:stratum 0} restore-terminal [ctx]
   (if-not (and (map? (:execution/input ctx))
                (contains? (:execution/input ctx) :opsv/terminal-snapshot))
@@ -44,7 +36,17 @@
 
 ;------------------------------------------------------------------------------ Layer 1
 
-(defn ^{:stratum 1} persist [ctx assembly]
+(defn- ^{:stratum 1} persist-terminal [ctx]
+  (if (and (= :opsv/actuate (get-in ctx [:phase :name]))
+           (= :error (get-in ctx [:phase :result :status])))
+    (assoc-in ctx [:execution/input :opsv/terminal-snapshot]
+              (snapshot/encode ctx :terminal-checkpoint
+                               (terminal-record ctx)))
+    ctx))
+
+;------------------------------------------------------------------------------ Layer 2
+
+(defn ^{:stratum 2} persist [ctx assembly]
   (let [encoded (snapshot/encode ctx :checkpoint assembly)]
     (-> ctx
         (assoc-in [:execution/input :opsv/evidence-assembly] assembly)
