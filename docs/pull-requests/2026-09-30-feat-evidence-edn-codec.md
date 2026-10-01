@@ -33,5 +33,5 @@ No provider operations or migration are performed.
 
 ## Checklist
 
-- [x] JVM and packaged codec regressions pass (3 tests, 23 assertions each)
+- [x] JVM and packaged codec regressions pass (3 tests, 26 assertions each)
 - [ ] Standards, review, and CI settle
