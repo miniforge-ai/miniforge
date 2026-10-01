@@ -215,19 +215,20 @@
       (is (identical? before @store)))))
 
 (deftest ^{:stratum 1} restoration-rejects-false-sensitivity-declarations
-  (let [[store id] (accumulated-store f/opsv-evidence)
-        snapshot @store
-        base (assoc-in f/base-bundle [:evidence/intent :intent/description] "000-00-0000")
-        bundle (evidence/finalize-opsv-evidence! store id base f/opsv-evidence (set f/artifact-ids))]
-    (is (true? (:compliance/sensitive-data bundle)))
-    (is (true? (:evidence/contains-pii? bundle)))
-    (doseq [field [:compliance/sensitive-data :evidence/contains-pii?]]
-      (let [candidate (false-declaration bundle field)
-            restored (atom snapshot)]
-        (is (:valid? (evidence/validate-canonical-bundle candidate)))
-        (is (response/anomaly-map?
-              (evidence/restore-finalized-opsv-bundle! restored candidate (set f/artifact-ids))))
-        (is (identical? snapshot @restored))))))
+  (doseq [sensitive-value ["000-00-0000" "4111 1111 1111 1111"]]
+    (let [[store id] (accumulated-store f/opsv-evidence)
+          snapshot @store
+          base (assoc-in f/base-bundle [:evidence/intent :intent/description] sensitive-value)
+          bundle (evidence/finalize-opsv-evidence! store id base f/opsv-evidence (set f/artifact-ids))]
+      (is (true? (:compliance/sensitive-data bundle)))
+      (is (true? (:evidence/contains-pii? bundle)))
+      (doseq [field [:compliance/sensitive-data :evidence/contains-pii?]]
+        (let [candidate (false-declaration bundle field)
+              restored (atom snapshot)]
+          (is (:valid? (evidence/validate-canonical-bundle candidate)))
+          (is (response/anomaly-map?
+                (evidence/restore-finalized-opsv-bundle! restored candidate (set f/artifact-ids))))
+          (is (identical? snapshot @restored)))))))
 
 (deftest ^{:stratum 1} finalize-rejects-invalid-base-bundle
   (let [[store bundle-id] (accumulated-store f/opsv-evidence)
