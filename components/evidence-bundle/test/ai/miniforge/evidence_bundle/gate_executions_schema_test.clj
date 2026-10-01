@@ -3,6 +3,7 @@
 ;; Licensed under the Apache License, Version 2.0.
 (ns ai.miniforge.evidence-bundle.gate-executions-schema-test
   (:require [clojure.test :refer [deftest is]]
+            [clojure.walk :as walk]
             [ai.miniforge.evidence-bundle.governance-fixtures :as fixtures]
             [ai.miniforge.evidence-bundle.schema :as schema]
             [ai.miniforge.evidence-bundle.schema.validation :as validation]))
@@ -37,9 +38,9 @@
       (assoc-in [:gate-execution/resolution-trace 0 :rule/proposals 0 :rule/enabled?] false)))
 
 (defn- ^{:stratum 0} with-overlay [record severity enabled?]
-  (let [pack (assoc (first (:gate-execution/packs record)) :pack/id :overlay)
+  (let [pack (assoc (first (:gate-execution/packs record)) :pack/id :pack/overlay)
         binding (select-keys pack [:pack/id :pack/version])
-        proposal {:pack/id :overlay :rule/severity severity :rule/enabled? enabled?}]
+        proposal {:pack/id :pack/overlay :rule/severity severity :rule/enabled? enabled?}]
     (-> record
         (update :gate-execution/packs conj pack)
         (update-in [:gate-execution/binding :binding/packs] conj binding)
@@ -53,6 +54,11 @@
       (assoc-in [:gate-execution/violations 0 :violation/severity] :low)))
 
 ;------------------------------------------------------------------------------ Layer 1
+
+(deftest ^{:stratum 1} consistently-joined-unqualified-identities-are-not-canonical
+  (doseq [replacement [{:pack/example :example} {:rule/example :example}]]
+    (let [record (walk/postwalk-replace replacement (fixtures/gate))]
+      (is (not (accepted? {:evidence/gate-executions [record]}))))))
 
 (deftest ^{:stratum 1} complete-records-and-empty-history-are-valid
   (let [record (fixtures/gate)]
@@ -82,11 +88,11 @@
                           [[:gate-execution/resolution-trace 0 :rule/severity] :unknown]
                           [[:gate-execution/resolved-rules] []]
                           [[:gate-execution/resolution-trace 0 :rule/proposals] []]
-                          [[:gate-execution/resolution-trace 0 :rule/proposals 0 :pack/id] :missing]
+                          [[:gate-execution/resolution-trace 0 :rule/proposals 0 :pack/id] :pack/missing]
                           [[:gate-execution/resolution-trace 0 :rule/proposals 0 :rule/severity] :critical]
                           [[:gate-execution/resolution-trace 0 :rule/proposals 0 :rule/enabled?] false]
                           [[:gate-execution/resolution-trace 0 :rule/selected?] false]
-                          [[:gate-execution/resolution-trace 0 :pack/id] :missing]
+                          [[:gate-execution/resolution-trace 0 :pack/id] :pack/missing]
                           [[:gate-execution/violations 0 :violation/severity] :high]
                           [[:gate-execution/allow-override?] false]
                           [[:gate-execution/waivers 0 :waiver/evaluation-id] (random-uuid)]

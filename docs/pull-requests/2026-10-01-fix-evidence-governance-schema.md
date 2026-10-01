@@ -52,3 +52,6 @@ Reject duplicate violation IDs and auto-fixable execution-failure records.
 Shared test factories support canonical boundary checks without copied record maps.
 Current-main and spec-prerequisite integration passes all three evidence consumers
 and rebuilt packaged governance/control regressions.
+Pack and rule identities require namespace-qualified keywords per N4.PK.2 across
+bindings, owners, proposals, resolved sets, violations and waivers. All three
+consumers pass; rebuilt focused governance tests pass 14 tests and 157 assertions.
