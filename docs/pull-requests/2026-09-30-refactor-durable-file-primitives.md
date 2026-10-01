@@ -28,6 +28,10 @@ The adversarial standards pass added explicit input schemas at the public
 boundary. Invalid file and payload arguments return anomalies before filesystem
 operations. The component does not authorize paths; each store retains that duty.
 
+CI found the standalone Babashka task classpath missing the new component.
+Add both its source and catalog resource paths. The packaged CLI and Polylith
+projects already had them; verify both composition paths explicitly.
+
 ## Testing Plan
 
 - Focused JVM and rebuilt packaged runtime: 50 tests, 276 assertions, all pass.
