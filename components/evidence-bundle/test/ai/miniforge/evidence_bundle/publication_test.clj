@@ -5,6 +5,7 @@
   (:require [ai.miniforge.evidence-bundle.interface :as evidence]
             [ai.miniforge.evidence-bundle.opsv-test-fixtures :as f]
             [clojure.edn :as edn]
+            [clojure.java.io :as io]
             [clojure.test :refer [deftest is]]))
 
 ;------------------------------------------------------------------------------ Layer 0
@@ -22,6 +23,9 @@
     (swap! (:bundles manager) assoc id bundle)
     (evidence/export-bundle manager id (str file))))
 
+(defn- ^{:stratum 0} legacy-default-writer [writer destination & options]
+  (apply writer destination (concat [:encoding "US-ASCII"] options)))
+
 ;------------------------------------------------------------------------------ Layer 1
 
 (deftest ^{:stratum 1} manager-export-checks-seal-before-writing
@@ -38,6 +42,19 @@
         (is (false? (:valid? (evidence/validate-published-bundle invalid))))
         (is (false? (export! invalid file)))
         (is (= "unchanged" (slurp file))))
+      (finally (.delete file)))))
+
+(deftest ^{:stratum 1} manager-export-uses-utf8-independently-of-platform-default
+  (let [base (assoc (dissoc (sealed-bundle) :evidence/content-hash) :test/text "café 東京")
+        sealed (assoc base :evidence/content-hash (evidence/content-hash base))
+        file (java.io.File/createTempFile "evidence-utf8-" ".edn")
+        writer (partial legacy-default-writer io/writer)]
+    (try
+      (with-redefs [io/writer writer]
+        (is (true? (export! sealed file))))
+      (let [decoded (evidence/read-bundle-edn file)]
+        (is (= (:test/text sealed) (:test/text decoded)))
+        (is (:valid? (evidence/validate-published-bundle decoded))))
       (finally (.delete file)))))
 
 (deftest ^{:stratum 1} exported-instant-precision-preserves-the-seal
