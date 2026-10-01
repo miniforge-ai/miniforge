@@ -14,7 +14,8 @@
   (let [title (messages/t :evidence/header)
         content (evidence/encode-bundle-edn bundle)]
     (str "<!doctype html>"
-         (html/html [:html [:head [:meta {:charset "utf-8"}] [:title title]]
+         (html/html [:html {:lang (messages/t :evidence/document-language)}
+                     [:head [:meta {:charset "utf-8"}] [:title title]]
                      [:body [:h1 title] [:pre content]]]))))
 
 ;------------------------------------------------------------------------------ Layer 1
