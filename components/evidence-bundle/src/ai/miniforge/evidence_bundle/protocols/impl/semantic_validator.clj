@@ -16,138 +16,30 @@
 ;; See the License for the specific language governing permissions and
 ;; limitations under the License.
 (ns ai.miniforge.evidence-bundle.protocols.impl.semantic-validator
-  "Implementation functions for SemanticValidator protocol.
-   Validates that implementation matches declared intent."
-  (:require
-   [ai.miniforge.evidence-bundle.schema.domain :as domain]
-   [clojure.string :as str]))
+  "Compose resource analysis and shared semantic policy into protocol reports."
+  (:require [ai.miniforge.evidence-bundle.semantic-analysis :as analysis]
+            [ai.miniforge.evidence-bundle.semantic-report :as report]
+            [ai.miniforge.evidence-bundle.semantic-rules :as rules]))
 
 ;------------------------------------------------------------------------------ Layer 0
 
-;; Terraform Plan Analysis
-(defn ^{:stratum 0} parse-terraform-change-line
-  "Parse a single Terraform plan line for resource changes.
-   Returns {:type :create|:update|:destroy|:recreate|:import}"
-  [line]
-  (cond
-    (str/includes? line " will be created")
-    {:type :create}
+(def ^{:stratum 0} parse-terraform-change-line analysis/parse-terraform-change-line)
 
-    (str/includes? line " must be replaced")
-    {:type :recreate :creates 1 :destroys 1}
+(def ^{:stratum 0} analyze-kubernetes-manifest-impl analysis/analyze-kubernetes-manifest-impl)
 
-    (str/includes? line " will be updated in-place")
-    {:type :update}
+(def ^{:stratum 0} analyze-terraform-plan-impl analysis/analyze-terraform-plan-impl)
 
-    (str/includes? line " will be destroyed")
-    {:type :destroy}
+(def ^{:stratum 0} check-rule rules/check-count-rule)
 
-    (str/includes? line " will be imported")
-    {:type :import}
-
-    :else
-    nil))
-
-;; Kubernetes Manifest Analysis
-(defn ^{:stratum 0} analyze-kubernetes-manifest-impl
-  "Analyze Kubernetes manifest for resource changes.
-   Returns {:creates N :updates N :destroys N}"
-  [manifest-artifact]
-  ;; Simplified implementation - count resources in manifest
-  (let [content (or (:artifact/content manifest-artifact) "")
-        ;; Count 'kind:' declarations as resources
-        resources (count (re-seq #"(?m)^kind:" content))]
-    {:creates resources
-     :updates 0
-     :destroys 0}))
-
-;; Semantic Validation Rules
-(defn ^{:stratum 0} check-rule
-  "Check if actual count matches rule.
-   Rule can be: 0 (must be zero), :pos (must be positive), :any (any value)"
-  [rule-value actual-count]
-  (domain/check-count-rule rule-value actual-count))
+(defn- ^{:stratum 0} total-changes [artifacts]
+  (reduce (partial merge-with +) rules/empty-changes (map analysis/analyze-artifact artifacts)))
 
 ;------------------------------------------------------------------------------ Layer 1
 
-(defn ^{:stratum 1} analyze-terraform-plan-impl
-  "Analyze Terraform plan artifact for resource changes.
-   Returns {:creates N :updates N :destroys N}"
-  [plan-artifact]
-  (let [content (or (:artifact/content plan-artifact) "")
-        lines (str/split-lines content)
-        changes (keep parse-terraform-change-line lines)
-
-        creates (count (filter #(= (:type %) :create) changes))
-        updates (count (filter #(= (:type %) :update) changes))
-        destroys (count (filter #(= (:type %) :destroy) changes))
-        recreates (filter #(= (:type %) :recreate) changes)
-        recreate-creates (reduce + 0 (map :creates recreates))
-        recreate-destroys (reduce + 0 (map :destroys recreates))]
-
-    {:creates (+ creates recreate-creates)
-     :updates updates
-     :destroys (+ destroys recreate-destroys)}))
-
-;------------------------------------------------------------------------------ Layer 2
-
-(defn ^{:stratum 2} validate-intent-impl
-  "Validate implementation matches declared intent.
-   Returns {:passed? bool :violations [...]}"
+(defn ^{:stratum 1} validate-intent-impl
+  "Validate declared intent against analyzed resources without accumulating mutable state."
   [intent implementation-artifacts]
-  (let [intent-type (:intent/type intent)
-        rules (get domain/semantic-validation-rules intent-type)
-        violations (atom [])
+  (report/build (:intent/type intent) (total-changes implementation-artifacts) (java.time.Instant/now)))
 
-        ;; Analyze all artifacts to count changes
-        ;; This is simplified - in real implementation would analyze based on artifact type
-        total-changes (reduce
-                       (fn [acc artifact]
-                         (let [analysis (cond
-                                          (= (:artifact/type artifact) :terraform-plan)
-                                          (analyze-terraform-plan-impl artifact)
-
-                                          (= (:artifact/type artifact) :kubernetes-manifest)
-                                          (analyze-kubernetes-manifest-impl artifact)
-
-                                          :else
-                                          {:creates 0 :updates 0 :destroys 0})]
-                           (merge-with + acc analysis)))
-                       {:creates 0 :updates 0 :destroys 0}
-                       implementation-artifacts)
-
-        creates (:creates total-changes)
-        updates (:updates total-changes)
-        destroys (:destroys total-changes)
-        behavior (domain/inferred-behavior creates updates destroys)]
-
-    ;; Check each rule
-    (when-not (check-rule (:creates rules) creates)
-      (swap! violations conj
-             {:violation/rule-id "semantic-creates"
-              :violation/severity :critical
-              :violation/message (format "Intent '%s' expects %s creates, found %d"
-                                         intent-type (:creates rules) creates)}))
-
-    (when-not (check-rule (:updates rules) updates)
-      (swap! violations conj
-             {:violation/rule-id "semantic-updates"
-              :violation/severity :high
-              :violation/message (format "Intent '%s' expects %s updates, found %d"
-                                         intent-type (:updates rules) updates)}))
-
-    (when-not (check-rule (:destroys rules) destroys)
-      (swap! violations conj
-             {:violation/rule-id "semantic-destroys"
-              :violation/severity :critical
-              :violation/message (format "Intent '%s' expects %s destroys, found %d"
-                                         intent-type (:destroys rules) destroys)}))
-
-    {:passed? (empty? @violations)
-     :violations @violations
-     :semantic-validation/declared-intent intent-type
-     :semantic-validation/actual-behavior behavior
-     :semantic-validation/resource-creates creates
-     :semantic-validation/resource-updates updates
-     :semantic-validation/resource-destroys destroys
-     :semantic-validation/checked-at (java.time.Instant/now)}))
+(comment
+  (validate-intent-impl {:intent/type :import} []))

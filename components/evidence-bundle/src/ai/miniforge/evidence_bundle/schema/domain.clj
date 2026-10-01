@@ -27,6 +27,7 @@
    Split out of the former `schema.clj` (SL003, Wave 2) — this was most of
    its Layer 0/1/2."
   (:require
+   [ai.miniforge.evidence-bundle.semantic-rules :as semantic]
    [ai.miniforge.evidence-bundle.schema.optional-key :as optional-key]
    [ai.miniforge.schema.interface :as shared]))
 
@@ -56,27 +57,12 @@
 
 (def ^{:stratum 0} semantic-validation-rules
   "Validation rules per N6 section 2.4.1."
-  {:import  {:creates 0 :updates 0 :destroys 0}
-   :create  {:creates :pos :updates :any :destroys 0}
-   :update  {:creates 0 :updates :pos :destroys 0}
-   :destroy {:creates 0 :updates 0 :destroys :pos}
-   :refactor {:creates 0 :updates 0 :destroys 0}
-   :migrate {:creates :pos :updates 0 :destroys :pos}})
+  semantic/rules)
 
-(defn ^{:stratum 0} check-count-rule [rule-value actual-count]
-  (case rule-value
-    0 (= 0 actual-count)
-    :pos (> actual-count 0)
-    :any true
-    (= rule-value actual-count)))
-
-(defn ^{:stratum 0} inferred-behavior [creates updates destroys]
-  (cond
-    (and (pos? creates) (pos? destroys)) :migrate
-    (pos? creates) :create
-    (pos? updates) :update
-    (pos? destroys) :destroy
-    :else :import))
+(defn- ^{:stratum 0} resource-counts [value]
+  {:creates (:semantic-validation/resource-creates value)
+   :updates (:semantic-validation/resource-updates value)
+   :destroys (:semantic-validation/resource-destroys value)})
 
 (def ^{:stratum 0} semantic-validation-schema
   "Schema for semantic validation evidence."
@@ -185,11 +171,10 @@
 
 ;------------------------------------------------------------------------------ Layer 1
 
-(defn- ^{:stratum 1} failed-count-rule [value kind]
-  (let [rule (get-in semantic-validation-rules [(:semantic-validation/declared-intent value) kind])
-        field (keyword "semantic-validation" (str "resource-" (name kind)))]
-    (when-not (check-count-rule rule (get value field))
-      (str "semantic-" (name kind)))))
+(defn- ^{:stratum 1} failed-rule-ids [value]
+  (let [failed (semantic/failed-rules (:semantic-validation/declared-intent value)
+                                     (resource-counts value))]
+    (set (map semantic/rule-ids failed))))
 
 (def ^{:stratum 1} phase-evidence-schema
   "Schema for individual phase evidence."
@@ -298,13 +283,12 @@
 ;------------------------------------------------------------------------------ Layer 2
 
 (defn ^{:stratum 2} consistent-semantic-conclusion? [value]
-  (let [failed (set (keep (partial failed-count-rule value) [:creates :updates :destroys]))
+  (let [failed (failed-rule-ids value)
         reported (set (map :violation/rule-id (:semantic-validation/violations value)))
-        inferred (inferred-behavior (:semantic-validation/resource-creates value)
-                                   (:semantic-validation/resource-updates value)
-                                   (:semantic-validation/resource-destroys value))]
+        actual (:semantic-validation/actual-behavior value)
+        inferred (semantic/inferred-behavior (resource-counts value))]
     (and (= (empty? failed) (:semantic-validation/passed? value))
-         (= inferred (:semantic-validation/actual-behavior value))
+         (or (= inferred actual) (= [:import :refactor] [inferred actual]))
          (= failed reported))))
 
 ;------------------------------------------------------------------------------ Rich Comment

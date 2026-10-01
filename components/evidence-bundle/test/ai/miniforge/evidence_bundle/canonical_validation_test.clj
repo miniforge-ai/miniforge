@@ -5,6 +5,7 @@
   (:require [ai.miniforge.evidence-bundle.interface :as evidence]
             [ai.miniforge.evidence-bundle.collectors :as collectors]
             [ai.miniforge.evidence-bundle.collector :as collector]
+            [ai.miniforge.evidence-bundle.collector-projection :as projection]
             [ai.miniforge.artifact.interface :as artifact]
             [ai.miniforge.evidence-bundle.phases :as phases]
             [ai.miniforge.evidence-bundle.schema.compliance :as compliance]
@@ -164,6 +165,13 @@
     (is (:valid? (evidence/validate-canonical-bundle
                   (assoc bundle :evidence/semantic-validation semantic
                                 :evidence/tool-invocations [tool] :evidence/implement phase))))
+    (is (:valid? (evidence/validate-canonical-bundle
+                  (-> bundle
+                      (assoc-in [:evidence/intent :intent/type] :refactor)
+                      (assoc :evidence/semantic-validation
+                             (assoc semantic :semantic-validation/declared-intent :refactor
+                                             :semantic-validation/actual-behavior :refactor
+                                             :semantic-validation/resource-updates 0))))))
     (doseq [invalid [{} 42 nil]]
       (is (false? (:valid? (evidence/validate-canonical-bundle
                            (assoc bundle :evidence/semantic-validation
@@ -188,6 +196,19 @@
     (is (false? (:valid? (evidence/validate-canonical-bundle
                          (assoc-in (assoc bundle :evidence/implement phase)
                                    [:evidence/implement :phase/output :summary] 42)))))))
+
+(deftest ^{:stratum 1} canonical-migration-conclusions-use-producer-balance-rules
+  (doseq [content ["old will be destroyed\nnew will be created\nextra will be created"
+                   "old will be destroyed\nextra will be destroyed\nnew will be created"]]
+    (let [bundle (assoc-in (base-bundle) [:evidence/intent :intent/type] :migrate)
+          material {:artifact/type :terraform-plan :artifact/content content}
+          semantic (projection/semantic-evidence (:evidence/intent bundle) [material])
+          honest (assoc bundle :evidence/semantic-validation semantic)
+          false-pass (assoc semantic :semantic-validation/passed? true :semantic-validation/violations [])]
+      (is (false? (:semantic-validation/passed? semantic)))
+      (is (:valid? (evidence/validate-canonical-bundle honest)))
+      (is (false? (:valid? (evidence/validate-canonical-bundle
+                           (assoc bundle :evidence/semantic-validation false-pass))))))))
 
 (deftest ^{:stratum 1} collector-phase-projections-pass-canonical-validation-test
   (doseq [phase-name [:plan :design :implement :verify :review :release :observe]
