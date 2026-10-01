@@ -13,7 +13,6 @@
 (defn- ^{:stratum 0} candidate-bundle [record base evidence]
   (when (map? base)
     (-> base
-        (dissoc :evidence/content-hash :evidence/signature)
         (assoc :evidence-bundle/id (:evidence-bundle/id record)
                :evidence/opsv evidence))))
 
@@ -27,6 +26,8 @@
   (cond-> []
     (not schema-valid?) (conj {:code :invalid-opsv-evidence})
     (not (map? base)) (conj {:code :invalid-base-bundle})
+    (and (map? base) (some #(contains? base %) [:evidence/content-hash :evidence/signature :evidence/sealed-at]))
+    (conj {:code :sealed-base-bundle})
     (and (map? base) (not= (:evidence-bundle/workflow-id record) (:evidence-bundle/workflow-id base)))
     (conj {:code :workflow-reference-mismatch})
     schema-valid? (into (references/errors record evidence available-ids))

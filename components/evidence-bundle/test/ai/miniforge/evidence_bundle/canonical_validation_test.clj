@@ -3,6 +3,9 @@
 ;; Licensed under the Apache License, Version 2.0.
 (ns ai.miniforge.evidence-bundle.canonical-validation-test
   (:require [ai.miniforge.evidence-bundle.interface :as evidence]
+            [ai.miniforge.evidence-bundle.phases :as phases]
+            [ai.miniforge.evidence-bundle.schema.compliance :as compliance]
+            [ai.miniforge.evidence-bundle.schema.validation :as validation]
             [clojure.test :refer [deftest is]]))
 
 ;------------------------------------------------------------------------------ Layer 0
@@ -30,6 +33,14 @@
    :policy-check/duration-ms 0
    :policy-check/envelope nil})
 
+(deftest ^{:stratum 0} schema-validation-reports-malformed-records-without-throwing-test
+  (doseq [value [nil 42 :invalid [] "record"]]
+    (is (false? (:valid? (validation/validate-schema {:field string?} value))))
+    (is (false? (compliance/valid-access-log-entry? value))))
+  (is (false? (:valid? (validation/validate-schema {:field seq} {:field 42}))))
+  (is (true? (:valid? (validation/validate-schema {:field nil?} {:field nil}))))
+  (is (false? (:valid? (validation/validate-schema {:field nil?} {})))))
+
 ;------------------------------------------------------------------------------ Layer 1
 
 (deftest ^{:stratum 1} canonical-validation-checks-required-types-and-domain-values-test
@@ -42,21 +53,77 @@
                           [[:evidence-bundle/version] 1]
                           [[:evidence/intent :intent/type] :unknown]
                           [[:evidence/intent :intent/constraints] 42]
+                          [[:evidence/intent :intent/constraints] nil]
+                          [[:evidence/intent :intent/constraints] {}]
                           [[:evidence/outcome :outcome/success] "true"]
                           [[:evidence/policy-checks] [{}]]
+                          [[:compliance/created-at] "yesterday"]
+                          [[:compliance/pii-handling] :unknown]
                           [[:evidence/opsv] {}]]]
       (is (false? (:valid? (evidence/validate-canonical-bundle (assoc-in bundle path value))))))))
 
 (deftest ^{:stratum 1} declared-hash-is-verified-without-claiming-authority-test
-  (let [bundle (base-bundle)
+  (let [bundle (assoc (base-bundle)
+                       :compliance/created-at #inst "2026-09-30T00:00:00Z"
+                       :evidence/sealed-at #inst "2026-09-30T00:00:00Z")
         sealed (assoc bundle :evidence/content-hash (evidence/content-hash bundle))]
     (is (:valid? (evidence/validate-canonical-bundle sealed)))
     (is (:valid? (evidence/validate-canonical-bundle
                   (assoc sealed :evidence/signature "not-an-authenticity-check"))))
     (doseq [altered [(assoc-in sealed [:evidence/outcome :outcome/success] false)
                      (assoc sealed :evidence/content-hash nil)
-                     (assoc sealed :evidence/content-hash "wrong")]]
+                     (assoc sealed :evidence/content-hash "wrong")
+                     (assoc sealed :evidence/signature 42)
+                     (assoc sealed :evidence/signature nil)
+                     (dissoc sealed :evidence/sealed-at)
+                     (dissoc sealed :compliance/created-at)
+                     (dissoc sealed :evidence/content-hash)]]
       (is (false? (:valid? (evidence/validate-canonical-bundle altered)))))))
+
+(deftest ^{:stratum 1} present-structured-fields-cannot-hide-empty-records-test
+  (doseq [field [:evidence/semantic-validation :evidence/plan :evidence/design
+                :evidence/implement :evidence/verify :evidence/review
+                :evidence/release :evidence/observe]]
+    (is (false? (:valid? (evidence/validate-canonical-bundle (assoc (base-bundle) field {}))))))
+  (doseq [field [:evidence/tool-invocations :evidence/pack-promotions
+                :evidence/supervision-decisions :evidence/control-actions :evidence/rules-applied]]
+    (is (:valid? (evidence/validate-canonical-bundle (assoc (base-bundle) field []))))
+    (is (false? (:valid? (evidence/validate-canonical-bundle (assoc (base-bundle) field [{}])))))))
+
+(deftest ^{:stratum 1} structured-records-accept-complete-domain-values-test
+  (let [at #inst "2026-09-30T00:00:00Z"
+        bundle (base-bundle)
+        semantic {:semantic-validation/declared-intent :update
+                  :semantic-validation/actual-behavior :update
+                  :semantic-validation/resource-creates 0
+                  :semantic-validation/resource-updates 1
+                  :semantic-validation/resource-destroys 0
+                  :semantic-validation/passed? true
+                  :semantic-validation/violations []
+                  :semantic-validation/checked-at at}
+        tool {:tool/id :read :tool/invoked-at at :tool/duration-ms 0 :tool/args {}}
+        output {:status :success :environment-id "test" :summary "Done." :metrics {}}
+        phase {:phase/name :implement :phase/agent :test :phase/agent-instance-id (random-uuid)
+               :phase/started-at at :phase/completed-at at :phase/duration-ms 1
+               :phase/output output :phase/artifacts []}]
+    (is (:valid? (evidence/validate-canonical-bundle
+                  (assoc bundle :evidence/semantic-validation semantic
+                                :evidence/tool-invocations [tool] :evidence/implement phase))))
+    (is (false? (:valid? (evidence/validate-canonical-bundle
+                         (assoc-in (assoc bundle :evidence/implement phase)
+                                   [:evidence/implement :phase/output :summary] 42)))))))
+
+(deftest ^{:stratum 1} collector-phase-projections-pass-canonical-validation-test
+  (doseq [phase-name [:implement :verify :release]
+          input [{:output {:summary "Done." :metrics {}}}
+                 {:environment-id "test" :summary "Done." :metrics {}}]]
+    (let [phase (phases/build-phase-evidence phase-name :test (assoc input :duration-ms 0))
+          key (keyword "evidence" (name phase-name))
+          bundle (assoc (base-bundle) key phase)]
+      (is (zero? (:phase/inner-loop-iterations phase)))
+      (is (:valid? (evidence/validate-canonical-bundle bundle)))
+      (is (false? (:valid? (evidence/validate-canonical-bundle
+                           (assoc-in bundle [key :phase/artifacts] nil))))))))
 
 (deftest ^{:stratum 1} field-presence-is-distinct-from-nullability-test
   (let [check (policy-check)

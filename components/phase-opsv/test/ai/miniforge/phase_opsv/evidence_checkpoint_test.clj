@@ -12,6 +12,9 @@
 
 ;------------------------------------------------------------------------------ Layer 0
 
+(defn- ^{:stratum 0} unexpected-decode [_]
+  (throw (AssertionError. "Live assembly must not decode a checkpoint")))
+
 (defn- ^{:stratum 0} assert-corruption-rejected [ctx _directory]
       (let [completed (f/step ctx (first support/handlers))
             detached (dissoc completed :opsv/evidence-assembly-store)
@@ -34,11 +37,25 @@
 
 ;------------------------------------------------------------------------------ Layer 1
 
+(defn- ^{:stratum 1} assert-live-store-skips-decoding [ctx _directory]
+  (let [completed (f/step ctx (first support/handlers))
+        store (:opsv/evidence-assembly-store completed)
+        entered (with-redefs [artifact/decode-snapshot unexpected-decode]
+                  (runtime/ensure-assembly completed))]
+    (is (identical? store (:opsv/evidence-assembly-store entered)))
+    (is (= (get-in completed [:execution/input :opsv/evidence-assembly])
+           (get-in entered [:execution/input :opsv/evidence-assembly])))))
+
 (deftest ^{:stratum 1} checkpoint-corruption-cannot-fall-back-to-display-map-test
   (f/with-context assert-corruption-rejected))
 
 (deftest ^{:stratum 1} failed-snapshot-cannot-report-phase-success-test
   (f/with-context assert-encoding-failure))
+
+;------------------------------------------------------------------------------ Layer 2
+
+(deftest ^{:stratum 2} live-assembly-does-not-decode-durable-snapshots-test
+  (f/with-context assert-live-store-skips-decoding))
 
 (comment
   (clojure.test/run-tests 'ai.miniforge.phase-opsv.evidence-checkpoint-test))

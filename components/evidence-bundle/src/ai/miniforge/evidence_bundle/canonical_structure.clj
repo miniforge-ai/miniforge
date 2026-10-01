@@ -11,6 +11,23 @@
 
 ;------------------------------------------------------------------------------ Layer 0
 
+(def ^{:stratum 0} structured-fields
+  {:evidence/semantic-validation domain/semantic-validation-schema
+   :evidence/plan domain/phase-evidence-schema
+   :evidence/design domain/phase-evidence-schema
+   :evidence/implement domain/phase-evidence-schema
+   :evidence/verify domain/phase-evidence-schema
+   :evidence/review domain/phase-evidence-schema
+   :evidence/release domain/phase-evidence-schema
+   :evidence/observe domain/phase-evidence-schema})
+
+(def ^{:stratum 0} collection-fields
+  {:evidence/tool-invocations domain/tool-invocation-schema
+   :evidence/pack-promotions domain/pack-promotion-schema
+   :evidence/supervision-decisions domain/supervision-decision-schema
+   :evidence/control-actions domain/control-action-evidence-schema
+   :evidence/rules-applied domain/rule-applied-schema})
+
 (defn- ^{:stratum 0} field-errors [field-schema value]
   (:errors (validation/validate-schema field-schema value)))
 
@@ -20,6 +37,17 @@
     [{:code :invalid-opsv-evidence}]))
 
 ;------------------------------------------------------------------------------ Layer 1
+
+(defn- ^{:stratum 1} structured-errors [bundle [field field-schema]]
+  (when (contains? bundle field)
+    (field-errors field-schema (get bundle field))))
+
+(defn- ^{:stratum 1} collection-errors [bundle [field field-schema]]
+  (mapcat (partial field-errors field-schema) (get bundle field)))
+
+(defn- ^{:stratum 1} phase-output-errors [bundle field]
+  (when (contains? bundle field)
+    (field-errors domain/phase-output-schema (get-in bundle [field :phase/output]))))
 
 (defn- ^{:stratum 1} policy-errors [check]
   (concat (field-errors domain/policy-check-schema check)
@@ -38,6 +66,10 @@
                (intent-errors (:evidence/intent bundle))
                (field-errors domain/outcome-schema (:evidence/outcome bundle))
                (mapcat policy-errors (:evidence/policy-checks bundle))
+               (mapcat (partial structured-errors bundle) structured-fields)
+               (mapcat (partial collection-errors bundle) collection-fields)
+               (mapcat (partial phase-output-errors bundle)
+                       [:evidence/implement :evidence/verify :evidence/release])
                (opsv-errors bundle))))
 
 (comment
