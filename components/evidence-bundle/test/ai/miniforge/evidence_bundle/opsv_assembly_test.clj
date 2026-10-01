@@ -64,6 +64,24 @@
 
 ;------------------------------------------------------------------------------ Layer 1
 
+(deftest ^{:stratum 1} finalization-does-not-realize-deferred-availability
+  (let [[store id] (accumulated-store f/opsv-evidence)
+        realized? (atom false)
+        available (lazy-seq (reset! realized? true) (seq f/artifact-ids))
+        before @store
+        result (evidence/finalize-opsv-evidence! store id f/base-bundle f/opsv-evidence available)]
+    (is (response/anomaly-map? result))
+    (is (false? @realized?))
+    (is (= before @store))))
+
+(deftest ^{:stratum 1} redaction-cannot-publish-an-invalid-canonical-value
+  (let [opsv (assoc-in f/opsv-evidence [:opsv/policy-proposals 0 :scaling :AKIAIOSFODNN7EXAMPLE] "test")
+        [store id] (accumulated-store opsv)
+        before @store
+        result (evidence/finalize-opsv-evidence! store id f/base-bundle opsv (set f/artifact-ids))]
+    (is (response/anomaly-map? result))
+    (is (= before @store))))
+
 (deftest ^{:stratum 1} sealing-scans-redacts-and-records-compliance-before-hashing
   (let [[store id] (accumulated-store f/opsv-evidence)
         base (assoc-in f/base-bundle [:evidence/intent :intent/description] "AKIAABCDEFGHIJKLMNOP")

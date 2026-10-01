@@ -12,8 +12,8 @@
   (cond
     (nil? value) #{}
     (set? value) value
-    (sequential? value) (set value)
-    :else #{value}))
+    (or (vector? value) (list? value)) (set value)
+    :else #{}))
 
 (defn- ^{:stratum 0} detailed-artifact-refs
   [evidence]

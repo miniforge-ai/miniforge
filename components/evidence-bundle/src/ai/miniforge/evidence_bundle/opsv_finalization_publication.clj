@@ -5,6 +5,7 @@
   "Atomically publish against the validated assembly version; retry concurrent accumulation."
   (:require [ai.miniforge.anomaly.interface :as anomaly]
             [ai.miniforge.content-hash.interface :as hash]
+            [ai.miniforge.evidence-bundle.canonical-validation :as validation]
             [ai.miniforge.evidence-bundle.opsv-diagnostics :as diagnostics]
             [ai.miniforge.evidence-bundle.publication-compliance :as compliance]))
 
@@ -25,7 +26,11 @@
 (defn- ^{:stratum 1} seal-with-exception-handling [record candidate]
   ;; No slingshot dependency; scanning and redaction are the sealing boundary.
   (try
-    (sealed-bundle candidate (java.time.Instant/now))
+    (let [sealed (sealed-bundle candidate (java.time.Instant/now))
+          report (validation/validate-with-exception-handling sealed)]
+      (if (:valid? report) sealed
+        (diagnostics/failure :anomalies/incorrect :finalization/invalid
+                             (:evidence-bundle/id record) (:errors report))))
     (catch InterruptedException interrupted
       (.interrupt (Thread/currentThread))
       (throw interrupted))
