@@ -15,7 +15,7 @@
 (defn- ^{:stratum 0} restore-and-publish! [ctx]
   (flow/continue (runtime/ensure-assembly ctx) recovery/publish!))
 
-(defn- ^{:stratum 0} call-with-exception-handling [output operation]
+(defn ^{:stratum 0} call-with-exception-handling [output operation]
   (try (operation)
        (catch InterruptedException _
          (let [result (model/failure output :interrupted)] (.interrupt (Thread/currentThread)) result))

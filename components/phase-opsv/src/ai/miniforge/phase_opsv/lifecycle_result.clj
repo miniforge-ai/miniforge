@@ -20,6 +20,7 @@
   (:require
    [ai.miniforge.anomaly.interface :as anomaly]
    [ai.miniforge.phase.interface :as phase]
+   [ai.miniforge.phase-opsv.evidence-checkpoint :as checkpoint]
    [ai.miniforge.phase-opsv.evidence-runtime :as evidence-runtime]
    [ai.miniforge.phase-opsv.lifecycle-outcome :as outcome]))
 
@@ -38,7 +39,7 @@
 
 (defn- ^{:stratum 0} persist-evidence [ctx]
   (let [persisted (evidence-runtime/persist ctx)
-        snapshot (get-in persisted [:execution/input :opsv/evidence-snapshot])
+        snapshot (checkpoint/persistence-failure persisted)
         output (get-in ctx [:phase :result :output])
         retained (get-in output [:anomaly/data :opsv/phase-output] output)]
     (if (anomaly/anomaly? snapshot)
@@ -49,15 +50,23 @@
 
 ;------------------------------------------------------------------------------ Layer 1
 
-(defn ^{:stratum 1} complete-phase
+(defn- ^{:stratum 1} with-completion-metadata [ctx success? end-time duration-ms]
+  (-> ctx
+      (assoc-in [:phase :ended-at] end-time)
+      (assoc-in [:phase :duration-ms] duration-ms)
+      (assoc-in [:phase :status] (if success? :completed :failed))
+      (assoc-in [:phase :metrics] (completed-metrics duration-ms))
+      (assoc-in [:phase :result :metrics :duration-ms] duration-ms)))
+
+;------------------------------------------------------------------------------ Layer 2
+
+(defn ^{:stratum 2} complete-phase
   [ctx phase-key success? end-time duration-ms]
-  (let [persisted (persist-evidence ctx)
+  (let [completed (with-completion-metadata ctx success? end-time duration-ms)
+        persisted (persist-evidence completed)
         success? (and success? (= :success (get-in persisted [:phase :result :status])))]
     (cond-> (-> persisted
-              (assoc-in [:phase :ended-at] end-time)
-              (assoc-in [:phase :duration-ms] duration-ms)
               (assoc-in [:phase :status] (if success? :completed :failed))
-              (assoc-in [:phase :metrics] (completed-metrics duration-ms))
               (assoc-in [:phase :result :metrics :duration-ms] duration-ms))
     success?
       (update-in [:execution :phases-completed] (fnil conj []) phase-key))))

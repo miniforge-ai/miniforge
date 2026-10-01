@@ -19,6 +19,7 @@
   "Public OPSV application transformations and adapter port."
   (:require
    [ai.miniforge.phase-opsv.actuation :as actuation]
+   [ai.miniforge.phase-opsv.evidence-recovery :as recovery]
    [ai.miniforge.phase-opsv.finalization-boundary :as finalization]
    [ai.miniforge.phase-opsv.adapter-factory :as adapter-factory]
    [ai.miniforge.phase-opsv.model :as model]
@@ -80,6 +81,13 @@
   "Resume retained post-actuation evidence or finalized N6 publication; never actuates."
   [ctx]
   (finalization/publish-finalized! ctx))
+
+(defn ^{:stratum 0} recover-actuation-evidence!
+  "Restore a failed actuation checkpoint and retry only its evidence operations.
+   Returns an updated context with the phase still failed, or an input anomaly.
+   The caller must persist the returned context. Never invokes the provider."
+  [ctx]
+  (recovery/recover-with-exception-handling! ctx))
 
 (defn ^{:stratum 0} actuate
   [ctx]

@@ -25,6 +25,7 @@
    [ai.miniforge.phase-opsv.events :as events]
    [ai.miniforge.phase-opsv.finalization-boundary :as finalization]
    [ai.miniforge.phase-opsv.finalization-config :as finalization-config]
+   [ai.miniforge.phase-opsv.terminal-evidence :as terminal]
    [ai.miniforge.phase-opsv.flow :as flow]
    [ai.miniforge.phase-opsv.post-actuation-checkpoint :as checkpoint]
    [ai.miniforge.phase-opsv.lifecycle-result :as lifecycle-result]))
@@ -73,8 +74,8 @@
 (defn- ^{:stratum 1} leave-phase
   [ctx]
   (let [phase-key (get-in ctx [:phase :name])
-        result (result-after-publication
-                ctx phase-key (get-in ctx [:phase :result]))
+        published (result-after-publication ctx phase-key (get-in ctx [:phase :result]))
+        result (terminal/complete-failure! ctx phase-key published)
         completed-ctx (assoc-in ctx [:phase :result] result)
         success? (phase/result-succeeded? result)
         end-time (System/currentTimeMillis)

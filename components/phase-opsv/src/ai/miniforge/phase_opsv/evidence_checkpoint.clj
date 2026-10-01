@@ -3,18 +3,52 @@
 ;; Licensed under the Apache License, Version 2.0.
 (ns ai.miniforge.phase-opsv.evidence-checkpoint
   "Preserve domain values across the shared workflow's text-oriented checkpoints."
-  (:require [ai.miniforge.phase-opsv.evidence-snapshot :as snapshot]))
+  (:require [ai.miniforge.anomaly.interface :as anomaly]
+            [ai.miniforge.phase-opsv.evidence-base :as base]
+            [ai.miniforge.phase-opsv.evidence-snapshot :as snapshot]))
 
 ;------------------------------------------------------------------------------ Layer 0
 
-(defn ^{:stratum 0} persist [ctx assembly]
-  (let [snapshot (snapshot/encode ctx :checkpoint assembly)]
-    (-> ctx
-        (assoc-in [:execution/input :opsv/evidence-assembly] assembly)
-        (assoc-in [:execution/input :opsv/evidence-snapshot] snapshot))))
+(defn ^{:stratum 0} persistence-failure [ctx]
+  (some #(when (anomaly/anomaly? %) %)
+        (map (get ctx :execution/input {}) [:opsv/evidence-snapshot :opsv/terminal-snapshot])))
+
+(defn- ^{:stratum 0} terminal-record [ctx]
+  (assoc (select-keys (:phase ctx) [:name :result :status :ended-at :duration-ms :metrics])
+         :opsv/evidence-base (base/bundle ctx)))
+
+(defn ^{:stratum 0} restore-terminal [ctx]
+  (if-not (and (map? (:execution/input ctx))
+               (contains? (:execution/input ctx) :opsv/terminal-snapshot))
+    ctx
+    (let [phase (snapshot/decode ctx :terminal-checkpoint
+                                 (get-in ctx [:execution/input :opsv/terminal-snapshot]))]
+      (if (anomaly/anomaly? phase) phase
+        (-> ctx
+            (assoc :phase (dissoc phase :opsv/evidence-base))
+            (assoc-in [:execution/opts :opsv/evidence-base] (:opsv/evidence-base phase)))))))
 
 (defn ^{:stratum 0} restore [ctx]
   (let [input (:execution/input ctx)]
     (if-not (contains? input :opsv/evidence-snapshot)
       (:opsv/evidence-assembly input)
       (snapshot/decode ctx :checkpoint (:opsv/evidence-snapshot input)))))
+
+;------------------------------------------------------------------------------ Layer 1
+
+(defn- ^{:stratum 1} persist-terminal [ctx]
+  (if (and (= :opsv/actuate (get-in ctx [:phase :name]))
+           (= :error (get-in ctx [:phase :result :status])))
+    (assoc-in ctx [:execution/input :opsv/terminal-snapshot]
+              (snapshot/encode ctx :terminal-checkpoint
+                               (terminal-record ctx)))
+    ctx))
+
+;------------------------------------------------------------------------------ Layer 2
+
+(defn ^{:stratum 2} persist [ctx assembly]
+  (let [encoded (snapshot/encode ctx :checkpoint assembly)]
+    (-> ctx
+        (assoc-in [:execution/input :opsv/evidence-assembly] assembly)
+        (assoc-in [:execution/input :opsv/evidence-snapshot] encoded)
+        persist-terminal)))

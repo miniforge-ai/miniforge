@@ -16,8 +16,15 @@
 (defn ^{:stratum 0} enabled? [ctx]
   (contains? (:execution/opts ctx) :opsv/evidence-base))
 
-(defn ^{:stratum 0} base-bundle [ctx]
-  (base/bundle ctx))
+(defn ^{:stratum 0} base-bundle
+  ([ctx] (base-bundle ctx nil))
+  ([ctx output]
+   (assoc (base/bundle ctx)
+          :evidence/outcome
+          (cond-> {:outcome/success (not (or (:opsv/phase-failure output) (:opsv/stopped? output)))}
+            (:opsv/phase-failure output)
+            (assoc :outcome/error-phase :opsv/actuate
+                   :outcome/error-message (get-in output [:opsv/phase-failure :anomaly/message]))))))
 
 (defn- ^{:stratum 0} assembly-status [ctx]
   (when-let [store (:opsv/evidence-assembly-store ctx)]

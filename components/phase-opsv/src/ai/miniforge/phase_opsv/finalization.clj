@@ -19,7 +19,7 @@
     (if (nil? bundle)
       (evidence/finalize-opsv-evidence!
         (:opsv/evidence-assembly-store ctx) (:evidence-bundle/id record)
-        (config/base-bundle ctx) (model/evidence-section record output) (:opsv/artifact-refs record))
+        (config/base-bundle ctx output) (model/evidence-section record output) (:opsv/artifact-refs record))
       bundle)))
 
 (defn ^{:stratum 0} assembly [ctx]

@@ -15,4 +15,4 @@
         ai.miniforge/phase {:local/root "../phase"}
         metosin/malli {:mvn/version "0.16.4"}}
  :aliases {:test {:extra-paths ["test" "test-resources"]
-                  :extra-deps {}}}}
+                  :extra-deps {ai.miniforge/coerce {:local/root "../coerce"}}}}}
