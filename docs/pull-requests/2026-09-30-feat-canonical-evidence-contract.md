@@ -12,13 +12,11 @@ Seals also require the canonical workflow tier and unique, correlated event-scop
 links with valid sequence ranges and counts. Semantic declarations must match root intent;
 resource counts, passed status, and violation IDs must agree with the shared intent rules.
 Actual behavior uses shared inference; zero changes also permit code-only refactoring.
-Shared semantic rules from #1965 enforce balanced migration creates/destroys in
-both the producer and canonical validator; failed reports must identify that rule.
-The outcome reliability prerequisite supplies canonical failure/degradation domains
-and SLI measurement shapes; invalid optional values remain invalid after rehashing.
-The optional-projection prerequisite normalizes release PR keys and omits
-unavailable runtime metadata and error phases. Shared assembled-producer fixtures
-pass this canonical API without weakening presence-aware validation.
+Shared producer contracts cover semantic rules, reliability, optional metadata,
+and canonical controls without relaxing field presence. Policy envelopes are optional.
+Control-record prerequisite #1969 is merged. Governance record schemas from #1972
+are integrated and exercised through the canonical public API with shared fixtures.
+Retarget to main after prerequisites merge; this PR must merge only into main.
 Event counts must equal the
 inclusive scoped sequence range; missing events cannot be certified as complete.
 Unsealed assembly inputs remain valid here, but are not publishable evidence.
@@ -38,7 +36,22 @@ Run all three evidence consumers, normal commit hooks, and the component standar
 Regressions cover malformed nested records, incomplete seals, tampering, and nonportable inputs.
 Require clean current-head review and CI before merging.
 
-After optional-projection integration, all three evidence consumers pass.
-The rebuilt CLI passes 30 tests and 457 assertions across canonical validation,
-optional projections, and reliability outcomes. Explicit stratum lint and kondo
-pass for the conflict resolution and new round-trip regression.
+All three evidence consumers and dashboard tests pass after #1969 integration.
+Rebuilt packaged canonical/dashboard regressions pass 16 tests and 272 assertions.
+Optional phase status is validated when present. Canonical-keyed policy violations
+normalize keyword IDs and legacy severities just like legacy-keyed producer records.
+Legacy artifact maps retain their `:id` fallback; explicitly malformed canonical
+IDs are not replaced. JVM and rebuilt packaged canonical/approval regressions
+pass 16 tests and 288 assertions after the approval-alias integration.
+The zero-count refactor exception requires declared refactor intent. All three
+evidence consumers pass after readiness/N8 integration; rebuilt packaged canonical
+and control schema regressions pass 16 tests and 296 assertions.
+N11 execution modes use the shared root schema's local/governed allowlist.
+Canonical validation reuses one phase-field registry for structural and output checks.
+All three consumers pass; rebuilt canonical/execution regressions pass 28 tests and 300 assertions.
+Merged control-records integration passes JVM and rebuilt packaged canonical,
+control-schema and lifecycle regressions: 22 tests and 327 assertions.
+Governance integration passes all three consumers and rebuilt packaged canonical
+and governance regressions: 22 tests and 371 assertions.
+The corrected resolution-trace and outcome contracts pass all three consumers
+and rebuilt packaged canonical/governance regressions: 25 tests and 385 assertions.

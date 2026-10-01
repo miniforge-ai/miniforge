@@ -1,18 +1,17 @@
 <!-- Title: Miniforge.ai -->
 <!-- Copyright 2025-2026 Christopher Lester (christopher@miniforge.ai) -->
 <!-- Licensed under the Apache License, Version 2.0. -->
-# Canonical evidence validation
+# Canonical evidence finalization
 
 ## Scope
 
 Stacked on canonical contract #1959; retarget main after it merges.
 Consumer presentation/export enforcement is reviewed independently in #1960.
-Expose manager-free validation of portable N6 bundle structure, domain values,
-optional OPSV evidence, and declared content hashes. Unhashed base bundles remain
-valid inputs before finalization. Content integrity does not establish authority.
+Use the manager-free canonical validation API from #1959 for OPSV finalization.
+That prerequisite validates portable N6 structure, domain values and declared hashes.
+Unhashed base bundles remain valid assembly inputs. Content integrity does not establish authority.
 
-Keep the existing manager protocol compatible and document its limited legacy
-validation contract. Published-evidence consumers must use the new canonical API.
+Published-evidence consumers must use the canonical API through #1960.
 OPSV finalization validates the candidate with that API before sealing or changing
 assembly state. Hash verification excludes both hash and signature per N6.
 Reject sealed base inputs instead of repairing or resealing them.
@@ -25,6 +24,8 @@ also set redacted handling, and the seal regressions cover string/integral cards
 and metadata without relying on serialized scanning or ordinary map equality.
 Read-only recovery validates retained seals and reference correlation.
 Recovery can adopt an existing published seal without replacing its timestamps or digest.
+Publication here is atomic in memory; this PR does not claim disk durability or
+the full N3 retention and replay contract.
 
 ## Standards adversarial pass
 
@@ -50,3 +51,5 @@ component-wide standards scan pass; final-head review and CI remain merge gates.
 After integrating #1963 and the shared semantic rules, all three evidence consumers
 pass and the rebuilt packaged canonical/assembly suite passes 35 tests with 326
 assertions. The component standards scan reports zero findings across 62 files.
+After governance trace integration, all three evidence consumers pass; the rebuilt
+packaged canonical and assembly suite passes 38 tests with 389 assertions.

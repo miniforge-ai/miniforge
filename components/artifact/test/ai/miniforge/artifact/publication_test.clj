@@ -5,6 +5,7 @@
   (:require [ai.miniforge.anomaly.interface :as anomaly]
             [ai.miniforge.artifact.interface :as artifact]
             [ai.miniforge.artifact.publication-codec :as codec]
+            [ai.miniforge.artifact.publication-boundary :as boundary]
             [ai.miniforge.artifact.publication-files :as files]
             [ai.miniforge.artifact.publication-record :as record-codec]
             [clojure.java.io :as io]
@@ -27,7 +28,23 @@
   (artifact/build-artifact {:id (random-uuid) :type :manifest :version "1.0.0"
                             :content {:evidence/hash "verified"}}))
 
+(defn- ^{:stratum 0} check-unavailable [id result]
+  (is (= :unavailable (:anomaly/type result)))
+  (is (= id (get-in result [:anomaly/data :artifact/id]))))
+
 ;------------------------------------------------------------------------------ Layer 1
+
+(defn- ^{:stratum 1} check-durability-anomaly [directory]
+  (let [value (record)
+        id (:artifact/id value)
+        failure (boundary/failure :unavailable :publication/unconfirmed id)]
+    (with-redefs [files/write! (constantly failure)]
+      (check-unavailable id (artifact/publish! directory value)))
+    (is (nil? (artifact/read-published directory id)))
+    (with-redefs [files/confirm! (constantly failure)]
+      (check-unavailable id (artifact/publish! directory value)))
+    (is (= value (artifact/read-published directory id)))
+    (is (= value (artifact/publish! directory value)))))
 
 (deftest ^{:stratum 1} deferred-input-is-rejected-before-realization-test
   (with-directory
@@ -248,3 +265,8 @@
             (is (= :fatal (:anomaly/type fatal)))
             (doseq [result [conflict fatal]]
               (is (= :unavailable (get-in result [:anomaly/data :publication/cleanup-failure :anomaly/type]))))))))))
+
+;------------------------------------------------------------------------------ Layer 2
+
+(deftest ^{:stratum 2} durability-anomaly-never-acknowledges-publication-test
+  (with-directory check-durability-anomaly))

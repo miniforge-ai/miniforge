@@ -11,15 +11,9 @@
 
 ;------------------------------------------------------------------------------ Layer 0
 
-(def ^{:stratum 0} structured-fields
-  {:evidence/semantic-validation domain/semantic-validation-schema
-   :evidence/plan domain/phase-evidence-schema
-   :evidence/design domain/phase-evidence-schema
-   :evidence/implement domain/phase-evidence-schema
-   :evidence/verify domain/phase-evidence-schema
-   :evidence/review domain/phase-evidence-schema
-   :evidence/release domain/phase-evidence-schema
-   :evidence/observe domain/phase-evidence-schema})
+(def ^{:stratum 0} phase-fields
+  [:evidence/plan :evidence/design :evidence/implement :evidence/verify
+   :evidence/review :evidence/release :evidence/observe])
 
 (def ^{:stratum 0} collection-fields
   {:evidence/tool-invocations domain/tool-invocation-schema
@@ -37,11 +31,12 @@
     [{:code :invalid-opsv-evidence}]))
 
 (defn- ^{:stratum 0} semantic-intent-errors [bundle]
-  (when-let [semantic (:evidence/semantic-validation bundle)]
-    (when-not (and (contains? domain/intent-types (:semantic-validation/declared-intent semantic))
-                  (contains? domain/intent-types (:semantic-validation/actual-behavior semantic))
-                  (= (get-in bundle [:evidence/intent :intent/type])
-                     (:semantic-validation/declared-intent semantic)))
+  (let [semantic (:evidence/semantic-validation bundle)]
+    (when (and semantic
+               (not (and (contains? domain/intent-types (:semantic-validation/declared-intent semantic))
+                         (contains? domain/intent-types (:semantic-validation/actual-behavior semantic))
+                         (= (get-in bundle [:evidence/intent :intent/type])
+                          (:semantic-validation/declared-intent semantic)))))
       [{:code :invalid-semantic-intent}])))
 
 (defn- ^{:stratum 0} semantic-count-errors [bundle]
@@ -50,6 +45,10 @@
       [{:code :inconsistent-semantic-conclusion}])))
 
 ;------------------------------------------------------------------------------ Layer 1
+
+(def ^{:stratum 1} structured-fields
+  (into {:evidence/semantic-validation domain/semantic-validation-schema}
+        (zipmap phase-fields (repeat domain/phase-evidence-schema))))
 
 (defn- ^{:stratum 1} structured-errors [bundle [field field-schema]]
   (when (contains? bundle field)
@@ -88,9 +87,7 @@
                        (get-in bundle [:evidence/semantic-validation :semantic-validation/violations]))
                (mapcat (partial structured-errors bundle) structured-fields)
                (mapcat (partial collection-errors bundle) collection-fields)
-               (mapcat (partial phase-output-errors bundle)
-                       [:evidence/plan :evidence/design :evidence/implement :evidence/verify
-                        :evidence/review :evidence/release :evidence/observe])
+               (mapcat (partial phase-output-errors bundle) phase-fields)
                (opsv-errors bundle))))
 
 (comment
