@@ -1,4 +1,4 @@
-;; Copyright 2025 miniforge.ai
+;; Copyright 2025-2026 Christopher Lester (christopher@miniforge.ai)
 ;;
 ;; Licensed under the Apache License, Version 2.0 (the "License");
 ;; you may not use this file except in compliance with the License.
@@ -12,7 +12,8 @@
 ;; See the License for the specific language governing permissions and
 ;; limitations under the License.
 (ns ai.miniforge.web-dashboard.state.core
-  "Pure utilities and state atom creation.")
+  "Utilities and dashboard state creation."
+  (:require [ai.miniforge.web-dashboard.control-identity :as control-identity]))
 
 ;------------------------------------------------------------------------------ Layer 0
 
@@ -43,7 +44,8 @@
                 :archived-workflows (atom {})
                 :archive-loading? (atom true)
                 :start-time (System/currentTimeMillis)}
-               opts)))
+               opts
+               {:control/requester (control-identity/register! (:event-stream opts))})))
 
 (defn ^{:stratum 0} get-uptime
   "Get server uptime in milliseconds."

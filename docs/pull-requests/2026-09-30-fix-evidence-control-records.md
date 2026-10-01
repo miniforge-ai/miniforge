@@ -22,6 +22,8 @@ a lossy control-action projection. Valid portable records must remain valid.
 - Preserve canonical action keys and structured results in the collector.
 - Preserve supplied approval and state evidence without inventing missing facts.
 - Test actual control-event producers and portable record validation.
+- Register a server-owned dashboard listener per instance and retain its ID in
+  control evidence; ignore body-supplied identities and release it on shutdown.
 
 Approval is conditional under N8. The schema accepts N6 `:status` and N8
 `:approval-status` vocabulary. Missing states remain missing, not fabricated.
@@ -38,6 +40,10 @@ All three evidence-bundle consumer suites pass. Kondo and inferred strata pass.
 The packaged CLI was rebuilt with the production changes.
 After integrating current main, focused JVM and rebuilt packaged suites pass
 16 tests and 87 assertions, including optional producer projections.
+Dashboard producer regressions pass eight tests and 48 assertions, covering
+stable registered identity, body spoofing, assembled evidence, and listener cleanup.
+The full dashboard consumer suite passes. Rebuilt packaged dashboard and control
+record regressions pass 15 tests and 83 assertions.
 
 ## Deployment Plan
 
