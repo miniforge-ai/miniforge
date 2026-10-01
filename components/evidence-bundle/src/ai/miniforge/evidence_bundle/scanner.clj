@@ -43,6 +43,12 @@
 
 ;------------------------------------------------------------------------------ Layer 1
 
+(defn ^{:stratum 1} protection-required?
+  "Whether findings establish content covered by the shared secret contract."
+  [scan-result]
+  (boolean (some #(contains? secret-finding-types (:finding/type %))
+                 (:scan/findings scan-result))))
+
 (defn- ^{:stratum 1} named-findings [bundle]
   (let [labelled (into [] (keep (partial pattern-finding bundle)) sensitive-patterns)]
     (cond-> labelled
