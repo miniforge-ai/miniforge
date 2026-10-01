@@ -54,6 +54,14 @@
 
 ;------------------------------------------------------------------------------ Layer 1
 
+(deftest ^{:stratum 1} canonical-boundary-checks-defined-optional-sections
+  (let [bundle (base-bundle)]
+    (is (valid? bundle))
+    (doseq [field [:evidence/dag-run :evidence/task-workflows :evidence/merge
+                  :evidence/annotations :evidence/pack-run]
+            invalid [nil 42 "invalid" {} [42]]]
+      (is (not (valid? (assoc bundle field invalid))) (str field)))))
+
 (deftest ^{:stratum 1} collected-optional-producer-fields-pass-canonical-validation
   (doseq [bundle (roundtrips/collected-bundles)]
     (is (valid? bundle))))
