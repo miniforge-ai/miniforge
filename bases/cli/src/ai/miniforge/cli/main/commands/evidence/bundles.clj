@@ -27,7 +27,6 @@
    [clojure.java.io :as io]
    [clojure.string :as str]
    [ai.miniforge.cli.app-config :as app-config]
-   [ai.miniforge.cli.main.commands.evidence.exporting :as exporting]
    [ai.miniforge.cli.main.commands.evidence.validation :as validation]
    [ai.miniforge.cli.main.commands.shared :as shared]
    [ai.miniforge.cli.main.display :as display]
@@ -80,21 +79,15 @@
     (nil? value) "unknown"
     :else (str value)))
 
-;; Command implementations
-(defn ^{:stratum 0} display-component-bundles
-  "Render bundles returned from the evidence-bundle component interface."
-  [bundles]
-  (if (seq bundles)
-    (doseq [bundle bundles
-            :let [id (str (or (:evidence-bundle/id bundle) (:bundle/id bundle)))]
-            :when (validation/accepted? id bundle)]
-      (println (messages/t :evidence/bundle-entry
-                          {:id          (display/style id :bold true)
-                           :workflow-id (:evidence-bundle/workflow-id bundle)
-                           :status      (get-in bundle [:evidence/outcome :outcome/success])})))
-    (println (messages/t :evidence/none))))
-
 ;------------------------------------------------------------------------------ Layer 1
+
+(defn- ^{:stratum 1} display-bundle! [diagnostic-id bundle]
+  (when (validation/accepted? diagnostic-id bundle)
+    (let [id (display/style (str (:evidence-bundle/id bundle)) :bold true)
+          workflow-id (:evidence-bundle/workflow-id bundle)
+          status (canonical-status bundle)]
+      (println (messages/t :evidence/bundle-entry
+                          {:id id :workflow-id workflow-id :status status})))))
 
 ;; Display helpers
 (def ^{:stratum 1} bundle-detail-spec
@@ -147,6 +140,19 @@
 
 ;------------------------------------------------------------------------------ Layer 2
 
+(defn ^{:stratum 2} display-component-bundles [bundles]
+  (if (seq bundles)
+    (doseq [bundle bundles]
+      (display-bundle! (str (or (:evidence-bundle/id bundle) (:bundle/id bundle))) bundle))
+    (println (messages/t :evidence/none))))
+
+(defn ^{:stratum 2} display-filesystem-bundles []
+  (let [files (scan-evidence-dir)]
+    (if (seq files)
+      (doseq [file files]
+        (display-bundle! (.getName file) (load-bundle-from-file file)))
+      (println (messages/t :evidence/none)))))
+
 (defn ^{:stratum 2} load-bundle-for-show
   "Load a bundle from the component interface or the filesystem."
   [id]
@@ -154,13 +160,5 @@
       (let [f (io/file (str (evidence-dir) "/" id ".edn"))]
         (when (.exists f) (load-bundle-from-file f)))))
 
-(defn ^{:stratum 2} export-bundle-fallback
-  "Load once and export only validated, sealed evidence as EDN."
-  [id fmt]
-  (let [src (io/file (str (evidence-dir) "/" id ".edn"))]
-    (if (.exists src)
-      (let [dest (str (evidence-dir) "/" id "-export." fmt)
-            bundle (load-bundle-from-file src)]
-        (exporting/export! id bundle fmt dest))
-      (do (display/print-error (messages/t :evidence/export-not-found {:id id}))
-          (shared/exit! 1)))))
+(comment
+  (scan-evidence-dir))

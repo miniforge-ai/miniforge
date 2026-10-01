@@ -3,7 +3,8 @@
 ;; Licensed under the Apache License, Version 2.0.
 (ns ai.miniforge.cli.main.commands.evidence.exporting
   "Export the validated in-memory value, without rereading mutable source bytes."
-  (:require [ai.miniforge.cli.main.commands.evidence.validation :as validation]
+  (:require [clojure.java.io :as io]
+            [ai.miniforge.cli.main.commands.evidence.validation :as validation]
             [ai.miniforge.cli.main.commands.shared :as shared]
             [ai.miniforge.cli.main.display :as display]
             [ai.miniforge.cli.messages :as messages]
@@ -17,6 +18,7 @@
 
 (defn- ^{:stratum 0} write-with-exception-handling! [bundle destination]
   (try
+    (io/make-parents destination)
     (spit destination (evidence/encode-bundle-edn bundle))
     (display/print-success (messages/t :evidence/export-raw {:path destination}))
     (catch InterruptedException interrupted

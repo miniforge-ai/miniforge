@@ -29,6 +29,7 @@
   (:require
    [ai.miniforge.cli.app-config :as app-config]
    [ai.miniforge.cli.main.commands.evidence.bundles :as bundles]
+   [ai.miniforge.cli.main.commands.evidence.exporting :as exporting]
    [ai.miniforge.cli.main.commands.evidence.validation :as validation]
    [ai.miniforge.cli.main.commands.shared :as shared]
    [ai.miniforge.cli.main.display :as display]
@@ -53,29 +54,15 @@
      :bundle/failure-attribution (bundles/failure-attribution-summary
                                   (:evidence/failure-attribution bundle))}))
 
-(defn- ^{:stratum 0} display-filesystem-bundles
-  "Validate and render discovered evidence."
-  []
-  (bundles/display-component-bundles
-    (map bundles/load-bundle-from-file (bundles/scan-evidence-dir))))
+(defn- ^{:stratum 0} export-bundle! [id fmt]
+  (let [bundle (bundles/load-bundle-for-show id)
+        destination (str (bundles/evidence-dir) "/" id "-export." fmt)]
+    (if bundle
+      (exporting/export! id bundle fmt destination)
+      (do (display/print-error (messages/t :evidence/export-not-found {:id id}))
+          (shared/exit! 1)))))
 
-(defn ^{:stratum 0} evidence-export-cmd
-  "Export a validated, sealed evidence bundle as EDN."
-  [opts]
-  (let [{:keys [id]} opts]
-    (if-not id
-      (shared/usage-error! :evidence/export-usage "evidence export <id> edn")
-      (bundles/export-bundle-fallback id (get opts :format "edn")))))
-
-;------------------------------------------------------------------------------ Layer 1
-
-(defn- ^{:stratum 1} display-bundle-detail
-  "Render the detail view for a single evidence bundle."
-  [id bundle]
-  (display/render-detail (assoc bundles/bundle-detail-spec :header-params {:id id})
-                         (normalize-bundle-detail bundle)))
-
-(defn ^{:stratum 1} evidence-list-cmd
+(defn ^{:stratum 0} evidence-list-cmd
   "List all available evidence bundles.
 
    Shows bundles from the evidence-bundle component if available,
@@ -88,8 +75,24 @@
                           'ai.miniforge.evidence-bundle.interface/list-bundles)]
     (if component-result
       (bundles/display-component-bundles component-result)
-      (display-filesystem-bundles)))
+      (bundles/display-filesystem-bundles)))
   (println))
+
+;------------------------------------------------------------------------------ Layer 1
+
+(defn ^{:stratum 1} evidence-export-cmd
+  "Export a validated, sealed evidence bundle as EDN."
+  [opts]
+  (let [{:keys [id]} opts]
+    (if-not id
+      (shared/usage-error! :evidence/export-usage "evidence export <id> edn")
+      (export-bundle! id (get opts :format "edn")))))
+
+(defn- ^{:stratum 1} display-bundle-detail
+  "Render the detail view for a single evidence bundle."
+  [id bundle]
+  (display/render-detail (assoc bundles/bundle-detail-spec :header-params {:id id})
+                         (normalize-bundle-detail bundle)))
 
 ;------------------------------------------------------------------------------ Layer 2
 

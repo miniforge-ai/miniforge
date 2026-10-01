@@ -145,6 +145,22 @@
       (spit f "{}")
       (is (nil? (bundles/load-bundle-from-file f))))))
 
+(deftest ^{:stratum 1} list-reports-canonical-status-and-rejected-filenames-test
+  (doseq [[success status] [[true "completed"] [false "failed"]]]
+    (let [bundle (f/bundle {:evidence/outcome (make-outcome :outcome/success success)})]
+      (with-redefs [shared/call-optional-provider (constantly [bundle])]
+        (is (.contains (with-out-str (sut/evidence-list-cmd {})) status)))))
+  (let [directory (str *tmp-dir* "/evidence")]
+    (fs/create-dirs directory)
+    (spit (str directory "/malformed.edn") "{")
+    (spit (str directory "/missing-id.edn") "{}")
+    (with-redefs [shared/call-optional-provider (constantly nil)
+                  app-config/home-dir (constantly *tmp-dir*)]
+      (let [output (with-out-str (sut/evidence-list-cmd {}))]
+        (is (.contains output "malformed.edn"))
+        (is (.contains output "missing-id.edn"))
+        (is (.contains output "refused"))))))
+
 ;------------------------------------------------------------------------------ Layer 2
 
 (deftest ^{:stratum 2} evidence-show-cmd-with-bundle-test
@@ -195,5 +211,19 @@
       (spit source (pr-str sealed))
       (is (.contains (with-out-str (sut/evidence-export-cmd {:id "checked" :format "json"})) "Unsupported"))
       (is (not (fs/exists? (str directory "/checked-export.json")))))))
+
+(deftest ^{:stratum 2} provider-only-bundle-exports-the-validated-snapshot-test
+  (let [bundle (make-canonical-bundle)
+        destination (str *tmp-dir* "/evidence/provider-export.edn")]
+    (with-redefs [shared/call-optional-provider (constantly bundle)
+                  app-config/home-dir (constantly *tmp-dir*)]
+      (with-out-str (sut/evidence-export-cmd {:id "provider"}))
+      (is (= bundle (edn/read-string (slurp destination)))))
+    (with-redefs [shared/call-optional-provider (constantly (assoc bundle :evidence/content-hash "wrong"))
+                  app-config/home-dir (constantly *tmp-dir*)
+                  shared/exit! identity]
+      (spit destination "unchanged")
+      (is (.contains (with-out-str (sut/evidence-export-cmd {:id "provider"})) "refused"))
+      (is (= "unchanged" (slurp destination))))))
 
 (use-fixtures :each tmp-dir-fixture)
