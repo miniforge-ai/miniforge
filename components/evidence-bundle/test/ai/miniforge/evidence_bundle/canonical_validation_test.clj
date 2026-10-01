@@ -169,7 +169,13 @@
                                   (assoc semantic :semantic-validation/violations [invalid])))))))
     (doseq [[field value] [[:semantic-validation/declared-intent :destroy]
                           [:semantic-validation/declared-intent :unknown]
-                          [:semantic-validation/actual-behavior :unknown]]]
+                          [:semantic-validation/actual-behavior :unknown]
+                          [:semantic-validation/resource-creates 1]
+                          [:semantic-validation/resource-updates 0]
+                          [:semantic-validation/passed? false]
+                          [:semantic-validation/violations [{:violation/rule-id "semantic-creates"
+                                                             :violation/severity :critical
+                                                             :violation/message "Contradictory violation"}]]]]
       (is (false? (:valid? (evidence/validate-canonical-bundle
                            (assoc bundle :evidence/semantic-validation (assoc semantic field value)))))))
     (doseq [range [{} {:start-seq "0" :end-seq 1} {:start-seq 0} nil

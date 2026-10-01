@@ -66,11 +66,7 @@
   "Check if actual count matches rule.
    Rule can be: 0 (must be zero), :pos (must be positive), :any (any value)"
   [rule-value actual-count]
-  (case rule-value
-    0 (= 0 actual-count)
-    :pos (> actual-count 0)
-    :any true
-    (= rule-value actual-count)))
+  (domain/check-count-rule rule-value actual-count))
 
 ;------------------------------------------------------------------------------ Layer 1
 

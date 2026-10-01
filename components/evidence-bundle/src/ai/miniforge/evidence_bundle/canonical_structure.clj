@@ -44,6 +44,11 @@
                      (:semantic-validation/declared-intent semantic)))
       [{:code :invalid-semantic-intent}])))
 
+(defn- ^{:stratum 0} semantic-count-errors [bundle]
+  (let [value (:evidence/semantic-validation bundle)]
+    (when (and value (not (domain/consistent-semantic-conclusion? value)))
+      [{:code :inconsistent-semantic-conclusion}])))
+
 ;------------------------------------------------------------------------------ Layer 1
 
 (defn- ^{:stratum 1} structured-errors [bundle [field field-schema]]
@@ -76,6 +81,7 @@
   (vec (concat (field-errors schema/evidence-bundle-schema bundle)
                (intent-errors (:evidence/intent bundle))
                (semantic-intent-errors bundle)
+               (semantic-count-errors bundle)
                (field-errors domain/outcome-schema (:evidence/outcome bundle))
                (mapcat policy-errors (:evidence/policy-checks bundle))
                (mapcat (partial field-errors domain/violation-schema)
