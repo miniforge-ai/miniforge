@@ -224,7 +224,8 @@
         (doseq [destination [(str *tmp-dir* "/requested/audit." format)
                              (str "audit-" (random-uuid) "." format)]]
           (try+
-            (with-out-str (sut/evidence-export-cmd (export-options format destination)))
+            (is (.contains (with-out-str (sut/evidence-export-cmd (export-options format destination)))
+                           (messages/t :evidence/export-success {:path destination})))
             (is (= (formats/encode bundle format) (slurp destination :encoding "UTF-8")))
             (finally (fs/delete-if-exists destination))))))))
 

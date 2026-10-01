@@ -433,10 +433,9 @@
   :evidence/show-phases "  Phases:    {count}"
   :evidence/not-found "Evidence bundle not found: {id}\nRun `{command}` to see available bundles."
   :evidence/export-usage "Usage: {command}"
-  :evidence/export-success "Exported evidence bundle: {id}"
+  :evidence/export-success "Exported: {path}"
   :evidence/export-format "  Format: {format}"
   :evidence/export-path "  Path:   {path}"
-  :evidence/export-raw "Exported (raw): {path}"
   :evidence/export-not-found "Evidence bundle not found: {id}"
 
   ;; ── Fleet ─────────────────────────────────────────────────────────────
