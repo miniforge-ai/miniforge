@@ -27,6 +27,7 @@
    [ai.miniforge.event-stream.core :as core]
    [ai.miniforge.event-stream.approval :as approval]
    [ai.miniforge.event-stream.control-authorization-adapter :as authorization]
+   [ai.miniforge.event-stream.control-events :as control-events]
    [ai.miniforge.response.interface :as response]))
 
 ;------------------------------------------------------------------------------ Layer 0
@@ -142,9 +143,7 @@
       ;; RBAC denied
       (do
         (core/publish! stream
-                       (core/control-action-requested
-                        stream workflow-id action-id (:action/type action)
-                        requester))
+                       (control-events/requested stream action))
         (let [denial {:status :denied
                       :reason (:reason auth-result)
                       :anomaly (:anomaly auth-result)}]
@@ -155,9 +154,7 @@
       ;; RBAC authorized — execute
       (do
         (core/publish! stream
-                       (core/control-action-requested
-                        stream workflow-id action-id (:action/type action)
-                        requester))
+                       (control-events/requested stream action))
         (let [result (try
                        (let [r (execution-fn action)]
                          (response/success r))
