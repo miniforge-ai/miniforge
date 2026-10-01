@@ -45,6 +45,8 @@ dashboard suite pass again. Rebuilt packaged failure and malformed-dispatch
 regressions pass 10 tests and 108 assertions. Kondo and inferred strata are clean.
 Interruption and startup-boundary regressions pass 14 tests and 90 assertions
 on the JVM and rebuilt packaged CLI; the worker retains its interrupt signal.
+The HTTP-handler interruption case is also covered. Combined JVM and rebuilt
+packaged control regressions pass 12 tests and 111 assertions.
 
 ## Deployment Plan
 

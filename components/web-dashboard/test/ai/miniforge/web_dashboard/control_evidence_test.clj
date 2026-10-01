@@ -21,6 +21,8 @@
 
 (def ^{:stratum 0} failure-message "Intervention unavailable")
 
+(def ^{:stratum 0} wait-ms 5000)
+
 (defn- ^{:stratum 0} dashboard [stream]
   (control-identity/attach! (state/create-state {:event-stream stream})))
 
@@ -103,3 +105,14 @@
           (is (= :failure (:status result)))
           (is (response/error? result))
           (is (string? (get-in result [:error :message]))))))))
+
+(deftest ^{:stratum 2} interrupted-interventions-retain-the-worker-signal
+  (let [dashboard-state (dashboard (events/create-event-stream {:sinks []}))]
+    (with-redefs [events/request-intervention! (fn [_] (throw (InterruptedException. failure-message)))]
+      (let [worker (future
+                     (try
+                       (let [http (handlers/handle-api-workflow-command-v2
+                                    dashboard-state (random-uuid) (control-body))]
+                         [(:status http) (.isInterrupted (Thread/currentThread))])
+                       (finally (Thread/interrupted))))]
+        (is (= [500 true] (deref worker wait-ms :timeout)))))))

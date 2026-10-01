@@ -47,6 +47,8 @@
         :intervention/requested-by requested-by
         :intervention/request-source :dashboard})
       (catch Exception e
+        (when (instance? InterruptedException e)
+          (.interrupt (Thread/currentThread)))
         (support/make-anomaly :anomalies/fault
                               (messages/t :control/intervention-failed {:error (ex-message e)})
                               {:workflow-id workflow-id :command command})))

@@ -132,7 +132,7 @@
    - opts: Optional map with :roles (RBAC roles, defaults to default-roles)
 
    Emits :control-action/requested before execution and
-   :control-action/executed after. Returns result map with :status and :result."
+   :control-action/executed after. Returns the normalized executor result or denial."
   [stream action execution-fn & [opts]]
   (let [workflow-id (get-in action [:action/target :target-id])
         action-id (:action/id action)
