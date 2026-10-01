@@ -21,6 +21,10 @@ are not skipped; malformed records fail validation and fatal errors propagate.
 Validate present values without inventing absent knowledge or gate history.
 Use N4 section 3.3 for recorded gate violations, as required by N6 section 2.13.
 Gate records check exact resolved versions, pack hashes, bindings and waiver joins.
+Resolved versions must satisfy recorded exact, caret, tilde or whitespace-joined
+comparison constraints; unsupported range syntax fails closed. SemVer precedence
+handles prerelease identifiers and ignores build metadata, with explicit prerelease
+opt-in. This does not reuse the separate workspace DateVer dependency rules.
 Waived rules must remain in the violations; waived gates cannot masquerade as passed.
 Keep legacy supervisory entities separate from the portable N6 record shape.
 

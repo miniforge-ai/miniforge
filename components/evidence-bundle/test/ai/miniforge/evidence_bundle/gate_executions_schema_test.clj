@@ -44,6 +44,8 @@
     (doseq [[path value] [[[:gate-execution/outcome] :unknown]
                           [[:gate-execution/binding :gate/id] :other]
                           [[:gate-execution/packs 0 :pack/version] "^2.0"]
+                          [[:gate-execution/packs 0 :pack/version] "3.0.0"]
+                          [[:gate-execution/binding :binding/packs 0 :pack/version] "2.0.0"]
                           [[:gate-execution/packs 0 :pack/content-hash] "invalid"]
                           [[:gate-execution/violations 0 :violation/rule-id] "rule/example"]
                           [[:gate-execution/violations 0 :violation/severity] :critical-ish]
