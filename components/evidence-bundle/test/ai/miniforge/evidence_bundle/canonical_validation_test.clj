@@ -134,6 +134,8 @@
           key (keyword "evidence" (name phase-name))
           bundle (assoc (base-bundle) key phase)]
       (is (zero? (:phase/inner-loop-iterations phase)))
+      (is (false? (:valid? (evidence/validate-canonical-bundle
+                           (assoc-in bundle [key :phase/name] :contradictory-phase)))))
       (is (:valid? (evidence/validate-canonical-bundle bundle)))
       (is (false? (:valid? (evidence/validate-canonical-bundle
                            (assoc-in bundle [key :phase/output :metrics] 42)))))

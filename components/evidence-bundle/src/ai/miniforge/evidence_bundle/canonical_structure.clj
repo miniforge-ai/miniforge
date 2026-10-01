@@ -47,7 +47,10 @@
 
 (defn- ^{:stratum 1} phase-output-errors [bundle field]
   (when (contains? bundle field)
-    (field-errors domain/phase-output-schema (get-in bundle [field :phase/output]))))
+    (concat
+      (field-errors domain/phase-output-schema (get-in bundle [field :phase/output]))
+      (when (not= (keyword (name field)) (get-in bundle [field :phase/name]))
+        [{:code :phase-name-mismatch :field field}]))))
 
 (defn- ^{:stratum 1} policy-errors [check]
   (concat (field-errors domain/policy-check-schema check)
