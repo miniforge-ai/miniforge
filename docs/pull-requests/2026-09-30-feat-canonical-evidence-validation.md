@@ -53,3 +53,8 @@ pass and the rebuilt packaged canonical/assembly suite passes 35 tests with 326
 assertions. The component standards scan reports zero findings across 62 files.
 After governance trace integration, all three evidence consumers pass; the rebuilt
 packaged canonical and assembly suite passes 38 tests with 389 assertions.
+Retained-seal recovery also enforces shared redaction across payload and metadata
+after canonical portability checks. It rejects root and nested sensitive metadata
+without changing the retained assembly or repairing and resealing the input.
+After phase-link and bounded-metadata integration, all three evidence consumers
+pass; rebuilt canonical and assembly tests pass 40 tests with 441 assertions.

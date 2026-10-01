@@ -6,14 +6,11 @@
   (:require [ai.miniforge.evidence-bundle.schema :as schema]
             [ai.miniforge.evidence-bundle.schema.domain :as domain]
             [ai.miniforge.evidence-bundle.schema.opsv :as opsv]
+            [ai.miniforge.evidence-bundle.schema.phase-linkage :as phase-linkage]
             [ai.miniforge.evidence-bundle.schema.validation :as validation]
             [malli.core :as m]))
 
 ;------------------------------------------------------------------------------ Layer 0
-
-(def ^{:stratum 0} phase-fields
-  [:evidence/plan :evidence/design :evidence/implement :evidence/verify
-   :evidence/review :evidence/release :evidence/observe])
 
 (def ^{:stratum 0} collection-fields
   {:evidence/tool-invocations domain/tool-invocation-schema
@@ -44,11 +41,11 @@
     (when (and value (not (domain/consistent-semantic-conclusion? value)))
       [{:code :inconsistent-semantic-conclusion}])))
 
-;------------------------------------------------------------------------------ Layer 1
-
-(def ^{:stratum 1} structured-fields
+(def ^{:stratum 0} structured-fields
   (into {:evidence/semantic-validation domain/semantic-validation-schema}
-        (zipmap phase-fields (repeat domain/phase-evidence-schema))))
+        (zipmap phase-linkage/phase-fields (repeat domain/phase-evidence-schema))))
+
+;------------------------------------------------------------------------------ Layer 1
 
 (defn- ^{:stratum 1} structured-errors [bundle [field field-schema]]
   (when (contains? bundle field)
@@ -87,7 +84,7 @@
                        (get-in bundle [:evidence/semantic-validation :semantic-validation/violations]))
                (mapcat (partial structured-errors bundle) structured-fields)
                (mapcat (partial collection-errors bundle) collection-fields)
-               (mapcat (partial phase-output-errors bundle) phase-fields)
+               (mapcat (partial phase-output-errors bundle) phase-linkage/phase-fields)
                (opsv-errors bundle))))
 
 (comment

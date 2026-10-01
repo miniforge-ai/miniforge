@@ -55,3 +55,11 @@ Governance integration passes all three consumers and rebuilt packaged canonical
 and governance regressions: 22 tests and 371 assertions.
 The corrected resolution-trace and outcome contracts pass all three consumers
 and rebuilt packaged canonical/governance regressions: 25 tests and 385 assertions.
+The pure domain and phase-link contracts are split into prerequisite #1974.
+Collected phases retain missing ranges as invalid values instead of inventing
+audit positions. Policy projections supply explicit location and repair fields.
+The shared phase registry joins every phase range to its workflow event link.
+Metadata is checked before recursive consumers: reject deferred or nonportable
+values and cap the combined walk at 65,536 nodes and 128 levels.
+All three evidence consumers pass. Rebuilt canonical/domain/publication tests
+pass 24 tests with 457 assertions; shared-fixture canonical tests pass 17/324.

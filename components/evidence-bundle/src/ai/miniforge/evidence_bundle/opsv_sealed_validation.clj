@@ -6,6 +6,7 @@
   (:require [ai.miniforge.evidence-bundle.canonical-validation :as canonical]
             [ai.miniforge.evidence-bundle.opsv-finalization-references :as references]
             [ai.miniforge.evidence-bundle.schema.opsv :as schema]
+            [ai.miniforge.redaction.interface :as redaction]
             [malli.core :as m]))
 
 ;------------------------------------------------------------------------------ Layer 0
@@ -21,6 +22,7 @@
 
 (defn- ^{:stratum 1} valid? [record bundle available-ids]
   (and (:valid? (canonical/validate-with-exception-handling bundle))
+       (redaction/clean? bundle)
        (correlated? record bundle)
        (empty? (references/errors record (:evidence/opsv bundle) available-ids))))
 

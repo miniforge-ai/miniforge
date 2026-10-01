@@ -41,7 +41,7 @@
 (defn- ^{:stratum 0} artifact-ids? [value]
   (and (vector? value) (every? uuid? value)))
 
-(defn- ^{:stratum 0} event-stream-range? [value]
+(defn ^{:stratum 0} event-stream-range? [value]
   (and (map? value) (nat-int? (:start-seq value)) (nat-int? (:end-seq value))
        (<= (:start-seq value) (:end-seq value))))
 
@@ -194,7 +194,7 @@
    :phase/output map?
    :phase/artifacts artifact-ids?
    (optional-key/optional-key :phase/inner-loop-iterations) nat-int?
-   (optional-key/optional-key :phase/event-stream-range) event-stream-range?})
+   :phase/event-stream-range event-stream-range?})
 
 ;; Artifact Provenance Schema
 (def ^{:stratum 1} provenance-schema
@@ -259,9 +259,9 @@
   {:violation/rule-id string?
    :violation/severity (fn [s] (contains? violation-severities s))
    :violation/message string?
-   (optional-key/optional-key :violation/location) map?
+   :violation/location map?
    (optional-key/optional-key :violation/remediation) string?
-   (optional-key/optional-key :violation/auto-fixable?) boolean?})
+   :violation/auto-fixable? boolean?})
 
 (def ^{:stratum 1} outcome-schema
   "Schema for workflow outcome."

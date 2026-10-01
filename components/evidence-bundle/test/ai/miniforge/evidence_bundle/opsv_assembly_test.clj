@@ -185,6 +185,19 @@
     (is (response/anomaly-map? (evidence/restore-finalized-opsv-bundle! restored bundle #{})))
     (is (response/anomaly-map? (evidence/restore-finalized-opsv-bundle! (atom {}) nil #{})))))
 
+(deftest ^{:stratum 1} restoration-rejects-sensitive-metadata-without-changing-retained-state
+  (let [[store id] (accumulated-store f/opsv-evidence)
+        snapshot @store
+        bundle (evidence/finalize-opsv-evidence! store id f/base-bundle f/opsv-evidence (set f/artifact-ids))]
+    (doseq [metadata [{:secret "private-value"} {:card 500000000009}]
+            candidate [(with-meta bundle metadata)
+                       (update bundle :evidence/outcome with-meta metadata)]]
+      (let [restored (atom snapshot)]
+        (is (:valid? (evidence/validate-canonical-bundle candidate)))
+        (is (response/anomaly-map?
+              (evidence/restore-finalized-opsv-bundle! restored candidate (set f/artifact-ids))))
+        (is (identical? snapshot @restored))))))
+
 (deftest ^{:stratum 1} finalize-rejects-invalid-base-bundle
   (let [[store bundle-id] (accumulated-store f/opsv-evidence)
         result (evidence/finalize-opsv-evidence!
