@@ -33,9 +33,9 @@
   (let [[_ operator value] (re-matches #"(>=|<=|>|<|=|\^|~)?([^\s]+)" token)
         range? (contains? #{"^" "~"} operator)
         version (semver/parse (if range? (expand-partial value) value))
-        precision (count (str/split (or value "") #"\."))]
-    (when version
-      [operator version (when range? (upper-core operator (:core version) precision))])))
+        precision (count (str/split (or value "") #"\."))
+        upper (when (and version range?) (upper-core operator (:core version) precision))]
+    (when version [operator version upper])))
 
 (defn- ^{:stratum 1} matches? [candidate [operator target upper]]
   (let [order (semver/precedence candidate target)]

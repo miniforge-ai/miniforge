@@ -7,6 +7,7 @@
             [ai.miniforge.evidence-bundle.schema.gate-records :as records]
             [ai.miniforge.evidence-bundle.schema.gate-violation :as violation]
             [ai.miniforge.evidence-bundle.schema.governance-values :as values]
+            [ai.miniforge.evidence-bundle.schema.resolved-rules :as rules]
             [malli.core :as m]))
 
 ;------------------------------------------------------------------------------ Layer 0
@@ -14,9 +15,12 @@
 (def ^{:stratum 0} record-schema
   [:map
    [:gate-execution/gate-id keyword?] [:gate-execution/phase keyword?]
+   [:gate-execution/evaluation-id uuid?]
+   [:gate-execution/allow-override? {:optional true} boolean?]
    [:gate-execution/outcome [:enum :passed :failed :waived]]
    [:gate-execution/binding records/binding-schema]
    [:gate-execution/packs (values/record-vector records/resolved-pack)]
+   [:gate-execution/resolved-rules (values/record-vector rules/record-schema)]
    [:gate-execution/violations (values/record-vector violation/record-schema)]
    [:gate-execution/waivers (values/record-vector records/waiver)]])
 
