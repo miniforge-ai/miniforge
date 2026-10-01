@@ -19,24 +19,20 @@
   "Dependency-light leaf helpers shared across `ai.miniforge.cli.main` and
    its sibling command-dispatch namespaces: process/time/opts primitives,
    the optional-composition-var late-binding helper, and status-label
-   formatting. Every def here is independent of every other def in this
-   file (no same-file references), so the whole namespace is one real
-   layer."
+   formatting. Optional loading preserves fatal causes across exception wrappers."
   (:require
    [babashka.fs :as fs]
-   [ai.miniforge.cli.messages :as messages]))
+   [ai.miniforge.cli.messages :as messages]
+   [slingshot.slingshot :refer [try+]]))
 
 ;------------------------------------------------------------------------------ Layer 0
 
-(defn ^{:stratum 0} optional-composition-var
-  "Resolve a provider whose entire component is optional for this CLI product.
-   This is the CLI's only late-binding boundary: miniforge-core loads this
-   namespace without web-dashboard or TUI components on its classpath."
-  [ns-sym var-sym]
-  (try
-    (require ns-sym)
-    (ns-resolve ns-sym var-sym)
-    (catch Throwable _ nil)))
+(defn- ^{:stratum 0} fatal? [failure]
+  (or (instance? Error failure) (instance? InterruptedException failure)))
+
+(defn- ^{:stratum 0} rethrow-fatal! [failure]
+  (when (instance? InterruptedException failure) (.interrupt (Thread/currentThread)))
+  (throw failure))
 
 (defn ^{:stratum 0} caught-message
   [caught throwable]
@@ -44,12 +40,12 @@
     (instance? Throwable caught)
     (or (.getMessage ^Throwable caught)
         (some-> caught class .getName)
-        "unknown exception")
+        (messages/t :error/unknown-exception))
 
     throwable
     (or (.getMessage ^Throwable throwable)
         (some-> throwable class .getName)
-        "unknown exception")
+        (messages/t :error/unknown-exception))
 
     :else
     (str caught)))
@@ -81,7 +77,7 @@
     (.toEpochMilli ^java.time.Instant timestamp)
 
     (string? timestamp)
-    (try
+    (try+
       (.toEpochMilli (java.time.Instant/parse timestamp))
       (catch Exception _ nil))
 
@@ -90,3 +86,23 @@
 (defn ^{:stratum 0} status-label
   [status]
   (messages/t (keyword "status" (str "value-" (name status)))))
+
+;------------------------------------------------------------------------------ Layer 1
+
+(defn- ^{:stratum 1} fatal-cause [failure]
+  (some #(when (fatal? %) %) (take-while some? (iterate ex-cause failure))))
+
+;------------------------------------------------------------------------------ Layer 2
+
+(defn ^{:stratum 2} optional-composition-var
+  "Resolve optional product components; preserve fatal and interrupted loading failures."
+  [ns-sym var-sym]
+  (try+
+    (require ns-sym)
+    (ns-resolve ns-sym var-sym)
+    (catch Object _
+      (when-let [fatal (fatal-cause (:throwable &throw-context))]
+        (rethrow-fatal! fatal)))))
+
+(comment
+  ::optional-composition-var)

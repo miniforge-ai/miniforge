@@ -1,5 +1,6 @@
 {:cli/messages
- {:help/title "{binary} - {description}"
+ {:error/unknown-exception "unknown exception"
+  :help/title "{binary} - {description}"
   :help/usage "Usage: {binary} <command> [options]"
   :help/command-lines
   ["Commands:"
