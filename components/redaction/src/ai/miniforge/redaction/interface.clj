@@ -55,6 +55,6 @@
   (policy/marker))
 
 (defn ^{:stratum 0} payment-card?
-  "Whether text contains a checksum-valid payment-card candidate."
-  [text]
-  (payment-card/present? text))
+  "Whether original strings or integers in a nested value contain a card candidate."
+  [value]
+  (payment-card/present? value))

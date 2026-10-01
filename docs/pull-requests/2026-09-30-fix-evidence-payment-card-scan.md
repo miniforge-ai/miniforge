@@ -16,6 +16,9 @@ card numbers. Detection and replacement share the same predicate. Preserve
 surrounding audit text and reject invalid checksums rather than blanket-redacting
 every long number. Token boundaries exclude UUID/hash fragments and partial matches
 inside overlong digit groups. The public redaction interface remains the cross-component boundary.
+Walk original strings and integers for card findings, including numeric map keys;
+never combine separate numeric measurements into a card through serialization.
+Redaction removes integral PANs as well as text. Other numeric values retain their types.
 
 ## Testing plan
 
@@ -23,7 +26,7 @@ Test known synthetic card numbers, invalid checksums, nesting, scanner labels,
 and redaction idempotency. Run redaction and evidence consumers serially, packaged
 Babashka tests, standards scans, normal hooks, review, and CI.
 All four redaction consumers and all three evidence consumers passed. The built
-CLI passed 49 tests / 626 assertions, including the collector regression that
+CLI passed 51 tests / 647 assertions, including the collector regression that
 initially exposed UUID false positives. Both component standards scans are clean.
 
 ## Deployment and related work

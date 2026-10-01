@@ -21,9 +21,14 @@
 
 ;------------------------------------------------------------------------------ Layer 2
 
-(defn ^{:stratum 2} present? [text]
-  (boolean (and (string? text)
-                (some valid-checksum? (re-seq (:redaction/payment-card-pattern @policy/policy) text)))))
+(defn ^{:stratum 2} present? [value]
+  (boolean
+    (or (some-> value meta present?)
+        (cond
+          (string? value) (some valid-checksum? (re-seq (:redaction/payment-card-pattern @policy/policy) value))
+          (integer? value) (present? (str value))
+          (coll? value) (some present? value)
+          :else false))))
 
 (defn ^{:stratum 2} redact [text marker]
   (str/replace text (:redaction/payment-card-pattern @policy/policy)

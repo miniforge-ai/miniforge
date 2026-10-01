@@ -39,11 +39,10 @@
 (defn- ^{:stratum 0} bundle-text
   "Render BUNDLE for pattern matching.
 
-   Bounded by print-length and print-level, so detection sees a truncated
-   view of a deep or wide bundle. That makes the findings best-effort
-   metadata, not a security boundary: redaction walks the whole structure
-   and does not share this limit, so a secret past level 20 is still
-   removed even when nothing reports it."
+   Legacy named patterns see a bounded view of deep or wide bundles.
+   Payment-card detection and the shared redaction fallback walk original
+   values independently of these print limits. Redaction, not these labels,
+   remains the publication security boundary."
   [bundle]
   (binding [*print-length* 1000
             *print-level* 20]
@@ -55,17 +54,17 @@
 
 ;------------------------------------------------------------------------------ Layer 1
 
-(defn- ^{:stratum 1} named-findings [text]
+(defn- ^{:stratum 1} named-findings [bundle text]
   (let [labelled (into [] (keep (partial pattern-finding text)) sensitive-patterns)]
     (cond-> labelled
-      (redaction/payment-card? text) (conj {:finding/type :payment-card}))))
+      (redaction/payment-card? bundle) (conj {:finding/type :payment-card}))))
 
-(defn- ^{:stratum 1} include-unnamed-secret [text labelled]
+(defn- ^{:stratum 1} include-unnamed-secret [bundle labelled]
   ;; N6.SD.3 shares N3's definition of a secret. This fallback avoids a
   ;; duplicate label when a named finding already establishes sensitivity;
   ;; redaction remains unconditional and walks the complete value.
   (cond-> labelled
-    (and (redaction/secret-string? text)
+    (and (not (redaction/clean? bundle))
          (not-any? #(contains? secret-finding-types (:finding/type %)) labelled))
     (conj {:finding/type :embedded-secret})))
 
@@ -85,8 +84,8 @@
   "Scan an evidence bundle and return finding types, never matched values."
   [bundle]
   (let [text (bundle-text bundle)
-        labelled (named-findings text)
-        findings (include-unnamed-secret text labelled)]
+        labelled (named-findings bundle text)
+        findings (include-unnamed-secret bundle labelled)]
     {:scan/findings findings}))
 
 (comment

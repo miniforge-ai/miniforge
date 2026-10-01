@@ -28,5 +28,22 @@
     (is (false? (redaction/payment-card? value)))
     (is (= value (redaction/redact value)))))
 
+(deftest ^{:stratum 0} numeric-cards-are-redacted-at-original-value-boundaries-test
+  (doseq [card [4111111111111111 4111111111111111N]]
+    (let [value {:nested [card] card :label}
+          redacted (redaction/redact value)]
+      (is (redaction/payment-card? value))
+      (is (= {:nested ["[REDACTED]"] "[REDACTED]" :label} redacted))
+      (is (false? (redaction/payment-card? redacted)))
+      (is (redaction/clean? redacted))))
+  (doseq [value [[4111 1111 1111 1111] 4111111111111112]]
+    (is (false? (redaction/payment-card? value)))
+    (is (= value (redaction/redact value))))
+  (let [value (with-meta [] {:card 4111111111111111})
+        redacted (redaction/redact value)]
+    (is (redaction/payment-card? value))
+    (is (false? (redaction/payment-card? redacted)))
+    (is (= {:card "[REDACTED]"} (meta redacted)))))
+
 (comment
   (clojure.test/run-tests 'ai.miniforge.redaction.payment-card-test))
