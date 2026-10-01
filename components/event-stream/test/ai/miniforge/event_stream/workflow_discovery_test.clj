@@ -5,14 +5,15 @@
   (:require [ai.miniforge.event-stream.interface :as events]
             [ai.miniforge.event-stream.storage-layout :as layout]
             [clojure.java.io :as io]
-            [clojure.test :refer [deftest is]]))
+            [clojure.test :refer [deftest is]]
+            [slingshot.slingshot :refer [try+]]))
 
 ;------------------------------------------------------------------------------ Layer 0
 
 (defn- ^{:stratum 0} with-temporary-root [check]
   (let [root (io/file (System/getProperty "java.io.tmpdir") (str (random-uuid)))]
     (.mkdirs root)
-    (try (check root)
+    (try+ (check root)
          (finally (doseq [file (reverse (file-seq root))] (.delete ^java.io.File file))))))
 
 (defn- ^{:stratum 0} check-layout-discovery [root]

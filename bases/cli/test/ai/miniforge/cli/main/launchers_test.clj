@@ -8,7 +8,8 @@
             [ai.miniforge.pr-train.interface :as pr-train]
             [ai.miniforge.repo-dag.interface :as repo-dag]
             [ai.miniforge.supervisory-state.interface :as supervisory]
-            [clojure.test :refer [deftest is]]))
+            [clojure.test :refer [deftest is]]
+            [slingshot.slingshot :refer [try+]]))
 
 ;------------------------------------------------------------------------------ Layer 0
 
@@ -19,7 +20,7 @@
 (defn- ^{:stratum 0} fail-with [failure & _] (throw failure))
 
 (defn- ^{:stratum 0} interruption-preserved? [create]
-  (try (create) false
+  (try+ (create) false
        (catch InterruptedException _ (.isInterrupted (Thread/currentThread)))
        (finally (Thread/interrupted))))
 
@@ -51,6 +52,17 @@
     (doseq [create [launchers/create-pr-train-manager launchers/create-repo-dag-manager]]
       (with-redefs [pr-train/create-manager interrupted repo-dag/create-manager interrupted]
         (is (true? (interruption-preserved? create)))))))
+
+(deftest ^{:stratum 1} optional-resolution-preserves-direct-and-wrapped-fatal-causes
+  (doseq [wrap [identity (partial ex-info "loader fixture" {})]]
+    (with-redefs [clojure.core/require (partial fail-with (wrap (AssertionError. "fatal fixture")))]
+      (is (thrown? AssertionError (launchers/optional-web-launcher))))
+    (with-redefs [clojure.core/require (partial fail-with (wrap (InterruptedException.)))]
+      (is (true? (interruption-preserved? launchers/optional-web-launcher))))))
+
+(deftest ^{:stratum 1} optional-resolution-still-tolerates-absent-components
+  (with-redefs [clojure.core/require (partial fail-with (java.io.FileNotFoundException.))]
+    (is (nil? (launchers/optional-web-launcher)))))
 
 (comment
   ::optional-web-launcher)
