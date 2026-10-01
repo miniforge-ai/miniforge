@@ -27,7 +27,9 @@
         message (ts message-key (message-params intent counts kind))]
     {:violation/rule-id id
      :violation/severity severity
-     :violation/message message}))
+     :violation/message message
+     :violation/location {}
+     :violation/auto-fixable? false}))
 
 ;------------------------------------------------------------------------------ Layer 2
 

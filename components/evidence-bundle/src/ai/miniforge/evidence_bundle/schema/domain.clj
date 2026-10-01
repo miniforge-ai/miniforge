@@ -35,6 +35,16 @@
 
 ;------------------------------------------------------------------------------ Layer 0
 
+(defn- ^{:stratum 0} constraint-records? [value]
+  (and (vector? value) (every? map? value)))
+
+(defn- ^{:stratum 0} artifact-ids? [value]
+  (and (vector? value) (every? uuid? value)))
+
+(defn ^{:stratum 0} event-stream-range? [value]
+  (and (map? value) (nat-int? (:start-seq value)) (nat-int? (:end-seq value))
+       (<= (:start-seq value) (:end-seq value))))
+
 ;; Intent Schema
 (def ^{:stratum 0} intent-types
   "Valid intent types per N6 spec."
@@ -43,6 +53,11 @@
 (def ^{:stratum 0} semantic-validation-rules
   "Validation rules per N6 section 2.4.1."
   semantic/rules)
+
+(defn- ^{:stratum 0} resource-counts [value]
+  {:creates (:semantic-validation/resource-creates value)
+   :updates (:semantic-validation/resource-updates value)
+   :destroys (:semantic-validation/resource-destroys value)})
 
 (def ^{:stratum 0} semantic-validation-schema
   "Schema for semantic validation evidence."
@@ -65,19 +80,6 @@
 (def ^{:stratum 0} phase-result-status-values
   "Valid status values for a phase result in the N6 environment model."
   #{:success :failure :already-implemented :retrying :completed})
-
-(def ^{:stratum 0} phase-evidence-schema
-  "Schema for individual phase evidence."
-  {:phase/name keyword?
-   :phase/agent keyword?
-   :phase/agent-instance-id uuid?
-   :phase/started-at inst?
-   :phase/completed-at inst?
-   :phase/duration-ms pos-int?
-   :phase/output map?
-   :phase/artifacts (fn [as] (every? uuid? as))
-   (optional-key/optional-key :phase/inner-loop-iterations) pos-int?
-   (optional-key/optional-key :phase/event-stream-range) map?})
 
 ;; Policy Check Schema
 (def ^{:stratum 0} policy-check-schema
@@ -121,20 +123,6 @@
   "Valid trust levels for pack promotion per N6 spec."
   #{:untrusted :tainted :trusted})
 
-;; Artifact Provenance Schema
-(def ^{:stratum 0} provenance-schema
-  "Schema for artifact provenance per N6 section 3.2."
-  {:provenance/workflow-id uuid?
-   :provenance/phase keyword?
-   :provenance/agent keyword?
-   :provenance/agent-instance-id uuid?
-   :provenance/created-at inst?
-   (optional-key/optional-key :provenance/created-by-event-id) uuid?
-   (optional-key/optional-key :provenance/source-artifacts) (fn [as] (every? uuid? as))
-   (optional-key/optional-key :provenance/tool-executions) vector?
-   :provenance/content-hash string?
-   (optional-key/optional-key :provenance/signature) string?})
-
 (def ^{:stratum 0} tool-execution-schema
   "Schema for tool execution record."
   {:tool/name keyword?
@@ -163,7 +151,7 @@
    :supervision/timestamp inst?
    (optional-key/optional-key :supervision/reasoning) string?
    (optional-key/optional-key :supervision/meta-eval?) boolean?
-   (optional-key/optional-key :supervision/confidence) float?
+   (optional-key/optional-key :supervision/confidence) number?
    (optional-key/optional-key :supervision/phase) keyword?})
 
 (def ^{:stratum 0} control-action-evidence-schema
@@ -182,12 +170,52 @@
 
 ;------------------------------------------------------------------------------ Layer 1
 
+(def ^{:stratum 1} phase-output-schema
+  "Collected phase output is a projection, not the enclosing execution result.
+   Validate known fields when present; phase-specific output remains extensible."
+  {(optional-key/optional-key :environment-id) string?
+   (optional-key/optional-key :status) (partial contains? phase-result-status-values)
+   (optional-key/optional-key :summary) string?
+   (optional-key/optional-key :metrics) map?})
+
+(defn- ^{:stratum 1} failed-rule-ids [value]
+  (let [failed (semantic/failed-rules (:semantic-validation/declared-intent value)
+                                     (resource-counts value))]
+    (set (map semantic/rule-ids failed))))
+
+(def ^{:stratum 1} phase-evidence-schema
+  "Schema for individual phase evidence."
+  {:phase/name keyword?
+   :phase/agent keyword?
+   :phase/agent-instance-id uuid?
+   :phase/started-at inst?
+   :phase/completed-at inst?
+   :phase/duration-ms nat-int?
+   :phase/output map?
+   :phase/artifacts artifact-ids?
+   (optional-key/optional-key :phase/inner-loop-iterations) nat-int?
+   :phase/event-stream-range event-stream-range?})
+
+;; Artifact Provenance Schema
+(def ^{:stratum 1} provenance-schema
+  "Schema for artifact provenance per N6 section 3.2."
+  {:provenance/workflow-id uuid?
+   :provenance/phase keyword?
+   :provenance/agent keyword?
+   :provenance/agent-instance-id uuid?
+   :provenance/created-at inst?
+   (optional-key/optional-key :provenance/created-by-event-id) uuid?
+   (optional-key/optional-key :provenance/source-artifacts) artifact-ids?
+   (optional-key/optional-key :provenance/tool-executions) vector?
+   :provenance/content-hash string?
+   (optional-key/optional-key :provenance/signature) string?})
+
 (def ^{:stratum 1} intent-schema
   "Schema for intent evidence."
   {:intent/type (fn [t] (contains? intent-types t))
    :intent/description string?
    :intent/business-reason string?
-   :intent/constraints (fn [cs] (every? map? cs))
+   :intent/constraints constraint-records?
    :intent/declared-at inst?
    (optional-key/optional-key :intent/author) string?})
 
@@ -231,9 +259,9 @@
   {:violation/rule-id string?
    :violation/severity (fn [s] (contains? violation-severities s))
    :violation/message string?
-   (optional-key/optional-key :violation/location) map?
+   :violation/location map?
    (optional-key/optional-key :violation/remediation) string?
-   (optional-key/optional-key :violation/auto-fixable?) boolean?})
+   :violation/auto-fixable? boolean?})
 
 (def ^{:stratum 1} outcome-schema
   "Schema for workflow outcome."
@@ -262,6 +290,18 @@
    :promotion-justification string?  ; REQUIRED: audit trail for trust decision
    :pack-hash string?
    (optional-key/optional-key :pack-signature) string?})
+
+;------------------------------------------------------------------------------ Layer 2
+
+(defn ^{:stratum 2} consistent-semantic-conclusion? [value]
+  (let [failed (failed-rule-ids value)
+        reported (set (map :violation/rule-id (:semantic-validation/violations value)))
+        actual (:semantic-validation/actual-behavior value)
+        inferred (semantic/inferred-behavior (resource-counts value))]
+    (and (= (empty? failed) (:semantic-validation/passed? value))
+         (or (= inferred actual)
+             (and (= :import inferred) (= :refactor actual (:semantic-validation/declared-intent value))))
+         (= failed reported))))
 
 ;------------------------------------------------------------------------------ Rich Comment
 (comment

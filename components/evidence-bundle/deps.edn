@@ -10,7 +10,8 @@
         ai.miniforge/reliability  {:local/root "../reliability"}
         ai.miniforge/response     {:local/root "../response"}
         ai.miniforge/schema       {:local/root "../schema"}
-        ai.miniforge/workflow     {:local/root "../workflow"}}
+        ai.miniforge/workflow     {:local/root "../workflow"}
+        metosin/malli            {:mvn/version "0.16.4"}}
  :aliases
  {:test {:extra-paths ["test"]
          :extra-deps {org.clojure/test.check {:mvn/version "1.1.1"}}}}}
