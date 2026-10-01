@@ -3,16 +3,11 @@
 ;; Licensed under the Apache License, Version 2.0.
 (ns ai.miniforge.evidence-bundle.knowledge-inputs-schema-test
   (:require [clojure.test :refer [deftest is]]
-            [ai.miniforge.content-hash.interface :as hash]
+            [ai.miniforge.evidence-bundle.governance-fixtures :as fixtures]
             [ai.miniforge.evidence-bundle.schema :as schema]
             [ai.miniforge.evidence-bundle.schema.validation :as validation]))
 
 ;------------------------------------------------------------------------------ Layer 0
-
-(defn- ^{:stratum 0} knowledge []
-  {:knowledge/id (random-uuid) :knowledge/type :policy-pack
-   :knowledge/trust-level :trusted :knowledge/authority :authority/instruction
-   :knowledge/source "policy/example" :knowledge/content-hash (hash/content-hash {:rule :example})})
 
 (defn- ^{:stratum 0} accepted? [value]
   (not-any? #(= :evidence/knowledge-inputs (:key %))
@@ -28,7 +23,7 @@
 ;------------------------------------------------------------------------------ Layer 1
 
 (deftest ^{:stratum 1} knowledge-input-present-values-are-validated
-  (let [record (knowledge)]
+  (let [record (fixtures/knowledge)]
     (doseq [value [[] [record] [(assoc record :knowledge/signature "signed")]]]
       (is (accepted? {:evidence/knowledge-inputs value})))
     (is (accepted? {}))
