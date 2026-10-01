@@ -26,6 +26,14 @@
    :evidence/policy-checks []
    :evidence/outcome {:outcome/success true}})
 
+(defn- ^{:stratum 0} publication-fields [bundle]
+  (-> bundle
+      (assoc :evidence/event-links [{:event-links/scope-type :workflow
+                                    :event-links/scope-id (:evidence-bundle/workflow-id bundle)
+                                    :event-links/from-sequence 0 :event-links/to-sequence 2
+                                    :event-links/event-count 3}])
+      (assoc-in [:evidence/outcome :outcome/tier] :standard)))
+
 (defn- ^{:stratum 0} policy-check []
   {:policy-check/pack-id "opsv"
    :policy-check/pack-version "1.0.0"
@@ -84,12 +92,25 @@
       (is (false? (:valid? (evidence/validate-canonical-bundle (assoc-in bundle path value))))))))
 
 (deftest ^{:stratum 1} declared-hash-is-verified-without-claiming-authority-test
-  (let [bundle (assoc (base-bundle)
+  (let [bundle (assoc (publication-fields (base-bundle))
                        :compliance/sensitive-data false :compliance/pii-handling :none
                        :compliance/created-at #inst "2026-09-30T00:00:00Z"
                        :evidence/sealed-at #inst "2026-09-30T00:00:00Z")
         sealed (assoc bundle :evidence/content-hash (evidence/content-hash bundle))]
     (is (:valid? (evidence/validate-canonical-bundle sealed)))
+    (doseq [[path value] [[[:evidence/event-links] nil]
+                         [[:evidence/event-links] []]
+                         [[:evidence/event-links] [{}]]
+                         [[:evidence/event-links 0 :event-links/scope-type] :unknown]
+                         [[:evidence/event-links 0 :event-links/scope-id] (random-uuid)]
+                         [[:evidence/event-links 0 :event-links/from-sequence] -1]
+                         [[:evidence/event-links 0 :event-links/to-sequence] 0]
+                         [[:evidence/event-links 0 :event-links/event-count] 4]
+                         [[:evidence/outcome :outcome/tier] nil]
+                         [[:evidence/outcome :outcome/tier] :unknown]]]
+      (let [changed (assoc-in bundle path value)
+            rehashed (assoc changed :evidence/content-hash (evidence/content-hash changed))]
+        (is (false? (:valid? (evidence/validate-canonical-bundle rehashed))))))
     (is (:valid? (evidence/validate-canonical-bundle
                   (assoc sealed :evidence/signature "not-an-authenticity-check"))))
     (doseq [altered [(assoc-in sealed [:evidence/outcome :outcome/success] false)

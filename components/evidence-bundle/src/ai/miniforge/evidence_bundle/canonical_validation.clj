@@ -6,7 +6,8 @@
   (:require [ai.miniforge.anomaly.interface :as anomaly]
             [ai.miniforge.artifact.interface :as artifact]
             [ai.miniforge.content-hash.interface :as hash]
-            [ai.miniforge.evidence-bundle.canonical-structure :as structure]))
+            [ai.miniforge.evidence-bundle.canonical-structure :as structure]
+            [ai.miniforge.evidence-bundle.schema.publication :as publication]))
 
 ;------------------------------------------------------------------------------ Layer 0
 
@@ -22,12 +23,13 @@
 
 (defn- ^{:stratum 0} sealing-errors [bundle]
   (when (some #(contains? bundle %) [:evidence/content-hash :evidence/signature :evidence/sealed-at])
-    (when-not (and (string? (:evidence/content-hash bundle))
+    (concat (publication/errors bundle)
+     (when-not (and (string? (:evidence/content-hash bundle))
                    (inst? (:evidence/sealed-at bundle))
                    (contains? bundle :compliance/sensitive-data)
                    (contains? bundle :compliance/pii-handling)
                    (inst? (:compliance/created-at bundle)))
-      [{:code :incomplete-seal}])))
+      [{:code :incomplete-seal}]))))
 
 ;------------------------------------------------------------------------------ Layer 1
 
