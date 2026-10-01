@@ -36,6 +36,8 @@ tests, namespace strata checks, and a root incremental standards scan.
 Final focused JVM and packaged tests pass: seven tests, 35 assertions.
 All three evidence-bundle consumer suites pass. Kondo and inferred strata pass.
 The packaged CLI was rebuilt with the production changes.
+After integrating current main, focused JVM and rebuilt packaged suites pass
+16 tests and 87 assertions, including optional producer projections.
 
 ## Deployment Plan
 
@@ -50,5 +52,5 @@ Prerequisite for #1959, addressing canonical review findings 4152222971 and 4152
 
 - [x] Verify schemas and live collector projection against N6/N8.
 - [x] Complete JVM and packaged tests and adversarial code review.
-- [ ] Complete the root incremental standards scan after indexing new files.
+- [x] Root incremental standards scan: 4,108 indexed files, zero changed-file findings.
 - [ ] Settle current-head review and CI.

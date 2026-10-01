@@ -21,6 +21,7 @@
    decisions, control actions, and execution output."
   (:require
    [ai.miniforge.evidence-bundle.control-projection :as control-projection]
+   [ai.miniforge.evidence-bundle.projection :as projection]
    [ai.miniforge.event-stream.interface :as event-stream]))
 
 ;------------------------------------------------------------------------------ Layer 0
@@ -95,22 +96,7 @@
    Looks in :execution/output for evidence fields produced by runner/extract-output.
    Returns a map of evidence keys to merge into the bundle, or empty map."
   [workflow-state]
-  (let [output (get workflow-state :execution/output {})]
-    (cond-> {}
-      (contains? output :evidence/execution-mode)
-      (assoc :evidence/execution-mode (:evidence/execution-mode output))
-
-      (contains? output :evidence/runtime-class)
-      (assoc :evidence/runtime-class (:evidence/runtime-class output))
-
-      (contains? output :evidence/task-started-at)
-      (assoc :evidence/task-started-at (:evidence/task-started-at output))
-
-      (contains? output :evidence/task-finished-at)
-      (assoc :evidence/task-finished-at (:evidence/task-finished-at output))
-
-      (contains? output :evidence/image-digest)
-      (assoc :evidence/image-digest (:evidence/image-digest output)))))
+  (projection/execution workflow-state))
 
 ;------------------------------------------------------------------------------ Layer 1
 
