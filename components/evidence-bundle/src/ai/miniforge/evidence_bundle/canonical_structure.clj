@@ -69,7 +69,8 @@
                (mapcat (partial structured-errors bundle) structured-fields)
                (mapcat (partial collection-errors bundle) collection-fields)
                (mapcat (partial phase-output-errors bundle)
-                       [:evidence/implement :evidence/verify :evidence/release])
+                       [:evidence/plan :evidence/design :evidence/implement :evidence/verify
+                        :evidence/review :evidence/release :evidence/observe])
                (opsv-errors bundle))))
 
 (comment
