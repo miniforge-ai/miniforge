@@ -33,7 +33,9 @@
                                     :event-links/scope-id (:evidence-bundle/workflow-id bundle)
                                     :event-links/from-sequence 0 :event-links/to-sequence 2
                                     :event-links/event-count 3}])
-      (assoc-in [:evidence/outcome :outcome/tier] :standard)))
+      (assoc-in [:evidence/outcome :outcome/tier] :standard)
+      (assoc-in [:evidence/outcome :outcome/sli-measurements]
+                [{:sli/name :SLI-1 :sli/value 1.0}])))
 
 (defn- ^{:stratum 0} policy-check []
   {:policy-check/pack-id "opsv"
@@ -114,8 +116,13 @@
                          [[:evidence/outcome :outcome/degradation-mode] nil]
                          [[:evidence/outcome :outcome/failure-class] :unknown]
                          [[:evidence/outcome :outcome/failure-class] nil]
+                         [[:evidence/outcome :outcome/failure-class] :failure.class/timeout]
                          [[:evidence/outcome :outcome/sli-measurements] 42]
                          [[:evidence/outcome :outcome/sli-measurements] nil]
+                         [[:evidence/outcome :outcome/sli-measurements 0 :sli/value] ##NaN]
+                         [[:evidence/outcome :outcome/sli-measurements 0 :sli/value] ##Inf]
+                         [[:evidence/outcome :outcome/sli-measurements 0 :sli/value] ##-Inf]
+                         [[:evidence/outcome :outcome/sli-measurements 0 :sli/target] ##Inf]
                          [[:evidence/outcome :outcome/sli-measurements] [{}]]]]
       (let [changed (assoc-in bundle path value)
             rehashed (assoc changed :evidence/content-hash (evidence/content-hash changed))]

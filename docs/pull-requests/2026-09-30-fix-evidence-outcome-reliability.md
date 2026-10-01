@@ -16,11 +16,15 @@ Add a small outcome reliability schema vocabulary and compose its predicates int
 the shared outcome schema. Reuse public component schemas rather than copying
 enumerations. Missing optional fields remain compatible with unsealed assembly;
 publication still owns the requirement for a workflow tier.
+Reject non-finite measured values and targets. Root outcome validation rejects a
+successful outcome with a non-nil failure class; failed legacy outcomes may omit
+the optional class. N6's vector measurement shape takes precedence over the older
+RN-06 work brief's map shape.
 
 ## Testing Plan
 
 All three evidence-bundle consumers passed serially. The new regressions passed
-on the JVM and rebuilt CLI jar: 5 tests, 128 assertions. Component standards scan:
+on the JVM and rebuilt CLI jar: 7 tests, 156 assertions. Component standards scan:
 55 files, no violations. clj-kondo reported no errors or warnings.
 
 Adversarial review checked the shared enum dependencies, optional-field presence,

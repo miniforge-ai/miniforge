@@ -2,7 +2,8 @@
 ;; Copyright 2025-2026 Christopher Lester (christopher@miniforge.ai)
 ;; Licensed under the Apache License, Version 2.0.
 (ns ai.miniforge.evidence-bundle.outcome-reliability-test
-  (:require [ai.miniforge.evidence-bundle.schema.domain :as domain]
+  (:require [ai.miniforge.evidence-bundle.schema :as schema]
+            [ai.miniforge.evidence-bundle.schema.domain :as domain]
             [ai.miniforge.evidence-bundle.schema.outcome-reliability :as outcome]
             [ai.miniforge.evidence-bundle.schema.validation :as validation]
             [ai.miniforge.failure-classifier.interface :as failure]
@@ -15,8 +16,11 @@
   {:sli/name :SLI-1 :sli/value 0.99})
 
 (defn- ^{:stratum 0} valid-outcome? [fields]
-  (:valid? (validation/validate-schema domain/outcome-schema
-                                       (assoc fields :outcome/success true))))
+  (let [value (merge {:outcome/success true} fields)
+        root (select-keys schema/evidence-bundle-schema [:evidence/outcome])
+        structure (validation/validate-schema domain/outcome-schema value)
+        coherence (validation/validate-schema root {:evidence/outcome value})]
+    (and (:valid? structure) (:valid? coherence))))
 
 ;------------------------------------------------------------------------------ Layer 1
 
@@ -27,7 +31,7 @@
            [:outcome/failure-class outcome/failure-class? failure/failure-classes]]]
     (doseq [value values]
       (is (predicate value))
-      (is (valid-outcome? {field value}))))
+      (is (valid-outcome? {field value :outcome/success false}))))
   (is (valid-outcome? {})))
 
 (deftest ^{:stratum 1} invalid-enumerations-are-not-evidence
@@ -62,6 +66,18 @@
   (doseq [field [:sli/name :sli/value]]
     (is (not (outcome/sli-measurements? [(dissoc (measurement) field)]))))
   (is (outcome/sli-measurements? [])))
+
+(deftest ^{:stratum 1} successful-outcomes-cannot-claim-a-failure-class
+  (doseq [class failure/failure-classes]
+    (is (not (valid-outcome? {:outcome/success true :outcome/failure-class class})))
+    (is (valid-outcome? {:outcome/success false :outcome/failure-class class})))
+  (is (valid-outcome? {:outcome/success true}))
+  (is (valid-outcome? {:outcome/success false})))
+
+(deftest ^{:stratum 1} non-finite-measurements-cannot-be-sealed-as-reliability-evidence
+  (doseq [field [:sli/value :sli/target]
+          value [##NaN ##Inf ##-Inf]]
+    (is (not (valid-outcome? {:outcome/sli-measurements [(assoc (measurement) field value)]})))))
 
 (comment
   (clojure.test/run-tests 'ai.miniforge.evidence-bundle.outcome-reliability-test))
