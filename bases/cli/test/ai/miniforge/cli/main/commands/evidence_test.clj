@@ -22,8 +22,10 @@
    [clojure.edn :as edn]
    [babashka.fs :as fs]
    [ai.miniforge.cli.app-config :as app-config]
+   [ai.miniforge.cli.messages :as messages]
    [ai.miniforge.cli.main.commands.evidence :as sut]
    [ai.miniforge.cli.main.commands.evidence.bundles :as bundles]
+   [ai.miniforge.cli.main.commands.evidence.formats :as formats]
    [ai.miniforge.cli.main.commands.evidence-fixtures :as f]
    [ai.miniforge.cli.main.commands.shared :as shared]))
 
@@ -197,6 +199,28 @@
           (is (.contains output status))
           (is (.contains output "external-provider / anthropic / rate-limit")))))))
 
+(deftest ^{:stratum 1} export-formats-honor-the-requested-destination
+  (let [bundle (f/bundle {:test/text "café 東京"})]
+    (with-redefs [shared/call-optional-provider (constantly bundle)]
+      (doseq [format ["edn" "json" "html"]]
+        (let [destination (str *tmp-dir* "/requested/audit." format)]
+          (with-out-str (sut/evidence-export-cmd {:id "provider" :format format :output-path destination}))
+          (is (= (formats/encode bundle format) (slurp destination :encoding "UTF-8"))))))))
+
+(deftest ^{:stratum 1} renderer-failure-does-not-write-or-create-directories
+  (let [bundle (f/bundle {})
+        destination (str *tmp-dir* "/unchanged.edn")
+        absent (str *tmp-dir* "/not-created/audit.json")]
+    (spit destination "unchanged")
+    (with-redefs [shared/call-optional-provider (constantly bundle)
+                  formats/encode (constantly nil)
+                  shared/exit! identity]
+      (doseq [path [destination absent]]
+        (is (.contains (with-out-str (sut/evidence-export-cmd {:id "provider" :format "json" :output-path path}))
+                       (messages/t :evidence/export-failed {:path path}))))
+      (is (= "unchanged" (slurp destination)))
+      (is (not (fs/exists? (str *tmp-dir* "/not-created")))))))
+
 ;------------------------------------------------------------------------------ Layer 2
 
 (deftest ^{:stratum 2} evidence-show-cmd-with-bundle-test
@@ -245,8 +269,8 @@
         (is (.contains (with-out-str (sut/evidence-export-cmd {:id "checked"})) "refused"))
         (is (= "unchanged" (slurp destination))))
       (spit source (pr-str sealed))
-      (is (.contains (with-out-str (sut/evidence-export-cmd {:id "checked" :format "json"})) "Unsupported"))
-      (is (not (fs/exists? (str directory "/checked-export.json")))))))
+      (is (.contains (with-out-str (sut/evidence-export-cmd {:id "checked" :format "unknown"})) "Unsupported"))
+      (is (not (fs/exists? (str directory "/checked-export.unknown")))))))
 
 (deftest ^{:stratum 2} provider-only-bundle-exports-the-validated-snapshot-test
   (let [bundle (make-canonical-bundle)

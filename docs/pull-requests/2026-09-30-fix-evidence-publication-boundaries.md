@@ -5,8 +5,9 @@
 
 ## Scope
 
-Stacked on the canonical contract prerequisite #1959; retarget main after it merges.
-Require a complete verified seal before CLI list/show or CLI/manager export.
+Require a complete verified seal before CLI list/show or CLI export. Canonical
+validation (#1959), format renderers (#1975), and manager export enforcement
+(#1977) are merged prerequisites; this PR owns the CLI consumers.
 Report invalid, tampered, and unsealed bundles without presenting their ordinary evidence details.
 Do not silently repair legacy evidence or overwrite an export destination on validation failure.
 Distinguish existing unreadable files from absent sources; show/export refuse the
@@ -15,7 +16,11 @@ Serialize the exact validated value instead of rereading a mutable source file.
 Use canonical EDN and preserve nanosecond instant precision when reading it back.
 Use the bounded public file reader from #1961; reject trailing forms and input
 larger than 16 MiB before parsing. Published fixtures include event links and tier.
-The CLI fallback supports EDN; reject unsupported formats instead of mislabeling raw EDN as JSON or HTML.
+Export canonical EDN, lossless Transit JSON, or escaped HTML through the shared
+format adapters, always using UTF-8. Honor the requested positional output path
+and preserve the default destination for existing programmatic callers. Encode
+before creating directories or writing files; renderer failure leaves existing
+destinations unchanged. Reject unsupported formats explicitly.
 This implements the consumer-boundary finding from #1957.
 
 ## Standards adversarial pass
@@ -32,9 +37,7 @@ Packaged CLI and manager tests verify valid round trips and rejection before exp
 Tampering and missing seals leave existing destinations unchanged.
 Run evidence consumers, CLI regressions, normal hooks, and standards scans before merge.
 Current-head review and all CI, including Build, remain mandatory merge gates.
-After integrating canonical corrections through db3659d4, all three evidence
-consumers pass. JVM and rebuilt packaged boundary tests pass 26 tests and 124 assertions.
 Legacy nil/false detail fields retain canonical fallbacks, including status,
 phase names and artifacts. Failure attribution selects the first truthy source.
-After c16736f0 integration, all three consumers and JVM/rebuilt packaged boundary
-regressions pass (27 tests, 132 assertions).
+Refresh consumer and packaged results after integrating the CLI entry-point
+strata prerequisite and positional parser regression. No deployment is required.

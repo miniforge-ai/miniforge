@@ -54,9 +54,9 @@
      :bundle/failure-attribution (bundles/failure-attribution-summary
                                   (:evidence/failure-attribution bundle))}))
 
-(defn- ^{:stratum 0} export-bundle! [id fmt]
+(defn- ^{:stratum 0} export-bundle! [id fmt output-path]
   (let [bundle (bundles/load-bundle-for-show id)
-        destination (str (bundles/evidence-dir) "/" id "-export." fmt)]
+        destination (if (nil? output-path) (str (bundles/evidence-dir) "/" id "-export." fmt) output-path)]
     (if bundle
       (exporting/export! id bundle fmt destination)
       (do (display/print-error (messages/t :evidence/export-not-found {:id id}))
@@ -81,12 +81,12 @@
 ;------------------------------------------------------------------------------ Layer 1
 
 (defn ^{:stratum 1} evidence-export-cmd
-  "Export a validated, sealed evidence bundle as EDN."
+  "Export a validated seal to the requested path as EDN, Transit JSON, or HTML."
   [opts]
   (let [{:keys [id]} opts]
     (if-not id
-      (shared/usage-error! :evidence/export-usage "evidence export <id> edn")
-      (export-bundle! id (get opts :format "edn")))))
+      (shared/usage-error! :evidence/export-usage "evidence export <id> <output-path> [--format edn|json|html]")
+      (export-bundle! id (get opts :format "edn") (:output-path opts)))))
 
 (defn- ^{:stratum 1} display-bundle-detail
   "Render the detail view for a single evidence bundle."
