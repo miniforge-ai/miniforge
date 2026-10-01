@@ -29,6 +29,8 @@ a lossy control-action projection. Valid portable records must remain valid.
   even when cleanup fails. Preserve supplied request metadata at event publication.
 - Gate all HTTP requests with 503 during startup and publish discovery only after
   identity attachment. Validate supplied N8 capability and approval vocabularies.
+- Roll back acquired HTTP, watcher and listener resources when startup fails;
+  retain the original exception and suppress any secondary cleanup failure.
 
 Approval is conditional under N8. The schema accepts N6 `:status` and N8
 `:approval-status` vocabulary; when both are supplied they must agree. Missing
@@ -57,6 +59,9 @@ Approval-alias regressions pass on the JVM and rebuilt packaged CLI: two tests,
 After the N8 vocabulary and HTTP readiness fixes, all three evidence consumers
 and the dashboard suite pass serially. Rebuilt packaged readiness/schema/evidence
 regressions pass eight tests and 60 assertions. Inferred strata and Kondo pass.
+Post-bind rollback and cleanup-error preservation regressions pass with the full
+dashboard consumer suite. Rebuilt packaged schema, lifecycle, identity, authorization
+and event-metadata regressions pass 13 tests and 104 assertions.
 
 ## Deployment Plan
 

@@ -30,6 +30,7 @@
    [ai.miniforge.web-dashboard.server.auth :as auth]
    [ai.miniforge.web-dashboard.server.responses :as responses]
    [ai.miniforge.web-dashboard.server.shutdown :as shutdown]
+   [ai.miniforge.web-dashboard.server.startup :as startup]
    [ai.miniforge.web-dashboard.server.filters :as filters]
    [ai.miniforge.web-dashboard.server.websocket :as websocket]
    [ai.miniforge.web-dashboard.server.handlers :as handlers]
@@ -375,7 +376,7 @@
 ;------------------------------------------------------------------------------ Layer 1
 
 ;; Server lifecycle
-(defn ^{:stratum 1} start-server!
+(defn- ^{:stratum 1} start-server-resources!
   "Start HTTP server with WebSocket support.
 
    Options:
@@ -385,7 +386,7 @@
    - :repo-dag-manager - Repo DAG manager instance
    - :auth - Optional dashboard auth config"
   [{:keys [port event-stream pr-train-manager repo-dag-manager auth]
-    :or {port (:port defaults)}}]
+    :or {port (:port defaults)}} resources]
   (let [;; Create dashboard-local event stream with NO file sinks to prevent write-back loop.
         ;; The watcher reads from ~/.miniforge/events/ and publishes to this in-memory-only stream.
         dashboard-event-stream (or event-stream (es/create-event-stream {:sinks []}))
@@ -400,13 +401,15 @@
                   :decision-manager (cp/create-decision-manager)})
         handler (control-identity/ready-handler state (create-handler state))
         server (http/run-server handler {:port port :legacy-return-value? false})
+        _ (swap! resources assoc :server server :state state)
         actual-port (http/server-port server)
         ;; Start file watcher to tail-follow event files
         events-dir (str (config/miniforge-home) "/events")
         watcher-cleanup (watcher/start-watcher!
                          events-dir
                          (fn [event]
-                           (es/publish! dashboard-event-stream event)))]
+                           (es/publish! dashboard-event-stream event)))
+        _ (swap! resources assoc :watcher-cleanup watcher-cleanup)]
     ;; Launch background archive scan
     (let [archive-state (:archived-workflows @state)
           loading?      (:archive-loading? @state)]
@@ -442,3 +445,10 @@
     (shutdown/stop! handle)
     (finally
       (when server (delete-discovery-file!)))))
+
+;------------------------------------------------------------------------------ Layer 2
+
+(defn ^{:stratum 2} start-server!
+  "Start the dashboard, rolling back acquired resources if initialization fails."
+  [opts]
+  (startup/acquire! (partial start-server-resources! opts)))
