@@ -27,6 +27,7 @@
    Split out of the former `schema.clj` (SL003, Wave 2) — this was most of
    its Layer 0/1/2."
   (:require
+   [ai.miniforge.evidence-bundle.schema.control-action :as control-action]
    [ai.miniforge.evidence-bundle.semantic-rules :as semantic]
    [ai.miniforge.evidence-bundle.schema.optional-key :as optional-key]
    [ai.miniforge.evidence-bundle.schema.outcome-reliability :as outcome]
@@ -92,7 +93,7 @@
    :policy-check/duration-ms nat-int?
    ;; nilable: legacy/mechanical gate results carry no DecisionEnvelope —
    ;; the collector always writes the key, with nil for envelope-less checks
-   :policy-check/envelope (some-fn nil? map?)})
+   (optional-key/optional-key :policy-check/envelope) (some-fn nil? map?)})
 
 (def ^{:stratum 0} violation-severities
   "Pass-through to the canonical severity scale (policy-clause via the
@@ -167,13 +168,17 @@
 
 (def ^{:stratum 0} control-action-evidence-schema
   "Schema for control action evidence."
-  {:control-action/id uuid?
-   :control-action/type keyword?
-   :control-action/requester map?
-   :control-action/timestamp inst?
-   :control-action/result keyword?
-   (optional-key/optional-key :control-action/justification) string?
-   (optional-key/optional-key :control-action/target) map?})
+  {:action/id uuid?
+   :action/type keyword?
+   :action/requester control-action/requester?
+   :action/timestamp inst?
+   :action/result control-action/result?
+   (optional-key/optional-key :action/justification) string?
+   (optional-key/optional-key :action/target) map?
+   (optional-key/optional-key :action/parameters) map?
+   (optional-key/optional-key :action/approval) control-action/approval?
+   (optional-key/optional-key :action/pre-state) map?
+   (optional-key/optional-key :action/post-state) map?})
 
 ;------------------------------------------------------------------------------ Layer 1
 
