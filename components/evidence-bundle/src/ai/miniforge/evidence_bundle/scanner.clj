@@ -18,6 +18,7 @@
 (ns ai.miniforge.evidence-bundle.scanner
   "Sensitive-data scanner for assembled evidence bundles."
   (:require
+   [ai.miniforge.evidence-bundle.pattern-scan :as pattern-scan]
    [ai.miniforge.redaction.interface :as redaction]))
 
 ;------------------------------------------------------------------------------ Layer 0
@@ -36,26 +37,14 @@
 (def ^{:stratum 0} ^:private secret-finding-types
   #{:aws-access-key :embedded-secret :payment-card})
 
-(defn- ^{:stratum 0} bundle-text
-  "Render BUNDLE for pattern matching.
-
-   Legacy named patterns see a bounded view of deep or wide bundles.
-   Payment-card detection and the shared redaction fallback walk original
-   values independently of these print limits. Redaction, not these labels,
-   remains the publication security boundary."
-  [bundle]
-  (binding [*print-length* 1000
-            *print-level* 20]
-    (pr-str bundle)))
-
-(defn- ^{:stratum 0} pattern-finding [text {:finding/keys [type pattern]}]
-  (when (re-find pattern text)
+(defn- ^{:stratum 0} pattern-finding [bundle {:finding/keys [type pattern]}]
+  (when (pattern-scan/present? pattern bundle)
     {:finding/type type}))
 
 ;------------------------------------------------------------------------------ Layer 1
 
-(defn- ^{:stratum 1} named-findings [bundle text]
-  (let [labelled (into [] (keep (partial pattern-finding text)) sensitive-patterns)]
+(defn- ^{:stratum 1} named-findings [bundle]
+  (let [labelled (into [] (keep (partial pattern-finding bundle)) sensitive-patterns)]
     (cond-> labelled
       (redaction/payment-card? bundle) (conj {:finding/type :payment-card}))))
 
@@ -83,8 +72,7 @@
 (defn ^{:stratum 2} scan-artifact
   "Scan an evidence bundle and return finding types, never matched values."
   [bundle]
-  (let [text (bundle-text bundle)
-        labelled (named-findings bundle text)
+  (let [labelled (named-findings bundle)
         findings (include-unnamed-secret bundle labelled)]
     {:scan/findings findings}))
 
