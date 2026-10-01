@@ -24,6 +24,7 @@
    [clojure.java.io :as io]
    [cheshire.core :as json]
    [ai.miniforge.web-dashboard.config :as dashboard-config]
+   [ai.miniforge.web-dashboard.control-identity :as control-identity]
    [ai.miniforge.web-dashboard.state :as state]
    [ai.miniforge.web-dashboard.views :as views]
    [ai.miniforge.web-dashboard.server.auth :as auth]
@@ -434,9 +435,11 @@
 
 (defn ^{:stratum 1} stop-server!
   "Stop HTTP server and watcher."
-  [{:keys [server watcher-cleanup]}]
+  [{:keys [server watcher-cleanup state]}]
   (when watcher-cleanup
     (watcher-cleanup))
+  (when state
+    (control-identity/release! state))
   (when server
     (delete-discovery-file!)
     (http/server-stop! server {:timeout 100})

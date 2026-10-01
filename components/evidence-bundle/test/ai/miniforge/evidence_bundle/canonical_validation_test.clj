@@ -203,9 +203,12 @@
       (is (false? (:valid? (evidence/validate-canonical-bundle
                            (assoc bundle :evidence/implement
                                   (assoc phase :phase/event-stream-range range)))))))
-    (is (false? (:valid? (evidence/validate-canonical-bundle
-                         (assoc-in (assoc bundle :evidence/implement phase)
-                                   [:evidence/implement :phase/output :summary] 42)))))))
+    (is (:valid? (evidence/validate-canonical-bundle
+                 (assoc bundle :evidence/implement (update phase :phase/output dissoc :status)))))
+    (doseq [[field value] [[:summary 42] [:status :unknown] [:status nil] [:status false] [:status 42]]]
+      (is (false? (:valid? (evidence/validate-canonical-bundle
+                           (assoc-in (assoc bundle :evidence/implement phase)
+                                     [:evidence/implement :phase/output field] value))))))))
 
 (deftest ^{:stratum 1} canonical-migration-conclusions-use-producer-balance-rules
   (doseq [content ["old will be destroyed\nnew will be created\nextra will be created"

@@ -50,3 +50,5 @@ After control-record integration (#1969), all three evidence consumers pass.
 The rebuilt packaged CLI passes 21 tests and 288 assertions across canonical
 validation and control records. The valid N6 policy fixture omits the envelope;
 missing required fields and malformed control records remain rejected.
+Optional phase-output status now uses the shared status vocabulary when present;
+absent status remains valid, while unknown, nil, boolean and numeric values fail.
