@@ -20,8 +20,8 @@
   (:require
    [ai.miniforge.anomaly.interface :as anomaly]
    [ai.miniforge.decision-envelope.interface :as envelope]
-   [ai.miniforge.evidence-bundle.interface :as evidence]
    [ai.miniforge.event-stream.interface.opsv :as opsv-event]
+   [ai.miniforge.phase-opsv.event-evidence :as event-evidence]
    [ai.miniforge.phase-opsv.event-replay :as replay]
    [ai.miniforge.phase-opsv.messages :as msg]
    [malli.core :as m]))
@@ -63,13 +63,6 @@
                       :event/type (:event/type event)
                       :evidence/result assembly})))
 
-(defn- ^{:stratum 0} evidence-material [event]
-  (let [effects (or (:opsv/governed-effects event)
-                    (some-> (:opsv/governed-effect event) vector) [])]
-    {:opsv/event-refs [(:event/id event)]
-     :opsv/grant-refs (mapv :evidence/grant-id effects)
-     :opsv/actuation {:governed-effects effects}}))
-
 ;------------------------------------------------------------------------------ Layer 1
 
 (defn- ^{:stratum 1} validation-anomaly
@@ -87,10 +80,9 @@
         failure (publication-anomaly event published)]
     (cond
       failure failure
-      store (let [assembly (evidence/accumulate-opsv-evidence!
-                            store (evidence-id ctx)
-                            (evidence-material event))]
-              (evidence-anomaly event assembly)))))
+      store (evidence-anomaly published
+                              (event-evidence/accumulate! store (evidence-id ctx)
+                                                         stream-value published)))))
 
 ;------------------------------------------------------------------------------ Layer 2
 

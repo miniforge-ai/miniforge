@@ -6,6 +6,7 @@
             [ai.miniforge.artifact.interface :as artifact]
             [ai.miniforge.event-stream.interface :as events]
             [ai.miniforge.phase-opsv.events :as publication]
+            [ai.miniforge.phase-opsv.evidence-base :as base]
             [ai.miniforge.phase-opsv.artifact-test-support :as f]
             [ai.miniforge.phase-opsv.evidence-runtime :as runtime]
             [ai.miniforge.phase-opsv.evidence-snapshot :as snapshot]
@@ -55,11 +56,26 @@
         (is (= :failed (get-in failed [:phase :status])))
         (is (nil? (publication/emit-phase-events! failed phase-key output)))
         (is (= before (events/get-events (:event-stream failed))))
+        (let [original (base/bundle failed)
+              persisted (runtime/persist failed)
+              restored (runtime/ensure-assembly
+                         (assoc (dissoc persisted :opsv/evidence-assembly-store)
+                                :event-stream (events/create-event-stream)))]
+          (is (= (count before) (get-in original [:evidence/event-links 0 :event-links/event-count] 0)))
+          (is (= (:evidence/event-links original) (:evidence/event-links (base/bundle restored)))))
         (let [completed ((:leave interceptor) entered)
               result (get-in completed [:phase :result])]
           (is (= :success (:status result)))
           (recur (assoc-in completed [:execution/phase-results phase-key :result] result)
                  (rest handlers)))))))
+
+(deftest ^{:stratum 0} evidence-tier-follows-workflow-and-survives-captured-base-test
+  (is (= :standard (get-in (base/bundle {}) [:evidence/outcome :outcome/tier])))
+  (let [ctx {:execution/workflow {:workflow/tier :critical}}
+        captured (base/bundle ctx)]
+    (is (= :critical (get-in captured [:evidence/outcome :outcome/tier])))
+    (is (= :critical (get-in (base/bundle {:execution/opts {:opsv/evidence-base captured}})
+                            [:evidence/outcome :outcome/tier])))))
 
 ;------------------------------------------------------------------------------ Layer 1
 

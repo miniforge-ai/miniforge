@@ -6,14 +6,14 @@
             [ai.miniforge.phase-opsv.actuation-snapshot :as snapshot]
             [ai.miniforge.phase-opsv.artifact-test-support :as f]
             [ai.miniforge.phase-opsv.evidence-base :as base]
-            [ai.miniforge.phase-opsv.evidence-runtime :as runtime]
             [ai.miniforge.phase-opsv.evidence-snapshot :as envelope]
+            [ai.miniforge.phase-opsv.test-support :as support]
             [clojure.test :refer [deftest is]]))
 
 ;------------------------------------------------------------------------------ Layer 0
 
 (defn- ^{:stratum 0} assert-bound-base [ctx _directory]
-  (let [ready (runtime/ensure-assembly (f/configured ctx))
+  (let [ready (f/step (f/configured ctx) (first support/handlers))
         original (base/bundle ready)
         output {:opsv/actuation-record {:effect :completed}}
         encoded (snapshot/encode ready output)]

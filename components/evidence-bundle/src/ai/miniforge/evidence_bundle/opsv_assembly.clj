@@ -78,7 +78,8 @@
               reference-keys)
       (update :opsv/governed-effects into
               (reference-collection
-               (get-in material [:opsv/actuation :governed-effects])))))
+               (get-in material [:opsv/actuation :governed-effects])))
+      (update :opsv/event-sequences #(merge (:opsv/event-sequences material) %))))
 
 ;------------------------------------------------------------------------------ Layer 2
 

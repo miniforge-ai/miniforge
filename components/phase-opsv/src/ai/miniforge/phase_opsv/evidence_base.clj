@@ -2,7 +2,8 @@
 ;; Copyright 2025-2026 Christopher Lester (christopher@miniforge.ai)
 ;; Licensed under the Apache License, Version 2.0.
 (ns ai.miniforge.phase-opsv.evidence-base
-  "One sanitized N6 base shared by preflight and durable actuation capture.")
+  "One sanitized N6 base shared by preflight and durable actuation capture."
+  (:require [ai.miniforge.phase-opsv.evidence-linkage :as linkage]))
 
 ;------------------------------------------------------------------------------ Layer 0
 
@@ -15,9 +16,13 @@
 (defn ^{:stratum 1} bundle [ctx]
   (let [supplied (get-in ctx [:execution/opts :opsv/evidence-base])
         base (select-keys (when (map? supplied) supplied) fields)
-        id (get-in ctx [:execution/input :opsv/evidence-bundle-id])]
-    (assoc base :evidence-bundle/id id
-                :evidence/policy-checks [] :evidence/outcome {:outcome/success true})))
+        id (get-in ctx [:execution/input :opsv/evidence-bundle-id])
+        tier (get (:evidence/outcome supplied) :outcome/tier
+                  (get (:execution/workflow ctx) :workflow/tier :standard))
+        links (linkage/links ctx)]
+    (cond-> (assoc base :evidence-bundle/id id :evidence/policy-checks []
+                       :evidence/outcome {:outcome/success true :outcome/tier tier})
+      links (assoc :evidence/event-links links))))
 
 (comment
   (bundle {}))
