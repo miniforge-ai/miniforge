@@ -28,7 +28,8 @@ a lossy control-action projection. Valid portable records must remain valid.
   even when cleanup fails. Preserve supplied request metadata at event publication.
 
 Approval is conditional under N8. The schema accepts N6 `:status` and N8
-`:approval-status` vocabulary. Missing states remain missing, not fabricated.
+`:approval-status` vocabulary; when both are supplied they must agree. Missing
+states remain missing, not fabricated.
 This corrects projection; capturing every control-executor snapshot remains a
 separate N8 implementation obligation.
 
@@ -48,6 +49,8 @@ The full dashboard consumer suite passes. Rebuilt packaged dashboard and control
 record regressions pass 15 tests and 83 assertions.
 Final lifecycle/metadata regressions pass 24 tests and 123 assertions in the rebuilt
 CLI. All four event-stream consumer suites and the dashboard suite pass serially.
+Approval-alias regressions pass on the JVM and rebuilt packaged CLI: two tests,
+21 assertions, including agreement, contradiction, malformed and absent statuses.
 
 ## Deployment Plan
 
