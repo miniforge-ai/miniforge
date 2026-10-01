@@ -218,12 +218,10 @@ jobs:
           clojure -M:poly test brick:opsv-provider-github :dev
           clojure -M:test:dev -e "(require 'ai.miniforge.opsv-provider-test) (let [r (clojure.test/run-tests 'ai.miniforge.opsv-provider-test)] (System/exit (+ (:fail r) (:error r))))"
 
-      - name: OPSV shared lifecycle and fresh verification
+      - name: OPSV shared-workflow evidence recovery
         working-directory: projects/miniforge
-        run: >-
-          clojure -M -e "(require 'ai.miniforge.workflow.opsv-lifecycle-integration-test)
-          (let [r (clojure.test/run-tests 'ai.miniforge.workflow.opsv-lifecycle-integration-test)]
-          (System/exit (+ (:fail r) (:error r))))"
+        run: |
+          clojure -M -e "(require 'ai.miniforge.workflow.opsv-lifecycle-integration-test 'ai.miniforge.workflow.opsv-finalization-integration-test) (let [r (clojure.test/run-tests 'ai.miniforge.workflow.opsv-lifecycle-integration-test 'ai.miniforge.workflow.opsv-finalization-integration-test)] (System/exit (+ (:fail r) (:error r))))"
 
       - name: OPSV typed checkpoint recovery
         working-directory: projects/miniforge

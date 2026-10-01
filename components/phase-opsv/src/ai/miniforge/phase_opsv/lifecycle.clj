@@ -23,7 +23,10 @@
    [ai.miniforge.phase-opsv.artifact-boundary :as artifacts]
    [ai.miniforge.phase-opsv.evidence-runtime :as evidence-runtime]
    [ai.miniforge.phase-opsv.events :as events]
+   [ai.miniforge.phase-opsv.finalization-boundary :as finalization]
+   [ai.miniforge.phase-opsv.finalization-config :as finalization-config]
    [ai.miniforge.phase-opsv.flow :as flow]
+   [ai.miniforge.phase-opsv.post-actuation-checkpoint :as checkpoint]
    [ai.miniforge.phase-opsv.lifecycle-result :as lifecycle-result]))
 
 ;------------------------------------------------------------------------------ Layer 0
@@ -53,7 +56,17 @@
       (if (anomaly/anomaly? published)
         (lifecycle-result/phase-result
          (assoc-in published [:anomaly/data :opsv/phase-output] (:output result)))
-        result))))
+        (if (and (= :opsv/actuate phase-key) (finalization-config/enabled? ctx))
+          (lifecycle-result/phase-result (finalization/finalize! ctx (:output result)))
+          result)))))
+
+(defn- ^{:stratum 0} transformed-phase [ctx phase-key transform config start-time]
+  (let [output (transform ctx)
+        retained (checkpoint/capture ctx phase-key output)
+        published (or (checkpoint/encoding-failure retained output)
+                      (artifacts/publish-with-exception-handling retained phase-key output))]
+    (phase/enter-context retained phase-key (:agent config) (:gates config)
+                         (:budget config) start-time (lifecycle-result/phase-result published))))
 
 ;------------------------------------------------------------------------------ Layer 1
 
@@ -73,17 +86,14 @@
   [phase-key transform config ctx]
   (let [runtime-ctx (isolate-runtime-adapter ctx)
         assembled-ctx (evidence-runtime/ensure-assembly runtime-ctx)
-        prepared-ctx (flow/continue assembled-ctx artifacts/prepare)
+        active-ctx (flow/continue assembled-ctx artifacts/prepare)
+        prepared-ctx (flow/continue active-ctx finalization/prepare)
         start-time (System/currentTimeMillis)
-        prepared? (not (anomaly/anomaly? prepared-ctx))
-        output (if prepared?
-                 (artifacts/publish-with-exception-handling prepared-ctx phase-key (transform prepared-ctx))
-                 prepared-ctx)
-        result (lifecycle-result/phase-result output)]
-    (phase/enter-context (if prepared? prepared-ctx runtime-ctx) phase-key
-                         (:agent config)
-                         (:gates config) (:budget config)
-                         start-time result)))
+        prepared? (not (anomaly/anomaly? prepared-ctx))]
+    (if prepared?
+      (transformed-phase prepared-ctx phase-key transform config start-time)
+      (phase/enter-context runtime-ctx phase-key (:agent config) (:gates config)
+                           (:budget config) start-time (lifecycle-result/phase-result prepared-ctx)))))
 
 ;------------------------------------------------------------------------------ Layer 2
 
