@@ -17,7 +17,8 @@
     (cond
       (not (validation/valid-with-exception-handling? finalized bundle available-ids))
       (diagnostics/failure :anomalies/incorrect :finalization/invalid id [{:code :invalid-retained-seal}])
-      (= bundle (:opsv.assembly/bundle record)) bundle
+      (and (= :finalized (:opsv.assembly/status record))
+           (= bundle (:opsv.assembly/bundle record))) bundle
       (not= :assembling (:opsv.assembly/status record)) (diagnostics/immutable id)
       :else (publication/publish-sealed! store record bundle))))
 
