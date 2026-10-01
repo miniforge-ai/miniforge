@@ -24,7 +24,6 @@
    optional component provider) and deriving their normalized/summary
    fields live here."
   (:require
-   [clojure.edn :as edn]
    [clojure.java.io :as io]
    [clojure.string :as str]
    [ai.miniforge.cli.app-config :as app-config]
@@ -32,7 +31,8 @@
    [ai.miniforge.cli.main.commands.evidence.validation :as validation]
    [ai.miniforge.cli.main.commands.shared :as shared]
    [ai.miniforge.cli.main.display :as display]
-   [ai.miniforge.cli.messages :as messages]))
+   [ai.miniforge.cli.messages :as messages]
+   [ai.miniforge.evidence-bundle.interface :as evidence]))
 
 ;------------------------------------------------------------------------------ Layer 0
 
@@ -45,7 +45,7 @@
   [file]
   (try
     (when (str/ends-with? (.getName file) ".edn")
-      (edn/read-string (slurp file)))
+      (evidence/decode-bundle-edn (slurp file)))
     (catch InterruptedException interrupted
       (.interrupt (Thread/currentThread))
       (throw interrupted))

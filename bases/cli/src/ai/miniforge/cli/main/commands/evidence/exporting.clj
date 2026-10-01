@@ -6,7 +6,8 @@
   (:require [ai.miniforge.cli.main.commands.evidence.validation :as validation]
             [ai.miniforge.cli.main.commands.shared :as shared]
             [ai.miniforge.cli.main.display :as display]
-            [ai.miniforge.cli.messages :as messages]))
+            [ai.miniforge.cli.messages :as messages]
+            [ai.miniforge.evidence-bundle.interface :as evidence]))
 
 ;------------------------------------------------------------------------------ Layer 0
 
@@ -16,7 +17,7 @@
 
 (defn- ^{:stratum 0} write-with-exception-handling! [bundle destination]
   (try
-    (spit destination (pr-str bundle))
+    (spit destination (evidence/encode-bundle-edn bundle))
     (display/print-success (messages/t :evidence/export-raw {:path destination}))
     (catch InterruptedException interrupted
       (.interrupt (Thread/currentThread))

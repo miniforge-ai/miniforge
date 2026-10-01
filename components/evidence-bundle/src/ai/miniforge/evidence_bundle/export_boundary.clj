@@ -3,13 +3,14 @@
 ;; Licensed under the Apache License, Version 2.0.
 (ns ai.miniforge.evidence-bundle.export-boundary
   "Validate the exact immutable value written by the manager export boundary."
-  (:require [ai.miniforge.evidence-bundle.publication-validation :as validation]
+  (:require [ai.miniforge.evidence-bundle.edn-codec :as codec]
+            [ai.miniforge.evidence-bundle.publication-validation :as validation]
             [ai.miniforge.logging.interface :as log]))
 
 ;------------------------------------------------------------------------------ Layer 0
 
 (defn- ^{:stratum 0} write-bundle! [logger bundle-id bundle output-path]
-  (spit output-path (pr-str bundle))
+  (spit output-path (codec/encode bundle))
   (log/info logger :evidence-bundle :bundle/exported
             {:data {:bundle-id bundle-id :output-path output-path}})
   true)

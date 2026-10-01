@@ -23,6 +23,7 @@
    [ai.miniforge.evidence-bundle.canonical-validation :as canonical]
    [ai.miniforge.evidence-bundle.chain-evidence :as chain-evidence]
    [ai.miniforge.evidence-bundle.collector :as collector]
+   [ai.miniforge.evidence-bundle.edn-codec :as edn-codec]
    [ai.miniforge.evidence-bundle.extraction :as extraction]
    [ai.miniforge.evidence-bundle.extraction-bulk :as extraction-bulk]
    [ai.miniforge.evidence-bundle.opsv-assembly :as opsv-assembly]
@@ -173,6 +174,17 @@
    Returns {:valid? bool :errors [...]}; does not establish authenticity."
   [bundle]
   (canonical/validate-with-exception-handling bundle))
+
+(defn ^{:stratum 0} encode-bundle-edn
+  "Serialize an already-validated bundle in its canonical N6 EDN form."
+  [bundle]
+  (edn-codec/encode bundle))
+
+(defn ^{:stratum 0} decode-bundle-edn
+  "Read bounded EDN preserving instant precision; returns nil on malformed input.
+   Validate the resulting bundle before presentation or export."
+  [text]
+  (edn-codec/decode-with-exception-handling text))
 
 (defn ^{:stratum 0} validate-published-bundle
   "Validate canonical domain values and a required complete N6 seal. No authenticity claim."

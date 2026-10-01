@@ -10,6 +10,7 @@ Require a complete verified seal before CLI list/show or CLI/manager export.
 Report invalid, tampered, and unsealed bundles without presenting their ordinary evidence details.
 Do not silently repair legacy evidence or overwrite an export destination on validation failure.
 Serialize the exact validated value instead of rereading a mutable source file.
+Use canonical EDN and preserve nanosecond instant precision when reading it back.
 The CLI fallback supports EDN; reject unsupported formats instead of mislabeling raw EDN as JSON or HTML.
 This implements the consumer-boundary finding from #1957.
 

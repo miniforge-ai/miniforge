@@ -39,5 +39,15 @@
         (is (= "unchanged" (slurp file))))
       (finally (.delete file)))))
 
+(deftest ^{:stratum 1} exported-instant-precision-preserves-the-seal
+  (let [at (java.time.Instant/parse "2026-09-30T00:00:00.123456789Z")
+        base (assoc (dissoc (sealed-bundle) :evidence/content-hash) :evidence/sealed-at at)
+        sealed (assoc base :evidence/content-hash (evidence/content-hash base))
+        decoded (evidence/decode-bundle-edn (evidence/encode-bundle-edn sealed))]
+    (is (= at (:evidence/sealed-at decoded)))
+    (is (:valid? (evidence/validate-published-bundle decoded)))
+    (is (= (:evidence/content-hash sealed) (:evidence/content-hash decoded)))
+    (is (nil? (evidence/decode-bundle-edn "#object [unsupported]")))))
+
 (comment
   (clojure.test/run-tests 'ai.miniforge.evidence-bundle.publication-test))
