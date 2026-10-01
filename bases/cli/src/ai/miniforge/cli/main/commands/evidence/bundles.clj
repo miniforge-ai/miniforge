@@ -16,22 +16,17 @@
 ;; See the License for the specific language governing permissions and
 ;; limitations under the License.
 (ns ai.miniforge.cli.main.commands.evidence.bundles
-  "Evidence bundle discovery, loading, and field-derivation helpers.
-   Split out of `ai.miniforge.cli.main.commands.evidence` (rule 210:
-   the combined namespace measured 5 real layers, max 3) — the command
-   entry points and detail-view rendering stay in the parent
-   namespace; locating/loading bundle files (filesystem scan and the
-   optional component provider) and deriving their normalized/summary
-   fields live here."
+  "Discover evidence from providers or disk and derive verified presentation fields."
   (:require
-   [babashka.fs :as fs]
-   [clojure.edn :as edn]
    [clojure.java.io :as io]
    [clojure.string :as str]
    [ai.miniforge.cli.app-config :as app-config]
+   [ai.miniforge.cli.main.commands.evidence.validation :as validation]
    [ai.miniforge.cli.main.commands.shared :as shared]
    [ai.miniforge.cli.main.display :as display]
-   [ai.miniforge.cli.messages :as messages]))
+   [ai.miniforge.cli.messages :as messages]
+   [ai.miniforge.evidence-bundle.interface :as evidence]
+   [slingshot.slingshot :refer [try+]]))
 
 ;------------------------------------------------------------------------------ Layer 0
 
@@ -39,27 +34,33 @@
 (defn ^{:stratum 0} evidence-dir []
   (str (app-config/home-dir) "/evidence"))
 
-(defn ^{:stratum 0} load-bundle-from-file
+(defn- ^{:stratum 0} load-with-exception-handling
   "Load an evidence bundle from an EDN file. Returns nil on failure."
   [file]
-  (try
+  (try+
     (when (str/ends-with? (.getName file) ".edn")
-      (edn/read-string (slurp file)))
+      (evidence/read-bundle-edn file))
+    (catch InterruptedException interrupted
+      (.interrupt (Thread/currentThread))
+      (throw interrupted))
     (catch Exception _ nil)))
 
-;; Display helpers
-(def ^{:stratum 0} bundle-detail-spec
-  {:header   :evidence/show-header
-   :fields   [[:bundle/workflow-id :evidence/show-workflow {:default "—"}]
-              [:bundle/status      :evidence/show-status   {:default "unknown"}]
-              [:bundle/created-at  :evidence/show-created  {:default "—"}]
-              [:bundle/failure-attribution :evidence/show-failure-attribution {:default "—"}]
-              [:bundle/dependency-issues :evidence/show-dependency-issues {:default 0}]]
-   :sections [{:key :bundle/artifacts :header :evidence/show-artifacts
-               :entry :evidence/show-artifact-entry :max 10
-               :entry-fn (fn [a] {:type (get a :artifact/type "unknown")
-                                   :id   (get a :artifact/id "")})}
-              {:key :bundle/phases :header :evidence/show-phases}]})
+(defn- ^{:stratum 0} artifact-entry [artifact]
+  (let [type (get artifact :artifact/type (messages/t :evidence/unknown-value))
+        id (get artifact :artifact/id "")]
+    {:type type :id id}))
+
+(def ^{:stratum 0} ^:private artifact-display-limit
+  "Maximum artifact entries in evidence details." 10)
+
+(defn ^{:stratum 0} canonical-status [bundle]
+  (messages/t (if (true? (get-in bundle [:evidence/outcome :outcome/success]))
+                :status/value-completed :status/value-failed)))
+
+(defn ^{:stratum 0} legacy-field-or
+  "Nil/false legacy presentation fields do not override canonical data."
+  [bundle field fallback]
+  (if-let [value (get bundle field)] value fallback))
 
 (def ^{:stratum 0} ^:private phase-evidence-keys
   [:evidence/plan
@@ -80,22 +81,36 @@
   (cond
     (keyword? value) (name value)
     (string? value) value
-    (nil? value) "unknown"
+    (nil? value) (messages/t :evidence/unknown-value)
     :else (str value)))
 
-;; Command implementations
-(defn ^{:stratum 0} display-component-bundles
-  "Render bundles returned from the evidence-bundle component interface."
-  [bundles]
-  (if (seq bundles)
-    (doseq [bundle bundles]
-      (println (messages/t :evidence/bundle-entry
-                          {:id          (display/style (get bundle :bundle/id "unknown") :foreground :bold)
-                           :workflow-id (get bundle :bundle/workflow-id "—")
-                           :status      (get bundle :bundle/status "unknown")})))
-    (println (messages/t :evidence/none))))
-
 ;------------------------------------------------------------------------------ Layer 1
+
+(defn- ^{:stratum 1} display-bundle! [diagnostic-id bundle]
+  (when (validation/accepted? diagnostic-id bundle)
+    (let [id (display/style (str (:evidence-bundle/id bundle)) :bold true)
+          workflow-id (:evidence-bundle/workflow-id bundle)
+          status (canonical-status bundle)]
+      (println (messages/t :evidence/bundle-entry
+                          {:id id :workflow-id workflow-id :status status})))))
+
+;; Display helpers
+(defn ^{:stratum 1} bundle-detail-spec []
+  (let [missing {:default (messages/t :evidence/missing-value)}
+        unknown {:default (messages/t :evidence/unknown-value)}]
+    {:header   :evidence/show-header
+     :fields   [[:bundle/workflow-id :evidence/show-workflow missing]
+                [:bundle/status      :evidence/show-status unknown]
+                [:bundle/created-at  :evidence/show-created missing]
+                [:bundle/failure-attribution :evidence/show-failure-attribution missing]
+                [:bundle/dependency-issues :evidence/show-dependency-issues {:default 0}]]
+     :sections [{:key :bundle/artifacts :header :evidence/show-artifacts
+                 :entry :evidence/show-artifact-entry :max artifact-display-limit
+                 :entry-fn artifact-entry}
+                {:key :bundle/phases :header :evidence/show-phases}]}))
+
+(defn ^{:stratum 1} load-bundle-from-file [file]
+  (load-with-exception-handling file))
 
 (defn ^{:stratum 1} scan-evidence-dir []
   (let [dir (io/file (evidence-dir))]
@@ -115,15 +130,9 @@
 (defn ^{:stratum 1} failure-attribution-summary
   [failure-attribution]
   (when (seq failure-attribution)
-    (let [source (or (:failure/source failure-attribution)
-                     (:dependency/source failure-attribution)
-                     :unknown)
-          vendor (or (:failure/vendor failure-attribution)
-                     (:dependency/vendor failure-attribution)
-                     (:dependency/id failure-attribution))
-          failure-class (or (:dependency/class failure-attribution)
-                            (:failure/class failure-attribution)
-                            :unknown)]
+    (let [source (some failure-attribution [:failure/source :dependency/source])
+          vendor (some failure-attribution [:failure/vendor :dependency/vendor :dependency/id])
+          failure-class (some failure-attribution [:dependency/class :failure/class])]
       (str (label source) " / " (label vendor) " / " (label failure-class)))))
 
 (defn ^{:stratum 1} canonical-phase-names
@@ -132,20 +141,27 @@
        (filter #(contains? bundle %))
        (mapv (comp keyword name))))
 
-(defn ^{:stratum 1} load-bundle-for-show
-  "Load a bundle from the component interface or the filesystem."
+;------------------------------------------------------------------------------ Layer 2
+
+(defn ^{:stratum 2} display-component-bundles [bundles]
+  (if (seq bundles)
+    (doseq [bundle bundles]
+      (display-bundle! (str (or (:evidence-bundle/id bundle) (:bundle/id bundle))) bundle))
+    (println (messages/t :evidence/none))))
+
+(defn ^{:stratum 2} display-filesystem-bundles []
+  (let [files (scan-evidence-dir)]
+    (if (seq files)
+      (doseq [file files]
+        (display-bundle! (.getName file) (load-bundle-from-file file)))
+      (println (messages/t :evidence/none)))))
+
+(defn ^{:stratum 2} load-bundle-for-show
+  "Load a bundle; nil means absent, a sentinel means present but unreadable."
   [id]
   (or (shared/call-optional-provider 'ai.miniforge.evidence-bundle.interface/get-bundle id)
       (let [f (io/file (str (evidence-dir) "/" id ".edn"))]
-        (when (.exists f) (load-bundle-from-file f)))))
+        (when (.exists f) (or (load-bundle-from-file f) ::unreadable-bundle)))))
 
-(defn ^{:stratum 1} export-bundle-fallback
-  "Copy the raw EDN bundle file as-is when the export component is unavailable."
-  [id fmt]
-  (let [src (io/file (str (evidence-dir) "/" id ".edn"))]
-    (if (.exists src)
-      (let [dest (str (evidence-dir) "/" id "-export." fmt)]
-        (fs/copy (str src) dest {:replace-existing true})
-        (display/print-success (messages/t :evidence/export-raw {:path dest})))
-      (do (display/print-error (messages/t :evidence/export-not-found {:id id}))
-          (shared/exit! 1)))))
+(comment
+  (scan-evidence-dir))

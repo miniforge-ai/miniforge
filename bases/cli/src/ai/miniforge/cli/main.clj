@@ -687,7 +687,7 @@
    {:cmds ["evidence"]           :fn help-cmd}
    {:cmds ["evidence" "list"]    :fn evidence-list-cmd}
    {:cmds ["evidence" "show"]    :fn evidence-show-cmd   :args->opts [:id]}
-   {:cmds ["evidence" "export"]  :fn evidence-export-cmd :args->opts [:id :format]}
+   {:cmds ["evidence" "export"]  :fn evidence-export-cmd :args->opts [:id :output-path]}
 
    ;; Artifact commands (N5)
    {:cmds ["artifact"]              :fn help-cmd}

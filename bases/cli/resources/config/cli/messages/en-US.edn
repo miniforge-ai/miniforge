@@ -412,6 +412,11 @@
 
   ;; ── Evidence ──────────────────────────────────────────────────────────
   :evidence/header "Evidence Bundles"
+  :evidence/missing-value "—"
+  :evidence/unknown-value "unknown"
+  :evidence/invalid "Evidence bundle {id} is invalid, tampered, or unsealed; presentation and export are refused."
+  :evidence/export-format-unsupported "Unsupported evidence export format: {format}. Use edn, json, or html."
+  :evidence/export-failed "Could not export evidence to {path}."
   :evidence/document-language "en-US"
   :evidence/bundle-entry "  {id}  wf:{workflow-id}  ({status})"
   :evidence/none "  No evidence bundles found."
