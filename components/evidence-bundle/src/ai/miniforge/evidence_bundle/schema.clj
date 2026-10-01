@@ -29,6 +29,8 @@
    Based on N6 Evidence & Provenance Standard."
   (:require
    [ai.miniforge.evidence-bundle.schema.compliance :as compliance]
+   [ai.miniforge.evidence-bundle.schema.dag-evidence :as dag]
+   [ai.miniforge.evidence-bundle.schema.extended-evidence :as extended]
    [ai.miniforge.evidence-bundle.schema.gate-executions :as gate-executions]
    [ai.miniforge.evidence-bundle.schema.knowledge-inputs :as knowledge-inputs]
    [ai.miniforge.evidence-bundle.schema.optional-key :as optional-key]
@@ -95,6 +97,13 @@
 
    ;; Control Action Evidence
    (optional-key/optional-key :evidence/control-actions) vector?
+   (optional-key/optional-key :evidence/annotations) extended/annotations?
+
+   ;; DAG and pack workflows supply these sections when applicable.
+   (optional-key/optional-key :evidence/dag-run) dag/run?
+   (optional-key/optional-key :evidence/task-workflows) dag/tasks?
+   (optional-key/optional-key :evidence/merge) dag/merge?
+   (optional-key/optional-key :evidence/pack-run) extended/pack-run?
 
    ;; Rules Applied (knowledge base rules injected into agents)
    (optional-key/optional-key :evidence/rules-applied) vector?
