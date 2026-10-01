@@ -221,9 +221,12 @@
   (let [bundle (f/bundle {:test/text "café 東京"})]
     (with-redefs [shared/call-optional-provider (constantly bundle)]
       (doseq [format ["edn" "json" "html"]]
-        (let [destination (str *tmp-dir* "/requested/audit." format)]
-          (with-out-str (sut/evidence-export-cmd (export-options format destination)))
-          (is (= (formats/encode bundle format) (slurp destination :encoding "UTF-8"))))))))
+        (doseq [destination [(str *tmp-dir* "/requested/audit." format)
+                             (str "audit-" (random-uuid) "." format)]]
+          (try+
+            (with-out-str (sut/evidence-export-cmd (export-options format destination)))
+            (is (= (formats/encode bundle format) (slurp destination :encoding "UTF-8")))
+            (finally (fs/delete-if-exists destination))))))))
 
 (deftest ^{:stratum 1} cli-parser-keeps-destination-separate-from-format
   (let [bundle (f/bundle {:test/text "café 東京"})]
