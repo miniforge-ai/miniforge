@@ -48,8 +48,9 @@
      Returns {:valid? bool :errors [...]}")
 
   (export-bundle [this bundle-id output-path]
-    "Export evidence bundle to file (EDN or JSON).
-     Returns true on success, false on error."))
+    "Export valid sealed evidence as canonical EDN.
+     Invalid, unsealed or missing evidence returns false without touching the destination.
+     Returns true on success, false on filesystem errors."))
 
 (defprotocol ^{:stratum 0} ProvenanceTracer
   "Protocol for tracing artifact provenance chains."
