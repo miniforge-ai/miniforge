@@ -4,6 +4,7 @@
 (ns ai.miniforge.web-dashboard.server.shutdown
   "Drain HTTP traffic before releasing the control identity."
   (:require [org.httpkit.server :as http]
+            [ai.miniforge.web-dashboard.server.boundary.cleanup :as cleanup]
             [ai.miniforge.web-dashboard.control-identity :as control-identity]))
 
 ;------------------------------------------------------------------------------ Layer 0
@@ -16,10 +17,6 @@
 ;------------------------------------------------------------------------------ Layer 1
 
 (defn ^{:stratum 1} stop! [{:keys [server watcher-cleanup state]}]
-  (try
-    (some-> server stop-http!)
-    (finally
-      (try
-        (when watcher-cleanup (watcher-cleanup))
-        (finally
-          (when state (control-identity/release! state)))))))
+  (cleanup/complete! nil [#(some-> server stop-http!)
+                          #(when watcher-cleanup (watcher-cleanup))
+                          #(when state (control-identity/release! state))]))
