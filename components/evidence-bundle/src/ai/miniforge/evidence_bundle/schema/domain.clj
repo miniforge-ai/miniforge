@@ -300,11 +300,12 @@
 (defn ^{:stratum 2} consistent-semantic-conclusion? [value]
   (let [failed (set (keep (partial failed-count-rule value) [:creates :updates :destroys]))
         reported (set (map :violation/rule-id (:semantic-validation/violations value)))
+        actual (:semantic-validation/actual-behavior value)
         inferred (inferred-behavior (:semantic-validation/resource-creates value)
                                    (:semantic-validation/resource-updates value)
                                    (:semantic-validation/resource-destroys value))]
     (and (= (empty? failed) (:semantic-validation/passed? value))
-         (= inferred (:semantic-validation/actual-behavior value))
+         (or (= inferred actual) (= [:import :refactor] [inferred actual]))
          (= failed reported))))
 
 ;------------------------------------------------------------------------------ Rich Comment

@@ -164,6 +164,13 @@
     (is (:valid? (evidence/validate-canonical-bundle
                   (assoc bundle :evidence/semantic-validation semantic
                                 :evidence/tool-invocations [tool] :evidence/implement phase))))
+    (is (:valid? (evidence/validate-canonical-bundle
+                  (-> bundle
+                      (assoc-in [:evidence/intent :intent/type] :refactor)
+                      (assoc :evidence/semantic-validation
+                             (assoc semantic :semantic-validation/declared-intent :refactor
+                                             :semantic-validation/actual-behavior :refactor
+                                             :semantic-validation/resource-updates 0))))))
     (doseq [invalid [{} 42 nil]]
       (is (false? (:valid? (evidence/validate-canonical-bundle
                            (assoc bundle :evidence/semantic-validation
