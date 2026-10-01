@@ -4,6 +4,8 @@
 (ns ai.miniforge.evidence-bundle.canonical-validation-test
   (:require [ai.miniforge.evidence-bundle.interface :as evidence]
             [ai.miniforge.evidence-bundle.collectors :as collectors]
+            [ai.miniforge.evidence-bundle.collector :as collector]
+            [ai.miniforge.artifact.interface :as artifact]
             [ai.miniforge.evidence-bundle.phases :as phases]
             [ai.miniforge.evidence-bundle.schema.compliance :as compliance]
             [ai.miniforge.evidence-bundle.schema.validation :as validation]
@@ -41,6 +43,24 @@
   (is (false? (:valid? (validation/validate-schema {:field seq} {:field 42}))))
   (is (true? (:valid? (validation/validate-schema {:field nil?} {:field nil}))))
   (is (false? (:valid? (validation/validate-schema {:field nil?} {})))))
+
+(deftest ^{:stratum 0} collected-semantic-and-policy-evidence-use-canonical-fields-test
+  (let [workflow-id (random-uuid)
+        material {:artifact/type :terraform-plan :artifact/content "resource will be created"
+                  :artifact/provenance {:provenance/workflow-id workflow-id :provenance/phase :implement}}
+        violation {:rule-id "example" :severity :high :message "Policy failed."}
+        wrapped {:rule {:rule/id "example" :rule/severity :high}
+                 :violation {:message "Policy failed."}}
+        state {:workflow/spec {:intent/type :import} :workflow/status :failed
+               :workflow/gate-results [{:passed? false :violations [violation wrapped]}]}]
+    (with-redefs [artifact/query (constantly [material])]
+      (let [bundle (dissoc (collector/assemble-evidence-bundle workflow-id state :test)
+                           :evidence/content-hash)
+            semantic (:evidence/semantic-validation bundle)]
+        (is (false? (:semantic-validation/passed? semantic)))
+        (is (seq (:semantic-validation/violations semantic)))
+        (is (false? (get-in bundle [:evidence/policy-checks 0 :policy-check/passed?])))
+        (is (:valid? (evidence/validate-canonical-bundle bundle)))))))
 
 ;------------------------------------------------------------------------------ Layer 1
 
