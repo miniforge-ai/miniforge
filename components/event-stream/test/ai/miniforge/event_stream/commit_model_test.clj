@@ -4,20 +4,12 @@
 (ns ai.miniforge.event-stream.commit-model-test
   (:require [ai.miniforge.anomaly.interface :as anomaly]
             [ai.miniforge.event-stream.commit-model :as model]
+            [ai.miniforge.event-stream.commit-test-support :refer [draft]]
             [clojure.test :refer [deftest is]]))
 
 ;------------------------------------------------------------------------------ Layer 0
 
-(defn ^{:stratum 0} draft []
-  {:event/id (random-uuid)
-   :event/type :workflow/started
-   :event/timestamp (java.util.Date.)
-   :event/version "1.0.0"
-   :message "started"})
-
-;------------------------------------------------------------------------------ Layer 1
-
-(deftest ^{:stratum 1} preparation-does-not-consume-a-sequence
+(deftest ^{:stratum 0} preparation-does-not-consume-a-sequence
   (let [state (model/empty-state)
         scope [:workflow (random-uuid)]
         first-event (model/candidate state scope (draft))
@@ -28,7 +20,7 @@
     (is (= 1 (:event/sequence-number (model/candidate accepted scope (draft)))))
     (is (= first-event (:event (model/recorded accepted (:event/id first-event)))))))
 
-(deftest ^{:stratum 1} scope-type-and-identity-both-partition-sequences
+(deftest ^{:stratum 0} scope-type-and-identity-both-partition-sequences
   (let [id (random-uuid)
         workflow [:workflow id]
         other-workflow [:workflow (random-uuid)]
@@ -40,7 +32,7 @@
     (doseq [scope [pr other-workflow]]
       (is (= 0 (:event/sequence-number (model/candidate accepted scope (draft))))))))
 
-(deftest ^{:stratum 1} retries-return-the-original-acknowledgment
+(deftest ^{:stratum 0} retries-return-the-original-acknowledgment
   (let [scope [:workflow (random-uuid)]
         state (model/empty-state)
         event (model/candidate state scope (draft))
@@ -50,7 +42,7 @@
     (is (anomaly/anomaly? (model/candidate accepted scope (assoc retry :message "changed"))))
     (is (anomaly/anomaly? (model/candidate accepted [:pr (random-uuid)] retry)))))
 
-(deftest ^{:stratum 1} sequence-overflow-is-explicit
+(deftest ^{:stratum 0} sequence-overflow-is-explicit
   (let [scope [:workflow (random-uuid)]
         state (assoc-in (model/empty-state) [:next-sequences scope] Long/MAX_VALUE)
         event (model/candidate state scope (draft))
