@@ -10,4 +10,5 @@
   :journal/ownership "Event journal directory is unavailable or already owned."
   :journal/closed "Event journal is closed."
   :journal/recovery "Event journal recovery failed."
-  :publication/invalid-scope "Event publication requires its family's non-nil authoritative scope."}}
+  :publication/invalid-scope "Event publication requires its family's non-nil authoritative scope."
+  :publication/delivery-failed "Committed events remain queued after a delivery failure."}}

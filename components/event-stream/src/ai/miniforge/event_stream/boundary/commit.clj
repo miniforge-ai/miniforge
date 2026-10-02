@@ -4,6 +4,7 @@
 (ns ai.miniforge.event-stream.boundary.commit
   "A storage receipt is authoritative; uncertain writes fence the journal."
   (:require [ai.miniforge.anomaly.interface :as anomaly]
+            [ai.miniforge.event-stream.boundary.critical :as critical]
             [ai.miniforge.event-stream.commit-model :as model]
             [slingshot.slingshot :refer [try+]]))
 
@@ -17,18 +18,6 @@
   (swap! (:state journal) model/accept scope event)
   event)
 
-(defn- ^{:stratum 0} critical-cause [throwable]
-  (loop [cause throwable seen #{}]
-    (cond
-      (nil? cause) nil
-      (contains? seen cause) nil
-      (or (instance? Error cause) (instance? InterruptedException cause)) cause
-      :else (recur (.getCause ^Throwable cause) (conj seen cause)))))
-
-(defn- ^{:stratum 0} propagate-critical! [cause]
-  (when (instance? InterruptedException cause) (.interrupt (Thread/currentThread)))
-  (throw cause))
-
 ;------------------------------------------------------------------------------ Layer 1
 
 (defn- ^{:stratum 1} accept-receipt! [journal scope event receipt]
@@ -40,9 +29,9 @@
 (defn- ^{:stratum 1} handle-thrown! [journal event object throwable]
   (let [failure (if (anomaly/any-anomaly? object) object
                    (model/failure :fault :commit/write-failed event))
-        critical (critical-cause throwable)]
+        critical (critical/cause throwable)]
     (fence! journal failure)
-    (if critical (propagate-critical! critical) failure)))
+    (if critical (critical/propagate! critical) failure)))
 
 ;------------------------------------------------------------------------------ Layer 2
 
