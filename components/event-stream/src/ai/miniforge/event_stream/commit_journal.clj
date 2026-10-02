@@ -25,6 +25,7 @@
       (let [snapshot @state
             candidate (model/candidate snapshot scope draft)]
         (cond
+          (.isInterrupted (Thread/currentThread)) (model/failure :unavailable :commit/interrupted draft)
           (:failure snapshot) (model/failure :unavailable :commit/recovery-required draft)
           (:writing? snapshot) (model/failure :conflict :commit/reentrant draft)
           (anomaly/anomaly? candidate) candidate

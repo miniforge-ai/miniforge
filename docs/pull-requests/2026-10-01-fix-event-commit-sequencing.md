@@ -46,9 +46,24 @@ remain separate storage and integration work. No deployment is included.
 
 ## Standards and verification
 
-Extract a coherent publication primitive; retain genuine namespace strata and
-reuse existing anomaly/message boundaries. Do not add counter-rewind logic.
-Test concurrent publication, failures, retries, quiesce, and acknowledged return
-values. Run every event-stream consumer and packaged regressions serially, then
-rerun the OPSV publication-recovery scenario. Normal hooks, a root standards
-scan, bounded commits/PR, fresh review and all CI are required before merge.
+The model, storage-exception boundary and journal orchestration have separate
+namespaces with at most three real strata. Reuse one event fixture and receipt
+recorder; construct anomalies and localized diagnostics through shared interfaces.
+No counter rewinds, fabricated event links or public API expansion.
+
+Focused JVM and rebuilt packaged tests pass 13 tests / 88 assertions. All four
+event-stream consumers pass serially. Direct probes verify that interruption
+survives the API boundary; tests capture it before reporting can consume the flag.
+Normal hooks pass for the model and acknowledgment commits. Complete normal hooks
+for the matrix commit, current-head review and all CI before merge.
+
+Adversarial trace: a fresh candidate gets zero without mutation; storage sees that
+candidate while the counter remains unchanged; only an exact receipt installs it.
+Retry returns the stored envelope without another write. Changed identity content
+or scope is refused. Uncertain receipt/throw fences the journal before releasing
+the lock. Critical causes propagate after fencing and the in-flight marker is
+always removed. Concurrent calls share the same state lock; same-thread storage
+reentry is refused. A pre-interrupted caller never reaches storage.
+
+This PR does not close N3.EF.4 in the running product. The durable adapter and
+publisher integration must still pass restart and OPSV recovery acceptance.
