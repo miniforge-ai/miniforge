@@ -25,6 +25,7 @@
    [ai.miniforge.artifact.publication :as publication]
    [ai.miniforge.artifact.publication-boundary :as publication-boundary]
    [ai.miniforge.artifact.publication-identity :as publication-identity]
+   [ai.miniforge.artifact.publication-inventory :as publication-inventory]
    [ai.miniforge.artifact.snapshot :as snapshot]
    [ai.miniforge.schema.interface :as schema]
    [clojure.string :as str]
@@ -92,6 +93,16 @@
     (publication-boundary/call-with-exception-handling id :fault :publication/read-failed
                                                      #(publication/read-record directory id))
     (publication-boundary/failure :invalid-input :publication/invalid id)))
+
+(defn ^{:stratum 0} list-published
+  "Read every immutable publication, or return an anomaly for any unreadable record.
+   Ignores temporary/unrelated files; refuses malformed owned filenames and symlinks.
+   Enumeration is not a transaction: callers needing a snapshot must own the directory."
+  [directory]
+  (if (and (string? directory) (not (str/blank? directory)))
+    (publication-boundary/call-with-exception-handling
+     nil :fault :publication/read-failed (partial publication-inventory/read-records directory))
+    (publication-boundary/failure :invalid-input :publication/invalid nil)))
 
 ;; Re-export protocol for public API
 (def ^{:stratum 0} ArtifactStore
