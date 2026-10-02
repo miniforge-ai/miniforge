@@ -46,7 +46,7 @@ remain separate storage and integration work. No deployment is included.
 
 ## Standards and verification
 
-The model, storage-exception boundary and journal orchestration have separate
+The model, designated `boundary.commit` exception adapter and journal orchestration have separate
 namespaces with at most three real strata. Reuse one event fixture and receipt
 recorder; construct anomalies and localized diagnostics through shared interfaces.
 No counter rewinds, fabricated event links or public API expansion.
@@ -54,8 +54,12 @@ No counter rewinds, fabricated event links or public API expansion.
 Focused JVM and rebuilt packaged tests pass 13 tests / 88 assertions. All four
 event-stream consumers pass serially. Direct probes verify that interruption
 survives the API boundary; tests capture it before reporting can consume the flag.
-Normal hooks pass for the model and acknowledgment commits. Complete normal hooks
-for the matrix commit, current-head review and all CI before merge.
+Normal hooks pass for the model, acknowledgment and matrix commits. The standards
+scan identified the original boundary namespace spelling as outside the recognized
+boundary convention; the exception adapter now uses the explicit `.boundary.`
+namespace. Final focused JVM/packaged verification also passes 13 / 88;
+the root scan covers 4,213 files with zero violations. Normal hooks,
+current-head review and all CI remain mandatory merge gates.
 
 Adversarial trace: a fresh candidate gets zero without mutation; storage sees that
 candidate while the counter remains unchanged; only an exact receipt installs it.

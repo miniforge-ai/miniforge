@@ -4,7 +4,7 @@
 (ns ai.miniforge.event-stream.commit-journal
   "Single-owner publication primitive. The adapter owns durable recovery and locking."
   (:require [ai.miniforge.anomaly.interface :as anomaly]
-            [ai.miniforge.event-stream.commit-boundary :as boundary]
+            [ai.miniforge.event-stream.boundary.commit :as boundary]
             [ai.miniforge.event-stream.commit-model :as model]))
 
 ;------------------------------------------------------------------------------ Layer 0

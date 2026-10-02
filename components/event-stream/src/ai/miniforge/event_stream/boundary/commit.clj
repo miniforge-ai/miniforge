@@ -1,7 +1,7 @@
 ;; Title: Miniforge.ai
 ;; Copyright 2025-2026 Christopher Lester (christopher@miniforge.ai)
 ;; Licensed under the Apache License, Version 2.0.
-(ns ai.miniforge.event-stream.commit-boundary
+(ns ai.miniforge.event-stream.boundary.commit
   "A storage receipt is authoritative; uncertain writes fence the journal."
   (:require [ai.miniforge.anomaly.interface :as anomaly]
             [ai.miniforge.event-stream.commit-model :as model]
