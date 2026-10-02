@@ -5,4 +5,8 @@
   :commit/reentrant "Storage must not recursively publish into its own journal."
   :commit/interrupted "Event publication was interrupted before storage was invoked."
   :commit/unacknowledged "Event storage did not acknowledge the exact publication."
-  :commit/write-failed "Event storage failed; recovery is required before further publication."}}
+  :commit/write-failed "Event storage failed; recovery is required before further publication."
+  :journal/invalid "Event journal record is invalid or inconsistent."
+  :journal/ownership "Event journal directory is unavailable or already owned."
+  :journal/closed "Event journal is closed."
+  :journal/recovery "Event journal recovery failed."}}
