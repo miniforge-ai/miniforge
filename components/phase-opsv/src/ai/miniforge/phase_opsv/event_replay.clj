@@ -2,7 +2,7 @@
 ;; Copyright 2025-2026 Christopher Lester (christopher@miniforge.ai)
 ;; Licensed under the Apache License, Version 2.0.
 (ns ai.miniforge.phase-opsv.event-replay
-  "Reuse confirmed actuation audit occurrences during evidence-only retries."
+  "Reuse confirmed phase audit occurrences during checkpoint/publication retries."
   (:require [ai.miniforge.anomaly.interface :as anomaly]
             [ai.miniforge.artifact.interface :as artifact]
             [ai.miniforge.evidence-bundle.interface :as evidence]
@@ -13,7 +13,10 @@
 ;------------------------------------------------------------------------------ Layer 0
 
 (def ^{:stratum 0} ^:private retryable-types
-  #{:gate/decision :opsv.actuation/emitted :opsv.actuation/disposition})
+  #{:gate/decision :opsv.actuation/emitted :opsv.actuation/disposition
+    :opsv.experiment/planned :opsv.experiment/started :opsv/load-step
+    :opsv.guardrail/abort :opsv.convergence/iteration :opsv.policy/proposed
+    :opsv.verification/result})
 
 (defn- ^{:stratum 0} acknowledged? [ctx event]
   (when-let [store (:opsv/evidence-assembly-store ctx)]

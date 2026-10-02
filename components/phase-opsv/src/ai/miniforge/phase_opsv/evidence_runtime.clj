@@ -20,7 +20,9 @@
   (:require
    [ai.miniforge.anomaly.interface :as anomaly]
    [ai.miniforge.evidence-bundle.interface :as evidence]
-   [ai.miniforge.phase-opsv.messages :as msg]))
+   [ai.miniforge.phase-opsv.evidence-checkpoint :as checkpoint]
+   [ai.miniforge.phase-opsv.messages :as msg]
+   [ai.miniforge.phase-opsv.runtime-context :as context]))
 
 ;------------------------------------------------------------------------------ Layer 0
 
@@ -48,7 +50,7 @@
 (defn- ^{:stratum 0} allocate-assembly
   [ctx supplied-store]
   (let [store (or supplied-store (evidence/create-opsv-assembly-store))
-        assembly (evidence/allocate-opsv-assembly! store (:execution/id ctx))]
+        assembly (evidence/allocate-opsv-assembly! store (context/workflow-id ctx))]
     (-> ctx
         (assoc :opsv/evidence-assembly-store store)
         (assoc-in [:execution/input :opsv/evidence-bundle-id]
@@ -61,28 +63,33 @@
         bundle-id (get-in ctx [:execution/input :opsv/evidence-bundle-id])]
     (if-let [assembly (and store bundle-id
                            (evidence/get-opsv-assembly store bundle-id))]
-      (assoc-in ctx [:execution/input :opsv/evidence-assembly] assembly)
+      (checkpoint/persist ctx assembly)
       ctx)))
 
 ;------------------------------------------------------------------------------ Layer 1
 
-(defn ^{:stratum 1} ensure-assembly
+(defn- ^{:stratum 1} restore-or-allocate
+  [ctx supplied-store bundle-id]
+  (let [durable-assembly (checkpoint/restore ctx)]
+    (cond
+      (anomaly/anomaly? durable-assembly) durable-assembly
+      (and (= bundle-id (:evidence-bundle/id durable-assembly))
+           (assembly-for-workflow? durable-assembly (context/workflow-id ctx)))
+      (with-restored-assembly ctx durable-assembly)
+      bundle-id (unmatched-evidence-id bundle-id)
+      :else (allocate-assembly ctx supplied-store))))
+
+;------------------------------------------------------------------------------ Layer 2
+
+(defn ^{:stratum 2} ensure-assembly
   [ctx]
   (let [bundle-id (get-in ctx [:execution/input :opsv/evidence-bundle-id])
-        durable-assembly (get-in ctx [:execution/input :opsv/evidence-assembly])
         supplied-store (or (:opsv/evidence-assembly-store ctx)
                            (get-in ctx [:execution/opts
                                         :opsv/evidence-assembly-store]))
         supplied-assembly (when (and bundle-id supplied-store)
                             (evidence/get-opsv-assembly supplied-store
                                                        bundle-id))]
-    (cond
-      (assembly-for-workflow? supplied-assembly (:execution/id ctx))
+    (if (assembly-for-workflow? supplied-assembly (context/workflow-id ctx))
       (with-supplied-assembly ctx supplied-store supplied-assembly)
-
-      (and (= bundle-id (:evidence-bundle/id durable-assembly))
-           (assembly-for-workflow? durable-assembly (:execution/id ctx)))
-      (with-restored-assembly ctx durable-assembly)
-
-      bundle-id (unmatched-evidence-id bundle-id)
-      :else (allocate-assembly ctx supplied-store))))
+      (restore-or-allocate ctx supplied-store bundle-id))))
