@@ -1,0 +1,4 @@
+{:evidence-bundle/system
+ {:finalization/not-found "OPSV evidence assembly not found"
+  :finalization/immutable "OPSV evidence bundle is immutable"
+  :finalization/invalid "OPSV evidence finalization failed"}}

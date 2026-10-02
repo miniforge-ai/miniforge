@@ -18,7 +18,7 @@
 (ns ai.miniforge.evidence-bundle.opsv-assembly
   "Run-scoped N6 OPSV evidence accumulation and immutable finalization."
   (:require
-   [ai.miniforge.response.interface :as response]))
+   [ai.miniforge.evidence-bundle.opsv-diagnostics :as diagnostics]))
 
 ;------------------------------------------------------------------------------ Layer 0
 
@@ -34,12 +34,6 @@
   "Restore an in-memory store from one durable OPSV assembly record."
   [assembly]
   (atom {(:evidence-bundle/id assembly) assembly}))
-
-(defn- ^{:stratum 0} anomaly
-  [category message bundle-id errors]
-  (response/make-anomaly category message
-                         {:opsv/evidence-bundle-id bundle-id
-                          :opsv.validation/errors errors}))
 
 (defn ^{:stratum 0} allocate!
   "Allocate and store the evidence identifier before the first OPSV event."
@@ -103,11 +97,9 @@
         old-assembly (get old-state bundle-id)]
     (cond
       (nil? old-assembly)
-      (anomaly :anomalies/not-found "OPSV evidence assembly not found"
-               bundle-id [{:code :assembly-not-found}])
+      (diagnostics/not-found bundle-id)
 
       (not= :assembling (:opsv.assembly/status old-assembly))
-      (anomaly :anomalies/conflict "OPSV evidence bundle is immutable"
-               bundle-id [{:code :bundle-already-finalized}])
+      (diagnostics/immutable bundle-id)
 
       :else (get new-state bundle-id))))

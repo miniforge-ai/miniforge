@@ -29,6 +29,8 @@
    [ai.miniforge.evidence-bundle.extraction-bulk :as extraction-bulk]
    [ai.miniforge.evidence-bundle.opsv-assembly :as opsv-assembly]
    [ai.miniforge.evidence-bundle.opsv-finalization :as opsv-finalization]
+   [ai.miniforge.evidence-bundle.opsv-sealed-validation :as opsv-sealed-validation]
+   [ai.miniforge.evidence-bundle.opsv-sealed-restoration :as opsv-sealed-restoration]
    [ai.miniforge.evidence-bundle.publication-validation :as publication-validation]
    [ai.miniforge.evidence-bundle.schema :as schema]
    [ai.miniforge.evidence-bundle.schema.compliance :as compliance]
@@ -75,6 +77,16 @@
                                available-artifact-ids))
 
 ;; Protocol re-exports
+(defn ^{:stratum 0} restore-finalized-opsv-bundle!
+  "Adopt an existing verified seal into its matching assembly without resealing."
+  [store bundle available-artifact-ids]
+  (opsv-sealed-restoration/restore! store bundle available-artifact-ids))
+
+(defn ^{:stratum 0} valid-finalized-opsv-bundle?
+  "Read-only seal and assembly-reference validation; never reseals or mutates evidence."
+  [assembly bundle available-artifact-ids]
+  (opsv-sealed-validation/valid-with-exception-handling? assembly bundle available-artifact-ids))
+
 (def ^{:stratum 0} EvidenceBundle
   "Protocol for creating, storing, and querying evidence bundles.
    Methods: create-bundle, get-bundle, get-bundle-by-workflow,
