@@ -9,4 +9,5 @@
   :journal/invalid "Event journal record is invalid or inconsistent."
   :journal/ownership "Event journal directory is unavailable or already owned."
   :journal/closed "Event journal is closed."
-  :journal/recovery "Event journal recovery failed."}}
+  :journal/recovery "Event journal recovery failed."
+  :publication/invalid-scope "Event publication requires its family's non-nil authoritative scope."}}
