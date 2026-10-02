@@ -1,0 +1,3 @@
+{:event-commit/messages
+ {:commit/identity-conflict "Event identity already names a different publication."
+  :commit/sequence-exhausted "Event scope has exhausted its sequence numbers."}}
