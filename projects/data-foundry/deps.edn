@@ -29,6 +29,7 @@
         ai.miniforge/connector-sarif           {:local/root "../../components/connector-sarif"}
         ai.miniforge/algorithms                {:local/root "../../components/algorithms"}
         ai.miniforge/anomaly                   {:local/root "../../components/anomaly"}
+        ai.miniforge/artifact                  {:local/root "../../components/artifact"}
         ai.miniforge/coerce                    {:local/root "../../components/coerce"}
         ai.miniforge/config                    {:local/root "../../components/config"}
         ai.miniforge/content-hash              {:local/root "../../components/content-hash"}
@@ -41,6 +42,7 @@
         ai.miniforge/decision-envelope         {:local/root "../../components/decision-envelope"}
         ai.miniforge/effect-transaction        {:local/root "../../components/effect-transaction"}
         ai.miniforge/execution-grant           {:local/root "../../components/execution-grant"}
+        ai.miniforge/file-durability           {:local/root "../../components/file-durability"}
         ai.miniforge/knowledge                 {:local/root "../../components/knowledge"}
         ai.miniforge/logging                   {:local/root "../../components/logging"}
         ai.miniforge/messages                  {:local/root "../../components/messages"}

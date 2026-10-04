@@ -257,8 +257,14 @@
 
    Arguments:
      event-stream - event stream atom
-     config       - optional {:unknown-failure-threshold 3}"
+     config       - optional policy plus :before-safe-mode!, a synchronous unary
+                    host callback. It must close write admission before returning;
+                    its result or anomaly is retained independently of event delivery."
   degradation/create-manager)
+
+(def ^{:stratum 0} safe-mode-stop-result
+  "Read the last host stop report or anomaly; mode entry alone does not prove cleanup."
+  degradation/stop-result)
 
 (def ^{:stratum 0} degradation-mode
   "Get the current degradation mode (:nominal, :degraded, or :safe-mode)."

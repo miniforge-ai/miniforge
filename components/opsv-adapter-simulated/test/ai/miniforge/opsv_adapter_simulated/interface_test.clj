@@ -18,6 +18,7 @@
 (ns ai.miniforge.opsv-adapter-simulated.interface-test
   (:require
    [clojure.test :refer [deftest is testing]]
+   [ai.miniforge.anomaly.interface :as anomaly]
    [ai.miniforge.opsv-adapter-simulated.interface :as sut]
    [ai.miniforge.phase-opsv.interface :as opsv]))
 
@@ -42,3 +43,18 @@
              (opsv/run-guarded-ramp adapter {:experiment-pack/id "pack"})))
       (is (= (opsv/run-guarded-ramp adapter {})
              (opsv/run-guarded-ramp adapter {}))))))
+
+(deftest ^{:stratum 1} verification-does-not-reuse-the-baseline-ramp-test
+  (let [request {:verification/id (random-uuid)
+                 :candidate/hash "candidate" :experiment-pack/hash "pack"}
+        measurements {:environment-fingerprint {:cluster "verification-staging"}
+                      :observations {"latency" 42} :confidence 0.95
+                      :metric-snapshot-artifact-refs [#uuid "00000000-0000-0000-0000-000000000799"]}
+        configured (assoc scenario :opsv/verification-result measurements)
+        adapter (sut/create-adapter configured)]
+    (is (satisfies? opsv/VerificationAdapter adapter))
+    (is (= (merge measurements request) (opsv/run-verification adapter request)))
+    (is (anomaly/anomaly? (opsv/run-verification (sut/create-adapter scenario) request)))))
+
+(comment
+  (sut/create-adapter scenario))

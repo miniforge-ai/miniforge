@@ -1,0 +1,100 @@
+;; Title: Miniforge.ai
+;; Subtitle: An agentic SDLC / fleet-control platform
+;; Author: Christopher Lester
+;; Line: Founder, Miniforge.ai (project)
+;; Copyright 2025-2026 Christopher Lester (christopher@miniforge.ai)
+;;
+;; Licensed under the Apache License, Version 2.0 (the "License");
+;; you may not use this file except in compliance with the License.
+;; You may obtain a copy of the License at
+;;
+;;     http://www.apache.org/licenses/LICENSE-2.0
+;;
+;; Unless required by applicable law or agreed to in writing, software
+;; distributed under the License is distributed on an "AS IS" BASIS,
+;; WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+;; See the License for the specific language governing permissions and
+;; limitations under the License.
+(ns ai.miniforge.phase-opsv.event-delivery
+  "Validate, publish and correlate OPSV audit events without assuming success."
+  (:require
+   [ai.miniforge.anomaly.interface :as anomaly]
+   [ai.miniforge.decision-envelope.interface :as envelope]
+   [ai.miniforge.evidence-bundle.interface :as evidence]
+   [ai.miniforge.event-stream.interface.opsv :as opsv-event]
+   [ai.miniforge.phase-opsv.event-replay :as replay]
+   [ai.miniforge.phase-opsv.messages :as msg]
+   [malli.core :as m]))
+
+;------------------------------------------------------------------------------ Layer 0
+
+(def ^{:stratum 0} DecisionEvent
+  [:map [:event/type [:= :gate/decision]]
+   [:event/id :uuid] [:event/timestamp inst?] [:workflow/id :uuid]
+   [:opsv/evidence-bundle-id :uuid] [:gate/phase [:= :opsv/actuate]]
+   [:envelope/id :uuid] [:gate/decision-envelope envelope/DecisionEnvelope]])
+
+(defn- ^{:stratum 0} evidence-id
+  [ctx]
+  (get-in ctx [:execution/input :opsv/evidence-bundle-id]))
+
+(defn- ^{:stratum 0} publication-anomaly
+  [event published]
+  (let [rejected? (or (:rejected? published) (anomaly/any-anomaly? published))]
+    (cond
+      (anomaly/anomaly? published) published
+      (and (not rejected?) (= (:event/id event) (:event/id published))) nil
+      :else (anomaly/anomaly
+             (if rejected? :unavailable :conflict)
+             (msg/ts :event/publication-failed)
+             {:event/id (:event/id event)
+              :event/type (:event/type event)
+              :event-stream/result published}))))
+
+(defn- ^{:stratum 0} evidence-anomaly
+  [event assembly]
+  (cond
+    (anomaly/anomaly? assembly) assembly
+    (or (anomaly/any-anomaly? assembly)
+        (not (contains? (:opsv/event-refs assembly) (:event/id event))))
+    (anomaly/anomaly :fault
+                     (msg/ts :evidence/accumulation-failed)
+                     {:event/id (:event/id event)
+                      :event/type (:event/type event)
+                      :evidence/result assembly})))
+
+(defn- ^{:stratum 0} evidence-material [event]
+  (let [effects (or (:opsv/governed-effects event)
+                    (some-> (:opsv/governed-effect event) vector) [])]
+    {:opsv/event-refs [(:event/id event)]
+     :opsv/grant-refs (mapv :evidence/grant-id effects)
+     :opsv/actuation {:governed-effects effects}}))
+
+;------------------------------------------------------------------------------ Layer 1
+
+(defn- ^{:stratum 1} validation-anomaly
+  [event]
+  (when-let [explanation (if (= :gate/decision (:event/type event))
+                          (m/explain DecisionEvent event)
+                          (opsv-event/explain-invalid-event event))]
+    (anomaly/validation-anomaly
+     (msg/ts :event/invalid) :opsv/event event explanation)))
+
+(defn- ^{:stratum 1} publish-event!
+  [ctx stream-value event]
+  (let [published (replay/publish! ctx stream-value event)
+        store (:opsv/evidence-assembly-store ctx)
+        failure (publication-anomaly event published)]
+    (cond
+      failure failure
+      store (let [assembly (evidence/accumulate-opsv-evidence!
+                            store (evidence-id ctx)
+                            (evidence-material event))]
+              (evidence-anomaly event assembly)))))
+
+;------------------------------------------------------------------------------ Layer 2
+
+(defn ^{:stratum 2} emit! [ctx stream-value event]
+  (or (validation-anomaly event)
+      (let [identified (replay/identify event)]
+        (if (anomaly/anomaly? identified) identified (publish-event! ctx stream-value identified)))))

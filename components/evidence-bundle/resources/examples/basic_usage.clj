@@ -81,9 +81,9 @@
   (def import-bundles (evidence/query-bundles evidence-mgr {:intent-type :import}))
   (println "Import bundles count:" (count import-bundles))
 
-  ;; Export for audit
-  (evidence/export-bundle evidence-mgr (:evidence-bundle/id bundle) "/tmp/evidence.edn")
-  (println "Exported to /tmp/evidence.edn"))
+  ;; Export requires a complete published seal. Legacy create-bundle output
+  ;; is not a finalized publication and is refused without creating a file.
+  (assert (false? (evidence/export-bundle evidence-mgr (:evidence-bundle/id bundle) "/tmp/evidence.edn"))))
 
 ;; ============================================================================
 ;; Example 2: Semantic Intent Validation

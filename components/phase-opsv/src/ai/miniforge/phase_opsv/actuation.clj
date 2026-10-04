@@ -20,7 +20,9 @@
   (:require
    [ai.miniforge.anomaly.interface :as anomaly]
    [ai.miniforge.opsv.interface :as opsv]
-   [ai.miniforge.phase-opsv.governance :as governance]))
+   [ai.miniforge.phase-opsv.actuation-decision :as decision]
+   [ai.miniforge.phase-opsv.governance :as governance]
+   [ai.miniforge.phase-opsv.pr-emission :as pr-emission]))
 
 ;------------------------------------------------------------------------------ Layer 0
 
@@ -39,22 +41,6 @@
   (if (anomaly/anomaly? record)
     record
     (assoc verified :opsv/actuation-record record)))
-
-(defn- ^{:stratum 0} decision-input
-  [ctx verification gate-results]
-  (let [input (:execution/input ctx)
-        requested-mode (get-in input [:opsv/experiment-pack
-                                      :experiment-pack/actuation-intent])
-        safe-mode? (true? (:opsv/safe-mode? input))]
-    {:requested-actuation-mode requested-mode
-     :verification-passed? (:passed? verification)
-     :gate-results gate-results
-     :safe-mode? safe-mode?
-     ;; This executor cannot perform governed effects. Input flags are not grants.
-     :pr-capability-valid? false
-     :apply-capability-valid? false
-     :rollback-verified? false
-     :postconditions-configured? false}))
 
 ;------------------------------------------------------------------------------ Layer 1
 
@@ -76,10 +62,9 @@
     (let [evaluated (governance/evaluate ctx verified)]
       (if (anomaly/anomaly? evaluated)
         evaluated
-        (let [verification (:opsv/verification-result verified)
-              decision (decision-input ctx verification (:opsv/gate-results evaluated))
-              record (recommendation decision)]
-          (attach-record (merge verified evaluated) record))))))
+        (let [complete (merge verified evaluated)
+              record (recommendation (decision/input ctx complete))]
+          (pr-emission/emit! ctx (attach-record complete record)))))))
 
 (comment
   (actuation-record :pr-only :recommend-only))

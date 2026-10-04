@@ -212,11 +212,18 @@ jobs:
           fi
           echo "::endgroup::"
 
-      # The provider remains development-only until runtime integration lands.
+      # Keep provider boundary and durable reconciliation coverage explicit.
       - name: OPSV provider contracts and durable reconciliation
         run: |
           clojure -M:poly test brick:opsv-provider-github :dev
           clojure -M:test:dev -e "(require 'ai.miniforge.opsv-provider-test) (let [r (clojure.test/run-tests 'ai.miniforge.opsv-provider-test)] (System/exit (+ (:fail r) (:error r))))"
+
+      - name: OPSV shared lifecycle and fresh verification
+        working-directory: projects/miniforge
+        run: >-
+          clojure -M -e "(require 'ai.miniforge.workflow.opsv-lifecycle-integration-test)
+          (let [r (clojure.test/run-tests 'ai.miniforge.workflow.opsv-lifecycle-integration-test)]
+          (System/exit (+ (:fail r) (:error r))))"
 
       - name: Upload test logs
         if: always()

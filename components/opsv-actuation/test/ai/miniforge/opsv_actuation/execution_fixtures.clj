@@ -36,7 +36,7 @@
   {:effect/outcome :unknown-outcome})
 
 (defn ^{:stratum 0} grant-request [prepared]
-  (merge (dissoc prepared :pr/title :pr/body :pr/draft? :opsv/envelope :opsv/evidence-bundle-id)
+  (merge (select-keys prepared (get-in grant/issuance-policies [:effect/pr-create :policy/scope-keys]))
          {:workflow-run/status :running
           :effect/class :effect/pr-create
           :effect/preflight {:preflight/type :preflight/pr-create-readiness

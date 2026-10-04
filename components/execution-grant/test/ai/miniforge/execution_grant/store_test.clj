@@ -4,12 +4,13 @@
 (ns ai.miniforge.execution-grant.store-test
   (:require [ai.miniforge.anomaly.interface :as anomaly]
             [ai.miniforge.execution-grant.interface :as grant]
+            [ai.miniforge.execution-grant.messages :as msg]
             [ai.miniforge.execution-grant.store-codec :as codec]
-            [ai.miniforge.execution-grant.store-durability :as durability]
+            [ai.miniforge.file-durability.interface :as durability]
             [ai.miniforge.execution-grant.store-path :as path]
             [clojure.java.io :as io]
             [clojure.test :refer [deftest is]])
-  (:import [java.io File IOException]
+  (:import [java.io File]
            [java.nio.charset StandardCharsets]
            [java.nio.file Files OpenOption]
            [java.nio.file.attribute FileAttribute]
@@ -42,7 +43,7 @@
 
 (defn- ^{:stratum 0} sync-failure!
   [& _]
-  (throw (IOException. "Injected disk sync failure")))
+  (anomaly/anomaly :fault (msg/t :store/write-failed) {}))
 
 (defn- ^{:stratum 0} sql-date
   [^Instant instant]
@@ -209,7 +210,7 @@
 (deftest ^{:stratum 2} file-sync-failure-does-not-publish-test
   (let [dir (tmp-dir)
         g (issued)]
-    (with-redefs [durability/write! sync-failure!]
+    (with-redefs [durability/write-new-text! sync-failure!]
       (is (= :fault (:anomaly/type (grant/register! dir g)))))
     (is (nil? (grant/current dir (:grant/id g))))
     (is (empty? (seq (.listFiles (io/file dir "grants")))))))
@@ -284,7 +285,8 @@
         g (issued)
         id (:grant/id g)]
     (grant/register! dir g)
-    (with-redefs [durability/sync-ancestry! sync-failure!]
+    (with-redefs [durability/sync-ancestry! sync-failure!
+                  durability/confirm! sync-failure!]
       (is (= :fault (:anomaly/type (grant/revoke-stored! dir id :revocation/operator now))))
       (is (= now (:grant/revoked-at (grant/current dir id))))
       (is (= :fault (:anomaly/type (grant/revoke-stored! dir id :revocation/superseded later)))))

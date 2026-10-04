@@ -46,8 +46,8 @@
    shared on-disk cursor and could publish a workflow's audit trail
    through the wrong stream."
   (:require
-   [ai.miniforge.agent.interface :as agent]
    [ai.miniforge.automation-edge-correlator.interface :as correlator]
+   [ai.miniforge.cli.workflow-runner.opsv-control :as opsv-control]
    [ai.miniforge.cli.workflow-runner.policy-evaluator :as policy-evaluator]
    [ai.miniforge.cli.workflow-runner.resume-launcher :as resume-launcher]
    [ai.miniforge.cli.workflow-runner.resume-records :as resume-records]
@@ -85,7 +85,7 @@
         ;; supervisory-state and emits `:supervisory/automation-edge-upserted`
         ;; events; consumers (Rust core, native app) dedup on `:edge/id`.
         _correlator (correlator/attach! operator-stream)]
-    (agent/create-meta-loop-context operator-stream)))
+    (opsv-control/context operator-stream)))
 
 (defn ^{:stratum 0} release-workflow-control!
   "Drop `workflow-id` from the live-runner registry, and this process
@@ -157,7 +157,6 @@
         (or @meta-loop-ctx
             (reset! meta-loop-ctx (create-meta-loop-ctx!))))))
 
-;; Consumer lifecycle
 (defn- ^{:stratum 1} ensure-operator-consumer!
   [ctx accept?]
   ;; Double-checked locking (see meta-loop-context!). The inner re-check
@@ -200,6 +199,15 @@
   (stop-held-consumer! operator-consumer-handle))
 
 ;------------------------------------------------------------------------------ Layer 2
+
+;; Consumer lifecycle
+(defn ^{:stratum 2} register-opsv-run-control!
+  "Bind a prepared OPSV run to this process's safe-mode stop domain.
+   Use the returned control/fence in trusted PR runtime options. Stopped domains
+   never reopen; safe-mode exit alone does not renew prior execution authority."
+  [workflow-id authority-directory request-abort!]
+  (opsv-control/register! (:opsv/supervisor (meta-loop-context!)) workflow-id
+                          authority-directory request-abort!))
 
 ;; Runner registration
 (defn ^{:stratum 2} register-workflow-control!

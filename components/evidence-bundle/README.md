@@ -1,6 +1,12 @@
+<!--
+  Title: Miniforge.ai
+  Author: Christopher Lester (christopher@miniforge.ai)
+  Copyright 2025-2026 Christopher Lester. Licensed under Apache 2.0.
+-->
+
 # Evidence Bundle Component
 
-The evidence-bundle component provides comprehensive audit trails for autonomous workflow execution, implementing the N6
+The evidence-bundle component provides audit trails for autonomous workflow execution, implementing the N6
 Evidence & Provenance Standard.
 
 ## Purpose
@@ -98,7 +104,8 @@ Protocol for semantic intent validation:
 ;; Query bundles
 (evidence/query-bundles evidence-mgr {:intent-type :import})
 
-;; Export bundle for audit
+;; Export only a finalized, sealed bundle for audit.
+;; Legacy create-bundle output is unsealed and returns false without writing.
 (evidence/export-bundle evidence-mgr bundle-id "/tmp/evidence.edn")
 ```
 

@@ -20,6 +20,9 @@
    invocations, rules, policy checks, pack promotions, supervision
    decisions, control actions, and execution output."
   (:require
+   [ai.miniforge.evidence-bundle.collector-projection :as collector-projection]
+   [ai.miniforge.evidence-bundle.control-projection :as control-projection]
+   [ai.miniforge.evidence-bundle.projection :as projection]
    [ai.miniforge.event-stream.interface :as event-stream]))
 
 ;------------------------------------------------------------------------------ Layer 0
@@ -45,7 +48,7 @@
    :policy-check/pack-version (get gate-result :pack-version "1.0.0")
    :policy-check/phase (get gate-result :phase :unknown)
    :policy-check/checked-at (get gate-result :checked-at (java.time.Instant/now))
-   :policy-check/violations (vec (get gate-result :violations []))
+   :policy-check/violations (mapv collector-projection/violation (get gate-result :violations []))
    :policy-check/passed? (get gate-result :passed? true)
    :policy-check/duration-ms (get gate-result :duration-ms 0)
    :policy-check/envelope (get gate-result :envelope)})
@@ -94,22 +97,7 @@
    Looks in :execution/output for evidence fields produced by runner/extract-output.
    Returns a map of evidence keys to merge into the bundle, or empty map."
   [workflow-state]
-  (let [output (get workflow-state :execution/output {})]
-    (cond-> {}
-      (contains? output :evidence/execution-mode)
-      (assoc :evidence/execution-mode (:evidence/execution-mode output))
-
-      (contains? output :evidence/runtime-class)
-      (assoc :evidence/runtime-class (:evidence/runtime-class output))
-
-      (contains? output :evidence/task-started-at)
-      (assoc :evidence/task-started-at (:evidence/task-started-at output))
-
-      (contains? output :evidence/task-finished-at)
-      (assoc :evidence/task-finished-at (:evidence/task-finished-at output))
-
-      (contains? output :evidence/image-digest)
-      (assoc :evidence/image-digest (:evidence/image-digest output)))))
+  (projection/execution workflow-state))
 
 ;------------------------------------------------------------------------------ Layer 1
 
@@ -188,31 +176,12 @@
 
    Returns vector of control action evidence maps."
   [event-stream workflow-id]
-  (try
-    (when event-stream
-      (let [requested (collect-event-stream-events event-stream
-                                                   {:workflow-id workflow-id
-                                                    :event-type :control-action/requested})
-            executed (collect-event-stream-events event-stream
-                                                  {:workflow-id workflow-id
-                                                   :event-type :control-action/executed})
-            executed-by-id (into {} (map (fn [e] [(:action/id e) e]) executed))]
-        (mapv (fn [req-event]
-                (let [action-id (:action/id req-event)
-                      exec-event (get executed-by-id action-id)]
-                  (cond-> {:control-action/id action-id
-                           :control-action/type (:action/type req-event)
-                           :control-action/requester (get req-event :action/requester {})
-                           :control-action/timestamp (get req-event :event/timestamp
-                                                         (java.util.Date.))
-                           :control-action/result (if exec-event :executed :pending)}
-                    (:action/justification req-event)
-                    (assoc :control-action/justification (:action/justification req-event))
-
-                    (:action/target req-event)
-                    (assoc :control-action/target (:action/target req-event)))))
-              requested)))
-    (catch Exception _e
-      [])))
+  (let [requested (collect-event-stream-events event-stream
+                                              {:workflow-id workflow-id
+                                               :event-type :control-action/requested})
+        executed (collect-event-stream-events event-stream
+                                             {:workflow-id workflow-id
+                                              :event-type :control-action/executed})]
+    (control-projection/from-events requested executed)))
 
 ;; Outcome Evidence

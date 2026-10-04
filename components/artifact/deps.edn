@@ -1,10 +1,13 @@
 {:paths ["src" "resources"]
  :deps {ai.miniforge/anomaly {:local/root "../anomaly"}
+        ai.miniforge/content-hash {:local/root "../content-hash"}
+        ai.miniforge/file-durability {:local/root "../file-durability"}
         ai.miniforge/config {:local/root "../config"}
         ai.miniforge/messages {:local/root "../messages"}
         ai.miniforge/schema {:local/root "../schema"}
         ai.miniforge/logging {:local/root "../logging"}
         datalevin/datalevin {:mvn/version "0.9.16"}
-        com.cognitect/transit-clj {:mvn/version "1.0.333"}}
+        com.cognitect/transit-clj {:mvn/version "1.0.333"}
+        cheshire/cheshire {:mvn/version "5.13.0"}}
  :aliases {:test {:extra-paths ["test"]
                   :extra-deps {}}}}

@@ -29,6 +29,14 @@
 
 ;------------------------------------------------------------------------------ Layer 0
 
+(defn- ^{:stratum 0} predicate-with-exception-handling [validator value]
+  ;; No slingshot dependency; malformed external values fail validation.
+  (try (boolean (validator value))
+       (catch InterruptedException interrupted
+         (.interrupt (Thread/currentThread))
+         (throw interrupted))
+       (catch Exception _ false)))
+
 (defn ^{:stratum 0} unwrap-key
   "Unwrap an optional key to get the actual key."
   [k]
@@ -38,7 +46,7 @@
 
 ;------------------------------------------------------------------------------ Layer 1
 
-(defn ^{:stratum 1} validate-schema
+(defn- ^{:stratum 1} validate-map
   "Simple schema validation.
    Returns {:valid? bool :errors [...]}"
   [schema data]
@@ -46,15 +54,25 @@
     (doseq [[k validator] schema]
       (let [is-optional? (optional-key/optional-key? k)
             actual-key   (unwrap-key k)
+            present?     (contains? data actual-key)
             v            (get data actual-key)]
         (cond
-          (and (nil? v) (not is-optional?))
+          (and (not present?) (not is-optional?))
           (swap! errors conj {:key actual-key :error "Required key missing"})
 
-          (and (some? v) (fn? validator) (not (validator v)))
+          (and present? (fn? validator) (not (predicate-with-exception-handling validator v)))
           (swap! errors conj {:key actual-key :error "Validation failed" :value v}))))
     {:valid? (empty? @errors)
      :errors @errors}))
+
+;------------------------------------------------------------------------------ Layer 2
+
+(defn ^{:stratum 2} validate-schema
+  "Validate schema-map input without throwing on malformed domain values."
+  [schema data]
+  (if (map? data)
+    (validate-map schema data)
+    {:valid? false :errors [{:code :invalid-record}]}))
 
 ;------------------------------------------------------------------------------ Rich Comment
 (comment
