@@ -68,6 +68,9 @@
    :warn/context-reads-parse
    "WARN: failed to parse context reads at %s — %s"
 
+   :warn/codex-answers-parse
+   "WARN: failed to parse codex peg answers at %s — %s"
+
    :info/mcp-artifact-skipped
    "INFO: MCP artifact not submitted — worktree-promotion succeeded (workdir: %s)"})
 
@@ -367,10 +370,10 @@
   "Sentinel line separating the concatenated session-output files in the
    single `read-capsule-session-outputs` executor round-trip.
 
-   Collision assumption: the first two segments (context-misses.edn,
-   context-reads.edn) are written by our own MCP server and contain
-   record maps (paths, keywords, timestamps), so this sentinel is not
-   expected to occur in them — a pathological workspace path containing
+   Collision assumption: the first three segments (context-misses.edn,
+   context-reads.edn, answers.edn) are written by our own MCP server and
+   contain record maps (paths, keywords, short answer strings,
+   timestamps), so this sentinel is not expected to occur in them — a pathological workspace path containing
    it would corrupt the split. The artifact segment CAN contain arbitrary
    agent-authored strings, which is why it is deliberately placed LAST in
    the cat chain: the bounded `str/split` keeps any embedded occurrence
@@ -924,10 +927,10 @@
                            path)))))
 
 (defn ^{:stratum 3} read-capsule-session-outputs
-  "Read artifact.edn, context-misses.edn, and context-reads.edn from a
-   capsule session in a SINGLE executor round-trip.
+  "Read artifact.edn, context-misses.edn, context-reads.edn and
+   answers.edn from a capsule session in a SINGLE executor round-trip.
 
-   The three files are concatenated by one `cat` chain with
+   The four files are concatenated by one `cat` chain with
    `capsule-output-boundary` sentinel lines between them, then split back
    apart here. This is how capsule sessions surface `:context-misses` and
    `:context-reads` (Codex SPEC §7.4.2 recorded flows) without adding
@@ -946,17 +949,21 @@
 
    Returns: {:artifact <map-or-nil>
              :context-misses <vector-or-nil>
-             :context-reads <vector-or-nil>}"
+             :context-reads <vector-or-nil>
+             :codex-answers <vector-or-nil>}"
   [session]
-  (let [dir         (:dir session)
-        misses-path (str dir "/context-misses.edn")
-        reads-path  (str dir "/context-reads.edn")
-        sep         (str "; echo; echo " capsule-output-boundary "; ")
-        cmd         (str "cat " (file-artifacts/shell-quote misses-path) " 2>/dev/null"
-                         sep
-                         "cat " (file-artifacts/shell-quote reads-path) " 2>/dev/null"
-                         sep
-                         "cat " (file-artifacts/shell-quote (:artifact-path session)) " 2>/dev/null")
+  (let [dir          (:dir session)
+        misses-path  (str dir "/context-misses.edn")
+        reads-path   (str dir "/context-reads.edn")
+        answers-path (str dir "/answers.edn")
+        sep          (str "; echo; echo " capsule-output-boundary "; ")
+        cmd          (str "cat " (file-artifacts/shell-quote misses-path) " 2>/dev/null"
+                          sep
+                          "cat " (file-artifacts/shell-quote reads-path) " 2>/dev/null"
+                          sep
+                          "cat " (file-artifacts/shell-quote answers-path) " 2>/dev/null"
+                          sep
+                          "cat " (file-artifacts/shell-quote (:artifact-path session)) " 2>/dev/null")
         result      ((:exec! session) (:executor session) (:environment-id session)
                      cmd {:workdir (:workdir session)})
         stdout      (get-in result [:data :stdout] "")
@@ -966,7 +973,8 @@
         boundary-re (re-pattern (str "(?m)^"
                                      (java.util.regex.Pattern/quote capsule-output-boundary)
                                      "$"))
-        [misses-part reads-part artifact-part] (mapv str/trim (str/split stdout boundary-re 3))]
+        [misses-part reads-part answers-part artifact-part]
+        (mapv str/trim (str/split stdout boundary-re 4))]
     {:artifact       (when (seq artifact-part)
                        (parse-edn-content artifact-part
                                           (comp parse-uuid-strings edn/read-string)
@@ -977,7 +985,10 @@
                                           :warn/context-misses-parse misses-path))
      :context-reads  (when (seq reads-part)
                        (parse-edn-content reads-part edn/read-string
-                                          :warn/context-reads-parse reads-path))}))
+                                          :warn/context-reads-parse reads-path))
+     :codex-answers  (when (seq answers-part)
+                       (parse-edn-content answers-part edn/read-string
+                                          :warn/codex-answers-parse answers-path))}))
 
 (defmacro ^{:stratum 3} with-capsule-artifact-session
   "Execute body with a capsule-aware artifact session (N11 §6.3).
@@ -1102,6 +1113,18 @@
     (when (.exists f)
       (parse-edn-file f edn/read-string :warn/context-reads-parse))))
 
+(defn ^{:stratum 4} read-codex-answers
+  "Read recorded answer_peg calls from the session directory — the
+   explicit half of the Codex §7.7 answer channel (SPEC §7.7.2). The MCP
+   server writes answers.edn on exit; no answers means no file, which
+   reads back as nil. Capsule sessions surface the same file through
+   `read-capsule-session-outputs`."
+  [session]
+  (let [path (str (:dir session) "/answers.edn")
+        f (io/file path)]
+    (when (.exists f)
+      (parse-edn-file f edn/read-string :warn/codex-answers-parse))))
+
 (defn ^{:stratum 4} with-readonly-session
   "Like `with-session`, but for READ-ONLY agents (e.g. the reviewer) that
    consume the MCP context cache but produce NO worktree artifact.
@@ -1144,7 +1167,8 @@
   [session]
   {:artifact       (read-artifact session)
    :context-misses (read-context-misses session)
-   :context-reads  (read-context-reads session)})
+   :context-reads  (read-context-reads session)
+   :codex-answers  (read-codex-answers session)})
 
 (defmacro ^{:stratum 5} with-artifact-session
   "Execute body with an artifact session, returning the artifact if found.
@@ -1234,7 +1258,7 @@
           worktree-artifacts  (if (:explicit-workdir? session)
                                 (collect-worktree-artifacts read-role-artifact workdir)
                                 {})
-          {:keys [artifact context-misses context-reads]} (read-outputs-fn session)
+          {:keys [artifact context-misses context-reads codex-answers]} (read-outputs-fn session)
           ;; Track whether any .miniforge/<role>.edn files existed on disk,
           ;; independent of parse success. A file that exists but contains
           ;; malformed EDN returns nil from read-role-artifact (and emits
@@ -1280,6 +1304,7 @@
        :worktree-artifacts   worktree-artifacts
        :context-misses       context-misses
        :context-reads        context-reads
+       :codex-answers        codex-answers
        :pre-session-snapshot (:pre-session-snapshot session)
        :session-mode         mode})
     (finally

@@ -933,7 +933,7 @@
    existing-files input]
   (let [working-dir (workspace/resolve-execution-workdir context "implement")
         {:keys [llm-result artifact worktree-artifacts context-misses
-                context-reads pre-session-snapshot session-mode]}
+                context-reads codex-answers pre-session-snapshot session-mode]}
         (artifact-session/with-session context
           #(invoke-implementer-session % llm-client user-prompt effective-system-prompt
                                        config context on-chunk existing-files working-dir))
@@ -1118,7 +1118,9 @@
       ;; which is a different fact from "no log surfaced" (capsule mode) —
       ;; dropping it would turn a real unread into unknown downstream.
       (cond-> result
-        (some? context-reads) (assoc :context-reads context-reads)))))
+        (some? context-reads) (assoc :context-reads context-reads)
+        ;; §7.7.2 explicit answers: same some?-not-seq reasoning as reads.
+        (some? codex-answers) (assoc :codex-answers codex-answers)))))
 
 ;------------------------------------------------------------------------------ Layer 7
 
