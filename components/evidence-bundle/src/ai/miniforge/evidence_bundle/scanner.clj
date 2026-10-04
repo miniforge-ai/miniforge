@@ -27,7 +27,7 @@
   [{:finding/type :email
     :finding/pattern #"[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}"}
    {:finding/type :ssn
-    :finding/pattern #"\b\d{3}-\d{2}-\d{4}\b"}
+    :finding/pattern #"(?<!\d)\d{3}-\d{2}-\d{4}(?!\d)"}
    {:finding/type :aws-access-key
     :finding/pattern #"\bAKIA[0-9A-Z]{16}\b"}])
 
@@ -35,7 +35,7 @@
   #{:email :ssn :payment-card})
 
 (def ^{:stratum 0} ^:private secret-finding-types
-  #{:aws-access-key :embedded-secret :payment-card})
+  #{:aws-access-key :embedded-secret :ssn :payment-card})
 
 (defn- ^{:stratum 0} pattern-finding [bundle {:finding/keys [type pattern]}]
   (when (pattern-scan/present? pattern bundle)
