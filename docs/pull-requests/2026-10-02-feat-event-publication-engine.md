@@ -18,6 +18,9 @@ This is the application layer between #1983 and public publisher wiring.
 - Keep acknowledged records queued on critical delivery failure; preserve fatal
   causes and interruption flags. Clear the delivery fault after successful retry.
 - Preserve the existing public publisher in this PR. No default durability claim.
+- Migrate existing supervisory emitters to stamp canonical entity scope keys
+  through one shared constructor, preserve envelope failures, and localize their
+  summaries. Regenerate the nine affected golden contract fixtures.
 
 ## Validation
 
@@ -30,8 +33,11 @@ probes do not claim this engine-only PR changes production publication.
 The fuller probe with corrected supervisory producers exposed cross-scope
 contamination in OPSV evidence collection. Its workflow-ID query also selects
 supervisory snapshots carrying that cross-reference. A scope-filtered diagnostic
-passes, but the public scope query and consumer migration are not implemented.
-Do not treat the initial source-overlay green result as end-to-end acceptance.
+passed, identifying the query defect. The dependent implementation now adds an
+authoritative scope query and migrates evidence collection. Unchanged OPSV recovery
+and query regressions pass 4 tests / 31 assertions. Supervisory events are active,
+without diagnostic overrides. This is still a source-overlay
+result, not verification of a rebuilt or merged integration artifact.
 
 ## Deployment and remaining work
 

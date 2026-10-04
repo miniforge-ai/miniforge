@@ -26,7 +26,7 @@
    :deployment #{:reliability/sli-computed :reliability/slo-breach
                  :reliability/error-budget-update :reliability/degradation-mode-changed}
    :repo #{:repo-index/quality-computed :repo-index/canary-failed}
-   :supervisory-entity #{:supervisory/workflow-upserted :supervisory/agent-upserted
+   :supervisory-entity #{:supervisory/spec-upserted :supervisory/workflow-upserted :supervisory/agent-upserted
                          :supervisory/pr-upserted :supervisory/policy-evaluated
                          :supervisory/attention-derived :supervisory/intervention-upserted
                          :supervisory/evidence-upserted :supervisory/artifact-upserted

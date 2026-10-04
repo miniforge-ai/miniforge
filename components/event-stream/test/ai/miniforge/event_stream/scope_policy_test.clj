@@ -25,6 +25,7 @@
 (deftest ^{:stratum 1} non-workflow-families-require-their-own-key
   (doseq [[type scope key id] [[:pack/installed :pack :pack/id "pack/example"]
                               [:repo-index/canary-failed :repo :repo/id "owner/repo"]
+                              [:supervisory/spec-upserted :supervisory-entity :supervisory/entity-key (random-uuid)]
                               [:reliability/sli-computed :deployment :deployment/id "deployment-test"]
                               [:supervisory/pr-upserted :supervisory-entity :supervisory/entity-key ["owner/repo" 42]]]]
     (let [draft (event type {key id :workflow/id (random-uuid)})]
