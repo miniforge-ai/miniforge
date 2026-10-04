@@ -8,6 +8,7 @@
 Base: main. Canonical contract #1959, complete-value scanner #1979, and manager
 export enforcement #1977 are merged. Shared compliance policy #1981 and CLI
 presentation/export enforcement #1960 are merged. Marker compliance #1995 is also merged.
+Pure assembly transitions and named ordering fixtures from #1996 are merged.
 Use the manager-free canonical validation API from #1959 for OPSV finalization.
 That prerequisite validates portable N6 structure, domain values and declared hashes.
 Unhashed base bundles remain valid assembly inputs. Content integrity does not establish authority.
@@ -40,14 +41,15 @@ No storage manager, network operation, or authority is created by validation.
 Split the existing nested finalizer into reference ordering/checks, candidate
 validation, atomic publication, and retry orchestration. Assembly and finalization
 share one localized failure constructor. Each namespace has at most three strata.
-Flatten the accumulation guard without changing behavior: an absent assembly has
-no assembling status, leaves state unchanged, and retains its not-found result.
+Reuse #1996's named pure transitions instead of multi-step anonymous callbacks.
+An absent assembly has no assembling status, leaves state unchanged, and retains
+its not-found result. Keep the fixed sealing timestamp in the ordering regression.
 
 The main refresh also brought the OpenRouter PR document into the staged merge.
 Normal hooks rejected five sentences there with PS101 (over 25 words).
 Split those sentences without changing their meaning; no OpenRouter code changed.
 This is required lint repair under the standing instruction to fix breaks, not bypass them.
-Markdown is excluded from the reportable code budget, which remains 600/600.
+Markdown is excluded from the reportable code budget.
 The marker refresh also imported the bb-proc PR document from #1990.
 Normal hooks rejected four sentences there with PS101 (27, 28, 26 and 46 words).
 Split those sentences preserving meaning; no bb-proc code was changed by this PR.
@@ -69,8 +71,10 @@ Regressions remove original findings before rehashing understated treatment.
 The remaining marker must still prevent restoration, preserving the original assembly identity.
 Missing assemblies use the same not-found diagnostic in accumulation, finalization
 and recovery, before validating any retained seal.
-After the marker prerequisite merged, one refresh passed all three deployed evidence
-consumers and rebuilt the CLI. Packaged canonical, assembly, publication, compliance,
-CLI export and SSN regressions pass 78 tests and 776 assertions.
+After both prerequisites merged, the combined branch passed all three deployed
+evidence consumers and rebuilt the CLI. Packaged canonical, assembly/transitions,
+publication, compliance, CLI export and SSN regressions pass 83 tests and 808 assertions.
+The final adversarial pass preserves named transitions, immutable seals and retry safety.
+The PR remains within budget at 595 reportable lines.
 Require zero standards violations, normal signed hooks, a clean
 exact-head review and all CI including Build. Preserve this branch and worktree.

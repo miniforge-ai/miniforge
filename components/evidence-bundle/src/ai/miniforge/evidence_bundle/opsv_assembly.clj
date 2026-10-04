@@ -18,12 +18,10 @@
 (ns ai.miniforge.evidence-bundle.opsv-assembly
   "Run-scoped N6 OPSV evidence accumulation and immutable finalization."
   (:require
+   [ai.miniforge.evidence-bundle.opsv-assembly-state :as state]
    [ai.miniforge.evidence-bundle.opsv-diagnostics :as diagnostics]))
 
 ;------------------------------------------------------------------------------ Layer 0
-
-(def ^{:stratum 0} ^:private reference-keys
-  [:opsv/event-refs :opsv/artifact-refs :opsv/grant-refs])
 
 (defn ^{:stratum 0} create-store
   "Create an in-memory store for run-scoped OPSV assembly records."
@@ -40,17 +38,9 @@
   [store workflow-id]
   (loop []
     (let [bundle-id (random-uuid)
-          assembly {:evidence-bundle/id bundle-id
-                    :evidence-bundle/workflow-id workflow-id
-                    :opsv.assembly/status :assembling
-                    :opsv/event-refs #{}
-                    :opsv/artifact-refs #{}
-                    :opsv/grant-refs #{}
-                    :opsv/governed-effects #{}}
+          assembly (state/initial-record bundle-id workflow-id)
           [old-state _new-state]
-          (swap-vals! store #(if (contains? % bundle-id)
-                               %
-                               (assoc % bundle-id assembly)))]
+          (swap-vals! store state/insert-if-absent bundle-id assembly)]
       (if (contains? old-state bundle-id)
         (recur)
         assembly))))
@@ -60,39 +50,13 @@
   [store bundle-id]
   (get @store bundle-id))
 
-(defn- ^{:stratum 0} reference-collection
-  [value]
-  (cond
-    (nil? value) []
-    (or (sequential? value) (set? value)) value
-    :else [value]))
-
 ;------------------------------------------------------------------------------ Layer 1
 
-(defn- ^{:stratum 1} merge-references
-  [assembly material]
-  (-> (reduce (fn [result key]
-                (update result key into
-                        (reference-collection (get material key))))
-              assembly
-              reference-keys)
-      (update :opsv/governed-effects into
-              (reference-collection
-               (get-in material [:opsv/actuation :governed-effects])))))
-
-;------------------------------------------------------------------------------ Layer 2
-
-(defn ^{:stratum 2} accumulate!
+(defn ^{:stratum 1} accumulate!
   "Accumulate immutable-reference material while an OPSV run is active."
   [store bundle-id material]
   (let [[old-state new-state]
-        (swap-vals! store
-                    (fn [state]
-                      (let [assembly (get state bundle-id)]
-                        (if (= :assembling (:opsv.assembly/status assembly))
-                          (assoc state bundle-id
-                                 (merge-references assembly material))
-                          state))))
+        (swap-vals! store state/accumulate bundle-id material)
         old-assembly (get old-state bundle-id)]
     (cond
       (nil? old-assembly)
@@ -102,3 +66,6 @@
       (diagnostics/immutable bundle-id)
 
       :else (get new-state bundle-id))))
+
+(comment
+  (create-store))
