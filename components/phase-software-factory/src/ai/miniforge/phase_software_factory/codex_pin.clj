@@ -222,11 +222,19 @@
                            ;; :answers renamed on destructure: the peg row's
                            ;; branch map and the recorded answer log are
                            ;; different things and must not shadow.
-                           (mapv (fn [{:keys [id] branch-landings :answers}]
-                                   {:id id
-                                    :answer (get answer-of id)
-                                    :landings branch-landings})
-                                 pegs))
+                           ;; distinct: pin-outcome concatenates primary and
+                           ;; secondary consultations without dedup, and a peg
+                           ;; both reach would otherwise record twice — one
+                           ;; answer must not count as two observations
+                           ;; (SPEC §7.7.2). Rows differing in landings are
+                           ;; genuinely different presentations and both stay.
+                           (into []
+                                 (distinct)
+                                 (map (fn [{:keys [id] branch-landings :answers}]
+                                        {:id id
+                                         :answer (get answer-of id)
+                                         :landings branch-landings})
+                                      pegs)))
               :pin-read? (when (some? context-reads)
                            (boolean (some #(= pin-path (:path %)) context-reads)))}
        unmatched (assoc :unmatched-answers (vec unmatched))))))

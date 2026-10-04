@@ -168,3 +168,20 @@
             (is (= "PRIMARY" (get-in out [:entry :content])))
             (is (= [{:id "p1"}] (:pegs out)))
             (is (re-find #"WARN: codex consultation skipped for implement" (str err)))))))))
+
+(deftest ^{:stratum 0} consultation-summary-dedupes-identical-peg-rows
+  ;; SPEC §7.7.2: pin-outcome concatenates primary and secondary
+  ;; consultations without dedup; a peg both reach must not record its
+  ;; one answer as two observations. Rows with different landings are
+  ;; different presentations and both stay.
+  (let [peg {:id "peg-a" :answers {"yes" ["p1"] "no" ["p2"]}}
+        other {:id "peg-a" :answers {"yes" ["p9"] "no" ["p2"]}}
+        outcome {:entry {:path codex-pin/pin-path} :status :pinned
+                 :anomaly nil :situation "s"
+                 :pegs [peg peg other]}
+        summary (codex-pin/consultation-summary
+                 outcome nil [{:peg-id "peg-a" :answer "yes" :timestamp "t"}])]
+    (is (= [{:id "peg-a" :answer "yes" :landings {"yes" ["p1"] "no" ["p2"]}}
+            {:id "peg-a" :answer "yes" :landings {"yes" ["p9"] "no" ["p2"]}}]
+           (:pegs summary))
+        "identical rows collapse; a different landing snapshot survives")))
