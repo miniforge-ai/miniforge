@@ -416,3 +416,53 @@
           "both answers were valid against their own vocabulary")
       (is (= [] (:invalid-answers s))
           "neither is rejected against the other's landing map"))))
+
+(deftest ^{:stratum 1} donated-answers-validate-against-the-donor-vocabulary
+  ;; Review catch on #1993 round 7: a miss answer recorded against x/y
+  ;; must not be judged by a surviving unanswered consultation's yes/no
+  ;; vocabulary — the donor's landing map validates its own answer while
+  ;; the consultation snapshot still owns mechanism selection.
+  (let [root (str (Files/createTempDirectory "peg-telemetry-donorvocab" (make-array FileAttribute 0)))
+        survivor {:id "shifting"
+                  :landings {"yes" ["other-problem"] "no" ["unmapped-problem"]}}
+        donor {:id "shifting" :answer "x"
+               :landings {"x" ["unmapped-problem"] "y" ["other-problem"]}}
+        dir (io/file root "run-a")]
+    (.mkdirs dir)
+    (spit (io/file dir "codex-consultations.edn")
+          (str (pr-str {:consultation/id (random-uuid)
+                        :consultation/phase :implement
+                        :consultation/pegs [survivor]})
+               "\n"))
+    (spit (io/file dir "codex-gap-ledger.edn")
+          (str (pr-str {:miss/id (random-uuid) :miss/phase :implement
+                        :miss/pegs [donor]})
+               "\n"))
+    (let [s (get-in (sut/peg-telemetry root nodes gate-map) [:pegs "shifting"])]
+      (is (= {"x" 1} (:answers s))
+          "the donated answer is valid against ITS OWN vocabulary")
+      (is (= [] (:invalid-answers s))))))
+
+(deftest ^{:stratum 1} lost-consultation-file-keeps-per-consultation-answer-counts
+  ;; Review catch on #1993 round 8: with the consultation file missing,
+  ;; answers from SEPARATE phase consultations each count (the recovered
+  ;; stream matches what the file would have recorded), while the
+  ;; multiple entries one leave writes for its several failure signals
+  ;; collapse to one.
+  (let [root (str (Files/createTempDirectory "peg-telemetry-missfile" (make-array FileAttribute 0)))
+        dir (io/file root "run-a")
+        answered (assoc unmapped-peg :answer "x")]
+    (.mkdirs dir)
+    (spit (io/file dir "codex-gap-ledger.edn")
+          (str ;; implement leave, two failure signals -> identical copies
+               (pr-str {:miss/id (random-uuid) :miss/phase :implement
+                        :miss/pegs [answered]}) "\n"
+               (pr-str {:miss/id (random-uuid) :miss/phase :implement
+                        :miss/pegs [answered]}) "\n"
+               ;; review leave: a separate consultation, same answer
+               (pr-str {:miss/id (random-uuid) :miss/phase :review
+                        :miss/pegs [answered]}) "\n"))
+    (let [u (get-in (sut/peg-telemetry root nodes gate-map) [:pegs "unmapped"])]
+      (is (= {"x" 2} (:answers u))
+          "two consultations count twice; duplicate signal copies do not")
+      (is (= 2 (:observations u))))))

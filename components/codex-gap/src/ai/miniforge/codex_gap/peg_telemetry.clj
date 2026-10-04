@@ -93,13 +93,13 @@
   "Every distinct peg presented in a run, keyed by id, from the two
    per-run sources read once by the caller. Consultation rows (SPEC
    $7.7.2.1 -- the snapshot the run actually presented) own the landing
-   metadata outright: a miss row never displaces one, whatever either
-   row's answer state, because a stale miss snapshot picking the
-   mechanism is exactly the defect this merge exists to prevent. Miss
-   rows may only DONATE an answer the consultation rows lack (the
-   lost-consultation-file survival path) or stand in whole for ids the
-   consultation record never presented. Within one source, an answered
-   row beats an answerless one for its id."
+   metadata outright: a miss row never displaces one, because a stale
+   miss snapshot picking the mechanism is exactly the defect this merge
+   prevents. Miss-only ids merge by the one-source rule (answered row
+   beats answerless, supplying its own metadata). Answer COUNTING never
+   reads the merged row: consultation answers come from
+   explicit-answers-by-id and lost-consultation survival from
+   miss-explicit-answers-by-id, each validated against its own row."
   [miss-pegs consult-pegs]
   (let [one-source (fn [acc {:keys [id] :as peg}]
                      (cond
@@ -111,14 +111,7 @@
     (reduce (fn [acc {:keys [id] :as peg}]
               (cond
                 (nil? id) acc
-                ;; Only CONSULTATION rows are protected snapshots; a
-                ;; miss-only duplicate merges by one-source so an
-                ;; answered later miss row supplies its own metadata.
-                (contains? consults id)
-                (if (and (some? (:answer peg))
-                         (nil? (:answer (get acc id))))
-                  (update acc id assoc :answer (:answer peg))
-                  acc)
+                (contains? consults id) acc
                 :else (one-source acc peg)))
             consults
             miss-pegs)))
@@ -142,6 +135,28 @@
               acc))
           {}
           consult-pegs))
+
+(defn- ^{:stratum 1} miss-explicit-answers-by-id
+  "Lost-consultation survival (SPEC $7.7.2): per-consultation explicit
+   answers recovered from the miss entries themselves, validated against
+   each row's own vocabulary. Entries written by one phase leave carry
+   identical peg vectors (one copy per failure signal) and collapse to
+   one; distinct phases are distinct consultations, so their answers
+   each count -- the recovered stream matches what the consultation file
+   would have recorded, not one-answer-per-run."
+  [ledger-entries]
+  (->> ledger-entries
+       (map (juxt :miss/phase :miss/pegs))
+       distinct
+       (mapcat second)
+       (reduce (fn [acc {:keys [id answer] :as peg}]
+                 (if (and id (some? answer))
+                   (let [slot (if (contains? (peg-landings peg) answer)
+                                :valid
+                                :invalid)]
+                     (update-in acc [id slot] (fnil conj []) answer))
+                   acc))
+               {})))
 
 (defn ^{:stratum 1} branches-collapsed?
   "True when every answer of `peg` lands on the same problem set -- the
@@ -284,6 +299,8 @@
         consult-pegs (mapcat :consultation/pegs (get consult-res :entries []))
         pegs (vals (presented-pegs miss-pegs consult-pegs))
         explicit-by-id (explicit-answers-by-id consult-pegs)
+        miss-explicit-by-id (miss-explicit-answers-by-id
+                             (get ledger-res :entries []))
         history (read-gate-history run-dir)
         entries (:entries history)]
     {:incomplete? (boolean (or (:codex-gap/anomaly ledger-res)
@@ -304,22 +321,17 @@
                   ;; When the consultation file is lost but the miss ledger
                   ;; survives, the selected row's own :answer (copied into
                   ;; :miss/pegs by build-entry) is the surviving record.
-                  {from-consults :valid invalid-consults :invalid}
-                  (get explicit-by-id (:id peg))
+                  consult-answers (get explicit-by-id (:id peg))
                   ;; Lost-consultation survival: when no consultation row
-                  ;; answered, the selected row's own :answer stands,
-                  ;; validated against that row's own vocabulary.
-                  fallback (when (and (empty? from-consults)
-                                      (empty? invalid-consults)
-                                      (some? (:answer peg)))
-                             (:answer peg))
-                  fallback-valid? (and fallback
-                                       (contains? (peg-landings peg) fallback))
-                  valid-explicit (cond-> (vec from-consults)
-                                   fallback-valid? (conj fallback))
-                  invalid-explicit (cond-> (vec invalid-consults)
-                                     (and fallback (not fallback-valid?))
-                                     (conj fallback))
+                  ;; recorded ANY answer for this peg, the miss entries'
+                  ;; own per-consultation answers stand (each validated
+                  ;; against its own row by the recoverer).
+                  {valid-explicit :valid invalid-explicit :invalid
+                   :or {valid-explicit [] invalid-explicit []}}
+                  (if (or (seq (:valid consult-answers))
+                          (seq (:invalid consult-answers)))
+                    consult-answers
+                    (get miss-explicit-by-id (:id peg)))
                   mech-answers (when gate (gate-answers entries gate))
                   mech-won? (boolean (seq mech-answers))]]
         (cond-> {:peg (:id peg)
