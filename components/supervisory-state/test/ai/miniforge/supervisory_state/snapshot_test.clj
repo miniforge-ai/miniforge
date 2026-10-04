@@ -26,6 +26,12 @@
   (let [failure (anomaly/anomaly :unavailable "injected envelope refusal" {})]
     (is (identical? failure (snapshot/attach-entity failure {})))))
 
+(deftest ^{:stratum 0} incomplete-pr-identity-does-not-create-a-synthetic-scope
+  (let [stream (events/create-event-stream {:sinks []})]
+    (doseq [{:keys [family ctor entity]} fixtures/families :when (= :pr family)
+            missing [:pr/repo :pr/number]]
+      (is (nil? (:supervisory/entity-key (ctor stream (dissoc entity missing))))))))
+
 ;------------------------------------------------------------------------------ Layer 1
 
 (deftest ^{:stratum 1} every-emitter-stamps-the-canonical-entity-key

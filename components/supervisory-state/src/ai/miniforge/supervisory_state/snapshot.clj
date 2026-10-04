@@ -21,10 +21,10 @@
 ;------------------------------------------------------------------------------ Layer 1
 
 (defn- ^{:stratum 1} entity-key [event-type entity]
-  (if (= :supervisory/pr-upserted event-type)
-    (when (and (:pr/repo entity) (:pr/number entity))
-      [(:pr/repo entity) (:pr/number entity)])
-    (get entity (get identity-fields event-type))))
+  (cond
+    (not= :supervisory/pr-upserted event-type) (get entity (get identity-fields event-type))
+    (and (:pr/repo entity) (:pr/number entity)) [(:pr/repo entity) (:pr/number entity)]
+    :else nil))
 
 ;------------------------------------------------------------------------------ Layer 2
 
