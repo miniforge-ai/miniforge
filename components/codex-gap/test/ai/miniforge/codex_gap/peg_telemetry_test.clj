@@ -590,3 +590,48 @@
       (let [s (get-in (sut/peg-telemetry root nodes gate-map) [:pegs "shifting"])]
         (is (= {"x" 1} (:answers s)))
         (is (= [] (:invalid-answers s)))))))
+
+(deftest ^{:stratum 1} lost-identity-snapshots-union-with-the-survivors
+  ;; Review catch on #1993 round 12: a lost consultation's metadata
+  ;; counts with its answers — its mapped, collapsed snapshot joins the
+  ;; union even though the file's surviving consultation presented the
+  ;; same peg id — while a stale miss copy of a SURVIVING identity
+  ;; still adds nothing.
+  (let [root (str (Files/createTempDirectory "peg-telemetry-lostmeta" (make-array FileAttribute 0)))
+        dir (io/file root "run-a")
+        survived-id (random-uuid)
+        lost-id (random-uuid)
+        survivor {:id "shifting"
+                  :landings {"yes" ["other-problem"] "no" ["unmapped-problem"]}}
+        lost-collapsed {:id "shifting" :answer "a"
+                        :landings {"a" ["contract-drift-is-silent"]
+                                   "b" ["contract-drift-is-silent"]}}
+        stale-copy {:id "shifting"
+                    :landings {"stale" ["unmapped-problem"]}}
+        deny {:phase :implement :decision :deny
+              :phase/gate-failures [{:gate :stale-references}]}]
+    (.mkdirs dir)
+    (spit (io/file dir "codex-consultations.edn")
+          (str (pr-str {:consultation/id survived-id
+                        :consultation/phase :implement
+                        :consultation/pegs [survivor]}) "\n"))
+    (spit (io/file dir sut/gate-history-filename)
+          (str (pr-str deny) "\n"))
+    (spit (io/file dir "codex-gap-ledger.edn")
+          (str ;; stale copy of the SURVIVING identity: adds nothing
+               (pr-str {:miss/id (random-uuid) :miss/phase :implement
+                        :miss/consultation {:consultation-id survived-id}
+                        :miss/pegs [stale-copy]}) "\n"
+               ;; the LOST identity: metadata and answer both recover
+               (pr-str {:miss/id (random-uuid) :miss/phase :review
+                        :miss/consultation {:consultation-id lost-id}
+                        :miss/pegs [lost-collapsed]}) "\n"))
+    (let [s (get-in (sut/peg-telemetry root nodes gate-map) [:pegs "shifting"])]
+      (is (= "miniforge/gate/stale-references" (:mechanism s))
+          "the lost consultation's mapped landing picks the mechanism")
+      (is (= {:denied 1} (:answers s))
+          "its gate verdict is the counted stream")
+      (is (= 1 (:collapsed-runs s))
+          "its collapse signature survives")
+      (is (= ["a"] (:explicit-answers s))
+          "its recovered explicit answer stays inspectable"))))

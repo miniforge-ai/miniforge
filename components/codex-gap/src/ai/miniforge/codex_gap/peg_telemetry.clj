@@ -91,23 +91,56 @@
 
 (defn- ^{:stratum 0} snapshots-by-id
   "{peg-id [distinct snapshot rows]} for every peg presented in a run.
-   Consultation rows (SPEC $7.7.2.1) own a peg's snapshots outright --
-   ALL its distinct landing maps are kept, because mechanism detection
-   and the collapsed-branch trigger must see every snapshot the run
-   presented, not whichever row a merge would select. Miss rows stand in
-   only for ids the consultation record never presented (a stale miss
-   snapshot must not pick the mechanism). Rows dedupe by landing map
-   with :answer stripped: answers are counted by the identity-reconciled
-   maps, never read from snapshots."
-  [miss-pegs consult-pegs]
+   The union spans the consultation file's rows AND the rows of
+   consultation identities the file lost (recovered from their miss
+   copies): a lost consultation's mechanism and collapse signature count
+   with its answers. Miss copies of identities the file RECORDS never
+   add rows -- a stale copy must not displace or extend the surviving
+   snapshot -- and pre-identity miss rows stand in only for ids nothing
+   else presented. Rows dedupe by landing map with :answer stripped:
+   answers are counted by the identity-reconciled maps, never read from
+   snapshots."
+  [consult-pegs recovered-groups legacy-groups]
   (let [dedupe-rows (fn [rows]
                       (->> rows (map #(dissoc % :answer)) distinct vec))
         consults (group-by :id (filter :id consult-pegs))
-        misses (group-by :id (filter :id miss-pegs))]
+        recovered (group-by :id (filter :id (mapcat second recovered-groups)))
+        legacy (group-by :id (filter :id (mapcat second legacy-groups)))]
     (into {}
           (map (fn [id]
-                 [id (dedupe-rows (get consults id (get misses id)))]))
-          (distinct (concat (keys consults) (keys misses))))))
+                 [id (dedupe-rows
+                      (or (seq (concat (get consults id) (get recovered id)))
+                          (get legacy id)))]))
+          (distinct (concat (keys consults) (keys recovered) (keys legacy))))))
+
+(defn- ^{:stratum 0} missing-consultation-groups
+  "Per lost consultation identity, its peg rows recovered from the miss
+   ledger: [[cid pegs] ..], identities the file records excluded, one
+   group per identity (a leave's several copies collapse). The groups
+   feed BOTH answer recovery and the snapshot union -- a lost
+   consultation's mechanism and collapse metadata must survive with its
+   answers (SPEC $7.7.2.1)."
+  [ledger-entries surviving-ids]
+  (->> ledger-entries
+       (keep (fn [e]
+               (when-some [cid (get-in e [:miss/consultation :consultation-id])]
+                 [cid (:miss/pegs e)])))
+       distinct
+       (remove (fn [[cid _]] (contains? surviving-ids cid)))
+       vec))
+
+(defn- ^{:stratum 0} legacy-miss-groups
+  "Pre-identity miss entries (no :consultation-id): the old conservative
+   recovery, grouped distinct by phase+rows (one leave's signal copies
+   collapse; same-phase retries with identical rows are
+   indistinguishable and undercount). Used per peg only when nothing
+   else recorded an answer or snapshot for it."
+  [ledger-entries]
+  (->> ledger-entries
+       (remove #(get-in % [:miss/consultation :consultation-id]))
+       (map (juxt :miss/phase :miss/pegs))
+       distinct
+       vec))
 
 ;------------------------------------------------------------------------------ Layer 1
 
@@ -253,37 +286,13 @@
           {}
           consult-entries))
 
-(defn- ^{:stratum 2} missing-consultation-answers-by-id
-  "Lost-consultation recovery, reconciled by consultation identity
-   (SPEC $7.7.2.1): miss entries carry their leave's :consultation-id,
-   so every identity ABSENT from the surviving consultation file
-   contributes its answers exactly once (the several copies one leave
-   writes share the identity and collapse), while identities the file
-   already records contribute nothing — their answers were counted from
-   the file. Returns {peg-id {:valid [..] :invalid [..]}}."
-  [ledger-entries surviving-ids]
-  (->> ledger-entries
-       (keep (fn [e]
-               (when-some [cid (get-in e [:miss/consultation :consultation-id])]
-                 [cid (:miss/pegs e)])))
-       distinct
-       (remove (fn [[cid _]] (contains? surviving-ids cid)))
-       (map second)
-       (reduce consultation-answer-slots {})))
-
-(defn- ^{:stratum 2} legacy-miss-answers-by-id
-  "Pre-identity miss entries (no :consultation-id on the stored
-   consultation): the old conservative recovery — entries distinct by
-   phase+rows (one leave's signal copies collapse; same-phase retries
-   with identical rows are indistinguishable and undercount), used per
-   peg only when nothing else recorded an answer for it."
-  [ledger-entries]
-  (->> ledger-entries
-       (remove #(get-in % [:miss/consultation :consultation-id]))
-       (map (juxt :miss/phase :miss/pegs))
-       distinct
-       (map second)
-       (reduce consultation-answer-slots {})))
+(defn- ^{:stratum 2} groups-answers-by-id
+  "Fold [[_ pegs] ..] consultation groups into the {peg-id {:valid
+   :invalid}} answer map, one observation per group and peg id."
+  [groups]
+  (reduce (fn [acc [_ pegs]] (consultation-answer-slots acc pegs))
+          {}
+          groups))
 
 ;------------------------------------------------------------------------------ Layer 3
 
@@ -309,15 +318,16 @@
   [run-dir nodes gate-map]
   (let [ledger-res (ledger/read-ledger (str run-dir))
         consult-res (ledger/read-consultations (str run-dir))
-        miss-pegs (mapcat :miss/pegs (get ledger-res :entries []))
         consult-pegs (mapcat :consultation/pegs (get consult-res :entries []))
-        snapshots (snapshots-by-id miss-pegs consult-pegs)
         explicit-by-id (explicit-answers-by-id (get consult-res :entries []))
         surviving-ids (into #{} (keep :consultation/id)
                             (get consult-res :entries []))
-        recovered-by-id (missing-consultation-answers-by-id
-                         (get ledger-res :entries []) surviving-ids)
-        legacy-by-id (legacy-miss-answers-by-id (get ledger-res :entries []))
+        recovered-groups (missing-consultation-groups
+                          (get ledger-res :entries []) surviving-ids)
+        legacy-groups (legacy-miss-groups (get ledger-res :entries []))
+        snapshots (snapshots-by-id consult-pegs recovered-groups legacy-groups)
+        recovered-by-id (groups-answers-by-id recovered-groups)
+        legacy-by-id (groups-answers-by-id legacy-groups)
         history (read-gate-history run-dir)
         entries (:entries history)]
     {:incomplete? (boolean (or (:codex-gap/anomaly ledger-res)
