@@ -111,7 +111,10 @@
     (reduce (fn [acc {:keys [id] :as peg}]
               (cond
                 (nil? id) acc
-                (contains? acc id)
+                ;; Only CONSULTATION rows are protected snapshots; a
+                ;; miss-only duplicate merges by one-source so an
+                ;; answered later miss row supplies its own metadata.
+                (contains? consults id)
                 (if (and (some? (:answer peg))
                          (nil? (:answer (get acc id))))
                   (update acc id assoc :answer (:answer peg))
@@ -120,18 +123,25 @@
             consults
             miss-pegs)))
 
-(defn- ^{:stratum 0} explicit-answers-by-id
-  "{peg-id [answer ..]} -- every non-nil explicit :answer across the
-   run's consultation rows, in record order."
+;------------------------------------------------------------------------------ Layer 1
+
+(defn- ^{:stratum 1} explicit-answers-by-id
+  "{peg-id {:valid [..] :invalid [..]}} -- every non-nil explicit
+   :answer across the run's consultation rows in record order, each
+   validated against ITS OWN row's landing vocabulary (the one the
+   agent was shown when it answered), never against whichever snapshot
+   the presented-pegs merge later selects: vocabularies can change
+   between consultations within one run."
   [consult-pegs]
-  (reduce (fn [acc {:keys [id answer]}]
+  (reduce (fn [acc {:keys [id answer] :as peg}]
             (if (and id (some? answer))
-              (update acc id (fnil conj []) answer)
+              (let [slot (if (contains? (peg-landings peg) answer)
+                           :valid
+                           :invalid)]
+                (update-in acc [id slot] (fnil conj []) answer))
               acc))
           {}
           consult-pegs))
-
-;------------------------------------------------------------------------------ Layer 1
 
 (defn ^{:stratum 1} branches-collapsed?
   "True when every answer of `peg` lands on the same problem set -- the
@@ -294,14 +304,22 @@
                   ;; When the consultation file is lost but the miss ledger
                   ;; survives, the selected row's own :answer (copied into
                   ;; :miss/pegs by build-entry) is the surviving record.
-                  explicit (let [from-consults (get explicit-by-id (:id peg))]
-                             (cond
-                               (seq from-consults) from-consults
-                               (some? (:answer peg)) [(:answer peg)]
-                               :else []))
-                  vocabulary (set (keys (peg-landings peg)))
-                  valid-explicit (filterv vocabulary explicit)
-                  invalid-explicit (filterv (complement vocabulary) explicit)
+                  {from-consults :valid invalid-consults :invalid}
+                  (get explicit-by-id (:id peg))
+                  ;; Lost-consultation survival: when no consultation row
+                  ;; answered, the selected row's own :answer stands,
+                  ;; validated against that row's own vocabulary.
+                  fallback (when (and (empty? from-consults)
+                                      (empty? invalid-consults)
+                                      (some? (:answer peg)))
+                             (:answer peg))
+                  fallback-valid? (and fallback
+                                       (contains? (peg-landings peg) fallback))
+                  valid-explicit (cond-> (vec from-consults)
+                                   fallback-valid? (conj fallback))
+                  invalid-explicit (cond-> (vec invalid-consults)
+                                     (and fallback (not fallback-valid?))
+                                     (conj fallback))
                   mech-answers (when gate (gate-answers entries gate))
                   mech-won? (boolean (seq mech-answers))]]
         (cond-> {:peg (:id peg)

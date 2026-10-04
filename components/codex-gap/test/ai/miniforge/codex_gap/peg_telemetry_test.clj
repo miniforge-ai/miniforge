@@ -367,3 +367,52 @@
                             [:pegs "did-you-update-every-consumer"])]
           (is (= {"no" 1} (:answers drift))
               "the donated answer counts against the consultation landings"))))))
+
+(deftest ^{:stratum 1} answered-miss-only-duplicates-carry-their-own-metadata
+  ;; Review catch on #1993 round 6: with no consultation file, an
+  ;; answered later miss row must supply its own landing snapshot —
+  ;; only consultation rows are protected metadata.
+  (let [root (str (Files/createTempDirectory "peg-telemetry-missdup" (make-array FileAttribute 0)))
+        dir (io/file root "run-a")
+        stale {:id "did-you-update-every-consumer"
+               :landings {"a" ["unmapped-problem"] "b" ["other-problem"]}}
+        answered (assoc drift-peg :answer "no")]
+    (.mkdirs dir)
+    (spit (io/file dir "codex-gap-ledger.edn")
+          (str (pr-str {:miss/id (random-uuid) :miss/phase :implement
+                        :miss/pegs [stale]})
+               "\n"
+               (pr-str {:miss/id (random-uuid) :miss/phase :implement
+                        :miss/pegs [answered]})
+               "\n"))
+    (let [drift (get-in (sut/peg-telemetry root nodes gate-map)
+                        [:pegs "did-you-update-every-consumer"])]
+      (is (= {"no" 1} (:answers drift))
+          "the answer validates against the ANSWERED row's vocabulary")
+      (is (= [] (:invalid-answers drift))))))
+
+(deftest ^{:stratum 1} answers-validate-against-their-own-consultations-vocabulary
+  ;; Review catch on #1993 round 6: vocabularies can change between
+  ;; consultations within one run; each answer validates against the
+  ;; landing map it was given against, not the merge-selected snapshot.
+  (let [root (str (Files/createTempDirectory "peg-telemetry-vocabchange" (make-array FileAttribute 0)))
+        early {:id "shifting" :answer "x"
+               :landings {"x" ["unmapped-problem"] "y" ["other-problem"]}}
+        late {:id "shifting" :answer "yes"
+              :landings {"yes" ["other-problem"] "no" ["unmapped-problem"]}}
+        dir (io/file root "run-a")]
+    (.mkdirs dir)
+    (spit (io/file dir "codex-consultations.edn")
+          (str (pr-str {:consultation/id (random-uuid)
+                        :consultation/phase :implement
+                        :consultation/pegs [early]})
+               "\n"
+               (pr-str {:consultation/id (random-uuid)
+                        :consultation/phase :review
+                        :consultation/pegs [late]})
+               "\n"))
+    (let [s (get-in (sut/peg-telemetry root nodes gate-map) [:pegs "shifting"])]
+      (is (= {"x" 1 "yes" 1} (:answers s))
+          "both answers were valid against their own vocabulary")
+      (is (= [] (:invalid-answers s))
+          "neither is rejected against the other's landing map"))))
