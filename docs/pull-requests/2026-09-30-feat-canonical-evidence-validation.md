@@ -43,6 +43,12 @@ share one localized failure constructor. Each namespace has at most three strata
 Flatten the accumulation guard without changing behavior: an absent assembly has
 no assembling status, leaves state unchanged, and retains its not-found result.
 
+The main refresh also brought the OpenRouter PR document into the staged merge.
+Normal hooks rejected five sentences there with PS101 (over 25 words).
+Split those sentences without changing their meaning; no OpenRouter code changed.
+This is required lint repair under the standing instruction to fix breaks, not bypass them.
+Markdown is excluded from the reportable code budget, which remains 600/600.
+
 ## Verification
 
 Regressions cover required fields, invalid scalar and nested domain values,
