@@ -34,7 +34,8 @@
 ;------------------------------------------------------------------------------ Layer 2
 
 (deftest ^{:stratum 2} scans-original-values-beyond-print-bounds
-  (doseq [[text type] [["000-00-0000" :ssn] ["alice@example.test" :email]]
+  (doseq [[text type] [["000-00-0000" :ssn] ["employee_ssn_000-00-0000_suffix" :ssn]
+                     ["alice@example.test" :email]]
           value (placements text)]
     (let [result (binding [*print-level* 1 *print-length* 1] (scanner/scan-artifact value))
           metadata (scanner/compliance-metadata result)]

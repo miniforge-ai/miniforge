@@ -77,14 +77,6 @@
           :dependency/class :rate-limit}
          overrides))
 
-(defn- ^{:stratum 0} make-list-bundle
-  "Factory for the minimal bundle shape returned by the optional provider in list output."
-  [& {:as overrides}]
-  (merge {:bundle/id          "b-1"
-          :bundle/workflow-id "wf-1"
-          :bundle/status      "complete"}
-         overrides))
-
 (deftest ^{:stratum 0} evidence-show-cmd-missing-id-test
   (testing "show command exits with error when no id provided"
     (let [exited? (atom false)]
@@ -107,6 +99,15 @@
       (let [fields (:fields (bundles/bundle-detail-spec))]
         (is (= "absent" (get-in fields [0 2 :default])))
         (is (= "inconnu" (get-in fields [1 2 :default])))))))
+
+(deftest ^{:stratum 0} evidence-list-cmd-component-results-test
+  (let [bundle (f/bundle {})]
+    (with-redefs [shared/call-optional-provider (constantly [bundle])]
+      (let [output (with-out-str (sut/evidence-list-cmd {}))]
+        (is (.contains output (str (:evidence-bundle/id bundle))))
+        (is (.contains output (str (:evidence-bundle/workflow-id bundle))))
+        (is (.contains output "completed"))
+        (is (not (.contains output "refused")))))))
 
 ;------------------------------------------------------------------------------ Layer 1
 
@@ -137,13 +138,6 @@
         (doseq [name ["export.json" "export.html" "notes.txt"]]
           (spit (str directory "/" name) "export"))
         (is (re-find #"(?i)no evidence" (with-out-str (sut/evidence-list-cmd {}))))))))
-
-(deftest ^{:stratum 1} evidence-list-cmd-component-results-test
-  (testing "list command displays component results when available"
-    (with-redefs [shared/call-optional-provider
-                  (constantly [(make-list-bundle)])]
-      (let [output (with-out-str (sut/evidence-list-cmd {}))]
-        (is (.contains output "b-1"))))))
 
 (deftest ^{:stratum 1} evidence-show-cmd-not-found-test
   (testing "show command reports not found for unknown bundle"
@@ -292,6 +286,7 @@
       (is (= sealed (edn/read-string (slurp destination))))
       (doseq [invalid [(assoc-in sealed [:evidence/outcome :outcome/success] true)
                        (f/bundle {:test/text "AKIAIOSFODNN7EXAMPLE"})
+                       (f/bundle {:test/text "employee_ssn_000-00-0000_suffix"})
                        (dissoc sealed :evidence/content-hash :evidence/sealed-at)]]
         (spit source (pr-str invalid))
         (spit destination "unchanged")

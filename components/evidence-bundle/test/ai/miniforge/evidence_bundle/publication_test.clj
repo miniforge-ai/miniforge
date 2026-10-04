@@ -31,7 +31,7 @@
     (assoc changed :evidence/content-hash (evidence/content-hash changed))))
 
 (defn- ^{:stratum 0} declared-ssn [handling]
-  {:test/text "000-00-0000" :compliance/sensitive-data true
+  {:test/text "employee_ssn_000-00-0000_suffix" :compliance/sensitive-data true
    :evidence/contains-pii? true :compliance/pii-handling handling})
 
 ;------------------------------------------------------------------------------ Layer 1

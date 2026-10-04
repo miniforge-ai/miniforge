@@ -53,7 +53,7 @@
  ;; Matched against string values anywhere they occur.
  :redaction/secret-value-patterns
  [;; Social Security numbers (N6 §7.2)
-  "\\b\\d{3}-\\d{2}-\\d{4}\\b"
+  "(?<!\\d)\\d{3}-\\d{2}-\\d{4}(?!\\d)"
   ;; AWS access key id
   "\\bAKIA[0-9A-Z]{16}\\b"
   ;; Anthropic / OpenAI style bearer keys
