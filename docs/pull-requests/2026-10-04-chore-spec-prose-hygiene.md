@@ -32,6 +32,10 @@ contract is introduced here.
 Run plainspeak and Markdown lint on every touched file. Review each edit for
 semantic equivalence, then run normal signed hooks and all required CI checks.
 
+Normal signed hooks passed for all three commits, including Polylith checks,
+360 smoke tests / 1,389 assertions and 8 compatibility tests / 692 assertions.
+Exact-head review and CI remain merge gates, not runtime conformance evidence.
+
 ## Deployment Plan
 
 Documentation only. No runtime behavior or data migration changes.
@@ -44,5 +48,5 @@ Prerequisite for the approved chain/supervisory contract reconciliation.
 
 - [x] Preserve existing requirements and historical meaning.
 - [x] Pass prose and Markdown checks.
-- [ ] Pass normal signed hooks.
-- [ ] Obtain clean exact-head review and CI before merge.
+- [x] Pass normal signed hooks.
+- Require clean exact-head review and all CI checks before merge.
