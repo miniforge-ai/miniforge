@@ -15,49 +15,33 @@
 ;; WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 ;; See the License for the specific language governing permissions and
 ;; limitations under the License.
-
 (ns ai.miniforge.supervisory-state.core-test
   "End-to-end tests for the supervisory-state component lifecycle:
    replay, live subscription, snapshot emission, and re-emit prevention."
   (:require
    [clojure.test :refer [deftest is]]
-   [ai.miniforge.event-stream.core :as es-core]
    [ai.miniforge.event-stream.interface :as es]
    [ai.miniforge.supervisory-state.core :as core]
+   [ai.miniforge.supervisory-state.core-test-events :as test-events]
+   [ai.miniforge.supervisory-state.emitter :as emitter]
    [ai.miniforge.supervisory-state.interface :as iface]))
 
+;------------------------------------------------------------------------------ Layer 0
+
 ;------------------------------------------------------------------------------ Helpers
+(defn- ^{:stratum 0} no-sink-stream []
+  (es/create-event-stream {:sinks []}))
 
-(defn- no-sink-stream []
-  (es-core/create-event-stream {:sinks []}))
-
-(defn- supervisory-events
+(defn- ^{:stratum 0} supervisory-events
   "Events on the stream with type in the `:supervisory/*` family."
   [stream]
   (->> (es/get-events stream)
        (filter #(some-> % :event/type namespace (= "supervisory")))))
 
-(defn- workflow-started [wf-id]
-  {:event/type :workflow/started
-   :event/id (random-uuid)
-   :event/timestamp (java.util.Date.)
-   :event/version "1.0.0"
-   :event/sequence-number 0
-   :workflow/id wf-id
-   :message "Workflow started"})
-
-(defn- workflow-completed [wf-id]
-  {:event/type :workflow/completed
-   :event/id (random-uuid)
-   :event/timestamp (java.util.Date.)
-   :event/version "1.0.0"
-   :event/sequence-number 1
-   :workflow/id wf-id
-   :message "Workflow completed"})
+;------------------------------------------------------------------------------ Layer 1
 
 ;------------------------------------------------------------------------------ Lifecycle
-
-(deftest start-then-stop-subscribes-and-unsubscribes
+(deftest ^{:stratum 1} start-then-stop-subscribes-and-unsubscribes
   (let [stream (no-sink-stream)
         comp   (iface/create stream)]
     (iface/start! comp)
@@ -67,7 +51,7 @@
     (is (false? (:subscribed? @comp)))
     (is (not (contains? (:subscribers @stream) core/subscriber-id)))))
 
-(deftest attach!-is-create-plus-start!
+(deftest ^{:stratum 1} attach!-is-create-plus-start!
   (let [stream (no-sink-stream)
         comp   (iface/attach! stream)]
     (is (true? (:subscribed? @comp))
@@ -76,7 +60,7 @@
         "attach! registers the stream subscription identically to create+start!")
     (iface/stop! comp)))
 
-(deftest ensure-attached!-is-idempotent
+(deftest ^{:stratum 1} ensure-attached!-is-idempotent
   (let [stream (no-sink-stream)]
     (is (false? (iface/attached? stream)))
     (let [created (iface/ensure-attached! stream)]
@@ -86,7 +70,7 @@
     (is (nil? (iface/ensure-attached! stream)))
     (is (= 1 (count (:subscribers @stream))))))
 
-(deftest ensure-attached!-is-atomic-per-stream
+(deftest ^{:stratum 1} ensure-attached!-is-atomic-per-stream
   (let [stream (no-sink-stream)
         attempts 8
         results (->> (range attempts)
@@ -99,14 +83,13 @@
     (is (= 1 (count (:subscribers @stream))))))
 
 ;------------------------------------------------------------------------------ Emission
-
-(deftest live-workflow-events-produce-supervisory-snapshots
+(deftest ^{:stratum 1} live-workflow-events-produce-supervisory-snapshots
   (let [stream (no-sink-stream)
         comp   (iface/create stream)
         wf-id  (random-uuid)]
     (iface/start! comp)
-    (es/publish! stream (workflow-started wf-id))
-    (es/publish! stream (workflow-completed wf-id))
+    (es/publish! stream (test-events/workflow-started wf-id))
+    (es/publish! stream (test-events/workflow-completed wf-id))
     (let [snaps   (supervisory-events stream)
           kinds   (frequencies (map :event/type snaps))]
       (is (>= (count snaps) 2)
@@ -115,29 +98,21 @@
       ;; attention may also fire (workflow completed → :info item)
       )))
 
-(deftest supervisory-events-are-not-re-emitted
+(deftest ^{:stratum 1} supervisory-events-are-not-re-emitted
   (let [stream (no-sink-stream)
         comp   (iface/create stream)]
     (iface/start! comp)
-    (es/publish! stream (workflow-started (random-uuid)))
+    (es/publish! stream (test-events/workflow-started (random-uuid)))
     (let [before (count (supervisory-events stream))]
       ;; Publish a synthetic supervisory event directly; handle-event! must
       ;; ignore it so the component doesn't recurse.
-      (es/publish! stream {:event/type :supervisory/workflow-upserted
-                           :event/id (random-uuid)
-                           :event/timestamp (java.util.Date.)
-                           :event/version "1.0.0"
-                           :event/sequence-number 99
-                           :workflow/id (random-uuid)
-                           :message "synthetic"
-                           :supervisory/entity {:workflow-run/id (random-uuid)}})
+      (es/publish! stream (emitter/workflow-upserted stream {:workflow-run/id (random-uuid)}))
       (let [after (count (supervisory-events stream))]
         (is (= (inc before) after)
             "only the synthetic event should be added; no re-emission loop")))))
 
 ;------------------------------------------------------------------------------ Live view build-up
-
-(deftest live-events-build-the-view-incrementally
+(deftest ^{:stratum 1} live-events-build-the-view-incrementally
   ;; Covers the production attach order: component attaches first, then
   ;; events flow. Replaces the former startup-replay test after YAGNI-
   ;; removing `replay` (no production caller ever populated the stream
@@ -145,34 +120,20 @@
   (let [stream (no-sink-stream)
         wf-id  (random-uuid)
         comp   (iface/start! (iface/create stream))]
-    (es/publish! stream (workflow-started wf-id))
-    (es/publish! stream (workflow-completed wf-id))
+    (es/publish! stream (test-events/workflow-started wf-id))
+    (es/publish! stream (test-events/workflow-completed wf-id))
     (let [runs (iface/workflows comp)]
       (is (= 1 (count runs)))
       (is (= :completed (:workflow-run/status (first runs)))
           "live subscription must see all events, ending in :completed"))))
 
-;------------------------------------------------------------------------------ TaskNode (N5-δ3 §3.3)
-
-(defn- task-state-changed [tid wf-id to-state & [context]]
-  (cond-> {:event/type :task/state-changed
-           :event/id (random-uuid)
-           :event/timestamp (java.util.Date.)
-           :event/version "1.0.0"
-           :event/sequence-number 0
-           :workflow/id wf-id
-           :task/id tid
-           :task/to-state to-state
-           :message (str "Task " tid " → " (name to-state))}
-    context (assoc :task/context context)))
-
-(deftest task-state-changed-produces-supervisory-task-node-upserted
+(deftest ^{:stratum 1} task-state-changed-produces-supervisory-task-node-upserted
   (let [stream (no-sink-stream)
         comp   (iface/create stream)
         tid    (random-uuid)
         wf-id  (random-uuid)]
     (iface/start! comp)
-    (es/publish! stream (task-state-changed tid wf-id :running
+    (es/publish! stream (test-events/task-state-changed tid wf-id :running
                                             {:description "Implement X" :type :implement}))
     (let [snaps (->> (supervisory-events stream)
                      (filter #(= :supervisory/task-node-upserted (:event/type %))))]
@@ -184,14 +145,14 @@
         (is (= :active (:task/kanban-column entity)))
         (is (= "Implement X" (:task/description entity)))))))
 
-(deftest task-transitions-emit-one-snapshot-per-change
+(deftest ^{:stratum 1} task-transitions-emit-one-snapshot-per-change
   (let [stream (no-sink-stream)
         comp   (iface/create stream)
         tid    (random-uuid)
         wf-id  (random-uuid)]
     (iface/start! comp)
     (doseq [state [:pending :ready :running :completed]]
-      (es/publish! stream (task-state-changed tid wf-id state)))
+      (es/publish! stream (test-events/task-state-changed tid wf-id state)))
     (let [snaps (->> (supervisory-events stream)
                      (filter #(= :supervisory/task-node-upserted (:event/type %))))
           final (last snaps)]
@@ -202,39 +163,14 @@
       (is (some? (:task/completed-at (:supervisory/entity final))))
       (is (some? (:task/elapsed-ms (:supervisory/entity final)))))))
 
-;------------------------------------------------------------------------------ DecisionCard (N5-δ3 §3.4)
-
-(defn- cp-decision-created-event [decision-id agent-id summary]
-  {:event/type :control-plane/decision-created
-   :event/id (random-uuid)
-   :event/timestamp (java.util.Date.)
-   :event/version "1.0.0"
-   :event/sequence-number 0
-   :workflow/id (random-uuid)
-   :cp/agent-id agent-id
-   :cp/decision-id decision-id
-   :cp/summary summary
-   :message (str "Decision needed from " agent-id ": " summary)})
-
-(defn- cp-decision-resolved-event [decision-id resolution]
-  {:event/type :control-plane/decision-resolved
-   :event/id (random-uuid)
-   :event/timestamp (java.util.Date.)
-   :event/version "1.0.0"
-   :event/sequence-number 0
-   :workflow/id (random-uuid)
-   :cp/decision-id decision-id
-   :cp/resolution resolution
-   :message (str "Decision " decision-id " resolved: " resolution)})
-
-(deftest decision-created-then-resolved-produces-two-snapshots
+(deftest ^{:stratum 1} decision-created-then-resolved-produces-two-snapshots
   (let [stream (no-sink-stream)
         comp   (iface/create stream)
         did    (random-uuid)
         aid    (random-uuid)]
     (iface/start! comp)
-    (es/publish! stream (cp-decision-created-event  did aid "Approve the merge"))
-    (es/publish! stream (cp-decision-resolved-event did "approve"))
+    (es/publish! stream (test-events/cp-decision-created-event  did aid "Approve the merge"))
+    (es/publish! stream (test-events/cp-decision-resolved-event did "approve"))
     (let [snaps (->> (supervisory-events stream)
                      (filter #(= :supervisory/decision-upserted (:event/type %))))
           final (last snaps)]
@@ -244,46 +180,14 @@
       (is (= aid         (:decision/agent-id (:supervisory/entity final)))
           "resolve event must preserve the agent-id from the create event"))))
 
-;------------------------------------------------------------------------------ InterventionRequest
-
-(defn- intervention-requested-event [workflow-id intervention-id]
-  {:event/type :supervisory/intervention-requested
-   :event/id (random-uuid)
-   :event/timestamp (java.util.Date.)
-   :event/version "1.0.0"
-   :event/sequence-number 0
-   :workflow/id workflow-id
-   :intervention/id intervention-id
-   :intervention/type :pause
-   :intervention/target-type :workflow
-   :intervention/target-id workflow-id
-   :intervention/requested-by "operator@example.com"
-   :intervention/request-source :tui
-   :intervention/state :proposed
-   :intervention/requested-at (java.util.Date.)
-   :intervention/updated-at (java.util.Date.)
-   :message "Pause requested"})
-
-(defn- intervention-state-changed-event [workflow-id intervention-id next-state]
-  {:event/type :supervisory/intervention-state-changed
-   :event/id (random-uuid)
-   :event/timestamp (java.util.Date.)
-   :event/version "1.0.0"
-   :event/sequence-number 0
-   :workflow/id workflow-id
-   :intervention/id intervention-id
-   :intervention/state next-state
-   :intervention/outcome {:paused true}
-   :message (str "Intervention " intervention-id " → " (name next-state))})
-
-(deftest intervention-events-produce-supervisory-intervention-snapshots
+(deftest ^{:stratum 1} intervention-events-produce-supervisory-intervention-snapshots
   (let [stream (no-sink-stream)
         comp   (iface/create stream)
         workflow-id (random-uuid)
         intervention-id (random-uuid)]
     (iface/start! comp)
-    (es/publish! stream (intervention-requested-event workflow-id intervention-id))
-    (es/publish! stream (intervention-state-changed-event workflow-id intervention-id :applied))
+    (es/publish! stream (test-events/intervention-requested-event workflow-id intervention-id))
+    (es/publish! stream (test-events/intervention-state-changed-event workflow-id intervention-id :applied))
     (let [snaps (->> (supervisory-events stream)
                      (filter #(= :supervisory/intervention-upserted (:event/type %))))
           final (last snaps)]
