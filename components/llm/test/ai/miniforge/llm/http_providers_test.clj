@@ -17,13 +17,14 @@
 ;; limitations under the License.
 (ns ai.miniforge.llm.http-providers-test
   "Direct API-key HTTP provider backends (:anthropic-api / :openai-api /
-   :gemini-api): request-body shaping, auth headers, endpoint
+   :gemini-api / :openrouter): request-body shaping, auth headers, endpoint
    resolution, response parsing, and API-key resolution. The transport
    (`http-post-request`) is stubbed via `with-redefs` — no test here
    touches the network."
   (:require
    [clojure.test :refer [deftest is testing]]
    [cheshire.core :as json]
+   [org.httpkit.client :as http]
    [ai.miniforge.llm.interface :as llm]
    [ai.miniforge.llm.protocols.impl.llm-client :as impl]))
 
@@ -62,6 +63,20 @@
 (defn- ^{:stratum 0} backend-config
   [backend]
   (get impl/backends backend))
+
+;; Transport
+(deftest ^{:stratum 0} http-post-request-idle-timeout-test
+  (testing "a provider call may idle for the configured window — these calls
+            are non-streaming, so a long completion sends nothing until it
+            is done and would be cut at http-kit's 60 s default"
+    (let [captured (atom nil)]
+      (with-redefs [http/post (fn [_url opts]
+                                (reset! captured opts)
+                                (delay {:status 200 :body "{}"}))]
+        (impl/http-post-request "http://llm-test.invalid/" {} {:q 1}))
+      (is (= 600000 (:idle-timeout @captured)))
+      (is (not (contains? @captured :timeout))
+          "the connect timeout keeps its default; only the idle window is widened"))))
 
 ;; Request-body builders
 (deftest ^{:stratum 0} anthropic-request-body-test
@@ -112,6 +127,18 @@
               (impl/openai-request-body {:prompt "p" :model "m" :max-tokens 9}))))
     (is (not (contains? (impl/openai-request-body {:prompt "p" :model "m"})
                         :max_completion_tokens)))))
+
+(deftest ^{:stratum 0} openrouter-request-body-test
+  (let [request {:prompt "q" :system "sys" :model "vendor/model" :max-tokens 64}
+        body (impl/openrouter-request-body request)]
+    (testing "the OpenAI body, plus the usage-accounting flag that makes the
+              response report billed cost and cached-token counts"
+      (is (= (impl/openai-request-body request)
+             (dissoc body :usage :provider)))
+      (is (= {:include true} (:usage body))))
+    (testing "routing is limited to hosts that neither train on prompts nor
+              retain them: OpenRouter filters the two separately"
+      (is (= {:data_collection "deny" :zdr true} (:provider body))))))
 
 (deftest ^{:stratum 0} gemini-request-body-test
   (testing "assistant role maps to model; system rides in systemInstruction"
@@ -184,6 +211,31 @@
           "optional -> declaring api-key-env must not fail closed on a missing key")
       (is (= "http://localhost:1234/v1/chat/completions" (:api-endpoint entry)))
       (is (= "MINIFORGE_OPENAI_COMPAT_BASE_URL" (:base-url-env entry)))
+      (is (false? (:requires-cli? entry))))))
+
+(defn- ^{:stratum 1} openrouter-200
+  "An OpenRouter success body: the OpenAI shape plus billed cost and the
+   cache / reasoning breakdown under the `*_details` maps."
+  [text]
+  (http-200 {:choices [{:message {:role "assistant" :content text}}]
+             :provider "SomeUpstream"
+             :usage {:prompt_tokens 1000
+                     :completion_tokens 50
+                     :cost 0.00125
+                     :prompt_tokens_details {:cached_tokens 800
+                                             :cache_write_tokens 150}
+                     :completion_tokens_details {:reasoning_tokens 20}}}))
+
+(deftest ^{:stratum 1} openrouter-wiring-test
+  (testing "OpenRouter is a keyed HTTP backend at its own endpoint; the key
+            is required, unlike the generic compatible backend"
+    (let [entry (backend-config :openrouter)]
+      (is (= "http" (:cmd entry)))
+      (is (= "OpenRouter" (:provider entry)))
+      (is (= "OPENROUTER_API_KEY" (:api-key-env entry)))
+      (is (not (:optional-api-key? entry)))
+      (is (nil? (:base-url-env entry)) "the endpoint is fixed")
+      (is (= "https://openrouter.ai/api/v1/chat/completions" (:api-endpoint entry)))
       (is (false? (:requires-cli? entry))))))
 
 (deftest ^{:stratum 1} missing-api-key-test
@@ -289,6 +341,86 @@
     (testing "response parses candidates + usageMetadata"
       (is (:success result))
       (is (= "answer" (:content result)))
+      (is (= {:input-tokens 11 :output-tokens 7} (:usage result))))))
+
+(deftest ^{:stratum 2} openrouter-round-trip-test
+  (let [{:keys [result captured]}
+        (capture-http (openrouter-200 "answer")
+                      #(llm/complete (llm/create-client {:backend :openrouter
+                                                         :model "vendor/model"
+                                                         :api-key test-api-key})
+                                     {:prompt "q"}))]
+    (testing "request goes to OpenRouter with a Bearer key and asks for usage accounting"
+      (is (= "https://openrouter.ai/api/v1/chat/completions" (:url captured)))
+      (is (= (str "Bearer " test-api-key)
+             (get-in captured [:headers "Authorization"])))
+      (is (= "vendor/model" (:model (:body captured))))
+      (is (= {:include true} (:usage (:body captured))))
+      (is (= {:data_collection "deny" :zdr true}
+             (get-in captured [:body :provider]))))
+    (testing "response keeps the cache and reasoning breakdown and the billed cost"
+      (is (:success result))
+      (is (= "answer" (:content result)))
+      (is (= {:input-tokens 1000
+              :output-tokens 50
+              :cached-input-tokens 800
+              :cache-write-input-tokens 150
+              :reasoning-output-tokens 20}
+             (:usage result)))
+      (is (= 0.00125 (:cost-usd result)))
+      (is (= 1050 (:tokens result))
+          "the subset counts are not added to the total"))))
+
+(deftest ^{:stratum 2} openrouter-empty-answer-keeps-the-billed-cost-test
+  (testing "a 200 with no text is an error, and the amount billed for it
+            stays on the result for the caller's bookkeeping"
+    (let [{:keys [result]}
+          (capture-http (openrouter-200 "")
+                        #(llm/complete (llm/create-client {:backend :openrouter
+                                                           :model "vendor/model"
+                                                           :api-key test-api-key})
+                                       {:prompt "q"}))]
+      (is (not (:success result)))
+      (is (= "empty_success_output" (get-in result [:error :type])))
+      (is (= 0.00125 (:cost-usd result))))))
+
+(deftest ^{:stratum 2} openrouter-missing-key-fails-closed-test
+  (testing "no config key and no OPENROUTER_API_KEY fails before any request"
+    (let [{:keys [result captured]}
+          (capture-http (openrouter-200 "never sent")
+                        (fn []
+                          (with-redefs [impl/getenv-value (constantly nil)]
+                            (llm/complete (llm/create-client {:backend :openrouter
+                                                              :model "vendor/model"})
+                                          {:prompt "q"}))))]
+      (is (not (:success result)))
+      (is (= "missing_api_key" (get-in result [:error :type])))
+      (is (nil? captured)))))
+
+(deftest ^{:stratum 2} openai-usage-details-test
+  (testing "an OpenAI-shaped response that reports cache and reasoning details
+            keeps them; they stay subsets, under their own keys"
+    (let [{:keys [result]}
+          (capture-http (http-200 {:choices [{:message {:role "assistant" :content "a"}}]
+                                   :usage {:prompt_tokens 100
+                                           :completion_tokens 9
+                                           :prompt_tokens_details {:cached_tokens 64}
+                                           :completion_tokens_details {:reasoning_tokens 3}}})
+                        #(impl/http-complete (backend-config :openai-api)
+                                             {:prompt "q" :model "gpt-x"}
+                                             {:api-key test-api-key}))]
+      (is (= {:input-tokens 100
+              :output-tokens 9
+              :cached-input-tokens 64
+              :reasoning-output-tokens 3}
+             (:usage result)))
+      (is (not (contains? result :cost-usd)) "OpenAI reports no cost")))
+  (testing "a response without the details carries no nil keys"
+    (let [{:keys [result]}
+          (capture-http (openai-200 "a")
+                        #(impl/http-complete (backend-config :openai-api)
+                                             {:prompt "q" :model "gpt-x"}
+                                             {:api-key test-api-key}))]
       (is (= {:input-tokens 11 :output-tokens 7} (:usage result))))))
 
 (deftest ^{:stratum 2} openai-compat-keyless-round-trip-test

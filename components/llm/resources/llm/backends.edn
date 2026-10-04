@@ -97,6 +97,18 @@
                  :optional-api-key? true
                  :probe-endpoint "http://localhost:1234/v1/models"}
 
+ ;; OpenRouter: one key, many upstream providers, over the OpenAI wire
+ ;; shape. Model ids are OpenRouter's (`vendor/model`). The response
+ ;; reports billed cost and cached-token counts, which the client keeps.
+ :openrouter {:cmd "http"
+              :streaming? false
+              :description "Any hosted model via OpenRouter (one API key)"
+              :provider "OpenRouter"
+              :requires-cli? false
+              :api-endpoint "https://openrouter.ai/api/v1/chat/completions"
+              :api-key-env "OPENROUTER_API_KEY"
+              :probe-endpoint "https://openrouter.ai/api/v1/models"}
+
  ;; Gemini's REST shape embeds the model in the URL path, so
  ;; :api-endpoint is a format string filled by `request-endpoint`
  ;; (:model-in-url?).

@@ -286,6 +286,26 @@
       (is (= 9971 (get-in parsed [:usage :input-tokens])))
       (is (= 206 (get-in parsed [:usage :output-tokens])))))
 
+  (testing "turn.completed keeps Codex's cached-input and reasoning counts,
+            and adds neither key when Codex does not report them"
+    (let [line (json/generate-string
+                 {:type "turn.completed"
+                  :usage {:input_tokens 14153
+                          :cached_input_tokens 8960
+                          :output_tokens 5
+                          :reasoning_output_tokens 0}})
+          parsed (impl/parse-codex-stream-line line)]
+      (is (= {:input-tokens 14153
+              :output-tokens 5
+              :cached-input-tokens 8960
+              :reasoning-output-tokens 0}
+             (:usage parsed))))
+    (let [line (json/generate-string
+                 {:type "turn.completed"
+                  :usage {:input_tokens 10 :output_tokens 5}})
+          parsed (impl/parse-codex-stream-line line)]
+      (is (= {:input-tokens 10 :output-tokens 5} (:usage parsed)))))
+
   (testing "mcp_tool_call item returns empty delta"
     (let [line (json/generate-string
                  {:type "item.completed"

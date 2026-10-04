@@ -28,7 +28,6 @@
 
   Evidence commands:
   - miniforge evidence show <id>
-  - miniforge evidence export <id> <format>
   - miniforge evidence list
 
   Artifact commands:

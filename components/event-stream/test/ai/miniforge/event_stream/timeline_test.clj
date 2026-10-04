@@ -19,7 +19,8 @@
   (:require
    [clojure.string :as str]
    [clojure.test :refer [deftest is testing]]
-   [ai.miniforge.event-stream.timeline :as sut]))
+   [ai.miniforge.event-stream.timeline :as sut]
+   [ai.miniforge.event-stream.timeline-values :as values]))
 
 ;------------------------------------------------------------------------------ Layer 0
 
@@ -39,6 +40,14 @@
     (is (= "" (sut/render-timeline [])))
     (is (= "" (sut/render-timeline nil)))
     (is (= "" (sut/render-timeline [] {})))))
+
+(deftest ^{:stratum 0} truncation-preserves-short-values-and-bounds-the-suffix
+  (is (nil? (values/truncate nil 2)))
+  (is (nil? (values/truncate :invalid 2)))
+  (is (= "ab" (values/truncate "ab" 2)))
+  (is (= "…" (values/truncate "abc" 1)))
+  (doseq [limit [0 -1]]
+    (is (= "" (values/truncate "abc" limit)))))
 
 (deftest ^{:stratum 0} events-without-timestamps-handled-gracefully
   (testing "events with nil timestamp render with ?? placeholders but do not throw"
@@ -70,6 +79,20 @@
          extra))
 
 ;------------------------------------------------------------------------------ Layer 2
+
+(deftest ^{:stratum 2} timestamp-representations-share-the-same-normalization
+  (doseq [timestamp [(java.util.Date. 0) 0 "1970-01-01T00:00:00Z"]]
+    (is (str/starts-with? (sut/render-timeline [(mk-event :test/event 0 :event/timestamp timestamp)])
+                         "00:00:00")))
+  (doseq [timestamp [nil "not-an-instant" :invalid]]
+    (is (str/starts-with? (sut/render-timeline [(mk-event :test/event 0 :event/timestamp timestamp)])
+                         "??:??:??"))))
+
+(deftest ^{:stratum 2} missing-timestamp-breaks-gap-adjacency
+  (let [events [(mk-event :test/event 0)
+                (mk-event :test/event 0 :event/timestamp nil)
+                (mk-event :test/event 120000)]]
+    (is (= 3 (count (str/split-lines (sut/render-timeline events)))))))
 
 (deftest ^{:stratum 2} tool-call-started-renders-correctly
   (testing "agent/tool-call-started shows tool name and args digest preview"

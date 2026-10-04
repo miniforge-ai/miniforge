@@ -27,7 +27,7 @@
   [{:finding/type :email
     :finding/pattern #"[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}"}
    {:finding/type :ssn
-    :finding/pattern #"\b\d{3}-\d{2}-\d{4}\b"}
+    :finding/pattern #"(?<!\d)\d{3}-\d{2}-\d{4}(?!\d)"}
    {:finding/type :aws-access-key
     :finding/pattern #"\bAKIA[0-9A-Z]{16}\b"}])
 

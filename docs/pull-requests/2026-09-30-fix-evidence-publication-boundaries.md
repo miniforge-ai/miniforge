@@ -28,7 +28,8 @@ The shared publication validator also refuses correctly hashed evidence with
 exposed secrets or understated sensitivity, PII, or treatment declarations.
 It checks the policy from merged #1981 without modifying or resealing evidence.
 Shared redaction excludes plaintext SSNs from values, keys, and metadata, and
-recorded SSN findings require protected treatment. Truthful flags or a claimed
+recorded SSN findings require protected treatment (shared foundation #1989).
+Truthful flags or a claimed
 redacted/encrypted treatment never authorize exporting an exposed SSN.
 
 ## Standards adversarial pass
@@ -44,10 +45,10 @@ Keep every namespace within three strata and every commit below its reportable b
 
 Packaged CLI and manager tests verify valid round trips and rejection before export writes.
 Tampering and missing seals leave existing destinations unchanged.
-Evidence and redaction consumers and a CLI build pass. CLI regressions pass
-20 tests / 84 assertions; packaged CLI, publication, compliance and SSN coverage
-passes 31 tests / 202 assertions. The root standards scan reports no violations.
-Run normal hooks before each commit and refresh verification before merge.
+Run CLI, evidence and redaction consumers across all four product projects.
+Rebuild the CLI and run packaged CLI, publication, compliance, scanner and SSN
+regressions. Require zero violations from the root standards scan.
+Run normal hooks before each commit and verify the refreshed branch before push.
 Current-head review and all CI, including Build, remain mandatory merge gates.
 Legacy nil/false detail fields retain canonical fallbacks, including status,
 phase names and artifacts. Failure attribution selects the first truthy source.
@@ -56,3 +57,6 @@ Command-line regressions cover explicit paths (including spaces), the EDN
 default, and JSON/HTML format flags. No deployment is required.
 Format regressions include basename-only destinations. Clojure 1.12's
 `make-parents` already guards a missing parent; no path-handling change is needed.
+All export formats report neutral localized success text with the actual destination.
+Provider-list coverage requires successful sealed details, not an ID in an error.
+Embedded SSNs are refused at the list, show and export boundaries.

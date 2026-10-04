@@ -19,6 +19,7 @@
   "Event bus and event constructors for workflow observability."
   (:require
    [ai.miniforge.event-stream.messages :as messages]
+   [ai.miniforge.event-stream.publication-fence :as fence]
    [ai.miniforge.event-stream.snowflake :as snowflake]
    [ai.miniforge.logging.interface :as log]
    [ai.miniforge.redaction.interface :as redaction]
@@ -97,63 +98,6 @@
            ;; `create-envelope` calls it for `:event/id` so events sort
            ;; lexically by creation order. nil = random-uuid fallback.
            :snowflake-generator (:snowflake-generator opts)})))
-
-;; publish! helpers — small, single-purpose pieces composed by publish!
-;; itself. Each helper is testable in isolation; tests live in
-;; `publish_helpers_test.clj`.
-(defn- ^{:stratum 0} workflow-quiesced?
-  "True when `event`'s workflow id has been fenced via `quiesce!`."
-  [stream event]
-  (when-let [wid (:workflow/id event)]
-    (contains? (:quiesced-workflows @stream) wid)))
-
-(defn- ^{:stratum 0} rejection-result
-  "Build the structured rejection map returned to a publisher whose
-   workflow has been quiesced. Stable shape so callers can pattern-match."
-  [event reason]
-  {:rejected?   true
-   :reason      reason
-   :workflow-id (:workflow/id event)
-   :event-type  (:event/type event)})
-
-(defn- ^{:stratum 0} log-rejection!
-  "Surface a quiesce rejection at warn level if a logger is configured."
-  [logger event]
-  (when logger
-    (log/warn logger :event-stream :event/rejected-after-quiesce
-              {:message "publish! rejected: workflow quiesced"
-               :data    {:event-type  (:event/type event)
-                         :workflow-id (:workflow/id event)}})))
-
-(def ^{:stratum 0} ^:private quiesced-sentinel
-  "Sentinel value returned by `with-in-flight` when the event's workflow was
-   quiesced between the caller's fast-path check and the atomic increment,
-   closing the TOCTOU window. Distinct from nil so callers can distinguish
-   'quiesced-during-acquire' from 'no-workflow-id event'."
-  ::quiesced)
-
-(defn- ^{:stratum 0} try-acquire-in-flight!
-  "Atomically check the quiesce fence for `event`'s workflow and, if not
-   fenced, increment the in-flight counter.
-
-   Uses a decision volatile captured inside the `swap!` fn to signal the
-   outcome to the caller without polluting the stream map with temporary keys.
-   The `swap!` fn may be retried by the atom under contention — the volatile
-   is reset on each retry so the final value always reflects the last
-   successful swap.
-
-   Returns true when the slot was acquired (in-flight incremented), false
-   when the workflow was quiesced at the moment of the swap."
-  [stream event]
-  (let [wid      (:workflow/id event)
-        acquired (volatile! false)]
-    (swap! stream
-           (fn [s]
-             (if (and wid (contains? (:quiesced-workflows s) wid))
-               (do (vreset! acquired false) s)
-               (do (vreset! acquired true)
-                   (update s :in-flight inc)))))
-    @acquired))
 
 (defn- ^{:stratum 0} record-event!
   "Append `event` to the in-memory event log."
@@ -323,33 +267,6 @@
            (:agent/id opts)          (assoc :agent/id (:agent/id opts))
            (:agent/instance-id opts) (assoc :agent/instance-id (:agent/instance-id opts))))))))
 
-(defn- ^{:stratum 1} rejection-if-quiesced
-  "Return the structured rejection map when `event`'s workflow is fenced,
-   else nil. Logs the rejection as a side effect so callers don't have
-   to do it twice."
-  [stream event]
-  (when (workflow-quiesced? stream event)
-    (log-rejection! (:logger @stream) event)
-    (rejection-result event :workflow-quiesced)))
-
-(defn- ^{:stratum 1} with-in-flight
-  "Run `body-fn` while incrementing the stream's in-flight publish
-   counter, decrementing in a finally so an exception still releases the
-   slot. Returns body-fn's result, or `quiesced-sentinel` when the
-   workflow was fenced at the moment of the atomic acquire.
-
-   The quiesce check and increment are fused into a single `swap!` via
-   `try-acquire-in-flight!`, eliminating the TOCTOU window that existed
-   when the two operations were separate (check in `rejection-if-quiesced`
-   then increment in `swap! update :in-flight inc`)."
-  [stream event body-fn]
-  (if-not (try-acquire-in-flight! stream event)
-    quiesced-sentinel
-    (try
-      (body-fn)
-      (finally
-        (swap! stream update :in-flight dec)))))
-
 (defn- ^{:stratum 1} deliver-to-sinks!
   "Fan `event` out to every configured sink. Each sink runs in
    isolation via `deliver-to-sink!`."
@@ -486,8 +403,8 @@
    In-flight publishes are tracked so `quiesce!` / `drain!` can wait
    for the stream to settle before reporting at-rest.
 
-   The quiesce fence is enforced atomically: `with-in-flight` fuses the
-   quiesce-check and the in-flight increment into a single `swap!`,
+   The quiesce fence is enforced atomically: `fence/with-in-flight` fuses the
+   quiesce-check and the in-flight increment into a single `swap-vals!`,
    eliminating the TOCTOU window that allowed a publish to slip through
    after `quiesce!` fenced the workflow."
   [stream event]
@@ -499,9 +416,9 @@
     ;; in-memory log and every other sink holding the secret.
     (let [event (redaction/redact event)]
       ;; Fast path: check quiesce before acquiring the in-flight slot so
-      ;; already-quiesced workflows skip the swap! entirely.
-      (or (rejection-if-quiesced stream event)
-          (let [result (with-in-flight stream event
+      ;; already-quiesced workflows skip atomic admission entirely.
+      (or (fence/rejection-if-quiesced stream event)
+          (let [result (fence/with-in-flight stream event
                          (fn []
                            (let [{:keys [sinks subscribers filters logger]} @stream]
                              (deliver-to-sinks! sinks event logger)
@@ -513,9 +430,8 @@
             ;; fenced during the atomic acquire (the TOCTOU window). Convert
             ;; to the canonical rejection shape so callers see a consistent
             ;; {:rejected? true ...} map regardless of which path triggered it.
-            (if (= result quiesced-sentinel)
-              (do (log-rejection! (:logger @stream) event)
-                  (rejection-result event :workflow-quiesced))
+            (if (= result fence/quiesced-sentinel)
+              (fence/reject! stream event)
               result))))))
 
 ;; Event constructors (N3 compliant)

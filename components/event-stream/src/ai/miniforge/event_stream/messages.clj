@@ -26,3 +26,8 @@
   "Look up an event-stream message by key, with optional param substitution."
   (messages/create-translator "config/event-stream/messages/en-US.edn"
                               :event-stream/messages))
+
+(def ^{:stratum 0} system
+  "Look up a developer-facing event-stream message."
+  (messages/create-translator "config/event-stream/messages/system.edn"
+                              :event-stream/messages))

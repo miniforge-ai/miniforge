@@ -6,8 +6,22 @@
  ;; every request, so only it carries a default here — OpenAI and
  ;; Gemini omit the cap unless the caller sets :max-tokens.
  :http
- {:anthropic {:api-version "2023-06-01"
-              :default-max-tokens 16000}}
+ {;; A direct provider call is non-streaming: nothing arrives until the
+  ;; model finishes. Sized like the stream ceiling below so a long
+  ;; completion is not cut at http-kit's 60 s default.
+  :idle-timeout-ms 600000
+  :anthropic {:api-version "2023-06-01"
+              :default-max-tokens 16000}
+  ;; Sent as the `provider` object of every OpenRouter request, in
+  ;; OpenRouter's own field names. OpenRouter serves one model from
+  ;; several hosts with different data policies, and it treats two of
+  ;; them separately: "deny" excludes hosts that may train on prompts,
+  ;; and `:zdr true` limits routing to zero-data-retention endpoints,
+  ;; which store nothing (a host can retain without training, for
+  ;; abuse scanning). A model with no such endpoint fails the call
+  ;; instead of falling back to a host that keeps the prompt.
+  :openrouter {:provider {:data_collection "deny"
+                          :zdr true}}}
 
  ;; Framework defaults for a monitored streaming run. A role overrides
  ;; them per turn through its prompt config's :prompt/progress-monitor
