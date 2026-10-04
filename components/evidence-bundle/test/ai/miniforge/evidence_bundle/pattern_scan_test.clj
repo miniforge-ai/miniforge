@@ -16,7 +16,8 @@
   [value])
 
 (deftest ^{:stratum 0} separate-values-do-not-form-a-sensitive-string
-  (doseq [value [["000" "00" "0000"] ["alice" "@" "example.test"]]]
+  (doseq [value [["000" "00" "0000"] ["alice" "@" "example.test"]
+                 "1000-00-0000" "000-00-00000"]]
     (is (empty? (:scan/findings (scanner/scan-artifact value))))))
 
 ;------------------------------------------------------------------------------ Layer 1
@@ -34,7 +35,8 @@
 ;------------------------------------------------------------------------------ Layer 2
 
 (deftest ^{:stratum 2} scans-original-values-beyond-print-bounds
-  (doseq [[text type] [["000-00-0000" :ssn] ["alice@example.test" :email]]
+  (doseq [[text type] [["000-00-0000" :ssn] ["employee_ssn_000-00-0000_suffix" :ssn]
+                     ["alice@example.test" :email]]
           value (placements text)]
     (let [result (binding [*print-level* 1 *print-length* 1] (scanner/scan-artifact value))
           metadata (scanner/compliance-metadata result)]
