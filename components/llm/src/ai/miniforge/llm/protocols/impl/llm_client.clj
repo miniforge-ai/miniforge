@@ -1322,6 +1322,13 @@
       (format endpoint (:model request))
       endpoint)))
 
+(defn ^{:stratum 2} openrouter-request-body
+  "Build an OpenRouter request body: the OpenAI Chat Completions shape,
+   with usage accounting requested so the response reports billed cost
+   and cached-token counts."
+  [request]
+  (assoc (openai-request-body request) :usage {:include true}))
+
 (defn- ^{:stratum 2} extract-anthropic
   "Text + usage from an Anthropic Messages response: join the `text`
    content blocks (tool-use and thinking blocks carry no answer text)."
@@ -1340,6 +1347,16 @@
               (get-in body [:usage :completion_tokens])
               (openai-usage-extras (:usage body))
               nil))
+
+(defn- ^{:stratum 2} extract-openrouter
+  "Text + usage from an OpenRouter response: the OpenAI shape, plus the
+   USD amount OpenRouter billed for the call (`usage.cost`)."
+  [body]
+  (extraction (get-in body [:choices 0 :message :content])
+              (get-in body [:usage :prompt_tokens])
+              (get-in body [:usage :completion_tokens])
+              (openai-usage-extras (:usage body))
+              (get-in body [:usage :cost])))
 
 (defn- ^{:stratum 2} extract-gemini
   "Text + usage from a Gemini generateContent response: join the text
@@ -1747,6 +1764,8 @@
                  "anthropic-version" (anthropic-api-version)}
     "OpenAI"    {"Content-Type" "application/json"
                  "Authorization" (str "Bearer " api-key)}
+    "OpenRouter" {"Content-Type" "application/json"
+                  "Authorization" (str "Bearer " api-key)}
     ;; Compatible servers are usually credential-free; send auth only
     ;; when a key was actually supplied (vLLM behind a gateway, etc.).
     "OpenAI-Compatible" (cond-> {"Content-Type" "application/json"}
@@ -1883,6 +1902,10 @@
                         :parse-fn (partial parse-provider-response
                                            extract-openai)
                         :requires-model? true}
+   "OpenRouter" {:body-fn openrouter-request-body
+                 :parse-fn (partial parse-provider-response
+                                    extract-openrouter)
+                 :requires-model? true}
    "Gemini"    {:body-fn gemini-request-body
                 :parse-fn (partial parse-provider-response extract-gemini)
                 :requires-model? true}})
@@ -1942,8 +1965,8 @@
 
    Two families share this path: the local, credential-free Ollama
    endpoint, and the direct API-key providers (:anthropic-api /
-   :openai-api / :gemini-api) for builds where CLI-agent backends are
-   unavailable. `config` is the client config — only `:api-key` is
+   :openai-api / :gemini-api / :openrouter) for builds where CLI-agent
+   backends are unavailable. `config` is the client config — only `:api-key` is
    read from it here; the caller (`complete-impl` /
    `complete-stream-impl`) has already merged the config `:model` into
    `request`, which is where this fn and the body builders read it."
