@@ -430,9 +430,11 @@
 
 (defn- ^{:stratum 1} split-answers-segment
   "Split an answers.edn `cat` segment that was prefixed by the
-   presence-marker echo into {:present? bool :content trimmed-str}."
+   presence-marker echo into {:present? bool :content trimmed-str}.
+   nil (a truncated batched read with fewer boundary segments than
+   expected) reads as an absent, empty segment."
   [segment]
-  (let [trimmed (str/trim segment)
+  (let [trimmed (str/trim (or segment ""))
         present? (str/starts-with? trimmed capsule-answers-present-marker)]
     {:present? present?
      :content  (if present?
