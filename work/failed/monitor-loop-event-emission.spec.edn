@@ -1,0 +1,71 @@
+;; Publish PR-monitor loop progress events to the workflow event bus.
+;; Followup from the 2026-06-15 rn-03 dogfood: the observe phase reached the
+;; PR-monitor loop but emitted ZERO :pr-monitor/* events, so an operator could
+;; not tell "polling normally" from "stuck" (it looked like a hang).
+
+{:spec/title "Emit PR-monitor loop progress events to the workflow event bus"
+ :version "1.0.0"
+ :type :feature
+ :priority :high
+
+ :spec/description
+ "The PR-monitor loop in the pr-lifecycle component runs (after #1183, on a
+  detached future started by the observe phase) but is observability-dark: it
+  publishes no progress events to the workflow event stream. The constructors
+  already exist in monitor_events.clj (loop-started, poll-completed,
+  loop-stopped) but are never emitted onto the event bus — run-monitor-loop
+  only writes to the logger via state/log-loop-start!.
+
+  Make the loop emit a structured event onto the workflow event bus:
+  (1) once when the loop starts, (2) once per outer poll iteration (even when a
+  poll finds zero new comments), and (3) once when the loop stops, carrying the
+  stop reason. Verify the bus the monitor publishes to is the same workflow
+  event stream the rest of the SDLC writes to (the one persisted under
+  ~/.miniforge/events), not a separate side bus — if it is a side bus, the
+  events will never reach the operator-visible stream regardless of emission.
+
+  Outcome: tailing the workflow event stream during observe shows a steady
+  cadence of pr-monitor events, so a stalled vs. normally-polling monitor is
+  distinguishable from the events alone."
+
+ :spec/intent
+ {:type :feature
+  :scope ["components/pr-lifecycle/src/ai/miniforge/pr_lifecycle/monitor_loop.clj"
+          "components/pr-lifecycle/src/ai/miniforge/pr_lifecycle/monitor_state.clj"
+          "components/pr-lifecycle/src/ai/miniforge/pr_lifecycle/monitor_events.clj"]}
+
+ :current-state
+ {:events "monitor_events.clj defines loop-started / poll-completed / loop-stopped, but run-monitor-loop / step-monitor-loop! never publish them to the event bus; only logger output is produced"
+  :symptom "observe phase produced 91 phase-heartbeats but 0 :pr-monitor/* events over a 45-minute window — indistinguishable from a hang"}
+
+ :target-state
+ {:loop-started "published to the workflow event bus on loop entry, carrying the PRs being monitored and the poll interval"
+  :poll-tick "published once per outer iteration with iteration count + open-PR count, even when no new comments are found"
+  :loop-stopped "published on termination with the stop reason (all-merged / budget-exhausted / no-open-prs)"
+  :bus "confirmed to be the workflow event stream (events persisted under ~/.miniforge/events), not a separate pr-lifecycle side bus"}
+
+ :spec/constraints
+ ["Reuse the existing monitor_events.clj constructors; do not invent parallel event shapes"
+  "Events are data emitted through the event-stream component, not log lines — follow the one-canonical-writer convention"
+  "Per-iteration emission must not change the poll cadence or add blocking work to the loop"
+  "No new :pr-monitor event type may be added without a corresponding entry in event-type-registry.edn"]
+
+ :testing-strategy
+ {:unit-tests
+  ["Loop entry publishes a loop-started event to the injected event bus"
+   "Each outer iteration publishes a poll event, including iterations that find zero new comments"
+   "Loop termination publishes a loop-stopped event carrying the stop reason"
+   "Events are routed to the workflow event bus passed by the observe phase, captured via a test bus"]}
+
+ :spec/acceptance-criteria
+ [{:criterion "loop-started emitted on entry"
+   :verification "A test event bus receives one loop-started event when run-monitor-loop begins"}
+  {:criterion "per-iteration poll event emitted even on a no-new-comments cycle"
+   :verification "Drive N iterations against a poller returning no comments; assert N poll events on the bus"}
+  {:criterion "loop-stopped emitted with reason on termination"
+   :verification "Stop via no-open-prs; assert a loop-stopped event carrying that reason"}
+  {:criterion "events reach the workflow event stream"
+   :verification "The monitor's event bus is the one observe passes from [:execution/event-bus]; events are visible on that stream"}]
+
+ :estimated-effort "0.5 day"
+ :workflow/type :canonical-sdlc}

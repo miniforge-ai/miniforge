@@ -103,7 +103,7 @@
   (testing "but a terminal target does"
     (is (= :anomalies.deliberation/terminal-target
            (subtype-of (validate-tx
-                        (workspace (object-at "claim-1" 12 :object/status :accepted))
+                        (workspace (object-at "claim-1" 12 :object/status :superseded))
                         (transaction :proposer 10
                                      {:op :attach-evidence :targets #{"claim-1"}})))))))
 

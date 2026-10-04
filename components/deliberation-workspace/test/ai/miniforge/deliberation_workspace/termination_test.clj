@@ -54,7 +54,8 @@
     (is (:termination/forced-synthesis result))))
 
 (deftest ^{:stratum 1} quiescence-closes-a-run-that-stopped-producing
-  (let [ws (workspace [(obj "goal-1" :goal)] :workspace/quiet-rounds 3)]
+  (let [ws (workspace [(obj "goal-1" :goal)] :workspace/quiet-rounds 3
+                      :workspace/passed #{:proposer :skeptic :synthesizer})]
     (is (= :quiescence (:termination/rule (termination/closing-rule ws))))))
 
 (deftest ^{:stratum 1} a-live-run-does-not-terminate

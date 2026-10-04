@@ -353,7 +353,9 @@
               {:op (:op operation) :basis basis})
 
       (= :additive (tx/class-of (:op operation)))
-      (when-let [terminal (seq (filter object/terminal? targets))]
+      (when-let [terminal (seq (filter #(and (object/terminal? %)
+                                               (not (and (contains? #{:challenge :attach-evidence} (:op operation))
+                                                         (= :accepted (:object/status %))))) targets))]
         (reject :conflict :anomalies.deliberation/terminal-target
                 "Operation targets an object already in a terminal status"
                 {:op (:op operation) :targets (mapv :object/id terminal)}))
@@ -384,6 +386,7 @@
   [workspace transaction stages]
   (let [operations (:tx/operations transaction)
         context {:role (:tx/role transaction)
+                 :participant (:tx/participant transaction)
                  :basis (:tx/basis transaction)
                  :siblings operations}]
     (if (or (nil? operations) (sequential? operations))
@@ -393,6 +396,14 @@
               {:operations operations}))))
 
 ;------------------------------------------------------------------------------ Layer 2
+
+(def ^{:stratum 2} payload-stages
+  "Shape checks that do not require objects created by earlier sibling operations."
+  [check-schema check-id-fields check-creates check-links check-outcome])
+
+(def ^{:stratum 2} basis-stages
+  "Check the original activation basis before simulating this transaction's own writes."
+  [check-basis])
 
 (def ^{:stratum 2} concurrency-stages
   "Ordered §3.4 stages. Schema conformance runs first because every later
@@ -416,5 +427,4 @@
    transaction can carry a malformed payload and a missing target at once,
    and the payload is the more basic fault: the ids a graph stage would
    report come out of the same payload whose shape is not yet established."
-  [check-schema check-id-fields check-creates check-links check-outcome
-   check-targets check-permission check-basis])
+  (into payload-stages [check-targets check-permission check-basis]))

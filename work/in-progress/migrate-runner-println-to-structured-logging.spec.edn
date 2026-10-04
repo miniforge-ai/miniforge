@@ -1,0 +1,42 @@
+{:spec/title "Migrate workflow runner-events println calls to structured logging"
+
+ :spec/description
+ "The workflow event-publishing helpers
+  (components/workflow/src/ai/miniforge/workflow/runner_events.clj) use bare
+  `println` for their error-path warnings. There are 9, each inside a
+  `catch Exception` handler, and each already routes its text through the
+  localized message catalog via `(messages/t :warn/... {...})`. They print to
+  stdout instead of the structured logging component
+  (ai.miniforge.logging.interface), so they never reach the event stream or
+  the TUI dashboard.
+
+  runner_events.clj does not yet require the logging interface and has no
+  logger instance. runner.clj (the sibling it was extracted from) already
+  holds a module-level logger:
+    (defonce ^:private runner-logger
+      (log/create-logger {:min-level :debug :output :human}))
+  and calls e.g. (log/warn runner-logger :system :workflow/execution-stopped {...}).
+  Mirror that: add the require and a module-level logger, then replace each
+  `(println (messages/t :warn/x {...}))` with
+  `(log/warn <logger> :workflow :warn/x {...})`, keeping the same message key
+  and data map."
+
+ :spec/intent {:type :refactor
+               :scope ["components/workflow/src/ai/miniforge/workflow/runner_events.clj"]}
+
+ :spec/constraints
+ ["Only modify runner_events.clj"
+  "Add (require [ai.miniforge.logging.interface :as log]) and a module-level logger mirroring runner.clj's runner-logger"
+  "All 9 println calls are warn-level (error-path catch handlers) — use log/warn; there are no debug-level candidates in this file"
+  "Preserve the existing (messages/t :warn/...) message keys and the {:error (ex-message e)} data; only the sink changes (println -> log/warn)"
+  "Use the :workflow category keyword for every log/warn call"
+  "Preserve existing error-handling behavior — the catch handlers must still swallow the exception (logging replaces printing, nothing more)"
+  "All existing tests must continue to pass without modification"]
+
+ :spec/acceptance-criteria
+ ["No println calls remain in runner_events.clj"
+  "All 9 former println sites use log/warn with the :workflow category and their original :warn/... message key + data"
+  "runner_events.clj requires ai.miniforge.logging.interface and defines a module-level logger"
+  "Existing workflow tests pass without modification"]
+
+ :spec/workflow-type :canonical-sdlc}

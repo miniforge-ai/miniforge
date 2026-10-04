@@ -107,7 +107,7 @@
         ;; projection each one was actually rendered from — that is what the
         ;; §3.1 contract means by basis. A constant would be right only for
         ;; the first activation.
-        activate (fn [{:keys [role projection workspace]}]
+        activate (fn [{:keys [role projection]}]
                    (swap! seen conj
                           {:role role
                            :delta (set (map :object/id (:projection/delta projection)))})
@@ -115,7 +115,7 @@
                     {:role role :activation "act-1"
                      :basis (:projection/version projection)
                      :operations [{:op :assert-claim
-                                   :creates [{:id (str "claim-" (:workspace/version workspace))
+                                   :creates [{:id (str "claim-" (:projection/version projection))
                                               :type :claim :statement "a claim"}]}]}))
         _ (run/run (workspace :workspace/budget {:activations 4}) activate {})
         by-role (group-by :role @seen)

@@ -1,0 +1,98 @@
+;; =============================================================================
+;; Spec: Eliminate requiring-resolve agent-smell across the codebase
+;; =============================================================================
+;;
+;; Standards-pack rule "No requiring-resolve in Clojure" flags 134 occurrences
+;; across 10 components / bases. Per `feedback_avoid_requiring_resolve`:
+;;   `requiring-resolve` is an agent-smell; fix the underlying design instead
+;;   of lazy-resolving around load-order issues.
+;;
+;; Each call site is one of:
+;;   (a) a load-order workaround for a circular `:require` (real design fix
+;;       needed: restructure to break the cycle)
+;;   (b) a defensive idiom for "this var might not be loaded yet" (real fix:
+;;       add an eager `:require` in the consumer's ns)
+;;   (c) an optional dependency the original author didn't want to declare
+;;       (real fix: declare it; if truly optional, hide behind a protocol or
+;;       capability flag)
+;;
+;; This work decomposes naturally per component / base — each cluster is
+;; independent, tests run per brick, no cross-cluster ordering constraint.
+
+{:spec/title
+ "Eliminate the requiring-resolve agent-smell across the codebase (134 sites in 10 bricks)"
+
+ :spec/description
+ "Replace every `(requiring-resolve 'some.ns/some-var)` call with an eager
+  `:require` in the consuming namespace (and a direct symbol reference), OR
+  with a proper design fix when the original author was masking a circular
+  dependency.
+
+  Audit baseline (2026-06-04 `bb review` post-FSM-RFC): 134 production
+  occurrences across `components/*/src` and `bases/*/src`, concentrated:
+    bases/cli           — 28 sites
+    components/workflow — 15
+    components/gate     — 14
+    components/agent    — 13
+    components/phase    — 12
+    components/web-dashboard — 10
+    components/evidence-bundle — 8
+    components/phase-deployment — 5
+    components/operator — 4
+    components/event-stream — 4
+
+  Each cluster is independently fixable: per-brick tests verify locally, no
+  cross-cluster import dependency exists today (if one shows up during work,
+  that IS the load-order design issue the smell was masking and the planner
+  should split the affected cluster further).
+
+  Per `feedback_avoid_requiring_resolve`, DO NOT:
+    - rewrap `requiring-resolve` in a try/catch and call it a fix;
+    - introduce a `delay` around the resolve (lazy-but-still-resolve);
+    - move the resolve into an init fn (still lazy-by-runtime).
+
+  Each fix MUST root-cause one of:
+    (a) Add the eager `:require` to the consumer namespace; if that creates a
+        circular dep, restructure (extract shared protocol / move pure helper
+        down a layer) until it doesn't.
+    (b) Replace with a multimethod / protocol dispatch when the resolve was
+        compensating for a missing polymorphic seam.
+    (c) For truly-optional deps, hide behind an explicit capability flag the
+        consumer checks at the top — not a runtime resolve buried in the
+        middle of a function body."
+
+ :spec/intent
+ {:type :refactor
+  :scope ["bases/cli/src"
+          "components/workflow/src"
+          "components/gate/src"
+          "components/agent/src"
+          "components/phase/src"
+          "components/web-dashboard/src"
+          "components/evidence-bundle/src"
+          "components/phase-deployment/src"
+          "components/operator/src"
+          "components/event-stream/src"]}
+
+ :spec/constraints
+ ["Every removed `requiring-resolve` MUST be replaced with an eager `:require` or a proper protocol/dispatch — never with a `delay`, `try/catch around resolve`, or `init-fn that resolves at boot`"
+  "When a fix would create a circular `:require`, the work is to BREAK the cycle (extract shared protocol or pure helper namespace) — not to fall back to a runtime resolve"
+  "Per-brick tests must stay green; integration tests touching the cluster must stay green"
+  "No behavior change at runtime: this is a load-time / static-dependency cleanup"
+  "Tasks are independently committable per cluster — do not bundle multiple clusters into one diff unless they share a root cycle that must be broken atomically"
+  "The Polylith `:poly/interface` boundary must be respected — if a fix would import a non-interface namespace across bricks, the cycle break needs to expose the helper via the brick's interface, not reach around it"]
+
+ :spec/acceptance-criteria
+ ["`grep -rE '\\(requiring-resolve' components/ bases/ --include='*.clj' | grep -v _test.clj | wc -l` returns 0 (or the residue is documented in the PR as truly-optional deps behind explicit capability flags)"
+  "`bb review` post-fix shows zero remaining flags under rule 'No requiring-resolve in Clojure' on production code paths"
+  "Every per-brick test suite (`clojure -M:poly test brick:<each-touched-brick>`) passes"
+  "Pre-commit smoke (`bb test:precommit`) passes"
+  "No new `delay`-wrapped resolves, try-catch-around-resolve patterns, or boot-time resolve helpers introduced"]
+
+ :spec/priority
+ {:tier :should
+  :axes #{:correctness :dogfood-enabler}
+  :theme :standards-cleanup
+  :rationale "120+ violations of an alwaysApply standards rule. Each requiring-resolve hides a real load-order design issue and silently breaks under AOT/native-image. Cleanup is naturally parallelizable per brick — exercises the FSM RFC's multi-workflow decomposition AND removes a class of agent-smell from production."
+  :blocks []
+  :blocked-by []}}

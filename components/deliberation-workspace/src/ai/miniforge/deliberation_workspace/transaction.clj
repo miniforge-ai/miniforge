@@ -32,7 +32,7 @@
     :propose-plan :revise-plan
     :propose-decision :accept-decision :reject-decision
     :register-artifact :invalidate-artifact
-    :add-goal :add-constraint :declare-blocked :close-goal})
+    :add-goal :add-constraint :declare-blocked :close-goal :supersede})
 
 (def ^{:stratum 0} operation-class
   "Concurrency class per operation (N14 §3.3).
@@ -68,7 +68,8 @@
    :close-goal :exclusive
    :add-goal :exclusive
    :add-constraint :exclusive
-   :retire-question :exclusive})
+   :retire-question :exclusive
+   :supersede :exclusive})
 
 (def ^{:stratum 0} role-permissions
   "Operations each role may propose (N14 §5.3). Roles absent from a given
@@ -81,7 +82,6 @@
    :reject-decision #{:synthesizer}
    :close-goal #{:synthesizer}
    :add-goal #{:interpreter}
-   :add-constraint #{:interpreter}
    :retire-question #{:meta-watchdog}})
 
 (def ^{:stratum 0} status-effect
@@ -97,7 +97,8 @@
    :retire-question :retired
    :record-experiment-result :completed
    :invalidate-artifact :superseded
-   :challenge :contested})
+   :challenge :contested
+   :supersede :superseded})
 
 (def ^{:stratum 0} goal-outcomes
   "Outcomes `close-goal` may impose (N14 §2.3)."

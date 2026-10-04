@@ -1,0 +1,35 @@
+;; Title: Miniforge.ai
+;; Copyright 2025-2026 Christopher Lester (christopher@miniforge.ai)
+;; Licensed under the Apache License, Version 2.0.
+(ns ai.miniforge.deliberation-lab.fixtures
+  "Synthetic development problems. Sealed scoring is intentionally outside model input.
+   These short tasks are NOT N15 long-horizon/calibrated gate fixtures.")
+
+(def tasks
+  [{:id :retry-contract :version 1 :synthetic? true
+    :brief "SYNTHETIC: Design a payment retry policy. A stakeholder asks for immediate retry on timeout; another asks for no duplicate charges. Support asks to report every timeout as failure; accounting requires never reporting failure when the charge may have completed. Choose keys :retry, :identity, :timeout-status. Inspect processor and incident evidence before deciding. Allowed values: retry = reconcile-first or immediate; identity = stable or fresh; timeout-status = unknown or failed."
+    :experiments {"processor" "SYNTHETIC processor contract: the same idempotency key returns the original charge; a fresh key creates another charge. Query-by-key returns the recorded outcome."
+                  "incident" "SYNTHETIC incident: the processor committed a charge before its response was lost. A timeout therefore does not establish failure."}
+    :reference {:retry "reconcile-first" :identity "stable" :timeout-status "unknown"}
+    :distractors [{:retry "immediate" :identity "fresh" :timeout-status "failed"}
+                  {:retry "reconcile-first" :identity "stable" :timeout-status "failed"}]}
+   {:id :cache-contract :version 1 :synthetic? true
+    :brief "SYNTHETIC: Design a customer permission cache. Performance requests a process-wide cache keyed by document id. Compliance requires tenant separation and revocation effective on the next consequential write. Operations requests continued writes during authorization outages. Choose keys :cache-key, :write-check, :outage. Inspect identity and revocation evidence. Allowed values: cache-key = tenant-document or document; write-check = current or cached; outage = deny or allow."
+    :experiments {"identity" "SYNTHETIC identity fixture: tenant Red and tenant Blue both contain document id 42 with different owners and permissions."
+                  "revocation" "SYNTHETIC audit: permission was revoked at revision 9 while a worker held cached revision 8. The next consequential write must check current authorization; unavailable authority cannot prove permission."}
+    :reference {:cache-key "tenant-document" :write-check "current" :outage "deny"}
+    :distractors [{:cache-key "document" :write-check "cached" :outage "allow"}
+                  {:cache-key "tenant-document" :write-check "cached" :outage "deny"}]}])
+
+(defn public-task [task] (select-keys task [:id :version :synthetic? :brief]))
+(defn score [task solution inspected]
+  (let [checks (into {} (map (fn [[k value]] [k (= value (get solution k))])) (:reference task))
+        inspected? (= (set (keys (:experiments task))) (set inspected))]
+    {:success (if (and (every? true? (vals checks)) inspected?) 1 0)
+     :checks checks :evidence-complete? inspected?
+     :partial (/ (count (filter true? (vals checks))) (count checks))}))
+(defn validate-fixtures! []
+  (doseq [task tasks]
+    (assert (= 1 (:success (score task (:reference task) (keys (:experiments task)))))))
+  (doseq [task tasks distractor (:distractors task)]
+    (assert (zero? (:success (score task distractor (keys (:experiments task))))))))

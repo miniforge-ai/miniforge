@@ -448,6 +448,10 @@ Defines:
 - Workspace events on the N3 envelope; closure exports as N6 artifacts (§9)
 - Conformance Stages 0–2 with promotion gated on N15 experiments; demotion to Informative on gate failure (§0.4, §11)
 
+**Experimental implementation:** the [shared-deliberation architecture atlas](../docs/architecture/deliberation/README.md)
+records the Ariadne-aligned design, five SVG panels and standalone synthetic lab.
+The development runner does not establish N15 gate conformance; G0 is not evaluated.
+
 ### N15 — Collective-Cognition Evaluation Harness 🆕
 
 **File:** [normative/N15-collective-cognition-harness.md](normative/N15-collective-cognition-harness.md)

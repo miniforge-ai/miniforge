@@ -1,0 +1,83 @@
+;; Make the detached PR-monitor survive a one-shot workflow process exit.
+;; Followup from #1183: the observe phase now starts the PR-monitor on a
+;; detached future and returns :observe/status :monitoring so the SDLC reaches
+;; :done. But in a one-shot `bb miniforge run`, the JVM exits at :done and the
+;; future dies — so the autonomous comment -> fix -> resolve loop never runs to
+;; completion in a dogfood. This spec closes that gap.
+
+{:spec/title "Persist and resume the PR-monitor so it survives a one-shot CLI exit"
+ :version "1.0.0"
+ :type :feature
+ :priority :high
+
+ :spec/description
+ "After #1183, the observe phase detaches the PR-monitor onto an in-process
+  future. That is correct for a long-lived deployment, but in a one-shot
+  `bb miniforge run` the process exits when the workflow reaches :done, killing
+  the monitor before it can respond to any PR review comments. The autonomous
+  comment -> fix -> resolve capability therefore never actually exercises in a
+  dogfood run.
+
+  Close the gap so PR monitoring outlives the workflow process:
+
+  1. On entry, the observe phase persists the monitor's work-list (the open PRs
+     it would monitor, the self-author, and the poll/budget config) to a
+     durable location under a gitignored runtime path.
+
+  2. A resumable entry point — a `miniforge monitor` CLI command (or equivalent)
+     — reads that persisted work-list and runs the same run-pr-monitor-loop
+     out-of-band, so monitoring can continue (or be re-attached) after the
+     one-shot workflow process has exited.
+
+  3. The persisted work-list is keyed so a later `miniforge monitor` invocation
+     resumes the right PRs idempotently, and a PR that has since merged/closed
+     is dropped from the work-list rather than polled forever.
+
+  This is the prerequisite for the autonomous comment -> fix -> resolve loop
+  (work/pr-comment-monitoring.spec.edn) to actually complete in a dogfood: the
+  monitor must be able to run to a terminal condition outside the workflow
+  process that opened the PR."
+
+ :spec/intent
+ {:type :feature
+  :scope ["components/workflow/src/ai/miniforge/workflow/observe_phase.clj"
+          "components/pr-lifecycle/src/ai/miniforge/pr_lifecycle/monitor_loop.clj"
+          "components/pr-lifecycle (monitor work-list persistence + resume)"
+          "the CLI base (a `miniforge monitor` resumable command)"]}
+
+ :current-state
+ {:detach "observe starts the monitor on an in-process future and exposes it at :execution/pr-monitor-future (#1183)"
+  :gap "a one-shot `bb miniforge run` exits the JVM at :done, killing the future; no persisted work-list and no out-of-band entry point exist, so monitoring never resumes"}
+
+ :target-state
+ {:persist "observe writes the monitor work-list (open PRs + self-author + poll/budget config) to a gitignored runtime path"
+  :resume "a `miniforge monitor` command reads the work-list and runs run-pr-monitor-loop out-of-band"
+  :idempotent "resuming re-attaches the correct PRs; merged/closed PRs are pruned from the work-list, not polled forever"
+  :dogfood "after a one-shot run completes, invoking the resume path lets the comment -> fix -> resolve loop run to a terminal condition"}
+
+ :spec/constraints
+ ["Runtime state (the persisted work-list) must live under a gitignored path — never git-tracked, never under the worktree root"
+  "Reuse run-pr-monitor-loop and the existing monitor config shape; do not fork a second monitor implementation"
+  "Persisting on observe entry must not re-introduce a blocking call on the workflow thread (keep observe non-blocking, per #1183)"
+  "The resume command must be safe to run when the work-list is empty or all PRs are already merged (no-op, clear exit)"
+  "Return anomalies as data at component boundaries; the resume command surfaces a clear status rather than throwing"]
+
+ :testing-strategy
+ {:unit-tests
+  ["observe entry writes a work-list containing the open PRs, self-author, and poll/budget config to the configured runtime path"
+   "the resume entry point reads a persisted work-list and starts run-pr-monitor-loop for those PRs"
+   "resume with an empty / all-merged work-list is a clean no-op"
+   "a merged/closed PR is pruned from the work-list on the next resume rather than polled"]}
+
+ :spec/acceptance-criteria
+ [{:criterion "observe persists a resumable monitor work-list"
+   :verification "After enter-observe, the configured gitignored runtime path contains the open-PR work-list + config"}
+  {:criterion "the monitor resumes out-of-band"
+   :verification "Invoking the resume entry point against the persisted work-list runs the monitor loop for those PRs without the original workflow process"}
+  {:criterion "resume is idempotent and prunes terminal PRs"
+   :verification "A merged PR is removed from the work-list on resume; resuming twice does not double-monitor"}
+  {:criterion "empty work-list is a safe no-op"
+   :verification "Resume with no open PRs exits cleanly with a status, no exception"}]
+
+ :estimated-effort "1-2 days"
+ :workflow/type :canonical-sdlc}

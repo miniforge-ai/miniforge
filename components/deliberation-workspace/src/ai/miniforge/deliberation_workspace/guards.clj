@@ -27,7 +27,8 @@
   (:require
    [ai.miniforge.deliberation-workspace.object :as object]
    [ai.miniforge.deliberation-workspace.transaction :as tx]
-   [ai.miniforge.deliberation-workspace.validation :as validation]))
+   [ai.miniforge.deliberation-workspace.validation :as validation]
+   [clojure.string :as str]))
 
 ;------------------------------------------------------------------------------ Layer 0
 
@@ -47,9 +48,9 @@
        count))
 
 (defn- ^{:stratum 0} backed?
-  "N14 §3.5: a challenge must carry evidence, or ride in the same transaction
-   as an experiment that discriminates what it challenges. Bare objections are
-   refused — that rule is what stops a skeptic looping forever.
+  "N14 §3.5: evidence, a discriminating experiment, or a specific concern plus
+   resolution criterion backs a challenge. Unactionable objections are refused;
+   participant/object caps bound repeated challenges without suppressing questions.
 
    `:evidence` and a sibling's `:discriminates` are read unscreened.
    `validation/concurrency-stages` establishes that both name object ids
@@ -60,7 +61,9 @@
         discriminates? (fn [sibling]
                          (and (= :propose-experiment (:op sibling))
                               (some (set (get sibling :discriminates #{})) targets)))]
-    (boolean (or (seq (get operation :evidence #{}))
+    (boolean (or (and (string? (:reason operation)) (not (str/blank? (:reason operation)))
+                      (string? (:resolution operation)) (not (str/blank? (:resolution operation))))
+                 (seq (get operation :evidence #{}))
                  (some discriminates? siblings)))))
 
 (defn- ^{:stratum 0} committed-already?
@@ -68,10 +71,9 @@
    targets (N14 §3.4 idempotency)."
   [workspace operation role]
   (->> (get workspace :workspace/log [])
-       (filter #(= role (:tx/role %)))
+       (filter #(= role (or (:tx/participant %) (:tx/role %))))
        (mapcat :tx/operations)
-       (some #(and (= (:op %) (:op operation))
-                   (= (tx/touched-ids %) (tx/touched-ids operation))))
+       (some #(= % operation))
        boolean))
 
 (defn- ^{:stratum 0} check-hard-constraints
@@ -89,24 +91,24 @@
 ;------------------------------------------------------------------------------ Layer 1
 
 (defn- ^{:stratum 1} check-idempotency
-  [workspace operation {:keys [role]}]
-  (when (committed-already? workspace operation role)
+  [workspace operation {:keys [role participant]}]
+  (when (committed-already? workspace operation (or participant role))
     (validation/reject
      :conflict :anomalies.deliberation/duplicate-operation
      "Role already committed this operation against these targets"
      {:op (:op operation) :role role})))
 
 (defn- ^{:stratum 1} check-anti-livelock
-  [workspace operation {:keys [role siblings]}]
+  [workspace operation {:keys [role participant siblings]}]
   (when (= :challenge (:op operation))
     (let [limit (get workspace :workspace/challenge-limit default-challenge-limit)
-          saturated (filter #(>= (open-challenges-by workspace role %) limit)
+          saturated (filter #(>= (open-challenges-by workspace (or participant role) %) limit)
                             (tx/touched-ids operation))]
       (cond
         (not (backed? operation siblings))
         (validation/reject
          :invalid-input :anomalies.deliberation/bare-challenge
-         "A challenge must carry evidence or a discriminating experiment (N14 §3.5)"
+         "A challenge requires evidence, an experiment, or a reason and resolution criterion"
          {:targets (tx/touched-ids operation)})
 
         (seq saturated)

@@ -6,8 +6,8 @@
 
 # N14 — Shared Deliberation Workspace
 
-**Version:** 0.2.1-draft
-**Date:** 2026-08-10
+**Version:** 0.3.0-draft
+**Date:** 2026-10-20
 **Status:** Draft (Speculative — see §0.4)
 **Conformance:** MUST, scoped per §0.4
 **Class:** Extension spec (N7+)
@@ -73,6 +73,20 @@ Its lifecycle is bound to the N15 gates:
   be built, with the deciding N15 experiment report (manifest hash) attached. It MUST NOT
   be deleted; the record is the deliverable.
 
+### 0.5 Ariadne alignment and experimental profile
+
+Ariadne v1.6.1 §§11 and 13 is the authority and information-flow contract.
+A deliberation decision records a chosen alternative; it MUST NOT confer an
+ExecutionGrant or substitute for a DecisionEnvelope or an effect receipt.
+Participant identity, responsibility, activation identity and basis MUST be
+established by the runtime, not accepted from model output.
+
+The synthetic development profile and its exact limitations are described in
+[the architecture atlas](../../docs/architecture/deliberation/README.md).
+It is runnable experimental infrastructure, not Stage 1 adoption or N15 gate
+evidence. It MUST NOT accept arbitrary repository/customer data while the
+Ariadne object-label and provider-egress boundaries are absent.
+
 ## 1. Terminology
 
 - **Workspace**: the append-only transaction log plus its materialized typed object graph,
@@ -113,7 +127,8 @@ A conforming workspace MUST support these object types and MUST reject others (c
 | `blocker` | Declared inability to proceed, with cause |
 
 Every object MUST carry: stable id, type, authoring role, activation id, workspace version
-at creation, and links to related objects (typed edges: `supports`, `contradicts`,
+at creation, runtime-established participant identity, and links to related objects (typed edges: `supports`,
+`contradicts`,
 `depends-on`, `resolves`, `discriminates`, `supersedes`).
 
 ### 2.2 No content payloads
@@ -124,7 +139,7 @@ capsules and evidence bundles; the workspace holds statements about them plus re
 
 ### 2.3 Status model (structural, not probabilistic)
 
-Objects carry a status from a closed set:
+Objects carry a status from a closed set. Adoption is a scoped working choice, not proof of truth:
 
 - goals: `:open` → `:accepted` | `:rejected` (only via `close-goal`, which MUST reference
   the decision(s) covering the outcome)
@@ -132,9 +147,16 @@ Objects carry a status from a closed set:
 - questions: `:open` → `:answered` | `:retired`
 - experiments: `:proposed` → `:running` → `:completed` | `:aborted`
 
+An adopted decision MAY receive a new actionable challenge. Its accepted record
+MUST remain identifiable; open dissent is recorded separately. A replacement MUST
+explicitly supersede the prior decision before adoption at the same choice point.
+Refinements MUST preserve prior statement history. `:accepted` MUST NOT prevent
+recording contrary evidence or challenging the assumptions of a working choice.
+
 Status transitions MUST be governed by structural rules, not numeric confidence:
 
-- A claim is `:contested` while any unresolved challenge references it.
+- An open claim is `:contested` while unresolved challenges reference it. An adopted record retains its disposition
+  and records a separate contested marker.
 - A claim MAY become `:accepted` only when (a) it has at least one evidence link of source
   class `:execution` or `:user` and no open challenge, or (b) a decision explicitly accepts it.
 - Objects MUST NOT carry required numeric confidence fields. An optional free-form
@@ -150,11 +172,12 @@ Status transitions MUST be governed by structural rules, not numeric confidence:
 - Agents MAY propose `:soft` constraints.
 - Evidence carries a source class: `:execution` (produced by a verifier-role activation via
   governed tools, referencing an N6 bundle), `:retrieval`, `:user`, or `:agent-analysis`.
-  Only `:execution` and `:user` evidence satisfy §2.3 acceptance rule (a).
+  Only `:execution` and `:user` evidence satisfy §2.3 acceptance rule (a). These classes MUST be derived from
+runtime receipts, not model assertions.
 
 ### 2.5 Derived conflicts
 
-The workspace engine MUST derive `conflict` objects automatically when: two `:open` or
+The workspace engine MUST derive `conflict` objects automatically when: two `:open`, `:contested` or
 `:accepted` claims are linked `contradicts`; an artifact-ref or plan violates a `:hard`
 constraint; or two decisions target the same choice point. Conflicts MUST NOT be closed by
 deletion — only by a transaction that resolves or supersedes a participant.
@@ -174,7 +197,7 @@ closed vocabulary (§3.2). Every operation MUST identify the objects it touches.
 `merge-hypotheses`, `propose-experiment`, `record-experiment-result`, `propose-plan`,
 `revise-plan`, `propose-decision`, `accept-decision`, `reject-decision`,
 `register-artifact`, `invalidate-artifact`, `add-goal`, `add-constraint`,
-`declare-blocked`, `close-goal`.
+`declare-blocked`, `close-goal`, `supersede`.
 
 ### 3.3 Operation classes and merge semantics
 
@@ -182,23 +205,31 @@ closed vocabulary (§3.2). Every operation MUST identify the objects it touches.
 |---|---|---|
 | additive | assert-claim, add-question, attach-evidence, propose-*, register-artifact, challenge, declare-blocked | Commute; commit even on stale basis if touched objects still exist and are non-terminal |
 | mergeable | refine-claim, revise-plan, answer-question | Commit if touched objects unchanged since basis; otherwise reject with current state returned |
-| exclusive | accept-decision, reject-decision, record-experiment-result, merge-hypotheses, invalidate-artifact, close-goal, add-goal, add-constraint, retire-question | Commit only against current version of touched objects; single writer wins |
+| exclusive | accept-decision, reject-decision, record-experiment-result, merge-hypotheses, invalidate-artifact, close-goal, add-goal, add-constraint, retire-question, supersede | Commit only against current version of touched objects; single writer wins |
 
 ### 3.4 Validation pipeline
 
 The engine MUST validate, in order: schema conformance; role permission (§5.3); basis
 staleness per §3.3; `:hard` constraint guards (§2.4); anti-livelock rules (§3.5); and
-idempotency (an operation identical to one already committed by the same role against the
-same object MUST be rejected). Rejections MUST be returned to the scheduler with a machine-
+idempotency (an identical full operation payload already committed by the same participant MUST be rejected; new
+payloads against the same targets are distinct contributions). Rejections MUST be returned to the scheduler with a
+machine-
 readable reason and MUST be logged as events (§9.1). A rejected transaction is discarded;
 the activation is not retried automatically.
 
+Every operation MUST enforce its creation and target types, required fields and
+reference integrity. The runtime MUST reject model-supplied authority, policy or
+unattested provenance metadata. Goal closure MUST name an adopted decision that
+covers that goal. Candidate validation MUST account for earlier operations in the
+same transaction without publishing partial state. Choice-point uniqueness is
+checked at admission; agents cannot bypass it by creating different decision ids.
+
 ### 3.5 Anti-livelock rules
 
-- A `challenge` MUST attach either an evidence reference or a `propose-experiment` operation
-  (in the same transaction) whose experiment discriminates the challenged object. Bare
-  objections MUST be rejected.
-- Per (role, object), at most N challenges MAY be open simultaneously (default N=2,
+- A `challenge` MUST attach evidence, propose a discriminating experiment, or name a specific concern and a
+  resolution criterion. Repeated unbacked objections remain bounded; uncertainty does not require an already
+  completed experiment.
+- Per (participant, object), at most N challenges MAY be open simultaneously (default N=2,
   manifest-configurable).
 - A decision with open challenges MAY still be accepted when its closing rule fires (§7);
   unresolved challenges are recorded as dissent, not discarded.
@@ -209,6 +240,11 @@ the activation is not retried automatically.
 
 A projection MUST be a deterministic function of (workspace version, role configuration,
 projection parameters). Given identical inputs, byte-identical output MUST result.
+
+A projection MUST first satisfy Ariadne read, purpose and destination constraints.
+Relevance selection and N12 shedding MUST NOT broaden access. Output clauses MUST
+be computed by the runtime from delivered inputs. Required goals or constraints
+that cannot be disclosed require authorized reformulation or refusal.
 
 The projection — plus the role's static prompt and, where applicable, the activation's
 capsule contents (§8) — MUST be the activation's only task-specific input. Activations
@@ -256,9 +292,10 @@ produces at most one transaction, plus capsule artifacts where applicable.
 
 A role is configuration, not code: `{agent binding, static prompt, projection parameters,
 eligible event types, permitted operations, capsule policy}`. A run manifest MUST declare
-its role population. The seven-role minimum below applies to Stage 1 and later (§11);
-Stage 0 pilots require only proposer, skeptic, and synthesizer. The minimum population
-for a conforming Stage 1+ deliberation run:
+its participant population, responsibility assignments, and required independence.
+Responsibilities MAY be combined or assigned to multiple participants; there is
+no mandatory seven-agent population. A responsibility is not a principal or an
+authority grant. The following responsibilities describe the available work:
 
 - **interpreter** — task spec → goals, `:hard` constraints (from spec), questions
 - **proposer** — hypotheses, plans, soft constraints
@@ -302,23 +339,26 @@ a benchmark axis under N15, not a rewrite.
 
 A run manifest MUST declare budgets: per-run and per-goal activation counts, cost ceiling,
 and wall-clock ceiling. The manifest MUST additionally reserve a **closure allowance**,
-outside the run budgets, sized for one synthesizer activation. The scheduler MUST NOT
+inside the total condition allowance, sized for one synthesizer activation. The scheduler MUST NOT
 start an ordinary activation that a budget forbids; the forced-synthesis closure
-activation (§7) is the single exception, drawing only from the closure allowance.
+activation (§7) draws only from the reserved closure allowance.
 Every scheduling decision (start, skip, budget-block) MUST be logged as an event with reason.
 
 ## 7. Termination
 
 A deliberation run MUST close on the first of:
 
-1. **Success** — all goals terminal (`:accepted`/`:rejected` with decision coverage).
+1. **Success** — all goals accepted with decision coverage. All goals terminal with a rejected goal is a distinct
+  completed-with-rejected-goals outcome, not task success.
 2. **Budget boundary** — any run-level budget exhausted. The engine MUST then run one final
    synthesizer activation ("forced synthesis") producing the best-available decision record
    with explicit dissent and open items. This activation is funded by the reserved closure
-   allowance (§6.3), not the exhausted run budgets, so the §6.3 prohibition and this
+   allowance (§6.3), reserved before ordinary work, never added to the matched allowance, so the §6.3 prohibition
+and this
    requirement never conflict.
-3. **Quiescence** — k consecutive committed transactions produce zero net new open objects
-   (default k=3), and no eligible activations remain that could change that.
+3. **Quiescence** — a full bounded round of participants passes without a meaningful contribution, and no eligible
+  work remains. Answering a question, revising a statement or resolving a conflict counts as progress even if object
+  count does not grow.
 4. **Deadlock** — no eligible activations exist for any open goal. The meta-watchdog MUST be
    activated once before deadlock closure.
 5. **OCI stop** (N8).
@@ -349,7 +389,7 @@ Closure with open challenges records them as dissent on the affected decisions
 `workspace/conflict-derived`, `workspace/schedule-decision`, `workspace/budget-exceeded`,
 `workspace/deadlock-detected`, `workspace/closed`.
 
-**None of these is registered in N3 §6.** Under N3 §6 an implementation MUST
+**These proposed types are not yet registered in N3 §6.** Under N3 §6 an implementation MUST
 NOT emit an unregistered `:event/type`, so this list cannot be read as an
 emission requirement today. Registering them — a schema in N3 §3, a registry
 row in N3 §6, and an emission point in N3 §4.1, together per N3 §6.1 — is a
@@ -377,11 +417,15 @@ names the content, not a new evidence model.
 
 ## 10. Governance
 
-### 10.1 Transactions as governed tool actions (N10)
+### 10.1 Transactions as governed actions (Ariadne)
 
-Transaction submission MUST be exposed to agents as a governed tool. Operational intent
-classification applies; policy packs (N4) MAY gate operation classes (e.g., forbid
-`accept-decision` autonomy in a given environment).
+Transaction submission MUST cross a runtime-governed boundary under Ariadne's
+authority, information-flow and effect planes. Responsibility checks are additional
+structural constraints, not credentials. Policy packs (N4) MAY restrict adoption
+or require an approval envelope. A board decision MUST NOT itself authorize an
+external effect. Such effects use the existing grant/envelope/effect-transaction
+protocol, including current authority, exact scope and reconciliation. N10 is a
+profile of that architecture, not a parallel source of ambient permission.
 
 ### 10.2 OCI surfaces (N8)
 
@@ -471,27 +515,31 @@ these requirements withdraw with it.
 
 ## Annex A — Implementation Conformance Status (informative)
 
-This annex is **informative**, recording implementation state as of 2026-08-10.
+This annex is **informative**, recording implementation state as of 2026-10-20.
 
-### A.1 Specified, Not Implemented
+### A.1 Implemented experimental infrastructure
 
-No deliberation-workspace component exists. `components/workspace` is unrelated
-— it handles workflow workspace paths, not the shared graph of §2.
+`components/deliberation-workspace` contains the typed graph, operation vocabulary,
+concurrency checks, semantic admission, abuse guards, projections, scheduling,
+closure and deterministic reducer. `bases/deliberation-lab` and
+`projects/deliberation-lab` provide an isolated synthetic experiment runner,
+fresh tool-free CLI adapter, immutable journal, replay verification and development
+comparisons. See the linked atlas for run commands, diagrams and limitations.
 
-None of §9.1's ten `workspace/*` event types is registered in N3 §6, so under
-N3 §6.1 none may be emitted (N14.WS.6). Since §9.1 also makes the event stream
-the workspace log (N14.WS.1), the spec's central mechanism is blocked on that
-registration.
+### A.2 Not implemented as production conformance
 
-### A.2 Status
-
-This is expected rather than a defect: §0.4 declares the spec speculative,
-binding experimental implementations pre-gate, and it demotes to informative if
-N15's gate G0 fails. The annex records the position so a reader does not mistake
-the requirement set for a description of something running.
+N3 event registration, N6 exports, full Ariadne ownership/labels/provider policy,
+general governed capsule execution, complete cost reservation, watchdog/OCI
+integration and full N15 controls/calibrated long-horizon tasks remain prerequisites.
+The development report MUST state G0 is not evaluated. The standalone lab MUST NOT
+be described as an adopted canonical workflow or a production authority boundary.
 
 ---
 
 **Version History:**
+
+- 0.3.0-draft (2026-10-20): Ariadne alignment; participant identity separate from responsibility; revisable
+  decisions and actionable challenges; semantic admission; closure inside the total allowance; synthetic lab status
+  and visual architecture atlas.
 
 - 0.1.0-draft (2026-07-22): Initial shared deliberation workspace specification

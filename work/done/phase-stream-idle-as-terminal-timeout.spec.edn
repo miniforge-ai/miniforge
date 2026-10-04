@@ -1,0 +1,132 @@
+;; =============================================================================
+;; Spec: Phase-LLM stream-idle as a `:phase/timeout` terminal verdict
+;; =============================================================================
+;;
+;; Dogfood evidence (2026-06-05, review-redirect-convergence run): workflow
+;; `adhoc-944448986` walked explore → plan (8.7m) → implement task 1 (8.7m)
+;; → verify task 1 (12.7m), all clean. Review died at task 1 because the
+;; reviewer LLM stream-idle'd at 360s. The framework promoted the adaptive
+;; timeout text into `:review/blocking-issues`, set `:review/decision :rejected`,
+;; the `:review-approved` gate correctly rejected, `:phase/verdict :exhausted`
+;; fired, the DAG cascade-failed task 2.
+;;
+;; The reviewer already has a `timeout-only-review?` predicate (reviewer/
+;; llm_response.clj) + a `:reviewer/backend-timeout` error path. In this
+;; dogfood it did NOT fire — likely because the framework's synthesized
+;; "rejection-with-timeout-text" artifact didn't match the strict shape the
+;; predicate requires (or the call path bypassed it). Either way, planner /
+;; implementer / verifier have no analogous wiring, so any phase agent's
+;; stream-idle will keep cascade-failing.
+;;
+;; This is adjacent to but distinct from the network-resilience stack
+;; (#1051/#1053/#1054). Network-drop = TCP/TLS reachability lost; stream-idle
+;; = provider connected but stopped producing tokens for N seconds.
+;; Recovery shape is similar (terminal verdict + checkpoint resume) — that's
+;; the design target here.
+
+{:spec/title "Phase-LLM stream-idle should produce a `:phase/timeout` terminal verdict, not `:rejected`"
+
+ :spec/description
+ "Treat a phase-LLM stream-idle timeout as an INFRA failure, not a code-review
+  / planner / implementer rejection. Three changes, each phase-shaped:
+
+  (a) DETECTION. Add a uniform `stream-idle-in-result?` predicate (mirror of
+  `network-drop-in-result?` in phase_software_factory/implement.clj). Reads
+  `[:error :data :timeout :type]` and `[:timeout :type]` for `:stream-idle`,
+  plus the message-channel `type: stream-idle` marker the same way the
+  network-drop classifier does. Audit the reviewer's existing
+  `timeout-only-review?` (agent/reviewer/llm_response.clj) for shape drift
+  against what the framework actually produces when the LLM call times out
+  with no parsed response — the 2026-06-05 dogfood proves the predicate did
+  NOT fire on the production path.
+
+  (b) VERDICT. Introduce `:phase/timeout` as a TERMINAL verdict in the
+  per-phase compute-verdict pipelines (implement.clj's `network-drop-in-result?`
+  arm has the right shape — reuse, don't fork). `:phase/timeout` ranks above
+  `:repair-requested` so a transient infra timeout never burns a real
+  redirect/repair cycle, and below `:stagnated?` / `:needs-decomposition?`
+  so existing terminal classifications keep priority. Reviewer's
+  `:reviewer/backend-timeout` path is the prototype — generalize and apply
+  to planner, implementer, verifier, reviewer uniformly.
+
+  (c) COMPOSE WITH AUTO-RESUME. `:phase/timeout` must compose with the PR-C
+  workflow-checkpoint resume path (#1054). On terminal `:phase/timeout` the
+  DAG SHOULD retry the phase from the last persisted checkpoint instead of
+  cascade-failing the task. The retry semantics mirror `:network-drop`:
+  retry once with the same checkpoint; only after a configured retry budget
+  is exhausted does the task fail terminally.
+
+  Non-goals: changing what counts as `:stream-idle` (the adaptive-timeout
+  thresholds remain; this spec only changes what HAPPENS when one fires).
+  Tuning the reviewer's 360s threshold separately."
+
+ :spec/intent
+ {:type :feature
+  :scope ["components/phase-software-factory/src"
+          "components/agent/src/ai/miniforge/agent/reviewer"
+          "components/agent/src/ai/miniforge/agent/result_boundary.clj"
+          "components/workflow/src"
+          "components/phase/resources/config"]}
+
+ :spec/constraints
+ ["The detection predicate MUST mirror `network-drop-in-result?` in
+   components/phase-software-factory/src/ai/miniforge/phase_software_factory/implement.clj
+   (path priority [:error :data :timeout :type] → [:timeout :type] → message-channel marker)
+   so the two timeout families stay symmetrically shaped"
+  "`:phase/timeout` is a NEW terminal verdict distinct from `:rejected`,
+   `:exhausted`, `:needs-decomposition`, `:network-drop`. It conveys 'infra
+   timeout in the phase-LLM call' — actionable as a retry signal, not as a
+   defect"
+  "The existing reviewer `timeout-only-review?` + `timeout-only-error-result`
+   path must be audited against the 2026-06-05 dogfood evidence — fix the
+   shape mismatch so it actually fires on a real reviewer stream-idle, then
+   factor the audit's lessons into the cross-phase pattern"
+  "Auto-resume budget is bounded: default 1 retry per phase-LLM call (config-
+   driven, EDN-owned per rule 007); after the budget exhausts the task
+   terminal-fails so an upstream infra outage cannot loop indefinitely"
+  "No regression: a planner/reviewer/implementer that produces a real verdict
+   (approved/rejected/changes-requested/etc.) still flows through the existing
+   compute-verdict pipeline unchanged. Only the stream-idle terminal case
+   takes the new path"
+  "Telemetry: a per-phase `:phase/stream-idle-detected` event + the resulting
+   verdict (`:phase/timeout` vs `:rejected` if detection mis-fires) must be
+   emitted so dogfood post-mortems can verify the new path"]
+
+ :spec/acceptance-criteria
+ ["A reviewer LLM that stream-idles at 360s (the 2026-06-05 dogfood shape)
+   produces a `:phase/timeout` terminal verdict and the framework schedules
+   a single retry from the last persisted checkpoint — it does NOT cascade-
+   fail the DAG task, and it does NOT promote the timeout text into
+   `:review/blocking-issues`"
+  "A planner LLM that stream-idles produces the same `:phase/timeout` verdict
+   (no planner-shaped regression — symmetry across phase agents)"
+  "An implementer LLM that stream-idles produces `:phase/timeout`,
+   composing with the existing `network-drop-in-result?` arm in
+   `leave-implement` (the two arms sit side by side and never both fire on
+   the same result)"
+  "When the configured retry budget is exhausted (default 1), the phase
+   fails terminally with the `:phase/timeout` verdict preserved — the DAG
+   knows to mark the task failed AND distinguishes it from a real-defect
+   `:rejected` in the events stream"
+  "The reviewer's existing `timeout-only-review?` predicate either fires
+   correctly on a real reviewer stream-idle (audit + fix), or is replaced
+   by the new cross-phase detection — no redundant overlap"
+  "A normal review/plan/implement that does NOT stream-idle continues to
+   reach release unchanged (no regression on the happy path)"
+  "Re-running the dogfood spec that previously died at the reviewer stream-
+   idle (`work/review-redirect-convergence.spec.edn` or any equivalent)
+   now retries the phase once, and if the retry succeeds the DAG task
+   completes — it does not cascade-fail on a single transient timeout"
+  "A new `:phase/stream-idle-detected` event is emitted on every stream-idle
+   detection (separate from the resulting verdict), so post-mortems can
+   measure stream-idle frequency per backend / per phase"]
+
+ :spec/priority
+ {:tier :blocker
+  :axes #{:dogfood-enabler :correctness :token-conservation}
+  :theme :dogfood-resilience
+  :rationale "Every phase-LLM call has stream-idle exposure. Without this, any reviewer / planner / implementer that hits a slow provider response cascade-fails the DAG and burns the parent workflow. The 2026-06-05 dogfood (`adhoc-944448986`) lost a $2.95 / 40m run to exactly this on the first review. Composes with the just-shipped network-resilience stack — same recovery shape, different trigger."
+  :blocks []
+  :blocked-by []}
+
+ :spec/workflow-type :canonical-sdlc}

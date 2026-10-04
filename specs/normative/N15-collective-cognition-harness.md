@@ -6,8 +6,8 @@
 
 # N15 — Collective-Cognition Evaluation Harness
 
-**Version:** 0.2.0-draft
-**Date:** 2026-08-10
+**Version:** 0.3.0-draft
+**Date:** 2026-10-20
 **Status:** Draft
 **Conformance:** MUST (core protocol); workspace-conditional sections per §0.4
 **Class:** Extension spec (N7+)
@@ -57,6 +57,14 @@ Workspace-conditional content — C6/C7 (§3), the ablation delta (§8.2), and G
 demotes to Informative, these sections MUST be re-marked as an informative annex recording
 the negative result. A later architecture claim MUST re-instantiate its own conditions,
 ablation pairing, and pre-registered gates under the surviving core protocol.
+
+### 0.5 Development comparisons are not gate evidence
+
+The standalone synthetic lab is documented in
+[the architecture atlas](../../docs/architecture/deliberation/README.md).
+Its short fixtures and five development conditions do not establish this spec's
+control semantics, long-horizon task conformance, calibration or hard cost parity.
+Every such report MUST say G0 is not evaluated. Mock runs prove mechanics only.
 
 ## 1. Terminology
 
@@ -264,6 +272,14 @@ tests. Reported uncertainty MUST use exact (binomial) intervals; a manifest that
 p-value or power criterion MUST pin the replicate count that delivers it, and results MUST
 NOT be described with significance language the pinned counts cannot support.
 
+For binary success, the manifest MUST define an explicit paired comparison,
+practical effect margin and uncertainty method. The informal spread criterion
+above MUST NOT be interpreted as a statistical test or require a binary min–max
+range to exceed another binary range. Small development samples MUST NOT be
+reported as significant. All closing, synthesis and selection passes consume the
+same total matched allowance; a reserved closure pass is not extra participant
+compute outside that allowance.
+
 ### 8.2 Ablation delta
 
 For every ablation pair, delta = C6 − C7 per metric per (task, tier). The ablation delta is
@@ -286,7 +302,9 @@ tiers. Promote iff both:
    of tasks, under §8.1, with no tier where C6 is dominated across the board; and
 2. the ablation delta on **success** or **coverage** is positive under §8.1.
 
-Fail → N14 Stage 1 is not built; C2/C3 remain available as ordinary workflows; the
+Fail → the tested N14 protocol/population/task/budget configuration is not promoted; retain its negative result and
+demote or revise that protocol version. A later version needs a new preregistration and evidence. C2/C3 remain
+available as ordinary workflows; the
 negative result is recorded in the decision record.
 
 ### 8.5 Gate G1 — N14 Stage 1 → Stage 2
@@ -341,12 +359,17 @@ An MCI MUST:
 
 ## Annex A — Implementation Conformance Status (informative)
 
-This annex is **informative**, recording implementation state as of 2026-08-10.
+This annex is **informative**, recording implementation state as of 2026-10-20.
 
-### A.1 Specified, Not Implemented
+### A.1 Development Harness and Remaining Gate Requirements
 
-No harness component exists. The hypothesis registry (§2), budget protocol
-(§4), replication (§5), and scoring (§7) are unimplemented.
+A synthetic development runner now exists in `bases/deliberation-lab`, packaged
+by `projects/deliberation-lab`. It provides development comparisons, allowance
+tiers, replicates, provenance, observed metering, failures, deterministic scoring,
+paired descriptive deltas and replay. This is not a conforming gate harness:
+full controls, hard normalized-cost reservation, overhead classification,
+calibrated long-horizon tasks and sealed executable artifact evaluation remain
+unimplemented. G0 is not evaluated.
 
 `minibench` is the adjacent evaluation substrate in this workspace and is the
 natural host for §4's budget matching and §7's metrics rather than a new
@@ -362,5 +385,8 @@ whose absence blocks another spec's disposition.
 ---
 
 **Version History:**
+
+- 0.3.0-draft (2026-10-20): distinguish the runnable synthetic development lab from gate evidence; clarify paired
+  binary comparisons, closure inside the total allowance, and version-scoped negative results.
 
 - 0.1.0-draft (2026-07-22): Initial collective-cognition evaluation harness specification

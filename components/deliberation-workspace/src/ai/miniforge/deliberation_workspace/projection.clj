@@ -51,7 +51,7 @@
     :full true
     :none (or (= :goal (:object/type object))
               (object/hard-constraint? object)
-              (= role (:object/role object))
+              (= role (or (:object/participant object) (:object/role object)))
               (contains? #{:interpreter :user} (:object/role object)))))
 
 (defn- ^{:stratum 0} by-id [objects]
@@ -97,16 +97,24 @@
    Required content per §4.2 — goals, hard constraints, open conflicts, and
    the delta — is computed over the visible set, so the ablation cannot be
    defeated through derived objects."
-  [workspace role {:keys [visibility since] :or {visibility :full since 0}}]
-  (let [candidates (visible-objects workspace role visibility)
+  [workspace role {:keys [visibility since readable-ids]
+                   :or {visibility :full since 0}}]
+  (let [candidates (cond->> (visible-objects workspace role visibility)
+                     readable-ids (filter #(contains? readable-ids (:object/id %))))
         candidate-ids (into #{} (map :object/id) candidates)
         ;; A conflict the role may otherwise see is withheld ENTIRELY when it
         ;; references something hidden — dropping it from :projection/conflicts
         ;; alone would still leak its existence through the object list and the
         ;; delta. One pass suffices: conflicts never reference other conflicts.
-        visible (remove #(and (= :conflict (:object/type %))
+        visible-raw (remove #(and (= :conflict (:object/type %))
                               (not (renderable-conflict? % candidate-ids)))
                         candidates)
+        visible-ids (set (map :object/id visible-raw))
+        visible (map (fn [o]
+                       (update o :object/links
+                               (fn [links]
+                                 (into {} (map (fn [[k ids]] [k (set (filter visible-ids ids))]))
+                                       links)))) visible-raw)
         conflicts (filter open? (of-type visible :conflict))]
     {:projection/version (get workspace :workspace/version 0)
      :projection/role role

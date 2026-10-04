@@ -40,7 +40,8 @@
   (let [{:keys [activations cost]} (get workspace :workspace/budget {})
         spent (get workspace :workspace/spent {})]
     (cond
-      (and activations (>= (get spent :activations 0) activations)) :activations
+      (and activations (>= (get spent :activations 0)
+                           (- activations (get workspace :workspace/closure-reserve 0)))) :activations
       (and cost (>= (get spent :cost 0) cost)) :cost)))
 
 ;------------------------------------------------------------------------------ Layer 1
@@ -60,14 +61,20 @@
   (let [exhausted (exhausted-budget workspace)]
     (cond
       (goals-terminal? workspace)
-      {:termination/rule :success}
+      (if (some #(and (= :goal (:object/type %)) (= :rejected (:object/status %)))
+                (vals (:workspace/objects workspace)))
+        {:termination/rule :goals-closed :termination/outcome :goals-rejected}
+        {:termination/rule :success :termination/outcome :goals-accepted})
 
       exhausted
       {:termination/rule :budget-boundary
        :termination/detail exhausted
        :termination/forced-synthesis true}
 
-      (quiescent? workspace)
+      (and (quiescent? workspace)
+           (>= (get workspace :workspace/quiet-rounds 0)
+               (count (:workspace/roles workspace)))
+           (every? (get workspace :workspace/passed #{}) (:workspace/roles workspace)))
       {:termination/rule :quiescence}
 
       (nil? (scheduler/next-activation workspace))

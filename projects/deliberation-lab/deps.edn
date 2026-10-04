@@ -1,0 +1,11 @@
+{:paths ["resources"]
+ :deps {org.clojure/clojure {:mvn/version "1.12.0"}
+        ai.miniforge/deliberation-lab {:local/root "../../bases/deliberation-lab"}
+        ai.miniforge/deliberation-workspace {:local/root "../../components/deliberation-workspace"}
+        ai.miniforge/file-durability {:local/root "../../components/file-durability"}
+        ai.miniforge/anomaly {:local/root "../../components/anomaly"}
+        ai.miniforge/messages {:local/root "../../components/messages"}}
+ :aliases {:run {:main-opts ["-m" "ai.miniforge.deliberation-lab.main"]}
+           :test {:main-opts ["-m" "ai.miniforge.deliberation-lab.test-runner"]
+                  :extra-paths ["../../bases/deliberation-lab/test"
+                                "../../components/deliberation-workspace/test"]}}}

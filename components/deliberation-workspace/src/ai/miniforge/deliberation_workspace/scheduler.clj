@@ -54,7 +54,8 @@
   "The role following the one that acted most recently, so no role starves."
   [workspace]
   (let [roles (vec (get workspace :workspace/roles []))
-        last-role (:tx/role (peek (get workspace :workspace/log [])))
+        last-role (or (:workspace/last-actor workspace)
+                      (:tx/role (peek (get workspace :workspace/log []))))
         position (.indexOf roles last-role)]
     (when (seq roles)
       (nth roles (mod (inc position) (count roles))))))
@@ -102,7 +103,11 @@
         ;; no eligible role is skipped rather than ending the search.
         fired (fn [[event target]]
                 (when target
-                  (when-let [role (first (eligible-roles workspace event))]
+                  (when-let [role (let [eligible (vec (eligible-roles workspace event))
+                                        last-role (:workspace/last-actor workspace)
+                                        position (.indexOf eligible last-role)]
+                                    (when (seq eligible)
+                                      (nth eligible (mod (inc position) (count eligible)))))]
                     {:activation/role role
                      :activation/reason event
                      :activation/target (:object/id target)})))]

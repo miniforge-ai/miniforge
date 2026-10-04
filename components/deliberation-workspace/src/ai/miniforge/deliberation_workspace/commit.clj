@@ -99,10 +99,13 @@
                                         (+ start ordinal) "-" id)]
                   (assoc-in ws [:workspace/challenges challenge-id]
                             {:challenge/id challenge-id
-                             :challenge/role (:role context)
+                             :challenge/role (or (:participant context) (:role context))
                              :challenge/target id
                              :challenge/status :open
-                             :challenge/version version})))
+                             :challenge/version version
+                             :challenge/reason (:reason operation)
+                             :challenge/resolution (:resolution operation)
+                             :challenge/evidence (:evidence operation)})))
               workspace
               (map-indexed vector (sort (tx/touched-ids operation)))))
     workspace))
@@ -110,12 +113,13 @@
 (defn- ^{:stratum 0} insert-created
   "Insert the objects `operation` creates, stamping provenance from the
    transaction rather than trusting the activation's own report of it."
-  [workspace operation {:keys [role activation version]}]
+  [workspace operation {:keys [role activation version participant]}]
   (reduce (fn [ws spec]
             (let [created (object/new-object
                            (assoc spec :role role :activation activation
                                   :version version))]
-              (assoc-in ws [:workspace/objects (:object/id created)] created)))
+              (assoc-in ws [:workspace/objects (:object/id created)]
+                        (cond-> created participant (assoc :object/participant participant)))))
           workspace
           (get operation :creates [])))
 
@@ -133,11 +137,14 @@
                  (get tx/status-effect (:op operation)))]
     (reduce (fn [ws id]
               (let [current (get-in ws [:workspace/objects id])]
-                (if (and status (object/legal-status? (:object/type current) status))
+                (if (and (= :challenge (:op operation)) (= :accepted (:object/status current)))
                   (update-in ws [:workspace/objects id]
-                             #(-> % (assoc :object/status status)
-                                  (object/touch version)))
-                  (update-in ws [:workspace/objects id] object/touch version))))
+                             #(-> % (assoc :object/contested? true) (object/touch version)))
+                  (if (and status (object/legal-status? (:object/type current) status))
+                    (update-in ws [:workspace/objects id]
+                               #(-> % (assoc :object/status status)
+                                    (object/touch version)))
+                    (update-in ws [:workspace/objects id] object/touch version)))))
             workspace
             (tx/touched-ids operation))))
 
@@ -150,7 +157,16 @@
         (insert-created operation context)
         (apply-status operation version)
         (apply-links operation)
-        (record-challenge operation context version))))
+        (record-challenge operation context version)
+        (cond-> (contains? #{:refine-claim :revise-plan :answer-question} (:op operation))
+          ((fn [ws]
+             (reduce (fn [w id]
+                       (update-in w [:workspace/objects id]
+                                  (fn [o] (-> o
+                                              (update :object/history (fnil conj [])
+                                                      (select-keys o [:object/statement :object/touched-at]))
+                                              (assoc :object/statement (:statement operation))))))
+                     ws (tx/touched-ids operation))))))))
 
 ;------------------------------------------------------------------------------ Layer 2
 
@@ -168,6 +184,7 @@
   (let [version (inc (get workspace :workspace/version 0))
         context {:role (:tx/role transaction)
                  :activation (:tx/activation transaction)
+                 :participant (:tx/participant transaction)
                  :version version}]
     (-> (reduce #(apply-operation %1 %2 context)
                 workspace
