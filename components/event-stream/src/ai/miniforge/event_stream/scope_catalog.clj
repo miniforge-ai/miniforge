@@ -51,6 +51,10 @@
 (def ^{:private true :stratum 1} fixed-scopes
   (into {} (mapcat family-entries scope-families)))
 
+(def ^{:private true :stratum 1} migrated-types
+  (into (:chain scope-families)
+        [:supervisory/intervention-requested :supervisory/intervention-state-changed]))
+
 (defn ^{:stratum 1} inherited? [event-type]
   (contains? inherited-types event-type))
 
@@ -58,6 +62,9 @@
   (get scope-fields scope-type))
 
 ;------------------------------------------------------------------------------ Layer 2
+
+(defn ^{:stratum 2} discriminator-required? [event-type]
+  (contains? migrated-types event-type))
 
 (defn ^{:stratum 2} type-for [event]
   (let [event-type (:event/type event)]

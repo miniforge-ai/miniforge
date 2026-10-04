@@ -19,13 +19,14 @@ Workflow cross-references must not divert chain or intervention events into work
 ## Layer
 
 Pure event-stream scope policy. Branched from main at `6b3c1336`.
-The reviewed chain/supervisory contract amendment must merge before this PR opens.
+Contract PR #2000 must merge before this PR opens.
 
 ## Changes in Detail
 
 - Resolve all nine chain lifecycle types by `:chain/run-id`.
 - Register Spec snapshots and both intervention facts in supervisory entity scope.
 - Support explicit inherited chain scope and reject unknown family members.
+- Require current-write scope discriminators for chain and intervention facts.
 - Separate family lookup vocabulary from scope resolution without changing other families.
 
 ## Testing Plan
@@ -35,9 +36,14 @@ then run focused tests and normal signed hooks serially.
 Adversarial standards review and all exact-head CI/review gates precede merge.
 
 The initial regressions produced 26 assertion failures on the original policy.
-The final focused suite passes 9 tests / 76 assertions, including absent workflow
+Profile regressions produced 22 failures before adding the discriminator guard.
+The final focused suite passes 10 tests / 98 assertions, including absent workflow
 cross-references and missing supervisory keys. All four deployed event-stream
 consumers pass serially. Kondo reports zero warnings and errors.
+The rebuilt CLI artifact passes the same 10 tests / 98 assertions from outside
+the checkout, without source overlays. The changed-file standards scan is clean.
+The whole-tree scan reports 12 pre-existing candidates outside this diff,
+including an intentional bad-code string in the scanner's own example.
 
 ## Deployment Plan
 
@@ -46,12 +52,12 @@ publication integration remain separate dependent changes.
 
 ## Related Issues/PRs
 
-Follows the approved chain/supervisory contract reconciliation and PR #1999.
+Follows contract PR #2000 and its prose prerequisite, PR #1999.
 
 ## Checklist
 
 - [x] Prove regressions fail on the old policy.
 - [x] Pass focused and deployed-consumer tests.
 - [x] Complete adversarial standards review.
-- Require normal signed hooks before publishing.
+- [x] Pass normal signed hooks.
 - Require clean exact-head review and all CI before merge.

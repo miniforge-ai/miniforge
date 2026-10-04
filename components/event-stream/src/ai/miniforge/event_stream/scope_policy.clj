@@ -11,14 +11,21 @@
 (defn ^{:stratum 0} inherited? [event-type]
   (catalog/inherited? event-type))
 
-(defn ^{:stratum 0} scope
-  "Resolve one non-nil scope. The publication boundary validates envelope shapes.
+(defn- ^{:stratum 0} matching-profile? [event scope-type]
+  (or (not (catalog/discriminator-required? (:event/type event)))
+      (= scope-type (:scope/type event))))
+
+;------------------------------------------------------------------------------ Layer 1
+
+(defn ^{:stratum 1} scope
+  "Resolve a current-write scope; never reinterpret retained historical records.
+   The publication boundary validates payload versions and envelope field types.
    Inherited families must name a supported :scope/type; never infer it from keys."
   [event]
   (let [scope-type (catalog/type-for event)
         field (catalog/field scope-type)
         id (get event field)]
-    (if (and field (some? id))
+    (if (and field (some? id) (matching-profile? event scope-type))
       [scope-type id]
       (model/failure :invalid-input :publication/invalid-scope event))))
 

@@ -22,6 +22,7 @@
   (merge (support/draft)
          {:event/type type
           :event/version "2.0.0"
+          :scope/type :chain
           :chain/run-id run-id
           :chain/definition-id :example/chain
           :workflow/id workflow-id}))
@@ -72,11 +73,13 @@
       (let [draft (chain-event type run-id workflow-id)]
         (is (= [:chain run-id] (policy/scope draft)))
         (is (= [:chain run-id] (policy/scope (dissoc draft :workflow/id))))
+        (is (anomaly/anomaly? (policy/scope (dissoc draft :scope/type))))
+        (is (anomaly/anomaly? (policy/scope (assoc draft :scope/type :workflow))))
         (is (anomaly/anomaly? (policy/scope (dissoc draft :chain/run-id))))))))
 
 (deftest ^{:stratum 1} chain-scope-can-be-inherited-explicitly
   (let [run-id (random-uuid)
-        draft (chain-event :listener/attached run-id (random-uuid))]
+        draft (dissoc (chain-event :listener/attached run-id (random-uuid)) :scope/type)]
     (is (anomaly/anomaly? (policy/scope draft)))
     (is (= [:chain run-id] (policy/scope (assoc draft :scope/type :chain))))))
 
@@ -96,13 +99,21 @@
 
 (deftest ^{:stratum 1} supervisory-facts-and-spec-snapshots-own-entity-scope
   (let [entity-id (random-uuid)
-        fields {:supervisory/entity-key entity-id :workflow/id (random-uuid)}]
+        fields {:supervisory/entity-key entity-id
+                :workflow/id (random-uuid)
+                :scope/type :supervisory-entity}]
     (doseq [type [:supervisory/spec-upserted :supervisory/intervention-requested
                  :supervisory/intervention-state-changed]]
       (let [draft (event type fields)]
         (is (= [:supervisory-entity entity-id] (policy/scope draft)))
         (is (= [:supervisory-entity entity-id] (policy/scope (dissoc draft :workflow/id))))
         (is (anomaly/anomaly? (policy/scope (dissoc draft :supervisory/entity-key))))))))
+
+(deftest ^{:stratum 1} intervention-profile-discriminator-is-required
+  (doseq [type [:supervisory/intervention-requested :supervisory/intervention-state-changed]]
+    (let [draft (event type {:supervisory/entity-key (random-uuid)})]
+      (is (anomaly/anomaly? (policy/scope draft)))
+      (is (anomaly/anomaly? (policy/scope (assoc draft :scope/type :workflow)))))))
 
 (comment
   ::authoritative-scope)
