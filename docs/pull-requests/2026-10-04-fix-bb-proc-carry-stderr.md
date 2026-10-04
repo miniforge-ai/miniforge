@@ -59,7 +59,7 @@ what it threw before. `:out` is deliberately not included: `aws`, `git` and
 
 ## Evidence
 
-Three tests, in `components/bb-proc/test`:
+Four tests, in `components/bb-proc/test`:
 
 - `test-run!-carries-captured-stderr-into-the-failure` — a command that writes
   to stderr and exits 1; asserts the text is in `ex-data` and in the message.
