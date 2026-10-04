@@ -1087,8 +1087,9 @@ pack lifecycle events and Pack Run events.
 N1 §2.32 distinguishes definitions, runs, steps, and binding edges. Every
 `chain/*` and `chain.edge/*` event MUST carry the §2 envelope plus
 `:chain/run-id` (UUID) and `:chain/definition-id` (keyword).
-The chain executor owns these emissions. All belong to the chain-run scope,
-including when a child `:workflow/id` cross-reference is present.
+The chain executor owns these emissions. All belong to the chain-run scope.
+Every step lifecycle event MUST carry its preallocated child-run `:workflow/id`
+UUID, including failures before execution. This cross-reference does not change scope.
 
 The following table defines required payload fields in addition to those common
 fields. Counts, indexes, and durations MUST be non-negative longs. Step IDs and
@@ -1097,15 +1098,15 @@ workflow-definition IDs MUST be keywords; failure classes MUST follow N1 §5.3.3
 | Event type | Required fields | Meaning |
 |------------|-----------------|---------|
 | `chain/started` | `:chain/step-count` | Run admitted before any step executes |
-| `chain/step-started` | `:step/id`, `:step/index`, `:step/workflow-id` | Step begins, including input binding and loading |
-| `chain/step-completed` | `:step/id`, `:step/index` | Workflow execution succeeded |
-| `chain/step-failed` | `:step/id`, `:step/index`, `:chain/error` (string), `:failure/class` | Step did not succeed |
+| `chain/step-started` | `:step/id`, `:step/index`, `:step/workflow-id`, `:workflow/id` | Step begins, including input binding and loading |
+| `chain/step-completed` | `:step/id`, `:step/index`, `:workflow/id` | Workflow execution succeeded |
+| `chain/step-failed` | `:step/id`, `:step/index`, `:workflow/id`, `:chain/error` (string), `:failure/class` | Step did not succeed |
 | `chain/completed` | `:chain/step-count`, `:chain/duration-ms` | All required steps and bindings succeeded |
 | `chain/failed` | `:chain/error` (string), `:failure/class` | Run failed; `:chain/failed-step` (keyword) is REQUIRED when attributable to a step |
 
 `:step/index` is zero-based in the definition's ordered step vector; it is not
 an event sequence number. Step outcome events MUST retain their started event's
-step identity and index. `:chain/step-count` MUST mean the definition's total,
+step identity, index, and workflow-run UUID. `:chain/step-count` MUST mean the definition's total,
 not the number completed before failure. Lifecycle and recovery MUST follow N2 §14.4.
 
 These six types and the three edge types below use payload version `2.0.0`

@@ -42,6 +42,11 @@ pass traced repeated invocations, missing workflow targets, intervention admissi
 versus approval, replay ownership, and ambiguous legacy records. A contract-only
 change does not claim runtime tests prove the newly specified behavior.
 
+Review corrections preserve ambiguous legacy IDs without reinterpretation and
+require child-run UUIDs even for one-step chains and pre-execution failures.
+The Spec projection retains structured intent, string/keyword tags, and the
+WorkflowRun-owned foreign key; none of these fields grants execution authority.
+
 ## Deployment Plan
 
 No runtime behavior changes. Schema/scope enforcement precedes live publication

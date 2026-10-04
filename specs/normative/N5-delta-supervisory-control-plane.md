@@ -222,9 +222,11 @@ Minimum required keys:
 ```
 
 The projection MAY include `:spec/description` and `:spec/repo-url` strings,
-`:spec/intent` (keyword), and `:spec/tags` (vector of strings).
+`:spec/intent` (structured map), and `:spec/tags` (vector of strings or keywords).
+Intent remains descriptive data, not executable instruction or an authorization grant.
 Unknown extension fields MUST pass through without acquiring execution authority.
-Linked WorkflowRuns MUST carry `:spec/id` as a UUID cross-reference.
+Linked WorkflowRuns MUST carry `:workflow-run/spec-id` as a UUID cross-reference
+to the Spec's `:spec/id`. Their `:workflow-run/spec` remains the separate run-start snapshot.
 Distinct specifications with equal titles MUST remain distinct; replay MUST
 preserve a supplied ID rather than deriving a replacement from display text.
 

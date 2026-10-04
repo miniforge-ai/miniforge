@@ -1715,10 +1715,12 @@ steps and bindings succeeded. Each started step MUST have one terminal outcome,
 including binding or loading failures. Failure MUST prevent dependent steps
 from starting. Emission failure MUST follow N3 §9, never report false success.
 
-Edges MUST reference preallocated source and destination workflow-run UUIDs,
-including failures before the destination starts. Recovery MUST preserve the
-chain-run UUID and resolved definition; a fresh invocation MUST allocate a new one. The former
-`:chain/id` invocation field is retired; migration MUST follow N3 §7.5.
+Each step MUST preallocate its workflow-run UUID before `chain/step-started`,
+including when binding or loading fails before workflow execution.
+Edges MUST reference those source and destination UUIDs.
+Recovery MUST preserve the chain-run UUID and resolved definition;
+a fresh invocation MUST allocate a new one. The ambiguous legacy `:chain/id`
+field is retired without assigning it one historical meaning; migration MUST follow N3 §7.5.
 
 ---
 
