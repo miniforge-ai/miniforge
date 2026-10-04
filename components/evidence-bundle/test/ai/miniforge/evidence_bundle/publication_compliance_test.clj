@@ -48,6 +48,21 @@
     (is (= :none (:compliance/pii-handling prepared)))
     (is (compliance/accurate-declarations? prepared))))
 
+(deftest ^{:stratum 1} marker-requires-truthful-declarations-without-recorded-findings
+  (let [input (candidate :description (redaction/marker))
+        prepared (compliance/prepare input)]
+    (is (redaction/clean? input))
+    (is (false? (compliance/accurate-declarations? input)))
+    (is (true? (:compliance/sensitive-data prepared)))
+    (is (= :redacted (:compliance/pii-handling prepared)))
+    (is (false? (:evidence/contains-pii? prepared)))
+    (is (compliance/accurate-declarations? prepared))
+    (doseq [handling [:none :encrypted]]
+      (let [declared (candidate :description (redaction/marker)
+                                 :compliance/sensitive-data true :compliance/pii-handling handling)]
+        (is (false? (compliance/accurate-declarations? declared)))
+        (is (= :redacted (:compliance/pii-handling (compliance/prepare declared))))))))
+
 ;------------------------------------------------------------------------------ Layer 2
 
 (deftest ^{:stratum 2} recorded-secrets-require-protected-treatment

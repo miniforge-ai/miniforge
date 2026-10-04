@@ -35,7 +35,8 @@
 (deftest ^{:stratum 0} card-findings-do-not-cross-original-value-boundaries-test
   (doseq [value [{:card 4111111111111111} {:card 4111111111111111N}]]
     (is (= [{:finding/type :payment-card}] (:scan/findings (scanner/scan-artifact value))))
-    (is (empty? (:scan/findings (scanner/scan-artifact (redaction/redact value))))))
+    (is (= [{:finding/type :redaction-marker}]
+           (:scan/findings (scanner/scan-artifact (redaction/redact value))))))
   (let [separate {:measurements [4111 1111 1111 1111]}]
     (is (empty? (:scan/findings (scanner/scan-artifact separate))))
     (is (= separate (redaction/redact separate)))))
@@ -49,7 +50,7 @@
       (is (false? (redaction/clean? value)))
       (is (= [{:finding/type :aws-access-key}] (:scan/findings (scanner/scan-artifact value))))
       (is (redaction/clean? redacted))
-      (is (empty? (:scan/findings (scanner/scan-artifact redacted)))))))
+      (is (= [{:finding/type :redaction-marker}] (:scan/findings (scanner/scan-artifact redacted)))))))
 
 (deftest ^{:stratum 0} scan-artifact-reports-finding-types-only
   (testing "sensitive values are detected but not copied into evidence"

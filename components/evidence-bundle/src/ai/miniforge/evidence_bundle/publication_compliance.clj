@@ -17,6 +17,7 @@
 (defn- ^{:stratum 0} treatment [bundle scan]
   (cond
     (not (redaction/clean? bundle)) :redacted
+    (scanner/redaction-recorded? scan) :redacted
     (= :encrypted (:compliance/pii-handling bundle)) :encrypted
     (scanner/protection-required? scan) :redacted
     :else (get bundle :compliance/pii-handling :none)))
@@ -28,7 +29,8 @@
         metadata (scanner/compliance-metadata scan)]
     (and (or (empty? (:scan/findings scan)) (true? (:compliance/sensitive-data bundle)))
          (or (not (:evidence/contains-pii? metadata)) (true? (:evidence/contains-pii? bundle)))
-         (or (not (scanner/protection-required? scan)) (protected-treatment? bundle)))))
+         (or (not (scanner/protection-required? scan)) (protected-treatment? bundle))
+         (or (not (scanner/redaction-recorded? scan)) (= :redacted (:compliance/pii-handling bundle))))))
 
 (defn ^{:stratum 1} prepare [bundle]
   (let [scan (findings bundle)
