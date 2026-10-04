@@ -3,6 +3,7 @@
 ;; Licensed under the Apache License, Version 2.0.
 (ns ai.miniforge.evidence-bundle.pattern-scan-test
   (:require [ai.miniforge.evidence-bundle.scanner :as scanner]
+            [ai.miniforge.redaction.interface :as redaction]
             [clojure.string :as str]
             [clojure.test :refer [deftest is]]))
 
@@ -43,6 +44,15 @@
       (is (= [{:finding/type type}] (:scan/findings result)))
       (is (true? (:evidence/contains-pii? metadata)))
       (is (not (str/includes? (pr-str result) text))))))
+
+(deftest ^{:stratum 2} marker-survives-embedded-keys-and-metadata
+  (doseq [text [(redaction/marker) (str "before_" (redaction/marker) "_after")]
+          value (placements text)]
+    (let [result (scanner/scan-artifact value)]
+      (is (= [{:finding/type :redaction-marker}] (:scan/findings result)))
+      (is (scanner/redaction-recorded? result))
+      (is (scanner/protection-required? result))
+      (is (nil? (:evidence/contains-pii? (scanner/compliance-metadata result)))))))
 
 (comment
   (clojure.test/run-tests 'ai.miniforge.evidence-bundle.pattern-scan-test))
