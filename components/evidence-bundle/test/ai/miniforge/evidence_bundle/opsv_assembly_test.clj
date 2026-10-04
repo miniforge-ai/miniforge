@@ -25,6 +25,20 @@
 
 ;------------------------------------------------------------------------------ Layer 0
 
+(defn- ^{:stratum 0} with-second-grant [evidence-value]
+  (let [grant-id #uuid "00000000-0000-0000-0000-000000000113"
+        effect (assoc f/governed-effect :evidence/grant-id grant-id)]
+    (-> evidence-value
+        (update :opsv/grant-refs conj grant-id)
+        (update-in [:opsv/actuation :governed-effects] conj effect))))
+
+(defn- ^{:stratum 0} reverse-reference-order [evidence-value]
+  (-> evidence-value
+      (update :opsv/event-refs (comp vec reverse))
+      (update :opsv/artifact-refs (comp vec reverse))
+      (update :opsv/grant-refs (comp vec reverse))
+      (update-in [:opsv/actuation :governed-effects] (comp vec reverse))))
+
 (defn ^{:stratum 0} error-codes
   [result]
   (set (map :code (:opsv.validation/errors result))))
@@ -48,6 +62,10 @@
     (is (= #{event-id} (:opsv/event-refs result)))))
 
 ;------------------------------------------------------------------------------ Layer 1
+
+(defn- ^{:stratum 1} finalize-fixture [input]
+  (let [[store bundle-id] (accumulated-store input)]
+    (evidence/finalize-opsv-evidence! store bundle-id f/base-bundle input (set f/artifact-ids))))
 
 (deftest ^{:stratum 1} finalize-preserves-preallocated-identity-once
   (let [[store bundle-id] (accumulated-store f/opsv-evidence)
@@ -177,24 +195,13 @@
     (is (response/anomaly-map? result))
     (is (contains? (error-codes result) :referenced-artifact-not-found))))
 
-(deftest ^{:stratum 1} finalization-canonicalizes-reference-order
-  (let [second-grant-id #uuid "00000000-0000-0000-0000-000000000113"
-        second-effect (assoc f/governed-effect
-                             :evidence/grant-id second-grant-id)
-        evidence-value (-> f/opsv-evidence
-                           (update :opsv/grant-refs conj second-grant-id)
-                           (update-in [:opsv/actuation :governed-effects]
-                                      conj second-effect))
-        reordered (-> evidence-value
-                      (update :opsv/event-refs #(vec (reverse %)))
-                      (update :opsv/artifact-refs #(vec (reverse %)))
-                      (update :opsv/grant-refs #(vec (reverse %)))
-                      (update-in [:opsv/actuation :governed-effects]
-                                 #(vec (reverse %))))
-        finalize (fn [input]
-                   (let [[store bundle-id] (accumulated-store input)]
-                     (evidence/finalize-opsv-evidence!
-                      store bundle-id f/base-bundle input
-                      (set f/artifact-ids))))]
+;------------------------------------------------------------------------------ Layer 2
+
+(deftest ^{:stratum 2} finalization-canonicalizes-reference-order
+  (let [evidence-value (with-second-grant f/opsv-evidence)
+        reordered (reverse-reference-order evidence-value)]
     (with-redefs [random-uuid (constantly f/canonical-bundle-id)]
-      (is (= (finalize evidence-value) (finalize reordered))))))
+      (is (= (finalize-fixture evidence-value) (finalize-fixture reordered))))))
+
+(comment
+  (clojure.test/run-tests 'ai.miniforge.evidence-bundle.opsv-assembly-test))
