@@ -34,10 +34,9 @@
    `resources/config/event-stream/messages/en-US.edn` under the
    `:timeline/*` namespace."
   (:require
-   [ai.miniforge.event-stream.messages :as messages])
-  (:import
-   [java.text SimpleDateFormat]
-   [java.util Date TimeZone]))
+   [clojure.string :as str]
+   [ai.miniforge.event-stream.messages :as messages]
+   [ai.miniforge.event-stream.timeline-values :as values]))
 
 ;------------------------------------------------------------------------------ Layer 0
 
@@ -48,7 +47,7 @@
 
 (def ^{:stratum 0} ^:const args-preview-length
   "Maximum character length for the args-summary column."
-  60)
+  values/args-preview-length)
 
 (def ^{:stratum 0} ^:private terminal-event-types
   "Event types that denote workflow termination."
@@ -62,84 +61,7 @@
   "Event types for phase start/stop lifecycle."
   #{:workflow/phase-started :workflow/phase-completed})
 
-;; Time formatting helpers
-(defn- ^{:stratum 0} make-hms-formatter
-  "Create a thread-local HH:mm:ss formatter in UTC."
-  ^SimpleDateFormat []
-  (doto (SimpleDateFormat. "HH:mm:ss")
-    (.setTimeZone (TimeZone/getTimeZone "UTC"))))
-
-(defn- ^{:stratum 0} ts->epoch-ms
-  "Coerce `ts` to epoch-ms long. Returns nil on failure."
-  [ts]
-  (try
-    (cond
-      (nil? ts)            nil
-      (instance? Date ts)  (.getTime ^Date ts)
-      (number? ts)         (long ts)
-      (string? ts)         (-> (java.time.Instant/parse ts)
-                               (.toEpochMilli))
-      :else                nil)
-    (catch Exception _
-      nil)))
-
-;; Field extraction helpers
-(defn- ^{:stratum 0} event-timestamp [event]
-  (:event/timestamp event))
-
-(defn- ^{:stratum 0} event-phase [event]
-  (or (:workflow/phase event) (messages/t :timeline/no-phase)))
-
-(defn- ^{:stratum 0} event-type [event]
-  (:event/type event))
-
-(defn- ^{:stratum 0} event-message
-  "Return the renderable event message, or an empty string when absent or malformed."
-  [event]
-  (let [message (get event :message)]
-    (if (string? message) message "")))
-
-(defn- ^{:stratum 0} truncate
-  "Truncate string `s` to at most `n` characters, appending the
-   localized `:timeline/truncation-suffix` if cut."
-  [s n]
-  (when (string? s)
-    (if (<= (count s) n)
-      s
-      (let [suffix        (str (messages/t :timeline/truncation-suffix))
-            suffix-length (min (count suffix) (max 0 n))
-            prefix-length (max 0 (- n suffix-length))]
-        (str (subs s 0 prefix-length)
-             (subs suffix 0 suffix-length))))))
-
-;; Duration helpers
-(defn- ^{:stratum 0} format-duration-ms
-  "Format `ms` as a human-readable duration string. Both shapes
-   (mins+secs, secs-only) flow through the user catalog."
-  [ms]
-  (let [total-s (long (/ ms 1000))
-        m       (long (/ total-s 60))
-        s       (long (rem total-s 60))]
-    (if (pos? m)
-      (messages/t :timeline/duration-mins-secs {:mins m :secs s})
-      (messages/t :timeline/duration-secs      {:secs s}))))
-
-;------------------------------------------------------------------------------ Layer 1
-
-(def ^{:stratum 1} ^:private ^ThreadLocal hms-formatter-local
-  "Thread-local SimpleDateFormat to avoid allocation on hot paths."
-  (proxy [ThreadLocal] []
-    (initialValue [] (make-hms-formatter))))
-
-(defn- ^{:stratum 1} args-summary
-  "Extract the args preview from an event, truncated to `args-preview-length` chars.
-   Prefers `:tool/args-digest :digest/preview`, falls back to `:message`."
-  [event]
-  (let [preview (get-in event [:tool/args-digest :digest/preview])
-        raw     (if (string? preview) preview (event-message event))]
-    (truncate raw args-preview-length)))
-
-(defn- ^{:stratum 1} index-tool-names
+(defn- ^{:stratum 0} index-tool-names
   "Build a `{tool-call-id → tool-name}` lookup map from the event stream.
 
    `:tool/call-completed` events don't carry the tool name (per the
@@ -148,48 +70,23 @@
    completed-event renderer can look the name up without re-scanning."
   [events]
   (->> events
-       (filter #(and (= :agent/tool-call-started (event-type %))
+       (filter #(and (= :agent/tool-call-started (values/event-type %))
                      (:tool/call-id %)
                      (:tool/name %)))
        (reduce (fn [m e] (assoc m (:tool/call-id e) (:tool/name e)))
                {})))
 
-;------------------------------------------------------------------------------ Layer 2
-
-(defn- ^{:stratum 2} format-hms
-  "Format `ts` (a Date, long epoch-ms, or ISO-8601 string) as HH:mm:ss.
-   Returns the localized `:timeline/unknown-time` sentinel when `ts` is
-   nil or unparseable."
-  [ts]
-  (try
-    (let [^SimpleDateFormat fmt (.get hms-formatter-local)
-          ^Date d (cond
-                    (nil? ts)    nil
-                    (instance? Date ts) ts
-                    (number? ts) (Date. (long ts))
-                    (string? ts) (-> (java.time.Instant/parse ts)
-                                     (.toEpochMilli)
-                                     (Date.))
-                    :else        nil)]
-      (if d
-        (.format fmt d)
-        (messages/t :timeline/unknown-time)))
-    (catch Exception _
-      (messages/t :timeline/unknown-time))))
-
-;------------------------------------------------------------------------------ Layer 3
-
 ;; Per-event-type render dispatch
-(defn- ^{:stratum 3} render-tool-call-started
+(defn- ^{:stratum 0} render-tool-call-started
   "`:agent/tool-call-started` — show tool name + args digest preview."
   [event]
-  (let [ts       (format-hms (event-timestamp event))
-        phase    (event-phase event)
+  (let [ts       (values/format-hms (values/event-timestamp event))
+        phase    (values/event-phase event)
         tool     (or (:tool/name event) (messages/t :timeline/unknown-tool))
-        args-sum (args-summary event)]
+        args-sum (values/args-summary event)]
     (format "%s  %s  %s  %s" ts phase tool args-sum)))
 
-(defn- ^{:stratum 3} render-tool-call-completed
+(defn- ^{:stratum 0} render-tool-call-completed
   "`:tool/call-completed` — show tool name + duration + success/error.
 
    Per `schema/ToolCallCompleted` the event does NOT carry `:tool/name`;
@@ -203,8 +100,8 @@
    `:tool/error` presence as the secondary signal for legacy events
    that omitted the boolean."
   [event tool-names-by-call-id]
-  (let [ts       (format-hms (event-timestamp event))
-        phase    (event-phase event)
+  (let [ts       (values/format-hms (values/event-timestamp event))
+        phase    (values/event-phase event)
         call-id  (:tool/call-id event)
         tool     (or (get tool-names-by-call-id call-id)
                      call-id
@@ -216,79 +113,79 @@
                    (some? (:tool/error event))     (messages/t :timeline/status-error)
                    :else                           (messages/t :timeline/status-success))
         dur-str  (if dur-ms
-                   (str "  " (format-duration-ms dur-ms) "  " status)
+                   (str "  " (values/format-duration-ms dur-ms) "  " status)
                    (str "  " status))]
     (format "%s  %s  %s%s" ts phase tool dur-str)))
 
-(defn- ^{:stratum 3} render-phase-lifecycle
+(defn- ^{:stratum 0} render-phase-lifecycle
   "`:workflow/phase-started` / `:workflow/phase-completed` — phase lifecycle."
   [event]
-  (let [ts       (format-hms (event-timestamp event))
-        phase    (event-phase event)
-        ev-type  (event-type event)
+  (let [ts       (values/format-hms (values/event-timestamp event))
+        phase    (values/event-phase event)
+        ev-type  (values/event-type event)
         suffix   (case ev-type
                    :workflow/phase-started   (messages/t :timeline/phase-suffix-started)
                    :workflow/phase-completed (messages/t :timeline/phase-suffix-completed)
                    (name ev-type))
         marker   (messages/t :timeline/phase-marker {:suffix suffix})
-        msg      (event-message event)]
+        msg      (values/event-message event)]
     (if (seq msg)
       (format "%s  %s  %s  %s" ts phase marker msg)
       (format "%s  %s  %s" ts phase marker))))
 
-(defn- ^{:stratum 3} render-terminal
+(defn- ^{:stratum 0} render-terminal
   "`:workflow/completed` / `:workflow/failed` — terminal status with the
    localized terminated marker."
   [event]
-  (let [ts     (format-hms (event-timestamp event))
-        phase  (event-phase event)
+  (let [ts     (values/format-hms (values/event-timestamp event))
+        phase  (values/event-phase event)
         marker (messages/t :timeline/terminated-marker)
-        reason (or (not-empty (event-message event))
+        reason (or (not-empty (values/event-message event))
                    (when-let [r (:workflow/result event)]
                      (str r))
                    "")]
     (format "%s  %s  %s  %s" ts phase marker reason)))
 
-(defn- ^{:stratum 3} render-stall
+(defn- ^{:stratum 0} render-stall
   "`:agent/stream-stalled` — stall marker."
   [event]
-  (let [ts     (format-hms (event-timestamp event))
-        phase  (event-phase event)
+  (let [ts     (values/format-hms (values/event-timestamp event))
+        phase  (values/event-phase event)
         marker (messages/t :timeline/stall-marker)
-        msg    (or (not-empty (event-message event))
+        msg    (or (not-empty (values/event-message event))
                    (messages/t :timeline/stall-default-msg))]
     (format "%s  %s  %s  %s" ts phase marker msg)))
 
-(defn- ^{:stratum 3} render-generic
-  "Catch-all for event types without a specific renderer."
-  [event]
-  (let [ts       (format-hms (event-timestamp event))
-        phase    (event-phase event)
-        ev-type  (or (event-type event) (messages/t :timeline/unknown-event-type))
-        msg      (event-message event)]
-    (format "%s  %s  %s  %s" ts phase (str ev-type) (truncate msg args-preview-length))))
-
 ;; Gap line rendering
-(defn- ^{:stratum 3} render-gap-line
+(defn- ^{:stratum 0} render-gap-line
   "Format a gap line between two events with timestamps `ts-a` and `ts-b`
    and a computed gap of `gap-ms` milliseconds."
   [ts-a ts-b gap-ms]
   (messages/t :timeline/gap-line
-              {:ts-a (format-hms ts-a)
-               :ts-b (format-hms ts-b)
-               :gap  (format-duration-ms gap-ms)}))
+              {:ts-a (values/format-hms ts-a)
+               :ts-b (values/format-hms ts-b)
+               :gap  (values/format-duration-ms gap-ms)}))
 
-;------------------------------------------------------------------------------ Layer 4
+(defn- ^{:stratum 0} render-generic
+  "Catch-all for event types without a specific renderer."
+  [event]
+  (let [ts       (values/format-hms (values/event-timestamp event))
+        phase    (values/event-phase event)
+        ev-type  (or (values/event-type event) (messages/t :timeline/unknown-event-type))
+        msg      (values/event-message event)]
+    (format "%s  %s  %s  %s" ts phase (str ev-type) (values/truncate msg values/args-preview-length))))
 
-(defn- ^{:stratum 4} render-event
+;------------------------------------------------------------------------------ Layer 1
+
+(defn- ^{:stratum 1} render-event
   "Dispatch to the appropriate per-event-type renderer.
 
    `tool-names-by-call-id` is the correlation map render-timeline
    builds as it walks the event stream — only consulted by the
    completed-event renderer, but threaded through every dispatch so
    the signature stays uniform."
-  [event tool-names-by-call-id]
-  (let [et (event-type event)]
+  [tool-names-by-call-id event]
+  (let [et (values/event-type event)]
     (cond
       (contains? terminal-event-types et)   (render-terminal event)
       (contains? stall-event-types et)      (render-stall event)
@@ -297,10 +194,21 @@
       (= et :tool/call-completed)           (render-tool-call-completed event tool-names-by-call-id)
       :else                                 (render-generic event))))
 
-;------------------------------------------------------------------------------ Layer 5
+(defn- ^{:stratum 1} append-event [render gap-threshold {:keys [prev-ts lines]} event]
+  (let [cur-ts (values/ts->epoch-ms (values/event-timestamp event))
+        gap-line (when (and prev-ts cur-ts (> (- cur-ts prev-ts) gap-threshold))
+                   (render-gap-line prev-ts cur-ts (- cur-ts prev-ts)))
+        event-line (render event)]
+    ;; Missing timestamps break adjacency; do not bridge gaps across them.
+    {:prev-ts cur-ts
+     :lines (cond-> lines
+              gap-line (conj gap-line)
+              event-line (conj event-line))}))
+
+;------------------------------------------------------------------------------ Layer 2
 
 ;; Public API
-(defn ^{:stratum 5} render-timeline
+(defn ^{:stratum 2} render-timeline
   "Transform a seq of parsed event maps into a human-readable timeline string.
 
    Each event renders as one line:
@@ -322,30 +230,10 @@
   ([events]
    (render-timeline events {}))
   ([events opts]
-   (if (empty? events)
-     ""
-     (let [gap-threshold (get opts :gap-threshold-ms default-gap-threshold-ms)
-           name-by-id    (index-tool-names events)
-           lines         (reduce
-                          (fn [{:keys [prev-ts lines]} event]
-                            (let [cur-ts     (ts->epoch-ms (event-timestamp event))
-                                  gap-line   (when (and prev-ts cur-ts
-                                                        (> (- cur-ts prev-ts) gap-threshold))
-                                               (render-gap-line prev-ts cur-ts (- cur-ts prev-ts)))
-                                  event-line (render-event event name-by-id)]
-                              ;; Update `:prev-ts` to `cur-ts` (allowing
-                              ;; nil) rather than clinging to the last
-                              ;; non-nil value — otherwise an event with
-                              ;; no timestamp injected between two
-                              ;; timestamped events fires a phantom gap
-                              ;; line spanning across it.
-                              {:prev-ts cur-ts
-                               :lines   (cond-> lines
-                                          gap-line   (conj gap-line)
-                                          event-line (conj event-line))}))
-                          {:prev-ts nil :lines []}
-                          events)]
-       (clojure.string/join "\n" (:lines lines))))))
+   (let [gap-threshold (get opts :gap-threshold-ms default-gap-threshold-ms)
+         render (partial render-event (index-tool-names events))
+         rows (reduce (partial append-event render gap-threshold) {:prev-ts nil :lines []} events)]
+     (str/join "\n" (:lines rows)))))
 
 ;------------------------------------------------------------------------------ Rich comment
 (comment
