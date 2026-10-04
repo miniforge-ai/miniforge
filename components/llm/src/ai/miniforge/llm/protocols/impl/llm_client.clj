@@ -1818,11 +1818,13 @@
 
         :else
         (let [{:keys [content usage cost-usd]} (extract-fn body)]
-          (if (str/blank? content)
-            (llm-error :anomalies.agent/llm-error "empty_success_output"
-                       (msg/t :http-provider.system/no-generated-text))
-            (cond-> (llm-success content {:usage usage})
-              (number? cost-usd) (assoc :cost-usd cost-usd))))))))
+          ;; A provider bills a call whether or not it produced text, so
+          ;; the amount it reports stays on the result either way.
+          (cond-> (if (str/blank? content)
+                    (llm-error :anomalies.agent/llm-error "empty_success_output"
+                               (msg/t :http-provider.system/no-generated-text))
+                    (llm-success content {:usage usage}))
+            (number? cost-usd) (assoc :cost-usd cost-usd)))))))
 
 (defn ^{:stratum 4} parse-cli-output
   ([output exit-code]
@@ -1978,10 +1980,11 @@
 (defn ^{:stratum 6} http-complete
   "Complete request using an HTTP backend.
 
-   Two families share this path: the local, credential-free Ollama
-   endpoint, and the direct API-key providers (:anthropic-api /
+   Three families share this path: the local, credential-free Ollama
+   endpoint; the direct API-key providers (:anthropic-api /
    :openai-api / :gemini-api / :openrouter) for builds where CLI-agent
-   backends are unavailable. `config` is the client config — only `:api-key` is
+   backends are unavailable; and :openai-compat, any server speaking
+   the OpenAI wire shape, keyed or not. `config` is the client config — only `:api-key` is
    read from it here; the caller (`complete-impl` /
    `complete-stream-impl`) has already merged the config `:model` into
    `request`, which is where this fn and the body builders read it."

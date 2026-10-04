@@ -371,6 +371,19 @@
       (is (= 1050 (:tokens result))
           "the subset counts are not added to the total"))))
 
+(deftest ^{:stratum 2} openrouter-empty-answer-keeps-the-billed-cost-test
+  (testing "a 200 with no text is an error, and the amount billed for it
+            stays on the result for the caller's bookkeeping"
+    (let [{:keys [result]}
+          (capture-http (openrouter-200 "")
+                        #(llm/complete (llm/create-client {:backend :openrouter
+                                                           :model "vendor/model"
+                                                           :api-key test-api-key})
+                                       {:prompt "q"}))]
+      (is (not (:success result)))
+      (is (= "empty_success_output" (get-in result [:error :type])))
+      (is (= 0.00125 (:cost-usd result))))))
+
 (deftest ^{:stratum 2} openrouter-missing-key-fails-closed-test
   (testing "no config key and no OPENROUTER_API_KEY fails before any request"
     (let [{:keys [result captured]}

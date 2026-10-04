@@ -105,11 +105,12 @@ SL003, with every other pre-commit check passing.
 
 ## Tests
 
-`http-providers-test`, `network-health-test`, `interface-test`: 102
-tests, 506 assertions. New: OpenRouter wiring, request body, round
+`http-providers-test`, `network-health-test`, `interface-test`: 103
+tests, 509 assertions. New: OpenRouter wiring, request body, round
 trip (URL, Bearer key, usage flag, routing preference, usage
 breakdown, billed cost,
-`:tokens` unchanged), missing key fails closed before any request;
+`:tokens` unchanged), missing key fails closed before any request,
+an empty answer is an error that still carries the billed cost;
 OpenAI usage details kept and no nil keys without them; Codex
 cached-input and reasoning counts kept, absent when unreported; the
 provider call passes the configured idle timeout and leaves the
