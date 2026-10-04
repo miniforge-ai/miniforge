@@ -36,6 +36,26 @@
 
 (def ^{:stratum 0} ledger-filename "codex-gap-ledger.edn")
 
+(def ^{:stratum 0} consultations-filename "codex-consultations.edn")
+
+(defn ^{:stratum 0} build-consultation-entry
+  "Normalize one phase consultation into its durable per-run shape
+   (SPEC $7.7.2.1): recorded WHATEVER the phase outcome, because
+   zero-entropy detection needs observations from runs where the guarded
+   failure never happened -- exactly the runs the miss ledger ignores.
+   `consultation` is the $7.4.3 summary off the phase result; its :pegs
+   rows already carry :answer (explicit, or nil = presented-unanswered)."
+  [{:keys [run-id phase consultation]}]
+  {:consultation/id (random-uuid)
+   :consultation/at (str (java.time.Instant/now))
+   :consultation/run-id run-id
+   :consultation/phase phase
+   :consultation/situation (get consultation :situation)
+   :consultation/status (get consultation :status)
+   :consultation/pin-read? (get consultation :pin-read?)
+   :consultation/pegs (get consultation :pegs)
+   :consultation/unmatched-answers (get consultation :unmatched-answers)})
+
 (defn ^{:stratum 0} build-entry
   "Normalize a miss into its ledger shape. `signal` is
    {:type :review-blocking|:gate-failure|:terminal-anomaly :payload ...}
@@ -65,33 +85,15 @@
    :codex-gap/reason (ex-message e)
    :codex-gap/dir (str dir)})
 
-;------------------------------------------------------------------------------ Layer 1
-
-(defn ^{:stratum 1} append!
-  "Append one entry to <dir>/codex-gap-ledger.edn. Returns the entry, or
-   {:codex-gap/anomaly :ledger-write-failed ...} — data, never a throw for
-   environmental failures. A nil/blank dir is a programmer error and
-   throws (rule 005): callers own dir resolution."
-  [dir entry]
+(defn- ^{:stratum 0} read-lines-file
+  "All entries from <dir>/<filename>, oldest first. Unreadable lines are
+   skipped with a count — a corrupt line must not hide the rest. Returns
+   {:entries [..] :skipped n}; missing file = no entries, which is a true
+   statement about an instrument that has not run."
+  [dir filename]
   (when (or (nil? dir) (and (string? dir) (str/blank? dir)))
     (throw (IllegalArgumentException. "ledger dir must be non-blank")))
-  (try
-    (io/make-parents (io/file dir ledger-filename))
-    (with-open [w (java.io.FileOutputStream. (io/file dir ledger-filename) true)]
-      (.write w (.getBytes (str (pr-str entry) "\n") "UTF-8")))
-    entry
-    (catch java.io.IOException e (write-anomaly dir e))
-    (catch SecurityException e (write-anomaly dir e))))
-
-(defn ^{:stratum 1} read-ledger
-  "All entries from <dir>/codex-gap-ledger.edn, oldest first. Unreadable
-   lines are skipped with a count — a corrupt line must not hide the rest.
-   Returns {:entries [..] :skipped n}; missing file = no entries, which is
-   a true statement about an instrument that has not run."
-  [dir]
-  (when (or (nil? dir) (and (string? dir) (str/blank? dir)))
-    (throw (IllegalArgumentException. "ledger dir must be non-blank")))
-  (let [f (io/file dir ledger-filename)]
+  (let [f (io/file dir filename)]
     (if-not (.exists f)
       {:entries [] :skipped 0}
       (try
@@ -115,3 +117,48 @@
           {:codex-gap/anomaly :ledger-read-failed
            :codex-gap/reason (ex-message e)
            :codex-gap/dir (str dir)})))))
+
+;------------------------------------------------------------------------------ Layer 1
+
+(defn- ^{:stratum 1} append-line!
+  "Append one EDN entry as a line to <dir>/<filename>. Returns the entry,
+   or {:codex-gap/anomaly :ledger-write-failed ...} — data, never a throw
+   for environmental failures. A nil/blank dir is a programmer error and
+   throws (rule 005): callers own dir resolution."
+  [dir filename entry]
+  (when (or (nil? dir) (and (string? dir) (str/blank? dir)))
+    (throw (IllegalArgumentException. "ledger dir must be non-blank")))
+  (try
+    (io/make-parents (io/file dir filename))
+    (with-open [w (java.io.FileOutputStream. (io/file dir filename) true)]
+      (.write w (.getBytes (str (pr-str entry) "\n") "UTF-8")))
+    entry
+    (catch java.io.IOException e (write-anomaly dir e))
+    (catch SecurityException e (write-anomaly dir e))))
+
+(defn ^{:stratum 1} read-ledger
+  "All miss entries from <dir>/codex-gap-ledger.edn, oldest first (see
+   read-lines-file for the skip/anomaly contract)."
+  [dir]
+  (read-lines-file dir ledger-filename))
+
+(defn ^{:stratum 1} read-consultations
+  "All consultation entries from <dir>/codex-consultations.edn, oldest
+   first (see read-lines-file for the skip/anomaly contract)."
+  [dir]
+  (read-lines-file dir consultations-filename))
+
+;------------------------------------------------------------------------------ Layer 2
+
+(defn ^{:stratum 2} append!
+  "Append one miss entry to <dir>/codex-gap-ledger.edn (see append-line!
+   for the write/anomaly contract)."
+  [dir entry]
+  (append-line! dir ledger-filename entry))
+
+(defn ^{:stratum 2} record-consultation!
+  "Append one consultation entry (build-consultation-entry) to
+   <dir>/codex-consultations.edn. Same write/anomaly contract as the miss
+   ledger's append!."
+  [dir entry]
+  (append-line! dir consultations-filename entry))
