@@ -99,6 +99,30 @@
       (is (nil? (:pegs (codex-pin/consultation-summary
                          (assoc outcome :pegs []) nil)))))))
 
+(deftest ^{:stratum 0} consultation-summary-fills-answers-from-the-recorded-log
+  ;; SPEC §7.7.2: the session's answer_peg log fills :answer per presented
+  ;; peg. Last recording wins (the agent's final position IS the
+  ;; observation); a row matching no presented peg surfaces as
+  ;; :unmatched-answers rather than vanishing.
+  (let [outcome {:entry {:path codex-pin/pin-path} :status :pinned
+                 :anomaly nil :situation "changing-one-side-of-a-boundary"
+                 :pegs [{:id "peg-a" :answers {"yes" ["p1"] "no" ["p2"]}}
+                        {:id "peg-b" :answers {"yes" ["p3"] "no" ["p4"]}}]}
+        answers [{:peg-id "peg-a" :answer "no" :timestamp "t1"}
+                 {:peg-id "peg-a" :answer "yes" :timestamp "t2"}
+                 {:peg-id "ghost" :answer "no" :timestamp "t3"}]
+        summary (codex-pin/consultation-summary outcome nil answers)]
+    (is (= [{:id "peg-a" :answer "yes" :landings {"yes" ["p1"] "no" ["p2"]}}
+            {:id "peg-b" :answer nil :landings {"yes" ["p3"] "no" ["p4"]}}]
+           (:pegs summary))
+        "answered peg takes the LAST recorded answer; unanswered stays nil")
+    (is (= [{:peg-id "ghost" :answer "no" :timestamp "t3"}]
+           (:unmatched-answers summary)))
+    (testing "nil answer log = the 2-arity record, no :unmatched-answers key"
+      (let [s2 (codex-pin/consultation-summary outcome nil)]
+        (is (= [nil nil] (mapv :answer (:pegs s2))))
+        (is (not (contains? s2 :unmatched-answers)))))))
+
 (deftest ^{:stratum 0} attach-consultation-shapes
   (let [summary {:status :unconfigured :pinned? false}]
     (testing "failure result with nil :output gains the marker"

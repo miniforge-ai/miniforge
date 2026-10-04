@@ -193,24 +193,43 @@
 
    :pegs is the §7.7 per-peg record: one row per peg the consultation
    presented — {:id peg-id
-                :answer nil
+                :answer <string-or-nil>
                 :landings {answer [landing-ids-that-follow]}}.
-   :answer is nil because push delivery has no answer-capture channel yet;
-   the peg went unanswered, and §7.7 says record exactly that. The
-   :landings map keeps every branch's landing set so routing relevance
-   (both branches reaching the same problem set, §4.4.1) stays computable
-   from the record alone. nil (not []) when nothing was presented."
-  [outcome context-reads]
-  {:pinned?   (= :pinned (:status outcome))
-   :status    (:status outcome)
-   :anomaly   (:anomaly outcome)
-   :situation (:situation outcome)
-   :pegs      (when-let [pegs (seq (:pegs outcome))]
-                (mapv (fn [{:keys [id answers]}]
-                        {:id id :answer nil :landings answers})
-                      pegs))
-   :pin-read? (when (some? context-reads)
-                (boolean (some #(= pin-path (:path %)) context-reads)))})
+   `answers` is the session's recorded answer_peg log (§7.7.2), or nil
+   when the session surfaced none. A presented peg with no matching
+   recorded answer keeps :answer nil — it went unanswered, and §7.7 says
+   record exactly that. When one peg was answered more than once the
+   LAST recording wins (the agent changed its mind; the final position
+   is the observation). Recorded answers that match no presented peg
+   surface as :unmatched-answers — a mis-keyed answer is data about the
+   channel, not noise to drop. The :landings map keeps every branch's
+   landing set so routing relevance (both branches reaching the same
+   problem set, §4.4.1) stays computable from the record alone. nil
+   (not []) when nothing was presented."
+  ([outcome context-reads]
+   (consultation-summary outcome context-reads nil))
+  ([outcome context-reads answers]
+   (let [answer-of (reduce (fn [m {:keys [peg-id answer]}]
+                             (assoc m peg-id answer))
+                           {} answers)
+         presented (set (map :id (:pegs outcome)))
+         unmatched (seq (remove #(contains? presented (:peg-id %)) answers))]
+     (cond-> {:pinned?   (= :pinned (:status outcome))
+              :status    (:status outcome)
+              :anomaly   (:anomaly outcome)
+              :situation (:situation outcome)
+              :pegs      (when-let [pegs (seq (:pegs outcome))]
+                           ;; :answers renamed on destructure: the peg row's
+                           ;; branch map and the recorded answer log are
+                           ;; different things and must not shadow.
+                           (mapv (fn [{:keys [id] branch-landings :answers}]
+                                   {:id id
+                                    :answer (get answer-of id)
+                                    :landings branch-landings})
+                                 pegs))
+              :pin-read? (when (some? context-reads)
+                           (boolean (some #(= pin-path (:path %)) context-reads)))}
+       unmatched (assoc :unmatched-answers (vec unmatched))))))
 
 ;------------------------------------------------------------------------------ Layer 2
 
