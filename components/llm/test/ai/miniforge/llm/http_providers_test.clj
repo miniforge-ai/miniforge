@@ -136,8 +136,9 @@
       (is (= (impl/openai-request-body request)
              (dissoc body :usage :provider)))
       (is (= {:include true} (:usage body))))
-    (testing "routing is limited to hosts that do not retain or train on prompts"
-      (is (= {:data_collection "deny"} (:provider body))))))
+    (testing "routing is limited to hosts that neither train on prompts nor
+              retain them: OpenRouter filters the two separately"
+      (is (= {:data_collection "deny" :zdr true} (:provider body))))))
 
 (deftest ^{:stratum 0} gemini-request-body-test
   (testing "assistant role maps to model; system rides in systemInstruction"
@@ -355,7 +356,8 @@
              (get-in captured [:headers "Authorization"])))
       (is (= "vendor/model" (:model (:body captured))))
       (is (= {:include true} (:usage (:body captured))))
-      (is (= "deny" (get-in captured [:body :provider :data_collection]))))
+      (is (= {:data_collection "deny" :zdr true}
+             (get-in captured [:body :provider]))))
     (testing "response keeps the cache and reasoning breakdown and the billed cost"
       (is (:success result))
       (is (= "answer" (:content result)))

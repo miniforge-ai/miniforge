@@ -60,12 +60,16 @@ Four changes:
 
 4. **Routing preference.** OpenRouter serves one model from several
    hosts, and the hosts differ on whether they retain prompts or train
-   on them. Every request now carries a `provider` object read from
-   `client-defaults.edn` (`[:http :openrouter :provider]`), set to
-   `{data_collection: "deny"}`: only hosts that do neither may serve
-   the call. A model with no such host fails the call; it does not fall
-   back to a host that collects. The map is in OpenRouter's own field
-   names, so a deployment can add `order`, `zdr`, or `only` there.
+   on them. OpenRouter filters the two separately: `data_collection:
+   "deny"` excludes hosts that may train on prompts, and `zdr: true`
+   limits routing to zero-data-retention endpoints (a host can retain
+   without training, for abuse scanning). Every request now carries a
+   `provider` object read from `client-defaults.edn`
+   (`[:http :openrouter :provider]`), set to
+   `{data_collection: "deny", zdr: true}`. A model with no such
+   endpoint fails the call; it does not fall back to a host that keeps
+   the prompt. The map is in OpenRouter's own field names, so a
+   deployment can add `order` or `only` there, or relax it.
    Reading a client default lifts `openrouter-request-body` from
    Layer 2 to Layer 3.
 
@@ -82,7 +86,13 @@ were read from a live `codex exec --json` `turn.completed` event
 still routed `deepseek/deepseek-v4-pro`, `deepseek/deepseek-v4-flash`,
 `moonshotai/kimi-k2.6`, `google/gemini-3.1-pro-preview`,
 `google/gemini-3.8-flash`, and `anthropic/claude-sonnet-5` (one short
-call each).
+call each). OpenRouter's public list of zero-retention endpoints
+(`/api/v1/endpoints/zdr`, read 2026-10-03) has at least one for each of
+those, for `moonshotai/kimi-k3`, for `anthropic/claude-opus-5`, and for
+the `openai/gpt-5.6` family; it has none for
+`anthropic/claude-fable-5.1`, which therefore fails under the default.
+Most zero-retention endpoints report no implicit prompt caching, so the
+default trades the cached-input discount for retention.
 
 ## Stratum lint
 
