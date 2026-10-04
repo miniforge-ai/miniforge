@@ -39,9 +39,12 @@ something worth reporting or nil:
   stdio overrides have to keep working.
 - nil when the captured text is blank. An empty stream is nothing to report,
   not an empty report.
-- long output keeps its **tail**, bounded by `max-captured-error-chars` (4000).
-  A failing command states what went wrong at the end, and an exception is not
-  the place to paste a build log.
+- long output keeps its **tail**, with `truncation-marker` standing in for the
+  head so a truncated block cannot read as a complete one. A failing command
+  states what went wrong at the end, and an exception is not the place to paste
+  a build log. The marker is counted *within* `max-captured-error-chars` (4000),
+  not added on top of it, so the value in `:err` never exceeds the bound its
+  own docstring promises.
 
 Layer 1's `run!` adds the text to both halves of the throw:
 
@@ -65,6 +68,9 @@ Three tests, in `components/bb-proc/test`:
   nothing; asserts no `:err` key and a single-line message.
 - `test-run!-tolerates-uncaptured-stderr` — `:err :inherit`; asserts it still
   throws with `:exit` and no `:err` key.
+- `test-run!-truncates-long-stderr-within-the-bound` — 5011 characters of
+  stderr ending in a recognisable tail; asserts the marker is present, the tail
+  survives, and the whole value fits inside `max-captured-error-chars`.
 
 The existing `test-run!-throws-on-nonzero-exit` continues to assert `:exit` and
 `:cmd`, so the established contract is pinned by a test that did not change.

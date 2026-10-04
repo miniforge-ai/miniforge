@@ -18,8 +18,8 @@
 
 (ns ai.miniforge.bb-proc.core-test
   "Unit tests for bb-proc. Exercises only on commands guaranteed to
-   exist on any POSIX host (`true`, `false`, `echo`). No network, no
-   filesystem writes, no sleeps beyond the tight `destroy!` deadline."
+   exist on any POSIX host (`true`, `false`, `echo`, `sh`). No network,
+   no filesystem writes, no sleeps beyond the tight `destroy!` deadline."
   (:require [babashka.fs :as fs]
             [clojure.test :refer [deftest testing is]]
             [clojure.string :as str]
@@ -76,6 +76,25 @@
           "stderr belongs in ex-data: it is what the command said went wrong")
       (is (str/includes? (ex-message ex) "r2-said-no")
           "and in the message, which is what a bare handler prints"))))
+
+(deftest test-run!-truncates-long-stderr-within-the-bound
+  (testing "given stderr past the bound → marked, tail kept, total bounded"
+    ;; 5000 zeros then a recognisable tail: longer than the bound, and the
+    ;; part worth keeping is at the end, where a failing command puts its
+    ;; error.
+    (let [ex  (is (thrown? clojure.lang.ExceptionInfo
+                           (sut/run! {:out :string :err :string}
+                                     shell-cmd "-c"
+                                     (str "printf '%05000d' 0 >&2; "
+                                          "printf 'TAIL-MARKER' >&2; "
+                                          "exit 1"))))
+          err (:err (ex-data ex))]
+      (is (str/starts-with? err sut/truncation-marker)
+          "a truncated block has to say so, or it reads as the whole error")
+      (is (str/ends-with? err "TAIL-MARKER")
+          "the tail is the half worth keeping")
+      (is (<= (count err) sut/max-captured-error-chars)
+          "the marker counts against the bound rather than adding to it"))))
 
 (deftest test-run!-omits-stderr-when-there-is-none
   (testing "given a failing command that wrote nothing → no :err key"
