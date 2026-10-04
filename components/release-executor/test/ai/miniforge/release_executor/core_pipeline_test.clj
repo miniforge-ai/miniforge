@@ -217,6 +217,24 @@
       (is (str/includes? body "## Review"))
       (is (str/includes? body "Clean code")))))
 
+(deftest ^{:stratum 0} step-generate-metadata-threads-answer-channel
+  (testing "§7.7.2: the releaser's recorded answers + answer-log land on state"
+    (let [releaser {:invoke-fn (fn [_ctx _input]
+                                 {:status :success
+                                  :output {:release/branch-name "mf/x"
+                                           :release/pr-title "T"
+                                           :release/commit-message "t"}
+                                  :codex-answers [{:peg-id "p" :answer "yes"}]
+                                  :codex-answer-log :recorded})}
+          state {:code-artifacts [{:code/files [{:path "a.clj" :action :create}]}]
+                 :task-description "X"
+                 :releaser releaser
+                 :context {:llm-backend :mock}}
+          result (sut/step-generate-metadata state)]
+      (is (not (sut/failed? result)))
+      (is (= [{:peg-id "p" :answer "yes"}] (:codex-answers result)))
+      (is (= :recorded (:codex-answer-log result))))))
+
 ;; ============================================================================
 ;; step-stage-dirty-files — passes through failure
 ;; ============================================================================
@@ -294,6 +312,21 @@
       (is (= 42 (get-in result [:metrics :pr-number])))
       (is (= "abc123" (get-in result [:metrics :commit-sha])))
       (is (= "mf/test" (get-in result [:metrics :branch]))))))
+
+(deftest ^{:stratum 0} pipeline-result-carries-answer-channel
+  (testing "§7.7.2 answer-channel keys ride success and failure results"
+    (let [base {:codex-answers [{:peg-id "p" :answer "no"}]
+                :codex-answer-log :recorded}
+          success (sut/pipeline->result
+                   (merge base {:release-artifact {:artifact/id (random-uuid)}
+                                :write-metrics {}}))
+          failure (sut/pipeline->result
+                   (merge base {:failure {:type :push-failed :message "x"}}))]
+      (is (= [{:peg-id "p" :answer "no"}] (:codex-answers success)))
+      (is (= :recorded (:codex-answer-log success)))
+      (is (= [{:peg-id "p" :answer "no"}] (:codex-answers failure))
+          "a failed release whose releaser answered still carries the record")
+      (is (= :recorded (:codex-answer-log failure))))))
 
 (deftest ^{:stratum 0} pipeline-result-failure-without-metrics
   (testing "failure without write-metrics uses empty map"
