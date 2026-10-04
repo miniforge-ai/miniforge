@@ -380,6 +380,16 @@
    inside the final segment intact."
   "===MINIFORGE-SESSION-OUTPUT-BOUNDARY===")
 
+(def ^{:stratum 0} ^:private capsule-answers-present-marker
+  "Sentinel line echoed BEFORE answers.edn's content when the file
+   exists, so the capsule readers can tell a present-but-empty file (a
+   write torn before any bytes landed — :unreadable, observations LOST)
+   from a missing one (:absent). `cat` output alone cannot make that
+   distinction; the host reader gets it from `.exists`. Same collision
+   assumption as `capsule-output-boundary`: answers.edn is written by
+   our own MCP server and is not expected to contain this line."
+  "===MINIFORGE-ANSWERS-PRESENT===")
+
 (defn- ^{:stratum 0} read-role-entry
   "Read the worktree artifact for `role` via `read-role-artifact` and
    return a `[role artifact]` map entry, or nil if the role file was
@@ -417,6 +427,17 @@
     :else                      :absent))
 
 ;------------------------------------------------------------------------------ Layer 1
+
+(defn- ^{:stratum 1} split-answers-segment
+  "Split an answers.edn `cat` segment that was prefixed by the
+   presence-marker echo into {:present? bool :content trimmed-str}."
+  [segment]
+  (let [trimmed (str/trim segment)
+        present? (str/starts-with? trimmed capsule-answers-present-marker)]
+    {:present? present?
+     :content  (if present?
+                 (str/trim (subs trimmed (count capsule-answers-present-marker)))
+                 trimmed)}))
 
 (defn ^{:stratum 1} validate-session
   "Validate a session map against the Session schema.
@@ -990,7 +1011,14 @@
                           sep
                           "cat " (file-artifacts/shell-quote reads-path) " 2>/dev/null"
                           sep
-                          "cat " (file-artifacts/shell-quote answers-path) " 2>/dev/null"
+                          ;; Presence marker before the cat: a
+                          ;; present-but-empty answers.edn (write torn
+                          ;; before any bytes landed) must read as
+                          ;; :unreadable, not :absent — cat output alone
+                          ;; cannot tell the two apart.
+                          "test -f " (file-artifacts/shell-quote answers-path)
+                          " && echo " capsule-answers-present-marker
+                          "; cat " (file-artifacts/shell-quote answers-path) " 2>/dev/null"
                           sep
                           "cat " (file-artifacts/shell-quote (:artifact-path session)) " 2>/dev/null")
         result      ((:exec! session) (:executor session) (:environment-id session)
@@ -1004,8 +1032,10 @@
                                      "$"))
         [misses-part reads-part answers-part artifact-part]
         (mapv str/trim (str/split stdout boundary-re 4))
-        codex-answers (when (seq answers-part)
-                        (parse-edn-content answers-part edn/read-string
+        {answers-present? :present? answers-content :content}
+        (split-answers-segment answers-part)
+        codex-answers (when (seq answers-content)
+                        (parse-edn-content answers-content edn/read-string
                                            :warn/codex-answers-parse answers-path))]
     {:artifact       (when (seq artifact-part)
                        (parse-edn-content artifact-part
@@ -1019,9 +1049,10 @@
                        (parse-edn-content reads-part edn/read-string
                                           :warn/context-reads-parse reads-path))
      :codex-answers  codex-answers
-     ;; §7.7.2 lost-vs-unanswered: an empty segment is a server that
-     ;; recorded no answers; a segment that fails to parse is a torn log.
-     :codex-answer-log (answer-log-state (seq answers-part) codex-answers)}))
+     ;; §7.7.2 lost-vs-unanswered: no file is a server that recorded no
+     ;; answers; a present file that is empty or fails to parse is a
+     ;; torn log.
+     :codex-answer-log (answer-log-state answers-present? codex-answers)}))
 
 (defn ^{:stratum 3} read-capsule-codex-answers
   "Read only answers.edn from a capsule session — the §7.7.2 answer
@@ -1033,15 +1064,21 @@
    Returns {:answers <vector-or-nil> :answer-log :absent|:recorded|:unreadable}."
   [session]
   (let [path    (str (:dir session) "/answers.edn")
+        ;; Presence marker before the cat — same reasoning as the
+        ;; batched reader: a present-but-empty file is a torn log
+        ;; (:unreadable), not a missing one (:absent).
+        cmd     (str "test -f " (file-artifacts/shell-quote path)
+                     " && echo " capsule-answers-present-marker
+                     "; cat " (file-artifacts/shell-quote path) " 2>/dev/null")
         result  ((:exec! session) (:executor session) (:environment-id session)
-                 (str "cat " (file-artifacts/shell-quote path) " 2>/dev/null")
-                 {:workdir (:workdir session)})
-        content (str/trim (get-in result [:data :stdout] ""))
+                 cmd {:workdir (:workdir session)})
+        {:keys [present? content]}
+        (split-answers-segment (get-in result [:data :stdout] ""))
         answers (when (seq content)
                   (parse-edn-content content edn/read-string
                                      :warn/codex-answers-parse path))]
     {:answers    answers
-     :answer-log (answer-log-state (seq content) answers)}))
+     :answer-log (answer-log-state present? answers)}))
 
 (defmacro ^{:stratum 3} with-capsule-artifact-session
   "Execute body with a capsule-aware artifact session (N11 §6.3).

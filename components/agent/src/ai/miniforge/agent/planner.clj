@@ -573,9 +573,14 @@
 (defn- ^{:stratum 2} recover-submitted-plan
   "Retry planner submission once when analysis exists but the final submission
    did not land, via the shared agent-agnostic runner. Returns
-   {:llm-response ... :submitted-plan ... :parsed-plan ...}."
+   {:llm-response ... :submitted-plan ... :parsed-plan ...} plus the
+   retry session's §7.7.2 answer channel (:codex-answers
+   :codex-answer-log) — the retry runs its own session with its own
+   answers.edn, and answers recorded there are observations the caller
+   must merge with the primary session's."
   [llm-client spec-text effective-system config context on-chunk prior-content]
-  (let [{:keys [llm-result artifact worktree-artifacts]}
+  (let [{:keys [llm-result artifact worktree-artifacts
+                codex-answers codex-answer-log]}
         (submission-recovery/run-recovery-session
          {:context          context
           :llm-client       llm-client
@@ -587,10 +592,12 @@
         submitted-plan (:structured-artifact normalized)
         parsed-plan    (when-not submitted-plan
                          (:parsed-content normalized))]
-    {:llm-response   llm-result
-     :normalized     normalized
-     :submitted-plan submitted-plan
-     :parsed-plan    parsed-plan}))
+    {:llm-response     llm-result
+     :normalized       normalized
+     :submitted-plan   submitted-plan
+     :parsed-plan      parsed-plan
+     :codex-answers    codex-answers
+     :codex-answer-log codex-answer-log}))
 
 ;------------------------------------------------------------------------------ Layer 3
 
@@ -801,9 +808,21 @@
                ;; lost-vs-unanswered answer-log marker) ride the planner
                ;; result so plan.clj can hand them to the consultation
                ;; summary. some?-not-seq — same reasoning as the
-               ;; implementer's threading.
-               (some? codex-answers) (assoc :codex-answers codex-answers)
-               (some? codex-answer-log) (assoc :codex-answer-log codex-answer-log))))))))
+               ;; implementer's threading. The submission retry runs its
+               ;; own session: its answers append AFTER the primary log
+               ;; (last-recording-wins includes an answer revised during
+               ;; the retry) and a torn log in either session wins the
+               ;; marker.
+               (or (some? codex-answers)
+                   (some? (:codex-answers retry-result)))
+               (assoc :codex-answers
+                      (vec (concat codex-answers (:codex-answers retry-result))))
+               (or (some? codex-answer-log)
+                   (some? (:codex-answer-log retry-result)))
+               (assoc :codex-answer-log
+                      (artifact-session/merge-answer-logs
+                       (keep identity [codex-answer-log
+                                       (:codex-answer-log retry-result)]))))))))))
 
       :validate-fn validate-plan
 

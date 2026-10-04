@@ -422,6 +422,11 @@
    (white-box access, same pattern as run-session in the capsule tests)."
   @(ns-resolve 'ai.miniforge.agent.artifact-session 'capsule-output-boundary))
 
+(def ^{:stratum 0} ^:private answers-present-marker
+  "The production answers-presence sentinel, resolved like
+   capsule-boundary above."
+  @(ns-resolve 'ai.miniforge.agent.artifact-session 'capsule-answers-present-marker))
+
 (defn- ^{:stratum 0} outputs-read?
   "True when `cmd` is the batched session-outputs read (the only command
    that references the context files)."
@@ -489,7 +494,9 @@
       (is (= :unreadable (:codex-answer-log result))
           "a present-but-unparseable log is LOST observations, not absence"))))
 
-(deftest ^{:stratum 0} read-capsule-codex-answers-test
+;------------------------------------------------------------------------------ Layer 1
+
+(deftest ^{:stratum 1} read-capsule-codex-answers-test
   ;; The lean answers-only reader for read-only capsule sessions
   ;; (with-readonly-session): one cat, one file, the §7.7.2 marker.
   (let [make-session (fn [stdout calls]
@@ -505,12 +512,13 @@
     (testing "recorded answers come back with :recorded in one round-trip"
       (let [calls (atom [])
             r (session/read-capsule-codex-answers
-               (make-session (pr-str answers) calls))]
+               (make-session (str answers-present-marker "\n" (pr-str answers))
+                             calls))]
         (is (= 1 (count @calls)))
         (is (str/includes? (first @calls) "answers.edn"))
         (is (= answers (:answers r)))
         (is (= :recorded (:answer-log r)))))
-    (testing "no file (empty stdout) reads back :absent"
+    (testing "no file (empty stdout, no presence marker) reads back :absent"
       (let [r (session/read-capsule-codex-answers (make-session "" (atom [])))]
         (is (nil? (:answers r)))
         (is (= :absent (:answer-log r)))))
@@ -518,11 +526,16 @@
       (let [err (java.io.StringWriter.)
             r (binding [*err* err]
                 (session/read-capsule-codex-answers
-                 (make-session "{{{not edn" (atom []))))]
+                 (make-session (str answers-present-marker "\n{{{not edn")
+                               (atom []))))]
         (is (nil? (:answers r)))
-        (is (= :unreadable (:answer-log r)))))))
-
-;------------------------------------------------------------------------------ Layer 1
+        (is (= :unreadable (:answer-log r)))))
+    (testing "a present-but-EMPTY file (marker, no bytes) reads back :unreadable"
+      (let [r (session/read-capsule-codex-answers
+               (make-session answers-present-marker (atom [])))]
+        (is (nil? (:answers r)))
+        (is (= :unreadable (:answer-log r))
+            "a write torn before any bytes landed is LOST, not absent")))))
 
 (defn- ^{:stratum 1} code-artifact
   "Factory for code-artifact EDN maps written to a session's `:artifact-path`.
@@ -588,15 +601,22 @@
    misses/reads/artifact segments (chain order: the agent-authored
    artifact rides last so an embedded boundary cannot corrupt the
    server-written segments). Empty string = missing file (cat wrote
-   nothing; the echoed boundary lines remain). 3-arity keeps the older
-   call sites readable: no recorded peg answers."
+   nothing; the echoed boundary lines remain). A non-empty answers
+   segment carries the production presence marker the chain's `test -f`
+   echoes before the cat; pass `:torn-empty` as `answers` for a file
+   that exists with no bytes (marker, no content). 3-arity keeps the
+   older call sites readable: no recorded peg answers."
   ([misses reads artifact]
    (capsule-outputs-stdout misses reads "" artifact))
   ([misses reads answers artifact]
-   (str misses "\n" capsule-boundary "\n"
-        reads "\n" capsule-boundary "\n"
-        answers "\n" capsule-boundary "\n"
-        artifact "\n")))
+   (let [answers-segment (cond
+                           (= :torn-empty answers) answers-present-marker
+                           (seq answers) (str answers-present-marker "\n" answers)
+                           :else "")]
+     (str misses "\n" capsule-boundary "\n"
+          reads "\n" capsule-boundary "\n"
+          answers-segment "\n" capsule-boundary "\n"
+          artifact "\n"))))
 
 (defn- ^{:stratum 1} capsule-exec-stub
   "Executor stub for capsule-session tests. Returns `outputs-stdout` for the
@@ -923,6 +943,22 @@
       (is (nil? (:codex-answers result)))
       (is (= :unreadable (:codex-answer-log result))
           "a present-but-unparseable log is LOST observations, not absence")))
+
+  (testing "§7.7.2: a present-but-EMPTY answers.edn (write torn before any
+            bytes landed) marks :unreadable, not :absent"
+    (let [calls   (atom [])
+          stdout  (capsule-outputs-stdout "" "" :torn-empty
+                                          (pr-str (code-artifact)))
+          session {:dir            "/workspace/.miniforge-session"
+                   :artifact-path  "/workspace/.miniforge-session/artifact.edn"
+                   :workdir        "/workspace"
+                   :executor       :fake-executor
+                   :environment-id "env-1"
+                   :exec!          (capsule-exec-stub calls stdout)}
+          result  (session/read-capsule-session-outputs session)]
+      (is (nil? (:codex-answers result)))
+      (is (= :unreadable (:codex-answer-log result))
+          "the presence marker separates torn-empty from missing")))
 
   (testing "malformed segment emits parse WARN and yields nil for that file only"
     (let [calls   (atom [])
