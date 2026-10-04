@@ -20,50 +20,44 @@
   (:require
    [ai.miniforge.anomaly.interface :as anomaly]
    [ai.miniforge.phase.interface :as phase]
-   [ai.miniforge.phase-opsv.evidence-runtime :as evidence-runtime]))
+   [ai.miniforge.phase-opsv.evidence-runtime :as evidence-runtime]
+   [ai.miniforge.phase-opsv.lifecycle-outcome :as outcome]))
 
 ;------------------------------------------------------------------------------ Layer 0
 
-(def ^{:stratum 0} empty-metrics
-  {:tokens 0 :cost-usd 0.0 :duration-ms 0})
+(def ^{:stratum 0} phase-result outcome/phase-result)
 
 (defn ^{:stratum 0} fail-phase
   [ctx ex]
   (assoc ctx :phase
          (phase/fail-phase (:phase ctx) (phase/exception-error ex))))
 
+(defn- ^{:stratum 0} completed-metrics
+  [duration-ms]
+  (assoc outcome/empty-metrics :duration-ms duration-ms))
+
+(defn- ^{:stratum 0} persist-evidence [ctx]
+  (let [persisted (evidence-runtime/persist ctx)
+        snapshot (get-in persisted [:execution/input :opsv/evidence-snapshot])
+        output (get-in ctx [:phase :result :output])
+        retained (get-in output [:anomaly/data :opsv/phase-output] output)]
+    (if (anomaly/anomaly? snapshot)
+      (assoc-in persisted [:phase :result]
+                (outcome/phase-result (assoc-in snapshot [:anomaly/data :opsv/phase-output]
+                                   retained)))
+      persisted)))
+
 ;------------------------------------------------------------------------------ Layer 1
 
-(defn- ^{:stratum 1} success
-  [output]
-  {:status :success :output output :metrics empty-metrics})
-
-(defn- ^{:stratum 1} failure
-  [output]
-  {:status :error
-   :output output
-   :error {:message (:anomaly/message output)
-           :data (:anomaly/data output)}
-   :metrics empty-metrics})
-
-(defn- ^{:stratum 1} completed-metrics
-  [duration-ms]
-  (assoc empty-metrics :duration-ms duration-ms))
-
-;------------------------------------------------------------------------------ Layer 2
-
-(defn ^{:stratum 2} phase-result
-  [output]
-  (if (anomaly/anomaly? output) (failure output) (success output)))
-
-(defn ^{:stratum 2} complete-phase
+(defn ^{:stratum 1} complete-phase
   [ctx phase-key success? end-time duration-ms]
-  (cond-> (-> ctx
-              evidence-runtime/persist
+  (let [persisted (persist-evidence ctx)
+        success? (and success? (= :success (get-in persisted [:phase :result :status])))]
+    (cond-> (-> persisted
               (assoc-in [:phase :ended-at] end-time)
               (assoc-in [:phase :duration-ms] duration-ms)
               (assoc-in [:phase :status] (if success? :completed :failed))
               (assoc-in [:phase :metrics] (completed-metrics duration-ms))
               (assoc-in [:phase :result :metrics :duration-ms] duration-ms))
     success?
-    (update-in [:execution :phases-completed] (fnil conj []) phase-key)))
+      (update-in [:execution :phases-completed] (fnil conj []) phase-key))))
