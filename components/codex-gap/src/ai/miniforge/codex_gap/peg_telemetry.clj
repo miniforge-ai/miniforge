@@ -89,6 +89,34 @@
                        :allowed))))
         history))
 
+(defn- ^{:stratum 0} presented-pegs
+  "Every distinct peg presented in a run, keyed by id, from the two
+   per-run sources read once by the caller: `consult-pegs` (SPEC
+   $7.7.2.1 consultation entries -- the primary source, the only one
+   that can carry an explicit :answer) and `miss-pegs` (miss-ledger
+   rows, covering runs recorded before the consultation file existed).
+   An answered row wins its id; among answerless rows the first stands."
+  [miss-pegs consult-pegs]
+  (reduce (fn [acc {:keys [id] :as peg}]
+            (cond
+              (nil? id) acc
+              (some? (:answer peg)) (assoc acc id peg)
+              (contains? acc id) acc
+              :else (assoc acc id peg)))
+          {}
+          (concat miss-pegs consult-pegs)))
+
+(defn- ^{:stratum 0} explicit-answers-by-id
+  "{peg-id [answer ..]} -- every non-nil explicit :answer across the
+   run's consultation rows, in record order."
+  [consult-pegs]
+  (reduce (fn [acc {:keys [id answer]}]
+            (if (and id (some? answer))
+              (update acc id (fnil conj []) answer)
+              acc))
+          {}
+          consult-pegs))
+
 ;------------------------------------------------------------------------------ Layer 1
 
 (defn ^{:stratum 1} branches-collapsed?
@@ -152,6 +180,14 @@
                      entropy (entropy-bits freqs)
                      collapsed (count (filter :collapsed? obs))]
                  [peg {:runs (count obs)
+                       :unanswered-runs (count (remove (comp seq :answers) obs))
+                       :answer-sources (frequencies (keep :answer-source obs))
+                       ;; runs where the mechanism outranked recorded
+                       ;; explicit answers (SPEC $7.7.2.2) -- the
+                       ;; disagreement reader's pointer, never counted
+                       ;; into the entropy stream
+                       :mechanism-overrode-explicit
+                       (count (filter :explicit-answers obs))
                        ;; The mechanism that answered in some run wins over
                        ;; one that never did; ties resolve by sorted name.
                        :mechanism (or (->> obs (filter :observed?) (keep :mechanism) sort first)
@@ -170,16 +206,25 @@
 ;------------------------------------------------------------------------------ Layer 2
 
 (defn ^{:stratum 2} run-observations
-  "Per distinct peg presented in `run-dir`'s ledger: {:peg :mechanism
-   :collapsed? :answers :observed?} -- the answers its mechanism's gate
-   recorded in that run, or :observed? false with no answers when no
-   landing carries a mapped mechanism."
+  "Per distinct peg presented in `run-dir` (consultation record first,
+   miss ledger as the pre-$7.7.2 fallback): {:peg :mechanism :collapsed?
+   :answers :answer-source :observed?}.
+
+   The counted :answers stream obeys SPEC $7.7.2.2 -- mechanism outranks
+   self-report: a peg whose landing carries a mapped mechanism is
+   observed through its gate verdicts, and any explicit answers it ALSO
+   received ride :explicit-answers for the disagreement reader without
+   entering the counted stream twice (and without mixing the two answer
+   vocabularies in one entropy computation). A peg with no mapped
+   mechanism is observed through its explicit answers alone;
+   with neither, :observed? false and no answers."
   [run-dir nodes gate-map]
-  (let [pegs (->> (:entries (ledger/read-ledger (str run-dir)))
-                  (mapcat :miss/pegs)
-                  (filter :id)
-                  (reduce (fn [acc p] (if (contains? acc (:id p)) acc (assoc acc (:id p) p))) {})
-                  vals)
+  (let [miss-pegs (->> (:entries (ledger/read-ledger (str run-dir)))
+                       (mapcat :miss/pegs))
+        consult-pegs (->> (:entries (ledger/read-consultations (str run-dir)))
+                          (mapcat :consultation/pegs))
+        pegs (vals (presented-pegs miss-pegs consult-pegs))
+        explicit-by-id (explicit-answers-by-id consult-pegs)
         history (delay (read-gate-history run-dir))]
     (for [peg pegs
           :let [mechanisms (peg-mechanisms peg nodes)
@@ -187,12 +232,21 @@
                 ;; the answers -- the first mapped one, in sorted order.
                 mechanism (or (some #(when (contains? gate-map %) %) mechanisms)
                               (first mechanisms))
-                gate (get gate-map mechanism)]]
-      {:peg (:id peg)
-       :mechanism mechanism
-       :collapsed? (branches-collapsed? peg)
-       :answers (if gate (gate-answers @history gate) [])
-       :observed? (some? gate)})))
+                gate (get gate-map mechanism)
+                explicit (get explicit-by-id (:id peg) [])]]
+      (cond-> {:peg (:id peg)
+               :mechanism mechanism
+               :collapsed? (branches-collapsed? peg)
+               :answers (cond
+                          gate (gate-answers @history gate)
+                          (seq explicit) explicit
+                          :else [])
+               :answer-source (cond
+                                gate :mechanism
+                                (seq explicit) :explicit
+                                :else nil)
+               :observed? (boolean (or gate (seq explicit)))}
+        (and gate (seq explicit)) (assoc :explicit-answers explicit)))))
 
 ;------------------------------------------------------------------------------ Layer 3
 

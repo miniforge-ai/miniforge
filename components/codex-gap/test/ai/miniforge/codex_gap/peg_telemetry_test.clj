@@ -87,6 +87,23 @@
     (is (= "miniforge/gate/stale-references" (get-in (sut/aggregate (reverse obs)) ["p" :mechanism]))
         "independent of observation order")))
 
+(defn- ^{:stratum 0} consult-dir!
+  "A checkpoint run dir with one consultation entry presenting `pegs`
+   (SPEC §7.7.2.1 shape) and optionally a gate history."
+  ([root name pegs] (consult-dir! root name pegs nil))
+  ([root name pegs entries]
+   (let [dir (io/file root name)]
+     (.mkdirs dir)
+     (spit (io/file dir "codex-consultations.edn")
+           (str (pr-str {:consultation/id (random-uuid)
+                         :consultation/phase :implement
+                         :consultation/pegs pegs})
+                "\n"))
+     (when entries
+       (spit (io/file dir sut/gate-history-filename)
+             (apply str (map #(str (pr-str %) "\n") entries))))
+     dir)))
+
 ;------------------------------------------------------------------------------ Layer 1
 
 (deftest ^{:stratum 1} entropy-and-collapse-primitives
@@ -98,6 +115,38 @@
   (is (false? (sut/branches-collapsed? {:id "one" :landings {"only" ["x"]}})))
   (is (true? (sut/branches-collapsed? {:id "raw" :answers {"a" ["x"] "b" ["x"]}}))
       "the raw codex basis key is read too"))
+
+(deftest ^{:stratum 1} explicit-answers-observe-mechanismless-pegs
+  ;; SPEC §7.7.2: a peg with no mapped mechanism was unobservable before
+  ;; the answer channel; an explicit answer_peg recording now observes it.
+  ;; The consultation record alone suffices — clean runs write no miss.
+  (let [root (str (Files/createTempDirectory "peg-telemetry-exp" (make-array FileAttribute 0)))]
+    (consult-dir! root "run-a" [(assoc unmapped-peg :answer "x")])
+    (consult-dir! root "run-b" [(assoc unmapped-peg :answer "x")])
+    (consult-dir! root "run-c" [unmapped-peg])
+    (let [u (get-in (sut/peg-telemetry root nodes gate-map) [:pegs "unmapped"])]
+      (is (true? (:observed? u)))
+      (is (= {"x" 2} (:answers u)))
+      (is (= {:explicit 2} (:answer-sources u)))
+      (is (= 1 (:unanswered-runs u))
+          "presented-but-unanswered stays a distinguishable observation")
+      (is (nil? (:trigger u)) "two observations cannot trigger"))))
+
+(deftest ^{:stratum 1} mechanism-outranks-explicit-answers
+  ;; SPEC §7.7.2.2: where a peg has both a gate verdict and an explicit
+  ;; answer in the same run, the mechanism's verdict is counted; the
+  ;; explicit answers stay readable for the disagreement reader without
+  ;; entering the entropy stream (and without mixing vocabularies).
+  (let [root (str (Files/createTempDirectory "peg-telemetry-mech" (make-array FileAttribute 0)))]
+    (consult-dir! root "run-a" [(assoc drift-peg :answer "yes")]
+                  [{:phase :implement :decision :deny
+                    :phase/gate-failures [{:gate :stale-references}]}])
+    (let [drift (get-in (sut/peg-telemetry root nodes gate-map)
+                        [:pegs "did-you-update-every-consumer"])]
+      (is (= {:denied 1} (:answers drift))
+          "the counted stream is the gate's, not the self-report")
+      (is (= {:mechanism 1} (:answer-sources drift)))
+      (is (= 1 (:mechanism-overrode-explicit drift))))))
 
 (deftest ^{:stratum 1} telemetry-over-runs
   (let [root (str (Files/createTempDirectory "peg-telemetry" (make-array FileAttribute 0)))]
