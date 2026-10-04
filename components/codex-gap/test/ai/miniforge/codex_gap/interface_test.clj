@@ -58,6 +58,31 @@
     (is (= :codex-unavailable (:anchoring r)))
     (is (re-find #"anchoring: codex unavailable" (gap/render-report r)))))
 
+(deftest ^{:stratum 0} consultation-record-round-trips-beside-the-miss-ledger
+  ;; SPEC §7.7.2.1: consultations accrue per run whatever the outcome —
+  ;; the file the retirement trigger reads for zero-entropy evidence from
+  ;; clean runs. Same append/read machinery as the miss ledger, separate
+  ;; file, so neither contaminates the other.
+  (let [dir (str (java.nio.file.Files/createTempDirectory
+                   "codex-gap-test-"
+                   (into-array java.nio.file.attribute.FileAttribute [])))
+        entry (gap/build-consultation-entry
+               {:run-id "run-1" :phase :implement
+                :consultation {:status :pinned :pin-read? true
+                               :situation "changing-one-side-of-a-boundary"
+                               :pegs [{:id "peg-a" :answer "no"
+                                       :landings {"yes" ["p1"] "no" ["p2"]}}]
+                               :unmatched-answers nil}})]
+    (is (uuid? (:consultation/id entry)))
+    (is (= "no" (get-in entry [:consultation/pegs 0 :answer]))
+        "the explicit answer survives into the durable shape")
+    (is (= entry (gap/record-consultation! dir entry)))
+    (is (= {:entries [] :skipped 0} (gap/read-ledger dir))
+        "a consultation is not a miss — the miss ledger stays empty")
+    (let [{:keys [entries skipped]} (gap/read-consultations dir)]
+      (is (= [entry] entries))
+      (is (= 0 skipped)))))
+
 ;------------------------------------------------------------------------------ Layer 1
 
 (deftest ^{:stratum 1} no-situation-classifies-uncovered-first

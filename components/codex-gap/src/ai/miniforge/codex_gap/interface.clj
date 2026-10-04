@@ -58,6 +58,27 @@
   [dir entry]
   (ledger/append! dir entry))
 
+(defn ^{:stratum 0} build-consultation-entry
+  "Normalize one phase consultation into its durable per-run shape
+   (SPEC §7.7.2.1 — recorded whatever the phase outcome; ids and
+   timestamps stamped here, writers normalize)."
+  [consultation-record]
+  (ledger/build-consultation-entry consultation-record))
+
+(defn ^{:stratum 0} record-consultation!
+  "Append a consultation entry to the run's codex-consultations.edn under
+   `dir`. Same write/anomaly and nil/blank-dir contracts as record-miss!."
+  [dir entry]
+  (ledger/record-consultation! dir entry))
+
+(defn ^{:stratum 0} read-consultations
+  "All consultation entries under `dir`, oldest first:
+   {:entries [..] :skipped n-unreadable-lines}, or
+   {:codex-gap/anomaly :ledger-read-failed ...} on an environmental read
+   failure. Same nil/blank-dir programmer-error contract as record-miss!."
+  [dir]
+  (ledger/read-consultations dir))
+
 (defn ^{:stratum 0} read-ledger
   "All ledger entries under `dir`, oldest first:
    {:entries [..] :skipped n-unreadable-lines}, or
