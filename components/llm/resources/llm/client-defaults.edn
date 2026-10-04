@@ -11,7 +11,14 @@
   ;; completion is not cut at http-kit's 60 s default.
   :idle-timeout-ms 600000
   :anthropic {:api-version "2023-06-01"
-              :default-max-tokens 16000}}
+              :default-max-tokens 16000}
+  ;; Sent as the `provider` object of every OpenRouter request, in
+  ;; OpenRouter's own field names. OpenRouter serves one model from
+  ;; several hosts with different data policies; "deny" keeps a call
+  ;; off any host that retains prompts or trains on them. A model with
+  ;; no such host fails the call instead of falling back to one that
+  ;; collects.
+  :openrouter {:provider {:data_collection "deny"}}}
 
  ;; Framework defaults for a monitored streaming run. A role overrides
  ;; them per turn through its prompt config's :prompt/progress-monitor

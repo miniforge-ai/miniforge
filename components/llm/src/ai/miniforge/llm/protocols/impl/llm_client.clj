@@ -1300,13 +1300,6 @@
       (format endpoint (:model request))
       endpoint)))
 
-(defn ^{:stratum 2} openrouter-request-body
-  "Build an OpenRouter request body: the OpenAI Chat Completions shape,
-   with usage accounting requested so the response reports billed cost
-   and cached-token counts."
-  [request]
-  (assoc (openai-request-body request) :usage {:include true}))
-
 (defn- ^{:stratum 2} extract-anthropic
   "Text + usage from an Anthropic Messages response: join the `text`
    content blocks (tool-use and thinking blocks carry no answer text)."
@@ -1486,6 +1479,17 @@
    server before the client gives up."
   []
   (client-default [:http :idle-timeout-ms]))
+
+(defn ^{:stratum 3} openrouter-request-body
+  "Build an OpenRouter request body: the OpenAI Chat Completions shape,
+   with usage accounting requested so the response reports billed cost
+   and cached-token counts, and with the configured routing preferences
+   as the `provider` object. OpenRouter serves one model from several
+   hosts; the preferences decide which hosts may see the prompt."
+  [request]
+  (assoc (openai-request-body request)
+         :usage {:include true}
+         :provider (client-default [:http :openrouter :provider])))
 
 (defn- ^{:stratum 3} stream-line-timeout-ms
   []

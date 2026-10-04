@@ -17,7 +17,7 @@ exec. `:openai-compat` (#1428, #1440) can reach it with a base-URL
 override and an optional key, but nothing names it, the key is not
 required, and the response's cost and cache figures are dropped.
 
-Three commits:
+Four changes:
 
 1. **Usage fields.** The OpenAI wire shape reports cached input,
    cache-write input, and reasoning output tokens under
@@ -58,6 +58,17 @@ Three commits:
    `http-post-request` from Layer 1 to Layer 4; the function is moved,
    not changed beyond the one option.
 
+4. **Routing preference.** OpenRouter serves one model from several
+   hosts, and the hosts differ on whether they retain prompts or train
+   on them. Every request now carries a `provider` object read from
+   `client-defaults.edn` (`[:http :openrouter :provider]`), set to
+   `{data_collection: "deny"}`: only hosts that do neither may serve
+   the call. A model with no such host fails the call; it does not fall
+   back to a host that collects. The map is in OpenRouter's own field
+   names, so a deployment can add `order`, `zdr`, or `only` there.
+   Reading a client default lifts `openrouter-request-body` from
+   Layer 2 to Layer 3.
+
 ## Verified against the live API
 
 One call through the real endpoint (key injected by `op run`, never
@@ -67,7 +78,11 @@ in the shell) returned HTTP 200 with `max_completion_tokens` and
 `prompt_tokens_details.cache_write_tokens`, and
 `completion_tokens_details.reasoning_tokens`. The Codex field names
 were read from a live `codex exec --json` `turn.completed` event
-(CLI 0.144.6).
+(CLI 0.144.6). With `provider: {data_collection: "deny"}` the endpoint
+still routed `deepseek/deepseek-v4-pro`, `deepseek/deepseek-v4-flash`,
+`moonshotai/kimi-k2.6`, `google/gemini-3.1-pro-preview`,
+`google/gemini-3.8-flash`, and `anthropic/claude-sonnet-5` (one short
+call each).
 
 ## Stratum lint
 
@@ -81,8 +96,9 @@ SL003, with every other pre-commit check passing.
 ## Tests
 
 `http-providers-test`, `network-health-test`, `interface-test`: 102
-tests, 503 assertions. New: OpenRouter wiring, request body, round
-trip (URL, Bearer key, usage flag, usage breakdown, billed cost,
+tests, 506 assertions. New: OpenRouter wiring, request body, round
+trip (URL, Bearer key, usage flag, routing preference, usage
+breakdown, billed cost,
 `:tokens` unchanged), missing key fails closed before any request;
 OpenAI usage details kept and no nil keys without them; Codex
 cached-input and reasoning counts kept, absent when unreported; the

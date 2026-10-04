@@ -129,11 +129,15 @@
                         :max_completion_tokens)))))
 
 (deftest ^{:stratum 0} openrouter-request-body-test
-  (testing "the OpenAI body, plus the usage-accounting flag that makes the
-            response report billed cost and cached-token counts"
-    (let [request {:prompt "q" :system "sys" :model "vendor/model" :max-tokens 64}]
-      (is (= (assoc (impl/openai-request-body request) :usage {:include true})
-             (impl/openrouter-request-body request))))))
+  (let [request {:prompt "q" :system "sys" :model "vendor/model" :max-tokens 64}
+        body (impl/openrouter-request-body request)]
+    (testing "the OpenAI body, plus the usage-accounting flag that makes the
+              response report billed cost and cached-token counts"
+      (is (= (impl/openai-request-body request)
+             (dissoc body :usage :provider)))
+      (is (= {:include true} (:usage body))))
+    (testing "routing is limited to hosts that do not retain or train on prompts"
+      (is (= {:data_collection "deny"} (:provider body))))))
 
 (deftest ^{:stratum 0} gemini-request-body-test
   (testing "assistant role maps to model; system rides in systemInstruction"
@@ -350,7 +354,8 @@
       (is (= (str "Bearer " test-api-key)
              (get-in captured [:headers "Authorization"])))
       (is (= "vendor/model" (:model (:body captured))))
-      (is (= {:include true} (:usage (:body captured)))))
+      (is (= {:include true} (:usage (:body captured))))
+      (is (= "deny" (get-in captured [:body :provider :data_collection]))))
     (testing "response keeps the cache and reasoning breakdown and the billed cost"
       (is (:success result))
       (is (= "answer" (:content result)))
