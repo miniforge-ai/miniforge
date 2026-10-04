@@ -520,3 +520,31 @@
     (let [u (get-in (sut/peg-telemetry root nodes gate-map) [:pegs "unmapped"])]
       (is (= {"x" 1 "y" 1} (:answers u))
           "the file's answer and the lost identity's recovery both count, once each"))))
+
+(deftest ^{:stratum 1} metadata-unions-over-every-snapshot-the-run-presented
+  ;; Review catch on #1993 round 10: a peg presented with two landing
+  ;; snapshots in one run (one mapped and collapsed, one unmapped and
+  ;; answered) must keep the gate verdicts AND the collapsed-branch
+  ;; trigger whichever order the snapshots arrived in.
+  (let [deny {:phase :implement :decision :deny
+              :phase/gate-failures [{:gate :stale-references}]}
+        mapped-collapsed {:id "shifting"
+                          :landings {"a" ["contract-drift-is-silent"]
+                                     "b" ["contract-drift-is-silent"]}}
+        unmapped-open (assoc {:id "shifting"
+                              :landings {"yes" ["other-problem"]
+                                         "no" ["unmapped-problem"]}}
+                             :answer "yes")]
+    (doseq [rows [[mapped-collapsed unmapped-open]
+                  [unmapped-open mapped-collapsed]]]
+      (let [root (str (Files/createTempDirectory "peg-telemetry-union" (make-array FileAttribute 0)))]
+        (consult-dir! root "run-a" rows [deny])
+        (let [s (get-in (sut/peg-telemetry root nodes gate-map) [:pegs "shifting"])]
+          (is (= "miniforge/gate/stale-references" (:mechanism s))
+              "the mapped snapshot's mechanism survives either order")
+          (is (= {:denied 1} (:answers s))
+              "the gate verdict is the counted stream")
+          (is (= ["yes"] (:explicit-answers s))
+              "the overridden explicit answer stays inspectable")
+          (is (= 1 (:collapsed-runs s))
+              "the collapsed snapshot's trigger survives either order"))))))

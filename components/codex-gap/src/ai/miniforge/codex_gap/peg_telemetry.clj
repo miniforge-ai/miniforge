@@ -89,32 +89,25 @@
                        :allowed))))
         history))
 
-(defn- ^{:stratum 0} presented-pegs
-  "Every distinct peg presented in a run, keyed by id, from the two
-   per-run sources read once by the caller. Consultation rows (SPEC
-   $7.7.2.1 -- the snapshot the run actually presented) own the landing
-   metadata outright: a miss row never displaces one, because a stale
-   miss snapshot picking the mechanism is exactly the defect this merge
-   prevents. Miss-only ids merge by the one-source rule (answered row
-   beats answerless, supplying its own metadata). Answer COUNTING never
-   reads the merged row: consultation answers come from
-   explicit-answers-by-id and lost-consultation survival from
-   miss-explicit-answers-by-id, each validated against its own row."
+(defn- ^{:stratum 0} snapshots-by-id
+  "{peg-id [distinct snapshot rows]} for every peg presented in a run.
+   Consultation rows (SPEC $7.7.2.1) own a peg's snapshots outright --
+   ALL its distinct landing maps are kept, because mechanism detection
+   and the collapsed-branch trigger must see every snapshot the run
+   presented, not whichever row a merge would select. Miss rows stand in
+   only for ids the consultation record never presented (a stale miss
+   snapshot must not pick the mechanism). Rows dedupe by landing map
+   with :answer stripped: answers are counted by the identity-reconciled
+   maps, never read from snapshots."
   [miss-pegs consult-pegs]
-  (let [one-source (fn [acc {:keys [id] :as peg}]
-                     (cond
-                       (nil? id) acc
-                       (some? (:answer peg)) (assoc acc id peg)
-                       (contains? acc id) acc
-                       :else (assoc acc id peg)))
-        consults (reduce one-source {} consult-pegs)]
-    (reduce (fn [acc {:keys [id] :as peg}]
-              (cond
-                (nil? id) acc
-                (contains? consults id) acc
-                :else (one-source acc peg)))
-            consults
-            miss-pegs)))
+  (let [dedupe-rows (fn [rows]
+                      (->> rows (map #(dissoc % :answer)) distinct vec))
+        consults (group-by :id (filter :id consult-pegs))
+        misses (group-by :id (filter :id miss-pegs))]
+    (into {}
+          (map (fn [id]
+                 [id (dedupe-rows (get consults id (get misses id)))]))
+          (distinct (concat (keys consults) (keys misses))))))
 
 ;------------------------------------------------------------------------------ Layer 1
 
@@ -323,7 +316,7 @@
         consult-res (ledger/read-consultations (str run-dir))
         miss-pegs (mapcat :miss/pegs (get ledger-res :entries []))
         consult-pegs (mapcat :consultation/pegs (get consult-res :entries []))
-        pegs (vals (presented-pegs miss-pegs consult-pegs))
+        snapshots (snapshots-by-id miss-pegs consult-pegs)
         explicit-by-id (explicit-answers-by-id consult-pegs)
         surviving-ids (into #{} (keep :consultation/id)
                             (get consult-res :entries []))
@@ -340,29 +333,33 @@
                                (pos? (get consult-res :skipped 0))))
      :observations
      (vec
-      (for [peg pegs
-            :let [mechanisms (peg-mechanisms peg nodes)
+      (for [[id peg-snapshots] snapshots
+            :let [mechanisms (->> peg-snapshots
+                                  (mapcat #(peg-mechanisms % nodes))
+                                  distinct
+                                  sort)
                   ;; The mechanism reported is the one whose gate produced
-                  ;; the answers -- the first mapped one, in sorted order.
+                  ;; the answers -- the first mapped one, in sorted order,
+                  ;; across EVERY snapshot the run presented.
                   mechanism (or (some #(when (contains? gate-map %) %) mechanisms)
                                 (first mechanisms))
                   gate (get gate-map mechanism)
                   ;; When the consultation file is lost but the miss ledger
                   ;; survives, the selected row's own :answer (copied into
                   ;; :miss/pegs by build-entry) is the surviving record.
-                  consult-answers (get explicit-by-id (:id peg))
+                  consult-answers (get explicit-by-id id)
                   ;; Identity-reconciled recovery is a UNION with the
                   ;; file's answers: a consultation whose rows the file
                   ;; lost contributes from its miss copies even when a
                   ;; sibling consultation's rows survived. Pre-identity
                   ;; entries keep the old conservative gate (only when
                   ;; nothing else answered).
-                  recovered (get recovered-by-id (:id peg))
+                  recovered (get recovered-by-id id)
                   legacy (when (and (empty? (:valid consult-answers))
                                     (empty? (:invalid consult-answers))
                                     (empty? (:valid recovered))
                                     (empty? (:invalid recovered)))
-                           (get legacy-by-id (:id peg)))
+                           (get legacy-by-id id))
                   valid-explicit (vec (concat (:valid consult-answers)
                                               (:valid recovered)
                                               (:valid legacy)))
@@ -371,9 +368,9 @@
                                                 (:invalid legacy)))
                   mech-answers (when gate (gate-answers entries gate))
                   mech-won? (boolean (seq mech-answers))]]
-        (cond-> {:peg (:id peg)
+        (cond-> {:peg id
                  :mechanism mechanism
-                 :collapsed? (branches-collapsed? peg)
+                 :collapsed? (boolean (some branches-collapsed? peg-snapshots))
                  :answers (cond
                             mech-won? mech-answers
                             (seq valid-explicit) valid-explicit
