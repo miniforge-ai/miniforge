@@ -238,6 +238,9 @@
    ;; phase-start pin (phase-software-factory codex-pin); this lets an
    ;; agent RE-consult mid-run for a different situation.
    {:mcp/server :context :mcp/tool :consider_situation}
+   ;; The explicit half of the §7.7 answer channel: records the agent's
+   ;; answer to a presented peg (answers.edn beside context-reads.edn).
+   {:mcp/server :context :mcp/tool :answer_peg}
    ;; Agent-agnostic edit path: writes to the worktree + refreshes the cache,
    ;; needs no prior native Read. The reliable way to modify EXISTING files
    ;; across Claude/Codex/Cursor (native Write/Edit require a prior Read, which

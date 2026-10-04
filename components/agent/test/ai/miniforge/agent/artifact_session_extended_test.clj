@@ -269,9 +269,9 @@
     (let [mcp-entries (filter map? session/mcp-tools)]
       (is (every? #(= :context (:mcp/server %)) mcp-entries))
       (is (= #{:context_read :context_grep :context_glob :context_write
-               :consider_situation}
+               :consider_situation :answer_peg}
              (into #{} (map :mcp/tool) mcp-entries))
-          "submit removed; context_write is the worktree write path; consider_situation is the codex consultation surface")))
+          "submit removed; context_write is the worktree write path; consider_situation is the codex consultation surface; answer_peg is the §7.7.2 answer channel")))
 
   (testing "native Write is auto-approved — plan.edn submission path"
     ;; Iter 15 dogfood regression — Write wasn't in --allowedTools,

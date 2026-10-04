@@ -35,6 +35,7 @@
   (tools/register-handler! :context-grep  context-cache/handle-context-grep)
   (tools/register-handler! :context-glob  context-cache/handle-context-glob)
   (tools/register-handler! :context-write context-cache/handle-context-write)
+  (tools/register-handler! :answer-peg context-cache/handle-answer-peg)
   (tools/register-handler! :consider-situation codex-tool/handle-consider-situation))
 
 (defn ^{:stratum 0} process-message
@@ -92,6 +93,7 @@
      (finally
        (context-cache/flush-misses! artifact-dir)
        (context-cache/flush-reads! artifact-dir)
+       (context-cache/flush-answers! artifact-dir)
        ;; Persist the accumulated cache (incl. read-through additions) to the
        ;; worktree so the next phase loads it — cross-phase write-through.
        (context-cache/save-cache!)))))

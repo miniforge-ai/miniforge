@@ -55,6 +55,30 @@
     (testing "coverage says the §4.4 retirement trigger has no data (§7.7)"
       (is (str/includes? text "retirement: untriggerable")))))
 
+(deftest ^{:stratum 0} render-presents-pegs-as-answerable-questions
+  (let [resp {:situation "s1" :situation-title "t"
+              :landings [{:id "p" :type "problem" :title "t" :horizon "tactical"
+                          :confidence "high" :open [] :scars [] :escalations []}]
+              :coverage {:landing-count 1 :unanchored-count 0
+                         :horizon-mix {"tactical" 1}
+                         :no-strategic-coverage? false
+                         :newest-scar-date nil
+                         :retirement :untriggerable}
+              :pegs [{:id "peg-routed"
+                      :title "Peg 1 · Did you check?"
+                      :answers {"yes" ["p"] "no" ["p" "q"]}}
+                     {:id "peg-bare" :title "Peg 2 · Unrouted?" :answers {}}]}
+        text (codex/render-response resp)]
+    (testing "id, question and the answer vocabulary all render verbatim (§7.7)"
+      (is (str/includes? text "pegs — answer each listed vocabulary with the answer_peg tool"))
+      (is (str/includes? text "- [peg-routed] Peg 1 · Did you check?  (answers: no | yes)")))
+    (testing "a peg with no routed answers renders without a vocabulary"
+      (is (str/includes? text "- [peg-bare] Peg 2 · Unrouted?  (no routed answers — nothing to record)"))
+      (is (not (str/includes? text "Peg 2 · Unrouted?  (answers:"))))
+    (testing "pegs render after the landings — answers should be informed ones"
+      (is (< (str/index-of text "landings")
+             (str/index-of text "pegs — answer each"))))))
+
 (deftest ^{:stratum 0} render-says-when-strategic-coverage-is-absent
   (let [resp {:situation "s1" :situation-title "t"
               :landings [{:id "p" :type "problem" :title "t" :horizon "tactical"
@@ -76,8 +100,13 @@
     (is (str/includes? (:content entry) "Pinned at phase start"))
     (is (str/includes? (:content entry) "situation: process-stuck-or-slow"))
     (is (str/includes? (:content entry) "coverage:"))
-    (testing "the §7.7 telemetry basis rides the entry, outside the file body"
+    (testing "the §7.7 telemetry basis rides the entry, and the questions
+              render into the body — the answer channel needs them in
+              front of the agent, as prose, never as the raw EDN basis"
       (is (= 5 (count (:pegs entry))))
+      (is (str/includes? (:content entry)
+                         "pegs — answer each listed vocabulary with the answer_peg tool"))
+      (is (str/includes? (:content entry) "[already-failed-silently]"))
       (is (not (str/includes? (:content entry) ":pegs"))))))
 
 (deftest ^{:stratum 0} pin-entry-surfaces-anomalies-instead-of-pinning-them
