@@ -145,7 +145,7 @@
 (deftest ^{:stratum 1} with-in-flight-returns-quiesced-sentinel-when-fenced
   ;; Pins the TOCTOU fix at the unit level: with-in-flight bypasses
   ;; body-fn and returns the sentinel when try-acquire-in-flight! finds
-  ;; the workflow already fenced in its atomic swap!.
+  ;; the workflow already fenced during atomic admission.
   (let [wid    (random-uuid)
         stream (atom {:in-flight 0 :quiesced-workflows #{wid}})
         event  (evt :test/event wid)

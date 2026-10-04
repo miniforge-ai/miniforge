@@ -416,7 +416,7 @@
     ;; in-memory log and every other sink holding the secret.
     (let [event (redaction/redact event)]
       ;; Fast path: check quiesce before acquiring the in-flight slot so
-      ;; already-quiesced workflows skip the swap! entirely.
+      ;; already-quiesced workflows skip atomic admission entirely.
       (or (fence/rejection-if-quiesced stream event)
           (let [result (fence/with-in-flight stream event
                          (fn []

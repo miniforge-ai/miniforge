@@ -13,8 +13,8 @@ Base: main after #1985. No dependency on the timeline cleanup.
 
 ## Design
 
-The atomic transition is pure. A refused acquire returns the identical state;
-a successful acquire increments the counter. The successful before/after pair
+The `acquire-state` transition is pure: refusal returns the identical state;
+admission increments the counter. The successful before/after pair
 from `swap-vals!` determines ownership without side effects inside a retried CAS.
 An acquired slot is released in finally, including when publication throws.
 The public publisher keeps its existing sequencing and delivery behavior.
