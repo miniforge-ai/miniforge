@@ -11,7 +11,7 @@
   (doseq [[ssn redacted] [["000-00-0000" "[REDACTED]"]
                          ["employee_ssn_000-00-0000_suffix" "employee_ssn_[REDACTED]_suffix"]]]
     (doseq [value [ssn {:note (str "before " ssn " after")}
-                    {ssn :value} {(keyword ssn) :value} (with-meta [] {:note ssn})]]
+                   {ssn :value} {(keyword ssn) :value} (with-meta [] {:note ssn})]]
       (let [clean (redaction/redact value)]
         (is (not (redaction/clean? value)))
         (is (redaction/clean? clean))

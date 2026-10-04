@@ -45,10 +45,10 @@ Keep every namespace within three strata and every commit below its reportable b
 
 Packaged CLI and manager tests verify valid round trips and rejection before export writes.
 Tampering and missing seals leave existing destinations unchanged.
-Evidence and redaction consumers and a CLI build pass. CLI regressions pass
-20 tests / 90 assertions; packaged CLI, publication, compliance and SSN coverage
-passes 31 tests / 208 assertions. The root standards scan reports no violations.
-Run normal hooks before each commit and refresh verification before merge.
+Run CLI, evidence and redaction consumers across all four product projects.
+Rebuild the CLI and run packaged CLI, publication, compliance, scanner and SSN
+regressions. Require zero violations from the root standards scan.
+Run normal hooks before each commit and verify the refreshed branch before push.
 Current-head review and all CI, including Build, remain mandatory merge gates.
 Legacy nil/false detail fields retain canonical fallbacks, including status,
 phase names and artifacts. Failure attribution selects the first truthy source.
