@@ -81,8 +81,9 @@
     (testing "skipped consultation carries its anomaly"
       (is (= {:pinned? false :status :skipped :anomaly :codex-unreadable
               :situation nil :pegs nil :pin-read? nil}
-             (codex-pin/consultation-summary
-               {:entry nil :status :skipped :anomaly :codex-unreadable} nil))))))
+             (dissoc (codex-pin/consultation-summary
+                       {:entry nil :status :skipped :anomaly :codex-unreadable} nil)
+                     :consultation-id))))))
 
 (deftest ^{:stratum 0} consultation-summary-records-per-peg-telemetry
   ;; SPEC §7.7: per peg presented, which way it answered — push delivery
@@ -185,3 +186,14 @@
             {:id "peg-a" :answer "yes" :landings {"yes" ["p9"] "no" ["p2"]}}]
            (:pegs summary))
         "identical rows collapse; a different landing snapshot survives")))
+
+(deftest ^{:stratum 0} consultation-summary-stamps-one-identity-per-construction
+  ;; SPEC §7.7.2.1: every miss entry of a leave and its consultation
+  ;; record share the summary's identity; two constructions (a retry
+  ;; attempt) are two consultations.
+  (let [outcome {:entry {:path codex-pin/pin-path} :status :pinned
+                 :anomaly nil :situation "s" :pegs []}
+        s1 (codex-pin/consultation-summary outcome nil)
+        s2 (codex-pin/consultation-summary outcome nil)]
+    (is (uuid? (:consultation-id s1)))
+    (is (not= (:consultation-id s1) (:consultation-id s2)))))
