@@ -68,8 +68,9 @@
       (is (true? (:no-strategic-coverage? coverage)))
       (is (= {"operational" 6 "tactical" 1} (:horizon-mix coverage)))
       (is (= "2026-06-07" (:newest-scar-date coverage))))
-    (testing "coverage confesses the §4.4 trigger has no data yet (§7.7)"
-      (is (= :untriggerable (:retirement coverage))))))
+    (testing "coverage reports the §4.4 trigger as live — the §7.7.2
+              answer channel exists (answer_peg + mechanism verdicts)"
+      (is (= :triggerable (:retirement coverage))))))
 
 (deftest ^{:stratum 1} consider-carries-the-per-peg-telemetry-basis
   (let [{:keys [pegs]} (codex/consider fixture-dir "process-stuck-or-slow")]
