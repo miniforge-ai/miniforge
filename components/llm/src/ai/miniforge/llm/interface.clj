@@ -72,7 +72,7 @@
    - :backend - Backend keyword - default :codex. CLI backends:
                 :opencode, :codex, :claude, :cursor, :echo. HTTP
                 backends: :ollama, :anthropic-api, :openai-api,
-                :gemini-api.
+                :gemini-api, :openai-compat, :openrouter.
    - :model   - Optional model id passed through to the backend
    - :api-key - Optional API key for the direct HTTP providers;
                 falls back to the backend's :api-key-env variable
