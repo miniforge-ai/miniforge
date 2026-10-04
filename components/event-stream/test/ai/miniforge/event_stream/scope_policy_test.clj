@@ -25,7 +25,7 @@
 (deftest ^{:stratum 1} non-workflow-families-require-their-own-key
   (doseq [[type scope key id] [[:pack/installed :pack :pack/id "pack/example"]
                               [:repo-index/canary-failed :repo :repo/id "owner/repo"]
-                              [:supervisory/spec-upserted :supervisory-entity :supervisory/entity-key (random-uuid)]
+                              [:supervisory/workflow-upserted :supervisory-entity :supervisory/entity-key (random-uuid)]
                               [:reliability/sli-computed :deployment :deployment/id "deployment-test"]
                               [:supervisory/pr-upserted :supervisory-entity :supervisory/entity-key ["owner/repo" 42]]]]
     (let [draft (event type {key id :workflow/id (random-uuid)})]
@@ -43,6 +43,12 @@
 (deftest ^{:stratum 1} no-synthetic-nil-workflow-bucket
   (doseq [fields [{} {:workflow/id nil} {:pr/id (random-uuid)}]]
     (is (anomaly/anomaly? (policy/scope (event :workflow/started fields))))))
+
+(deftest ^{:stratum 1} unregistered-supervisory-members-cannot-fall-back-to-workflow
+  (doseq [type [:supervisory/spec-upserted :supervisory/unknown]
+          fields [{} {:workflow/id (random-uuid)}]]
+    (is (anomaly/anomaly?
+         (policy/scope (event type (assoc fields :supervisory/entity-key (random-uuid))))))))
 
 (comment
   ::authoritative-scope)

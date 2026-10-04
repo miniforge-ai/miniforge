@@ -13,6 +13,9 @@ This is the application layer between #1983 and public publisher wiring.
 ## Changes
 
 - Resolve N3 family scope independently of incidental cross-reference keys.
+- Refuse unregistered supervisory family members, including the existing spec
+  snapshot extension identified by N3 Annex A.3. Their entity contracts need an
+  explicit specification amendment before acknowledged publication can accept them.
 - Construct explicit volatile or durable publication ports through one factory.
 - Serialize commit and admission, then drain callbacks outside the commit lock.
 - Keep acknowledged records queued on critical delivery failure; preserve fatal

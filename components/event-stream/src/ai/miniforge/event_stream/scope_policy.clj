@@ -26,7 +26,7 @@
    :deployment #{:reliability/sli-computed :reliability/slo-breach
                  :reliability/error-budget-update :reliability/degradation-mode-changed}
    :repo #{:repo-index/quality-computed :repo-index/canary-failed}
-   :supervisory-entity #{:supervisory/spec-upserted :supervisory/workflow-upserted :supervisory/agent-upserted
+   :supervisory-entity #{:supervisory/workflow-upserted :supervisory/agent-upserted
                          :supervisory/pr-upserted :supervisory/policy-evaluated
                          :supervisory/attention-derived :supervisory/intervention-upserted
                          :supervisory/evidence-upserted :supervisory/artifact-upserted
@@ -35,6 +35,10 @@
 
 (defn- ^{:stratum 0} family-entries [[scope types]]
   (map #(vector % scope) types))
+
+(defn- ^{:stratum 0} fallback-scope-type [event-type]
+  ;; N3 section 3.19 requires explicit registration of every supervisory member.
+  (when-not (= "supervisory" (namespace event-type)) :workflow))
 
 ;------------------------------------------------------------------------------ Layer 1
 
@@ -51,7 +55,9 @@
    Inherited families must name a supported :scope/type; never infer it from keys."
   [event]
   (let [event-type (:event/type event)
-        scope-type (if (inherited? event-type) (:scope/type event) (get fixed-scopes event-type :workflow))
+        scope-type (if (inherited? event-type)
+                     (:scope/type event)
+                     (get fixed-scopes event-type (fallback-scope-type event-type)))
         field (get scope-fields scope-type)
         id (get event field)]
     (if (and field (some? id))
