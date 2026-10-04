@@ -17,27 +17,28 @@
 ;; limitations under the License.
 (ns ai.miniforge.event-stream.publish-helpers-test
   "Stratum-by-stratum tests for the helpers `publish!` composes. The
-   helpers are private (`defn-`) so tests reach them via `#'`-vars.
+   Fence helpers are separate; legacy delivery helpers remain private.
    Each helper is single-purpose; the existing `publish!` integration
    coverage in `core_test.clj` and `quiesce_drain_test.clj` exercises
    them composed."
   (:require
-   [clojure.test :refer [deftest is testing]]
-   [ai.miniforge.event-stream.core :as core]))
+   [clojure.test :refer [deftest is]]
+   [ai.miniforge.event-stream.core :as core]
+   [ai.miniforge.event-stream.publication-fence :as fence]))
 
 ;------------------------------------------------------------------------------ Layer 0
 
-(def ^{:stratum 0} ^:private workflow-quiesced?       #'core/workflow-quiesced?)
+(def ^{:stratum 0} ^:private workflow-quiesced?       fence/workflow-quiesced?)
 
-(def ^{:stratum 0} ^:private rejection-result         #'core/rejection-result)
+(def ^{:stratum 0} ^:private rejection-result         fence/rejection-result)
 
-(def ^{:stratum 0} ^:private rejection-if-quiesced    #'core/rejection-if-quiesced)
+(def ^{:stratum 0} ^:private rejection-if-quiesced    fence/rejection-if-quiesced)
 
-(def ^{:stratum 0} ^:private try-acquire-in-flight!   #'core/try-acquire-in-flight!)
+(def ^{:stratum 0} ^:private try-acquire-in-flight!   fence/try-acquire-in-flight!)
 
-(def ^{:stratum 0} ^:private with-in-flight           #'core/with-in-flight)
+(def ^{:stratum 0} ^:private with-in-flight           fence/with-in-flight)
 
-(def ^{:stratum 0} ^:private quiesced-sentinel        #'core/quiesced-sentinel)
+(def ^{:stratum 0} ^:private quiesced-sentinel        #'fence/quiesced-sentinel)
 
 (def ^{:stratum 0} ^:private record-event!            #'core/record-event!)
 
@@ -111,6 +112,15 @@
         ":in-flight is NOT incremented when fenced — the TOCTOU window is closed")))
 
 ;------------------------------------------------------------------------------ with-in-flight
+(deftest ^{:stratum 1} concurrent-acquires-count-every-owned-slot
+  (let [stream (core/create-event-stream {:sinks []})
+        event (evt)
+        attempts 32
+        acquire (partial try-acquire-in-flight! stream event)
+        pending (doall (repeatedly attempts #(future (acquire))))]
+    (is (every? true? (map deref pending)))
+    (is (= attempts (:in-flight @stream)))))
+
 (deftest ^{:stratum 1} with-in-flight-increments-and-decrements-around-body
   (let [stream   (atom {:in-flight 0})
         observed (atom nil)]

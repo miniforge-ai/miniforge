@@ -24,8 +24,9 @@
    pre-BD-2a race where headless exits could land before background
    producers finished publishing or sinks finished writing."
   (:require
-   [clojure.test :refer [deftest testing is]]
-   [ai.miniforge.event-stream.core :as core]))
+   [clojure.test :refer [deftest is]]
+   [ai.miniforge.event-stream.core :as core]
+   [ai.miniforge.event-stream.publication-fence :as fence]))
 
 ;------------------------------------------------------------------------------ Layer 0
 
@@ -130,9 +131,9 @@
     (is (= :sink-error (:reason result)))
     (is (= "kaboom" (-> result :failed-sinks first :error)))))
 
-(def ^{:stratum 0} ^:private with-in-flight-var  #'core/with-in-flight)
+(def ^{:stratum 0} ^:private with-in-flight-var  #'fence/with-in-flight)
 
-(def ^{:stratum 0} ^:private quiesced-sentinel-var #'core/quiesced-sentinel)
+(def ^{:stratum 0} ^:private quiesced-sentinel-var #'fence/quiesced-sentinel)
 
 ;------------------------------------------------------------------------------ Layer 1
 
