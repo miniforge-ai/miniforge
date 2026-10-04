@@ -41,7 +41,8 @@
           record (:opsv/actuation-record output)
           expected-mode (if safe-mode? :none :recommend-only)]
       (testing (str "requested " mode ", safe mode " safe-mode?)
-        (is (= verified-output (dissoc output :opsv/actuation-record)))
+        (is (= verified-output (select-keys output (keys verified-output))))
+        (is (= :deny (get-in output [:opsv/decision-envelope :envelope/decision])))
         (is (= mode (:requested-actuation-mode record)))
         (is (= expected-mode (:effective-actuation-mode record)))
         (is (= record (opsv/validate-actuation record)))

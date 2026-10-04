@@ -12,11 +12,15 @@
                        "components/buzzword-bingo/src"
                        "components/buzzword-bingo/resources"
                        "components/content-hash/src"
+                       "components/file-durability/src"
+                       "components/file-durability/resources"
                        "components/redaction/src"
                        "components/redaction/resources"
                        "components/opsv/src"
                        "components/opsv-actuation/src"
                        "components/opsv-actuation/resources"
+                       "components/opsv-provider-github/src"
+                       "components/opsv-provider-github/resources"
                        "components/logging/src"
                        "components/logging/resources"
                        "components/llm/src"
@@ -248,9 +252,11 @@
                       ai.miniforge/algorithms {:local/root "components/algorithms"}
                       ai.miniforge/buzzword-bingo {:local/root "components/buzzword-bingo"}
                       ai.miniforge/content-hash {:local/root "components/content-hash"}
+                      ai.miniforge/file-durability {:local/root "components/file-durability"}
                       ai.miniforge/redaction {:local/root "components/redaction"}
                       ai.miniforge/opsv {:local/root "components/opsv"}
                       ai.miniforge/opsv-actuation {:local/root "components/opsv-actuation"}
+                      ai.miniforge/opsv-provider-github {:local/root "components/opsv-provider-github"}
                       ai.miniforge/logging {:local/root "components/logging"}
                       ai.miniforge/llm {:local/root "components/llm"}
                       ai.miniforge/tool {:local/root "components/tool"}
@@ -376,6 +382,7 @@
                      ai.miniforge/bb-etl-runner    {:local/root "components/bb-etl-runner"}}}
 
   :test {:extra-paths ["development/test"
+                       "projects/miniforge/test-provider"
                        ;; bb task namespaces, so their tests can `require`
                        ;; them instead of `load-file` (which cannot resolve
                        ;; a task ns that requires a sibling task ns).
@@ -389,6 +396,7 @@
                        "components/redaction/test"
                        "components/opsv/test"
                        "components/opsv-actuation/test"
+                       "components/opsv-provider-github/test"
                        "components/response/test"
                        "components/fsm/test"
                        "components/logging/test"
@@ -441,6 +449,7 @@
                        "components/policy-calibration/test"
                        "components/decision-envelope/test"
                        "components/execution-grant/test"
+                       "components/file-durability/test"
                        "components/tenancy/test"
                        "components/effect-transaction/test"
                        "components/policy-clause/test"
@@ -538,8 +547,10 @@
                       ai.miniforge/algorithms {:local/root "components/algorithms"}
                       ai.miniforge/buzzword-bingo {:local/root "components/buzzword-bingo"}
                       ai.miniforge/content-hash {:local/root "components/content-hash"}
+                      ai.miniforge/file-durability {:local/root "components/file-durability"}
                       ai.miniforge/opsv {:local/root "components/opsv"}
                       ai.miniforge/opsv-actuation {:local/root "components/opsv-actuation"}
+                      ai.miniforge/opsv-provider-github {:local/root "components/opsv-provider-github"}
                       ai.miniforge/logging {:local/root "components/logging"}
                       ai.miniforge/llm {:local/root "components/llm"}
                       ai.miniforge/tool {:local/root "components/tool"}
@@ -715,6 +726,7 @@
                 :extra-deps {ai.miniforge/schema {:local/root "components/schema"}
                              ai.miniforge/algorithms {:local/root "components/algorithms"}
                              ai.miniforge/content-hash {:local/root "components/content-hash"}
+                             ai.miniforge/file-durability {:local/root "components/file-durability"}
                              ai.miniforge/opsv {:local/root "components/opsv"}
                              ai.miniforge/logging {:local/root "components/logging"}
                              ai.miniforge/llm {:local/root "components/llm"}

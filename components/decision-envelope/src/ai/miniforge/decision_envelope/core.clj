@@ -75,6 +75,12 @@
 
 ;------------------------------------------------------------------------------ Layer 2
 
+(def ^{:stratum 2} AllowingEnvelope
+  "A runtime envelope with no denial or unfulfilled obligations."
+  [:and schema/DecisionEnvelope
+   [:fn #(= :allow (:envelope/decision %)
+             (derive-decision (:envelope/reasons %) (:envelope/obligations %)))]])
+
 ;; Factory
 (defn ^{:stratum 2} envelope
   "Mint a DecisionEnvelope. `reasons`/`obligations` are vectors per the

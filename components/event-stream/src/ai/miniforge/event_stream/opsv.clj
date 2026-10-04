@@ -18,7 +18,9 @@
 (ns ai.miniforge.event-stream.opsv
   "N3 OPSV event constructors with preallocated N6 bundle correlation."
   (:require
-   [ai.miniforge.event-stream.core :as core]))
+   [ai.miniforge.event-stream.core :as core]
+   [ai.miniforge.event-stream.schema.opsv :as schema]
+   [ai.miniforge.event-stream.messages :as msg]))
 
 ;------------------------------------------------------------------------------ Layer 0
 
@@ -58,7 +60,7 @@
   ;; N3 section 3.14 deliberately includes both load values in the canonical
   ;; message; consumers that need structure should still use the payload keys.
   (opsv-event stream workflow-id evidence-id :opsv/load-step
-              [:opsv/step-id :opsv/intended-load :opsv/observed-load]
+              [:opsv/step-id :opsv/intended-load :opsv/observed-load :opsv/metric-snapshot-artifact-refs]
               (str "OPSV load step " (:opsv/step-id data) ": "
                    (pr-str (:opsv/intended-load data)) " → "
                    (pr-str (:opsv/observed-load data)))
@@ -76,14 +78,14 @@
   [stream workflow-id evidence-id data]
   (opsv-event stream workflow-id evidence-id :opsv.convergence/iteration
               [:opsv/iteration-id :opsv/params
-               :opsv/observed-metrics-summary]
+               :opsv/observed-metrics-summary :opsv/metric-snapshot-artifact-refs]
               (str "OPSV convergence iteration " (:opsv/iteration-id data))
               data))
 
 (defn ^{:stratum 2} policy-proposed
   [stream workflow-id evidence-id data]
   (opsv-event stream workflow-id evidence-id :opsv.policy/proposed
-              [:opsv/policy-hash :opsv/diff-artifact-refs :opsv/confidence]
+              [:opsv/policy-hash :opsv/diff-artifact-refs :opsv/confidence :opsv/policy-artifact-ref]
               (str "OPSV policy proposed: " (:opsv/policy-hash data))
               data))
 
@@ -91,7 +93,7 @@
   [stream workflow-id evidence-id data]
   (opsv-event stream workflow-id evidence-id :opsv.verification/result
               [:opsv/passed? :opsv/criteria-evaluation
-               :opsv/confidence :opsv/caveats]
+               :opsv/confidence :opsv/caveats :opsv/metric-snapshot-artifact-refs]
               (str "OPSV verification result: " (:opsv/passed? data))
               data))
 
@@ -103,6 +105,12 @@
               (str "OPSV actuation emitted: "
                    (:opsv/effective-actuation-mode data))
               data))
+
+(defn ^{:stratum 2} actuation-disposition
+  [stream workflow-id evidence-id data]
+  (opsv-event stream workflow-id evidence-id :opsv.actuation/disposition
+              (mapv first schema/disposition-entries)
+              (msg/t :opsv/actuation-disposition {:state (:opsv/effect-state data)}) data))
 
 (defn ^{:stratum 2} drift-detected
   [stream workflow-id evidence-id data]

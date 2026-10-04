@@ -821,6 +821,8 @@
                  "components/effect-transaction/resources"
                  "components/execution-grant/src"
                  "components/execution-grant/resources"
+                 "components/file-durability/src"
+                 "components/file-durability/resources"
                  "components/automation-edge-correlator/src"
                  "components/workflow-resume/src"
                  "components/workflow-resume/resources"

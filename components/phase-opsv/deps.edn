@@ -1,10 +1,18 @@
 {:paths ["src" "resources"]
  :deps {ai.miniforge/anomaly {:local/root "../anomaly"}
+        ai.miniforge/artifact {:local/root "../artifact"}
         ai.miniforge/content-hash {:local/root "../content-hash"}
+        ai.miniforge/decision-envelope {:local/root "../decision-envelope"}
+        ai.miniforge/effect-transaction {:local/root "../effect-transaction"}
+        ai.miniforge/execution-grant {:local/root "../execution-grant"}
         ai.miniforge/evidence-bundle {:local/root "../evidence-bundle"}
         ai.miniforge/event-stream {:local/root "../event-stream"}
+        ai.miniforge/gate {:local/root "../gate"}
         ai.miniforge/messages {:local/root "../messages"}
         ai.miniforge/opsv {:local/root "../opsv"}
-        ai.miniforge/phase {:local/root "../phase"}}
+        ai.miniforge/opsv-actuation {:local/root "../opsv-actuation"}
+        ai.miniforge/opsv-provider-github {:local/root "../opsv-provider-github"}
+        ai.miniforge/phase {:local/root "../phase"}
+        metosin/malli {:mvn/version "0.16.4"}}
  :aliases {:test {:extra-paths ["test" "test-resources"]
                   :extra-deps {}}}}

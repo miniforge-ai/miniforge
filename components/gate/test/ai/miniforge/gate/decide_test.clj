@@ -17,6 +17,7 @@
 ;; limitations under the License.
 (ns ai.miniforge.gate.decide-test
   (:require
+   [clojure.string :as str]
    [clojure.test :refer [deftest is testing]]
    [ai.miniforge.gate.decide :as decide]
    [ai.miniforge.policy-pack.interface :as policy-pack]))
@@ -31,6 +32,15 @@
   (cond-> {:rule {:rule/id :r/a :rule/enforcement {:action action}}
            :message "m"}
     severity (assoc-in [:rule :rule/severity] severity)))
+
+(deftest ^{:stratum 0} explicit-runtime-pins-are-retained-test
+  (let [runtime-pins {:pins/pack-revision "runtime@2"
+                      :pins/rule-ids [:opsv/actuation-gate]
+                      :pins/event-watermark 42}
+        checks {:results [{:gate :opsv/actuation-gate :passed? true}]}
+        result (decide/gates->envelope checks false runtime-pins)]
+    (is (= runtime-pins (:envelope/pins result)))
+    (is (= :allow (:envelope/decision result)))))
 
 (deftest ^{:stratum 0} missing-artifact-reason-test
   (is (= :reason/missing-artifact (:reason/code (decide/missing-artifact-reason)))))
@@ -202,9 +212,9 @@
       (is (= 2 (count (:envelope/reasons phase-env))))
       (is (every? #(= :reason/gate-check-failed (:reason/code %))
                   (:envelope/reasons phase-env)))
-      (is (some #(clojure.string/includes? (:reason/detail %) ":skipped")
+      (is (some #(str/includes? (:reason/detail %) ":skipped")
                 (:envelope/reasons phase-env)))
-      (is (some #(clojure.string/includes? (:reason/detail %) "read-ledger")
+      (is (some #(str/includes? (:reason/detail %) "read-ledger")
                 (:envelope/reasons phase-env)))))
   (testing "a mechanical failure contributes :reason/gate-check-failed"
     (let [phase-env (decide/gates->envelope

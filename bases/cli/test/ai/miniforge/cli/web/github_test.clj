@@ -54,6 +54,12 @@
               (f))]
     [ret (.toString buf)]))
 
+(deftest ^{:stratum 0} fetch-pr-diff-is-nil-when-gh-cannot-start-test
+  (testing "gh not installed: no diff, not an exception for the operator pass to report"
+    (with-redefs [babashka.process/process
+                  (fn [& _] (throw (java.io.IOException. "Cannot run program \"gh\": error=2")))]
+      (is (nil? (sut/fetch-pr-diff "o/r" 7))))))
+
 ;------------------------------------------------------------------------------ Layer 1
 
 ;; fetch-prs

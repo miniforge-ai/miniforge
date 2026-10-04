@@ -91,23 +91,62 @@
         (testing "no pid recorded: in flight until the start timeout has passed"
           (is (sut/launch-running? {:resume/launched-at-ms now} 60000))
           (is (not (sut/launch-running? {:resume/launched-at-ms (- now 61000)} 60000))))
+        (testing "a pid with no start instant to check it by: the same window"
+          (is (sut/launch-running? {:resume/pid this-pid :resume/launched-at-ms now} 60000))
+          (is (not (sut/launch-running? {:resume/pid this-pid :resume/launched-at-ms (- now 61000)} 60000))))
+        (testing "a record with no launch time has no window, and does not throw"
+          (is (not (sut/launch-running? {:resume/intervention-id "i"} 60000))))
         (testing "a child gone before it was recorded is recorded as exited, never running"
           (is (:resume/exited? launch))
           (is (not (sut/launch-running? launch 60000))))))))
+
+(deftest ^{:stratum 1} a-pid-needs-its-start-instant-test
+  (posix/on-posix-host with-temp-home
+    (fn []
+      (let [child (.exec (Runtime/getRuntime) (into-array String ["/bin/sleep" "30"]))
+            pid (.pid child)
+            started (sut/start-instant (sut/process-handle pid))]
+        (try
+          (testing "a live pid is running only as the process started at the recorded instant"
+            (is (sut/process-running? pid started))
+            (is (not (sut/process-running? pid nil)) "a pid alone is no evidence")
+            (is (not (sut/process-running? pid "1970-01-01T00:00:00Z"))))
+          (testing "it is destroyed only by that pair"
+            (sut/destroy-process! pid nil)
+            (sut/destroy-process! pid "1970-01-01T00:00:00Z")
+            (Thread/sleep 100)
+            (is (.isAlive child))
+            (sut/destroy-process! pid started)
+            (is (.waitFor child 5 java.util.concurrent.TimeUnit/SECONDS))
+            (is (not (.isAlive child))))
+          (finally (.destroy child)))))))
 
 (deftest ^{:stratum 1} a-live-target-test
   (with-temp-home
     (fn []
       (let [workflow-id (str (random-uuid))
-            manifest! #(spit (doto (io/file (sut/run-dir workflow-id) "manifest.json") io/make-parents)
-                             (json/generate-string {:status % :owner {:pid (str this-pid)}}))]
+            manifest! (fn write-manifest!
+                        ([status] (write-manifest! status (java.time.Instant/now)))
+                        ([status renewed]
+                         (spit (doto (io/file (sut/run-dir workflow-id) "manifest.json") io/make-parents)
+                               (json/generate-string {:status status
+                                                      :owner {:pid (str this-pid)
+                                                              :lease_renewed_at (str renewed)
+                                                              :lease_ttl_seconds 30}}))))]
         (is (not (sut/target-live? workflow-id)))
         (with-redefs [operator/live-runner? (constantly true)]
           (is (sut/target-live? workflow-id) "a runner in this process"))
         (manifest! "active")
         (is (sut/target-live? workflow-id) "an active manifest whose owner is alive")
+        (manifest! "active" (.minusSeconds (java.time.Instant/now) 120))
+        (is (not (sut/target-live? workflow-id))
+            "a lapsed lease: the owner stopped renewing, so a live pid may be a reused one")
         (manifest! "completed")
-        (is (not (sut/target-live? workflow-id)))))))
+        (is (not (sut/target-live? workflow-id)))
+        (testing "an origin whose runner left no start instant does not claim a live pid"
+          (spit (io/file (sut/run-dir workflow-id) "origin.edn") (pr-str {:cwd "/" :pid this-pid}))
+          (is (not (sut/target-live? workflow-id))
+              "the pid may belong to any process by now, so the retry is not refused forever"))))))
 
 (deftest ^{:stratum 1} only-an-event-carrying-the-intervention-id-is-evidence-test
   (with-temp-home

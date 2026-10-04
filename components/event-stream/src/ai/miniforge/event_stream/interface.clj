@@ -33,6 +33,7 @@
    [ai.miniforge.event-stream.operator-requests :as operator-requests]
    [ai.miniforge.event-stream.reader :as reader]
    [ai.miniforge.event-stream.sinks :as sinks]
+   [ai.miniforge.event-stream.workflow-discovery :as discovery]
    [ai.miniforge.event-stream.timeline :as timeline]))
 
 ;------------------------------------------------------------------------------ Layer 0
@@ -236,6 +237,10 @@
 (def ^{:stratum 0} drift-detected
   "Construct an N3 :opsv.drift/detected event."
   opsv/drift-detected)
+
+(def ^{:stratum 0} actuation-disposition
+  "Construct an N3 governed OPSV effect disposition event."
+  opsv/actuation-disposition)
 
 (def ^{:stratum 0} workflow-started
   "Build and return a :workflow/started event envelope map. Multi-arity
@@ -687,8 +692,8 @@
    :control-action/requested before and :control-action/executed after.
    On RBAC denial returns {:status :denied :reason string :anomaly map}
    and runs no execution-fn. On authorization, runs execution-fn and
-   returns its result wrapped via response/success, or
-   response/failure on a thrown exception."
+   preserves structured success/failure results. Anomalies and thrown exceptions
+   become response/failure; only unstructured values use response/success."
   control/execute-control-action!)
 
 (def ^{:stratum 0} requires-approval?
@@ -929,6 +934,10 @@
    parsed event maps, or nil when the directory does not exist.
    Unparseable files are silently dropped."
   reader/read-workflow-events)
+
+(def ^{:stratum 0} stored-workflow-ids
+  "Distinct workflow IDs under live, archived and legacy layouts; excludes operator storage."
+  discovery/workflow-ids)
 
 (def ^{:stratum 0} workflow-events-dir
   "`(workflow-events-dir base-dir workflow-id)`: the first existing of the

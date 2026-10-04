@@ -32,4 +32,8 @@
   ^Instant [value]
   (if (instance? Instant value)
     value
-    (.toInstant ^Date value)))
+    (try
+      (.toInstant ^Date value)
+      ;; SQL Date/Time admit epoch milliseconds but do not implement toInstant.
+      (catch UnsupportedOperationException _
+        (Instant/ofEpochMilli (.getTime ^Date value))))))

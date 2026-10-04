@@ -49,6 +49,7 @@
     {:result result
      :lifecycle-events lifecycle-events
      :domain-events domain-events
+     :decision-events (filter #(= :gate/decision (:event/type %)) events)
      :domain-type-counts (frequencies (map :event/type domain-events))
      :planned-event (support/event-of-type
                      domain-events :opsv.experiment/planned)
@@ -104,7 +105,7 @@
 ;------------------------------------------------------------------------------ Layer 1
 
 (deftest ^{:stratum 1} test-opsv-run-emits-lifecycle-and-domain-events
-  (let [{:keys [result lifecycle-events domain-events domain-type-counts
+  (let [{:keys [result lifecycle-events domain-events decision-events domain-type-counts
                 planned-event evidence-id evidence-store checkpoint]}
         (checkpoint-root-support/call-with-temp-checkpoint-root run-opsv-scenario)
         assembly (when (and evidence-store evidence-id)
@@ -113,6 +114,8 @@
         discovery (support/phase-output result :opsv/discover)
         policy (:opsv/operational-policy
                 (support/phase-output result :opsv/synthesize))
+        verification (support/phase-output result :opsv/verify)
+        verification-run (:opsv/verification-run verification)
         actuation (:opsv/actuation-record
                    (support/phase-output result :opsv/actuate))]
     (testing "the shared runner executes all registered phases"
@@ -133,7 +136,7 @@
       (is (uuid? evidence-id))
       (is (every? #(= evidence-id (:opsv/evidence-bundle-id %)) domain-events))
       (is (= :assembling (:opsv.assembly/status assembly)))
-      (is (= (set (map :event/id domain-events)) (:opsv/event-refs assembly)))
+      (is (= (set (map :event/id (concat domain-events decision-events))) (:opsv/event-refs assembly)))
       (is (= assembly (:opsv/evidence-assembly checkpoint-input)))
       (is (not (contains? checkpoint-input :opsv/evidence-assembly-store)))
       (is (not (contains? checkpoint-input :opsv/adapter))))
@@ -149,7 +152,14 @@
              (get-in policy [:operational-policy/scaling :keda :trigger]))))
     (testing "the default posture remains side-effect free"
       (is (= :recommend-only (:effective-actuation-mode actuation)))
-      (is (= [] (:governed-effects actuation))))))
+      (is (= [] (:governed-effects actuation))))
+    (testing "verification has a separate candidate-bound measurement receipt"
+      (is (uuid? (:verification/id verification-run)))
+      (is (= (:opsv/policy-hash (support/phase-output result :opsv/synthesize))
+             (:candidate/hash verification-run)))
+      (is (= 2 (count (:observations verification-run))))
+      (is (not= (:opsv/metric-snapshot-artifact-refs (support/workflow-input))
+                (:opsv/metric-snapshot-artifact-refs verification))))))
 
 ;; Every pipeline this namespace runs acquires its worktree from a
 ;; throwaway host repository and checkpoints into a throwaway root — never

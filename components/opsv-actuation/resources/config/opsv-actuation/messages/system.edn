@@ -1,2 +1,8 @@
 {:opsv-actuation/system
- {:proposal/invalid "Invalid OPSV pull-request proposal input"}}
+ {:proposal/invalid "Invalid OPSV pull-request proposal input"
+  :execution/invalid-input "Invalid governed OPSV PR execution input"
+  :execution/stopped "OPSV mutation admission is stopped"
+  :execution/boundary-unconfirmed "OPSV mutation boundary returned no confirmed result"
+  :execution/unbound-grant "OPSV PR authority must bind the full provider and governance scope"
+  :execution/substituted-grant "Stored OPSV PR authority differs from the runtime-issued grant"
+  :execution/invalid-record "Stored OPSV PR payload or governance correlation is invalid"}}

@@ -1,5 +1,6 @@
 {:cli/messages
- {:help/title "{binary} - {description}"
+ {:error/unknown-exception "unknown exception"
+  :help/title "{binary} - {description}"
   :help/usage "Usage: {binary} <command> [options]"
   :help/command-lines
   ["Commands:"
@@ -9,6 +10,9 @@
    "    --interactive     Interactive mode (chat-based)"
    "    --worktree <path> Custom worktree path"
    "    --resume <id>     Resume a workflow from its last checkpoint (legacy — prefer `resume`)"
+   ""
+   "  operator serve      Consume operator interventions while no run is active"
+   "                      (one server per home; prints a JSON ready line)"
    ""
    "  resume <workflow-id>  Resume a workflow from its last checkpoint"
    "    -q, --quiet       Suppress progress output"
@@ -109,6 +113,7 @@
   :runtime/doctor-override-hint "Override with :runtime-kind in config or {env-var}=docker|podman"
   :runtime/probed-available "{kind} ({runtime-version})"
   :runtime/probed-unavailable "{kind} — {reason}"
+  :runtime/opsv-unavailable "OPSV execution control is unavailable in this product runtime."
   :runtime/info-kind "Runtime:        {kind}"
   :runtime/info-executable "Executable:     {executable}"
   :runtime/info-runtime-version "Version:        {runtime-version}"
@@ -407,6 +412,7 @@
 
   ;; ── Evidence ──────────────────────────────────────────────────────────
   :evidence/header "Evidence Bundles"
+  :evidence/document-language "en-US"
   :evidence/bundle-entry "  {id}  wf:{workflow-id}  ({status})"
   :evidence/none "  No evidence bundles found."
   :evidence/evidence-dir "  Evidence dir: {dir}"
@@ -709,6 +715,8 @@
   :resume/completed-status "Resumed workflow completed with status: {status}"
   :resume/failed "Resume failed: {error}"
   :resume/missing-workflow-id "resume requires a workflow id. Usage: miniforge resume <workflow-id>"
+  :operator-serve/already-running "An operator server is already running for {home} (pid {pid}). Stop it first, or set MINIFORGE_HOME to serve another home."
+  :operator-serve/pid-unknown "unknown"
   :resume/unknown-phase "Cannot resume from phase {phase}: this run never recorded it."
   :resume/rewind-without-results "Cannot resume from phase {phase}: the run has no checkpointed result for {phases}, which the re-run would build on."
   :resume/not-a-uuid "{flag} must be a UUID (got {value})."

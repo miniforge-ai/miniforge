@@ -58,8 +58,9 @@
    [[:pr/repo NonBlankString]
     [:pr/base NonBlankString]
     [:pr/branch NonBlankString]
-    [:pr/head-sha [:re #"(?:[0-9a-f]{40}|[0-9a-f]{64})"]]
-    [:pr/payload-hash [:re #"[0-9a-f]{64}"]]]))
+    [:pr/head-sha [:re #"\A(?:[0-9a-f]{40}|[0-9a-f]{64})\z"]]
+    [:pr/payload-hash [:re #"\A[0-9a-f]{64}\z"]]
+    [:pr/governance-hash [:re #"\A[0-9a-f]{64}\z"]]]))
 
 (def ^{:stratum 1} DeployRequest
   "Closed request for one exact Kubernetes deployment.

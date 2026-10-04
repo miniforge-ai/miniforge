@@ -64,7 +64,7 @@
   {:command ["mf"]
    :spawn! (fn [argv _log-file _pid-file dir] (swap! spawned conj [argv dir]) (.pid (java.lang.ProcessHandle/current)))
    :alive? (constantly alive?)
-   :kill! #(swap! killed conj %)
+   :kill! (fn [pid _started] (swap! killed conj pid))
    :timeout-ms 200
    :poll-ms 10})
 
@@ -213,6 +213,7 @@
             launch {:resume/run-id run-id
                     :resume/intervention-id (str intervention-id)
                     :resume/pid 4242
+                    :resume/pid-started "2026-09-27T00:00:00Z"
                     :resume/launched-at-ms (System/currentTimeMillis)
                     :resume/log "/tmp/resume.log"}
             killed (atom [])]
@@ -231,6 +232,21 @@
         (testing "an event carrying this intervention id is the start"
           (write-event! run-id intervention-id)
           (is (= launch (sut/await-start! (deps {}) launch))))))))
+
+(deftest ^{:stratum 1} a-child-with-no-start-instant-is-not-killed-at-the-deadline-test
+  (posix/on-posix-host with-temp-home
+    (fn []
+      (let [child (.exec (Runtime/getRuntime) (into-array String ["/bin/sleep" "30"]))
+            launch {:resume/run-id (random-uuid)
+                    :resume/intervention-id (str (random-uuid))
+                    :resume/pid (.pid child)
+                    :resume/launched-at-ms (System/currentTimeMillis)}]
+        (try
+          (let [result (sut/await-start! (assoc (deps {}) :kill! records/destroy-process!) launch)]
+            (is (= :timeout (get-in result [:anomaly/data :failure/reason]))
+                "with no start instant, only the deadline decides")
+            (is (.isAlive child) "a pid alone may name any process by then, so none is killed"))
+          (finally (.destroy child)))))))
 
 (deftest ^{:stratum 1} an-interrupted-wait-leaves-the-child-running-test
   (with-temp-home
@@ -356,7 +372,8 @@
         (is (some #{"two words it's \"quoted\"\n"} (repeatedly 200 read-log)))
         (.waitFor (.exec (Runtime/getRuntime) (into-array String ["kill" "-HUP" (str sleeper)])))
         (Thread/sleep 200)
-        (is (records/process-running? sleeper nil) "a hangup does not stop it")
+        (is (records/process-running? sleeper (records/start-instant (records/process-handle sleeper)))
+            "a hangup does not stop it")
         (is (not= (process-group (.pid (java.lang.ProcessHandle/current))) (process-group sleeper))
             "it is not in this process's group, so a signal to the group misses it")
-        (records/destroy-process! sleeper)))))
+        (records/destroy-process! sleeper (records/start-instant (records/process-handle sleeper)))))))

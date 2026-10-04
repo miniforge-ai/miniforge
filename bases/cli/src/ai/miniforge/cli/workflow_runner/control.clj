@@ -27,6 +27,12 @@
    three-and-a-half times. `mf operator serve` runs the consumer half
    alone, so interventions are consumed while no run is active.
 
+   Retries are left to `mf operator serve`: a runner's consumer declines
+   them (and decisions on them), because a runner exits when its run
+   does and a retry it launched would lose its verification with it. A
+   serve that starts again finishes verifying the retries a previous one
+   launched but never saw through.
+
    Every consuming process registers the same process handles (the
    degradation manager, the resume launcher, the policy evaluator):
    retry verbs and process-global targets are claimed by whichever
@@ -40,8 +46,8 @@
    shared on-disk cursor and could publish a workflow's audit trail
    through the wrong stream."
   (:require
-   [ai.miniforge.agent.interface :as agent]
    [ai.miniforge.automation-edge-correlator.interface :as correlator]
+   [ai.miniforge.cli.workflow-runner.opsv-control :as opsv-control]
    [ai.miniforge.cli.workflow-runner.policy-evaluator :as policy-evaluator]
    [ai.miniforge.cli.workflow-runner.resume-launcher :as resume-launcher]
    [ai.miniforge.cli.workflow-runner.resume-records :as resume-records]
@@ -79,7 +85,7 @@
         ;; supervisory-state and emits `:supervisory/automation-edge-upserted`
         ;; events; consumers (Rust core, native app) dedup on `:edge/id`.
         _correlator (correlator/attach! operator-stream)]
-    (agent/create-meta-loop-context operator-stream)))
+    (opsv-control/context operator-stream)))
 
 (defn ^{:stratum 0} release-workflow-control!
   "Drop `workflow-id` from the live-runner registry, and this process
@@ -101,6 +107,20 @@
   (when-let [launcher (resume-launcher/launcher)]
     (operator/register-resume-launcher! launcher))
   (operator/register-policy-evaluator! policy-evaluator/evaluate))
+
+(defn- ^{:stratum 0} runner-accepts?
+  "The ownership predicate of a runner's consumer: the process-wide one,
+   without retries."
+  [event]
+  (and (operator/live-intervention-target? event)
+       (not (operator/retry-intervention? event))))
+
+(defn- ^{:stratum 0} resume-pending-verifications!
+  "Hand every retry launched here but never seen through back to the
+   verification pool."
+  [ctx]
+  (doseq [launch (resume-records/pending-launches)]
+    (operator/verify-launched-resume! (:event-stream ctx) (:resume/intervention launch) launch)))
 
 (defn- ^{:stratum 0} stop-held-consumer!
   "Stop the consumer `holder` holds and clear it. Idempotent.
@@ -137,9 +157,8 @@
         (or @meta-loop-ctx
             (reset! meta-loop-ctx (create-meta-loop-ctx!))))))
 
-;; Consumer lifecycle
 (defn- ^{:stratum 1} ensure-operator-consumer!
-  [ctx]
+  [ctx accept?]
   ;; Double-checked locking (see meta-loop-context!). The inner re-check
   ;; matters more here: without it a race would `start-operator-consumer!`
   ;; twice, leaving a second poller thread orphaned — its handle
@@ -151,13 +170,26 @@
                           {:events-dir (es/default-events-dir)
                            :stream (:event-stream ctx)
                            :apply! operator/apply-intervention!
-                           :accept? operator/live-intervention-target?
+                           :accept? accept?
                            :stream-for operator/live-intervention-stream})]
+              ;; Published before the hook is installed, so the hook finds
+              ;; it. Installing one throws once the JVM is shutting down;
+              ;; then this consumer is stopped here, before the exception
+              ;; leaves, since not every caller's cleanup stops consumers
+              ;; (a runner's only deregisters itself).
+              (reset! operator-consumer-handle handle)
               ;; The hook reads the holder at exit, so it also stops a
               ;; consumer started after a stop-process-control!.
               (when (compare-and-set! exit-hook-installed? false true)
-                (stop-at-exit! (partial stop-held-consumer! operator-consumer-handle)))
-              (reset! operator-consumer-handle handle))))))
+                (let [installed? (volatile! false)]
+                  (try
+                    (stop-at-exit! (partial stop-held-consumer! operator-consumer-handle))
+                    (vreset! installed? true)
+                    (finally
+                      (when-not @installed?
+                        (reset! exit-hook-installed? false)
+                        (stop-held-consumer! operator-consumer-handle))))))
+              handle)))))
 
 (defn ^{:stratum 1} stop-process-control!
   "Stop this process's operator consumer and the retry verifications it
@@ -167,6 +199,15 @@
   (stop-held-consumer! operator-consumer-handle))
 
 ;------------------------------------------------------------------------------ Layer 2
+
+;; Consumer lifecycle
+(defn ^{:stratum 2} register-opsv-run-control!
+  "Bind a prepared OPSV run to this process's safe-mode stop domain.
+   Use the returned control/fence in trusted PR runtime options. Stopped domains
+   never reopen; safe-mode exit alone does not renew prior execution authority."
+  [workflow-id authority-directory request-abort!]
+  (opsv-control/register! (:opsv/supervisor (meta-loop-context!)) workflow-id
+                          authority-directory request-abort!))
 
 ;; Runner registration
 (defn ^{:stratum 2} register-workflow-control!
@@ -184,7 +225,7 @@
     (register-process-handles! ctx)
     (operator/register-live-runner! workflow-id handles)
     (try
-      (ensure-operator-consumer! ctx)
+      (ensure-operator-consumer! ctx runner-accepts?)
       (catch Throwable e
         (operator/deregister-live-runner! workflow-id)
         (throw e)))))
@@ -193,9 +234,20 @@
   "Make this process an operator-channel consumer without a runner of its
    own (`mf operator serve`). Same context, process handles, and consumer
    options as [[register-workflow-control!]], so workflow-targeted
-   pause/resume/cancel are still left to the live runner that owns them.
+   pause/resume/cancel are still left to the live runner that owns them —
+   except that this consumer takes retries, and resumes verifying the
+   ones a previous server left `:dispatched`. It resumes them only once
+   the consumer is running, and before letting go of the lock a stop
+   takes: stopping the consumer is what drains the verification pool, so
+   a start that fails earlier must leave no verification behind, and a
+   stop must not slip in between and drain the pool before they land.
    Returns the consumer handle."
   []
   (let [ctx (meta-loop-context!)]
     (register-process-handles! ctx)
-    (ensure-operator-consumer! ctx)))
+    ;; The holder's monitor is reentrant: ensure-operator-consumer! takes it
+    ;; again, and stop-held-consumer! waits for it.
+    (locking operator-consumer-handle
+      (let [handle (ensure-operator-consumer! ctx operator/live-intervention-target?)]
+        (resume-pending-verifications! ctx)
+        handle))))

@@ -26,7 +26,8 @@
    :pr/base "main"
    :pr/branch "opsv/scaling"
    :pr/head-sha "0123456789012345678901234567890123456789"
-   :pr/payload-hash "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"})
+   :pr/payload-hash "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"
+   :pr/governance-hash "abcdef0123456789abcdef0123456789abcdef0123456789abcdef0123456789"})
 
 (defn- ^{:stratum 0} empty-history-path
   []
@@ -68,9 +69,12 @@
   (is (= :unauthorized
          (:anomaly/type (issue (assoc-in request [:effect/preflight :preflight/result]
                                         :deny)))))
-  (doseq [field [:pr/head-sha :pr/payload-hash]]
+  (doseq [field [:pr/head-sha :pr/payload-hash :pr/governance-hash]]
     (is (= :invalid-input
-           (:anomaly/type (issue (assoc request field "not-a-digest")))))))
+           (:anomaly/type (issue (assoc request field "not-a-digest")))))
+    (doseq [affix ["prefix" "\n" " "]]
+      (is (= :invalid-input
+             (:anomaly/type (issue (update request field str affix))))))))
 
 (deftest ^{:stratum 2} pr-grant-rechecks-scope-liveness-and-count-test
   (let [g (issue request)

@@ -130,12 +130,13 @@
 
 ;; -------------------------------------------------------------------------- max-redirects guard semantics
 (deftest ^{:stratum 0} max-redirects-is-finite-and-positive
-  ;; This is the safety constant that prevents an infinite redirect loop.
+  ;; This is the safety constant that prevents an infinite redirect loop:
+  ;; the ceiling the FSM's `:budget/redirects-spent?` guard reads.
   ;; Keep it numeric-pinned so a refactor to `nil` or a string doesn't
   ;; silently disable the guard.
-  (is (pos-int? transition/max-redirects)
+  (is (pos-int? (runner-defaults/max-redirects))
       "max-redirects must be a positive integer")
-  (is (<= transition/max-redirects 100)
+  (is (<= (runner-defaults/max-redirects) 100)
       "max-redirects must stay small enough that an unhappy loop ends fast"))
 
 ;; -------------------------------------------------------------------------- infra-retry (Fable §2.4 PR-B)

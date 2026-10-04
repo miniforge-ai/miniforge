@@ -24,6 +24,11 @@
 
 ;------------------------------------------------------------------------------ Layer 0
 
+(defn- ^{:stratum 0} diff-references [ctx]
+  (if (contains? (:execution/opts ctx) :opsv/artifact-directory)
+    []
+    (get-in ctx [:execution/input :opsv/policy-diff-artifact-refs] [])))
+
 (defn- ^{:stratum 0} policy-confidence
   [output]
   (confidence/level
@@ -74,13 +79,19 @@
 (defn- ^{:stratum 0} actuation-events
   [stream workflow-id evidence-id output]
   (let [actuation (:opsv/actuation-record output)]
-    [(event-stream/actuation-emitted
+    (cond-> []
+      (:opsv/decision-envelope output)
+      (conj (assoc (event-stream/phase-decision
+                    stream workflow-id :opsv/actuate (:opsv/decision-envelope output))
+                   :opsv/evidence-bundle-id evidence-id))
+      true
+      (conj (event-stream/actuation-emitted
       stream workflow-id evidence-id
       {:opsv/requested-actuation-mode (:requested-actuation-mode actuation)
        :opsv/effective-actuation-mode (:effective-actuation-mode actuation)
        :opsv/governed-effects (:governed-effects actuation)
        :opsv/pr-refs (:pr-refs actuation)
-       :opsv/apply-refs (:apply-refs actuation)})]))
+       :opsv/apply-refs (:apply-refs actuation)})))))
 
 ;------------------------------------------------------------------------------ Layer 1
 
@@ -95,8 +106,7 @@
   [(event-stream/policy-proposed
     stream workflow-id evidence-id
     {:opsv/policy-hash (:opsv/policy-hash output)
-     :opsv/diff-artifact-refs
-     (get-in ctx [:execution/input :opsv/policy-diff-artifact-refs] [])
+     :opsv/diff-artifact-refs (diff-references ctx)
      :opsv/confidence (policy-confidence output)})])
 
 ;------------------------------------------------------------------------------ Layer 2

@@ -677,7 +677,8 @@
         ;; interpreter refuses both `FileLockImpl.close` and
         ;; `.release` ("Method close on class sun.nio.ch.FileLockImpl
         ;; not allowed!"). That matters because this consumer runs
-        ;; inside the bb-hosted workflow runner: a `with-open` on the
+        ;; inside the bb-hosted CLI (a workflow runner, or
+        ;; `mf operator serve`): a `with-open` on the
         ;; lock threw on EVERY poll tick, and the poller's per-tick
         ;; containment turned it into a warning loop that consumed
         ;; nothing — the control path looked alive and was dead.

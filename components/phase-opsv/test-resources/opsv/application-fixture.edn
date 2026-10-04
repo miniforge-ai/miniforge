@@ -33,6 +33,16 @@
 
  :opsv/candidate-drivers [{:driver :cpu} {:driver :backlog}]
 
+ :opsv/verification-result
+ {:environment-fingerprint
+  {:cluster "staging-1"
+   :node-pools ["general"]
+   :image-digests {"catalog" "sha256:abc"}
+   :config-hash "config-1"}
+  :observations {"cpu-utilization" 0.65 "backlog-per-replica" 80.0}
+  :confidence 0.8
+  :metric-snapshot-artifact-refs [#uuid "00000000-0000-0000-0000-000000000702"]}
+
  :opsv/ramp-result
  {:environment-fingerprint
   {:cluster "staging-1"

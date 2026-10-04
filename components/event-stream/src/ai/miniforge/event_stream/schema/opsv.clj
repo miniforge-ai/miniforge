@@ -18,11 +18,21 @@
 (ns ai.miniforge.event-stream.schema.opsv
   "Canonical N3 section 3.14 OPSV event schemas."
   (:require
+   [ai.miniforge.decision-envelope.interface :as decision]
+   [ai.miniforge.effect-transaction.interface :as effect]
    [ai.miniforge.event-stream.schema :as event-schema]))
 
 ;------------------------------------------------------------------------------ Layer 0
 
 (def ^{:stratum 0} KeywordMap [:map-of :keyword :any])
+
+(defn- ^{:stratum 0} matching-envelope? [payload]
+  (= (get-in payload [:opsv/governed-effect :evidence/envelope-id])
+     (get-in payload [:opsv/decision-envelope :envelope/id])))
+
+(defn- ^{:stratum 0} observations-after-confirmation? [payload]
+  (or (not (#{:proposed :committing} (:opsv/effect-state payload)))
+      (empty? (:opsv/effect-observed payload))))
 
 (def ^{:stratum 0} Targets
   [:map {:closed true}
@@ -68,6 +78,13 @@
 
 ;------------------------------------------------------------------------------ Layer 1
 
+(def ^{:stratum 1} disposition-entries
+  [[:opsv/governed-effect GovernedEffect]
+   [:opsv/effect-state (into [:enum] effect/states)]
+   [:opsv/decision-envelope decision/AllowingEnvelope]
+   [:opsv/effect-observed KeywordMap]
+   [:opsv/effect-failure [:maybe :string]]])
+
 (def ^{:stratum 1} RiskResult
   [:map {:closed true}
    [:score [:double {:min 0.0 :max 1.0}]]
@@ -100,7 +117,8 @@
    :opsv/load-step
    [[:opsv/step-id :string]
     [:opsv/intended-load KeywordMap]
-    [:opsv/observed-load KeywordMap]]))
+    [:opsv/observed-load KeywordMap]
+    [:opsv/metric-snapshot-artifact-refs {:optional true} [:vector :uuid]]]))
 
 (def ^{:stratum 2} GuardrailAbort
   (opsv-event-schema
@@ -115,13 +133,15 @@
    :opsv.convergence/iteration
    [[:opsv/iteration-id :string]
     [:opsv/params KeywordMap]
-    [:opsv/observed-metrics-summary KeywordMap]]))
+    [:opsv/observed-metrics-summary KeywordMap]
+    [:opsv/metric-snapshot-artifact-refs {:optional true} [:vector :uuid]]]))
 
 (def ^{:stratum 2} PolicyProposed
   (opsv-event-schema
    :opsv.policy/proposed
    [[:opsv/policy-hash :string]
     [:opsv/diff-artifact-refs [:vector :uuid]]
+    [:opsv/policy-artifact-ref {:optional true} :uuid]
     [:opsv/confidence :keyword]]))
 
 (def ^{:stratum 2} VerificationResult
@@ -129,6 +149,7 @@
    :opsv.verification/result
    [[:opsv/passed? :boolean]
     [:opsv/criteria-evaluation [:vector CriterionResult]]
+    [:opsv/metric-snapshot-artifact-refs {:optional true} [:vector :uuid]]
     [:opsv/confidence :keyword]
     [:opsv/caveats [:vector :string]]]))
 
@@ -149,3 +170,14 @@
    [[:opsv/signal :keyword]
     [:opsv/deviation KeywordMap]
     [:opsv/suggested-rerun? :boolean]]))
+
+(def ^{:stratum 2} ActuationDisposition
+  [:and
+   (opsv-event-schema :opsv.actuation/disposition disposition-entries)
+   [:fn matching-envelope?]
+   [:fn observations-after-confirmation?]])
+
+(def ^{:stratum 2} DispositionPayload
+  [:and (event-schema/with-identity (into [:map {:closed true}] disposition-entries))
+   [:fn matching-envelope?]
+   [:fn observations-after-confirmation?]])

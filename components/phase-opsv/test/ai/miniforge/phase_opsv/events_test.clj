@@ -50,14 +50,17 @@
                    :result {:status :success :output planned-output}}))))
 
 (deftest ^{:stratum 1} test-policy-confidence-degrades-safely
-  (let [stream (event-stream/create-event-stream)]
+  (let [stream (event-stream/create-event-stream)
+        refs [(random-uuid)]
+        ctx (assoc-in (event-context stream) [:execution/input :opsv/policy-diff-artifact-refs] refs)]
     (events/emit-phase-events!
-     (event-context stream)
+     ctx
      :opsv/synthesize
      {:opsv/policy-hash "policy-hash"
       :opsv/experiment-pack {:experiment-pack/convergence {}}
       :opsv/convergence-result {:evaluation {:confidence 0.9}}})
-    (is (= :low (:opsv/confidence (first (event-stream/get-events stream)))))))
+    (is (= :low (:opsv/confidence (first (event-stream/get-events stream)))))
+    (is (= refs (:opsv/diff-artifact-refs (first (event-stream/get-events stream)))))))
 
 (deftest ^{:stratum 1} test-guardrail-abort-projection
   (let [stream (event-stream/create-event-stream)

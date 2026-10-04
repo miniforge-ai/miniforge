@@ -55,7 +55,7 @@
 
    :effect/pr-create
    (effect-policy pull-request-grant-ttl-seconds
-                  [:pr/repo :pr/base :pr/branch :pr/head-sha :pr/payload-hash])
+                  [:pr/repo :pr/base :pr/branch :pr/head-sha :pr/payload-hash :pr/governance-hash])
 
    :effect/deploy
    (effect-policy (* 30 60)
