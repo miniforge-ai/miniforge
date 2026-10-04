@@ -28,6 +28,8 @@
     :finding/pattern #"[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}"}
    {:finding/type :ssn
     :finding/pattern #"(?<!\d)\d{3}-\d{2}-\d{4}(?!\d)"}
+   {:finding/type :redaction-marker
+    :finding/pattern (re-pattern (java.util.regex.Pattern/quote (redaction/marker)))}
    {:finding/type :aws-access-key
     :finding/pattern #"\bAKIA[0-9A-Z]{16}\b"}])
 
@@ -35,7 +37,12 @@
   #{:email :ssn :payment-card})
 
 (def ^{:stratum 0} ^:private secret-finding-types
-  #{:aws-access-key :embedded-secret :ssn :payment-card})
+  #{:aws-access-key :embedded-secret :ssn :payment-card :redaction-marker})
+
+(defn ^{:stratum 0} redaction-recorded?
+  "Whether findings record the reserved marker, regardless of the original secret class."
+  [scan-result]
+  (boolean (some #(= :redaction-marker (:finding/type %)) (:scan/findings scan-result))))
 
 (defn- ^{:stratum 0} pattern-finding [bundle {:finding/keys [type pattern]}]
   (when (pattern-scan/present? pattern bundle)

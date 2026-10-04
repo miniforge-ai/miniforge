@@ -245,7 +245,7 @@
         snapshot @store
         base (assoc-in f/base-bundle [:evidence/intent :intent/description] "4111 1111 1111 1111")
         bundle (evidence/finalize-opsv-evidence! store id base f/opsv-evidence (set f/artifact-ids))
-        candidate (altered-declaration bundle :compliance/pii-handling :none)
+        candidate (altered-declaration (dissoc bundle :compliance/sensitive-findings) :compliance/pii-handling :none)
         restored (atom snapshot)]
     (is (= :redacted (:compliance/pii-handling bundle)))
     (is (:valid? (evidence/validate-canonical-bundle candidate)))

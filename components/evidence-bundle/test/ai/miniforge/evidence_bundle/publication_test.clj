@@ -4,6 +4,8 @@
 (ns ai.miniforge.evidence-bundle.publication-test
   (:require [ai.miniforge.evidence-bundle.interface :as evidence]
             [ai.miniforge.evidence-bundle.opsv-test-fixtures :as f]
+            [ai.miniforge.evidence-bundle.publication-compliance :as compliance]
+            [ai.miniforge.redaction.interface :as redaction]
             [clojure.edn :as edn]
             [clojure.java.io :as io]
             [clojure.test :refer [deftest is]]))
@@ -81,6 +83,8 @@
     (try
       (doseq [overrides (concat (map declared-ssn [:none :redacted :encrypted])
                                [{:test/text "AKIAIOSFODNN7EXAMPLE"}
+                                {:test/text (redaction/marker) :compliance/sensitive-data false
+                                 :compliance/pii-handling :none}
                                 {:test/text "000-00-0000"}
                                 {:compliance/sensitive-data true :evidence/contains-pii? true
                                  :compliance/sensitive-findings [{:finding/type :payment-card}]}])]
@@ -93,6 +97,16 @@
           (is (false? (export! bundle file)))
           (is (= "unchanged" (slurp file)))))
       (finally (.delete file)))))
+
+(deftest ^{:stratum 1} removing-findings-cannot-erase-redaction-evidence
+  (let [prepared (compliance/prepare (assoc (sealed-bundle) :test/text "000-00-0000"))
+        sealed (rehash-with prepared {})
+        altered (rehash-with (dissoc sealed :compliance/sensitive-findings)
+                             {:compliance/sensitive-data false :compliance/pii-handling :none})]
+    (is (:valid? (evidence/validate-published-bundle sealed)))
+    (is (= (redaction/marker) (:test/text altered)))
+    (is (:valid? (evidence/validate-canonical-bundle altered)))
+    (is (false? (:valid? (evidence/validate-published-bundle altered))))))
 
 (comment
   (clojure.test/run-tests 'ai.miniforge.evidence-bundle.publication-test))

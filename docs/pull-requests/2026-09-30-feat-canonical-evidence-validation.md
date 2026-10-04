@@ -6,8 +6,8 @@
 ## Scope
 
 Base: main. Canonical contract #1959, complete-value scanner #1979, and manager
-export enforcement #1977 are merged. Shared compliance policy #1981 is a
-prerequisite. CLI presentation/export enforcement in #1960 must merge first.
+export enforcement #1977 are merged. Shared compliance policy #1981 and CLI
+presentation/export enforcement #1960 are merged. Marker compliance #1995 is also merged.
 Use the manager-free canonical validation API from #1959 for OPSV finalization.
 That prerequisite validates portable N6 structure, domain values and declared hashes.
 Unhashed base bundles remain valid assembly inputs. Content integrity does not establish authority.
@@ -48,6 +48,10 @@ Normal hooks rejected five sentences there with PS101 (over 25 words).
 Split those sentences without changing their meaning; no OpenRouter code changed.
 This is required lint repair under the standing instruction to fix breaks, not bypass them.
 Markdown is excluded from the reportable code budget, which remains 600/600.
+The marker refresh also imported the bb-proc PR document from #1990.
+Normal hooks rejected four sentences there with PS101 (27, 28, 26 and 46 words).
+Split those sentences preserving meaning; no bb-proc code was changed by this PR.
+Markdownlint also required a language label on that document's example (MD040).
 
 ## Verification
 
@@ -61,10 +65,12 @@ new reference or sealing incomplete evidence.
 Retained-seal recovery also enforces shared redaction across payload and metadata
 after canonical portability checks. It rejects root and nested sensitive metadata
 without changing the retained assembly or repairing and resealing the input.
-Regressions cover rehashed understated treatment and identity-preserving rejection of restoration.
+Regressions remove original findings before rehashing understated treatment.
+The remaining marker must still prevent restoration, preserving the original assembly identity.
 Missing assemblies use the same not-found diagnostic in accumulation, finalization
 and recovery, before validating any retained seal.
-After the prerequisite merges, refresh once and run all evidence consumers,
-rebuild the CLI, and run packaged canonical, assembly, publication and compliance
-regressions. Require zero standards violations, normal signed hooks, a clean
+After the marker prerequisite merged, one refresh passed all three deployed evidence
+consumers and rebuilt the CLI. Packaged canonical, assembly, publication, compliance,
+CLI export and SSN regressions pass 78 tests and 776 assertions.
+Require zero standards violations, normal signed hooks, a clean
 exact-head review and all CI including Build. Preserve this branch and worktree.
