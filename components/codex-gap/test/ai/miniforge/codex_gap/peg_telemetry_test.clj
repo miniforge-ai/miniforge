@@ -20,6 +20,7 @@
    verdicts are the recorded answers; identical landing sets are a
    collapsed branch; nothing is invented for unmapped pegs."
   (:require [clojure.java.io :as io]
+            [clojure.string :as str]
             [clojure.test :refer [deftest is testing]]
             [ai.miniforge.codex-gap.peg-telemetry :as sut])
   (:import (java.nio.file Files)
@@ -147,6 +148,60 @@
           "the counted stream is the gate's, not the self-report")
       (is (= {:mechanism 1} (:answer-sources drift)))
       (is (= 1 (:mechanism-overrode-explicit drift))))))
+
+(deftest ^{:stratum 1} empty-gate-history-does-not-discard-explicit-answers
+  ;; Review catch on #1993: gate-history writes are best-effort. A mapped
+  ;; gate with no recorded verdicts must fall back to the recorded
+  ;; explicit answer, not report a mechanism source that answered nothing.
+  (let [root (str (Files/createTempDirectory "peg-telemetry-nogate" (make-array FileAttribute 0)))]
+    (consult-dir! root "run-a" [(assoc drift-peg :answer "yes")])
+    (let [drift (get-in (sut/peg-telemetry root nodes gate-map)
+                        [:pegs "did-you-update-every-consumer"])]
+      (is (= {"yes" 1} (:answers drift)))
+      (is (= {:explicit 1} (:answer-sources drift)))
+      (is (= 0 (:mechanism-overrode-explicit drift))))))
+
+(deftest ^{:stratum 1} out-of-vocabulary-answers-never-enter-the-stream
+  ;; Review catch on #1993: ten "Yes" answers to a peg offering yes/no
+  ;; must not zero the entropy. Invalid recordings surface for the
+  ;; channel reader instead of counting.
+  (let [root (str (Files/createTempDirectory "peg-telemetry-vocab" (make-array FileAttribute 0)))]
+    (consult-dir! root "run-a" [(assoc unmapped-peg :answer "X")])
+    (consult-dir! root "run-b" [(assoc unmapped-peg :answer "x")])
+    (let [u (get-in (sut/peg-telemetry root nodes gate-map) [:pegs "unmapped"])]
+      (is (= {"x" 1} (:answers u)) "only the in-vocabulary answer counts")
+      (is (= ["X"] (:invalid-answers u)))
+      (is (= 1 (:unanswered-runs u))
+          "an invalid-only run has no counted answer"))))
+
+(deftest ^{:stratum 1} mixed-source-windows-count-the-mechanism-stream-only
+  ;; Review catch on #1993: a peg observed explicitly in some runs and
+  ;; via its mechanism in others must not blend the two vocabularies
+  ;; into a fake distribution that suppresses the trigger.
+  (let [root (str (Files/createTempDirectory "peg-telemetry-mixed" (make-array FileAttribute 0)))
+        deny {:phase :implement :decision :deny
+              :phase/gate-failures [{:gate :stale-references}]}]
+    (consult-dir! root "run-a" [(assoc drift-peg :answer "yes")])
+    (consult-dir! root "run-b" [drift-peg] [deny deny])
+    (let [drift (get-in (sut/peg-telemetry root nodes gate-map)
+                        [:pegs "did-you-update-every-consumer"])]
+      (is (= :mechanism (:counted-source drift)))
+      (is (= {:denied 2} (:answers drift))
+          "the counted stream is the mechanism runs' alone")
+      (is (= {:explicit 1 :mechanism 1} (:answer-sources drift))
+          "both sources stay visible even though one is counted"))))
+
+(deftest ^{:stratum 1} unreadable-run-dirs-are-named-not-quiet
+  ;; Review catch on #1993: an IO failure reading a run's records must
+  ;; not present that run as quiet — the report names incomplete input.
+  (let [root (str (Files/createTempDirectory "peg-telemetry-unread" (make-array FileAttribute 0)))]
+    ;; a DIRECTORY at the consultations path forces a read IOException
+    (.mkdirs (io/file root "run-a" "codex-consultations.edn"))
+    (let [{:keys [unreadable-runs unreadable-run-dirs]}
+          (sut/peg-telemetry root nodes gate-map)]
+      (is (= 1 unreadable-runs))
+      (is (= 1 (count unreadable-run-dirs)))
+      (is (str/ends-with? (first unreadable-run-dirs) "run-a")))))
 
 (deftest ^{:stratum 1} telemetry-over-runs
   (let [root (str (Files/createTempDirectory "peg-telemetry" (make-array FileAttribute 0)))]

@@ -95,7 +95,9 @@
    $7.7.2.1 consultation entries -- the primary source, the only one
    that can carry an explicit :answer) and `miss-pegs` (miss-ledger
    rows, covering runs recorded before the consultation file existed).
-   An answered row wins its id; among answerless rows the first stands."
+   An answered row wins its id; among answerless rows the consultation
+   row stands (its landing snapshot is the one the run presented;
+   a stale miss row must not pick the mechanism)."
   [miss-pegs consult-pegs]
   (reduce (fn [acc {:keys [id] :as peg}]
             (cond
@@ -104,7 +106,7 @@
               (contains? acc id) acc
               :else (assoc acc id peg)))
           {}
-          (concat miss-pegs consult-pegs)))
+          (concat consult-pegs miss-pegs)))
 
 (defn- ^{:stratum 0} explicit-answers-by-id
   "{peg-id [answer ..]} -- every non-nil explicit :answer across the
@@ -170,11 +172,21 @@
         (catch java.io.IOException _ [])))))
 
 (defn ^{:stratum 1} aggregate
-  "Fold per-run observations into the §7.7 record per peg."
+  "Fold per-run observations into the §7.7 record per peg. The entropy
+   stream never mixes answer vocabularies (SPEC $7.7.2.2): when any run
+   observed the peg through its mechanism, the counted distribution is
+   the mechanism-sourced runs' alone -- a peg whose landings gained a
+   mechanism mid-window must not have its gate verdicts diluted by
+   earlier explicit answers (two constant single-source streams would
+   otherwise fake a live distribution and suppress the trigger)."
   [observations]
   (into (sorted-map)
         (map (fn [[peg obs]]
-               (let [answers (mapcat :answers obs)
+               (let [mech-obs (filter #(= :mechanism (:answer-source %)) obs)
+                     counted (if (seq mech-obs)
+                               mech-obs
+                               (filter #(= :explicit (:answer-source %)) obs))
+                     answers (mapcat :answers counted)
                      freqs (frequencies answers)
                      n (count answers)
                      entropy (entropy-bits freqs)
@@ -182,12 +194,16 @@
                  [peg {:runs (count obs)
                        :unanswered-runs (count (remove (comp seq :answers) obs))
                        :answer-sources (frequencies (keep :answer-source obs))
-                       ;; runs where the mechanism outranked recorded
+                       :counted-source (cond (seq mech-obs) :mechanism
+                                             (seq counted) :explicit
+                                             :else nil)
+                       ;; runs where gate verdicts outranked recorded valid
                        ;; explicit answers (SPEC $7.7.2.2) -- the
                        ;; disagreement reader's pointer, never counted
                        ;; into the entropy stream
                        :mechanism-overrode-explicit
                        (count (filter :explicit-answers obs))
+                       :invalid-answers (vec (mapcat :invalid-answers obs))
                        ;; The mechanism that answered in some run wins over
                        ;; one that never did; ties resolve by sorted name.
                        :mechanism (or (->> obs (filter :observed?) (keep :mechanism) sort first)
@@ -206,68 +222,90 @@
 ;------------------------------------------------------------------------------ Layer 2
 
 (defn ^{:stratum 2} run-observations
-  "Per distinct peg presented in `run-dir` (consultation record first,
-   miss ledger as the pre-$7.7.2 fallback): {:peg :mechanism :collapsed?
-   :answers :answer-source :observed?}.
+  "Observations for every distinct peg presented in `run-dir`
+   (consultation record first, miss ledger as the pre-$7.7.2 fallback).
+   Returns {:observations [..] :unreadable? bool} -- :unreadable? marks a
+   run whose ledger or consultation file failed to READ (an IO anomaly,
+   not a missing file): its observations are incomplete and the report
+   must say so rather than show a quieter run.
 
-   The counted :answers stream obeys SPEC $7.7.2.2 -- mechanism outranks
-   self-report: a peg whose landing carries a mapped mechanism is
-   observed through its gate verdicts, and any explicit answers it ALSO
-   received ride :explicit-answers for the disagreement reader without
-   entering the counted stream twice (and without mixing the two answer
-   vocabularies in one entropy computation). A peg with no mapped
-   mechanism is observed through its explicit answers alone;
-   with neither, :observed? false and no answers."
+   Per observation, the counted :answers stream obeys SPEC $7.7.2.2 --
+   mechanism outranks self-report, but only when the mechanism actually
+   ANSWERED: gate-history writes are best-effort, and a mapped gate with
+   no recorded verdicts must not discard a recorded explicit answer.
+   Explicit answers are counted only when inside the peg's recorded
+   vocabulary (the landing-map keys); out-of-vocabulary recordings ride
+   :invalid-answers for the channel reader and never enter the stream.
+   When gate verdicts win over recorded valid explicit answers, those
+   ride :explicit-answers for the disagreement reader."
   [run-dir nodes gate-map]
-  (let [miss-pegs (->> (:entries (ledger/read-ledger (str run-dir)))
-                       (mapcat :miss/pegs))
-        consult-pegs (->> (:entries (ledger/read-consultations (str run-dir)))
-                          (mapcat :consultation/pegs))
+  (let [ledger-res (ledger/read-ledger (str run-dir))
+        consult-res (ledger/read-consultations (str run-dir))
+        miss-pegs (mapcat :miss/pegs (get ledger-res :entries []))
+        consult-pegs (mapcat :consultation/pegs (get consult-res :entries []))
         pegs (vals (presented-pegs miss-pegs consult-pegs))
         explicit-by-id (explicit-answers-by-id consult-pegs)
         history (delay (read-gate-history run-dir))]
-    (for [peg pegs
-          :let [mechanisms (peg-mechanisms peg nodes)
-                ;; The mechanism reported is the one whose gate produced
-                ;; the answers -- the first mapped one, in sorted order.
-                mechanism (or (some #(when (contains? gate-map %) %) mechanisms)
-                              (first mechanisms))
-                gate (get gate-map mechanism)
-                explicit (get explicit-by-id (:id peg) [])]]
-      (cond-> {:peg (:id peg)
-               :mechanism mechanism
-               :collapsed? (branches-collapsed? peg)
-               :answers (cond
-                          gate (gate-answers @history gate)
-                          (seq explicit) explicit
-                          :else [])
-               :answer-source (cond
-                                gate :mechanism
-                                (seq explicit) :explicit
-                                :else nil)
-               :observed? (boolean (or gate (seq explicit)))}
-        (and gate (seq explicit)) (assoc :explicit-answers explicit)))))
+    {:unreadable? (boolean (or (:codex-gap/anomaly ledger-res)
+                               (:codex-gap/anomaly consult-res)))
+     :observations
+     (vec
+      (for [peg pegs
+            :let [mechanisms (peg-mechanisms peg nodes)
+                  ;; The mechanism reported is the one whose gate produced
+                  ;; the answers -- the first mapped one, in sorted order.
+                  mechanism (or (some #(when (contains? gate-map %) %) mechanisms)
+                                (first mechanisms))
+                  gate (get gate-map mechanism)
+                  explicit (get explicit-by-id (:id peg) [])
+                  vocabulary (set (keys (peg-landings peg)))
+                  valid-explicit (filterv vocabulary explicit)
+                  invalid-explicit (filterv (complement vocabulary) explicit)
+                  mech-answers (when gate (gate-answers @history gate))
+                  mech-won? (boolean (seq mech-answers))]]
+        (cond-> {:peg (:id peg)
+                 :mechanism mechanism
+                 :collapsed? (branches-collapsed? peg)
+                 :answers (cond
+                            mech-won? mech-answers
+                            (seq valid-explicit) valid-explicit
+                            :else [])
+                 :answer-source (cond
+                                  mech-won? :mechanism
+                                  (seq valid-explicit) :explicit
+                                  :else nil)
+                 :observed? (boolean (or mech-won? (seq valid-explicit)))}
+          (seq invalid-explicit) (assoc :invalid-answers invalid-explicit)
+          (and mech-won? (seq valid-explicit))
+          (assoc :explicit-answers valid-explicit))))}))
 
 ;------------------------------------------------------------------------------ Layer 3
 
 (defn ^{:stratum 3} peg-telemetry
   "The §7.7 record over every run directory under `checkpoint-root`
-   whose ledger presented pegs, using `nodes` ({id node}) for mechanism
+   whose records presented pegs, using `nodes` ({id node}) for mechanism
    pointers and `gate-map` for mechanism->gate. Returns
-   {:pegs {peg-id record} :runs-with-pegs n :runs-scanned n}."
+   {:pegs {peg-id record} :runs-with-pegs n :runs-scanned n
+    :unreadable-runs n :unreadable-run-dirs [..]} -- an unreadable run's
+   surviving observations still count, but the report names the dirs
+   whose input is incomplete rather than presenting them as quiet."
   [checkpoint-root nodes gate-map]
   (let [run-dirs (->> (.listFiles (io/file checkpoint-root))
                       (filter #(.isDirectory ^java.io.File %)))
         ;; One pass over the run dirs: observations accumulate into a
         ;; single vector and runs contributing any are counted as we go.
-        {:keys [obs runs-with-pegs]}
+        {:keys [obs runs-with-pegs unreadable]}
         (reduce (fn [acc run-dir]
-                  (let [these (run-observations run-dir nodes gate-map)]
-                    (if (seq these)
-                      (-> acc (update :obs into these) (update :runs-with-pegs inc))
-                      acc)))
-                {:obs [] :runs-with-pegs 0}
+                  (let [{:keys [observations unreadable?]}
+                        (run-observations run-dir nodes gate-map)]
+                    (cond-> acc
+                      (seq observations) (-> (update :obs into observations)
+                                             (update :runs-with-pegs inc))
+                      unreadable? (update :unreadable conj (str run-dir)))))
+                {:obs [] :runs-with-pegs 0 :unreadable []}
                 run-dirs)]
     {:pegs (aggregate obs)
      :runs-with-pegs runs-with-pegs
-     :runs-scanned (count run-dirs)}))
+     :runs-scanned (count run-dirs)
+     :unreadable-runs (count unreadable)
+     :unreadable-run-dirs unreadable}))
