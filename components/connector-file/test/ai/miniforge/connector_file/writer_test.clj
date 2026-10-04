@@ -51,7 +51,14 @@
   (testing "append to a file that does not exist yet writes the records"
     (let [path (tmp-edn-path)]
       (is (= 2 (sut/write-edn path [{:id 1} {:id 2}] :append)))
-      (is (= [{:id 1} {:id 2}] (edn/read-string (slurp path)))))))
+      (is (= [{:id 1} {:id 2}] (edn/read-string (slurp path))))))
+  (testing "append to an empty file writes the records"
+    ;; clojure.edn/read-string returns nil at end of input, where
+    ;; clojure.core/read-string threw, so an empty file reads as no records.
+    (let [path (tmp-edn-path)]
+      (spit path "")
+      (is (= 1 (sut/write-edn path [{:id 1}] :append)))
+      (is (= [{:id 1}] (edn/read-string (slurp path)))))))
 
 (deftest ^{:stratum 1} write-edn-append-does-not-evaluate-test
   (testing "a #= form in the existing file is rejected, not run"
