@@ -449,7 +449,7 @@
 
 (deftest ^{:stratum 0} with-readonly-session-test
   (testing "runs body-fn with a configured session and returns its result
-            directly (no artifact-promotion map), for read-only agents"
+            under :llm-result (no artifact-promotion map), for read-only agents"
     (let [ran (atom false)
           result (session/with-readonly-session
                   {}
@@ -459,8 +459,68 @@
                     (is (:mcp-allowed-tools s) "session carries the MCP tool allowlist")
                     :review-result))]
       (is @ran "body-fn ran")
-      (is (= :review-result result)
-          "returns the body-fn value directly, not a normalized artifact map"))))
+      (is (= :review-result (:llm-result result))
+          "the body-fn value rides :llm-result, not a normalized artifact map")
+      (is (nil? (:codex-answers result)))
+      (is (= :absent (:codex-answer-log result))
+          "no answers.edn written means the channel records :absent")))
+
+  (testing "§7.7.2: answers.edn is read BEFORE cleanup deletes the session dir"
+    (let [answers [{:peg-id "contract-verified-against-producer"
+                    :answer "no" :timestamp "2026-10-03T00:00:00Z"}]
+          result (session/with-readonly-session
+                  {}
+                  (fn [s]
+                    (spit (str (:dir s) "/answers.edn") (pr-str answers))
+                    :review-result))]
+      (is (= answers (:codex-answers result))
+          "a reviewer's recorded answers survive session cleanup")
+      (is (= :recorded (:codex-answer-log result)))))
+
+  (testing "§7.7.2 lost-vs-unanswered: a torn answers.edn marks :unreadable"
+    (let [err (java.io.StringWriter.)
+          result (binding [*err* err]
+                   (session/with-readonly-session
+                    {}
+                    (fn [s]
+                      (spit (str (:dir s) "/answers.edn") "{{{not edn")
+                      :review-result)))]
+      (is (nil? (:codex-answers result)))
+      (is (= :unreadable (:codex-answer-log result))
+          "a present-but-unparseable log is LOST observations, not absence"))))
+
+(deftest ^{:stratum 0} read-capsule-codex-answers-test
+  ;; The lean answers-only reader for read-only capsule sessions
+  ;; (with-readonly-session): one cat, one file, the §7.7.2 marker.
+  (let [make-session (fn [stdout calls]
+                       {:dir            "/workspace/.miniforge-session"
+                        :workdir        "/workspace"
+                        :executor       :fake-executor
+                        :environment-id "env-1"
+                        :exec!          (fn [_executor _env-id cmd _opts]
+                                          (swap! calls conj cmd)
+                                          {:data {:stdout stdout}})})
+        answers [{:peg-id "contract-verified-against-producer"
+                  :answer "yes" :timestamp "2026-10-03T00:00:00Z"}]]
+    (testing "recorded answers come back with :recorded in one round-trip"
+      (let [calls (atom [])
+            r (session/read-capsule-codex-answers
+               (make-session (pr-str answers) calls))]
+        (is (= 1 (count @calls)))
+        (is (str/includes? (first @calls) "answers.edn"))
+        (is (= answers (:answers r)))
+        (is (= :recorded (:answer-log r)))))
+    (testing "no file (empty stdout) reads back :absent"
+      (let [r (session/read-capsule-codex-answers (make-session "" (atom [])))]
+        (is (nil? (:answers r)))
+        (is (= :absent (:answer-log r)))))
+    (testing "a torn log reads back :unreadable, not :absent"
+      (let [err (java.io.StringWriter.)
+            r (binding [*err* err]
+                (session/read-capsule-codex-answers
+                 (make-session "{{{not edn" (atom []))))]
+        (is (nil? (:answers r)))
+        (is (= :unreadable (:answer-log r)))))))
 
 ;------------------------------------------------------------------------------ Layer 1
 
@@ -819,7 +879,9 @@
       (is (nil? (:artifact result)))
       (is (nil? (:context-misses result)))
       (is (nil? (:context-reads result)))
-      (is (nil? (:codex-answers result)))))
+      (is (nil? (:codex-answers result)))
+      (is (= :absent (:codex-answer-log result))
+          "an empty answers segment is a server that recorded nothing")))
 
   (testing "recorded peg answers ride the same round-trip (§7.7.2)"
     (let [calls   (atom [])
@@ -838,8 +900,29 @@
                    :exec!          (capsule-exec-stub calls stdout)}
           result  (session/read-capsule-session-outputs session)]
       (is (= answers (:codex-answers result)))
+      (is (= :recorded (:codex-answer-log result)))
       (is (= [(context-read-record "src/a.clj" :cache)] (:context-reads result))
           "the answers segment must not displace its neighbours")))
+
+  (testing "§7.7.2 lost-vs-unanswered: a torn answers segment marks :unreadable"
+    (let [calls   (atom [])
+          stdout  (capsule-outputs-stdout
+                   ""
+                   ""
+                   "[{:peg-id \"p\" :answer"
+                   (pr-str (code-artifact)))
+          session {:dir            "/workspace/.miniforge-session"
+                   :artifact-path  "/workspace/.miniforge-session/artifact.edn"
+                   :workdir        "/workspace"
+                   :executor       :fake-executor
+                   :environment-id "env-1"
+                   :exec!          (capsule-exec-stub calls stdout)}
+          err     (java.io.StringWriter.)
+          result  (binding [*err* err]
+                    (session/read-capsule-session-outputs session))]
+      (is (nil? (:codex-answers result)))
+      (is (= :unreadable (:codex-answer-log result))
+          "a present-but-unparseable log is LOST observations, not absence")))
 
   (testing "malformed segment emits parse WARN and yields nil for that file only"
     (let [calls   (atom [])
