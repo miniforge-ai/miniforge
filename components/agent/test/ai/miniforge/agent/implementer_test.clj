@@ -461,6 +461,36 @@
    :tokens 8000
    :stop-reason "tool_use"})
 
+(deftest ^{:stratum 0} recovery-cut-by-max-turns-keeps-its-answers-test
+  (testing "the max-turns recovery sentinel carries the recovery turn's
+            answers instead of dropping them with the failed artifact"
+    (with-redefs [submission-recovery/run-recovery-session
+                  (fn [& _] {:llm-result {:success true
+                                          :content ""
+                                          :tokens 50
+                                          :num-turns 6
+                                          :stop-reason "max_turns"}
+                             :artifact nil
+                             :worktree-artifacts {}
+                             :codex-answers [{:peg-id "peg-a" :answer "yes"
+                                              :timestamp "t1"}]
+                             :session-mode :host
+                             :pre-session-snapshot {:untracked #{} :modified #{}
+                                                    :deleted #{} :added #{}}})
+                  file-artifacts/collect-written-files (fn [_ _] nil)
+                  file-artifacts/collect-worktree-files (fn [_ _] nil)]
+      (let [[logger _] (log/collecting-logger {:min-level :trace})
+            sentinel (@#'implementer/recover-implementer-submission
+                      {:llm-client nil :config {} :context {}
+                       :on-chunk nil :working-dir nil
+                       :effective-system-prompt "s"
+                       :input {} :normalized {:response {:success true}
+                                              :content "prose"}
+                       :logger logger})]
+        (is (true? (get sentinel :ai.miniforge.agent.implementer/recovery-cut-by-max-turns?)))
+        (is (= [{:peg-id "peg-a" :answer "yes" :timestamp "t1"}]
+               (get sentinel :ai.miniforge.agent.implementer/recovery-codex-answers)))))))
+
 ;------------------------------------------------------------------------------ Layer 1
 
 ;; Invoke tests
@@ -1077,6 +1107,61 @@
       (is (some? monitor) ":progress-monitor opt must reach the LLM client")
       (is (>= (:max-total-ms @monitor) min-implement-total-budget-ms)
           "implement turns write many files; the ceiling must be ≥ 30 minutes"))))
+
+(deftest ^{:stratum 1} recovery-answers-append-after-the-primary-log-test
+  (testing "a recovery turn's answer_peg recordings merge AFTER the primary
+            session's (SPEC §7.7.2 last-recording-wins includes recovery),
+            and a recovery with answers but no promotable artifact loses
+            neither the answers nor the error outcome"
+    (let [[logger _] (log/collecting-logger {:min-level :trace})
+          primary [{:peg-id "peg-a" :answer "no" :timestamp "t1"}]
+          recovery [{:peg-id "peg-a" :answer "yes" :timestamp "t2"}]
+          result (with-redefs [artifact-session/create-session!
+                               (fn [& _] (session-map))
+                               artifact-session/write-mcp-config!
+                               identity
+                               artifact-session/read-artifact
+                               (constantly nil)
+                               artifact-session/read-context-misses
+                               (constantly nil)
+                               artifact-session/read-context-reads
+                               (constantly nil)
+                               artifact-session/read-codex-answers
+                               (constantly primary)
+                               artifact-session/cleanup-session!
+                               (constantly nil)
+                               budget/resolve-cost-budget-usd
+                               (fn [& _] 1.0)
+                               ;; clean success, prose only, no artifact ->
+                               ;; submission-retry? fires
+                               llm/chat
+                               (fn [& _] {:success true
+                                          :content "narrated the work, wrote nothing"
+                                          :tokens 100
+                                          :stop-reason "end_turn"})
+                               ;; recovery turn: answers recorded, still no
+                               ;; promotable artifact
+                               submission-recovery/run-recovery-session
+                               (fn [& _] {:llm-result {:success true
+                                                       :content ""
+                                                       :tokens 50
+                                                       :stop-reason "end_turn"}
+                                          :artifact nil
+                                          :worktree-artifacts {}
+                                          :codex-answers recovery
+                                          :session-mode :host})
+                               file-artifacts/collect-written-files
+                               (fn [_ _] nil)
+                               file-artifacts/collect-worktree-files
+                               (fn [_ _] nil)]
+                   (@#'implementer/invoke-with-llm
+                    nil "prompt" "system" {} {} nil logger [] {}))]
+      (is (= [{:peg-id "peg-a" :answer "no" :timestamp "t1"}
+              {:peg-id "peg-a" :answer "yes" :timestamp "t2"}]
+             (:codex-answers result))
+          "primary first, recovery appended — last-recording-wins sees t2")
+      (is (response/error? result)
+          "answers-only recovery does not manufacture an artifact success"))))
 
 ;------------------------------------------------------------------------------ Rich Comment
 (comment
