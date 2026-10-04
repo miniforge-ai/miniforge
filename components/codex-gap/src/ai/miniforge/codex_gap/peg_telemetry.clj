@@ -136,27 +136,19 @@
           {}
           consult-pegs))
 
-(defn- ^{:stratum 1} miss-explicit-answers-by-id
-  "Lost-consultation survival (SPEC $7.7.2): per-consultation explicit
-   answers recovered from the miss entries themselves, validated against
-   each row's own vocabulary. Entries written by one phase leave carry
-   identical peg vectors (one copy per failure signal) and collapse to
-   one; distinct phases are distinct consultations, so their answers
-   each count -- the recovered stream matches what the consultation file
-   would have recorded, not one-answer-per-run."
-  [ledger-entries]
-  (->> ledger-entries
-       (map (juxt :miss/phase :miss/pegs))
-       distinct
-       (mapcat second)
-       (reduce (fn [acc {:keys [id answer] :as peg}]
-                 (if (and id (some? answer))
-                   (let [slot (if (contains? (peg-landings peg) answer)
-                                :valid
-                                :invalid)]
-                     (update-in acc [id slot] (fnil conj []) answer))
-                   acc))
-               {})))
+(defn- ^{:stratum 1} answer-slots
+  "Fold peg rows into {peg-id {:valid [..] :invalid [..]}}, each answer
+   validated against ITS OWN row's landing vocabulary."
+  [acc pegs]
+  (reduce (fn [acc {:keys [id answer] :as peg}]
+            (if (and id (some? answer))
+              (let [slot (if (contains? (peg-landings peg) answer)
+                           :valid
+                           :invalid)]
+                (update-in acc [id slot] (fnil conj []) answer))
+              acc))
+          acc
+          pegs))
 
 (defn ^{:stratum 1} branches-collapsed?
   "True when every answer of `peg` lands on the same problem set -- the
@@ -273,7 +265,41 @@
 
 ;------------------------------------------------------------------------------ Layer 2
 
-(defn ^{:stratum 2} run-observations
+(defn- ^{:stratum 2} missing-consultation-answers-by-id
+  "Lost-consultation recovery, reconciled by consultation identity
+   (SPEC $7.7.2.1): miss entries carry their leave's :consultation-id,
+   so every identity ABSENT from the surviving consultation file
+   contributes its answers exactly once (the several copies one leave
+   writes share the identity and collapse), while identities the file
+   already records contribute nothing — their answers were counted from
+   the file. Returns {peg-id {:valid [..] :invalid [..]}}."
+  [ledger-entries surviving-ids]
+  (->> ledger-entries
+       (keep (fn [e]
+               (when-some [cid (get-in e [:miss/consultation :consultation-id])]
+                 [cid (:miss/pegs e)])))
+       distinct
+       (remove (fn [[cid _]] (contains? surviving-ids cid)))
+       (map second)
+       (reduce answer-slots {})))
+
+(defn- ^{:stratum 2} legacy-miss-answers-by-id
+  "Pre-identity miss entries (no :consultation-id on the stored
+   consultation): the old conservative recovery — entries distinct by
+   phase+rows (one leave's signal copies collapse; same-phase retries
+   with identical rows are indistinguishable and undercount), used per
+   peg only when nothing else recorded an answer for it."
+  [ledger-entries]
+  (->> ledger-entries
+       (remove #(get-in % [:miss/consultation :consultation-id]))
+       (map (juxt :miss/phase :miss/pegs))
+       distinct
+       (map second)
+       (reduce answer-slots {})))
+
+;------------------------------------------------------------------------------ Layer 3
+
+(defn ^{:stratum 3} run-observations
   "Observations for every distinct peg presented in `run-dir`
    (consultation record first, miss ledger as the pre-$7.7.2 fallback).
    Returns {:observations [..] :incomplete? bool} -- :incomplete? marks
@@ -299,8 +325,11 @@
         consult-pegs (mapcat :consultation/pegs (get consult-res :entries []))
         pegs (vals (presented-pegs miss-pegs consult-pegs))
         explicit-by-id (explicit-answers-by-id consult-pegs)
-        miss-explicit-by-id (miss-explicit-answers-by-id
-                             (get ledger-res :entries []))
+        surviving-ids (into #{} (keep :consultation/id)
+                            (get consult-res :entries []))
+        recovered-by-id (missing-consultation-answers-by-id
+                         (get ledger-res :entries []) surviving-ids)
+        legacy-by-id (legacy-miss-answers-by-id (get ledger-res :entries []))
         history (read-gate-history run-dir)
         entries (:entries history)]
     {:incomplete? (boolean (or (:codex-gap/anomaly ledger-res)
@@ -322,16 +351,24 @@
                   ;; survives, the selected row's own :answer (copied into
                   ;; :miss/pegs by build-entry) is the surviving record.
                   consult-answers (get explicit-by-id (:id peg))
-                  ;; Lost-consultation survival: when no consultation row
-                  ;; recorded ANY answer for this peg, the miss entries'
-                  ;; own per-consultation answers stand (each validated
-                  ;; against its own row by the recoverer).
-                  {valid-explicit :valid invalid-explicit :invalid
-                   :or {valid-explicit [] invalid-explicit []}}
-                  (if (or (seq (:valid consult-answers))
-                          (seq (:invalid consult-answers)))
-                    consult-answers
-                    (get miss-explicit-by-id (:id peg)))
+                  ;; Identity-reconciled recovery is a UNION with the
+                  ;; file's answers: a consultation whose rows the file
+                  ;; lost contributes from its miss copies even when a
+                  ;; sibling consultation's rows survived. Pre-identity
+                  ;; entries keep the old conservative gate (only when
+                  ;; nothing else answered).
+                  recovered (get recovered-by-id (:id peg))
+                  legacy (when (and (empty? (:valid consult-answers))
+                                    (empty? (:invalid consult-answers))
+                                    (empty? (:valid recovered))
+                                    (empty? (:invalid recovered)))
+                           (get legacy-by-id (:id peg)))
+                  valid-explicit (vec (concat (:valid consult-answers)
+                                              (:valid recovered)
+                                              (:valid legacy)))
+                  invalid-explicit (vec (concat (:invalid consult-answers)
+                                                (:invalid recovered)
+                                                (:invalid legacy)))
                   mech-answers (when gate (gate-answers entries gate))
                   mech-won? (boolean (seq mech-answers))]]
         (cond-> {:peg (:id peg)
@@ -350,9 +387,9 @@
           (and mech-won? (seq valid-explicit))
           (assoc :explicit-answers valid-explicit))))}))
 
-;------------------------------------------------------------------------------ Layer 3
+;------------------------------------------------------------------------------ Layer 4
 
-(defn ^{:stratum 3} peg-telemetry
+(defn ^{:stratum 4} peg-telemetry
   "The §7.7 record over every run directory under `checkpoint-root`
    whose records presented pegs, using `nodes` ({id node}) for mechanism
    pointers and `gate-map` for mechanism->gate. Returns

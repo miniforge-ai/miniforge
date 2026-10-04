@@ -466,3 +466,57 @@
       (is (= {"x" 2} (:answers u))
           "two consultations count twice; duplicate signal copies do not")
       (is (= 2 (:observations u))))))
+
+(deftest ^{:stratum 1} same-phase-retries-count-separately-by-identity
+  ;; Review catch on #1993 round 9: two attempts of one phase are two
+  ;; consultations; their identical answers both count when the
+  ;; consultation file is lost, while one attempt's several signal
+  ;; copies (same identity) collapse.
+  (let [root (str (Files/createTempDirectory "peg-telemetry-retry" (make-array FileAttribute 0)))
+        dir (io/file root "run-a")
+        answered (assoc unmapped-peg :answer "x")
+        cid1 (random-uuid)
+        cid2 (random-uuid)]
+    (.mkdirs dir)
+    (spit (io/file dir "codex-gap-ledger.edn")
+          (str ;; attempt 1, two signals (same identity)
+               (pr-str {:miss/id (random-uuid) :miss/phase :implement
+                        :miss/consultation {:consultation-id cid1}
+                        :miss/pegs [answered]}) "\n"
+               (pr-str {:miss/id (random-uuid) :miss/phase :implement
+                        :miss/consultation {:consultation-id cid1}
+                        :miss/pegs [answered]}) "\n"
+               ;; attempt 2: same phase, same rows, NEW identity
+               (pr-str {:miss/id (random-uuid) :miss/phase :implement
+                        :miss/consultation {:consultation-id cid2}
+                        :miss/pegs [answered]}) "\n"))
+    (let [u (get-in (sut/peg-telemetry root nodes gate-map) [:pegs "unmapped"])]
+      (is (= {"x" 2} (:answers u))
+          "two identities count twice; one identity's copies collapse"))))
+
+(deftest ^{:stratum 1} partially-lost-consultation-file-recovers-the-missing-identity
+  ;; Review catch on #1993 round 9: when one consultation's rows survive
+  ;; in the file and another's were lost, the lost one recovers from its
+  ;; miss copies — union, not all-or-nothing per peg.
+  (let [root (str (Files/createTempDirectory "peg-telemetry-partial" (make-array FileAttribute 0)))
+        dir (io/file root "run-a")
+        survived-id (random-uuid)
+        lost-id (random-uuid)]
+    (.mkdirs dir)
+    (spit (io/file dir "codex-consultations.edn")
+          (str (pr-str {:consultation/id survived-id
+                        :consultation/phase :implement
+                        :consultation/pegs [(assoc unmapped-peg :answer "x")]})
+               "\n"))
+    (spit (io/file dir "codex-gap-ledger.edn")
+          (str ;; the survived consultation's miss copy: contributes nothing
+               (pr-str {:miss/id (random-uuid) :miss/phase :implement
+                        :miss/consultation {:consultation-id survived-id}
+                        :miss/pegs [(assoc unmapped-peg :answer "x")]}) "\n"
+               ;; the LOST consultation's miss copy: recovers
+               (pr-str {:miss/id (random-uuid) :miss/phase :review
+                        :miss/consultation {:consultation-id lost-id}
+                        :miss/pegs [(assoc unmapped-peg :answer "y")]}) "\n"))
+    (let [u (get-in (sut/peg-telemetry root nodes gate-map) [:pegs "unmapped"])]
+      (is (= {"x" 1 "y" 1} (:answers u))
+          "the file's answer and the lost identity's recovery both count, once each"))))
