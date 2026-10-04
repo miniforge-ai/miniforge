@@ -21,7 +21,8 @@
     (let [event (state/pending @stream)]
       ;; The empty observation and releasing the drainer are atomic with enqueue.
       ;; Otherwise a sender can strand its event behind a departing drainer.
-      (when-not event (swap! stream assoc-in [:publication :draining?] false))
+      (when-not event
+        (swap! stream update :publication #(-> % (assoc :draining? false) (dissoc :delivery-failure))))
       event)))
 
 (defn- ^{:stratum 0} handle-thrown! [stream throwable]
