@@ -77,13 +77,8 @@
 
 ;------------------------------------------------------------------------------ Layer 1
 
-(def ^{:stratum 1} compliance-schema
-  "Schema for compliance metadata."
-  {:compliance/created-at inst?
-   :compliance/sensitive-data boolean?
-   :compliance/pii-handling (fn [t] (contains? pii-handling-types t))
-   (optional-key/optional-key :compliance/retention-policy) keyword?
-   (optional-key/optional-key :compliance/auditor-notes) string?})
+(defn ^{:stratum 1} valid-pii-handling? [value]
+  (contains? pii-handling-types value))
 
 ;; Public (not `defn-`): evidence-bundle-schema in the root `schema` ns
 ;; references these as validator predicates across the namespace boundary
@@ -112,6 +107,14 @@
   (:valid? (validation/validate-schema access-log-entry-schema entry)))
 
 ;------------------------------------------------------------------------------ Layer 2
+
+(def ^{:stratum 2} compliance-schema
+  "Schema for compliance metadata."
+  {:compliance/created-at inst?
+   :compliance/sensitive-data boolean?
+   :compliance/pii-handling valid-pii-handling?
+   (optional-key/optional-key :compliance/retention-policy) keyword?
+   (optional-key/optional-key :compliance/auditor-notes) string?})
 
 (defn ^{:stratum 2} valid-access-log?
   "Returns true when the access log is a vector of valid entries."

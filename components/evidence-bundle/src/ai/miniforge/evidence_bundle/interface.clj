@@ -20,6 +20,7 @@
    Handles evidence collection, storage, and provenance tracing per N6 spec."
   (:require
    [ai.miniforge.content-hash.interface :as content-hash]
+   [ai.miniforge.evidence-bundle.canonical-validation :as canonical]
    [ai.miniforge.evidence-bundle.chain-evidence :as chain-evidence]
    [ai.miniforge.evidence-bundle.collector :as collector]
    [ai.miniforge.evidence-bundle.edn-codec :as edn-codec]
@@ -28,6 +29,7 @@
    [ai.miniforge.evidence-bundle.extraction-bulk :as extraction-bulk]
    [ai.miniforge.evidence-bundle.opsv-assembly :as opsv-assembly]
    [ai.miniforge.evidence-bundle.opsv-finalization :as opsv-finalization]
+   [ai.miniforge.evidence-bundle.publication-validation :as publication-validation]
    [ai.miniforge.evidence-bundle.schema :as schema]
    [ai.miniforge.evidence-bundle.schema.compliance :as compliance]
    [ai.miniforge.evidence-bundle.schema.domain :as domain]
@@ -161,20 +163,35 @@
   (p/query-bundles manager criteria))
 
 (defn ^{:stratum 0} validate-bundle
-  "Validate evidence bundle structure and integrity.
+  "Legacy required-field and intent validation; does not check canonical integrity.
+   Use validate-canonical-bundle for published evidence.
    Returns {:valid? bool :errors [...]}"
   [manager bundle]
   (p/validate-bundle manager bundle))
 
+(defn ^{:stratum 0} validate-canonical-bundle
+  "Validate portable N6 schema, intent, outcome, policy checks and optional OPSV.
+   A declared content hash must match. Base bundles may omit the content hash.
+   Returns {:valid? bool :errors [...]}; does not establish authenticity."
+  [bundle]
+  (canonical/validate-with-exception-handling bundle))
+
+(defn ^{:stratum 0} validate-published-bundle
+  "Validate canonical domain values and a required complete N6 seal. No authenticity claim."
+  [bundle]
+  (publication-validation/validate bundle))
+
 (defn ^{:stratum 0} export-bundle
-  "Export evidence bundle to file (EDN format).
+  "Export a valid, sealed evidence bundle to canonical EDN.
+   Unsealed create-bundle values must be finalized before export.
 
    Arguments:
    - manager: Evidence manager instance
    - bundle-id: UUID of the bundle to export
    - output-path: Path to output file
 
-   Returns true on success, false on error.
+   Returns true on success. Invalid, unsealed or missing evidence returns false
+   without touching the destination; filesystem errors also return false.
 
    Example:
      (export-bundle manager bundle-id \"/tmp/evidence.edn\")"

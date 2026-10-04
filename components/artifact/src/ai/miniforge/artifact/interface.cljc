@@ -21,9 +21,11 @@
    #?@(:bb []
        :default [[ai.miniforge.artifact.datalevin-store :as datalevin-store]])
    [ai.miniforge.artifact.core :as core]
+   [ai.miniforge.artifact.content-json :as content-json]
    [ai.miniforge.artifact.publication :as publication]
    [ai.miniforge.artifact.publication-boundary :as publication-boundary]
    [ai.miniforge.artifact.publication-identity :as publication-identity]
+   [ai.miniforge.artifact.publication-inventory :as publication-inventory]
    [ai.miniforge.artifact.snapshot :as snapshot]
    [ai.miniforge.schema.interface :as schema]
    [clojure.string :as str]
@@ -39,6 +41,14 @@
    This integrity value is not authority or writer authentication."
   [value]
   (publication-identity/digest-with-exception-handling value))
+
+(defn ^{:stratum 0} encode-content-json
+  "Encode portable content as bounded lossless Transit JSON, or return an anomaly.
+   Preserves keyword/UUID identity, collection kinds and nanosecond instants via
+   the miniforge/instant tag. Metadata is not serialized. Serialization does not
+   validate evidence or authority."
+  [value]
+  (content-json/encode-with-exception-handling value))
 
 (defn ^{:stratum 0} encode-snapshot
   "Encode a validated artifact as a lossless, checksummed string of at most 16 MiB.
@@ -83,6 +93,16 @@
     (publication-boundary/call-with-exception-handling id :fault :publication/read-failed
                                                      #(publication/read-record directory id))
     (publication-boundary/failure :invalid-input :publication/invalid id)))
+
+(defn ^{:stratum 0} list-published
+  "Read every immutable publication, or return an anomaly for any unreadable record.
+   Ignores temporary/unrelated files; refuses malformed owned filenames and symlinks.
+   Enumeration is not a transaction: callers needing a snapshot must own the directory."
+  [directory]
+  (if (and (string? directory) (not (str/blank? directory)))
+    (publication-boundary/call-with-exception-handling
+     nil :fault :publication/read-failed (partial publication-inventory/read-records directory))
+    (publication-boundary/failure :invalid-input :publication/invalid nil)))
 
 ;; Re-export protocol for public API
 (def ^{:stratum 0} ArtifactStore

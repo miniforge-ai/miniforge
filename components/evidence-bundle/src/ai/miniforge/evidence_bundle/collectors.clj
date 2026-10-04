@@ -20,6 +20,7 @@
    invocations, rules, policy checks, pack promotions, supervision
    decisions, control actions, and execution output."
   (:require
+   [ai.miniforge.evidence-bundle.collector-projection :as collector-projection]
    [ai.miniforge.evidence-bundle.control-projection :as control-projection]
    [ai.miniforge.evidence-bundle.projection :as projection]
    [ai.miniforge.event-stream.interface :as event-stream]))
@@ -47,7 +48,7 @@
    :policy-check/pack-version (get gate-result :pack-version "1.0.0")
    :policy-check/phase (get gate-result :phase :unknown)
    :policy-check/checked-at (get gate-result :checked-at (java.time.Instant/now))
-   :policy-check/violations (vec (get gate-result :violations []))
+   :policy-check/violations (mapv collector-projection/violation (get gate-result :violations []))
    :policy-check/passed? (get gate-result :passed? true)
    :policy-check/duration-ms (get gate-result :duration-ms 0)
    :policy-check/envelope (get gate-result :envelope)})
