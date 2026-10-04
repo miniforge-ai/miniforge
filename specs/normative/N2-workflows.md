@@ -6,8 +6,8 @@
 
 # N2 — Workflow Execution Model
 
-**Version:** 0.6.0-draft
-**Date:** 2026-08-06
+**Version:** 0.7.0-draft
+**Date:** 2026-10-04
 **Status:** Draft
 **Conformance:** MUST
 
@@ -1687,7 +1687,11 @@ Chained execution MUST preserve provenance across workflow boundaries:
 ### 14.4 Chain Execution
 
 ```clojure
-{:chain/id uuid                        ; REQUIRED: unique chain identifier
+{:chain/run-id uuid                    ; REQUIRED: invocation identity (N1 §2.32)
+ :chain/definition-id keyword          ; REQUIRED: reusable composition identity
+ :chain/steps
+ [{:step/id keyword                    ; Unique within the definition
+   :step/workflow-id keyword}]         ; Workflow definition, not run UUID
  :chain/edges
  [{:edge/id uuid                       ; REQUIRED: unique edge identifier
    :edge/from-workflow-id uuid         ; Upstream workflow
@@ -1700,9 +1704,21 @@ Chained execution MUST preserve provenance across workflow boundaries:
 
 Implementations MUST:
 
-1. Emit chain edge events (see N3) for edge lifecycle transitions
+1. Emit chain-run, step, and edge events for their distinct transitions (N3 §3.12.1)
 2. Support pausing/retrying/rolling back at edge granularity via OCI (N8) when available
 3. Record chain structure and edge results in evidence bundles (N6)
+
+Each run MUST emit `chain/started` before starting steps. On termination,
+including after recovery, it MUST record exactly one `chain/completed` or
+`chain/failed` outcome. Completion MUST mean all required
+steps and bindings succeeded. Each started step MUST have one terminal outcome,
+including binding or loading failures. Failure MUST prevent dependent steps
+from starting. Emission failure MUST follow N3 §9, never report false success.
+
+Edges MUST reference preallocated source and destination workflow-run UUIDs,
+including failures before the destination starts. Recovery MUST preserve the
+chain-run UUID and resolved definition; a fresh invocation MUST allocate a new one. The former
+`:chain/id` invocation field is retired; migration MUST follow N3 §7.5.
 
 ---
 
@@ -1787,6 +1803,9 @@ partly implemented already — the gap is naming, not capability.
 terminal run (N2.LC.6, N2.RS.2).
 
 **Version History:**
+
+- 0.7.0-draft (2026-10-04): Reconciled chain execution and dependency provenance
+  with N1 §2.32 and N3's chain-run scope and compatibility rules.
 
 - 0.6.0-draft (2026-08-06): Spec-completion pass.
   **Lifecycle vocabulary unified (§2.2).** Three spellings were in use: N2 said

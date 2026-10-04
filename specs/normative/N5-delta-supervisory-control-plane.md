@@ -6,8 +6,8 @@
 
 # N5 Delta — Supervisory Control Plane
 
-**Version:** 0.3.0-draft
-**Date:** 2026-04-22
+**Version:** 0.4.0-draft
+**Date:** 2026-10-04
 **Status:** Draft
 **Conformance:** MUST
 
@@ -205,6 +205,40 @@ Minimum required keys for supervisory display:
  :evidence/gate-summary  map?}      ;; {:passed N :failed N :skipped N}
 ```
 
+#### Spec
+
+The supervisory projection of a Work Specification (N1 §2.33) groups related
+workflow runs without replacing their frozen run-start snapshots.
+
+Minimum required keys:
+
+```clojure
+{:spec/id uuid?
+ :spec/title string?                 ; Non-blank display label, not identity
+ :spec/status keyword?               ; :draft, :active, :completed, :archived
+ :spec/origin keyword?               ; Source system, preserved after creation
+ :spec/created-at inst?
+ :spec/updated-at inst?}
+```
+
+The projection MAY include `:spec/description` and `:spec/repo-url` strings,
+`:spec/intent` (keyword), and `:spec/tags` (vector of strings).
+Unknown extension fields MUST pass through without acquiring execution authority.
+Linked WorkflowRuns MUST carry `:spec/id` as a UUID cross-reference.
+Distinct specifications with equal titles MUST remain distinct; replay MUST
+preserve a supplied ID rather than deriving a replacement from display text.
+
+`:draft` means no execution yet; `:active` means work is ongoing.
+`:completed` means the owner considers the work finished.
+`:archived` removes it from default views without deleting history.
+A workflow completion alone MUST NOT mark the
+specification completed. A snapshot MUST NOT itself authorize a status change,
+launch, or intervention. This amendment adds no new Spec mutation command.
+
+The supervisory-state component MUST emit `supervisory/spec-upserted` under
+N3 §3.19 with `:supervisory/entity-key` equal to `:spec/id` and the full entity
+inside `:supervisory/entity`. Replay MUST preserve origin and creation time.
+
 #### InterventionRequest
 
 A durable request to perform a bounded supervisory action against the system.
@@ -265,6 +299,24 @@ InterventionRequest `:intervention/state` MUST distinguish at least:
 
 Terminal states are `:rejected`, `:verified`, and `:failed`.
 
+The initial state MUST be `:proposed`. N3 §3.22 owns request and state-change
+wire contracts. Admission MUST be durable before dispatch; materialized snapshots
+MUST NOT replace command authorization or acknowledged lifecycle facts.
+
+Only the following transitions are permitted; policy and authorization checks
+MUST still pass before any transition is admitted:
+
+| From | Permitted next states |
+|------|-----------------------|
+| `:proposed` | `:pending-human`, `:approved`, `:rejected`, `:failed` |
+| `:pending-human` | `:approved`, `:rejected`, `:failed` |
+| `:approved` | `:dispatched`, `:rejected`, `:failed` |
+| `:dispatched` | `:applied`, `:failed` |
+| `:applied` | `:verified`, `:failed` |
+
+Terminal states MUST NOT transition. Retrying a terminal request MUST create
+a new request identity rather than rewrite the completed record.
+
 ### 3.4 Existing entities carried forward
 
 The following entities already exist in sufficient form across N1, N4, N9, and existing components. They do not require
@@ -299,7 +351,7 @@ consumers: TUI, native console, web dashboard, and Rust control console.
    supervisory model.
 3. **Durable via the event stream.** The component does not maintain a
    separate persistence store. On startup it replays the event stream.
-   `:supervisory/*-upserted` events take precedence as entity-state baselines.
+   Snapshot events registered by N3 §3.19 take precedence as entity-state baselines.
    Fine-grained events newer than an entity's most recent snapshot are applied
    on top. This satisfies §9 (durable startup and stale-read)
    without a parallel database.
@@ -310,7 +362,7 @@ consumers: TUI, native console, web dashboard, and Rust control console.
    derived inside this component and emitted as `:supervisory/attention-derived`
    (N3 §3.19). No other component MAY emit attention snapshots.
 6. **One source per entity family.** For each of WorkflowRun, AgentSession,
-   PrFleetEntry, PolicyEvaluation, AttentionItem, and InterventionRequest the
+   PrFleetEntry, PolicyEvaluation, AttentionItem, Spec, and InterventionRequest the
    component MUST be the
    sole emitter of the corresponding `:supervisory/*-upserted` event.
    Other components MAY and SHOULD continue emitting their own fine-grained
@@ -332,7 +384,7 @@ consumers: TUI, native console, web dashboard, and Rust control console.
 | `:gate/passed` / `:gate/failed` | Emits new immutable `PolicyEvaluation` |
 
 **Consumer contract:** External renderers, including the Rust control console,
-subscribe to the event stream. They deserialize `:supervisory/*-upserted` events directly into
+subscribe to the event stream. They deserialize N3 §3.19 snapshots directly into
 §3.1 entity shapes. They MUST NOT reconstruct entities from fine-grained events.
 
 **Relationship to `control-plane/registry`:** The registry remains the
@@ -609,10 +661,16 @@ through without error. Required keys MUST be present and correctly typed.
 1. A restart reproduces the entity table from the stream alone.
 2. No second component emits a snapshot for an entity family it does not own.
 3. Terminal states never reactivate.
+4. Equal Spec titles with distinct IDs stay distinct across restart and rerun.
+5. Intervention facts and snapshots replay in one entity scope without granting
+   authority from snapshot observation or losing immutable request metadata.
 
 ---
 
 **Version History:**
+
+0.4.0-draft (2026-10-04): Added the Spec projection of N1's Work Specification
+and clarified intervention admission, lifecycle facts, and snapshot ownership.
 
 0.3.0-draft (2026-08-10): Spec-completion pass — metadata normalized to the header form;
 `N5D1.SV.*` conformance requirement IDs and test obligations added.

@@ -6,8 +6,8 @@
 
 # N1 — Core Architecture & Concepts
 
-**Version:** 0.8.0-draft
-**Date:** 2026-08-10
+**Version:** 0.9.0-draft
+**Date:** 2026-10-04
 **Status:** Draft
 **Conformance:** MUST
 
@@ -1722,6 +1722,40 @@ The CLI surface for listener-visible status is defined in N5.
 
 ---
 
+### 2.32 Chain Definition, Run, Step, and Edge
+
+A **Chain Definition** composes workflow definitions. A **Chain Run** is one
+invocation of that composition, not a workflow definition or an individual workflow run.
+Implementations MUST distinguish these identities:
+
+| Field | Meaning | Type |
+|-------|---------|------|
+| `:chain/definition-id` | Reusable composition identity | keyword |
+| `:chain/run-id` | One invocation, including its recovery | uuid |
+| `:step/id` | Step identity within the definition | keyword |
+| `:step/workflow-id` | Referenced workflow definition | keyword |
+| `:edge/id` | Dependency binding within the run | uuid |
+
+A step executes a workflow; an edge transfers inputs between steps. Implementations
+MUST NOT substitute one for the other. A sequential composition is a DAG with a linear
+dependency order. Implementations MUST retain both step outcomes and resolved
+edge bindings so the composition remains reconstructable under N2 §14.
+
+Each new invocation MUST allocate a fresh `:chain/run-id` before its first event.
+Recovery MUST preserve it. Step IDs MUST be unique within a definition, and
+referenced workflow executions MUST retain their own workflow UUIDs.
+Chain events MUST use the chain-run scope defined by N3 §2.3; a definition ID
+MUST NOT be substituted for a workflow or chain-run UUID.
+
+### 2.33 Work Specification
+
+A **Work Specification** is the durable intent that may produce multiple workflow
+runs. Its identity MUST remain distinct from each run's frozen specification
+snapshot. The specification's `:spec/id` MUST be a stable UUID, preserved across
+edits and reruns. A title alone MUST NOT determine identity: distinct work may
+share a title. N5's supervisory amendment owns its display projection.
+N2 owns execution; observing or editing a projection MUST NOT authorize execution.
+
 ## 3. Three-Layer Architecture
 
 miniforge is structured as three cooperating layers:
@@ -2881,6 +2915,9 @@ N1 states the model; the gaps surface downstream.
 
 **Version History:**
 
+- 0.9.0-draft (2026-10-04): Added chain definitions/runs/steps/edges and durable
+  work-specification identity. Product-owner approval and scope are recorded in
+  SPEC_INDEX's approved contract decisions.
 - 0.8.0-draft (2026-08-10): Spec-completion pass. §2's Workflow entity still
   declared `:workflow/status` as `:pending, :running, :completed, :failed,
   :cancelled` — the vocabulary N2 §2.2 superseded, missing `:paused` and
