@@ -548,3 +548,45 @@
               "the overridden explicit answer stays inspectable")
           (is (= 1 (:collapsed-runs s))
               "the collapsed snapshot's trigger survives either order"))))))
+
+(deftest ^{:stratum 1} one-answer-counts-once-across-same-id-snapshots
+  ;; Review catch on #1993 round 11: the writer stamps the recorded
+  ;; answer onto every same-id snapshot it keeps; counting per row would
+  ;; inflate :observations. One consultation counts once; separate
+  ;; consultations still count separately; validity holds when ANY of
+  ;; the id's snapshots accepts the answer.
+  (let [root (str (Files/createTempDirectory "peg-telemetry-oneanswer" (make-array FileAttribute 0)))
+        snap-a {:id "shifting" :answer "x"
+                :landings {"x" ["unmapped-problem"] "y" ["other-problem"]}}
+        snap-b {:id "shifting" :answer "x"
+                :landings {"x" ["other-problem"] "z" ["unmapped-problem"]}}
+        dir (io/file root "run-a")]
+    (.mkdirs dir)
+    (spit (io/file dir "codex-consultations.edn")
+          (str ;; one consultation, two snapshots carrying the one answer
+               (pr-str {:consultation/id (random-uuid)
+                        :consultation/phase :implement
+                        :consultation/pegs [snap-a snap-b]}) "\n"
+               ;; a separate consultation: counts separately
+               (pr-str {:consultation/id (random-uuid)
+                        :consultation/phase :review
+                        :consultation/pegs [snap-a]}) "\n"))
+    (let [s (get-in (sut/peg-telemetry root nodes gate-map) [:pegs "shifting"])]
+      (is (= {"x" 2} (:answers s))
+          "two consultations, two observations — not three")
+      (is (= 2 (:observations s)))))
+  (testing "the answer is valid when only the OTHER snapshot accepts it"
+    (let [root (str (Files/createTempDirectory "peg-telemetry-anyrow" (make-array FileAttribute 0)))
+          rejecting {:id "shifting" :answer "x"
+                     :landings {"yes" ["other-problem"] "no" ["unmapped-problem"]}}
+          accepting {:id "shifting" :answer "x"
+                     :landings {"x" ["unmapped-problem"]}}
+          dir (io/file root "run-a")]
+      (.mkdirs dir)
+      (spit (io/file dir "codex-consultations.edn")
+            (str (pr-str {:consultation/id (random-uuid)
+                          :consultation/phase :implement
+                          :consultation/pegs [rejecting accepting]}) "\n"))
+      (let [s (get-in (sut/peg-telemetry root nodes gate-map) [:pegs "shifting"])]
+        (is (= {"x" 1} (:answers s)))
+        (is (= [] (:invalid-answers s)))))))

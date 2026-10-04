@@ -111,37 +111,23 @@
 
 ;------------------------------------------------------------------------------ Layer 1
 
-(defn- ^{:stratum 1} explicit-answers-by-id
-  "{peg-id {:valid [..] :invalid [..]}} -- every non-nil explicit
-   :answer across the run's consultation rows in record order, each
-   validated against ITS OWN row's landing vocabulary (the one the
-   agent was shown when it answered), never against whichever snapshot
-   the presented-pegs merge later selects: vocabularies can change
-   between consultations within one run."
-  [consult-pegs]
-  (reduce (fn [acc {:keys [id answer] :as peg}]
-            (if (and id (some? answer))
-              (let [slot (if (contains? (peg-landings peg) answer)
-                           :valid
-                           :invalid)]
-                (update-in acc [id slot] (fnil conj []) answer))
-              acc))
-          {}
-          consult-pegs))
-
-(defn- ^{:stratum 1} answer-slots
-  "Fold peg rows into {peg-id {:valid [..] :invalid [..]}}, each answer
-   validated against ITS OWN row's landing vocabulary."
+(defn- ^{:stratum 1} consultation-answer-slots
+  "One consultation's peg rows folded into {peg-id {:valid [..]
+   :invalid [..]}} with at most ONE answer observation per peg id: the
+   writer stamps the recorded answer onto every same-id snapshot it
+   keeps, so counting per row would count one answer per snapshot. The
+   answer is valid when ANY of that id's snapshots accepts it -- it was
+   given against the presentation as a whole."
   [acc pegs]
-  (reduce (fn [acc {:keys [id answer] :as peg}]
-            (if (and id (some? answer))
-              (let [slot (if (contains? (peg-landings peg) answer)
-                           :valid
-                           :invalid)]
-                (update-in acc [id slot] (fnil conj []) answer))
-              acc))
-          acc
-          pegs))
+  (reduce-kv (fn [acc id rows]
+               (let [answer (:answer (first rows))
+                     slot (if (some #(contains? (peg-landings %) answer) rows)
+                            :valid
+                            :invalid)]
+                 (update-in acc [id slot] (fnil conj []) answer)))
+             acc
+             (group-by :id
+                       (filter #(and (:id %) (some? (:answer %))) pegs))))
 
 (defn ^{:stratum 1} branches-collapsed?
   "True when every answer of `peg` lands on the same problem set -- the
@@ -258,6 +244,15 @@
 
 ;------------------------------------------------------------------------------ Layer 2
 
+(defn- ^{:stratum 2} explicit-answers-by-id
+  "{peg-id {:valid [..] :invalid [..]}} -- explicit answers across the
+   run's consultation ENTRIES, one observation per consultation identity
+   and peg id (SPEC $7.7.2), in record order."
+  [consult-entries]
+  (reduce (fn [acc e] (consultation-answer-slots acc (:consultation/pegs e)))
+          {}
+          consult-entries))
+
 (defn- ^{:stratum 2} missing-consultation-answers-by-id
   "Lost-consultation recovery, reconciled by consultation identity
    (SPEC $7.7.2.1): miss entries carry their leave's :consultation-id,
@@ -274,7 +269,7 @@
        distinct
        (remove (fn [[cid _]] (contains? surviving-ids cid)))
        (map second)
-       (reduce answer-slots {})))
+       (reduce consultation-answer-slots {})))
 
 (defn- ^{:stratum 2} legacy-miss-answers-by-id
   "Pre-identity miss entries (no :consultation-id on the stored
@@ -288,7 +283,7 @@
        (map (juxt :miss/phase :miss/pegs))
        distinct
        (map second)
-       (reduce answer-slots {})))
+       (reduce consultation-answer-slots {})))
 
 ;------------------------------------------------------------------------------ Layer 3
 
@@ -317,7 +312,7 @@
         miss-pegs (mapcat :miss/pegs (get ledger-res :entries []))
         consult-pegs (mapcat :consultation/pegs (get consult-res :entries []))
         snapshots (snapshots-by-id miss-pegs consult-pegs)
-        explicit-by-id (explicit-answers-by-id consult-pegs)
+        explicit-by-id (explicit-answers-by-id (get consult-res :entries []))
         surviving-ids (into #{} (keep :consultation/id)
                             (get consult-res :entries []))
         recovered-by-id (missing-consultation-answers-by-id
