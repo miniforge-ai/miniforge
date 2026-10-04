@@ -214,7 +214,14 @@
                            {} answers)
          presented (set (map :id (:pegs outcome)))
          unmatched (seq (remove #(contains? presented (:peg-id %)) answers))]
-     (cond-> {:pinned?   (= :pinned (:status outcome))
+     (cond-> {;; One identity per constructed summary (one per phase
+              ;; enter): every miss entry of that leave and the
+              ;; consultation record share it, so the telemetry reader
+              ;; can tell same-phase retry attempts apart from the
+              ;; multiple copies one leave writes, and reconcile a
+              ;; partially lost consultation file (SPEC $7.7.2.1).
+              :consultation-id (random-uuid)
+              :pinned?   (= :pinned (:status outcome))
               :status    (:status outcome)
               :anomaly   (:anomaly outcome)
               :situation (:situation outcome)

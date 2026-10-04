@@ -46,7 +46,10 @@
    `consultation` is the $7.4.3 summary off the phase result; its :pegs
    rows already carry :answer (explicit, or nil = presented-unanswered)."
   [{:keys [run-id phase consultation]}]
-  {:consultation/id (random-uuid)
+  {;; the summary's own identity when it carries one (stamped at
+   ;; construction, shared with the leave's miss entries); minted here
+   ;; only for pre-identity summaries
+   :consultation/id (get consultation :consultation-id (random-uuid))
    :consultation/at (str (java.time.Instant/now))
    :consultation/run-id run-id
    :consultation/phase phase
