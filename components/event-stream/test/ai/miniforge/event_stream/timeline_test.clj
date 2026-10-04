@@ -71,6 +71,20 @@
 
 ;------------------------------------------------------------------------------ Layer 2
 
+(deftest ^{:stratum 2} timestamp-representations-share-the-same-normalization
+  (doseq [timestamp [(java.util.Date. 0) 0 "1970-01-01T00:00:00Z"]]
+    (is (str/starts-with? (sut/render-timeline [(mk-event :test/event 0 :event/timestamp timestamp)])
+                         "00:00:00")))
+  (doseq [timestamp [nil "not-an-instant" :invalid]]
+    (is (str/starts-with? (sut/render-timeline [(mk-event :test/event 0 :event/timestamp timestamp)])
+                         "??:??:??"))))
+
+(deftest ^{:stratum 2} missing-timestamp-breaks-gap-adjacency
+  (let [events [(mk-event :test/event 0)
+                (mk-event :test/event 0 :event/timestamp nil)
+                (mk-event :test/event 120000)]]
+    (is (= 3 (count (str/split-lines (sut/render-timeline events)))))))
+
 (deftest ^{:stratum 2} tool-call-started-renders-correctly
   (testing "agent/tool-call-started shows tool name and args digest preview"
     (let [event  (mk-event :agent/tool-call-started 0
