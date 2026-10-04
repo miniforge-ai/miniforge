@@ -78,6 +78,9 @@
               "is-there-progress-at-all" "reports-activity-while-stuck"
               "started-in-the-intended-environment"]
              (mapv :id pegs))))
+    (testing "each peg carries its question text — the answer channel puts
+              the question in front of the agent, not just an id"
+      (is (every? #(seq (:title %)) pegs)))
     (testing "each answer carries the landing set that follows it — exposes edges included (§4.4.1 routing relevance)"
       (is (= {"yes" ["fail-closed-by-default" "infra-vs-domain-failure"]
               "no" ["chained-work-identity" "contract-drift-is-silent"

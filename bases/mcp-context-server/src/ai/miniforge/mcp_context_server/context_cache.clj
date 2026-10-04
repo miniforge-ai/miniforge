@@ -92,7 +92,7 @@
 ;; whether an agent consulted a pinned artifact must be an answerable
 ;; question).
 (defonce ^{:stratum 0} cache-state
-  (atom {:files {} :mtimes {} :misses [] :reads []
+  (atom {:files {} :mtimes {} :misses [] :reads [] :answers []
          :source-root nil :artifact-dir nil :workdir nil}))
 
 (def ^{:stratum 0} ^:private persistent-cache-relpath ".miniforge/context-cache.edn")
@@ -128,7 +128,7 @@
 (defn ^{:stratum 1} reset-state!
   "Reset cache state. Intended for test isolation."
   []
-  (reset! cache-state {:files {} :mtimes {} :misses [] :reads []
+  (reset! cache-state {:files {} :mtimes {} :misses [] :reads [] :answers []
                        :source-root nil :artifact-dir nil :workdir nil}))
 
 (defn ^{:stratum 1} set-workdir!
@@ -170,6 +170,15 @@
     (when (seq reads)
       (spit (str artifact-dir "/context-reads.edn") (pr-str reads)))))
 
+(defn ^{:stratum 1} flush-answers!
+  "Write every recorded answer_peg call to answers.edn in artifact-dir —
+   the explicit half of the Codex §7.7 answer channel (§7.7.2). Same
+   contract as flush-reads!: no answers, no file."
+  [artifact-dir]
+  (let [answers (:answers @cache-state)]
+    (when (seq answers)
+      (spit (str artifact-dir "/answers.edn") (pr-str answers)))))
+
 ;; `handle-submit` (the artifact.edn metadata channel) removed: the artifact is
 ;; the worktree/container diff (promotion); the curator derives the summary.
 ;; Models ignored the opt-in submit tool anyway. See artifact_session/mcp-tools.
@@ -192,6 +201,18 @@
          {:path path
           :source source
           :timestamp (str (java.time.Instant/now))}))
+
+(defn- ^{:stratum 1} record-answer!
+  "Record one answer_peg call (Codex SPEC §7.7.2). Appended verbatim:
+   whether the peg id and answer string match a presented peg is the
+   telemetry reader's judgment, not the recorder's — a mis-keyed answer
+   is itself data about the channel."
+  [peg-id answer basis]
+  (swap! cache-state update :answers conj
+         (cond-> {:peg-id peg-id
+                  :answer answer
+                  :timestamp (str (java.time.Instant/now))}
+           (some? basis) (assoc :basis basis))))
 
 (defn- ^{:stratum 1} cache-get
   "Get cached content for a path, or nil if not cached."
@@ -304,6 +325,20 @@
         (catch Exception e
           (binding [*out* *err*]
             (println (msg/t :cache/save-failed {:error (ex-message e)}))))))))
+
+(defn ^{:stratum 2} handle-answer-peg
+  "Handler for the answer_peg MCP tool — the explicit half of the Codex
+   §7.7 answer channel. Lives here, not in codex-tool: recording is
+   session-state bookkeeping (like reads and misses), and it must not
+   require a configured codex — an answer given against an unreadable
+   codex is still an observation."
+  [params]
+  (let [peg-id (get params "peg_id")
+        answer (get params "answer")
+        basis  (get params "basis")]
+    (record-answer! peg-id answer basis)
+    (text-response (msg/t :codex/answer-recorded
+                          {:peg-id peg-id :answer answer}))))
 
 ;------------------------------------------------------------------------------ Layer 3
 

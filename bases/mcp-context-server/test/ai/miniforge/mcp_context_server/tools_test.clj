@@ -6,21 +6,20 @@
 ;;
 ;; Licensed under the Apache License, Version 2.0 (the "License");
 ;; you may not use this file except in compliance with the License.
-
 (ns ai.miniforge.mcp-context-server.tools-test
   (:require [clojure.string :as str]
             [clojure.test :refer [deftest is testing]]
             [ai.miniforge.mcp-context-server.tools :as tools]))
 
-;; -------------------------------------------------------------------------- Layer 0
-;; Helpers
+;------------------------------------------------------------------------------ Layer 0
 
-(def ^:private anthropic-property-key-pattern
+;; Helpers
+(def ^{:stratum 0} ^:private anthropic-property-key-pattern
   "Anthropic's tool-schema validator pattern. Property keys outside
    this range cause a 400 response on every agent call."
   #"^[a-zA-Z0-9_.-]{1,64}$")
 
-(defn- collect-property-keys
+(defn- ^{:stratum 0} collect-property-keys
   "Walk a JSON schema map and collect every property key found under
    any nested `:properties` map. Returns a seq of [tool-name path key]
    triples to make assertion failures easy to read."
@@ -45,10 +44,8 @@
               :else nil))]
     (walk [] schema)))
 
-;; -------------------------------------------------------------------------- Layer 1
 ;; apply-param-aliases
-
-(deftest apply-param-aliases-rewrites-listed-keys
+(deftest ^{:stratum 0} apply-param-aliases-rewrites-listed-keys
   (testing "keys listed in aliases get renamed; others pass through"
     (let [aliases {"code_summary"       :code/summary
                    "code_tests_needed"  :code/tests-needed?}
@@ -62,16 +59,25 @@
       (is (= 42 (get result "passthrough"))
           "unaliased keys retain their original wire form"))))
 
-(deftest apply-param-aliases-empty-is-identity
+(deftest ^{:stratum 0} apply-param-aliases-empty-is-identity
   (testing "nil/empty alias maps return the argument unchanged"
     (let [args {"a" 1 "b" 2}]
       (is (identical? args (tools/apply-param-aliases args nil)))
       (is (identical? args (tools/apply-param-aliases args {}))))))
 
-;; -------------------------------------------------------------------------- Layer 2
 ;; tool-registry regression — every property key must satisfy Anthropic's pattern
+(deftest ^{:stratum 0} answer-peg-is-registered-with-required-params
+  (testing "the §7.7.2 answer channel's tool contract is pinned"
+    (let [entry (get (tools/tool-registry) "answer_peg")]
+      (is (= :answer-peg (:handler entry)))
+      (is (= #{"peg_id" "answer"}
+             (set (get-in entry [:tool-def :inputSchema :required]))))
+      (is (contains? (:required-params entry) "peg_id"))
+      (is (contains? (:required-params entry) "answer")))))
 
-(deftest registered-tool-schemas-match-anthropic-property-key-pattern
+;------------------------------------------------------------------------------ Layer 1
+
+(deftest ^{:stratum 1} registered-tool-schemas-match-anthropic-property-key-pattern
   (testing "every property key under any :inputSchema satisfies ^[a-zA-Z0-9_.-]{1,64}$"
     (doseq [[tool-name tool-config] (tools/tool-registry)]
       (let [schema (get-in tool-config [:tool-def :inputSchema])

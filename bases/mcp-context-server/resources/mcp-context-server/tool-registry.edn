@@ -71,6 +71,22 @@
    "content" {:check :string    :msg "content is required (string)"}}}
 
  ;; ------------------------------------------------------------------------- Thesium Codex
+ "answer_peg"
+ {:handler :answer-peg
+  :tool-def
+  {:name "answer_peg"
+   :description "Record your answer to a codex peg — one of the questions listed under 'pegs —' in your consultation. Call once per peg BEFORE acting on what the question gates, quoting the peg's id and one entry from its answer vocabulary verbatim. Answers feed the codex's retirement telemetry (SPEC T1 §7.7.2); a peg you leave unanswered is recorded as unobserved."
+   :inputSchema
+   {:type "object"
+    :required ["peg_id" "answer"]
+    :properties
+    {"peg_id" {:type "string" :description "The peg's id, exactly as shown in brackets in the consultation's pegs list"}
+     "answer" {:type "string" :description "One of the peg's listed answers, verbatim (e.g. \"yes\" or \"no\")"}
+     "basis"  {:type "string" :description "Optional one-line evidence for the answer (what you checked, not what you believe)"}}}}
+  :required-params
+  {"peg_id" {:check :non-blank :msg "peg_id is required"}
+   "answer" {:check :non-blank :msg "answer is required"}}}
+
  "consider_situation"
  {:handler :consider-situation
   :tool-def
