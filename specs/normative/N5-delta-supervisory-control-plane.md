@@ -312,7 +312,7 @@ MUST still pass before any transition is admitted:
 |------|-----------------------|
 | `:proposed` | `:pending-human`, `:approved`, `:rejected`, `:failed` |
 | `:pending-human` | `:approved`, `:rejected`, `:failed` |
-| `:approved` | `:dispatched`, `:rejected`, `:failed` |
+| `:approved` | `:dispatched`, `:failed` |
 | `:dispatched` | `:applied`, `:failed` |
 | `:applied` | `:verified`, `:failed` |
 

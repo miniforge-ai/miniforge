@@ -46,6 +46,10 @@ Review corrections preserve ambiguous legacy IDs without reinterpretation and
 require child-run UUIDs even for one-step chains and pre-execution failures.
 The Spec projection retains structured intent, string/keyword tags, and the
 WorkflowRun-owned foreign key; none of these fields grants execution authority.
+Historical scope profiles are explicit and retained edge events keep Workflow scope.
+New writes require a scope discriminator; a payload version alone cannot change scope.
+N5's required justification remains required, with producer and migration obligations
+made explicit. The lifecycle does not add an approved-to-rejected transition.
 
 ## Deployment Plan
 

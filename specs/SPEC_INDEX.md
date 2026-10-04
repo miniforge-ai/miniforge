@@ -135,7 +135,7 @@ Defines:
 - Event envelope fields and fixed envelope field types (§2.1.1); scope keys —
   workflow, PR Work Item, pack, repo, supervisory entity, deployment, chain run (§2.3)
 - Required event types (workflow, agent, status, subagent, tool, LLM, messages,
-  milestone, gate, pack lifecycle, pack run, chain edge)
+  milestone, gate, pack lifecycle, pack run, chain run, chain step, chain edge)
 - Ordering guarantees (per-scope sequence, causal ordering, replay determinism)
 - Streaming API (SSE/WebSocket) with subscription protocol
 - Throttling and performance requirements

@@ -107,7 +107,7 @@ Envelope field types are fixed across every event family:
 | `:deployment/id` | string | Conditional | Deployment scope key (§2.3) |
 | `:chain/run-id` | uuid | Conditional | Chain invocation scope key (§2.3, N1 §2.32) |
 | `:supervisory/entity-key` | any | Conditional | Supervisory entity scope key (§2.3, §3.19.1, §3.22) |
-| `:scope/type` | keyword | Conditional | REQUIRED on inherited-scope families (§2.3, §3.15) |
+| `:scope/type` | keyword | Conditional | REQUIRED on inherited scopes and migrated scope profiles (§2.3, §3.15, §7.5) |
 | `:message` | string | MUST | Human-renderable summary |
 
 **Absent and nil are equivalent.** For any field not marked MUST, omitting the
@@ -204,6 +204,8 @@ Rules:
   of this table it resolved to, plus that row's scope key. It resolves to
   exactly one scope — chosen at emission, not left open — and MUST NOT
   substitute one scope's key for another's.
+- Scope-changing families MUST also carry the fixed `:scope/type` discriminator
+  required by §7.5. It identifies a declared contract profile, not a caller-selected scope.
 
 ---
 
@@ -1086,7 +1088,7 @@ pack lifecycle events and Pack Run events.
 
 N1 §2.32 distinguishes definitions, runs, steps, and binding edges. Every
 `chain/*` and `chain.edge/*` event MUST carry the §2 envelope plus
-`:chain/run-id` (UUID) and `:chain/definition-id` (keyword).
+`:chain/run-id` (UUID), `:chain/definition-id` (keyword), and `:scope/type :chain`.
 The chain executor owns these emissions. All belong to the chain-run scope.
 Every step lifecycle event MUST carry its preallocated child-run `:workflow/id`
 UUID, including failures before execution. This cross-reference does not change scope.
@@ -1118,6 +1120,7 @@ be treated as step completion. Edge failure fields and ownership remain required
 
 ```clojure
 {:event/type :chain.edge/started
+ :scope/type :chain
  :event/id uuid
  :event/timestamp inst
  :event/version "2.0.0"
@@ -1137,6 +1140,7 @@ be treated as step completion. Edge failure fields and ownership remain required
 
 ```clojure
 {:event/type :chain.edge/completed
+ :scope/type :chain
  :event/id uuid
  :event/timestamp inst
  :event/version "2.0.0"
@@ -1156,6 +1160,7 @@ be treated as step completion. Edge failure fields and ownership remain required
 
 ```clojure
 {:event/type :chain.edge/failed
+ :scope/type :chain
  :event/id uuid
  :event/timestamp inst
  :event/version "2.0.0"
@@ -2276,8 +2281,8 @@ governed by N2-delta §9; N3 only fixes the wire shape.
 
 These events report the bounded command lifecycle owned by the orchestrator
 under N5-delta-1 §7. They are not entity snapshots and MUST NOT be coalesced.
-Both MUST carry `:intervention/id` (UUID) and `:supervisory/entity-key` equal to
-that UUID. They use the Supervisory entity scope, even when a workflow target
+Both MUST carry `:intervention/id` (UUID), `:scope/type :supervisory-entity`, and
+`:supervisory/entity-key` equal to that UUID. They use the Supervisory entity scope, even when a workflow target
 is also referenced. `:workflow/id`, when present, MUST be only a cross-reference.
 
 | Event type | Required payload in addition to §2 | Sole emitter |
@@ -2509,7 +2514,7 @@ WS   /api/workflows/:id/stream
 ```
 
 `:scope-type` is one of `workflow`, `pr`, `pack`, `repo`,
-`supervisory-entity`, `deployment`. `:scope-id` is the scope identifier
+`supervisory-entity`, `deployment`, `chain`. `:scope-id` is the scope identifier
 encoded per §5.1.1 and occupies exactly one path segment — a composite key is
 percent-encoded, never split across segments.
 
@@ -2690,7 +2695,8 @@ that emits an unregistered type is non-conformant, and a consumer MUST treat an
 unregistered type per the unknown-type rule of §7.3.
 
 **Columns.** _Scope_ is the scope key of §2.3. _Retention_ is the class of
-§4.3.1. Both are properties of the type, not of a particular emission.
+§4.3.1. Both are properties of the type's declared contract profile, not caller choices.
+The table defines current-write profiles; §7.5 preserves the historical chain-edge profile for replay.
 
 Every row carries exactly one scope and exactly one retention class. A
 type's class is readable without parsing prose (§4.3.1: every event type
@@ -2783,6 +2789,8 @@ event types evolve independently: `:agent/status` at "1.2.0" and
 
 The envelope itself (§2) is versioned by this spec's own version, not by
 `:event/version`. An envelope change is a change to N3.
+In particular, a payload major bump MUST NOT by itself change an event's scope.
+Scope migrations require explicit profile discrimination under §7.5.
 
 ### 7.2 Change Classification
 
@@ -2854,6 +2862,32 @@ The nine chain types in §3.12.1 and two intervention lifecycle types in §3.22
 use payload version `2.0.0`. Required scope identity and lifecycle fields are
 breaking additions. New writes MUST satisfy the new contracts. Consumers MUST
 dispatch legacy payloads by their recorded version, not guess from missing keys.
+
+#### Scope profiles
+
+N3 0.11 introduces explicit scope discrimination, separately from payload versioning.
+New chain and intervention writes MUST carry the fixed `:scope/type` named below.
+The payload version and scope discriminator MUST match the same profile:
+
+| Profile | Event types | Payload | Scope discriminator | Scope key |
+|---------|-------------|---------|---------------------|-----------|
+| N3 0.10 retained chain edges | Three `chain.edge/*` types | `1.x` | Absent/nil, or `:workflow` | `:workflow/id` |
+| N3 0.11 chain execution | Nine types in §3.12.1 | `2.x` | REQUIRED `:chain` | `:chain/run-id` |
+| N3 0.11 intervention lifecycle | Two types in §3.22 | `2.x` | REQUIRED `:supervisory-entity` | `:supervisory/entity-key` |
+
+The retained chain-edge profile remains valid for historical reads, not new writes.
+Its absent discriminator means Workflow only because this historical profile explicitly defines it.
+Readers MUST validate its original envelope and sequence in Workflow scope.
+They MUST NOT apply the current-write registry to rescope retained records.
+Other legacy unregistered types gain no historical conformance from this amendment.
+Unsupported or conflicting profiles MUST NOT be replayed as authoritative state.
+
+#### Payload and provenance migration
+
+Version-2 intervention requests MUST include the justification already required by N5-delta-1 §3.1.
+Legacy constructors accepted its absence; that behavior does not satisfy the new-write contract.
+Producers MUST collect the required justification before admission, rather than manufacture a reason.
+Migration MUST NOT invent justification for retained requests; an incomplete record cannot establish v2 authorization.
 
 Legacy `:chain/id` has represented different concepts across producers. It MUST
 NOT be reinterpreted in place. Migration MUST produce separate
@@ -3400,8 +3434,8 @@ resolution is an N3 amendment per §6.1, not silent acceptance.
   `/api/workflows/:id/stream` (`bases/cli/src/ai/miniforge/cli/web.clj:68`).
   The `/api/streams/:scope-type/:scope-id` endpoint of §5.3.1, and with it the
   subscribe and query surfaces for non-workflow scopes (N3.API.1),
-  have no implementation. The four scopes introduced in this revision are
-  therefore specified but unobservable over HTTP.
+  have no implementation. Non-workflow scopes are therefore specified but
+  unobservable over HTTP.
 - **`:supervisory/schema-version`.** Already emitted by `supervisory-state`;
   §3.19 now requires it, so this row is closed on the next spec sync rather
   than being a code change.
