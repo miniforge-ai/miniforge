@@ -40,6 +40,9 @@
 (def ^:private fail-cmd
   (required-command "false"))
 
+(def ^:private shell-cmd
+  (required-command "sh"))
+
 ;------------------------------------------------------------------------------ Layer 1
 ;; Unit tests
 
@@ -61,6 +64,36 @@
           data (ex-data ex)]
       (is (= 1 (:exit data)))
       (is (= [fail-cmd] (vec (:cmd data)))))))
+
+(deftest test-run!-carries-captured-stderr-into-the-failure
+  (testing "given a failing command that wrote to stderr → ex carries the text"
+    (let [ex   (is (thrown? clojure.lang.ExceptionInfo
+                            (sut/run! {:out :string :err :string}
+                                      shell-cmd "-c" "echo r2-said-no >&2; exit 1")))
+          data (ex-data ex)]
+      (is (= 1 (:exit data)))
+      (is (str/includes? (:err data) "r2-said-no")
+          "stderr belongs in ex-data: it is what the command said went wrong")
+      (is (str/includes? (ex-message ex) "r2-said-no")
+          "and in the message, which is what a bare handler prints"))))
+
+(deftest test-run!-omits-stderr-when-there-is-none
+  (testing "given a failing command that wrote nothing → no :err key"
+    (let [ex   (is (thrown? clojure.lang.ExceptionInfo
+                            (sut/run! {:out :string :err :string} fail-cmd)))
+          data (ex-data ex)]
+      (is (not (contains? data :err))
+          "an empty stream is nothing to report, not an empty report")
+      (is (not (str/includes? (ex-message ex) "\n"))
+          "the message stays one line when there is no stderr to add"))))
+
+(deftest test-run!-tolerates-uncaptured-stderr
+  (testing "given :err inherited rather than captured → no :err key, still throws"
+    (let [ex   (is (thrown? clojure.lang.ExceptionInfo
+                            (sut/run! {:out :string :err :inherit} fail-cmd)))
+          data (ex-data ex)]
+      (is (= 1 (:exit data)))
+      (is (not (contains? data :err))))))
 
 (deftest test-run!-returns-result-on-zero-exit
   (testing "given a zero-exit command → returns :exit 0"
