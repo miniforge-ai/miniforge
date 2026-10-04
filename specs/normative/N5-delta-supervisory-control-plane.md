@@ -77,8 +77,8 @@ The human supervisory loop MUST:
 3. Receive durable intervention results and evidence after the orchestrator applies an action
 
 The human supervisory loop MAY be exposed through a TUI, dashboard, API-backed
-operator agent, or other UX surfaces, but all such surfaces MUST share the same
-canonical intervention model.
+operator agent, or other UX surfaces. All surfaces MUST share the same canonical
+intervention model.
 
 ### 2.4 Boundary to orchestrator and learning loop
 
@@ -282,10 +282,9 @@ new formalization for v1 but MUST be correlatable to v1 entities:
 
 ### 3.5 Materialization — the supervisory-state component
 
-The entities defined in §3.1 MUST be materialized by a dedicated component,
-`components/supervisory-state`, which is the canonical source of supervisory
-truth for all external consumers (TUI, native console, web dashboard, Rust
-control console).
+The entities in §3.1 MUST be materialized by `components/supervisory-state`.
+This dedicated component is the canonical supervisory source for all external
+consumers: TUI, native console, web dashboard, and Rust control console.
 
 **Design invariants:**
 
@@ -299,10 +298,10 @@ control console).
    snapshot events are the only surface external consumers use to read the
    supervisory model.
 3. **Durable via the event stream.** The component does not maintain a
-   separate persistence store. On startup it replays the event stream:
-   `:supervisory/*-upserted` events take precedence as entity-state baselines;
-   fine-grained events newer than the most recent snapshot for a given entity
-   are applied on top. This satisfies §9 (durable startup and stale-read)
+   separate persistence store. On startup it replays the event stream.
+   `:supervisory/*-upserted` events take precedence as entity-state baselines.
+   Fine-grained events newer than an entity's most recent snapshot are applied
+   on top. This satisfies §9 (durable startup and stale-read)
    without a parallel database.
 4. **Coalesced bursts.** Updates within a short window (≤ 100 ms,
    implementation-tunable) SHOULD be coalesced into a single emission per
@@ -332,10 +331,9 @@ control console).
 | `:pr/created` / `:pr/merged` / `:pr/closed` / `:pr-monitor/*` | Upserts `PrFleetEntry` |
 | `:gate/passed` / `:gate/failed` | Emits new immutable `PolicyEvaluation` |
 
-**Consumer contract:** The Rust control console and any other external
-renderer subscribes to the event stream and deserializes
-`:supervisory/*-upserted` events directly into the entity shapes of §3.1 — it
-MUST NOT attempt to reconstruct entities from fine-grained events itself.
+**Consumer contract:** External renderers, including the Rust control console,
+subscribe to the event stream. They deserialize `:supervisory/*-upserted` events directly into
+§3.1 entity shapes. They MUST NOT reconstruct entities from fine-grained events.
 
 **Relationship to `control-plane/registry`:** The registry remains the
 authoritative *orchestration* surface (heartbeats, decisions, state
@@ -385,8 +383,8 @@ The TUI MUST derive attention items from supervisory state. Attention items are 
 Implementations MAY add additional attention rules.
 
 Note: The PR monitor loop (`:pr-monitor/*` events from the pr-lifecycle component) is a primary source of supervisory
-events. The monitor autonomously resolves review comments on miniforge-authored PRs, emitting fine-grained events that
-the TUI MUST subscribe to for real-time visibility into the autonomous feedback loop.
+events. The monitor autonomously resolves review comments on miniforge-authored PRs and emits fine-grained events.
+The TUI MUST subscribe to those events for real-time visibility into the autonomous feedback loop.
 
 ### 5.2 Attention lifecycle
 
@@ -616,5 +614,5 @@ through without error. Required keys MUST be present and correctly typed.
 
 **Version History:**
 
-- 0.3.0-draft (2026-08-10): Spec-completion pass — metadata normalized to the header form; `N5D1.SV.*` conformance
-  requirement IDs and test obligations added.
+0.3.0-draft (2026-08-10): Spec-completion pass — metadata normalized to the header form;
+`N5D1.SV.*` conformance requirement IDs and test obligations added.
