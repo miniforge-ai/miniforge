@@ -304,11 +304,29 @@
 (defn- ^{:stratum 0} token-usage
   "Build the canonical usage map, keeping only numeric fields — a
    present-but-nil key defeats downstream `(get usage :input-tokens 0)`
-   defaulting (same trap `parsed-usage` guards against)."
-  [input-tokens output-tokens]
-  (cond-> {}
-    (number? input-tokens)  (assoc :input-tokens input-tokens)
-    (number? output-tokens) (assoc :output-tokens output-tokens)))
+   defaulting (same trap `parsed-usage` guards against).
+
+   `extras` carries the optional fields a backend reports beyond the two
+   totals, under these keys:
+   - `:cached-input-tokens`       input tokens served from the provider's
+                                  prompt cache. On the OpenAI wire shape and
+                                  the Codex CLI this is a SUBSET of
+                                  `:input-tokens` (unlike the Claude CLI's
+                                  `:cache-read-input-tokens`, which is counted
+                                  beside `:input-tokens`, never inside it).
+   - `:cache-write-input-tokens`  input tokens written to the prompt cache,
+                                  also a subset of `:input-tokens`.
+   - `:reasoning-output-tokens`   output tokens spent on reasoning, a subset
+                                  of `:output-tokens`.
+   Kept under their own names so no consumer double-counts them."
+  ([input-tokens output-tokens]
+   (token-usage input-tokens output-tokens nil))
+  ([input-tokens output-tokens extras]
+   (reduce-kv (fn [usage k v] (cond-> usage (number? v) (assoc k v)))
+              (cond-> {}
+                (number? input-tokens)  (assoc :input-tokens input-tokens)
+                (number? output-tokens) (assoc :output-tokens output-tokens))
+              extras)))
 
 (def ^{:stratum 0} ^:private http-too-many-requests
   "HTTP 429. `java.net.HttpURLConnection` predates RFC 6585 and has no
@@ -681,6 +699,15 @@
       ([_cmd]       (respond))
       ([_cmd _opts] (respond)))))
 
+(defn- ^{:stratum 0} openai-usage-extras
+  "The cache and reasoning breakdown an OpenAI-shaped `usage` block
+   carries under its `*_details` maps. Absent on servers that do not
+   report them (most local OpenAI-compatible servers)."
+  [usage]
+  {:cached-input-tokens (get-in usage [:prompt_tokens_details :cached_tokens])
+   :cache-write-input-tokens (get-in usage [:prompt_tokens_details :cache_write_tokens])
+   :reasoning-output-tokens (get-in usage [:completion_tokens_details :reasoning_tokens])})
+
 ;------------------------------------------------------------------------------ Layer 1
 
 (defn ^{:stratum 1} terminated-by
@@ -956,8 +983,16 @@
                 stop-reason (normalize-codex-finish-reason (:finish_reason data))]
             (cond-> {:delta "" :done? true
                      :increment-turns true
-                     :usage {:input-tokens (:input_tokens usage)
-                             :output-tokens (:output_tokens usage)}}
+                     ;; input/output stay present even when nil (existing
+                     ;; contract); the cache and reasoning counts ride
+                     ;; along only when Codex reports a number.
+                     :usage (cond-> {:input-tokens (:input_tokens usage)
+                                     :output-tokens (:output_tokens usage)}
+                              (number? (:cached_input_tokens usage))
+                              (assoc :cached-input-tokens (:cached_input_tokens usage))
+                              (number? (:reasoning_output_tokens usage))
+                              (assoc :reasoning-output-tokens
+                                     (:reasoning_output_tokens usage)))}
               stop-reason (assoc :stop-reason stop-reason)))
 
           ;; Turn failed
@@ -1014,10 +1049,15 @@
 (defn- ^{:stratum 1} extraction
   "The `{:content :usage}` shape `parse-provider-response` expects from
    every extractor — built in one place so the extractors stay pure
-   field mappings."
-  [content input-tokens output-tokens]
-  {:content content
-   :usage (token-usage input-tokens output-tokens)})
+   field mappings. `extras` are the optional usage fields (see
+   `token-usage`); a numeric `cost-usd` is the amount the provider says
+   it billed for the call and rides beside `:usage`, never inside it."
+  ([content input-tokens output-tokens]
+   (extraction content input-tokens output-tokens nil nil))
+  ([content input-tokens output-tokens extras cost-usd]
+   (cond-> {:content content
+            :usage (token-usage input-tokens output-tokens extras)}
+     (number? cost-usd) (assoc :cost-usd cost-usd))))
 
 (defn- ^{:stratum 1} http-status->category
   "Map a non-OK provider HTTP status to the brick's legacy anomaly
@@ -1297,7 +1337,9 @@
   [body]
   (extraction (get-in body [:choices 0 :message :content])
               (get-in body [:usage :prompt_tokens])
-              (get-in body [:usage :completion_tokens])))
+              (get-in body [:usage :completion_tokens])
+              (openai-usage-extras (:usage body))
+              nil))
 
 (defn- ^{:stratum 2} extract-gemini
   "Text + usage from a Gemini generateContent response: join the text
@@ -1741,11 +1783,12 @@
         (response-parse-error body)
 
         :else
-        (let [{:keys [content usage]} (extract-fn body)]
+        (let [{:keys [content usage cost-usd]} (extract-fn body)]
           (if (str/blank? content)
             (llm-error :anomalies.agent/llm-error "empty_success_output"
                        (msg/t :http-provider.system/no-generated-text))
-            (llm-success content {:usage usage})))))))
+            (cond-> (llm-success content {:usage usage})
+              (number? cost-usd) (assoc :cost-usd cost-usd))))))))
 
 (defn ^{:stratum 4} parse-cli-output
   ([output exit-code]

@@ -291,6 +291,32 @@
       (is (= "answer" (:content result)))
       (is (= {:input-tokens 11 :output-tokens 7} (:usage result))))))
 
+(deftest ^{:stratum 2} openai-usage-details-test
+  (testing "an OpenAI-shaped response that reports cache and reasoning details
+            keeps them; they stay subsets, under their own keys"
+    (let [{:keys [result]}
+          (capture-http (http-200 {:choices [{:message {:role "assistant" :content "a"}}]
+                                   :usage {:prompt_tokens 100
+                                           :completion_tokens 9
+                                           :prompt_tokens_details {:cached_tokens 64}
+                                           :completion_tokens_details {:reasoning_tokens 3}}})
+                        #(impl/http-complete (backend-config :openai-api)
+                                             {:prompt "q" :model "gpt-x"}
+                                             {:api-key test-api-key}))]
+      (is (= {:input-tokens 100
+              :output-tokens 9
+              :cached-input-tokens 64
+              :reasoning-output-tokens 3}
+             (:usage result)))
+      (is (not (contains? result :cost-usd)) "OpenAI reports no cost")))
+  (testing "a response without the details carries no nil keys"
+    (let [{:keys [result]}
+          (capture-http (openai-200 "a")
+                        #(impl/http-complete (backend-config :openai-api)
+                                             {:prompt "q" :model "gpt-x"}
+                                             {:api-key test-api-key}))]
+      (is (= {:input-tokens 11 :output-tokens 7} (:usage result))))))
+
 (deftest ^{:stratum 2} openai-compat-keyless-round-trip-test
   (testing "a keyless local server gets no Authorization header; the OpenAI
             body/parse shapes are reused"
