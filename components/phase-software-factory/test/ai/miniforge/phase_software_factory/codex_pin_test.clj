@@ -81,8 +81,9 @@
     (testing "skipped consultation carries its anomaly"
       (is (= {:pinned? false :status :skipped :anomaly :codex-unreadable
               :situation nil :pegs nil :pin-read? nil}
-             (codex-pin/consultation-summary
-               {:entry nil :status :skipped :anomaly :codex-unreadable} nil))))))
+             (dissoc (codex-pin/consultation-summary
+                       {:entry nil :status :skipped :anomaly :codex-unreadable} nil)
+                     :consultation-id))))))
 
 (deftest ^{:stratum 0} consultation-summary-records-per-peg-telemetry
   ;; SPEC §7.7: per peg presented, which way it answered — push delivery
@@ -98,6 +99,30 @@
     (testing "no pegs presented records nil, not an empty claim"
       (is (nil? (:pegs (codex-pin/consultation-summary
                          (assoc outcome :pegs []) nil)))))))
+
+(deftest ^{:stratum 0} consultation-summary-fills-answers-from-the-recorded-log
+  ;; SPEC §7.7.2: the session's answer_peg log fills :answer per presented
+  ;; peg. Last recording wins (the agent's final position IS the
+  ;; observation); a row matching no presented peg surfaces as
+  ;; :unmatched-answers rather than vanishing.
+  (let [outcome {:entry {:path codex-pin/pin-path} :status :pinned
+                 :anomaly nil :situation "changing-one-side-of-a-boundary"
+                 :pegs [{:id "peg-a" :answers {"yes" ["p1"] "no" ["p2"]}}
+                        {:id "peg-b" :answers {"yes" ["p3"] "no" ["p4"]}}]}
+        answers [{:peg-id "peg-a" :answer "no" :timestamp "t1"}
+                 {:peg-id "peg-a" :answer "yes" :timestamp "t2"}
+                 {:peg-id "ghost" :answer "no" :timestamp "t3"}]
+        summary (codex-pin/consultation-summary outcome nil answers)]
+    (is (= [{:id "peg-a" :answer "yes" :landings {"yes" ["p1"] "no" ["p2"]}}
+            {:id "peg-b" :answer nil :landings {"yes" ["p3"] "no" ["p4"]}}]
+           (:pegs summary))
+        "answered peg takes the LAST recorded answer; unanswered stays nil")
+    (is (= [{:peg-id "ghost" :answer "no" :timestamp "t3"}]
+           (:unmatched-answers summary)))
+    (testing "nil answer log = the 2-arity record, no :unmatched-answers key"
+      (let [s2 (codex-pin/consultation-summary outcome nil)]
+        (is (= [nil nil] (mapv :answer (:pegs s2))))
+        (is (not (contains? s2 :unmatched-answers)))))))
 
 (deftest ^{:stratum 0} attach-consultation-shapes
   (let [summary {:status :unconfigured :pinned? false}]
@@ -144,3 +169,31 @@
             (is (= "PRIMARY" (get-in out [:entry :content])))
             (is (= [{:id "p1"}] (:pegs out)))
             (is (re-find #"WARN: codex consultation skipped for implement" (str err)))))))))
+
+(deftest ^{:stratum 0} consultation-summary-dedupes-identical-peg-rows
+  ;; SPEC §7.7.2: pin-outcome concatenates primary and secondary
+  ;; consultations without dedup; a peg both reach must not record its
+  ;; one answer as two observations. Rows with different landings are
+  ;; different presentations and both stay.
+  (let [peg {:id "peg-a" :answers {"yes" ["p1"] "no" ["p2"]}}
+        other {:id "peg-a" :answers {"yes" ["p9"] "no" ["p2"]}}
+        outcome {:entry {:path codex-pin/pin-path} :status :pinned
+                 :anomaly nil :situation "s"
+                 :pegs [peg peg other]}
+        summary (codex-pin/consultation-summary
+                 outcome nil [{:peg-id "peg-a" :answer "yes" :timestamp "t"}])]
+    (is (= [{:id "peg-a" :answer "yes" :landings {"yes" ["p1"] "no" ["p2"]}}
+            {:id "peg-a" :answer "yes" :landings {"yes" ["p9"] "no" ["p2"]}}]
+           (:pegs summary))
+        "identical rows collapse; a different landing snapshot survives")))
+
+(deftest ^{:stratum 0} consultation-summary-stamps-one-identity-per-construction
+  ;; SPEC §7.7.2.1: every miss entry of a leave and its consultation
+  ;; record share the summary's identity; two constructions (a retry
+  ;; attempt) are two consultations.
+  (let [outcome {:entry {:path codex-pin/pin-path} :status :pinned
+                 :anomaly nil :situation "s" :pegs []}
+        s1 (codex-pin/consultation-summary outcome nil)
+        s2 (codex-pin/consultation-summary outcome nil)]
+    (is (uuid? (:consultation-id s1)))
+    (is (not= (:consultation-id s1) (:consultation-id s2)))))

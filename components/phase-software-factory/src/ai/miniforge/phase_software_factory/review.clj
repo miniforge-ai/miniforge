@@ -473,11 +473,13 @@
         ;; SPEC §7.4.3 consultation provenance, prompt-section flavor. The
         ;; reviewer session surfaces no reads log, so :pin-read? is nil
         ;; (unknown). Attached before enter-context stores the result so
-        ;; gates and the gap ledger can see it.
-        result (if (map? (:output result))
-                 (assoc-in result [:output :codex/consultation]
-                           (codex-pin/consultation-summary codex-outcome nil))
-                 result)]
+        ;; gates and the gap ledger can see it — on FAILURES too (:output
+        ;; starts nil on response/failure): the consultation happened in
+        ;; build-review-task whatever the reviewer did next, and §7.7.2.1
+        ;; records per consultation, not per success.
+        result (codex-pin/attach-consultation
+                 result
+                 (codex-pin/consultation-summary codex-outcome nil))]
 
     (-> (phase/enter-context ctx :review :reviewer gates budget start-time result)
         (assoc-in [:phase :rules-manifest] rules-manifest))))

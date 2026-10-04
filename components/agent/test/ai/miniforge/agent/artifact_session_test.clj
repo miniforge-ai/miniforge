@@ -528,11 +528,15 @@
    misses/reads/artifact segments (chain order: the agent-authored
    artifact rides last so an embedded boundary cannot corrupt the
    server-written segments). Empty string = missing file (cat wrote
-   nothing; the echoed boundary lines remain)."
-  [misses reads artifact]
-  (str misses "\n" capsule-boundary "\n"
-       reads "\n" capsule-boundary "\n"
-       artifact "\n"))
+   nothing; the echoed boundary lines remain). 3-arity keeps the older
+   call sites readable: no recorded peg answers."
+  ([misses reads artifact]
+   (capsule-outputs-stdout misses reads "" artifact))
+  ([misses reads answers artifact]
+   (str misses "\n" capsule-boundary "\n"
+        reads "\n" capsule-boundary "\n"
+        answers "\n" capsule-boundary "\n"
+        artifact "\n")))
 
 (defn- ^{:stratum 1} capsule-exec-stub
   "Executor stub for capsule-session tests. Returns `outputs-stdout` for the
@@ -792,10 +796,11 @@
                    :exec!          (capsule-exec-stub calls stdout)}
           result  (session/read-capsule-session-outputs session)]
       (is (= 1 (count @calls))
-          "all three files must ride one executor round-trip, not three")
+          "all four files must ride one executor round-trip, not four")
       (is (str/includes? (first @calls) "artifact.edn"))
       (is (str/includes? (first @calls) "context-misses.edn"))
       (is (str/includes? (first @calls) "context-reads.edn"))
+      (is (str/includes? (first @calls) "answers.edn"))
       (is (= (java.util.UUID/fromString default-uuid-str)
              (get-in result [:artifact :code/id]))
           "artifact segment must go through parse-uuid-strings like host mode")
@@ -813,7 +818,28 @@
           result  (session/read-capsule-session-outputs session)]
       (is (nil? (:artifact result)))
       (is (nil? (:context-misses result)))
-      (is (nil? (:context-reads result)))))
+      (is (nil? (:context-reads result)))
+      (is (nil? (:codex-answers result)))))
+
+  (testing "recorded peg answers ride the same round-trip (§7.7.2)"
+    (let [calls   (atom [])
+          answers [{:peg-id "contract-verified-against-producer"
+                    :answer "no" :timestamp "2026-10-03T00:00:00Z"}]
+          stdout  (capsule-outputs-stdout
+                   ""
+                   (pr-str [(context-read-record "src/a.clj" :cache)])
+                   (pr-str answers)
+                   (pr-str (code-artifact)))
+          session {:dir            "/workspace/.miniforge-session"
+                   :artifact-path  "/workspace/.miniforge-session/artifact.edn"
+                   :workdir        "/workspace"
+                   :executor       :fake-executor
+                   :environment-id "env-1"
+                   :exec!          (capsule-exec-stub calls stdout)}
+          result  (session/read-capsule-session-outputs session)]
+      (is (= answers (:codex-answers result)))
+      (is (= [(context-read-record "src/a.clj" :cache)] (:context-reads result))
+          "the answers segment must not displace its neighbours")))
 
   (testing "malformed segment emits parse WARN and yields nil for that file only"
     (let [calls   (atom [])

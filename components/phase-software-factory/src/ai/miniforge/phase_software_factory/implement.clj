@@ -983,7 +983,11 @@
         result (codex-pin/attach-consultation
                  result
                  (codex-pin/consultation-summary
-                   codex-outcome (:context-reads impl-result)))]
+                   codex-outcome
+                   (:context-reads impl-result)
+                   ;; §7.7.2 explicit answers: same off-impl-result read as
+                   ;; context-reads — curator-result branches drop the key.
+                   (:codex-answers impl-result)))]
     (-> (phase/enter-context ctx :implement :implementer gates budget start-time result)
         (assoc-in [:phase :rules-manifest] rules-manifest)
         (assoc-in [:phase :watchdog-state]
