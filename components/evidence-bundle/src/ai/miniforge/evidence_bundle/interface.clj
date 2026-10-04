@@ -76,7 +76,6 @@
   (opsv-finalization/finalize! store bundle-id base-bundle evidence
                                available-artifact-ids))
 
-;; Protocol re-exports
 (defn ^{:stratum 0} restore-finalized-opsv-bundle!
   "Adopt an existing verified seal into its matching assembly without resealing."
   [store bundle available-artifact-ids]
@@ -87,6 +86,7 @@
   [assembly bundle available-artifact-ids]
   (opsv-sealed-validation/valid-with-exception-handling? assembly bundle available-artifact-ids))
 
+;; Protocol re-exports
 (def ^{:stratum 0} EvidenceBundle
   "Protocol for creating, storing, and querying evidence bundles.
    Methods: create-bundle, get-bundle, get-bundle-by-workflow,

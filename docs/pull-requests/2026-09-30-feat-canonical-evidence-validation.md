@@ -40,6 +40,8 @@ No storage manager, network operation, or authority is created by validation.
 Split the existing nested finalizer into reference ordering/checks, candidate
 validation, atomic publication, and retry orchestration. Assembly and finalization
 share one localized failure constructor. Each namespace has at most three strata.
+Flatten the accumulation guard without changing behavior: an absent assembly has
+no assembling status, leaves state unchanged, and retains its not-found result.
 
 ## Verification
 

@@ -88,12 +88,11 @@
   (let [[old-state new-state]
         (swap-vals! store
                     (fn [state]
-                      (if-let [assembly (get state bundle-id)]
+                      (let [assembly (get state bundle-id)]
                         (if (= :assembling (:opsv.assembly/status assembly))
                           (assoc state bundle-id
                                  (merge-references assembly material))
-                          state)
-                        state)))
+                          state))))
         old-assembly (get old-state bundle-id)]
     (cond
       (nil? old-assembly)
