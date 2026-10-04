@@ -59,6 +59,23 @@
           (apply str (map #(str (pr-str %) "\n") entries)))
     dir))
 
+(defn- ^{:stratum 0} consult-dir!
+  "A checkpoint run dir with one consultation entry presenting `pegs`
+   (SPEC §7.7.2.1 shape) and optionally a gate history."
+  ([root name pegs] (consult-dir! root name pegs nil))
+  ([root name pegs entries]
+   (let [dir (io/file root name)]
+     (.mkdirs dir)
+     (spit (io/file dir "codex-consultations.edn")
+           (str (pr-str {:consultation/id (random-uuid)
+                         :consultation/phase :implement
+                         :consultation/pegs pegs})
+                "\n"))
+     (when entries
+       (spit (io/file dir sut/gate-history-filename)
+             (apply str (map #(str (pr-str %) "\n") entries))))
+     dir)))
+
 (deftest ^{:stratum 0} gate-answers-read-implement-iterations-only
   (let [history [{:phase :plan :decision :allow}
                  {:phase :implement :decision :deny :phase/gate-failures [{:gate :stale-references}]}
@@ -79,11 +96,11 @@
     (.mkdirs dir)
     ;; a directory where the file should be: opening it as a file fails
     (.mkdirs (io/file dir sut/gate-history-filename))
-    (is (= {:entries [] :unreadable? true} (sut/read-gate-history dir))))
+    (is (= {:entries [] :unreadable? true :skipped 0} (sut/read-gate-history dir))))
   (let [root (str (Files/createTempDirectory "peg-telemetry-io2" (make-array FileAttribute 0)))
         dir (io/file root "run-y")]
     (.mkdirs dir)
-    (is (= {:entries [] :unreadable? false} (sut/read-gate-history dir))
+    (is (= {:entries [] :unreadable? false :skipped 0} (sut/read-gate-history dir))
         "a missing file is a run that never wrote one, not incomplete input")))
 
 (deftest ^{:stratum 0} aggregate-prefers-the-mechanism-that-answered
@@ -93,24 +110,27 @@
     (is (= "miniforge/gate/stale-references" (get-in (sut/aggregate (reverse obs)) ["p" :mechanism]))
         "independent of observation order")))
 
-(defn- ^{:stratum 0} consult-dir!
-  "A checkpoint run dir with one consultation entry presenting `pegs`
-   (SPEC §7.7.2.1 shape) and optionally a gate history."
-  ([root name pegs] (consult-dir! root name pegs nil))
-  ([root name pegs entries]
-   (let [dir (io/file root name)]
-     (.mkdirs dir)
-     (spit (io/file dir "codex-consultations.edn")
-           (str (pr-str {:consultation/id (random-uuid)
-                         :consultation/phase :implement
-                         :consultation/pegs pegs})
-                "\n"))
-     (when entries
-       (spit (io/file dir sut/gate-history-filename)
-             (apply str (map #(str (pr-str %) "\n") entries))))
-     dir)))
-
 ;------------------------------------------------------------------------------ Layer 1
+
+(deftest ^{:stratum 1} torn-gate-history-rows-flag-the-run-incomplete
+  ;; Review catch on #1993 round 4: a torn nonblank gate-history row
+  ;; keeps the readable verdicts but must not let the run pass as
+  ;; complete — missing verdicts can move the answer distribution.
+  (let [root (str (Files/createTempDirectory "peg-telemetry-torn-gh" (make-array FileAttribute 0)))
+        deny {:phase :implement :decision :deny
+              :phase/gate-failures [{:gate :stale-references}]}]
+    (consult-dir! root "run-a" [drift-peg])
+    (spit (io/file root "run-a" sut/gate-history-filename)
+          (str (pr-str deny) "
+" "{torn row
+"))
+    (let [{:keys [pegs incomplete-runs incomplete-run-dirs]}
+          (sut/peg-telemetry root nodes gate-map)]
+      (is (= {:denied 1}
+             (:answers (get pegs "did-you-update-every-consumer")))
+          "the readable verdict still counts")
+      (is (= 1 incomplete-runs))
+      (is (str/ends-with? (first incomplete-run-dirs) "run-a")))))
 
 (deftest ^{:stratum 1} entropy-and-collapse-primitives
   (is (= 0.0 (sut/entropy-bits {:denied 5})))

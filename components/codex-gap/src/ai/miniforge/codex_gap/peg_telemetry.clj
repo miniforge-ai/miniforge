@@ -150,30 +150,35 @@
     {}))
 
 (defn ^{:stratum 1} read-gate-history
-  "A run's gate-history.edn as {:entries [..] :unreadable? bool}.
-   Unreadable lines are skipped (a torn last line must not lose the
-   run); an unreadable EXISTING file yields no entries with
-   :unreadable? true, and a missing file is simply a run that never
-   wrote one (one run's IO failure must not abort the whole scan)."
+  "A run's gate-history.edn as {:entries [..] :unreadable? bool
+   :skipped n}. Torn nonblank lines are skipped AND counted (a torn
+   last line must not lose the run, but missing verdicts must not pass
+   as complete input either); an unreadable EXISTING file yields no
+   entries with :unreadable? true, and a missing file is simply a run
+   that never wrote one (one run's IO failure must not abort the whole
+   scan)."
   [run-dir]
   (let [f (io/file run-dir gate-history-filename)]
     (if-not (.exists f)
-      {:entries [] :unreadable? false}
+      {:entries [] :unreadable? false :skipped 0}
       ;; Streamed line by line: the file is append-only and unbounded.
       ;; Plain try, IOException only (std 211 ex. a): this is the IO
       ;; boundary of a read-only report.
       (try
         (with-open [rdr (io/reader f)]
-          {:entries (into []
-                          (keep (fn [line]
-                                  (when-not (str/blank? line)
-                                    (try (edn/read-string {:default (fn [_ v] v)} line)
-                                         (catch Exception _ nil)))))
-                          (line-seq rdr))
-           :unreadable? false})
+          (reduce (fn [acc line]
+                    (if (str/blank? line)
+                      acc
+                      (let [v (try (edn/read-string {:default (fn [_ v] v)} line)
+                                   (catch Exception _ ::torn))]
+                        (if (= ::torn v)
+                          (update acc :skipped inc)
+                          (update acc :entries conj v)))))
+                  {:entries [] :unreadable? false :skipped 0}
+                  (line-seq rdr)))
         ;; An unreadable EXISTING file is incomplete input, distinct from
         ;; a run that never wrote one.
-        (catch java.io.IOException _ {:entries [] :unreadable? true})))))
+        (catch java.io.IOException _ {:entries [] :unreadable? true :skipped 0})))))
 
 (defn ^{:stratum 1} aggregate
   "Fold per-run observations into the §7.7 record per peg. The entropy
@@ -262,6 +267,7 @@
     {:incomplete? (boolean (or (:codex-gap/anomaly ledger-res)
                                (:codex-gap/anomaly consult-res)
                                (:unreadable? history)
+                               (pos? (get history :skipped 0))
                                (pos? (get ledger-res :skipped 0))
                                (pos? (get consult-res :skipped 0))))
      :observations
