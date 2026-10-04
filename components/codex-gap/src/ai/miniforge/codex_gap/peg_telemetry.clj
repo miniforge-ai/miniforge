@@ -150,26 +150,30 @@
     {}))
 
 (defn ^{:stratum 1} read-gate-history
-  "Every readable line of a run's gate-history.edn as a map; unreadable
-   lines are skipped (a torn last line must not lose the run) and an
-   unreadable file yields no entries (one run's IO failure must not
-   abort the scan of a whole checkpoint root)."
+  "A run's gate-history.edn as {:entries [..] :unreadable? bool}.
+   Unreadable lines are skipped (a torn last line must not lose the
+   run); an unreadable EXISTING file yields no entries with
+   :unreadable? true, and a missing file is simply a run that never
+   wrote one (one run's IO failure must not abort the whole scan)."
   [run-dir]
   (let [f (io/file run-dir gate-history-filename)]
     (if-not (.exists f)
-      []
+      {:entries [] :unreadable? false}
       ;; Streamed line by line: the file is append-only and unbounded.
       ;; Plain try, IOException only (std 211 ex. a): this is the IO
       ;; boundary of a read-only report.
       (try
         (with-open [rdr (io/reader f)]
-          (into []
-                (keep (fn [line]
-                        (when-not (str/blank? line)
-                          (try (edn/read-string {:default (fn [_ v] v)} line)
-                               (catch Exception _ nil)))))
-                (line-seq rdr)))
-        (catch java.io.IOException _ [])))))
+          {:entries (into []
+                          (keep (fn [line]
+                                  (when-not (str/blank? line)
+                                    (try (edn/read-string {:default (fn [_ v] v)} line)
+                                         (catch Exception _ nil)))))
+                          (line-seq rdr))
+           :unreadable? false})
+        ;; An unreadable EXISTING file is incomplete input, distinct from
+        ;; a run that never wrote one.
+        (catch java.io.IOException _ {:entries [] :unreadable? true})))))
 
 (defn ^{:stratum 1} aggregate
   "Fold per-run observations into the §7.7 record per peg. The entropy
@@ -203,10 +207,16 @@
                        ;; into the entropy stream
                        :mechanism-overrode-explicit
                        (count (filter :explicit-answers obs))
+                       ;; the overridden values themselves, so a
+                       ;; disagreement is inspectable, not just countable
+                       :explicit-answers (vec (mapcat :explicit-answers obs))
                        :invalid-answers (vec (mapcat :invalid-answers obs))
-                       ;; The mechanism that answered in some run wins over
-                       ;; one that never did; ties resolve by sorted name.
-                       :mechanism (or (->> obs (filter :observed?) (keep :mechanism) sort first)
+                       ;; The mechanism whose gate produced the counted
+                       ;; stream names the record; an explicit-only run's
+                       ;; unrelated mechanism must not label another
+                       ;; gate's verdicts. Ties resolve by sorted name.
+                       :mechanism (or (->> mech-obs (keep :mechanism) sort first)
+                                      (->> obs (filter :observed?) (keep :mechanism) sort first)
                                       (->> obs (keep :mechanism) sort first))
                        :observed? (boolean (some :observed? obs))
                        :observations n
@@ -224,10 +234,12 @@
 (defn ^{:stratum 2} run-observations
   "Observations for every distinct peg presented in `run-dir`
    (consultation record first, miss ledger as the pre-$7.7.2 fallback).
-   Returns {:observations [..] :unreadable? bool} -- :unreadable? marks a
-   run whose ledger or consultation file failed to READ (an IO anomaly,
-   not a missing file): its observations are incomplete and the report
-   must say so rather than show a quieter run.
+   Returns {:observations [..] :incomplete? bool} -- :incomplete? marks
+   a run whose records are known-partial: a ledger/consultation read
+   anomaly, torn rows skipped by the line reader, or an unreadable
+   EXISTING gate-history file (a missing one is just a run that never
+   wrote it). Such a run's surviving observations still count, but the
+   report must name it rather than show a quieter run.
 
    Per observation, the counted :answers stream obeys SPEC $7.7.2.2 --
    mechanism outranks self-report, but only when the mechanism actually
@@ -245,9 +257,13 @@
         consult-pegs (mapcat :consultation/pegs (get consult-res :entries []))
         pegs (vals (presented-pegs miss-pegs consult-pegs))
         explicit-by-id (explicit-answers-by-id consult-pegs)
-        history (delay (read-gate-history run-dir))]
-    {:unreadable? (boolean (or (:codex-gap/anomaly ledger-res)
-                               (:codex-gap/anomaly consult-res)))
+        history (read-gate-history run-dir)
+        entries (:entries history)]
+    {:incomplete? (boolean (or (:codex-gap/anomaly ledger-res)
+                               (:codex-gap/anomaly consult-res)
+                               (:unreadable? history)
+                               (pos? (get ledger-res :skipped 0))
+                               (pos? (get consult-res :skipped 0))))
      :observations
      (vec
       (for [peg pegs
@@ -257,11 +273,18 @@
                   mechanism (or (some #(when (contains? gate-map %) %) mechanisms)
                                 (first mechanisms))
                   gate (get gate-map mechanism)
-                  explicit (get explicit-by-id (:id peg) [])
+                  ;; When the consultation file is lost but the miss ledger
+                  ;; survives, the selected row's own :answer (copied into
+                  ;; :miss/pegs by build-entry) is the surviving record.
+                  explicit (let [from-consults (get explicit-by-id (:id peg))]
+                             (cond
+                               (seq from-consults) from-consults
+                               (some? (:answer peg)) [(:answer peg)]
+                               :else []))
                   vocabulary (set (keys (peg-landings peg)))
                   valid-explicit (filterv vocabulary explicit)
                   invalid-explicit (filterv (complement vocabulary) explicit)
-                  mech-answers (when gate (gate-answers @history gate))
+                  mech-answers (when gate (gate-answers entries gate))
                   mech-won? (boolean (seq mech-answers))]]
         (cond-> {:peg (:id peg)
                  :mechanism mechanism
@@ -286,26 +309,26 @@
    whose records presented pegs, using `nodes` ({id node}) for mechanism
    pointers and `gate-map` for mechanism->gate. Returns
    {:pegs {peg-id record} :runs-with-pegs n :runs-scanned n
-    :unreadable-runs n :unreadable-run-dirs [..]} -- an unreadable run's
+    :incomplete-runs n :incomplete-run-dirs [..]} -- an incomplete run's
    surviving observations still count, but the report names the dirs
-   whose input is incomplete rather than presenting them as quiet."
+   whose input is known-partial rather than presenting them as quiet."
   [checkpoint-root nodes gate-map]
   (let [run-dirs (->> (.listFiles (io/file checkpoint-root))
                       (filter #(.isDirectory ^java.io.File %)))
         ;; One pass over the run dirs: observations accumulate into a
         ;; single vector and runs contributing any are counted as we go.
-        {:keys [obs runs-with-pegs unreadable]}
+        {:keys [obs runs-with-pegs incomplete]}
         (reduce (fn [acc run-dir]
-                  (let [{:keys [observations unreadable?]}
+                  (let [{:keys [observations incomplete?]}
                         (run-observations run-dir nodes gate-map)]
                     (cond-> acc
                       (seq observations) (-> (update :obs into observations)
                                              (update :runs-with-pegs inc))
-                      unreadable? (update :unreadable conj (str run-dir)))))
-                {:obs [] :runs-with-pegs 0 :unreadable []}
+                      incomplete? (update :incomplete conj (str run-dir)))))
+                {:obs [] :runs-with-pegs 0 :incomplete []}
                 run-dirs)]
     {:pegs (aggregate obs)
      :runs-with-pegs runs-with-pegs
      :runs-scanned (count run-dirs)
-     :unreadable-runs (count unreadable)
-     :unreadable-run-dirs unreadable}))
+     :incomplete-runs (count incomplete)
+     :incomplete-run-dirs incomplete}))

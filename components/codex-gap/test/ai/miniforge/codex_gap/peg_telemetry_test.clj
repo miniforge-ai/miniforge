@@ -73,13 +73,18 @@
         nodes {"m-a" {:id "m-a" :mechanism "z/mechanism"} "m-b" {:id "m-b" :mechanism "a/mechanism"}}]
     (is (= ["a/mechanism" "z/mechanism"] (sut/peg-mechanisms peg nodes)))))
 
-(deftest ^{:stratum 0} unreadable-gate-history-yields-no-entries
+(deftest ^{:stratum 0} unreadable-gate-history-yields-no-entries-and-says-so
   (let [root (str (Files/createTempDirectory "peg-telemetry-io" (make-array FileAttribute 0)))
         dir (io/file root "run-x")]
     (.mkdirs dir)
     ;; a directory where the file should be: opening it as a file fails
     (.mkdirs (io/file dir sut/gate-history-filename))
-    (is (= [] (sut/read-gate-history dir)))))
+    (is (= {:entries [] :unreadable? true} (sut/read-gate-history dir))))
+  (let [root (str (Files/createTempDirectory "peg-telemetry-io2" (make-array FileAttribute 0)))
+        dir (io/file root "run-y")]
+    (.mkdirs dir)
+    (is (= {:entries [] :unreadable? false} (sut/read-gate-history dir))
+        "a missing file is a run that never wrote one, not incomplete input")))
 
 (deftest ^{:stratum 0} aggregate-prefers-the-mechanism-that-answered
   (let [obs [{:peg "p" :mechanism "no/such/mechanism" :observed? false :answers [] :collapsed? false}
@@ -191,17 +196,74 @@
       (is (= {:explicit 1 :mechanism 1} (:answer-sources drift))
           "both sources stay visible even though one is counted"))))
 
-(deftest ^{:stratum 1} unreadable-run-dirs-are-named-not-quiet
-  ;; Review catch on #1993: an IO failure reading a run's records must
-  ;; not present that run as quiet — the report names incomplete input.
+(deftest ^{:stratum 1} incomplete-run-dirs-are-named-not-quiet
+  ;; Review catches on #1993: incomplete input must be named, never
+  ;; presented as a quiet run — an IO failure on any record file, a
+  ;; torn row the line reader skipped, or an unreadable existing
+  ;; gate-history all count.
   (let [root (str (Files/createTempDirectory "peg-telemetry-unread" (make-array FileAttribute 0)))]
     ;; a DIRECTORY at the consultations path forces a read IOException
     (.mkdirs (io/file root "run-a" "codex-consultations.edn"))
-    (let [{:keys [unreadable-runs unreadable-run-dirs]}
+    ;; torn consultation row: readable file, one skipped line
+    (.mkdirs (io/file root "run-b"))
+    (spit (io/file root "run-b" "codex-consultations.edn") "{torn
+")
+    ;; unreadable existing gate history beside readable records
+    (consult-dir! root "run-c" [unmapped-peg])
+    (.mkdirs (io/file root "run-c" sut/gate-history-filename))
+    (let [{:keys [incomplete-runs incomplete-run-dirs]}
           (sut/peg-telemetry root nodes gate-map)]
-      (is (= 1 unreadable-runs))
-      (is (= 1 (count unreadable-run-dirs)))
-      (is (str/ends-with? (first unreadable-run-dirs) "run-a")))))
+      (is (= 3 incomplete-runs))
+      (is (= #{"run-a" "run-b" "run-c"}
+             (into #{} (map #(last (str/split % #"/"))) incomplete-run-dirs))))))
+
+(deftest ^{:stratum 1} overridden-explicit-values-stay-inspectable
+  ;; Review catch on #1993 round 3: the override COUNT alone cannot say
+  ;; whether the agent disagreed with the gate — keep the values.
+  (let [root (str (Files/createTempDirectory "peg-telemetry-vals" (make-array FileAttribute 0)))
+        deny {:phase :implement :decision :deny
+              :phase/gate-failures [{:gate :stale-references}]}]
+    (consult-dir! root "run-a" [(assoc drift-peg :answer "yes")] [deny])
+    (let [drift (get-in (sut/peg-telemetry root nodes gate-map)
+                        [:pegs "did-you-update-every-consumer"])]
+      (is (= ["yes"] (:explicit-answers drift)))
+      (is (= {:denied 1} (:answers drift))))))
+
+(deftest ^{:stratum 1} reported-mechanism-labels-the-counted-stream
+  ;; Review catch on #1993 round 3: an explicit-only run's unrelated
+  ;; mechanism must not label another gate's verdicts.
+  (let [root (str (Files/createTempDirectory "peg-telemetry-label" (make-array FileAttribute 0)))
+        deny {:phase :implement :decision :deny
+              :phase/gate-failures [{:gate :stale-references}]}
+        ;; same peg id, two landing snapshots: one run's landings carry
+        ;; only the unmapped mechanism, the other's the mapped one
+        unmapped-snapshot {:id "did-you-update-every-consumer" :answer "yes"
+                           :landings {"yes" ["unmapped-problem"] "no" ["other-problem"]}}]
+    (consult-dir! root "run-a" [unmapped-snapshot])
+    (consult-dir! root "run-b" [drift-peg] [deny])
+    (let [drift (get-in (sut/peg-telemetry root nodes gate-map)
+                        [:pegs "did-you-update-every-consumer"])]
+      (is (= {:denied 1} (:answers drift)))
+      (is (= "miniforge/gate/stale-references" (:mechanism drift))
+          "the mechanism names the gate whose verdicts were counted"))))
+
+(deftest ^{:stratum 1} miss-ledger-answers-survive-a-lost-consultation-file
+  ;; Review catch on #1993 round 3: build-entry copies answered peg rows
+  ;; into :miss/pegs; when the consultation file is gone, that surviving
+  ;; answer must still observe the peg (vocabulary validation intact).
+  (let [root (str (Files/createTempDirectory "peg-telemetry-missans" (make-array FileAttribute 0)))
+        dir (io/file root "run-a")]
+    (.mkdirs dir)
+    (spit (io/file dir "codex-gap-ledger.edn")
+          (str (pr-str {:miss/id (random-uuid) :miss/phase :implement
+                        :miss/pegs [(assoc unmapped-peg :answer "x")
+                                    (assoc drift-peg :answer "not-in-vocabulary")]})
+               "
+"))
+    (let [{:keys [pegs]} (sut/peg-telemetry root nodes gate-map)]
+      (is (= {"x" 1} (:answers (get pegs "unmapped"))))
+      (is (= ["not-in-vocabulary"] (:invalid-answers (get pegs "did-you-update-every-consumer")))
+          "the fallback answer still passes vocabulary validation"))))
 
 (deftest ^{:stratum 1} telemetry-over-runs
   (let [root (str (Files/createTempDirectory "peg-telemetry" (make-array FileAttribute 0)))]
