@@ -29,6 +29,7 @@
         ai.miniforge/connector-sarif           {:local/root "../../components/connector-sarif"}
         ai.miniforge/algorithms                {:local/root "../../components/algorithms"}
         ai.miniforge/anomaly                   {:local/root "../../components/anomaly"}
+        ai.miniforge/artifact                  {:local/root "../../components/artifact"}
         ai.miniforge/coerce                    {:local/root "../../components/coerce"}
         ai.miniforge/config                    {:local/root "../../components/config"}
         ai.miniforge/content-hash              {:local/root "../../components/content-hash"}

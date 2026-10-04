@@ -1,5 +1,14 @@
 {:supervisory-state/messages
- {;; attention.clj
+ {:snapshot/spec "Spec {title} upserted"
+  :snapshot/workflow "Workflow {key} upserted"
+  :snapshot/agent "Agent {name} upserted"
+  :snapshot/pr "PR {repo}#{number} upserted"
+  :snapshot/policy "Policy evaluation {id}: {passed?}"
+  :snapshot/attention "Attention {severity}: {summary}"
+  :snapshot/task "Task {id} → {column}"
+  :snapshot/decision "Decision {id} → {status}"
+  :snapshot/intervention "Intervention {id} → {state}"
+  ;; attention.clj
   :policy/target-pr "PR {repo}#{number}"
   :policy/target-pr-generic "PR {target}"
   :policy/target-workflow-output "workflow output {target}"

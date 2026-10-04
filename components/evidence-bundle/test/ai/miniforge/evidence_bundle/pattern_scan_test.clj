@@ -16,7 +16,8 @@
   [value])
 
 (deftest ^{:stratum 0} separate-values-do-not-form-a-sensitive-string
-  (doseq [value [["000" "00" "0000"] ["alice" "@" "example.test"]]]
+  (doseq [value [["000" "00" "0000"] ["alice" "@" "example.test"]
+                 "1000-00-0000" "000-00-00000"]]
     (is (empty? (:scan/findings (scanner/scan-artifact value))))))
 
 ;------------------------------------------------------------------------------ Layer 1
