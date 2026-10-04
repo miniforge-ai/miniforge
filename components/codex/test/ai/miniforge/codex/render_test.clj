@@ -70,10 +70,10 @@
                      {:id "peg-bare" :title "Peg 2 · Unrouted?" :answers {}}]}
         text (codex/render-response resp)]
     (testing "id, question and the answer vocabulary all render verbatim (§7.7)"
-      (is (str/includes? text "pegs — answer each with the answer_peg tool"))
+      (is (str/includes? text "pegs — answer each listed vocabulary with the answer_peg tool"))
       (is (str/includes? text "- [peg-routed] Peg 1 · Did you check?  (answers: no | yes)")))
     (testing "a peg with no routed answers renders without a vocabulary"
-      (is (str/includes? text "- [peg-bare] Peg 2 · Unrouted?"))
+      (is (str/includes? text "- [peg-bare] Peg 2 · Unrouted?  (no routed answers — nothing to record)"))
       (is (not (str/includes? text "Peg 2 · Unrouted?  (answers:"))))
     (testing "pegs render after the landings — answers should be informed ones"
       (is (< (str/index-of text "landings")
@@ -105,7 +105,7 @@
               front of the agent, as prose, never as the raw EDN basis"
       (is (= 5 (count (:pegs entry))))
       (is (str/includes? (:content entry)
-                         "pegs — answer each with the answer_peg tool"))
+                         "pegs — answer each listed vocabulary with the answer_peg tool"))
       (is (str/includes? (:content entry) "[already-failed-silently]"))
       (is (not (str/includes? (:content entry) ":pegs"))))))
 
