@@ -1689,6 +1689,7 @@ Chained execution MUST preserve provenance across workflow boundaries:
 ```clojure
 {:chain/run-id uuid                    ; REQUIRED: invocation identity (N1 §2.32)
  :chain/definition-id keyword          ; REQUIRED: reusable composition identity
+ :chain/definition-version string      ; REQUIRED: resolved immutable version (N1 §2.32)
  :chain/steps
  [{:step/id keyword                    ; Unique within the definition
    :step/workflow-id keyword}]         ; Workflow definition, not run UUID
@@ -1718,8 +1719,9 @@ from starting. Emission failure MUST follow N3 §9, never report false success.
 Each step MUST preallocate its workflow-run UUID before `chain/step-started`,
 including when binding or loading fails before workflow execution.
 Edges MUST reference those source and destination UUIDs.
-Recovery MUST preserve the chain-run UUID and resolved definition;
-a fresh invocation MUST allocate a new one. The ambiguous legacy `:chain/id`
+Recovery MUST preserve the chain-run UUID, definition ID, version, and snapshot.
+It MUST refuse recovery when the snapshot is unavailable or conflicts with that identity.
+A fresh invocation MUST allocate a new run UUID. The ambiguous legacy `:chain/id`
 field is retired without assigning it one historical meaning; migration MUST follow N3 §7.5.
 
 ---

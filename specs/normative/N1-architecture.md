@@ -1731,6 +1731,7 @@ Implementations MUST distinguish these identities:
 | Field | Meaning | Type |
 |-------|---------|------|
 | `:chain/definition-id` | Reusable composition identity | keyword |
+| `:chain/definition-version` | Resolved immutable composition version | non-blank string |
 | `:chain/run-id` | One invocation, including its recovery | uuid |
 | `:step/id` | Step identity within the definition | keyword |
 | `:step/workflow-id` | Referenced workflow definition | keyword |
@@ -1744,6 +1745,10 @@ edge bindings so the composition remains reconstructable under N2 §14.
 Each new invocation MUST allocate a fresh `:chain/run-id` before its first event.
 Recovery MUST preserve it. Step IDs MUST be unique within a definition, and
 referenced workflow executions MUST retain their own workflow UUIDs.
+The definition ID and version together MUST identify one immutable composition.
+Selectors such as `latest` MUST resolve before admission and MUST NOT be recorded
+as the resolved version. Runs MUST retain the resolved definition snapshot;
+recovery MUST use that snapshot, not resolve the selector again.
 Chain events MUST use the chain-run scope defined by N3 §2.3; a definition ID
 MUST NOT be substituted for a workflow or chain-run UUID.
 

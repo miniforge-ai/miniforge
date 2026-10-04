@@ -634,6 +634,7 @@ Normative specs are enforced by:
   separate definition and invocation identities, chain-run scope, step/edge
   observability, work-specification projection, and intervention lifecycle facts.
   This amendment does not assert implementation completeness.
+  N9's compatibility references and train-scope summary defer to the same N3 contracts.
 
 - **0.24.0-draft** (2026-08-10) - N4-delta reclassified to informative. Its unique content folded
   into N4. The document's requirements were written lowercase, with no uppercase

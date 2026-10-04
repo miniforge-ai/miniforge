@@ -1088,7 +1088,10 @@ pack lifecycle events and Pack Run events.
 
 N1 §2.32 distinguishes definitions, runs, steps, and binding edges. Every
 `chain/*` and `chain.edge/*` event MUST carry the §2 envelope plus
-`:chain/run-id` (UUID), `:chain/definition-id` (keyword), and `:scope/type :chain`.
+`:chain/run-id` (UUID), `:chain/definition-id` (keyword),
+`:chain/definition-version` (non-blank string), and `:scope/type :chain`.
+The definition ID and resolved version MUST remain constant across the run's
+events and match its retained definition snapshot (N1 §2.32, N2 §14.4).
 The chain executor owns these emissions. All belong to the chain-run scope.
 Every step lifecycle event MUST carry its preallocated child-run `:workflow/id`
 UUID, including failures before execution. This cross-reference does not change scope.
@@ -1128,6 +1131,7 @@ be treated as step completion. Edge failure fields and ownership remain required
 
  :chain/run-id uuid
  :chain/definition-id keyword
+ :chain/definition-version string
  :edge/id uuid
  :edge/from-workflow-id uuid
  :edge/to-workflow-id uuid
@@ -1148,6 +1152,7 @@ be treated as step completion. Edge failure fields and ownership remain required
 
  :chain/run-id uuid
  :chain/definition-id keyword
+ :chain/definition-version string
  :edge/id uuid
  :edge/from-workflow-id uuid
  :edge/to-workflow-id uuid
@@ -1168,6 +1173,7 @@ be treated as step completion. Edge failure fields and ownership remain required
 
  :chain/run-id uuid
  :chain/definition-id keyword
+ :chain/definition-version string
  :edge/id uuid
  :edge/from-workflow-id uuid
  :edge/to-workflow-id uuid
@@ -1642,6 +1648,7 @@ Emitted when PR readiness state changes (derived-state-change event).
 
 ```clojure
 {:event/type :train/changed
+ :pr/id uuid                        ; REQUIRED: PR Work Item scope key (§2.3, §6)
  :train/id uuid
  :train/members [uuid ...]           ; Ordered PR Work Item ids
  :train/change-type keyword          ; :member-added, :member-removed,
@@ -1867,7 +1874,8 @@ implementation emits it.
 Family membership MUST use this enumeration, not a namespace glob.
 `policy-evaluated` and `attention-derived` are snapshots despite their names;
 the intervention lifecycle facts in §3.22 are not snapshots. Every rule in
-§3.19 applies to all thirteen rows. Unregistered members MUST be rejected.
+§3.19 applies to all thirteen rows. The publication boundary MUST reject
+unregistered members. Consumers MUST handle unknown types under §7.3.
 
 #### supervisory/workflow-upserted
 
@@ -2704,7 +2712,7 @@ belongs to exactly one class). A family whose members differ in scope or class
 occupies more than one row. Scope and retention assignments apply per row,
 not by namespace prefix.
 
-Two of the three §3.15 rows name an inherited scope (§2.3) rather than one of
+All three §3.15 rows name an inherited scope (§2.3) rather than one of
 the seven fixed scopes. These are the stream's for `listener/*`, the target's for
 `annotation/created` and `control-action/*`. Each emission still resolves to
 exactly one scope, named by its `:scope/type` field.
@@ -2871,7 +2879,7 @@ The payload version and scope discriminator MUST match the same profile:
 
 | Profile | Event types | Payload | Scope discriminator | Scope key |
 |---------|-------------|---------|---------------------|-----------|
-| N3 0.10 retained chain edges | Three `chain.edge/*` types | `1.x` | Absent/nil, or `:workflow` | `:workflow/id` |
+| N3 0.10 retained chain edges | Three edge types in §3.12.1 | `1.x` | Absent/nil, or `:workflow` | `:workflow/id` |
 | N3 0.11 chain execution | Nine types in §3.12.1 | `2.x` | REQUIRED `:chain` | `:chain/run-id` |
 | N3 0.11 intervention lifecycle | Two types in §3.22 | `2.x` | REQUIRED `:supervisory-entity` | `:supervisory/entity-key` |
 

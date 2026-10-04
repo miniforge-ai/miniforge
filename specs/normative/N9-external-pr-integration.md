@@ -6,8 +6,8 @@
 
 # N9 — External PR Integration
 
-**Version:** 0.3.0-draft
-**Date:** 2026-08-06
+**Version:** 0.3.1-draft
+**Date:** 2026-10-04
 **Status:** Draft
 **Conformance:** MUST
 
@@ -18,14 +18,12 @@
 ### 0.1 Purpose
 
 This specification defines how Miniforge MUST ingest, model, evaluate, and
-(optionally) act on pull requests that were **not created by Miniforge**
-("external PRs"), providing the same monitoring, governance, and workflow
-benefits available to Miniforge-originated PRs.
+(optionally) act on **external PRs**: pull requests not created by Miniforge.
+They receive the same monitoring, governance, and workflow benefits as Miniforge-originated PRs.
 
 Miniforge already creates PRs as outputs of its workflow engine (Release phase,
-DAG task executor). This spec extends the system to treat **any** PR — from any
-author, in any connected repo — as a first-class work item inside the Fleet
-control plane.
+DAG task executor). This spec makes **any** PR a first-class Fleet control-plane
+work item, regardless of author or connected repo.
 
 ### 0.2 Relationship to N1–N8
 
@@ -79,7 +77,7 @@ fleet capabilities:
 | **External PR integration** | **N9** | **Development** | **Repository fleets** | **PR monitoring & governance** |
 
 N7 answers: "How should these services scale at runtime?"
-N9 answers: "What is the state of all open PRs across our repos, and are they safe to merge?"
+N9 answers: "What is the state of open PRs across our repos? Are they safe to merge?"
 
 Both share:
 
@@ -382,8 +380,8 @@ specific to N9:
   and carry `:pr/id` as a cross-reference. They are not part of this family.
 - An external PR's events carry a nil `:workflow/id` and are sequenced per PR
   Work Item.
-- Per N3 §5.1, delivery is strictly by scope: a subscription on a PR Work Item
-  receives that item's events, and a cross-reference key confers no membership.
+- Per N3 §5.1, delivery is strictly by scope. A PR Work Item subscription
+  receives that item's events; a cross-reference key confers no membership.
   A consumer wanting both a workflow and its PR subscribes to both.
 
 ### 7.2 Event Families
@@ -401,14 +399,14 @@ not reproduced, so they cannot drift from the stream contract.
 | `pr.state/changed` | Provider-reported PR state changed |
 | `train/changed` | Train membership or order changed (§13) |
 
-All six are PR Work Item scoped (§7.1) and `:durable` retention class
-(N3 §6), except `train/changed`, which is keyed by `:train/id` and carries
-member `:pr/id`s.
+All six are PR Work Item scoped (§7.1), keyed by `:pr/id`, with `:durable`
+retention (N3 §6). `train/changed` carries train identity and membership as payload
+references; `:train/id` does not create a separate scope.
 
 ### 7.3 Event Ordering
 
 - Provider ingestion events MUST be idempotent per `:provider/dedupe-key`.
-- Derived-state-change events MUST only fire when computed state actually changes.
+- Derived-state-change events MUST only fire when computed state changes.
 - All events MUST conform to N3 §2.2 ordering guarantees where a workflow scope
   exists. For external PRs (no workflow), events MUST be ordered per PR Work Item.
 
@@ -601,16 +599,15 @@ The TUI (N5 §3) MUST provide:
   columns, sortable and filterable. RECOMMEND column derives the optimal next action
   (merge, approve, review, remediate, decompose, wait) from enriched readiness, risk,
   and policy signals. Filter palette supports field-qualified queries with AND composition.
-- **PR Detail View:** Readiness factor breakdown (6 weighted factors from `pr-train/explain-readiness`),
-  risk factor breakdown (7 factors from `pr-train/assess-risk`), policy evaluation results
+- **PR Detail View:** Readiness factor breakdown (6 weighted factors from `pr-train/explain-readiness`).
+  Risk factor breakdown (7 factors from `pr-train/assess-risk`). Policy evaluation results
   (per-rule from `policy-pack/evaluate-external-pr`) with drill-down to evidence artifacts.
   Recommended action with explanation. Chat mode for conversational PR analysis.
 - **Train View:** Ordered train members with merge readiness status, dependency edges,
   and per-PR recommended actions. Commands: `:create-train`, `:add-to-train`, `:merge-next`.
 
-These views derive from the event stream (N3) and PR Work Item state — they
-are projections, not separate data models (same principle as N5 §3.2.5 DAG
-Kanban View).
+These views project the event stream (N3) and PR Work Item state, not separate
+data models. N5 §3.2.5's DAG Kanban View follows the same principle.
 
 **TUI-triggered Policy Evaluation:**
 
@@ -724,11 +721,9 @@ dependencies without explicit declaration.
 - Version is tracked in the N3 event envelope `:event/version` field.
 
 An earlier revision required breaking changes to "be supported in parallel for
-at least one deprecation cycle". That is withdrawn: N3 §7.4 states that because
-the product is pre-release, dual-emission of old and new payload shapes is not
-required and implementations cut over. Requiring a deprecation cycle here would
-have obliged N9 implementations to carry compatibility machinery that no
-consumer needs and that N3 explicitly declines to mandate.
+at least one deprecation cycle". That requirement is withdrawn.
+N3 §7.4–§7.5 govern cutover, supported readers, retained history, and migration.
+N9 neither adds a dual-emission requirement nor waives those compatibility obligations.
 
 ---
 
@@ -889,22 +884,24 @@ diverges from the contract above, as of 2026-08-06.
 
 **Version History:**
 
+- 0.3.1-draft (2026-10-04): Aligned compatibility references and train-scope
+  wording with N3's authoritative contracts. Repaired prose lint without adding capabilities.
+
 - 0.3.0-draft (2026-08-06): Spec-completion pass. §7.1 restated a PR-only
-  version of the scope rule that N3 §2.3 now generalizes to six scopes; it now
-  references N3 and states only what is N9-specific, including that delivery is
-  strictly by scope (N3 §5.1). §7.2 reproduced N3 §3.16's event schemas; now a
-  reference table. §14 required breaking changes to "be supported in parallel
-  for at least one deprecation cycle", contradicting N3 §7.4, which states that
-  because the product is pre-release implementations cut over rather than
-  dual-emit — withdrawn. N5 §2.1 documented the command as `miniforge` while the shipped binary is
-  `mf` (installed to `~/.local/bin/mf` by `bb install:cli`, and invoked as `mf`
-  by CI and the release workflow). N9's use of `mf` was correct; N5 §2.1 is
+  version of the scope rule generalized by N3 §2.3 to six scopes.
+  It now references N3 and states only what is N9-specific, including strict
+  scope delivery (N3 §5.1). §7.2 replaced copied event schemas with a reference table.
+  §14's required deprecation cycle was withdrawn: it contradicted N3 §7.4's
+  then-current pre-release cutover policy. N5 §2.1 documented the command as
+  `miniforge`; the shipped binary is `mf`.
+  It is installed to `~/.local/bin/mf` by `bb install:cli` and invoked as `mf`
+  by CI and the release workflow. N9's use of `mf` was correct; N5 §2.1 is
   amended here to document the real binary name.
   §17–§18 conformance requirement IDs and test obligations. Annex A records
   implementation divergence.
 
 - 0.2.0-draft (2026-04-23): External-PR artifact amendment — `:pr-context-pack`
-  added to §9.1 with the obligation that ingestion emits the artifact on PR
-  creation and on significant updates (diff, CI status, review state, base-branch
-  change). Schema lives in N6 §3.1.1; this section defines the emission contract
+  added to §9.1. Ingestion emits it on PR creation and significant updates:
+  diff, CI status, review state, or base-branch changes.
+  Schema lives in N6 §3.1.1; this section defines the emission contract
 - 0.1.0-draft (2026-02-07): Initial external PR integration specification

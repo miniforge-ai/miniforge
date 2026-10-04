@@ -28,6 +28,7 @@ That PR supplies the separate prose-hygiene prerequisite.
 - Define chain execution identity, steps, edges, and event ownership.
 - Define supervisory spec records and intervention lifecycle event boundaries.
 - Reconcile scope, registry, emission, and compatibility requirements.
+- Align N9's compatibility references and train-scope summary with N3's existing authority.
 - Preserve the separate prose-hygiene prerequisite without repeating its changes.
   No lint settings or budgets are relaxed.
 
@@ -37,7 +38,7 @@ Adversarial cross-spec review, Markdown/prose lint, normal commit hooks,
 exact-head Copilot review, and all required CI checks precede merge.
 Runtime enforcement and negative regressions follow in separate code PRs.
 
-Local Markdown and plainspeak checks pass across all six files. The adversarial
+Local Markdown and plainspeak checks pass across all touched files. The adversarial
 pass traced repeated invocations, missing workflow targets, intervention admission
 versus approval, replay ownership, and ambiguous legacy records. A contract-only
 change does not claim runtime tests prove the newly specified behavior.
@@ -50,6 +51,9 @@ Historical scope profiles are explicit and retained edge events keep Workflow sc
 New writes require a scope discriminator; a payload version alone cannot change scope.
 N5's required justification remains required, with producer and migration obligations
 made explicit. The lifecycle does not add an approved-to-rejected transition.
+Resolved chain versions and retained snapshots pin recovery to the admitted composition.
+Unknown-family rejection belongs to publishers; consumers retain forward compatibility.
+All three inherited-scope registry rows are identified consistently.
 
 ## Deployment Plan
 
