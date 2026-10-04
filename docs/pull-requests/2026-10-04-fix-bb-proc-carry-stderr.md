@@ -11,14 +11,14 @@ dependencies beyond `clojure.string`. Nothing else in the workspace changes.
 ## Scope
 
 `run!` captures a command's stderr and then discards it. Every bang-caller in
-every repository that uses this component reports a failure as an exit code and
-an argv, with the reason the command gave thrown away.
+every repository using this component reports a failure as an exit code and argv.
+The reason the command gave is thrown away.
 
 Observed cost, in thesium: `Daily Pro Snapshot` failed on **30 consecutive
 scheduled runs**, 2026-09-04 through 2026-10-03, and the weekly publish with it.
 Every run logged exactly this and nothing more:
 
-```
+```text
 Message:  Command failed: ("aws" "s3" "cp" ".../dist/daily/dashboard_snapshot.json"
           "s3://***/daily/archive/2026-10-03-snapshot.json" ...)
 Data:     {:exit 1, :cmd (...)}
@@ -26,8 +26,8 @@ Data:     {:exit 1, :cmd (...)}
 
 The AWS CLI prints a specific reason on stderr for each of credentials,
 permissions, bucket and endpoint. `p/sh` captured it. `run!` dropped it. A month
-of identical failures carried no information about which of those it was, and
-two different guesses at the cause from the surviving evidence were both wrong.
+of identical failures carried no information about which of those it was.
+Two different guesses at the cause from the surviving evidence were both wrong.
 
 ## Change
 
@@ -43,7 +43,7 @@ something worth reporting or nil:
   head so a truncated block cannot read as a complete one. A failing command
   states what went wrong at the end, and an exception is not the place to paste
   a build log. The marker is counted *within* `max-captured-error-chars` (4000),
-  not added on top of it, so the value in `:err` never exceeds the bound its
+  not added on top of it. The value in `:err` never exceeds the bound its
   own docstring promises.
 
 Layer 1's `run!` adds the text to both halves of the throw:
@@ -82,8 +82,7 @@ session's proxy. `bb test` has to run on review. The tests above use only `sh`,
 
 ## Consequence
 
-The next failing `run!` says what the command said. For the thesium publish
-specifically, the following run prints the AWS CLI's own error, which decides
-between a mis-wired credential, a token whose scope does not cover the write,
-and a bucket or endpoint mismatch — none of which can be told apart from an
-exit code.
+The next failing `run!` says what the command said. For the thesium publish,
+the following run prints the AWS CLI's own error. That distinguishes a mis-wired
+credential, insufficient token scope, or a bucket or endpoint mismatch.
+An exit code alone cannot tell these causes apart.

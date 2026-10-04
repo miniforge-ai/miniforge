@@ -14,8 +14,8 @@ Thesium Career needs a hosted route to the cheaper models (DeepSeek,
 Kimi, Gemini) that works in a sandboxed build. Today the only route to
 OpenRouter is the OpenCode CLI, a host CLI the App Store build cannot
 exec. `:openai-compat` (#1428, #1440) can reach it with a base-URL
-override and an optional key, but nothing names it, the key is not
-required, and the response's cost and cache figures are dropped.
+override and an optional key. No named backend requires that key.
+The response's cost and cache figures are dropped.
 
 Four changes:
 
@@ -49,9 +49,9 @@ Four changes:
 
 3. **HTTP idle timeout.** `http-post-request` called http-kit with no
    timeout, so http-kit's 60 s idle default applied. These calls are
-   non-streaming: the server sends nothing until the model is done, and
-   a long completion (a Thesium rank read is ~170K tokens in and takes
-   minutes) was cut at 60 s on every direct provider backend. The call
+   non-streaming: the server sends nothing until the model is done.
+   A Thesium rank read has ~170K input tokens and takes minutes.
+   Every direct provider backend cut such completions at 60 s. The call
    now passes `:idle-timeout` from `client-defaults.edn`
    (`[:http :idle-timeout-ms]`, 600000, the stream ceiling's size). The
    connect timeout keeps its default. Reading a client default lifts
@@ -75,9 +75,10 @@ Four changes:
 
 ## Verified against the live API
 
-One call through the real endpoint (key injected by `op run`, never
-in the shell) returned HTTP 200 with `max_completion_tokens` and
-`usage.include` accepted, and a `usage` block carrying `cost`,
+One call through the real endpoint returned HTTP 200.
+The key was injected by `op run`, never in the shell.
+The endpoint accepted `max_completion_tokens` and `usage.include`.
+Its `usage` block carried `cost`,
 `prompt_tokens_details.cached_tokens`,
 `prompt_tokens_details.cache_write_tokens`, and
 `completion_tokens_details.reasoning_tokens`. The Codex field names
@@ -87,10 +88,10 @@ still routed `deepseek/deepseek-v4-pro`, `deepseek/deepseek-v4-flash`,
 `moonshotai/kimi-k2.6`, `google/gemini-3.1-pro-preview`,
 `google/gemini-3.8-flash`, and `anthropic/claude-sonnet-5` (one short
 call each). OpenRouter's public list of zero-retention endpoints
-(`/api/v1/endpoints/zdr`, read 2026-10-03) has at least one for each of
-those, for `moonshotai/kimi-k3`, for `anthropic/claude-opus-5`, and for
-the `openai/gpt-5.6` family; it has none for
-`anthropic/claude-fable-5.1`, which therefore fails under the default.
+(`/api/v1/endpoints/zdr`, read 2026-10-03) has at least one for each of those.
+It also lists endpoints for `moonshotai/kimi-k3`, `anthropic/claude-opus-5`, and
+the `openai/gpt-5.6` family. It has none for `anthropic/claude-fable-5.1`,
+which therefore fails under the default.
 Most zero-retention endpoints report no implicit prompt caching, so the
 default trades the cached-input discount for retention.
 
@@ -106,12 +107,11 @@ SL003, with every other pre-commit check passing.
 ## Tests
 
 `http-providers-test`, `network-health-test`, `interface-test`: 103
-tests, 509 assertions. New: OpenRouter wiring, request body, round
-trip (URL, Bearer key, usage flag, routing preference, usage
-breakdown, billed cost,
-`:tokens` unchanged), missing key fails closed before any request,
-an empty answer is an error that still carries the billed cost;
-OpenAI usage details kept and no nil keys without them; Codex
-cached-input and reasoning counts kept, absent when unreported; the
-provider call passes the configured idle timeout and leaves the
-connect timeout alone.
+tests, 509 assertions. New tests cover OpenRouter wiring and request bodies.
+Round-trip checks cover the URL, Bearer key, usage flag, routing preference,
+usage breakdown, billed cost, and unchanged `:tokens`.
+A missing key fails closed before any request.
+An empty answer is an error that still carries the billed cost.
+OpenAI usage details are kept, with no nil keys when absent.
+Codex cached-input and reasoning counts are kept when reported and absent otherwise.
+The provider call passes the configured idle timeout and leaves the connect timeout alone.
