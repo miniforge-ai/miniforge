@@ -7,7 +7,7 @@
 
 Base: main. Canonical contract #1959, complete-value scanner #1979, and manager
 export enforcement #1977 are merged. Shared compliance policy #1981 is a
-prerequisite. CLI presentation/export enforcement is reviewed independently in #1960.
+prerequisite. CLI presentation/export enforcement in #1960 must merge first.
 Use the manager-free canonical validation API from #1959 for OPSV finalization.
 That prerequisite validates portable N6 structure, domain values and declared hashes.
 Unhashed base bundles remain valid assembly inputs. Content integrity does not establish authority.
@@ -49,22 +49,14 @@ Required nullable fields distinguish explicit nil from absence; optional fields
 still validate their values when present.
 Nested constraints and violations reuse their canonical domain schemas.
 Concurrent accumulation invalidates a prepared candidate instead of losing the
-new reference or sealing incomplete evidence. All three evidence consumers and
-the packaged canonical/assembly regressions pass. Polylith, kondo, strata and the
-component-wide standards scan pass; final-head review and CI remain merge gates.
-After integrating #1963 and the shared semantic rules, all three evidence consumers
-pass and the rebuilt packaged canonical/assembly suite passes 35 tests with 326
-assertions. The component standards scan reports zero findings across 62 files.
-After governance trace integration, all three evidence consumers pass; the rebuilt
-packaged canonical and assembly suite passes 38 tests with 389 assertions.
+new reference or sealing incomplete evidence.
 Retained-seal recovery also enforces shared redaction across payload and metadata
 after canonical portability checks. It rejects root and nested sensitive metadata
 without changing the retained assembly or repairing and resealing the input.
-After phase-link and bounded-metadata integration, all three evidence consumers
-pass; rebuilt canonical and assembly tests pass 40 tests with 441 assertions.
-After shared compliance policy integration, all three consumers pass.
-Rebuilt assembly and compliance regressions pass 32 tests with 186 assertions.
-They cover rehashed understated treatment and identity-preserving rejection of restoration.
+Regressions cover rehashed understated treatment and identity-preserving rejection of restoration.
 Missing assemblies use the same not-found diagnostic in accumulation, finalization
-and recovery, before validating any retained seal. Refreshed consumers pass;
-rebuilt assembly/compliance checks pass 33 tests with 189 assertions.
+and recovery, before validating any retained seal.
+After the prerequisite merges, refresh once and run all evidence consumers,
+rebuild the CLI, and run packaged canonical, assembly, publication and compliance
+regressions. Require zero standards violations, normal signed hooks, a clean
+exact-head review and all CI including Build. Preserve this branch and worktree.
