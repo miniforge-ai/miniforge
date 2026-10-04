@@ -198,12 +198,13 @@
   (let [cur-ts (values/ts->epoch-ms (values/event-timestamp event))
         gap-line (when (and prev-ts cur-ts (> (- cur-ts prev-ts) gap-threshold))
                    (render-gap-line prev-ts cur-ts (- cur-ts prev-ts)))
-        event-line (render event)]
+        event-line (render event)
+        next-lines (cond-> lines
+                     gap-line (conj gap-line)
+                     event-line (conj event-line))]
     ;; Missing timestamps break adjacency; do not bridge gaps across them.
     {:prev-ts cur-ts
-     :lines (cond-> lines
-              gap-line (conj gap-line)
-              event-line (conj event-line))}))
+     :lines next-lines}))
 
 ;------------------------------------------------------------------------------ Layer 2
 

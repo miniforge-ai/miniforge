@@ -49,19 +49,13 @@
   (let [message (get event :message)]
     (if (string? message) message "")))
 
-(defn ^{:stratum 0} truncate
-  "Truncate string `s` to at most `n` characters, appending the
-   localized `:timeline/truncation-suffix` if cut."
+(defn- ^{:stratum 0} truncate-with-suffix
   [s n]
-  (cond
-    (not (string? s)) nil
-    (<= (count s) n) s
-    :else
-    (let [suffix        (str (messages/t :timeline/truncation-suffix))
-            suffix-length (min (count suffix) (max 0 n))
-            prefix-length (max 0 (- n suffix-length))]
-        (str (subs s 0 prefix-length)
-             (subs suffix 0 suffix-length)))))
+  (let [suffix        (str (messages/t :timeline/truncation-suffix))
+        suffix-length (min (count suffix) (max 0 n))
+        prefix-length (max 0 (- n suffix-length))]
+    (str (subs s 0 prefix-length)
+         (subs suffix 0 suffix-length))))
 
 ;; Duration helpers
 (defn ^{:stratum 0} format-duration-ms
@@ -77,20 +71,29 @@
 
 ;------------------------------------------------------------------------------ Layer 1
 
+(defn ^{:stratum 1} truncate
+  "Truncate string `s` to at most `n` characters, appending the
+   localized `:timeline/truncation-suffix` if cut."
+  [s n]
+  (cond
+    (not (string? s)) nil
+    (<= (count s) n) s
+    :else (truncate-with-suffix s n)))
+
 (def ^{:stratum 1} ^:private ^ThreadLocal hms-formatter-local
   "Thread-local SimpleDateFormat to avoid allocation on hot paths."
   (proxy [ThreadLocal] []
     (initialValue [] (make-hms-formatter))))
 
-(defn ^{:stratum 1} args-summary
+;------------------------------------------------------------------------------ Layer 2
+
+(defn ^{:stratum 2} args-summary
   "Extract the args preview from an event, truncated to `args-preview-length` chars.
    Prefers `:tool/args-digest :digest/preview`, falls back to `:message`."
   [event]
   (let [preview (get-in event [:tool/args-digest :digest/preview])
         raw     (if (string? preview) preview (event-message event))]
     (truncate raw args-preview-length)))
-
-;------------------------------------------------------------------------------ Layer 2
 
 (defn ^{:stratum 2} format-hms
   "Format `ts` (a Date, long epoch-ms, or ISO-8601 string) as HH:mm:ss.

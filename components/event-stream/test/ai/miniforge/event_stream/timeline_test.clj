@@ -19,7 +19,8 @@
   (:require
    [clojure.string :as str]
    [clojure.test :refer [deftest is testing]]
-   [ai.miniforge.event-stream.timeline :as sut]))
+   [ai.miniforge.event-stream.timeline :as sut]
+   [ai.miniforge.event-stream.timeline-values :as values]))
 
 ;------------------------------------------------------------------------------ Layer 0
 
@@ -39,6 +40,14 @@
     (is (= "" (sut/render-timeline [])))
     (is (= "" (sut/render-timeline nil)))
     (is (= "" (sut/render-timeline [] {})))))
+
+(deftest ^{:stratum 0} truncation-preserves-short-values-and-bounds-the-suffix
+  (is (nil? (values/truncate nil 2)))
+  (is (nil? (values/truncate :invalid 2)))
+  (is (= "ab" (values/truncate "ab" 2)))
+  (is (= "…" (values/truncate "abc" 1)))
+  (doseq [limit [0 -1]]
+    (is (= "" (values/truncate "abc" limit)))))
 
 (deftest ^{:stratum 0} events-without-timestamps-handled-gracefully
   (testing "events with nil timestamp render with ?? placeholders but do not throw"
