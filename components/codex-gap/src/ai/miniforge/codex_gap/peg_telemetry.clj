@@ -91,22 +91,34 @@
 
 (defn- ^{:stratum 0} presented-pegs
   "Every distinct peg presented in a run, keyed by id, from the two
-   per-run sources read once by the caller: `consult-pegs` (SPEC
-   $7.7.2.1 consultation entries -- the primary source, the only one
-   that can carry an explicit :answer) and `miss-pegs` (miss-ledger
-   rows, covering runs recorded before the consultation file existed).
-   An answered row wins its id; among answerless rows the consultation
-   row stands (its landing snapshot is the one the run presented;
-   a stale miss row must not pick the mechanism)."
+   per-run sources read once by the caller. Consultation rows (SPEC
+   $7.7.2.1 -- the snapshot the run actually presented) own the landing
+   metadata outright: a miss row never displaces one, whatever either
+   row's answer state, because a stale miss snapshot picking the
+   mechanism is exactly the defect this merge exists to prevent. Miss
+   rows may only DONATE an answer the consultation rows lack (the
+   lost-consultation-file survival path) or stand in whole for ids the
+   consultation record never presented. Within one source, an answered
+   row beats an answerless one for its id."
   [miss-pegs consult-pegs]
-  (reduce (fn [acc {:keys [id] :as peg}]
-            (cond
-              (nil? id) acc
-              (some? (:answer peg)) (assoc acc id peg)
-              (contains? acc id) acc
-              :else (assoc acc id peg)))
-          {}
-          (concat consult-pegs miss-pegs)))
+  (let [one-source (fn [acc {:keys [id] :as peg}]
+                     (cond
+                       (nil? id) acc
+                       (some? (:answer peg)) (assoc acc id peg)
+                       (contains? acc id) acc
+                       :else (assoc acc id peg)))
+        consults (reduce one-source {} consult-pegs)]
+    (reduce (fn [acc {:keys [id] :as peg}]
+              (cond
+                (nil? id) acc
+                (contains? acc id)
+                (if (and (some? (:answer peg))
+                         (nil? (:answer (get acc id))))
+                  (update acc id assoc :answer (:answer peg))
+                  acc)
+                :else (one-source acc peg)))
+            consults
+            miss-pegs)))
 
 (defn- ^{:stratum 0} explicit-answers-by-id
   "{peg-id [answer ..]} -- every non-nil explicit :answer across the

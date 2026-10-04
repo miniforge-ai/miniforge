@@ -330,3 +330,40 @@
       (is (= "miniforge/gate/stale-references" (:mechanism rec))
           "the unmapped mechanism sorts first but did not answer")
       (is (= {:denied 1} (:answers rec))))))
+
+(deftest ^{:stratum 1} answered-miss-rows-never-displace-consultation-snapshots
+  ;; Review catch on #1993 round 5: an answered miss row must not
+  ;; replace a newer consultation row's landing snapshot — stale
+  ;; landings pick stale mechanisms. It may only donate an answer the
+  ;; consultation rows lack.
+  (let [root (str (Files/createTempDirectory "peg-telemetry-displace" (make-array FileAttribute 0)))
+        ;; consultation snapshot: landings WITHOUT a mapped mechanism,
+        ;; answered explicitly
+        consult-snapshot {:id "did-you-update-every-consumer" :answer "yes"
+                          :landings {"yes" ["unmapped-problem"] "no" ["other-problem"]}}
+        ;; stale miss snapshot: answered, landings WITH the mapped mechanism
+        miss-snapshot (assoc drift-peg :answer "no")
+        deny {:phase :implement :decision :deny
+              :phase/gate-failures [{:gate :stale-references}]}]
+    (consult-dir! root "run-a" [consult-snapshot] [deny])
+    (spit (io/file root "run-a" "codex-gap-ledger.edn")
+          (str (pr-str {:miss/id (random-uuid) :miss/phase :implement
+                        :miss/pegs [miss-snapshot]})
+               "\n"))
+    (let [drift (get-in (sut/peg-telemetry root nodes gate-map)
+                        [:pegs "did-you-update-every-consumer"])]
+      (is (= {"yes" 1} (:answers drift))
+          "the consultation snapshot's unmapped landings mean the explicit
+           answer counts — the stale miss row's mechanism does not")
+      (is (= {:explicit 1} (:answer-sources drift))))
+    (testing "an unanswered consultation row accepts a miss row's answer"
+      (let [root2 (str (Files/createTempDirectory "peg-telemetry-donate" (make-array FileAttribute 0)))]
+        (consult-dir! root2 "run-a" [(dissoc consult-snapshot :answer)])
+        (spit (io/file root2 "run-a" "codex-gap-ledger.edn")
+              (str (pr-str {:miss/id (random-uuid) :miss/phase :implement
+                            :miss/pegs [(assoc consult-snapshot :answer "no")]})
+                   "\n"))
+        (let [drift (get-in (sut/peg-telemetry root2 nodes gate-map)
+                            [:pegs "did-you-update-every-consumer"])]
+          (is (= {"no" 1} (:answers drift))
+              "the donated answer counts against the consultation landings"))))))
