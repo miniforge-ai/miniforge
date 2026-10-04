@@ -30,8 +30,8 @@ These specifications define three products built on a shared kernel:
 **miniforge** executes a **workflow DAG** (planner → implementer → tester → reviewer → release
 manager) with an **inner validate/repair loop** and **explicit gates**
 (lint/coverage/stratification/docs/policy/etc). It produces **evidence bundles** and
-**artifacts with provenance**, while emitting an **append-only event stream** (agent status,
-tool use, subagents, LLM calls, messages) so the CLI/TUI can show live progress and
+**artifacts with provenance**. It emits an **append-only event stream** (agent status,
+tool use, subagents, LLM calls, messages). The CLI/TUI shows live progress and
 drill-down without scraping logs.
 
 **The interesting parts for experts:**
@@ -199,7 +199,7 @@ Defines:
 - Operations console purpose: monitoring autonomous factory (NOT PR management)
 - Manual override mechanisms: plan approval, gate handling, budget escalation
 - **Localization contract (§9):** no raw prose at emit sites, user vs system catalogs by
-  destination, what is not prose, locale resolution — dewey 050 applied to the console surface
+  destination, non-prose content, and locale resolution. Applies dewey 050 to the console surface.
 - **CLI output contract (§8.4):** stdout/stderr separation, exit-code taxonomy distinguishing
   policy refusal from failure, `--json` stability, stable error codes
 - **Command stability and deprecation (§8.5)**
@@ -311,7 +311,7 @@ Defines:
 - Fleet Mode disambiguation: N9 (SDLC governance) vs N7 (runtime policy synthesis)
 - CLI/TUI/API extensions: `fleet prs`, `fleet trains` commands and views
 - **Scope and event schemas deferred to N3** (§7) — §7.1 restated a PR-only scope rule that
-  N3 §2.3 generalizes to six scopes; §7.2 reproduced N3 §3.16's schemas
+  N3 §2.3 generalizes to six scopes. §7.2 reproduced N3 §3.16's schemas
 - **Versioning aligned with N3 §7** (§14) — the required parallel deprecation cycle is
   withdrawn; pre-release implementations cut over
 - **Binary name reconciled** — N5 §2.1 documented `miniforge` while the shipped binary is `mf`;
@@ -342,8 +342,8 @@ Defines:
 - Audit integration: full event stream (N3) and evidence bundle (N6) linkage
 - **Tool operational semantics:** Timeout, retry, circuit-breaker, concurrency, fallback (§3.4–§3.5)
 - **Tool response validation:** Schema validation and injection sanitization at capsule boundary (§7.4)
-- **Audit events reframed (§12.1):** none of the fifteen types is registered in N3 §6, so the
-  table is informative; adding a row is an N3 amendment first
+- **Audit events reframed (§12.1):** none of the fifteen types is registered in N3 §6. The
+  table is informative. Adding a row requires an N3 amendment first.
 - **Evidence type gated on N6 (§12.2):** `:governed-execution` is not an N6 §3.1.1 artifact type
 - **Annex A (informative):** implementation conformance status — §10's ten safety invariants
   have no enforcement point
@@ -378,7 +378,7 @@ Defines:
 
 **File:** [normative/N12-agent-context-economy.md](normative/N12-agent-context-economy.md)
 **Status:** Draft
-**Purpose:** The context window as a bounded, governed resource — measure it, degrade before bailing, and grow a learned
+**Purpose:** Treat the context window as a bounded, governed resource. Measure it, degrade before bailing, and grow a learned
   symbol language for intent
 
 Defines:
@@ -402,7 +402,7 @@ Defines:
 
 **File:** [normative/N13-policy-injection-and-standards-learning.md](normative/N13-policy-injection-and-standards-learning.md)
 **Status:** Draft
-**Purpose:** Split policy into full-fidelity **enforcement** (gates) and compact **guidance** (session injection); learn
+**Purpose:** Split policy into full-fidelity **enforcement** (gates) and compact **guidance** (session injection). Learn
   the per-repo guidance subset from violations and promote broadly-valuable rules to a generic bootstrap set
 
 Defines:
@@ -429,8 +429,9 @@ Defines:
 
 **File:** [normative/N14-shared-deliberation-workspace.md](normative/N14-shared-deliberation-workspace.md)
 **Status:** Draft (Speculative — lifecycle bound to N15 gates, see N14 §0.4)
+
 **Purpose:** Typed, event-sourced, transactional shared reasoning state for multi-agent deliberation runs — object
-  mutation instead of transcript passing; the substrate for testing whether collective cognition beats matched-compute
+  mutation instead of transcript passing. The substrate for testing whether collective cognition beats matched-compute
   sampling
 
 Defines:
@@ -452,8 +453,9 @@ Defines:
 
 **File:** [normative/N15-collective-cognition-harness.md](normative/N15-collective-cognition-harness.md)
 **Status:** Draft (core protocol); workspace-conditional sections share N14's speculative status (N15 §0.4)
+
 **Purpose:** Matched-budget evaluation protocol (implemented in minibench) deciding whether multi-agent architectures —
-  N14 in particular — beat test-time-compute baselines; pre-registered gates govern N14 staging
+  N14 in particular — beat test-time-compute baselines. Pre-registered gates govern N14 staging
 
 Defines:
 
@@ -473,7 +475,7 @@ Defines:
 
 ## Informative Documentation (Non-Normative)
 
-- [informative/I-policy-compilation-contract.md](informative/I-policy-compilation-contract.md) — policy candidate
+[informative/I-policy-compilation-contract.md](informative/I-policy-compilation-contract.md) — policy candidate
   model and pack compilation design. Reclassified from a normative N4 amendment on 2026-08-10:
   its requirements were lowercase (non-binding per RFC 8174) and the compiler it describes does
   not exist. Its two novel ideas — per-rule provenance and enforceability class — were folded
@@ -497,7 +499,7 @@ These documents provide guidance, examples, and context but do NOT define contra
 
 ### Future Workflows
 
-- [informative/pr-monitoring-workflow.md](informative/pr-monitoring-workflow.md) - PR monitoring and conflict resolution
+[informative/pr-monitoring-workflow.md](informative/pr-monitoring-workflow.md) - PR monitoring and conflict resolution
 
 ### Architecture & Internals
 
@@ -615,81 +617,81 @@ Normative specs are enforced by:
 
 ## Version History
 
-- **0.24.0-draft** (2026-08-10) - N4-delta reclassified to informative; its unique content folded
+- **0.24.0-draft** (2026-08-10) - N4-delta reclassified to informative. Its unique content folded
   into N4. The document's requirements were written lowercase, with no uppercase
-  RFC 2119 keyword anywhere, and so bound nothing per RFC 8174,
-  and the document-to-candidate compiler it specifies does not exist — what exists instead is
+  RFC 2119 keyword anywhere, and so bound nothing per RFC 8174.
+  The document-to-candidate compiler it specifies does not exist. What exists instead is
   `components/policy-calibration`, which decides gate-readiness empirically by measuring a semantic
   judge's false-positive and recall rates. **Folded into N4:** `:rule/provenance` (§2.3.3), the
-  rule-level counterpart to N6 §2.13's reproducibility requirement, and `:rule/enforceability`
+  rule-level counterpart to N6 §2.13's reproducibility requirement. Also added `:rule/enforceability`
   (§2.3.2) with the rule that a rule MUST NOT be silently promoted to `:executable`. Both optional,
   defaulting to current behaviour, so no existing rule is invalidated. **N4 Annex A.5** records a
-  larger finding: the shipped rule model carries `:rule/enforcement` actions, a
-  semantic-vs-deterministic detector distinction, and a calibration gate refusing to ship a
+  larger finding. The shipped rule model carries `:rule/enforcement` actions and a
+  semantic-vs-deterministic detector distinction. A calibration gate refuses to ship a
   semantic gating rule without a passing `:gate-ready?` record — and N4 mentions calibration zero
-  times. That safety property exists only in code; specifying it is a deliberate future amendment
+  times. That safety property exists only in code. Specifying it is a deliberate future amendment
   rather than something to reverse-engineer (020). Per-spec bumps: N4 0.7→0.8
 
 - **0.23.0-draft** (2026-08-10) - N7 completion, and a fix to N14 from the previous pass.
   **N7** was missed by the sweep entirely — it was surveyed and then not scheduled. Added
   `N7.EX.*`, `N7.VF.*`, `N7.AC.*` requirement IDs, test obligations, and Annex A. N7 turns out to
-  be the best-served spec in the set on the dimension that defeated the others: its nine `opsv.*`
-  event types are both registered in N3 §3.14 and emitted by `event-stream/opsv.clj` with tests,
-  where every other extension spec reviewed declared types that were never registered. Its gap is
-  elsewhere — §7.3 requires apply actions to run as N10-governed effects with postcondition
+  be the best-served spec in the set on event registration. Its nine `opsv.*`
+  event types are both registered in N3 §3.14 and emitted by `event-stream/opsv.clj` with tests.
+  Every other extension spec reviewed declared types that were never registered. Its gap is
+  elsewhere. §7.3 requires apply actions to run as N10-governed effects with postcondition
   monitoring, and N10 Annex A records that no such component exists.
   **N14** carried two `## 11.` sections after the N12–N15 pass: the pre-existing "Conformance
   staging" and the "Conformance Requirements" that pass appended. Renumbered to §14.
   Per-spec bumps: N7 0.2.1→0.3.0, N14 0.2.0→0.2.1
 
-- **0.22.0-draft** (2026-08-10) - Delta-spec completion pass across all seven deltas. Metadata was
-  carried three different ways — a core-style header block (N11-delta), a bulleted list under the
-  H1 (the four N5 deltas), and a `## Spec metadata` section (N2-delta, N4-delta) — and
+- **0.22.0-draft** (2026-08-10) - Delta-spec completion pass across all seven deltas.
+  Metadata used core-style headers (N11-delta), bulleted lists under H1 (four N5 deltas),
+  or a `## Spec metadata` section (N2-delta, N4-delta).
   N4-delta had no version anywhere. All normalized to the header form used by N1–N15, with Spec ID,
   Amends and Related preserved. Conformance requirement IDs and test obligations added to the six
   deltas carrying MUSTs: `N2D.CK.*`, `N5D1.SV.*`, `N5D2.SC.*`, `N5D3.OE.*`, `N5D4.AE.*`,
   `N11D.RA.*`. N5-delta-3's second `§3.6` renumbered to `§3.7` — it duplicated the pack-management
   producer's number, and both inbound references mean the producer. **N4-delta contains no uppercase RFC 2119
-  keyword** and so binds nothing per RFC 8174; a Status subsection recorded that it is effectively
+  keyword** and so binds nothing per RFC 8174. A Status subsection recorded that it is effectively
   informative until its requirements are stated or it is reclassified. (That subsection also read
   "states no requirements", which was wrong — it states about twenty-five, in lowercase. Corrected
   in 0.24.0, which reclassified the document.)
 - **0.21.0-draft** (2026-08-10) - N12–N15 completion pass. Conformance requirement IDs and test
   obligations added to all four (`N12.CE.*`, `N13.PI.*`, `N14.WS.*`, `N15.CH.*`), plus Annex A on
   each. **N14 §9.1** declared ten `workspace/*` types as required N3 events and none is registered
-  in N3 §6, so under N3 §6.1 none may be emitted — the same pattern found in N8, N9, and N10. Since
+  in N3 §6. Under N3 §6.1 none may be emitted — the same pattern found in N8, N9, and N10. Since
   §9.1 also makes the event stream the workspace log, the spec's central mechanism is blocked on
-  that registration; the list is retained as the proposed content of an N3 amendment rather than
-  added to N3's registry, because adding ten unimplemented types would misrepresent the stream's
+  that registration. The list is retained as the proposed content of an N3 amendment rather than
+  added to N3's registry. Adding ten unimplemented types would misrepresent the stream's
   surface to every consumer. N14 §9.2's four N6 exports are gated the same way. Annex A notes that
-  N15 is the one spec whose absence blocks another's disposition: its §8 gate G0 decides whether
+  N15 is the one spec whose absence blocks another's disposition. Its §8 gate G0 decides whether
   N14 is kept or demoted, and it cannot run until the harness exists.
   Per-spec bumps: N12 0.1→0.2, N13 0.1→0.2, N14 0.1→0.2, N15 0.1→0.2
 
 - **0.19.0-draft** (2026-08-10) - N11 spec-completion pass. **N11**: §11's five subsections were
-  numbered §10.1–§10.5, duplicating the TaskExecutor protocol's subsection numbers; renumbered,
-  and the two inbound `N11 §10` references both mean the protocol so are unaffected. §11 marked
+  numbered §10.1–§10.5, duplicating the TaskExecutor protocol's subsection numbers. Renumbered.
+  The two inbound `N11 §10` references both mean the protocol so are unaffected. §11 marked
   informative — it maps requirements to file and line coordinates that rot, and the `docker.clj`
   it cites no longer exists in the tree. §8.1's secret rules deferred to N3 §8. §9.1's evidence
   keys are not N6 artifact fields and are now gated on registering them there, the same shape as
-  N10 §12.2. Annex A records that only three of the runtime classes §5 admits have an executor,
-  and that §9.3's prohibition on resolving the workspace from `user.dir` — the exact fallback
-  behind the sandbox-leak defect seen in this repo — is unenforced.
+  N10 §12.2. Annex A records executors for only three admitted runtime classes (§5).
+  It also records §9.3's unenforced prohibition on workspace resolution from `user.dir`.
+  That fallback caused this repo's sandbox-leak defect.
   Per-spec bumps: N11 0.2→0.3
 - **0.18.0-draft** (2026-08-10) - N1 spec-completion pass. **N1**: §2's Workflow entity declared
   `:workflow/status` with the vocabulary N2 §2.2 superseded — `:pending` rather than `:queued`, and
   no `:paused`/`:blocked`. N1 was a consumer the N2 sweep missed. Added `N1.DM.*` and `N1.AR.*`
-  requirement IDs — the domain model and layering are N1's own subject and had no IDs, while six
+  requirement IDs. The domain model and layering are N1's own subject and had no IDs, while six
   families existed for capabilities later amendments added. Annex A separates the architectural
   requirements that have a static check (`poly check` for interfaces, `bb lint:stratum` for stratum
-  direction) from those that do not (layer direction, status-vocabulary conformance) — the latter
+  direction). Others lack checks (layer direction, status-vocabulary conformance) — the latter
   being how `:executing` reached the implementation unchallenged. Per-spec bumps: N1 0.7→0.8
 
 - **0.17.0-draft** (2026-08-06) - N10 spec-completion pass. **N10**: §12.1 required governed
-  execution to emit events to N3 directly above a note saying implementations MUST NOT emit them,
-  since none of the fifteen types is registered in N3 §6 — a requirement satisfiable in neither
-  direction. The table is now informative and the conformant path is correlation identifiers on
-  registered types, with N3 §6.1 amendment as the route to emitting any of them. §12.2's
+  execution to emit events to N3. A note directly below says implementations MUST NOT emit them,
+  since none of the fifteen types is registered in N3 §6. Neither direction satisfies both requirements.
+  The table is now informative and the conformant path is correlation identifiers on
+  registered types, with an N3 §6.1 amendment required before emitting them. §12.2's
   `:governed-execution` evidence shape is not an N6 §3.1.1 artifact type and is gated on
   registering it there. Annex A records that §10's ten safety invariants — including SI-10's
   five-second revocation bound — have no enforcement point, because no capsule, postcondition, or
@@ -697,27 +699,27 @@ Normative specs are enforced by:
 - **0.16.0-draft** (2026-08-06) - N9 spec-completion pass. **N9**: §7.1 restated a PR-only scope
   rule superseded by N3 §2.3's six-scope table, and §7.2 reproduced N3 §3.16's event schemas —
   both now reference N3. §14 required breaking changes to be "supported in parallel for at least
-  one deprecation cycle", contradicting N3 §7.4's pre-release cut-over stance; withdrawn. N5 §2.1
+  one deprecation cycle", contradicting N3 §7.4's pre-release cut-over stance. Withdrawn. N5 §2.1
   documented the command as `miniforge` while the shipped binary is `mf` (`bb install:cli` →
-  `~/.local/bin/mf`, and CI invokes it by that name); N9 was correct and N5 §2.1 is amended, with
+  `~/.local/bin/mf`, and CI invokes it by that name). N9 was correct and N5 §2.1 is amended, with
   its own examples swept to match.
   Conformance requirement IDs and test obligations (§17–§18). Annex A records that none of N9's
   six event types is emitted, so the `:pr/id` scope has no producer.
   Per-spec bumps: N9 0.2→0.3
 - **0.15.0-draft** (2026-08-06) - N8 spec-completion pass. **N8**: §5 carried a parallel model for
   concerns N3 owns — privacy levels, a regex pattern table, a field-rule vocabulary, and its own
-  retention schema — so an operator configuring redaction there could not tell whether N3 §8.1's
+  retention schema. An operator configuring redaction there could not tell whether N3 §8.1's
   MUST NOT still applied. All withdrawn; §5 now defines only which principal sees which field
   class. `:redaction/custom-fn function` withdrawn as a config-as-data violation (dewey 007).
   §10.1 reproduced N3 §3.15's event schemas with a fixed `:workflow/id`, unusable on the five
-  non-workflow scopes N3 streams; now a reference table. Conformance requirement IDs and test
+  non-workflow scopes N3 streams. Now a reference table. Conformance requirement IDs and test
   obligations (§12.4–§12.5). Annex A notes that no redaction configuration exists anywhere in the
   tree — the third spec in a row to record that gap. Per-spec bumps: N8 0.3→0.4
 - **0.14.0-draft** (2026-08-06) - N2 spec-completion pass. **N2**: the workflow status
-  vocabulary was spelled three ways — N2 said `:pending`, N5-delta-supervisory §3.2 said
-  `:queued`, and N5 §2.3.2's CLI filter plus the implementation said `:executing`, so a filter
+  vocabulary had three spellings. N2 said `:pending`, N5-delta-supervisory §3.2 said
+  `:queued`, and N5 §2.3.2's CLI filter plus the implementation said `:executing`. A filter
   written against one spec matched nothing produced by another. §2.2 is now canonical and names
-  the synonyms withdrawn; `:paused` and `:blocked` added, having been absent from the authority
+  the synonyms withdrawn. `:paused` and `:blocked` added, having been absent from the authority
   while N8 defined a pause action and the supervisory projection reported both. Terminality made
   explicit and §8.1's "user cancelled and wants to restart" resume case withdrawn as contradicting
   it. Resume protocol completed: spec-hash comparison, N3 §3.21 emissions, run-identity
@@ -727,57 +729,57 @@ Normative specs are enforced by:
   Per-spec bumps: N2 0.5→0.6
 - **0.13.0-draft** (2026-08-06) - N6 spec-completion pass. **N6**: bundle sealing and integrity
   (§2.14) — the spec asserted immutability in three places without a mechanism a reader could
-  check; event stream linkage schema (§2.12); gate execution evidence (§2.13) discharging the four
-  obligations N4 §5.5 places on N6, none of which the bundle recorded; retention (§7.4);
-  conformance requirement IDs and test obligations (§9.4–§9.5). Contract fixes: §7.2's
+  check. Event stream linkage schema (§2.12). Gate execution evidence (§2.13) discharging the four
+  obligations N4 §5.5 places on N6, none of which the bundle recorded. Retention (§7.4).
+  Conformance requirement IDs and test obligations (§9.4–§9.5). Contract fixes: §7.2's
   `[REDACTED:<type>]` marker against N3 §8.2's `[REDACTED]`, and its "redact **or** flag" against
-  N3 §8.1's MUST NOT; §2.1 and §7.1 compliance keys disagreeing in both directions; §8.1–§8.2
+  N3 §8.1's MUST NOT. §2.1 and §7.1 compliance keys disagreeing in both directions. §8.1–§8.2
   restating N5's CLI/TUI contracts. Annex A records implementation divergence — notably that the
   scanner detects secrets but never redacts them. Per-spec bumps: N6 0.7.2→0.8.0
 - **0.12.0-draft** (2026-08-05) - N5 spec-completion pass. **N5**: localization contract (§9)
   applying dewey 050 to the console surface — the spec defining the largest prose surface in the
-  system had none; CLI output contract with stdout/stderr separation, an exit-code taxonomy that
-  distinguishes policy refusal from failure, `--json` stability, and stable error codes (§8.4);
-  command stability and deprecation (§8.5); terminal capability degradation (§8.6); configuration
-  precedence and validation (§7.3–§7.4); conformance requirement IDs and test obligations
+  system had none. CLI output contract with stdout/stderr separation, an exit-code taxonomy that
+  distinguishes policy refusal from failure, `--json` stability, and stable error codes (§8.4).
+  Command stability and deprecation (§8.5). Terminal capability degradation (§8.6). Configuration
+  precedence and validation (§7.3–§7.4). Conformance requirement IDs and test obligations
   (§8.7–§8.8). Contract fixes: §5.2's "not a chat interface" against §3.2.8/§3.2.9 mandating a
-  chat key; `c` collided between Cancel and chat; §2.2's namespace table missing three namespaces
-  §2.3.3 defined commands for; §6.1.2 offering override for a CRITICAL violation that N4 §6.3.1
-  forbids; §6.2's bespoke override record replaced by the Waiver; §4.2.2/§4.3 aligned with N3 §5.3;
+  chat key. `c` collided between Cancel and chat. §2.2's namespace table missing three namespaces
+  §2.3.3 defined commands for. §6.1.2 offering override for a CRITICAL violation that N4 §6.3.1
+  forbids. §6.2's bespoke override record replaced by the Waiver. §4.2.2/§4.3 aligned with N3 §5.3.
   §3.2.8–§3.2.9 stopped mandating implementation namespaces per standard 020.
   Annex A records implementation divergence. Per-spec bumps: N5 0.4→0.5
 - **0.11.0-draft** (2026-08-05) - N4 spec-completion pass. **N4**: unified the severity vocabulary
   (§2.3.1 had `:error`/`:warning`/`:info` against the canonical `:critical :high :medium :low :info`
-  used everywhere else in the same spec); check-function execution semantics with fail-closed
-  behaviour, resource bounds, and isolation (§3.5); taxonomy compatibility (§2.1.1); standard pack
-  registry and identifier convention (§5.1); pack resolution and precedence (§5.3); gate binding
-  (§5.4); events and evidence obligations (§5.5); override/waiver contract bound to
-  N5-delta-supervisory-control-plane §3.1 (§6.3.1); signature canonicalization and trust roots (§8.1.1, §8.2.1);
-  conformance requirement IDs and test obligations (§9.4–§9.5). Contract fixes: `:violation/rule-id`
+  used everywhere else in the same spec). Check-function execution semantics with fail-closed
+  behaviour, resource bounds, and isolation (§3.5). Taxonomy compatibility (§2.1.1). Standard pack
+  registry and identifier convention (§5.1). Pack resolution and precedence (§5.3). Gate binding
+  (§5.4). Events and evidence obligations (§5.5). Override/waiver contract bound to
+  N5-delta-supervisory-control-plane §3.1 (§6.3.1). Signature canonicalization and trust roots (§8.1.1, §8.2.1).
+  Conformance requirement IDs and test obligations (§9.4–§9.5). Contract fixes: `:violation/rule-id`
   typed keyword, `:violation/pack-id` added, §11.1 example rewritten off the pre-0.6
   `:policy-pack/*` namespace, duplicate `require-capability-declaration` rule ID split.
   Annex A records implementation divergence. Per-spec bumps: N4 0.6→0.7
 - **0.10.0-draft** (2026-08-05) - N3 spec-completion pass. **N3**: canonical event type registry (§6),
-  schema evolution and consumer compatibility rules (§7), sensitive-data and redaction contract (§8),
-  emission-failure semantics with fail-closed durable/audit classes (§9), conformance requirement IDs
-  and test obligations (§10.4–§10.5), workflow control and checkpoint event family (§3.21) sourced from
+  schema evolution and consumer compatibility rules (§7), sensitive-data and redaction contract (§8).
+  Emission-failure semantics with fail-closed durable/audit classes (§9), conformance requirement IDs
+  and test obligations (§10.4–§10.5). Workflow control and checkpoint event family (§3.21) sourced from
   N2 §5 and N2-delta §9, `listener/overflow` defined (§3.15), supervisory family enumerated at twelve
-  members (§3.19.1), retention classes (§4.3.1–§4.3.3), scope-key table generalized beyond PR-only
+  members (§3.19.1). Retention classes (§4.3.1–§4.3.3), scope-key table generalized beyond PR-only
   (§2.3). Contract fixes: `:pr/id` unified as PR Work Item UUID with `:pr/number` for provider numbers,
-  bare `:timestamp` removed, `:event/sequence-number` unified on `long`, duplicate §3.17 resolved
+  bare `:timestamp` removed. `:event/sequence-number` unified on `long`, duplicate §3.17 resolved
   (Data Foundry → §3.20). Annex A records implementation divergence as tracked work.
   Per-spec bumps: N3 0.9→0.10
 - **0.9.0-draft** (2026-08-04) - Indexed every normative amendment and extension with explicit
-  product applicability; reconciled N7 requested/effective actuation, OPSV event/evidence
+  product applicability. Reconciled N7 requested/effective actuation, OPSV event/evidence
   correlation, and N8/N10 governance semantics
 - **0.8.0-draft** (2026-07-23) - Added N14 (Shared Deliberation Workspace) and N15 (Collective-Cognition
-  Evaluation Harness). N14 is a speculative spec: conformance binds experimental implementations pre-gate and
+  Evaluation Harness). N14 is speculative. Conformance binds experimental implementations pre-gate and
   the spec demotes to Informative as a recorded negative result if N15 Gate G0 fails. N15's core protocol
   (budget matching, replication, comparability, task class, metrics) is architecture-agnostic and survives any
-  gate outcome; its workspace-conditional sections (C6/C7, ablation delta, G0/G1) share N14's lifecycle
+  gate outcome. Its workspace-conditional sections (C6/C7, ablation delta, G0/G1) share N14's lifecycle
 - **0.7.0-draft** (2026-04-23) - Pack interchange, control surface, and per-workflow streaming
   amendments. **N1**: Pack Signature Format (§2.10.4.1) and Pack Bundle Format (§2.10.6) so signed
-  packs and pack archives are portable between OSS implementations; Tool Registry (§2.31) hoists
+  packs and pack archives are portable between OSS implementations. Tool Registry (§2.31) hoists
   the tool/connector contract from informative to normative so the capability-grant gate
   (N4 §5.1.9) has a canonical surface to enforce against. **N3**: §5.3 expanded from a one-line
   SSE sketch to a complete per-workflow wire contract (auth, listener attach handshake,
@@ -790,13 +792,13 @@ Normative specs are enforced by:
   Per-spec bumps: N1 0.5→0.6, N3 0.7→0.8, N6 0.5→0.6, N8 0.2→0.3, N9 0.1→0.2, N11 0.1→0.2
 - **0.6.0-draft** (2026-03-08) - Reliability nines amendments: canonical failure taxonomy, SLIs/SLOs/error
   budgets, unified autonomy model (A0-A5), trust boundary validation, retrieval governance, evaluation
-  pipeline in N1; workflow tier + compensation/success predicates in N2; failure class enum +
-  reliability metric + repo intelligence events in N3; validation layer taxonomy in N4; SLI evidence +
-  eval artifacts in N6; safe-mode posture in N8; tool operational semantics + response validation in N10
+  pipeline in N1. Workflow tier + compensation/success predicates in N2. Failure class enum +
+  reliability metric + repo intelligence events in N3. Validation layer taxonomy in N4; SLI evidence +
+  eval artifacts in N6. Safe-mode posture in N8. Tool operational semantics + response validation in N10
 - **0.5.0-draft** (2026-03-04) - TUI fidelity amendments
 - **0.4.0-draft** (2026-02-16) - OSS pack runtime amendments: Workflow Pack, Capability, Pack Run
-  concepts in N1; workflow chaining in N2; pack lifecycle/run events in N3; pack trust/capability
-  gates in N4; pack CLI + browser/launcher TUI in N5; Pack Run evidence in N6
+  concepts in N1. Workflow chaining in N2. Pack lifecycle/run events in N3. Pack trust/capability
+  gates in N4. Pack CLI + browser/launcher TUI in N5; Pack Run evidence in N6
 - **0.3.0-draft** (2026-02-07) - Added N9 (External PR Integration), Fleet Mode disambiguation
 - **0.2.0-draft** (2026-02-01) - Added N7 (OPSV) and N8 (OCI), updated governance for extension specs
 - **0.1.0-draft** (2026-01-23) - Initial spec index, normative spec structure established

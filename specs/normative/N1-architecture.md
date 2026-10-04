@@ -16,7 +16,7 @@
 ## 1. Purpose & Scope
 
 This specification defines the **core architectural concepts** and **structural model** of
-**MiniForge Core**, the governed workflow engine that powers Miniforge (the autonomous
+**MiniForge Core**. This governed workflow engine powers Miniforge (the autonomous
 software factory) and Data Foundry (ETL product). It establishes:
 
 - **Core domain nouns** and their precise definitions
@@ -389,8 +389,8 @@ Knowledge units SHOULD include a content hash and MAY include a cryptographic si
 Implementations MUST enforce these transitive trust rules:
 
 1. **Instruction authority is not transitive:** If pack A (`:trusted`, `:authority/instruction`)
-   references pack B (`:untrusted`), pack B MUST remain `:authority/data` and MUST NOT gain
-   instruction authority through the reference.
+   references pack B (`:untrusted`), pack B MUST remain `:authority/data`.
+   Pack B MUST NOT gain instruction authority through the reference.
 
 2. **Trust level inheritance:** When pack A includes content from pack B, the resulting combined
    content MUST be assigned the lower trust level (`:tainted` < `:untrusted` < `:trusted`).
@@ -403,8 +403,8 @@ Implementations MUST enforce these transitive trust rules:
 
 ##### Trust Promotion and Revocation
 
-**Trust promotion is one-way for a given pack version:** Once a pack version is promoted from
-`:untrusted` to `:trusted`, that specific version MUST NOT be demoted back to `:untrusted`. This
+**Trust promotion is one-way for a given pack version.** Once promoted from
+`:untrusted` to `:trusted`, that version MUST NOT be demoted back to `:untrusted`. This
 prevents accidental trust downgrades and ensures immutability of trust decisions.
 
 **Revocation mechanisms:** If a vulnerability or malicious content is discovered in a promoted
@@ -456,9 +456,9 @@ schema-validated.
 - **Workflow Pack** (`:workflow-pack`) — versioned bundle containing workflows, schemas, templates,
   and metadata for distributable domain workflows (see §2.24)
 
-Policy Packs (N4) are a specialization of the general pack model: they follow the same
-versioning, signing, and trust semantics but their content is deterministic validation
-rules rather than workflow definitions. Workflow Packs generalize the pack model to
+Policy Packs (N4) specialize the general pack model with the same versioning,
+signing, and trust semantics. Their content is deterministic validation rules
+rather than workflow definitions. Workflow Packs generalize the pack model to
 arbitrary domain workflows (e.g., reporting, product-brief pipelines).
 
 Packs MUST be machine-readable and MUST NOT embed freeform prose as executable instruction.
@@ -507,8 +507,8 @@ Implementations MUST validate pack dependencies before loading and MUST reject c
 
 #### 2.10.4 Pack Registry Roots and Loading
 
-Implementations MUST support loading packs from a declared set of registry roots (e.g., a local
-directory, a central repo checkout, or a remote registry in enterprise mode).
+Implementations MUST support loading packs from declared registry roots.
+Examples include a local directory, central repo checkout, or remote enterprise registry.
 
 - Registry roots MUST be explicitly configured.
 - Implementations MUST NOT implicitly ingest arbitrary repository markdown as instruction authority.
@@ -1559,10 +1559,9 @@ envelope permits `:request-escalation`.
 ### 2.31 Tool Registry
 
 A **Tool Registry** is the runtime catalog of executable tools and connectors
-available to agents, workflow packs, and validators. It is the canonical thing
-that pack **capabilities** (§2.25) resolve against: a capability declaration
-like `github.pr.read` is meaningful only if a matching tool is registered and
-the agent has been granted permission to invoke it.
+available to agents, workflow packs, and validators. Pack **capabilities** (§2.25)
+resolve against this catalog. A declaration like `github.pr.read` is meaningful
+only if a matching tool is registered and the agent has permission to invoke it.
 
 Workflow Packs (§2.24), the capability-grant gate (N4 §5.1.9), and governed
 tool execution (N10) all depend on this contract.
@@ -1666,11 +1665,10 @@ Override semantics: a later-root descriptor with the same `:tool/id` fully
 replaces the earlier one; there is no merge. A `:tool/enabled? false` later
 descriptor disables a built-in tool without removal.
 
-The project root is the lowest-trust source for instruction-authority purposes;
-project-root tools MUST default to `:tool/source :project` and MUST NOT be
-granted capabilities automatically — they require explicit user grant even if
-the capability is normally auto-granted for the same tool from a higher-trust
-source.
+The project root is the lowest-trust source for instruction authority.
+Project-root tools MUST default to `:tool/source :project` and MUST NOT receive
+automatic capability grants. They require explicit user grants even when the
+same tool's capabilities are normally auto-granted from a higher-trust source.
 
 #### 2.31.4 Capability Resolution
 
@@ -1688,10 +1686,9 @@ The runtime MUST expose a pure resolution function:
 ```
 
 `bind-capability` MUST be deterministic given `registry` and `grant-context`.
-The chosen tool MUST be recorded in Pack Run evidence (N6 §2.11.1) as part
-of `:pack/capabilities-granted` — specifically, each granted capability MUST
-carry the `:tool/id` that fulfilled it, so the run can be reproduced with the
-same binding.
+The chosen tool MUST be recorded in Pack Run evidence (N6 §2.11.1) under
+`:pack/capabilities-granted`. Each granted capability MUST carry the fulfilling
+`:tool/id`, so the run can be reproduced with the same binding.
 
 #### 2.31.5 Capability Enforcement at Invocation
 
@@ -1851,9 +1848,8 @@ The Learning Layer MUST remain downstream of workflow execution:
 
 1. The Meta Loop MAY consume execution outcomes, evidence bundles, and observation signals
 2. The Meta Loop MUST NOT directly advance, pause, resume, or cancel an in-flight workflow
-3. Any learning-derived recommendation that affects a live workflow
-   MUST be routed back through the control plane as a bounded control
-   action or future workflow selection input
+3. Learning-derived recommendations affecting live workflows MUST return through
+   the control plane as bounded control actions or future workflow selection inputs
 
 #### 3.3.4 Evaluation Pipeline
 
@@ -2186,7 +2182,7 @@ OSS implementations MUST support:
 
 OSS implementations MAY support:
 
-- Multiple concurrent workflows (resource management required)
+Multiple concurrent workflows (resource management required).
 
 **Integration point for Team+ plans:** OSS implementations SHOULD support event streaming to
 aggregation sinks (see N3 event stream API). The value proposition for multi-user scenarios is in
@@ -2380,9 +2376,8 @@ Implementations MUST enforce:
 4. **TB-INV-4:** All timestamps crossing any trust boundary MUST be normalized to UTC
    `inst` values at ingestion. Implementations MUST reject timestamps that cannot be
    parsed to valid instants.
-5. **TB-INV-5:** All entity identifiers crossing any trust boundary MUST be normalized to
-   their canonical form (UUID for internal entities; provider-specific canonical form for
-   external entities) at ingestion.
+5. **TB-INV-5:** Entity identifiers crossing trust boundaries MUST be normalized at
+   ingestion. Internal entities use UUIDs; external entities use provider-specific canonical forms.
 
 #### 5.7.3 Boundary Crossing Record
 
@@ -2568,10 +2563,10 @@ Implementations MUST demonstrate:
 
 ### 8.4 Conformance Requirements
 
-N1 already carries requirement IDs for the capabilities added by later
-amendments — `N1.AU.*` (autonomy), `N1.CP.*` (capability), `N1.EV.*`
-(evaluation), `N1.RI.*` (repository intelligence), `N1.RL.*` (reliability), and
-`N1.SI.*` (semantic intent). This section adds the two families the spec's own
+N1 already carries requirement IDs for capabilities added by later amendments.
+These include `N1.AU.*` (autonomy), `N1.CP.*` (capability), `N1.EV.*` (evaluation),
+`N1.RI.*` (repository intelligence), `N1.RL.*` (reliability), and `N1.SI.*` (semantic intent).
+This section adds the two families the spec's own
 subject matter needs and previously lacked: the domain model of §2 and the
 layering of §3–§4.
 
@@ -2696,9 +2691,8 @@ Research directions:
 
 ## 11. Repository Intelligence and Context Assembly
 
-This section consolidates the normative requirements for the Repo Index (§2.27), Context
-Pack (§2.28), staleness protocol (§2.29), and tool contract (§2.30) into a single
-conformance checklist.
+This conformance checklist consolidates requirements for Repo Index (§2.27),
+Context Pack (§2.28), staleness protocol (§2.29), and the tool contract (§2.30).
 
 ### 11.1 Repository Index Requirements
 
@@ -2797,11 +2791,10 @@ check, which is why they are the ones that have not drifted.
 
 ### A.3 Structural
 
-- **The reliability, autonomy, and evaluation requirement families**
-  (`N1.RL.*`, `N1.AU.*`, `N1.EV.*`) largely describe capabilities whose
-  implementation status is recorded in the annexes of the specs that consume
-  them — N3 for reliability events, N10 for autonomy gating. N1 states the
-  model; the gaps surface downstream.
+**The reliability, autonomy, and evaluation families** (`N1.RL.*`, `N1.AU.*`,
+`N1.EV.*`) largely describe capabilities tracked in consuming specs' annexes.
+These include N3 for reliability events and N10 for autonomy gating.
+N1 states the model; the gaps surface downstream.
 
 ---
 
@@ -2892,27 +2885,27 @@ check, which is why they are the ones that have not drifted.
   declared `:workflow/status` as `:pending, :running, :completed, :failed,
   :cancelled` — the vocabulary N2 §2.2 superseded, missing `:paused` and
   `:blocked` and naming `:pending` rather than `:queued`. N1 is a consumer the
-  N2 sweep missed; it now defers to N2 §2.2. Added the two requirement-ID
-  families N1's own subject matter lacked: `N1.DM.*` for the domain model and
-  `N1.AR.*` for layering and component boundaries, plus test obligations
+  N2 sweep missed; it now defers to N2 §2.2. Added `N1.DM.*` for the domain
+  model and `N1.AR.*` for layering and component boundaries. Added test obligations
   (§8.4–§8.5). Annex A records which architectural requirements have a static
   check — interface boundaries and stratum direction do; layer direction and
   status-vocabulary conformance do not.
 
 - 0.7.0-draft (2026-08-04): Clarified OPSV requested actuation as intent rather
-  than authority; added rollback and required-instrumentation fields to the N7
-  specializations and linked governed effects to N10
-- 0.6.0-draft (2026-04-23): Pack interchange and tool registry amendments — Pack Signature
-  Format (§2.10.4.1) defining detached-signature wire format and verification API so
-  signed packs are portable between OSS implementations; Pack Bundle Format (§2.10.6)
-  defining the on-disk archive layout and canonical-EDN content-hash so any miniforge
-  instance can install a pack produced by another; Tool Registry (§2.31) hoisting the
-  tool/connector contract from informative to normative so the capability-grant gate
-  (N4 §5.1.9) has a canonical surface to enforce against
-- 0.5.0-draft (2026-03-08): Reliability Nines amendments — Failure Taxonomy (§5.3.3),
-  Reliability Model with SLIs/SLOs/Error Budgets (§5.5), Unified Autonomy Model (§5.6),
-  Trust Boundary Validation (§5.7), Index Quality Metrics and Canary Protocol (§2.27.9–2.27.10),
-  Evaluation Pipeline (§3.3.3), Reliability and Evaluation conformance (§11.5–§11.6)
+  than authority. Added rollback and required-instrumentation fields to N7
+  specializations and linked governed effects to N10.
+- 0.6.0-draft (2026-04-23): Pack interchange and tool registry amendments.
+  Pack Signature Format (§2.10.4.1) defines detached-signature wire format and verification API so
+  signed packs are portable between OSS implementations.
+  Pack Bundle Format (§2.10.6) defines the on-disk archive layout and canonical-EDN content-hash.
+  Any miniforge instance can install a pack produced by another.
+  Tool Registry (§2.31) hoists the tool/connector contract from informative to normative.
+  The capability-grant gate (N4 §5.1.9) gains a canonical enforcement surface.
+- 0.5.0-draft (2026-03-08): Reliability Nines amendments added Failure Taxonomy (§5.3.3)
+  and Reliability Model with SLIs/SLOs/Error Budgets (§5.5).
+  Added Unified Autonomy Model (§5.6), Trust Boundary Validation (§5.7), and
+  Index Quality Metrics and Canary Protocol (§2.27.9–2.27.10).
+  Added Evaluation Pipeline (§3.3.3) and Reliability and Evaluation conformance (§11.5–§11.6).
 - 0.4.0-draft (2026-03-04): Added Repository Intelligence and Context Assembly
   (§2.27–§2.30 domain entities, §11 conformance requirements, §13 glossary additions)
 - 0.3.0-draft (2026-02-16): Added Workflow Pack, Capability, Pack Run concepts
