@@ -1024,28 +1024,6 @@
              :stream (boolean streaming?)}
       num-ctx (assoc :options {:num_ctx (long num-ctx)}))))
 
-(defn ^{:stratum 1} http-post-request
-  "Make HTTP POST request to LLM API.
-
-   Returns HTTP response map or canonical anomaly map on failure
-   (W2 convergence: `:anomaly/type :unavailable`, no subtype since
-   `:anomalies/unavailable` is a generic-standard category).
-
-   http-kit signals connection failures via either a thrown exception
-   or a `{:error <Throwable>}` response map (depending on whether the
-   error surfaces before or after the future resolves); both modes
-   collapse to the same canonical anomaly."
-  [url headers body]
-  (try
-    (let [response @(http/post url
-                               {:headers headers
-                                :body (json/generate-string body)})]
-      (if-let [cause (:error response)]
-        (http-failure-anomaly cause url)
-        response))
-    (catch Exception e
-      (http-failure-anomaly e url))))
-
 (defn- ^{:stratum 1} extraction
   "The `{:content :usage}` shape `parse-provider-response` expects from
    every extractor — built in one place so the extractors stay pure
@@ -1503,6 +1481,12 @@
   []
   (client-default [:stream :default-min-activity-interval-ms]))
 
+(defn- ^{:stratum 3} http-idle-timeout-ms
+  "How long a direct provider call may go without a byte from the
+   server before the client gives up."
+  []
+  (client-default [:http :idle-timeout-ms]))
+
 (defn- ^{:stratum 3} stream-line-timeout-ms
   []
   (client-default [:stream :line-timeout-ms]))
@@ -1654,6 +1638,33 @@
        (seq final-message-preview) (assoc :final-message-preview final-message-preview)))))
 
 ;------------------------------------------------------------------------------ Layer 4
+
+(defn ^{:stratum 4} http-post-request
+  "Make HTTP POST request to LLM API.
+
+   Returns HTTP response map or canonical anomaly map on failure
+   (W2 convergence: `:anomaly/type :unavailable`, no subtype since
+   `:anomalies/unavailable` is a generic-standard category).
+
+   http-kit signals connection failures via either a thrown exception
+   or a `{:error <Throwable>}` response map (depending on whether the
+   error surfaces before or after the future resolves); both modes
+   collapse to the same canonical anomaly.
+
+   The idle timeout is set explicitly: these calls are non-streaming, so
+   the server sends nothing until the model is done, and a long
+   completion outlasts http-kit's 60 s default."
+  [url headers body]
+  (try
+    (let [response @(http/post url
+                               {:headers headers
+                                :body (json/generate-string body)
+                                :idle-timeout (http-idle-timeout-ms)})]
+      (if-let [cause (:error response)]
+        (http-failure-anomaly cause url)
+        response))
+    (catch Exception e
+      (http-failure-anomaly e url))))
 
 (defn- ^{:stratum 4} claude-args
   "Build CLI arguments for the Claude backend.

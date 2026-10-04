@@ -24,6 +24,7 @@
   (:require
    [clojure.test :refer [deftest is testing]]
    [cheshire.core :as json]
+   [org.httpkit.client :as http]
    [ai.miniforge.llm.interface :as llm]
    [ai.miniforge.llm.protocols.impl.llm-client :as impl]))
 
@@ -62,6 +63,20 @@
 (defn- ^{:stratum 0} backend-config
   [backend]
   (get impl/backends backend))
+
+;; Transport
+(deftest ^{:stratum 0} http-post-request-idle-timeout-test
+  (testing "a provider call may idle for the configured window — these calls
+            are non-streaming, so a long completion sends nothing until it
+            is done and would be cut at http-kit's 60 s default"
+    (let [captured (atom nil)]
+      (with-redefs [http/post (fn [_url opts]
+                                (reset! captured opts)
+                                (delay {:status 200 :body "{}"}))]
+        (impl/http-post-request "http://llm-test.invalid/" {} {:q 1}))
+      (is (= 600000 (:idle-timeout @captured)))
+      (is (not (contains? @captured :timeout))
+          "the connect timeout keeps its default; only the idle window is widened"))))
 
 ;; Request-body builders
 (deftest ^{:stratum 0} anthropic-request-body-test

@@ -6,7 +6,11 @@
  ;; every request, so only it carries a default here — OpenAI and
  ;; Gemini omit the cap unless the caller sets :max-tokens.
  :http
- {:anthropic {:api-version "2023-06-01"
+ {;; A direct provider call is non-streaming: nothing arrives until the
+  ;; model finishes. Sized like the stream ceiling below so a long
+  ;; completion is not cut at http-kit's 60 s default.
+  :idle-timeout-ms 600000
+  :anthropic {:api-version "2023-06-01"
               :default-max-tokens 16000}}
 
  ;; Framework defaults for a monitored streaming run. A role overrides

@@ -17,7 +17,7 @@ exec. `:openai-compat` (#1428, #1440) can reach it with a base-URL
 override and an optional key, but nothing names it, the key is not
 required, and the response's cost and cache figures are dropped.
 
-Two commits:
+Three commits:
 
 1. **Usage fields.** The OpenAI wire shape reports cached input,
    cache-write input, and reasoning output tokens under
@@ -47,6 +47,17 @@ Two commits:
    `usage: {include: true}` and parses `usage.cost` into `:cost-usd`.
    Model ids are OpenRouter's (`vendor/model`); no default model.
 
+3. **HTTP idle timeout.** `http-post-request` called http-kit with no
+   timeout, so http-kit's 60 s idle default applied. These calls are
+   non-streaming: the server sends nothing until the model is done, and
+   a long completion (a Thesium rank read is ~170K tokens in and takes
+   minutes) was cut at 60 s on every direct provider backend. The call
+   now passes `:idle-timeout` from `client-defaults.edn`
+   (`[:http :idle-timeout-ms]`, 600000, the stream ceiling's size). The
+   connect timeout keeps its default. Reading a client default lifts
+   `http-post-request` from Layer 1 to Layer 4; the function is moved,
+   not changed beyond the one option.
+
 ## Verified against the live API
 
 One call through the real endpoint (key injected by `op run`, never
@@ -69,9 +80,11 @@ SL003, with every other pre-commit check passing.
 
 ## Tests
 
-`http-providers-test`, `network-health-test`, `interface-test`: 101
-tests, 501 assertions. New: OpenRouter wiring, request body, round
+`http-providers-test`, `network-health-test`, `interface-test`: 102
+tests, 503 assertions. New: OpenRouter wiring, request body, round
 trip (URL, Bearer key, usage flag, usage breakdown, billed cost,
 `:tokens` unchanged), missing key fails closed before any request;
 OpenAI usage details kept and no nil keys without them; Codex
-cached-input and reasoning counts kept, absent when unreported.
+cached-input and reasoning counts kept, absent when unreported; the
+provider call passes the configured idle timeout and leaves the
+connect timeout alone.
