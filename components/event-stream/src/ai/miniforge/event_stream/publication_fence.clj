@@ -39,7 +39,7 @@
   (rejection-result event :workflow-quiesced))
 
 (defn ^{:stratum 1} try-acquire-in-flight!
-  "A refused acquire returns the identical state; a successful one increments it."
+  "Return true when this call acquires a slot, or false when the workflow is fenced."
   [stream event]
   (let [[before after] (swap-vals! stream (partial acquire-state (:workflow/id event)))]
     (not (identical? before after))))

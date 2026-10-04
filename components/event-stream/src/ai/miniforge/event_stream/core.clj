@@ -404,7 +404,7 @@
    for the stream to settle before reporting at-rest.
 
    The quiesce fence is enforced atomically: `fence/with-in-flight` fuses the
-   quiesce-check and the in-flight increment into a single `swap!`,
+   quiesce-check and the in-flight increment into a single `swap-vals!`,
    eliminating the TOCTOU window that allowed a publish to slip through
    after `quiesce!` fenced the workflow."
   [stream event]
