@@ -3,6 +3,7 @@
 ;; Licensed under the Apache License, Version 2.0.
 (ns ai.miniforge.evidence-bundle.publication-compliance-test
   (:require [clojure.test :refer [deftest is]]
+            [ai.miniforge.evidence-bundle.interface :as evidence]
             [ai.miniforge.evidence-bundle.publication-compliance :as compliance]
             [ai.miniforge.redaction.interface :as redaction]))
 
@@ -99,3 +100,20 @@
     (is (= :encrypted (:compliance/pii-handling (compliance/prepare encrypted))))
     (is (= :redacted (:compliance/pii-handling
                       (compliance/prepare (assoc encrypted :description synthetic-secret)))))))
+
+(deftest ^{:stratum 2} repeated-preparation-preserves-content-and-hash
+  (doseq [input (concat [(candidate) (recorded :redaction-marker)]
+                       (map #(candidate :description %)
+                            [(redaction/marker) synthetic-secret "000-00-0000" "alice@example.com"])
+                       (map #(candidate :compliance/sensitive-findings [(contaminated-finding %)])
+                            [:field :metadata :nested]))]
+    (let [once-prepared (compliance/prepare input)
+          twice-prepared (compliance/prepare once-prepared)
+          findings (:compliance/sensitive-findings twice-prepared)]
+      (is (= once-prepared twice-prepared (compliance/prepare twice-prepared)))
+      (is (= (evidence/content-hash once-prepared) (evidence/content-hash twice-prepared)))
+      (is (= (count findings) (count (distinct findings))))
+      (is (redaction/clean? twice-prepared)))))
+
+(comment
+  (clojure.test/run-tests 'ai.miniforge.evidence-bundle.publication-compliance-test))

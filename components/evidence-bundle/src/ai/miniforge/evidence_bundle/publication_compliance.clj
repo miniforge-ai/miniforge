@@ -9,7 +9,9 @@
 ;------------------------------------------------------------------------------ Layer 0
 
 (defn- ^{:stratum 0} findings [bundle]
-  (update (scanner/scan-artifact bundle) :scan/findings into (:compliance/sensitive-findings bundle)))
+  (let [scan (scanner/scan-artifact bundle)
+        merged (concat (:scan/findings scan) (:compliance/sensitive-findings bundle))]
+    (assoc scan :scan/findings (into [] (distinct) merged))))
 
 (defn- ^{:stratum 0} protected-treatment? [bundle]
   (contains? #{:redacted :encrypted} (:compliance/pii-handling bundle)))
@@ -32,7 +34,7 @@
          (or (not (scanner/protection-required? scan)) (protected-treatment? bundle))
          (or (not (scanner/redaction-recorded? scan)) (= :redacted (:compliance/pii-handling bundle))))))
 
-(defn ^{:stratum 1} prepare [bundle]
+(defn- ^{:stratum 1} prepare-content [bundle]
   (let [scan (findings bundle)
         sensitive? (boolean (or (seq (:scan/findings scan)) (:compliance/sensitive-data bundle)))
         handling (treatment bundle scan)]
@@ -40,6 +42,13 @@
         (merge (scanner/compliance-metadata scan))
         (assoc :compliance/sensitive-data sensitive? :compliance/pii-handling handling)
         redaction/redact)))
+
+;------------------------------------------------------------------------------ Layer 2
+
+(defn ^{:stratum 2} prepare [bundle]
+  (let [redacted (prepare-content bundle)
+        metadata (scanner/compliance-metadata (findings redacted))]
+    (merge redacted metadata)))
 
 (comment
   (prepare {}))

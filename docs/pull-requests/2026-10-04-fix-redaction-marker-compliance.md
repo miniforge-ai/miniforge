@@ -17,16 +17,21 @@ embedded strings, keys and metadata. Do not infer the removed secret's PII class
 Reuse this finding in preparation and read-only publication validation.
 Existing markers require sensitive-data true and redacted treatment, even when
 an input claims encryption. Marker-free encrypted evidence retains its treatment.
-No new traversal or duplicate redaction policy is introduced.
+Reuse the existing traversal and shared redaction policy.
+Deduplicate fresh and retained findings. Scan the redacted result during initial
+preparation so newly created markers are recorded immediately, not on a retry.
+Repeated preparation preserves both the content and its hash.
 
 ## Testing plan
 
 Findings removal and rehashing are covered at the publication boundary.
 The pending finalization regression fails against the old policy and passes
 with this shared fix: 27 tests, 143 assertions. All three deployed evidence
-consumers pass serially. The rebuilt CLI passes 23 tests and 299 assertions.
+consumers pass serially. The rebuilt CLI passes 24 tests and 335 assertions.
 Older scanner tests now require exactly the marker finding after redaction.
 The original secret findings must still disappear.
+Repeat-preparation regressions cover markers, raw secrets, PII and contaminated
+finding fields or metadata. The old implementation fails 17 assertions.
 
 ## Deployment plan
 
