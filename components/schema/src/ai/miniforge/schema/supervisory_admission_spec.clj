@@ -3,12 +3,13 @@
 ;; Licensed under the Apache License, Version 2.0.
 (ns ai.miniforge.schema.supervisory-admission-spec
   "N5-delta-1 current-write records, separate from historical projection shapes."
-  (:require [ai.miniforge.schema.supervisory-records-spec :as records]))
+  (:require [ai.miniforge.schema.supervisory-records-spec :as records]
+            [ai.miniforge.schema.text-spec :as text]))
 
 ;------------------------------------------------------------------------------ Layer 0
 
 (def ^{:stratum 0} NonBlankTitle
-  [:and :string [:re #"(?s).*\S.*"]])
+  text/NonBlankString)
 
 (def ^{:stratum 0} InterventionRecord
   "Complete record shape; initial-state and transition constraints are separate."

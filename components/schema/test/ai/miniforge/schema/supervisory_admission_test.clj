@@ -20,9 +20,9 @@
 
 (deftest ^{:stratum 0} spec-titles-require-content-not-just-length
   (let [record (support/spec-record)]
-    (doseq [title [nil "" " " "\t\n" :title]]
+    (doseq [title [nil "" " " "\t\n" "\u2003" "\u00a0" "\u3000" "\u202f" "\u0085" :title]]
       (is (not (schema/valid? schema/SpecRecord (assoc record :spec/title title)))))
-    (doseq [title ["A" "\nA\n" "仕様"]]
+    (doseq [title ["A" "\nA\n" "仕様" "\u2003仕様\u00a0"]]
       (is (schema/valid? schema/SpecRecord (assoc record :spec/title title))))
     (is (schema/valid? schema/SpecProjection (assoc record :spec/title " ")))
     (is (not (schema/valid? schema/SpecRecord (assoc record :spec/origin "miniforge"))))))

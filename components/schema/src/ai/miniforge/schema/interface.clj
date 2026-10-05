@@ -30,7 +30,8 @@
    [ai.miniforge.schema.supervisory :as supervisory]
    [ai.miniforge.schema.supervisory-records-spec :as records]
    [ai.miniforge.schema.supervisory-admission-spec :as admission]
-   [ai.miniforge.schema.semantic-version-spec :as version]))
+   [ai.miniforge.schema.semantic-version-spec :as version]
+   [ai.miniforge.schema.text-spec :as text]))
 
 ;------------------------------------------------------------------------------ Layer 0
 
@@ -103,6 +104,10 @@
   logging/Scenario)
 
 ;; Supervisory entity schemas
+(def ^{:stratum 0} NonBlankString
+  "Current-write text containing at least one non-whitespace Unicode character."
+  text/NonBlankString)
+
 (def ^{:stratum 0} SemanticVersion
   "Resolved semantic wire version; not a selector, range, or workspace DateVer."
   version/SemanticVersion)

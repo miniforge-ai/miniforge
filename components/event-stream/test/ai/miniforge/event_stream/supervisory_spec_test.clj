@@ -55,7 +55,8 @@
       (is (schema/valid? spec/SpecSnapshot (assoc event :supervisory/schema-version version))))
     (doseq [field (keys (:supervisory/entity event))]
       (is (not (schema/valid? spec/SpecSnapshot (update event :supervisory/entity dissoc field)))))
-    (is (not (schema/valid? spec/SpecSnapshot (assoc-in event [:supervisory/entity :spec/title] " "))))))
+    (doseq [title [" " "\u2003" "\u00a0" "\u3000"]]
+      (is (not (schema/valid? spec/SpecSnapshot (assoc-in event [:supervisory/entity :spec/title] title)))))))
 
 ;------------------------------------------------------------------------------ Layer 2
 
