@@ -5,7 +5,6 @@
   "Chain lifecycle effects composed around normalized child outcomes."
   (:require [ai.miniforge.clock.interface :as clock]
             [ai.miniforge.event-stream.interface :as events]
-            [ai.miniforge.phase.interface :as phase]
             [ai.miniforge.workflow.boundary.chain-step :as child]
             [ai.miniforge.workflow.chain-outcome :as outcome]))
 
@@ -22,13 +21,13 @@
 ;------------------------------------------------------------------------------ Layer 1
 
 (defn- ^{:stratum 1} terminal-step! [opts chain-id step index result]
-  (if (phase/succeeded? result)
+  (if (outcome/completed? result)
     (emit! opts events/chain-step-completed chain-id (:step/id step) index)
     (emit! opts events/chain-step-failed chain-id (:step/id step) index (:execution/error result))))
 
 (defn ^{:stratum 1} finish! [definition started {:keys [results last-result]} opts]
   (let [duration (clock/elapsed-since started)
-        status (if (phase/failed? last-result) :failed :completed)
+        status (if (or (nil? last-result) (outcome/completed? last-result)) :completed :failed)
         result (outcome/chain-result definition duration results status)]
     (if (= :completed status)
       (emit! opts events/chain-completed (:chain/id definition) duration (:chain/step-count result))

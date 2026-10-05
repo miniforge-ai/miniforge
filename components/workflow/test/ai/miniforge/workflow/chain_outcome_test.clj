@@ -20,5 +20,12 @@
     (is (= failed (outcome/normalize failed)))
     (is (= :failed (:execution/status (outcome/normalize nil))))))
 
+(deftest ^{:stratum 0} completion-requires-an-unambiguous-execution-status
+  (doseq [result [{:status :completed}
+                  {:execution/status :completed :anomaly/type :fault}
+                  {:execution/status :completed :anomaly/category nil}]]
+    (is (not (outcome/completed? result)))
+    (is (= :failed (:execution/status (outcome/normalize result))))))
+
 (comment
   (outcome/normalize nil))

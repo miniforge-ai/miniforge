@@ -15,7 +15,6 @@
 ;; WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 ;; See the License for the specific language governing permissions and
 ;; limitations under the License.
-
 (ns ai.miniforge.workflow.chain
   "Workflow chaining — execute a sequence of workflows where each step's
    output feeds into the next step's input via configurable bindings.
@@ -38,73 +37,29 @@
    - keyword                 — reads from chain input"
   (:require
    [ai.miniforge.event-stream.interface :as events]
+   [ai.miniforge.workflow.chain-bindings :as bindings]
    [ai.miniforge.phase.interface :as phase]
    [ai.miniforge.workflow.loader :as loader]
    [ai.miniforge.workflow.runner :as runner]))
 
-;------------------------------------------------------------------------------ Layer 0: Binding resolution
+;------------------------------------------------------------------------------ Layer 0
 
-(defn resolve-binding
-  "Resolve a single input binding against previous output and chain input.
-   Path expressions:
-   - :chain/input.KEY — reads KEY from the chain's initial input
-   - [:prev/KEY1 :KEY2 ...] — reads from previous step's :execution/output
-   - string literal — passed through as-is"
-  [binding prev-output chain-input]
-  (cond
-    ;; String literal — pass through
-    (string? binding) binding
+;; Binding resolution
+(def ^{:stratum 0} resolve-binding bindings/resolve-binding)
 
-    ;; Namespaced keyword :chain/input.KEY — read from chain input
-    (and (keyword? binding)
-         (= "chain" (namespace binding))
-         (.startsWith (name binding) "input."))
-    (let [input-key (keyword (subs (name binding) (count "input.")))]
-      (get chain-input input-key))
+(def ^{:stratum 0} resolve-bindings bindings/resolve-bindings)
 
-    ;; Vector path — navigate into prev-output
-    (vector? binding)
-    (let [[root & path] binding
-          source (case root
-                   :prev/phase-results (:phase-results prev-output)
-                   :prev/artifacts (:artifacts prev-output)
-                   :prev/last-phase-result (:last-phase-result prev-output)
-                   prev-output)]
-      (if (seq path)
-        (get-in source (vec path))
-        source))
-
-    ;; Keyword — try chain-input
-    (keyword? binding) (get chain-input binding)))
-
-(defn resolve-bindings
-  "Resolve all input bindings for a step.
-
-   Bindings that resolve to nil are omitted from the returned map
-   instead of being materialized as present-with-nil keys. This
-   preserves the semantic difference between an absent optional input
-   and an explicit nil value."
-  [input-bindings prev-output chain-input]
-  (reduce-kv
-    (fn [acc k binding]
-      (let [resolved (resolve-binding binding prev-output chain-input)]
-        (if (nil? resolved)
-          acc
-          (assoc acc k resolved))))
-    {}
-    input-bindings))
-
-;------------------------------------------------------------------------------ Layer 1: Event emission
-
-(defn emit!
+;; Event emission
+(defn ^{:stratum 0} emit!
   "Emit a chain event if event-stream is present in opts."
   [opts constructor & args]
   (when-let [stream (:event-stream opts)]
     (events/publish! stream (apply constructor stream args))))
 
-;------------------------------------------------------------------------------ Layer 2: Chain execution
+;------------------------------------------------------------------------------ Layer 1
 
-(defn run-chain
+;; Chain execution
+(defn ^{:stratum 1} run-chain
   "Execute a chain of workflows sequentially.
 
    Arguments:

@@ -3,8 +3,7 @@
 ;; Licensed under the Apache License, Version 2.0.
 (ns ai.miniforge.workflow.boundary.chain-step
   "Convert failures from binding, legacy loading, and execution into child outcomes."
-  (:require [ai.miniforge.anomaly.interface :as anomaly]
-            [ai.miniforge.workflow.chain-bindings :as bindings]
+  (:require [ai.miniforge.workflow.chain-bindings :as bindings]
             [ai.miniforge.workflow.chain-outcome :as outcome]
             [ai.miniforge.workflow.loader :as loader]
             [ai.miniforge.workflow.runner :as runner]
@@ -14,7 +13,7 @@
 
 (defn- ^{:stratum 0} execute-loaded [loaded input opts]
   (cond
-    (anomaly/any-anomaly? loaded) (outcome/failure loaded)
+    (outcome/failure-value? loaded) (outcome/failure loaded)
     (not (map? (:workflow loaded))) (outcome/failure loaded)
     :else (runner/run-pipeline (:workflow loaded) input opts)))
 

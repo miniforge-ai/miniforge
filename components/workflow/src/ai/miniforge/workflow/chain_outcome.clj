@@ -3,11 +3,14 @@
 ;; Licensed under the Apache License, Version 2.0.
 (ns ai.miniforge.workflow.chain-outcome
   "Normalize child outcomes and construct chain projections in one place."
-  (:require [ai.miniforge.anomaly.interface :as anomaly]
-            [ai.miniforge.phase.interface :as phase]
+  (:require [ai.miniforge.phase.interface :as phase]
             [ai.miniforge.workflow.messages :as messages]))
 
 ;------------------------------------------------------------------------------ Layer 0
+
+(defn ^{:stratum 0} failure-value? [result]
+  (and (map? result)
+       (or (contains? result :anomaly/type) (contains? result :anomaly/category))))
 
 (defn- ^{:stratum 0} error-message [result]
   (let [error (or (:execution/error result) (:anomaly/message result) (:message result))]
@@ -35,13 +38,20 @@
 
 ;------------------------------------------------------------------------------ Layer 1
 
+(defn ^{:stratum 1} completed? [result]
+  (and (= :completed (:execution/status result))
+       (not (failure-value? result))
+       (phase/succeeded? result)))
+
 (defn ^{:stratum 1} failure [result]
   {:execution/status :failed
    :execution/error (error-message result)
    :execution/cause result})
 
-(defn ^{:stratum 1} normalize [result]
-  (if (and (not (anomaly/any-anomaly? result)) (phase/succeeded? result)) result
+;------------------------------------------------------------------------------ Layer 2
+
+(defn ^{:stratum 2} normalize [result]
+  (if (completed? result) result
       (assoc (result-data result)
              :execution/status :failed :execution/error (error-message result))))
 
