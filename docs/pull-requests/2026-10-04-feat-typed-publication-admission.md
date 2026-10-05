@@ -40,6 +40,7 @@ Constructor integration tests use the merged typed chain draft API.
 - Bound structural inspection to 128 levels and 100000 nodes, including keys and metadata.
 - Reject secrets in protected identity metadata rather than relying on metadata-blind equality.
 - Admit only concrete built-in collection types; reject custom maps with hidden state.
+- Omit unreadable diagnostic IDs without swallowing fatal or interruption causes.
 
 Other snapshot families are intentionally not admitted by this API yet. Legacy
 publication routing and historical reader contracts remain unchanged. Shared
@@ -48,7 +49,7 @@ No generic-envelope fallback can admit unvalidated payloads through this new bou
 
 ## Testing Plan
 
-Boundary/schema and redaction tests pass 50 tests / 1239 assertions against the merged dependency.
+Boundary/schema and redaction tests pass 51 tests / 1247 assertions against the merged dependency.
 All nine chain types pass from the real public constructor through preparation.
 Tests reject missing fields, retired aliases, malformed supervisory records, and unsupported envelope versions.
 Failure tests cover canonical/legacy anomalies, redactor exceptions, wrapped critical causes, and sensitive malformed IDs.
@@ -65,11 +66,14 @@ The final pass bounds rendering before allocation and centralizes identity/prove
 including authentication context and snapshot repository references.
 Depth/size regressions reject hostile structure before recursive redaction, while
 protected identity values must also pass the metadata-aware cleanliness check.
+Malformed sorted maps and throwing identity lookups return safe diagnostics;
+wrapped fatal and interruption causes still escape instead of becoming anomalies.
 End-to-end tracing also caught redacted lists
 becoming deferred sequences, incompatible with durable encoding; they now materialize as lists.
 Kondo and truthful strata checks pass. The incremental standards scanner is rerun before push.
 All four deployed event-stream/redaction consumer suites passed serially in 1 minute 19 seconds.
-The CLI rebuilt to 39,115,557 bytes. Its isolated packaged API passes the same 50 tests / 1239 assertions.
+After the diagnostic-only fix, all four event-stream consumer suites passed in 1 minute 18 seconds.
+The CLI rebuilt to 39,115,602 bytes. Its isolated packaged API passes the same 51 tests / 1247 assertions.
 
 ## Deployment Plan
 

@@ -26,6 +26,11 @@
 
 (defn- ^{:stratum 0} throw-value [value _] (throw+ value))
 
+(defn- ^{:stratum 0} unreadable-id [cause]
+  (reify clojure.lang.ILookup
+    (valAt [_ _] (throw cause))
+    (valAt [_ _ _] (throw cause))))
+
 (defn- ^{:stratum 0} constructed-chain-draft [event-type]
   (let [stream (events/create-event-stream {:sinks []})
         fields (dissoc (chain/payload event-type) :event/type :event/version :scope/type)]
@@ -60,6 +65,20 @@
   (let [payload (assoc-in (supervisory/snapshot) [:supervisory/entity :spec/repo-url]
                          "https://example.test/AKIAIOSFODNN7EXAMPLE")]
     (is (anomaly/anomaly? (events/prepare-current-publication (draft payload))))))
+
+(deftest ^{:stratum 1} unreadable-diagnostic-identities-do-not-escape
+  (doseq [event [(sorted-map 1 "AKIAIOSFODNN7EXAMPLE")
+                 (unreadable-id (ex-info "AKIAIOSFODNN7EXAMPLE" {}))]]
+    (let [result (events/prepare-current-publication event)]
+      (is (anomaly/anomaly? result))
+      (is (nil? (get-in result [:anomaly/data :event/id])))
+      (is (redaction/clean? result))))
+  (doseq [cause [(AssertionError.) (InterruptedException.)]]
+    (try+
+      (events/prepare-current-publication (unreadable-id (ex-info "wrapped fixture" {} cause)))
+      (is false "Critical diagnostic lookup causes must escape")
+      (catch Throwable actual (is (identical? cause actual)))
+      (finally (Thread/interrupted)))))
 
 ;------------------------------------------------------------------------------ Layer 2
 

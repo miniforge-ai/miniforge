@@ -16,8 +16,12 @@
 ;------------------------------------------------------------------------------ Layer 0
 
 (defn- ^{:stratum 0} failure [type code event]
-  (let [event-id (:event/id event)
-        safe-id (when (uuid? event-id) event-id)]
+  (let [safe-id (try+
+                  (let [event-id (:event/id event)] (when (uuid? event-id) event-id))
+                  (catch Object _
+                    (when-let [fatal (critical/cause (:throwable &throw-context))]
+                      (critical/propagate! fatal))
+                    nil))]
     (model/failure type code {:event/id safe-id})))
 
 ;------------------------------------------------------------------------------ Layer 1
