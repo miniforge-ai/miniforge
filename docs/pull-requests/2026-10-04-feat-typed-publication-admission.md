@@ -41,7 +41,7 @@ fallback that could admit unvalidated payloads through this new boundary.
 
 ## Testing Plan
 
-Boundary/schema and redaction tests pass 36 tests / 896 assertions against the merged dependency.
+Boundary/schema and redaction tests pass 36 tests / 943 assertions against the merged dependency.
 All nine chain types pass from the real public constructor through preparation.
 Tests reject missing fields, retired aliases, malformed supervisory records, and unsupported envelope versions.
 Failure tests cover canonical/legacy anomalies, redactor exceptions, wrapped critical causes, and sensitive malformed IDs.
@@ -49,12 +49,13 @@ Failure tests cover canonical/legacy anomalies, redactor exceptions, wrapped cri
 The adversarial standards pass separated schema data from boundary effects and
 kept validation outside the publication engine. It found and fixed error-data
 leakage and swallowed critical causes. Shared fixtures avoid copied entity maps.
-Copilot identified opaque nested representations and omitted identity references;
-both are covered by regressions. End-to-end tracing also caught redacted lists
+Copilot identified opaque nested representations, mutable numeric subclasses, and omitted identity references;
+all are covered by regressions. A concrete scalar allowlist rejects opaque subclasses.
+End-to-end tracing also caught redacted lists
 becoming deferred sequences, incompatible with durable encoding; they now materialize as lists.
 Kondo and truthful strata checks pass. The incremental standards scanner is rerun before push.
-All four deployed event-stream/redaction consumer suites passed serially in 1 minute 22 seconds.
-The CLI rebuilt to 39,113,714 bytes. Its isolated packaged API passes the same 36 tests / 896 assertions.
+All four deployed event-stream/redaction consumer suites passed serially in 1 minute 20 seconds.
+The CLI rebuilt to 39,113,857 bytes. Its isolated packaged API passes the same 36 tests / 943 assertions.
 
 ## Deployment Plan
 

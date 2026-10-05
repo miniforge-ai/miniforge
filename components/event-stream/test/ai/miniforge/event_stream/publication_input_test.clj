@@ -128,6 +128,8 @@
         secret "AKIAIOSFODNN7EXAMPLE"]
     (with-redefs [redaction/redact (partial observe-redaction calls)]
       (doseq [opaque [(atom secret) (object-array [secret])
+                     (java.util.concurrent.atomic.AtomicLong. 4111111111111111)
+                     (java.util.concurrent.atomic.AtomicInteger. 42)
                      (java.util.ArrayList. [secret]) (java.util.HashMap. {:value secret})
                      (delay secret) (map identity [secret])]
               nested [[opaque] {opaque :value} (with-meta [] {:nested opaque})
