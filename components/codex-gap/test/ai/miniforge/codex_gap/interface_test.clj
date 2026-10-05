@@ -70,12 +70,15 @@
                {:run-id "run-1" :phase :implement
                 :consultation {:status :pinned :pin-read? true
                                :situation "changing-one-side-of-a-boundary"
+                               :answer-log :recorded
                                :pegs [{:id "peg-a" :answer "no"
                                        :landings {"yes" ["p1"] "no" ["p2"]}}]
                                :unmatched-answers nil}})]
     (is (uuid? (:consultation/id entry)))
     (is (= "no" (get-in entry [:consultation/pegs 0 :answer]))
         "the explicit answer survives into the durable shape")
+    (is (= :recorded (:consultation/answer-log entry))
+        "the §7.7.2 lost-vs-unanswered marker survives into the durable shape")
     (is (= entry (gap/record-consultation! dir entry)))
     (is (= {:entries [] :skipped 0} (gap/read-ledger dir))
         "a consultation is not a miss — the miss ledger stays empty")

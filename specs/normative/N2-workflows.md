@@ -6,8 +6,8 @@
 
 # N2 — Workflow Execution Model
 
-**Version:** 0.6.0-draft
-**Date:** 2026-08-06
+**Version:** 0.7.0-draft
+**Date:** 2026-10-04
 **Status:** Draft
 **Conformance:** MUST
 
@@ -95,8 +95,8 @@ control action and the supervisory projection reported both. A state an
 operator can put a workflow into MUST exist in the authority that defines the
 lifecycle.
 
-The machine MAY use more specific internal state identifiers such as `:phase/plan`,
-`:phase/verify`, `:awaiting-operator`, or `:releasing`, but those states MUST map
+The machine MAY use more specific internal states, such as `:phase/plan`,
+`:phase/verify`, `:awaiting-operator`, or `:releasing`. These states MUST map
 deterministically onto the lifecycle projection above.
 
 **Terminal states** are `:completed`, `:failed`, and `:cancelled`. They MUST NOT
@@ -127,10 +127,9 @@ queued ──[start]──► running ──[complete machine]──► complete
 difference is who clears them — `:paused` by an operator resuming, `:blocked`
 by the blocking condition being satisfied.
 
-Within `:running`, the execution machine MAY move through workflow-defined states,
-including phase states, retry states, review or release states, and temporary
-awaiting-supervision states, provided those transitions are encoded in the same
-authoritative machine.
+Within `:running`, the execution machine MAY move through workflow-defined states.
+These include phases, retries, review, release, and temporary awaiting-supervision
+states. Their transitions MUST be encoded in the same authoritative machine.
 
 ### 2.4 Workflow Lifecycle Events
 
@@ -152,10 +151,9 @@ Implementations MUST also emit the checkpoint and resume family of N3 §3.21 —
 protocol whose checkpoint writes are unobservable cannot be audited when it
 fails.
 
-A transition into `:paused` or `:blocked` MUST be observable. Where the
-transition results from an N8 control action, the `control-action/executed`
-event of N3 §3.15 carries it; where it results from a gate or dependency, the
-corresponding `gate/failed` or task event does.
+A transition into `:paused` or `:blocked` MUST be observable.
+N8 control-action transitions are carried by `control-action/executed` (N3 §3.15).
+Gate or dependency transitions are carried by the corresponding `gate/failed` or task event.
 
 ---
 
@@ -192,8 +190,8 @@ Implementations MUST separate **workflow selection** from **workflow execution**
 1. Selection chooses a workflow family, profile, and policy set for the run
 2. Execution runs the compiled machine for that chosen definition
 
-The selected definition MAY be static, policy-driven, or later learned by convergence logic,
-but once execution begins, the run MUST have one authoritative compiled machine snapshot.
+The selected definition MAY be static, policy-driven, or later learned by convergence logic.
+Once execution begins, the run MUST have one authoritative compiled machine snapshot.
 Mid-run re-planning MAY be supported only as an explicit machine transition or intervention,
 not by mutating the workflow graph out-of-band.
 
@@ -235,7 +233,7 @@ its current state, guards, and configured budgets.
 
 **Artifacts:**
 
-- Plan document (`:plan-document`)
+Plan document (`:plan-document`).
 
 **Gates:** None (planning cannot "fail", only produce poor plans)
 
@@ -517,7 +515,7 @@ Implementations MUST:
 
 **Gates:**
 
-- Deployment validation (REQUIRED if deploying to production)
+Deployment validation (REQUIRED if deploying to production).
 
 **Requirements:**
 
@@ -580,9 +578,9 @@ Implementations MUST:
 3. Propose heuristic improvements (if patterns detected)
 4. Record signals for the learning layer and meta loop (see N1, Section 3.3)
 
-The Observe phase remains part of the per-run execution machine. The cross-run learning
-meta loop consumes Observe outputs and other evidence after or alongside workflow execution,
-but it is not itself the live supervisory mechanism for phase transitions.
+The Observe phase remains part of the per-run execution machine. The cross-run
+learning meta loop consumes Observe outputs and evidence after or alongside execution.
+It is not the live supervisory mechanism for phase transitions.
 
 ```clojure
 ;; Observe output schema
@@ -690,9 +688,9 @@ Phase context MUST explicitly separate **instruction authority** from **untruste
 - `:instructions` are platform-authored or policy-approved and MAY shape plans and execution.
 - `:data` is repo- or user-derived content and MUST be treated as reference material only.
 
-Implementations MUST ensure that untrusted documents (e.g., markdown specs, READMEs,
-`agents.md`) are never elevated into instruction authority unless first normalized into
-schema-valid packs and promoted to `:trusted` under policy.
+Untrusted documents include markdown specs, READMEs, and `agents.md`.
+Implementations MUST NOT grant them instruction authority unless first
+normalized into schema-valid packs and promoted to `:trusted` under policy.
 
 Recommended context shape:
 
@@ -1037,9 +1035,9 @@ If phase skipped, implementations MUST emit:
 
 ### 8.1 Resume Requirements
 
-Implementations MUST support resuming a workflow from an authoritative machine
-snapshot when the run has not reached a terminal state (§2.2) — that is, when
-it is `:running`, `:paused`, or `:blocked` and execution was interrupted:
+Implementations MUST support resuming interrupted, non-terminal workflows from
+authoritative machine snapshots (§2.2). Eligible states are `:running`, `:paused`,
+and `:blocked`. Interruptions include:
 
 - Process crashed and was restarted
 - Transient error interrupted execution (LLM timeout, network issue)
@@ -1051,8 +1049,8 @@ run: `:completed`, `:failed`, and `:cancelled` never return to an active state
 `:workflow/id`, which MAY seed itself from the prior run's artifacts.
 
 An earlier revision listed "user cancelled workflow and wants to restart" as a
-resume case. That is withdrawn — it contradicted terminality here and in
-N5-delta-supervisory-control-plane §3.2, and it would have made a cancelled
+resume case. That is withdrawn because it contradicted terminality here and in
+N5-delta-supervisory-control-plane §3.2. It would have made a cancelled
 workflow's evidence bundle (N6) describe a run that later continued.
 
 ### 8.2 Resume Protocol
@@ -1070,7 +1068,7 @@ To resume workflow:
 6. **Emit `workflow/resumed`** (N3 §3.21) recording the state and phase resumed
    from and the phases skipped as already complete
 
-The resumed run continues the original run's identity and event sequence:
+The resumed run retains its original identity and event sequence.
 `:workflow/id` is unchanged, sequence numbers do not reset, and
 `workflow/started` MUST NOT be re-emitted (N3 §3.21).
 
@@ -1104,10 +1102,10 @@ A snapshot is stale when any of the following holds:
 3. External state the snapshot depends on can no longer be reached — a
    worktree, a container, or a checked-out revision that no longer exists.
 
-Staleness is a refusal, not a silent restart. An implementation that declines
-to resume MUST report which of the three conditions applied, and MUST leave the
-run in its existing non-terminal state rather than marking it failed on the
-operator's behalf.
+Staleness is a refusal, not a silent restart. An implementation declining
+resume MUST report which of the three conditions applied.
+It MUST retain the existing non-terminal state rather than mark the run failed
+on the operator's behalf.
 
 ---
 
@@ -1168,11 +1166,11 @@ ETL workflows SHOULD emit:
 ETL workflows MUST default generated packs to `:untrusted` unless explicitly promoted under policy.
 
 **Custom Phase Sequence:** ETL workflows use a fundamentally different process than
-standard software-factory workflows. While the canonical SDLC sequence is
-(Plan → Design → Implement → Verify → Review → Release → Observe), ETL workflows
-MAY define custom phases appropriate to the ingestion and normalization process,
-provided those phases are still compiled into a single authoritative execution machine.
-(e.g., Inventory → Classify → Scan → Extract → Validate → Index). The workflow
+standard software-factory workflows. The canonical SDLC sequence is
+Plan → Design → Implement → Verify → Review → Release → Observe.
+ETL workflows MAY define custom ingestion and normalization phases,
+provided they compile into a single authoritative execution machine.
+For example: Inventory → Classify → Scan → Extract → Validate → Index. The workflow
 extensibility model treats ETL as just another workflow type with its own phase graph.
 
 Recommended `:workflow/context` for ETL:
@@ -1273,6 +1271,16 @@ withdrawn requirement is marked withdrawn, not deleted.
 | N2.RS.5 | MUST | Emit `workflow/resumed` recording resumed-from state, phase, and skipped phases (§8.2). |
 | N2.RS.6 | MUST | Refuse a stale snapshot per §8.4, reporting which condition applied and leaving the run's state unchanged. |
 
+#### Chain execution
+
+| ID | Level | Requirement |
+|----|-------|-------------|
+| N2.CH.1 | MUST | Allocate fresh chain-run identity per invocation and preallocate child-run UUIDs before step-start emission (§14.4). |
+| N2.CH.2 | MUST | Emit start before steps and exactly one terminal outcome per run and started step, including early failures (§14.4). |
+| N2.CH.3 | MUST | Require all steps and bindings to succeed for completion; prevent dependent execution after failure (§14.4). |
+| N2.CH.4 | MUST | Preserve run identity and resolved composition during recovery; refuse unavailable or conflicting snapshots (§14.4). |
+| N2.CH.5 | MUST | Propagate emission failure under N3 §9 without reporting false success (§14.4). |
+
 ### 10.5 Test Obligations
 
 A conformance suite MUST cover, at minimum:
@@ -1296,6 +1304,12 @@ A conformance suite MUST cover, at minimum:
 7. **Projection consistency** — `:workflow/status` derived from the machine
    matches the supervisory projection for the same run at every transition
    (N2.LC.3, N2.LC.5).
+8. **Chain lifecycle** — repeated runs, single-step chains, and binding/load
+   failures preserve child identities and terminal cardinality (N2.CH.1–N2.CH.3).
+9. **Chain recovery** — interruption retains the admitted composition despite
+   newer definitions; missing or conflicting snapshots refuse recovery (N2.CH.4).
+10. **Chain emission failure** — a failing journal prevents successful completion
+    and dependent execution (N2.CH.5).
 
 ---
 
@@ -1586,9 +1600,9 @@ actions for coordinated rollback across dependent tasks.
 **Compensation requirements:**
 
 1. The compensation action reference MUST be recorded at task completion (in evidence).
-2. If a downstream dependent task fails AND the failure propagation policy requires
-   rollback, the executor MUST invoke the compensation function for all upstream
-   completed tasks in reverse dependency order.
+2. Compensation applies when a downstream dependent task fails AND failure
+   propagation policy requires rollback. The executor MUST compensate all completed
+   upstream tasks in reverse dependency order.
 3. Compensation invocations MUST be recorded in evidence bundles (see N6).
 4. Compensation functions MUST be idempotent — invoking compensation twice MUST produce
    the same result as invoking it once.
@@ -1689,7 +1703,12 @@ Chained execution MUST preserve provenance across workflow boundaries:
 ### 14.4 Chain Execution
 
 ```clojure
-{:chain/id uuid                        ; REQUIRED: unique chain identifier
+{:chain/run-id uuid                    ; REQUIRED: invocation identity (N1 §2.32)
+ :chain/definition-id keyword          ; REQUIRED: reusable composition identity
+ :chain/definition-version string      ; REQUIRED: resolved immutable version (N1 §2.32)
+ :chain/steps
+ [{:step/id keyword                    ; Unique within the definition
+   :step/workflow-id keyword}]         ; Workflow definition, not run UUID
  :chain/edges
  [{:edge/id uuid                       ; REQUIRED: unique edge identifier
    :edge/from-workflow-id uuid         ; Upstream workflow
@@ -1702,9 +1721,24 @@ Chained execution MUST preserve provenance across workflow boundaries:
 
 Implementations MUST:
 
-1. Emit chain edge events (see N3) for edge lifecycle transitions
+1. Emit chain-run, step, and edge events for their distinct transitions (N3 §3.12.1)
 2. Support pausing/retrying/rolling back at edge granularity via OCI (N8) when available
 3. Record chain structure and edge results in evidence bundles (N6)
+
+Each run MUST emit `chain/started` before starting steps. On termination,
+including after recovery, it MUST record exactly one `chain/completed` or
+`chain/failed` outcome. Completion MUST mean all required
+steps and bindings succeeded. Each started step MUST have one terminal outcome,
+including binding or loading failures. Failure MUST prevent dependent steps
+from starting. Emission failure MUST follow N3 §9, never report false success.
+
+Each step MUST preallocate its workflow-run UUID before `chain/step-started`,
+including when binding or loading fails before workflow execution.
+Edges MUST reference those source and destination UUIDs.
+Recovery MUST preserve the chain-run UUID, definition ID, version, and snapshot.
+It MUST refuse recovery when the snapshot is unavailable or conflicts with that identity.
+A fresh invocation MUST allocate a new run UUID. The ambiguous legacy `:chain/id`
+field is retired without assigning it one historical meaning; migration MUST follow N3 §7.5.
 
 ---
 
@@ -1785,10 +1819,13 @@ partly implemented already — the gap is naming, not capability.
 
 ### A.3 Structural
 
-- **Terminality is unenforced.** Nothing prevents a resume attempt against a
-  terminal run (N2.LC.6, N2.RS.2).
+**Terminality is unenforced.** Nothing prevents a resume attempt against a
+terminal run (N2.LC.6, N2.RS.2).
 
 **Version History:**
+
+- 0.7.0-draft (2026-10-04): Reconciled chain execution and dependency provenance
+  with N1 §2.32 and N3's chain-run scope and compatibility rules.
 
 - 0.6.0-draft (2026-08-06): Spec-completion pass.
   **Lifecycle vocabulary unified (§2.2).** Three spellings were in use: N2 said
@@ -1800,15 +1837,14 @@ partly implemented already — the gap is naming, not capability.
   the supervisory projection reported both.
   **Terminality made explicit (§2.2, §8).** Terminal states never reactivate;
   re-running produces a new `:workflow/id`. §8.1's "user cancelled and wants to
-  restart" resume case is withdrawn — it contradicted terminality here and in
-  N5-delta-supervisory §3.2, and would have left a cancelled run's evidence
+  restart" resume case is withdrawn. It contradicted terminality here and in
+  N5-delta-supervisory §3.2. It would have left a cancelled run's evidence
   bundle describing a run that later continued.
   **Resume protocol completed (§8.2–§8.4).** Spec-hash comparison and the
   `workflow/spec-hash-mismatch`, `workflow/resumed` emissions wired to N3 §3.21
-  and N2-delta §9; run identity preserved across resume; §8.3's unenforceable
-  "too much time has passed" replaced by §8.4's three staleness conditions,
-  with refusal required to name the condition and leave the run's state
-  unchanged.
+  and N2-delta §9. Run identity is preserved across resume.
+  §8.3's unenforceable "too much time has passed" is replaced by §8.4's three staleness conditions.
+  Refusal must name the condition and leave the run's state unchanged.
   **§2.4** extended with the checkpoint/resume event family and the requirement
   that pause and block transitions be observable.
   **§10.4–§10.5** conformance requirement IDs and test obligations.

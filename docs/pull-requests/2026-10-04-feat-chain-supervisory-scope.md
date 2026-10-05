@@ -19,7 +19,7 @@ Workflow cross-references must not divert chain or intervention events into work
 ## Layer
 
 Pure event-stream scope policy. Branched from main at `6b3c1336`.
-Contract PR #2000 must merge before this PR opens.
+Updated to main at `364c2131` after contract PR #2000 merged.
 
 ## Changes in Detail
 
@@ -44,6 +44,10 @@ The rebuilt CLI artifact passes the same 10 tests / 98 assertions from outside
 the checkout, without source overlays. The changed-file standards scan is clean.
 The whole-tree scan reports 12 pre-existing candidates outside this diff,
 including an intentional bad-code string in the scanner's own example.
+Scope and counter cases cover N3.EV.4–5; explicit current-write discrimination
+covers N3.CP.9. Historical profile reading and migration are not implemented here.
+The main merge exposed one prose-lint failure in an incoming PR document.
+Its sentence is split without changing the recorded behavior or validation history.
 
 ## Deployment Plan
 

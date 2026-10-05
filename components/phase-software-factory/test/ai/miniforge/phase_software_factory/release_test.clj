@@ -117,7 +117,18 @@
       (is (= "x" (get-in result [:output :pr-url])))
       (is (some? (get-in result [:output :codex/consultation])))))
   (testing "a non-map result passes through unchanged"
-    (is (nil? (release/attach-consultation nil {:pegs []})))))
+    (is (nil? (release/attach-consultation nil {:pegs []}))))
+  (testing "§7.7.2: the result's answer channel reaches the summary"
+    (let [result (release/attach-consultation
+                  {:output {}
+                   :codex-answers [{:peg-id "p" :answer "yes" :timestamp "t"}]
+                   :codex-answer-log :recorded}
+                  {:status :pinned
+                   :pegs [{:id "p" :answers {"yes" ["l1"] "no" ["l2"]}}]})
+          summary (get-in result [:output :codex/consultation])]
+      (is (= "yes" (:answer (first (:pegs summary))))
+          "the releaser's recorded answer fills the per-peg record")
+      (is (= :recorded (:answer-log summary))))))
 
 (deftest ^{:stratum 0} phase-defaults-registration-test
   (testing "release phase defaults are registered"

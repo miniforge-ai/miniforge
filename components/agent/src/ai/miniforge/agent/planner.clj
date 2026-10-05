@@ -15,7 +15,6 @@
 ;; WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 ;; See the License for the specific language governing permissions and
 ;; limitations under the License.
-
 (ns ai.miniforge.agent.planner
   "Planner agent implementation.
    Analyzes specifications and creates detailed implementation plans."
@@ -40,9 +39,9 @@
    [clojure.string :as str]))
 
 ;------------------------------------------------------------------------------ Layer 0
-;; Planner-specific schemas
 
-(def PlanTask
+;; Planner-specific schemas
+(def ^{:stratum 0} PlanTask
   [:map
    [:task/id uuid?]
    [:task/description [:string {:min 1}]]
@@ -62,62 +61,18 @@
    [:task/merge-strategy {:optional true}
     [:enum :git-merge :sequential-merge]]])
 
-(def Plan
-  [:map
-   [:plan/id uuid?]
-   [:plan/name [:string {:min 1}]]
-   [:plan/tasks [:vector PlanTask]]
-   [:plan/estimated-complexity {:optional true} [:enum :low :medium :high]]
-   [:plan/risks {:optional true} [:vector [:string {:min 1}]]]
-   [:plan/assumptions {:optional true} [:vector [:string {:min 1}]]]
-   [:plan/created-at {:optional true} inst?]])
-
 ;; System Prompt - loaded from resources/prompts/planner.edn
-
-(def planner-system-prompt
+(def ^{:stratum 0} planner-system-prompt
   "System prompt for the planner agent.
    Loaded from EDN resource for configurability."
   (delay (prompts/load-prompt :planner)))
 
-(def ^:private planner-prompt-data
+(def ^{:stratum 0} ^:private planner-prompt-data
   "Full prompt data map for the planner agent.
    Exposes knobs like :prompt/max-turns that gate backend-CLI loop length."
   (delay (prompts/load-prompt-data :planner)))
 
-;------------------------------------------------------------------------------ Layer 1
-;; Planner functions
-
-(defn validate-plan
-  [plan]
-  (let [schema-valid? (m/validate Plan plan)]
-    (if-not schema-valid?
-      {:valid? false
-       :errors (schema/explain Plan plan)}
-      ;; Additional structural validations
-      (let [task-ids (set (map :task/id (:plan/tasks plan)))
-            ;; Check for invalid dependency references
-            invalid-deps (for [task (:plan/tasks plan)
-                               dep (:task/dependencies task)
-                               :when (not (contains? task-ids dep))]
-                           {:task (:task/id task)
-                            :invalid-dependency dep})
-            ;; Check for circular dependencies (simple check)
-            has-self-dep? (some (fn [task]
-                                  (some #{(:task/id task)} (:task/dependencies task)))
-                                (:plan/tasks plan))]
-        (cond
-          (seq invalid-deps)
-          {:valid? false
-           :errors {:dependencies (str "Invalid dependency references: " (pr-str invalid-deps))}}
-
-          has-self-dep?
-          {:valid? false
-           :errors {:dependencies "Task has circular self-dependency"}}
-
-          :else
-          {:valid? true :errors nil})))))
-
-(defn format-existing-files
+(defn ^{:stratum 0} format-existing-files
   "Format existing file contents for inclusion in the user prompt.
 
    Arguments:
@@ -134,7 +89,7 @@
                      "\n```\n" content "\n```")))
          (str/join "\n"))))
 
-(defn- existing-files->cache-map
+(defn- ^{:stratum 0} existing-files->cache-map
   "Build the artifact-session context cache map from existing files."
   [existing-files]
   (into {}
@@ -142,11 +97,11 @@
                [path content]))
         existing-files))
 
-(def ^:private render-template
+(def ^{:stratum 0} ^:private render-template
   "Shared `{{key}}` template renderer (single source in the prompts ns)."
   prompts/render-template)
 
-(defn format-existing-files-manifest
+(defn ^{:stratum 0} format-existing-files-manifest
   "Compact manifest of in-scope files for the shed path (N12 §6): paths and
    size only, not bodies. Keeps the planner aware the files exist and tells
    it to fetch them on demand via context_read."
@@ -162,67 +117,7 @@
                                 :else   ""))))
               (str/join "\n")))))
 
-(defn- existing-files-section
-  "Build the planner-prompt section that previews existing in-scope files.
-   `files-list-fn` renders the file list — full bodies by default, a
-   manifest on the shed path. Empty string when no files are present."
-  ([existing-files] (existing-files-section existing-files format-existing-files))
-  ([existing-files files-list-fn]
-   (if (seq existing-files)
-     (render-template (get @planner-prompt-data :prompt/existing-files-template)
-                      {:files-list (files-list-fn existing-files)})
-     "")))
-
-(defn- build-user-prompt
-  "Render the planner user-turn prompt from the spec text and any existing
-   in-scope files. `files-list-fn` selects body inlining (default) vs a
-   manifest. Template lives in planner.edn (:prompt/user-template)."
-  ([spec-text existing-files] (build-user-prompt spec-text existing-files format-existing-files))
-  ([spec-text existing-files files-list-fn]
-   (render-template (get @planner-prompt-data :prompt/user-template)
-                    {:spec-text              spec-text
-                     :existing-files-section (existing-files-section existing-files files-list-fn)})))
-
-(defn- assemble-within-budget
-  "Assemble the planner user-prompt within the model's context window
-   (N12 §5). If the prompt reaches the configured inline cap or overflows
-   the window, shed the eagerly-inlined file bodies down to a manifest
-   (paths only) — the bodies stay reachable via the context MCP cache
-   (seeded separately in invoke-planner-session), so the agent keeps a query
-   surface, and the section's already-satisfied evidence-bundle instructions
-   are preserved. Returns
-   {:user-prompt :shed? :over-after-shed? :window :reserve :effective-window
-    :reserve-clamped? :inline-cap :est-full :est-final :file-count};
-   :over-after-shed? marks an irreducible WINDOW overflow, not merely an
-   inline-cap crossing.
-
-   `reserve` is headroom kept below the real window: the estimate covers
-   only miniforge's assembled prompt, while the agent CLI adds its own
-   unmeasured baseline (system prompt, tools, host plugins/skills) on top.
-   The shed/bail fire against `effective-window = window - reserve`. The
-   reserve is clamped to at most half the window so a reserve >= window
-   (misconfig, or a tiny-window model) can't zero the effective window and
-   make every prompt look over-budget; `:reserve-clamped?` flags that.
-
-   Thin role wrapper over `context-budget/assemble-within-budget`: supplies
-   the planner's full/shed prompt builders, its sheddable-unit count
-   (the eagerly-inlined existing files), and the planner's inline cap
-   (`:prompt/max-inline-window-fraction`) — bodies shed to a manifest well
-   before window fit, so a barely-fitting prompt can't stall a turn past
-   the phase timeout."
-  [spec-text existing-files effective-system model reserve]
-  (context-budget/assemble-within-budget
-   {:effective-system effective-system
-    :model            model
-    :reserve          reserve
-    :max-inline-fraction (get @planner-prompt-data
-                              :prompt/max-inline-window-fraction 1.0)
-    :build-full       #(build-user-prompt spec-text existing-files)
-    :build-shed       #(build-user-prompt spec-text existing-files
-                                          format-existing-files-manifest)
-    :shed-count       (count existing-files)}))
-
-(defn- emit-prompt-size!
+(defn- ^{:stratum 0} emit-prompt-size!
   "Emit an :agent/prompt-size workflow event recording the planner's
    pre-flight budget (N12 §3) so estimate-vs-window is visible/queryable —
    the logger isn't surfaced in headless runs. Safe no-op without a stream."
@@ -248,7 +143,7 @@
                     :prompt/file-count (:file-count budget))))
         (catch Exception _ nil)))))
 
-(defn spec->text
+(defn ^{:stratum 0} spec->text
   "Convert a spec to text for the LLM."
   [spec]
   (if (map? spec)
@@ -258,7 +153,7 @@
         (pr-str spec))
     (str spec)))
 
-(defn parse-plan-response
+(defn ^{:stratum 0} parse-plan-response
   "Parse the LLM response to extract a plan.
    Handles both EDN in code blocks and plain EDN.
    Returns nil if the parsed result is not a map."
@@ -275,23 +170,14 @@
       ;; Return nil if parsing fails
       nil)))
 
-(defn- planner-response-content
+(defn- ^{:stratum 0} planner-response-content
   "Return the best available content payload for plan extraction."
   [llm-response]
   (or (llm/get-content llm-response)
       (get (llm/get-error llm-response) :stdout)
       ""))
 
-(defn- submission-retry-prompt
-  "Build a short, submission-only retry prompt for planner recovery.
-   Template lives in resources/prompts/planner.edn
-   (:prompt/submission-retry-template)."
-  [spec-text prior-content]
-  (render-template (get @planner-prompt-data :prompt/submission-retry-template)
-                   {:spec-text     spec-text
-                    :prior-content prior-content}))
-
-(defn- planner-submission-retry?
+(defn- ^{:stratum 0} planner-submission-retry?
   "True when a planner turn produced useful plan prose but delivered NO
    artifact (neither `.miniforge/plan.edn` nor a parseable final-message EDN
    fence), so a short submission-only retry can recover the plan that already
@@ -316,8 +202,7 @@
 
 ;; make-fallback-plan removed — silent fallback masks real failures.
 ;; Plan generation now throws with evidence on failure (see invoke-fn below).
-
-(defn repair-plan
+(defn ^{:stratum 0} repair-plan
   "Attempt to repair a plan based on validation errors."
   [plan errors _context]
   ;; Simple repair strategies based on common errors
@@ -363,20 +248,12 @@
      :repairs-made (when (not= plan @repaired)
                      {:original-errors errors})}))
 
-(defn ensure-task-ids
+(defn ^{:stratum 0} ensure-task-ids
   "Ensure all tasks in a plan have proper UUIDs."
   [tasks]
   (mapv (fn [t] (update t :task/id #(or % (random-uuid)))) tasks))
 
-(defn finalize-plan
-  "Ensure a plan has proper ID, task IDs, and timestamp."
-  [plan]
-  (-> plan
-      (update :plan/id #(or % (random-uuid)))
-      (update :plan/tasks ensure-task-ids)
-      (assoc :plan/created-at (java.util.Date.))))
-
-(defn validate-already-satisfied
+(defn ^{:stratum 0} validate-already-satisfied
   "Check that an already-satisfied claim is backed by evidence.
    Returns {:valid? bool :reason string}.
 
@@ -406,10 +283,8 @@
       :else
       {:valid? true})))
 
-;------------------------------------------------------------------------------ Layer 2
 ;; Public API
-
-(def ^:private planner-disallowed-tools
+(def ^{:stratum 0} ^:private planner-disallowed-tools
   "Native Claude Code tools the planner MUST NOT call.
 
    Rationale (iteration 5 + 6 dogfood evidence): the planner had access
@@ -436,14 +311,225 @@
    Matches the role-scoped disallow-list pattern tester.clj uses."
   ["Read" "Bash" "Grep" "Glob" "Agent" "LS"])
 
-(defn- create-planner-progress-monitor
+(defn- ^{:stratum 0} planner-log-data
+  "Build planner invocation telemetry data."
+  [llm-response on-chunk normalized]
+  (let [plan-source (case (:artifact-source normalized)
+                      :worktree-metadata :worktree
+                      :mcp :mcp-artifact
+                      :final-message)]
+    (cond-> {:success (llm/success? llm-response)
+             :tokens (get llm-response :tokens 0)
+             :streaming? (boolean on-chunk)
+             :plan-source plan-source}
+      (:stop-reason llm-response)
+      (assoc :stop-reason (:stop-reason llm-response))
+
+      (:num-turns llm-response)
+      (assoc :num-turns (:num-turns llm-response)))))
+
+(defn- ^{:stratum 0} require-llm-client-or-anomaly
+  "Return `llm-client` when truthy, else an `:invalid-input` anomaly
+   describing the missing planner backend.
+
+   Anomaly-returning sibling of the legacy boundary throw at the
+   `:invoke-fn` no-LLM-backend branch. Private — tests reach it via
+   `#'planner/require-llm-client-or-anomaly`. The boundary inlines a
+   slingshot throw at `:anomalies.agent/llm-error` so external try+
+   callers continue to observe the agent-error category they depend
+   on."
+  [llm-client]
+  (or llm-client
+      (anomaly/anomaly :invalid-input
+                       "No LLM backend provided for planner agent"
+                       {:phase :plan})))
+
+(defn- ^{:stratum 0} anomaly->response-error
+  "Convert an expected planner anomaly into the canonical agent error response."
+  ([category anom]
+   (anomaly->response-error category anom {}))
+  ([category anom {:keys [data tokens metrics]}]
+   (response/error
+    (:anomaly/message anom)
+    (cond-> {:data (merge {:anomaly/category category
+                           :anomaly/type (:anomaly/type anom)}
+                          (:anomaly/data anom)
+                          data)}
+      tokens (assoc :tokens tokens)
+      metrics (assoc :metrics metrics)))))
+
+(defn ^{:stratum 0} plan-summary
+  [plan]
+  {:id (:plan/id plan)
+   :name (:plan/name plan)
+   :task-count (count (:plan/tasks plan))
+   :complexity (:plan/estimated-complexity plan)
+   :risk-count (count (:plan/risks plan))})
+
+(defn ^{:stratum 0} task-dependency-order
+  [plan]
+  (let [tasks (:plan/tasks plan)
+        task-map (into {} (map (juxt :task/id identity) tasks))
+        deps-map (into {} (map (fn [t] [(:task/id t) (set (:task/dependencies t []))]) tasks))]
+    ;; Simple topological sort using Kahn's algorithm
+    (loop [remaining (set (keys task-map))
+           satisfied #{}
+           result []]
+      (if (empty? remaining)
+        result
+        (let [ready (filter (fn [id]
+                              (every? satisfied (get deps-map id #{})))
+                            remaining)]
+          (if (empty? ready)
+            ;; Cycle detected, return what we have
+            (into result (map task-map remaining))
+            (recur (apply disj remaining ready)
+                   (into satisfied ready)
+                   (into result (map task-map ready)))))))))
+
+;------------------------------------------------------------------------------ Layer 1
+
+(def ^{:stratum 1} Plan
+  [:map
+   [:plan/id uuid?]
+   [:plan/name [:string {:min 1}]]
+   [:plan/tasks [:vector PlanTask]]
+   [:plan/estimated-complexity {:optional true} [:enum :low :medium :high]]
+   [:plan/risks {:optional true} [:vector [:string {:min 1}]]]
+   [:plan/assumptions {:optional true} [:vector [:string {:min 1}]]]
+   [:plan/created-at {:optional true} inst?]])
+
+(defn- ^{:stratum 1} existing-files-section
+  "Build the planner-prompt section that previews existing in-scope files.
+   `files-list-fn` renders the file list — full bodies by default, a
+   manifest on the shed path. Empty string when no files are present."
+  ([existing-files] (existing-files-section existing-files format-existing-files))
+  ([existing-files files-list-fn]
+   (if (seq existing-files)
+     (render-template (get @planner-prompt-data :prompt/existing-files-template)
+                      {:files-list (files-list-fn existing-files)})
+     "")))
+
+(defn- ^{:stratum 1} submission-retry-prompt
+  "Build a short, submission-only retry prompt for planner recovery.
+   Template lives in resources/prompts/planner.edn
+   (:prompt/submission-retry-template)."
+  [spec-text prior-content]
+  (render-template (get @planner-prompt-data :prompt/submission-retry-template)
+                   {:spec-text     spec-text
+                    :prior-content prior-content}))
+
+(defn ^{:stratum 1} finalize-plan
+  "Ensure a plan has proper ID, task IDs, and timestamp."
+  [plan]
+  (-> plan
+      (update :plan/id #(or % (random-uuid)))
+      (update :plan/tasks ensure-task-ids)
+      (assoc :plan/created-at (java.util.Date.))))
+
+(defn- ^{:stratum 1} create-planner-progress-monitor
   "Planner main-turn progress monitor. Thresholds live in
    resources/prompts/planner.edn (:prompt/progress-monitor)."
   []
   (prompts/load-progress-monitor @planner-prompt-data
                                  :prompt/progress-monitor))
 
-(defn- invoke-planner-session
+(defn- ^{:stratum 1} normalize-planner-result
+  [response worktree-artifacts artifact]
+  (result-boundary/normalize-llm-result
+   {:role :plan
+    :response response
+    :worktree-artifacts worktree-artifacts
+    :artifact artifact
+    :content-fn planner-response-content
+    :parse-response parse-plan-response}))
+
+(defn- ^{:stratum 1} planner-retry-mcp-opts
+  "Build the planner's submission-retry session opts from a fresh session.
+   Turn cap + progress-monitor come from planner.edn; model/disallowed-tools
+   match the main planner turn so the retry enforces the same policy pack."
+  [config context session]
+  (let [prompt-data     @planner-prompt-data
+        budget-usd      (budget/resolve-cost-budget-usd :planner config context)
+        retry-max-turns (get prompt-data :prompt/submission-retry-max-turns)
+        retry-monitor   (prompts/load-progress-monitor
+                         prompt-data :prompt/submission-retry-monitor)]
+    (cond-> (artifact-session/session->mcp-opts session budget-usd retry-max-turns)
+      true (assoc :model (model/default-model-for-role :planner)
+                  :disallowed-tools planner-disallowed-tools
+                  :progress-monitor retry-monitor)
+      (:workdir session) (assoc :workdir (:workdir session)))))
+
+(defn- ^{:stratum 1} parsed-plan-or-anomaly
+  "Return the first non-nil plan from `submitted` then `parsed`, else
+   a `:fault` anomaly describing the EDN parse miss.
+
+   This is the canonical, anomaly-returning entry point for the
+   plan-extraction step. Private — tests reach it via
+   `#'planner/parsed-plan-or-anomaly`. The boundary site inside
+   `create-planner` inlines `response/throw-anomaly!` with
+   `:anomalies.agent/invoke-failed` when an anomaly is observed,
+   preserving the legacy slingshot contract for callers that try+ on
+   the agent taxonomy."
+  [submitted parsed llm-response]
+  (or submitted
+      parsed
+      (let [content     (planner-response-content llm-response)
+            stop-reason (:stop-reason llm-response)
+            num-turns   (:num-turns llm-response)]
+        (anomaly/anomaly :fault
+                         "Plan generation failed: EDN parse did not succeed"
+                         (cond-> {:phase :plan
+                                  :parse-result nil
+                                  :llm-content-length (count content)
+                                  :llm-content-preview (subs content 0 (min 500 (count content)))}
+                           stop-reason (assoc :stop-reason stop-reason)
+                           num-turns   (assoc :num-turns num-turns))))))
+
+;------------------------------------------------------------------------------ Layer 2
+
+;; Planner functions
+(defn ^{:stratum 2} validate-plan
+  [plan]
+  (let [schema-valid? (m/validate Plan plan)]
+    (if-not schema-valid?
+      {:valid? false
+       :errors (schema/explain Plan plan)}
+      ;; Additional structural validations
+      (let [task-ids (set (map :task/id (:plan/tasks plan)))
+            ;; Check for invalid dependency references
+            invalid-deps (for [task (:plan/tasks plan)
+                               dep (:task/dependencies task)
+                               :when (not (contains? task-ids dep))]
+                           {:task (:task/id task)
+                            :invalid-dependency dep})
+            ;; Check for circular dependencies (simple check)
+            has-self-dep? (some (fn [task]
+                                  (some #{(:task/id task)} (:task/dependencies task)))
+                                (:plan/tasks plan))]
+        (cond
+          (seq invalid-deps)
+          {:valid? false
+           :errors {:dependencies (str "Invalid dependency references: " (pr-str invalid-deps))}}
+
+          has-self-dep?
+          {:valid? false
+           :errors {:dependencies "Task has circular self-dependency"}}
+
+          :else
+          {:valid? true :errors nil})))))
+
+(defn- ^{:stratum 2} build-user-prompt
+  "Render the planner user-turn prompt from the spec text and any existing
+   in-scope files. `files-list-fn` selects body inlining (default) vs a
+   manifest. Template lives in planner.edn (:prompt/user-template)."
+  ([spec-text existing-files] (build-user-prompt spec-text existing-files format-existing-files))
+  ([spec-text existing-files files-list-fn]
+   (render-template (get @planner-prompt-data :prompt/user-template)
+                    {:spec-text              spec-text
+                     :existing-files-section (existing-files-section existing-files files-list-fn)})))
+
+(defn- ^{:stratum 2} invoke-planner-session
   "Session body for the planner: build mcp-opts with model hint, call LLM.
 
    `effective-system` is the base planner prompt with the phase-filtered
@@ -484,55 +570,17 @@
       (llm/chat llm-client user-prompt
                 (merge {:system effective-system} mcp-opts)))))
 
-(defn- normalize-planner-result
-  [response worktree-artifacts artifact]
-  (result-boundary/normalize-llm-result
-   {:role :plan
-    :response response
-    :worktree-artifacts worktree-artifacts
-    :artifact artifact
-    :content-fn planner-response-content
-    :parse-response parse-plan-response}))
-
-(defn- planner-log-data
-  "Build planner invocation telemetry data."
-  [llm-response on-chunk normalized]
-  (let [plan-source (case (:artifact-source normalized)
-                      :worktree-metadata :worktree
-                      :mcp :mcp-artifact
-                      :final-message)]
-    (cond-> {:success (llm/success? llm-response)
-             :tokens (get llm-response :tokens 0)
-             :streaming? (boolean on-chunk)
-             :plan-source plan-source}
-      (:stop-reason llm-response)
-      (assoc :stop-reason (:stop-reason llm-response))
-
-      (:num-turns llm-response)
-      (assoc :num-turns (:num-turns llm-response)))))
-
-(defn- planner-retry-mcp-opts
-  "Build the planner's submission-retry session opts from a fresh session.
-   Turn cap + progress-monitor come from planner.edn; model/disallowed-tools
-   match the main planner turn so the retry enforces the same policy pack."
-  [config context session]
-  (let [prompt-data     @planner-prompt-data
-        budget-usd      (budget/resolve-cost-budget-usd :planner config context)
-        retry-max-turns (get prompt-data :prompt/submission-retry-max-turns)
-        retry-monitor   (prompts/load-progress-monitor
-                         prompt-data :prompt/submission-retry-monitor)]
-    (cond-> (artifact-session/session->mcp-opts session budget-usd retry-max-turns)
-      true (assoc :model (model/default-model-for-role :planner)
-                  :disallowed-tools planner-disallowed-tools
-                  :progress-monitor retry-monitor)
-      (:workdir session) (assoc :workdir (:workdir session)))))
-
-(defn- recover-submitted-plan
+(defn- ^{:stratum 2} recover-submitted-plan
   "Retry planner submission once when analysis exists but the final submission
    did not land, via the shared agent-agnostic runner. Returns
-   {:llm-response ... :submitted-plan ... :parsed-plan ...}."
+   {:llm-response ... :submitted-plan ... :parsed-plan ...} plus the
+   retry session's §7.7.2 answer channel (:codex-answers
+   :codex-answer-log) — the retry runs its own session with its own
+   answers.edn, and answers recorded there are observations the caller
+   must merge with the primary session's."
   [llm-client spec-text effective-system config context on-chunk prior-content]
-  (let [{:keys [llm-result artifact worktree-artifacts]}
+  (let [{:keys [llm-result artifact worktree-artifacts
+                codex-answers codex-answer-log]}
         (submission-recovery/run-recovery-session
          {:context          context
           :llm-client       llm-client
@@ -544,68 +592,57 @@
         submitted-plan (:structured-artifact normalized)
         parsed-plan    (when-not submitted-plan
                          (:parsed-content normalized))]
-    {:llm-response   llm-result
-     :normalized     normalized
-     :submitted-plan submitted-plan
-     :parsed-plan    parsed-plan}))
+    {:llm-response     llm-result
+     :normalized       normalized
+     :submitted-plan   submitted-plan
+     :parsed-plan      parsed-plan
+     :codex-answers    codex-answers
+     :codex-answer-log codex-answer-log}))
 
-(defn- parsed-plan-or-anomaly
-  "Return the first non-nil plan from `submitted` then `parsed`, else
-   a `:fault` anomaly describing the EDN parse miss.
+;------------------------------------------------------------------------------ Layer 3
 
-   This is the canonical, anomaly-returning entry point for the
-   plan-extraction step. Private — tests reach it via
-   `#'planner/parsed-plan-or-anomaly`. The boundary site inside
-   `create-planner` inlines `response/throw-anomaly!` with
-   `:anomalies.agent/invoke-failed` when an anomaly is observed,
-   preserving the legacy slingshot contract for callers that try+ on
-   the agent taxonomy."
-  [submitted parsed llm-response]
-  (or submitted
-      parsed
-      (let [content     (planner-response-content llm-response)
-            stop-reason (:stop-reason llm-response)
-            num-turns   (:num-turns llm-response)]
-        (anomaly/anomaly :fault
-                         "Plan generation failed: EDN parse did not succeed"
-                         (cond-> {:phase :plan
-                                  :parse-result nil
-                                  :llm-content-length (count content)
-                                  :llm-content-preview (subs content 0 (min 500 (count content)))}
-                           stop-reason (assoc :stop-reason stop-reason)
-                           num-turns   (assoc :num-turns num-turns))))))
+(defn- ^{:stratum 3} assemble-within-budget
+  "Assemble the planner user-prompt within the model's context window
+   (N12 §5). If the prompt reaches the configured inline cap or overflows
+   the window, shed the eagerly-inlined file bodies down to a manifest
+   (paths only) — the bodies stay reachable via the context MCP cache
+   (seeded separately in invoke-planner-session), so the agent keeps a query
+   surface, and the section's already-satisfied evidence-bundle instructions
+   are preserved. Returns
+   {:user-prompt :shed? :over-after-shed? :window :reserve :effective-window
+    :reserve-clamped? :inline-cap :est-full :est-final :file-count};
+   :over-after-shed? marks an irreducible WINDOW overflow, not merely an
+   inline-cap crossing.
 
-(defn- require-llm-client-or-anomaly
-  "Return `llm-client` when truthy, else an `:invalid-input` anomaly
-   describing the missing planner backend.
+   `reserve` is headroom kept below the real window: the estimate covers
+   only miniforge's assembled prompt, while the agent CLI adds its own
+   unmeasured baseline (system prompt, tools, host plugins/skills) on top.
+   The shed/bail fire against `effective-window = window - reserve`. The
+   reserve is clamped to at most half the window so a reserve >= window
+   (misconfig, or a tiny-window model) can't zero the effective window and
+   make every prompt look over-budget; `:reserve-clamped?` flags that.
 
-   Anomaly-returning sibling of the legacy boundary throw at the
-   `:invoke-fn` no-LLM-backend branch. Private — tests reach it via
-   `#'planner/require-llm-client-or-anomaly`. The boundary inlines a
-   slingshot throw at `:anomalies.agent/llm-error` so external try+
-   callers continue to observe the agent-error category they depend
-   on."
-  [llm-client]
-  (or llm-client
-      (anomaly/anomaly :invalid-input
-                       "No LLM backend provided for planner agent"
-                       {:phase :plan})))
+   Thin role wrapper over `context-budget/assemble-within-budget`: supplies
+   the planner's full/shed prompt builders, its sheddable-unit count
+   (the eagerly-inlined existing files), and the planner's inline cap
+   (`:prompt/max-inline-window-fraction`) — bodies shed to a manifest well
+   before window fit, so a barely-fitting prompt can't stall a turn past
+   the phase timeout."
+  [spec-text existing-files effective-system model reserve]
+  (context-budget/assemble-within-budget
+   {:effective-system effective-system
+    :model            model
+    :reserve          reserve
+    :max-inline-fraction (get @planner-prompt-data
+                              :prompt/max-inline-window-fraction 1.0)
+    :build-full       #(build-user-prompt spec-text existing-files)
+    :build-shed       #(build-user-prompt spec-text existing-files
+                                          format-existing-files-manifest)
+    :shed-count       (count existing-files)}))
 
-(defn- anomaly->response-error
-  "Convert an expected planner anomaly into the canonical agent error response."
-  ([category anom]
-   (anomaly->response-error category anom {}))
-  ([category anom {:keys [data tokens metrics]}]
-   (response/error
-    (:anomaly/message anom)
-    (cond-> {:data (merge {:anomaly/category category
-                           :anomaly/type (:anomaly/type anom)}
-                          (:anomaly/data anom)
-                          data)}
-      tokens (assoc :tokens tokens)
-      metrics (assoc :metrics metrics)))))
+;------------------------------------------------------------------------------ Layer 4
 
-(defn create-planner
+(defn ^{:stratum 4} create-planner
   "Create a Planner agent with optional configuration overrides.
 
    Options:
@@ -667,7 +704,8 @@
                    :estimated-tokens (:est-final budget)
                    :context-window (:window budget)
                    :tokens 0}))
-                (let [{:keys [llm-result artifact worktree-artifacts context-misses]}
+                (let [{:keys [llm-result artifact worktree-artifacts context-misses
+                              codex-answers codex-answer-log]}
                   (artifact-session/with-session context
                     #(invoke-planner-session % llm-client user-prompt
                                              effective-system config context
@@ -713,7 +751,8 @@
               ;; successful Write — the plan existed, but the old
               ;; success-branch-only logic ignored it because the LLM
               ;; response was classified as failure.
-              (if (result-boundary/usable-content? final-normalized)
+              (cond->
+               (if (result-boundary/usable-content? final-normalized)
                 (let [stop-reason (:stop-reason final-llm-response)
                       num-turns   (:num-turns final-llm-response)
                       plan-or-anom (parsed-plan-or-anomaly final-submitted-plan
@@ -764,40 +803,30 @@
                 ;; post-mortem. Iters 11-12 lost this context and
                 ;; produced undiagnosable \"Unknown error\" / bare
                 ;; \"Process timed out\" phase errors.
-                (result-boundary/error-response final-normalized "LLM call failed"))))))))
+                (result-boundary/error-response final-normalized "LLM call failed"))
+               ;; §7.7.2 explicit answers: recorded peg answers (and the
+               ;; lost-vs-unanswered answer-log marker) ride the planner
+               ;; result so plan.clj can hand them to the consultation
+               ;; summary. some?-not-seq — same reasoning as the
+               ;; implementer's threading. The submission retry runs its
+               ;; own session: its answers append AFTER the primary log
+               ;; (last-recording-wins includes an answer revised during
+               ;; the retry) and a torn log in either session wins the
+               ;; marker.
+               (or (some? codex-answers)
+                   (some? (:codex-answers retry-result)))
+               (assoc :codex-answers
+                      (vec (concat codex-answers (:codex-answers retry-result))))
+               (or (some? codex-answer-log)
+                   (some? (:codex-answer-log retry-result)))
+               (assoc :codex-answer-log
+                      (artifact-session/merge-answer-logs
+                       (keep identity [codex-answer-log
+                                       (:codex-answer-log retry-result)]))))))))))
 
       :validate-fn validate-plan
 
       :repair-fn repair-plan})))
-
-(defn plan-summary
-  [plan]
-  {:id (:plan/id plan)
-   :name (:plan/name plan)
-   :task-count (count (:plan/tasks plan))
-   :complexity (:plan/estimated-complexity plan)
-   :risk-count (count (:plan/risks plan))})
-
-(defn task-dependency-order
-  [plan]
-  (let [tasks (:plan/tasks plan)
-        task-map (into {} (map (juxt :task/id identity) tasks))
-        deps-map (into {} (map (fn [t] [(:task/id t) (set (:task/dependencies t []))]) tasks))]
-    ;; Simple topological sort using Kahn's algorithm
-    (loop [remaining (set (keys task-map))
-           satisfied #{}
-           result []]
-      (if (empty? remaining)
-        result
-        (let [ready (filter (fn [id]
-                              (every? satisfied (get deps-map id #{})))
-                            remaining)]
-          (if (empty? ready)
-            ;; Cycle detected, return what we have
-            (into result (map task-map remaining))
-            (recur (apply disj remaining ready)
-                   (into satisfied ready)
-                   (into result (map task-map ready)))))))))
 
 ;------------------------------------------------------------------------------ Rich Comment
 (comment

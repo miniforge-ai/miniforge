@@ -44,7 +44,12 @@
    zero-entropy detection needs observations from runs where the guarded
    failure never happened -- exactly the runs the miss ledger ignores.
    `consultation` is the $7.4.3 summary off the phase result; its :pegs
-   rows already carry :answer (explicit, or nil = presented-unanswered)."
+   rows already carry :answer (explicit, or nil = presented-unanswered).
+   :consultation/answer-log is the $7.7.2 lost-vs-unanswered marker
+   (:absent | :recorded | :unreadable): under :unreadable the session's
+   answer log existed but did not parse, so a peg row's nil :answer
+   means LOST, not declined -- the telemetry reader keeps such runs out
+   of its unanswered count."
   [{:keys [run-id phase consultation]}]
   {;; the summary's own identity when it carries one (stamped at
    ;; construction, shared with the leave's miss entries); minted here
@@ -56,6 +61,7 @@
    :consultation/situation (get consultation :situation)
    :consultation/status (get consultation :status)
    :consultation/pin-read? (get consultation :pin-read?)
+   :consultation/answer-log (get consultation :answer-log)
    :consultation/pegs (get consultation :pegs)
    :consultation/unmatched-answers (get consultation :unmatched-answers)})
 

@@ -6,8 +6,8 @@
 
 # N5 Delta — Supervisory Control Plane
 
-**Version:** 0.3.0-draft
-**Date:** 2026-04-22
+**Version:** 0.4.0-draft
+**Date:** 2026-10-04
 **Status:** Draft
 **Conformance:** MUST
 
@@ -77,8 +77,8 @@ The human supervisory loop MUST:
 3. Receive durable intervention results and evidence after the orchestrator applies an action
 
 The human supervisory loop MAY be exposed through a TUI, dashboard, API-backed
-operator agent, or other UX surfaces, but all such surfaces MUST share the same
-canonical intervention model.
+operator agent, or other UX surfaces. All surfaces MUST share the same canonical
+intervention model.
 
 ### 2.4 Boundary to orchestrator and learning loop
 
@@ -205,6 +205,42 @@ Minimum required keys for supervisory display:
  :evidence/gate-summary  map?}      ;; {:passed N :failed N :skipped N}
 ```
 
+#### Spec
+
+The supervisory projection of a Work Specification (N1 §2.33) groups related
+workflow runs without replacing their frozen run-start snapshots.
+
+Minimum required keys:
+
+```clojure
+{:spec/id uuid?
+ :spec/title string?                 ; Non-blank display label, not identity
+ :spec/status keyword?               ; :draft, :active, :completed, :archived
+ :spec/origin keyword?               ; Source system, preserved after creation
+ :spec/created-at inst?
+ :spec/updated-at inst?}
+```
+
+The projection MAY include `:spec/description` and `:spec/repo-url` strings,
+`:spec/intent` (structured map), and `:spec/tags` (vector of strings or keywords).
+Intent remains descriptive data, not executable instruction or an authorization grant.
+Unknown extension fields MUST pass through without acquiring execution authority.
+Linked WorkflowRuns MUST carry `:workflow-run/spec-id` as a UUID cross-reference
+to the Spec's `:spec/id`. Their `:workflow-run/spec` remains the separate run-start snapshot.
+Distinct specifications with equal titles MUST remain distinct; replay MUST
+preserve a supplied ID rather than deriving a replacement from display text.
+
+`:draft` means no execution yet; `:active` means work is ongoing.
+`:completed` means the owner considers the work finished.
+`:archived` removes it from default views without deleting history.
+A workflow completion alone MUST NOT mark the
+specification completed. A snapshot MUST NOT itself authorize a status change,
+launch, or intervention. This amendment adds no new Spec mutation command.
+
+The supervisory-state component MUST emit `supervisory/spec-upserted` under
+N3 §3.19 with `:supervisory/entity-key` equal to `:spec/id` and the full entity
+inside `:supervisory/entity`. Replay MUST preserve origin and creation time.
+
 #### InterventionRequest
 
 A durable request to perform a bounded supervisory action against the system.
@@ -265,6 +301,24 @@ InterventionRequest `:intervention/state` MUST distinguish at least:
 
 Terminal states are `:rejected`, `:verified`, and `:failed`.
 
+The initial state MUST be `:proposed`. N3 §3.22 owns request and state-change
+wire contracts. Admission MUST be durable before dispatch; materialized snapshots
+MUST NOT replace command authorization or acknowledged lifecycle facts.
+
+Only the following transitions are permitted; policy and authorization checks
+MUST still pass before any transition is admitted:
+
+| From | Permitted next states |
+|------|-----------------------|
+| `:proposed` | `:pending-human`, `:approved`, `:rejected`, `:failed` |
+| `:pending-human` | `:approved`, `:rejected`, `:failed` |
+| `:approved` | `:dispatched`, `:failed` |
+| `:dispatched` | `:applied`, `:failed` |
+| `:applied` | `:verified`, `:failed` |
+
+Terminal states MUST NOT transition. Retrying a terminal request MUST create
+a new request identity rather than rewrite the completed record.
+
 ### 3.4 Existing entities carried forward
 
 The following entities already exist in sufficient form across N1, N4, N9, and existing components. They do not require
@@ -282,10 +336,9 @@ new formalization for v1 but MUST be correlatable to v1 entities:
 
 ### 3.5 Materialization — the supervisory-state component
 
-The entities defined in §3.1 MUST be materialized by a dedicated component,
-`components/supervisory-state`, which is the canonical source of supervisory
-truth for all external consumers (TUI, native console, web dashboard, Rust
-control console).
+The entities in §3.1 MUST be materialized by `components/supervisory-state`.
+This dedicated component is the canonical supervisory source for all external
+consumers: TUI, native console, web dashboard, and Rust control console.
 
 **Design invariants:**
 
@@ -295,14 +348,14 @@ control console).
    (e.g., `control-plane/registry`, §3.3) — those are orchestration scratch
    space, not a durable supervisory view.
 2. **Single emitter.** Whenever an entity is inserted or updated, the
-   component emits a `:supervisory/*-upserted` event per N3 §3.19. Those
+   component emits the snapshot event registered for that entity in N3 §3.19.1. Those
    snapshot events are the only surface external consumers use to read the
    supervisory model.
 3. **Durable via the event stream.** The component does not maintain a
-   separate persistence store. On startup it replays the event stream:
-   `:supervisory/*-upserted` events take precedence as entity-state baselines;
-   fine-grained events newer than the most recent snapshot for a given entity
-   are applied on top. This satisfies §9 (durable startup and stale-read)
+   separate persistence store. On startup it replays the event stream.
+   Snapshot events registered by N3 §3.19 take precedence as entity-state baselines.
+   Fine-grained events newer than an entity's most recent snapshot are applied
+   on top. This satisfies §9 (durable startup and stale-read)
    without a parallel database.
 4. **Coalesced bursts.** Updates within a short window (≤ 100 ms,
    implementation-tunable) SHOULD be coalesced into a single emission per
@@ -310,10 +363,10 @@ control console).
 5. **Attention derivation co-located.** Attention items (§5.1) MUST be
    derived inside this component and emitted as `:supervisory/attention-derived`
    (N3 §3.19). No other component MAY emit attention snapshots.
-6. **One source per entity family.** For each of WorkflowRun, AgentSession,
-   PrFleetEntry, PolicyEvaluation, AttentionItem, and InterventionRequest the
-   component MUST be the
-   sole emitter of the corresponding `:supervisory/*-upserted` event.
+6. **One source per entity family.** The families are WorkflowRun, AgentSession,
+   PrFleetEntry, PolicyEvaluation, AttentionItem, Spec, and InterventionRequest.
+   For each, the component MUST be the sole emitter of its registered snapshot
+   event (N3 §3.19.1).
    Other components MAY and SHOULD continue emitting their own fine-grained
    lifecycle events, but MUST NOT produce snapshot events directly.
 
@@ -332,10 +385,9 @@ control console).
 | `:pr/created` / `:pr/merged` / `:pr/closed` / `:pr-monitor/*` | Upserts `PrFleetEntry` |
 | `:gate/passed` / `:gate/failed` | Emits new immutable `PolicyEvaluation` |
 
-**Consumer contract:** The Rust control console and any other external
-renderer subscribes to the event stream and deserializes
-`:supervisory/*-upserted` events directly into the entity shapes of §3.1 — it
-MUST NOT attempt to reconstruct entities from fine-grained events itself.
+**Consumer contract:** External renderers, including the Rust control console,
+subscribe to the event stream. They deserialize N3 §3.19 snapshots directly into
+§3.1 entity shapes. They MUST NOT reconstruct entities from fine-grained events.
 
 **Relationship to `control-plane/registry`:** The registry remains the
 authoritative *orchestration* surface (heartbeats, decisions, state
@@ -385,8 +437,8 @@ The TUI MUST derive attention items from supervisory state. Attention items are 
 Implementations MAY add additional attention rules.
 
 Note: The PR monitor loop (`:pr-monitor/*` events from the pr-lifecycle component) is a primary source of supervisory
-events. The monitor autonomously resolves review comments on miniforge-authored PRs, emitting fine-grained events that
-the TUI MUST subscribe to for real-time visibility into the autonomous feedback loop.
+events. The monitor autonomously resolves review comments on miniforge-authored PRs and emits fine-grained events.
+The TUI MUST subscribe to those events for real-time visibility into the autonomous feedback loop.
 
 ### 5.2 Attention lifecycle
 
@@ -602,19 +654,35 @@ through without error. Required keys MUST be present and correctly typed.
 | N5D1.SV.2 | MUST NOT | Peer with ephemeral in-process registries for supervisory state (§3.5 invariant 1). |
 | N5D1.SV.3 | MUST | Be the sole emitter of each entity family's snapshot event (§3.5 invariant 6). |
 | N5D1.SV.4 | MUST | Rebuild state on startup by replaying the stream, snapshots taking precedence (§3.5 invariant 3). |
-| N5D1.SV.5 | MUST | Coalesce updates within the ≤ 100 ms window per entity (§3.5 invariant 4). |
+| N5D1.SV.5 | SHOULD | Coalesce snapshot updates within the ≤ 100 ms window per entity (§3.5 invariant 4). |
 | N5D1.SV.6 | MUST | Derive attention items inside this component and nowhere else (§3.5 invariant 5). |
 | N5D1.SV.7 | MUST NOT | Transition a terminal workflow state back to active; a retry is a new run (§3.2). |
+| N5D1.SV.8 | MUST | Preserve supplied Spec identity, origin, and creation time; keep run snapshots separate (§3.1). |
+| N5D1.SV.9 | MUST | Admit complete intervention requests as proposed, preserve their metadata, and follow permitted transitions (§3.1, §3.3). |
+| N5D1.SV.10 | MUST NOT | Infer authorization from request admission or snapshot observation (§3.3, §7). |
+| N5D1.SV.11 | MUST NOT | Mark a Spec completed from workflow completion alone or authorize a status change from a snapshot (§3.1). |
 
 ### Test Obligations
 
 1. A restart reproduces the entity table from the stream alone.
 2. No second component emits a snapshot for an entity family it does not own.
 3. Terminal states never reactivate.
+4. Equal Spec titles with distinct IDs stay distinct across restart and rerun
+   (N5D1.SV.8).
+5. Intervention facts and snapshots replay in one entity scope without granting
+   authority from snapshot observation or losing immutable request metadata
+   (N5D1.SV.9–N5D1.SV.10).
+6. Incomplete requests and invalid transitions fail before dependent execution
+   (N5D1.SV.9, N3.EM.7–N3.EM.8).
+7. Completing a workflow does not complete its Spec; observing a snapshot does
+   not authorize a Spec status change (N5D1.SV.11).
 
 ---
 
 **Version History:**
 
-- 0.3.0-draft (2026-08-10): Spec-completion pass — metadata normalized to the header form; `N5D1.SV.*` conformance
-  requirement IDs and test obligations added.
+0.4.0-draft (2026-10-04): Added the Spec projection of N1's Work Specification
+and clarified intervention admission, lifecycle facts, and snapshot ownership.
+
+0.3.0-draft (2026-08-10): Spec-completion pass — metadata normalized to the header form;
+`N5D1.SV.*` conformance requirement IDs and test obligations added.

@@ -64,6 +64,26 @@
   [backend]
   (get impl/backends backend))
 
+(def ^{:stratum 0} ^:private finish-reason-cases
+  "One row per provider spelling: the backend, a 200 body carrying that
+   provider's finish reason beside an answer, and the canonical
+   `:stop-reason` the result must carry."
+  [[:anthropic-api {:content [{:type "text" :text "a"}] :stop_reason "end_turn"} "end_turn"]
+   [:anthropic-api {:content [{:type "text" :text "a"}] :stop_reason "max_tokens"} "max_tokens"]
+   [:anthropic-api {:content [{:type "text" :text "a"}] :stop_reason "refusal"} "refusal"]
+   [:openai-api {:choices [{:message {:content "a"} :finish_reason "stop"}]} "end_turn"]
+   [:openai-api {:choices [{:message {:content "a"} :finish_reason "length"}]} "max_tokens"]
+   [:openai-compat {:choices [{:message {:content "a"} :finish_reason "length"}]} "max_tokens"]
+   [:openrouter {:choices [{:message {:content "a"} :finish_reason "length"}]} "max_tokens"]
+   [:openrouter {:choices [{:message {:content "a"} :finish_reason "content_filter"}]}
+    "content_filter"]
+   [:gemini-api {:candidates [{:content {:parts [{:text "a"}]} :finishReason "STOP"}]} "end_turn"]
+   [:gemini-api {:candidates [{:content {:parts [{:text "a"}]} :finishReason "MAX_TOKENS"}]}
+    "max_tokens"]
+   [:gemini-api {:candidates [{:content {:parts [{:text "a"}]} :finishReason "SAFETY"}]} "SAFETY"]
+   [:ollama {:message {:content "a"} :done_reason "stop"} "end_turn"]
+   [:ollama {:message {:content "a"} :done_reason "length"} "max_tokens"]])
+
 ;; Transport
 (deftest ^{:stratum 0} http-post-request-idle-timeout-test
   (testing "a provider call may idle for the configured window — these calls
@@ -268,6 +288,14 @@
                                               {:prompt "q" :model "m"}
                                               {:api-key test-api-key}))))
 
+(defn- ^{:stratum 1} complete-against
+  "Run one request on `backend` against a canned 200 `body`."
+  [backend body]
+  (:result (capture-http (http-200 body)
+                         #(impl/http-complete (backend-config backend)
+                                              {:prompt "q" :model "m"}
+                                              {:api-key test-api-key}))))
+
 (deftest ^{:stratum 1} missing-model-test
   (testing "an API provider without a model fails closed before any request"
     (let [result (impl/http-complete (backend-config :anthropic-api)
@@ -292,6 +320,21 @@
       (is (:success result))
       (is (= {} (:usage result)))
       (is (= 0 (:tokens result))))))
+
+(deftest ^{:stratum 1} stop-reason-reaches-the-client-test
+  (testing "complete and complete-stream both return the :stop-reason"
+    (let [body {:choices [{:message {:content "cut"} :finish_reason "length"}]}
+          client #(llm/create-client {:backend :openrouter
+                                      :model "vendor/model"
+                                      :api-key test-api-key})
+          completed (:result (capture-http (http-200 body)
+                                           #(llm/complete (client) {:prompt "q"})))
+          streamed (:result (capture-http (http-200 body)
+                                          #(llm/complete-stream (client)
+                                                                {:prompt "q"}
+                                                                (fn [_chunk] nil))))]
+      (is (= "max_tokens" (:stop-reason completed)))
+      (is (= "max_tokens" (:stop-reason streamed))))))
 
 ;------------------------------------------------------------------------------ Layer 2
 
@@ -559,6 +602,43 @@
                                      {:prompt "q"}
                                      {})]
       (is (= "unsupported_backend" (get-in result [:error :type]))))))
+
+;; Finish reason → :stop-reason
+(deftest ^{:stratum 2} finish-reason-becomes-stop-reason-test
+  (testing "every HTTP provider's finish reason reaches the result as the
+            canonical :stop-reason, so an answer cut at the output cap can
+            be told from a complete one"
+    (doseq [[backend body expected] finish-reason-cases]
+      (let [result (complete-against backend body)]
+        (is (:success result) (pr-str backend body))
+        (is (= expected (:stop-reason result)) (pr-str backend body)))))
+  (testing "a response that names no finish reason carries no :stop-reason key"
+    (doseq [[backend body] [[:anthropic-api {:content [{:type "text" :text "a"}]}]
+                            [:openai-api {:choices [{:message {:content "a"}}]}]
+                            [:openai-api {:choices [{:message {:content "a"}
+                                                     :finish_reason nil}]}]
+                            [:gemini-api {:candidates [{:content {:parts [{:text "a"}]}}]}]
+                            [:ollama {:message {:content "a"}}]]]
+      (let [result (complete-against backend body)]
+        (is (:success result) (pr-str backend body))
+        (is (not (contains? result :stop-reason)) (pr-str backend body))))))
+
+(deftest ^{:stratum 2} empty-answer-keeps-the-stop-reason-test
+  (testing "a 200 with no text and a finish reason is still an error; the
+            reason is on the result and the billed cost stays — a read whose
+            whole output budget went to reasoning arrives this way"
+    (let [result (complete-against
+                  :openrouter
+                  {:choices [{:message {:content nil} :finish_reason "length"}]
+                   :usage {:prompt_tokens 1000 :completion_tokens 64 :cost 0.002}})]
+      (is (not (:success result)))
+      (is (= "empty_success_output" (get-in result [:error :type])))
+      (is (= "max_tokens" (:stop-reason result)))
+      (is (= 0.002 (:cost-usd result)))))
+  (testing "with no finish reason the failure carries no :stop-reason key"
+    (let [result (complete-against :openrouter {:choices [{:message {:content ""}}]})]
+      (is (= "empty_success_output" (get-in result [:error :type])))
+      (is (not (contains? result :stop-reason))))))
 
 ;; Client integration: config threading through complete / complete-stream
 (deftest ^{:stratum 2} client-round-trip-test

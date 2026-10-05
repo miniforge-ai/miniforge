@@ -223,14 +223,25 @@
         (= (str/trim body) (str/trim (str (:release/pr-title release-meta)))))))
 
 (defn ^{:stratum 0} pipeline->result
-  "Convert pipeline state to phase result."
+  "Convert pipeline state to phase result. The §7.7.2 answer-channel
+   keys (:codex-answers / :codex-answer-log, placed on state by
+   step-generate-metadata) ride the result on success AND failure — a
+   failed release whose releaser answered pegs still made observations
+   the consultation record needs."
   [state]
   (let [{:keys [logger failure release-artifact write-metrics
-                branch commit-sha pr-number pr-url]} state]
+                branch commit-sha pr-number pr-url
+                codex-answers codex-answer-log]} state
+        attach-answer-channel
+        (fn [result]
+          (cond-> result
+            (some? codex-answers) (assoc :codex-answers codex-answers)
+            (some? codex-answer-log) (assoc :codex-answer-log codex-answer-log)))]
     (if failure
-      (result/phase-failure (:type failure) (:message failure)
-                            {:hint    (:hint failure)
-                             :metrics (or write-metrics {})})
+      (attach-answer-channel
+       (result/phase-failure (:type failure) (:message failure)
+                             {:hint    (:hint failure)
+                              :metrics (or write-metrics {})}))
       (do
         (when logger
           (log/info logger :release-executor :phase-completed
@@ -238,13 +249,14 @@
                             :commit        commit-sha
                             :pr-url        pr-url
                             :files-written (:files-written write-metrics)}}))
-        (result/phase-success
-         [release-artifact]
-         (merge write-metrics
-                {:pr-number  pr-number
-                 :pr-url     pr-url
-                 :commit-sha commit-sha
-                 :branch     branch}))))))
+        (attach-answer-channel
+         (result/phase-success
+          [release-artifact]
+          (merge write-metrics
+                 {:pr-number  pr-number
+                  :pr-url     pr-url
+                  :commit-sha commit-sha
+                  :branch     branch})))))))
 
 ;------------------------------------------------------------------------------ Layer 1
 
@@ -342,11 +354,17 @@
       state ;; Already provided (e.g. by caller or test)
       (let [{:keys [releaser code-artifacts task-description context logger
                     workflow-data]} state
-            release-meta (metadata/generate-release-metadata
-                          releaser code-artifacts task-description context logger
-                          workflow-data)]
+            {:keys [release-meta codex-answers codex-answer-log]}
+            (metadata/generate-release-metadata
+             releaser code-artifacts task-description context logger
+             workflow-data)]
         (if release-meta
-          (assoc state :release-meta release-meta)
+          ;; §7.7.2: the releaser session's recorded peg answers (and the
+          ;; lost-vs-unanswered answer-log marker) ride the pipeline state
+          ;; so pipeline->result can surface them to the release phase.
+          (cond-> (assoc state :release-meta release-meta)
+            (some? codex-answers) (assoc :codex-answers codex-answers)
+            (some? codex-answer-log) (assoc :codex-answer-log codex-answer-log))
           (fail state :metadata-generation-failed (msg/t :step/metadata-generation-failed)))))))
 
 (defn ^{:stratum 1} step-create-branch
