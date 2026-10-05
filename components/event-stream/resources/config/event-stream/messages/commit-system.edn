@@ -14,4 +14,5 @@
   :publication/delivery-failed "Committed events remain queued after a delivery failure."
   :publication/listener-failed "A best-effort listener failed after durable event acknowledgment."
   :publication/invalid-recovery "The journal contains unsupported, altered or unredacted current-profile records."
+  :publication/invalid-query "Current event queries require valid scope, filter and pagination options."
   :publication/invalid-options "A current event stream requires explicit valid journal ownership options."}}
