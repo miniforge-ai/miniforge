@@ -11,4 +11,7 @@
   :journal/closed "Event journal is closed."
   :journal/recovery "Event journal recovery failed."
   :publication/invalid-scope "Event publication requires its family's non-nil authoritative scope."
-  :publication/delivery-failed "Committed events remain queued after a delivery failure."}}
+  :publication/delivery-failed "Committed events remain queued after a delivery failure."
+  :publication/listener-failed "A best-effort listener failed after durable event acknowledgment."
+  :publication/invalid-recovery "The journal contains unsupported, altered or unredacted current-profile records."
+  :publication/invalid-options "A current event stream requires explicit valid journal ownership options."}}
