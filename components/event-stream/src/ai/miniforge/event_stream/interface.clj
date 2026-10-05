@@ -466,6 +466,12 @@
    action id; optional result as :action/result."
   events/control-action-executed)
 
+(def ^{:stratum 0} create-chain-event-draft
+  "Args: [stream event-type payload & [opts]]. Validate a v2 chain payload before
+   allocating event identity. Supply run/definition identity and type-specific fields.
+   No sequence or admission occurs; do not pass to the legacy publisher."
+  events/create-chain-event-draft)
+
 (def ^{:stratum 0} chain-started
   "Build and return a :chain/started event envelope map (chains are not
    workflow-scoped, so :workflow/id is nil) carrying :chain/id and
