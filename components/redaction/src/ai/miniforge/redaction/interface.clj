@@ -28,7 +28,8 @@
 
 (defn ^{:stratum 0} supported?
   "Whether every value, key and metadata node is inspectable by redaction.
-   Reject opaque objects, records and deferred sequences before admission."
+   Reject opaque objects, records, deferred sequences, and excessive structure.
+   Limits: 128 nesting levels and 100000 nodes, including keys and metadata."
   [value]
   (representation/supported? value))
 

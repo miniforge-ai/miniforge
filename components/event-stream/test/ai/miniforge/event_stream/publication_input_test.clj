@@ -177,5 +177,20 @@
       (is (vector? result))
       (is (= event (second result))))))
 
+(deftest ^{:stratum 2} protected-nested-metadata-cannot-be-silently-redacted
+  (let [principal (with-meta 'operator {:source "AKIAIOSFODNN7EXAMPLE"})
+        event (assoc (chain-draft) :auth/context {:principal principal})]
+    (is (anomaly/anomaly? (events/prepare-current-publication event)))))
+
+(deftest ^{:stratum 2} excessive-structure-is-rejected-before-recursive-redaction
+  (let [deep (nth (iterate vector nil) 4096)
+        broad (vec (repeat 100001 nil))
+        calls (atom 0)]
+    (with-redefs [redaction/redact (partial observe-redaction calls)]
+      (doseq [extension [deep broad (array-map deep :value) (with-meta [] {:nested deep})]]
+        (is (anomaly/anomaly? (events/prepare-current-publication
+                               (assoc (chain-draft) :extension/data extension)))))
+      (is (zero? @calls)))))
+
 (comment
   (supported-drafts))

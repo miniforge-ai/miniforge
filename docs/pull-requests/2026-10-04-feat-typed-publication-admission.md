@@ -37,6 +37,9 @@ Constructor integration tests use the merged typed chain draft API.
 - Detect numeric card values across integer, decimal, and finite floating-point representations.
 - Bound decimal expansion before rendering; extreme exponents retain compact notation.
 - Preserve requester identity, authentication context, and snapshot repository/provenance fields.
+- Bound structural inspection to 128 levels and 100000 nodes, including keys and metadata.
+- Reject secrets in protected identity metadata rather than relying on metadata-blind equality.
+- Admit only concrete built-in collection types; reject custom maps with hidden state.
 
 Other snapshot families are intentionally not admitted by this API yet. Legacy
 publication routing and historical reader contracts remain unchanged. Shared
@@ -45,7 +48,7 @@ No generic-envelope fallback can admit unvalidated payloads through this new bou
 
 ## Testing Plan
 
-Boundary/schema and redaction tests pass 46 tests / 1206 assertions against the merged dependency.
+Boundary/schema and redaction tests pass 50 tests / 1239 assertions against the merged dependency.
 All nine chain types pass from the real public constructor through preparation.
 Tests reject missing fields, retired aliases, malformed supervisory records, and unsupported envelope versions.
 Failure tests cover canonical/legacy anomalies, redactor exceptions, wrapped critical causes, and sensitive malformed IDs.
@@ -54,17 +57,19 @@ The adversarial standards pass separated schema data from boundary effects and
 kept validation outside the publication engine. It found and fixed error-data
 leakage and swallowed critical causes. Shared fixtures avoid copied entity maps.
 Copilot identified opaque nested representations, mutable numeric subclasses, and omitted identity references;
-all are covered by regressions. A concrete scalar allowlist rejects opaque subclasses.
+all are covered by regressions. Concrete scalar and collection allowlists reject opaque implementations.
 Adversarial numeric checks also reproduced decimal and floating-point card leaks.
 The shared detector now inspects those numeric representations; ordinary measurements remain numeric.
 Follow-up review identified extreme-exponent allocation and requester identity gaps.
 The final pass bounds rendering before allocation and centralizes identity/provenance projection,
 including authentication context and snapshot repository references.
+Depth/size regressions reject hostile structure before recursive redaction, while
+protected identity values must also pass the metadata-aware cleanliness check.
 End-to-end tracing also caught redacted lists
 becoming deferred sequences, incompatible with durable encoding; they now materialize as lists.
 Kondo and truthful strata checks pass. The incremental standards scanner is rerun before push.
 All four deployed event-stream/redaction consumer suites passed serially in 1 minute 19 seconds.
-The CLI rebuilt to 39,115,213 bytes. Its isolated packaged API passes the same 46 tests / 1206 assertions.
+The CLI rebuilt to 39,115,557 bytes. Its isolated packaged API passes the same 50 tests / 1239 assertions.
 
 ## Deployment Plan
 

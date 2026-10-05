@@ -36,6 +36,7 @@
     (cond
       (anomaly/any-anomaly? redacted) redacted
       (not (m/validate spec/CurrentDraft redacted)) (failure :invalid-input :publication/invalid-draft event)
+      (not (redaction/clean? before)) (failure :invalid-input :publication/identity-redacted event)
       (not= before after) (failure :invalid-input :publication/identity-redacted event)
       (not= scope (policy/scope redacted)) (failure :invalid-input :publication/identity-redacted event)
       :else [scope redacted])))
