@@ -2620,6 +2620,8 @@ IDs are never reused; a withdrawn requirement is marked withdrawn, not deleted.
 | N1.DM.3 | MUST | Derive `:workflow/status` from the execution machine, using N2 §2.2's vocabulary and no synonym (§2). |
 | N1.DM.4 | MUST | Treat every entity identifier as opaque — no consumer parses meaning out of an id (§2). |
 | N1.DM.5 | MUST NOT | Introduce an entity in an extension spec that duplicates a §2 concept rather than specializing it (§2, standard 020). |
+| N1.DM.6 | MUST | Separate chain definition, run, step, and edge identities; retain the resolved immutable composition (§2.32). |
+| N1.DM.7 | MUST | Preserve Work Specification identity across edits and reruns, independently of titles and frozen run snapshots (§2.33). |
 
 #### Architecture and boundaries
 
@@ -2649,6 +2651,10 @@ A conformance suite MUST cover, at minimum:
    dependency (N1.AR.6).
 6. **Component isolation** — each component's tests pass with only that
    component and its declared dependencies on the classpath (N1.AR.5).
+7. **Chain identity** — repeated invocations use different run UUIDs but retain
+   the same resolved composition; steps and edges remain distinct (N1.DM.6).
+8. **Work identity** — equal titles do not merge specifications; edits preserve
+   specification IDs without changing prior run snapshots (N1.DM.7).
 
 Obligations 3 through 5 are static checks the repository can run continuously;
 they are the ones that catch architectural drift before it reaches review.

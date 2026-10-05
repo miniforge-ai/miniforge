@@ -64,6 +64,9 @@ their recorded workflow identity (including nil) and counters are not replaced.
 Reader support is explicit rather than a promise to interpret every legacy version.
 Subscription guidance includes PR scopes and fleet subscriptions. Snapshot emission
 references the enumerated registry, including policy and attention event names.
+Stable conformance IDs link the new N1/N2/N3/N5 contracts to their test obligations.
+The snapshot-coalescing index now matches its existing SHOULD requirement;
+intervention lifecycle facts remain non-coalescible.
 
 ## Deployment Plan
 

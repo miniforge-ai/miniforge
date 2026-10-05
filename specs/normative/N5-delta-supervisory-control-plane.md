@@ -654,18 +654,28 @@ through without error. Required keys MUST be present and correctly typed.
 | N5D1.SV.2 | MUST NOT | Peer with ephemeral in-process registries for supervisory state (§3.5 invariant 1). |
 | N5D1.SV.3 | MUST | Be the sole emitter of each entity family's snapshot event (§3.5 invariant 6). |
 | N5D1.SV.4 | MUST | Rebuild state on startup by replaying the stream, snapshots taking precedence (§3.5 invariant 3). |
-| N5D1.SV.5 | MUST | Coalesce updates within the ≤ 100 ms window per entity (§3.5 invariant 4). |
+| N5D1.SV.5 | SHOULD | Coalesce snapshot updates within the ≤ 100 ms window per entity (§3.5 invariant 4). |
 | N5D1.SV.6 | MUST | Derive attention items inside this component and nowhere else (§3.5 invariant 5). |
 | N5D1.SV.7 | MUST NOT | Transition a terminal workflow state back to active; a retry is a new run (§3.2). |
+| N5D1.SV.8 | MUST | Preserve supplied Spec identity, origin, and creation time; keep run snapshots separate (§3.1). |
+| N5D1.SV.9 | MUST | Admit complete intervention requests as proposed, preserve their metadata, and follow permitted transitions (§3.1, §3.3). |
+| N5D1.SV.10 | MUST NOT | Infer authorization from request admission or snapshot observation (§3.3, §7). |
+| N5D1.SV.11 | MUST NOT | Mark a Spec completed from workflow completion alone or authorize a status change from a snapshot (§3.1). |
 
 ### Test Obligations
 
 1. A restart reproduces the entity table from the stream alone.
 2. No second component emits a snapshot for an entity family it does not own.
 3. Terminal states never reactivate.
-4. Equal Spec titles with distinct IDs stay distinct across restart and rerun.
+4. Equal Spec titles with distinct IDs stay distinct across restart and rerun
+   (N5D1.SV.8).
 5. Intervention facts and snapshots replay in one entity scope without granting
-   authority from snapshot observation or losing immutable request metadata.
+   authority from snapshot observation or losing immutable request metadata
+   (N5D1.SV.9–N5D1.SV.10).
+6. Incomplete requests and invalid transitions fail before dependent execution
+   (N5D1.SV.9, N3.EM.7–N3.EM.8).
+7. Completing a workflow does not complete its Spec; observing a snapshot does
+   not authorize a Spec status change (N5D1.SV.11).
 
 ---
 

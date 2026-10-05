@@ -1271,6 +1271,16 @@ withdrawn requirement is marked withdrawn, not deleted.
 | N2.RS.5 | MUST | Emit `workflow/resumed` recording resumed-from state, phase, and skipped phases (§8.2). |
 | N2.RS.6 | MUST | Refuse a stale snapshot per §8.4, reporting which condition applied and leaving the run's state unchanged. |
 
+#### Chain execution
+
+| ID | Level | Requirement |
+|----|-------|-------------|
+| N2.CH.1 | MUST | Allocate fresh chain-run identity per invocation and preallocate child-run UUIDs before step-start emission (§14.4). |
+| N2.CH.2 | MUST | Emit start before steps and exactly one terminal outcome per run and started step, including early failures (§14.4). |
+| N2.CH.3 | MUST | Require all steps and bindings to succeed for completion; prevent dependent execution after failure (§14.4). |
+| N2.CH.4 | MUST | Preserve run identity and resolved composition during recovery; refuse unavailable or conflicting snapshots (§14.4). |
+| N2.CH.5 | MUST | Propagate emission failure under N3 §9 without reporting false success (§14.4). |
+
 ### 10.5 Test Obligations
 
 A conformance suite MUST cover, at minimum:
@@ -1294,6 +1304,12 @@ A conformance suite MUST cover, at minimum:
 7. **Projection consistency** — `:workflow/status` derived from the machine
    matches the supervisory projection for the same run at every transition
    (N2.LC.3, N2.LC.5).
+8. **Chain lifecycle** — repeated runs, single-step chains, and binding/load
+   failures preserve child identities and terminal cardinality (N2.CH.1–N2.CH.3).
+9. **Chain recovery** — interruption retains the admitted composition despite
+   newer definitions; missing or conflicting snapshots refuse recovery (N2.CH.4).
+10. **Chain emission failure** — a failing journal prevents successful completion
+    and dependent execution (N2.CH.5).
 
 ---
 

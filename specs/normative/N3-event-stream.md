@@ -3128,6 +3128,9 @@ withdrawn, not deleted.
 | N3.EM.4 | MUST NOT | Exceed 3 status events per second per agent (§4.2). |
 | N3.EM.5 | MUST | Emit at least one status event per 5 seconds during active work (§4.2). |
 | N3.EM.6 | MUST | Event type keywords follow the naming rules of §6.2. |
+| N3.EM.7 | MUST | Emit intervention facts from their lifecycle owner, without coalescing; acknowledge durably before dependent execution (§3.22). |
+| N3.EM.8 | MUST | Preserve requested metadata and reject unknown, stale, or terminal-reactivating intervention transitions (§3.22). |
+| N3.EM.9 | MUST | Deliver train changes to every prior or current member with distinct per-PR identities and ordered after-state membership (§3.16). |
 
 #### Storage and retention
 
@@ -3170,6 +3173,10 @@ withdrawn, not deleted.
 | N3.CP.6 | MUST NOT | Silently process an event of a higher major version (§7.3 rule 4). |
 | N3.CP.7 | MUST NOT | Let a skipped event desynchronize the consumer's sequence position (§7.3 rule 5). |
 | N3.CP.8 | MUST | Keep `:event/type` stable across a major payload bump (§7.4). |
+| N3.CP.9 | MUST | Match chain/intervention type, payload version, and scope discriminator to one supported profile (§7.5). |
+| N3.CP.10 | MUST | Validate retained chain edges in their original Workflow scope without rescoping or resequencing (§7.5). |
+| N3.CP.11 | MUST | Refuse authoritative replay of unsupported profiles, including v1 intervention facts; preserve retained source records (§7.5). |
+| N3.CP.12 | MUST | Derive chain migrations only from verifiable provenance, preserve source records, and report ambiguity instead of fabricating identities (§7.5). |
 
 #### Sensitive data
 
@@ -3221,12 +3228,16 @@ A conformance suite MUST cover, at minimum:
    emitting a `:durable` or `:audit` event fails rather than succeeding
    silently (N3.EF.1, N3.EF.2).
 
-The suite MUST also distinguish repeated chain invocations and child-workflow
-scopes, cover binding/load failures, and reject ambiguous legacy replay.
-Intervention tests MUST cover non-workflow targets, stale transitions, journal
-failure before execution, and replay through interleaved facts and snapshots.
-Registry tests MUST reject unregistered supervisory members and distinguish
-snapshot schemas from lifecycle facts.
+9. **Chain scopes** — repeated invocations and child workflows retain independent
+   scopes through binding/load failures (N3.EV.4–N3.EV.7, N3.CP.9).
+10. **Compatibility** — mismatched profiles fail; retained edges keep their original
+    scope; v1 interventions and ambiguous chain migrations refuse authoritative replay (N3.CP.9–N3.CP.12).
+11. **Interventions** — non-workflow targets, stale transitions, journal failures,
+    and interleaved snapshots preserve metadata without granting authority (N3.EM.7–N3.EM.8, N3.EF.1).
+12. **Registry** — unregistered supervisory types fail admission; lifecycle facts
+    and entity snapshots use distinct schemas (N3.EM.2–N3.EM.3).
+13. **Train delivery** — removal and empty-after transitions notify former members;
+    retries preserve per-PR IDs and successive changes preserve order (N3.EM.9).
 
 ---
 
