@@ -28,7 +28,7 @@
 
    Layer 0: independent leaves — selector parsing/formatting, stable-tag
    detection and glob constants, the changed-projects argv constant,
-   error-map construction, git-worktree-key/heartbeat-default constants,
+   error-map construction, git-local-env-var/heartbeat-default constants,
    the expand-start-size default, `shuffle-projects`, and
    `bisect-project-groups`.
    Layer 1: `stable-tag-globs`, `changed-projects-command`,
@@ -58,8 +58,19 @@
 (def ^{:stratum 0} ^:private default-expand-start-size
   1)
 
-(def ^{:stratum 0} ^:private git-worktree-env-keys
-  ["GIT_INDEX_FILE" "GIT_DIR" "GIT_WORK_TREE" "GIT_COMMON_DIR"])
+(def ^{:stratum 0} ^:private git-local-env-vars
+  "What `git rev-parse --local-env-vars` prints (git 2.48): the variables
+   that bind a git command to one repository. A child that inherits one
+   acts on the launching repository, not the directory it was pointed at.
+   A list, not the `GIT_` prefix: the prefix also takes variables that
+   bind to no repository and that a launcher sets on purpose —
+   `GIT_CONFIG_GLOBAL`, the author and committer variables, and
+   `GIT_SSH_COMMAND`, which the Clojure CLI's git-dependency fetch uses."
+  ["GIT_ALTERNATE_OBJECT_DIRECTORIES" "GIT_CONFIG" "GIT_CONFIG_PARAMETERS"
+   "GIT_CONFIG_COUNT" "GIT_OBJECT_DIRECTORY" "GIT_DIR" "GIT_WORK_TREE"
+   "GIT_IMPLICIT_WORK_TREE" "GIT_GRAFT_FILE" "GIT_INDEX_FILE"
+   "GIT_NO_REPLACE_OBJECTS" "GIT_REPLACE_REF_BASE" "GIT_PREFIX"
+   "GIT_SHALLOW_FILE" "GIT_COMMON_DIR"])
 
 (def ^{:stratum 0} ^:private changed-or-affected-projects-argv
   ["clojure" "-M:poly" "ws" "get:changes:changed-or-affected-projects"
@@ -182,15 +193,14 @@
                         :cause (.getMessage e)}))))))
 
 (defn ^{:stratum 1} sanitize-git-worktree-env
-  "Remove git worktree/index variables that must not leak into child
-   processes.
+  "`env` without git's repository-binding variables (`git-local-env-vars`).
 
-   `git commit` and related flows can export worktree-specific git vars.
-   If those leak into nested `git` calls inside tests, temp repos and
-   temp worktrees stop behaving like standalone repos. The stable-derived
-   wrapper must strip them before spawning `poly test`."
+   Git exports them to hooks, and obeys `GIT_DIR` over `-C <dir>`: a test
+   that inherits them runs its `git init` and `git config` against the
+   repository the hook fired in. Every launcher of a test process passes
+   its environment through here first."
   [env]
-  (apply dissoc env git-worktree-env-keys))
+  (apply dissoc env git-local-env-vars))
 
 (defn ^{:stratum 1} heartbeat-seconds
   "Return the heartbeat interval, defaulting to 30 seconds.
