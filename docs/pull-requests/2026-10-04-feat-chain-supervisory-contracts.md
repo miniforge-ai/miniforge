@@ -20,8 +20,8 @@ and materialized snapshots have different owners and replay semantics.
 
 ## Layer
 
-Contract foundations. Base branch: main at `9000a049`, after PR #1999 merged.
-That PR supplies the separate prose-hygiene prerequisite.
+Contract foundations. Base branch: main at `4ad92e7a`, after PR #2002 merged.
+PRs #1999 and #2002 supply the separate prose-hygiene prerequisites.
 
 ## Changes in Detail
 
@@ -54,6 +54,8 @@ made explicit. The lifecycle does not add an approved-to-rejected transition.
 Resolved chain versions and retained snapshots pin recovery to the admitted composition.
 Unknown-family rejection belongs to publishers; consumers retain forward compatibility.
 All three inherited-scope registry rows are identified consistently.
+N5/N8 defer scope membership to N3, including chain runs. Train changes notify
+the union of prior and current members, with distinct per-PR event identities.
 
 ## Deployment Plan
 
@@ -64,6 +66,7 @@ and durable evidence checkpoint integration.
 
 PRs #1985 and #1957 supply publication and sealing prerequisites.
 PR #1999 repairs pre-existing prose violations without altering contracts.
+PR #2002 does the same for N5 and N8.
 PRs #1956, #1952, and #1948 remain downstream evidence integration work.
 
 ## Checklist

@@ -402,6 +402,7 @@ not reproduced, so they cannot drift from the stream contract.
 All six are PR Work Item scoped (§7.1), keyed by `:pr/id`, with `:durable`
 retention (N3 §6). `train/changed` carries train identity and membership as payload
 references; `:train/id` does not create a separate scope.
+N3 §3.16 defines per-member delivery, including removed members and empty resulting trains.
 
 ### 7.3 Event Ordering
 

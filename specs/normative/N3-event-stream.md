@@ -1646,6 +1646,16 @@ Emitted when PR readiness state changes (derived-state-change event).
 
 #### train/changed
 
+For each train change, producers MUST emit one event per PR in the union of
+the before-change and after-change member sets. Each event MUST use that PR's
+`:pr/id` as its scope key, including removed or merged members.
+All copies MUST carry the same ordered after-change `:train/members` snapshot.
+An empty after-change train therefore still notifies its former members.
+If both sets are empty, no PR-scoped event is emitted.
+Each copy MUST have its own event ID and scope-local sequence; retries MUST
+preserve event identity rather than create another logical change.
+Successive changes MUST retain their order within each affected PR scope.
+
 ```clojure
 {:event/type :train/changed
  :pr/id uuid                        ; REQUIRED: PR Work Item scope key (§2.3, §6)

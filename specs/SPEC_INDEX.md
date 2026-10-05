@@ -288,7 +288,7 @@ Defines:
   `:restricted` suppressed per-recipient at delivery
 - **Redaction patterns are EDN configuration**, never a function (§5.2, dewey 007)
 - **Event schemas referenced, not restated** (§10.1) — the reproduced copies carried a
-  fixed `:workflow/id` and were unusable on N3's five non-workflow scopes
+  fixed `:workflow/id` and were unusable on N3's non-workflow scopes
 - **Conformance requirement IDs** (`N8.CAP.*`, `N8.CTL.*`, `N8.PRV.*`) and test
   obligations (§12.4–§12.5)
 - **Annex A (informative):** implementation conformance status
@@ -635,6 +635,7 @@ Normative specs are enforced by:
   observability, work-specification projection, and intervention lifecycle facts.
   This amendment does not assert implementation completeness.
   N9's compatibility references and train-scope summary defer to the same N3 contracts.
+  N5/N8 scope references include chain runs; N3 specifies per-PR train-change delivery.
 
 - **0.24.0-draft** (2026-08-10) - N4-delta reclassified to informative. Its unique content folded
   into N4. The document's requirements were written lowercase, with no uppercase
