@@ -149,6 +149,7 @@
                          "ai.miniforge.web-dashboard.fleet-onboarding-integration-test"
                          "ai.miniforge.self-healing.integration-test"
                          "ai.miniforge.workflow.opsv-lifecycle-integration-test"
+                         "ai.miniforge.workflow.isolation-support-test"
                          "ai.miniforge.governance.e2e-test"]
         kernel-tests ["ai.miniforge.workflow.kernel-loader-integration-test"]
         miniforge-exit (run-project-tests! "miniforge" miniforge-tests)]
