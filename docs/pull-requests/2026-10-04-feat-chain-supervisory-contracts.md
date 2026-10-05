@@ -59,6 +59,11 @@ the union of prior and current members, with distinct per-PR event identities.
 The main merge exposed missing namespace requires in orchestrator tests. Those
 requires are explicit now; no orchestrator behavior or test assertions change.
 Kondo is clean, and the affected namespace passes 23 tests / 86 assertions.
+Legacy v1 intervention facts are retained for inspection, not authoritative replay;
+their recorded workflow identity (including nil) and counters are not replaced.
+Reader support is explicit rather than a promise to interpret every legacy version.
+Subscription guidance includes PR scopes and fleet subscriptions. Snapshot emission
+references the enumerated registry, including policy and attention event names.
 
 ## Deployment Plan
 

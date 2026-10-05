@@ -2442,9 +2442,9 @@ Implementations MUST provide:
 (unsubscribe subscription-handle)
 ```
 
-Subscribing by scope is the only way to observe events with a nil
-`:workflow/id`. Pack, repository, supervisory-entity, deployment, and chain scopes
-have no workflow to subscribe through.
+To observe a non-Workflow scope, subscribe to that scope or to the fleet.
+This includes PR Work Item, pack, repository, supervisory-entity, deployment,
+and chain scopes, even when an event carries a `:workflow/id` cross-reference.
 
 **Delivery is by scope, strictly.** A subscription on scope S receives exactly
 the events whose scope is S. A cross-reference key does not confer membership.
@@ -2878,8 +2878,9 @@ Unsupported major payloads MUST be handled under §7.3, never silently reinterpr
 
 The nine chain types in §3.12.1 and two intervention lifecycle types in §3.22
 use payload version `2.0.0`. Required scope identity and lifecycle fields are
-breaking additions. New writes MUST satisfy the new contracts. Consumers MUST
-dispatch legacy payloads by their recorded version, not guess from missing keys.
+breaking additions. New writes MUST satisfy the new contracts. Readers MUST
+select a supported profile by recorded type and version, not guess from missing keys.
+This section does not require support for every legacy payload version.
 
 #### Scope profiles
 
@@ -2900,12 +2901,21 @@ They MUST NOT apply the current-write registry to rescope retained records.
 Other legacy unregistered types gain no historical conformance from this amendment.
 Unsupported or conflicting profiles MUST NOT be replayed as authoritative state.
 
+Legacy `1.x` payloads of both intervention lifecycle types are unsupported for
+authoritative replay; this amendment defines no historical scope profile for them.
+Readers MUST report that refusal, not apply the v2 registry or infer entity scope.
+Inspection MAY expose these records as non-authoritative history. It MUST preserve
+their recorded `:workflow/id`, including nil, and original sequence without
+assigning a replacement scope or counter. A nil workflow is not a valid scope key.
+Neither a historical reader nor a v1-to-v2 intervention migration is required.
+Source retention under §7.4 still applies; these records cannot establish v2 authorization.
+
 #### Payload and provenance migration
 
 Version-2 intervention requests MUST include the justification already required by N5-delta-1 §3.1.
 Legacy constructors accepted its absence; that behavior does not satisfy the new-write contract.
 Producers MUST collect the required justification before admission, rather than manufacture a reason.
-Migration MUST NOT invent justification for retained requests; an incomplete record cannot establish v2 authorization.
+Inspection or migration MUST NOT invent justification for retained requests.
 
 Legacy `:chain/id` has represented different concepts across producers. It MUST
 NOT be reinterpreted in place. Migration MUST produce separate
@@ -2914,7 +2924,7 @@ It MUST preserve original event IDs, versions, scope, sequence, and payload in
 the source record. A derived migrated view MUST record that provenance and its
 mapping; it MUST NOT overwrite the source journal or reset live sequence counters.
 
-When historical run identity or intervention order cannot be established,
+When a chain migration cannot establish historical run identity or event order,
 migration MUST report the ambiguity. It MUST refuse authoritative replay of
 that range rather than fabricate identity, transitions, or evidence completeness.
 Registration of `supervisory/spec-upserted` uses payload version `1.0.0` and

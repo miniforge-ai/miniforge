@@ -348,7 +348,7 @@ consumers: TUI, native console, web dashboard, and Rust control console.
    (e.g., `control-plane/registry`, §3.3) — those are orchestration scratch
    space, not a durable supervisory view.
 2. **Single emitter.** Whenever an entity is inserted or updated, the
-   component emits a `:supervisory/*-upserted` event per N3 §3.19. Those
+   component emits the snapshot event registered for that entity in N3 §3.19.1. Those
    snapshot events are the only surface external consumers use to read the
    supervisory model.
 3. **Durable via the event stream.** The component does not maintain a
@@ -363,10 +363,10 @@ consumers: TUI, native console, web dashboard, and Rust control console.
 5. **Attention derivation co-located.** Attention items (§5.1) MUST be
    derived inside this component and emitted as `:supervisory/attention-derived`
    (N3 §3.19). No other component MAY emit attention snapshots.
-6. **One source per entity family.** For each of WorkflowRun, AgentSession,
-   PrFleetEntry, PolicyEvaluation, AttentionItem, Spec, and InterventionRequest the
-   component MUST be the
-   sole emitter of the corresponding `:supervisory/*-upserted` event.
+6. **One source per entity family.** The families are WorkflowRun, AgentSession,
+   PrFleetEntry, PolicyEvaluation, AttentionItem, Spec, and InterventionRequest.
+   For each, the component MUST be the sole emitter of its registered snapshot
+   event (N3 §3.19.1).
    Other components MAY and SHOULD continue emitting their own fine-grained
    lifecycle events, but MUST NOT produce snapshot events directly.
 
