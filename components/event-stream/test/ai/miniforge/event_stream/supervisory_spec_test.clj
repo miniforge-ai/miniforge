@@ -3,49 +3,19 @@
 ;; Licensed under the Apache License, Version 2.0.
 (ns ai.miniforge.event-stream.supervisory-spec-test
   (:require [ai.miniforge.event-stream.supervisory-spec :as spec]
+            [ai.miniforge.event-stream.supervisory-test-support :as support]
             [ai.miniforge.schema.interface :as schema]
             [clojure.test :refer [deftest is]]))
 
 ;------------------------------------------------------------------------------ Layer 0
 
-(defn- ^{:stratum 0} intervention [event-type]
-  (let [id (random-uuid)]
-    {:event/type event-type
-     :event/version "2.0.0"
-     :scope/type :supervisory-entity
-     :supervisory/entity-key id
-     :intervention/id id
-     :intervention/updated-at #inst "2026-10-04"}))
+(def ^{:private true :stratum 0} snapshot support/snapshot)
 
-(defn- ^{:stratum 0} snapshot []
-  (let [id (random-uuid)]
-    {:event/type :supervisory/spec-upserted
-     :supervisory/entity-key id
-     :supervisory/schema-version "2.0.0"
-     :supervisory/entity {:spec/id id
-                          :spec/title "Snapshot fixture"
-                          :spec/status :active
-                          :spec/origin :miniforge
-                          :spec/created-at #inst "2026-10-04"
-                          :spec/updated-at #inst "2026-10-04"}}))
+(def ^{:private true :stratum 0} request support/request)
+
+(def ^{:private true :stratum 0} change support/change)
 
 ;------------------------------------------------------------------------------ Layer 1
-
-(defn- ^{:stratum 1} request []
-  (merge (intervention :supervisory/intervention-requested)
-         {:intervention/type :pause
-          :intervention/target-type :workflow
-          :intervention/target-id (random-uuid)
-          :intervention/requested-by "fixture-operator"
-          :intervention/request-source :tui
-          :intervention/justification "Fixture rationale"
-          :intervention/state :proposed
-          :intervention/requested-at #inst "2026-10-04"}))
-
-(defn- ^{:stratum 1} change []
-  (assoc (intervention :supervisory/intervention-state-changed)
-         :intervention/from-state :proposed
-         :intervention/state :approved))
 
 (deftest ^{:stratum 1} spec-snapshots-use-complete-records-and-semantic-schema-versions
   (let [event (snapshot)]
@@ -58,9 +28,7 @@
     (doseq [title [" " "\u2003" "\u00a0" "\u3000"]]
       (is (not (schema/valid? spec/SpecSnapshot (assoc-in event [:supervisory/entity :spec/title] title)))))))
 
-;------------------------------------------------------------------------------ Layer 2
-
-(deftest ^{:stratum 2} complete-payloads-preserve-open-extensions-and-required-fields
+(deftest ^{:stratum 1} complete-payloads-preserve-open-extensions-and-required-fields
   (doseq [[contract event] [[spec/InterventionPayload (request)]
                             [spec/InterventionPayload (change)]
                             [spec/SpecSnapshot (snapshot)]]]
@@ -78,7 +46,7 @@
                           [:scope/type :workflow] [:event/type :supervisory/unknown]]]
       (is (not (schema/valid? contract (assoc event field value)))))))
 
-(deftest ^{:stratum 2} intervention-facts-require-current-profile-and-initial-state
+(deftest ^{:stratum 1} intervention-facts-require-current-profile-and-initial-state
   (doseq [event [(request) (change)]]
     (doseq [version [nil 2 "1.0.0" "2.1.0"]]
       (is (not (schema/valid? spec/InterventionPayload (assoc event :event/version version)))))
@@ -87,7 +55,7 @@
     (is (not (schema/valid? spec/InterventionPayload (assoc (request) :intervention/state state)))))
   (is (not (schema/valid? spec/InterventionPayload (assoc (change) :intervention/from-state :unknown)))))
 
-(deftest ^{:stratum 2} intervention-identities-and-times-retain-wire-types
+(deftest ^{:stratum 1} intervention-identities-and-times-retain-wire-types
   (doseq [event [(request) (change)]]
     (doseq [field [:intervention/id :intervention/updated-at]]
       (is (not (schema/valid? spec/InterventionPayload (assoc event field "invalid"))))))
