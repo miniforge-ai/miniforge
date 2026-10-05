@@ -56,6 +56,9 @@ Unknown-family rejection belongs to publishers; consumers retain forward compati
 All three inherited-scope registry rows are identified consistently.
 N5/N8 defer scope membership to N3, including chain runs. Train changes notify
 the union of prior and current members, with distinct per-PR event identities.
+The main merge exposed missing namespace requires in orchestrator tests. Those
+requires are explicit now; no orchestrator behavior or test assertions change.
+Kondo is clean, and the affected namespace passes 23 tests / 86 assertions.
 
 ## Deployment Plan
 
