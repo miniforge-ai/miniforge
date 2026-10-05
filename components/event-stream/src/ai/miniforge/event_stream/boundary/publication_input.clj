@@ -6,6 +6,7 @@
   (:require [ai.miniforge.anomaly.interface :as anomaly]
             [ai.miniforge.event-stream.boundary.critical :as critical]
             [ai.miniforge.event-stream.commit-model :as model]
+            [ai.miniforge.event-stream.publication-identity :as identity]
             [ai.miniforge.event-stream.publication-input-spec :as spec]
             [ai.miniforge.event-stream.scope-policy :as policy]
             [ai.miniforge.redaction.interface :as redaction]
@@ -13,15 +14,6 @@
             [slingshot.slingshot :refer [try+]]))
 
 ;------------------------------------------------------------------------------ Layer 0
-
-(def ^{:stratum 0} ^:private identity-fields
-  [:event/id :event/type :event/timestamp :event/version :event/parent-id
-   :org/id :workspace/id :repo/id :agent/id :agent/instance-id :workflow/id
-   :pr/id :pack/id :deployment/id
-   :chain/run-id :chain/definition-id :chain/definition-version
-   :step/id :step/index :step/workflow-id
-   :edge/id :edge/from-workflow-id :edge/to-workflow-id
-   :supervisory/entity-key :intervention/id :intervention/target-id])
 
 (defn- ^{:stratum 0} failure [type code event]
   (let [event-id (:event/id event)
@@ -39,8 +31,8 @@
 
 (defn- ^{:stratum 1} redacted-input [event scope]
   (let [redacted (redaction/redact event)
-        before (select-keys event identity-fields)
-        after (select-keys redacted identity-fields)]
+        before (identity/projection event)
+        after (identity/projection redacted)]
     (cond
       (anomaly/any-anomaly? redacted) redacted
       (not (m/validate spec/CurrentDraft redacted)) (failure :invalid-input :publication/invalid-draft event)

@@ -35,6 +35,8 @@ Constructor integration tests use the merged typed chain draft API.
 - Guard pack, deployment, and PR references against redaction changes.
 - Materialize redacted sequences as concrete lists so durable codecs can accept them.
 - Detect numeric card values across integer, decimal, and finite floating-point representations.
+- Bound decimal expansion before rendering; extreme exponents retain compact notation.
+- Preserve requester identity, authentication context, and snapshot repository/provenance fields.
 
 Other snapshot families are intentionally not admitted by this API yet. The legacy
 publisher and historical readers remain unchanged; there is no generic-envelope
@@ -42,7 +44,7 @@ fallback that could admit unvalidated payloads through this new boundary.
 
 ## Testing Plan
 
-Boundary/schema and redaction tests pass 43 tests / 1186 assertions against the merged dependency.
+Boundary/schema and redaction tests pass 46 tests / 1206 assertions against the merged dependency.
 All nine chain types pass from the real public constructor through preparation.
 Tests reject missing fields, retired aliases, malformed supervisory records, and unsupported envelope versions.
 Failure tests cover canonical/legacy anomalies, redactor exceptions, wrapped critical causes, and sensitive malformed IDs.
@@ -54,11 +56,14 @@ Copilot identified opaque nested representations, mutable numeric subclasses, an
 all are covered by regressions. A concrete scalar allowlist rejects opaque subclasses.
 Adversarial numeric checks also reproduced decimal and floating-point card leaks.
 The shared detector now inspects those numeric representations; ordinary measurements remain numeric.
+Follow-up review identified extreme-exponent allocation and requester identity gaps.
+The final pass bounds rendering before allocation and centralizes identity/provenance projection,
+including authentication context and snapshot repository references.
 End-to-end tracing also caught redacted lists
 becoming deferred sequences, incompatible with durable encoding; they now materialize as lists.
 Kondo and truthful strata checks pass. The incremental standards scanner is rerun before push.
 All four deployed event-stream/redaction consumer suites passed serially in 1 minute 19 seconds.
-The CLI rebuilt to 39,113,957 bytes. Its isolated packaged API passes the same 43 tests / 1186 assertions.
+The CLI rebuilt to 39,115,213 bytes. Its isolated packaged API passes the same 46 tests / 1206 assertions.
 
 ## Deployment Plan
 

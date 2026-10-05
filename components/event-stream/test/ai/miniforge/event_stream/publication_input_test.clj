@@ -51,6 +51,16 @@
                    (assoc (supervisory/snapshot) :supervisory/schema-version 2)]]
     (is (anomaly/anomaly? (events/prepare-current-publication (draft payload))))))
 
+(deftest ^{:stratum 1} redaction-cannot-rewrite-intervention-requester-or-target
+  (doseq [field [:intervention/requested-by :intervention/target-id]]
+    (let [event (draft (assoc (supervisory/request) field "AKIAIOSFODNN7EXAMPLE"))]
+      (is (anomaly/anomaly? (events/prepare-current-publication event))))))
+
+(deftest ^{:stratum 1} redaction-cannot-rewrite-snapshot-repository-identity
+  (let [payload (assoc-in (supervisory/snapshot) [:supervisory/entity :spec/repo-url]
+                         "https://example.test/AKIAIOSFODNN7EXAMPLE")]
+    (is (anomaly/anomaly? (events/prepare-current-publication (draft payload))))))
+
 ;------------------------------------------------------------------------------ Layer 2
 
 (deftest ^{:stratum 2} supported-profiles-select-exact-scope-without-changing-clean-drafts
@@ -93,6 +103,8 @@
     (doseq [field [:chain/definition-version :pack/id :deployment/id :repo/id]]
       (is (anomaly/anomaly? (events/prepare-current-publication
                              (assoc event field "AKIAIOSFODNN7EXAMPLE")))))
+    (is (anomaly/anomaly? (events/prepare-current-publication
+                           (assoc event :auth/context {:principal "AKIAIOSFODNN7EXAMPLE"}))))
     (doseq [changed [(assoc event :chain/run-id (random-uuid))
                      (assoc event :event/id (random-uuid))
                      (assoc event :pr/id (random-uuid))
@@ -157,6 +169,13 @@
       (is (vector? result))
       (is (not (redaction/payment-card? (second result))))
       (is (redaction/payment-card? event)))))
+
+(deftest ^{:stratum 2} extreme-decimals-are-prepared-without-expanding-their-exponents
+  (doseq [value [1E1000000000M 1E-1000000000M 1E2147483647M 1E-2147483647M]]
+    (let [event (assoc (chain-draft) :extension/value value)
+          result (events/prepare-current-publication event)]
+      (is (vector? result))
+      (is (= event (second result))))))
 
 (comment
   (supported-drafts))

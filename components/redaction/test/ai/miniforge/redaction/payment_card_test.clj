@@ -38,7 +38,8 @@
       (is (false? (redaction/payment-card? redacted)))
       (is (redaction/clean? redacted))))
   (doseq [value [[4111 1111 1111 1111] 4111111111111112
-                 42.0 0.5M 1/3 ##Inf ##-Inf]]
+                 42.0 0.5M 1/3 ##Inf ##-Inf 1E1000000000M 1E-1000000000M
+                 1E2147483647M 1E-2147483647M]]
     (is (false? (redaction/payment-card? value)))
     (is (= value (redaction/redact value))))
   (let [value (with-meta [] {:card 4111111111111111})
