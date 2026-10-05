@@ -3,14 +3,15 @@
 ;; Licensed under the Apache License, Version 2.0.
 (ns ai.miniforge.event-stream.chain-fields-spec
   "Shared chain identity and lifecycle fields from N1 §2.32 and N3 §3.12.1."
-  (:require [ai.miniforge.failure-classifier.interface :as failure]))
+  (:require [ai.miniforge.failure-classifier.interface :as failure]
+            [ai.miniforge.schema.interface :as schema]))
 
 ;------------------------------------------------------------------------------ Layer 0
 
 (def ^{:stratum 0} NonNegativeLong [:and int? [:>= 0]])
 
 (def ^{:stratum 0} DefinitionVersion
-  [:and :string [:re #"(?s).*\S.*"] [:not [:= "latest"]]])
+  [:and schema/NonBlankString [:not [:= "latest"]]])
 
 (def ^{:stratum 0} Failure
   [:map

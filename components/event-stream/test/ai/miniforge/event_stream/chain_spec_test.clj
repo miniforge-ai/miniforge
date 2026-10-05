@@ -90,7 +90,7 @@
 (deftest ^{:stratum 2} current-writes-require-resolved-version-and-chain-profile
   (doseq [event-type (keys required-fields)]
     (let [event (payload event-type)]
-      (doseq [version [nil "" " \n\t" "latest" :latest]]
+      (doseq [version [nil "" " \n\t" "\u2003" "\u00a0" "\u3000" "\u202f" "\u0085" "latest" :latest]]
         (is (not (valid? (assoc event :chain/definition-version version)))))
       (doseq [version ["1.0.0" "2" "2.1.0" nil]]
         (is (not (valid? (assoc event :event/version version)))))
