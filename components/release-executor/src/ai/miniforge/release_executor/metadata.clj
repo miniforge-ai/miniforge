@@ -185,7 +185,14 @@
 ;; Releaser agent integration
 (defn ^{:stratum 1} invoke-releaser
   "Invoke the releaser agent to generate release metadata.
-   Falls back to nil if agent fails (caller should use fallback).
+
+   Returns {:release-meta <map-or-nil>
+            :codex-answers <vector-or-nil>
+            :codex-answer-log <keyword-or-nil>}
+   — :release-meta nil when the agent failed or none was configured
+   (caller should use fallback). The §7.7.2 answer-channel keys survive
+   a FAILED invocation too: a releaser that answered pegs before erroring
+   still made observations the durable consultation record needs.
 
    Reads `:task/behavior-addendum` from `context` (placed there by the
    release phase via `phase/load-and-filter-behaviors :release`) and
@@ -207,23 +214,24 @@
       (try
         (let [result ((:invoke-fn releaser)
                       (assoc context :llm-backend llm-backend)
-                      input)]
+                      input)
+              channel (select-keys result [:codex-answers :codex-answer-log])]
           (when logger
             (log/debug logger :release-executor :releaser-invoked
                        {:data {:status (:status result)}}))
           (if (= :success (:status result))
-            (:output result)
+            (assoc channel :release-meta (:output result))
             (do
               (when logger
                 (log/warn logger :release-executor :releaser-failed-fallback
                           {:message (msg/t :releaser/failed-fallback)}))
-              nil)))
+              (assoc channel :release-meta nil))))
         (catch Exception e
           (when logger
             (log/warn logger :release-executor :releaser-exception
                       {:message (.getMessage e)}))
-          nil))
-      nil)))
+          {:release-meta nil}))
+      {:release-meta nil})))
 
 ;------------------------------------------------------------------------------ Layer 2
 
@@ -307,6 +315,12 @@
   "Generate release metadata using releaser agent, falling back to deterministic
    metadata from the task description when no agent or LLM is available.
 
+   Returns {:release-meta <map> :codex-answers <vector-or-nil>
+   :codex-answer-log <keyword-or-nil>} — the §7.7.2 answer-channel keys
+   ride beside the metadata (including on the fallback path, where they
+   come from the failed agent invocation) so the pipeline can surface
+   them to the release phase's consultation record.
+
    Arguments:
    - releaser         — releaser agent map with :invoke-fn, or nil
    - code-artifacts   — seq of code artifact maps
@@ -317,9 +331,14 @@
   ([releaser code-artifacts task-description context logger]
    (generate-release-metadata releaser code-artifacts task-description context logger nil))
   ([releaser code-artifacts task-description context logger workflow-data]
-   (or (invoke-releaser releaser code-artifacts task-description context logger)
+   (let [invoked (invoke-releaser releaser code-artifacts task-description
+                                  context logger)]
+     (if (:release-meta invoked)
+       invoked
        (do
          (when logger
            (log/info logger :release-executor :release/using-fallback-metadata
                      {:message (msg/t :release/using-deterministic-metadata)}))
-         (fallback-release-metadata task-description code-artifacts workflow-data)))))
+         (assoc invoked :release-meta
+                (fallback-release-metadata task-description code-artifacts
+                                           workflow-data)))))))

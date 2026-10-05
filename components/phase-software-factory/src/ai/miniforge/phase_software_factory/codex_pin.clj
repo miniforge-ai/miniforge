@@ -205,10 +205,21 @@
    channel, not noise to drop. The :landings map keeps every branch's
    landing set so routing relevance (both branches reaching the same
    problem set, §4.4.1) stays computable from the record alone. nil
-   (not []) when nothing was presented."
+   (not []) when nothing was presented.
+
+   `answer-log` is the session's answer-channel state
+   (:absent | :recorded | :unreadable), surfaced as :answer-log on the
+   summary. :unreadable means the answer log existed but did not parse
+   — every presented peg still records :answer nil, but the marker lets
+   the telemetry reader keep LOST observations out of its unanswered
+   count (a torn log is not evidence the agent declined to answer).
+   nil derives the marker from `answers` (recorded when non-nil, else
+   absent) for callers that predate the channel."
   ([outcome context-reads]
-   (consultation-summary outcome context-reads nil))
+   (consultation-summary outcome context-reads nil nil))
   ([outcome context-reads answers]
+   (consultation-summary outcome context-reads answers nil))
+  ([outcome context-reads answers answer-log]
    (let [answer-of (reduce (fn [m {:keys [peg-id answer]}]
                              (assoc m peg-id answer))
                            {} answers)
@@ -225,6 +236,8 @@
               :status    (:status outcome)
               :anomaly   (:anomaly outcome)
               :situation (:situation outcome)
+              :answer-log (or answer-log
+                              (if (some? answers) :recorded :absent))
               :pegs      (when-let [pegs (seq (:pegs outcome))]
                            ;; :answers renamed on destructure: the peg row's
                            ;; branch map and the recorded answer log are

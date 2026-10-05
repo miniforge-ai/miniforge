@@ -1126,8 +1126,11 @@
                                (constantly nil)
                                artifact-session/read-context-reads
                                (constantly nil)
+                               ;; Producer shape: read-codex-answers returns
+                               ;; the §7.7.2 channel map, not a bare vector.
                                artifact-session/read-codex-answers
-                               (constantly primary)
+                               (constantly {:answers primary
+                                            :answer-log :recorded})
                                artifact-session/cleanup-session!
                                (constantly nil)
                                budget/resolve-cost-budget-usd

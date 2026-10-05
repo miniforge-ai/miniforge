@@ -199,6 +199,33 @@
       (is (= 1 (:unanswered-runs u))
           "an invalid-only run has no counted answer"))))
 
+(deftest ^{:stratum 1} torn-answer-log-runs-are-lost-not-unanswered
+  ;; Copilot catch on #1992 (§7.7.2 lost-vs-unanswered): a torn
+  ;; answers.edn parses to nil and every presented peg records :answer
+  ;; nil — without the :consultation/answer-log marker those runs
+  ;; inflate :unanswered-runs, letting log corruption masquerade as the
+  ;; agent declining to answer.
+  (let [root (str (Files/createTempDirectory "peg-telemetry-torn" (make-array FileAttribute 0)))
+        write! (fn [name pegs answer-log]
+                 (let [dir (io/file root name)]
+                   (.mkdirs dir)
+                   (spit (io/file dir "codex-consultations.edn")
+                         (str (pr-str {:consultation/id (random-uuid)
+                                       :consultation/phase :implement
+                                       :consultation/answer-log answer-log
+                                       :consultation/pegs pegs})
+                              "\n"))))]
+    (write! "run-a" [(assoc unmapped-peg :answer "x")] :recorded)
+    (write! "run-b" [unmapped-peg] :unreadable)
+    (write! "run-c" [unmapped-peg] :absent)
+    (let [u (get-in (sut/peg-telemetry root nodes gate-map) [:pegs "unmapped"])]
+      (is (= 3 (:runs u)))
+      (is (= {"x" 1} (:answers u)))
+      (is (= 1 (:unanswered-runs u))
+          "only the intact-log unanswered run counts as unanswered")
+      (is (= 1 (:unreadable-log-runs u))
+          "the torn-log run reports as lost, not unanswered"))))
+
 (deftest ^{:stratum 1} mixed-source-windows-count-the-mechanism-stream-only
   ;; Review catch on #1993: a peg observed explicitly in some runs and
   ;; via its mechanism in others must not blend the two vocabularies
