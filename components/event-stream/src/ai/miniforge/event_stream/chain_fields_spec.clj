@@ -31,6 +31,8 @@
    [:event/type qualified-keyword?]
    [:event/version [:= "2.0.0"]]
    [:scope/type [:= :chain]]
+   ;; N2 §14.4 retires this alias for current writes; historical records stay intact.
+   [:chain/id {:optional true} [:not :any]]
    [:chain/run-id :uuid]
    [:chain/definition-id :keyword]
    [:chain/definition-version DefinitionVersion]
