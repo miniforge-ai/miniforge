@@ -41,15 +41,17 @@ Constructor integration tests use the merged typed chain draft API.
 - Reject secrets in protected identity metadata rather than relying on metadata-blind equality.
 - Admit only concrete built-in collection types; reject custom maps with hidden state.
 - Omit unreadable diagnostic IDs without swallowing fatal or interruption causes.
+- Resume redacted-key suffix searches instead of repeating quadratic collision scans.
 
 Other snapshot families are intentionally not admitted by this API yet. Legacy
 publication routing and historical reader contracts remain unchanged. Shared
-redaction improvements also apply to legacy callers: eager lists and numeric card detection.
+redaction improvements also apply to legacy callers: eager lists, numeric card detection,
+and bounded collision-search work.
 No generic-envelope fallback can admit unvalidated payloads through this new boundary.
 
 ## Testing Plan
 
-Boundary/schema and redaction tests pass 51 tests / 1247 assertions against the merged dependency.
+Boundary/schema and redaction tests pass 52 tests / 1255 assertions against the merged dependency.
 All nine chain types pass from the real public constructor through preparation.
 Tests reject missing fields, retired aliases, malformed supervisory records, and unsupported envelope versions.
 Failure tests cover canonical/legacy anomalies, redactor exceptions, wrapped critical causes, and sensitive malformed IDs.
@@ -68,12 +70,16 @@ Depth/size regressions reject hostile structure before recursive redaction, whil
 protected identity values must also pass the metadata-aware cleanliness check.
 Malformed sorted maps and throwing identity lookups return safe diagnostics;
 wrapped fatal and interruption causes still escape instead of becoming anomalies.
+A collision-heavy regression checks membership probes rather than wall-clock time;
+per-key suffix cursors preserve all values without restarting each collision search.
+Map keys that differ only in an existing disambiguator share the same search cursor.
+Against the prior implementation, the regression reproduces 500500 and 374750 probes
+for two 1000-entry cases; both fixed cases stay below 10000 probes.
 End-to-end tracing also caught redacted lists
 becoming deferred sequences, incompatible with durable encoding; they now materialize as lists.
 Kondo and truthful strata checks pass. The incremental standards scanner is rerun before push.
 All four deployed event-stream/redaction consumer suites passed serially in 1 minute 19 seconds.
-After the diagnostic-only fix, all four event-stream consumer suites passed in 1 minute 18 seconds.
-The CLI rebuilt to 39,115,602 bytes. Its isolated packaged API passes the same 51 tests / 1247 assertions.
+The CLI rebuilt to 39,115,727 bytes. Its isolated packaged API passes the same 52 tests / 1255 assertions.
 
 ## Deployment Plan
 

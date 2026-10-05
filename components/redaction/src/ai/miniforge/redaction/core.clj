@@ -39,14 +39,14 @@
   (if (sorted? value) #{} (empty value)))
 
 (defn- ^{:stratum 0} free-key
-  "K, or K with a counter appended until it is absent from M.
+  "Return [unused-key next-suffix], continuing this key's prior search.
 
    Two different secrets redact to the same marker, so a map keyed by
    both would collapse to one entry and silently drop a value — the
    keys were secret, but the values they held were not. Only runs for a
    key that actually changed, which is rare, so the common path pays
    nothing."
-  [m k]
+  [m k start]
   (letfn [(nth-form [k n]
             ;; Type-preserving: a map key is compared by value, so the
             ;; only way to keep two entries is to make the keys differ by
@@ -68,11 +68,11 @@
               (coll? k)   (conj k (str (policy/marker) policy/disambiguator-separator n))
               :else       (str k policy/disambiguator-separator n)))]
     (if (contains? m k)
-      (first (for [n (iterate inc 2)
+      (first (for [n (iterate inc start)
                    :let [candidate (nth-form k n)]
                    :when (not (contains? m candidate))]
-               candidate))
-      k)))
+               [candidate (inc n)]))
+      [k start])))
 
 ;------------------------------------------------------------------------------ Layer 1
 
@@ -104,8 +104,9 @@
           ;; back onto X preserves record/plain map types. Sorted collections
           ;; become hash collections because markers can change key/value types.
           (map? x)
-          (reduce-kv
-           (fn [m k v]
+          (first
+           (reduce-kv
+           (fn [[m suffixes] k v]
              (let [;; A collection can be a key too, and match/redact-key
                    ;; knows only scalars — it cannot recurse without
                    ;; depending on this namespace. Dispatch here, where
@@ -126,8 +127,8 @@
                    v* (if (and (match/secret-key? k)
                              (match/redactable-value? v))
                         (policy/marker)
-                        (redact v))]
-               (cond-> (assoc m k v*)
+                        (redact v))
+                   m (assoc m k v*)]
                  ;; Only touch the key when it actually changed —
                  ;; dissoc/assoc would otherwise reorder an array-map
                  ;; and re-sort a sorted-map for nothing.
@@ -138,11 +139,15 @@
                  ;; redacted form and the original stayed in the map.
                  ;; redact-key returns k itself when nothing changed, so
                  ;; a scalar key still costs nothing.
-                 (not (identical? k k*))
-                 (-> (dissoc k)
-                     (as-> m' (assoc m' (free-key m' k*) v*))))))
-           (map-target x)
-           x)
+                 (if (identical? k k*)
+                   [m suffixes]
+                   (let [m (dissoc m k)
+                         cursor-key (if (map? k*) (dissoc k* ::disambiguator) k*)
+                         [key next-suffix] (free-key m k* (get suffixes cursor-key 2))]
+                     [(assoc m key v*) (assoc suffixes cursor-key next-suffix)]))))
+           ;; Each redacted key resumes its search, avoiding quadratic collision work.
+           [(map-target x) {}]
+           x))
 
           (vector? x) (mapv redact x)
           (set? x)    (into (set-target x) (map redact) x)
