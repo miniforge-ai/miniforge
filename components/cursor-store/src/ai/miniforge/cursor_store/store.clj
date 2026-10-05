@@ -3,7 +3,7 @@
 
    Stratification (intra-namespace):
    Layer 0 — no in-ns deps: cursor-file, normalize-for-storage,
-             read-edn, write-edn.
+             read-edn, write-edn, temp-file, write-synced!, move-target!.
    Layer 1 — existing-cursors, the single read of the file both public
              calls need.
    Layer 2 — the public I/O (save-cursors, load-cursors). Both sit here
@@ -16,7 +16,9 @@
             [ai.miniforge.cursor-store.messages :as msg]
             [ai.miniforge.logging.interface :as log]
             [ai.miniforge.schema.interface :as schema])
-  (:import [java.io StringWriter]))
+  (:import [java.io FileOutputStream StringWriter]
+           [java.nio.charset StandardCharsets]
+           [java.nio.file Files StandardCopyOption]))
 
 ;------------------------------------------------------------------------------ Layer 0
 
@@ -91,6 +93,30 @@
     (pp/pprint (coerce/stringify-instants v) sw)
     (str sw)))
 
+(defn- ^{:stratum 0} temp-file
+  "Return a sibling temp path for atomic write: <dir>/<name>.<uuid>.tmp"
+  ^java.io.File [^java.io.File target]
+  (io/file (.getParentFile target)
+           (str (.getName target) "." (random-uuid) ".tmp")))
+
+(defn- ^{:stratum 0} write-synced!
+  "Write content to file as UTF-8 and force it to the device, so the
+   bytes are on disk before the rename that publishes them. Without the
+   force, a host crash after the rename can still leave an empty file."
+  [^java.io.File file ^String content]
+  (with-open [out (FileOutputStream. file)]
+    (.write out (.getBytes content StandardCharsets/UTF_8))
+    (.force (.getChannel out) true)))
+
+(defn- ^{:stratum 0} move-target!
+  "Atomically replace target with tmp using ATOMIC_MOVE + REPLACE_EXISTING."
+  [^java.io.File tmp ^java.io.File target]
+  (Files/move (.toPath tmp)
+              (.toPath target)
+              (into-array java.nio.file.CopyOption
+                          [StandardCopyOption/ATOMIC_MOVE
+                           StandardCopyOption/REPLACE_EXISTING])))
+
 ;------------------------------------------------------------------------------ Layer 1
 
 ;; File access, and the public I/O that shares it.
@@ -145,9 +171,14 @@
                   (log/info logger :cursor-store :cursor-store/no-cursors
                             {:message (msg/t :store/no-cursors)}))
                 (schema/success :cursors persisted))
-            (let [dir (.getParentFile file)]
+            (let [dir (.getParentFile file)
+                  tmp (temp-file file)]
               (.mkdirs dir)
-              (spit file (write-edn persisted))
+              (try
+                (write-synced! tmp (write-edn persisted))
+                (move-target! tmp file)
+                (finally
+                  (.delete tmp)))
               (when logger
                 (log/info logger :cursor-store :cursor-store/saved
                           {:message (msg/t :store/saved {:count     (count normalized)
