@@ -38,9 +38,10 @@ Constructor integration tests use the merged typed chain draft API.
 - Bound decimal expansion before rendering; extreme exponents retain compact notation.
 - Preserve requester identity, authentication context, and snapshot repository/provenance fields.
 
-Other snapshot families are intentionally not admitted by this API yet. The legacy
-publisher and historical readers remain unchanged; there is no generic-envelope
-fallback that could admit unvalidated payloads through this new boundary.
+Other snapshot families are intentionally not admitted by this API yet. Legacy
+publication routing and historical reader contracts remain unchanged. Shared
+redaction improvements also apply to legacy callers: eager lists and numeric card detection.
+No generic-envelope fallback can admit unvalidated payloads through this new boundary.
 
 ## Testing Plan
 
