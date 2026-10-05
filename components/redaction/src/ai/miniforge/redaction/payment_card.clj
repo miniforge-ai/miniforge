@@ -4,6 +4,7 @@
 (ns ai.miniforge.redaction.payment-card
   "Checksum-aware detection shared by evidence scanning and redaction."
   (:require [ai.miniforge.redaction.policy :as policy]
+            [ai.miniforge.redaction.numeric-text :as numeric-text]
             [clojure.string :as str]))
 
 ;------------------------------------------------------------------------------ Layer 0
@@ -26,7 +27,8 @@
     (or (some-> value meta present?)
         (cond
           (string? value) (some valid-checksum? (re-seq (:redaction/payment-card-pattern @policy/policy) value))
-          (or (integer? value) (keyword? value) (symbol? value)) (present? (str value))
+          (number? value) (present? (numeric-text/render value))
+          (or (keyword? value) (symbol? value)) (present? (str value))
           (coll? value) (some present? value)
           :else false))))
 

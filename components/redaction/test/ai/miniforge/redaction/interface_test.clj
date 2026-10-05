@@ -130,6 +130,23 @@
           (is (every? pred (keys out)) (str kind ": both keys keep the kind"))
           (is (= #{:first :second} (set (vals out)))))))))
 
+(deftest ^{:stratum 0} collision-search-does-not-restart-for-every-secret-key
+  (doseq [input [(into {} (map (fn [i] [(format "AKIA%016d" i) i]) (range 1000)))
+                 (into {} (for [i (range 500) secret ["AKIAIOSFODNN7EXAMPLE" (sut/marker)]]
+                            [{:value secret :ai.miniforge.redaction.core/disambiguator i}
+                             [i secret]]))]]
+    (let [size (count input)
+          probes (atom 0)
+          original-contains? contains?
+          output (with-redefs [clojure.core/contains? (fn [coll key]
+                                                      (swap! probes inc)
+                                                      (original-contains? coll key))]
+                   (sut/redact input))]
+      (is (= size (count output)))
+      (is (= (frequencies (map sut/redact (vals input))) (frequencies (vals output))))
+      (is (sut/clean? output))
+      (is (< @probes (* 10 size)) "Collision lookup work must grow linearly."))))
+
 ;------------------------------------------------------------------------------ Layer 1
 
 (deftest ^{:stratum 1} marker-is-the-one-N3-mandates-test
@@ -216,7 +233,7 @@
     ;; still looking redacted.
     (let [src (map identity ["AKIAIOSFODNN7EXAMPLE" "plain"])
           out (:items (sut/redact {:items src}))]
-      (is (realized? out) "redaction is forced, not deferred")
+      (is (list? out) "redaction produces a concrete list, not deferred work")
       (is (= [marker "plain"] (vec out))))))
 
 (deftest ^{:stratum 1} counts-are-not-secrets-test
