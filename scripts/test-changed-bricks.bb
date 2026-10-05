@@ -11,34 +11,24 @@
 ;; Usage:
 ;;   bb scripts/test-changed-bricks.bb
 
-(require '[babashka.fs :as fs]
+(require '[ai.miniforge.bb-test-runner.interface :as bb-test-runner]
+         '[babashka.fs :as fs]
          '[babashka.process :as p]
          '[clojure.string :as str])
 
 ;; --------------------------------------------------------------------------- Poly integration
 
-(def ^:private clean-git-env
-  "Environment with GIT_INDEX_FILE stripped.
-   Prevents worktree-specific index from leaking into subprocesses that
-   run git commands (Polylith, Clojure test JVM). Without this, git
-   operations inside subprocesses can corrupt the committing worktree's
-   index, causing empty or wrong-tree commits."
-  (dissoc (into {} (System/getenv)) "GIT_INDEX_FILE"))
-
-(def ^:private test-env
-  "Environment for the test JVM with git worktree vars stripped.
-   Test namespaces shell out to git against temp repos and worktrees, so the
-   caller's worktree-specific git vars must not leak into child JVMs."
-  (dissoc (into {} (System/getenv))
-          "GIT_INDEX_FILE"
-          "GIT_DIR"
-          "GIT_WORK_TREE"
-          "GIT_COMMON_DIR"))
+(def ^:private clean-env
+  "The launch environment without git's repository-binding variables, for
+   every subprocess. Polylith's change query and the test JVMs both run
+   git: the query must find the repository from its working directory, and
+   a test must not act on the committing worktree's index or config."
+  (bb-test-runner/sanitize-git-worktree-env (into {} (System/getenv))))
 
 (defn poly-changed-names
   "Query poly for changed brick names since main. Returns a vector of strings."
   [key]
-  (let [{:keys [out]} (p/sh {:out :string :env clean-git-env}
+  (let [{:keys [out]} (p/sh {:out :string :env clean-env}
                              "poly" "ws" (str "get:changes:" key) "since:main")
         trimmed (str/trim out)]
     (if (or (str/blank? trimmed) (= trimmed "nil") (= trimmed "[]"))
@@ -196,7 +186,7 @@
   [brick-groups parallel?]
   (let [expr (build-test-expr brick-groups parallel?)
         {:keys [exit]} (deref (p/process {:out :inherit :err :inherit
-                                          :env test-env}
+                                          :env clean-env}
                                          "clojure" "-M:dev:test" "-e" expr))]
     exit))
 

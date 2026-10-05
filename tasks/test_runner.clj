@@ -26,12 +26,24 @@
 
 ;------------------------------------------------------------------------------ Layer 0
 
-(defn ^{:stratum 0} run-stream! [& args]
+(defn ^{:stratum 0} run-stream!
+  "Start a test process with inherited stdio and return its exit code.
+
+   The environment — `:env` in a leading opts map, else this process's own
+   — always goes through `sanitize-git-worktree-env`. A git hook exports
+   `GIT_DIR`, and a test that inherits it runs `git init` and `git config`
+   against the hook's repository instead of its temp directory."
+  [& args]
   (let [[opts cmd-args] (if (map? (first args))
-                          [(merge {:out :inherit :err :inherit} (first args))
-                           (rest args)]
-                          [{:out :inherit :err :inherit} args])
-        {:keys [exit]} (deref (apply p/process opts cmd-args))]
+                          [(first args) (rest args)]
+                          [{} args])
+        env (bb-test-runner/sanitize-git-worktree-env
+             (get opts :env (into {} (System/getenv))))
+        {:keys [exit]} (deref (apply p/process
+                                     (merge {:out :inherit :err :inherit}
+                                            opts
+                                            {:env env})
+                                     cmd-args))]
     exit))
 
 (def ^{:stratum 0} ^:private precommit-smoke-config-path
@@ -65,6 +77,21 @@
                   "  (System/exit (if (zero? (+ (:fail r 0) (:error r 0))) 0 1)))")]
     (run-stream! {:dir (str "projects/" project)}
                  clojure-cmd "-Sdeps" deps "-M" "-e" expr)))
+
+(defn ^{:stratum 1} poly-all
+  "Run every brick and project test through Polylith, serially.
+
+   `:all`, not plain `poly test`: the plain form tests only bricks changed
+   since the stable tag, so a test namespace that is out of scope and no
+   longer compiles — or that a change breaks through a reverse dependency
+   — is never loaded and cannot fail. Use `bb test` for fast local runs."
+  []
+  (println "🧪 Running tests via poly test :all...")
+  (println "Command: clojure -M:poly test :all")
+  (let [exit (run-stream! (proc/clojure-command) "-M:poly" "test" ":all")]
+    (when-not (zero? exit)
+      (println "❌ Tests failed with exit code:" exit)
+      (System/exit exit))))
 
 (defn ^{:stratum 1} conformance []
   (println "🧪 Running N1 conformance tests...")
@@ -178,13 +205,7 @@
         expr (str "(require 'clojure.test" ns-args ") "
                   "(let [r (clojure.test/run-tests" ns-args ")] "
                   "  (System/exit (if (zero? (+ (:fail r 0) (:error r 0))) 0 1)))")
-        ;; `git commit` exports GIT_DIR and GIT_INDEX_FILE to its hooks. A
-        ;; test JVM that inherits them points every `git init` at the hook's
-        ;; own repository — which, with no work tree named, comes back bare
-        ;; (core.bare = true in the shared config, 2026-09-03). Same strip
-        ;; `bb test` applies before spawning `poly test`.
-        env  (bb-test-runner/sanitize-git-worktree-env (into {} (System/getenv)))
-        exit (run-stream! {:env env} clojure-cmd "-M:test:dev" "-e" expr)]
+        exit (run-stream! clojure-cmd "-M:test:dev" "-e" expr)]
     (when-not (zero? exit)
       (println "❌ Pre-commit smoke tests failed with exit code:" exit)
       (System/exit exit))
