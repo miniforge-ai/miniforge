@@ -18,8 +18,9 @@
 (ns ai.miniforge.bb-test-runner.stable-derived
   "Pure helpers for the stable-derived Polylith test wrapper: parsing
    and rendering project selectors, detecting stable tags, building the
-   Polylith `ws` changed-projects queries, sanitizing the git worktree
-   env before spawning `poly test`, deriving the heartbeat interval, and
+   Polylith `ws` changed-projects queries, stripping git's
+   repository-binding variables from a test process's environment,
+   deriving the heartbeat interval, and
    ordering/grouping a project vector for diagnostic runs (additive
    expand, breadth-first bisect). Two otherwise-unconnected concerns
    share this namespace rather than each getting a two-def file of
@@ -59,9 +60,11 @@
   1)
 
 (def ^{:stratum 0} ^:private git-local-env-vars
-  "What `git rev-parse --local-env-vars` prints (git 2.48): the variables
-   that bind a git command to one repository. A child that inherits one
-   acts on the launching repository, not the directory it was pointed at.
+  "What `git rev-parse --local-env-vars` prints: the variables that bind
+   a git command to one repository. A child that inherits one acts on the
+   launching repository, not the directory it was pointed at. The 15 names
+   of git 2.40 and later, then `GIT_INTERNAL_SUPER_PREFIX`, which git
+   2.11 through 2.39 also list.
    A list, not the `GIT_` prefix: the prefix also takes variables that
    bind to no repository and that a launcher sets on purpose —
    `GIT_CONFIG_GLOBAL`, the author and committer variables, and
@@ -70,7 +73,7 @@
    "GIT_CONFIG_COUNT" "GIT_OBJECT_DIRECTORY" "GIT_DIR" "GIT_WORK_TREE"
    "GIT_IMPLICIT_WORK_TREE" "GIT_GRAFT_FILE" "GIT_INDEX_FILE"
    "GIT_NO_REPLACE_OBJECTS" "GIT_REPLACE_REF_BASE" "GIT_PREFIX"
-   "GIT_SHALLOW_FILE" "GIT_COMMON_DIR"])
+   "GIT_SHALLOW_FILE" "GIT_COMMON_DIR" "GIT_INTERNAL_SUPER_PREFIX"])
 
 (def ^{:stratum 0} ^:private changed-or-affected-projects-argv
   ["clojure" "-M:poly" "ws" "get:changes:changed-or-affected-projects"
@@ -195,10 +198,10 @@
 (defn ^{:stratum 1} sanitize-git-worktree-env
   "`env` without git's repository-binding variables (`git-local-env-vars`).
 
-   Git exports them to hooks, and obeys `GIT_DIR` over `-C <dir>`: a test
-   that inherits them runs its `git init` and `git config` against the
-   repository the hook fired in. Every launcher of a test process passes
-   its environment through here first."
+   Git exports some of them to its hooks, and obeys `GIT_DIR` over
+   `-C <dir>`: a test that inherits them runs its `git init` and
+   `git config` against the repository the hook fired in. A launcher
+   passes a test process's environment through here before starting it."
   [env]
   (apply dissoc env git-local-env-vars))
 

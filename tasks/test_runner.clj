@@ -29,16 +29,18 @@
 (defn ^{:stratum 0} run-stream!
   "Start a test process with inherited stdio and return its exit code.
 
-   The environment — `:env` in a leading opts map, else this process's own
-   — always goes through `sanitize-git-worktree-env`. A git hook exports
-   `GIT_DIR`, and a test that inherits it runs `git init` and `git config`
-   against the hook's repository instead of its temp directory."
+   The environment — `:env` in a leading opts map when it holds one, else
+   this process's own — goes through `sanitize-git-worktree-env` on every
+   call. A git hook exports `GIT_DIR`, and a test that inherits it runs
+   `git init` and `git config` against the hook's repository instead of
+   its temp directory."
   [& args]
   (let [[opts cmd-args] (if (map? (first args))
                           [(first args) (rest args)]
                           [{} args])
+        launch-env (into {} (System/getenv))
         env (bb-test-runner/sanitize-git-worktree-env
-             (get opts :env (into {} (System/getenv))))
+             (or (get opts :env) launch-env))
         {:keys [exit]} (deref (apply p/process
                                      (merge {:out :inherit :err :inherit}
                                             opts
@@ -130,7 +132,8 @@
   (println "🧪 Testing GraalVM/Babashka compatibility...")
   (let [clojure-cmd (proc/clojure-command)
         ;; Use :dev alias to get full component classpath
-        cp (-> (p/sh {:out :string} clojure-cmd "-A:dev" "-Spath")
+        env (bb-test-runner/sanitize-git-worktree-env (into {} (System/getenv)))
+        cp (-> (p/sh {:out :string :env env} clojure-cmd "-A:dev" "-Spath")
                :out
                str/trim)
         ;; Add tests directory to classpath

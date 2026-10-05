@@ -16,11 +16,13 @@
 ;; See the License for the specific language governing permissions and
 ;; limitations under the License.
 (ns test-runner-test
-  "Pins the environment strip in `test-runner/run-stream!`, the one place
-   every bb test task starts its test process: git started through it
-   cannot write to the repository a hook's environment names. Runs real
-   git against a decoy repository under java.io.tmpdir."
-  (:require [babashka.fs :as fs]
+  "Pins the environment strip in `test-runner`: git started through
+   `run-stream!` cannot write to the repository a hook's environment
+   names, and every launcher in the namespace starts its processes with
+   the sanitizer's output. The first runs real git against a decoy
+   repository under java.io.tmpdir; the second starts no process."
+  (:require [ai.miniforge.bb-test-runner.interface :as bb-test-runner]
+            [babashka.fs :as fs]
             [babashka.process :as p]
             [clojure.string :as str]
             [clojure.test :refer [deftest is testing]]
@@ -36,6 +38,19 @@
 (def ^{:stratum 0} ^:private unstripped-probe
   "A `user.name` only the unstripped control write sets."
   "unstripped-probe")
+
+(def ^{:stratum 0} ^:private sanitized-env
+  "Stands in for the sanitizer's output: a process started with exactly
+   this environment got it from `sanitize-git-worktree-env`."
+  {"SANITIZED" "yes"})
+
+(def ^{:stratum 0} ^:private launchers
+  "Every function in `test-runner` that starts a process, by task name."
+  {"test:poly"        sut/poly-all
+   "test:integration" sut/integration
+   "test:conformance" sut/conformance
+   "test:graalvm"     sut/graalvm
+   "test:precommit"   sut/precommit-smoke})
 
 (defn- ^{:stratum 0} base-env
   "`PATH` and `HOME` and nothing else. The tests lay `GIT_*` variables
@@ -63,9 +78,9 @@
 
 (defn- ^{:stratum 1} hook-env
   "`base-env` plus the repository-binding variables a git hook fired in
-   `repo` hands its children. A hook does not export `GIT_CONFIG`; it
-   redirects a `git config` write by itself, and is here because the
-   strip once missed it."
+   `repo` hands its children. A hook does not export `GIT_CONFIG`; it is
+   here because it redirects a `git config` write by itself, with or
+   without `GIT_DIR`."
   [repo]
   (let [git-dir (str (fs/path repo ".git"))]
     (merge (base-env)
@@ -73,6 +88,19 @@
             "GIT_INDEX_FILE" (str (fs/path git-dir "index"))
             "GIT_PREFIX"     ""
             "GIT_CONFIG"     (config-file repo)})))
+
+(defn- ^{:stratum 1} started-envs
+  "The `:env` of each process `launcher` starts, in order. The sanitizer
+   returns `sanitized-env` and both process entry points only record, so
+   nothing runs and a zero exit keeps the launcher off `System/exit`."
+  [launcher]
+  (let [envs   (atom [])
+        record (fn [opts] (swap! envs conj (get opts :env)))]
+    (with-redefs [bb-test-runner/sanitize-git-worktree-env (constantly sanitized-env)
+                  p/process (fn [opts & _] (record opts) (delay {:exit 0}))
+                  p/sh      (fn [opts & _] (record opts) {:exit 0 :out ""})]
+      (with-out-str (launcher)))
+    @envs))
 
 (defn- ^{:stratum 1} call-with-decoy-and-target
   "Call `f` with two fresh repositories under one temp root: `:decoy`
@@ -104,6 +132,13 @@
        (testing "given the same environment unstripped → the same write reaches the decoy"
          (git! env target "config" "user.name" unstripped-probe)
          (is (str/includes? (slurp (config-file decoy)) unstripped-probe)))))))
+
+(deftest ^{:stratum 2} test-every-launcher-starts-its-processes-with-the-sanitized-environment
+  (doseq [[task launcher] launchers]
+    (testing (str "given " task " with no environment passed → each process it starts gets the sanitizer's output")
+      (let [envs (started-envs launcher)]
+        (is (seq envs))
+        (is (every? (fn [env] (= sanitized-env env)) envs))))))
 
 ;------------------------------------------------------------------------------ Rich Comment
 (comment

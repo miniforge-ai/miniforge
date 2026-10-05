@@ -17,8 +17,7 @@
 ;; limitations under the License.
 (ns ai.miniforge.bb-test-runner.stable-derived-test
   "Unit tests for `stable-derived`."
-  (:require [clojure.java.shell :as shell]
-            [clojure.string :as str]
+  (:require [clojure.string :as str]
             [clojure.test :refer [deftest testing is]]
             [ai.miniforge.bb-test-runner.stable-derived :as sut]))
 
@@ -36,15 +35,22 @@
    "GIT_TERMINAL_PROMPT"     "0"
    "GIT_CEILING_DIRECTORIES" "/tmp"})
 
+(def ^{:stratum 0} ^:private older-git-local-env-var
+  "Listed by git 2.11 through 2.39 and by no later release, so the
+   installed-git check does not reach it on a current git."
+  "GIT_INTERNAL_SUPER_PREFIX")
+
 (defn- ^{:stratum 0} running-git-local-env-vars
   "The names the installed git prints for `git rev-parse --local-env-vars`.
-   The command reads no repository, so it runs the same from anywhere."
+   The command reads no repository, so it runs the same from anywhere.
+   Started with `ProcessBuilder`: other bricks' tests redefine
+   `clojure.java.shell/sh`, and may share this JVM."
   []
-  (->> (shell/sh "git" "rev-parse" "--local-env-vars")
-       :out
-       str/split-lines
-       (remove str/blank?)
-       vec))
+  (let [process (.start (ProcessBuilder. ["git" "rev-parse" "--local-env-vars"]))]
+    (->> (slurp (.getInputStream process))
+         str/split-lines
+         (remove str/blank?)
+         vec)))
 
 (deftest ^{:stratum 0} test-stable-tag-globs-covers-supported-history
   (testing "stable tag globs cover both historical naming schemes"
@@ -185,6 +191,10 @@
       (is (seq names)))
     (testing "given an environment that sets every one of them → none survives"
       (is (= {} (sut/sanitize-git-worktree-env (zipmap names (repeat "inherited"))))))))
+
+(deftest ^{:stratum 1} test-sanitize-git-worktree-env-drops-the-variable-only-older-git-lists
+  (testing "given the name git 2.11 through 2.39 also list → it is dropped"
+    (is (= {} (sut/sanitize-git-worktree-env {older-git-local-env-var "inherited"})))))
 
 (deftest ^{:stratum 1} test-sanitize-git-worktree-env-keeps-variables-set-on-purpose
   (testing "given GIT_* variables that bind to no repository → all are kept"
