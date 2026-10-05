@@ -32,7 +32,7 @@
 (deftest ^{:stratum 1} family-owns-scope-despite-cross-references
   (let [workflow (random-uuid)
         pr (random-uuid)
-        fields {:workflow/id workflow :pr/id pr :scope/type :pr}]
+        fields {:workflow/id workflow :pr/id pr}]
     (doseq [type [:workflow/started :pr/opened :pr/merged :opsv.actuation/emitted]]
       (is (= [:workflow workflow] (policy/scope (event type fields)))))
     (is (= [:pr pr] (policy/scope (event :pr.readiness/changed fields))))))
@@ -114,6 +114,18 @@
     (let [draft (event type {:supervisory/entity-key (random-uuid)})]
       (is (anomaly/anomaly? (policy/scope draft)))
       (is (anomaly/anomaly? (policy/scope (assoc draft :scope/type :workflow)))))))
+
+(deftest ^{:stratum 1} fixed-families-reject-conflicting-discriminators
+  (doseq [[type scope key id] [[:workflow/started :workflow :workflow/id (random-uuid)]
+                              [:pack/installed :pack :pack/id "example-pack"]
+                              [:supervisory/spec-upserted :supervisory-entity :supervisory/entity-key (random-uuid)]]]
+    (let [draft (event type {key id})
+          resolved [scope id]]
+      (is (= resolved (policy/scope draft)))
+      (is (= resolved (policy/scope (assoc draft :scope/type scope))))
+      (is (= resolved (policy/scope (assoc draft :scope/type nil))))
+      (is (anomaly/anomaly? (policy/scope (assoc draft :scope/type :pr))))
+      (is (anomaly/anomaly? (policy/scope (assoc draft :scope/type :unregistered)))))))
 
 (comment
   ::authoritative-scope)

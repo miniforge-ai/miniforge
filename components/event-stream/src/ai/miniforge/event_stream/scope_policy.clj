@@ -12,8 +12,10 @@
   (catalog/inherited? event-type))
 
 (defn- ^{:stratum 0} matching-profile? [event scope-type]
-  (or (not (catalog/discriminator-required? (:event/type event)))
-      (= scope-type (:scope/type event))))
+  (let [declared (:scope/type event)]
+    (or (= scope-type declared)
+        (and (nil? declared)
+             (not (catalog/discriminator-required? (:event/type event)))))))
 
 ;------------------------------------------------------------------------------ Layer 1
 

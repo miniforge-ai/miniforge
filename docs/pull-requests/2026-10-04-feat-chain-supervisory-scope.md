@@ -27,7 +27,8 @@ Updated to main at `364c2131` after contract PR #2000 merged.
 - Register Spec snapshots and both intervention facts in supervisory entity scope.
 - Support explicit inherited chain scope and reject unknown family members.
 - Require current-write scope discriminators for chain and intervention facts.
-- Separate family lookup vocabulary from scope resolution without changing other families.
+- Separate family lookup vocabulary from scope resolution.
+- Reject explicit markers that contradict fixed families, while preserving optional omissions.
 
 ## Testing Plan
 
@@ -37,10 +38,11 @@ Adversarial standards review and all exact-head CI/review gates precede merge.
 
 The initial regressions produced 26 assertion failures on the original policy.
 Profile regressions produced 22 failures before adding the discriminator guard.
-The final focused suite passes 10 tests / 98 assertions, including absent workflow
+Six adversarial regressions exposed contradictory markers on other fixed families.
+The final focused suite passes 11 tests / 113 assertions, including absent workflow
 cross-references and missing supervisory keys. All four deployed event-stream
 consumers pass serially. Kondo reports zero warnings and errors.
-The rebuilt CLI artifact passes the same 10 tests / 98 assertions from outside
+The rebuilt CLI artifact passes the same 11 tests / 113 assertions from outside
 the checkout, without source overlays. The changed-file standards scan is clean.
 The whole-tree scan reports 12 pre-existing candidates outside this diff,
 including an intentional bad-code string in the scanner's own example.
