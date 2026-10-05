@@ -14,4 +14,10 @@
   :publication/invalid-draft "Event draft does not satisfy a supported current-write envelope and payload contract."
   :publication/identity-redacted "Redaction would change publication identity or authoritative scope."
   :publication/preparation-failed "Event publication preparation failed before commit."
-  :publication/delivery-failed "Committed events remain queued after a delivery failure."}}
+  :publication/delivery-failed "Committed events remain queued after a delivery failure."
+  :publication/listener-failed "A best-effort listener failed after durable event acknowledgment."
+  :publication/invalid-recovery "The journal contains unsupported, altered or unredacted current-profile records."
+  :publication/invalid-query "Current event queries require valid scope, filter and pagination options."
+  :publication/unsupported-control "Legacy workflow barriers do not control current-profile streams."
+  :publication/not-current "This operation requires a current-profile event stream."
+  :publication/invalid-options "A current event stream requires explicit valid journal ownership options."}}

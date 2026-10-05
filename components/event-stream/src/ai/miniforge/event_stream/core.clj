@@ -19,8 +19,10 @@
   "Event bus and event constructors for workflow observability."
   (:require
    [ai.miniforge.anomaly.interface :as anomaly]
+   [ai.miniforge.event-stream.boundary.current-query :as current-query]
    [ai.miniforge.event-stream.messages :as messages]
    [ai.miniforge.event-stream.envelope-draft :as draft]
+   [ai.miniforge.event-stream.current-publication :as current]
    [ai.miniforge.event-stream.publication-fence :as fence]
    [ai.miniforge.logging.interface :as log]
    [ai.miniforge.redaction.interface :as redaction]
@@ -178,14 +180,16 @@
 
 ;; Query API
 (defn ^{:stratum 0} get-events [stream & [opts]]
-  (let [{:keys [workflow-id event-type offset limit]} opts
-        events (:events @stream)]
-    (cond->> events
-      workflow-id (filter #(= workflow-id (:workflow/id %)))
-      event-type (filter #(= event-type (:event/type %)))
-      offset (drop offset)
-      limit (take limit)
-      true vec)))
+  (let [events (:events @stream)]
+    (if (current/active? stream)
+      (current-query/events events opts)
+      (let [{:keys [workflow-id event-type offset limit]} opts]
+        (cond->> events
+          workflow-id (filter #(= workflow-id (:workflow/id %)))
+          event-type (filter #(= event-type (:event/type %)))
+          offset (drop offset)
+          limit (take limit)
+          true vec)))))
 
 (defn ^{:stratum 0} get-latest-status [stream workflow-id & [agent-id]]
   (->> (:events @stream)
@@ -366,6 +370,9 @@
 (defn ^{:stratum 2} publish!
   "Publish `event` to the stream.
 
+   Current-profile streams delegate typed admission, durable commit and delivery
+   to current-publication. The following workflow fence applies only to legacy streams.
+
    When the event's workflow has been quiesced (BD-2a), short-circuits
    with a structured `{:rejected? true ...}` map and runs no sinks or
    subscribers. Otherwise: fan out to sinks, append to the in-memory
@@ -379,8 +386,10 @@
    eliminating the TOCTOU window that allowed a publish to slip through
    after `quiesce!` fenced the workflow."
   [stream event]
-  (if (response/anomaly-map? event)
-    event
+  (cond
+    (current/active? stream) (current/publish! stream event)
+    (response/anomaly-map? event) event
+    :else
     ;; N3 §8.1: redact before the event reaches a sink, the log, or a
     ;; subscriber. This is the last point at which no durable or
     ;; delivered copy exists yet — redacting at a sink would leave the

@@ -38,6 +38,14 @@
 
 ;------------------------------------------------------------------------------ Layer 0
 
+(def ^{:stratum 0} create-current-event-stream
+  "Create a durable stream for the supported current profiles; see interface.stream."
+  stream/create-current-event-stream)
+
+(def ^{:stratum 0} close-current-event-stream!
+  "Release a current stream's journal ownership; not a listener drain."
+  stream/close-current-event-stream!)
+
 ;; ────────────────────────────────────────────────────────────────────────────
 ;; Stream lifecycle and control state
 (def ^{:stratum 0} create-control-state
@@ -121,7 +129,8 @@
 (def ^{:stratum 0} get-events
   "Query the in-memory event log. Returns a vector of event maps.
    Optional opts map filters/pages: :workflow-id, :event-type, :offset,
-   :limit."
+   :limit. Current streams also support authoritative :scope [type UUID] and
+   return anomalies for invalid query options."
   stream/get-events)
 
 (def ^{:stratum 0} get-latest-status
@@ -182,7 +191,7 @@
    no fence and only waits for in-flight publishes. Returns a map:
    {:ok? true :pending-publishers 0} or {:ok? false :reason :timeout
    :pending-publishers N}. Opts: :workflow-id, :timeout-ms (default
-   5000)."
+   5000). Unsupported on current-profile streams."
   stream/quiesce!)
 
 (def ^{:stratum 0} drain!
@@ -191,7 +200,7 @@
    :drained-count N}, {:ok? false :reason :timeout :pending-count N}, or
    {:ok? false :reason :sink-error :failed-sinks [...]}. Opts:
    :timeout-ms (default 5000) is the total budget across in-flight
-   settle plus sink drain."
+   settle plus sink drain. Unsupported on current-profile streams."
   stream/drain!)
 
 ;; Phase heartbeat scheduler — start/stop liveness signalling for long-running phases.
