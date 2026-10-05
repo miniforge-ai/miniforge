@@ -67,8 +67,8 @@ or none. Thesium's rank read had three such unexplained failures on
 This PR adds no layer and moves no function between layers.
 `normalize-finish-reason` is a `case` with no dependencies, so it stays
 in Layer 0 where the Codex normalizer was. A first draft kept the
-spellings in a separate map; that lifted the normalizer one layer and
-the autofix then reordered about 300 unrelated lines, so the map was
+spellings in a separate map, lifting the normalizer one layer.
+The autofix then reordered about 300 unrelated lines, so the map was
 folded back into the function. The commit used the documented
 `MINIFORGE_STRATUM_BUDGET_MODE=warn` opt-out for the pre-existing
 SL003, with every other pre-commit check passing.
