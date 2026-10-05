@@ -20,26 +20,23 @@
    Loads chain EDN files from resources/chains/ directory.
    Works both on filesystem (dev) and inside uberjars."
   (:require
-   [clojure.java.io :as io]
    [clojure.string :as str]
    [ai.miniforge.workflow.chain-resources :as resources]
+   [ai.miniforge.workflow.chain-selection :as selection]
    [ai.miniforge.anomaly.interface :as anomaly]
    [ai.miniforge.response.interface :as response]))
 
 ;------------------------------------------------------------------------------ Layer 0
 
 (defn ^{:stratum 0} find-latest-chain-resource
-  "Find the highest-versioned chain EDN resource path for chain-id.
+  "Find the lexically last versioned chain EDN resource path for chain-id.
    Returns a resource path string like \"chains/reporting-chain-v1.0.0.edn\"."
   [chain-id]
-  (let [prefix (str (name chain-id) "-v")
-        candidates (->> (resources/names "chains")
-                        (filter #(str/ends-with? % ".edn"))
-                        (filter #(str/starts-with? % prefix))
-                        sort
-                        reverse)]
-    (when-let [filename (first candidates)]
-      (str "chains/" filename))))
+  (let [prefix (str (name chain-id) "-v")]
+    (some->> (resources/names "chains")
+             (filter #(str/ends-with? % ".edn"))
+             (filter #(str/starts-with? % prefix))
+             sort last (str "chains/"))))
 
 (defn ^{:stratum 0} list-chains
   "List all available chain definitions from classpath."
@@ -54,38 +51,16 @@
 
 ;; Public API
 (defn ^{:stratum 1} try-load-chain
-  "Anomaly-returning chain loader.
-
-   Arguments:
-   - chain-id: Chain identifier (keyword, e.g. :reporting-chain)
-   - version: Version string (e.g. \"1.0.0\" or \"latest\")
-
-   Returns:
-   - on success: `{:chain chain-def :source :resource :path resource-path}`
-   - on miss:    a `:not-found` anomaly carrying `:chain-id`, `:version`,
-                 `:looked-for` (vector of paths attempted)
-
-   This is the canonical, anomaly-returning entry point. The boundary
-   site `load-chain` inlines a `response/throw-anomaly!` when an
-   anomaly is observed, preserving the legacy thrown-exception
-   contract for external callers that depend on it."
+  "Load the requested identity/version or return an anomaly; exact misses never fall back.
+   Nil, :latest and \"latest\" select a resolved definition. Selection precedes execution."
   [chain-id version]
-  (let [versioned-path (str "chains/" (name chain-id) "-v" version ".edn")
-        base-path (str "chains/" (name chain-id) ".edn")
-        resource-path (or (when (and version (not= version "latest"))
-                            (when (io/resource versioned-path)
-                              versioned-path))
-                          (when (io/resource base-path) base-path)
-                          (find-latest-chain-resource chain-id))
-        chain-def (when resource-path (resources/read-definition resource-path))]
-    (if chain-def
-      {:chain chain-def :source :resource :path resource-path}
-      (anomaly/anomaly :not-found
-                       (str "Chain '" (name chain-id) "' not found. "
-                            "Looked for: " versioned-path ", " base-path)
-                       {:chain-id chain-id
-                        :version version
-                        :looked-for [versioned-path base-path]}))))
+  (let [request (selection/request chain-id version)]
+    (if (selection/valid-request? request)
+      (let [paths (resources/candidates request find-latest-chain-resource)
+            path (some resources/existing paths)
+            definition (some-> path resources/read-definition)]
+        (selection/result (assoc request :looked-for paths) path definition))
+      (selection/invalid-request request))))
 
 ;------------------------------------------------------------------------------ Layer 2
 
@@ -98,14 +73,14 @@
 
    Returns the chain definition result map on success.
    Throws via `response/throw-anomaly!` with category
-   `:anomalies/not-found` when no matching chain resource exists.
+   corresponding to the returned anomaly (not-found, invalid-input, or fault).
 
    For an anomaly-returning equivalent that callers can branch on as
    data, use `try-load-chain` directly."
   [chain-id version]
   (let [result (try-load-chain chain-id version)]
     (if (anomaly/anomaly? result)
-      (response/throw-anomaly! :anomalies/not-found
+      (response/throw-anomaly! (keyword "anomalies" (name (:anomaly/type result)))
                                (:anomaly/message result)
                                (:anomaly/data result))
       result)))
