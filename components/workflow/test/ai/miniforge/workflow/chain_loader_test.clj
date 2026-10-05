@@ -63,11 +63,10 @@
   (when (contains? definitions resource-path) stub-resource-url))
 
 (deftest ^{:stratum 1} find-latest-chain-resource-test
-  (testing "latest chain discovery chooses the highest matching version from discovered resources"
-    (with-redefs [resources/names (fn [_]
-                                                     ["spec-to-pr-v1.0.0.edn"
-                                                      "spec-to-pr-v1.2.0.edn"
-                                                      "sdlc-to-deploy-v1.0.0.edn"])]
+  (testing "latest discovery chooses the lexically last matching resource"
+    (with-redefs [resources/names (constantly ["spec-to-pr-v1.0.0.edn"
+                                              "spec-to-pr-v1.2.0.edn"
+                                              "sdlc-to-deploy-v1.0.0.edn"])]
       (is (= spec-to-pr-latest-path
              (chain-loader/find-latest-chain-resource :spec-to-pr))))))
 
@@ -96,9 +95,8 @@
 (deftest ^{:stratum 2} load-chain-latest-test
   (testing "loads latest version when version is 'latest'"
     (with-redefs [io/resource (partial fake-resource chain-definitions)
-                  resources/names (fn [_]
-                                                     ["spec-to-pr-v1.0.0.edn"
-                                                      "spec-to-pr-v1.2.0.edn"])
+                  resources/names (constantly ["spec-to-pr-v1.0.0.edn"
+                                               "spec-to-pr-v1.2.0.edn"])
                   resources/read-definition chain-definitions]
       (let [{:keys [chain path]} (chain-loader/load-chain :spec-to-pr "latest")]
         (is (= :spec-to-pr (:chain/id chain)))
