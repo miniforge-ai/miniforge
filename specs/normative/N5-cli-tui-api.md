@@ -12,7 +12,7 @@
 **Conformance:** MUST
 
 _v0.5.0 adds the localization contract (§9), the CLI output and stability
-contracts (§8.4–§8.5), terminal capability degradation (§8.6), configuration
+contracts (§8.4–§8.5), and terminal capability degradation (§8.6). It also adds configuration
 precedence and validation (§7.3–§7.4), and conformance requirement IDs
 (§8.7–§8.8); and reconciles the override path with N4 §6.3.1._
 
@@ -1132,8 +1132,8 @@ GET /api/workflows/:id/stream
   Alias for scope-type=workflow
 ```
 
-The SSE wire format — the `event`, `id`, `data`, and `retry` fields, heartbeats,
-and the JSON serialization of the envelope — is specified in N3 §5.3.7 and is
+N3 §5.3.7 specifies the SSE wire format: `event`, `id`, `data`, and `retry` fields, heartbeats,
+and JSON serialization of the envelope. That contract is
 deliberately not reproduced here.
 
 **Requirements:**
@@ -1147,9 +1147,8 @@ authentication, listener attach handshake, subscription filters,
 resume-from-sequence, backpressure, and wire format. This section names the
 endpoint the console consumes; it MUST NOT restate or diverge from N3 §5.3.
 
-In particular, the stream is single-scope: N3 §2.3 defines six scopes
-(workflow, PR Work Item, pack, repository, supervisory entity, deployment) and
-the console subscribes to one per connection.
+The stream is single-scope: the console subscribes to one scope per connection.
+N3 §2.3 defines six scopes: workflow, PR Work Item, pack, repository, supervisory entity, and deployment.
 
 #### 4.2.3 Evidence & Artifacts
 
@@ -1181,8 +1180,8 @@ GET /api/fleet/trains/:train-id
   Returns: Train detail with ordered members
 ```
 
-The Fleet event stream (§4.2.2) MUST support subscription filters for N9 event types,
-enabling clients to subscribe to PR state changes, readiness changes, and policy changes.
+The Fleet event stream (§4.2.2) MUST support subscription filters for N9 event types. These enable
+clients to subscribe to PR state changes, readiness changes, and policy changes.
 
 ### 4.3 API Authentication
 
@@ -1232,7 +1231,7 @@ The operations console is NOT:
 3. **A chat-first interface** - The console does not require conversation to
    operate, and no primary workflow is driven through a chat prompt. It does
    provide a **conversational handoff** (§3.2.8, §3.2.9): a key that carries
-   the current selection and filter into a workflow, so an operator who has
+   the current selection and filter into a workflow. An operator who has
    found something can act on it without retyping context. That is an
    affordance on top of the views, not the way the console is used.
 4. **A micromanagement tool** - Don't require human input for every step
@@ -1314,11 +1313,10 @@ Override is not offered: CRITICAL and HIGH violations are not overridable
 here (N4 §6.3.1). Bypassing them requires multi-party approval (N8 §3).
 ```
 
-**Override availability is not a UI choice.** Implementations MUST offer `[o]`
-only when N4 §6.3.1 permits it — the gate declares `:gate/allow-override?` and
-every unrepaired violation is `:medium` or lower. Presenting an override that
+**Override availability is not a UI choice.** Implementations MUST offer `[o]` only when N4 §6.3.1 permits it.
+This requires `:gate/allow-override?` and only unrepaired violations of `:medium` or lower. Presenting an override that
 the policy layer will refuse trains operators to expect a bypass that does not
-exist; presenting one the policy layer would _accept_ for a `:critical`
+exist. Presenting one the policy layer would _accept_ for a `:critical`
 violation is worse.
 
 #### 6.1.3 Budget Exhausted
@@ -1374,7 +1372,7 @@ to create.
 
 Overrides at non-gate decision points (§6.1.1 plan approval, §6.1.3 budget
 exhaustion) are not policy waivers. They MUST be recorded in the evidence
-bundle per N6 with the deciding principal, timestamp, and justification, but
+bundle per N6 with the deciding principal, timestamp, and justification. However,
 they do not produce a Waiver — there is no PolicyEvaluation to waive.
 
 ---
@@ -1445,7 +1443,7 @@ this order, first match winning:
 4. Built-in default
 
 Precedence MUST be uniform. A setting that reads its flag but ignores its
-environment variable, or vice versa, is non-conformant — an operator cannot
+environment variable, or vice versa, is non-conformant. An operator cannot
 reason about configuration that resolves differently per setting.
 
 `mf config show` SHOULD render the effective configuration and, for each
@@ -1459,7 +1457,7 @@ Implementations MUST validate the configuration file against a schema at load:
 - An unparseable or schema-invalid config MUST fail startup with exit code 3
   (§8.4.2) and an error naming the offending key and why.
 - An **unknown** key MUST warn rather than fail. A typo'd key silently ignored
-  is how an operator concludes a setting does not work; failing outright makes
+  makes the setting appear broken. Failing outright makes
   a config written for a newer version unusable on an older one.
 - Secrets MUST NOT be stored in the config file. `:api-key-env` names an
   environment variable precisely so the key itself never lands on disk;
@@ -1538,11 +1536,11 @@ consumes it, which is why the split is normative rather than stylistic.
 | 5 | Not found — the named workflow, artifact, or pack does not exist |
 | 130 | Interrupted by SIGINT while the command was doing the work |
 
-A workflow that runs and fails its gates exits 4, not 1: a caller MUST be able
+A workflow that runs and fails its gates exits 4, not 1. A caller MUST be able
 to distinguish "the tool broke" from "the tool worked and said no".
 
 Exit 130 covers SIGINT that aborts work the command was performing. Detaching
-is the documented exception: Ctrl+C during `--follow` exits 0, because the
+is the documented exception: Ctrl+C during `--follow` exits 0. The
 console is only watching — the workflow continues server-side and §2.3.2 says
 so on screen. A command MUST state which of the two it does when interrupted,
 so an operator can tell "I stopped watching" from "I stopped the work".
@@ -1560,8 +1558,8 @@ so an operator can tell "I stopped watching" from "I stopped the work".
   human-readable text — are the exception. They come from the catalog (§9) and
   are rendered in the resolved locale. Consumers MUST NOT branch on them; that
   is what `error.code` is for (§8.4.4).
-- Implementations MUST make byte-stable output obtainable: `--locale en-US`
-  pins every prose field, so a caller that needs reproducible output across
+- Implementations MUST make byte-stable output obtainable. `--locale en-US`
+  pins every prose field. A caller that needs reproducible output across
   environments has a supported way to get it.
 - Enum values MUST be the keyword's name, not a display label — `merge-ready`,
   never "Merge Ready".
@@ -1597,7 +1595,7 @@ The CLI is a contract. Scripts depend on it.
 | Removing or renaming a `--json` key | MAJOR |
 | Changing an exit code's meaning | MAJOR |
 
-A removed or renamed command MUST first be deprecated: it keeps working, warns
+A removed or renamed command MUST first be deprecated. It keeps working, warns
 on stderr naming its replacement, and is removed no earlier than the next MAJOR.
 Deprecation warnings MUST go to stderr so they never corrupt piped output.
 
@@ -1614,7 +1612,7 @@ Implementations MUST detect and degrade for:
 
 - **No color** — when `NO_COLOR` is set, `TERM=dumb`, or stdout is not a TTY.
   Status MUST remain distinguishable without color; the glyphs of §3.2.1
-  (`●`, `✓`, `✗`, `○`) carry status independently, which is why they are
+  (`●`, `✓`, `✗`, `○`) carry status independently. They are
   normative rather than decorative.
 - **No Unicode** — when the locale or terminal cannot render the box-drawing
   and status glyphs, implementations MUST substitute ASCII equivalents rather
@@ -1699,8 +1697,8 @@ A conformance suite MUST cover, at minimum:
 2. **Exit code discrimination** — a workflow whose gates fail exits 4; a
    malformed flag exits 2; an unreadable config exits 3 (N5.CLI.6).
 3. **Locale invariance of data** — the same command under two locales produces
-   `--json` output whose keys, codes, enum values, and identifiers are
-   identical; only prose fields differ. Under `--locale en-US` the two runs are
+   `--json` output with identical keys, codes, enum values, and identifiers.
+   Only prose fields differ. Under `--locale en-US` the two runs are
    byte-identical (N5.CLI.7).
 4. **Catalog coverage** — no emitted prose originates at an emit site, and
    every key referenced exists in `en-US` (N5.L10N.1, N5.L10N.5).
@@ -1726,7 +1724,7 @@ contract those strings obey.
 Implementations MUST NOT emit an authored, human-readable string as a literal
 at the emit site. Every such string MUST be looked up from a **catalog** by
 key. This is the `foundations/localization` standard (dewey 050) applied to
-the console surface; it is normative here because N5 defines the surface that
+the console surface. It is normative here because N5 defines the surface that
 produces the most prose in the system.
 
 Two catalogs, chosen by who reads the string:
@@ -1771,13 +1769,13 @@ caller needs byte-stable output.
 
 ### 9.4 Locale Selection
 
-Implementations MUST resolve the user locale in this order, first match
-winning: the `--locale` flag, the `MINIFORGE_LOCALE` environment variable, the
+Implementations MUST resolve the user locale by first match. The order is:
+the `--locale` flag, the `MINIFORGE_LOCALE` environment variable, the
 `:locale` config key (§7.1), the host locale, then `en-US`.
 
 A key missing from the resolved locale's catalog MUST fall back to `en-US`
 rather than rendering the key or an empty string. A key missing from `en-US`
-is a defect: implementations MUST surface it in development and MUST NOT ship
+is a defect. Implementations MUST surface it in development and MUST NOT ship
 an interface that renders a raw key to a user.
 
 ---
@@ -1954,7 +1952,7 @@ any requirement in §1–§13.
 
 ### A.2 Implemented, Matching
 
-- **Localization scaffolding (§9).** `bases/cli`, `components/tui-views`, and
+**Localization scaffolding (§9).** `bases/cli`, `components/tui-views`, and
   `components/web-dashboard` each carry
   `resources/config/<component>/messages/en-US.edn`, and
   `bases/cli/.../messages.clj` resolves an active locale with an `en-US`
@@ -1964,7 +1962,7 @@ any requirement in §1–§13.
 
 ### A.3 Structural
 
-- **Locale resolution order.** `messages.clj` derives the locale from the host
+**Locale resolution order.** `messages.clj` derives the locale from the host
   language. §9.4 puts `--locale` and `MINIFORGE_LOCALE` ahead of it; neither
   is currently consulted.
 
@@ -1973,24 +1971,24 @@ any requirement in §1–§13.
 **Version History:**
 
 - 0.5.0-draft (2026-08-05): Spec-completion pass.
-  **New normative sections:** localization contract (§9) applying dewey 050 to
+  **New sections:** localization contract (§9) applying dewey 050 to
   the console surface — no raw prose, two catalogs by destination, what is not
-  prose, locale resolution; CLI output contract (§8.4) — stream separation,
-  exit codes, `--json` stability, error format; command stability and
-  deprecation (§8.5); terminal capability degradation (§8.6); configuration
+  prose, locale resolution. CLI output contract (§8.4) — stream separation,
+  exit codes, `--json` stability, error format. Command stability and
+  deprecation (§8.5). Terminal capability degradation (§8.6). Configuration
   precedence and validation (§7.3–§7.4); conformance requirement IDs and test
   obligations (§8.7–§8.8).
-  **Contract fixes:** §5.2 claimed the console is not a chat interface while
+  **Contract fixes:** §5.2 denied a chat interface while
   §3.2.8 and §3.2.9 mandated a chat key — reworded to distinguish chat-first
-  operation from conversational handoff; `c` collided between Cancel (§3.3)
-  and chat, so chat moved to `C`; §2.2's namespace table gained `listener`,
-  `agent`, and `gate`, which §2.3.3 already defined commands for; §2.3.3's
-  control commands moved out of the fleet namespace they were nested under;
-  §8.1's required-namespace list resynced with §2.2; §6.1.2 no longer offers
-  override for a CRITICAL violation, which N4 §6.3.1 forbids; §6.2's bespoke
+  operation from conversational handoff. `c` collided between Cancel (§3.3)
+  and chat, so chat moved to `C`. §2.2's namespace table gained `listener`,
+  `agent`, and `gate`, which §2.3.3 already defined commands for. §2.3.3's
+  control commands moved out of the fleet namespace they were nested under.
+  §8.1's required-namespace list resynced with §2.2. §6.1.2 no longer offers
+  override for a CRITICAL violation, which N4 §6.3.1 forbids. §6.2's bespoke
   `:override/*` record replaced by the Waiver of
-  N5-delta-supervisory-control-plane §3.1; §4.2.2 and §4.3 aligned with N3
-  §5.3's streaming and authentication contract; §3.2.8–§3.2.9 stopped
+  N5-delta-supervisory-control-plane §3.1. §4.2.2 and §4.3 aligned with N3
+  §5.3's streaming and authentication contract. §3.2.8–§3.2.9 stopped
   mandating implementation namespaces (`pr-train/*`, `policy-pack/*`) and now
   reference the N9 and N4 contracts, per standard 020.
   **Structural:** §9 inserted; former §9–§12 renumbered to §10–§13.
