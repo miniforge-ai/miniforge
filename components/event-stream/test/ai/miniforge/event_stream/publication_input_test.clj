@@ -1,0 +1,124 @@
+;; Title: Miniforge.ai
+;; Copyright 2025-2026 Christopher Lester (christopher@miniforge.ai)
+;; Licensed under the Apache License, Version 2.0.
+(ns ai.miniforge.event-stream.publication-input-test
+  (:require [ai.miniforge.anomaly.interface :as anomaly]
+            [ai.miniforge.event-stream.chain-test-support :as chain]
+            [ai.miniforge.event-stream.commit-test-support :as support]
+            [ai.miniforge.event-stream.interface :as events]
+            [ai.miniforge.event-stream.supervisory-test-support :as supervisory]
+            [ai.miniforge.redaction.interface :as redaction]
+            [ai.miniforge.response.interface :as response]
+            [clojure.test :refer [deftest is]]
+            [slingshot.slingshot :refer [try+ throw+]]))
+
+;------------------------------------------------------------------------------ Layer 0
+
+(defn- ^{:stratum 0} draft [payload]
+  (merge (support/draft) payload))
+
+(defn- ^{:stratum 0} observe-redaction [calls event]
+  (swap! calls inc)
+  event)
+
+(defn- ^{:stratum 0} throw-redaction [_]
+  (throw (ex-info "redaction fixture failure" {})))
+
+(defn- ^{:stratum 0} throw-value [value _] (throw+ value))
+
+(defn- ^{:stratum 0} constructed-chain-draft [event-type]
+  (let [stream (events/create-event-stream {:sinks []})
+        fields (dissoc (chain/payload event-type) :event/type :event/version :scope/type)]
+    (events/create-chain-event-draft stream event-type fields)))
+
+;------------------------------------------------------------------------------ Layer 1
+
+(defn- ^{:stratum 1} chain-draft []
+  (draft (chain/payload :chain/started)))
+
+(defn- ^{:stratum 1} supported-drafts []
+  (concat (map constructed-chain-draft (keys chain/required-fields))
+          (map draft [(supervisory/request) (supervisory/change) (supervisory/snapshot)])))
+
+(deftest ^{:stratum 1} supervisory-payloads-cannot-fall-back-to-generic-envelopes
+  (doseq [payload [(dissoc (supervisory/request) :intervention/justification)
+                   (assoc (supervisory/request) :intervention/state :approved)
+                   (assoc (supervisory/change) :supervisory/entity-key (random-uuid))
+                   (dissoc (supervisory/change) :intervention/from-state)
+                   (assoc (supervisory/change) :event/version "1.0.0")
+                   (assoc (supervisory/snapshot) :event/version "99.0.0")
+                   (update (supervisory/snapshot) :supervisory/entity dissoc :spec/origin)
+                   (assoc (supervisory/snapshot) :supervisory/schema-version 2)]]
+    (is (anomaly/anomaly? (events/prepare-current-publication (draft payload))))))
+
+;------------------------------------------------------------------------------ Layer 2
+
+(deftest ^{:stratum 2} supported-profiles-select-exact-scope-without-changing-clean-drafts
+  (doseq [event (supported-drafts)]
+    (let [expected (if (:chain/run-id event) [:chain (:chain/run-id event)]
+                       [:supervisory-entity (:supervisory/entity-key event)])]
+      (is (= [expected event] (events/prepare-current-publication event)))
+      (is (= expected (first (events/prepare-current-publication
+                              (assoc event :workflow/id (random-uuid)))))))))
+
+(deftest ^{:stratum 2} invalid-drafts-are-rejected-before-redaction
+  (let [calls (atom 0)
+        event (chain-draft)]
+    (with-redefs [redaction/redact (partial observe-redaction calls)]
+      (doseq [bad [nil [] {} (support/draft) (assoc event :event/type :chain/unknown)
+                   (assoc event :event/version "1.0.0") (assoc event :event/sequence-number 0)
+                   (assoc event :timestamp nil) (assoc event :scope/type :workflow)
+                   (assoc event :chain/id nil)
+                   (assoc event :chain/step-count -1)]]
+        (is (anomaly/anomaly? (events/prepare-current-publication bad))))
+      (doseq [key [:event/id :event/type :event/timestamp :event/version :message
+                   :chain/run-id :chain/definition-id :chain/definition-version :chain/step-count]]
+        (is (anomaly/anomaly? (events/prepare-current-publication (dissoc event key)))))
+      (doseq [key [:event/parent-id :agent/instance-id :workflow/id :pr/id :org/id :workspace/id]]
+        (is (anomaly/anomaly? (events/prepare-current-publication (assoc event key :invalid)))))
+      (is (zero? @calls)))))
+
+(deftest ^{:stratum 2} malformed-identities-are-not-echoed-into-errors
+  (let [event (assoc (chain-draft) :event/id "AKIAIOSFODNN7EXAMPLE")
+        result (events/prepare-current-publication event)]
+    (is (anomaly/anomaly? result))
+    (is (nil? (get-in result [:anomaly/data :event/id])))
+    (is (redaction/clean? result))))
+
+(deftest ^{:stratum 2} redaction-removes-sensitive-content-but-cannot-rewrite-identity
+  (let [event (assoc (chain-draft) :password "fixture-secret")
+        result (events/prepare-current-publication event)]
+    (is (= (redaction/marker) (:password (second result))))
+    (is (= (:event/id event) (:event/id (second result))))
+    (is (anomaly/anomaly? (events/prepare-current-publication
+                           (assoc event :chain/definition-version "AKIAIOSFODNN7EXAMPLE"))))
+    (doseq [changed [(assoc event :chain/run-id (random-uuid))
+                     (assoc event :event/id (random-uuid))
+                     (assoc event :chain/definition-version "rewritten")
+                     (dissoc event :message)]]
+      (with-redefs [redaction/redact (constantly changed)]
+        (is (anomaly/anomaly? (events/prepare-current-publication event)))))
+    (with-redefs [redaction/redact throw-redaction]
+      (is (anomaly/anomaly? (events/prepare-current-publication event))))))
+
+(deftest ^{:stratum 2} upstream-and-redaction-anomalies-remain-values
+  (doseq [failure [(anomaly/anomaly :fault (:message (support/draft)) {})
+                   (response/make-anomaly :anomalies/fault (:message (support/draft)) {})]]
+    (is (identical? failure (events/prepare-current-publication failure)))
+    (with-redefs [redaction/redact (constantly failure)]
+      (is (identical? failure (events/prepare-current-publication (chain-draft)))))
+    (with-redefs [redaction/redact (partial throw-value failure)]
+      (is (identical? failure (events/prepare-current-publication (chain-draft)))))))
+
+(deftest ^{:stratum 2} critical-redaction-causes-are-not-downgraded
+  (doseq [cause [(AssertionError.) (InterruptedException.)]]
+    (let [wrapped (ex-info "wrapped redaction fixture" {} cause)]
+      (with-redefs [redaction/redact (partial throw-value wrapped)]
+        (try+
+          (events/prepare-current-publication (chain-draft))
+          (is false "Critical cause must escape admission")
+          (catch Throwable actual (is (identical? cause actual)))
+          (finally (Thread/interrupted)))))))
+
+(comment
+  (supported-drafts))

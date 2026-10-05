@@ -78,6 +78,11 @@
    generator for lexically-sortable ids)."
   stream/create-event-stream)
 
+(def ^{:stratum 0} prepare-current-publication
+  "Prepare a supported current-write draft as [scope redacted-draft] or an anomaly.
+   This validates chain v2, intervention v2, and Spec snapshots; it grants no lifecycle authority or receipt."
+  stream/prepare-current-publication)
+
 (def ^{:stratum 0} create-event-draft
   "Construct an uncommitted envelope without a sequence number. No publication,
    redaction, or admission occurs; retain this draft across publication retries.

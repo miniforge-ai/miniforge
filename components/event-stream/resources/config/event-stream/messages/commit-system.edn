@@ -11,4 +11,7 @@
   :journal/closed "Event journal is closed."
   :journal/recovery "Event journal recovery failed."
   :publication/invalid-scope "Event publication requires its family's non-nil authoritative scope."
+  :publication/invalid-draft "Event draft does not satisfy a supported current-write envelope and payload contract."
+  :publication/identity-redacted "Redaction would change publication identity or authoritative scope."
+  :publication/preparation-failed "Event publication preparation failed before commit."
   :publication/delivery-failed "Committed events remain queued after a delivery failure."}}
