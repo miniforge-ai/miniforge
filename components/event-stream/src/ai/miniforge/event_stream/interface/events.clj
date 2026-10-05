@@ -18,6 +18,9 @@
 (ns ai.miniforge.event-stream.interface.events
   "Workflow, agent, gate, task, listener, control, chain, and control-plane event constructors."
   (:require
+   [ai.miniforge.anomaly.interface :as anomaly]
+   [ai.miniforge.event-stream.chain-draft-model :as chain-model]
+   [ai.miniforge.event-stream.chain-event-draft :as chain-draft]
    [ai.miniforge.event-stream.core :as core]
    [ai.miniforge.event-stream.compound-events :as compound]
    [ai.miniforge.event-stream.phase-events :as phase-events]))
@@ -248,6 +251,14 @@
   "Build and return a :control-action/executed event envelope map for an
    action id; optional result as :action/result."
   core/control-action-executed)
+
+(defn ^{:stratum 0} create-chain-event-draft
+  "Construct a validated v2 chain draft from explicit run/definition identity and
+   lifecycle fields. Optional opts supply envelope identity metadata. Retain the
+   draft for retries. No sequencing, admission, redaction, authority, or publication."
+  [stream event-type payload & [opts]]
+  (anomaly/let-ok [prepared (chain-model/prepare event-type payload)]
+    (chain-draft/create stream prepared opts)))
 
 (def ^{:stratum 0} chain-started
   "Build and return a :chain/started event envelope map (chains are not

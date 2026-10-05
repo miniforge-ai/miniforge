@@ -18,24 +18,32 @@ N2 §14.4 retires the ambiguous chain identity alias for new writes.
 
 ## Layer
 
-Event construction, branched from main `532bf711`. Draft assembly depends on
-PR #2011, which must merge before the constructor is committed and published.
-The independent schema/fixture prerequisite does not need that draft API.
+Event construction, branched from main `532bf711` and updated through the
+merged draft dependency #2011 (`ce5f7d2e`).
 
 ## Changes in Detail
 
 - Reject retired `:chain/id` in current-write payloads without changing historical readers.
 - Share independent contract fixtures between schema and constructor tests.
-- Validate typed payloads before constructing event identity.
+- Validate typed payloads at the public boundary before constructing event identity.
 - Preserve supplied run and child identities; do not invent them during construction.
 - Protect envelope fields from payload injection and retain extension fields.
 
 ## Testing Plan
 
 Twenty-seven assertions exposed acceptance of the retired alias, including nil.
-The corrected payload suite passes eight tests / 528 assertions.
-Complete constructor coverage, serial deployed consumers, packaged validation,
-adversarial standards review, and normal signed hooks before publication.
+The schema and public constructor suites pass 11 tests / 641 assertions, covering
+all nine types, required-field omissions, injection, unchanged stream state, and
+canonical/legacy allocation failures. All four deployed event-stream consumer
+suites passed serially in 2 minutes 23 seconds. The CLI rebuilt to 39,110,317 bytes;
+the isolated packaged API passed the same 11 tests / 641 assertions. The incremental
+standards scan reported zero violations across 4307 files.
+
+The adversarial standards pass traced validation before allocation and moved it
+to the interface. It verified nil options and run-level workflow IDs.
+All nine types share one fixture factory and one assembly path.
+No duplicate per-type envelope maps, interior revalidation, or hidden publishing
+effects were introduced. Kondo and per-file strata checks pass.
 
 ## Deployment Plan
 
@@ -51,6 +59,7 @@ Depends on #2011 and the typed payload foundations from #2007/#2008.
 ## Checklist
 
 - [x] Tighten current-write identities and share fixtures.
-- [ ] Implement and validate typed draft construction.
-- [ ] Complete consumer/artifact/standards checks and normal signed hooks.
+- [x] Implement and validate typed draft construction.
+- [x] Complete consumer/artifact/standards checks.
+- Run normal signed hooks, then require fresh no-findings review and every CI gate.
 - Require fresh no-findings review and every CI gate before merge.
