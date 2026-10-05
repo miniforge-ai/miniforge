@@ -17,7 +17,8 @@
 ;; limitations under the License.
 
 {:workflow/messages
- {;; Event publishing warnings
+ {:chain/child-incomplete "Chain child did not complete successfully."
+  ;; Event publishing warnings
   :warn/websocket-send       "Warning: Failed to send event via WebSocket: {error}"
   :warn/publish-event        "Warning: Failed to publish event: {error}"
   :warn/publish-started      "Warning: Failed to publish workflow-started event: {error}"
