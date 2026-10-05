@@ -18,20 +18,46 @@ and schema validation alone do not satisfy that contract.
 ## Layer
 
 Publication integration, branched from main `cfc9bce3` after #2014. Depends on
-typed publication admission #2015; merge it before publishing this implementation.
+typed publication admission #2015, now merged and integrated from `e0ba7445`.
 
 ## Changes in Detail
 
-Implementation planning in progress. Require explicit durable storage for the
-new supported-profile stream. Retain the legacy stream's existing behavior.
-Prevent bypassing admission on the new stream. A returned receipt must correspond
-to the exact durable event; listener failures must not undo storage acknowledgment.
+- Add an explicit current-profile stream owning an existing canonical journal directory.
+- Validate and redact drafts before durable commit; return the journal's exact receipt.
+- Restore validated history and retry identities without redelivering recovered events.
+- Release ownership after rejected recovery; never fall back to volatile storage.
+- Isolate ordinary listener/filter/logging failures after commit while preserving critical causes.
+- Query by authoritative scope; workflow cross-references do not imply membership.
+- Reject legacy quiesce/drain calls on current streams instead of returning false success.
+- Reject closing a legacy stream through the current API without mutating its state.
+- Reject unreadable creation/query options without downgrading fatal or interruption causes.
+- Detach mutable dates in receipts, history results, and each listener's view.
+
+Supported writes remain chain v2, intervention v2, and Spec snapshots only.
+Legacy stream routing is unchanged. Current streams default to no listeners;
+their configured sinks are best-effort consumers, not the durable storage port.
+Recovered history preserves per-scope sequence order; no global cross-scope
+commit order is inferred from independent sequence counters.
 
 ## Testing Plan
 
-Exercise rejection before storage, commit-before-delivery, retries, closed streams,
-resource ownership, and real disk recovery. Run consumers and hooks serially.
-Build and test the packaged API, then complete an adversarial standards review.
+Regressions cover rejection before storage, commit-before-delivery, retry identity,
+per-scope positions, and closed streams. They also cover resource ownership, real disk
+recovery, invalid recovered profiles, authoritative queries, and legacy-control rejection.
+All four deployed event-stream consumer suites passed serially in 1 minute 23 seconds.
+The real miniforge project's JVM disk integration passes 2 tests / 16 assertions.
+The CLI built to 39,124,397 bytes. Its isolated packaged API, with test paths but no
+source overlays, passes 18 tests / 94 assertions. Lint and truthful strata checks pass.
+The incremental standards scan reports zero violations across 4327 files.
+
+The adversarial pass reused the existing stream-state constructor and shared test
+factories rather than duplicating maps. It caught legacy anomaly destructuring,
+redaction of storage-assigned sequence metadata, and cross-reference scope leakage.
+It also caught false success from legacy barriers, mixed-profile close mutation, unreadable sorted-map
+options, and mutable-date aliases in public views.
+Views preserve trusted sequence counters without treating them as redactable payloads.
+Schema data, boundary validation, storage,
+publication, and delivery remain separate. Run JVM consumers and hooks serially.
 
 ## Deployment Plan
 
@@ -46,6 +72,7 @@ Preserve the older acknowledgment worktree and its drafts.
 
 ## Checklist
 
-- [ ] Implement and validate durable publication integration.
-- [ ] Complete standards, consumer, artifact, and signed-hook gates.
+- [x] Implement and validate durable publication integration.
+- [x] Complete standards, consumer, and artifact gates.
+- [ ] Complete normal signed-hook gates.
 - [ ] Require fresh no-findings review and all CI before merge.
