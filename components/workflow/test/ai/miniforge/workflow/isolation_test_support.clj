@@ -49,7 +49,8 @@
   (:require
    [ai.miniforge.workflow.checkpoint-test-support :as checkpoint]
    [ai.miniforge.workflow.runner-environment :as env]
-   [clojure.java.shell :as shell])
+   [clojure.java.shell :as shell]
+   [clojure.string :as str])
   (:import
    [java.io File]
    [java.nio.file Files]
@@ -75,23 +76,45 @@
         (doseq [child (.listFiles f)] (delete-tree! child)))
       (.delete f))))
 
-(defn ^{:stratum 0} git!
-  "Run git in `dir` with a hermetic environment; throw on a non-zero exit.
+(def ^{:stratum 0} host-config
+  "Local config of the throwaway host repository: an identity for the
+   commits the code under test makes in it, and signing off."
+  [["user.email" "isolation-test@example.invalid"]
+   ["user.name" "Isolation Test"]
+   ["commit.gpgsign" "false"]])
 
-   Hermetic: GIT_INDEX_FILE, GIT_DIR, GIT_WORK_TREE, GIT_COMMON_DIR and
-   GIT_CONFIG_PARAMETERS are dropped. A git hook exports the first four to
-   its children, and `git -c k=v` travels as the fifth; a `git init` that
-   inherits them acts on the hook's repository, not the directory it was
-   pointed at — under the pre-commit hook this fixture's `git init`
-   re-initialised the launch repository as bare (`core.bare = true` in its
-   shared config, 2026-09-03). Fixture setup that fails must fail here,
-   not later as a confusing acquisition warning."
-  [dir & args]
-  (let [env (apply dissoc (into {} (System/getenv))
-                   ["GIT_INDEX_FILE" "GIT_DIR" "GIT_WORK_TREE" "GIT_COMMON_DIR"
-                    "GIT_CONFIG_PARAMETERS"])
+(defn ^{:stratum 0} launch-env
+  "The environment this JVM was launched with, as a map."
+  []
+  (into {} (System/getenv)))
+
+(defn ^{:stratum 0} config-args
+  "git arguments that set `k` to `v` in the config file of the repository
+   at `dir`, named by absolute path. A write that names its file cannot
+   land in another repository whatever the environment says, and fails
+   when `dir` holds no repository instead of finding an enclosing one."
+  [dir [k v]]
+  ["config" "--file"
+   (.getAbsolutePath (File. (File. (str dir) ".git") "config"))
+   k v])
+
+(defn ^{:stratum 0} git!
+  "Run git in `dir` with `process-env` minus every `GIT_*` variable;
+   throw on a non-zero exit.
+
+   In a linked worktree git exports `GIT_DIR` to its hooks and obeys it
+   over `-C`: a `git init` or `git config` that inherits a hook's
+   environment acts on the hook's repository, whose config all its
+   worktrees share. The whole prefix goes, not a list of names:
+   `GIT_COMMON_DIR` and `GIT_CONFIG` each redirect a config write too.
+   Fixture setup that fails must fail here, not later as a confusing
+   acquisition warning."
+  [process-env dir & args]
+  (let [hermetic (into {}
+                       (remove (fn [[k _]] (str/starts-with? k "GIT_")))
+                       process-env)
         {:keys [exit err] :as result}
-        (apply shell/sh "git" "-C" (str dir) (concat args [:env env]))]
+        (apply shell/sh "git" "-C" (str dir) (concat args [:env hermetic]))]
     (when-not (zero? exit)
       (throw (ex-info "isolation fixture git command failed"
                       {:dir (str dir) :args (vec args) :exit exit :err err})))
@@ -116,17 +139,19 @@
 
 (defn ^{:stratum 1} init-host-repo!
   "A stand-in for the checkout the test JVM was launched from: one commit
-   on `host-branch`, signing off, no remote."
-  [dir]
-  (.mkdirs (File. (str dir)))
-  (git! dir "init" "--quiet" "-b" host-branch)
-  (git! dir "config" "user.email" "isolation-test@example.invalid")
-  (git! dir "config" "user.name" "Isolation Test")
-  (git! dir "config" "commit.gpgsign" "false")
-  (spit (str (File. (str dir) "seed.txt")) "seed\n")
-  (git! dir "add" "seed.txt")
-  (git! dir "commit" "--quiet" "--no-verify" "-m" "seed")
-  (str dir))
+   on `host-branch`, `host-config` applied, no remote. `process-env`
+   defaults to the JVM's own; `git!` scrubs it either way."
+  ([dir]
+   (init-host-repo! dir (launch-env)))
+  ([dir process-env]
+   (.mkdirs (File. (str dir)))
+   (git! process-env dir "init" "--quiet" "-b" host-branch)
+   (doseq [entry host-config]
+     (apply git! process-env dir (config-args dir entry)))
+   (spit (str (File. (str dir) "seed.txt")) "seed\n")
+   (git! process-env dir "add" "seed.txt")
+   (git! process-env dir "commit" "--quiet" "--no-verify" "-m" "seed")
+   (str dir)))
 
 (defn ^{:stratum 1} isolated-registry-config
   "`registry-config-for-mode` with the worktree entry rooted under `root`.
