@@ -15,7 +15,6 @@
 ;; WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 ;; See the License for the specific language governing permissions and
 ;; limitations under the License.
-
 (ns ai.miniforge.agent.planner-test
   "Tests for the Planner agent."
   (:require
@@ -28,24 +27,23 @@
    [ai.miniforge.llm.interface :as llm]
    [ai.miniforge.logging.interface :as log]))
 
-;------------------------------------------------------------------------------ Regression-floor constants
+;------------------------------------------------------------------------------ Layer 0
 
-(def ^:private min-stagnation-threshold-ms
+;------------------------------------------------------------------------------ Regression-floor constants
+(def ^{:stratum 0} ^:private min-stagnation-threshold-ms
   "Floor for the planner main-turn :stagnation-threshold-ms. Below
    this, Opus's pre-first-chunk think on heavy planner prompts trips
    stagnation before the first structured-EDN chunk lands. This is the
    regression floor PR #781 establishes."
   180000)
 
-(def ^:private min-total-budget-ms
+(def ^{:stratum 0} ^:private min-total-budget-ms
   "Floor for the planner main-turn :max-total-ms. Covers the longest
    historical successful planner run."
   600000)
 
-;------------------------------------------------------------------------------ Layer 0
 ;; Test fixtures
-
-(def valid-plan
+(def ^{:stratum 0} valid-plan
   {:plan/id (random-uuid)
    :plan/name "test-plan"
    :plan/tasks [{:task/id (random-uuid)
@@ -56,15 +54,13 @@
    :plan/estimated-complexity :medium
    :plan/risks ["None identified"]})
 
-(def minimal-plan
+(def ^{:stratum 0} minimal-plan
   {:plan/id (random-uuid)
    :plan/name "minimal"
    :plan/tasks []})
 
-;------------------------------------------------------------------------------ Layer 1
 ;; Agent creation tests
-
-(deftest create-planner-test
+(deftest ^{:stratum 0} create-planner-test
   (testing "creates planner with default config"
     (let [agent (planner/create-planner)]
       (is (some? agent))
@@ -82,10 +78,8 @@
           agent (planner/create-planner {:logger logger})]
       (is (some? (:logger agent))))))
 
-;------------------------------------------------------------------------------ Layer 2
 ;; Invoke tests
-
-(deftest planner-invoke-test
+(deftest ^{:stratum 0} planner-invoke-test
   (testing "returns error data when no LLM backend provided"
     (let [agent (planner/create-planner)
           result (core/invoke agent {} "Build a user login system")]
@@ -249,7 +243,79 @@
           (is (str/includes? (second @prompts) "Do NOT explore further"))
           (is (str/includes? (second @prompts) "Write `.miniforge/plan.edn`"))))))))
 
-(deftest planner-system-prompt-includes-behavior-addendum-test
+(deftest ^{:stratum 0} planner-retry-answer-channel-merges-test
+  ;; §7.7.2: the submission retry runs its own session with its own
+  ;; answers.edn. Its recorded answers APPEND after the primary log
+  ;; (last-recording-wins includes an answer revised during the retry)
+  ;; and a torn log in either session wins the merged marker — without
+  ;; this, answers recorded during a successful retry persist as absent.
+  (let [run-retry
+        (fn [primary-channel retry-channel]
+          (let [fake-llm-client {:type :fake}
+                call-count (atom 0)
+                submitted-plan {:plan/id (random-uuid)
+                                :plan/name "retry-plan"
+                                :plan/tasks []}
+                first-response {:status :error
+                                :type "adaptive_timeout"
+                                :message "Adaptive timeout"
+                                :stdout "Sufficient data. Writing the plan now."}
+                second-response {:status :success :content ""}
+                responses (atom [first-response second-response])
+                agent (planner/create-planner {:llm-backend fake-llm-client})]
+            (with-redefs [model/resolve-llm-client-for-role
+                          (fn [_role provided] provided)
+                          artifact-session/with-session
+                          (fn [_context body-fn]
+                            (let [n (swap! call-count inc)
+                                  llm-result (body-fn {:dir "/tmp/fake-session"
+                                                       :workdir "/tmp/fake-workdir"
+                                                       :mcp-config-path "/tmp/fake-session/mcp-config.json"
+                                                       :mcp-allowed-tools []
+                                                       :supervision {}
+                                                       :pre-session-snapshot {}})
+                                  channel (if (= n 1) primary-channel retry-channel)]
+                              (merge {:llm-result llm-result
+                                      :artifact (when (= n 2) submitted-plan)
+                                      :worktree-artifacts {}
+                                      :context-misses nil
+                                      :pre-session-snapshot {}
+                                      :session-mode :host}
+                                     channel)))
+                          llm/chat (fn [_client _prompt _opts]
+                                     (let [response (first @responses)]
+                                       (swap! responses rest)
+                                       response))
+                          llm/success? #(= :success (:status %))
+                          llm/get-content :content
+                          llm/get-error identity]
+              (let [result (core/invoke agent {:llm-backend fake-llm-client}
+                                        {:description "Plan this"})]
+                (is (= :success (:status result)))
+                (is (= 2 @call-count) "the submission retry ran")
+                result))))]
+    (testing "retry answers append AFTER the primary log"
+      (let [result (run-retry {:codex-answers [{:peg-id "peg-a" :answer "no" :timestamp "t1"}]
+                               :codex-answer-log :recorded}
+                              {:codex-answers [{:peg-id "peg-a" :answer "yes" :timestamp "t2"}]
+                               :codex-answer-log :recorded})]
+        (is (= [{:peg-id "peg-a" :answer "no" :timestamp "t1"}
+                {:peg-id "peg-a" :answer "yes" :timestamp "t2"}]
+               (:codex-answers result))
+            "primary first, retry appended — last-recording-wins sees t2")
+        (is (= :recorded (:codex-answer-log result)))))
+    (testing "a torn retry log wins the merged marker"
+      (let [result (run-retry {:codex-answers [{:peg-id "peg-a" :answer "no" :timestamp "t1"}]
+                               :codex-answer-log :recorded}
+                              {:codex-answers nil
+                               :codex-answer-log :unreadable})]
+        (is (= [{:peg-id "peg-a" :answer "no" :timestamp "t1"}]
+               (:codex-answers result))
+            "the primary session's answers survive a torn retry log")
+        (is (= :unreadable (:codex-answer-log result))
+            "LOST retry observations must not read as a clean record")))))
+
+(deftest ^{:stratum 0} planner-system-prompt-includes-behavior-addendum-test
   ;; Pins the wiring that lets the planner agent see the phase-filtered
   ;; standards rules `phase/load-and-filter-behaviors :plan` produces.
   ;; Without this, rules targeting :plan (specification-standards,
@@ -295,7 +361,7 @@
           (is (str/includes? system-prompt "Plan rule body.")
               "rule body text must reach the LLM verbatim"))))))
 
-(deftest planner-system-prompt-empty-when-no-addendum-test
+(deftest ^{:stratum 0} planner-system-prompt-empty-when-no-addendum-test
   (testing "absent :task/behavior-addendum is treated as empty — no nil concat"
     (let [captured (atom nil)
           fake-llm-client {:type :fake}
@@ -332,50 +398,9 @@
               ":system must always be a string (default \"\" when no addendum)")
           (is (pos? (count system-prompt))))))))
 
-;------------------------------------------------------------------------------ Layer 3
-;; Validation tests
-
-(deftest validate-plan-test
-  (testing "valid plan passes validation"
-    (let [result (planner/validate-plan valid-plan)]
-      (is (:valid? result))
-      (is (nil? (:errors result)))))
-
-  (testing "minimal plan passes validation"
-    (let [result (planner/validate-plan minimal-plan)]
-      (is (:valid? result))))
-
-  (testing "missing required fields fails validation"
-    (let [result (planner/validate-plan {:plan/name "no-id"})]
-      (is (not (:valid? result)))
-      (is (some? (:errors result)))))
-
-  (testing "invalid task dependencies fail validation"
-    (let [bad-plan {:plan/id (random-uuid)
-                    :plan/name "bad-deps"
-                    :plan/tasks [{:task/id (random-uuid)
-                                  :task/description "Task"
-                                  :task/type :implement
-                                  :task/dependencies [(random-uuid)]}]}
-          result (planner/validate-plan bad-plan)]
-      (is (not (:valid? result)))
-      (is (contains? (:errors result) :dependencies))))
-
-  (testing "self-dependency fails validation"
-    (let [task-id (random-uuid)
-          self-dep-plan {:plan/id (random-uuid)
-                         :plan/name "self-dep"
-                         :plan/tasks [{:task/id task-id
-                                       :task/description "Task"
-                                       :task/type :implement
-                                       :task/dependencies [task-id]}]}
-          result (planner/validate-plan self-dep-plan)]
-      (is (not (:valid? result))))))
-
 ;------------------------------------------------------------------------------ Layer 3.5
 ;; Already-satisfied validation tests
-
-(deftest validate-already-satisfied-test
+(deftest ^{:stratum 0} validate-already-satisfied-test
   (testing "rejects when no evidence provided"
     (let [result (planner/validate-already-satisfied
                   {:plan/status :already-satisfied :plan/evidence []}
@@ -418,55 +443,7 @@
                   nil)]
       (is (:valid? result)))))
 
-;------------------------------------------------------------------------------ Layer 3.75
-;; Schema backward-compat & new-field tests
-
-(deftest validate-plan-new-fields-test
-  (testing "plan with task/component, exclusive-files, stratum validates"
-    (let [plan {:plan/id (random-uuid)
-                :plan/name "multi-component"
-                :plan/tasks [{:task/id (random-uuid)
-                              :task/description "Agent changes"
-                              :task/type :implement
-                              :task/component "agent"
-                              :task/exclusive-files ["components/agent/src/foo.clj"]
-                              :task/stratum 0}
-                             {:task/id (random-uuid)
-                              :task/description "Workflow changes"
-                              :task/type :implement
-                              :task/component "workflow"
-                              :task/exclusive-files ["components/workflow/src/bar.clj"]
-                              :task/stratum 0}]}
-          result (planner/validate-plan plan)]
-      (is (:valid? result))))
-
-  (testing "plan without new fields still validates (backward compat)"
-    (let [result (planner/validate-plan valid-plan)]
-      (is (:valid? result))))
-
-  (testing "invalid stratum type fails validation"
-    (let [plan {:plan/id (random-uuid)
-                :plan/name "bad-stratum"
-                :plan/tasks [{:task/id (random-uuid)
-                              :task/description "Task"
-                              :task/type :implement
-                              :task/stratum -1}]}
-          result (planner/validate-plan plan)]
-      (is (not (:valid? result))))))
-
-;------------------------------------------------------------------------------ Layer 4
-;; Utility tests
-
-(deftest plan-summary-test
-  (testing "returns plan summary"
-    (let [summary (planner/plan-summary valid-plan)]
-      (is (uuid? (:id summary)))
-      (is (string? (:name summary)))
-      (is (number? (:task-count summary)))
-      (is (keyword? (:complexity summary)))
-      (is (number? (:risk-count summary))))))
-
-(deftest task-dependency-order-test
+(deftest ^{:stratum 0} task-dependency-order-test
   (testing "returns tasks in dependency order"
     (let [task-a-id (random-uuid)
           task-b-id (random-uuid)
@@ -500,10 +477,8 @@
           ordered (planner/task-dependency-order plan)]
       (is (= 2 (count ordered))))))
 
-;------------------------------------------------------------------------------ Layer 5
 ;; Full cycle tests
-
-(deftest planner-cycle-test
+(deftest ^{:stratum 0} planner-cycle-test
   (testing "full invoke-validate cycle returns error data without LLM"
     (let [agent (planner/create-planner)
           result (core/cycle-agent agent {} "Create a REST API endpoint")]
@@ -511,11 +486,9 @@
       (is (= "No LLM backend provided for planner agent"
              (get-in result [:error :message]))))))
 
-;------------------------------------------------------------------------------ Layer 6
 ;; Tool-disallow-list — role-scoped restriction so the planner cannot
 ;; bypass the context MCP by using native filesystem tools.
-
-(deftest planner-disallowed-tools-contents-test
+(deftest ^{:stratum 0} planner-disallowed-tools-contents-test
   (testing "planner-disallowed-tools names the native file/shell tools"
     (let [dt @#'planner/planner-disallowed-tools]
       (is (vector? dt))
@@ -545,7 +518,7 @@
       (is (nil? (some #{t} @#'planner/planner-disallowed-tools))
           (str t " should not be disallowed until GROUP 2B ships")))))
 
-(deftest planner-passes-disallowed-tools-to-llm-test
+(deftest ^{:stratum 0} planner-passes-disallowed-tools-to-llm-test
   (testing ":disallowed-tools reaches the LLM client via mcp-opts"
     (let [captured (atom nil)
           fake-llm-client {:type :fake}
@@ -598,7 +571,102 @@
                  (:disallowed-tools @captured))
               ":disallowed-tools opt must equal the planner's role-scoped list"))))))
 
-(deftest planner-progress-monitor-thresholds-loaded-test
+;; planner-submission-retry? — recovery trigger (incl. success-but-no-artifact)
+(def ^{:stratum 0} ^:private submission-retry? #'planner/planner-submission-retry?)
+
+;; Context-budget shedding (N12 §5)
+(def ^{:stratum 0} ^:private assemble-within-budget #'planner/assemble-within-budget)
+
+(defn- ^{:stratum 0} big-file [chars]
+  {:path "components/agent/src/ai/miniforge/agent/big.clj"
+   :content (apply str (repeat chars \x))})
+
+;------------------------------------------------------------------------------ Layer 1
+
+;; Validation tests
+(deftest ^{:stratum 1} validate-plan-test
+  (testing "valid plan passes validation"
+    (let [result (planner/validate-plan valid-plan)]
+      (is (:valid? result))
+      (is (nil? (:errors result)))))
+
+  (testing "minimal plan passes validation"
+    (let [result (planner/validate-plan minimal-plan)]
+      (is (:valid? result))))
+
+  (testing "missing required fields fails validation"
+    (let [result (planner/validate-plan {:plan/name "no-id"})]
+      (is (not (:valid? result)))
+      (is (some? (:errors result)))))
+
+  (testing "invalid task dependencies fail validation"
+    (let [bad-plan {:plan/id (random-uuid)
+                    :plan/name "bad-deps"
+                    :plan/tasks [{:task/id (random-uuid)
+                                  :task/description "Task"
+                                  :task/type :implement
+                                  :task/dependencies [(random-uuid)]}]}
+          result (planner/validate-plan bad-plan)]
+      (is (not (:valid? result)))
+      (is (contains? (:errors result) :dependencies))))
+
+  (testing "self-dependency fails validation"
+    (let [task-id (random-uuid)
+          self-dep-plan {:plan/id (random-uuid)
+                         :plan/name "self-dep"
+                         :plan/tasks [{:task/id task-id
+                                       :task/description "Task"
+                                       :task/type :implement
+                                       :task/dependencies [task-id]}]}
+          result (planner/validate-plan self-dep-plan)]
+      (is (not (:valid? result))))))
+
+;------------------------------------------------------------------------------ Layer 3.75
+;; Schema backward-compat & new-field tests
+(deftest ^{:stratum 1} validate-plan-new-fields-test
+  (testing "plan with task/component, exclusive-files, stratum validates"
+    (let [plan {:plan/id (random-uuid)
+                :plan/name "multi-component"
+                :plan/tasks [{:task/id (random-uuid)
+                              :task/description "Agent changes"
+                              :task/type :implement
+                              :task/component "agent"
+                              :task/exclusive-files ["components/agent/src/foo.clj"]
+                              :task/stratum 0}
+                             {:task/id (random-uuid)
+                              :task/description "Workflow changes"
+                              :task/type :implement
+                              :task/component "workflow"
+                              :task/exclusive-files ["components/workflow/src/bar.clj"]
+                              :task/stratum 0}]}
+          result (planner/validate-plan plan)]
+      (is (:valid? result))))
+
+  (testing "plan without new fields still validates (backward compat)"
+    (let [result (planner/validate-plan valid-plan)]
+      (is (:valid? result))))
+
+  (testing "invalid stratum type fails validation"
+    (let [plan {:plan/id (random-uuid)
+                :plan/name "bad-stratum"
+                :plan/tasks [{:task/id (random-uuid)
+                              :task/description "Task"
+                              :task/type :implement
+                              :task/stratum -1}]}
+          result (planner/validate-plan plan)]
+      (is (not (:valid? result))))))
+
+;; Utility tests
+(deftest ^{:stratum 1} plan-summary-test
+  (testing "returns plan summary"
+    (let [summary (planner/plan-summary valid-plan)]
+      (is (uuid? (:id summary)))
+      (is (string? (:name summary)))
+      (is (number? (:task-count summary)))
+      (is (keyword? (:complexity summary)))
+      (is (number? (:risk-count summary))))))
+
+(deftest ^{:stratum 1} planner-progress-monitor-thresholds-loaded-test
   ;; Guards the 2026-05-04 stagnation-threshold fix at the planner
   ;; boundary: a regression in prompt loading or
   ;; create-planner-progress-monitor would otherwise let the threshold
@@ -660,22 +728,17 @@
               (is (>= (:max-total-ms state) min-total-budget-ms)
                   "Total budget must be ≥ min-total-budget-ms — covers the longest historical successful planner run"))))))))
 
-;------------------------------------------------------------------------------ Layer 1
-;; planner-submission-retry? — recovery trigger (incl. success-but-no-artifact)
-
-(def ^:private submission-retry? #'planner/planner-submission-retry?)
-
-(deftest planner-submission-retry-fires-on-success-without-artifact
+(deftest ^{:stratum 1} planner-submission-retry-fires-on-success-without-artifact
   (testing "a CLEAN success that produced plan prose but NO artifact triggers recovery
             (the intermittent dogfood failure — previously no retry fired here)"
     (is (true? (boolean (submission-retry? {:success true} nil nil "## Plan\nTask A -> B"))))))
 
-(deftest planner-submission-retry-not-on-success-without-prose
+(deftest ^{:stratum 1} planner-submission-retry-not-on-success-without-prose
   (testing "a success with no prose content has nothing to recover — no retry"
     (is (false? (boolean (submission-retry? {:success true} nil nil ""))))
     (is (false? (boolean (submission-retry? {:success true} nil nil nil))))))
 
-(deftest planner-submission-retry-still-fires-on-recoverable-error
+(deftest ^{:stratum 1} planner-submission-retry-still-fires-on-recoverable-error
   (testing "the original trigger survives: adaptive_timeout/cli_error with useful stdout"
     (is (true? (boolean (submission-retry?
                          {:success false :error {:stdout "plan prose" :type "cli_error"}}
@@ -684,28 +747,19 @@
                          {:success false :error {:stdout "plan prose" :type "adaptive_timeout"}}
                          nil nil ""))))))
 
-(deftest planner-submission-retry-no-fire-when-artifact-present
+(deftest ^{:stratum 1} planner-submission-retry-no-fire-when-artifact-present
   (testing "an artifact (submitted or parsed) means no recovery is needed"
     (is (false? (boolean (submission-retry? {:success true} {:plan/id 1} nil "prose"))))
     (is (false? (boolean (submission-retry? {:success true} nil {:plan/id 1} "prose"))))))
 
-(deftest planner-submission-retry-no-fire-on-unrecoverable-error
+(deftest ^{:stratum 1} planner-submission-retry-no-fire-on-unrecoverable-error
   (testing "an error without useful stdout or with a non-retriable type does not retry"
     (is (false? (boolean (submission-retry?
                           {:success false :error {:stdout "" :type "cli_error"}} nil nil ""))))
     (is (false? (boolean (submission-retry?
                           {:success false :error {:stdout "x" :type "other"}} nil nil ""))))))
 
-;------------------------------------------------------------------------------ Layer 6
-;; Context-budget shedding (N12 §5)
-
-(def ^:private assemble-within-budget #'planner/assemble-within-budget)
-
-(defn- big-file [chars]
-  {:path "components/agent/src/ai/miniforge/agent/big.clj"
-   :content (apply str (repeat chars \x))})
-
-(deftest assemble-within-budget-test
+(deftest ^{:stratum 1} assemble-within-budget-test
   (testing "uncatalogued model (nil window) → never sheds, files stay inlined"
     (let [r (assemble-within-budget "do the thing" [(big-file 100)]
                                     "system" "no-such-model" 0)]

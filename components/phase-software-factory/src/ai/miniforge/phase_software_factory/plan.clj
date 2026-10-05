@@ -213,26 +213,32 @@
         on-chunk (create-streaming-callback ctx)
         agent-ctx (cond-> ctx on-chunk (assoc :on-chunk on-chunk))
         planner-agent (agent/create-planner {})]
-    {:result (let [r (validate-dag-readiness
-                       (try
-                         (agent/invoke planner-agent task agent-ctx)
-                         (catch Exception e
-                           ;; Preserve the spent-token count from the agent's failure
-                           ;; anomaly (planner tags ex-data with :tokens) into the
-                           ;; failure result's :metrics, so leave-plan still merges the
-                           ;; real cost into :execution/metrics instead of reporting $0.
-                           (let [ed   (ex-data e)
-                                 toks (get ed :tokens 0)]
-                             (response/failure e {:data ed
-                                                  :tokens toks
-                                                  :metrics {:tokens toks}})))))]
+    {:result (let [invoked (try
+                             (agent/invoke planner-agent task agent-ctx)
+                             (catch Exception e
+                               ;; Preserve the spent-token count from the agent's failure
+                               ;; anomaly (planner tags ex-data with :tokens) into the
+                               ;; failure result's :metrics, so leave-plan still merges the
+                               ;; real cost into :execution/metrics instead of reporting $0.
+                               (let [ed   (ex-data e)
+                                     toks (get ed :tokens 0)]
+                                 (response/failure e {:data ed
+                                                      :tokens toks
+                                                      :metrics {:tokens toks}}))))
+                   r (validate-dag-readiness invoked)]
                ;; SPEC §7.4.3 consultation provenance. The planner session does
                ;; not surface :context-reads yet, so :pin-read? is nil (unknown).
                ;; Attached on failures too (:output starts nil on
                ;; response/failure): a failed plan that consulted must not be
-               ;; ledgered as one that never did.
+               ;; ledgered as one that never did. §7.7.2: the planner result
+               ;; carries the session's recorded peg answers and the
+               ;; lost-vs-unanswered answer-log marker — read off `invoked`,
+               ;; not `r`: validate-dag-readiness rebuilds its failure
+               ;; response and would drop the channel keys.
                (codex-pin/attach-consultation
-                 r (codex-pin/consultation-summary codex-outcome nil)))
+                 r (codex-pin/consultation-summary codex-outcome nil
+                                                   (:codex-answers invoked)
+                                                   (:codex-answer-log invoked))))
      :rules-manifest rules-manifest}))
 
 ;------------------------------------------------------------------------------ Layer 2

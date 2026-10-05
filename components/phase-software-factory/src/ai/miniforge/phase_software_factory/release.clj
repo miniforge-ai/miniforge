@@ -45,12 +45,17 @@
 (defn ^{:stratum 0} attach-consultation
   "Record `codex-outcome`'s summary onto `result`, on both success and
    failure -- :output starts nil on response/failure, so a failed
-   release that consulted must not be ledgered as one that never did."
+   release that consulted must not be ledgered as one that never did.
+   §7.7.2: the result carries the releaser session's recorded peg
+   answers and the lost-vs-unanswered answer-log marker (threaded up
+   from the release executor) -- hand both to the summary."
   [result codex-outcome]
   (cond-> result
     (map? result)
     (assoc-in [:output :codex/consultation]
-              (codex-pin/consultation-summary codex-outcome nil))))
+              (codex-pin/consultation-summary codex-outcome nil
+                                              (:codex-answers result)
+                                              (:codex-answer-log result)))))
 
 ;; Defaults
 (def ^{:stratum 0} default-config
@@ -594,8 +599,8 @@
                  (let [exec-result (release-executor/execute-release-phase
                                     workflow-state
                                     exec-context
-                                    {:releaser releaser-agent})]
-                   (if (:success? exec-result)
+                                    {:releaser releaser-agent})
+                       r (if (:success? exec-result)
                      (let [release-artifact (first (:artifacts exec-result))
                            content (:artifact/content release-artifact)]
                        (response/success
@@ -621,7 +626,17 @@
                        (response/failure
                         (messages/t :release/phase-failed)
                         {:data {:errors (:errors exec-result)
-                                :metrics (:metrics exec-result)}}))))
+                                :metrics (:metrics exec-result)}})))]
+                   ;; §7.7.2: the releaser session's recorded peg answers
+                   ;; (and the lost-vs-unanswered answer-log marker) ride
+                   ;; the executor result — thread them onto the phase
+                   ;; result so attach-consultation can hand them to the
+                   ;; consultation summary. Success and failure alike.
+                   (cond-> r
+                     (some? (:codex-answers exec-result))
+                     (assoc :codex-answers (:codex-answers exec-result))
+                     (some? (:codex-answer-log exec-result))
+                     (assoc :codex-answer-log (:codex-answer-log exec-result))))
                  (catch Exception e
                    ;; The 2026-05-03 dogfood lost the actual exception here —
                    ;; the bare (response/failure e) wraps it but no log line

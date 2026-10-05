@@ -19,7 +19,7 @@ child-run references, counts, and failure taxonomy in N3 §3.12.1.
 ## Layer
 
 Schema foundations, branched from main at `9000a049`.
-Contract PR #2000 must merge before this PR opens.
+Updated to main at `364c2131` after contract PR #2000 merged.
 Scope policy is a sibling foundation; publication admission will compose both.
 
 ## Changes in Detail
@@ -42,6 +42,12 @@ stratum lint makes no changes. The payload contract deliberately does not claim
 to prove snapshot immutability, lifecycle ordering, or successful durable publication.
 The rebuilt CLI passes the same 8 tests / 456 assertions from outside the checkout,
 with no source overlay. The incremental standards scan reports zero findings.
+The current-write profile tests cover the payload side of N3.CP.9 and §3.12.1.
+They do not claim the stateful recovery and terminal-cardinality guarantees of N2.CH.*.
+The main merge includes a sentence split in an incoming PR document to satisfy
+prose lint; its recorded behavior and validation history are unchanged.
+An incoming bootstrap marker is now inspectable in its namespace's REPL block.
+This removes an unused-private-var warning without deleting required startup effects.
 
 ## Deployment Plan
 
@@ -56,5 +62,5 @@ Follows approved contract reconciliation in #2000 and precedes live publication.
 
 - [x] Implement contract schemas and regressions.
 - [x] Verify consumers and packaged artifact serially.
-- [ ] Complete adversarial standards review and normal signed hooks.
+- [x] Complete adversarial standards review and normal signed hooks.
 - Require clean exact-head review and all CI before merge.

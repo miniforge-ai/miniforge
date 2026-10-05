@@ -80,10 +80,32 @@
                                pinned [{:path codex-pin/pin-path :source :cache}])))))
     (testing "skipped consultation carries its anomaly"
       (is (= {:pinned? false :status :skipped :anomaly :codex-unreadable
-              :situation nil :pegs nil :pin-read? nil}
+              :situation nil :pegs nil :pin-read? nil :answer-log :absent}
              (dissoc (codex-pin/consultation-summary
                        {:entry nil :status :skipped :anomaly :codex-unreadable} nil)
                      :consultation-id))))))
+
+(deftest ^{:stratum 0} consultation-summary-answer-log-marker
+  ;; SPEC §7.7.2 lost-vs-unanswered: a torn answers.edn parses to nil and
+  ;; every presented peg records :answer nil — indistinguishable from a
+  ;; genuinely unanswered consultation unless the marker rides the summary.
+  (let [outcome {:entry {:path codex-pin/pin-path} :status :pinned
+                 :anomaly nil :situation "process-stuck-or-slow"
+                 :pegs [{:id "peg-a" :answers {"yes" ["p1"] "no" ["p2"]}}]}]
+    (testing "explicit marker passes through"
+      (is (= :unreadable
+             (:answer-log (codex-pin/consultation-summary outcome nil nil :unreadable))))
+      (is (= :recorded
+             (:answer-log (codex-pin/consultation-summary outcome nil [] :recorded)))))
+    (testing "under :unreadable the pegs still record, with nil answers"
+      (is (= [{:id "peg-a" :answer nil :landings {"yes" ["p1"] "no" ["p2"]}}]
+             (:pegs (codex-pin/consultation-summary outcome nil nil :unreadable)))))
+    (testing "nil marker derives from the answers arg for legacy callers"
+      (is (= :recorded
+             (:answer-log (codex-pin/consultation-summary
+                            outcome nil [{:peg-id "peg-a" :answer "yes"}]))))
+      (is (= :absent
+             (:answer-log (codex-pin/consultation-summary outcome nil)))))))
 
 (deftest ^{:stratum 0} consultation-summary-records-per-peg-telemetry
   ;; SPEC §7.7: per peg presented, which way it answered — push delivery

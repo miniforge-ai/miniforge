@@ -6,8 +6,8 @@
 
 # miniforge Specification Index
 
-**Version:** 0.24.0-draft
-**Date:** 2026-08-10
+**Version:** 0.25.0-draft
+**Date:** 2026-10-04
 **Status:** Living specification during OSS development
 
 ---
@@ -133,16 +133,17 @@ Defines:
 Defines:
 
 - Event envelope fields and fixed envelope field types (§2.1.1); scope keys —
-  workflow, PR Work Item, pack, repo, supervisory entity, deployment (§2.3)
+  workflow, PR Work Item, pack, repo, supervisory entity, deployment, chain run (§2.3)
 - Required event types (workflow, agent, status, subagent, tool, LLM, messages,
-  milestone, gate, pack lifecycle, pack run, chain edge)
+  milestone, gate, pack lifecycle, pack run, chain run, chain step, chain edge)
 - Ordering guarantees (per-scope sequence, causal ordering, replay determinism)
 - Streaming API (SSE/WebSocket) with subscription protocol
 - Throttling and performance requirements
 - Minimal fields needed to render "live" progress and drill-down
 - **Reliability metric events:** SLI computation, SLO breach, error budget, degradation mode (§3.17)
 - **Repository intelligence events:** Index quality, canary failure (§3.18)
-- **Supervisory snapshot family:** twelve `:supervisory/*` types, entity shapes owned by the N5 deltas (§3.19.1)
+- **Supervisory snapshot family:** thirteen registered types, entity shapes owned by the N5 deltas (§3.19.1)
+- **Intervention lifecycle:** durable command facts remain distinct from snapshots (§3.22)
 - **Workflow control events:** cancellation, checkpoint write, machine snapshot, resume (§3.21)
 - **Event type registry:** the flat enumeration of every emittable `:event/type`, with scope and retention class (§6)
 - **Schema evolution:** what `:event/version` versions, change classification, consumer obligations (§7)
@@ -287,7 +288,7 @@ Defines:
   `:restricted` suppressed per-recipient at delivery
 - **Redaction patterns are EDN configuration**, never a function (§5.2, dewey 007)
 - **Event schemas referenced, not restated** (§10.1) — the reproduced copies carried a
-  fixed `:workflow/id` and were unusable on N3's five non-workflow scopes
+  fixed `:workflow/id` and were unusable on N3's non-workflow scopes
 - **Conformance requirement IDs** (`N8.CAP.*`, `N8.CTL.*`, `N8.PRV.*`) and test
   obligations (§12.4–§12.5)
 - **Annex A (informative):** implementation conformance status
@@ -311,9 +312,9 @@ Defines:
 - Fleet Mode disambiguation: N9 (SDLC governance) vs N7 (runtime policy synthesis)
 - CLI/TUI/API extensions: `fleet prs`, `fleet trains` commands and views
 - **Scope and event schemas deferred to N3** (§7) — §7.1 restated a PR-only scope rule that
-  N3 §2.3 generalizes to six scopes. §7.2 reproduced N3 §3.16's schemas
+  N3 §2.3 generalizes beyond PR scope. §7.2 reproduced N3 §3.16's schemas
 - **Versioning aligned with N3 §7** (§14) — the required parallel deprecation cycle is
-  withdrawn; pre-release implementations cut over
+  withdrawn; N3 §7.4–§7.5 govern cutover and historical replay
 - **Binary name reconciled** — N5 §2.1 documented `miniforge` while the shipped binary is `mf`;
   N9 was correct and N5 is amended
 - **Conformance requirement IDs** (`N9.WI.*`, `N9.EV.*`, `N9.AT.*`, `N9.AS.*`, `N9.EB.*`)
@@ -537,6 +538,18 @@ Documents superseded by normative specs. Retained for reference during migration
 
 ## Specification Governance
 
+### Approved contract decisions
+
+On 2026-10-04 the product owner approved preserving deployed chain-step and
+supervisory capabilities through explicit N1/N3 reconciliation during the
+implementation-completion work. This approval is the product-decision source
+for N1 §2.32–§2.33, N2 §14.4, N3 §3.12.1/§3.19/§3.22/§7.5, and the N5
+supervisory Spec projection. The decision preserves capabilities, not malformed
+envelopes, ambiguous identity, or unregistered events. Implementation still MUST
+satisfy scope isolation, durable acknowledgment, redaction, replay, and governance.
+The associated PR record is
+`docs/pull-requests/2026-10-04-feat-chain-supervisory-contracts.md`.
+
 ### Language Rules
 
 **Indexed normative specs:**
@@ -616,6 +629,13 @@ Normative specs are enforced by:
 ---
 
 ## Version History
+
+- **0.25.0-draft** (2026-10-04) - Approved chain/supervisory reconciliation:
+  separate definition and invocation identities, chain-run scope, step/edge
+  observability, work-specification projection, and intervention lifecycle facts.
+  This amendment does not assert implementation completeness.
+  N9's compatibility references and train-scope summary defer to the same N3 contracts.
+  N5/N8 scope references include chain runs; N3 specifies per-PR train-change delivery.
 
 - **0.24.0-draft** (2026-08-10) - N4-delta reclassified to informative. Its unique content folded
   into N4. The document's requirements were written lowercase, with no uppercase
