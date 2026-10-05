@@ -78,6 +78,12 @@
    generator for lexically-sortable ids)."
   stream/create-event-stream)
 
+(def ^{:stratum 0} create-event-draft
+  "Construct an uncommitted envelope without a sequence number. No publication,
+   redaction, or admission occurs; retain this draft across publication retries.
+   Do not pass an uncommitted draft to the legacy publish! API."
+  stream/create-event-draft)
+
 (def ^{:stratum 0} create-envelope
   "Build an event envelope map with an atomically-assigned per-workflow
    sequence number. Returns a map carrying :event/type, :event/id (a

@@ -18,7 +18,8 @@
 (ns ai.miniforge.event-stream.interface.stream
   "Event-stream lifecycle and query API."
   (:require
-   [ai.miniforge.event-stream.core :as core]))
+   [ai.miniforge.event-stream.core :as core]
+   [ai.miniforge.event-stream.envelope-draft :as draft]))
 
 ;------------------------------------------------------------------------------ Layer 0
 
@@ -41,6 +42,12 @@
    (:org/id, :workspace/id, :repo/id, :auth/context, :event/parent-id,
    :agent/id, :agent/instance-id)."
   core/create-envelope)
+
+(def ^{:stratum 0} create-event-draft
+  "Create event identity and optional metadata without reserving a sequence number.
+   This is not publication or acknowledgment; retain the draft across retries.
+   Do not pass an uncommitted draft to the legacy publish! API."
+  draft/create)
 
 (def ^{:stratum 0} publish!
   "Publish an event to the stream: fan out to sinks, append to the
