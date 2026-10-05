@@ -960,6 +960,22 @@
       (is (= :unreadable (:codex-answer-log result))
           "the presence marker separates torn-empty from missing")))
 
+  (testing "§7.7.2: a TRUNCATED batched read (fewer boundary segments than
+            expected) marks :unreadable — the channel state is unknown, which
+            must not read as the agent declining to answer"
+    (let [calls   (atom [])
+          session {:dir            "/workspace/.miniforge-session"
+                   :artifact-path  "/workspace/.miniforge-session/artifact.edn"
+                   :workdir        "/workspace"
+                   :executor       :fake-executor
+                   :environment-id "env-1"
+                   ;; stdout with NO boundary lines at all — a cut-off read
+                   :exec!          (capsule-exec-stub calls "partial output")}
+          result  (session/read-capsule-session-outputs session)]
+      (is (nil? (:codex-answers result)))
+      (is (= :unreadable (:codex-answer-log result))
+          "a missing file still produces every echoed boundary; nil segment = torn output")))
+
   (testing "malformed segment emits parse WARN and yields nil for that file only"
     (let [calls   (atom [])
           stdout  (capsule-outputs-stdout

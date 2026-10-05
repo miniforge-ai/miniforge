@@ -431,15 +431,22 @@
 (defn- ^{:stratum 1} split-answers-segment
   "Split an answers.edn `cat` segment that was prefixed by the
    presence-marker echo into {:present? bool :content trimmed-str}.
-   nil (a truncated batched read with fewer boundary segments than
-   expected) reads as an absent, empty segment."
+
+   nil marks a TRUNCATED batched read: a normal missing file still
+   produces every echoed boundary line and an empty (non-nil) segment,
+   so a nil segment means the output itself was cut and the channel's
+   state is unknown. Unknown must read as lost, never as the agent
+   declining to answer — the nil path yields {:present? true
+   :content \"\"}, which answer-log-state classifies :unreadable."
   [segment]
-  (let [trimmed (str/trim (or segment ""))
-        present? (str/starts-with? trimmed capsule-answers-present-marker)]
-    {:present? present?
-     :content  (if present?
-                 (str/trim (subs trimmed (count capsule-answers-present-marker)))
-                 trimmed)}))
+  (if (nil? segment)
+    {:present? true :content ""}
+    (let [trimmed (str/trim segment)
+          present? (str/starts-with? trimmed capsule-answers-present-marker)]
+      {:present? present?
+       :content  (if present?
+                   (str/trim (subs trimmed (count capsule-answers-present-marker)))
+                   trimmed)})))
 
 (defn ^{:stratum 1} validate-session
   "Validate a session map against the Session schema.

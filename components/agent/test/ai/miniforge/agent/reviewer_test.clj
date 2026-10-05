@@ -15,12 +15,12 @@
 ;; WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 ;; See the License for the specific language governing permissions and
 ;; limitations under the License.
-
 (ns ai.miniforge.agent.reviewer-test
   "Tests for the reviewer agent."
   (:require
    [clojure.string :as str]
    [clojure.test :refer [deftest testing is]]
+   [ai.miniforge.agent.artifact-session :as artifact-session]
    [ai.miniforge.agent.model :as model]
    [ai.miniforge.agent.reviewer :as reviewer]
    [ai.miniforge.agent.reviewer.artifact :as r-artifact]
@@ -31,9 +31,10 @@
    [ai.miniforge.messages.interface :as messages]
    [ai.miniforge.response.interface :as response]))
 
-;------------------------------------------------------------------------------ Regression-floor constants
+;------------------------------------------------------------------------------ Layer 0
 
-(def ^:private min-stagnation-threshold-ms
+;------------------------------------------------------------------------------ Regression-floor constants
+(def ^{:stratum 0} ^:private min-stagnation-threshold-ms
   "Floor for the reviewer main-turn :stagnation-threshold-ms. Below this,
    Opus's pre-first-chunk think on heavy review prompts (8+ files,
    50–100k tokens) trips stagnation before the first structured-EDN
@@ -42,58 +43,51 @@
    rejection observed on the 2026-05-04 dogfood."
   180000)
 
-(def ^:private min-total-budget-ms
+(def ^{:stratum 0} ^:private min-total-budget-ms
   "Floor for the reviewer main-turn :max-total-ms. Below this, long
    but legitimate reviews are killed mid-turn."
   600000)
 
-(def ^:private unparseable-output-token-count
+(def ^{:stratum 0} ^:private unparseable-output-token-count
   42)
 
-(def ^:private parseable-backend-failure-token-count
+(def ^{:stratum 0} ^:private parseable-backend-failure-token-count
   7)
 
-(def ^:private timeout-review-token-count
+(def ^{:stratum 0} ^:private timeout-review-token-count
   9)
 
-(def ^:private timeout-success-wrapper-token-count
+(def ^{:stratum 0} ^:private timeout-success-wrapper-token-count
   11)
 
-(def ^:private backend-timeout-elapsed-ms
+(def ^{:stratum 0} ^:private backend-timeout-elapsed-ms
   120183)
 
-(def ^:private wrapped-timeout-elapsed-ms
+(def ^{:stratum 0} ^:private wrapped-timeout-elapsed-ms
   120228)
 
-(def ^:private backend-timeout-stop-reason
+(def ^{:stratum 0} ^:private backend-timeout-stop-reason
   "timeout")
 
-(def ^:private backend-timeout-num-turns
+(def ^{:stratum 0} ^:private backend-timeout-num-turns
   4)
 
-(def ^:private backend-timeout-type
+(def ^{:stratum 0} ^:private backend-timeout-type
   "adaptive_timeout")
 
-(def ^:private test-t
+(def ^{:stratum 0} ^:private test-t
   (messages/create-translator "config/agent/test-fixtures/en-US.edn"
                               :agent-reviewer-test/fixtures))
 
-(def ^:private valid-review-blocking-description
-  (test-t :reviewer-test/valid-review-blocking-description))
-
-(def ^:private valid-review-content
-  (test-t :reviewer-test/valid-review-content))
-
 ;------------------------------------------------------------------------------ Test fixtures
-
-(defn passing-gate
+(defn ^{:stratum 0} passing-gate
   "Create a gate that always passes."
   [gate-id]
   (loop/custom-gate gate-id :test
                     (fn [_artifact _context]
                       (loop/pass-result gate-id :test))))
 
-(defn failing-gate
+(defn ^{:stratum 0} failing-gate
   "Create a gate that always fails with non-blocking errors."
   [gate-id error-message]
   (loop/custom-gate gate-id :test
@@ -102,7 +96,7 @@
                                         [(assoc (loop/make-error :test-error error-message)
                                                 :severity :non-blocking)]))))
 
-(defn warning-gate
+(defn ^{:stratum 0} warning-gate
   "Create a gate that passes but emits warnings."
   [gate-id warning-message]
   (loop/custom-gate gate-id :test
@@ -110,7 +104,7 @@
                       (loop/pass-result gate-id :test
                                         :warnings [(loop/make-error :warning warning-message)]))))
 
-(def sample-artifact
+(def ^{:stratum 0} sample-artifact
   ;; `:task/scope` carries the broad fixture scope so the reviewer's
   ;; required-scope contract (PR #1039) doesn't trip tests that aren't
   ;; about scope per se. Scope-specific tests below override or remove
@@ -122,7 +116,7 @@
                                     :action :create}]}
    :task/scope ["src" "components" "bases"]})
 
-(defn- review-gate-feedback
+(defn- ^{:stratum 0} review-gate-feedback
   ([] (review-gate-feedback :unknown 0))
   ([gate-id duration-ms]
    {:gate-id gate-id
@@ -132,7 +126,7 @@
     :warnings []
     :duration-ms duration-ms}))
 
-(deftest split-review-failure-normalizes-response-map-test
+(deftest ^{:stratum 0} split-review-failure-normalizes-response-map-test
   (testing "aggregate tokens are added to a valid failed response map"
     (let [combined (#'reviewer/combine-normalized-review-results
                     [{:parsed-content nil
@@ -151,20 +145,178 @@
       (is (= {:tokens 3} (:response combined))
           (str "normalized " (pr-str response))))))
 
-(defn- adaptive-timeout-message
+(deftest ^{:stratum 0} split-session-answer-channel-merges-test
+  ;; §7.7.2: split reviewer sessions each have their own answers.edn;
+  ;; the run's durable record is their in-session-order concatenation,
+  ;; and any torn per-session log wins the merged marker — a partially
+  ;; lost record must not read as a complete one.
+  (let [invoke-split!
+        (fn [channels]
+          (let [remaining (atom channels)]
+            (with-redefs [artifact-session/with-readonly-session
+                          (fn [_context _body-fn]
+                            (let [ch (first @remaining)]
+                              (swap! remaining rest)
+                              (assoc ch :llm-result {:success true :content ""})))
+                          llm/success? (constantly true)
+                          llm/get-content (constantly "")]
+              (#'reviewer/invoke-reviewer-sessions
+               {} ::client "prompt" nil ["system-a" "system-b"] nil 1.0 10))))]
+    (testing "answers concatenate in session order"
+      (let [normalized (invoke-split!
+                        [{:codex-answers [{:peg-id "p" :answer "no" :timestamp "t1"}]
+                          :codex-answer-log :recorded}
+                         {:codex-answers [{:peg-id "p" :answer "yes" :timestamp "t2"}]
+                          :codex-answer-log :recorded}])]
+        (is (= [{:peg-id "p" :answer "no" :timestamp "t1"}
+                {:peg-id "p" :answer "yes" :timestamp "t2"}]
+               (:codex-answers normalized))
+            "session order preserved — last-recording-wins stays meaningful")
+        (is (= :recorded (:codex-answer-log normalized)))))
+    (testing "a torn per-session log wins the merged marker"
+      (let [normalized (invoke-split!
+                        [{:codex-answers [{:peg-id "p" :answer "no" :timestamp "t1"}]
+                          :codex-answer-log :recorded}
+                         {:codex-answers nil :codex-answer-log :unreadable}])]
+        (is (= [{:peg-id "p" :answer "no" :timestamp "t1"}]
+               (:codex-answers normalized))
+            "the readable session's answers survive")
+        (is (= :unreadable (:codex-answer-log normalized))
+            "LOST observations in either split must not read as a clean record")))))
+
+(defn- ^{:stratum 0} adaptive-timeout-message
   [elapsed-ms]
   (str "Adaptive timeout: Stagnation timeout: no progress for "
        elapsed-ms
        "ms"))
 
-(defn- wrapped-timeout-message
+(defn- ^{:stratum 0} mock-llm-response
+  [content & {:as extra}]
+  (merge {:success? true
+          :content content
+          :tokens 1}
+         extra))
+
+(deftest ^{:stratum 0} test-reviewer-rejects-degraded-implement-handoff
+  (testing "default reviewer rejects curated artifacts marked as degraded handoffs"
+    (let [reviewer (reviewer/create-reviewer {:llm-backend nil})
+          artifact {:code/id (random-uuid)
+                    :code/files [{:path "src/example.clj"
+                                  :content "(ns example)"
+                                  :action :create}]
+                    :code/degraded-handoff? true
+                    :code/scope-deviations []}
+          result (core/invoke reviewer {} artifact)
+          review (:artifact result)]
+      (is (= :rejected (:review/decision review)))
+      (is (seq (:review/blocking-issues review))))))
+
+(deftest ^{:stratum 0} test-reviewer-rejects-scope-deviations
+  (testing "default reviewer rejects artifacts with curator-reported scope deviations"
+    (let [reviewer (reviewer/create-reviewer {:llm-backend nil})
+          artifact {:code/id (random-uuid)
+                    :code/files [{:path "docs/out-of-scope.md"
+                                  :content "oops"
+                                  :action :modify}]
+                    :code/scope-deviations ["docs/out-of-scope.md"]}
+          result (core/invoke reviewer {} artifact)
+          review (:artifact result)]
+      (is (= :rejected (:review/decision review)))
+      (is (some #(re-find #"out-of-scope" %) (:review/blocking-issues review))))))
+
+;; Enumeration-retry validator, well-formed-recovery?, recover-review-
+;; enumeration tests moved to reviewer/llm_response_test.clj (PR-F).
+;; normalize-llm-decision tests moved to reviewer/issues_test.clj (PR-C).
+;------------------------------------------------------------------------------ Scope-boundary tests
+;; The reviewer prompt and helper resolve a per-task scope so adjacent-file
+;; findings can't drive the verdict on tightly-scoped refactors. The 2026-06-04
+;; eliminate-requiring-resolve dogfood failed 20/20 tasks because the reviewer
+;; held every diff to the FULL standards bar across all changed files.
+;;
+;; Pure-helper coverage moved to `ai.miniforge.agent.reviewer.scope-test`
+;; (PR #1039 decomposition). Kept here: the reviewer-side wiring tests —
+;; prompt rendering and the end-to-end `core/invoke` integration.
+;; build-review-prompt + format-artifact-for-review tests moved to
+;; reviewer/prompts_test.clj (PR-E).
+;; sanitize-review-issues tests moved to reviewer/issues_test.clj (PR-C).
+(def ^{:stratum 0} ^:private scope-test-review-content
+  ;; Two blocking findings: one in scope (components/foo/src/a.clj), one
+  ;; adjacent-file noise (components/baz/src/b.clj). With the post-LLM
+  ;; filter active, only the in-scope finding should drive the verdict;
+  ;; the adjacent one should land in :review/out-of-scope-observations.
+  (str "```clojure\n"
+       "{:review/decision :changes-requested\n"
+       " :review/issues [{:severity :blocking\n"
+       "                  :file \"components/foo/src/a.clj\"\n"
+       "                  :description \"in-scope blocker\"}\n"
+       "                 {:severity :blocking\n"
+       "                  :file \"components/baz/src/b.clj\"\n"
+       "                  :description \"adjacent-file blocker\"}]\n"
+       " :review/summary \"mixed\"}\n"
+       "```"))
+
+;; Tool-disallow-list — the reviewer is forced onto the MCP context cache and
+;; blocked from all mutation (Fable #4 context side, reviewer rewire).
+(deftest ^{:stratum 0} reviewer-disallowed-tools-contents-test
+  (testing "names the native read/search tools (forced onto context_*)"
+    (let [dt @#'reviewer/reviewer-disallowed-tools]
+      (doseq [t ["Read" "Grep" "Glob" "LS" "Agent"]]
+        (is (some #{t} dt) (str "expected " t " in disallowed-tools")))))
+
+  (testing "blocks ALL mutation — the reviewer inspects, never writes"
+    (let [dt @#'reviewer/reviewer-disallowed-tools]
+      (doseq [t ["Write" "Edit" "MultiEdit" "Bash"]]
+        (is (some #{t} dt) (str t " must be disallowed for a read-only reviewer")))))
+
+  (testing "is exactly the native tool set — the MCP read tools are allowlisted
+            by their prefixed wire names (e.g. mcp__context__context_read) and
+            are never in this native disallow-list, so reads route through the
+            cache. Pinned so any change is deliberate."
+    (is (= #{"Read" "Grep" "Glob" "LS" "Agent" "Bash" "Write" "Edit" "MultiEdit"}
+           (set @#'reviewer/reviewer-disallowed-tools)))))
+
+;------------------------------------------------------------------------------ Context-budget shedding (N12 §5)
+(def ^{:stratum 0} ^:private assemble-review-within-budget #'reviewer/assemble-review-within-budget)
+
+(defn- ^{:stratum 0} code-artifact
+  "n files, each `chars` bytes of body — the inlined contributor the reviewer
+   sheds when the prompt would overflow."
+  [n chars]
+  {:code/files (vec (for [i (range n)]
+                      {:path (str "src/f" i ".clj")
+                       :action :modify
+                       :content (apply str (repeat chars \x))}))})
+
+(defn- ^{:stratum 0} review-input [artifact]
+  {:task/title "T" :task/scope ["src"] :task/artifact artifact})
+
+(deftest ^{:stratum 0} test-reviewer-split-session-summary-fallback
+  (testing "split reviews without per-session summaries still produce a useful summary"
+    (let [combine #'reviewer/combine-parsed-reviews
+          result (combine [{:review/decision :approved
+                            :review/issues []}
+                           {:review/decision :changes-requested
+                            :review/issues []}])]
+      (is (= :changes-requested (:review/decision result)))
+      (is (= "Split reviewer sessions completed."
+             (:review/summary result))))))
+
+;------------------------------------------------------------------------------ Layer 1
+
+(def ^{:stratum 1} ^:private valid-review-blocking-description
+  (test-t :reviewer-test/valid-review-blocking-description))
+
+(def ^{:stratum 1} ^:private valid-review-content
+  (test-t :reviewer-test/valid-review-content))
+
+(defn- ^{:stratum 1} wrapped-timeout-message
   [elapsed-ms]
   (str (adaptive-timeout-message elapsed-ms)
        " (type: stagnation, elapsed: "
        elapsed-ms
        "ms)"))
 
-(defn- timeout-only-review-content
+(defn- ^{:stratum 1} timeout-only-review-content
   ([blocking-message]
    (timeout-only-review-content blocking-message [(review-gate-feedback)]))
   ([blocking-message gate-results]
@@ -173,14 +325,7 @@
             :review/blocking-issues [blocking-message]
             :review/recommendations []})))
 
-(defn- mock-llm-response
-  [content & {:as extra}]
-  (merge {:success? true
-          :content content
-          :tokens 1}
-         extra))
-
-(defn- backend-timeout-error
+(defn- ^{:stratum 1} backend-timeout-error
   ([message]
    (backend-timeout-error message nil))
   ([message data]
@@ -188,7 +333,7 @@
             :message message}
      data (assoc :data data))))
 
-(defn- stream-idle-llm-error
+(defn- ^{:stratum 1} stream-idle-llm-error
   "Build the LLM-error shape `streaming-error-response` produces when the
    stream-idle adaptive timeout fires — the same shape `llm/get-error`
    surfaces. The 2026-06-05 dogfood (`adhoc-944448986`) hit exactly
@@ -203,7 +348,7 @@
                :elapsed-ms elapsed-ms
                :stats {:lines-read 0}}}))
 
-(defn- stagnation-llm-error
+(defn- ^{:stratum 1} stagnation-llm-error
   "Build the LLM-error shape `streaming-error-response` produces when the
    STAGNATION adaptive timeout fires (provider streamed, but made no forward
    progress for the configured window). The 2026-06-14 dogfood (`rn-03`) hit
@@ -219,8 +364,7 @@
                :elapsed-ms elapsed-ms}}))
 
 ;------------------------------------------------------------------------------ Core functionality tests
-
-(deftest test-create-reviewer
+(deftest ^{:stratum 1} test-create-reviewer
   (testing "Create reviewer with default configuration"
     (let [reviewer (reviewer/create-reviewer)]
       (is (some? reviewer)
@@ -240,7 +384,7 @@
       (is (some? reviewer)
           "Should create strict reviewer"))))
 
-(deftest test-reviewer-invoke-all-pass
+(deftest ^{:stratum 1} test-reviewer-invoke-all-pass
   (testing "Review with all gates passing"
     (let [gates [(passing-gate :gate1)
                  (passing-gate :gate2)
@@ -270,7 +414,7 @@
         (is (r-artifact/approved? review)
             "approved? helper should return true")))))
 
-(deftest test-reviewer-invoke-some-fail
+(deftest ^{:stratum 1} test-reviewer-invoke-some-fail
   (testing "Review with some gates failing"
     (let [gates [(passing-gate :gate1)
                  (failing-gate :gate2 "Test failure")
@@ -297,7 +441,7 @@
         (is (r-artifact/conditionally-approved? review)
             "conditionally-approved? should return true")))))
 
-(deftest test-reviewer-invoke-strict-mode
+(deftest ^{:stratum 1} test-reviewer-invoke-strict-mode
   (testing "Review with strict mode rejects on any failure"
     (let [gates [(passing-gate :gate1)
                  (failing-gate :gate2 "Test failure")]
@@ -314,7 +458,7 @@
       (is (seq (:review/blocking-issues review))
           "Should have blocking issues in strict mode"))))
 
-(deftest test-reviewer-invoke-with-warnings
+(deftest ^{:stratum 1} test-reviewer-invoke-with-warnings
   (testing "Review with warnings but all passing"
     (let [gates [(passing-gate :gate1)
                  (warning-gate :gate2 "Minor issue")]
@@ -331,7 +475,7 @@
       (is (= 2 (:review/gates-passed review))
           "Both gates should pass"))))
 
-(deftest test-reviewer-no-llm-usage
+(deftest ^{:stratum 1} test-reviewer-no-llm-usage
   (testing "Reviewer uses no tokens (no LLM)"
     (let [reviewer (reviewer/create-reviewer)
           result (core/invoke reviewer {} sample-artifact)]
@@ -339,7 +483,7 @@
       (is (= 0 (get-in result [:metrics :tokens]))
           "Should use 0 tokens - no LLM calls"))))
 
-(deftest test-reviewer-rejects-unparseable-llm-output
+(deftest ^{:stratum 1} test-reviewer-rejects-unparseable-llm-output
   (testing "successful LLM calls that cannot be parsed fail closed"
     (with-redefs [model/resolve-llm-client-for-role (fn [_role client] client)
                   llm/chat (fn [_client _prompt _opts]
@@ -358,284 +502,11 @@
         (is (= unparseable-output-token-count
                (get-in result [:metrics :tokens])))))))
 
-(deftest test-reviewer-uses-parseable-content-even-when-backend-flags-failure
-  (testing "parseable review content still drives the decision when backend success? is false"
-    (with-redefs [model/resolve-llm-client-for-role (fn [_role client] client)
-                  llm/chat (fn [_client _prompt _opts]
-                             (mock-llm-response
-                              valid-review-content
-                              :success? false
-                              :tokens parseable-backend-failure-token-count
-                              :error {:message "artifact file not found"}))
-                  llm/success? :success?
-                  llm/get-content :content
-                  llm/get-error :error]
-      (let [reviewer (reviewer/create-reviewer {:llm-backend ::mock-backend
-                                                :gates []})
-            result (core/invoke reviewer {} sample-artifact)
-            review (:artifact result)]
-        (is (= :changes-requested (:review/decision review)))
-        (is (some #{valid-review-blocking-description} (:review/blocking-issues review)))
-        (is (= parseable-backend-failure-token-count
-               (get-in result [:metrics :tokens])))))))
-
-;; parse-review-response tests (incl. malformed-issue, nil-line, all-nil-
-;; optional) moved to reviewer/llm_response_test.clj (PR-F).
-
-(deftest test-reviewer-timeout-only-parseable-failure-is-agent-error
-  (testing "timeout-only parsed review failures do not become rejected code-review artifacts"
-    (with-redefs [model/resolve-llm-client-for-role (fn [_role client] client)
-                  llm/chat (fn [_client _prompt _opts]
-                             (mock-llm-response
-                              (timeout-only-review-content
-                               (adaptive-timeout-message backend-timeout-elapsed-ms))
-                              :success? false
-                              :tokens timeout-review-token-count
-                              :error {:message (adaptive-timeout-message backend-timeout-elapsed-ms)}))
-                  llm/success? :success?
-                  llm/get-content :content
-                  llm/get-error :error]
-      (let [reviewer (reviewer/create-reviewer {:llm-backend ::mock-backend
-                                                :gates []})
-            result (core/invoke reviewer {} sample-artifact)]
-        (is (= :error (:status result)))
-        (is (= (adaptive-timeout-message backend-timeout-elapsed-ms)
-               (get-in result [:error :message])))
-        (is (= :reviewer/backend-timeout
-               (get-in result [:error :data :code])))
-        (is (= timeout-review-token-count
-               (get-in result [:metrics :tokens])))))))
-
-(deftest test-reviewer-timeout-only-parseable-success-wrapper-is-agent-error
-  (testing "timeout-only parsed review failures are treated as backend errors even when the wrapper reports success"
-    (with-redefs [model/resolve-llm-client-for-role (fn [_role client] client)
-                  llm/chat (fn [_client _prompt _opts]
-                             (mock-llm-response
-                              (timeout-only-review-content
-                               (wrapped-timeout-message wrapped-timeout-elapsed-ms)
-                               [(review-gate-feedback)
-                                (review-gate-feedback)])
-                              :success? true
-                              :tokens timeout-success-wrapper-token-count))
-                  llm/success? :success?
-                  llm/get-content :content
-                  llm/get-error (constantly nil)]
-      (let [reviewer (reviewer/create-reviewer {:llm-backend ::mock-backend
-                                                :gates []})
-            result (core/invoke reviewer {} sample-artifact)]
-        (is (= :error (:status result)))
-        (is (= (wrapped-timeout-message wrapped-timeout-elapsed-ms)
-               (get-in result [:error :message])))
-        (is (= :reviewer/backend-timeout
-               (get-in result [:error :data :code])))
-        (is (= timeout-success-wrapper-token-count
-               (get-in result [:metrics :tokens])))))))
-
-(deftest test-reviewer-boundary-stream-idle-is-agent-error
-  ;; The 2026-06-05 dogfood (`adhoc-944448986`) shape: the reviewer LLM
-  ;; stream-idle'd at 360s and returned NO parsed review (parse-failed),
-  ;; only the LLM-error's `:timeout {:type :stream-idle}`. The OLD
-  ;; `timeout-only-review?` predicate read from the parsed review map
-  ;; and so could not fire — the framework then promoted the timeout
-  ;; text into `:review/blocking-issues` via the parse-failed branch
-  ;; and synthesized a false `:rejected`, which the `:review-approved`
-  ;; gate (correctly given the verdict it received) failed.
-  ;;
-  ;; With the boundary-level `result-boundary/stream-idle-error?`
-  ;; check wired in, the reviewer must take the `:reviewer/backend-
-  ;; timeout` exit — the same path the parseable variants already
-  ;; take — instead of producing a false rejection.
-  (testing "stream-idle on the LLM-call boundary (no parsed review) → :reviewer/backend-timeout"
-    (let [stream-idle-elapsed-ms 360087
-          err (stream-idle-llm-error stream-idle-elapsed-ms)]
-      (with-redefs [model/resolve-llm-client-for-role (fn [_role client] client)
-                    llm/chat (fn [_client _prompt _opts]
-                               (mock-llm-response ""
-                                                  :success? false
-                                                  :tokens timeout-review-token-count
-                                                  :error err))
-                    llm/success? :success?
-                    llm/get-content :content
-                    llm/get-error :error]
-        (let [reviewer (reviewer/create-reviewer {:llm-backend ::mock-backend
-                                                  :gates []})
-              result (core/invoke reviewer {} sample-artifact)]
-          (is (= :error (:status result))
-              "Stream-idle must surface as an agent-level error, not a synthetic :rejected review")
-          (is (= :reviewer/backend-timeout
-                 (get-in result [:error :data :code]))
-              "Error code must be :reviewer/backend-timeout — distinguishes infra timeout from real defect")
-          (is (= (:message err)
-                 (get-in result [:error :message]))
-              "Error message preserves the adaptive-timeout text verbatim for operator post-mortem")
-          (is (= timeout-review-token-count
-                 (get-in result [:metrics :tokens])))
-          (is (= []
-                 (get-in result [:error :data :blocking-issues]))
-              "blocking-issues defaults to an empty vector — never nil — when the
-               boundary-stream-idle path fires with no parsed review. Downstream
-               consumers that pattern-match on sequential data (count, seq, into)
-               must not see a surprise nil from the new path.")
-          (is (vector? (get-in result [:error :data :blocking-issues]))
-              "vector shape preserved end-to-end — pinned because PR #1058 review
-               flagged the original implementation returning nil here."))))))
-
-(deftest test-reviewer-boundary-stagnation-is-agent-error
-  ;; The 2026-06-14 dogfood (`rn-03`) shape: on review cycle #3 the reviewer
-  ;; LLM streamed but stagnated (no forward progress for 318398ms) and returned
-  ;; NO parsed review. The OLD boundary check tested only `stream-idle-error?`,
-  ;; so this fell through to the parse-failed branch — the framework promoted
-  ;; the timeout text into `:review/blocking-issues` and synthesized a false
-  ;; `:rejected` (decision routed back to IMPLEMENT, wasting a redirect cycle
-  ;; "fixing" a non-rejection). The widened `backend-timeout-error?` covers
-  ;; `:stagnation` (and `:hard-limit`) too, so this must take the same
-  ;; `:reviewer/backend-timeout` exit as the stream-idle variant.
-  (testing "stagnation on the LLM-call boundary (no parsed review) → :reviewer/backend-timeout"
-    (let [stagnation-elapsed-ms 318398
-          err (stagnation-llm-error stagnation-elapsed-ms)]
-      (with-redefs [model/resolve-llm-client-for-role (fn [_role client] client)
-                    llm/chat (fn [_client _prompt _opts]
-                               (mock-llm-response ""
-                                                  :success? false
-                                                  :tokens timeout-review-token-count
-                                                  :error err))
-                    llm/success? :success?
-                    llm/get-content :content
-                    llm/get-error :error]
-        (let [reviewer (reviewer/create-reviewer {:llm-backend ::mock-backend
-                                                  :gates []})
-              result (core/invoke reviewer {} sample-artifact)]
-          (is (= :error (:status result))
-              "Stagnation must surface as an agent-level error, not a synthetic :rejected review")
-          (is (= :reviewer/backend-timeout
-                 (get-in result [:error :data :code]))
-              "Error code must be :reviewer/backend-timeout — distinguishes infra timeout from real defect")
-          (is (= (:message err)
-                 (get-in result [:error :message]))
-              "Error message preserves the adaptive-timeout text verbatim for operator post-mortem")
-          (is (= []
-                 (get-in result [:error :data :blocking-issues]))
-              "blocking-issues defaults to an empty vector — never a synthetic rejection"))))))
-
-(deftest test-reviewer-timeout-only-shape-does-not-hide-real-gate-failures
-  (testing "timeout-only classification requires the deterministic gates to approve"
-    (with-redefs [model/resolve-llm-client-for-role (fn [_role client] client)
-                  llm/chat (fn [_client _prompt _opts]
-                             (mock-llm-response
-                              (timeout-only-review-content
-                               (adaptive-timeout-message backend-timeout-elapsed-ms)
-                               [])
-                              :success? false
-                              :tokens timeout-review-token-count
-                              :error (backend-timeout-error
-                                      (adaptive-timeout-message backend-timeout-elapsed-ms))))
-                  llm/success? :success?
-                  llm/get-content :content
-                  llm/get-error :error]
-      (let [reviewer (reviewer/create-reviewer {:llm-backend ::mock-backend
-                                                :gates [(failing-gate :gate1 "Gate failure")]})
-            result (core/invoke reviewer {} sample-artifact)]
-        (is (= :success (:status result)))
-        (is (not= :reviewer/backend-timeout
-                  (get-in result [:error :data :code])))
-        (is (= :rejected (get-in result [:artifact :review/decision])))))))
-
-(deftest test-reviewer-timeout-only-error-emits-phase-completed
-  (testing "timeout-only backend errors still emit review phase completion telemetry"
-    (let [events (atom [])]
-      (with-redefs [model/resolve-llm-client-for-role (fn [_role client] client)
-                    llm/chat (fn [_client _prompt _opts]
-                               (mock-llm-response
-                                (timeout-only-review-content
-                                 (adaptive-timeout-message backend-timeout-elapsed-ms))
-                                :success? false
-                                :tokens timeout-review-token-count
-                                :error (backend-timeout-error
-                                        (adaptive-timeout-message backend-timeout-elapsed-ms)
-                                        {:elapsed-ms backend-timeout-elapsed-ms})))
-                    llm/success? :success?
-                    llm/get-content :content
-                    llm/get-error :error
-                    log/info (fn [_logger category event payload]
-                               (swap! events conj {:category category
-                                                   :event event
-                                                   :payload payload}))]
-        (let [reviewer (reviewer/create-reviewer {:llm-backend ::mock-backend
-                                                  :gates []})
-              result (core/invoke reviewer {} sample-artifact)
-              completed-event (some #(when (= :reviewer/phase-completed (:event %)) %) @events)]
-          (is (= :error (:status result)))
-          (is completed-event)
-          (is (= :reviewer/backend-timeout
-                 (get-in completed-event [:payload :data :error-code])))
-          (is (= :error
-                 (get-in completed-event [:payload :data :status]))))))))
-
-(deftest test-reviewer-timeout-only-error-preserves-backend-metadata
-  (testing "timeout-only backend errors preserve normalized backend metadata for post-mortem"
-    (with-redefs [model/resolve-llm-client-for-role (fn [_role client] client)
-                  llm/chat (fn [_client _prompt _opts]
-                             (mock-llm-response
-                              (timeout-only-review-content
-                               (adaptive-timeout-message backend-timeout-elapsed-ms))
-                              :success? false
-                              :tokens timeout-review-token-count
-                              :stop-reason backend-timeout-stop-reason
-                              :num-turns backend-timeout-num-turns
-                              :error (backend-timeout-error
-                                      (adaptive-timeout-message backend-timeout-elapsed-ms)
-                                      {:elapsed-ms backend-timeout-elapsed-ms})))
-                  llm/success? :success?
-                  llm/get-content :content
-                  llm/get-error :error]
-      (let [reviewer (reviewer/create-reviewer {:llm-backend ::mock-backend
-                                                :gates []})
-            result (core/invoke reviewer {} sample-artifact)]
-        (is (= :error (:status result)))
-        (is (= :reviewer/backend-timeout
-               (get-in result [:error :data :code])))
-        (is (= backend-timeout-type
-               (get-in result [:error :data :type])))
-        (is (= backend-timeout-elapsed-ms
-               (get-in result [:error :data :elapsed-ms])))
-        (is (= backend-timeout-stop-reason
-               (get-in result [:error :data :stop-reason])))
-        (is (= backend-timeout-num-turns
-               (get-in result [:error :data :num-turns])))))))
-
-(deftest test-reviewer-rejects-degraded-implement-handoff
-  (testing "default reviewer rejects curated artifacts marked as degraded handoffs"
-    (let [reviewer (reviewer/create-reviewer {:llm-backend nil})
-          artifact {:code/id (random-uuid)
-                    :code/files [{:path "src/example.clj"
-                                  :content "(ns example)"
-                                  :action :create}]
-                    :code/degraded-handoff? true
-                    :code/scope-deviations []}
-          result (core/invoke reviewer {} artifact)
-          review (:artifact result)]
-      (is (= :rejected (:review/decision review)))
-      (is (seq (:review/blocking-issues review))))))
-
-(deftest test-reviewer-rejects-scope-deviations
-  (testing "default reviewer rejects artifacts with curator-reported scope deviations"
-    (let [reviewer (reviewer/create-reviewer {:llm-backend nil})
-          artifact {:code/id (random-uuid)
-                    :code/files [{:path "docs/out-of-scope.md"
-                                  :content "oops"
-                                  :action :modify}]
-                    :code/scope-deviations ["docs/out-of-scope.md"]}
-          result (core/invoke reviewer {} artifact)
-          review (:artifact result)]
-      (is (= :rejected (:review/decision review)))
-      (is (some #(re-find #"out-of-scope" %) (:review/blocking-issues review))))))
-
 ;; ============================================================================
 ;; LLM vs gate disagreement — observability for the 2026-05-18 dogfood
 ;; finding (LLM :approved silently overridden by failing internal gates)
 ;; ============================================================================
-
-(deftest test-reviewer-emits-gate-overrode-llm-warn-on-disagreement
+(deftest ^{:stratum 1} test-reviewer-emits-gate-overrode-llm-warn-on-disagreement
   ;; When the LLM emits :approved but a deterministic gate fails, the
   ;; final decision flips and the workflow gate fails with no signal
   ;; to the operator about which internal gate caused the override.
@@ -686,8 +557,7 @@
 
 ;; Gate-decision and gate-result->feedback tests moved to
 ;; reviewer/gates_test.clj (PR-D).
-
-(deftest test-reviewer-no-override-warn-when-gates-and-llm-agree
+(deftest ^{:stratum 1} test-reviewer-no-override-warn-when-gates-and-llm-agree
   (testing "no :reviewer/gate-overrode-llm warn when LLM and gates agree on :approved"
     (with-redefs [model/resolve-llm-client-for-role (fn [_role client] client)
                   llm/chat (fn [_client _prompt _opts]
@@ -715,14 +585,11 @@
             "no warn when LLM and gates agree — keeps the signal high-value")))))
 
 ;; Schema validation tests moved to reviewer/artifact_test.clj (PR-G).
-
 ;; review-summary, decision predicates, and get-* accessor tests moved to
 ;; reviewer/artifact_test.clj (PR-G).
 ;; test-validate-review-artifact also moved (it covers artifact/validate-).
-
 ;------------------------------------------------------------------------------ Integration tests
-
-(deftest test-reviewer-with-real-gates
+(deftest ^{:stratum 1} test-reviewer-with-real-gates
   (testing "Review with syntax gate"
     (let [gates [(loop/syntax-gate)]
           reviewer (reviewer/create-reviewer {:gates gates})
@@ -749,8 +616,7 @@
           "Should run all 3 gates"))))
 
 ;------------------------------------------------------------------------------ Edge case tests
-
-(deftest test-reviewer-with-no-gates
+(deftest ^{:stratum 1} test-reviewer-with-no-gates
   (testing "Review with no gates should approve"
     (let [reviewer (reviewer/create-reviewer {:gates []})
           result (core/invoke reviewer {} sample-artifact)
@@ -760,7 +626,7 @@
           "Should approve when no gates configured")
       (is (= 0 (:review/gates-total review))))))
 
-(deftest test-reviewer-with-gate-exception
+(deftest ^{:stratum 1} test-reviewer-with-gate-exception
   (testing "Review handles gate exceptions gracefully"
     (let [error-gate (loop/custom-gate :error-gate :test
                                         (fn [_artifact _context]
@@ -776,7 +642,7 @@
         (is (= 1 (:review/gates-failed review))
             "Exception should be treated as gate failure")))))
 
-(deftest test-reviewer-metrics
+(deftest ^{:stratum 1} test-reviewer-metrics
   (testing "Reviewer returns proper metrics"
     (let [gates [(passing-gate :gate1)
                  (failing-gate :gate2 "fail")]
@@ -799,8 +665,7 @@
 ;; components/progress-detector/test/ai/miniforge/progress_detector/detectors/repair_loop_test.clj
 ;; per Stage 2 spec. The agent.reviewer namespace no longer hosts the
 ;; fingerprint logic, so the tests live with the detector.
-
-(deftest reviewer-progress-monitor-thresholds-loaded-test
+(deftest ^{:stratum 1} reviewer-progress-monitor-thresholds-loaded-test
   ;; Guards the 2026-05-04 reviewer stagnation-threshold fix at the
   ;; reviewer boundary: a regression in prompt loading or
   ;; create-reviewer-progress-monitor would otherwise let the threshold
@@ -843,7 +708,7 @@
               (is (>= (:max-total-ms state) min-total-budget-ms)
                   "Total budget must be ≥ min-total-budget-ms — covers heavy reviews"))))))))
 
-(deftest reviewer-system-prompt-includes-behavior-addendum-test
+(deftest ^{:stratum 1} reviewer-system-prompt-includes-behavior-addendum-test
   ;; Pins the wiring added so the reviewer agent actually sees the
   ;; standards rules that `phase/load-and-filter-behaviors` produces
   ;; for the :review phase. Without this, every rule violation we've
@@ -881,7 +746,7 @@
             (is (clojure.string/includes? system-prompt "Test rule body.")
                 "rule body text must reach the LLM verbatim")))))))
 
-(deftest reviewer-system-prompt-empty-when-no-addendum-test
+(deftest ^{:stratum 1} reviewer-system-prompt-empty-when-no-addendum-test
   (testing "absent :task/behavior-addendum is treated as empty — no nil concat"
     (let [captured (atom nil)
           parseable-review (str "```clojure\n"
@@ -909,41 +774,7 @@
             ;; assertion is just that we didn't NPE or get nil.
             (is (pos? (count system-prompt)))))))))
 
-;; Enumeration-retry validator, well-formed-recovery?, recover-review-
-;; enumeration tests moved to reviewer/llm_response_test.clj (PR-F).
-;; normalize-llm-decision tests moved to reviewer/issues_test.clj (PR-C).
-
-;------------------------------------------------------------------------------ Scope-boundary tests
-;; The reviewer prompt and helper resolve a per-task scope so adjacent-file
-;; findings can't drive the verdict on tightly-scoped refactors. The 2026-06-04
-;; eliminate-requiring-resolve dogfood failed 20/20 tasks because the reviewer
-;; held every diff to the FULL standards bar across all changed files.
-;;
-;; Pure-helper coverage moved to `ai.miniforge.agent.reviewer.scope-test`
-;; (PR #1039 decomposition). Kept here: the reviewer-side wiring tests —
-;; prompt rendering and the end-to-end `core/invoke` integration.
-
-;; build-review-prompt + format-artifact-for-review tests moved to
-;; reviewer/prompts_test.clj (PR-E).
-;; sanitize-review-issues tests moved to reviewer/issues_test.clj (PR-C).
-
-(def ^:private scope-test-review-content
-  ;; Two blocking findings: one in scope (components/foo/src/a.clj), one
-  ;; adjacent-file noise (components/baz/src/b.clj). With the post-LLM
-  ;; filter active, only the in-scope finding should drive the verdict;
-  ;; the adjacent one should land in :review/out-of-scope-observations.
-  (str "```clojure\n"
-       "{:review/decision :changes-requested\n"
-       " :review/issues [{:severity :blocking\n"
-       "                  :file \"components/foo/src/a.clj\"\n"
-       "                  :description \"in-scope blocker\"}\n"
-       "                 {:severity :blocking\n"
-       "                  :file \"components/baz/src/b.clj\"\n"
-       "                  :description \"adjacent-file blocker\"}]\n"
-       " :review/summary \"mixed\"}\n"
-       "```"))
-
-(deftest test-reviewer-filters-out-of-scope-issues-before-verdict
+(deftest ^{:stratum 1} test-reviewer-filters-out-of-scope-issues-before-verdict
   (testing "LLM findings outside the task scope are moved to observations and do not block"
     (with-redefs [model/resolve-llm-client-for-role (fn [_role client] client)
                   llm/chat (fn [_client _prompt _opts]
@@ -965,44 +796,7 @@
             "the adjacent-file blocker is preserved as an advisory observation")
         (is (= "adjacent-file blocker" (:description (first out))))))))
 
-;; Tool-disallow-list — the reviewer is forced onto the MCP context cache and
-;; blocked from all mutation (Fable #4 context side, reviewer rewire).
-
-(deftest reviewer-disallowed-tools-contents-test
-  (testing "names the native read/search tools (forced onto context_*)"
-    (let [dt @#'reviewer/reviewer-disallowed-tools]
-      (doseq [t ["Read" "Grep" "Glob" "LS" "Agent"]]
-        (is (some #{t} dt) (str "expected " t " in disallowed-tools")))))
-
-  (testing "blocks ALL mutation — the reviewer inspects, never writes"
-    (let [dt @#'reviewer/reviewer-disallowed-tools]
-      (doseq [t ["Write" "Edit" "MultiEdit" "Bash"]]
-        (is (some #{t} dt) (str t " must be disallowed for a read-only reviewer")))))
-
-  (testing "is exactly the native tool set — the MCP read tools are allowlisted
-            by their prefixed wire names (e.g. mcp__context__context_read) and
-            are never in this native disallow-list, so reads route through the
-            cache. Pinned so any change is deliberate."
-    (is (= #{"Read" "Grep" "Glob" "LS" "Agent" "Bash" "Write" "Edit" "MultiEdit"}
-           (set @#'reviewer/reviewer-disallowed-tools)))))
-
-;------------------------------------------------------------------------------ Context-budget shedding (N12 §5)
-
-(def ^:private assemble-review-within-budget #'reviewer/assemble-review-within-budget)
-
-(defn- code-artifact
-  "n files, each `chars` bytes of body — the inlined contributor the reviewer
-   sheds when the prompt would overflow."
-  [n chars]
-  {:code/files (vec (for [i (range n)]
-                      {:path (str "src/f" i ".clj")
-                       :action :modify
-                       :content (apply str (repeat chars \x))}))})
-
-(defn- review-input [artifact]
-  {:task/title "T" :task/scope ["src"] :task/artifact artifact})
-
-(deftest assemble-review-within-budget-test
+(deftest ^{:stratum 1} assemble-review-within-budget-test
   (testing "uncatalogued model (nil window) → never sheds, full bodies inlined"
     (let [r (assemble-review-within-budget (review-input (code-artifact 1 100))
                                            "system" "no-such-model" 0)]
@@ -1052,7 +846,253 @@
       (is (false? (:shed? r)))
       (is (true? (:over-after-shed? r))))))
 
-(deftest test-reviewer-context-overflow-splits-policy-addendum-across-llm-sessions
+;------------------------------------------------------------------------------ Layer 2
+
+(deftest ^{:stratum 2} test-reviewer-uses-parseable-content-even-when-backend-flags-failure
+  (testing "parseable review content still drives the decision when backend success? is false"
+    (with-redefs [model/resolve-llm-client-for-role (fn [_role client] client)
+                  llm/chat (fn [_client _prompt _opts]
+                             (mock-llm-response
+                              valid-review-content
+                              :success? false
+                              :tokens parseable-backend-failure-token-count
+                              :error {:message "artifact file not found"}))
+                  llm/success? :success?
+                  llm/get-content :content
+                  llm/get-error :error]
+      (let [reviewer (reviewer/create-reviewer {:llm-backend ::mock-backend
+                                                :gates []})
+            result (core/invoke reviewer {} sample-artifact)
+            review (:artifact result)]
+        (is (= :changes-requested (:review/decision review)))
+        (is (some #{valid-review-blocking-description} (:review/blocking-issues review)))
+        (is (= parseable-backend-failure-token-count
+               (get-in result [:metrics :tokens])))))))
+
+;; parse-review-response tests (incl. malformed-issue, nil-line, all-nil-
+;; optional) moved to reviewer/llm_response_test.clj (PR-F).
+(deftest ^{:stratum 2} test-reviewer-timeout-only-parseable-failure-is-agent-error
+  (testing "timeout-only parsed review failures do not become rejected code-review artifacts"
+    (with-redefs [model/resolve-llm-client-for-role (fn [_role client] client)
+                  llm/chat (fn [_client _prompt _opts]
+                             (mock-llm-response
+                              (timeout-only-review-content
+                               (adaptive-timeout-message backend-timeout-elapsed-ms))
+                              :success? false
+                              :tokens timeout-review-token-count
+                              :error {:message (adaptive-timeout-message backend-timeout-elapsed-ms)}))
+                  llm/success? :success?
+                  llm/get-content :content
+                  llm/get-error :error]
+      (let [reviewer (reviewer/create-reviewer {:llm-backend ::mock-backend
+                                                :gates []})
+            result (core/invoke reviewer {} sample-artifact)]
+        (is (= :error (:status result)))
+        (is (= (adaptive-timeout-message backend-timeout-elapsed-ms)
+               (get-in result [:error :message])))
+        (is (= :reviewer/backend-timeout
+               (get-in result [:error :data :code])))
+        (is (= timeout-review-token-count
+               (get-in result [:metrics :tokens])))))))
+
+(deftest ^{:stratum 2} test-reviewer-timeout-only-parseable-success-wrapper-is-agent-error
+  (testing "timeout-only parsed review failures are treated as backend errors even when the wrapper reports success"
+    (with-redefs [model/resolve-llm-client-for-role (fn [_role client] client)
+                  llm/chat (fn [_client _prompt _opts]
+                             (mock-llm-response
+                              (timeout-only-review-content
+                               (wrapped-timeout-message wrapped-timeout-elapsed-ms)
+                               [(review-gate-feedback)
+                                (review-gate-feedback)])
+                              :success? true
+                              :tokens timeout-success-wrapper-token-count))
+                  llm/success? :success?
+                  llm/get-content :content
+                  llm/get-error (constantly nil)]
+      (let [reviewer (reviewer/create-reviewer {:llm-backend ::mock-backend
+                                                :gates []})
+            result (core/invoke reviewer {} sample-artifact)]
+        (is (= :error (:status result)))
+        (is (= (wrapped-timeout-message wrapped-timeout-elapsed-ms)
+               (get-in result [:error :message])))
+        (is (= :reviewer/backend-timeout
+               (get-in result [:error :data :code])))
+        (is (= timeout-success-wrapper-token-count
+               (get-in result [:metrics :tokens])))))))
+
+(deftest ^{:stratum 2} test-reviewer-boundary-stream-idle-is-agent-error
+  ;; The 2026-06-05 dogfood (`adhoc-944448986`) shape: the reviewer LLM
+  ;; stream-idle'd at 360s and returned NO parsed review (parse-failed),
+  ;; only the LLM-error's `:timeout {:type :stream-idle}`. The OLD
+  ;; `timeout-only-review?` predicate read from the parsed review map
+  ;; and so could not fire — the framework then promoted the timeout
+  ;; text into `:review/blocking-issues` via the parse-failed branch
+  ;; and synthesized a false `:rejected`, which the `:review-approved`
+  ;; gate (correctly given the verdict it received) failed.
+  ;;
+  ;; With the boundary-level `result-boundary/stream-idle-error?`
+  ;; check wired in, the reviewer must take the `:reviewer/backend-
+  ;; timeout` exit — the same path the parseable variants already
+  ;; take — instead of producing a false rejection.
+  (testing "stream-idle on the LLM-call boundary (no parsed review) → :reviewer/backend-timeout"
+    (let [stream-idle-elapsed-ms 360087
+          err (stream-idle-llm-error stream-idle-elapsed-ms)]
+      (with-redefs [model/resolve-llm-client-for-role (fn [_role client] client)
+                    llm/chat (fn [_client _prompt _opts]
+                               (mock-llm-response ""
+                                                  :success? false
+                                                  :tokens timeout-review-token-count
+                                                  :error err))
+                    llm/success? :success?
+                    llm/get-content :content
+                    llm/get-error :error]
+        (let [reviewer (reviewer/create-reviewer {:llm-backend ::mock-backend
+                                                  :gates []})
+              result (core/invoke reviewer {} sample-artifact)]
+          (is (= :error (:status result))
+              "Stream-idle must surface as an agent-level error, not a synthetic :rejected review")
+          (is (= :reviewer/backend-timeout
+                 (get-in result [:error :data :code]))
+              "Error code must be :reviewer/backend-timeout — distinguishes infra timeout from real defect")
+          (is (= (:message err)
+                 (get-in result [:error :message]))
+              "Error message preserves the adaptive-timeout text verbatim for operator post-mortem")
+          (is (= timeout-review-token-count
+                 (get-in result [:metrics :tokens])))
+          (is (= []
+                 (get-in result [:error :data :blocking-issues]))
+              "blocking-issues defaults to an empty vector — never nil — when the
+               boundary-stream-idle path fires with no parsed review. Downstream
+               consumers that pattern-match on sequential data (count, seq, into)
+               must not see a surprise nil from the new path.")
+          (is (vector? (get-in result [:error :data :blocking-issues]))
+              "vector shape preserved end-to-end — pinned because PR #1058 review
+               flagged the original implementation returning nil here."))))))
+
+(deftest ^{:stratum 2} test-reviewer-boundary-stagnation-is-agent-error
+  ;; The 2026-06-14 dogfood (`rn-03`) shape: on review cycle #3 the reviewer
+  ;; LLM streamed but stagnated (no forward progress for 318398ms) and returned
+  ;; NO parsed review. The OLD boundary check tested only `stream-idle-error?`,
+  ;; so this fell through to the parse-failed branch — the framework promoted
+  ;; the timeout text into `:review/blocking-issues` and synthesized a false
+  ;; `:rejected` (decision routed back to IMPLEMENT, wasting a redirect cycle
+  ;; "fixing" a non-rejection). The widened `backend-timeout-error?` covers
+  ;; `:stagnation` (and `:hard-limit`) too, so this must take the same
+  ;; `:reviewer/backend-timeout` exit as the stream-idle variant.
+  (testing "stagnation on the LLM-call boundary (no parsed review) → :reviewer/backend-timeout"
+    (let [stagnation-elapsed-ms 318398
+          err (stagnation-llm-error stagnation-elapsed-ms)]
+      (with-redefs [model/resolve-llm-client-for-role (fn [_role client] client)
+                    llm/chat (fn [_client _prompt _opts]
+                               (mock-llm-response ""
+                                                  :success? false
+                                                  :tokens timeout-review-token-count
+                                                  :error err))
+                    llm/success? :success?
+                    llm/get-content :content
+                    llm/get-error :error]
+        (let [reviewer (reviewer/create-reviewer {:llm-backend ::mock-backend
+                                                  :gates []})
+              result (core/invoke reviewer {} sample-artifact)]
+          (is (= :error (:status result))
+              "Stagnation must surface as an agent-level error, not a synthetic :rejected review")
+          (is (= :reviewer/backend-timeout
+                 (get-in result [:error :data :code]))
+              "Error code must be :reviewer/backend-timeout — distinguishes infra timeout from real defect")
+          (is (= (:message err)
+                 (get-in result [:error :message]))
+              "Error message preserves the adaptive-timeout text verbatim for operator post-mortem")
+          (is (= []
+                 (get-in result [:error :data :blocking-issues]))
+              "blocking-issues defaults to an empty vector — never a synthetic rejection"))))))
+
+(deftest ^{:stratum 2} test-reviewer-timeout-only-shape-does-not-hide-real-gate-failures
+  (testing "timeout-only classification requires the deterministic gates to approve"
+    (with-redefs [model/resolve-llm-client-for-role (fn [_role client] client)
+                  llm/chat (fn [_client _prompt _opts]
+                             (mock-llm-response
+                              (timeout-only-review-content
+                               (adaptive-timeout-message backend-timeout-elapsed-ms)
+                               [])
+                              :success? false
+                              :tokens timeout-review-token-count
+                              :error (backend-timeout-error
+                                      (adaptive-timeout-message backend-timeout-elapsed-ms))))
+                  llm/success? :success?
+                  llm/get-content :content
+                  llm/get-error :error]
+      (let [reviewer (reviewer/create-reviewer {:llm-backend ::mock-backend
+                                                :gates [(failing-gate :gate1 "Gate failure")]})
+            result (core/invoke reviewer {} sample-artifact)]
+        (is (= :success (:status result)))
+        (is (not= :reviewer/backend-timeout
+                  (get-in result [:error :data :code])))
+        (is (= :rejected (get-in result [:artifact :review/decision])))))))
+
+(deftest ^{:stratum 2} test-reviewer-timeout-only-error-emits-phase-completed
+  (testing "timeout-only backend errors still emit review phase completion telemetry"
+    (let [events (atom [])]
+      (with-redefs [model/resolve-llm-client-for-role (fn [_role client] client)
+                    llm/chat (fn [_client _prompt _opts]
+                               (mock-llm-response
+                                (timeout-only-review-content
+                                 (adaptive-timeout-message backend-timeout-elapsed-ms))
+                                :success? false
+                                :tokens timeout-review-token-count
+                                :error (backend-timeout-error
+                                        (adaptive-timeout-message backend-timeout-elapsed-ms)
+                                        {:elapsed-ms backend-timeout-elapsed-ms})))
+                    llm/success? :success?
+                    llm/get-content :content
+                    llm/get-error :error
+                    log/info (fn [_logger category event payload]
+                               (swap! events conj {:category category
+                                                   :event event
+                                                   :payload payload}))]
+        (let [reviewer (reviewer/create-reviewer {:llm-backend ::mock-backend
+                                                  :gates []})
+              result (core/invoke reviewer {} sample-artifact)
+              completed-event (some #(when (= :reviewer/phase-completed (:event %)) %) @events)]
+          (is (= :error (:status result)))
+          (is completed-event)
+          (is (= :reviewer/backend-timeout
+                 (get-in completed-event [:payload :data :error-code])))
+          (is (= :error
+                 (get-in completed-event [:payload :data :status]))))))))
+
+(deftest ^{:stratum 2} test-reviewer-timeout-only-error-preserves-backend-metadata
+  (testing "timeout-only backend errors preserve normalized backend metadata for post-mortem"
+    (with-redefs [model/resolve-llm-client-for-role (fn [_role client] client)
+                  llm/chat (fn [_client _prompt _opts]
+                             (mock-llm-response
+                              (timeout-only-review-content
+                               (adaptive-timeout-message backend-timeout-elapsed-ms))
+                              :success? false
+                              :tokens timeout-review-token-count
+                              :stop-reason backend-timeout-stop-reason
+                              :num-turns backend-timeout-num-turns
+                              :error (backend-timeout-error
+                                      (adaptive-timeout-message backend-timeout-elapsed-ms)
+                                      {:elapsed-ms backend-timeout-elapsed-ms})))
+                  llm/success? :success?
+                  llm/get-content :content
+                  llm/get-error :error]
+      (let [reviewer (reviewer/create-reviewer {:llm-backend ::mock-backend
+                                                :gates []})
+            result (core/invoke reviewer {} sample-artifact)]
+        (is (= :error (:status result)))
+        (is (= :reviewer/backend-timeout
+               (get-in result [:error :data :code])))
+        (is (= backend-timeout-type
+               (get-in result [:error :data :type])))
+        (is (= backend-timeout-elapsed-ms
+               (get-in result [:error :data :elapsed-ms])))
+        (is (= backend-timeout-stop-reason
+               (get-in result [:error :data :stop-reason])))
+        (is (= backend-timeout-num-turns
+               (get-in result [:error :data :num-turns])))))))
+
+(deftest ^{:stratum 2} test-reviewer-context-overflow-splits-policy-addendum-across-llm-sessions
   (testing "an over-budget compiled policy addendum is split across multiple
             LLM sessions instead of silently skipping semantic policy review"
     (let [captured-systems (atom [])
@@ -1098,18 +1138,7 @@
                  (get-in result [:metrics :tokens]))
               "token accounting sums every split LLM session"))))))
 
-(deftest test-reviewer-split-session-summary-fallback
-  (testing "split reviews without per-session summaries still produce a useful summary"
-    (let [combine #'reviewer/combine-parsed-reviews
-          result (combine [{:review/decision :approved
-                            :review/issues []}
-                           {:review/decision :changes-requested
-                            :review/issues []}])]
-      (is (= :changes-requested (:review/decision result)))
-      (is (= "Split reviewer sessions completed."
-             (:review/summary result))))))
-
-(deftest test-reviewer-irreducible-context-overflow-applies-gates-without-llm
+(deftest ^{:stratum 2} test-reviewer-irreducible-context-overflow-applies-gates-without-llm
   (testing "irreducible context overflow skips the doomed LLM call but still
             runs deterministic policy gates"
     (let [llm-called? (atom false)]
