@@ -20,6 +20,7 @@ Existing projections deliberately accept older records missing those fields.
 ## Layer
 
 Schema foundations, branched from main at `ba6eaa25` after #2004 merged.
+Integrated main at `cf73c7a1` after scope and chain payload foundations merged.
 Event payload validation is the second commit in this contract layer.
 Producer migration and live publication follow separately.
 
@@ -71,5 +72,5 @@ Depends on merged contract reconciliation #2000 and shared projection schemas #2
 - [x] Implement record schemas and regressions.
 - [x] Add lifecycle and Spec snapshot payload contracts.
 - [x] Verify deployed consumers and packaged artifact.
-- [ ] Complete adversarial standards review and normal signed hooks.
+- [x] Complete adversarial standards review and normal signed hooks.
 - Require clean exact-head review and all CI before merge.
