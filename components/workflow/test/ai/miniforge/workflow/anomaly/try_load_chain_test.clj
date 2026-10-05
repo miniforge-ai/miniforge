@@ -22,6 +22,7 @@
   (:require [clojure.java.io :as io]
             [clojure.test :refer [deftest is testing]]
             [ai.miniforge.anomaly.interface :as anomaly]
+            [ai.miniforge.workflow.chain-resources :as resources]
             [ai.miniforge.workflow.chain-loader :as chain-loader]
             [ai.miniforge.workflow.chain-test-support :as support]
             [slingshot.slingshot :refer [try+]]))
@@ -69,7 +70,7 @@
 (deftest ^{:stratum 2} try-load-chain-returns-result-on-success
   (testing "existing chain resource yields a non-anomaly result map"
     (with-redefs [io/resource fixture-resource
-                  chain-loader/load-chain-resource fixture-definition]
+                  resources/read-definition fixture-definition]
       (let [result (chain-loader/try-load-chain :spec-to-pr "1.0.0")]
         (is (not (anomaly/anomaly? result)))
         (is (some? (:chain result)))

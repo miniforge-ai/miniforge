@@ -20,6 +20,7 @@
   (:require
    [clojure.test :refer [deftest testing is]]
    [clojure.java.io :as io]
+   [ai.miniforge.workflow.chain-resources :as resources]
    [ai.miniforge.workflow.chain-test-support :as support]
    [ai.miniforge.workflow.chain-loader :as chain-loader]))
 
@@ -63,7 +64,7 @@
 
 (deftest ^{:stratum 1} find-latest-chain-resource-test
   (testing "latest chain discovery chooses the highest matching version from discovered resources"
-    (with-redefs [chain-loader/list-resource-names (fn [_]
+    (with-redefs [resources/names (fn [_]
                                                      ["spec-to-pr-v1.0.0.edn"
                                                       "spec-to-pr-v1.2.0.edn"
                                                       "sdlc-to-deploy-v1.0.0.edn"])]
@@ -74,8 +75,8 @@
 
 (deftest ^{:stratum 2} list-chains-test
   (testing "lists chain summaries from every resource name returned by discovery"
-    (with-redefs [chain-loader/list-resource-names (constantly test-chain-resource-names)
-                  chain-loader/parse-chain-resource test-chain-summaries]
+    (with-redefs [resources/names (constantly test-chain-resource-names)
+                  resources/summary test-chain-summaries]
       (let [chains (chain-loader/list-chains)]
         (is (= [:spec-to-pr :test-chain] (mapv :id chains)))
         (is (= [1 2] (mapv :steps chains)))
@@ -85,7 +86,7 @@
 (deftest ^{:stratum 2} load-chain-versioned-test
   (testing "loads chain by ID and version from resources"
     (with-redefs [io/resource (partial fake-resource chain-definitions)
-                  chain-loader/load-chain-resource chain-definitions]
+                  resources/read-definition chain-definitions]
       (let [{:keys [chain source]} (chain-loader/load-chain :spec-to-pr "1.0.0")]
         (is (= :spec-to-pr (:chain/id chain)))
         (is (= "1.0.0" (:chain/version chain)))
@@ -95,10 +96,10 @@
 (deftest ^{:stratum 2} load-chain-latest-test
   (testing "loads latest version when version is 'latest'"
     (with-redefs [io/resource (partial fake-resource chain-definitions)
-                  chain-loader/list-resource-names (fn [_]
+                  resources/names (fn [_]
                                                      ["spec-to-pr-v1.0.0.edn"
                                                       "spec-to-pr-v1.2.0.edn"])
-                  chain-loader/load-chain-resource chain-definitions]
+                  resources/read-definition chain-definitions]
       (let [{:keys [chain path]} (chain-loader/load-chain :spec-to-pr "latest")]
         (is (= :spec-to-pr (:chain/id chain)))
         (is (= "1.2.0" (:chain/version chain)))
