@@ -28,7 +28,10 @@
    [ai.miniforge.schema.logging :as logging]
    [ai.miniforge.schema.logging-vocab :as logging-vocab]
    [ai.miniforge.schema.supervisory :as supervisory]
-   [ai.miniforge.schema.supervisory-records-spec :as records]))
+   [ai.miniforge.schema.supervisory-records-spec :as records]
+   [ai.miniforge.schema.supervisory-admission-spec :as admission]
+   [ai.miniforge.schema.semantic-version-spec :as version]
+   [ai.miniforge.schema.text-spec :as text]))
 
 ;------------------------------------------------------------------------------ Layer 0
 
@@ -101,6 +104,26 @@
   logging/Scenario)
 
 ;; Supervisory entity schemas
+(def ^{:stratum 0} NonBlankString
+  "Current-write text containing at least one non-whitespace Unicode character."
+  text/NonBlankString)
+
+(def ^{:stratum 0} SemanticVersion
+  "Resolved semantic wire version; not a selector, range, or workspace DateVer."
+  version/SemanticVersion)
+
+(def ^{:stratum 0} InterventionState
+  "Canonical intervention lifecycle state vocabulary."
+  records/InterventionState)
+
+(def ^{:stratum 0} SpecRecord
+  "Current-write Spec record with required origin and non-blank title."
+  admission/SpecRecord)
+
+(def ^{:stratum 0} InterventionRecord
+  "Current-write intervention record with justification; not authorization."
+  admission/InterventionRecord)
+
 (def ^{:stratum 0} SpecProjection
   "Deployed open Spec projection shape; not a current-write admission contract."
   records/SpecProjection)
