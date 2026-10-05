@@ -10,6 +10,7 @@
 
 Compose strict Spec and InterventionRequest records from shared projection schemas.
 These contracts support admission without changing retained projection compatibility.
+Define the corresponding Spec snapshot and intervention fact payloads in event-stream.
 
 ## Motivation
 
@@ -28,6 +29,9 @@ Producer migration and live publication follow separately.
 - Tighten only current-write Spec title/origin and intervention justification.
 - Preserve open extension fields and existing projection validators.
 - Share record fixtures between compatibility and admission tests.
+- Require matching payload identities and entity scope keys.
+- Require version-2 intervention facts, with requests initially proposed.
+- Share the existing semantic wire-version schema with evidence validation.
 
 ## Testing Plan
 
@@ -40,10 +44,22 @@ Substituting the old projection contracts produces seven expected assertion fail
 All four deployed schema consumers pass serially. Kondo reports zero warnings/errors.
 The CLI rebuild succeeds, and the incremental standards scan is clean.
 
+Payload and existing version regressions pass 7 tests / 154 assertions.
+They cover malformed records, missing/nil fields, identity mismatches, incorrect
+profiles and states, and semantic schema-version syntax. This is partial coverage
+of N3.CP.9 and the payload clauses of N3 §3.19/3.22, not emitter-authority proof.
+The shared version regex retains its capture groups for evidence precedence parsing.
+All four schema/event-stream consumers and all three evidence consumers pass serially.
+The rebuilt artifact passes all 14 focused tests / 250 assertions outside the checkout,
+without source overlays. The shared version alias has identical value identity.
+The final incremental standards scan reports zero findings.
+
 ## Deployment Plan
 
 No live admission cutover or historical rewrite. These schemas do not authorize actions.
-Initial intervention state and event identity matching belong to event payload validation.
+The payload schemas enforce initial intervention state and event identity matching.
+Other supervisory snapshot payloads and live producer cutover remain separate work.
+Schema-version syntax validation does not implement historical profile selection.
 Stateful authorization, durable acknowledgment, and transitions remain runtime obligations.
 
 ## Related Issues/PRs
@@ -53,7 +69,7 @@ Depends on merged contract reconciliation #2000 and shared projection schemas #2
 ## Checklist
 
 - [x] Implement record schemas and regressions.
-- [ ] Add lifecycle and Spec snapshot payload contracts.
-- [ ] Verify deployed consumers and packaged artifact.
+- [x] Add lifecycle and Spec snapshot payload contracts.
+- [x] Verify deployed consumers and packaged artifact.
 - [ ] Complete adversarial standards review and normal signed hooks.
 - Require clean exact-head review and all CI before merge.

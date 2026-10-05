@@ -29,7 +29,8 @@
    [ai.miniforge.schema.logging-vocab :as logging-vocab]
    [ai.miniforge.schema.supervisory :as supervisory]
    [ai.miniforge.schema.supervisory-records-spec :as records]
-   [ai.miniforge.schema.supervisory-admission-spec :as admission]))
+   [ai.miniforge.schema.supervisory-admission-spec :as admission]
+   [ai.miniforge.schema.semantic-version-spec :as version]))
 
 ;------------------------------------------------------------------------------ Layer 0
 
@@ -102,6 +103,14 @@
   logging/Scenario)
 
 ;; Supervisory entity schemas
+(def ^{:stratum 0} SemanticVersion
+  "Resolved semantic wire version; not a selector, range, or workspace DateVer."
+  version/SemanticVersion)
+
+(def ^{:stratum 0} InterventionState
+  "Canonical intervention lifecycle state vocabulary."
+  records/InterventionState)
+
 (def ^{:stratum 0} SpecRecord
   "Current-write Spec record with required origin and non-blank title."
   admission/SpecRecord)
