@@ -138,7 +138,7 @@
 (def ^{:stratum 0} intervention-states
   "Lifecycle states of an InterventionRequest per
    N5-delta-supervisory-control-plane §3.3."
-  [:proposed :pending-human :approved :rejected :dispatched :applied :verified :failed])
+  shared/intervention-states)
 
 (def ^{:stratum 0} dependency-kinds
   [:provider :platform :environment])
@@ -157,7 +157,7 @@
    Vector (not set) for deterministic enum ordering in malli printed
    schemas / error messages, matching `workflow-run-statuses` /
    `pr-statuses` / etc. throughout this namespace."
-  [:draft :active :completed :archived])
+  shared/spec-statuses)
 
 ;; Per-PR scoring sub-entities (N5-delta-2 §2). All three are OPTIONAL on
 ;; PrFleetEntry (`ai.miniforge.supervisory-state.entities`): absent = "not

@@ -16,7 +16,7 @@
 ;; See the License for the specific language governing permissions and
 ;; limitations under the License.
 (ns ai.miniforge.supervisory-state.entities
-  "Open Malli schemas for the ten canonical supervisory entities, plus the
+  "Open Malli schemas for the canonical supervisory entities, plus the
    aggregate EntityTable that holds them, per N5-delta-supervisory-control-
    plane §3.1 and the Rust supervisory-entities crate.
 
@@ -30,6 +30,7 @@
 
    All maps are open (additional keys pass through) per N5-delta-1 §12.4."
   (:require
+   [ai.miniforge.schema.interface :as shared]
    [ai.miniforge.supervisory-state.schema :as schema]))
 
 ;------------------------------------------------------------------------------ Layer 0
@@ -78,35 +79,8 @@
       [:pr/merge-order {:optional true} [:maybe :common/non-neg-int]]]]]])
 
 (def ^{:stratum 0} Spec
-  "A long-lived supervisory entity representing the operator's
-   top-level unit of work (N5-delta-3 §3.1, §5.1). One Spec owns N
-   WorkflowRuns over its lifetime.
-
-   Open map: additional keys pass through validation. Field types
-   chosen to be compatible with the existing per-run snapshot
-   (`:workflow-run/spec` above) and the spec-parser's `SpecIntent`
-   shape:
-
-   - `:spec/intent` is a structured map (per `SpecIntent` in
-     `spec-parser/.../schema.clj`); kept as open `map?` here so we
-     don't re-validate against the producer-side schema.
-   - `:spec/tags` accepts strings OR keywords (existing tag
-     conventions elsewhere in the codebase).
-   - `:spec/origin` discriminates `:miniforge` (specs known to this
-     runtime) from `:local-synthetic` (the Rust-core consumer
-     creates these ahead of upstream knowing about them, per
-     N5-delta-3 §5.3 reconciliation)."
-  [:map {:registry schema/registry}
-   [:spec/id         :spec/id]
-   [:spec/title      [:string {:min 1}]]
-   [:spec/status     :spec/status]
-   [:spec/created-at :common/timestamp]
-   [:spec/updated-at :common/timestamp]
-   [:spec/description {:optional true} :string]
-   [:spec/intent      {:optional true} map?]
-   [:spec/repo-url    {:optional true} :string]
-   [:spec/tags        {:optional true} [:vector [:or :string :keyword]]]
-   [:spec/origin      {:optional true} keyword?]])
+  "Deployed long-lived Spec projection, distinct from the run-start snapshot."
+  shared/SpecProjection)
 
 (def ^{:stratum 0} AgentSession
   "An external or internal agent observable to the supervisory plane.
@@ -224,25 +198,8 @@
    [:decision/resolved-at {:optional true} [:maybe :common/timestamp]]])
 
 (def ^{:stratum 0} InterventionRequest
-  "A bounded supervisory control request per N5 supervisory delta §3.1.
-
-   The type and target-type stay open keywords at this boundary so replay and
-   downstream consumers preserve future spec-aligned additions."
-  [:map {:registry schema/registry}
-   [:intervention/id :intervention/id]
-   [:intervention/type keyword?]
-   [:intervention/target-type keyword?]
-   [:intervention/target-id any?]
-   [:intervention/requested-by [:string {:min 1}]]
-   [:intervention/request-source keyword?]
-   [:intervention/state :intervention/state]
-   [:intervention/requested-at :common/timestamp]
-   [:intervention/updated-at :common/timestamp]
-   [:intervention/justification {:optional true} [:maybe string?]]
-   [:intervention/details {:optional true} [:maybe map?]]
-   [:intervention/approval-required? {:optional true} boolean?]
-   [:intervention/reason {:optional true} [:maybe string?]]
-   [:intervention/outcome {:optional true} any?]])
+  "Deployed intervention projection; admission and authorization remain separate."
+  shared/InterventionProjection)
 
 (def ^{:stratum 0} DependencyHealth
   "Projected health for an external provider, platform, or user environment."

@@ -27,7 +27,8 @@
    [ai.miniforge.schema.vocab :as vocab]
    [ai.miniforge.schema.logging :as logging]
    [ai.miniforge.schema.logging-vocab :as logging-vocab]
-   [ai.miniforge.schema.supervisory :as supervisory]))
+   [ai.miniforge.schema.supervisory :as supervisory]
+   [ai.miniforge.schema.supervisory-records-spec :as records]))
 
 ;------------------------------------------------------------------------------ Layer 0
 
@@ -100,6 +101,22 @@
   logging/Scenario)
 
 ;; Supervisory entity schemas
+(def ^{:stratum 0} SpecProjection
+  "Deployed open Spec projection shape; not a current-write admission contract."
+  records/SpecProjection)
+
+(def ^{:stratum 0} InterventionProjection
+  "Deployed open intervention projection shape; not an authorization validator."
+  records/InterventionProjection)
+
+(def ^{:stratum 0} spec-statuses
+  "Ordered lifecycle vocabulary for long-lived supervisory work records."
+  records/spec-statuses)
+
+(def ^{:stratum 0} intervention-states
+  "Ordered intervention lifecycle vocabulary; permitted transitions are separate."
+  records/intervention-states)
+
 (def ^{:stratum 0} WorkflowRun
   "Malli open `:map` schema for a supervisory workflow run: `:workflow/id`,
    `:workflow/key`, `:workflow/status`, `:workflow/phase`,
@@ -545,10 +562,10 @@
                   :agent/role :invalid-role})
   ;; => {:agent/id ["should be a uuid"], :agent/role ["should be either ..."]}
 
-  ;; Validate and return or throw
-  (validate Task {:task/id (random-uuid)
-                  :task/type :implement
-                  :task/status :pending})
+  ;; Validate and return the value or an anomaly
+  (validate-anomaly Task {:task/id (random-uuid)
+                          :task/type :implement
+                          :task/status :pending})
   ;; => {:task/id #uuid "...", :task/type :implement, :task/status :pending}
 
   ;; Supervisory entity validation
