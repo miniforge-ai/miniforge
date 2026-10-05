@@ -74,5 +74,5 @@ Preserve the older acknowledgment worktree and its drafts.
 
 - [x] Implement and validate durable publication integration.
 - [x] Complete standards, consumer, and artifact gates.
-- [ ] Complete normal signed-hook gates.
+- [x] Complete normal signed-hook gates.
 - [ ] Require fresh no-findings review and all CI before merge.
