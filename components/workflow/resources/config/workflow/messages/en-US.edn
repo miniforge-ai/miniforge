@@ -17,11 +17,12 @@
 ;; limitations under the License.
 
 {:workflow/messages
- {;; Event publishing warnings
+ {:chain/child-incomplete "Chain child did not complete successfully."
   :chain/not-found "Chain '{chain-id}' not found."
   :chain/definition-mismatch "Chain definition does not match the requested identity or resolved version."
   :chain/invalid-request "Chain selection requires a keyword identity and a resolved version or latest selector."
   :chain/read-failed "Chain definition could not be read."
+  ;; Event publishing warnings
   :warn/websocket-send       "Warning: Failed to send event via WebSocket: {error}"
   :warn/publish-event        "Warning: Failed to publish event: {error}"
   :warn/publish-started      "Warning: Failed to publish workflow-started event: {error}"
