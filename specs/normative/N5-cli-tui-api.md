@@ -6,8 +6,8 @@
 
 # N5 — Interface Standard: CLI/TUI/API
 
-**Version:** 0.5.0-draft
-**Date:** 2026-08-05
+**Version:** 0.5.1-draft
+**Date:** 2026-10-04
 **Status:** Draft
 **Conformance:** MUST
 
@@ -1147,8 +1147,8 @@ authentication, listener attach handshake, subscription filters,
 resume-from-sequence, backpressure, and wire format. This section names the
 endpoint the console consumes; it MUST NOT restate or diverge from N3 §5.3.
 
-The stream is single-scope: the console subscribes to one scope per connection.
-N3 §2.3 defines six scopes: workflow, PR Work Item, pack, repository, supervisory entity, and deployment.
+The stream is single-scope: the console subscribes to one N3 §2.3 scope per connection.
+That registry includes chain-run scope; this section does not maintain a separate enumeration.
 
 #### 4.2.3 Evidence & Artifacts
 
@@ -1969,6 +1969,8 @@ any requirement in §1–§13.
 ---
 
 **Version History:**
+
+- 0.5.1-draft (2026-10-04): Align stream subscriptions with N3's chain-run scope.
 
 - 0.5.0-draft (2026-08-05): Spec-completion pass.
   **New sections:** localization contract (§9) applying dewey 050 to

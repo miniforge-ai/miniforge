@@ -6,8 +6,8 @@
 
 # N1 — Core Architecture & Concepts
 
-**Version:** 0.8.0-draft
-**Date:** 2026-08-10
+**Version:** 0.9.0-draft
+**Date:** 2026-10-04
 **Status:** Draft
 **Conformance:** MUST
 
@@ -1722,6 +1722,45 @@ The CLI surface for listener-visible status is defined in N5.
 
 ---
 
+### 2.32 Chain Definition, Run, Step, and Edge
+
+A **Chain Definition** composes workflow definitions. A **Chain Run** is one
+invocation of that composition, not a workflow definition or an individual workflow run.
+Implementations MUST distinguish these identities:
+
+| Field | Meaning | Type |
+|-------|---------|------|
+| `:chain/definition-id` | Reusable composition identity | keyword |
+| `:chain/definition-version` | Resolved immutable composition version | non-blank string |
+| `:chain/run-id` | One invocation, including its recovery | uuid |
+| `:step/id` | Step identity within the definition | keyword |
+| `:step/workflow-id` | Referenced workflow definition | keyword |
+| `:edge/id` | Dependency binding within the run | uuid |
+
+A step executes a workflow; an edge transfers inputs between steps. Implementations
+MUST NOT substitute one for the other. A sequential composition is a DAG with a linear
+dependency order. Implementations MUST retain both step outcomes and resolved
+edge bindings so the composition remains reconstructable under N2 §14.
+
+Each new invocation MUST allocate a fresh `:chain/run-id` before its first event.
+Recovery MUST preserve it. Step IDs MUST be unique within a definition, and
+referenced workflow executions MUST retain their own workflow UUIDs.
+The definition ID and version together MUST identify one immutable composition.
+Selectors such as `latest` MUST resolve before admission and MUST NOT be recorded
+as the resolved version. Runs MUST retain the resolved definition snapshot;
+recovery MUST use that snapshot, not resolve the selector again.
+Chain events MUST use the chain-run scope defined by N3 §2.3; a definition ID
+MUST NOT be substituted for a workflow or chain-run UUID.
+
+### 2.33 Work Specification
+
+A **Work Specification** is the durable intent that may produce multiple workflow
+runs. Its identity MUST remain distinct from each run's frozen specification
+snapshot. The specification's `:spec/id` MUST be a stable UUID, preserved across
+edits and reruns. A title alone MUST NOT determine identity: distinct work may
+share a title. N5's supervisory amendment owns its display projection.
+N2 owns execution; observing or editing a projection MUST NOT authorize execution.
+
 ## 3. Three-Layer Architecture
 
 miniforge is structured as three cooperating layers:
@@ -2581,6 +2620,8 @@ IDs are never reused; a withdrawn requirement is marked withdrawn, not deleted.
 | N1.DM.3 | MUST | Derive `:workflow/status` from the execution machine, using N2 §2.2's vocabulary and no synonym (§2). |
 | N1.DM.4 | MUST | Treat every entity identifier as opaque — no consumer parses meaning out of an id (§2). |
 | N1.DM.5 | MUST NOT | Introduce an entity in an extension spec that duplicates a §2 concept rather than specializing it (§2, standard 020). |
+| N1.DM.6 | MUST | Separate chain definition, run, step, and edge identities; retain the resolved immutable composition (§2.32). |
+| N1.DM.7 | MUST | Preserve Work Specification identity across edits and reruns, independently of titles and frozen run snapshots (§2.33). |
 
 #### Architecture and boundaries
 
@@ -2610,6 +2651,10 @@ A conformance suite MUST cover, at minimum:
    dependency (N1.AR.6).
 6. **Component isolation** — each component's tests pass with only that
    component and its declared dependencies on the classpath (N1.AR.5).
+7. **Chain identity** — repeated invocations use different run UUIDs but retain
+   the same resolved composition; steps and edges remain distinct (N1.DM.6).
+8. **Work identity** — equal titles do not merge specifications; edits preserve
+   specification IDs without changing prior run snapshots (N1.DM.7).
 
 Obligations 3 through 5 are static checks the repository can run continuously;
 they are the ones that catch architectural drift before it reaches review.
@@ -2881,6 +2926,9 @@ N1 states the model; the gaps surface downstream.
 
 **Version History:**
 
+- 0.9.0-draft (2026-10-04): Added chain definitions/runs/steps/edges and durable
+  work-specification identity. Product-owner approval and scope are recorded in
+  SPEC_INDEX's approved contract decisions.
 - 0.8.0-draft (2026-08-10): Spec-completion pass. §2's Workflow entity still
   declared `:workflow/status` as `:pending, :running, :completed, :failed,
   :cancelled` — the vocabulary N2 §2.2 superseded, missing `:paused` and

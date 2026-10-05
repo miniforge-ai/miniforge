@@ -6,8 +6,8 @@
 
 # N8 — Observability Control Interface
 
-**Version:** 0.4.0-draft
-**Date:** 2026-08-06
+**Version:** 0.4.1-draft
+**Date:** 2026-10-04
 **Status:** Draft
 **Conformance:** MUST
 
@@ -796,7 +796,7 @@ Two properties of that family matter to implementers of this spec:
   scope of the stream it annotates, and `control-action/*` and
   `annotation/created` take the scope of their target. Each carries
   `:scope/type` naming which scope it resolved to. Earlier revisions fixed these
-  schemas to `:workflow/id`. This excluded the five non-workflow scopes N3 §5.3.1 now streams.
+  schemas to `:workflow/id`. This excluded non-workflow scopes. N3 §2.3's registry includes chain-run scope.
 - `control-action/*` is `:audit` retention class (§5.3).
 
 The remaining event types below are specific to this spec and are defined here.
@@ -1023,7 +1023,7 @@ any requirement in §0–§14.
 - **Per-recipient `:restricted` suppression (§5.1).** Filtering is
   per-subscription, not per-recipient by role (N8.PRV.2).
 - **Inherited scope on listener events (§10.1).** Listener events carry
-  `:workflow/id`; `:scope/type` is not emitted, so the five non-workflow
+  `:workflow/id`; `:scope/type` is not emitted, so the non-workflow
   scopes of N3 §2.3 cannot be observed (N8.CTL.5).
 
 ### A.3 Structural
@@ -1047,6 +1047,8 @@ any requirement in §0–§14.
 ---
 
 **Version History:**
+
+- 0.4.1-draft (2026-10-04): Defer inherited-scope coverage to N3's registry, including chain runs.
 
 - 0.4.0-draft (2026-08-06): Spec-completion pass. §5 carried a parallel model
   for concerns N3 owns — privacy levels `metadata-only | redacted | full`, a

@@ -19,9 +19,11 @@
   (:require
    [clojure.test :refer [deftest is testing]]
    [clojure.string :as str]
+   [ai.miniforge.knowledge.interface]
    [ai.miniforge.orchestrator.interface :as sut]
    [ai.miniforge.orchestrator.core :as core]
-   [ai.miniforge.orchestrator.protocol :as proto]))
+   [ai.miniforge.orchestrator.protocol :as proto]
+   [ai.miniforge.workflow.interface]))
 
 ;------------------------------------------------------------------------------ Layer 0
 
