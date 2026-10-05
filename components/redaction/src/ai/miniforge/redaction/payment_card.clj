@@ -12,6 +12,12 @@
   (let [weighted (if (odd? index) (* 2 digit) digit)]
     (+ (quot weighted 10) (mod weighted 10))))
 
+(defn- ^{:stratum 0} numeric-text [value]
+  (cond
+    (decimal? value) (.toPlainString ^java.math.BigDecimal value)
+    (and (float? value) (Double/isFinite (double value))) (.toPlainString (bigdec value))
+    :else (str value)))
+
 ;------------------------------------------------------------------------------ Layer 1
 
 (defn- ^{:stratum 1} valid-checksum? [candidate]
@@ -26,7 +32,8 @@
     (or (some-> value meta present?)
         (cond
           (string? value) (some valid-checksum? (re-seq (:redaction/payment-card-pattern @policy/policy) value))
-          (or (integer? value) (keyword? value) (symbol? value)) (present? (str value))
+          (number? value) (present? (numeric-text value))
+          (or (keyword? value) (symbol? value)) (present? (str value))
           (coll? value) (some present? value)
           :else false))))
 

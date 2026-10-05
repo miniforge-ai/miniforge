@@ -126,7 +126,7 @@
               (when (or (not= n n*) (not= nm nm*))
                 (if n* (str n* "/" nm*) nm*))))]
     (cond
-      (integer? k) (redact-number k)
+      (number? k) (redact-number k)
       (string? k)  (let [r (redact-string k)] (if (= r k) k r))
       (keyword? k) (or (qualified k) k)
       (symbol? k)  (or (qualified k) k)

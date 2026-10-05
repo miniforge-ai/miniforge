@@ -157,7 +157,7 @@
           ;; concrete types, and enumerations of types leak.
           (coll? x)   (into (empty x) (map redact) x)
 
-          (or (integer? x) (string? x) (keyword? x) (symbol? x))
+          (or (number? x) (string? x) (keyword? x) (symbol? x))
           (match/redact-key x)
           :else       x)]
     ;; Metadata is data. pr-str drops it, so a sink that serializes never

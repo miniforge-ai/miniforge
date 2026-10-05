@@ -149,5 +149,14 @@
     (is (= (list (redaction/marker))
            (get-in (second result) [:extension/data (redaction/marker)])))))
 
+(deftest ^{:stratum 2} admitted-numeric-card-representations-are-redacted
+  (doseq [card [4111111111111111M 4111111111111111.0]
+          extension [card {card :value} (with-meta [] {:value card})]]
+    (let [event (assoc (chain-draft) :extension/data extension)
+          result (events/prepare-current-publication event)]
+      (is (vector? result))
+      (is (not (redaction/payment-card? (second result))))
+      (is (redaction/payment-card? event)))))
+
 (comment
   (supported-drafts))
