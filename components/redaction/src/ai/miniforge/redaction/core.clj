@@ -116,7 +116,7 @@
                    ;; Only a symbol can carry any — keywords and strings
                    ;; are not IObj — but a symbol key's metadata is as
                    ;; reachable as a value's.
-                   k* (if (coll? k)
+                   k* (if (or (coll? k) (= java.util.Date (class k)))
                         (redact k)
                         (let [rk (match/redact-key k)]
                           (if-let [km (meta k)]
@@ -149,6 +149,7 @@
            [(map-target x) {}]
            x))
 
+          (= java.util.Date (class x)) (java.util.Date. (.getTime ^java.util.Date x))
           (vector? x) (mapv redact x)
           (set? x)    (into (set-target x) (map redact) x)
 

@@ -31,6 +31,9 @@
     (valAt [_ _] (throw cause))
     (valAt [_ _ _] (throw cause))))
 
+(defn- ^{:stratum 0} dated-extension [date]
+  (with-meta {date [date #{date} (list date)]} {date date}))
+
 (defn- ^{:stratum 0} constructed-chain-draft [event-type]
   (let [stream (events/create-event-stream {:sinks []})
         fields (dissoc (chain/payload event-type) :event/type :event/version :scope/type)]
@@ -113,6 +116,16 @@
     (is (anomaly/anomaly? result))
     (is (nil? (get-in result [:anomaly/data :event/id])))
     (is (redaction/clean? result))))
+
+(deftest ^{:stratum 2} prepared-dates-are-detached-from-caller-mutation
+  (let [date (java.util.Date. 0)
+        event (assoc (chain-draft) :event/timestamp date :extension/data (dated-extension date))
+        [_ prepared] (events/prepare-current-publication event)
+        expected (dated-extension (java.util.Date. 0))]
+    (.setTime date 42)
+    (is (= (java.util.Date. 0) (:event/timestamp prepared)))
+    (is (= expected (:extension/data prepared)))
+    (is (= (meta expected) (meta (:extension/data prepared))))))
 
 (deftest ^{:stratum 2} redaction-removes-sensitive-content-but-cannot-rewrite-identity
   (let [event (assoc (chain-draft) :password "fixture-secret")

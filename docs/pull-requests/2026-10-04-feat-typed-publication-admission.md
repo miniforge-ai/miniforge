@@ -42,16 +42,17 @@ Constructor integration tests use the merged typed chain draft API.
 - Admit only concrete built-in collection types; reject custom maps with hidden state.
 - Omit unreadable diagnostic IDs without swallowing fatal or interruption causes.
 - Resume redacted-key suffix searches instead of repeating quadratic collision scans.
+- Copy accepted mutable dates, including keys and metadata, before returning prepared data.
 
 Other snapshot families are intentionally not admitted by this API yet. Legacy
 publication routing and historical reader contracts remain unchanged. Shared
 redaction improvements also apply to legacy callers: eager lists, numeric card detection,
-and bounded collision-search work.
+bounded collision-search work, and defensive copies of plain Date values.
 No generic-envelope fallback can admit unvalidated payloads through this new boundary.
 
 ## Testing Plan
 
-Boundary/schema and redaction tests pass 52 tests / 1255 assertions against the merged dependency.
+Boundary/schema and redaction tests pass 53 tests / 1258 assertions against the merged dependency.
 All nine chain types pass from the real public constructor through preparation.
 Tests reject missing fields, retired aliases, malformed supervisory records, and unsupported envelope versions.
 Failure tests cover canonical/legacy anomalies, redactor exceptions, wrapped critical causes, and sensitive malformed IDs.
@@ -75,11 +76,13 @@ per-key suffix cursors preserve all values without restarting each collision sea
 Map keys that differ only in an existing disambiguator share the same search cursor.
 Against the prior implementation, the regression reproduces 500500 and 374750 probes
 for two 1000-entry cases; both fixed cases stay below 10000 probes.
+The mutable-date regression changes the caller's original after preparation and
+checks the detached timestamp, nested values, keys, and metadata.
 End-to-end tracing also caught redacted lists
 becoming deferred sequences, incompatible with durable encoding; they now materialize as lists.
 Kondo and truthful strata checks pass. The incremental standards scanner is rerun before push.
 All four deployed event-stream/redaction consumer suites passed serially in 1 minute 19 seconds.
-The CLI rebuilt to 39,115,727 bytes. Its isolated packaged API passes the same 52 tests / 1255 assertions.
+The CLI rebuilt to 39,115,764 bytes. Its isolated packaged API passes the same 53 tests / 1258 assertions.
 
 ## Deployment Plan
 
