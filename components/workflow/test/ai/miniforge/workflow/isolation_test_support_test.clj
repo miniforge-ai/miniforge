@@ -17,9 +17,10 @@
 ;; limitations under the License.
 (ns ai.miniforge.workflow.isolation-test-support-test
   "Pins the isolation fixture's containment: no git command it runs may
-   write to the repository the test JVM was launched from. The tests aim
-   a git hook's environment at a decoy launch repository and read the
-   decoy back. Project-level twin, body identical:
+   write to the repository the test JVM was launched from, and its
+   cleanup may delete nothing outside the tree it is handed. The config
+   tests aim a git hook's environment at a decoy launch repository and
+   read the decoy back. Project-level twin, body identical:
    `ai.miniforge.workflow.isolation-support-test`."
   (:require
    [ai.miniforge.workflow.isolation-test-support :as sut]
@@ -27,7 +28,9 @@
    [clojure.string :as str]
    [clojure.test :refer [deftest is testing]])
   (:import
-   [java.io File]))
+   [java.io File]
+   [java.nio.file Files]
+   [java.nio.file.attribute FileAttribute]))
 
 ;------------------------------------------------------------------------------ Layer 0
 
@@ -91,6 +94,23 @@
                       {:dir (str dir) :args (vec args) :exit exit :err err})))
     result))
 
+(def ^{:stratum 0} ^:private template-marker
+  "A file name git's own layout does not use: finding it in a
+   repository's git dir shows `git init` copied the template there."
+  "template-marker")
+
+(defn- ^{:stratum 0} git-dir-file
+  "The file `name` in the git dir of the repository at `repo`."
+  [repo name]
+  (File. (File. (str repo) ".git") (str name)))
+
+(defn- ^{:stratum 0} link!
+  "Create a symbolic link at `link` that points at `target`."
+  [link target]
+  (Files/createSymbolicLink (.toPath (File. (str link)))
+                            (.toPath (File. (str target)))
+                            (make-array FileAttribute 0)))
+
 ;------------------------------------------------------------------------------ Layer 1
 
 (defn- ^{:stratum 1} holds-host-config?
@@ -131,6 +151,43 @@
       (testing "given the same environment unscrubbed → git writes the trace"
         (raw-git! env root "version")
         (is (.exists trace)))
+      (finally
+        (sut/delete-tree! root)))))
+
+(deftest ^{:stratum 1} test-delete-tree-removes-a-link-and-keeps-its-target
+  (let [root    (sut/temp-root!)
+        outside (sut/temp-root!)
+        kept    (File. ^String outside "kept.txt")]
+    (try
+      (spit kept "kept\n")
+      (link! (str root "/to-outside") outside)
+      (link! (str root "/to-nothing") (str outside "/no-such-file"))
+      (sut/delete-tree! root)
+      (testing "given a link in the tree to a directory outside it → the file out there is still there"
+        (is (.exists kept)))
+      (testing "given that link and one whose target is missing → the tree is gone"
+        (is (not (.exists (File. ^String root)))))
+      (finally
+        (sut/delete-tree! root)
+        (sut/delete-tree! outside)))))
+
+(deftest ^{:stratum 1} test-host-repo-copies-no-template
+  (let [root     (sut/temp-root!)
+        home     (str root "/home")
+        template (File. home "template")
+        plain    (str root "/plain")
+        env      (assoc (base-env) "HOME" home)]
+    (try
+      (.mkdirs template)
+      (spit (File. template ^String template-marker) "")
+      (raw-git! env root "config" "--file" (str home "/.gitconfig")
+                "init.templateDir" (str template))
+      (testing "given a global init.templateDir → the host repository holds none of the template"
+        (is (not (.exists (git-dir-file (sut/init-host-repo! (str root "/host") env)
+                                        template-marker)))))
+      (testing "given the same environment → a plain git init copies the template"
+        (raw-git! env root "init" "--quiet" plain)
+        (is (.exists (git-dir-file plain template-marker))))
       (finally
         (sut/delete-tree! root)))))
 

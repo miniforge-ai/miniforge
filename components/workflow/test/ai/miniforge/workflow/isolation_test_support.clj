@@ -69,12 +69,19 @@
                                   (make-array FileAttribute 0))))
 
 (defn ^{:stratum 0} delete-tree!
+  "Delete `path` and everything under it; a missing path is a no-op.
+
+   A symbolic link is deleted as a link and never entered.
+   `File.isDirectory` follows links, so recursing on its answer alone
+   deletes the files in the link's target, outside the tree.
+   `File.exists` follows them too and is not asked: a link whose target
+   is gone would be left behind and keep its parent from being deleted."
   [path]
   (let [f (File. (str path))]
-    (when (.exists f)
-      (when (.isDirectory f)
-        (doseq [child (.listFiles f)] (delete-tree! child)))
-      (.delete f))))
+    (when (and (not (Files/isSymbolicLink (.toPath f)))
+               (.isDirectory f))
+      (doseq [child (.listFiles f)] (delete-tree! child)))
+    (.delete f)))
 
 (def ^{:stratum 0} host-config
   "Local config of the throwaway host repository: an identity for the
@@ -140,12 +147,17 @@
 (defn ^{:stratum 1} init-host-repo!
   "A stand-in for the checkout the test JVM was launched from: one commit
    on `host-branch`, `host-config` applied, no remote. `process-env`
-   defaults to the JVM's own; `git!` scrubs it either way."
+   defaults to the JVM's own; `git!` scrubs it either way.
+
+   `--template=` makes `git init` copy no template. The scrub drops
+   `GIT_TEMPLATE_DIR`, but `init.templateDir` in the developer's global
+   config can still name one, and git copies a linked `hooks` entry as
+   a link — into a tree this fixture later deletes."
   ([dir]
    (init-host-repo! dir (launch-env)))
   ([dir process-env]
    (.mkdirs (File. (str dir)))
-   (git! process-env dir "init" "--quiet" "-b" host-branch)
+   (git! process-env dir "init" "--quiet" "--template=" "-b" host-branch)
    (doseq [entry host-config]
      (apply git! process-env dir (config-args dir entry)))
    (spit (str (File. (str dir) "seed.txt")) "seed\n")
