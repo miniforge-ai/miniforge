@@ -31,6 +31,9 @@ Constructor integration tests use the merged typed chain draft API.
 - Never echo an unvalidated event ID into newly constructed error data.
 - Reject redaction that rewrites event identity, domain identities, or scope.
 - Share supervisory fixtures with existing schema tests instead of copying maps.
+- Reject opaque nested values, including keys and metadata, using the shared redaction domain predicate.
+- Guard pack, deployment, and PR references against redaction changes.
+- Materialize redacted sequences as concrete lists so durable codecs can accept them.
 
 Other snapshot families are intentionally not admitted by this API yet. The legacy
 publisher and historical readers remain unchanged; there is no generic-envelope
@@ -38,7 +41,7 @@ fallback that could admit unvalidated payloads through this new boundary.
 
 ## Testing Plan
 
-Boundary/schema tests pass 11 tests / 210 assertions against the merged dependency.
+Boundary/schema and redaction tests pass 36 tests / 896 assertions against the merged dependency.
 All nine chain types pass from the real public constructor through preparation.
 Tests reject missing fields, retired aliases, malformed supervisory records, and unsupported envelope versions.
 Failure tests cover canonical/legacy anomalies, redactor exceptions, wrapped critical causes, and sensitive malformed IDs.
@@ -46,9 +49,12 @@ Failure tests cover canonical/legacy anomalies, redactor exceptions, wrapped cri
 The adversarial standards pass separated schema data from boundary effects and
 kept validation outside the publication engine. It found and fixed error-data
 leakage and swallowed critical causes. Shared fixtures avoid copied entity maps.
-Kondo and truthful strata checks pass; the incremental scanner reports zero violations across 4312 files.
-All four deployed event-stream consumer suites passed serially in 3 minutes 4 seconds.
-The CLI rebuilt to 39,112,893 bytes. Its isolated packaged API passes the same 11 tests / 210 assertions.
+Copilot identified opaque nested representations and omitted identity references;
+both are covered by regressions. End-to-end tracing also caught redacted lists
+becoming deferred sequences, incompatible with durable encoding; they now materialize as lists.
+Kondo and truthful strata checks pass. The incremental standards scanner is rerun before push.
+All four deployed event-stream/redaction consumer suites passed serially in 1 minute 22 seconds.
+The CLI rebuilt to 39,113,714 bytes. Its isolated packaged API passes the same 36 tests / 896 assertions.
 
 ## Deployment Plan
 

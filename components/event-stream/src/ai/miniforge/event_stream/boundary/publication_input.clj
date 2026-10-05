@@ -17,6 +17,7 @@
 (def ^{:stratum 0} ^:private identity-fields
   [:event/id :event/type :event/timestamp :event/version :event/parent-id
    :org/id :workspace/id :repo/id :agent/id :agent/instance-id :workflow/id
+   :pr/id :pack/id :deployment/id
    :chain/run-id :chain/definition-id :chain/definition-version
    :step/id :step/index :step/workflow-id
    :edge/id :edge/from-workflow-id :edge/to-workflow-id
@@ -56,6 +57,7 @@
   (try+
     (cond
       (anomaly/any-anomaly? event) event
+      (not (redaction/supported? event)) (failure :invalid-input :publication/invalid-draft event)
       (not (m/validate spec/CurrentDraft event)) (failure :invalid-input :publication/invalid-draft event)
       :else (anomaly/let-ok [scope (policy/scope event)] (redacted-input event scope)))
     (catch Object object (caught-failure event object (:throwable &throw-context)))))

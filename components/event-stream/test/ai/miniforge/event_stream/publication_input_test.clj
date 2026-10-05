@@ -90,10 +90,12 @@
         result (events/prepare-current-publication event)]
     (is (= (redaction/marker) (:password (second result))))
     (is (= (:event/id event) (:event/id (second result))))
-    (is (anomaly/anomaly? (events/prepare-current-publication
-                           (assoc event :chain/definition-version "AKIAIOSFODNN7EXAMPLE"))))
+    (doseq [field [:chain/definition-version :pack/id :deployment/id :repo/id]]
+      (is (anomaly/anomaly? (events/prepare-current-publication
+                             (assoc event field "AKIAIOSFODNN7EXAMPLE")))))
     (doseq [changed [(assoc event :chain/run-id (random-uuid))
                      (assoc event :event/id (random-uuid))
+                     (assoc event :pr/id (random-uuid))
                      (assoc event :chain/definition-version "rewritten")
                      (dissoc event :message)]]
       (with-redefs [redaction/redact (constantly changed)]
@@ -119,6 +121,31 @@
           (is false "Critical cause must escape admission")
           (catch Throwable actual (is (identical? cause actual)))
           (finally (Thread/interrupted)))))))
+
+(deftest ^{:stratum 2} opaque-nested-values-are-rejected-before-redaction
+  (let [calls (atom 0)
+        event (chain-draft)
+        secret "AKIAIOSFODNN7EXAMPLE"]
+    (with-redefs [redaction/redact (partial observe-redaction calls)]
+      (doseq [opaque [(atom secret) (object-array [secret])
+                     (java.util.ArrayList. [secret]) (java.util.HashMap. {:value secret})
+                     (delay secret) (map identity [secret])]
+              nested [[opaque] {opaque :value} (with-meta [] {:nested opaque})
+                      (with-meta 'field {:nested opaque})]]
+        (let [result (events/prepare-current-publication (assoc event :extension/data nested))]
+          (is (anomaly/anomaly? result))
+          (is (not (.contains (pr-str result) secret)))))
+      (is (zero? @calls)))))
+
+(deftest ^{:stratum 2} finite-extension-values-are-redacted-through-keys-and-metadata
+  (let [secret "AKIAIOSFODNN7EXAMPLE"
+        extension (with-meta {secret (list secret)} {:nested secret})
+        event (assoc (chain-draft) :extension/data extension)
+        result (events/prepare-current-publication event)]
+    (is (vector? result))
+    (is (redaction/clean? (second result)))
+    (is (= (list (redaction/marker))
+           (get-in (second result) [:extension/data (redaction/marker)])))))
 
 (comment
   (supported-drafts))

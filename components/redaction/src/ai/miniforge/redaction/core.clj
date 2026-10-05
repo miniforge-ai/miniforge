@@ -63,10 +63,8 @@
               ;; adds, so a vector, set and queue each keep their exact
               ;; class and a list gains the element at the front.
               ;;
-              ;; A list arrives here as a seq regardless — redact's seq
-              ;; branch returns a LazySeq — so seq-ness is preserved but
-              ;; the concrete class is not. That is upstream of this
-              ;; branch, not a coercion it introduces.
+              ;; Redaction eagerly rebuilds sequences as lists so the result
+              ;; remains inspectable and portable without deferred work.
               (coll? k)   (conj k (str (policy/marker) policy/disambiguator-separator n))
               :else       (str k policy/disambiguator-separator n)))]
     (if (contains? m k)
@@ -149,10 +147,9 @@
           (vector? x) (mapv redact x)
           (set? x)    (into (set-target x) (map redact) x)
 
-          ;; doall, not a bare map: a lazy seq would defer redaction and keep
-          ;; the un-redacted value alive in the closure, so the secret would
-          ;; still be reachable from an event §8.1 calls conformant.
-          (seq? x)    (doall (map redact x))
+          ;; Materialize a list: no secret-bearing closure or deferred sequence
+          ;; may escape into the prepared event or durable codec.
+          (seq? x)    (apply list (map redact x))
 
           ;; Any other Clojure collection. A PersistentQueue is coll? but none
           ;; of map?, vector?, set? or seq?, so without this clause its

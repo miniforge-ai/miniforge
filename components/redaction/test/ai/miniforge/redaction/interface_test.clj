@@ -216,7 +216,7 @@
     ;; still looking redacted.
     (let [src (map identity ["AKIAIOSFODNN7EXAMPLE" "plain"])
           out (:items (sut/redact {:items src}))]
-      (is (realized? out) "redaction is forced, not deferred")
+      (is (list? out) "redaction produces a concrete list, not deferred work")
       (is (= [marker "plain"] (vec out))))))
 
 (deftest ^{:stratum 1} counts-are-not-secrets-test
