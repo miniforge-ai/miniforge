@@ -39,14 +39,14 @@
   (if (sorted? value) #{} (empty value)))
 
 (defn- ^{:stratum 0} free-key
-  "K, or K with a counter appended until it is absent from M.
+  "Return [unused-key next-suffix], continuing this key's prior search.
 
    Two different secrets redact to the same marker, so a map keyed by
    both would collapse to one entry and silently drop a value — the
    keys were secret, but the values they held were not. Only runs for a
    key that actually changed, which is rare, so the common path pays
    nothing."
-  [m k]
+  [m k start]
   (letfn [(nth-form [k n]
             ;; Type-preserving: a map key is compared by value, so the
             ;; only way to keep two entries is to make the keys differ by
@@ -63,18 +63,16 @@
               ;; adds, so a vector, set and queue each keep their exact
               ;; class and a list gains the element at the front.
               ;;
-              ;; A list arrives here as a seq regardless — redact's seq
-              ;; branch returns a LazySeq — so seq-ness is preserved but
-              ;; the concrete class is not. That is upstream of this
-              ;; branch, not a coercion it introduces.
+              ;; Redaction eagerly rebuilds sequences as lists so the result
+              ;; remains inspectable and portable without deferred work.
               (coll? k)   (conj k (str (policy/marker) policy/disambiguator-separator n))
               :else       (str k policy/disambiguator-separator n)))]
     (if (contains? m k)
-      (first (for [n (iterate inc 2)
+      (first (for [n (iterate inc start)
                    :let [candidate (nth-form k n)]
                    :when (not (contains? m candidate))]
-               candidate))
-      k)))
+               [candidate (inc n)]))
+      [k start])))
 
 ;------------------------------------------------------------------------------ Layer 1
 
@@ -106,8 +104,9 @@
           ;; back onto X preserves record/plain map types. Sorted collections
           ;; become hash collections because markers can change key/value types.
           (map? x)
-          (reduce-kv
-           (fn [m k v]
+          (first
+           (reduce-kv
+           (fn [[m suffixes] k v]
              (let [;; A collection can be a key too, and match/redact-key
                    ;; knows only scalars — it cannot recurse without
                    ;; depending on this namespace. Dispatch here, where
@@ -117,7 +116,7 @@
                    ;; Only a symbol can carry any — keywords and strings
                    ;; are not IObj — but a symbol key's metadata is as
                    ;; reachable as a value's.
-                   k* (if (coll? k)
+                   k* (if (or (coll? k) (= java.util.Date (class k)))
                         (redact k)
                         (let [rk (match/redact-key k)]
                           (if-let [km (meta k)]
@@ -128,8 +127,8 @@
                    v* (if (and (match/secret-key? k)
                              (match/redactable-value? v))
                         (policy/marker)
-                        (redact v))]
-               (cond-> (assoc m k v*)
+                        (redact v))
+                   m (assoc m k v*)]
                  ;; Only touch the key when it actually changed —
                  ;; dissoc/assoc would otherwise reorder an array-map
                  ;; and re-sort a sorted-map for nothing.
@@ -140,19 +139,23 @@
                  ;; redacted form and the original stayed in the map.
                  ;; redact-key returns k itself when nothing changed, so
                  ;; a scalar key still costs nothing.
-                 (not (identical? k k*))
-                 (-> (dissoc k)
-                     (as-> m' (assoc m' (free-key m' k*) v*))))))
-           (map-target x)
-           x)
+                 (if (identical? k k*)
+                   [m suffixes]
+                   (let [m (dissoc m k)
+                         cursor-key (if (map? k*) (dissoc k* ::disambiguator) k*)
+                         [key next-suffix] (free-key m k* (get suffixes cursor-key 2))]
+                     [(assoc m key v*) (assoc suffixes cursor-key next-suffix)]))))
+           ;; Each redacted key resumes its search, avoiding quadratic collision work.
+           [(map-target x) {}]
+           x))
 
+          (= java.util.Date (class x)) (java.util.Date. (.getTime ^java.util.Date x))
           (vector? x) (mapv redact x)
           (set? x)    (into (set-target x) (map redact) x)
 
-          ;; doall, not a bare map: a lazy seq would defer redaction and keep
-          ;; the un-redacted value alive in the closure, so the secret would
-          ;; still be reachable from an event §8.1 calls conformant.
-          (seq? x)    (doall (map redact x))
+          ;; Materialize a list: no secret-bearing closure or deferred sequence
+          ;; may escape into the prepared event or durable codec.
+          (seq? x)    (apply list (map redact x))
 
           ;; Any other Clojure collection. A PersistentQueue is coll? but none
           ;; of map?, vector?, set? or seq?, so without this clause its
@@ -160,7 +163,7 @@
           ;; concrete types, and enumerations of types leak.
           (coll? x)   (into (empty x) (map redact) x)
 
-          (or (integer? x) (string? x) (keyword? x) (symbol? x))
+          (or (number? x) (string? x) (keyword? x) (symbol? x))
           (match/redact-key x)
           :else       x)]
     ;; Metadata is data. pr-str drops it, so a sink that serializes never

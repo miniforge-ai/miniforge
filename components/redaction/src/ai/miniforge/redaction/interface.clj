@@ -21,9 +21,17 @@
    [ai.miniforge.redaction.core :as core]
    [ai.miniforge.redaction.match :as match]
    [ai.miniforge.redaction.payment-card :as payment-card]
-   [ai.miniforge.redaction.policy :as policy]))
+   [ai.miniforge.redaction.policy :as policy]
+   [ai.miniforge.redaction.representation :as representation]))
 
 ;------------------------------------------------------------------------------ Layer 0
+
+(defn ^{:stratum 0} supported?
+  "Whether every value, key and metadata node is inspectable by redaction.
+   Reject opaque objects, records, deferred sequences, and excessive structure.
+   Limits: 128 nesting levels and 100000 nodes, including keys and metadata."
+  [value]
+  (representation/supported? value))
 
 (defn ^{:stratum 0} redact
   "Redact X — any nested data structure — replacing values excluded by

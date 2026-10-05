@@ -18,10 +18,17 @@
 (ns ai.miniforge.event-stream.interface.stream
   "Event-stream lifecycle and query API."
   (:require
+   [ai.miniforge.event-stream.boundary.publication-input :as publication-input]
    [ai.miniforge.event-stream.core :as core]
    [ai.miniforge.event-stream.envelope-draft :as draft]))
 
 ;------------------------------------------------------------------------------ Layer 0
+
+(def ^{:stratum 0} prepare-current-publication
+  "Validate and redact a sequence-free chain v2, intervention v2, or Spec snapshot
+   draft. Returns [scope draft] or an anomaly, not an acknowledgment. Other families
+   are unsupported here. Historical replay and legacy publish! remain separate."
+  publication-input/prepare)
 
 ;; Event stream lifecycle and queries
 (def ^{:stratum 0} create-event-stream
