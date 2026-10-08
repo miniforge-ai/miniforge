@@ -47,8 +47,9 @@
    [cognitect.transit :as transit]
    [slingshot.slingshot :refer [try+]])
   (:import
-   [java.io ByteArrayOutputStream]
+   [java.io ByteArrayOutputStream File]
    [java.net.http HttpClient HttpResponse$BodyHandlers]
+   [java.nio.file Files StandardCopyOption]
    [java.time Instant ZonedDateTime ZoneOffset]
    [java.time.format DateTimeFormatter]))
 
@@ -476,10 +477,19 @@
                         (event-file-path base-dir workflow-id event)
                         (operator-event-file-path base-dir event))]
         (ensure-parent-dir! file-path)
-        ;; Explicit UTF-8: payload strings can carry non-ASCII and these
-        ;; files are a cross-language contract surface — platform default
-        ;; encoding must never decide the on-disk bytes.
-        (spit file-path (event->transit-json event) :encoding "UTF-8"))
+        ;; Write via temp file + ATOMIC_MOVE so readers never see a
+        ;; partial write of this cross-language contract surface.
+        ;; Explicit UTF-8: payload strings can carry non-ASCII and the
+        ;; platform default encoding must never decide the on-disk bytes.
+        (let [^File tmp (File/createTempFile ".evt-" ".tmp" (.getParentFile file-path))]
+          (try
+            (spit tmp (event->transit-json event) :encoding "UTF-8")
+            (Files/move (.toPath tmp) (.toPath file-path)
+                        (into-array StandardCopyOption
+                                    [StandardCopyOption/ATOMIC_MOVE
+                                     StandardCopyOption/REPLACE_EXISTING]))
+            (finally
+              (.delete tmp)))))
       (catch Exception e
         ;; Log to stderr so failures are visible without breaking the event stream
         (binding [*out* *err*]
