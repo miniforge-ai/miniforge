@@ -49,6 +49,7 @@
   (:import
    [java.io ByteArrayOutputStream]
    [java.net.http HttpClient HttpResponse$BodyHandlers]
+   [java.nio.file Files StandardCopyOption]
    [java.time Instant ZonedDateTime ZoneOffset]
    [java.time.format DateTimeFormatter]))
 
@@ -475,11 +476,23 @@
             file-path (if-let [workflow-id (:workflow/id event)]
                         (event-file-path base-dir workflow-id event)
                         (operator-event-file-path base-dir event))]
-        (ensure-parent-dir! file-path)
-        ;; Explicit UTF-8: payload strings can carry non-ASCII and these
-        ;; files are a cross-language contract surface — platform default
-        ;; encoding must never decide the on-disk bytes.
-        (spit file-path (event->transit-json event) :encoding "UTF-8"))
+        (let [f   (io/file file-path)
+              dir (or (.getParentFile f) (io/file "."))
+              _   (.mkdirs dir)
+              tmp (java.io.File/createTempFile ".es-" ".transit.tmp" dir)]
+          (try
+            ;; Explicit UTF-8: payload strings can carry non-ASCII and these
+            ;; files are a cross-language contract surface — platform default
+            ;; encoding must never decide the on-disk bytes.
+            (spit tmp (event->transit-json event) :encoding "UTF-8")
+            (Files/move (.toPath tmp) (.toPath f)
+                        (into-array StandardCopyOption
+                                    [StandardCopyOption/ATOMIC_MOVE
+                                     StandardCopyOption/REPLACE_EXISTING]))
+            (catch Throwable e
+              (try (Files/delete (.toPath tmp))
+                   (catch Throwable cleanup-e (.addSuppressed e cleanup-e)))
+              (throw e)))))
       (catch Exception e
         ;; Log to stderr so failures are visible without breaking the event stream
         (binding [*out* *err*]
