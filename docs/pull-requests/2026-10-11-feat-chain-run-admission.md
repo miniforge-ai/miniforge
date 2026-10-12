@@ -53,6 +53,6 @@ This slice concerns chain admission, not child execution or historical migration
 ## Checklist
 
 - [x] Implementation and contract tests
-- [ ] Serial validation, artifact build, and normal signed hooks
+- [x] Serial validation, artifact build, and normal signed hooks
 - [x] Adversarial standards pass
 - [ ] Exact-head clean review and all checks before merge
