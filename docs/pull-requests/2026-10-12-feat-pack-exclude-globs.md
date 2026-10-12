@@ -78,6 +78,15 @@ table).
   compiled to `PathMatcher`s once, outside the returned closure, which runs once
   per file in the repo index.
 
+  The no-globs include fallback changes from `["**/*"]` to `["**"]`, named
+  `every-path-globs`. java.nio's `glob:**/*` requires a separator, so it does
+  not match a root-level path: a rule carrying only `:exclude-globs` is
+  documented as covering every non-excluded path, and with `**/*` it would
+  silently skip every file at the repo root. No rule reaches this fallback today
+  (all five `:content-scan` rules declare globs), so there is no behaviour
+  change — but the field this PR adds is exactly what makes a rule with no
+  `globs` worth writing, so the fallback has to be right before that happens.
+
   The exclusion is applied at **file selection**, not after detection, because
   a `hard-halt` rule that detects a violation it is not allowed to act on still
   blocks the gate.
@@ -93,6 +102,15 @@ table).
 `:file-globs` directly — `select-files-for-rule` (reached by `bb miniforge
 scan`), `analyze-rule-on-files`, and `file-rule-violations` (reached by the
 gate's batched judge). They do **not** honour `:exclude-globs` yet.
+
+The batched gate path is the sharp one, and it is not simply "the exclusion is
+ignored". `batched-judge-rules` admits a rule when **any** artifact in the run
+matches it; `batched-semantic-analyzer` then hands every acting rule and every
+changed file to `analyze-rules-on-files`, which assigns rules to files
+per-file in `file-rule-violations` using `:file-globs` alone. So in a mixed
+change — one in-scope file and one excluded file — the in-scope file admits the
+rule and the excluded file is then judged against it. An `:exclude-globs` path
+can produce a blocking semantic violation.
 
 This was implemented and then deliberately removed from this PR. Touching that
 file causes `stratum-lint --fix` to annotate it for the first time, which
@@ -130,12 +148,16 @@ New tests:
   inline-array and bare-string form; kept without `globs`; absent (not `[]`)
   when undeclared.
 - `scan_test.clj` — end to end through `scan-repo` over a temp git repo holding
-  one real automation script and two fixture scripts. The same one-rule pack is
+  one real automation script, two fixture scripts and one root-level script. The same one-rule pack is
   run **with and without** the carve-out: without it all three are flagged, with
   it only `scripts/deploy.sh`. The control arm is the point — it shows the
   exclusion, not the include globs, is what changed the outcome. A third
   assertion pins `:rules-scanned`, since narrowing files must not disable the
-  rule.
+  rule. A fourth runs the same rule with `:file-globs` removed — the shape an
+  `alwaysApply` rule carrying only a carve-out compiles to — and asserts the
+  root-level script is in scope both with and without the exclusion. Both
+  root-path assertions fail against the `["**/*"]` fallback, so they are not
+  vacuous.
 
 ### End to end against the real standards trees
 

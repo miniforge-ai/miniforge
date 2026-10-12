@@ -104,6 +104,14 @@
 
 ;------------------------------------------------------------------------------ Layer 1
 
+(defn- ^{:stratum 1} unscoped-shebang-pack
+  "The same rule with NO `:file-globs` — the shape an `alwaysApply` rule
+   carrying only a carve-out compiles to. Exercises the every-path include
+   fallback, which must cover root-level files as well as nested ones."
+  [excludes]
+  (-> (shebang-pack excludes)
+      (update-in [:pack/rules 0 :rule/applies-to] dissoc :file-globs)))
+
 ;; ---------------------------------------------------------------------------
 ;; Dewey 210 regex tests
 (deftest ^{:stratum 1} dewey-210-matches-simple-literal-defaults
@@ -200,60 +208,6 @@
           (doseq [f (reverse (file-seq tmp-dir))]
             (.delete f)))))))
 
-(deftest ^{:stratum 1} scan-repo-honours-rule-exclude-globs
-  (testing "a rule's :exclude-globs removes matching files from the scan, and
-            the same pack without it flags them — so the exclusion, not the
-            include globs, is what changed the outcome"
-    (let [tmp-dir (doto (io/file (System/getProperty "java.io.tmpdir")
-                                 (str "cs-exclude-test-" (System/currentTimeMillis)))
-                    .mkdirs)]
-      (try
-        (let [run! (partial run-in-dir! tmp-dir)]
-          (run! "git" "init")
-          (run! "git" "config" "commit.gpgsign" "false")
-          (run! "git" "-c" "user.email=test@test.com" "-c" "user.name=Test"
-                "commit" "--allow-empty" "-m" "init")
-
-          ;; Real automation — in scope.
-          (write-temp-file! tmp-dir "scripts/deploy.sh"
-                            "#!/usr/bin/env bash\nset -euo pipefail\n")
-          ;; Fixture scripts — the subject of analysis, not automation.
-          (write-temp-file! tmp-dir "examples/demo/run-demo.sh"
-                            "#!/usr/bin/env bash\necho demo\n")
-          (write-temp-file! tmp-dir "examples/demo-polyglot-repo/scripts/setup.sh"
-                            "#!/bin/sh\necho setup\n")
-
-          (run! "git" "add" ".")
-          (run! "git" "-c" "user.email=test@test.com" "-c" "user.name=Test"
-                "commit" "-m" "add scripts"))
-
-        (let [path    (.getAbsolutePath tmp-dir)
-              scan-with (fn [excludes]
-                          (->> (scan/scan-repo path path
-                                               {:rules #{:std/bb-over-shell}
-                                                :pack  (shebang-pack excludes)})
-                               :violations
-                               (map :file)
-                               set))]
-          (testing "without the carve-out all three shebang files are flagged"
-            (is (= #{"scripts/deploy.sh"
-                     "examples/demo/run-demo.sh"
-                     "examples/demo-polyglot-repo/scripts/setup.sh"}
-                   (scan-with nil))))
-
-          (testing "with examples/** excluded only the real automation is flagged"
-            (is (= #{"scripts/deploy.sh"} (scan-with ["examples/**"]))))
-
-          (testing "the rule is still scanned — exclusion narrows files, it does
-                    not disable the rule"
-            (let [result (scan/scan-repo path path
-                                         {:rules #{:std/bb-over-shell}
-                                          :pack  (shebang-pack ["examples/**"])})]
-              (is (= [:std/bb-over-shell] (:rules-scanned result))))))
-        (finally
-          (doseq [f (reverse (file-seq tmp-dir))]
-            (.delete f)))))))
-
 (deftest ^{:stratum 1} scan-repo-excludes-fatal-only-exceptions-as-data-rows
   (testing "top-level review output keeps cleanup-needed rows actionable"
     (let [tmp-dir (doto (io/file (System/getProperty "java.io.tmpdir")
@@ -288,6 +242,83 @@
           (is (= 1 (count viols)))
           (is (= :cleanup-needed (:classification (first viols))))
           (is (re-find #"GET failed" (:current (first viols)))))
+        (finally
+          (doseq [f (reverse (file-seq tmp-dir))]
+            (.delete f)))))))
+
+;------------------------------------------------------------------------------ Layer 2
+
+(deftest ^{:stratum 2} scan-repo-honours-rule-exclude-globs
+  (testing "a rule's :exclude-globs removes matching files from the scan, and
+            the same pack without it flags them — so the exclusion, not the
+            include globs, is what changed the outcome"
+    (let [tmp-dir (doto (io/file (System/getProperty "java.io.tmpdir")
+                                 (str "cs-exclude-test-" (System/currentTimeMillis)))
+                    .mkdirs)]
+      (try
+        (let [run! (partial run-in-dir! tmp-dir)]
+          (run! "git" "init")
+          (run! "git" "config" "commit.gpgsign" "false")
+          (run! "git" "-c" "user.email=test@test.com" "-c" "user.name=Test"
+                "commit" "--allow-empty" "-m" "init")
+
+          ;; Real automation — in scope.
+          (write-temp-file! tmp-dir "scripts/deploy.sh"
+                            "#!/usr/bin/env bash\nset -euo pipefail\n")
+          ;; Root-level script: matched by neither `**/*.sh` nor `scripts/**`,
+          ;; so it is out of scope for the globbed rule and in scope for the
+          ;; unscoped one.
+          (write-temp-file! tmp-dir "root-setup.sh"
+                            "#!/usr/bin/env bash\necho root\n")
+          ;; Fixture scripts — the subject of analysis, not automation.
+          (write-temp-file! tmp-dir "examples/demo/run-demo.sh"
+                            "#!/usr/bin/env bash\necho demo\n")
+          (write-temp-file! tmp-dir "examples/demo-polyglot-repo/scripts/setup.sh"
+                            "#!/bin/sh\necho setup\n")
+
+          (run! "git" "add" ".")
+          (run! "git" "-c" "user.email=test@test.com" "-c" "user.name=Test"
+                "commit" "-m" "add scripts"))
+
+        (let [path    (.getAbsolutePath tmp-dir)
+              scan-with (fn [excludes]
+                          (->> (scan/scan-repo path path
+                                               {:rules #{:std/bb-over-shell}
+                                                :pack  (shebang-pack excludes)})
+                               :violations
+                               (map :file)
+                               set))]
+          (testing "without the carve-out all three shebang files are flagged"
+            (is (= #{"scripts/deploy.sh"
+                     "examples/demo/run-demo.sh"
+                     "examples/demo-polyglot-repo/scripts/setup.sh"}
+                   (scan-with nil))))
+
+          (testing "with examples/** excluded only the real automation is flagged"
+            (is (= #{"scripts/deploy.sh"} (scan-with ["examples/**"]))))
+
+          (testing "a rule with NO :file-globs covers every non-excluded path,
+                    root-level files included — java.nio's `glob:**/*` would
+                    silently skip `root-setup.sh`, so the fallback is `**`"
+            (let [scan-unscoped (fn [excludes]
+                                  (->> (scan/scan-repo path path
+                                                       {:rules #{:std/bb-over-shell}
+                                                        :pack  (unscoped-shebang-pack excludes)})
+                                       :violations
+                                       (map :file)
+                                       set))]
+              (is (contains? (scan-unscoped nil) "root-setup.sh")
+                  "the root-level script is in scope with no globs declared")
+              (is (= #{"root-setup.sh" "scripts/deploy.sh"}
+                     (scan-unscoped ["examples/**"]))
+                  "the carve-out alone scopes the rule, and still covers the root")))
+
+          (testing "the rule is still scanned — exclusion narrows files, it does
+                    not disable the rule"
+            (let [result (scan/scan-repo path path
+                                         {:rules #{:std/bb-over-shell}
+                                          :pack  (shebang-pack ["examples/**"])})]
+              (is (= [:std/bb-over-shell] (:rules-scanned result))))))
         (finally
           (doseq [f (reverse (file-seq tmp-dir))]
             (.delete f)))))))

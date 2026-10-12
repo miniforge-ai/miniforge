@@ -79,6 +79,17 @@
       :else
       (constantly nil))))
 
+(def ^{:stratum 0} ^:private every-path-globs
+  "The include set for a rule that declares no `:file-globs` — it applies
+   everywhere.
+
+   `**` and not `**/*`: java.nio's `glob:**/*` requires a separator, so it
+   does not match a root-level path (`README.md`). A rule carrying only
+   `:exclude-globs` is documented as covering every non-excluded path, and
+   with `**/*` it would silently skip every file at the repo root. `glob:**`
+   matches both root and nested."
+  ["**"])
+
 (def ^{:stratum 0} ^:private scannable-types
   "Detection types the compliance scanner can process."
   #{:content-scan :diff-analysis :plan-output})
@@ -116,7 +127,7 @@
          :rule/category (get rule :rule/category)
          :title         (get rule :rule/title)
          :pattern       (re-pattern (get detection :pattern))
-         :file-pred     (globs->file-pred (or globs ["**/*"]) excludes)
+         :file-pred     (globs->file-pred (or globs every-path-globs) excludes)
          :suggest-fn    (build-suggest-fn detection remediation)
          :detect-mode   (get detection :mode :positive)}
 
