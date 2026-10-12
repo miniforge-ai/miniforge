@@ -100,7 +100,7 @@
 
 (def ^{:stratum 0} prepare-current-publication
   "Prepare a supported current-write draft as [scope redacted-draft] or an anomaly.
-   This validates chain v2, intervention v2, Spec snapshots and OPSV drafts;
+   This validates chain v2, intervention v2, Spec snapshots, OPSV and workflow lifecycle drafts;
    it grants no lifecycle authority or receipt."
   stream/prepare-current-publication)
 

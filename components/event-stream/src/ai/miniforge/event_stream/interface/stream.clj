@@ -27,14 +27,14 @@
 ;------------------------------------------------------------------------------ Layer 0
 
 (def ^{:stratum 0} prepare-current-publication
-  "Validate and redact a sequence-free chain v2, intervention v2, Spec snapshot or OPSV
+  "Validate and redact a sequence-free chain v2, intervention v2, Spec snapshot, OPSV or workflow lifecycle
    draft. Returns [scope draft] or an anomaly, not an acknowledgment. Other families
    are unsupported here. Historical replay and legacy publish! remain separate."
   publication-input/prepare)
 
 (def ^{:stratum 0} create-current-event-stream
   "Own an existing canonical :journal-directory and restore supported typed records.
-   Supports chain v2, intervention v2, Spec snapshots and typed OPSV drafts. No volatile fallback.
+   Supports chain v2, intervention v2, Spec snapshots, OPSV and workflow lifecycle drafts. No volatile fallback.
    Optional :sinks are best-effort listeners after durable commit (default []).
    Also accepts :logger and :snowflake-generator. Returns a stream or anomaly."
   current-stream/create)
