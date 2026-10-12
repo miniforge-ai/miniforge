@@ -78,7 +78,9 @@
       (let [{:keys [result calls attempts]} (observed {type failure} :completed)]
         (is (= failure (update result :anomaly/data dissoc :workflow/id)))
         (is (= expected-count (count calls)))
-        (is (= expected (mapv :event/type attempts)))))))
+        (is (= expected (mapv :event/type attempts)))
+        (is (= (when (#{:chain/step-started :chain/step-completed} type) :first)
+               (:chain/failed-step (peek attempts))))))))
 
 (deftest ^{:stratum 2} failure-path-publication-cannot-mask-a-missing-event
   (doseq [type [:chain/step-failed :chain/failed]]
@@ -107,6 +109,7 @@
         fallback (anomaly/anomaly :fault "Failure path unavailable" {})
         {:keys [result attempts]} (observed {:chain/completed original :chain/failed fallback} :completed)]
     (is (= original result))
+    (is (nil? (:chain/failed-step (peek attempts))))
     (is (= (conj completed-events :chain/failed) (mapv :event/type attempts)))))
 
 (deftest ^{:stratum 2} failed-step-publications-return-the-preallocated-child-identity

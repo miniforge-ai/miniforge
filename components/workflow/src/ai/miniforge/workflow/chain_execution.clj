@@ -22,8 +22,8 @@
 
 ;------------------------------------------------------------------------------ Layer 1
 
-(defn- ^{:stratum 1} fail! [definition results error opts]
-  (emit! opts events/chain-failed (:chain/id definition) (:step/id (peek results)) error))
+(defn- ^{:stratum 1} fail! [definition failed-step error opts]
+  (emit! opts events/chain-failed (:chain/id definition) failed-step error))
 
 ;------------------------------------------------------------------------------ Layer 2
 
@@ -33,9 +33,9 @@
         result (outcome/chain-result definition duration results status)
         receipt (if (= :completed status)
                   (emit! opts events/chain-completed (:chain/id definition) duration (:chain/step-count result))
-                  (fail! definition results (:execution/error last-result) opts))]
+                  (fail! definition (:step/id (peek results)) (:execution/error last-result) opts))]
     (when (and (= :completed status) (outcome/failure-value? receipt))
-      (fail! definition results (messages/t :chain/completion-publication-failed) opts))
+      (fail! definition nil (messages/t :chain/completion-publication-failed) opts))
     (or (:execution/emission-failure last-result)
         (when (outcome/failure-value? receipt) receipt)
         result)))

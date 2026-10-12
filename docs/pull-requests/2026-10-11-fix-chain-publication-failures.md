@@ -64,6 +64,13 @@ Focused tests pass 10 tests and 72 assertions; the three deployed consumers pass
 The rebuilt CLI is 39,129,057 bytes; isolated packaged verification passed 31 tests and 200 assertions.
 The explicit-pack changed-line scan remains clean across 4,348 files.
 
+A subsequent overview review found that the completion-publication fallback falsely named the last successful child.
+The failure emitter now takes explicit step attribution: actual step failures retain their step, while a
+run-completion publication failure has no failed-step identity.
+Regression assertions verify both cases and preserve the original error when the fallback itself fails.
+Final attribution validation: consumers passed in 1m22, focused tests passed 10/77, and isolated packaged tests
+passed 31/205 against the 39,129,061-byte CLI. Lint, strata, and explicit-pack scanning are clean.
+
 ## Deployment Plan
 
 Preserve existing legacy event formats and the optional uninstrumented execution path.
