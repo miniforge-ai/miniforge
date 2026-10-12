@@ -45,13 +45,29 @@ bump, not on a rule change.
 
 ### `mdc_compiler/frontmatter.clj`
 
-`nested-block-keys` (Layer 0) — the keys written as a nested mapping, in file
-order. A key qualifies when it has no inline value and its next **non-blank**
-line is an indented `child:`. Two things deliberately do not qualify:
+`nested-block-keys` — the keys written as a nested mapping, in file order. A key
+qualifies when it has no inline value and its next line that is neither blank
+nor comment-only is an indented `child:`. Three things deliberately do not
+qualify:
 
 - `- item` children — the one multi-line form the grammar does support, so
-  `globs:` and friends are never reported.
+  `globs:` and friends are never reported, including `globs: # note` followed by
+  a list.
 - a blank-valued key with no children at all.
+- a quoted value that merely begins with `#`.
+
+A trailing `# comment` on the parent counts as **no value**, and comment-only
+lines between parent and child are skipped at any indentation. Both forms are
+real: the `## Core Structure` template in `meta/rule-format` writes frontmatter
+comments, so `detection: # shebang checks` is authoring the format as
+documented. Without this, the one mis-authoring most likely to carry an
+explanatory comment is the one the detector misses.
+
+`parse-kv-line` disagrees with the detector here — it captures `# comment` as
+the value rather than treating it as a comment. That is a pre-existing grammar
+quirk and is left alone: a parent whose value is a comment string resolves no
+`key.*` entries either way, so parser and detector land on the same fallback.
+Changing `parse-kv-line` would alter any real value containing a `#`.
 
 It lives beside the grammar it guards rather than in the caller: the loss it
 detects is a property of `process-frontmatter-line`, and a reader changing that
@@ -106,7 +122,12 @@ New tests:
 - `nested-block-keys-test` — nested blocks in file order; `- item` lists and
   dotted keys report nothing; blank-valued key with no children reports nothing;
   a blank line between parent and child does not hide the nesting; empty and nil
-  input.
+  input. Comment cases: a trailing comment on the parent (space- and
+  tab-separated), comment-only lines between parent and child at both
+  indentations, a commented parent with a list child (must stay a non-report), a
+  quoted value beginning with `#`, and a commented parent with no children. All
+  three comment-positive cases were checked against the pre-fix detector and
+  return `[]` there, so the tests are not vacuous.
 - `mdc->rule-nested-block-frontmatter-warning-test` — the silent-downgrade case
   end to end: `hard-halt` + nested style still compiles, lands on
   `:custom` / `:audit`, and produces two warnings naming the file, the key and

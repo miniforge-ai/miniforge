@@ -83,8 +83,15 @@
 ;; the grammar it guards rather than in the caller.
 (def ^{:stratum 0} ^:private blank-valued-key-re
   "A `key:` line with no value — the opening of either a legitimate
-   `- item` list or an (unsupported) nested mapping."
-  #"^([A-Za-z][A-Za-z0-9._-]*)[ \t]*:[ \t]*$")
+   `- item` list or an (unsupported) nested mapping.
+
+   A trailing `# comment` counts as no value, because that is what it is
+   in YAML and because the `## Core Structure` template in
+   `meta/rule-format` writes frontmatter comments. (`parse-kv-line` below
+   disagrees — it captures `# comment` as the value — but a parent whose
+   value is a comment string resolves no `key.*` entries either way, so
+   the detector and the parser land on the same silent fallback.)"
+  #"^([A-Za-z][A-Za-z0-9._-]*)[ \t]*:[ \t]*(?:#.*)?$")
 
 (def ^{:stratum 0} ^:private indented-kv-re
   "An indented `child: ...` line. This is the nested-mapping signature.
@@ -92,15 +99,22 @@
    `globs:` and friends — are not reported."
   #"^[ \t]+[A-Za-z][A-Za-z0-9_-]*[ \t]*:")
 
+(def ^{:stratum 0} ^:private comment-line-re
+  "A line carrying only a comment, at any indentation. Skipped when
+   looking for a parent's first child, so a comment between the two does
+   not hide the nesting."
+  #"^[ \t]*#")
+
 ;------------------------------------------------------------------------------ Layer 1
 
 (defn ^{:stratum 1} nested-block-keys
   "Frontmatter keys written as a nested YAML mapping, which this grammar
    cannot represent.
 
-   A key qualifies when it has no inline value and its next non-blank line
-   is an indented `child: value`. List-valued keys (`- item` children) and
-   keys with no children at all do not qualify.
+   A key qualifies when it has no inline value — a trailing comment counts
+   as none — and its next line that is neither blank nor comment-only is an
+   indented `child: value`. List-valued keys (`- item` children) and keys
+   with no children at all do not qualify.
 
    Arguments:
    - frontmatter-str - Raw text between --- delimiters
@@ -111,13 +125,14 @@
   [frontmatter-str]
   (if (str/blank? frontmatter-str)
     []
-    (let [lines (vec (str/split-lines frontmatter-str))
-          next-non-blank (fn [idx]
-                           (first (remove str/blank? (subvec lines (inc idx)))))]
+    (let [lines      (vec (str/split-lines frontmatter-str))
+          noise?     (fn [line] (or (str/blank? line)
+                                    (re-find comment-line-re line)))
+          next-child (fn [idx] (first (remove noise? (subvec lines (inc idx)))))]
       (into []
             (keep (fn [idx]
                     (when-let [[_ k] (re-matches blank-valued-key-re (lines idx))]
-                      (when-let [child (next-non-blank idx)]
+                      (when-let [child (next-child idx)]
                         (when (re-find indented-kv-re child)
                           k)))))
             (range (count lines))))))

@@ -147,6 +147,37 @@
     (is (= ["detection"] (frontmatter/nested-block-keys
                           "detection:\n\n  mode: positive"))))
 
+  (testing "a trailing comment on the parent counts as no value — frontmatter
+            comments are part of the documented authoring format, and a parent
+            whose value is a comment resolves no `key.*` entries either"
+    (is (= ["detection"] (frontmatter/nested-block-keys
+                          "detection: # shebang checks\n  mode: positive\n  pattern: 'x'")))
+    (is (= ["detection" "enforcement"]
+           (frontmatter/nested-block-keys
+            (str "detection:   # scan config\n  mode: positive\n"
+                 "enforcement:\t# gate config\n  action: hard-halt")))))
+
+  (testing "comment-only lines between parent and child do not hide the nesting,
+            at any indentation"
+    (is (= ["detection"] (frontmatter/nested-block-keys
+                          "detection:\n  # why positive mode\n  mode: positive")))
+    (is (= ["detection"] (frontmatter/nested-block-keys
+                          "detection:\n# flush-left note\n\n  mode: positive"))))
+
+  (testing "a commented parent with a list child is still a list, not a nested
+            block — the comment must not turn `globs:` into a false positive"
+    (is (= [] (frontmatter/nested-block-keys
+               "globs: # the shell ones\n  - \"**/*.sh\"")))
+    (is (= [] (frontmatter/nested-block-keys
+               "globs:\n  # the shell ones\n  - \"**/*.sh\""))))
+
+  (testing "a quoted value that begins with # is a value, not a comment"
+    (is (= [] (frontmatter/nested-block-keys
+               "detection.pattern: '#!/bin/sh'\ndewey: \"740\""))))
+
+  (testing "a commented parent with no children reports nothing"
+    (is (= [] (frontmatter/nested-block-keys "globs: # nothing follows"))))
+
   (testing "handles empty and nil frontmatter"
     (is (= [] (frontmatter/nested-block-keys "")))
     (is (= [] (frontmatter/nested-block-keys nil)))))
