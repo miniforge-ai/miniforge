@@ -30,11 +30,11 @@ Workflow/gate event support and OPSV host stream selection remain separate integ
 Verify all ten event families, malformed payload refusal, disposition consistency, scope isolation, retry identity, and
 durable journal reopening.
 
-- Focused source-overlay checks: 9 tests / 188 assertions passed.
+- Focused provenance/publication checks: 22 tests / 342 assertions passed.
 - All four event-stream consumer suites passed serially in 1m24s, including real journal reopening under the JVM.
-- Rebuilt CLI: 39,148,125 bytes. Isolated package checks (no production overlays): 41 tests / 506 assertions passed.
+- Rebuilt CLI: 39,148,291 bytes. Isolated package checks (no production overlays): 43 tests / 543 assertions passed.
 - Staged Clojure lint and stratum checks passed without warnings.
-- Explicit pinned Miniforge standards scan: zero violations across 4,388 files.
+- Explicit pinned Miniforge standards scan: zero violations across 4,392 files.
 
 The initial disk fixture used a noncanonical temp path and a stale query option; both were corrected to the existing
 boundary contracts.
@@ -47,6 +47,9 @@ Schema projection changes only top-level sequence requirements; nested maps and 
 Shared constructor fixtures avoid duplicated payload maps; legacy constructor behavior remains covered.
 Unsupported families still have no generic envelope fallback. No runtime defaults or historical records are rewritten.
 Review correction: both public API entry points now document typed OPSV draft support.
+Provenance review correction: protect OPSV bundle, target, hash, artifact, effect and authority fields from redaction rewrites.
+Secret-shaped provenance is refused before commitment; ordinary load observations remain redactable.
+Tests cover decision-envelope pins and confirmed provider references, preserving exact evidence instead of altering it.
 
 ## Deployment Plan
 

@@ -13,6 +13,12 @@
    :chain/run-id :chain/definition-id :chain/definition-version
    :step/id :step/index :step/workflow-id
    :edge/id :edge/from-workflow-id :edge/to-workflow-id
+   :opsv/evidence-bundle-id :opsv/experiment-pack-hash :opsv/targets
+   :opsv/environment-fingerprint :opsv/step-id :opsv/iteration-id :opsv/policy-hash
+   :opsv/diff-artifact-refs :opsv/policy-artifact-ref :opsv/metric-snapshot-artifact-refs
+   :opsv/requested-actuation-mode :opsv/effective-actuation-mode
+   :opsv/governed-effects :opsv/governed-effect :opsv/decision-envelope
+   :opsv/effect-state :opsv/effect-observed :opsv/pr-refs :opsv/apply-refs
    :supervisory/entity-key :intervention/id :intervention/target-id :intervention/requested-by])
 
 (def ^{:stratum 0} ^:private snapshot-fields
