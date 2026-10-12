@@ -27,61 +27,31 @@ That permits dependent execution and successful return values after missing life
 
 ## Testing Plan
 
-Exercise failures at every lifecycle boundary, rejected or mismatched receipts, and normal successful execution.
-Run deployed consumers serially, verify the rebuilt CLI, and perform an adversarial standards review.
+Regressions cover every lifecycle boundary, unavailable fallbacks, quiescence, redacted receipts, and successful execution.
+The initial failure-stage regression reproduced false completion against the previous packaged executor.
+Receipt checks permit redacted payloads while requiring matching event identity, type, version, workflow reference,
+and the assigned nonnegative legacy sequence.
 
-The failure-stage regression reproduces false completion against the previous packaged executor.
-The corrected implementation stops before dependents and propagates the publication failure.
-Receipt checks permit redacted payloads while requiring matching event identity, type, version, and a nonnegative sequence.
-The adversarial pass traced start, child failure, terminal publication, and the uninstrumented path.
-Review identified a missing completion-publication fallback; the corrected executor attempts the chain failure path
-before returning the original anomaly.
-Regression coverage includes both successful and failed fallback publication.
+Review corrections and the adversarial transition audit verify:
 
-Completed validation:
+- Failed start and completion publications attempt the shared chain-failure fallback without blaming a successful child.
+- Failed step completion attempts a step-failure terminal before failing the chain.
+- Unavailable fallbacks preserve the original anomaly, including its canonical or legacy provenance.
+- Actual failed-child identity survives step publication failure and failure to publish the chain failure.
+- Terminal publication is isolated from child execution in a small, stratified namespace.
+- Real durable admission remains readable during failed start publication, and no child loads afterward.
 
-- All three deployed workflow consumers passed serially in 1m35.
-- Focused regressions passed 8 tests and 37 assertions, including real quiescence and redaction.
-- Isolated packaged regressions passed 28 tests and 160 assertions without production source overlays.
-- Final CLI build: 39,128,901 bytes, including the corrected public API documentation.
-- Lint and namespace-stratum checks passed; changed-line standards scan found zero violations across 4,345 files.
+Final validation after integrating merged admission-retention work:
 
-After the completion-failure review correction:
+- Three deployed consumers passed serially in 1m24 before the documentation-only integration conflicts.
+- Focused publication regressions passed 12 tests and 90 assertions.
+- Combined real-disk integration passed 4 tests and 23 assertions.
+- Rebuilt integrated CLI: 39,134,594 bytes.
+- Isolated packaged admission, retention, and publication regressions passed 46 tests and 270 assertions.
+- Lint and namespace-stratum checks passed.
+- Explicit `standards/miniforge` scanning against the PR merge-base found zero violations across 4,359 files.
 
-- Three deployed consumers passed serially in 1m28.
-- Rebuilt CLI: 39,128,990 bytes; isolated packaged regressions passed 29 tests and 162 assertions.
-- Focused regressions passed 9 tests and 39 assertions; lint, strata, and the changed-line standards scan remain clean.
-
-Final standards verification explicitly uses `standards/miniforge` and the PR merge-base, superseding the earlier
-default-path scan results.
-It reports zero violations across 4,348 files after fixing missing headers in this PR document and three related
-implementation documents.
-
-The next overview-only review identified a child UUID that existed internally but was lost from the returned anomaly.
-Failed step publications now preserve the allocated UUID in canonical diagnostic data or legacy domain context,
-without replacing the original anomaly provenance.
-Coverage exercises all three step publication boundaries with canonical anomalies, legacy anomalies, and rejections.
-Focused tests pass 10 tests and 72 assertions; the three deployed consumers passed in 1m25.
-The rebuilt CLI is 39,129,057 bytes; isolated packaged verification passed 31 tests and 200 assertions.
-The explicit-pack changed-line scan remains clean across 4,348 files.
-
-A subsequent overview review found that the completion-publication fallback falsely named the last successful child.
-The failure emitter now takes explicit step attribution: actual step failures retain their step, while a
-run-completion publication failure has no failed-step identity.
-Regression assertions verify both cases and preserve the original error when the fallback itself fails.
-Final attribution validation: consumers passed in 1m22, focused tests passed 10/77, and isolated packaged tests
-passed 31/205 against the 39,129,061-byte CLI. Lint, strata, and explicit-pack scanning are clean.
-
-The final lifecycle audit extends the shared run-failure fallback to failed start publication.
-Start and completion failures both preserve the original anomaly if the fallback cannot be published,
-and neither attributes the run-level failure to a child.
-The receipt audit also requires the acknowledged workflow reference and legacy sequence to match the attempted event.
-Regressions cover all lifecycle boundaries, fallback unavailability, and mismatched event/child/sequence identities.
-Step-completion publication failure likewise attempts a step-failure terminal before failing the chain.
-Terminal publication has its own small namespace; child execution owns execution and identity, not fallback construction.
-Shared identity attribution preserves the actual failed child when publishing the chain failure also fails.
-Consolidated validation: focused tests passed 12/90, three consumers passed in 1m24, and isolated packaged tests
-passed 33/218 against the 39,129,887-byte CLI. Lint, strata, and explicit-pack scanning remain clean.
+The explicit-pack scan supersedes earlier default-path scans; missing headers in related implementation documents are fixed.
 
 ## Deployment Plan
 
@@ -91,8 +61,8 @@ Current-profile runtime wiring, durable retry/recovery, and full terminal-event 
 
 ## Related Issues/PRs
 
-Base branch: `main`, after #2024.
-Independent of the open #2026 admission-retention storage API.
+Base branch: `main`, including merged #2024, #2026, and #2028.
+Integration preserves both durable-admission and publication-anomaly API contracts.
 
 ## Checklist
 
