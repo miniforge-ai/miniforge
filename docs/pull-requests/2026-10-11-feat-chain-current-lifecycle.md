@@ -33,6 +33,7 @@ Run affected consumers serially, verify the packaged CLI, and perform adversaria
 Four affected product consumers passed in 2m24s. After the final orchestration cleanup and diagnostic attribution,
 31 focused tests passed with 220 assertions, including real-storage recovery and refusal regressions.
 The built CLI jar passed the same 31 tests/220 assertions from an isolated directory with no production source overlay.
+The explicit Miniforge standards pack reported no changed-line violations across 4,360 scanned files.
 
 The adversarial pass traced admission → retention → start acknowledgment → child identity allocation →
 child execution → terminal acknowledgment. It caught shared storage poisoning journal recovery;
@@ -54,5 +55,5 @@ Base branch: `main`, after merged #2028 and #2027.
 - [x] Boundary and lifecycle implementation
 - [x] Unit and real-storage integration coverage
 - [x] Serial consumers and packaged verification
-- [ ] Adversarial standards pass and normal signed hooks
+- [x] Adversarial standards pass and normal signed hooks
 - [ ] Exact-head clean review and all CI before merge
