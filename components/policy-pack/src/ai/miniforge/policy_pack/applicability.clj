@@ -33,7 +33,13 @@
 
 ;; Rule applicability
 (defn ^{:stratum 0} rule-applies-to-artifact?
-  "Check if a rule applies to an artifact based on file globs.
+  "Check if a rule applies to an artifact based on its path scope —
+   :file-globs minus :exclude-globs.
+
+   Delegates to `registry-support/path-in-scope?` rather than re-deriving
+   the rule: this predicate and `registry-support/rule-applies?` are two
+   independent entry points into the same question, and an exclusion
+   honoured by only one of them is worse than one honoured by neither.
 
    Arguments:
    - rule - Rule with :rule/applies-to
@@ -42,11 +48,8 @@
    Returns:
    - true if rule applies, false otherwise"
   [rule artifact]
-  (let [file-globs (get-in rule [:rule/applies-to :file-globs])
-        path (:artifact/path artifact "")]
-    (or (nil? file-globs)
-        (empty? file-globs)
-        (some #(registry-support/glob-matches? % path) file-globs))))
+  (registry-support/path-in-scope? (:rule/applies-to rule)
+                                   (:artifact/path artifact "")))
 
 (defn ^{:stratum 0} rule-applies-to-task?
   "Check if a rule applies to a task type.
@@ -105,6 +108,11 @@
   (rule-applies-to-artifact? {:rule/applies-to {:file-globs ["**/*.tf"]}}
                              {:artifact/path "main.tf"})
   ;; => true
+
+  (rule-applies-to-artifact? {:rule/applies-to {:file-globs ["**/*.sh"]
+                                                :exclude-globs ["examples/**"]}}
+                             {:artifact/path "examples/demo/run-demo.sh"})
+  ;; => false — the glob matches, the exclusion wins
 
   (filter-applicable-rules
    [{:rule/id :a :rule/applies-to {:phases #{:implement}}}

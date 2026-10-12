@@ -40,6 +40,24 @@
   "Pre-compiled pack fixture for integration tests."
   (edn/read-string (slurp (io/resource "test-fixtures/clojure-210-pack.edn"))))
 
+(defn- ^{:stratum 0} shebang-pack
+  "A one-rule pack shaped like compiled `workflows/bb-over-shell` (dewey
+   740): broad `.sh` include, positive shebang scan, blocking enforcement.
+   `excludes` becomes `:rule/applies-to :exclude-globs`, so the same pack
+   can be run with and without the carve-out."
+  [excludes]
+  {:pack/rules
+   [{:rule/id       :std/bb-over-shell
+     :rule/category "740"
+     :rule/title    "Babashka tasks over shell scripts"
+     :rule/severity :high
+     :rule/detection {:type    :content-scan
+                      :mode    :positive
+                      :pattern "^#!.*\\b(bash|sh|zsh|python[0-9.]*)\\b"}
+     :rule/enforcement {:action :hard-halt :message "Standard 740"}
+     :rule/applies-to (cond-> {:file-globs ["**/*.sh" "scripts/**"]}
+                        (seq excludes) (assoc :exclude-globs excludes))}]})
+
 ;; ---------------------------------------------------------------------------
 ;; Integration: scan a temp directory
 (defn- ^{:stratum 0} write-temp-file!
@@ -85,6 +103,14 @@
     (is (not (#'diff-plan/safe-git-ref? nil)))))
 
 ;------------------------------------------------------------------------------ Layer 1
+
+(defn- ^{:stratum 1} unscoped-shebang-pack
+  "The same rule with NO `:file-globs` — the shape an `alwaysApply` rule
+   carrying only a carve-out compiles to. Exercises the every-path include
+   fallback, which must cover root-level files as well as nested ones."
+  [excludes]
+  (-> (shebang-pack excludes)
+      (update-in [:pack/rules 0 :rule/applies-to] dissoc :file-globs)))
 
 ;; ---------------------------------------------------------------------------
 ;; Dewey 210 regex tests
@@ -216,6 +242,90 @@
           (is (= 1 (count viols)))
           (is (= :cleanup-needed (:classification (first viols))))
           (is (re-find #"GET failed" (:current (first viols)))))
+        (finally
+          (doseq [f (reverse (file-seq tmp-dir))]
+            (.delete f)))))))
+
+;------------------------------------------------------------------------------ Layer 2
+
+(deftest ^{:stratum 2} scan-repo-honours-rule-exclude-globs
+  (testing "a rule's :exclude-globs removes matching files from the scan, and
+            the same pack without it flags them — so the exclusion, not the
+            include globs, is what changed the outcome"
+    (let [tmp-dir (doto (io/file (System/getProperty "java.io.tmpdir")
+                                 (str "cs-exclude-test-" (System/currentTimeMillis)))
+                    .mkdirs)]
+      (try
+        (let [run! (partial run-in-dir! tmp-dir)]
+          (run! "git" "init")
+          (run! "git" "config" "commit.gpgsign" "false")
+          (run! "git" "-c" "user.email=test@test.com" "-c" "user.name=Test"
+                "commit" "--allow-empty" "-m" "init")
+
+          ;; Real automation — in scope.
+          (write-temp-file! tmp-dir "scripts/deploy.sh"
+                            "#!/usr/bin/env bash\nset -euo pipefail\n")
+          ;; Root-level script. `**/*.sh` covers it under policy-pack's
+          ;; matcher and would NOT under java.nio's, which requires a
+          ;; separator after `**/`. It is in this fixture to pin that: the
+          ;; scanner no longer carries its own matcher, so a root path is in
+          ;; scope here exactly as it is for the gate.
+          (write-temp-file! tmp-dir "root-setup.sh"
+                            "#!/usr/bin/env bash\necho root\n")
+          ;; Fixture scripts — the subject of analysis, not automation.
+          (write-temp-file! tmp-dir "examples/demo/run-demo.sh"
+                            "#!/usr/bin/env bash\necho demo\n")
+          (write-temp-file! tmp-dir "examples/demo-polyglot-repo/scripts/setup.sh"
+                            "#!/bin/sh\necho setup\n")
+
+          (run! "git" "add" ".")
+          (run! "git" "-c" "user.email=test@test.com" "-c" "user.name=Test"
+                "commit" "-m" "add scripts"))
+
+        (let [path    (.getAbsolutePath tmp-dir)
+              scan-with (fn [excludes]
+                          (->> (scan/scan-repo path path
+                                               {:rules #{:std/bb-over-shell}
+                                                :pack  (shebang-pack excludes)})
+                               :violations
+                               (map :file)
+                               set))]
+          (testing "without the carve-out every shebang file in scope is flagged,
+                    the root-level one included — `**/*.sh` reaches a root path
+                    under the shared predicate"
+            (is (= #{"scripts/deploy.sh"
+                     "root-setup.sh"
+                     "examples/demo/run-demo.sh"
+                     "examples/demo-polyglot-repo/scripts/setup.sh"}
+                   (scan-with nil))))
+
+          (testing "with examples/** excluded only the real automation is flagged,
+                    and the exclusion takes the fixture tree and nothing else"
+            (is (= #{"scripts/deploy.sh" "root-setup.sh"}
+                   (scan-with ["examples/**"]))))
+
+          (testing "a rule with NO :file-globs covers every non-excluded path —
+                    absent globs mean everything, with no `**/*` fallback to
+                    get wrong"
+            (let [scan-unscoped (fn [excludes]
+                                  (->> (scan/scan-repo path path
+                                                       {:rules #{:std/bb-over-shell}
+                                                        :pack  (unscoped-shebang-pack excludes)})
+                                       :violations
+                                       (map :file)
+                                       set))]
+              (is (contains? (scan-unscoped nil) "root-setup.sh")
+                  "the root-level script is in scope with no globs declared")
+              (is (= #{"root-setup.sh" "scripts/deploy.sh"}
+                     (scan-unscoped ["examples/**"]))
+                  "the carve-out alone scopes the rule, and still covers the root")))
+
+          (testing "the rule is still scanned — exclusion narrows files, it does
+                    not disable the rule"
+            (let [result (scan/scan-repo path path
+                                         {:rules #{:std/bb-over-shell}
+                                          :pack  (shebang-pack ["examples/**"])})]
+              (is (= [:std/bb-over-shell] (:rules-scanned result))))))
         (finally
           (doseq [f (reverse (file-seq tmp-dir))]
             (.delete f)))))))

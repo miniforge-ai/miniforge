@@ -22,27 +22,23 @@
    dispatches on, and filters pack rules by the :rules selector. Rule/
    category selector matching lives in `scan-rule-selector`.
 
-   Layer 0: Glob matching, suggest-fn building, scannable-types,
-            violation enrichment
+   File selection is NOT implemented here: `:file-pred` delegates to
+   `policy-pack/path-in-scope?`, the same predicate the workflow gate
+   reaches through `filter-applicable-rules`. Two glob implementations
+   would give a rule's declared `:exclude-globs` different meanings in the
+   gate and in a scan — `**/*.sh` covers a root-level `build.sh` under
+   policy-pack's matcher and not under java.nio's.
+
+   Layer 0: suggest-fn building, scannable-types, violation enrichment
    Layer 1: Pack-rule filtering by the :rules option + detection config
             conversion"
   (:require [ai.miniforge.compliance-scanner.scan-rule-selector :as rule-selector]
-            [clojure.string :as str])
-  (:import [java.nio.file FileSystems Paths]))
+            [ai.miniforge.policy-pack.interface :as policy-pack]
+            [clojure.string :as str]))
 
 ;------------------------------------------------------------------------------ Layer 0
 
 ;; Pack-driven detection config
-(defn- ^{:stratum 0} globs->file-pred
-  "Convert a vector of glob patterns into a file-path predicate function.
-   Uses java.nio.file.PathMatcher for standard glob matching."
-  [globs]
-  (let [fs       (FileSystems/getDefault)
-        matchers (mapv #(.getPathMatcher fs (str "glob:" %)) globs)]
-    (fn [path]
-      (let [p (Paths/get path (into-array String []))]
-        (boolean (some #(.matches ^java.nio.file.PathMatcher % p) matchers))))))
-
 (defn- ^{:stratum 0} build-suggest-fn
   "Build a suggest function from pack detection and remediation config.
    Uses str/replace-first with $1/$2/$3 group references for mechanical fixes."
@@ -91,14 +87,14 @@
   [rule]
   (let [detection   (get rule :rule/detection)
         remediation (get rule :rule/remediation)
-        globs       (get-in rule [:rule/applies-to :file-globs])]
+        applies-to  (get rule :rule/applies-to)]
     (when (= :content-scan (get detection :type))
       (cond->
         {:rule/id       (get rule :rule/id)
          :rule/category (get rule :rule/category)
          :title         (get rule :rule/title)
          :pattern       (re-pattern (get detection :pattern))
-         :file-pred     (globs->file-pred (or globs ["**/*"]))
+         :file-pred     #(policy-pack/path-in-scope? applies-to %)
          :suggest-fn    (build-suggest-fn detection remediation)
          :detect-mode   (get detection :mode :positive)}
 

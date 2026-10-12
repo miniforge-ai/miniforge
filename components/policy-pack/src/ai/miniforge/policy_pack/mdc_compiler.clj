@@ -222,10 +222,16 @@
           always-apply (true? (get fm "alwaysApply"))
 
           ;; ── Applicability ───────────────────────────────────────────────
-          phases       (dewey/dewey->phases dewey)
-          globs        (normalize-globs (get fm "globs"))
-          applies-to   (cond-> {:phases phases}
-                         (seq globs) (assoc :file-globs globs))
+          phases        (dewey/dewey->phases dewey)
+          globs         (normalize-globs (get fm "globs"))
+          ;; `excludeGlobs` carves paths back out of whatever scope the rule
+          ;; would otherwise have. It is kept even when `globs` is absent: a
+          ;; rule scoped by alwaysApply alone is still path-tested by scanners
+          ;; and gates, and the exclusion has to reach those.
+          exclude-globs (normalize-globs (get fm "excludeGlobs"))
+          applies-to    (cond-> {:phases phases}
+                          (seq globs)         (assoc :file-globs globs)
+                          (seq exclude-globs) (assoc :exclude-globs exclude-globs))
 
           ;; ── Detection & remediation ─────────────────────────────────────
           detection    (rule-config/build-detection-config (get fm "detection"))

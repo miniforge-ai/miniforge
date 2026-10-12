@@ -24,11 +24,15 @@
    InMemoryPackRegistry, and the registry constructor stay in the
    parent namespace; the pure functions they compose live here.
 
-   Layer 0: parse-datever, glob-matches?, decode-signature, dedupe-by-id
-   Layer 1: compare-versions (over parse-datever), rule-applies? (over
+   Layer 0: parse-datever, glob-matches? (a delegate to the `glob`
+     namespace, which owns the pattern syntax), decode-signature,
+     dedupe-by-id
+   Layer 1: compare-versions (over parse-datever), path-in-scope? (over
      glob-matches?)
-   Layer 2: latest-version (over compare-versions)"
+   Layer 2: latest-version (over compare-versions), rule-applies? (over
+     path-in-scope?)"
   (:require
+   [ai.miniforge.policy-pack.glob :as glob]
    [clojure.string :as str]))
 
 ;------------------------------------------------------------------------------ Layer 0
@@ -44,23 +48,16 @@
         nil))))
 
 ;; Rule applicability checking
-(defn ^{:stratum 0} glob-matches?
-  "Simple glob pattern matching.
-   Supports * (any within segment) and ** (any path segments)."
-  [pattern path]
-  (let [regex-pattern (str "^"
-                          (-> pattern
-                              (str/replace "." "\\.")
-                              (str/replace "**/" "<<<GLOBSTAR_SLASH>>>")
-                              (str/replace "**" "<<<GLOBSTAR>>>")
-                              (str/replace "*" "[^/]*")
-                              (str/replace "<<<GLOBSTAR_SLASH>>>" "(.*/)?")
-                              (str/replace "<<<GLOBSTAR>>>" ".*"))
-                          "$")]
-    (try
-      (boolean (re-matches (re-pattern regex-pattern) path))
-      (catch Exception _
-        false))))
+(def ^{:stratum 0} glob-matches?
+  "Glob pattern matching for rule path scope. Delegates to
+   `ai.miniforge.policy-pack.glob/matches?`, which owns the syntax
+   (`*`, `?`, `**`, `**/`, `{a,b}`, `[abc]`) and the one deliberate
+   difference from `java.nio.file.PathMatcher`: `**/x` matches a
+   root-level `x`.
+
+   Kept as a var here because `interface.registry` and
+   `external.matching` reference it by this name."
+  glob/matches?)
 
 (defn ^{:stratum 0} decode-signature
   "Base64 pack signature to bytes; nil when the field is not a string or not
@@ -91,7 +88,34 @@
         vb (or (parse-datever b) [0 0 0])]
     (compare va vb)))
 
-(defn ^{:stratum 1} rule-applies?
+(defn ^{:stratum 1} path-in-scope?
+  "Whether `path` is inside a rule's `:rule/applies-to` path scope.
+
+   Scope is `:file-globs` minus `:exclude-globs`. Absent or empty
+   `:file-globs` means every path is included, as before. `:exclude-globs`
+   is checked in either case and wins — a rule scoped by `alwaysApply`
+   alone is still path-tested here, and the carve-out has to reach it.
+
+   This is the ONE place the two-sided rule lives. Both `rule-applies?`
+   below and `applicability/rule-applies-to-artifact?` call it, so an
+   exclusion cannot be honoured on one path and ignored on the other.
+
+   Arguments:
+   - applies-to - A rule's :rule/applies-to map (may be nil)
+   - path       - Artifact path, '/'-delimited (nil is treated as \"\")
+
+   Returns:
+   - true when the rule's path scope covers `path`"
+  [applies-to path]
+  (let [{:keys [file-globs exclude-globs]} applies-to
+        p (or path "")]
+    (and (or (empty? file-globs)
+             (boolean (some #(glob-matches? % p) file-globs)))
+         (not-any? #(glob-matches? % p) exclude-globs))))
+
+;------------------------------------------------------------------------------ Layer 2
+
+(defn ^{:stratum 2} rule-applies?
   "Check if a rule applies to the given context.
 
    Context map:
@@ -100,7 +124,7 @@
    - :repo - Repository with :repo/type
    - :phase - Current workflow phase keyword"
   [rule context]
-  (let [{:keys [task-types file-globs repo-types phases]}
+  (let [{:keys [task-types repo-types phases] :as applies-to}
         (:rule/applies-to rule)]
     (and
      ;; Task type filter
@@ -108,11 +132,9 @@
          (empty? task-types)
          (contains? task-types (get-in context [:task :task/intent :intent/type])))
 
-     ;; File glob filter
-     (or (nil? file-globs)
-         (empty? file-globs)
-         (let [path (get-in context [:artifact :artifact/path] "")]
-           (some #(glob-matches? % path) file-globs)))
+     ;; Path scope filter — globs minus exclusions
+     (path-in-scope? applies-to
+                     (get-in context [:artifact :artifact/path] ""))
 
      ;; Repo type filter
      (or (nil? repo-types)
@@ -123,8 +145,6 @@
      (or (nil? phases)
          (empty? phases)
          (contains? phases (:phase context))))))
-
-;------------------------------------------------------------------------------ Layer 2
 
 (defn ^{:stratum 2} latest-version
   "Get the latest version from a collection of version strings."
