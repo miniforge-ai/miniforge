@@ -6,6 +6,7 @@
             [ai.miniforge.event-stream.interface :as events]
             [ai.miniforge.failure-classifier.interface :as failure]
             [ai.miniforge.workflow.interface :as workflow]
+            [ai.miniforge.workflow.chain-composition :as composition]
             [ai.miniforge.workflow.chain-current-lifecycle-support :as support :refer [options scope record-identity reject-type check-history run-observed]]
             [babashka.fs :as fs]
             [clojure.test :refer [deftest is]]
@@ -84,11 +85,15 @@
 
 (deftest ^{:stratum 0} shared-directory-is-refused-without-poisoning-the-journal
   (fs/with-temp-dir [root {:prefix "chain-current-storage-boundary-"}]
-    (let [directory (str (fs/canonicalize root))
+    (let [directory (support/directory root "journal")
+          alias (str (fs/create-sym-link (fs/path root "alias") directory))
           stream (events/create-current-event-stream {:journal-directory directory})
           calls (atom [])]
       (try+
-        (is (= :invalid-input (:anomaly/type (run-observed (options directory stream) :completed calls))))
+        (with-redefs [composition/run-record (partial support/unexpected calls)]
+          (doseq [path [directory (str directory "/.") (str directory "/") alias
+                        (str directory "/../journal") "relative" (str root "/missing")]]
+            (is (= :invalid-input (:anomaly/type (run-observed (options path stream) :completed calls))))))
         (is (empty? @calls))
         (is (empty? (events/get-events stream)))
         (finally (events/close-current-event-stream! stream)))
@@ -96,6 +101,21 @@
         (is (not (anomaly/any-anomaly? reopened)) (pr-str reopened))
         (when (events/current-event-stream? reopened)
           (events/close-current-event-stream! reopened))))))
+
+(deftest ^{:stratum 0} malformed-streams-refuse-before-invocation-allocation
+  (fs/with-temp-dir [root {:prefix "chain-current-malformed-stream-"}]
+    (let [directory (support/directory root "retention")
+          journal (support/directory root "journal")
+          stream (events/create-current-event-stream {:journal-directory journal})
+          opts (options directory stream) calls (atom [])]
+      (try+
+        (with-redefs [composition/run-record (partial support/unexpected calls)]
+          (doseq [field [:chain/event-stream :event-stream]
+                  value [42 "invalid" (atom {}) (atom {:publication {}})]]
+            (is (= :invalid-input (:anomaly/type (run-observed (assoc opts field value) :completed calls))))))
+        (is (empty? @calls))
+        (is (empty? (events/get-events stream)))
+        (finally (events/close-current-event-stream! stream))))))
 
 (deftest ^{:stratum 0} closed-current-stream-cannot-fall-back-to-the-child-stream
   (fs/with-temp-dir [root {:prefix "chain-current-closed-"}]

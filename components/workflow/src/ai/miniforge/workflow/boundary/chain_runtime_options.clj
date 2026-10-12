@@ -4,6 +4,7 @@
 (ns ai.miniforge.workflow.boundary.chain-runtime-options
   "Refuse explicit current-runtime misconfiguration before admission or effects."
   (:require [ai.miniforge.anomaly.interface :as anomaly]
+            [ai.miniforge.artifact.interface :as artifact]
             [ai.miniforge.event-stream.interface :as events]
             [ai.miniforge.schema.interface :as schema]
             [ai.miniforge.workflow.chain-runtime-spec :as spec]
@@ -15,8 +16,9 @@
   (anomaly/anomaly :invalid-input (messages/t :chain/invalid-runtime-options) {}))
 
 (defn- ^{:stratum 0} separate-storage? [opts]
-  (not= (:chain/retention-directory opts)
-        (events/current-journal-directory (:chain/event-stream opts))))
+  (let [directory (:chain/retention-directory opts)]
+    (and (artifact/canonical-publication-directory? directory)
+         (not= directory (events/current-journal-directory (:chain/event-stream opts))))))
 
 ;------------------------------------------------------------------------------ Layer 1
 

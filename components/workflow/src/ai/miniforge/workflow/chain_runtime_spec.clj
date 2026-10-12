@@ -12,7 +12,7 @@
   [:map
    [:chain/event-stream [:fn events/current-event-stream?]]
    [:chain/retention-directory schema/NonBlankString]
-   [:event-stream {:optional true} [:not [:fn events/current-event-stream?]]]])
+   [:event-stream {:optional true} [:maybe [:fn events/legacy-event-stream?]]]])
 
 (comment
   CurrentOptions)

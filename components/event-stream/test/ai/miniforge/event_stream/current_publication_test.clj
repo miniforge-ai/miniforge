@@ -63,6 +63,18 @@
         (is (anomaly/anomaly? (events/create-current-event-stream opts))))
       (is (empty? @calls)))))
 
+(deftest ^{:stratum 1} profile-queries-refuse-malformed-runtime-state
+  (let [stream (create (store/volatile-store) {})
+        legacy (events/create-event-stream {:sinks []})]
+    (is (true? (events/legacy-event-stream? legacy)))
+    (is (false? (events/legacy-event-stream? stream)))
+    (doseq [path [[:publication :store :commit!] [:publication :store :close!]
+                  [:publication :pending] [:publication :seen] [:sinks] [:events]]]
+      (is (false? (events/current-event-stream? (atom (assoc-in @stream path nil))))))
+    (doseq [value [42 "invalid" (atom {}) (atom {:publication {}})]]
+      (is (false? (events/current-event-stream? value)))
+      (is (false? (events/legacy-event-stream? value))))))
+
 (deftest ^{:stratum 1} admission-precedes-storage-and-commit-precedes-listeners
   (let [committed (atom [])
         observed (atom [])

@@ -43,8 +43,12 @@
   stream/create-current-event-stream)
 
 (def ^{:stratum 0} current-event-stream?
-  "Report the current publication profile, not availability or execution authority."
+  "Validate current stream structure, including closed streams; not availability or authority."
   stream/current-event-stream?)
+
+(def ^{:stratum 0} legacy-event-stream?
+  "Validate legacy stream structure without granting execution authority."
+  stream/legacy-event-stream?)
 
 (def ^{:stratum 0} current-journal-directory
   "Return a current stream's canonical journal directory, including after close. Not an authority check."

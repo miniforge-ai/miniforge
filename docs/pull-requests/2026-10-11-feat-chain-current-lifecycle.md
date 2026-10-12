@@ -19,6 +19,7 @@ Current chain events must use that admitted identity and their own chain scope, 
 
 - Require durable admission when selecting the current chain event path.
 - Refuse a shared retention/journal directory before allocating a run or writing artifacts.
+- Validate actual current/legacy stream structure and require an existing canonical retention directory before admission.
 - Keep current chain publication separate from legacy child workflow publication.
 - Construct current chain lifecycle drafts from the admitted run and preallocated child identities.
 - Preserve acknowledgment failures and the established failure paths.
@@ -30,10 +31,15 @@ Verify boundary refusal before storage or execution, immutable identity/scope pr
 real durable publication, and unchanged legacy behavior.
 Run affected consumers serially, verify the packaged CLI, and perform adversarial standards review.
 
-Four affected product consumers passed in 2m24s. After the final orchestration cleanup and diagnostic attribution,
-31 focused tests passed with 220 assertions, including real-storage recovery and refusal regressions.
-The built CLI jar passed the same 31 tests/220 assertions from an isolated directory with no production source overlay.
-The explicit Miniforge standards pack reported no changed-line violations across 4,360 scanned files.
+Four affected product consumers (artifact, event-stream, workflow) passed in 2m20s after the review fixes.
+The final JVM disk suite passed 6 tests/64 assertions. The built CLI jar passed 33 tests/252 assertions
+from an isolated directory with no production source overlay, including the real-storage regressions.
+The explicit Miniforge standards pack reported no changed-line violations across 4,368 scanned files.
+
+Review corrections add malformed stream/store and aliased storage regressions. The corrected focused suite
+passes 33 tests/252 assertions, including refusal before invocation allocation for symlinks, dot aliases,
+trailing separators, relative paths, and absent directories. Closed current streams still fail publication
+without falling back to child publication; structural validation does not claim availability or authority.
 
 The adversarial pass traced admission → retention → start acknowledgment → child identity allocation →
 child execution → terminal acknowledgment. It caught shared storage poisoning journal recovery;

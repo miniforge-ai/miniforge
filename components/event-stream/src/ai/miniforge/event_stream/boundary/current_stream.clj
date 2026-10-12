@@ -9,6 +9,7 @@
             [ai.miniforge.event-stream.commit-model :as model]
             [ai.miniforge.event-stream.core :as core]
             [ai.miniforge.event-stream.current-stream-spec :as spec]
+            [ai.miniforge.event-stream.stream-state-spec :as stream-spec]
             [ai.miniforge.event-stream.current-publication :as current]
             [ai.miniforge.event-stream.publication :as publication]
             [ai.miniforge.event-stream.publication-state :as state]
@@ -17,10 +18,9 @@
 
 ;------------------------------------------------------------------------------ Layer 0
 
-(defn ^{:stratum 0} current? [stream]
+(defn- ^{:stratum 0} valid-stream? [schema stream]
   (and (instance? clojure.lang.Atom stream)
-       (let [value @stream]
-         (and (map? value) (contains? (into {} value) :publication)))))
+       (validation/valid? schema @stream)))
 
 (defn ^{:stratum 0} close! [stream]
   (if (current/active? stream)
@@ -38,6 +38,10 @@
     stream))
 
 ;------------------------------------------------------------------------------ Layer 1
+
+(defn ^{:stratum 1} current? [stream] (valid-stream? stream-spec/Current stream))
+
+(defn ^{:stratum 1} legacy? [stream] (valid-stream? stream-spec/Legacy stream))
 
 (defn- ^{:stratum 1} own-stream [opts journal]
   (let [transferred? (atom false)]

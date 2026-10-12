@@ -18,6 +18,8 @@
 (defn ^{:stratum 0} directory [root child]
   (str (fs/canonicalize (fs/create-dir (fs/path root child)))))
 
+(defn ^{:stratum 0} unexpected [calls & args] (swap! calls conj args))
+
 (defn- ^{:stratum 0} loaded [& _] {:workflow {:workflow/id :fixture}})
 
 (defn- ^{:stratum 0} execute [calls status _definition _input opts]
