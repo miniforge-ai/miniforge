@@ -257,6 +257,7 @@
 (def ^{:stratum 0} run-chain
   "Run a sequence of workflows, feeding each step's output into the next.
    Args: [chain-def chain-input opts]. Invalid definitions return an anomaly before execution.
+   Publication failure returns an anomaly instead of a completed result.
    Results contain status, step results, duration, fresh :chain/run-id, resolved definition
    identity/version, and :chain/definition-snapshot. The snapshot is not durably stored here."
   pipeline/run-chain)

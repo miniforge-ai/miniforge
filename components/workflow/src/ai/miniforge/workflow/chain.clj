@@ -35,10 +35,11 @@
   [definition input opts]
   (let [started (clock/now-ms)
         step-opts (execution/options opts)
-        advance (partial advance! (:chain/id definition) input step-opts)]
-    (emit! opts events/chain-started (:chain/id definition) (count (:chain/steps definition)))
-    (let [state (reduce advance {:results [] :last-result nil} (:chain/steps definition))]
-      (execution/finish! definition started state opts))))
+        advance (partial advance! (:chain/id definition) input step-opts)
+        receipt (emit! opts events/chain-started (:chain/id definition) (count (:chain/steps definition)))]
+    (if (outcome/failure-value? receipt) receipt
+        (let [state (reduce advance {:results [] :last-result nil} (:chain/steps definition))]
+          (execution/finish! definition started state opts)))))
 
 (comment
   (resolve-binding :chain/input.task nil {:task "example"}))
