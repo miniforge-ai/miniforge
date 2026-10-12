@@ -46,6 +46,7 @@ Adversarial review traced fresh drafts through admission, redaction, commit rece
 Schema projection changes only top-level sequence requirements; nested maps and disposition predicates remain authoritative.
 Shared constructor fixtures avoid duplicated payload maps; legacy constructor behavior remains covered.
 Unsupported families still have no generic envelope fallback. No runtime defaults or historical records are rewritten.
+Review correction: both public API entry points now document typed OPSV draft support.
 
 ## Deployment Plan
 
