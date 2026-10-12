@@ -24,12 +24,15 @@
    InMemoryPackRegistry, and the registry constructor stay in the
    parent namespace; the pure functions they compose live here.
 
-   Layer 0: parse-datever, glob-matches?, decode-signature, dedupe-by-id
+   Layer 0: parse-datever, glob-matches? (a delegate to the `glob`
+     namespace, which owns the pattern syntax), decode-signature,
+     dedupe-by-id
    Layer 1: compare-versions (over parse-datever), path-in-scope? (over
      glob-matches?)
    Layer 2: latest-version (over compare-versions), rule-applies? (over
      path-in-scope?)"
   (:require
+   [ai.miniforge.policy-pack.glob :as glob]
    [clojure.string :as str]))
 
 ;------------------------------------------------------------------------------ Layer 0
@@ -45,23 +48,16 @@
         nil))))
 
 ;; Rule applicability checking
-(defn ^{:stratum 0} glob-matches?
-  "Simple glob pattern matching.
-   Supports * (any within segment) and ** (any path segments)."
-  [pattern path]
-  (let [regex-pattern (str "^"
-                          (-> pattern
-                              (str/replace "." "\\.")
-                              (str/replace "**/" "<<<GLOBSTAR_SLASH>>>")
-                              (str/replace "**" "<<<GLOBSTAR>>>")
-                              (str/replace "*" "[^/]*")
-                              (str/replace "<<<GLOBSTAR_SLASH>>>" "(.*/)?")
-                              (str/replace "<<<GLOBSTAR>>>" ".*"))
-                          "$")]
-    (try
-      (boolean (re-matches (re-pattern regex-pattern) path))
-      (catch Exception _
-        false))))
+(def ^{:stratum 0} glob-matches?
+  "Glob pattern matching for rule path scope. Delegates to
+   `ai.miniforge.policy-pack.glob/matches?`, which owns the syntax
+   (`*`, `?`, `**`, `**/`, `{a,b}`, `[abc]`) and the one deliberate
+   difference from `java.nio.file.PathMatcher`: `**/x` matches a
+   root-level `x`.
+
+   Kept as a var here because `interface.registry` and
+   `external.matching` reference it by this name."
+  glob/matches?)
 
 (defn ^{:stratum 0} decode-signature
   "Base64 pack signature to bytes; nil when the field is not a string or not
