@@ -17,15 +17,23 @@
 
 ;------------------------------------------------------------------------------ Layer 0
 
+(defn ^{:stratum 0} current? [stream]
+  (and (instance? clojure.lang.Atom stream)
+       (let [value @stream]
+         (and (map? value) (contains? (into {} value) :publication)))))
+
 (defn ^{:stratum 0} close! [stream]
   (if (current/active? stream)
     (publication/close! stream)
     (model/failure :invalid-input :publication/not-current nil)))
 
+(defn ^{:stratum 0} journal-directory [stream]
+  (get-in @stream [:publication :directory]))
+
 (defn- ^{:stratum 0} restore-stream [opts journal events]
   (let [stream (core/create-event-stream (merge {:sinks []} opts))
         seen (into #{} (map :event/id) events)
-        publication (assoc (state/initial journal) :seen seen)]
+        publication (assoc (state/initial journal) :seen seen :directory (:journal-directory opts))]
     (swap! stream assoc :events events :publication publication)
     stream))
 

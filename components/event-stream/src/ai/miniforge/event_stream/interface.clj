@@ -42,6 +42,14 @@
   "Create a durable stream for the supported current profiles; see interface.stream."
   stream/create-current-event-stream)
 
+(def ^{:stratum 0} current-event-stream?
+  "Report the current publication profile, not availability or execution authority."
+  stream/current-event-stream?)
+
+(def ^{:stratum 0} current-journal-directory
+  "Return a current stream's canonical journal directory, including after close. Not an authority check."
+  stream/current-journal-directory)
+
 (def ^{:stratum 0} close-current-event-stream!
   "Release a current stream's journal ownership; not a listener drain."
   stream/close-current-event-stream!)

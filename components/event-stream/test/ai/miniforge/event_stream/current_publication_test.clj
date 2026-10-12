@@ -44,6 +44,17 @@
 
 ;------------------------------------------------------------------------------ Layer 1
 
+(deftest ^{:stratum 1} profile-query-is-not-an-availability-or-authority-check
+  (let [stream (create (store/volatile-store) {})]
+    (is (true? (events/current-event-stream? stream)))
+    (is (= "fixture-journal" (events/current-journal-directory stream)))
+    (events/close-current-event-stream! stream)
+    (is (true? (events/current-event-stream? stream)))
+    (is (= "fixture-journal" (events/current-journal-directory stream)))
+    (doseq [value [nil {} "invalid" (atom nil) (atom []) (atom (sorted-map "unrelated" true))
+                   (events/create-event-stream {:sinks []})]]
+      (is (false? (events/current-event-stream? value))))))
+
 (deftest ^{:stratum 1} creation-requires-explicit-durable-ownership
   (let [calls (atom [])]
     (with-redefs [store/durable-store (partial record! calls)]
