@@ -412,7 +412,7 @@
   "Project a run-chain result into chain evidence, retaining admitted identity/snapshot and child UUIDs.
    Admitted results retain canonical :chain/* identity alongside compatible definition-only aliases.
    Observed summary count is separate from declared :chain/step-count. Upstream anomalies pass through unchanged.
-   This projection does not authorize recovery."
+   Reporting fields and the projected snapshot are redacted; this projection does not authorize recovery."
   [chain-def chain-result & [opts]]
   (if (anomaly/any-anomaly? chain-result) chain-result
       (chain-evidence/create-chain-evidence chain-def chain-result opts)))

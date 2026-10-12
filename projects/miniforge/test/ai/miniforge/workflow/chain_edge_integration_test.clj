@@ -5,9 +5,11 @@
   (:require [ai.miniforge.anomaly.interface :as anomaly]
             [ai.miniforge.event-stream.interface :as events]
             [ai.miniforge.evidence-bundle.interface :as evidence]
+            [ai.miniforge.redaction.interface :as redaction]
             [ai.miniforge.workflow.chain-binding-report :as report]
             [ai.miniforge.workflow.chain-current-lifecycle-support :as lifecycle]
             [ai.miniforge.workflow.chain-edge-support :as support]
+            [clojure.string :as str]
             [clojure.test :refer [deftest is]]
             [slingshot.slingshot :refer [try+]]))
 
@@ -19,6 +21,19 @@
 (defn- ^{:stratum 0} refuse-bindings [resolve declarations previous input]
   (if (seq declarations) (throw (ex-info "fixture resolution failure" {}))
       (resolve declarations previous input)))
+
+(deftest ^{:stratum 0} child-inputs-remain-original-while-binding-evidence-is-redacted
+  (support/with-fixture
+   (fn [opts _ _stream]
+     (let [declarations {:alias [:prev/last-phase-result :password]}
+           calls (atom [])
+           result (support/run-chain opts declarations :completed calls (atom []))
+           projection (evidence/create-chain-evidence (support/definition declarations) result)
+           records (:step/bindings (second (:chain/step-results result)))]
+       (is (= :completed (:chain/status result)))
+       (is (= {:alias "fixture-password"} (:input (second @calls))))
+       (is (every? #(= (redaction/marker) (:binding/value %)) records))
+       (is (not (str/includes? (pr-str projection) "fixture-password")))))))
 
 ;------------------------------------------------------------------------------ Layer 1
 

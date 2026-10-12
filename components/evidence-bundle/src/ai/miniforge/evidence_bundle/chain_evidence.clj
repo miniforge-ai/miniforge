@@ -20,7 +20,9 @@
 
    Aggregates per-step evidence bundles into a chain-level bundle,
    including chain definition, step results, total timing, and metrics."
-  (:require [ai.miniforge.phase.interface :as phase]))
+  (:require [ai.miniforge.phase.interface :as phase]
+            [ai.miniforge.redaction.interface :as redaction]
+            [ai.miniforge.evidence-bundle.chain-provenance :as provenance]))
 
 ;------------------------------------------------------------------------------ Layer 0
 
@@ -47,7 +49,7 @@
     (contains? step-result :step/execution-id)
     (assoc :step/execution-id (:step/execution-id step-result))
     (contains? step-result :step/bindings)
-    (assoc :step/bindings (:step/bindings step-result))))
+    (assoc :step/bindings (provenance/bindings (:step/bindings step-result)))))
 
 (defn- ^{:stratum 0} definition-reference [definition result]
   (if (contains? result :chain/run-id)
@@ -90,7 +92,8 @@
   (let [[id version] (definition-reference definition result)
         retained (select-keys result [:chain/run-id :chain/definition-id :chain/definition-version
                                       :chain/definition-snapshot :chain/step-count :chain/edges])]
-    (assoc retained :chain-evidence/chain-id id :chain-evidence/chain-version version)))
+    (cond-> (assoc retained :chain-evidence/chain-id id :chain-evidence/chain-version version)
+      (contains? retained :chain/edges) (update :chain/edges provenance/edges))))
 
 (defn ^{:stratum 1} build-step-summaries
   "Build step summaries from chain step results."
@@ -123,15 +126,16 @@
         summaries (build-step-summaries step-results)
         metrics (aggregate-metrics step-results)
         identity (chain-identity chain-def chain-result)]
-    (cond-> (merge identity {:chain-evidence/id (random-uuid)
-                            :chain-evidence/step-count step-count
-                            :chain-evidence/status status
-                            :chain-evidence/duration-ms (:chain/duration-ms chain-result)
-                            :chain-evidence/step-summaries summaries
-                            :chain-evidence/metrics metrics
-                            :chain-evidence/created-at (java.time.Instant/now)})
-      (:step-bundles opts)
-      (assoc :chain-evidence/step-bundles (:step-bundles opts)))))
+    (redaction/redact
+     (cond-> (merge identity {:chain-evidence/id (random-uuid)
+                             :chain-evidence/step-count step-count
+                             :chain-evidence/status status
+                             :chain-evidence/duration-ms (:chain/duration-ms chain-result)
+                             :chain-evidence/step-summaries summaries
+                             :chain-evidence/metrics metrics
+                             :chain-evidence/created-at (java.time.Instant/now)})
+       (:step-bundles opts)
+       (assoc :chain-evidence/step-bundles (:step-bundles opts))))))
 
 (comment
   (chain-identity {:chain/id :legacy :chain/version "1.0.0"} {}))

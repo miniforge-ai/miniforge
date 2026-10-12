@@ -21,7 +21,7 @@
   (swap! calls conj {:id (:workflow-id opts) :input input :opts opts})
   {:execution/id (:workflow-id opts)
    :execution/status (if (= 1 (count @calls)) :completed status)
-   :execution/output {:last-phase-result {:flag false}}
+   :execution/output {:last-phase-result {:flag false :password "fixture-password"}}
    :execution/edges [::forged-child-edge]
    :execution/error "fixture downstream failure"})
 
