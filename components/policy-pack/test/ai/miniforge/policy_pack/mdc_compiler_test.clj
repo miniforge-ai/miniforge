@@ -178,6 +178,10 @@
   (testing "a commented parent with no children reports nothing"
     (is (= [] (frontmatter/nested-block-keys "globs: # nothing follows"))))
 
+  (testing "an unindented `key: value` is a legitimate top-level key, not a
+            nested child — only the list form ignores indentation"
+    (is (= [] (frontmatter/nested-block-keys "detection:\nmode: positive"))))
+
   (testing "an indented DOTTED child is a nested mapping too. That shape makes
             `group-dotted-keys` throw rather than fall back, but the exception
             names nothing actionable, so the key is still reported"
@@ -194,8 +198,20 @@
                       "globs: # the shell ones\n  - \"**/*.sh\"\n  - \"bb.edn\""))))
 
   (testing "a BARE key over a list is the one multi-line form the grammar
-            supports, and is never reported"
-    (is (= [] (frontmatter/commented-list-keys "globs:\n  - \"**/*.sh\""))))
+            supports, and is never reported — indented or flush-left"
+    (is (= [] (frontmatter/commented-list-keys "globs:\n  - \"**/*.sh\"")))
+    (is (= [] (frontmatter/commented-list-keys "globs:\n- \"**/*.sh\""))))
+
+  (testing "a FLUSH-LEFT list loses its items the same way. Indentation is not
+            part of the list form: `process-frontmatter-line` trims every line
+            before testing for \"- \", which is why `parse-mdc-test` covers the
+            unindented style as supported"
+    (is (= ["globs"] (frontmatter/commented-list-keys
+                      "globs: # note\n- \"*.clj\"\n- \"*.cljc\""))))
+
+  (testing "a commented key followed by another TOP-LEVEL key is not a list"
+    (is (= [] (frontmatter/commented-list-keys
+               "description: # note\ndewey: \"740\""))))
 
   (testing "a commented key with a mapping child is a nested block, not this —
             the two detectors do not both claim the same line"

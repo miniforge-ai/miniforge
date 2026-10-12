@@ -110,9 +110,16 @@
   "A `key: # comment` line: a key whose only value is a comment."
   #"^([A-Za-z][A-Za-z0-9._-]*)[ \t]*:[ \t]*#.*$")
 
-(def ^{:stratum 0} ^:private indented-list-item-re
-  "An indented `- item` line — a list child."
-  #"^[ \t]+-[ \t]")
+(def ^{:stratum 0} ^:private list-item-re
+  "A `- item` line, indented or not. Indentation is NOT required:
+   `process-frontmatter-line` trims every line before testing for `\"- \"`,
+   so a flush-left list is a supported form and loses its items to a
+   commented parent exactly the same way.
+
+   This is the one place indentation does not matter. `indented-kv-re`
+   above still requires it, because an unindented `key: value` is a
+   legitimate top-level key rather than a nested child."
+  #"^[ \t]*-[ \t]")
 
 (def ^{:stratum 0} ^:private comment-line-re
   "A line carrying only a comment, at any indentation. Skipped when
@@ -164,7 +171,9 @@
 
    Distinct from `nested-block-keys`: a *bare* `key:` over a list is the
    one multi-line form the grammar supports and is never reported. Only
-   the commented form loses data.
+   the commented form loses data — in both the indented and the
+   flush-left list style, since the parser trims before testing for
+   `\"- \"`.
 
    Arguments:
    - frontmatter-str - Raw text between --- delimiters
@@ -182,7 +191,7 @@
             (keep (fn [idx]
                     (when-let [[_ k] (re-matches commented-key-re (lines idx))]
                       (when-let [child (next-child idx)]
-                        (when (re-find indented-list-item-re child)
+                        (when (re-find list-item-re child)
                           k)))))
             (range (count lines))))))
 

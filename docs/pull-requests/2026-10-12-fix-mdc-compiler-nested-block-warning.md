@@ -87,6 +87,14 @@ A **bare** `key:` over a list is the one multi-line form the grammar does
 support and is never reported. Only the commented form loses data, and a test
 asserts the two detectors never both claim the same line.
 
+Indentation is not part of the list form. `process-frontmatter-line` trims every
+line before testing for `"- "`, so a flush-left list is supported — the existing
+`parse-mdc-test` covers it — and loses its items to a commented parent exactly
+the same way. The list-item pattern therefore allows zero indentation. The
+nested-mapping pattern still requires it, because an unindented `key: value` is
+a legitimate top-level key rather than a nested child; both directions are
+pinned by tests.
+
 `parse-kv-line` itself is left alone. Correct YAML comment handling means
 knowing whether the `#` is inside quotes, which is a grammar change, and any
 real value containing a `#` would be at risk. Reporting the loss costs nothing
@@ -137,7 +145,7 @@ which rule 050 forbids. All three now go through
 
 | Check | Result |
 |---|---|
-| `mdc-compiler-test` namespace | 32 tests, 206 assertions, 0 failures |
+| `mdc-compiler-test` namespace | 32 tests, 210 assertions, 0 failures |
 | Full `policy-pack` test suite | 300 tests, 2736 assertions, 0 failures |
 | `bb lint:clj` | 0 errors, 0 warnings |
 | `bb lint:stratum` | clean (no rewrites) |
@@ -160,9 +168,11 @@ New tests:
   `:custom` / `:audit`, and produces two warnings naming the file, the key and
   the compiled values. The dotted-style equivalent is blocking and carries no
   `:warnings` key at all.
-- `commented-list-keys-test` — the commented form reports; the bare form does
-  not; a commented key with a *mapping* child belongs to the other detector and
-  not this one; no children, empty and nil.
+- `commented-list-keys-test` — the commented form reports, indented and
+  flush-left; the bare form does not, in either style; a commented key with a
+  *mapping* child belongs to the other detector and not this one; a commented
+  key followed by another top-level key is not a list; no children, empty and
+  nil.
 - `mdc->rule-commented-list-warning-test` — end to end: the rule compiles,
   `:file-globs` is `["# the shell ones"]`, and the warning names the key and
   says the list was discarded.
