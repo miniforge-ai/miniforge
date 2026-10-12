@@ -146,10 +146,13 @@ thousands of times — 7.5ms warm over 4,372 files, against 37ms unmemoized and
 No wildcard crosses a segment boundary. `*`, `?` and a character class — negated
 or not — all stop at `/`; only `**` and `**/` cross. The negated class is the one
 that nearly slipped: a regex `[^abc]` matches `/`, so `src[!x]foo` would have
-matched `src/foo`. `/` is now in the negation set, and a `/` listed inside a
-*positive* class is stripped so that class cannot match a separator either
-(`PathMatcher` rejects such a pattern outright; matching nothing is the same
-outcome without a throw).
+matched `src/foo`. `/` is now in the negation set.
+
+A class containing the separator — `a[b/c]d` — is **rejected** rather than
+rewritten, so the whole pattern matches nothing, the same outcome as
+`PathMatcher`'s refusal to compile it. Dropping the `/` instead would have
+turned it into `a[bc]d` and matched `abd`: a different pattern than the author
+wrote, silently substituted.
 
 Inside a class every character is a literal, which takes one more escape than it
 looks: `&&` is Java's class-intersection operator but two ordinary characters in

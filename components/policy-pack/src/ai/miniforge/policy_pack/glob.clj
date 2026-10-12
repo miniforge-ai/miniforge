@@ -38,8 +38,10 @@
    class — negated or not — all stop at `/`; only `**` and `**/` cross.
 
    Inside a class, every character is a literal: `&` does not form Java's
-   intersection operator and `/` is dropped, so a class can neither
-   silently match nothing nor cross a separator.
+   intersection operator, so a class cannot silently match nothing. A
+   class containing the separator is rejected rather than rewritten, so
+   the pattern matches nothing instead of quietly becoming a different
+   pattern.
 
    One deliberate difference from `java.nio.file.PathMatcher`: `**/x`
    matches a root-level `x` here, because `**/` stands for *zero* or more
@@ -68,7 +70,12 @@
    - pattern - Glob pattern, '/'-delimited
 
    Returns:
-   - Anchored regex string."
+   - Anchored regex string.
+
+   Throws:
+   - IllegalArgumentException when a character class contains '/', which
+     is malformed rather than meaningful. `pattern->matcher` catches it
+     and the pattern matches nothing."
   [pattern]
   (let [n (count pattern)]
     (loop [i 0, in-group? false, out (StringBuilder. "^")]
@@ -99,27 +106,33 @@
                                      (= (.charAt pattern j) \]) j
                                      :else (recur (inc j))))]
               (if close
-                ;; `/` is the segment separator and no class may cross it.
-                ;; A negated class gets it added to the negation set; a
-                ;; positive class has it stripped, so `[a/b]` cannot match a
-                ;; separator either. (PathMatcher rejects the pattern
-                ;; outright instead; matching nothing is the same outcome
-                ;; without a throw.)
-                (recur (inc close) in-group?
-                       (-> out
-                           (.append "[")
-                           (.append (if (= next \!) "^/" ""))
-                           (.append (-> (subs pattern body-start close)
-                                        (str/replace "\\" "\\\\")
-                                        ;; `&&` is class intersection in a
-                                        ;; Java regex but two literal
-                                        ;; characters in a glob: unescaped,
-                                        ;; `[a&&b]` would match nothing
-                                        ;; instead of `a`, `&` or `b`, which
-                                        ;; in an exclusion fails open.
-                                        (str/replace "&" "\\&")
-                                        (str/replace "/" "")))
-                           (.append "]")))
+                (let [body (subs pattern body-start close)]
+                  ;; A class containing the separator is a malformed glob —
+                  ;; PathMatcher rejects the whole pattern. Throwing here
+                  ;; routes it through `pattern->matcher`'s catch, so the
+                  ;; pattern matches nothing. Silently dropping the `/`
+                  ;; instead would turn `a[b/c]d` into `a[bc]d` and match
+                  ;; `abd` — a different pattern than the author wrote.
+                  (when (str/includes? body "/")
+                    (throw (IllegalArgumentException.
+                            (str "glob character class may not contain '/': " pattern))))
+                  (recur (inc close) in-group?
+                         (-> out
+                             (.append "[")
+                             ;; A negated class must not match the separator
+                             ;; either: a regex `[^abc]` does.
+                             (.append (if (= next \!) "^/" ""))
+                             (.append (-> body
+                                          (str/replace "\\" "\\\\")
+                                          ;; `&&` is class intersection in a
+                                          ;; Java regex but two literal
+                                          ;; characters in a glob: unescaped,
+                                          ;; `[a&&b]` would match nothing
+                                          ;; instead of `a`, `&` or `b`,
+                                          ;; which in an exclusion fails
+                                          ;; open.
+                                          (str/replace "&" "\\&")))
+                             (.append "]"))))
                 ;; Unterminated class: a literal `[`
                 (recur (inc i) in-group? (.append out "\\["))))
 

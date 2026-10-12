@@ -114,7 +114,7 @@
             path    ["bb.edn" "src/a.clj" "src/ab.clj" "src/a/b.clj" "src/a/b"
                      "tools/a/b.clj" "examples/d/x.sh" "src/a.ts" "src/a.js"
                      "src/a/b.tsx" "a/x" "d/x" "src/foo" "srcyfoo" "srcxfoo"
-                     "a" "b" "c" "&"
+                     "a" "b" "c" "&" "abd" "acd" "a/d"
                      "docs/a/b.md" "components/c/src/a/b.clj" "build.clj"]
             ;; `**/` anywhere in the pattern is the one deliberate
             ;; divergence — covered below.
