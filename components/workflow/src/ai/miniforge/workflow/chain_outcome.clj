@@ -30,11 +30,12 @@
 
 (defn ^{:stratum 0} chain-result [definition duration results status]
   (let [step-count (count (:chain/steps definition))]
-    {:chain/id (:chain/id definition)
-     :chain/status status
-     :chain/step-results results
-     :chain/step-count step-count
-     :chain/duration-ms duration}))
+    (merge (:chain/run-record definition)
+           {:chain/id (:chain/id definition)
+            :chain/status status
+            :chain/step-results results
+            :chain/step-count step-count
+            :chain/duration-ms duration})))
 
 ;------------------------------------------------------------------------------ Layer 1
 

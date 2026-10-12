@@ -256,9 +256,9 @@
 
 (def ^{:stratum 0} run-chain
   "Run a sequence of workflows, feeding each step's output into the next.
-   Args: [chain-def chain-input opts]. Returns
-   {:chain/id :chain/status (:completed|:failed) :chain/step-results
-   :chain/step-count :chain/duration-ms}."
+   Args: [chain-def chain-input opts]. Invalid definitions return an anomaly before execution.
+   Results contain status, step results, duration, fresh :chain/run-id, resolved definition
+   identity/version, and :chain/definition-snapshot. The snapshot is not durably stored here."
   pipeline/run-chain)
 
 (def ^{:stratum 0} load-chain
