@@ -19,9 +19,9 @@
   "Validate, publish and correlate OPSV audit events without assuming success."
   (:require
    [ai.miniforge.anomaly.interface :as anomaly]
-   [ai.miniforge.evidence-bundle.interface :as evidence]
    [ai.miniforge.event-stream.interface :as events]
    [ai.miniforge.phase-opsv.event-admission :as admission]
+   [ai.miniforge.phase-opsv.event-evidence :as event-evidence]
    [ai.miniforge.phase-opsv.event-replay :as replay]
    [ai.miniforge.phase-opsv.messages :as msg]))
 
@@ -60,13 +60,6 @@
                       :event/type (:event/type event)
                       :evidence/result assembly})))
 
-(defn- ^{:stratum 0} evidence-material [event]
-  (let [effects (or (:opsv/governed-effects event)
-                    (some-> (:opsv/governed-effect event) vector) [])]
-    {:opsv/event-refs [(:event/id event)]
-     :opsv/grant-refs (mapv :evidence/grant-id effects)
-     :opsv/actuation {:governed-effects effects}}))
-
 ;------------------------------------------------------------------------------ Layer 1
 
 (defn- ^{:stratum 1} publish-event!
@@ -76,10 +69,8 @@
         failure (publication-anomaly stream-value event published)]
     (cond
       failure failure
-      store (let [assembly (evidence/accumulate-opsv-evidence!
-                            store (evidence-id ctx)
-                            (evidence-material published))]
-              (evidence-anomaly published assembly)))))
+      store (evidence-anomaly published
+                              (event-evidence/accumulate! store (evidence-id ctx) published)))))
 
 ;------------------------------------------------------------------------------ Layer 2
 
