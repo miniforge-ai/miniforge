@@ -20,6 +20,7 @@
   (:require [clojure.string :as str]
             [clojure.test :refer [deftest is testing]]
             [ai.miniforge.compliance-scanner.classify :as classify]
+            [ai.miniforge.compliance-scanner.scan-diff-plan :as diff-plan]
             [ai.miniforge.compliance-scanner.scan-pack-config :as spc]))
 
 ;------------------------------------------------------------------------------ Layer 0
@@ -102,6 +103,40 @@
           [r]      (classify/classify-violations [enriched])]
       (is (= :semantic (:remediation-strategy enriched)))
       (is (false? (:auto-fixable? r))))))
+
+;; ---------------------------------------------------------------------------
+;; :diff-analysis / :plan-output paths, exercised through the real bulk entry
+;; points. These constructors do not go through `pack-rule->detection-config`,
+;; so they needed enrichment of their own: without it a declared :manual
+;; strategy was invisible, and classify's :auto-fixable-default true default
+;; overwrote the `false` the constructors pass.
+(deftest ^{:stratum 0} diff-rule-manual-strategy-reaches-classify
+  (testing "a diff-analysis rule declaring :manual is not auto-fixable"
+    (let [rule  {:rule/id          :std/diff-manual
+                 :rule/category    "700"
+                 :rule/title       "Diff Manual Rule"
+                 :rule/detection   {:type :diff-analysis :pattern "FORBIDDEN"}
+                 :rule/remediation {:strategy :manual :auto-fixable-default true}}
+          viols (diff-plan/scan-diff-rules [rule] "+ FORBIDDEN token\n")
+          [r]   (classify/classify-violations viols)]
+      (is (= 1 (count viols)) "the diff rule must actually match, or this proves nothing")
+      (is (= :manual (:remediation-strategy (first viols)))
+          "diff violations must carry the declared strategy")
+      (is (false? (:auto-fixable? r))))))
+
+(deftest ^{:stratum 0} diff-rule-without-remediation-stays-needs-review
+  (testing "a diff rule declaring no remediation is not flipped auto-fixable"
+    (let [rule  {:rule/id        :std/diff-bare
+                 :rule/category  "700"
+                 :rule/title     "Diff Bare Rule"
+                 :rule/detection {:type :diff-analysis :pattern "FORBIDDEN"}}
+          viols (diff-plan/scan-diff-rules [rule] "+ FORBIDDEN token\n")
+          [r]   (classify/classify-violations viols)]
+      (is (= 1 (count viols)))
+      (is (false? (:auto-fixable? (first viols)))
+          "the constructor marks diff violations not auto-fixable")
+      (is (false? (:auto-fixable? r))
+          "classify must not overwrite that with its true default"))))
 
 ;------------------------------------------------------------------------------ Layer 1
 

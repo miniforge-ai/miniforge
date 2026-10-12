@@ -63,6 +63,31 @@ the prepend alive regardless of `type`. This PR makes the declaration govern.
   `:strategy`, alongside the fields it already carried.
 - Docstring states why the field must be carried.
 
+### `scan_diff_plan.clj`
+
+`:diff-analysis` and `:plan-output` rules do not flow through
+`pack-rule->detection-config`, so they bypassed the enrichment above entirely.
+`scan-diff-rule` and `scan-plan-rule` build violations straight from
+`factory/->violation`. Two consequences, both found in review:
+
+1. A declared `:manual` / `:semantic` strategy was invisible for those two
+   supported detection types, so the fix above would not have covered them.
+2. Those constructors pass `:auto-fixable? false`, but with no
+   `:auto-fixable-default` key on the violation `classify` falls back to its
+   `true` default and **overwrites** that `false`. Confirmed: a
+   `factory/->violation` built with `false` classified `:auto-fixable? true`
+   with rationale "Literal default, non-JSON field".
+
+`enrich-diff-plan-violations` now carries `:rule/remediation` onto both paths
+and, since neither produces a `:suggested` value or a template to patch from,
+pins `:auto-fixable-default` to `false` when the rule declares none of its own.
+Wired into the bulk entry points `scan-diff-rules` / `scan-plan-rules` so the
+tests exercise the real pipeline rather than the private constructors.
+
+No rule in standards `main` currently uses either detection type (54 `:custom`,
+5 `:content-scan`), so this was latent rather than live — but both paths are
+wired in `scan.clj` and the PR's contract covers them.
+
 ### `classify.clj`
 
 - `semantic-strategy?` (a `:semantic`-only predicate) is replaced by
@@ -102,12 +127,14 @@ New tests, all confirmed to fail against the pre-fix code and pass after —
 | `enriched-semantic-strategy-reaches-classify` | the original dead-guard defect specifically |
 | `prepend-requires-declared-remediation-type-test` | no prepend off the rule id alone |
 | `prepend-honours-declared-type-for-any-rule-test` | declared `:prepend` governs for any rule |
+| `diff-rule-manual-strategy-reaches-classify` | `:diff-analysis` carries the declared strategy |
+| `diff-rule-without-remediation-stays-needs-review` | classify does not flip a diff violation auto-fixable |
 
 Verification runs:
 
-- Targeted: 42 tests / 129 assertions, 0 failures.
+- Targeted: 50 tests / 157 assertions, 0 failures.
 - `compliance-scanner` + `policy-pack` + `workflow-compliance-scanner`:
-  428 tests / 3108 assertions, 0 failures.
+  430 tests / 3114 assertions, 0 failures.
 - `evidence-bundle` + `pr-lifecycle` + `gate` + `gate-classification`:
   882 tests / 5155 assertions, 0 failures.
 - `bb lint:clj`: 0 errors, 0 warnings (also cleared a pre-existing unresolved
@@ -180,10 +207,23 @@ Deliberately left out, with reasons:
    ("Copyright header absent; can be prepended") is now actively false. Removing
    them is dead-code cleanup, a different stratum.
 
+## Review
+
+Copilot raised two findings on the first push, both verified before acting and
+both real:
+
+1. **High — diff/plan paths bypass enrichment.** Correct, and sharper than
+   stated: besides the invisible strategy, `classify`'s `:auto-fixable-default`
+   `true` default silently overwrote the `false` those constructors pass. Fixed
+   in `scan_diff_plan.clj` with coverage through the real entry points.
+2. **Low — incomplete sentence in `prepend-violation?`.** Correct; "This also
+   hardcoded" had no subject. Reworded to name the previous implementation.
+
 ## Checklist
 
 - [x] Both defects reproduced before fixing
-- [x] Every new test confirmed to fail pre-fix (9 failures) and pass post-fix
+- [x] Every new test confirmed to fail pre-fix (9 failures, then 3 more for the
+      diff/plan paths) and pass post-fix
 - [x] Rationale text added to the message catalog, not hardcoded
 - [x] Downstream consumers of classify output re-tested
 - [x] `lint:clj`, `lint:stratum`, `poly:check`, `commit-budget` all pass

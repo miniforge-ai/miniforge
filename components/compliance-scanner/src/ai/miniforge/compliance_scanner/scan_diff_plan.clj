@@ -29,6 +29,7 @@
    [ai.miniforge.compliance-scanner.exceptions-as-data :as exc-data]
    [ai.miniforge.compliance-scanner.factory            :as factory]
    [ai.miniforge.compliance-scanner.scan-content        :as scan-content]
+   [ai.miniforge.compliance-scanner.scan-pack-config    :as pack-config]
    [ai.miniforge.policy-pack.interface                  :as policy-pack]
    [clojure.java.io                                     :as io]
    [clojure.string                                      :as str]))
@@ -51,6 +52,27 @@
   (.start (doto (ProcessBuilder. ^java.util.List arguments)
             (.directory (io/file repo-path))
             (.redirectError java.lang.ProcessBuilder$Redirect/DISCARD))))
+
+(defn- ^{:stratum 0} enrich-diff-plan-violations
+  "Carry the rule's declared `:rule/remediation` onto diff/plan violations.
+
+   Without this, `:diff-analysis` and `:plan-output` violations reach `classify`
+   with no `:remediation-strategy` — so a rule declaring `:manual` or
+   `:semantic` is auto-fixed anyway — and with no `:auto-fixable-default`, which
+   `classify` defaults to **true**, overwriting the `false` these constructors
+   pass. Neither detection type produces a `:suggested` value or a template, so
+   there is nothing to patch from: when the rule declares no `autoFixable` of
+   its own, pin the default to false rather than letting it drift true."
+  [rule-cfg violations]
+  (let [remediation (get rule-cfg :rule/remediation)
+        enriched    (if remediation
+                      (mapv #(pack-config/enrich-violation % remediation) violations)
+                      (vec violations))]
+    (mapv (fn [v]
+            (cond-> v
+              (not (contains? v :auto-fixable-default))
+              (assoc :auto-fixable-default false)))
+          enriched)))
 
 (defn- ^{:stratum 0} scan-plan-rule
   "Scan plan output for violations using a plan-output rule.
@@ -175,7 +197,7 @@
   [plan-rules plan-output]
   (when plan-output
     (->> plan-rules
-         (mapcat #(scan-plan-rule % plan-output))
+         (mapcat #(enrich-diff-plan-violations % (scan-plan-rule % plan-output)))
          vec)))
 
 (defn ^{:stratum 1} scan-diff-rules
@@ -183,5 +205,5 @@
   [diff-rules diff-content]
   (when diff-content
     (->> diff-rules
-         (mapcat #(scan-diff-rule % diff-content))
+         (mapcat #(enrich-diff-plan-violations % (scan-diff-rule % diff-content)))
          vec)))

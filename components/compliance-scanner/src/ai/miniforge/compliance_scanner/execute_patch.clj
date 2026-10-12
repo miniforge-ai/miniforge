@@ -41,11 +41,12 @@
 (defn- ^{:stratum 0} prepend-violation?
   "Return true if a violation is a prepend-type remediation.
 
-   The pack-declared `remediation.type` is the only trigger. This also
-   hardcoded `:std/header-copyright`, which patched that rule as a prepend
-   regardless of what its declaration asked for — so the rule kept being
-   prepended after `project/header-copyright` (810) dropped `type: prepend` and
-   moved to `strategy: manual` (miniforge-standards#129). A rule id is not a
+   The pack-declared `remediation.type` is the only trigger. The previous
+   implementation also hardcoded `:std/header-copyright` as a prepend trigger,
+   which patched that rule as a prepend regardless of what its declaration
+   asked for — so the rule kept being prepended after
+   `project/header-copyright` (810) dropped `type: prepend` and moved to
+   `strategy: manual` (miniforge-standards#129). A rule id is not a
    remediation type; the declaration decides."
   [violation]
   (= :prepend (get violation :remediation-type)))
