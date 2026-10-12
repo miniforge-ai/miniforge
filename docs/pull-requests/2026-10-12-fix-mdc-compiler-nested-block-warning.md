@@ -128,11 +128,17 @@ compiles to `:file-globs ["*.sh"]`. The list is **truncated**, not emptied — t
 rule keeps the patterns above the comment and silently loses the rest. A rule
 that still has globs looks fine.
 
-Narrowly scoped: a comment without a colon is harmless and not reported; a
-colon-bearing comment with no list under the key discards nothing and is not
-reported; one outside any list leaves a junk key but loses no data and is not
-reported; and the next top-level key ends the block legitimately rather than
-counting as an interruption. The commented-parent form belongs to
+Only items **below** the comment are lost, which is what the condition tests: a
+list item somewhere after the first colon comment, not merely both in the same
+block. A colon comment trailing the last item discards nothing — the parser has
+already collected them, and the comment only leaves an ignored junk key — so
+that case is not reported.
+
+Narrowly scoped otherwise too: a comment without a colon is harmless and not
+reported; a colon-bearing comment with no list under the key discards nothing
+and is not reported; one outside any list leaves a junk key but loses no data
+and is not reported; and the next top-level key ends the block legitimately
+rather than counting as an interruption. The commented-parent form belongs to
 `commented-list-keys`, and a test asserts the two do not both claim the same
 line.
 
@@ -187,7 +193,7 @@ which rule 050 forbids. All three now go through
 
 | Check | Result |
 |---|---|
-| `mdc-compiler-test` namespace | 34 tests, 226 assertions, 0 failures |
+| `mdc-compiler-test` namespace | 34 tests, 229 assertions, 0 failures |
 | Full `policy-pack` test suite | 302 tests, 2756 assertions, 0 failures |
 | `bb lint:clj` | 0 errors, 0 warnings |
 | `bb lint:stratum` | clean (no rewrites) |
@@ -218,8 +224,10 @@ New tests:
 - `mdc->rule-commented-list-warning-test` — end to end: the rule compiles,
   `:file-globs` is `["# the shell ones"]`, and the warning names the key and
   says the list was discarded.
-- `interrupted-list-keys-test` — both positions (losing the whole list, and
-  truncating it); flush-left; and five non-reports: a comment without a colon, a
+- `interrupted-list-keys-test` — the two lossy positions (whole list, and
+  truncated); flush-left; an item after the *second* colon comment, since the
+  window opens at the first; and seven non-reports: a colon comment trailing the
+  last item (twice, with and without a blank line), a comment without a colon, a
   clean list, a colon comment with no list, one outside any list, and the
   commented-parent form that belongs to the other detector.
 - `mdc->rule-interrupted-list-warning-test` — end to end: `:file-globs` is

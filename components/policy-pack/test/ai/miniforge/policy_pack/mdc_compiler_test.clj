@@ -240,9 +240,23 @@
     (is (= ["globs"] (frontmatter/interrupted-list-keys
                       "globs:\n# note: x\n- \"*.sh\""))))
 
+  (testing "a colon comment TRAILING the last item discards nothing — the
+            parser has already collected them, and the comment only leaves an
+            ignored junk key. The condition is an item after the comment, not
+            both in the same block"
+    (is (= [] (frontmatter/interrupted-list-keys
+               "globs:\n  - \"*.sh\"\n  - \"bb.edn\"\n  # note: trailing")))
+    (is (= [] (frontmatter/interrupted-list-keys
+               "globs:\n  - \"*.sh\"\n\n  # note: trailing\n"))))
+
+  (testing "with two colon comments, an item after the second still counts —
+            the window opens at the FIRST one"
+    (is (= ["globs"] (frontmatter/interrupted-list-keys
+                      "globs:\n  # a: 1\n  - \"x\"\n  # b: 2\n  - \"y\""))))
+
   (testing "a comment WITHOUT a colon is harmless and not reported"
     (is (= [] (frontmatter/interrupted-list-keys
-               "globs:\n  # the shell ones\n  - \"*.sh\""))))
+               "globs:\n  - \"*.sh\"\n  # the shell ones\n  - \"bb.edn\""))))
 
   (testing "a clean list is not reported, and the next top-level key ends the
             block legitimately rather than counting as an interruption"

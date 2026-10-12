@@ -219,10 +219,15 @@
    `key: value`. It is stored as a key named `# note`, `current-key` is
    cleared, and every list item after it is dropped on the floor.
 
-   Position decides how much is lost. Before the items, the whole list
-   goes and the key compiles as `[]`. After some of them, the list is
-   *truncated* — the rule keeps the globs written above the comment and
-   silently loses the rest, which is the harder one to notice.
+   Position decides how much is lost, and only items BELOW the comment
+   are. Above every item, the whole list goes and the key compiles as
+   `[]`. In the middle, the list is *truncated* — the rule keeps the
+   globs written above the comment and silently loses the rest, which is
+   the harder one to notice. Trailing the last item, nothing is lost:
+   the parser has already collected them, and the comment only leaves an
+   ignored junk key. That case is NOT reported — the condition is a list
+   item somewhere after the first colon comment, not merely both in the
+   same block.
 
    A comment without a colon is harmless and is not reported. Nor is a
    colon-bearing comment outside a list: it leaves a junk key behind but
@@ -243,9 +248,14 @@
                       (let [block (take-while (fn [l] (or (str/blank? l)
                                                           (re-find comment-line-re l)
                                                           (re-find list-item-re l)))
-                                              (subvec lines (inc idx)))]
-                        (when (and (some #(re-find list-item-re %) block)
-                                   (some #(re-find colon-comment-re %) block))
+                                              (subvec lines (inc idx)))
+                            ;; Only items BELOW the first colon comment are
+                            ;; lost. A colon comment trailing the last item
+                            ;; discards nothing — the parser has already
+                            ;; collected them — so it must not be reported.
+                            after (rest (drop-while #(not (re-find colon-comment-re %))
+                                                    block))]
+                        (when (some #(re-find list-item-re %) after)
                           k)))))
             (range (count lines))))))
 
