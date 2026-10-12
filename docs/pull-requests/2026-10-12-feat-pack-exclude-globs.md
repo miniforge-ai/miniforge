@@ -108,9 +108,46 @@ This supersedes the `["**/*"]` → `["**"]` fallback fix from an earlier commit 
 this branch. There is no fallback any more: `path-in-scope?` treats absent
 `:file-globs` as "everything" directly, so there is no `**/*` to get wrong.
 
-The remaining divergence — `glob-matches?` implements neither `{a,b}` nor
-`[...]`, which `PathMatcher` does — is unchanged by this PR and costs nothing
-today: no glob in the standards uses either form. It stays on the follow-up.
+### The shared matcher now implements the syntax the format documents
+
+Having one matcher is not enough if it under-matches. `meta/rule-format`
+advertises brace globs in three of its own examples — `src/**/*.{js,ts}`,
+`**/*.test.{js,ts}`, `src/**/*.{js,jsx,ts,tsx}` — and the hand-rolled
+translation implemented none of them, nor `?`, nor character classes. An
+`excludeGlobs: ["examples/**/*.{sh,py}"]` copied out of that document would
+have matched nothing and the rule would have fired on the files the author
+excluded. Silently. Rejecting unsupported syntax was the alternative; it leaves
+authors unable to write what the format says they can.
+
+A new `policy-pack/glob` namespace owns the translation: one left-to-right pass
+covering `*`, `?`, `**`, `**/`, `{a,b}` and `[abc]`/`[!abc]`. A brace group is
+emitted inline as `(?:a|b)` with a depth flag rather than by recursing, since
+the syntax does not nest and self-recursion would have cost a layer. An
+uncompilable pattern matches nothing rather than throwing — a bad glob must not
+take down a scan. `registry.support/glob-matches?` becomes a delegate, kept as a
+var because `interface.registry` and `external.matching` reference it by name.
+
+Its own namespace rather than a var in `registry.support`, because a separate
+regex-builder var there would have pushed that file to four layers.
+
+**Verified identical, not assumed.** Every one of the 50 distinct globs in the
+compiled pack was run against all 4,369 files in this repo under both the old
+translation and the new one: zero differences. Patterns without `?`, braces or
+classes translate the same way; the new forms simply start working.
+
+The compile is memoized. A scan tests every rule's patterns against every file
+in the repo index, so the same handful of patterns were being translated tens of
+thousands of times — 7.5ms warm over 4,372 files, against 37ms unmemoized and
+123ms for `PathMatcher`. The pattern set is bounded by the pack.
+
+`glob_test.clj` asserts agreement with `PathMatcher` across a pattern × path
+table, excluding only patterns containing `**/`, and then pins that divergence
+explicitly in both positions it appears: `**/*.clj` vs `build.clj`, and
+`src/**/*.ts` vs `src/a.ts`. `**/` is zero or more segments here and one or more
+there; under PathMatcher's reading a `**/*.clj` rule drops every root-level file
+and `components/**/src/**/*.clj` misses a component whose `src` sits directly
+under it. The zero-segment reading is what authors mean, and
+miniforge-ai/miniforge-standards#130 now states it in `meta/rule-format`.
 
 ## Known gap: the semantic analyzer
 
@@ -146,7 +183,7 @@ PR small enough to review.
 
 | Check | Result |
 |---|---|
-| `policy-pack` + `compliance-scanner` + `semantic-analyzer` + `gate` suites | 596 tests, 3767 assertions, 0 failures |
+| `policy-pack` + `compliance-scanner` + `semantic-analyzer` + `gate` + `governance-provenance` suites | 606 tests, 3937 assertions, 0 failures |
 | `bb lint:clj` | 0 errors, 0 warnings |
 | `bb lint:stratum` | clean, no rewrites |
 | `bb poly:check` | OK |
@@ -237,11 +274,10 @@ PR changes or verifies. Flagged, not addressed.
   overlap with this PR beyond `mdc_compiler.clj`, in different functions.
 - Follow-up: split `semantic-analyzer/core.clj` to the rule 210 layer budget,
   then honour `:exclude-globs` at its three file-selection sites.
-- Follow-up: three independent glob implementations decide rule applicability
-  (`registry.support/glob-matches?` hand-rolled, plus two `PathMatcher` sites)
-  and they disagree on root-level paths — `glob:**/*` does not match a
-  single-segment path. Out of scope here; the divergence is pinned by a test
-  comment rather than changed.
+- Follow-up: `semantic-analyzer` still has its own `PathMatcher`-based
+  `file-matches-globs?`, so it is the one remaining place a rule's path scope is
+  decided by a different implementation. It rides with the namespace split
+  above, since the same file is blocked behind it.
 
 ## Breaking Changes
 
