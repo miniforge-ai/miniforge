@@ -76,7 +76,7 @@
              [:chain/step-completed 1 [:chain/started :chain/step-started :chain/step-completed :chain/failed]]
              [:chain/completed 2 (conj completed-events :chain/failed)]]]
       (let [{:keys [result calls attempts]} (observed {type failure} :completed)]
-        (is (= failure result))
+        (is (= failure (update result :anomaly/data dissoc :workflow/id)))
         (is (= expected-count (count calls)))
         (is (= expected (mapv :event/type attempts)))))))
 
@@ -84,7 +84,7 @@
   (doseq [type [:chain/step-failed :chain/failed]]
     (let [failure (anomaly/anomaly :unavailable "Failure event unavailable" {})
           {:keys [result calls]} (observed {type failure} :failed)]
-      (is (= failure result))
+      (is (= failure (update result :anomaly/data dissoc :workflow/id)))
       (is (= 1 (count calls))))))
 
 (deftest ^{:stratum 2} successful-publication-preserves-child-identities
@@ -108,6 +108,23 @@
         {:keys [result attempts]} (observed {:chain/completed original :chain/failed fallback} :completed)]
     (is (= original result))
     (is (= (conj completed-events :chain/failed) (mapv :event/type attempts)))))
+
+(deftest ^{:stratum 2} failed-step-publications-return-the-preallocated-child-identity
+  (doseq [[type status] [[:chain/step-started :completed]
+                        [:chain/step-completed :completed]
+                        [:chain/step-failed :failed]]
+          failure [(anomaly/anomaly :unavailable "Publication failed" {:original true})
+                   {:anomaly/category :anomalies/unavailable :original true}
+                   {:rejected? true :reason :workflow-quiesced}]]
+    (let [{:keys [result calls attempts]} (observed {type failure} status)
+          event (first (filter #(= type (:event/type %)) attempts))
+          id (:workflow/id event)
+          path (if (contains? result :anomaly/type) [:anomaly/data :workflow/id] [:workflow/id])]
+      (is (uuid? id))
+      (is (= id (get-in result path)))
+      (is (= (if (= type :chain/step-started) [] [id]) calls))
+      (when (anomaly/any-anomaly? failure)
+        (is (= (assoc-in failure path id) result))))))
 
 (comment
   ::fail-closed-chain-publication)

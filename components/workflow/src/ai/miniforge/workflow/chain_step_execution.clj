@@ -11,8 +11,11 @@
 ;------------------------------------------------------------------------------ Layer 0
 
 (defn- ^{:stratum 0} emission-failure [opts error]
-  (assoc (outcome/failure error)
-         :execution/id (:workflow-id opts) :execution/emission-failure error))
+  (let [id (:workflow-id opts)
+        path (if (contains? error :anomaly/type) [:anomaly/data :workflow/id] [:workflow/id])
+        attributed (assoc-in error path id)]
+    (assoc (outcome/failure attributed)
+           :execution/id id :execution/emission-failure attributed)))
 
 (defn- ^{:stratum 0} terminal! [opts chain-id step index result]
   (if (outcome/completed? result)

@@ -56,6 +56,14 @@ default-path scan results.
 It reports zero violations across 4,348 files after fixing missing headers in this PR document and three related
 implementation documents.
 
+The next overview-only review identified a child UUID that existed internally but was lost from the returned anomaly.
+Failed step publications now preserve the allocated UUID in canonical diagnostic data or legacy domain context,
+without replacing the original anomaly provenance.
+Coverage exercises all three step publication boundaries with canonical anomalies, legacy anomalies, and rejections.
+Focused tests pass 10 tests and 72 assertions; the three deployed consumers passed in 1m25.
+The rebuilt CLI is 39,129,057 bytes; isolated packaged verification passed 31 tests and 200 assertions.
+The explicit-pack changed-line scan remains clean across 4,348 files.
+
 ## Deployment Plan
 
 Preserve existing legacy event formats and the optional uninstrumented execution path.
