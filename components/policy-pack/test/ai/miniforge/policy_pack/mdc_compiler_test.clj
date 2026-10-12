@@ -225,6 +225,47 @@
     (is (= [] (frontmatter/commented-list-keys "")))
     (is (= [] (frontmatter/commented-list-keys nil)))))
 
+(deftest ^{:stratum 0} interrupted-list-keys-test
+  (testing "a colon-bearing comment BEFORE the items loses the whole list"
+    (is (= ["globs"] (frontmatter/interrupted-list-keys
+                      "globs:\n  # note: the shell ones\n  - \"*.sh\"\n  - \"bb.edn\""))))
+
+  (testing "a colon-bearing comment AFTER some items TRUNCATES the list — the
+            rule keeps the globs above the comment and silently loses the rest,
+            which is the harder case to notice"
+    (is (= ["globs"] (frontmatter/interrupted-list-keys
+                      "globs:\n  - \"*.sh\"\n  # note: more\n  - \"bb.edn\""))))
+
+  (testing "flush-left, since the parser trims before classifying"
+    (is (= ["globs"] (frontmatter/interrupted-list-keys
+                      "globs:\n# note: x\n- \"*.sh\""))))
+
+  (testing "a comment WITHOUT a colon is harmless and not reported"
+    (is (= [] (frontmatter/interrupted-list-keys
+               "globs:\n  # the shell ones\n  - \"*.sh\""))))
+
+  (testing "a clean list is not reported, and the next top-level key ends the
+            block legitimately rather than counting as an interruption"
+    (is (= [] (frontmatter/interrupted-list-keys
+               "globs:\n  - \"*.sh\"\n  - \"bb.edn\"\ndewey: \"740\""))))
+
+  (testing "a colon-bearing comment with no list under the key discards nothing"
+    (is (= [] (frontmatter/interrupted-list-keys
+               "globs:\n  # note: nothing\ndewey: \"740\""))))
+
+  (testing "a colon-bearing comment outside any list leaves a junk key but
+            loses no data, so it is not reported"
+    (is (= [] (frontmatter/interrupted-list-keys
+               "dewey: \"740\"\n# note: hello\ndescription: D"))))
+
+  (testing "a commented PARENT is the other detector's case, not this one"
+    (is (= [] (frontmatter/interrupted-list-keys "globs: # note\n  - \"*.sh\"")))
+    (is (= ["globs"] (frontmatter/commented-list-keys "globs: # note\n  - \"*.sh\""))))
+
+  (testing "handles empty and nil frontmatter"
+    (is (= [] (frontmatter/interrupted-list-keys "")))
+    (is (= [] (frontmatter/interrupted-list-keys nil)))))
+
 ;; ============================================================================
 ;; Dewey → phases mapping tests
 ;; ============================================================================
@@ -689,6 +730,21 @@
       (is (= 1 (count (:warnings result))))
       (is (str/includes? (first (:warnings result)) "'globs'"))
       (is (str/includes? (first (:warnings result)) "discarded")))))
+
+(deftest ^{:stratum 0} mdc->rule-interrupted-list-warning-test
+  (testing "a colon-bearing comment mid-list truncates the globs, and the
+            warning reports what the key actually compiled to"
+    (let [content (str "---\ndewey: \"740\"\ndescription: D\n"
+                       "globs:\n  - \"*.sh\"\n  # note: more follow\n  - \"bb.edn\"\n"
+                       "---\nbody")
+          result (sut/mdc->rule "x.mdc" content)]
+      (is (true? (:success? result)))
+      (is (= ["*.sh"] (get-in result [:rule :rule/applies-to :file-globs]))
+          "the patterns below the comment are gone")
+      (is (= 1 (count (:warnings result))))
+      (is (str/includes? (first (:warnings result)) "'globs'"))
+      (is (str/includes? (first (:warnings result)) "\"*.sh\"")
+          "the warning names what survived, so the truncation is visible"))))
 
 (deftest ^{:stratum 0} mdc->rule-warnings-survive-compile-failure-test
   (testing "an indented dotted child throws during grouping; the bare exception

@@ -45,6 +45,9 @@
   :mdc/commented-list-value
   "{filename}: frontmatter key '{key}' has a comment as its only value, so the '- item' list written under it was discarded and the key compiled as the comment text ({value}). Put the comment on its own line above the key."
 
+  :mdc/interrupted-list
+  "{filename}: a comment containing a colon sits inside the '- item' list under frontmatter key '{key}', so the parser read it as a key and dropped the list items after it — the key compiled as {value}. Remove the colon from the comment, or move the comment above the key."
+
   :mdc/compile-failed
   "Failed to compile {filename}: {error}"
 

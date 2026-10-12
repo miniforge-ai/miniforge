@@ -20,7 +20,7 @@
    parsing the frontmatter block's lines (key: value, multi-line
    `- item` lists) into a string-keyed map, and reporting keys written
    in a form the grammar cannot represent (`nested-block-keys`,
-   `commented-list-keys`).
+   `commented-list-keys`, `interrupted-list-keys`).
    Split out of
    `ai.miniforge.policy-pack.mdc-compiler` (rule 210: slice 2/6 of the
    same split train as
@@ -127,6 +127,21 @@
    not hide the nesting."
   #"^[ \t]*#")
 
+(def ^{:stratum 0} ^:private bare-key-re
+  "A `key:` line with no value and NO trailing comment — the opening of
+   a list the parser will actually collect. `blank-valued-key-re` above
+   also admits the commented form; this one does not, because a
+   commented parent never opens a list at all and is reported separately
+   by `commented-list-keys`."
+  #"^([A-Za-z][A-Za-z0-9._-]*)[ \t]*:[ \t]*$")
+
+(def ^{:stratum 0} ^:private colon-comment-re
+  "A comment line that contains a colon. Inside a list this is
+   destructive: `process-frontmatter-line` trims the line, sees the
+   colon, and routes it to `parse-kv-line`, which stores it as a key and
+   clears `current-key`. Every `- item` after it is dropped."
+  #"^[ \t]*#.*:")
+
 ;------------------------------------------------------------------------------ Layer 1
 
 (defn ^{:stratum 1} nested-block-keys
@@ -192,6 +207,45 @@
                     (when-let [[_ k] (re-matches commented-key-re (lines idx))]
                       (when-let [child (next-child idx)]
                         (when (re-find list-item-re child)
+                          k)))))
+            (range (count lines))))))
+
+(defn ^{:stratum 1} interrupted-list-keys
+  "Keys whose `- item` list is cut short by a comment line containing a
+   colon.
+
+   `process-frontmatter-line` trims before classifying, so an indented
+   `# note: the shell ones` is indistinguishable from a top-level
+   `key: value`. It is stored as a key named `# note`, `current-key` is
+   cleared, and every list item after it is dropped on the floor.
+
+   Position decides how much is lost. Before the items, the whole list
+   goes and the key compiles as `[]`. After some of them, the list is
+   *truncated* — the rule keeps the globs written above the comment and
+   silently loses the rest, which is the harder one to notice.
+
+   A comment without a colon is harmless and is not reported. Nor is a
+   colon-bearing comment outside a list: it leaves a junk key behind but
+   discards nothing.
+
+   Arguments:
+   - frontmatter-str - Raw text between --- delimiters
+
+   Returns:
+   - Vector of key names in file order, or []."
+  [frontmatter-str]
+  (if (str/blank? frontmatter-str)
+    []
+    (let [lines (vec (str/split-lines frontmatter-str))]
+      (into []
+            (keep (fn [idx]
+                    (when-let [[_ k] (re-matches bare-key-re (lines idx))]
+                      (let [block (take-while (fn [l] (or (str/blank? l)
+                                                          (re-find comment-line-re l)
+                                                          (re-find list-item-re l)))
+                                              (subvec lines (inc idx)))]
+                        (when (and (some #(re-find list-item-re %) block)
+                                   (some #(re-find colon-comment-re %) block))
                           k)))))
             (range (count lines))))))
 

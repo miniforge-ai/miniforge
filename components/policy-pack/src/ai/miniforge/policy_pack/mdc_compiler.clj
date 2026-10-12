@@ -226,14 +226,19 @@
   ;; failure result, or the author gets "Key must be integer" and nothing else.
   (let [{:keys [frontmatter frontmatter-raw body]} (parse-mdc content)
         nested-blocks   (frontmatter/nested-block-keys frontmatter-raw)
-        commented-lists (frontmatter/commented-list-keys frontmatter-raw)
-        commented-warnings
-        (mapv (fn [k]
-                (t :mdc/commented-list-value
-                   {:filename filename
-                    :key      k
-                    :value    (pr-str (get frontmatter k))}))
-              commented-lists)]
+        list-warnings
+        (into (mapv (fn [k]
+                      (t :mdc/commented-list-value
+                         {:filename filename
+                          :key      k
+                          :value    (pr-str (get frontmatter k))}))
+                    (frontmatter/commented-list-keys frontmatter-raw))
+              (mapv (fn [k]
+                      (t :mdc/interrupted-list
+                         {:filename filename
+                          :key      k
+                          :value    (pr-str (get frontmatter k))}))
+                    (frontmatter/interrupted-list-keys frontmatter-raw)))]
    (try
     (let [fm           (group-dotted-keys frontmatter)
 
@@ -317,7 +322,7 @@
                             :detection (get detection :type)
                             :action    action}))
                       nested-blocks)
-                commented-warnings)]
+                list-warnings)]
 
       (schema-validation/success :rule rule
                                  (when (seq warnings)
@@ -328,7 +333,7 @@
                                    (t :mdc/nested-block-compile-failed
                                       {:filename filename :key k}))
                                  nested-blocks)
-                           commented-warnings)]
+                           list-warnings)]
         (cond-> (merge (schema-validation/failure :rule (.getMessage e))
                        {:filename filename})
           (seq warnings) (assoc :warnings warnings)))))))

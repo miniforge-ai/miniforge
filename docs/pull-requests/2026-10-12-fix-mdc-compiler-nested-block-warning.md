@@ -7,9 +7,16 @@
 
 ## Overview
 
-The MDC frontmatter grammar is flat. A rule author who writes a nested YAML
-block gets no error, no warning, and a compiled rule built from frontmatter they
-did not write. This PR makes the compiler say so.
+The MDC frontmatter grammar is flat and silent about it. Three authoring shapes
+produce a compiled rule built from frontmatter the author did not write, with
+`success? true` and `warnings []`:
+
+1. a nested YAML mapping (`detection:` over indented `mode:`)
+2. a comment as a key's only value over a list (`globs: # note`)
+3. a colon-bearing comment inside a list
+
+This PR makes the compiler report all three, naming what the rule actually
+became.
 
 ## Motivation
 
@@ -100,6 +107,41 @@ knowing whether the `#` is inside quotes, which is a grammar change, and any
 real value containing a `#` would be at risk. Reporting the loss costs nothing
 and risks nothing.
 
+### `interrupted-list-keys` — the third discarded shape
+
+A comment line containing a colon, inside a list, is destructive.
+`process-frontmatter-line` trims the line, sees the colon, and routes it to
+`parse-kv-line`, which stores it as a key named `# note` and clears
+`current-key`. Every `- item` after it is dropped.
+
+Position decides how much is lost, and the less obvious position is the worse
+one:
+
+```yaml
+globs:
+  - "*.sh"
+  # note: more follow
+  - "bb.edn"
+```
+
+compiles to `:file-globs ["*.sh"]`. The list is **truncated**, not emptied — the
+rule keeps the patterns above the comment and silently loses the rest. A rule
+that still has globs looks fine.
+
+Narrowly scoped: a comment without a colon is harmless and not reported; a
+colon-bearing comment with no list under the key discards nothing and is not
+reported; one outside any list leaves a junk key but loses no data and is not
+reported; and the next top-level key ends the block legitimately rather than
+counting as an interruption. The commented-parent form belongs to
+`commented-list-keys`, and a test asserts the two do not both claim the same
+line.
+
+This is where the detectors stop agreeing with the parser on purpose. For the
+nested-mapping check, comment lines are skipped when looking for a parent's
+first child — the parser does not skip a colon-bearing one, but the warning
+fires either way, so the asymmetry costs nothing there. Here the parser's
+behaviour *is* the finding, so it is matched exactly.
+
 ### `mdc_compiler.clj`
 
 - `parse-mdc` additionally returns `:frontmatter-raw`. The parse is lossy in the
@@ -145,8 +187,8 @@ which rule 050 forbids. All three now go through
 
 | Check | Result |
 |---|---|
-| `mdc-compiler-test` namespace | 32 tests, 210 assertions, 0 failures |
-| Full `policy-pack` test suite | 300 tests, 2736 assertions, 0 failures |
+| `mdc-compiler-test` namespace | 34 tests, 226 assertions, 0 failures |
+| Full `policy-pack` test suite | 302 tests, 2756 assertions, 0 failures |
 | `bb lint:clj` | 0 errors, 0 warnings |
 | `bb lint:stratum` | clean (no rewrites) |
 | `bb poly:check` | OK |
@@ -176,6 +218,13 @@ New tests:
 - `mdc->rule-commented-list-warning-test` — end to end: the rule compiles,
   `:file-globs` is `["# the shell ones"]`, and the warning names the key and
   says the list was discarded.
+- `interrupted-list-keys-test` — both positions (losing the whole list, and
+  truncating it); flush-left; and five non-reports: a comment without a colon, a
+  clean list, a colon comment with no list, one outside any list, and the
+  commented-parent form that belongs to the other detector.
+- `mdc->rule-interrupted-list-warning-test` — end to end: `:file-globs` is
+  `["*.sh"]` and the warning names both the key and what survived, so the
+  truncation is visible rather than implied.
 - `mdc->rule-warnings-survive-compile-failure-test` — the indented-dotted shape
   returns `success? false` with `Key must be integer` **and** a warning naming
   `detection` and tying itself to that exception.
