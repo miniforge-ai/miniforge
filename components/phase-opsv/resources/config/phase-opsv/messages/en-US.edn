@@ -1,5 +1,9 @@
 {:phase-opsv/messages
  {:evidence/artifact-publication-failed "OPSV phase artifact publication or evidence correlation was not confirmed."
+  :evidence/finalization-failed "OPSV evidence finalization or durable publication was not confirmed. The mutation outcome is retained; do not repeat actuation to retry evidence publication."
+  :evidence/invalid-finalization-config "OPSV evidence requires a matching workflow, declared intent, creation time, version, and artifact directory before execution."
+  :evidence/assembly-finalized "This OPSV run is finalized. Retry evidence publication without repeating phase execution."
+  :evidence/actuation-recovery-required "This OPSV run has retained actuation output. Resume evidence publication without repeating phase execution."
   :risk/environment-class "The target environment class contributes to operational risk."
   :risk/blast-radius "The declared blast radius contributes to operational risk."
   :risk/actuation "The requested actuation mode contributes to operational risk."
