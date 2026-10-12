@@ -4,6 +4,7 @@
 (ns ai.miniforge.workflow.chain-step-execution
   "Own child-run identity across step lifecycle effects."
   (:require [ai.miniforge.workflow.boundary.chain-step :as child]
+            [ai.miniforge.workflow.chain-edge-execution :as edge]
             [ai.miniforge.workflow.chain-publication :as publication]
             [ai.miniforge.workflow.chain-step-publication :as terminal]
             [ai.miniforge.workflow.chain-outcome :as outcome]))
@@ -19,10 +20,13 @@
 ;------------------------------------------------------------------------------ Layer 1
 
 (defn- ^{:stratum 1} execute-started! [opts step index previous input]
-  (let [child-opts (dissoc opts :chain/event-stream :chain/run-record :chain/definition-id)
-        result (child/execute step previous input child-opts)
+  (let [report (edge/prepare! step previous input opts)
+        child-opts (dissoc opts :chain/event-stream :chain/run-record :chain/definition-id :chain/upstream-workflow-id)
+        result (child/execute step report child-opts)
         receipt (terminal/terminal! opts step index result)]
-    (if (outcome/failure-value? receipt) (emission-failure opts receipt) result)))
+    (if (outcome/failure-value? receipt)
+      (merge result (emission-failure opts (or (:execution/emission-failure result) receipt)))
+      result)))
 
 ;------------------------------------------------------------------------------ Layer 2
 

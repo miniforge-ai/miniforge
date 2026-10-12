@@ -14,7 +14,8 @@
 
 (defn- ^{:stratum 0} acknowledged [event receipt]
   (let [identity-fields [:event/id :event/type :event/version :workflow/id :scope/type
-                         :chain/id :chain/run-id :chain/definition-id :chain/definition-version]]
+                         :chain/id :chain/run-id :chain/definition-id :chain/definition-version
+                         :edge/id :edge/from-workflow-id :edge/to-workflow-id]]
     (cond
       (outcome/failure-value? receipt) receipt
       (and (map? receipt) (not (:rejected? receipt))

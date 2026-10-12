@@ -28,7 +28,7 @@ A summary must retain those references without confusing a definition keyword wi
 Exercise admitted results, fresh-run separation, child identities, early failure, and legacy compatibility.
 Run consumers serially, verify the packaged CLI, and audit the diff against Miniforge standards.
 
-Validation: all four product consumers passed in 55 seconds. The rebuilt CLI (39,135,129 bytes)
+Validation: all three product consumers passed in 55 seconds. The rebuilt CLI (39,135,129 bytes)
 passed isolated packaged regression checks: 10 tests, 45 assertions. The explicit pinned standards
 pack reported zero violations across 4,360 files. Lint and namespace strata checks passed.
 Adversarial review checked legacy aliases, admitted versus observed counts, upstream anomalies,

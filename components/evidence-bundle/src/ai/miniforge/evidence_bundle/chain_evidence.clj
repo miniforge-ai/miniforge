@@ -45,7 +45,9 @@
            :step/status (:step/status step-result)
            :step/has-output? (some? (:step/output step-result))}
     (contains? step-result :step/execution-id)
-    (assoc :step/execution-id (:step/execution-id step-result))))
+    (assoc :step/execution-id (:step/execution-id step-result))
+    (contains? step-result :step/bindings)
+    (assoc :step/bindings (:step/bindings step-result))))
 
 (defn- ^{:stratum 0} definition-reference [definition result]
   (if (contains? result :chain/run-id)
@@ -87,7 +89,7 @@
 (defn- ^{:stratum 1} chain-identity [definition result]
   (let [[id version] (definition-reference definition result)
         retained (select-keys result [:chain/run-id :chain/definition-id :chain/definition-version
-                                      :chain/definition-snapshot :chain/step-count])]
+                                      :chain/definition-snapshot :chain/step-count :chain/edges])]
     (assoc retained :chain-evidence/chain-id id :chain-evidence/chain-version version)))
 
 (defn ^{:stratum 1} build-step-summaries
