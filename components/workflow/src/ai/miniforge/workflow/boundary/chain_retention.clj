@@ -27,12 +27,22 @@
   (or (artifact/read-published directory id)
       (record/failure :not-found :chain/retention-missing)))
 
+(defn- ^{:stratum 0} persist-record! [directory admitted]
+  (anomaly/let-ok [artifacts (record/artifacts admitted)]
+    (store/persist! directory artifacts)))
+
 ;------------------------------------------------------------------------------ Layer 1
 
-(defn- ^{:stratum 1} prepare [value]
+(defn ^{:stratum 1} persist! [directory value]
   (anomaly/let-ok [_safe (inspectable value)
                    admitted (valid-record value)]
-    (record/artifacts admitted)))
+    (persist-record! directory admitted)))
+
+(defn ^{:stratum 1} persist-admitted!
+  "Retain a producer-validated invocation; inspect storage privacy without repeating schema admission."
+  [directory admitted]
+  (anomaly/let-ok [_safe (inspectable admitted)]
+    (persist-record! directory admitted)))
 
 (defn ^{:stratum 1} load-run [directory id]
   (anomaly/let-ok [actual (read-run directory id)
@@ -40,12 +50,6 @@
                    admitted (valid-record (get-in actual [:artifact/content :chain/record]))
                    artifacts (record/artifacts admitted)]
     (store/recover directory actual artifacts)))
-
-;------------------------------------------------------------------------------ Layer 2
-
-(defn ^{:stratum 2} persist! [directory value]
-  (anomaly/let-ok [artifacts (prepare value)]
-    (store/persist! directory artifacts)))
 
 (comment
   ::chain-admission-storage-boundary)

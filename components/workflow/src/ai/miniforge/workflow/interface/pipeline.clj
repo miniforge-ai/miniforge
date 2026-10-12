@@ -46,7 +46,8 @@
   runner/validate-pipeline)
 
 (defn ^{:stratum 0} run-chain
-  "Execute a resolved sequential definition, or return an invalid-input anomaly.
+  "Execute a resolved sequential definition, or return an anomaly.
+   A present :chain/retention-directory requires durable admission before execution; failures return anomalies.
    Results retain fresh invocation identity and the admitted composition; recovery requires durable storage."
   [chain-def chain-input opts]
   (chain-admission/run-chain chain-def chain-input opts))
