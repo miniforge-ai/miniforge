@@ -259,6 +259,8 @@
    Args: [chain-def chain-input opts]. Invalid definitions return an anomaly before execution.
    Publication failure returns an anomaly instead of a completed result.
    Set :chain/retention-directory in opts to require durable admission before the executor starts.
+   Set :chain/event-stream to a caller-owned current stream for typed durable chain events; retention must use a separate directory.
+   The optional :event-stream remains a separate legacy child stream. The caller closes the current stream.
    Results contain status, step results, duration, fresh :chain/run-id, resolved definition
    identity/version, and :chain/definition-snapshot. Without the directory option, retention remains in-memory only."
   pipeline/run-chain)

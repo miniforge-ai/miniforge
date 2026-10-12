@@ -3,8 +3,7 @@
 ;; Licensed under the Apache License, Version 2.0.
 (ns ai.miniforge.workflow.chain-step-execution
   "Own child-run identity across step lifecycle effects."
-  (:require [ai.miniforge.event-stream.interface :as events]
-            [ai.miniforge.workflow.boundary.chain-step :as child]
+  (:require [ai.miniforge.workflow.boundary.chain-step :as child]
             [ai.miniforge.workflow.chain-publication :as publication]
             [ai.miniforge.workflow.chain-step-publication :as terminal]
             [ai.miniforge.workflow.chain-outcome :as outcome]))
@@ -19,18 +18,19 @@
 
 ;------------------------------------------------------------------------------ Layer 1
 
-(defn- ^{:stratum 1} execute-started! [opts chain-id step index previous input]
-  (let [result (child/execute step previous input opts)
-        receipt (terminal/terminal! opts chain-id step index result)]
+(defn- ^{:stratum 1} execute-started! [opts step index previous input]
+  (let [child-opts (dissoc opts :chain/event-stream :chain/run-record :chain/definition-id)
+        result (child/execute step previous input child-opts)
+        receipt (terminal/terminal! opts step index result)]
     (if (outcome/failure-value? receipt) (emission-failure opts receipt) result)))
 
 ;------------------------------------------------------------------------------ Layer 2
 
-(defn ^{:stratum 2} step! [chain-id step index previous input opts]
+(defn ^{:stratum 2} step! [step index previous input opts]
   (let [child-opts (assoc opts :workflow-id (random-uuid))
-        receipt (publication/emit-step! child-opts events/chain-step-started chain-id (:step/id step) index (:step/workflow-id step))]
+        receipt (publication/emit-step! child-opts :chain/step-started step index {})]
     (if (outcome/failure-value? receipt) (emission-failure child-opts receipt)
-        (execute-started! child-opts chain-id step index previous input))))
+        (execute-started! child-opts step index previous input))))
 
 (comment
   ::child-run-lifecycle)

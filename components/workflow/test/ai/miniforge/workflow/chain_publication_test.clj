@@ -4,6 +4,7 @@
 (ns ai.miniforge.workflow.chain-publication-test
   (:require [ai.miniforge.anomaly.interface :as anomaly]
             [ai.miniforge.event-stream.interface :as events]
+            [ai.miniforge.workflow.chain-event-legacy :as legacy]
             [ai.miniforge.workflow.chain-execution-test-support :as support]
             [ai.miniforge.workflow.chain-publication :as publication]
             [ai.miniforge.workflow.interface :as workflow]
@@ -29,8 +30,8 @@
   (let [stream (events/create-event-stream {:sinks []}) id (random-uuid)]
     (events/quiesce! stream {:workflow-id id})
     (is (= :unavailable
-           (:anomaly/type (publication/emit-step! {:event-stream stream :workflow-id id}
-                                                  events/chain-step-started :chain :only 0 :workflow))))
+           (:anomaly/type (publication/emit-step! {:event-stream stream :workflow-id id :chain/definition-id :chain}
+                                                  :chain/step-started {:step/id :only :step/workflow-id :workflow} 0 {}))))
     (is (empty? (events/get-events stream)))))
 
 (deftest ^{:stratum 0} missing-or-mismatched-receipts-are-not-acknowledgments
@@ -41,14 +42,27 @@
                      (assoc event :event/version "unexpected")
                      (assoc event :workflow/id (random-uuid))
                      (update event :event/sequence-number inc)]]
-      (with-redefs [events/publish! (constantly receipt)]
-        (is (= :unavailable (:anomaly/type (publication/emit! {:event-stream stream} (constantly event)))))))))
+      (with-redefs [events/publish! (constantly receipt) legacy/draft (constantly event)]
+        (is (= :unavailable (:anomaly/type (publication/emit! {:event-stream stream} :chain/started {}))))))))
 
 (deftest ^{:stratum 0} failed-construction-never-reaches-publication
   (let [calls (atom []) failure (anomaly/anomaly :invalid-input "Constructor refused" {})]
-    (with-redefs [events/publish! (fn [& args] (swap! calls conj args))]
-      (is (= failure (publication/emit! {:event-stream :unused} (constantly failure))))
+    (with-redefs [events/publish! (fn [& args] (swap! calls conj args)) legacy/draft (constantly failure)]
+      (is (= failure (publication/emit! {:event-stream :unused} :chain/started {})))
       (is (empty? @calls)))))
+
+(deftest ^{:stratum 0} current-receipts-must-preserve-authoritative-identity
+  (let [event {:event/id (random-uuid) :event/type :chain/started :event/version "2.0.0"
+               :scope/type :chain :chain/run-id (random-uuid)
+               :chain/definition-id :fixture :chain/definition-version "1.0.0"}
+        receipt (assoc event :event/sequence-number 0)
+        opts {:chain/event-stream :fixture}]
+    (with-redefs [events/create-chain-event-draft (constantly event)]
+      (with-redefs [events/publish! (constantly receipt)]
+        (is (= receipt (publication/emit! opts :chain/started {}))))
+      (doseq [field [:scope/type :chain/run-id :chain/definition-id :chain/definition-version]]
+        (with-redefs [events/publish! (constantly (dissoc receipt field))]
+          (is (= :unavailable (:anomaly/type (publication/emit! opts :chain/started {})))))))))
 
 ;------------------------------------------------------------------------------ Layer 1
 
