@@ -18,6 +18,9 @@
 (ns ai.miniforge.event-stream.interface.events
   "Workflow, agent, gate, task, listener, control, chain, and control-plane event constructors."
   (:require
+   [ai.miniforge.anomaly.interface :as anomaly]
+   [ai.miniforge.event-stream.chain-draft-model :as chain-model]
+   [ai.miniforge.event-stream.chain-event-draft :as chain-draft]
    [ai.miniforge.event-stream.core :as core]
    [ai.miniforge.event-stream.compound-events :as compound]
    [ai.miniforge.event-stream.phase-events :as phase-events]))
@@ -249,6 +252,14 @@
    action id; optional result as :action/result."
   core/control-action-executed)
 
+(defn ^{:stratum 0} create-chain-event-draft
+  "Construct a validated v2 chain draft from explicit run/definition identity and
+   lifecycle fields. Optional opts supply envelope identity metadata. Retain the
+   draft for retries. No sequencing, admission, redaction, authority, or publication."
+  [stream event-type payload & [opts]]
+  (anomaly/let-ok [prepared (chain-model/prepare event-type payload)]
+    (chain-draft/create stream prepared opts)))
+
 (def ^{:stratum 0} chain-started
   "Build and return a :chain/started event envelope map (chains are not
    workflow-scoped, so :workflow/id is nil) carrying :chain/id and
@@ -257,18 +268,20 @@
 
 (def ^{:stratum 0} chain-step-started
   "Build and return a :chain/step-started event envelope map carrying
-   :chain/id, :step/id, :step/index, and :step/workflow-id."
+   :chain/id, :step/id, :step/index, and :step/workflow-id.
+   Optional final opts accept :workflow/id for child identity and legacy sequencing."
   compound/chain-step-started)
 
 (def ^{:stratum 0} chain-step-completed
   "Build and return a :chain/step-completed event envelope map carrying
-   :chain/id, :step/id, and :step/index."
+   :chain/id, :step/id, and :step/index.
+   Optional final opts accept :workflow/id for child identity and legacy sequencing."
   compound/chain-step-completed)
 
 (def ^{:stratum 0} chain-step-failed
   "Build and return a :chain/step-failed event envelope map carrying
    :chain/id, :step/id, :step/index, and :chain/error; optional
-   :failure/class."
+   :failure/class and :workflow/id in the final options map."
   compound/chain-step-failed)
 
 (def ^{:stratum 0} chain-completed

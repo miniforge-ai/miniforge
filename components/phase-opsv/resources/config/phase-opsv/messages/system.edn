@@ -23,5 +23,7 @@
   :adapter/missing-fingerprint "The OPSV adapter returned no environment fingerprint."
   :evidence/assembly-mismatch "The OPSV evidence identifier has no matching workflow assembly."
   :evidence/accumulation-failed "The OPSV event reference could not be added to evidence."
+  :event/preparation-failed "The OPSV event could not be prepared for publication."
   :event/invalid "The projected OPSV event does not satisfy its N3 schema."
+  :event/sequence-unavailable "The recorded OPSV event has no recoverable sequence acknowledgement."
   :event/publication-failed "The OPSV event stream rejected a domain event."}}

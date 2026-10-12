@@ -48,6 +48,15 @@
 
 ;------------------------------------------------------------------------------ Layer 1
 
+(deftest ^{:stratum 1} sequence-acknowledgments-keep-the-first-confirmed-position
+  (let [record (state/initial-record :bundle :workflow)
+        first-material {:opsv/event-sequences {:first 0}}
+        later-material {:opsv/event-sequences {:first 99 :second 1}}
+        before (state/accumulate {:bundle record} :bundle first-material)
+        after (state/accumulate before :bundle later-material)]
+    (is (= {:first 0 :second 1} (get-in after [:bundle :opsv/event-sequences])))
+    (is (= after (state/accumulate after :bundle later-material)))))
+
 (deftest ^{:stratum 1} allocation-retries-collisions-without-overwriting
   (let [occupied (random-uuid)
         fresh (random-uuid)

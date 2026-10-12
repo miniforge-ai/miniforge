@@ -6,12 +6,12 @@
 
 # N3 — Event Stream & Observability Contract
 
-**Version:** 0.10.2-draft
-**Date:** 2026-09-28
+**Version:** 0.11.0-draft
+**Date:** 2026-10-04
 **Status:** Draft
 **Conformance:** MUST
 
-_v0.10.2 adds explicit governed OPSV effect dispositions without implying success._
+_v0.11.0 reconciles chain execution and supervisory lifecycle contracts._
 
 _v0.10.0 closes the spec's structural gaps: a canonical event-type registry
 (§6), schema evolution and consumer compatibility rules (§7). It adds sensitive-data
@@ -52,8 +52,8 @@ All events MUST conform to this base envelope:
  :event/timestamp inst          ; REQUIRED: instant, ISO-8601 in the JSON wire form
  :event/version string          ; REQUIRED: event schema version (e.g., "1.0.0")
 
- ;; Scope — exactly one per event (§2.3). Workflow is the default; the other
- ;; five scopes carry their own key here instead.
+ ;; Scope — exactly one per event (§2.3). Workflow is the default;
+ ;; other scopes carry their own key here instead.
  :workflow/id uuid or nil       ; REQUIRED and non-nil on Workflow-scoped
                                 ; events; on other scopes omit it, or
                                 ; carry a workflow id as a cross-reference
@@ -105,8 +105,9 @@ Envelope field types are fixed across every event family:
 | `:pack/id` | string | Conditional | Pack scope key (§2.3) |
 | `:repo/id` | string | Conditional | Repository scope key (§2.3) |
 | `:deployment/id` | string | Conditional | Deployment scope key (§2.3) |
-| `:supervisory/entity-key` | any | Conditional | Supervisory entity scope key (§2.3, §3.19.1) |
-| `:scope/type` | keyword | Conditional | REQUIRED on inherited-scope families (§2.3, §3.15) |
+| `:chain/run-id` | uuid | Conditional | Chain invocation scope key (§2.3, N1 §2.32) |
+| `:supervisory/entity-key` | any | Conditional | Supervisory entity scope key (§2.3, §3.19.1, §3.22) |
+| `:scope/type` | keyword | Conditional | REQUIRED on inherited scopes and migrated scope profiles (§2.3, §3.15, §7.5) |
 | `:message` | string | MUST | Human-renderable summary |
 
 **Absent and nil are equivalent.** For any field not marked MUST, omitting the
@@ -146,7 +147,7 @@ In particular:
 Implementations MUST provide:
 
 1. **Total order per scope** - Events within a scope (§2.3) MUST be sequenced
-2. **Causal ordering** - If event B caused by event A, `sequence-number(B) > sequence-number(A)`
+2. **Causal ordering** - Within one scope, if B is caused by A, `sequence-number(B) > sequence-number(A)`
 3. **Replay determinism** - Replaying a scope's events in sequence order MUST produce the same state
 
 ### 2.3 Scope Keys
@@ -162,12 +163,18 @@ several families originate outside any workflow.
 | PR Work Item | `:pr/id` | N9 external PR events (§3.16) |
 | Pack | `:pack/id` | Pack install/update/remove (§3.12) |
 | Repository | `:repo/id` | Repository intelligence (§3.18) |
-| Supervisory entity | `:supervisory/entity-key` | Supervisory snapshots (§3.19) |
+| Supervisory entity | `:supervisory/entity-key` | Supervisory snapshots (§3.19) and intervention facts (§3.22) |
 | Deployment | `:deployment/id` | Reliability metrics (§3.17) |
+| Chain run | `:chain/run-id` | Chain, step, and binding-edge lifecycle (§3.12.1) |
 
-`:supervisory/entity-key` is the canonical ID of the entity the snapshot
-describes, as listed per family in §3.19.1 — `:workflow-run/id`, `:agent/id`,
-`[repo number]` for PRs, and so on. Sequencing per entity is what lets a
+The chain scope type is `:chain`. Its key identifies one invocation, never a
+reusable definition. Child workflows retain separate workflow scopes. Cross-scope
+causality MUST use `:event/parent-id` or domain references; independent scope
+counters MUST NOT be compared as a global clock.
+
+`:supervisory/entity-key` is the canonical ID of the entity the event
+describes (§3.19.1 and §3.22): `:workflow-run/id`, `:agent/id`,
+`:intervention/id`, `[repo number]` for PRs, and so on. Sequencing per entity lets a
 consumer detect a stale snapshot for one entity without serializing every
 entity behind a single counter.
 
@@ -197,6 +204,8 @@ Rules:
   of this table it resolved to, plus that row's scope key. It resolves to
   exactly one scope — chosen at emission, not left open — and MUST NOT
   substitute one scope's key for another's.
+- Scope-changing families MUST also carry the fixed `:scope/type` discriminator
+  required by §7.5. It identifies a declared contract profile, not a caller-selected scope.
 
 ---
 
@@ -1075,16 +1084,54 @@ pack lifecycle events and Pack Run events.
  :message "Capability denied: {capability.attempted} not in grant set for {pack.id}"}
 ```
 
+#### 3.12.1 Chain Run and Step Lifecycle
+
+N1 §2.32 distinguishes definitions, runs, steps, and binding edges. Every
+`chain/*` and `chain.edge/*` event MUST carry the §2 envelope plus
+`:chain/run-id` (UUID), `:chain/definition-id` (keyword),
+`:chain/definition-version` (non-blank string), and `:scope/type :chain`.
+The definition ID and resolved version MUST remain constant across the run's
+events and match its retained definition snapshot (N1 §2.32, N2 §14.4).
+The chain executor owns these emissions. All belong to the chain-run scope.
+Every step lifecycle event MUST carry its preallocated child-run `:workflow/id`
+UUID, including failures before execution. This cross-reference does not change scope.
+
+The following table defines required payload fields in addition to those common
+fields. Counts, indexes, and durations MUST be non-negative longs. Step IDs and
+workflow-definition IDs MUST be keywords; failure classes MUST follow N1 §5.3.3.
+
+| Event type | Required fields | Meaning |
+|------------|-----------------|---------|
+| `chain/started` | `:chain/step-count` | Run admitted before any step executes |
+| `chain/step-started` | `:step/id`, `:step/index`, `:step/workflow-id`, `:workflow/id` | Step begins, including input binding and loading |
+| `chain/step-completed` | `:step/id`, `:step/index`, `:workflow/id` | Workflow execution succeeded |
+| `chain/step-failed` | `:step/id`, `:step/index`, `:workflow/id`, `:chain/error` (string), `:failure/class` | Step did not succeed |
+| `chain/completed` | `:chain/step-count`, `:chain/duration-ms` | All required steps and bindings succeeded |
+| `chain/failed` | `:chain/error` (string), `:failure/class` | Run failed; `:chain/failed-step` (keyword) is REQUIRED when attributable to a step |
+
+`:step/index` is zero-based in the definition's ordered step vector; it is not
+an event sequence number. Step outcome events MUST retain their started event's
+step identity, index, and workflow-run UUID. `:chain/step-count` MUST mean the definition's total,
+not the number completed before failure. Lifecycle and recovery MUST follow N2 §14.4.
+
+These six types and the three edge types below use payload version `2.0.0`
+for this contract. Their legacy identity fields MUST migrate under §7.5.
+Edges describe binding work, not workflow execution; edge completion MUST NOT
+be treated as step completion. Edge failure fields and ownership remain required.
+
 #### chain.edge/started
 
 ```clojure
 {:event/type :chain.edge/started
+ :scope/type :chain
  :event/id uuid
  :event/timestamp inst
- :event/version "1.0.0"
+ :event/version "2.0.0"
  :event/sequence-number long
 
- :chain/id uuid
+ :chain/run-id uuid
+ :chain/definition-id keyword
+ :chain/definition-version string
  :edge/id uuid
  :edge/from-workflow-id uuid
  :edge/to-workflow-id uuid
@@ -1097,12 +1144,15 @@ pack lifecycle events and Pack Run events.
 
 ```clojure
 {:event/type :chain.edge/completed
+ :scope/type :chain
  :event/id uuid
  :event/timestamp inst
- :event/version "1.0.0"
+ :event/version "2.0.0"
  :event/sequence-number long
 
- :chain/id uuid
+ :chain/run-id uuid
+ :chain/definition-id keyword
+ :chain/definition-version string
  :edge/id uuid
  :edge/from-workflow-id uuid
  :edge/to-workflow-id uuid
@@ -1115,12 +1165,15 @@ pack lifecycle events and Pack Run events.
 
 ```clojure
 {:event/type :chain.edge/failed
+ :scope/type :chain
  :event/id uuid
  :event/timestamp inst
- :event/version "1.0.0"
+ :event/version "2.0.0"
  :event/sequence-number long
 
- :chain/id uuid
+ :chain/run-id uuid
+ :chain/definition-id keyword
+ :chain/definition-version string
  :edge/id uuid
  :edge/from-workflow-id uuid
  :edge/to-workflow-id uuid
@@ -1404,12 +1457,12 @@ opened on exactly one scope (§5.3.1). They therefore take **the scope of the
 stream they annotate**; `annotation/created` and the `control-action/*` events
 take the scope of their target. Fixing either family to `:workflow/id` would
 make N3.API.7 — every stream MUST open with `listener/attached` —
-unsatisfiable on the five non-workflow scopes.
+unsatisfiable on non-workflow scopes.
 
 An inherited-scope event MUST carry:
 
 - `:scope/type` — one of `:workflow :pr :pack :repo :supervisory-entity
-  :deployment`, naming which §2.3 scope this emission resolved to; and
+  :deployment :chain`, naming which §2.3 scope this emission resolved to; and
 - the scope key field that §2.3 pairs with that type, non-nil.
 
 `:workflow/id` keeps the meaning §2.1.1 gives it — a workflow uuid or nil. It
@@ -1593,8 +1646,19 @@ Emitted when PR readiness state changes (derived-state-change event).
 
 #### train/changed
 
+For each train change, producers MUST emit one event per PR in the union of
+the before-change and after-change member sets. Each event MUST use that PR's
+`:pr/id` as its scope key, including removed or merged members.
+All copies MUST carry the same ordered after-change `:train/members` snapshot.
+An empty after-change train therefore still notifies its former members.
+If both sets are empty, no PR-scoped event is emitted.
+Each copy MUST have its own event ID and scope-local sequence; retries MUST
+preserve event identity rather than create another logical change.
+Successive changes MUST retain their order within each affected PR scope.
+
 ```clojure
 {:event/type :train/changed
+ :pr/id uuid                        ; REQUIRED: PR Work Item scope key (§2.3, §6)
  :train/id uuid
  :train/members [uuid ...]           ; Ordered PR Work Item ids
  :train/change-type keyword          ; :member-added, :member-removed,
@@ -1747,7 +1811,7 @@ Emitted when index canary queries detect a recall regression.
 
 The supervisory snapshot family carries an entity-snapshot event whenever a
 canonical supervisory entity is inserted or updated. The supervisory-state
-component (N5-delta-supervisory-control-plane §3.4) emits every member except
+component (N5-delta-supervisory-control-plane §3.5) emits every member except
 `:supervisory/automation-edge-upserted`, which the automation-edge-correlator
 owns; §3.19.1 is normative on emitter ownership. These events carry the
 **full entity** as specified in
@@ -1755,24 +1819,24 @@ N5-delta-supervisory-control-plane §3. They are the single source of
 supervisory truth for external consumers (the Rust control console, native
 app, web dashboard).
 
-Consumers MAY rely on the invariant that any `:supervisory/*` event contains a
+Consumers MAY rely on the invariant that every §3.19.1 snapshot event contains a
 complete and valid entity per the §3 schema. The supervisory-state
 component owns materialization; consumers never reconstruct entities from
 fine-grained events directly.
 
 Rules:
 
-- Each entity MUST be keyed by its canonical ID — the _value_ of
-  `:workflow-run/id`, of `:agent/id`, of `:policy-eval/id`, of
-  `:attention/id`, and the composite `[repo number]` for PRs.
+- Each entity MUST be keyed by its canonical ID.
+  Examples include `:workflow-run/id`, `:agent/id`, `:policy-eval/id`,
+  `:attention/id`, `:spec/id`, `:intervention/id`, and composite `[repo number]` for PRs.
   The PR key is typed `[string long]`, encoded per §5.1.1.
-- A `:supervisory/*` event SHOULD be emitted at most once per state-change
+- A snapshot event SHOULD be emitted at most once per state-change
   burst (coalesce bursts within ≤ 100 ms into a single emission).
 - `:attention/resolved? = true` MUST be encoded as a standard upsert rather
   than a separate deletion event; consumers observe the transition via the
   `:attention/resolved?` field.
 - The supervisory-state component reads its own emitted events on startup to
-  rebuild its in-memory entity table (§3.4 of N5-delta-supervisory-control-plane).
+  rebuild its in-memory entity table (§3.5 of N5-delta-supervisory-control-plane).
   Implementations MAY also write periodic full-snapshot events to bound
   startup replay cost.
 - Every event in this family MUST carry `:supervisory/schema-version` (string,
@@ -1785,7 +1849,7 @@ Rules:
 
 #### 3.19.1 Family Membership
 
-The `:supervisory/*` family is enumerated here; entity shapes are defined by the
+The supervisory snapshot family is enumerated here; entity shapes are defined by the
 owning spec and MUST NOT be duplicated into N3.
 
 | Event type | Entity | Shape defined by | Sole emitter |
@@ -1795,7 +1859,8 @@ owning spec and MUST NOT be duplicated into N3.
 | `:supervisory/pr-upserted` | PrFleetEntry | N5-delta-1 §3.1, extended N5-delta-2 §4.2 | supervisory-state |
 | `:supervisory/policy-evaluated` | PolicyEvaluation | N5-delta-1 §3.1 | supervisory-state |
 | `:supervisory/attention-derived` | AttentionItem | N5-delta-1 §3.1 | supervisory-state |
-| `:supervisory/intervention-upserted` | InterventionRequest | N5-delta-1 §3.3 | supervisory-state |
+| `:supervisory/intervention-upserted` | InterventionRequest | N5-delta-1 §3.1, lifecycle §3.3 | supervisory-state |
+| `:supervisory/spec-upserted` | Spec | N5-delta-1 §3.1 | supervisory-state |
 | `:supervisory/evidence-upserted` | Evidence | N5-delta-3 §2.1 | supervisory-state |
 | `:supervisory/artifact-upserted` | Artifact | N5-delta-3 §2.2 | supervisory-state |
 | `:supervisory/task-node-upserted` | TaskNode | N5-delta-3 §2.3 | supervisory-state |
@@ -1816,10 +1881,11 @@ Adding a member to this family is an N3 change. A delta spec MAY define the
 entity shape, but the event type MUST appear in this table before an
 implementation emits it.
 
-The family glob is `:supervisory/*`, not `:supervisory/*-upserted`:
-`policy-evaluated` and `attention-derived` are members and are named for what
-they report rather than for the upsert mechanism. Every rule in §3.19 applies
-to all twelve.
+Family membership MUST use this enumeration, not a namespace glob.
+`policy-evaluated` and `attention-derived` are snapshots despite their names;
+the intervention lifecycle facts in §3.22 are not snapshots. Every rule in
+§3.19 applies to all thirteen rows. The publication boundary MUST reject
+unregistered members. Consumers MUST handle unknown types under §7.3.
 
 #### supervisory/workflow-upserted
 
@@ -2229,6 +2295,36 @@ governed by N2-delta §9; N3 only fixes the wire shape.
 
 ---
 
+### 3.22 Supervisory Intervention Lifecycle Facts
+
+These events report the bounded command lifecycle owned by the orchestrator
+under N5-delta-1 §7. They are not entity snapshots and MUST NOT be coalesced.
+Both MUST carry `:intervention/id` (UUID), `:scope/type :supervisory-entity`, and
+`:supervisory/entity-key` equal to that UUID. They use the Supervisory entity scope, even when a workflow target
+is also referenced. `:workflow/id`, when present, MUST be only a cross-reference.
+
+| Event type | Required payload in addition to §2 | Sole emitter |
+|------------|-----------------------------------|--------------|
+| `supervisory/intervention-requested` | Complete top-level InterventionRequest per N5-delta-1 §3.1 | Orchestrator's intervention admission boundary |
+| `supervisory/intervention-state-changed` | `:intervention/id`, `:intervention/from-state`, `:intervention/state`, `:intervention/updated-at` | Orchestrator's intervention lifecycle owner |
+
+States and permitted transitions MUST follow N5-delta-1 §3.3; timestamps MUST be instants.
+The requested event MUST establish the initial `:proposed` state before any
+state change. Each change MUST name the previously acknowledged state;
+unknown requests, stale transitions, and terminal reactivation MUST be rejected.
+Consumers MUST NOT infer approval or successful application from request admission.
+
+The original requested identity, target, requester, source, and justification
+MUST remain available during replay. Later state events MUST NOT rewrite them.
+The supervisory-state projection consumes these facts and is the sole emitter
+of `supervisory/intervention-upserted`. Both facts and snapshots share the same
+entity scope and sequence, but only the orchestrator authorizes transitions.
+
+Both lifecycle types use payload version `2.0.0` under §7.5 and retention class
+`:audit`. Request admission and transitions MUST be durably acknowledged before
+dependent execution proceeds. A publication failure MUST follow §9.1; it MUST
+NOT be converted into successful admission, authorization, or completion.
+
 ## 4. Event Emission Requirements
 
 ### 4.1 Emission Points
@@ -2250,11 +2346,13 @@ Implementations MUST emit events at these points:
 13. **Reliability metrics** - SLI computations, SLO breaches, error budget updates, degradation mode changes
 14. **Repository intelligence** - index quality metrics, canary validation results
 15. **ETL and pack promotion** - ETL stages, pack generation and promotion (§3.11)
-16. **Pack lifecycle and Pack Runs** - install/update/remove, run boundaries, capability denials, chain edges (§3.12)
+16. **Pack lifecycle and Pack Runs** - install/update/remove, run boundaries, capability denials, chain runs, steps, and
+  edges (§3.12)
 17. **Meta-loop refusals** - halt requests from meta-supervision agents (§3.7b)
 18. **Supervisory snapshots** - entity upserts from the supervisory-state component (§3.19)
 19. **Data Foundry pipelines** - pipeline and stage boundaries, quality, lineage, freshness, schema drift (§3.20)
 20. **Workflow control** - cancellation, checkpoint writes, resume (§3.21)
+21. **Intervention lifecycle** - request admission and each acknowledged state transition (§3.22)
 
 Every event type defined in §3 has an emission point in this list. A family added
 to §3 without a corresponding entry here is an incomplete amendment.
@@ -2284,7 +2382,7 @@ of the type, declared in the §6 registry.
 |-------|-------------------|-------------------|
 | `:ephemeral` | 24 hours | High-frequency progress signal, valuable live, near-worthless later |
 | `:operational` | 30 days | Activity and measurement an operator reconstructs a recent run from |
-| `:durable` | Life of the scope's record — the workflow, PR Work Item, pack, repository, entity, or deployment the event is scoped to (§2.3) | State transitions the scope's own history is unreadable without |
+| `:durable` | Life of the scope's record — workflow, PR Work Item, pack, repository, entity, deployment, or chain run (§2.3) | State transitions the scope's own history is unreadable without |
 | `:audit` | Per deployment policy, minimum 1 year | Refusals, denials, privileged actions, and trust promotions — the record of what the system declined or was told to do |
 
 The right-hand column characterizes each class; it does not assign membership.
@@ -2303,9 +2401,9 @@ Expiring an event narrows the replay horizon. Implementations MUST:
 1. Track the oldest retained sequence number per scope and expose it as
    `:oldest-available` on the HTTP 410 response of §5.3.5.
 2. Never expire an event of class `:durable` or `:audit` while its scope
-   (§2.3) is still live. This includes a non-terminal workflow, an open PR Work Item, an
-   installed pack, a tracked repository, a current entity, a running
-   deployment. Replay determinism (§2.2) is unachievable for a live scope
+   (§2.3) is still live. Examples include non-terminal workflows or chain runs,
+   open PR Work Items, installed packs, tracked repositories, current entities,
+   and running deployments. Replay determinism (§2.2) is unachievable for a live scope
    whose own lifecycle events have been collected.
 3. Expire whole prefixes only. Expiring an event from the middle of a scope's
    sequence breaks causal ordering and is non-conformant.
@@ -2327,7 +2425,7 @@ Implementations MUST provide:
 
 ```clojure
 ;; Subscribe to one scope. REQUIRED for every scope type in the §2.3 table:
-;; :workflow, :pr, :pack, :repo, :supervisory-entity, :deployment.
+;; :workflow, :pr, :pack, :repo, :supervisory-entity, :deployment, :chain.
 (subscribe-to-scope scope-type scope-id callback-fn)
 ;; Returns: subscription handle
 
@@ -2344,9 +2442,9 @@ Implementations MUST provide:
 (unsubscribe subscription-handle)
 ```
 
-Subscribing by scope is the only way to observe events with a nil
-`:workflow/id`. Pack, repository, supervisory-entity, and deployment scopes
-have no workflow to subscribe through.
+To observe a non-Workflow scope, subscribe to that scope or to the fleet.
+This includes PR Work Item, pack, repository, supervisory-entity, deployment,
+and chain scopes, even when an event carries a `:workflow/id` cross-reference.
 
 **Delivery is by scope, strictly.** A subscription on scope S receives exactly
 the events whose scope is S. A cross-reference key does not confer membership.
@@ -2434,7 +2532,7 @@ WS   /api/workflows/:id/stream
 ```
 
 `:scope-type` is one of `workflow`, `pr`, `pack`, `repo`,
-`supervisory-entity`, `deployment`. `:scope-id` is the scope identifier
+`supervisory-entity`, `deployment`, `chain`. `:scope-id` is the scope identifier
 encoded per §5.1.1 and occupies exactly one path segment — a composite key is
 percent-encoded, never split across segments.
 
@@ -2615,16 +2713,17 @@ that emits an unregistered type is non-conformant, and a consumer MUST treat an
 unregistered type per the unknown-type rule of §7.3.
 
 **Columns.** _Scope_ is the scope key of §2.3. _Retention_ is the class of
-§4.3.1. Both are properties of the type, not of a particular emission.
+§4.3.1. Both are properties of the type's declared contract profile, not caller choices.
+The table defines current-write profiles; §7.5 preserves the historical chain-edge profile for replay.
 
 Every row carries exactly one scope and exactly one retention class. A
 type's class is readable without parsing prose (§4.3.1: every event type
 belongs to exactly one class). A family whose members differ in scope or class
-occupies more than one row — §3.12 and §3.15 span three each, §3.11 and §3.13
-two each.
+occupies more than one row. Scope and retention assignments apply per row,
+not by namespace prefix.
 
-Two of the three §3.15 rows name an inherited scope (§2.3) rather than one of
-the six fixed scopes. These are the stream's for `listener/*`, the target's for
+All three §3.15 rows name an inherited scope (§2.3) rather than one of
+the seven fixed scopes. These are the stream's for `listener/*`, the target's for
 `annotation/created` and `control-action/*`. Each emission still resolves to
 exactly one scope, named by its `:scope/type` field.
 
@@ -2644,7 +2743,8 @@ exactly one scope, named by its `:scope/type` field.
 | 3.11 | ETL | Workflow | durable | `etl/started`, `etl/sources-classified`, `etl/safety-scan-completed`, `etl/completed`, `etl/failed`, `pack/generated` |
 | 3.11 | Pack promotion | Workflow | audit | `pack/promoted` |
 | 3.12 | Pack lifecycle | Pack | durable | `pack/installed`, `pack/updated`, `pack/removed` |
-| 3.12 | Pack Runs and chains | Workflow | durable | `pack.run/started`, `pack.run/completed`, `pack.run/failed`, `chain.edge/started`, `chain.edge/completed`, `chain.edge/failed` |
+| 3.12 | Pack Runs | Workflow | durable | `pack.run/started`, `pack.run/completed`, `pack.run/failed` |
+| 3.12.1 | Chain runs, steps, and edges | Chain run | durable | `chain/started`, `chain/completed`, `chain/failed`, `chain/step-started`, `chain/step-completed`, `chain/step-failed`, `chain.edge/started`, `chain.edge/completed`, `chain.edge/failed` |
 | 3.12 | Capability denial | Workflow | audit | `capability/denied` |
 | 3.13 | Task lifecycle | Workflow | operational | `task/frontier-entered`, `task/claimed`, `task/capability-bound`, `task/skip-propagated` |
 | 3.13 | Task scope violation | Workflow | audit | `task/scope-violation` |
@@ -2655,9 +2755,10 @@ exactly one scope, named by its `:scope/type` field.
 | 3.16 | External PR (N9) | PR Work Item | durable | `provider/event-received`, `pr.readiness/changed`, `pr.risk/changed`, `pr.policy/changed`, `pr.state/changed`, `train/changed` |
 | 3.17 | Reliability metrics | Deployment | operational | `reliability/sli-computed`, `reliability/slo-breach`, `reliability/error-budget-update`, `reliability/degradation-mode-changed` |
 | 3.18 | Repository intelligence | Repository | operational | `repo-index/quality-computed`, `repo-index/canary-failed` |
-| 3.19 | Supervisory snapshots | Supervisory entity | durable | `supervisory/workflow-upserted`, `supervisory/agent-upserted`, `supervisory/pr-upserted`, `supervisory/policy-evaluated`, `supervisory/attention-derived`, `supervisory/intervention-upserted`, `supervisory/evidence-upserted`, `supervisory/artifact-upserted`, `supervisory/task-node-upserted`, `supervisory/decision-upserted`, `supervisory/pack-manifest-upserted`, `supervisory/automation-edge-upserted` |
+| 3.19 | Supervisory snapshots | Supervisory entity | durable | `supervisory/workflow-upserted`, `supervisory/agent-upserted`, `supervisory/pr-upserted`, `supervisory/policy-evaluated`, `supervisory/attention-derived`, `supervisory/intervention-upserted`, `supervisory/spec-upserted`, `supervisory/evidence-upserted`, `supervisory/artifact-upserted`, `supervisory/task-node-upserted`, `supervisory/decision-upserted`, `supervisory/pack-manifest-upserted`, `supervisory/automation-edge-upserted` |
 | 3.20 | Data Foundry | Workflow | durable | `data-foundry/pipeline-started`, `data-foundry/stage-completed`, `data-foundry/pipeline-completed`, `data-foundry/pipeline-failed`, `data-foundry/quality-evaluated`, `data-foundry/lineage-edge-created`, `data-foundry/freshness-sla-breach`, `data-foundry/schema-drift-detected` |
 | 3.21 | Workflow control | Workflow | durable | `workflow/cancelled`, `workflow/checkpoint-written`, `workflow/checkpoint-write-failed`, `workflow/machine-snapshot-written`, `workflow/machine-snapshot-write-failed`, `workflow/resumed`, `workflow/spec-hash-mismatch` |
+| 3.22 | Supervisory intervention lifecycle | Supervisory entity | audit | `supervisory/intervention-requested`, `supervisory/intervention-state-changed` |
 
 ### 6.1 Registry Maintenance
 
@@ -2706,6 +2807,8 @@ event types evolve independently: `:agent/status` at "1.2.0" and
 
 The envelope itself (§2) is versioned by this spec's own version, not by
 `:event/version`. An envelope change is a change to N3.
+In particular, a payload major bump MUST NOT by itself change an event's scope.
+Scope migrations require explicit profile discrimination under §7.5.
 
 ### 7.2 Change Classification
 
@@ -2767,8 +2870,65 @@ A major bump to an event type MUST:
    consumer would ignore the renamed type and report no error.
 3. Ship the schema change and the registry (§6) update together.
 
-Because the product is pre-release, N3 does not require dual-emission of old
-and new payload shapes during a transition. Implementations cut over.
+Deployments MAY cut over without dual-emission, but MUST preserve retained
+history and document supported reader versions and migration requirements.
+Unsupported major payloads MUST be handled under §7.3, never silently reinterpreted.
+
+### 7.5 Chain and Supervisory Compatibility
+
+The nine chain types in §3.12.1 and two intervention lifecycle types in §3.22
+use payload version `2.0.0`. Required scope identity and lifecycle fields are
+breaking additions. New writes MUST satisfy the new contracts. Readers MUST
+select a supported profile by recorded type and version, not guess from missing keys.
+This section does not require support for every legacy payload version.
+
+#### Scope profiles
+
+N3 0.11 introduces explicit scope discrimination, separately from payload versioning.
+New chain and intervention writes MUST carry the fixed `:scope/type` named below.
+The payload version and scope discriminator MUST match the same profile:
+
+| Profile | Event types | Payload | Scope discriminator | Scope key |
+|---------|-------------|---------|---------------------|-----------|
+| N3 0.10 retained chain edges | Three edge types in §3.12.1 | `1.x` | Absent/nil, or `:workflow` | `:workflow/id` |
+| N3 0.11 chain execution | Nine types in §3.12.1 | `2.x` | REQUIRED `:chain` | `:chain/run-id` |
+| N3 0.11 intervention lifecycle | Two types in §3.22 | `2.x` | REQUIRED `:supervisory-entity` | `:supervisory/entity-key` |
+
+The retained chain-edge profile remains valid for historical reads, not new writes.
+Its absent discriminator means Workflow only because this historical profile explicitly defines it.
+Readers MUST validate its original envelope and sequence in Workflow scope.
+They MUST NOT apply the current-write registry to rescope retained records.
+Other legacy unregistered types gain no historical conformance from this amendment.
+Unsupported or conflicting profiles MUST NOT be replayed as authoritative state.
+
+Legacy `1.x` payloads of both intervention lifecycle types are unsupported for
+authoritative replay; this amendment defines no historical scope profile for them.
+Readers MUST report that refusal, not apply the v2 registry or infer entity scope.
+Inspection MAY expose these records as non-authoritative history. It MUST preserve
+their recorded `:workflow/id`, including nil, and original sequence without
+assigning a replacement scope or counter. A nil workflow is not a valid scope key.
+Neither a historical reader nor a v1-to-v2 intervention migration is required.
+Source retention under §7.4 still applies; these records cannot establish v2 authorization.
+
+#### Payload and provenance migration
+
+Version-2 intervention requests MUST include the justification already required by N5-delta-1 §3.1.
+Legacy constructors accepted its absence; that behavior does not satisfy the new-write contract.
+Producers MUST collect the required justification before admission, rather than manufacture a reason.
+Inspection or migration MUST NOT invent justification for retained requests.
+
+Legacy `:chain/id` has represented different concepts across producers. It MUST
+NOT be reinterpreted in place. Migration MUST produce separate
+`:chain/definition-id` and `:chain/run-id` values from verifiable run provenance.
+It MUST preserve original event IDs, versions, scope, sequence, and payload in
+the source record. A derived migrated view MUST record that provenance and its
+mapping; it MUST NOT overwrite the source journal or reset live sequence counters.
+
+When a chain migration cannot establish historical run identity or event order,
+migration MUST report the ambiguity. It MUST refuse authoritative replay of
+that range rather than fabricate identity, transitions, or evidence completeness.
+Registration of `supervisory/spec-upserted` uses payload version `1.0.0` and
+does not validate historical snapshots automatically; §3.19 still applies.
 
 ---
 
@@ -2955,7 +3115,7 @@ withdrawn, not deleted.
 | N3.EV.3 | MUST | No family redefines an envelope field's type or meaning (§2.1.1). |
 | N3.EV.4 | MUST | Every event has exactly one scope per §2.3 and carries a non-nil value for that scope's key. |
 | N3.EV.5 | MUST | `:event/sequence-number` is monotonic within scope (§2.2). |
-| N3.EV.6 | MUST | Causally ordered: if B is caused by A, `sequence-number(B) > sequence-number(A)`. |
+| N3.EV.6 | MUST | Preserve causal order within each scope; use explicit references across scopes (§2.2–§2.3). |
 | N3.EV.7 | MUST | Replaying a scope's events in sequence order reproduces the same state (§2.2). |
 
 #### Emission and registry
@@ -2968,6 +3128,9 @@ withdrawn, not deleted.
 | N3.EM.4 | MUST NOT | Exceed 3 status events per second per agent (§4.2). |
 | N3.EM.5 | MUST | Emit at least one status event per 5 seconds during active work (§4.2). |
 | N3.EM.6 | MUST | Event type keywords follow the naming rules of §6.2. |
+| N3.EM.7 | MUST | Emit intervention facts from their lifecycle owner, without coalescing; acknowledge durably before dependent execution (§3.22). |
+| N3.EM.8 | MUST | Preserve requested metadata and reject unknown, stale, or terminal-reactivating intervention transitions (§3.22). |
+| N3.EM.9 | MUST | Deliver train changes to every prior or current member with distinct per-PR identities and ordered after-state membership (§3.16). |
 
 #### Storage and retention
 
@@ -2976,7 +3139,7 @@ withdrawn, not deleted.
 | N3.ST.1 | MUST | Events persist across process restarts (§4.3). |
 | N3.ST.2 | MUST | Storage preserves sequence numbers and supports ordered replay (§4.3). |
 | N3.ST.3 | MUST NOT | Expire an event before its retention-class minimum (§4.3.1). |
-| N3.ST.4 | MUST NOT | Expire `:durable` or `:audit` events while their scope is still live — non-terminal workflow, open PR Work Item, installed pack, tracked repository, current entity, running deployment (§4.3.2). |
+| N3.ST.4 | MUST NOT | Expire `:durable` or `:audit` events while their scope is live, including non-terminal chain runs (§4.3.2). |
 | N3.ST.5 | MUST | Expire whole prefixes only; never from the middle of a sequence (§4.3.2). |
 | N3.ST.6 | MUST | Expose the oldest retained sequence number per scope (§4.3.2, §5.3.5). |
 
@@ -3010,6 +3173,10 @@ withdrawn, not deleted.
 | N3.CP.6 | MUST NOT | Silently process an event of a higher major version (§7.3 rule 4). |
 | N3.CP.7 | MUST NOT | Let a skipped event desynchronize the consumer's sequence position (§7.3 rule 5). |
 | N3.CP.8 | MUST | Keep `:event/type` stable across a major payload bump (§7.4). |
+| N3.CP.9 | MUST | Match chain/intervention type, payload version, and scope discriminator to one supported profile (§7.5). |
+| N3.CP.10 | MUST | Validate retained chain edges in their original Workflow scope without rescoping or resequencing (§7.5). |
+| N3.CP.11 | MUST | Refuse authoritative replay of unsupported profiles, including v1 intervention facts; preserve retained source records (§7.5). |
+| N3.CP.12 | MUST | Derive chain migrations only from verifiable provenance, preserve source records, and report ambiguity instead of fabricating identities (§7.5). |
 
 #### Sensitive data
 
@@ -3060,6 +3227,17 @@ A conformance suite MUST cover, at minimum:
 8. **Fail-closed emission** — with the event sink forced to fail, an operation
    emitting a `:durable` or `:audit` event fails rather than succeeding
    silently (N3.EF.1, N3.EF.2).
+
+9. **Chain scopes** — repeated invocations and child workflows retain independent
+   scopes through binding/load failures (N3.EV.4–N3.EV.7, N3.CP.9).
+10. **Compatibility** — mismatched profiles fail; retained edges keep their original
+    scope; v1 interventions and ambiguous chain migrations refuse authoritative replay (N3.CP.9–N3.CP.12).
+11. **Interventions** — non-workflow targets, stale transitions, journal failures,
+    and interleaved snapshots preserve metadata without granting authority (N3.EM.7–N3.EM.8, N3.EF.1).
+12. **Registry** — unregistered supervisory types fail admission; lifecycle facts
+    and entity snapshots use distinct schemas (N3.EM.2–N3.EM.3).
+13. **Train delivery** — removal and empty-after transitions notify former members;
+    retries preserve per-PR IDs and successive changes preserve order (N3.EM.9).
 
 ---
 
@@ -3241,7 +3419,7 @@ The implementation emits a differently-named event than the spec requires.
 | `repo-index/quality-computed` (§3.18) | `repo-index/quality-measured` | Field sets also differ: spec uses `:repo/id` + `:revision/commit-sha` + `:quality/*`; implementation uses `:index/id` + `:index/*`. N1 §2.27.9 independently specifies the spec name. |
 | `repo-index/canary-failed` (§3.18) | `repo-index/coverage-changed` | Not a rename — a different event. The canary-recall contract of N1 §2.27.10 has no implementation. |
 | `pr/opened` (§3.10) | `pr/created` | Both appear in the tree; `pr-lifecycle` emits `:pr/opened`, while the implementation's own registry resource (`event-type-registry.edn`) lists `pr/created`. The §6 registry in this spec is unambiguous: `pr/opened` is the contract. |
-| `chain.edge/started` / `-completed` / `-failed` (§3.12) | `chain/started`, `chain/step-started`, and variants | Implementation models chain **steps**; the spec models chain **edges**. Reconciliation requires deciding which concept is canonical, then amending N1 and N3 together. |
+| Chain runs, steps, and edges (§3.12.1) | Legacy `chain/*` step events | 2026-10-04 contract reconciliation preserves both concepts. Run identity, scope isolation, edge provenance, and versioned migration remain implementation work. |
 | `tool/invoked` / `tool/completed` (§3.5) | also `agent/tool-call-started` / `tool/call-completed` | Two parallel tool-event vocabularies exist. §6.2 forbids the duplication; one MUST be withdrawn. |
 
 ### A.2 Specified, Not Implemented
@@ -3272,8 +3450,10 @@ withdrawn.
 `oci/container-started`, `oci/container-completed`,
 `supervision/tool-use-evaluated`, `operator/intervention-anomaly`,
 `pr-monitor/review-comments-arrived`, `pr-monitor/ci-failed`,
-`standards-review/posted`, `control-plane/*`, `task/state-changed`,
-`supervisory/spec-upserted`.
+`standards-review/posted`, `control-plane/*`, `task/state-changed`.
+Other unregistered supervisory types remain forbidden. As of 2026-10-04,
+`supervisory/spec-upserted` is specified by §3.19 and intervention facts by
+§3.22; implementing their validation and scope rules remains work.
 
 Several are plainly legitimate capabilities that were built without a
 corresponding spec amendment — `workflow/phase-heartbeat` and
@@ -3292,9 +3472,9 @@ resolution is an N3 amendment per §6.1, not silent acceptance.
 - **Single-scope endpoint not implemented.** The HTTP surface exposes only
   `/api/workflows/:id/stream` (`bases/cli/src/ai/miniforge/cli/web.clj:68`).
   The `/api/streams/:scope-type/:scope-id` endpoint of §5.3.1, and with it the
-  subscribe and query surfaces for the five non-workflow scopes (N3.API.1),
-  have no implementation. The four scopes introduced in this revision are
-  therefore specified but unobservable over HTTP.
+  subscribe and query surfaces for non-workflow scopes (N3.API.1),
+  have no implementation. Non-workflow scopes are therefore specified but
+  unobservable over HTTP.
 - **`:supervisory/schema-version`.** Already emitted by `supervisory-state`;
   §3.19 now requires it, so this row is closed on the next spec sync rather
   than being a code change.
@@ -3303,6 +3483,11 @@ resolution is an N3 amendment per §6.1, not silent acceptance.
 
 **Version History:**
 
+- 0.11.0-draft (2026-10-04): Added chain-run scope, distinct step and edge
+  lifecycles, Spec snapshots, and audit-class intervention lifecycle facts.
+  All nine chain types and both intervention lifecycle types require `2.0.0`
+  payloads. §7.5 requires explicit legacy migration without rewriting history.
+  Causal sequence comparisons are scope-local; cross-scope causality uses references.
 - 0.10.2-draft (2026-09-28): Added correlated OPSV effect dispositions for
   proposed, failed, confirmed, and uncertain outcomes. Fixed prose lint without
   changing existing normative obligations.

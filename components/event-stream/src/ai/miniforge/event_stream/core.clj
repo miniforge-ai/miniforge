@@ -18,9 +18,12 @@
 (ns ai.miniforge.event-stream.core
   "Event bus and event constructors for workflow observability."
   (:require
+   [ai.miniforge.anomaly.interface :as anomaly]
+   [ai.miniforge.event-stream.boundary.current-query :as current-query]
    [ai.miniforge.event-stream.messages :as messages]
+   [ai.miniforge.event-stream.envelope-draft :as draft]
+   [ai.miniforge.event-stream.current-publication :as current]
    [ai.miniforge.event-stream.publication-fence :as fence]
-   [ai.miniforge.event-stream.snowflake :as snowflake]
    [ai.miniforge.logging.interface :as log]
    [ai.miniforge.redaction.interface :as redaction]
    [ai.miniforge.response.interface :as response]
@@ -29,19 +32,14 @@
 ;------------------------------------------------------------------------------ Layer 0
 
 ;; Constants
-(def ^{:stratum 0} ^:const event-version "1.0.0")
+(def ^{:stratum 0} ^:const event-version draft/event-version)
 
 ;; Event persistence via configurable sinks
 ;; Note: File persistence moved to sinks.clj for configurability
 ;; Event envelope constructor
-(defn- ^{:stratum 0} next-event-id
-  [generator]
-  (cond
-    (response/anomaly-map? generator) generator
-    generator
-    (snowflake/next-id! generator)
-    :else
-    (random-uuid)))
+(defn- ^{:stratum 0} reserve-sequence! [stream workflow-id]
+  (let [[previous _] (swap-vals! stream update-in [:sequence-numbers workflow-id] (fnil inc 0))]
+    (get-in previous [:sequence-numbers workflow-id] 0)))
 
 ;; Event bus operations
 (defn ^{:stratum 0} create-event-stream
@@ -72,7 +70,7 @@
      (create-event-stream {:config user-config})
 
      ;; With a Snowflake event-id generator (BD-2b)
-     (create-event-stream {:snowflake-generator (snowflake/create-generator)})"
+     (create-event-stream {:snowflake-generator generator})"
   [& [opts]]
   (let [;; Create sinks from config or use provided sinks or default
         event-sinks (cond
@@ -182,14 +180,16 @@
 
 ;; Query API
 (defn ^{:stratum 0} get-events [stream & [opts]]
-  (let [{:keys [workflow-id event-type offset limit]} opts
-        events (:events @stream)]
-    (cond->> events
-      workflow-id (filter #(= workflow-id (:workflow/id %)))
-      event-type (filter #(= event-type (:event/type %)))
-      offset (drop offset)
-      limit (take limit)
-      true vec)))
+  (let [events (:events @stream)]
+    (if (current/active? stream)
+      (current-query/events events opts)
+      (let [{:keys [workflow-id event-type offset limit]} opts]
+        (cond->> events
+          workflow-id (filter #(= workflow-id (:workflow/id %)))
+          event-type (filter #(= event-type (:event/type %)))
+          offset (drop offset)
+          limit (take limit)
+          true vec)))))
 
 (defn ^{:stratum 0} get-latest-status [stream workflow-id & [agent-id]]
   (->> (:events @stream)
@@ -238,34 +238,9 @@
   ([stream event-type workflow-id message]
    (create-envelope stream event-type workflow-id message {}))
   ([stream event-type workflow-id message opts]
-   ;; `swap-vals!` returns [old-state new-state] atomically, so we
-   ;; pull the seq value and increment it in a single CAS — no
-   ;; window where two concurrent producers see the same number.
-   ;; The previous read-then-swap pattern WAS racey; reviewers
-   ;; flagged it on PR #814.
-   (let [generator (:snowflake-generator @stream)
-         event-id  (next-event-id generator)]
-     (if (response/anomaly-map? event-id)
-       event-id
-       (let [[old _new] (swap-vals! stream
-                                    update-in
-                                    [:sequence-numbers workflow-id]
-                                    (fnil inc 0))
-             seq-num    (get-in old [:sequence-numbers workflow-id] 0)]
-         (cond-> {:event/type event-type
-                  :event/id event-id
-                  :event/timestamp (java.util.Date.)
-                  :event/version event-version
-                  :event/sequence-number seq-num
-                  :workflow/id workflow-id
-                  :message message}
-           (:org/id opts)            (assoc :org/id (:org/id opts))
-           (:workspace/id opts)      (assoc :workspace/id (:workspace/id opts))
-           (:repo/id opts)           (assoc :repo/id (:repo/id opts))
-           (:auth/context opts)      (assoc :auth/context (:auth/context opts))
-           (:event/parent-id opts)   (assoc :event/parent-id (:event/parent-id opts))
-           (:agent/id opts)          (assoc :agent/id (:agent/id opts))
-           (:agent/instance-id opts) (assoc :agent/instance-id (:agent/instance-id opts))))))))
+   (let [event (draft/create stream event-type workflow-id message opts)]
+     (if (anomaly/any-anomaly? event) event
+         (assoc event :event/sequence-number (reserve-sequence! stream workflow-id))))))
 
 (defn- ^{:stratum 1} deliver-to-sinks!
   "Fan `event` out to every configured sink. Each sink runs in
@@ -395,6 +370,9 @@
 (defn ^{:stratum 2} publish!
   "Publish `event` to the stream.
 
+   Current-profile streams delegate typed admission, durable commit and delivery
+   to current-publication. The following workflow fence applies only to legacy streams.
+
    When the event's workflow has been quiesced (BD-2a), short-circuits
    with a structured `{:rejected? true ...}` map and runs no sinks or
    subscribers. Otherwise: fan out to sinks, append to the in-memory
@@ -408,8 +386,10 @@
    eliminating the TOCTOU window that allowed a publish to slip through
    after `quiesce!` fenced the workflow."
   [stream event]
-  (if (response/anomaly-map? event)
-    event
+  (cond
+    (current/active? stream) (current/publish! stream event)
+    (response/anomaly-map? event) event
+    :else
     ;; N3 §8.1: redact before the event reaches a sink, the log, or a
     ;; subscriber. This is the last point at which no durable or
     ;; delivered copy exists yet — redacting at a sink would leave the
@@ -833,13 +813,13 @@
       (cond-> content (assoc :annotation/content content))))
 
 ;; Chain lifecycle events
-;; Chains are not workflow-scoped, so workflow-id is nil.
+;; Run-level legacy chain events have no workflow reference; steps can name a child.
 ;; Message is derived from the event-type keyword.
 (defn ^{:stratum 2} chain-envelope
-  "Create an envelope for chain events. Chains are not workflow-scoped,
-   so workflow-id is nil. Message is derived from the event-type keyword."
-  [stream event-type]
-  (create-envelope stream event-type nil (name event-type)))
+  "Create a legacy chain envelope, optionally referencing a child workflow run.
+   The reference participates in legacy sequence allocation at construction."
+  [stream event-type & [workflow-id]]
+  (create-envelope stream event-type workflow-id (name event-type)))
 
 ;; Control action events (N8)
 (defn ^{:stratum 2} control-action-requested [stream workflow-id action-id action-type & [requester]]

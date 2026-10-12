@@ -504,6 +504,7 @@
 
 ;------------------------------------------------------------------------------ Rich Comment
 (comment
+  validated-and-registered-review-defaults?
   (phase/get-phase-interceptor {:phase :review})
   (phase/get-phase-interceptor {:phase :review :on-fail :implement})
   (phase/phase-defaults :review)
