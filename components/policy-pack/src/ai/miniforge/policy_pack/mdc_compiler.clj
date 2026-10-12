@@ -220,9 +220,22 @@
    - {:success? true  :rule <rule-map>}
    - {:success? false :error <message> :filename <string>}"
   [filename content]
-  (try
-    (let [{:keys [frontmatter frontmatter-raw body]} (parse-mdc content)
-          fm           (group-dotted-keys frontmatter)
+  ;; The two frontmatter-shape detectors run OUTSIDE the try, because one of
+  ;; the shapes they report (an indented dotted child) makes
+  ;; `group-dotted-keys` throw. Their findings have to survive into the
+  ;; failure result, or the author gets "Key must be integer" and nothing else.
+  (let [{:keys [frontmatter frontmatter-raw body]} (parse-mdc content)
+        nested-blocks   (frontmatter/nested-block-keys frontmatter-raw)
+        commented-lists (frontmatter/commented-list-keys frontmatter-raw)
+        commented-warnings
+        (mapv (fn [k]
+                (t :mdc/commented-list-value
+                   {:filename filename
+                    :key      k
+                    :value    (pr-str (get frontmatter k))}))
+              commented-lists)]
+   (try
+    (let [fm           (group-dotted-keys frontmatter)
 
           ;; ── Identity ────────────────────────────────────────────────────
           slug         (str/replace filename #"\.mdc$" "")
@@ -296,22 +309,29 @@
           ;; above compiled from frontmatter the author did not write. Report
           ;; what it became, so a declared `hard-halt` silently landing on
           ;; `:audit` with no detection is visible rather than inferred.
-          nested-warnings
-          (mapv (fn [k]
-                  (t :mdc/nested-block-frontmatter
-                     {:filename  filename
-                      :key       k
-                      :detection (get detection :type)
-                      :action    action}))
-                (frontmatter/nested-block-keys frontmatter-raw))]
+          warnings
+          (into (mapv (fn [k]
+                        (t :mdc/nested-block-frontmatter
+                           {:filename  filename
+                            :key       k
+                            :detection (get detection :type)
+                            :action    action}))
+                      nested-blocks)
+                commented-warnings)]
 
       (schema-validation/success :rule rule
-                                 (when (seq nested-warnings)
-                                   {:warnings nested-warnings})))
+                                 (when (seq warnings)
+                                   {:warnings warnings})))
 
     (catch Exception e
-      (merge (schema-validation/failure :rule (.getMessage e))
-             {:filename filename}))))
+      (let [warnings (into (mapv (fn [k]
+                                   (t :mdc/nested-block-compile-failed
+                                      {:filename filename :key k}))
+                                 nested-blocks)
+                           commented-warnings)]
+        (cond-> (merge (schema-validation/failure :rule (.getMessage e))
+                       {:filename filename})
+          (seq warnings) (assoc :warnings warnings)))))))
 
 ;------------------------------------------------------------------------------ Layer 2
 
@@ -389,8 +409,12 @@
                                             :error    (:error %)})
                                        failures))
 
-                           (some (comp seq :warnings) successes)
-                           (into (mapcat :warnings successes))
+                           ;; Per-rule warnings ride on failures too: a
+                           ;; frontmatter shape that throws during grouping is
+                           ;; exactly the one whose bare exception explains
+                           ;; nothing.
+                           (some (comp seq :warnings) results)
+                           (into (mapcat :warnings results))
 
                            ;; Warn about always-inject + empty phases (meta range)
                            (some (fn [r]

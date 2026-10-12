@@ -19,7 +19,8 @@
   "MDC frontmatter line-grammar: splitting a file into frontmatter/body,
    parsing the frontmatter block's lines (key: value, multi-line
    `- item` lists) into a string-keyed map, and reporting keys written
-   in a form the grammar cannot represent (`nested-block-keys`).
+   in a form the grammar cannot represent (`nested-block-keys`,
+   `commented-list-keys`).
    Split out of
    `ai.miniforge.policy-pack.mdc-compiler` (rule 210: slice 2/6 of the
    same split train as
@@ -96,8 +97,22 @@
 (def ^{:stratum 0} ^:private indented-kv-re
   "An indented `child: ...` line. This is the nested-mapping signature.
    An indented `- item` line does NOT match, so list-valued keys —
-   `globs:` and friends — are not reported."
-  #"^[ \t]+[A-Za-z][A-Za-z0-9_-]*[ \t]*:")
+   `globs:` and friends — are not reported.
+
+   A dotted child (`  detection.mode: positive`) matches too. That shape
+   does not fall back silently — `group-dotted-keys` throws \"Key must be
+   integer\" trying to `assoc` onto the parent's `[]` — but the exception
+   names nothing an author can act on, so the key is still worth
+   reporting alongside it."
+  #"^[ \t]+[A-Za-z][A-Za-z0-9._-]*[ \t]*:")
+
+(def ^{:stratum 0} ^:private commented-key-re
+  "A `key: # comment` line: a key whose only value is a comment."
+  #"^([A-Za-z][A-Za-z0-9._-]*)[ \t]*:[ \t]*#.*$")
+
+(def ^{:stratum 0} ^:private indented-list-item-re
+  "An indented `- item` line — a list child."
+  #"^[ \t]+-[ \t]")
 
 (def ^{:stratum 0} ^:private comment-line-re
   "A line carrying only a comment, at any indentation. Skipped when
@@ -134,6 +149,40 @@
                     (when-let [[_ k] (re-matches blank-valued-key-re (lines idx))]
                       (when-let [child (next-child idx)]
                         (when (re-find indented-kv-re child)
+                          k)))))
+            (range (count lines))))))
+
+(defn ^{:stratum 1} commented-list-keys
+  "Frontmatter keys written as `key: # comment` over a `- item` list,
+   where the comment is kept as the value and the list is discarded.
+
+   `parse-kv-line` treats the comment as a non-blank value, so it never
+   opens a list: it clears `current-key`, and every `- item` line after
+   it is dropped on the floor. A `globs: # the shell ones` over two
+   patterns compiles to `:file-globs [\"# the shell ones\"]` — a glob that
+   matches nothing, on a rule that looks scoped.
+
+   Distinct from `nested-block-keys`: a *bare* `key:` over a list is the
+   one multi-line form the grammar supports and is never reported. Only
+   the commented form loses data.
+
+   Arguments:
+   - frontmatter-str - Raw text between --- delimiters
+
+   Returns:
+   - Vector of key names in file order, or []."
+  [frontmatter-str]
+  (if (str/blank? frontmatter-str)
+    []
+    (let [lines      (vec (str/split-lines frontmatter-str))
+          noise?     (fn [line] (or (str/blank? line)
+                                    (re-find comment-line-re line)))
+          next-child (fn [idx] (first (remove noise? (subvec lines (inc idx)))))]
+      (into []
+            (keep (fn [idx]
+                    (when-let [[_ k] (re-matches commented-key-re (lines idx))]
+                      (when-let [child (next-child idx)]
+                        (when (re-find indented-list-item-re child)
                           k)))))
             (range (count lines))))))
 

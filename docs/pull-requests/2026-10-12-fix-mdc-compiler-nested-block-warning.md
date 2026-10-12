@@ -73,18 +73,45 @@ It lives beside the grammar it guards rather than in the caller: the loss it
 detects is a property of `process-frontmatter-line`, and a reader changing that
 function needs this in view.
 
+### `commented-list-keys` — the second discarded shape
+
+`globs: # the shell ones` over a `- item` list loses the list entirely.
+`parse-kv-line` sees a non-blank value, so it clears `current-key` and every
+`- item` line after it is dropped. The rule compiles to
+`:file-globs ["# the shell ones"]` — a glob that matches nothing, on a rule that
+looks scoped. This one is worse than the nested-mapping case: that at least
+leaves a visible `{:type :custom}`, while this produces a plausible rule with a
+nonsense scope.
+
+A **bare** `key:` over a list is the one multi-line form the grammar does
+support and is never reported. Only the commented form loses data, and a test
+asserts the two detectors never both claim the same line.
+
+`parse-kv-line` itself is left alone. Correct YAML comment handling means
+knowing whether the `#` is inside quotes, which is a grammar change, and any
+real value containing a `#` would be at risk. Reporting the loss costs nothing
+and risks nothing.
+
 ### `mdc_compiler.clj`
 
 - `parse-mdc` additionally returns `:frontmatter-raw`. The parse is lossy in the
   one direction that matters — a nested block leaves no trace in the parsed map
   — so the source text is the only place the condition is still visible.
-- `mdc->rule` emits one warning per nested key, naming the file, the key, and
-  the values the rule **actually** compiled with (`detection :custom`,
-  `enforcement :audit`). Reporting the outcome rather than just the mistake is
-  the point: the author's intent is in the file, the silent result is not.
-- `compile-standards-pack` folds per-rule `:warnings` into the pack result. That
-  collection is the only thing `bb standards:pack` prints, so a warning that
-  does not reach it does not exist.
+- `mdc->rule` emits one warning per finding, naming the file, the key, and for a
+  nested block the values the rule **actually** compiled with
+  (`detection :custom`, `enforcement :audit`). Reporting the outcome rather than
+  just the mistake is the point: the author's intent is in the file, the silent
+  result is not.
+- **Both detectors run outside the `try`.** One of the shapes they report — an
+  indented *dotted* child, `detection:` over an indented `detection.mode:` —
+  does not fall back at all: `group-dotted-keys` throws `Key must be integer`
+  trying to `assoc` onto the parent's `[]`. That names nothing an author can
+  act on, so the findings have to survive into the failure result. They do, and
+  a test pins it.
+- `compile-standards-pack` folds per-rule `:warnings` from **every** result,
+  failures included, into the pack result. That collection is the only thing
+  `bb standards:pack` prints, so a warning that does not reach it does not
+  exist — and the result that most needs one is the one that threw.
 
 ### Warn, not fail
 
@@ -110,8 +137,8 @@ which rule 050 forbids. All three now go through
 
 | Check | Result |
 |---|---|
-| `mdc-compiler-test` namespace | 29 tests, 180 assertions, 0 failures |
-| Full `policy-pack` test suite | 297 tests, 2710 assertions, 0 failures |
+| `mdc-compiler-test` namespace | 32 tests, 206 assertions, 0 failures |
+| Full `policy-pack` test suite | 300 tests, 2736 assertions, 0 failures |
 | `bb lint:clj` | 0 errors, 0 warnings |
 | `bb lint:stratum` | clean (no rewrites) |
 | `bb poly:check` | OK |
@@ -133,6 +160,15 @@ New tests:
   `:custom` / `:audit`, and produces two warnings naming the file, the key and
   the compiled values. The dotted-style equivalent is blocking and carries no
   `:warnings` key at all.
+- `commented-list-keys-test` — the commented form reports; the bare form does
+  not; a commented key with a *mapping* child belongs to the other detector and
+  not this one; no children, empty and nil.
+- `mdc->rule-commented-list-warning-test` — end to end: the rule compiles,
+  `:file-globs` is `["# the shell ones"]`, and the warning names the key and
+  says the list was discarded.
+- `mdc->rule-warnings-survive-compile-failure-test` — the indented-dotted shape
+  returns `success? false` with `Key must be integer` **and** a warning naming
+  `detection` and tying itself to that exception.
 - `compile-standards-pack-nested-block-warning-test` — the warning reaches the
   pack result, and `failed-count` stays 0.
 

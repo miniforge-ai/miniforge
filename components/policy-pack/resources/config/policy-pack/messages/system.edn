@@ -39,6 +39,12 @@
   :mdc/nested-block-frontmatter
   "{filename}: frontmatter key '{key}' is a nested YAML block, which the MDC grammar cannot represent — its indented children parsed as separate top-level keys, so '{key}.*' resolved to nothing and the rule compiled with detection {detection} and enforcement {action}. Rewrite as dotted keys: '{key}.<child>: <value>'."
 
+  :mdc/nested-block-compile-failed
+  "{filename}: frontmatter key '{key}' is a nested YAML block, which the MDC grammar cannot represent. The compile error reported for this file is a symptom of it — an indented dotted child collides with the parent key during grouping. Rewrite as dotted keys: '{key}.<child>: <value>'."
+
+  :mdc/commented-list-value
+  "{filename}: frontmatter key '{key}' has a comment as its only value, so the '- item' list written under it was discarded and the key compiled as the comment text ({value}). Put the comment on its own line above the key."
+
   :mdc/compile-failed
   "Failed to compile {filename}: {error}"
 

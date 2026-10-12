@@ -178,9 +178,36 @@
   (testing "a commented parent with no children reports nothing"
     (is (= [] (frontmatter/nested-block-keys "globs: # nothing follows"))))
 
+  (testing "an indented DOTTED child is a nested mapping too. That shape makes
+            `group-dotted-keys` throw rather than fall back, but the exception
+            names nothing actionable, so the key is still reported"
+    (is (= ["detection"] (frontmatter/nested-block-keys
+                          "detection:\n  detection.mode: positive"))))
+
   (testing "handles empty and nil frontmatter"
     (is (= [] (frontmatter/nested-block-keys "")))
     (is (= [] (frontmatter/nested-block-keys nil)))))
+
+(deftest ^{:stratum 0} commented-list-keys-test
+  (testing "a comment as the only value swallows the `- item` list under it"
+    (is (= ["globs"] (frontmatter/commented-list-keys
+                      "globs: # the shell ones\n  - \"**/*.sh\"\n  - \"bb.edn\""))))
+
+  (testing "a BARE key over a list is the one multi-line form the grammar
+            supports, and is never reported"
+    (is (= [] (frontmatter/commented-list-keys "globs:\n  - \"**/*.sh\""))))
+
+  (testing "a commented key with a mapping child is a nested block, not this —
+            the two detectors do not both claim the same line"
+    (is (= [] (frontmatter/commented-list-keys "detection: # c\n  mode: positive")))
+    (is (= ["detection"] (frontmatter/nested-block-keys "detection: # c\n  mode: positive"))))
+
+  (testing "a commented key with no children reports nothing"
+    (is (= [] (frontmatter/commented-list-keys "globs: # nothing follows"))))
+
+  (testing "handles empty and nil frontmatter"
+    (is (= [] (frontmatter/commented-list-keys "")))
+    (is (= [] (frontmatter/commented-list-keys nil)))))
 
 ;; ============================================================================
 ;; Dewey → phases mapping tests
@@ -630,6 +657,36 @@
       (is (= :hard-halt (get-in rule [:rule/enforcement :action])))
       (is (nil? (:warnings result))
           "no :warnings key at all on a clean compile"))))
+
+(deftest ^{:stratum 0} mdc->rule-commented-list-warning-test
+  (testing "a comment as a key's only value swallows the list under it, and the
+            rule still compiles — with a glob that matches nothing"
+    (let [content (str "---\ndewey: \"740\"\ndescription: D\n"
+                       "globs: # the shell ones\n  - \"**/*.sh\"\n"
+                       "detection.mode: positive\ndetection.pattern: zzz\n"
+                       "enforcement.action: hard-halt\n---\nbody")
+          result (sut/mdc->rule "x.mdc" content)]
+      (is (true? (:success? result)))
+      (is (= ["# the shell ones"]
+             (get-in result [:rule :rule/applies-to :file-globs]))
+          "the comment became the glob and the declared patterns are gone")
+      (is (= 1 (count (:warnings result))))
+      (is (str/includes? (first (:warnings result)) "'globs'"))
+      (is (str/includes? (first (:warnings result)) "discarded")))))
+
+(deftest ^{:stratum 0} mdc->rule-warnings-survive-compile-failure-test
+  (testing "an indented dotted child throws during grouping; the bare exception
+            names nothing actionable, so the nested-block finding has to ride
+            on the FAILURE result"
+    (let [content (str "---\ndewey: \"740\"\ndescription: D\n"
+                       "detection:\n  detection.mode: positive\n---\nbody")
+          result (sut/mdc->rule "y.mdc" content)]
+      (is (false? (:success? result)))
+      (is (= "Key must be integer" (:error result)))
+      (is (= 1 (count (:warnings result))))
+      (is (str/includes? (first (:warnings result)) "'detection'"))
+      (is (str/includes? (first (:warnings result)) "symptom")
+          "the warning ties itself to the exception rather than standing alone"))))
 
 (deftest ^{:stratum 0} compile-standards-pack-nested-block-warning-test
   (testing "a per-rule nested-block warning reaches the pack result, which is
