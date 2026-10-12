@@ -265,6 +265,10 @@
    identity/version, and :chain/definition-snapshot. Without the directory option, retention remains in-memory only."
   pipeline/run-chain)
 
+(def ^{:stratum 0} redact-chain-binding
+  "Redact a chain binding report using target/source names, not its generic value key."
+  pipeline/redact-chain-binding)
+
 (def ^{:stratum 0} load-chain
   "Load a chain definition from classpath resources. Args: [chain-id version].
    Returns the chain-def result map; throws a :not-found anomaly when no

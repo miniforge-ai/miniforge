@@ -34,7 +34,8 @@
            :step/output (:execution/output result)
            :step/chain-id chain-id
            :step/chain-index index}
-    (contains? result :execution/bindings) (assoc :step/bindings (:execution/bindings result))))
+    (contains? result :execution/bindings) (assoc :step/bindings (:execution/bindings result))
+    (contains? result :execution/edges) (assoc :step/edges (:execution/edges result))))
 
 (defn- ^{:stratum 0} result-data [result]
   (if (map? result) result {}))
@@ -45,10 +46,14 @@
            {:chain/id (:chain/id definition)
             :chain/status status
             :chain/step-results results
+            :chain/edges (into [] (mapcat :step/edges) results)
             :chain/step-count step-count
             :chain/duration-ms duration})))
 
 ;------------------------------------------------------------------------------ Layer 1
+
+(defn ^{:stratum 1} failed? [result]
+  (or (failure-value? result) (= :failed (:execution/status result))))
 
 (defn ^{:stratum 1} completed? [result]
   (and (= :completed (:execution/status result))

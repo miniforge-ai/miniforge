@@ -23,7 +23,8 @@
   (let [results (:results state)
         index (count results)
         previous (get-in state [:last-result :execution/output])
-        result (execution/step! step index previous input opts)
+        step-opts (assoc opts :chain/upstream-workflow-id (get-in state [:last-result :execution/id]))
+        result (execution/step! step index previous input step-opts)
         projection (outcome/step-result chain-id step index result)
         next-results (conj results projection)
         next-state {:results next-results :last-result result}]

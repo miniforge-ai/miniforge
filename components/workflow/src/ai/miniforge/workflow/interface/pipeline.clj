@@ -18,6 +18,8 @@
 (ns ai.miniforge.workflow.interface.pipeline
   "Interceptor-pipeline workflow APIs."
   (:require
+   [ai.miniforge.redaction.interface :as redaction]
+   [ai.miniforge.workflow.chain-binding-evidence :as binding-evidence]
    [ai.miniforge.workflow.boundary.chain-admission :as chain-admission]
    [ai.miniforge.workflow.boundary.chain-retention :as chain-retention]
    [ai.miniforge.workflow.chain-loader :as chain-loader]
@@ -25,6 +27,11 @@
    [ai.miniforge.workflow.runner :as runner]))
 
 ;------------------------------------------------------------------------------ Layer 0
+
+(defn ^{:stratum 0} redact-chain-binding
+  "Redact a binding report with target/source context. Never use reporting values as execution inputs."
+  [record]
+  (if (map? record) (binding-evidence/redact (into {} record)) (redaction/marker)))
 
 ;; Pipeline API
 (def ^{:stratum 0} run-pipeline
