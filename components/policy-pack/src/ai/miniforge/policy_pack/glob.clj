@@ -37,6 +37,10 @@
    No wildcard crosses a segment boundary. `*`, `?` and a character
    class — negated or not — all stop at `/`; only `**` and `**/` cross.
 
+   Inside a class, every character is a literal: `&` does not form Java's
+   intersection operator and `/` is dropped, so a class can neither
+   silently match nothing nor cross a separator.
+
    One deliberate difference from `java.nio.file.PathMatcher`: `**/x`
    matches a root-level `x` here, because `**/` stands for *zero* or more
    segments. PathMatcher requires the separator and so excludes the root,
@@ -107,6 +111,13 @@
                            (.append (if (= next \!) "^/" ""))
                            (.append (-> (subs pattern body-start close)
                                         (str/replace "\\" "\\\\")
+                                        ;; `&&` is class intersection in a
+                                        ;; Java regex but two literal
+                                        ;; characters in a glob: unescaped,
+                                        ;; `[a&&b]` would match nothing
+                                        ;; instead of `a`, `&` or `b`, which
+                                        ;; in an exclusion fails open.
+                                        (str/replace "&" "\\&")
                                         (str/replace "/" "")))
                            (.append "]")))
                 ;; Unterminated class: a literal `[`

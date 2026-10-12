@@ -82,6 +82,17 @@
       "src/*"       "src/a/b"  false
       "src/?"       "src/ab"   false))
 
+  (testing "inside a class every character is a literal. `&&` is Java's
+            intersection operator but two ordinary characters in a glob —
+            unescaped, `[a&&b]` compiles to an empty intersection and matches
+            nothing, which in an exclusion fails open"
+    (are [pattern path expected] (= expected (sut/matches? pattern path))
+      "[a&&b]"  "a"  true
+      "[a&&b]"  "&"  true
+      "[a&&b]"  "b"  true
+      "[a&&b]"  "c"  false
+      "[a&b]"   "&"  true))
+
   (testing "a dot is literal, not the regex wildcard"
     (is (false? (sut/matches? "src/*.clj" "src/aXclj"))))
 
@@ -98,11 +109,12 @@
   (testing "on every form both implementations support, the answers match"
     (doseq [pattern ["bb.edn" "src/*.clj" "src/?.clj" "src/*" "src/?" "tools/**"
                      "examples/**" "**/*.{js,ts}" "src/**/*.{js,jsx,ts,tsx}"
-                     "[abc]/x" "[!abc]/x" "src[!x]foo"
+                     "[abc]/x" "[!abc]/x" "src[!x]foo" "[a&&b]" "[a&b]"
                      "docs/**/*.md" "components/**/src/**/*.clj"]
             path    ["bb.edn" "src/a.clj" "src/ab.clj" "src/a/b.clj" "src/a/b"
                      "tools/a/b.clj" "examples/d/x.sh" "src/a.ts" "src/a.js"
                      "src/a/b.tsx" "a/x" "d/x" "src/foo" "srcyfoo" "srcxfoo"
+                     "a" "b" "c" "&"
                      "docs/a/b.md" "components/c/src/a/b.clj" "build.clj"]
             ;; `**/` anywhere in the pattern is the one deliberate
             ;; divergence — covered below.

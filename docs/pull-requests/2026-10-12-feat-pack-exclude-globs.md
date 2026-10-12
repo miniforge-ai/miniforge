@@ -151,6 +151,11 @@ matched `src/foo`. `/` is now in the negation set, and a `/` listed inside a
 (`PathMatcher` rejects such a pattern outright; matching nothing is the same
 outcome without a throw).
 
+Inside a class every character is a literal, which takes one more escape than it
+looks: `&&` is Java's class-intersection operator but two ordinary characters in
+a glob. Unescaped, `[a&&b]` compiles to an empty intersection and matches
+nothing — in an exclusion, failing open. `&` is escaped on the way out.
+
 `glob_test.clj` asserts agreement with `PathMatcher` across a pattern × path
 table, excluding only patterns containing `**/`, and then pins that divergence
 explicitly in both positions it appears: `**/*.clj` vs `build.clj`, and
