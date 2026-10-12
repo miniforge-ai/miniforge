@@ -22,6 +22,7 @@
   :chain/completion-publication-failed "Chain completion publication failed."
   :chain/start-publication-failed "Chain start publication failed."
   :chain/step-completion-publication-failed "Chain step completion publication failed."
+ :chain/invalid-runtime-options "Current chain publication requires a valid current stream and an existing canonical retention directory separate from its journal; child publication requires a legacy stream."
   :chain/child-identity-conflict "Chain child returned a conflicting workflow-run identity."
   :chain/invalid-definition "Chain definition requires a resolved version, unique steps, and supported immutable bindings."
   :chain/not-found "Chain '{chain-id}' not found."

@@ -9,6 +9,7 @@
             [ai.miniforge.event-stream.commit-model :as model]
             [ai.miniforge.event-stream.core :as core]
             [ai.miniforge.event-stream.current-stream-spec :as spec]
+            [ai.miniforge.event-stream.stream-state-spec :as stream-spec]
             [ai.miniforge.event-stream.current-publication :as current]
             [ai.miniforge.event-stream.publication :as publication]
             [ai.miniforge.event-stream.publication-state :as state]
@@ -17,19 +18,30 @@
 
 ;------------------------------------------------------------------------------ Layer 0
 
+(defn- ^{:stratum 0} valid-stream? [schema stream]
+  (and (instance? clojure.lang.Atom stream)
+       (validation/valid? schema @stream)))
+
 (defn ^{:stratum 0} close! [stream]
   (if (current/active? stream)
     (publication/close! stream)
     (model/failure :invalid-input :publication/not-current nil)))
 
+(defn ^{:stratum 0} journal-directory [stream]
+  (get-in @stream [:publication :directory]))
+
 (defn- ^{:stratum 0} restore-stream [opts journal events]
   (let [stream (core/create-event-stream (merge {:sinks []} opts))
         seen (into #{} (map :event/id) events)
-        publication (assoc (state/initial journal) :seen seen)]
+        publication (assoc (state/initial journal) :seen seen :directory (:journal-directory opts))]
     (swap! stream assoc :events events :publication publication)
     stream))
 
 ;------------------------------------------------------------------------------ Layer 1
+
+(defn ^{:stratum 1} current? [stream] (valid-stream? stream-spec/Current stream))
+
+(defn ^{:stratum 1} legacy? [stream] (valid-stream? stream-spec/Legacy stream))
 
 (defn- ^{:stratum 1} own-stream [opts journal]
   (let [transferred? (atom false)]

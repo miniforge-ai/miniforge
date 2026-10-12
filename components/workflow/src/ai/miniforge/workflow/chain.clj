@@ -14,11 +14,16 @@
 
 (def ^{:stratum 0} resolve-bindings bindings/resolve-bindings)
 
+(defn- ^{:stratum 0} run-options [definition opts]
+  (-> opts
+      (assoc :chain/run-record (:chain/run-record definition) :chain/definition-id (:chain/id definition))
+      execution/options))
+
 (defn- ^{:stratum 0} advance! [chain-id input opts state step]
   (let [results (:results state)
         index (count results)
         previous (get-in state [:last-result :execution/output])
-        result (execution/step! chain-id step index previous input opts)
+        result (execution/step! step index previous input opts)
         projection (outcome/step-result chain-id step index result)
         next-results (conj results projection)
         next-state {:results next-results :last-result result}]
@@ -31,12 +36,12 @@
    Returns chain status, step projections, count, and elapsed duration."
   [definition input opts]
   (let [started (clock/now-ms)
-        step-opts (execution/options opts)
+        step-opts (run-options definition opts)
         advance (partial advance! (:chain/id definition) input step-opts)
-        receipt (execution/start! definition opts)]
+        receipt (execution/start! definition step-opts)]
     (if (outcome/failure-value? receipt) receipt
         (let [state (reduce advance {:results [] :last-result nil} (:chain/steps definition))]
-          (execution/finish! definition started state opts)))))
+          (execution/finish! definition started state step-opts)))))
 
 (comment
   (resolve-binding :chain/input.task nil {:task "example"}))

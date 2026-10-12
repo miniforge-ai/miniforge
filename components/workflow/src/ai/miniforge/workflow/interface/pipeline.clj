@@ -48,6 +48,7 @@
 (defn ^{:stratum 0} run-chain
   "Execute a resolved definition, or return an admission or publication anomaly.
    A present :chain/retention-directory requires durable admission before execution; failures return anomalies.
+   :chain/event-stream selects caller-owned current publication with a separate retention directory; :event-stream stays legacy for children.
    Results retain fresh invocation identity and the admitted composition; recovery requires durable storage."
   [chain-def chain-input opts]
   (chain-admission/run-chain chain-def chain-input opts))

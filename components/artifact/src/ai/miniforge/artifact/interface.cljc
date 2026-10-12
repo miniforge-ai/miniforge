@@ -67,6 +67,10 @@
     (snapshot/decode value)
     (publication-boundary/failure :invalid-input :snapshot/invalid nil)))
 
+(def ^{:stratum 0} canonical-publication-directory?
+  "True for an existing canonical absolute publication directory, without writing or claiming ownership."
+  publication/canonical-directory?)
+
 (defn ^{:stratum 0} publish!
   "Synchronously publish an immutable artifact to an existing canonical directory.
    Returns the artifact only after file and ancestor-directory durability barriers.

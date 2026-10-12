@@ -39,6 +39,18 @@
    Also accepts :logger and :snowflake-generator. Returns a stream or anomaly."
   current-stream/create)
 
+(def ^{:stratum 0} current-event-stream?
+  "Validate current stream structure, including closed streams; not availability or authority."
+  current-stream/current?)
+
+(def ^{:stratum 0} legacy-event-stream?
+  "Validate legacy stream structure without granting execution authority."
+  current-stream/legacy?)
+
+(def ^{:stratum 0} current-journal-directory
+  "Return a current stream's canonical journal directory, including after close. Not an authority check."
+  current-stream/journal-directory)
+
 (def ^{:stratum 0} close-current-event-stream!
   "Release a current stream's journal ownership and reject further publication.
    This does not wait for in-flight listener callbacks; it is not a delivery drain.

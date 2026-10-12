@@ -16,6 +16,12 @@
   (let [path (if (contains? error :anomaly/type) [:anomaly/data :workflow/id] [:workflow/id])]
     (assoc-in error path id)))
 
+(defn ^{:stratum 0} with-run-identity [error record]
+  (let [identity (select-keys record [:chain/run-id :chain/definition-id :chain/definition-version])]
+    (if (contains? error :anomaly/type)
+      (update error :anomaly/data merge identity)
+      (merge error identity))))
+
 (defn- ^{:stratum 0} error-message [result]
   (let [error (or (:execution/error result) (:anomaly/message result) (:message result))]
     (if (string? error) error (messages/t :chain/child-incomplete))))
