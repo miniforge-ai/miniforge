@@ -267,6 +267,16 @@
    matching chain resource exists."
   pipeline/load-chain)
 
+(def ^{:stratum 0} persist-chain-run!
+  "Retain an admission record durably. Args: [controlled-directory record].
+   Reject unsafe data and immutable identity conflicts; does not execute the chain."
+  pipeline/persist-chain-run!)
+
+(def ^{:stratum 0} load-chain-run
+  "Restore original chain identity and composition. Args: [controlled-directory run-uuid].
+   Missing or conflicting records return anomalies; this does not resume execution."
+  pipeline/load-chain-run)
+
 (def ^{:stratum 0} list-chains
   "List all chain definitions on the classpath. No args. Returns a vector of
    summary maps {:id :version :description :steps}."

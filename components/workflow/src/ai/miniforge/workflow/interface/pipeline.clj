@@ -19,6 +19,7 @@
   "Interceptor-pipeline workflow APIs."
   (:require
    [ai.miniforge.workflow.boundary.chain-admission :as chain-admission]
+   [ai.miniforge.workflow.boundary.chain-retention :as chain-retention]
    [ai.miniforge.workflow.chain-loader :as chain-loader]
    [ai.miniforge.workflow.dag-orchestrator :as dag-orchestrator]
    [ai.miniforge.workflow.runner :as runner]))
@@ -53,6 +54,19 @@
 (defn ^{:stratum 0} load-chain
   [chain-id version]
   (chain-loader/load-chain chain-id version))
+
+(defn ^{:stratum 0} persist-chain-run!
+  "Durably retain an admission record in an existing, controlled canonical directory.
+   Same ID/content retries are safe; conflicting versions or run IDs return anomalies.
+   Reject secrets rather than alter the executable composition. Does not start execution."
+  [directory record]
+  (chain-retention/persist! directory record))
+
+(defn ^{:stratum 0} load-chain-run
+  "Load the original admission record by run UUID; refuse missing or conflicting manifests.
+   This restores identity and composition only, not execution state or permission to resume."
+  [directory run-id]
+  (chain-retention/load-run directory run-id))
 
 (defn ^{:stratum 0} list-chains
   []

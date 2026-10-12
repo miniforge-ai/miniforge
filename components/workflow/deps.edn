@@ -13,6 +13,7 @@
         ai.miniforge/task {:local/root "../task"}
         ai.miniforge/loop {:local/root "../loop"}
         ai.miniforge/artifact {:local/root "../artifact"}
+        ai.miniforge/redaction {:local/root "../redaction"}
         ai.miniforge/tool {:local/root "../tool"}
         ai.miniforge/policy {:local/root "../policy"}      ; Gate evaluation
         ai.miniforge/heuristic {:local/root "../heuristic"} ; Workflow storage
