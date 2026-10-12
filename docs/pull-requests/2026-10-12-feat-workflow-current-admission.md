@@ -21,6 +21,8 @@ Add six sequence-free profiles: started, phase-started, phase-completed, complet
 Shared identity and terminal constraints compose with typed phase acts and cancellation-source requirements.
 Blocked phases require refusal reasons; redirected phases require transition requests. Failure classes use N1's taxonomy.
 Control-action cancellations require an action reference. Terminal events reject competing status discriminators.
+Optional values accept nil as absence under N3 §2.1.1; conditional required values remain non-null.
+Every cancellation source validates supplied action IDs. A nil terminal status carries no outcome discriminator.
 
 Protect workflow specification, intent, artifact/evidence references, phase acts, classification, and cancellation provenance.
 Ordinary context and error observations remain redactable. Public API documentation lists the supported family.
@@ -28,15 +30,17 @@ No generic event fallback, gate registry amendment, producer migration, or defau
 
 ## Testing Plan
 
-- Four event-stream consumer projects passed serially (1m25s).
-- New contract and real-journal tests: 8 tests / 133 assertions per consumer.
-- Rebuilt CLI: 39,150,685 bytes; isolated package: 30 tests / 475 assertions, no production source overlays.
+- Four event-stream consumer projects passed serially after review corrections (1m24s).
+- New contract and real-journal tests: 10 tests / 162 assertions per consumer.
+- Rebuilt CLI: 39,150,700 bytes; isolated package: 32 tests / 504 assertions, no production source overlays.
 - Clojure/stratum lint and workspace checks passed; pinned standards scan reported zero violations.
 
 ## Standards Review
 
 Schemas compose existing refusal, transition, and failure vocabularies without copying them.
 Shared payload fixtures drive required-field and durable-publication tests. Named operations keep journal setup separate.
+Review corrected optional nil handling and action-ID validation across all cancellation sources.
+Regressions retain the stricter requirements for blocked phases, redirects, and control-action cancellation.
 Trace confirms common admission still rejects caller positions before committing; retries retain the original receipt,
 identity conflicts do not append, and closed streams refuse publication. Journal reopening preserves scoped records.
 These are event admission contracts, not stateful lifecycle authority or a claim that the host migration is complete.

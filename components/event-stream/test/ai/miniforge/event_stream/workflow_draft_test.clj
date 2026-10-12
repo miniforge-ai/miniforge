@@ -45,7 +45,7 @@
 
 (deftest ^{:stratum 1} terminal-types-cannot-carry-a-competing-status
   (doseq [event-type [:workflow/completed :workflow/failed :workflow/cancelled]
-          status [:success :failure :cancelled nil]]
+          status [:success :failure :cancelled]]
     (is (refused? (assoc (fixture/draft (random-uuid) event-type) :workflow/status status)))))
 
 (deftest ^{:stratum 1} phase-refusal-and-redirection-require-typed-details
@@ -69,6 +69,27 @@
     (is (not (refused? (assoc controlled :action/id (random-uuid)))))
     (is (refused? (assoc cancelled :cancel/source :unknown)))
     (is (refused? (assoc failed :failure/class :unknown)))))
+
+(deftest ^{:stratum 1} optional-fields-accept-nil-without-weakening-conditional-requirements
+  (doseq [[event-type fields] [[:workflow/started [:routing/trigger-event-id]]
+                              [:workflow/phase-completed [:phase/blocked-reason :phase/transition-request]]
+                              [:workflow/completed [:workflow/status]]
+                              [:workflow/failed [:workflow/failure-phase :workflow/error-details :workflow/status]]
+                              [:workflow/cancelled [:cancel/reason :action/id :workflow/status]]]]
+    (let [draft (fixture/draft (random-uuid) event-type)]
+      (is (not (refused? draft)))
+      (doseq [field fields]
+        (is (not (refused? (assoc draft field nil)))))))
+  (let [draft (fixture/draft (random-uuid) :workflow/phase-completed)]
+    (is (refused? (assoc draft :phase/outcome :blocked :phase/blocked-reason nil)))
+    (is (refused? (assoc draft :phase/outcome :redirected :phase/transition-request nil)))))
+
+(deftest ^{:stratum 1} every-cancellation-source-validates-action-identity
+  (doseq [source [:cli :api :tui :supervisor :control-action]]
+    (let [draft (assoc (fixture/draft (random-uuid) :workflow/cancelled) :cancel/source source)]
+      (is (not (refused? (assoc draft :action/id (random-uuid)))))
+      (is (refused? (assoc draft :action/id "not-a-uuid")))
+      (is (= (= :control-action source) (refused? (assoc draft :action/id nil)))))))
 
 (comment
   ::canonical-workflow-admission)

@@ -34,7 +34,7 @@
 
 (def ^{:stratum 0} Terminal
   ;; Outcome is the event type, never a contradictory legacy status discriminator.
-  [:map [:workflow/status {:optional true} [:not :any]]])
+  [:map [:workflow/status {:optional true} :nil]])
 
 ;------------------------------------------------------------------------------ Layer 1
 
@@ -44,7 +44,7 @@
     [:map
      [:workflow/spec :map]
      [:workflow/intent :map]
-     [:routing/trigger-event-id {:optional true} :uuid]]]
+     [:routing/trigger-event-id {:optional true} [:maybe :uuid]]]]
    [:workflow/phase-started
     [:map
      [:workflow/phase :keyword]
@@ -56,8 +56,8 @@
       [:workflow/phase :keyword]
       [:phase/duration-ms Duration]
       [:phase/artifacts [:vector :uuid]]
-      [:phase/blocked-reason {:optional true} legacy/RefusalReason]
-      [:phase/transition-request {:optional true} legacy/TransitionRequest]]]]
+      [:phase/blocked-reason {:optional true} [:maybe legacy/RefusalReason]]
+      [:phase/transition-request {:optional true} [:maybe legacy/TransitionRequest]]]]]
    [:workflow/completed
     [:and Terminal
      [:map
@@ -66,15 +66,16 @@
    [:workflow/failed
     [:and Terminal
      [:map
-      [:workflow/failure-phase {:optional true} :keyword]
+      [:workflow/failure-phase {:optional true} [:maybe :keyword]]
       [:workflow/failure-reason :string]
       [:failure/class failure/FailureClass]
-      [:workflow/error-details {:optional true} :map]]]]
+      [:workflow/error-details {:optional true} [:maybe :map]]]]]
    [:workflow/cancelled
     [:and Terminal Cancellation
      [:map
       [:cancel/requested-by :string]
-      [:cancel/reason {:optional true} :string]
+      [:cancel/reason {:optional true} [:maybe :string]]
+      [:action/id {:optional true} [:maybe :uuid]]
       [:workflow/duration-ms Duration]]]]])
 
 ;------------------------------------------------------------------------------ Layer 2
