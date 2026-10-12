@@ -34,6 +34,9 @@
    | `{a,b}`   | either alternative (no nesting)                      |
    | `[abc]`   | one of the listed characters; `[!abc]` negates        |
 
+   No wildcard crosses a segment boundary. `*`, `?` and a character
+   class — negated or not — all stop at `/`; only `**` and `**/` cross.
+
    One deliberate difference from `java.nio.file.PathMatcher`: `**/x`
    matches a root-level `x` here, because `**/` stands for *zero* or more
    segments. PathMatcher requires the separator and so excludes the root,
@@ -92,11 +95,19 @@
                                      (= (.charAt pattern j) \]) j
                                      :else (recur (inc j))))]
               (if close
+                ;; `/` is the segment separator and no class may cross it.
+                ;; A negated class gets it added to the negation set; a
+                ;; positive class has it stripped, so `[a/b]` cannot match a
+                ;; separator either. (PathMatcher rejects the pattern
+                ;; outright instead; matching nothing is the same outcome
+                ;; without a throw.)
                 (recur (inc close) in-group?
                        (-> out
                            (.append "[")
-                           (.append (if (= next \!) "^" ""))
-                           (.append (str/replace (subs pattern body-start close) "\\" "\\\\"))
+                           (.append (if (= next \!) "^/" ""))
+                           (.append (-> (subs pattern body-start close)
+                                        (str/replace "\\" "\\\\")
+                                        (str/replace "/" "")))
                            (.append "]")))
                 ;; Unterminated class: a literal `[`
                 (recur (inc i) in-group? (.append out "\\["))))

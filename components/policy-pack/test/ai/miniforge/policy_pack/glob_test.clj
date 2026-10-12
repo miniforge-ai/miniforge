@@ -66,6 +66,22 @@
       "[!abc]/x"                 "d/x"               true
       "[!abc]/x"                 "a/x"               false))
 
+  (testing "no wildcard crosses a segment boundary. A negated class is the
+            one that nearly did: `[^abc]` in a regex matches `/`, so
+            `src[!x]foo` would have matched `src/foo`"
+    (are [pattern path expected] (= expected (sut/matches? pattern path))
+      "src[!x]foo"  "src/foo"  false
+      "src[!x]foo"  "srcyfoo"  true
+      "src[!x]foo"  "srcxfoo"  false
+      ;; a `/` listed inside a positive class is stripped, so the class
+      ;; cannot match a separator either. PathMatcher rejects the pattern
+      ;; outright; matching nothing is the same outcome without a throw.
+      "a[b/c]d"     "a/d"      false
+      "a[bc]d"      "abd"      true
+      ;; `*` and `?` were already segment-bound
+      "src/*"       "src/a/b"  false
+      "src/?"       "src/ab"   false))
+
   (testing "a dot is literal, not the regex wildcard"
     (is (false? (sut/matches? "src/*.clj" "src/aXclj"))))
 
@@ -80,11 +96,13 @@
 
 (deftest ^{:stratum 1} agrees-with-path-matcher-test
   (testing "on every form both implementations support, the answers match"
-    (doseq [pattern ["bb.edn" "src/*.clj" "src/?.clj" "tools/**" "examples/**"
-                     "**/*.{js,ts}" "src/**/*.{js,jsx,ts,tsx}" "[abc]/x" "[!abc]/x"
+    (doseq [pattern ["bb.edn" "src/*.clj" "src/?.clj" "src/*" "src/?" "tools/**"
+                     "examples/**" "**/*.{js,ts}" "src/**/*.{js,jsx,ts,tsx}"
+                     "[abc]/x" "[!abc]/x" "src[!x]foo"
                      "docs/**/*.md" "components/**/src/**/*.clj"]
-            path    ["bb.edn" "src/a.clj" "src/ab.clj" "src/a/b.clj" "tools/a/b.clj"
-                     "examples/d/x.sh" "src/a.ts" "src/a.js" "src/a/b.tsx" "a/x" "d/x"
+            path    ["bb.edn" "src/a.clj" "src/ab.clj" "src/a/b.clj" "src/a/b"
+                     "tools/a/b.clj" "examples/d/x.sh" "src/a.ts" "src/a.js"
+                     "src/a/b.tsx" "a/x" "d/x" "src/foo" "srcyfoo" "srcxfoo"
                      "docs/a/b.md" "components/c/src/a/b.clj" "build.clj"]
             ;; `**/` anywhere in the pattern is the one deliberate
             ;; divergence — covered below.

@@ -112,12 +112,15 @@ this branch. There is no fallback any more: `path-in-scope?` treats absent
 
 Having one matcher is not enough if it under-matches. `meta/rule-format`
 advertises brace globs in three of its own examples — `src/**/*.{js,ts}`,
-`**/*.test.{js,ts}`, `src/**/*.{js,jsx,ts,tsx}` — and the hand-rolled
-translation implemented none of them, nor `?`, nor character classes. An
-`excludeGlobs: ["examples/**/*.{sh,py}"]` copied out of that document would
-have matched nothing and the rule would have fired on the files the author
-excluded. Silently. Rejecting unsupported syntax was the alternative; it leaves
-authors unable to write what the format says they can.
+`**/*.test.{js,ts}`, `src/**/*.{js,jsx,ts,tsx}`. The translation **as it stood
+before this PR** supported none of them, nor `?`, nor character classes: an
+`excludeGlobs: ["examples/**/*.{sh,py}"]` copied out of that document matched
+nothing, and the rule fired on the files the author excluded. Silently.
+
+All three forms work as of this PR — `glob.clj` implements them and
+`glob_test.clj` tests them against `PathMatcher`. Rejecting unsupported syntax
+was the alternative; it leaves authors unable to write what the format says they
+can.
 
 A new `policy-pack/glob` namespace owns the translation: one left-to-right pass
 covering `*`, `?`, `**`, `**/`, `{a,b}` and `[abc]`/`[!abc]`. A brace group is
@@ -139,6 +142,14 @@ The compile is memoized. A scan tests every rule's patterns against every file
 in the repo index, so the same handful of patterns were being translated tens of
 thousands of times — 7.5ms warm over 4,372 files, against 37ms unmemoized and
 123ms for `PathMatcher`. The pattern set is bounded by the pack.
+
+No wildcard crosses a segment boundary. `*`, `?` and a character class — negated
+or not — all stop at `/`; only `**` and `**/` cross. The negated class is the one
+that nearly slipped: a regex `[^abc]` matches `/`, so `src[!x]foo` would have
+matched `src/foo`. `/` is now in the negation set, and a `/` listed inside a
+*positive* class is stripped so that class cannot match a separator either
+(`PathMatcher` rejects such a pattern outright; matching nothing is the same
+outcome without a throw).
 
 `glob_test.clj` asserts agreement with `PathMatcher` across a pattern × path
 table, excluding only patterns containing `**/`, and then pins that divergence
@@ -281,9 +292,26 @@ PR changes or verifies. Flagged, not addressed.
 
 ## Breaking Changes
 
-None. `:exclude-globs` is optional; a rule without it behaves exactly as before.
-`rule-applies-to-artifact?` now returns a strict boolean where it previously
-returned `some`'s truthy value — both are only ever consumed as predicates.
+`:exclude-globs` itself is optional and additive: a rule without it declares the
+same scope as before.
+
+Two behaviour changes do come with it, both deliberate:
+
+1. **The compliance scanner now matches include globs with policy-pack's
+   matcher** instead of `java.nio` `PathMatcher`, so an existing `**/*.clj` rule
+   covers root-level files the scanner previously skipped. Measured rule by rule
+   over this repo: only `:std/clojure-no-requiring-resolve` changes, gaining
+   `build.clj` and `demo-self-implementation.clj`, neither of which matches its
+   pattern — so no new violation appears here. A consuming repo with a
+   root-level file that *does* match such a rule will see a violation it did not
+   see before. That is the blind spot closing, and `bb review` is where it shows
+   up first.
+2. `rule-applies-to-artifact?` now returns a strict boolean where it previously
+   returned `some`'s truthy value. Both are only ever consumed as predicates.
+
+Patterns using `?`, `{a,b}` or `[abc]` previously matched nothing and now match
+what the format says they should. No rule in the standards pack uses those
+forms, so nothing in the pack changes.
 
 ## Checklist
 
