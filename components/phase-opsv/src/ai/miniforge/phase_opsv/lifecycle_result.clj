@@ -41,7 +41,7 @@
         snapshot (get-in persisted [:execution/input :opsv/evidence-snapshot])
         output (get-in ctx [:phase :result :output])
         retained (get-in output [:anomaly/data :opsv/phase-output] output)]
-    (if (anomaly/anomaly? snapshot)
+    (if (anomaly/any-anomaly? snapshot)
       (assoc-in persisted [:phase :result]
                 (outcome/phase-result (assoc-in snapshot [:anomaly/data :opsv/phase-output]
                                    retained)))

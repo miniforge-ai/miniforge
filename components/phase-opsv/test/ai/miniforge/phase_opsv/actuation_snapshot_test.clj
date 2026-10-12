@@ -19,9 +19,11 @@
         encoded (snapshot/encode ready output)]
     (doseq [restarted [(update ready :execution/opts dissoc :opsv/evidence-base)
                        (assoc-in ready [:execution/opts :opsv/evidence-base :evidence-bundle/version] "changed")
-                       (assoc-in ready [:execution/opts :opsv/evidence-base :evidence/intent :intent/description] "changed")]]
+                       (assoc-in ready [:execution/opts :opsv/evidence-base :evidence/intent :intent/description] "changed")
+                       (assoc-in ready [:execution/workflow :workflow/tier] :critical)]]
       (let [restored (snapshot/restore-context restarted encoded)]
         (is (= original (get-in restored [:execution/opts :opsv/evidence-base])))
+        (is (= (:evidence/outcome original) (:evidence/outcome (base/bundle restored))))
         (is (= output (:opsv/recovered-actuation-output restored)))))
     (is (anomaly/anomaly? (snapshot/restore-context ready "corrupt")))
     (is (anomaly/anomaly? (snapshot/restore-context ready (envelope/encode ready :post-actuation output))))

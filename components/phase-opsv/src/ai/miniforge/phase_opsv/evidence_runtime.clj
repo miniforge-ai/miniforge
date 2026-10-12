@@ -59,9 +59,11 @@
         (assoc-in [:execution/input :opsv/evidence-assembly] assembly))))
 
 (defn- ^{:stratum 0} checkpoint-assembly [ctx store bundle-id]
-  (if-let [stream (:event-stream ctx)]
-    (event-evidence/capture! store bundle-id stream (context/workflow-id ctx))
-    (evidence/get-opsv-assembly store bundle-id)))
+  (let [assembly (evidence/get-opsv-assembly store bundle-id)
+        stream (:event-stream ctx)]
+    (if (and stream (= :assembling (:opsv.assembly/status assembly)))
+      (event-evidence/capture! store bundle-id stream (context/workflow-id ctx))
+      assembly)))
 
 ;------------------------------------------------------------------------------ Layer 1
 
