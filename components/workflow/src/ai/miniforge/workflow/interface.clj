@@ -258,6 +258,9 @@
   "Run a sequence of workflows, feeding each step's output into the next.
    Args: [chain-def chain-input opts]. Invalid definitions return an anomaly before execution.
    Publication failure returns an anomaly instead of a completed result.
+   Shorthand input bindings remain optional. Wrap a predecessor path in
+   {:binding/expression path :binding/required? true} to fail before dependent loading when unresolved.
+   Binding reports are redacted; child execution receives original resolved values.
    Set :chain/retention-directory in opts to require durable admission before the executor starts.
    Set :chain/event-stream to a caller-owned current stream for typed durable chain events; retention must use a separate directory.
    The optional :event-stream remains a separate legacy child stream. The caller closes the current stream.

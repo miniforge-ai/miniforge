@@ -2,12 +2,13 @@
 ;; Copyright 2025-2026 Christopher Lester (christopher@miniforge.ai)
 ;; Licensed under the Apache License, Version 2.0.
 (ns ai.miniforge.workflow.chain-edge-record
-  "Binding-operation records are distinct from child workflow execution outcomes.")
+  "Binding-operation records are distinct from child workflow execution outcomes."
+  (:require [ai.miniforge.workflow.chain-bindings :as bindings]))
 
 ;------------------------------------------------------------------------------ Layer 0
 
 (defn ^{:stratum 0} dependencies [step]
-  (into {} (filter (comp vector? val)) (:step/input-bindings step)))
+  (into {} (filter (comp vector? bindings/expression val)) (:step/input-bindings step)))
 
 (defn ^{:stratum 0} started [id source destination declarations timestamp]
   {:edge/id id :edge/from-workflow-id source :edge/to-workflow-id destination
@@ -28,10 +29,15 @@
 
 ;------------------------------------------------------------------------------ Layer 1
 
-(defn ^{:stratum 1} completed [edge records timestamp duration]
-  (assoc edge :edge/status :completed :edge/completed-at timestamp :edge/duration-ms duration
-              :edge/bindings (mapv (partial sourced-binding (:edge/from-workflow-id edge))
-                                   (filter predecessor-binding? records))))
+(defn ^{:stratum 1} with-binding-records [edge records]
+  (assoc edge :edge/bindings (mapv (partial sourced-binding (:edge/from-workflow-id edge))
+                                  (filter predecessor-binding? records))))
+
+;------------------------------------------------------------------------------ Layer 2
+
+(defn ^{:stratum 2} completed [edge records timestamp duration]
+  (assoc (with-binding-records edge records)
+         :edge/status :completed :edge/completed-at timestamp :edge/duration-ms duration))
 
 (comment
   (dependencies {:step/input-bindings {:upstream [:prev/artifacts] :literal "fixture"}}))
