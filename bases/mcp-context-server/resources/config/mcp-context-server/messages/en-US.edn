@@ -4,6 +4,7 @@
   :tool/no-handler             "No handler registered for: {key}"
 
   ;; Context cache lifecycle
+  :codex/answer-recorded       "recorded: {peg-id} = {answer}"
   :cache/loaded                "Context cache loaded: {count} files"
   :cache/load-failed           "WARN: failed to load context cache: {error}"
   :cache/saved                 "Context cache persisted: {count} files to {path}"

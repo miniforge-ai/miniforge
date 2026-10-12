@@ -71,6 +71,8 @@
            (impl/probe-endpoint-for :ollama)))
     (is (= "http://localhost:1234/v1/models"
            (impl/probe-endpoint-for :openai-compat)))
+    (is (= "https://openrouter.ai/api/v1/models"
+           (impl/probe-endpoint-for :openrouter)))
     (is (= "https://api.anthropic.com/" (impl/probe-endpoint-for :opencode))
         "OpenCode defaults to Anthropic — the typical provider routing"))
 

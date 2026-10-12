@@ -27,7 +27,11 @@
    [ai.miniforge.schema.vocab :as vocab]
    [ai.miniforge.schema.logging :as logging]
    [ai.miniforge.schema.logging-vocab :as logging-vocab]
-   [ai.miniforge.schema.supervisory :as supervisory]))
+   [ai.miniforge.schema.supervisory :as supervisory]
+   [ai.miniforge.schema.supervisory-records-spec :as records]
+   [ai.miniforge.schema.supervisory-admission-spec :as admission]
+   [ai.miniforge.schema.semantic-version-spec :as version]
+   [ai.miniforge.schema.text-spec :as text]))
 
 ;------------------------------------------------------------------------------ Layer 0
 
@@ -100,6 +104,42 @@
   logging/Scenario)
 
 ;; Supervisory entity schemas
+(def ^{:stratum 0} NonBlankString
+  "Current-write text containing at least one non-whitespace Unicode character."
+  text/NonBlankString)
+
+(def ^{:stratum 0} SemanticVersion
+  "Resolved semantic wire version; not a selector, range, or workspace DateVer."
+  version/SemanticVersion)
+
+(def ^{:stratum 0} InterventionState
+  "Canonical intervention lifecycle state vocabulary."
+  records/InterventionState)
+
+(def ^{:stratum 0} SpecRecord
+  "Current-write Spec record with required origin and non-blank title."
+  admission/SpecRecord)
+
+(def ^{:stratum 0} InterventionRecord
+  "Current-write intervention record with justification; not authorization."
+  admission/InterventionRecord)
+
+(def ^{:stratum 0} SpecProjection
+  "Deployed open Spec projection shape; not a current-write admission contract."
+  records/SpecProjection)
+
+(def ^{:stratum 0} InterventionProjection
+  "Deployed open intervention projection shape; not an authorization validator."
+  records/InterventionProjection)
+
+(def ^{:stratum 0} spec-statuses
+  "Ordered lifecycle vocabulary for long-lived supervisory work records."
+  records/spec-statuses)
+
+(def ^{:stratum 0} intervention-states
+  "Ordered intervention lifecycle vocabulary; permitted transitions are separate."
+  records/intervention-states)
+
 (def ^{:stratum 0} WorkflowRun
   "Malli open `:map` schema for a supervisory workflow run: `:workflow/id`,
    `:workflow/key`, `:workflow/status`, `:workflow/phase`,
@@ -545,10 +585,10 @@
                   :agent/role :invalid-role})
   ;; => {:agent/id ["should be a uuid"], :agent/role ["should be either ..."]}
 
-  ;; Validate and return or throw
-  (validate Task {:task/id (random-uuid)
-                  :task/type :implement
-                  :task/status :pending})
+  ;; Validate and return the value or an anomaly
+  (validate-anomaly Task {:task/id (random-uuid)
+                          :task/type :implement
+                          :task/status :pending})
   ;; => {:task/id #uuid "...", :task/type :implement, :task/status :pending}
 
   ;; Supervisory entity validation

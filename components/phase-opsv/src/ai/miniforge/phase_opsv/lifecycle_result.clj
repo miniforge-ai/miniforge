@@ -61,3 +61,6 @@
               (assoc-in [:phase :result :metrics :duration-ms] duration-ms))
     success?
       (update-in [:execution :phases-completed] (fnil conj []) phase-key))))
+
+(comment
+  (phase-result {}))

@@ -16,8 +16,7 @@
 
 (def ^{:private true :stratum 0} no-follow (into-array LinkOption [LinkOption/NOFOLLOW_LINKS]))
 
-(defn ^{:stratum 0} target ^File [directory id]
-  (io/file directory (str id ".artifact.transit.json")))
+(def ^{:stratum 0} record-suffix ".artifact.transit.json")
 
 (def ^{:stratum 0} write! durability/write-temporary-bytes!)
 
@@ -45,6 +44,9 @@
               :else (recur))))))))
 
 ;------------------------------------------------------------------------------ Layer 1
+
+(defn ^{:stratum 1} target ^File [directory id]
+  (io/file directory (str id record-suffix)))
 
 (defn ^{:stratum 1} safe-directory? [directory]
   (let [file (io/file directory)]

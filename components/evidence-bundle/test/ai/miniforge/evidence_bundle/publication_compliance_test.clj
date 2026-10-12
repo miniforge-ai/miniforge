@@ -3,6 +3,7 @@
 ;; Licensed under the Apache License, Version 2.0.
 (ns ai.miniforge.evidence-bundle.publication-compliance-test
   (:require [clojure.test :refer [deftest is]]
+            [ai.miniforge.evidence-bundle.interface :as evidence]
             [ai.miniforge.evidence-bundle.publication-compliance :as compliance]
             [ai.miniforge.redaction.interface :as redaction]))
 
@@ -48,6 +49,21 @@
     (is (= :none (:compliance/pii-handling prepared)))
     (is (compliance/accurate-declarations? prepared))))
 
+(deftest ^{:stratum 1} marker-requires-truthful-declarations-without-recorded-findings
+  (let [input (candidate :description (redaction/marker))
+        prepared (compliance/prepare input)]
+    (is (redaction/clean? input))
+    (is (false? (compliance/accurate-declarations? input)))
+    (is (true? (:compliance/sensitive-data prepared)))
+    (is (= :redacted (:compliance/pii-handling prepared)))
+    (is (false? (:evidence/contains-pii? prepared)))
+    (is (compliance/accurate-declarations? prepared))
+    (doseq [handling [:none :encrypted]]
+      (let [declared (candidate :description (redaction/marker)
+                                 :compliance/sensitive-data true :compliance/pii-handling handling)]
+        (is (false? (compliance/accurate-declarations? declared)))
+        (is (= :redacted (:compliance/pii-handling (compliance/prepare declared))))))))
+
 ;------------------------------------------------------------------------------ Layer 2
 
 (deftest ^{:stratum 2} recorded-secrets-require-protected-treatment
@@ -84,3 +100,20 @@
     (is (= :encrypted (:compliance/pii-handling (compliance/prepare encrypted))))
     (is (= :redacted (:compliance/pii-handling
                       (compliance/prepare (assoc encrypted :description synthetic-secret)))))))
+
+(deftest ^{:stratum 2} repeated-preparation-preserves-content-and-hash
+  (doseq [input (concat [(candidate) (recorded :redaction-marker)]
+                       (map #(candidate :description %)
+                            [(redaction/marker) synthetic-secret "000-00-0000" "alice@example.com"])
+                       (map #(candidate :compliance/sensitive-findings [(contaminated-finding %)])
+                            [:field :metadata :nested]))]
+    (let [once-prepared (compliance/prepare input)
+          twice-prepared (compliance/prepare once-prepared)
+          findings (:compliance/sensitive-findings twice-prepared)]
+      (is (= once-prepared twice-prepared (compliance/prepare twice-prepared)))
+      (is (= (evidence/content-hash once-prepared) (evidence/content-hash twice-prepared)))
+      (is (= (count findings) (count (distinct findings))))
+      (is (redaction/clean? twice-prepared)))))
+
+(comment
+  (clojure.test/run-tests 'ai.miniforge.evidence-bundle.publication-compliance-test))

@@ -68,6 +68,9 @@
    :warn/context-reads-parse
    "WARN: failed to parse context reads at %s — %s"
 
+   :warn/codex-answers-parse
+   "WARN: failed to parse codex peg answers at %s — %s"
+
    :info/mcp-artifact-skipped
    "INFO: MCP artifact not submitted — worktree-promotion succeeded (workdir: %s)"})
 
@@ -238,6 +241,9 @@
    ;; phase-start pin (phase-software-factory codex-pin); this lets an
    ;; agent RE-consult mid-run for a different situation.
    {:mcp/server :context :mcp/tool :consider_situation}
+   ;; The explicit half of the §7.7 answer channel: records the agent's
+   ;; answer to a presented peg (answers.edn beside context-reads.edn).
+   {:mcp/server :context :mcp/tool :answer_peg}
    ;; Agent-agnostic edit path: writes to the worktree + refreshes the cache,
    ;; needs no prior native Read. The reliable way to modify EXISTING files
    ;; across Claude/Codex/Cursor (native Write/Edit require a prior Read, which
@@ -364,15 +370,25 @@
   "Sentinel line separating the concatenated session-output files in the
    single `read-capsule-session-outputs` executor round-trip.
 
-   Collision assumption: the first two segments (context-misses.edn,
-   context-reads.edn) are written by our own MCP server and contain
-   record maps (paths, keywords, timestamps), so this sentinel is not
-   expected to occur in them — a pathological workspace path containing
+   Collision assumption: the first three segments (context-misses.edn,
+   context-reads.edn, answers.edn) are written by our own MCP server and
+   contain record maps (paths, keywords, short answer strings,
+   timestamps), so this sentinel is not expected to occur in them — a pathological workspace path containing
    it would corrupt the split. The artifact segment CAN contain arbitrary
    agent-authored strings, which is why it is deliberately placed LAST in
    the cat chain: the bounded `str/split` keeps any embedded occurrence
    inside the final segment intact."
   "===MINIFORGE-SESSION-OUTPUT-BOUNDARY===")
+
+(def ^{:stratum 0} ^:private capsule-answers-present-marker
+  "Sentinel line echoed BEFORE answers.edn's content when the file
+   exists, so the capsule readers can tell a present-but-empty file (a
+   write torn before any bytes landed — :unreadable, observations LOST)
+   from a missing one (:absent). `cat` output alone cannot make that
+   distinction; the host reader gets it from `.exists`. Same collision
+   assumption as `capsule-output-boundary`: answers.edn is written by
+   our own MCP server and is not expected to contain this line."
+  "===MINIFORGE-ANSWERS-PRESENT===")
 
 (defn- ^{:stratum 0} read-role-entry
   "Read the worktree artifact for `role` via `read-role-artifact` and
@@ -382,7 +398,55 @@
   (when-let [a (read-role-artifact role)]
     [role a]))
 
+(defn- ^{:stratum 0} answer-log-state
+  "The §7.7.2 answer-log marker for one session's answers.edn: :absent
+   when the MCP server wrote no file (it only writes when answers were
+   recorded), :recorded when the file parsed, :unreadable when a file
+   was present but did not parse. The last case means recorded
+   observations were LOST — the durable record must keep it distinct
+   from pegs that genuinely went unanswered, or a torn log silently
+   inflates the telemetry's unanswered count."
+  [present? parsed]
+  (cond
+    (not present?) :absent
+    (nil? parsed)  :unreadable
+    :else          :recorded))
+
+(defn ^{:stratum 0} merge-answer-logs
+  "One §7.7.2 answer-log marker over several sessions' logs (split
+   reviewer sessions, an implementer's primary + recovery turn): any
+   torn log means observations were lost somewhere (:unreadable wins),
+   else any recorded log means the channel worked (:recorded), else
+   :absent. Conservative on the mixed readable/torn case — the whole
+   run is excluded from the telemetry's unanswered count rather than
+   letting a partially lost record masquerade as a complete one."
+  [logs]
+  (cond
+    (some #{:unreadable} logs) :unreadable
+    (some #{:recorded} logs)   :recorded
+    :else                      :absent))
+
 ;------------------------------------------------------------------------------ Layer 1
+
+(defn- ^{:stratum 1} split-answers-segment
+  "Split an answers.edn `cat` segment that was prefixed by the
+   presence-marker echo into {:present? bool :content trimmed-str}.
+
+   nil marks a TRUNCATED batched read: a normal missing file still
+   produces every echoed boundary line and an empty (non-nil) segment,
+   so a nil segment means the output itself was cut and the channel's
+   state is unknown. Unknown must read as lost, never as the agent
+   declining to answer — the nil path yields {:present? true
+   :content \"\"}, which answer-log-state classifies :unreadable."
+  [segment]
+  (if (nil? segment)
+    {:present? true :content ""}
+    (let [trimmed (str/trim segment)
+          present? (str/starts-with? trimmed capsule-answers-present-marker)]
+      {:present? present?
+       :content  (if present?
+                   (str/trim (subs trimmed (count capsule-answers-present-marker)))
+                   trimmed)})))
 
 (defn ^{:stratum 1} validate-session
   "Validate a session map against the Session schema.
@@ -921,10 +985,10 @@
                            path)))))
 
 (defn ^{:stratum 3} read-capsule-session-outputs
-  "Read artifact.edn, context-misses.edn, and context-reads.edn from a
-   capsule session in a SINGLE executor round-trip.
+  "Read artifact.edn, context-misses.edn, context-reads.edn and
+   answers.edn from a capsule session in a SINGLE executor round-trip.
 
-   The three files are concatenated by one `cat` chain with
+   The four files are concatenated by one `cat` chain with
    `capsule-output-boundary` sentinel lines between them, then split back
    apart here. This is how capsule sessions surface `:context-misses` and
    `:context-reads` (Codex SPEC §7.4.2 recorded flows) without adding
@@ -943,17 +1007,29 @@
 
    Returns: {:artifact <map-or-nil>
              :context-misses <vector-or-nil>
-             :context-reads <vector-or-nil>}"
+             :context-reads <vector-or-nil>
+             :codex-answers <vector-or-nil>
+             :codex-answer-log :absent|:recorded|:unreadable}"
   [session]
-  (let [dir         (:dir session)
-        misses-path (str dir "/context-misses.edn")
-        reads-path  (str dir "/context-reads.edn")
-        sep         (str "; echo; echo " capsule-output-boundary "; ")
-        cmd         (str "cat " (file-artifacts/shell-quote misses-path) " 2>/dev/null"
-                         sep
-                         "cat " (file-artifacts/shell-quote reads-path) " 2>/dev/null"
-                         sep
-                         "cat " (file-artifacts/shell-quote (:artifact-path session)) " 2>/dev/null")
+  (let [dir          (:dir session)
+        misses-path  (str dir "/context-misses.edn")
+        reads-path   (str dir "/context-reads.edn")
+        answers-path (str dir "/answers.edn")
+        sep          (str "; echo; echo " capsule-output-boundary "; ")
+        cmd          (str "cat " (file-artifacts/shell-quote misses-path) " 2>/dev/null"
+                          sep
+                          "cat " (file-artifacts/shell-quote reads-path) " 2>/dev/null"
+                          sep
+                          ;; Presence marker before the cat: a
+                          ;; present-but-empty answers.edn (write torn
+                          ;; before any bytes landed) must read as
+                          ;; :unreadable, not :absent — cat output alone
+                          ;; cannot tell the two apart.
+                          "test -f " (file-artifacts/shell-quote answers-path)
+                          " && echo " capsule-answers-present-marker
+                          "; cat " (file-artifacts/shell-quote answers-path) " 2>/dev/null"
+                          sep
+                          "cat " (file-artifacts/shell-quote (:artifact-path session)) " 2>/dev/null")
         result      ((:exec! session) (:executor session) (:environment-id session)
                      cmd {:workdir (:workdir session)})
         stdout      (get-in result [:data :stdout] "")
@@ -963,7 +1039,13 @@
         boundary-re (re-pattern (str "(?m)^"
                                      (java.util.regex.Pattern/quote capsule-output-boundary)
                                      "$"))
-        [misses-part reads-part artifact-part] (mapv str/trim (str/split stdout boundary-re 3))]
+        [misses-part reads-part answers-part artifact-part]
+        (mapv str/trim (str/split stdout boundary-re 4))
+        {answers-present? :present? answers-content :content}
+        (split-answers-segment answers-part)
+        codex-answers (when (seq answers-content)
+                        (parse-edn-content answers-content edn/read-string
+                                           :warn/codex-answers-parse answers-path))]
     {:artifact       (when (seq artifact-part)
                        (parse-edn-content artifact-part
                                           (comp parse-uuid-strings edn/read-string)
@@ -974,7 +1056,38 @@
                                           :warn/context-misses-parse misses-path))
      :context-reads  (when (seq reads-part)
                        (parse-edn-content reads-part edn/read-string
-                                          :warn/context-reads-parse reads-path))}))
+                                          :warn/context-reads-parse reads-path))
+     :codex-answers  codex-answers
+     ;; §7.7.2 lost-vs-unanswered: no file is a server that recorded no
+     ;; answers; a present file that is empty or fails to parse is a
+     ;; torn log.
+     :codex-answer-log (answer-log-state answers-present? codex-answers)}))
+
+(defn ^{:stratum 3} read-capsule-codex-answers
+  "Read only answers.edn from a capsule session — the §7.7.2 answer
+   channel for read-only agents (the reviewer), whose sessions skip the
+   full four-file output read because they promote no artifact. One
+   executor round-trip for the one file the session can still have
+   produced.
+
+   Returns {:answers <vector-or-nil> :answer-log :absent|:recorded|:unreadable}."
+  [session]
+  (let [path    (str (:dir session) "/answers.edn")
+        ;; Presence marker before the cat — same reasoning as the
+        ;; batched reader: a present-but-empty file is a torn log
+        ;; (:unreadable), not a missing one (:absent).
+        cmd     (str "test -f " (file-artifacts/shell-quote path)
+                     " && echo " capsule-answers-present-marker
+                     "; cat " (file-artifacts/shell-quote path) " 2>/dev/null")
+        result  ((:exec! session) (:executor session) (:environment-id session)
+                 cmd {:workdir (:workdir session)})
+        {:keys [present? content]}
+        (split-answers-segment (get-in result [:data :stdout] ""))
+        answers (when (seq content)
+                  (parse-edn-content content edn/read-string
+                                     :warn/codex-answers-parse path))]
+    {:answers    answers
+     :answer-log (answer-log-state present? answers)}))
 
 (defmacro ^{:stratum 3} with-capsule-artifact-session
   "Execute body with a capsule-aware artifact session (N11 §6.3).
@@ -1099,22 +1212,57 @@
     (when (.exists f)
       (parse-edn-file f edn/read-string :warn/context-reads-parse))))
 
-(defn ^{:stratum 4} with-readonly-session
+(defn ^{:stratum 4} read-codex-answers
+  "Read recorded answer_peg calls from the session directory — the
+   explicit half of the Codex §7.7 answer channel (SPEC §7.7.2). The MCP
+   server writes answers.edn on exit; no answers means no file.
+
+   Returns {:answers <vector-or-nil> :answer-log :absent|:recorded|:unreadable}
+   — the marker keeps a torn log (observations LOST) distinct from a
+   session that answered nothing. Capsule sessions surface the same
+   channel through `read-capsule-session-outputs` /
+   `read-capsule-codex-answers`."
+  [session]
+  (let [path (str (:dir session) "/answers.edn")
+        f (io/file path)
+        exists? (.exists f)
+        answers (when exists?
+                  (parse-edn-file f edn/read-string :warn/codex-answers-parse))]
+    {:answers    answers
+     :answer-log (answer-log-state exists? answers)}))
+
+;------------------------------------------------------------------------------ Layer 5
+
+(defn ^{:stratum 5} with-readonly-session
   "Like `with-session`, but for READ-ONLY agents (e.g. the reviewer) that
    consume the MCP context cache but produce NO worktree artifact.
 
    Sets up the session + MCP config (host or governed/capsule, mirroring
    `with-session`), runs `body-fn`, and cleans up — but skips the artifact
    read + the nothing-found WARN that `run-session` does, since a reviewer
-   has no work product to promote. Returns the `body-fn` result directly
-   (the LLM result), not a normalized artifact map.
+   has no work product to promote.
+
+   A read-only session still produces one output: the §7.7.2 answer log
+   (answers.edn), written by the MCP server when the agent records
+   explicit peg answers. It is read BEFORE cleanup — previously the
+   session directory was deleted with the log unread, so a reviewer's
+   recorded answers never reached the durable consultation record.
+
+   Returns {:llm-result <body-fn result>
+            :codex-answers <vector-or-nil>
+            :codex-answer-log :absent|:recorded|:unreadable}.
 
    Use when an agent needs cached reads (context_read/grep/glob) for
    exploration but does not write files."
   [context body-fn]
-  (let [run (fn [session cleanup-fn]
-              (try (body-fn session)
-                   (finally (cleanup-fn session))))]
+  (let [run (fn [session read-answers-fn cleanup-fn]
+              (try
+                (let [result (body-fn session)
+                      {:keys [answers answer-log]} (read-answers-fn session)]
+                  {:llm-result       result
+                   :codex-answers    answers
+                   :codex-answer-log answer-log})
+                (finally (cleanup-fn session))))]
     (if (governed? context)
       (let [executor (:execution/executor context)
             env-id   (:execution/environment-id context)
@@ -1122,16 +1270,14 @@
             exec!    (or (:execution/execute-fn context) (missing-execute-fn!))
             session  (-> (create-capsule-session! executor env-id workdir exec!)
                          write-capsule-mcp-config!)]
-        (run session cleanup-capsule-session!))
+        (run session read-capsule-codex-answers cleanup-capsule-session!))
       (let [workdir (:execution/worktree-path context)
             session (-> (if workdir
                           (create-session! {:workdir workdir
                                             :source-root (:source-root context)})
                           (create-session! {:source-root (:source-root context)}))
                         write-mcp-config!)]
-        (run session cleanup-session!)))))
-
-;------------------------------------------------------------------------------ Layer 5
+        (run session read-codex-answers cleanup-session!)))))
 
 (defn ^{:stratum 5} read-host-session-outputs
   "Read artifact + context-misses + context-reads from a host session's
@@ -1139,9 +1285,12 @@
    — same return shape, plain filesystem reads instead of an executor
    round-trip."
   [session]
-  {:artifact       (read-artifact session)
-   :context-misses (read-context-misses session)
-   :context-reads  (read-context-reads session)})
+  (let [{:keys [answers answer-log]} (read-codex-answers session)]
+    {:artifact         (read-artifact session)
+     :context-misses   (read-context-misses session)
+     :context-reads    (read-context-reads session)
+     :codex-answers    answers
+     :codex-answer-log answer-log}))
 
 (defmacro ^{:stratum 5} with-artifact-session
   "Execute body with an artifact session, returning the artifact if found.
@@ -1190,9 +1339,10 @@
 
    `read-outputs-fn` is the mode-specific session-outputs reader
    (`read-host-session-outputs` or `read-capsule-session-outputs`) and
-   must return {:artifact :context-misses :context-reads}. Both modes
-   surface all three — the capsule reader batches them into one executor
-   round-trip rather than dropping the context files.
+   must return {:artifact :context-misses :context-reads :codex-answers
+   :codex-answer-log}. Both modes surface all of them — the capsule
+   reader batches them into one executor round-trip rather than
+   dropping the context files.
 
    `:worktree-artifacts` is a map from role keyword to parsed artifact,
    read from <workdir>/.miniforge/<role>.edn. Container-promotion pattern —
@@ -1231,7 +1381,8 @@
           worktree-artifacts  (if (:explicit-workdir? session)
                                 (collect-worktree-artifacts read-role-artifact workdir)
                                 {})
-          {:keys [artifact context-misses context-reads]} (read-outputs-fn session)
+          {:keys [artifact context-misses context-reads codex-answers
+                  codex-answer-log]} (read-outputs-fn session)
           ;; Track whether any .miniforge/<role>.edn files existed on disk,
           ;; independent of parse success. A file that exists but contains
           ;; malformed EDN returns nil from read-role-artifact (and emits
@@ -1277,6 +1428,8 @@
        :worktree-artifacts   worktree-artifacts
        :context-misses       context-misses
        :context-reads        context-reads
+       :codex-answers        codex-answers
+       :codex-answer-log     codex-answer-log
        :pre-session-snapshot (:pre-session-snapshot session)
        :session-mode         mode})
     (finally
@@ -1298,7 +1451,7 @@
 
    Returns normalized map:
    {:llm-result :artifact :worktree-artifacts :context-misses :context-reads
-    :pre-session-snapshot :session-mode}"
+    :codex-answers :codex-answer-log :pre-session-snapshot :session-mode}"
   [context body-fn]
     (if (governed? context)
       (let [executor (:execution/executor context)

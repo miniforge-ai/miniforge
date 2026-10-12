@@ -19,6 +19,7 @@
   (:require
    [ai.miniforge.event-stream.interface :as event-stream]
    [ai.miniforge.event-stream.interface.opsv :as opsv]
+   [ai.miniforge.event-stream.opsv-constructor-cases :as cases]
    [ai.miniforge.anomaly.interface :as anomaly]
    [ai.miniforge.effect-transaction.interface :as effect]
    [ai.miniforge.event-stream.opsv-fixtures :refer [disposition-payload]]
@@ -32,45 +33,6 @@
 
 (def ^{:stratum 0} evidence-id
   #uuid "00000000-0000-0000-0000-000000000011")
-
-(def ^{:stratum 0} constructor-cases
-  [[event-stream/experiment-planned opsv/ExperimentPlanned
-    :opsv.experiment/planned
-    {:opsv/experiment-pack-hash "pack"
-     :opsv/targets {:services ["catalog"] :environments ["staging"]}
-     :opsv/risk-score {:score 0.1 :level :low :factors []}}]
-   [event-stream/experiment-started opsv/ExperimentStarted
-    :opsv.experiment/started
-    {:opsv/experiment-pack-hash "pack"
-     :opsv/environment-fingerprint
-     {:cluster "test" :node-pools [] :image-digests {} :config-hash "cfg"}}]
-   [event-stream/load-step opsv/LoadStep :opsv/load-step
-    {:opsv/step-id "1" :opsv/intended-load {:rps 5}
-     :opsv/observed-load {:rps 5}}]
-   [event-stream/guardrail-abort opsv/GuardrailAbort :opsv.guardrail/abort
-    {:opsv/trigger :errors :opsv/threshold {:max 1}
-     :opsv/observed {:value 2} :opsv/rollback-action :restore}]
-   [event-stream/convergence-iteration opsv/ConvergenceIteration
-    :opsv.convergence/iteration
-    {:opsv/iteration-id "1" :opsv/params {:replicas 2}
-     :opsv/observed-metrics-summary {:latency 100}}]
-   [event-stream/policy-proposed opsv/PolicyProposed :opsv.policy/proposed
-    {:opsv/policy-hash "policy" :opsv/diff-artifact-refs []
-     :opsv/confidence :high}]
-   [event-stream/verification-result opsv/VerificationResult
-    :opsv.verification/result
-    {:opsv/passed? true :opsv/criteria-evaluation []
-     :opsv/confidence :high :opsv/caveats []}]
-   [event-stream/actuation-emitted opsv/ActuationEmitted
-    :opsv.actuation/emitted
-    {:opsv/requested-actuation-mode :recommend-only
-     :opsv/effective-actuation-mode :recommend-only
-     :opsv/governed-effects [] :opsv/pr-refs [] :opsv/apply-refs []}]
-   [event-stream/actuation-disposition opsv/ActuationDisposition :opsv.actuation/disposition
-    disposition-payload]
-   [event-stream/drift-detected opsv/DriftDetected :opsv.drift/detected
-    {:opsv/signal :latency :opsv/deviation {:ratio 1.1}
-     :opsv/suggested-rerun? true}]])
 
 ;------------------------------------------------------------------------------ Layer 1
 
@@ -138,7 +100,7 @@
 
 (deftest ^{:stratum 1} test-all-opsv-constructors-emit-canonical-events
   (let [stream (event-stream/create-event-stream)]
-    (doseq [[constructor schema event-type payload] constructor-cases]
+    (doseq [[constructor schema event-type payload] cases/constructors]
       (let [event (constructor stream workflow-id evidence-id payload)]
         (is (= event-type (:event/type event)))
         (is (= workflow-id (:workflow/id event)))

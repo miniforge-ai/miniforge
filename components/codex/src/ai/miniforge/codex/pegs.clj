@@ -50,6 +50,11 @@
        (sort-by :id)
        (mapv (fn [peg]
                {:id (:id peg)
+                ;; The question text itself. Without it the consumer sees
+                ;; only an id and cannot answer — the §7.7 answer channel
+                ;; needs the question in front of the agent, not in the
+                ;; vault.
+                :title (:title peg)
                 :answers (into {}
                                (for [r (graph/as-edge-list (:routes-to peg))
                                      :let [target (or (:target r) (:value r))]

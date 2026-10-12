@@ -11,10 +11,15 @@
 ;------------------------------------------------------------------------------ Layer 0
 
 (defn- ^{:stratum 0} record [ctx kind content]
-  (artifact/build-artifact
-   {:id (get-in ctx [:execution/input :opsv/evidence-bundle-id])
-    :type :manifest :version "1.0.0" :content content
-    :metadata {:workflow/id (context/workflow-id ctx) :opsv/material-kind kind}}))
+  (let [bundle-id (get-in ctx [:execution/input :opsv/evidence-bundle-id])
+        workflow-id (context/workflow-id ctx)
+        metadata {:workflow/id workflow-id :opsv/material-kind kind}]
+    (artifact/build-artifact
+     {:id bundle-id
+      :type :manifest
+      :version "1.0.0"
+      :content content
+      :metadata metadata})))
 
 (defn- ^{:stratum 0} invalid [ctx]
   (anomaly/anomaly :invalid-input (msg/ts :evidence/assembly-mismatch)
@@ -32,3 +37,6 @@
       (anomaly/anomaly? value) value
       (= value (record ctx kind content)) content
       :else (invalid ctx))))
+
+(comment
+  (decode {} :checkpoint "invalid"))

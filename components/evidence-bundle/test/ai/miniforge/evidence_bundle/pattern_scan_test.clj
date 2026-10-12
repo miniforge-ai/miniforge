@@ -3,6 +3,7 @@
 ;; Licensed under the Apache License, Version 2.0.
 (ns ai.miniforge.evidence-bundle.pattern-scan-test
   (:require [ai.miniforge.evidence-bundle.scanner :as scanner]
+            [ai.miniforge.redaction.interface :as redaction]
             [clojure.string :as str]
             [clojure.test :refer [deftest is]]))
 
@@ -16,7 +17,8 @@
   [value])
 
 (deftest ^{:stratum 0} separate-values-do-not-form-a-sensitive-string
-  (doseq [value [["000" "00" "0000"] ["alice" "@" "example.test"]]]
+  (doseq [value [["000" "00" "0000"] ["alice" "@" "example.test"]
+                 "1000-00-0000" "000-00-00000"]]
     (is (empty? (:scan/findings (scanner/scan-artifact value))))))
 
 ;------------------------------------------------------------------------------ Layer 1
@@ -34,13 +36,23 @@
 ;------------------------------------------------------------------------------ Layer 2
 
 (deftest ^{:stratum 2} scans-original-values-beyond-print-bounds
-  (doseq [[text type] [["000-00-0000" :ssn] ["alice@example.test" :email]]
+  (doseq [[text type] [["000-00-0000" :ssn] ["employee_ssn_000-00-0000_suffix" :ssn]
+                     ["alice@example.test" :email]]
           value (placements text)]
     (let [result (binding [*print-level* 1 *print-length* 1] (scanner/scan-artifact value))
           metadata (scanner/compliance-metadata result)]
       (is (= [{:finding/type type}] (:scan/findings result)))
       (is (true? (:evidence/contains-pii? metadata)))
       (is (not (str/includes? (pr-str result) text))))))
+
+(deftest ^{:stratum 2} marker-survives-embedded-keys-and-metadata
+  (doseq [text [(redaction/marker) (str "before_" (redaction/marker) "_after")]
+          value (placements text)]
+    (let [result (scanner/scan-artifact value)]
+      (is (= [{:finding/type :redaction-marker}] (:scan/findings result)))
+      (is (scanner/redaction-recorded? result))
+      (is (scanner/protection-required? result))
+      (is (nil? (:evidence/contains-pii? (scanner/compliance-metadata result)))))))
 
 (comment
   (clojure.test/run-tests 'ai.miniforge.evidence-bundle.pattern-scan-test))

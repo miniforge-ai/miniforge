@@ -20,6 +20,7 @@
   (:require
    [ai.miniforge.anomaly.interface :as anomaly]
    [ai.miniforge.evidence-bundle.interface :as evidence]
+   [ai.miniforge.phase-opsv.event-evidence :as event-evidence]
    [ai.miniforge.phase-opsv.evidence-checkpoint :as checkpoint]
    [ai.miniforge.phase-opsv.messages :as msg]
    [ai.miniforge.phase-opsv.runtime-context :as context]))
@@ -57,16 +58,21 @@
                   (:evidence-bundle/id assembly))
         (assoc-in [:execution/input :opsv/evidence-assembly] assembly))))
 
-(defn ^{:stratum 0} persist
+(defn- ^{:stratum 0} checkpoint-assembly [ctx store bundle-id]
+  (if-let [stream (:event-stream ctx)]
+    (event-evidence/capture! store bundle-id stream (context/workflow-id ctx))
+    (evidence/get-opsv-assembly store bundle-id)))
+
+;------------------------------------------------------------------------------ Layer 1
+
+(defn ^{:stratum 1} persist
   [ctx]
   (let [store (:opsv/evidence-assembly-store ctx)
         bundle-id (get-in ctx [:execution/input :opsv/evidence-bundle-id])]
     (if-let [assembly (and store bundle-id
-                           (evidence/get-opsv-assembly store bundle-id))]
+                           (checkpoint-assembly ctx store bundle-id))]
       (checkpoint/persist ctx assembly)
       ctx)))
-
-;------------------------------------------------------------------------------ Layer 1
 
 (defn- ^{:stratum 1} restore-or-allocate
   [ctx supplied-store bundle-id]
@@ -93,3 +99,6 @@
     (if (assembly-for-workflow? supplied-assembly (context/workflow-id ctx))
       (with-supplied-assembly ctx supplied-store supplied-assembly)
       (restore-or-allocate ctx supplied-store bundle-id))))
+
+(comment
+  (persist {}))

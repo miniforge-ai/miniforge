@@ -121,6 +121,20 @@
                              (get codex-pin/phase->situation phase))
                consider-resp (when situation (codex/consider codex-dir situation))
                problems (codex-problems codex-dir)]
+           ;; §7.7.2.1: the consultation record is written on EVERY
+           ;; consulting leave, not only on misses — the retirement
+           ;; trigger's zero-entropy signature lives in the runs where
+           ;; the guarded failure never happened, which produce no miss.
+           (when consultation
+             (let [written (gap/record-consultation!
+                            dir
+                            (gap/build-consultation-entry
+                             {:run-id (:execution/id ctx)
+                              :phase phase
+                              :consultation consultation}))]
+               (when (and logger (:codex-gap/anomaly written))
+                 (log/warn logger phase :codex-gap/ledger-write-failed
+                           {:data written}))))
            (doseq [signal (phase-signals ctx phase)]
              (let [{:keys [bucket attribution queue-reason]}
                    (gap/classify {:miss/situation situation

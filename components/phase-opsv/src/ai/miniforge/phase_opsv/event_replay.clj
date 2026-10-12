@@ -25,40 +25,39 @@
     (anomaly/anomaly :unavailable (msg/ts :event/sequence-unavailable)
                      {:event/id (:event/id event)})))
 
-(defn- ^{:stratum 0} stable-event-id [event]
-  (let [digest (artifact/content-digest
-                (dissoc event :event/id :event/timestamp :event/sequence-number))]
-    (if (anomaly/anomaly? digest) digest
-      (UUID/nameUUIDFromBytes (.getBytes ^String digest StandardCharsets/UTF_8)))))
+(defn- ^{:stratum 0} stored-event [stream event]
+  (some #(when (= (:event/id event) (:event/id %)) %) (events/get-events stream)))
 
 ;------------------------------------------------------------------------------ Layer 1
 
 (defn- ^{:stratum 1} acknowledged-event [ctx event]
-  (let [store (:opsv/evidence-assembly-store ctx)
-        assembly (when store (evidence/get-opsv-assembly store (:opsv/evidence-bundle-id event)))]
-    (when (and (= (:workflow/id event) (:evidence-bundle/workflow-id assembly))
-               (contains? (:opsv/event-refs assembly) (:event/id event)))
-      (sequence-acknowledgment event (get-in assembly [:opsv/event-sequences (:event/id event)])))))
+  (when-let [store (:opsv/evidence-assembly-store ctx)]
+    (let [assembly (evidence/get-opsv-assembly store (:opsv/evidence-bundle-id event))]
+      (when (and (= (:workflow/id event) (:evidence-bundle/workflow-id assembly))
+                 (contains? (:opsv/event-refs assembly) (:event/id event)))
+        (sequence-acknowledgment event (get-in assembly [:opsv/event-sequences (:event/id event)]))))))
 
 (defn- ^{:stratum 1} retryable? [event]
   (and (contains? retryable-types (:event/type event))
        (uuid? (:opsv/evidence-bundle-id event))))
 
-(defn- ^{:stratum 1} identified-event [event]
-  (let [id (stable-event-id event)]
-    (if (anomaly/anomaly? id) id (assoc event :event/id id))))
-
 ;------------------------------------------------------------------------------ Layer 2
 
 (defn ^{:stratum 2} identify [event]
-  (if (retryable? event) (identified-event event) event))
+  (if-not (retryable? event)
+    event
+    (let [digest (artifact/content-digest
+                  (dissoc event :event/id :event/timestamp :event/sequence-number))]
+      (if (anomaly/anomaly? digest) digest
+        (assoc event :event/id (UUID/nameUUIDFromBytes (.getBytes ^String digest StandardCharsets/UTF_8)))))))
 
 (defn ^{:stratum 2} publish! [ctx stream event]
-  (if-not (retryable? event)
+  ;; Current publication owns indexed deduplication and retains the original receipt.
+  (if (or (events/current-event-stream? stream) (not (retryable? event)))
     (events/publish! stream event)
     (locking stream
-      (or (some #(when (= (:event/id event) (:event/id %)) %) (events/get-events stream))
-          (acknowledged-event ctx event)
+      (or (stored-event stream event)
+          (when (events/legacy-event-stream? stream) (acknowledged-event ctx event))
           (events/publish! stream event)))))
 
 (comment

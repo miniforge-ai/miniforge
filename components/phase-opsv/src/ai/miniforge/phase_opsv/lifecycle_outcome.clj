@@ -16,3 +16,6 @@
            :output output :metrics empty-metrics}
     (anomaly/anomaly? output)
     (assoc :error {:message (:anomaly/message output) :data (:anomaly/data output)})))
+
+(comment
+  (phase-result {}))

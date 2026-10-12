@@ -38,6 +38,26 @@
 
 ;------------------------------------------------------------------------------ Layer 0
 
+(def ^{:stratum 0} create-current-event-stream
+  "Create a durable stream for the supported current profiles; see interface.stream."
+  stream/create-current-event-stream)
+
+(def ^{:stratum 0} current-event-stream?
+  "Validate current stream structure, including closed streams; not availability or authority."
+  stream/current-event-stream?)
+
+(def ^{:stratum 0} legacy-event-stream?
+  "Validate legacy stream structure without granting execution authority."
+  stream/legacy-event-stream?)
+
+(def ^{:stratum 0} current-journal-directory
+  "Return a current stream's canonical journal directory, including after close. Not an authority check."
+  stream/current-journal-directory)
+
+(def ^{:stratum 0} close-current-event-stream!
+  "Release a current stream's journal ownership; not a listener drain."
+  stream/close-current-event-stream!)
+
 ;; ────────────────────────────────────────────────────────────────────────────
 ;; Stream lifecycle and control state
 (def ^{:stratum 0} create-control-state
@@ -78,6 +98,18 @@
    generator for lexically-sortable ids)."
   stream/create-event-stream)
 
+(def ^{:stratum 0} prepare-current-publication
+  "Prepare a supported current-write draft as [scope redacted-draft] or an anomaly.
+   This validates chain v2, intervention v2, Spec snapshots and OPSV drafts;
+   it grants no lifecycle authority or receipt."
+  stream/prepare-current-publication)
+
+(def ^{:stratum 0} create-event-draft
+  "Construct an uncommitted envelope without a sequence number. No publication,
+   redaction, or admission occurs; retain this draft across publication retries.
+   Do not pass an uncommitted draft to the legacy publish! API."
+  stream/create-event-draft)
+
 (def ^{:stratum 0} create-envelope
   "Build an event envelope map with an atomically-assigned per-workflow
    sequence number. Returns a map carrying :event/type, :event/id (a
@@ -110,7 +142,8 @@
 (def ^{:stratum 0} get-events
   "Query the in-memory event log. Returns a vector of event maps.
    Optional opts map filters/pages: :workflow-id, :event-type, :offset,
-   :limit."
+   :limit. Current streams also support authoritative :scope [type UUID] and
+   return anomalies for invalid query options."
   stream/get-events)
 
 (def ^{:stratum 0} get-latest-status
@@ -171,7 +204,7 @@
    no fence and only waits for in-flight publishes. Returns a map:
    {:ok? true :pending-publishers 0} or {:ok? false :reason :timeout
    :pending-publishers N}. Opts: :workflow-id, :timeout-ms (default
-   5000)."
+   5000). Unsupported on current-profile streams."
   stream/quiesce!)
 
 (def ^{:stratum 0} drain!
@@ -180,7 +213,7 @@
    :drained-count N}, {:ok? false :reason :timeout :pending-count N}, or
    {:ok? false :reason :sink-error :failed-sinks [...]}. Opts:
    :timeout-ms (default 5000) is the total budget across in-flight
-   settle plus sink drain."
+   settle plus sink drain. Unsupported on current-profile streams."
   stream/drain!)
 
 ;; Phase heartbeat scheduler — start/stop liveness signalling for long-running phases.
@@ -460,6 +493,12 @@
    action id; optional result as :action/result."
   events/control-action-executed)
 
+(def ^{:stratum 0} create-chain-event-draft
+  "Args: [stream event-type payload & [opts]]. Validate a v2 chain payload before
+   allocating event identity. Supply run/definition identity and type-specific fields.
+   No sequence or admission occurs; do not pass to the legacy publisher."
+  events/create-chain-event-draft)
+
 (def ^{:stratum 0} chain-started
   "Build and return a :chain/started event envelope map (chains are not
    workflow-scoped, so :workflow/id is nil) carrying :chain/id and
@@ -468,18 +507,20 @@
 
 (def ^{:stratum 0} chain-step-started
   "Build and return a :chain/step-started event envelope map carrying
-   :chain/id, :step/id, :step/index, and :step/workflow-id."
+   :chain/id, :step/id, :step/index, and :step/workflow-id.
+   Optional final opts accept :workflow/id for child identity and legacy sequencing."
   events/chain-step-started)
 
 (def ^{:stratum 0} chain-step-completed
   "Build and return a :chain/step-completed event envelope map carrying
-   :chain/id, :step/id, and :step/index."
+   :chain/id, :step/id, and :step/index.
+   Optional final opts accept :workflow/id for child identity and legacy sequencing."
   events/chain-step-completed)
 
 (def ^{:stratum 0} chain-step-failed
   "Build and return a :chain/step-failed event envelope map carrying
    :chain/id, :step/id, :step/index, and :chain/error; optional
-   :failure/class."
+   :failure/class and :workflow/id in the final options map."
   events/chain-step-failed)
 
 (def ^{:stratum 0} chain-completed

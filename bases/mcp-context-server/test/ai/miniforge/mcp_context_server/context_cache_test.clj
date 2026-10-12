@@ -114,6 +114,27 @@
       (is (= "(ns core)\n(defn hello [])" (get-in result [:content 0 :text])))
       (is (not (:isError result))))))
 
+(deftest ^{:stratum 0} handle-answer-peg-records-and-confirms-test
+  (testing "answer_peg records the call and confirms (Codex SPEC §7.7.2)"
+    (let [result (cache/handle-answer-peg
+                  {"peg_id" "contract-verified-against-producer"
+                   "answer" "no"
+                   "basis" "did not open the producer"})]
+      (is (not (:isError result)))
+      (is (= "recorded: contract-verified-against-producer = no"
+             (get-in result [:content 0 :text])))
+      (let [[row :as rows] (:answers @cache/cache-state)]
+        (is (= 1 (count rows)))
+        (is (= "contract-verified-against-producer" (:peg-id row)))
+        (is (= "no" (:answer row)))
+        (is (= "did not open the producer" (:basis row)))
+        (is (string? (:timestamp row)))))))
+
+(deftest ^{:stratum 0} handle-answer-peg-basis-optional-test
+  (testing "a row without basis carries no :basis key (not a nil)"
+    (cache/handle-answer-peg {"peg_id" "p" "answer" "yes"})
+    (is (not (contains? (first (:answers @cache/cache-state)) :basis)))))
+
 (deftest ^{:stratum 0} handle-context-read-offset-limit-test
   (testing "applies offset and limit on cache hit"
     (swap! cache/cache-state assoc-in [:files "src/core.clj"] "line0\nline1\nline2\nline3")
@@ -194,6 +215,20 @@
       "nil content rejected"))
 
 ;------------------------------------------------------------------------------ Layer 1
+
+(deftest ^{:stratum 1} flush-answers-writes-and-skips-empty-test
+  (with-temp-dir
+    (fn [dir]
+      (testing "no recorded answers -> no file (same contract as flush-reads!)"
+        (cache/flush-answers! dir)
+        (is (not (.exists (io/file dir "answers.edn")))))
+      (testing "recorded answers land verbatim in answers.edn"
+        (cache/handle-answer-peg {"peg_id" "p1" "answer" "yes"})
+        (cache/handle-answer-peg {"peg_id" "p2" "answer" "no" "basis" "checked"})
+        (cache/flush-answers! dir)
+        (let [rows (edn/read-string (slurp (str dir "/answers.edn")))]
+          (is (= ["p1" "p2"] (mapv :peg-id rows)))
+          (is (= [nil "checked"] (mapv :basis rows))))))))
 
 (deftest ^{:stratum 1} handle-context-read-cache-miss-test
   (testing "falls back to filesystem and records miss"
