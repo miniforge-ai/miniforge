@@ -2,7 +2,8 @@
 ;; Copyright 2025-2026 Christopher Lester (christopher@miniforge.ai)
 ;; Licensed under the Apache License, Version 2.0.
 (ns ai.miniforge.workflow.chain-child-identity-test
-  (:require [ai.miniforge.event-stream.interface :as events]
+  (:require [ai.miniforge.anomaly.interface :as anomaly]
+            [ai.miniforge.event-stream.interface :as events]
             [ai.miniforge.workflow.chain-execution-test-support :as support]
             [ai.miniforge.workflow.interface :as workflow]
             [ai.miniforge.workflow.loader :as loader]
@@ -65,21 +66,24 @@
         ids (mapcat (comp execution-ids :outcome) [first-run next-run])]
     (is (= 4 (count (set ids))))))
 
-(deftest ^{:stratum 2} early-failures-retain-the-started-child-identity
-  (let [definition (support/definition)
-        bad-bindings (assoc-in definition [:chain/steps 0 :step/input-bindings] 42)]
-    (doseq [[input load-child] [[definition support/missing-workflow]
-                               [bad-bindings support/loaded-workflow]]]
-      (let [{:keys [outcome events calls]} (observed input {} load-child complete)
-            ids (execution-ids outcome)
-            step-history (step-events events)]
-        (is (= :failed (:chain/status outcome)))
-        (is (empty? calls))
-        (is (= 1 (count ids)))
-        (is (uuid? (first ids)))
-        (is (= [:chain/step-started :chain/step-failed] (mapv :event/type step-history)))
-        (is (= [(first ids) (first ids)] (mapv :workflow/id step-history)))
-        (is (= [0 1] (mapv :event/sequence-number step-history)))))))
+(deftest ^{:stratum 2} loading-failures-retain-the-started-child-identity
+  (let [{:keys [outcome events calls]} (observed (support/definition) {} support/missing-workflow complete)
+        ids (execution-ids outcome)
+        step-history (step-events events)]
+    (is (= :failed (:chain/status outcome)))
+    (is (empty? calls))
+    (is (= 1 (count ids)))
+    (is (uuid? (first ids)))
+    (is (= [:chain/step-started :chain/step-failed] (mapv :event/type step-history)))
+    (is (= [(first ids) (first ids)] (mapv :workflow/id step-history)))
+    (is (= [0 1] (mapv :event/sequence-number step-history)))))
+
+(deftest ^{:stratum 2} invalid-binding-shapes-are-refused-before-a-child-starts
+  (let [definition (assoc-in (support/definition) [:chain/steps 0 :step/input-bindings] 42)
+        {:keys [outcome events calls]} (observed definition {} support/loaded-workflow complete)]
+    (is (anomaly/any-anomaly? outcome))
+    (is (empty? calls))
+    (is (empty? events))))
 
 (deftest ^{:stratum 2} conflicting-child-result-cannot-advance-the-chain
   (let [{:keys [outcome events calls]} (observed (support/definition) {} support/loaded-workflow conflicting-child)

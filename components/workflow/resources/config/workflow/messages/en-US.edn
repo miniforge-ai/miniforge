@@ -19,6 +19,7 @@
 {:workflow/messages
  {:chain/child-incomplete "Chain child did not complete successfully."
   :chain/child-identity-conflict "Chain child returned a conflicting workflow-run identity."
+  :chain/invalid-definition "Chain definition requires a resolved version, unique steps, and supported immutable bindings."
   :chain/not-found "Chain '{chain-id}' not found."
   :chain/definition-mismatch "Chain definition does not match the requested identity or resolved version."
   :chain/invalid-request "Chain selection requires a keyword identity and a resolved version or latest selector."

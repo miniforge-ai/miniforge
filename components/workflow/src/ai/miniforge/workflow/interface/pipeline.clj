@@ -15,19 +15,18 @@
 ;; WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 ;; See the License for the specific language governing permissions and
 ;; limitations under the License.
-
 (ns ai.miniforge.workflow.interface.pipeline
   "Interceptor-pipeline workflow APIs."
   (:require
-   [ai.miniforge.workflow.chain :as chain]
+   [ai.miniforge.workflow.boundary.chain-admission :as chain-admission]
    [ai.miniforge.workflow.chain-loader :as chain-loader]
    [ai.miniforge.workflow.dag-orchestrator :as dag-orchestrator]
    [ai.miniforge.workflow.runner :as runner]))
 
 ;------------------------------------------------------------------------------ Layer 0
-;; Pipeline API
 
-(def run-pipeline
+;; Pipeline API
+(def ^{:stratum 0} run-pipeline
   "Execute a workflow's interceptor pipeline end-to-end. Args:
    [workflow input] or [workflow input opts]. Acquires the execution
    environment, runs phases, validates, publishes, and always cleans up.
@@ -35,29 +34,31 @@
    governed-mode misconfiguration."
   runner/run-pipeline)
 
-(def build-pipeline
+(def ^{:stratum 0} build-pipeline
   "Build the interceptor pipeline from a workflow config. Args: [workflow].
    Returns a vector of phase interceptors."
   runner/build-pipeline)
 
-(def validate-pipeline
+(def ^{:stratum 0} validate-pipeline
   "Validate a workflow's pipeline (phase + execution-machine checks). Args:
    [workflow]. Returns {:valid? boolean :errors [...] :warnings [...]}."
   runner/validate-pipeline)
 
-(defn run-chain
+(defn ^{:stratum 0} run-chain
+  "Execute a resolved sequential definition, or return an invalid-input anomaly.
+   Results retain fresh invocation identity and the admitted composition; recovery requires durable storage."
   [chain-def chain-input opts]
-  (chain/run-chain chain-def chain-input opts))
+  (chain-admission/run-chain chain-def chain-input opts))
 
-(defn load-chain
+(defn ^{:stratum 0} load-chain
   [chain-id version]
   (chain-loader/load-chain chain-id version))
 
-(defn list-chains
+(defn ^{:stratum 0} list-chains
   []
   (chain-loader/list-chains))
 
-(defn execute-plan-as-dag
+(defn ^{:stratum 0} execute-plan-as-dag
   "Execute a normalized plan through the DAG orchestrator.
 
    Args: [plan context]. Returns an aggregate DAG execution summary with
