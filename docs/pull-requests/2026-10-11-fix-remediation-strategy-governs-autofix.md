@@ -114,8 +114,11 @@ wired in `scan.clj` and the PR's contract covers them.
 
 ## Testing Plan
 
-New tests, all confirmed to fail against the pre-fix code and pass after —
-**9 failures before, 0 after**, so none of them are vacuous:
+New tests, all confirmed to fail against the pre-fix code and pass after, so
+none of them are vacuous. Measured in two rounds because the diff/plan tests
+arrived with the review fix: **9 assertion failures** for the first eight tests
+against the parent of this branch, then **3** for the two diff/plan tests
+against the first commit — **12 in total**, 0 after:
 
 | Test | Guards |
 |---|---|
@@ -218,12 +221,16 @@ both real:
    in `scan_diff_plan.clj` with coverage through the real entry points.
 2. **Low — incomplete sentence in `prepend-violation?`.** Correct; "This also
    hardcoded" had no subject. Reworded to name the previous implementation.
+3. **Low — inconsistent failure totals in this doc.** Correct; the Testing Plan
+   said 9 while the checklist said 9 plus 3. Both now state 12 in total and say
+   why it was measured in two rounds.
 
 ## Checklist
 
 - [x] Both defects reproduced before fixing
-- [x] Every new test confirmed to fail pre-fix (9 failures, then 3 more for the
-      diff/plan paths) and pass post-fix
+- [x] Every new test confirmed to fail pre-fix and pass post-fix — 12 assertion
+      failures in total (9 for the first eight tests, 3 for the two diff/plan
+      tests added in review)
 - [x] Rationale text added to the message catalog, not hardcoded
 - [x] Downstream consumers of classify output re-tested
 - [x] `lint:clj`, `lint:stratum`, `poly:check`, `commit-budget` all pass
