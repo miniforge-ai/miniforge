@@ -6,6 +6,7 @@
   (:require [ai.miniforge.event-stream.chain-spec :as chain]
             [ai.miniforge.event-stream.opsv-draft-spec :as opsv]
             [ai.miniforge.event-stream.supervisory-spec :as supervisory]
+            [ai.miniforge.event-stream.workflow-draft-spec :as workflow]
             [ai.miniforge.schema.interface :as schema]))
 
 ;------------------------------------------------------------------------------ Layer 0
@@ -43,7 +44,7 @@
 (def ^{:stratum 1} CurrentDraft
   "Only these reconciled profiles are supported; no generic envelope fallback."
   [:and EnvelopeDraft
-   [:or chain/Payload supervisory/InterventionPayload SpecDraft opsv/Draft]])
+   [:or chain/Payload supervisory/InterventionPayload SpecDraft opsv/Draft workflow/Draft]])
 
 (comment
   CurrentDraft)
