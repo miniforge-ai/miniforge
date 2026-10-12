@@ -175,10 +175,11 @@ so the exclusion did not over-reach. `:std/header-copyright` reports
 
 ## Deployment Plan
 
-**This PR must merge before the standards PR.** The order is not free, because
-step 3 is automated.
+**The hard constraint is on step 3, not on the order of 1 and 2:** the automated
+bump PR must not merge until both feature PRs are in. Consumer-first is the
+*preferred* order because it means the bump PR is safe the moment it appears.
 
-1. **This PR merges.** Inert on its own — no rule in the pinned pack declares
+1. **This PR merges** (preferred first). Inert on its own — no rule in the pinned pack declares
    `excludeGlobs`, and `components/phase/resources/packs/miniforge-standards.pack.edn`
    (the artifact the runtime actually reads, not a live compile) still carries
    `bb-over-shell` as `{:type :custom}` / `:audit` from the current pin.
@@ -192,11 +193,12 @@ step 3 is automated.
    / `:high` **and** gains `:exclude-globs ["examples/**"]`, and
    `:std/header-copyright` goes `auto-fixable-default` `true` → `false`.
 
-If #130 merges before this PR, the automated bump PR arrives carrying a
-recompiled pack in which `bb-over-shell` is a live `hard-halt` and nothing in
-this repo reads `:exclude-globs` — merging it then blocks the gate on the three
-`examples/` files. The PR is not auto-merged, so it is catchable, but the safe
-order removes the window entirely.
+If #130 merges first nothing breaks on its own: the bump PR arrives carrying a
+recompiled pack in which `bb-over-shell` is a live `hard-halt` while nothing in
+this repo reads `:exclude-globs`, and it sits there as a review-only PR. The
+cost is a coordination window in which merging that PR would block the gate on
+the three `examples/` files. Consumer-first closes the window; it is not a
+correctness requirement, and #130 does not need to wait on this PR.
 
 ### Fan-out beyond this repo
 
