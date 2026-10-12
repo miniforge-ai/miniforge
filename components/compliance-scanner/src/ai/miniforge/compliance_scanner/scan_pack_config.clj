@@ -22,44 +22,23 @@
    dispatches on, and filters pack rules by the :rules selector. Rule/
    category selector matching lives in `scan-rule-selector`.
 
-   Layer 0: Glob matching (includes minus excludes), suggest-fn building,
-            scannable-types, violation enrichment
+   File selection is NOT implemented here: `:file-pred` delegates to
+   `policy-pack/path-in-scope?`, the same predicate the workflow gate
+   reaches through `filter-applicable-rules`. Two glob implementations
+   would give a rule's declared `:exclude-globs` different meanings in the
+   gate and in a scan — `**/*.sh` covers a root-level `build.sh` under
+   policy-pack's matcher and not under java.nio's.
+
+   Layer 0: suggest-fn building, scannable-types, violation enrichment
    Layer 1: Pack-rule filtering by the :rules option + detection config
             conversion"
   (:require [ai.miniforge.compliance-scanner.scan-rule-selector :as rule-selector]
-            [clojure.string :as str])
-  (:import [java.nio.file FileSystems Paths]))
+            [ai.miniforge.policy-pack.interface :as policy-pack]
+            [clojure.string :as str]))
 
 ;------------------------------------------------------------------------------ Layer 0
 
 ;; Pack-driven detection config
-(defn- ^{:stratum 0} globs->file-pred
-  "Convert a rule's include and exclude glob patterns into a file-path
-   predicate. Uses java.nio.file.PathMatcher for standard glob matching.
-
-   A path is in scope when it matches an include pattern and no exclude
-   pattern. `excludes` is a rule's `:rule/applies-to :exclude-globs` — a
-   scope carve-out the rule declares, e.g. a fixture tree a content rule
-   must read past rather than flag. The exclusion is applied here, at file
-   selection, rather than after detection: a hard-halt rule that detects a
-   violation it is not allowed to act on still blocks the gate.
-
-   Both pattern sets are compiled once, outside the returned closure — it
-   runs once per file in the repo index.
-
-   (Matcher compilation is inline rather than a shared helper on purpose:
-   extracting it adds a call-graph layer, and this namespace is at the rule
-   210 budget of 3.)"
-  [globs excludes]
-  (let [fs               (FileSystems/getDefault)
-        matcher          #(.getPathMatcher fs (str "glob:" %))
-        include-matchers (mapv matcher globs)
-        exclude-matchers (mapv matcher (or excludes []))]
-    (fn [path]
-      (let [p (Paths/get path (into-array String []))]
-        (and (boolean (some #(.matches ^java.nio.file.PathMatcher % p) include-matchers))
-             (not-any? #(.matches ^java.nio.file.PathMatcher % p) exclude-matchers))))))
-
 (defn- ^{:stratum 0} build-suggest-fn
   "Build a suggest function from pack detection and remediation config.
    Uses str/replace-first with $1/$2/$3 group references for mechanical fixes."
@@ -78,17 +57,6 @@
 
       :else
       (constantly nil))))
-
-(def ^{:stratum 0} ^:private every-path-globs
-  "The include set for a rule that declares no `:file-globs` — it applies
-   everywhere.
-
-   `**` and not `**/*`: java.nio's `glob:**/*` requires a separator, so it
-   does not match a root-level path (`README.md`). A rule carrying only
-   `:exclude-globs` is documented as covering every non-excluded path, and
-   with `**/*` it would silently skip every file at the repo root. `glob:**`
-   matches both root and nested."
-  ["**"])
 
 (def ^{:stratum 0} ^:private scannable-types
   "Detection types the compliance scanner can process."
@@ -119,15 +87,14 @@
   [rule]
   (let [detection   (get rule :rule/detection)
         remediation (get rule :rule/remediation)
-        globs       (get-in rule [:rule/applies-to :file-globs])
-        excludes    (get-in rule [:rule/applies-to :exclude-globs])]
+        applies-to  (get rule :rule/applies-to)]
     (when (= :content-scan (get detection :type))
       (cond->
         {:rule/id       (get rule :rule/id)
          :rule/category (get rule :rule/category)
          :title         (get rule :rule/title)
          :pattern       (re-pattern (get detection :pattern))
-         :file-pred     (globs->file-pred (or globs every-path-globs) excludes)
+         :file-pred     #(policy-pack/path-in-scope? applies-to %)
          :suggest-fn    (build-suggest-fn detection remediation)
          :detect-mode   (get detection :mode :positive)}
 

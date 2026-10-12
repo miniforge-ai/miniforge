@@ -164,6 +164,18 @@
    no match or a bad pattern."
   registry/glob-matches?)
 
+(def ^{:stratum 0} path-in-scope?
+  "Predicate. (path-in-scope? applies-to path) returns true when a rule's
+   `:rule/applies-to` path scope covers `path` — `:file-globs` (absent or
+   empty means everything) minus `:exclude-globs`, with an exclusion
+   winning.
+
+   This is THE path-scope question for a rule. Every consumer that decides
+   whether a rule covers a file goes through it, so a declared
+   `:exclude-globs` cannot mean one thing to the workflow gate and another
+   to a scanner."
+  registry/path-in-scope?)
+
 (def ^{:stratum 0} compare-versions
   "Compare two DateVer (YYYY.MM.DD) version strings. Returns a negative int if
    a < b, 0 if equal, positive if a > b; unparseable versions compare as

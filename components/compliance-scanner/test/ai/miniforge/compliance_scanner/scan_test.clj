@@ -265,9 +265,11 @@
           ;; Real automation — in scope.
           (write-temp-file! tmp-dir "scripts/deploy.sh"
                             "#!/usr/bin/env bash\nset -euo pipefail\n")
-          ;; Root-level script: matched by neither `**/*.sh` nor `scripts/**`,
-          ;; so it is out of scope for the globbed rule and in scope for the
-          ;; unscoped one.
+          ;; Root-level script. `**/*.sh` covers it under policy-pack's
+          ;; matcher and would NOT under java.nio's, which requires a
+          ;; separator after `**/`. It is in this fixture to pin that: the
+          ;; scanner no longer carries its own matcher, so a root path is in
+          ;; scope here exactly as it is for the gate.
           (write-temp-file! tmp-dir "root-setup.sh"
                             "#!/usr/bin/env bash\necho root\n")
           ;; Fixture scripts — the subject of analysis, not automation.
@@ -288,18 +290,23 @@
                                :violations
                                (map :file)
                                set))]
-          (testing "without the carve-out all three shebang files are flagged"
+          (testing "without the carve-out every shebang file in scope is flagged,
+                    the root-level one included — `**/*.sh` reaches a root path
+                    under the shared predicate"
             (is (= #{"scripts/deploy.sh"
+                     "root-setup.sh"
                      "examples/demo/run-demo.sh"
                      "examples/demo-polyglot-repo/scripts/setup.sh"}
                    (scan-with nil))))
 
-          (testing "with examples/** excluded only the real automation is flagged"
-            (is (= #{"scripts/deploy.sh"} (scan-with ["examples/**"]))))
+          (testing "with examples/** excluded only the real automation is flagged,
+                    and the exclusion takes the fixture tree and nothing else"
+            (is (= #{"scripts/deploy.sh" "root-setup.sh"}
+                   (scan-with ["examples/**"]))))
 
-          (testing "a rule with NO :file-globs covers every non-excluded path,
-                    root-level files included — java.nio's `glob:**/*` would
-                    silently skip `root-setup.sh`, so the fallback is `**`"
+          (testing "a rule with NO :file-globs covers every non-excluded path —
+                    absent globs mean everything, with no `**/*` fallback to
+                    get wrong"
             (let [scan-unscoped (fn [excludes]
                                   (->> (scan/scan-repo path path
                                                        {:rules #{:std/bb-over-shell}

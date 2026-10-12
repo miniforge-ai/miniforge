@@ -73,28 +73,44 @@ table).
 
 ### `compliance-scanner`
 
-- `scan_pack_config.clj` — `globs->file-pred` takes excludes and returns a
-  predicate that is "matches an include and no exclude". Both pattern sets are
-  compiled to `PathMatcher`s once, outside the returned closure, which runs once
-  per file in the repo index.
+- `scan_pack_config.clj` — the namespace **stops implementing file selection**.
+  `globs->file-pred` and its `java.nio` imports are gone; `:file-pred` is now
+  `#(policy-pack/path-in-scope? applies-to %)`, the same predicate the workflow
+  gate reaches through `filter-applicable-rules`.
 
-  The no-globs include fallback changes from `["**/*"]` to `["**"]`, named
-  `every-path-globs`. java.nio's `glob:**/*` requires a separator, so it does
-  not match a root-level path: a rule carrying only `:exclude-globs` is
-  documented as covering every non-excluded path, and with `**/*` it would
-  silently skip every file at the repo root. No rule reaches this fallback today
-  (all five `:content-scan` rules declare globs), so there is no behaviour
-  change — but the field this PR adds is exactly what makes a rule with no
-  `globs` worth writing, so the fallback has to be right before that happens.
-
-  The exclusion is applied at **file selection**, not after detection, because
+  The exclusion is therefore applied at **file selection**, not after detection:
   a `hard-halt` rule that detects a violation it is not allowed to act on still
   blocks the gate.
 
-  Matcher compilation is inlined rather than extracted to a helper: a helper
-  adds a call-graph layer, and `stratum-lint` then reports this namespace at 3
-  of 3 layers with no headroom. The docstring says so, so the next reader does
-  not undo it.
+### One matcher, because two gave the new field two meanings
+
+The scanner used `java.nio` `PathMatcher`; policy-pack uses its own
+`glob-matches?`. For *include* globs that divergence is pre-existing. For
+`:exclude-globs` it would have been newly introduced, and it is not academic:
+`glob:**/*.sh` requires a separator, so `:exclude-globs ["**/*.sh"]` excludes a
+root-level `build.sh` in the gate and **not** in a scan. The same declared
+carve-out would mean two different things.
+
+So the scanner now asks policy-pack. Measured over this repo (4,369 files), the
+switch changes which files one of the five `:content-scan` rules selects:
+`:std/clojure-no-requiring-resolve` (`**/*.clj`, `**/*.cljc`) gains root-level
+`build.clj` and `demo-self-implementation.clj`. That is a blind spot closed, not
+a regression — the rule is `hard-halt` and those files were never scanned — and
+neither matches its pattern, so no new violation appears. The other four rules
+select identical sets, and `:exclude-globs ["examples/**"]` resolves identically
+under both matchers.
+
+It is also faster: 37ms against 123ms over the same 4,369 files with six globs
+and one exclude, warm. `PathMatcher` allocates a `Path` per file; the regex form
+does not.
+
+This supersedes the `["**/*"]` → `["**"]` fallback fix from an earlier commit on
+this branch. There is no fallback any more: `path-in-scope?` treats absent
+`:file-globs` as "everything" directly, so there is no `**/*` to get wrong.
+
+The remaining divergence — `glob-matches?` implements neither `{a,b}` nor
+`[...]`, which `PathMatcher` does — is unchanged by this PR and costs nothing
+today: no glob in the standards uses either form. It stays on the follow-up.
 
 ## Known gap: the semantic analyzer
 
@@ -148,16 +164,16 @@ New tests:
   inline-array and bare-string form; kept without `globs`; absent (not `[]`)
   when undeclared.
 - `scan_test.clj` — end to end through `scan-repo` over a temp git repo holding
-  one real automation script, two fixture scripts and one root-level script. The same one-rule pack is
+  one real automation script, two fixture scripts and one root-level script. The
+  root-level script pins the shared-matcher semantics: `**/*.sh` reaches it here
+  exactly as it does in the gate, which `PathMatcher` would not. The same one-rule pack is
   run **with and without** the carve-out: without it all three are flagged, with
   it only `scripts/deploy.sh`. The control arm is the point — it shows the
   exclusion, not the include globs, is what changed the outcome. A third
   assertion pins `:rules-scanned`, since narrowing files must not disable the
   rule. A fourth runs the same rule with `:file-globs` removed — the shape an
   `alwaysApply` rule carrying only a carve-out compiles to — and asserts the
-  root-level script is in scope both with and without the exclusion. Both
-  root-path assertions fail against the `["**/*"]` fallback, so they are not
-  vacuous.
+  root-level script is in scope both with and without the exclusion.
 
 ### End to end against the real standards trees
 
@@ -172,6 +188,10 @@ Compiled both trees and ran the scanner's own `file-pred` plus the gate's
 `scripts/test-since-stable.bb` — real automation — stays in scope in both runs,
 so the exclusion did not over-reach. `:std/header-copyright` reports
 `auto-fixable-default false` in both, unchanged by this PR.
+
+The gate and the scanner were compared file by file in that run:
+`rule-applies-to-artifact?` and `:file-pred` return the same answer for every
+path, which is the property the shared predicate exists to guarantee.
 
 ## Deployment Plan
 
@@ -234,7 +254,9 @@ returned `some`'s truthy value — both are only ever consumed as predicates.
 - [x] `:exclude-globs` on the applicability schema, documented
 - [x] Compiler reads `excludeGlobs`, including without `globs`
 - [x] One shared `path-in-scope?`, used by both policy-pack entry points
-- [x] Scanner `file-pred` excludes at file selection, matchers compiled once
+- [x] Scanner `file-pred` delegates to the shared predicate — one matcher, one
+      meaning for a declared exclusion
+- [x] Matcher-switch impact measured over the whole repo, rule by rule
 - [x] End-to-end scan test with a control arm (with and without the carve-out)
 - [x] Verified against both standards trees: 3 files firing → 0
 - [x] Semantic-analyzer gap stated, cause verified pre-existing, follow-up named
