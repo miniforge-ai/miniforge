@@ -1,3 +1,9 @@
+<!--
+  Title: Miniforge.ai
+  Author: Christopher Lester (christopher@miniforge.ai)
+  Copyright 2025-2026 Christopher Lester. Licensed under Apache 2.0.
+-->
+
 # fix: propagate chain publication failures
 
 ## Overview
@@ -44,6 +50,11 @@ After the completion-failure review correction:
 - Three deployed consumers passed serially in 1m28.
 - Rebuilt CLI: 39,128,990 bytes; isolated packaged regressions passed 29 tests and 162 assertions.
 - Focused regressions passed 9 tests and 39 assertions; lint, strata, and the changed-line standards scan remain clean.
+
+Final standards verification explicitly uses `standards/miniforge` and the PR merge-base, superseding the earlier
+default-path scan results.
+It reports zero violations across 4,348 files after fixing missing headers in this PR document and three related
+implementation documents.
 
 ## Deployment Plan
 
