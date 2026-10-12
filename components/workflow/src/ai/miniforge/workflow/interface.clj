@@ -257,6 +257,7 @@
 (def ^{:stratum 0} run-chain
   "Run a sequence of workflows, feeding each step's output into the next.
    Args: [chain-def chain-input opts]. Invalid definitions return an anomaly before execution.
+   Publication failure returns an anomaly instead of a completed result.
    Set :chain/retention-directory in opts to require durable admission before the executor starts.
    Results contain status, step results, duration, fresh :chain/run-id, resolved definition
    identity/version, and :chain/definition-snapshot. Without the directory option, retention remains in-memory only."

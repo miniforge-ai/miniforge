@@ -12,6 +12,10 @@
   (and (map? result)
        (or (contains? result :anomaly/type) (contains? result :anomaly/category))))
 
+(defn ^{:stratum 0} with-child-identity [error id]
+  (let [path (if (contains? error :anomaly/type) [:anomaly/data :workflow/id] [:workflow/id])]
+    (assoc-in error path id)))
+
 (defn- ^{:stratum 0} error-message [result]
   (let [error (or (:execution/error result) (:anomaly/message result) (:message result))]
     (if (string? error) error (messages/t :chain/child-incomplete))))
