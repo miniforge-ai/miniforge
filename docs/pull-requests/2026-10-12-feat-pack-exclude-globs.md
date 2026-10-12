@@ -153,16 +153,37 @@ so the exclusion did not over-reach. `:std/header-copyright` reports
 
 ## Deployment Plan
 
-1. miniforge-ai/miniforge-standards#130 merges (adds the `excludeGlobs` field
-   and puts it on `bb-over-shell`). Inert without this PR.
-2. This PR merges. Inert without #130 — no rule in the pinned pack declares the
-   field.
-3. `standards/miniforge` re-pinned to standards `main`, and the compiled pack
-   artifact regenerated with `bb standards:pack`.
+**This PR must merge before the standards PR.** The order is not free, because
+step 3 is automated.
 
-Either of (1) and (2) is safe alone and in either order; (3) requires both.
-Re-pinning before this merges arms the `hard-halt` gate on the three `examples/`
-files with no exclusion in effect.
+1. **This PR merges.** Inert on its own — no rule in the pinned pack declares
+   `excludeGlobs`, and `components/phase/resources/packs/miniforge-standards.pack.edn`
+   (the artifact the runtime actually reads, not a live compile) still carries
+   `bb-over-shell` as `{:type :custom}` / `:audit` from the current pin.
+2. **miniforge-ai/miniforge-standards#130 merges.** A push to standards `main`
+   fires `notify-consumers.yml`, which sends a `standards-updated`
+   `repository_dispatch` to this repo. That runs `.github/workflows/bump-standards.yml`,
+   which re-pins the submodule to standards `main`, runs `bb standards:pack`,
+   and opens an automated PR.
+3. **Review and merge that automated bump PR.** Its pack diff is where the gate
+   actually arms: `:std/bb-over-shell` flips to `:content-scan` / `:hard-halt`
+   / `:high` **and** gains `:exclude-globs ["examples/**"]`, and
+   `:std/header-copyright` goes `auto-fixable-default` `true` → `false`.
+
+If #130 merges before this PR, the automated bump PR arrives carrying a
+recompiled pack in which `bb-over-shell` is a live `hard-halt` and nothing in
+this repo reads `:exclude-globs` — merging it then blocks the gate on the three
+`examples/` files. The PR is not auto-merged, so it is catchable, but the safe
+order removes the window entirely.
+
+### Fan-out beyond this repo
+
+`notify-consumers.yml` dispatches the same event to five other consumers —
+`thesium-career`, `thesium`, `thesium-workflows`, `thesium-app-foundation`,
+`miniforge-control`. Each gets its own bump PR pinning the standards that make
+`bb-over-shell` a live `hard-halt`. Whether that is safe there depends on their
+own `.sh`/`.py` inventory and on which compiler they use, neither of which this
+PR changes or verifies. Flagged, not addressed.
 
 ## Related Issues/PRs
 
