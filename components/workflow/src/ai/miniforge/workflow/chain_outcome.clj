@@ -27,13 +27,14 @@
     (if (string? error) error (messages/t :chain/child-incomplete))))
 
 (defn ^{:stratum 0} step-result [chain-id step index result]
-  {:step/id (:step/id step)
-   :step/workflow-id (:step/workflow-id step)
-   :step/execution-id (:execution/id result)
-   :step/status (:execution/status result)
-   :step/output (:execution/output result)
-   :step/chain-id chain-id
-   :step/chain-index index})
+  (cond-> {:step/id (:step/id step)
+           :step/workflow-id (:step/workflow-id step)
+           :step/execution-id (:execution/id result)
+           :step/status (:execution/status result)
+           :step/output (:execution/output result)
+           :step/chain-id chain-id
+           :step/chain-index index}
+    (contains? result :execution/bindings) (assoc :step/bindings (:execution/bindings result))))
 
 (defn- ^{:stratum 0} result-data [result]
   (if (map? result) result {}))
