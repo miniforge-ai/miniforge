@@ -28,14 +28,16 @@
    on miniforge-standards main, not an invention: a pattern that regressed here
    is a rule that stops firing in production.
 
-   Layer 0: `unescape-literal-text` in isolation. The field scoping that
-            decides which frontmatter keys reach it, and the round trip through
-            `mdc->rule`/`compile-standards-pack`, are covered alongside the
-            `rule-config` call site."
+   Layer 0: `unescape-literal-text` in isolation, the field scoping in
+            `build-remediation-config`, and escape-the-escape through `mdc->rule`
+   Layer 1: Round trip of the shared multi-line fixture through `mdc->rule`
+            and `compile-standards-pack`"
   (:require
    [clojure.string :as str]
    [clojure.test :refer [deftest is testing are]]
-   [ai.miniforge.policy-pack.mdc-compiler.frontmatter-values :as sut]))
+   [ai.miniforge.policy-pack.mdc-compiler :as compiler]
+   [ai.miniforge.policy-pack.mdc-compiler.frontmatter-values :as sut]
+   [ai.miniforge.policy-pack.mdc-compiler.rule-config :as rule-config]))
 
 ;------------------------------------------------------------------------------ Layer 0
 
@@ -112,3 +114,107 @@
       nil
       ["a" "b"]
       [])))
+
+(deftest ^{:stratum 0} build-remediation-config-unescapes-only-template-test
+  (testing "template escapes are expanded"
+    (let [cfg (rule-config/build-remediation-config
+               {"strategy" "mechanical"
+                "type"     "prepend"
+                "template" "<!--\\n  Author: Christopher Lester\\n-->"})]
+      (is (= "<!--\n  Author: Christopher Lester\n-->" (:template cfg)))
+      (is (= 3 (count (str/split-lines (:template cfg)))))))
+
+  (testing "replacement is a regex replacement string and is NOT unescaped"
+    ;; Real values: languages/clojure.mdc and workflows/datever.mdc.
+    (are [replacement] (= replacement
+                          (:replacement (rule-config/build-remediation-config
+                                         {"strategy"    "mechanical"
+                                          "replacement" replacement})))
+      "(get $2 $1 $3)"
+      "$1.$2.$3.0"
+      "$1\\n$2"))
+
+  (testing "exclude-context path lists are NOT unescaped"
+    (let [cfg (rule-config/build-remediation-config
+               {"strategy"            "mechanical"
+                "excludePathContains" ["a\\nb" "resources\\\\config"]})]
+      (is (= [{:path-contains "a\\nb"} {:path-contains "resources\\\\config"}]
+             (:exclude-contexts cfg))))))
+
+(def ^{:stratum 0} ^:private multiline-template-mdc
+  "An .mdc declaring a multi-line prepend template alongside regex detection —
+   the exact shape of 810 `project/header-copyright`."
+  (str "---\n"
+       "dewey: \"810\"\n"
+       "description: Escape Round Trip\n"
+       "globs: [\"*.md\"]\n"
+       "detection.mode: negative\n"
+       "detection.pattern: 'Christopher Lester'\n"
+       "detection.emailPattern: 'christopher@miniforge\\.ai'\n"
+       "remediation.strategy: mechanical\n"
+       "remediation.type: prepend\n"
+       "remediation.template: '<!--\\n  Title: Miniforge.ai\\n"
+       "  Copyright 2025-2026 Christopher Lester (christopher@miniforge.ai)\\n-->'\n"
+       "remediation.autoFixable: true\n"
+       "---\n\n# Escape Round Trip\n\nBody.\n"))
+
+(deftest ^{:stratum 0} mdc->rule-escape-the-escape-test
+  (testing "a template declaring \\\\n compiles to a literal backslash-n"
+    (let [content (str "---\ndewey: \"810\"\ndescription: Escaped\n"
+                       "remediation.strategy: mechanical\n"
+                       "remediation.type: prepend\n"
+                       "remediation.template: 'a\\\\nb'\n"
+                       "---\n\nBody.\n")
+          rule    (:rule (compiler/mdc->rule "escaped.mdc" content))
+          template (get-in rule [:rule/remediation :template])]
+      (is (= "a\\nb" template))
+      (is (= 1 (count (str/split-lines template)))))))
+
+;------------------------------------------------------------------------------ Layer 1
+
+(deftest ^{:stratum 1} mdc->rule-compiles-template-escapes-test
+  ;; NOTE: mdc->rule takes (filename content) in that order.
+  (let [{:keys [success? rule]} (compiler/mdc->rule "escape-round-trip.mdc"
+                                                    multiline-template-mdc)
+        template (get-in rule [:rule/remediation :template])]
+    (testing "the rule compiles"
+      (is (true? success?)))
+
+    (testing "the template carries real newlines, not literal backslash-n"
+      (is (= (str "<!--\n"
+                  "  Title: Miniforge.ai\n"
+                  "  Copyright 2025-2026 Christopher Lester (christopher@miniforge.ai)\n"
+                  "-->")
+             template))
+      (is (= 4 (count (str/split-lines template))))
+      (is (not (str/includes? template "\\n"))
+          "a literal backslash-n in the template is the defect this guards"))
+
+    (testing "detection patterns are untouched by the template expansion"
+      (is (= "Christopher Lester" (get-in rule [:rule/detection :pattern])))
+      (is (= "christopher@miniforge\\.ai"
+             (get-in rule [:rule/detection :email-pattern]))))))
+
+(deftest ^{:stratum 1} compile-standards-pack-round-trips-template-escapes-test
+  (testing "a pack compiled from disk carries real newlines in its template"
+    ;; compile-standards-pack walks with file-seq, so every .mdc goes directly
+    ;; in tmp-dir — a nested directory would duplicate filename slugs and fail
+    ;; the whole compilation.
+    (let [tmp-dir (java.io.File/createTempFile "mdc-escape-test" "")
+          _        (.delete tmp-dir)
+          _        (.mkdirs tmp-dir)
+          mdc-file (java.io.File. tmp-dir "escape-round-trip.mdc")]
+      (try
+        (spit mdc-file multiline-template-mdc)
+        (let [result (compiler/compile-standards-pack (str tmp-dir))
+              rule   (first (get-in result [:pack :pack/rules]))]
+          (is (true? (:success? result)) (str "errors: " (:errors result)))
+          (is (= 1 (:compiled-count result)))
+          (is (= :std/escape-round-trip (:rule/id rule)))
+          (is (= 4 (count (str/split-lines (get-in rule [:rule/remediation :template])))))
+          (is (not (str/includes? (get-in rule [:rule/remediation :template]) "\\n")))
+          (is (= "christopher@miniforge\\.ai"
+                 (get-in rule [:rule/detection :email-pattern]))))
+        (finally
+          (.delete mdc-file)
+          (.delete tmp-dir))))))
