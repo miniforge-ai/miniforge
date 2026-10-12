@@ -111,7 +111,8 @@
       (try+
         (with-redefs [composition/run-record (partial support/unexpected calls)]
           (doseq [field [:chain/event-stream :event-stream]
-                  value [42 "invalid" (atom {}) (atom {:publication {}})]]
+                  value [42 "invalid" (atom {}) (atom {:publication {}})
+                         (atom (assoc @(get opts field) :snowflake-generator {}))]]
             (is (= :invalid-input (:anomaly/type (run-observed (assoc opts field value) :completed calls))))))
         (is (empty? @calls))
         (is (empty? (events/get-events stream)))

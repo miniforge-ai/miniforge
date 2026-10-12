@@ -7,6 +7,7 @@
             [ai.miniforge.event-stream.commit-test-support :as support]
             [ai.miniforge.event-stream.interface :as events]
             [ai.miniforge.event-stream.publication-store :as store]
+            [ai.miniforge.event-stream.snowflake :as snowflake]
             [ai.miniforge.response.interface :as response]
             [clojure.test :refer [deftest is]]
             [slingshot.slingshot :refer [try+]]))
@@ -74,6 +75,25 @@
     (doseq [value [42 "invalid" (atom {}) (atom {:publication {}})]]
       (is (false? (events/current-event-stream? value)))
       (is (false? (events/legacy-event-stream? value))))))
+
+(deftest ^{:stratum 1} generator-contract-is-checked-without-consuming-an-id
+  (let [calls (atom [])
+        generator (snowflake/create-generator {:lease {:worker-id 0} :now-fn #(record! calls :clock)})
+        failure (anomaly/anomaly :unavailable "fixture generator unavailable" {})
+        stream (create (store/volatile-store) {})
+        legacy (events/create-event-stream {:sinks []})]
+    (doseq [value [nil generator failure (response/make-anomaly :anomalies/unavailable "fixture" {})]]
+      (is (events/current-event-stream? (create (store/volatile-store) {:snowflake-generator value})))
+      (is (events/legacy-event-stream? (atom (assoc @legacy :snowflake-generator value)))))
+    (with-redefs [store/durable-store #(record! calls %)]
+      (doseq [value [{} (assoc generator :now-fn nil) (assoc generator :worker-id -1)
+                     (assoc generator :state {}) (assoc generator :state (atom {}))
+                     (assoc generator :state (atom (assoc @(:state generator) :last-seq nil)))]]
+        (is (anomaly/anomaly? (events/create-current-event-stream
+                              {:journal-directory "fixture" :snowflake-generator value})))
+        (is (false? (events/current-event-stream? (atom (assoc @stream :snowflake-generator value)))))
+        (is (false? (events/legacy-event-stream? (atom (assoc @legacy :snowflake-generator value)))))))
+    (is (empty? @calls))))
 
 (deftest ^{:stratum 1} admission-precedes-storage-and-commit-precedes-listeners
   (let [committed (atom [])

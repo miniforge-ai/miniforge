@@ -31,15 +31,18 @@ Verify boundary refusal before storage or execution, immutable identity/scope pr
 real durable publication, and unchanged legacy behavior.
 Run affected consumers serially, verify the packaged CLI, and perform adversarial standards review.
 
-Four affected product consumers (artifact, event-stream, workflow) passed in 2m20s after the review fixes.
-The final JVM disk suite passed 6 tests/64 assertions. The built CLI jar passed 33 tests/252 assertions
+Four affected product consumers (artifact, event-stream, workflow) passed in 2m20s after the storage fixes.
+The final generator correction passed event-stream/workflow consumers in all four products in 2m28s.
+The final JVM disk suite passed 6 tests/66 assertions. The built CLI jar passed 34 tests/281 assertions
 from an isolated directory with no production source overlay, including the real-storage regressions.
-The explicit Miniforge standards pack reported no changed-line violations across 4,368 scanned files.
+The explicit Miniforge standards pack reported no changed-line violations across 4,369 scanned files.
 
 Review corrections add malformed stream/store and aliased storage regressions. The corrected focused suite
-passes 33 tests/252 assertions, including refusal before invocation allocation for symlinks, dot aliases,
+includes refusal before invocation allocation for symlinks, dot aliases,
 trailing separators, relative paths, and absent directories. Closed current streams still fail publication
 without falling back to child publication; structural validation does not claim availability or authority.
+Creation and runtime admission share the generator callable/state contract, preserve upstream anomalies,
+and validate without invoking the clock or consuming an event ID. Malformed generators fail before retention.
 
 The adversarial pass traced admission → retention → start acknowledgment → child identity allocation →
 child execution → terminal acknowledgment. It caught shared storage poisoning journal recovery;
