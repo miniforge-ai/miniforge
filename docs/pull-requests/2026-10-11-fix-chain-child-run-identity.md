@@ -28,6 +28,7 @@ Validation completed:
 
 - Final workflow/event-stream suites passed across data-foundry, miniforge, miniforge-core, and miniforge-tui in 2m52s.
 - Lint reported zero errors and warnings; the namespace-stratum checks passed.
+- Changed-line standards scan found zero violations across 4,336 files.
 - Constructor tests cover shared child counters and unchanged calls without a child reference.
 - Rebuilt CLI: 39,125,420 bytes; isolated packaged regressions passed 14 tests and 97 assertions without production
   source overlays.
@@ -51,6 +52,6 @@ N1 §2.32 and N2 §14.4 require distinct child workflow identities.
 ## Checklist
 
 - [x] Implementation and regression tests
-- [ ] Serial consumer validation and normal hooks
+- [x] Serial consumer validation and normal hooks
 - [x] Adversarial standards review
 - [ ] Exact-head clean review and all CI checks before merge
