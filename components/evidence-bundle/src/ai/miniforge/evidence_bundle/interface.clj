@@ -19,6 +19,7 @@
   "Public API for the evidence-bundle component.
    Handles evidence collection, storage, and provenance tracing per N6 spec."
   (:require
+   [ai.miniforge.anomaly.interface :as anomaly]
    [ai.miniforge.content-hash.interface :as content-hash]
    [ai.miniforge.evidence-bundle.canonical-validation :as canonical]
    [ai.miniforge.evidence-bundle.chain-evidence :as chain-evidence]
@@ -408,9 +409,13 @@
 ;------------------------------------------------------------------------------ Layer 7b
 ;; Chain Evidence
 (defn ^{:stratum 0} create-chain-evidence
-  "Create a chain-level evidence record from chain results."
+  "Project a run-chain result into chain evidence, retaining admitted identity/snapshot and child UUIDs.
+   Admitted results retain canonical :chain/* identity alongside compatible definition-only aliases.
+   Observed summary count is separate from declared :chain/step-count. Upstream anomalies pass through unchanged.
+   This projection does not authorize recovery."
   [chain-def chain-result & [opts]]
-  (chain-evidence/create-chain-evidence chain-def chain-result opts))
+  (if (anomaly/any-anomaly? chain-result) chain-result
+      (chain-evidence/create-chain-evidence chain-def chain-result opts)))
 
 (defn ^{:stratum 0} summarize-step
   "Create a summary of a single chain step."
