@@ -258,8 +258,9 @@
   "Run a sequence of workflows, feeding each step's output into the next.
    Args: [chain-def chain-input opts]. Invalid definitions return an anomaly before execution.
    Publication failure returns an anomaly instead of a completed result.
+   Set :chain/retention-directory in opts to require durable admission before the executor starts.
    Results contain status, step results, duration, fresh :chain/run-id, resolved definition
-   identity/version, and :chain/definition-snapshot. The snapshot is not durably stored here."
+   identity/version, and :chain/definition-snapshot. Without the directory option, retention remains in-memory only."
   pipeline/run-chain)
 
 (def ^{:stratum 0} load-chain
@@ -267,6 +268,16 @@
    Returns the chain-def result map; throws a :not-found anomaly when no
    matching chain resource exists."
   pipeline/load-chain)
+
+(def ^{:stratum 0} persist-chain-run!
+  "Retain an admission record durably. Args: [controlled-directory record].
+   Reject unsafe data and immutable identity conflicts; does not execute the chain."
+  pipeline/persist-chain-run!)
+
+(def ^{:stratum 0} load-chain-run
+  "Restore original chain identity and composition. Args: [controlled-directory run-uuid].
+   Missing or conflicting records return anomalies; this does not resume execution."
+  pipeline/load-chain-run)
 
 (def ^{:stratum 0} list-chains
   "List all chain definitions on the classpath. No args. Returns a vector of
