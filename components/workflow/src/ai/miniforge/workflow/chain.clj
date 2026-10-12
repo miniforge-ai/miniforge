@@ -4,7 +4,6 @@
 (ns ai.miniforge.workflow.chain
   "Sequential workflow chains: only completed children admit dependent execution."
   (:require [ai.miniforge.clock.interface :as clock]
-            [ai.miniforge.event-stream.interface :as events]
             [ai.miniforge.workflow.chain-bindings :as bindings]
             [ai.miniforge.workflow.chain-execution :as execution]
             [ai.miniforge.workflow.chain-outcome :as outcome]))
@@ -14,8 +13,6 @@
 (def ^{:stratum 0} resolve-binding bindings/resolve-binding)
 
 (def ^{:stratum 0} resolve-bindings bindings/resolve-bindings)
-
-(def ^{:stratum 0} emit! execution/emit!)
 
 (defn- ^{:stratum 0} advance! [chain-id input opts state step]
   (let [results (:results state)
@@ -36,7 +33,7 @@
   (let [started (clock/now-ms)
         step-opts (execution/options opts)
         advance (partial advance! (:chain/id definition) input step-opts)
-        receipt (emit! opts events/chain-started (:chain/id definition) (count (:chain/steps definition)))]
+        receipt (execution/start! definition opts)]
     (if (outcome/failure-value? receipt) receipt
         (let [state (reduce advance {:results [] :last-result nil} (:chain/steps definition))]
           (execution/finish! definition started state opts)))))

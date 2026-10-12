@@ -23,6 +23,7 @@ That permits dependent execution and successful return values after missing life
 - Preserve child identity while surfacing publication failure through the chain failure path.
 - Never return a successful result after the terminal publication fails.
 - Attempt the chain failure event when completion publication fails, preserving the original error if that fallback is unavailable.
+- Use the same failure fallback when start publication fails, before returning without child execution.
 
 ## Testing Plan
 
@@ -70,6 +71,17 @@ run-completion publication failure has no failed-step identity.
 Regression assertions verify both cases and preserve the original error when the fallback itself fails.
 Final attribution validation: consumers passed in 1m22, focused tests passed 10/77, and isolated packaged tests
 passed 31/205 against the 39,129,061-byte CLI. Lint, strata, and explicit-pack scanning are clean.
+
+The final lifecycle audit extends the shared run-failure fallback to failed start publication.
+Start and completion failures both preserve the original anomaly if the fallback cannot be published,
+and neither attributes the run-level failure to a child.
+The receipt audit also requires the acknowledged workflow reference and legacy sequence to match the attempted event.
+Regressions cover all lifecycle boundaries, fallback unavailability, and mismatched event/child/sequence identities.
+Step-completion publication failure likewise attempts a step-failure terminal before failing the chain.
+Terminal publication has its own small namespace; child execution owns execution and identity, not fallback construction.
+Shared identity attribution preserves the actual failed child when publishing the chain failure also fails.
+Consolidated validation: focused tests passed 12/90, three consumers passed in 1m24, and isolated packaged tests
+passed 33/218 against the 39,129,887-byte CLI. Lint, strata, and explicit-pack scanning remain clean.
 
 ## Deployment Plan
 

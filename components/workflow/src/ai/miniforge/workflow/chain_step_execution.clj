@@ -6,27 +6,22 @@
   (:require [ai.miniforge.event-stream.interface :as events]
             [ai.miniforge.workflow.boundary.chain-step :as child]
             [ai.miniforge.workflow.chain-publication :as publication]
+            [ai.miniforge.workflow.chain-step-publication :as terminal]
             [ai.miniforge.workflow.chain-outcome :as outcome]))
 
 ;------------------------------------------------------------------------------ Layer 0
 
 (defn- ^{:stratum 0} emission-failure [opts error]
   (let [id (:workflow-id opts)
-        path (if (contains? error :anomaly/type) [:anomaly/data :workflow/id] [:workflow/id])
-        attributed (assoc-in error path id)]
+        attributed (outcome/with-child-identity error id)]
     (assoc (outcome/failure attributed)
            :execution/id id :execution/emission-failure attributed)))
-
-(defn- ^{:stratum 0} terminal! [opts chain-id step index result]
-  (if (outcome/completed? result)
-    (publication/emit-step! opts events/chain-step-completed chain-id (:step/id step) index)
-    (publication/emit-step! opts events/chain-step-failed chain-id (:step/id step) index (:execution/error result))))
 
 ;------------------------------------------------------------------------------ Layer 1
 
 (defn- ^{:stratum 1} execute-started! [opts chain-id step index previous input]
   (let [result (child/execute step previous input opts)
-        receipt (terminal! opts chain-id step index result)]
+        receipt (terminal/terminal! opts chain-id step index result)]
     (if (outcome/failure-value? receipt) (emission-failure opts receipt) result)))
 
 ;------------------------------------------------------------------------------ Layer 2

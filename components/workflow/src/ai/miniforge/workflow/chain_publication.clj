@@ -17,6 +17,8 @@
          (= (:event/id event) (:event/id receipt))
          (= (:event/type event) (:event/type receipt))
          (= (:event/version event) (:event/version receipt))
+         (= (:workflow/id event) (:workflow/id receipt))
+         (= (:event/sequence-number event) (:event/sequence-number receipt))
          (nat-int? (:event/sequence-number receipt))) receipt
     :else (anomaly/anomaly :unavailable (messages/t :chain/publication-unconfirmed)
                            (select-keys event [:event/id :event/type]))))
