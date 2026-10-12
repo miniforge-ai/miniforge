@@ -2,7 +2,8 @@
 ;; Copyright 2025-2026 Christopher Lester (christopher@miniforge.ai)
 ;; Licensed under the Apache License, Version 2.0.
 (ns ai.miniforge.workflow.chain-composition
-  "Detached definition values and invocation records for sequential chains.")
+  "Detached definition values and invocation records for sequential chains."
+  (:require [ai.miniforge.workflow.chain-bindings :as bindings]))
 
 ;------------------------------------------------------------------------------ Layer 0
 
@@ -11,7 +12,7 @@
     (= (count ids) (count (set ids)))))
 
 (defn- ^{:stratum 0} binding-entry [[target value]]
-  [target (if (vector? value) (into [] value) value)])
+  [target (bindings/detach-declaration value)])
 
 (defn- ^{:stratum 0} snapshot [definition]
   (cond-> {:chain/definition-id (:chain/id definition)

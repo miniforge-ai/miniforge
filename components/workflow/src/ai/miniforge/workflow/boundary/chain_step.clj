@@ -34,7 +34,10 @@
 ;------------------------------------------------------------------------------ Layer 1
 
 (defn ^{:stratum 1} prepare [step previous input]
-  (safely #(bindings/resolve-inputs (:step/input-bindings step) previous input)))
+  (let [report (safely #(bindings/resolve-inputs (:step/input-bindings step) previous input))]
+    (if (outcome/failure-value? report)
+      (assoc (outcome/failure report) :execution/bindings (get-in report [:anomaly/data :bindings] []))
+      report)))
 
 (defn- ^{:stratum 1} attempt [step report opts]
   (let [result (safely #(let [loaded (loader/load-workflow (:step/workflow-id step) :latest {:skip-validation? true})]

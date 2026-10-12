@@ -4,27 +4,23 @@
 (ns ai.miniforge.workflow.chain-definition-spec
   "Admission schemas for the deployed sequential definition vocabulary."
   (:require [ai.miniforge.schema.interface :as schema]
+            [ai.miniforge.workflow.chain-binding-spec :as binding]
             [ai.miniforge.workflow.chain-composition :as composition]))
 
 ;------------------------------------------------------------------------------ Layer 0
 
-(def ^{:stratum 0} Binding
-  [:or :string :keyword [:vector [:or :keyword :string :int]]])
-
 (def ^{:stratum 0} ResolvedVersion
   [:and schema/NonBlankString [:not [:= "latest"]]])
 
-;------------------------------------------------------------------------------ Layer 1
-
-(def ^{:stratum 1} Step
+(def ^{:stratum 0} Step
   [:map {:closed true}
    [:step/id :keyword]
    [:step/workflow-id :keyword]
-   [:step/input-bindings {:optional true} [:maybe [:map-of :keyword Binding]]]])
+   [:step/input-bindings {:optional true} [:maybe [:map-of :keyword binding/Binding]]]])
 
-;------------------------------------------------------------------------------ Layer 2
+;------------------------------------------------------------------------------ Layer 1
 
-(def ^{:stratum 2} Definition
+(def ^{:stratum 1} Definition
   [:and
    [:map {:closed true}
     [:chain/id :keyword]
