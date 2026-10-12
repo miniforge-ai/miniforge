@@ -17,9 +17,9 @@
   (swap! calls conj (:workflow-id opts))
   {:execution/id (:workflow-id opts) :execution/status status})
 
-(defn- ^{:stratum 0} emit [attempts fail-type failure _stream event]
+(defn- ^{:stratum 0} emit [attempts failures _stream event]
   (swap! attempts conj event)
-  (if (= fail-type (:event/type event)) failure event))
+  (get failures (:event/type event) event))
 
 (def ^{:stratum 0} ^:private completed-events
   [:chain/started :chain/step-started :chain/step-completed
@@ -58,11 +58,11 @@
       (is (= :failed (:chain/status (workflow/run-chain (support/definition) {} {:event-stream stream}))))
       (is (= 1 (count @calls))))))
 
-(defn- ^{:stratum 1} observed [fail-type failure status]
+(defn- ^{:stratum 1} observed [failures status]
   (let [calls (atom []) attempts (atom []) stream (events/create-event-stream {:sinks []})]
     (with-redefs [loader/load-workflow support/loaded-workflow
                   runner/run-pipeline (partial execute calls status)
-                  events/publish! (partial emit attempts fail-type failure)]
+                  events/publish! (partial emit attempts failures)]
       {:result (workflow/run-chain (support/definition) {} {:event-stream stream})
        :calls @calls :attempts @attempts})))
 
@@ -74,8 +74,8 @@
             [[:chain/started 0 [:chain/started]]
              [:chain/step-started 0 [:chain/started :chain/step-started :chain/failed]]
              [:chain/step-completed 1 [:chain/started :chain/step-started :chain/step-completed :chain/failed]]
-             [:chain/completed 2 completed-events]]]
-      (let [{:keys [result calls attempts]} (observed type failure :completed)]
+             [:chain/completed 2 (conj completed-events :chain/failed)]]]
+      (let [{:keys [result calls attempts]} (observed {type failure} :completed)]
         (is (= failure result))
         (is (= expected-count (count calls)))
         (is (= expected (mapv :event/type attempts)))))))
@@ -83,12 +83,12 @@
 (deftest ^{:stratum 2} failure-path-publication-cannot-mask-a-missing-event
   (doseq [type [:chain/step-failed :chain/failed]]
     (let [failure (anomaly/anomaly :unavailable "Failure event unavailable" {})
-          {:keys [result calls]} (observed type failure :failed)]
+          {:keys [result calls]} (observed {type failure} :failed)]
       (is (= failure result))
       (is (= 1 (count calls))))))
 
 (deftest ^{:stratum 2} successful-publication-preserves-child-identities
-  (let [{:keys [result calls attempts]} (observed nil nil :completed)
+  (let [{:keys [result calls attempts]} (observed {} :completed)
         starts (filter #(= :chain/step-started (:event/type %)) attempts)]
     (is (= :completed (:chain/status result)))
     (is (= completed-events (mapv :event/type attempts)))
@@ -98,9 +98,16 @@
 (deftest ^{:stratum 2} legacy-anomalies-and-rejections-stop-the-chain
   (doseq [failure [{:anomaly/category :anomalies/unavailable}
                    {:rejected? true :reason :workflow-quiesced}]]
-    (let [{:keys [result calls]} (observed :chain/started failure :completed)]
+    (let [{:keys [result calls]} (observed {:chain/started failure} :completed)]
       (is (anomaly/any-anomaly? result))
       (is (empty? calls)))))
+
+(deftest ^{:stratum 2} failed-fallback-preserves-the-original-completion-error
+  (let [original (anomaly/anomaly :unavailable "Completion unavailable" {})
+        fallback (anomaly/anomaly :fault "Failure path unavailable" {})
+        {:keys [result attempts]} (observed {:chain/completed original :chain/failed fallback} :completed)]
+    (is (= original result))
+    (is (= (conj completed-events :chain/failed) (mapv :event/type attempts)))))
 
 (comment
   ::fail-closed-chain-publication)

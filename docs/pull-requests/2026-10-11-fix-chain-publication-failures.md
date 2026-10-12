@@ -16,6 +16,7 @@ That permits dependent execution and successful return values after missing life
 - Refuse dependent execution after a failed start or step-terminal publication.
 - Preserve child identity while surfacing publication failure through the chain failure path.
 - Never return a successful result after the terminal publication fails.
+- Attempt the chain failure event when completion publication fails, preserving the original error if that fallback is unavailable.
 
 ## Testing Plan
 
@@ -26,6 +27,9 @@ The failure-stage regression reproduces false completion against the previous pa
 The corrected implementation stops before dependents and propagates the publication failure.
 Receipt checks permit redacted payloads while requiring matching event identity, type, version, and a nonnegative sequence.
 The adversarial pass traced start, child failure, terminal publication, and the uninstrumented path.
+Review identified a missing completion-publication fallback; the corrected executor attempts the chain failure path
+before returning the original anomaly.
+Regression coverage includes both successful and failed fallback publication.
 
 Completed validation:
 
@@ -34,6 +38,12 @@ Completed validation:
 - Isolated packaged regressions passed 28 tests and 160 assertions without production source overlays.
 - Final CLI build: 39,128,901 bytes, including the corrected public API documentation.
 - Lint and namespace-stratum checks passed; changed-line standards scan found zero violations across 4,345 files.
+
+After the completion-failure review correction:
+
+- Three deployed consumers passed serially in 1m28.
+- Rebuilt CLI: 39,128,990 bytes; isolated packaged regressions passed 29 tests and 162 assertions.
+- Focused regressions passed 9 tests and 39 assertions; lint, strata, and the changed-line standards scan remain clean.
 
 ## Deployment Plan
 

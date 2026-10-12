@@ -19,6 +19,7 @@
 {:workflow/messages
  {:chain/child-incomplete "Chain child did not complete successfully."
   :chain/publication-unconfirmed "Chain lifecycle publication was rejected or did not return a matching acknowledgment."
+  :chain/completion-publication-failed "Chain completion publication failed."
   :chain/child-identity-conflict "Chain child returned a conflicting workflow-run identity."
   :chain/invalid-definition "Chain definition requires a resolved version, unique steps, and supported immutable bindings."
   :chain/not-found "Chain '{chain-id}' not found."
