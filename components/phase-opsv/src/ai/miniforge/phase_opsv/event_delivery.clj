@@ -19,31 +19,28 @@
   "Validate, publish and correlate OPSV audit events without assuming success."
   (:require
    [ai.miniforge.anomaly.interface :as anomaly]
-   [ai.miniforge.decision-envelope.interface :as envelope]
    [ai.miniforge.evidence-bundle.interface :as evidence]
-   [ai.miniforge.event-stream.interface.opsv :as opsv-event]
+   [ai.miniforge.event-stream.interface :as events]
+   [ai.miniforge.phase-opsv.event-admission :as admission]
    [ai.miniforge.phase-opsv.event-replay :as replay]
-   [ai.miniforge.phase-opsv.messages :as msg]
-   [malli.core :as m]))
+   [ai.miniforge.phase-opsv.messages :as msg]))
 
 ;------------------------------------------------------------------------------ Layer 0
-
-(def ^{:stratum 0} DecisionEvent
-  [:map [:event/type [:= :gate/decision]]
-   [:event/id :uuid] [:event/timestamp inst?] [:workflow/id :uuid]
-   [:opsv/evidence-bundle-id :uuid] [:gate/phase [:= :opsv/actuate]]
-   [:envelope/id :uuid] [:gate/decision-envelope envelope/DecisionEnvelope]])
 
 (defn- ^{:stratum 0} evidence-id
   [ctx]
   (get-in ctx [:execution/input :opsv/evidence-bundle-id]))
 
 (defn- ^{:stratum 0} publication-anomaly
-  [event published]
-  (let [rejected? (or (:rejected? published) (anomaly/any-anomaly? published))]
+  [stream event published]
+  (let [rejected? (or (:rejected? published) (anomaly/any-anomaly? published))
+        identity-keys [:event/id :event/type :workflow/id :opsv/evidence-bundle-id]]
     (cond
       (anomaly/anomaly? published) published
-      (and (not rejected?) (= (:event/id event) (:event/id published))) nil
+      (and (not rejected?) (= (:event/id event) (:event/id published))
+           (or (not (events/current-event-stream? stream))
+               (and (nat-int? (:event/sequence-number published))
+                    (= (select-keys event identity-keys) (select-keys published identity-keys))))) nil
       :else (anomaly/anomaly
              (if rejected? :unavailable :conflict)
              (msg/ts :event/publication-failed)
@@ -72,29 +69,22 @@
 
 ;------------------------------------------------------------------------------ Layer 1
 
-(defn- ^{:stratum 1} validation-anomaly
-  [event]
-  (when-let [explanation (if (= :gate/decision (:event/type event))
-                          (m/explain DecisionEvent event)
-                          (opsv-event/explain-invalid-event event))]
-    (anomaly/validation-anomaly
-     (msg/ts :event/invalid) :opsv/event event explanation)))
-
 (defn- ^{:stratum 1} publish-event!
   [ctx stream-value event]
   (let [published (replay/publish! ctx stream-value event)
         store (:opsv/evidence-assembly-store ctx)
-        failure (publication-anomaly event published)]
+        failure (publication-anomaly stream-value event published)]
     (cond
       failure failure
       store (let [assembly (evidence/accumulate-opsv-evidence!
                             store (evidence-id ctx)
-                            (evidence-material event))]
-              (evidence-anomaly event assembly)))))
+                            (evidence-material published))]
+              (evidence-anomaly published assembly)))))
 
 ;------------------------------------------------------------------------------ Layer 2
 
 (defn ^{:stratum 2} emit! [ctx stream-value event]
-  (or (validation-anomaly event)
-      (let [identified (replay/identify event)]
-        (if (anomaly/anomaly? identified) identified (publish-event! ctx stream-value identified)))))
+  (let [prepared (admission/prepare stream-value event)]
+    (if (anomaly/any-anomaly? prepared) prepared
+        (anomaly/let-ok [identified (replay/identify prepared)]
+          (publish-event! ctx stream-value identified)))))

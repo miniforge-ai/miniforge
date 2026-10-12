@@ -21,11 +21,26 @@
       (and (= (:workflow/id event) (:evidence-bundle/workflow-id assembly))
            (contains? (:opsv/event-refs assembly) (:event/id event))))))
 
+(defn- ^{:stratum 0} stored-event [stream event]
+  (some #(when (= (:event/id event) (:event/id %)) %) (events/get-events stream)))
+
+(defn- ^{:stratum 0} publish-current! [stream event previous]
+  ;; Reuse the occurrence timestamp, not its position or authority payload.
+  ;; Publication still checks exact content, journal ownership and closed state.
+  (events/publish! stream (cond-> event previous (assoc :event/timestamp (:event/timestamp previous)))))
+
 ;------------------------------------------------------------------------------ Layer 1
 
 (defn- ^{:stratum 1} retryable? [event]
   (and (contains? retryable-types (:event/type event))
        (uuid? (:opsv/evidence-bundle-id event))))
+
+(defn- ^{:stratum 1} retry! [ctx stream event]
+  (let [previous (stored-event stream event)]
+    (cond
+      (events/current-event-stream? stream) (publish-current! stream event previous)
+      (and (events/legacy-event-stream? stream) (acknowledged? ctx event)) event
+      :else (or previous (events/publish! stream event)))))
 
 ;------------------------------------------------------------------------------ Layer 2
 
@@ -41,9 +56,7 @@
   (if-not (retryable? event)
     (events/publish! stream event)
     (locking stream
-      (or (when (acknowledged? ctx event) event)
-          (some #(when (= (:event/id event) (:event/id %)) %) (events/get-events stream))
-          (events/publish! stream event)))))
+      (retry! ctx stream event))))
 
 (comment
   (identify {:event/type :unrelated}))
