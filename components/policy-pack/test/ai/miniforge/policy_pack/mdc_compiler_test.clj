@@ -118,6 +118,40 @@
       (is (= "Just body" (:body result))))))
 
 ;; ============================================================================
+;; nested-block-keys tests
+;; ============================================================================
+(deftest ^{:stratum 0} nested-block-keys-test
+  (testing "reports every key written as a nested YAML mapping, in file order"
+    (is (= ["detection" "enforcement"]
+           (frontmatter/nested-block-keys
+            (str "dewey: \"740\"\n"
+                 "detection:\n"
+                 "  mode: positive\n"
+                 "  pattern: 'x'\n"
+                 "enforcement:\n"
+                 "  action: hard-halt")))))
+
+  (testing "a list-valued key is NOT a nested block — `- item` children are the
+            one multi-line form the grammar does support"
+    (is (= [] (frontmatter/nested-block-keys
+               "globs:\n  - \"bb.edn\"\n  - \"**/*.sh\""))))
+
+  (testing "dotted keys — the canonical form — report nothing"
+    (is (= [] (frontmatter/nested-block-keys
+               "detection.mode: positive\ndetection.pattern: 'x'"))))
+
+  (testing "a blank-valued key with no children at all reports nothing"
+    (is (= [] (frontmatter/nested-block-keys "globs:"))))
+
+  (testing "a blank line between parent and child does not hide the nesting"
+    (is (= ["detection"] (frontmatter/nested-block-keys
+                          "detection:\n\n  mode: positive"))))
+
+  (testing "handles empty and nil frontmatter"
+    (is (= [] (frontmatter/nested-block-keys "")))
+    (is (= [] (frontmatter/nested-block-keys nil)))))
+
+;; ============================================================================
 ;; Dewey → phases mapping tests
 ;; ============================================================================
 (def ^{:stratum 0} all-phases #{:plan :implement :review :verify :release})
@@ -521,6 +555,70 @@
               (str "Compiled rule should pass schema validation: "
                    ((resolve 'ai.miniforge.policy-pack.schema-validation/explain)
                     @(resolve 'ai.miniforge.policy-pack.schema/Rule) rule))))))))
+
+(deftest ^{:stratum 0} mdc->rule-nested-block-frontmatter-warning-test
+  (testing "a rule declaring hard-halt in nested-block style compiles to the
+            non-blocking defaults AND says so — the silent-downgrade case"
+    (let [content (str "---\ndewey: \"740\"\n"
+                       "description: Nested style\n"
+                       "globs:\n  - \"**/*.sh\"\n"
+                       "detection:\n"
+                       "  mode: positive\n"
+                       "  pattern: '^#!'\n"
+                       "enforcement:\n"
+                       "  action: hard-halt\n"
+                       "---\n\n# Nested\n\nbody")
+          result (sut/mdc->rule "bb-over-shell.mdc" content)
+          rule   (:rule result)]
+      (is (true? (:success? result)) "the rule still compiles — a parse loss is not a parse error")
+      (is (= :custom (get-in rule [:rule/detection :type]))
+          "the declared content-scan was lost")
+      (is (= :audit (get-in rule [:rule/enforcement :action]))
+          "the declared hard-halt was lost")
+      (is (= 2 (count (:warnings result)))
+          "one warning per nested block key")
+      (is (every? #(str/includes? % "bb-over-shell.mdc") (:warnings result)))
+      (is (some #(and (str/includes? % "'detection'")
+                      (str/includes? % ":custom")
+                      (str/includes? % ":audit"))
+                (:warnings result))
+          "the warning names the key and what the rule actually became")
+      (is (some #(str/includes? % "'enforcement'") (:warnings result)))))
+
+  (testing "the equivalent dotted-style rule is blocking and warns about nothing"
+    (let [content (str "---\ndewey: \"740\"\n"
+                       "description: Dotted style\n"
+                       "globs:\n  - \"**/*.sh\"\n"
+                       "detection.mode: positive\n"
+                       "detection.pattern: '^#!'\n"
+                       "enforcement.action: hard-halt\n"
+                       "---\n\n# Dotted\n\nbody")
+          result (sut/mdc->rule "bb-over-shell.mdc" content)
+          rule   (:rule result)]
+      (is (= :content-scan (get-in rule [:rule/detection :type])))
+      (is (= :hard-halt (get-in rule [:rule/enforcement :action])))
+      (is (nil? (:warnings result))
+          "no :warnings key at all on a clean compile"))))
+
+(deftest ^{:stratum 0} compile-standards-pack-nested-block-warning-test
+  (testing "a per-rule nested-block warning reaches the pack result, which is
+            the only thing `bb standards:pack` prints"
+    (let [tmp-dir  (java.io.File/createTempFile "mdc-test" "")
+          _        (.delete tmp-dir)
+          _        (.mkdirs tmp-dir)
+          mdc-file (java.io.File. tmp-dir "nested-rule.mdc")]
+      (try
+        (spit mdc-file (str "---\ndewey: \"740\"\ndescription: Nested\n"
+                            "enforcement:\n  action: hard-halt\n---\nBody"))
+        (let [result (sut/compile-standards-pack (str tmp-dir))]
+          (is (true? (:success? result)))
+          (is (= 1 (:compiled-count result)))
+          (is (= 0 (:failed-count result))
+              "the rule is kept — dropping it would trade a downgrade for a disappearance")
+          (is (some #(str/includes? % "nested YAML block") (:warnings result))))
+        (finally
+          (.delete mdc-file)
+          (.delete tmp-dir))))))
 
 ;------------------------------------------------------------------------------ Layer 1
 

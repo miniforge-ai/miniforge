@@ -32,4 +32,15 @@
   "Invalid policy pack trust root: {key-id}"
 
   :trust-roots/invalid-config
-  "Invalid policy pack trust-root config: {source}"}}
+  "Invalid policy pack trust-root config: {source}"
+
+  ;; MDC compile diagnostics. Developer-facing: they reach the output of
+  ;; `bb standards:pack` and the pack's :warnings, not a product surface.
+  :mdc/nested-block-frontmatter
+  "{filename}: frontmatter key '{key}' is a nested YAML block, which the MDC grammar cannot represent — its indented children parsed as separate top-level keys, so '{key}.*' resolved to nothing and the rule compiled with detection {detection} and enforcement {action}. Rewrite as dotted keys: '{key}.<child>: <value>'."
+
+  :mdc/compile-failed
+  "Failed to compile {filename}: {error}"
+
+  :mdc/always-inject-no-phases
+  "Some always-inject rules have no applicable phases (Dewey 900 meta range)"}}

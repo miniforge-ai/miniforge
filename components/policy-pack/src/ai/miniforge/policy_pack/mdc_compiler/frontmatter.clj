@@ -17,8 +17,10 @@
 ;; limitations under the License.
 (ns ai.miniforge.policy-pack.mdc-compiler.frontmatter
   "MDC frontmatter line-grammar: splitting a file into frontmatter/body,
-   and parsing the frontmatter block's lines (key: value, multi-line
-   `- item` lists) into a string-keyed map. Split out of
+   parsing the frontmatter block's lines (key: value, multi-line
+   `- item` lists) into a string-keyed map, and reporting keys written
+   in a form the grammar cannot represent (`nested-block-keys`).
+   Split out of
    `ai.miniforge.policy-pack.mdc-compiler` (rule 210: slice 2/6 of the
    same split train as
    `ai.miniforge.policy-pack.mdc-compiler.frontmatter-values`, miniforge#1729
@@ -70,7 +72,55 @@
       [k (assoc acc k [])]
       [nil (assoc acc k (frontmatter-values/parse-frontmatter-value v))])))
 
+;; ── Nested-block detection ──────────────────────────────────────────────────
+;; The grammar below is flat. An author writing a nested YAML mapping gets no
+;; parse error: `process-frontmatter-line` trims each line before deciding what
+;; it is, so an indented `child: value` is indistinguishable from a top-level
+;; one. The children land as separate top-level keys and the parent is left
+;; holding `[]`, which `group-dotted-keys` then finds nothing to group. The rule
+;; compiles to its defaults and reports success. `nested-block-keys` is the only
+;; thing standing between that and a silent downgrade, so it belongs here beside
+;; the grammar it guards rather than in the caller.
+(def ^{:stratum 0} ^:private blank-valued-key-re
+  "A `key:` line with no value — the opening of either a legitimate
+   `- item` list or an (unsupported) nested mapping."
+  #"^([A-Za-z][A-Za-z0-9._-]*)[ \t]*:[ \t]*$")
+
+(def ^{:stratum 0} ^:private indented-kv-re
+  "An indented `child: ...` line. This is the nested-mapping signature.
+   An indented `- item` line does NOT match, so list-valued keys —
+   `globs:` and friends — are not reported."
+  #"^[ \t]+[A-Za-z][A-Za-z0-9_-]*[ \t]*:")
+
 ;------------------------------------------------------------------------------ Layer 1
+
+(defn ^{:stratum 1} nested-block-keys
+  "Frontmatter keys written as a nested YAML mapping, which this grammar
+   cannot represent.
+
+   A key qualifies when it has no inline value and its next non-blank line
+   is an indented `child: value`. List-valued keys (`- item` children) and
+   keys with no children at all do not qualify.
+
+   Arguments:
+   - frontmatter-str - Raw text between --- delimiters
+
+   Returns:
+   - Vector of parent key names in file order, or [] when the frontmatter
+     is flat (the expected case)."
+  [frontmatter-str]
+  (if (str/blank? frontmatter-str)
+    []
+    (let [lines (vec (str/split-lines frontmatter-str))
+          next-non-blank (fn [idx]
+                           (first (remove str/blank? (subvec lines (inc idx)))))]
+      (into []
+            (keep (fn [idx]
+                    (when-let [[_ k] (re-matches blank-valued-key-re (lines idx))]
+                      (when-let [child (next-non-blank idx)]
+                        (when (re-find indented-kv-re child)
+                          k)))))
+            (range (count lines))))))
 
 (defn- ^{:stratum 1} process-frontmatter-line
   "Process one frontmatter line. Returns [current-key acc]."
