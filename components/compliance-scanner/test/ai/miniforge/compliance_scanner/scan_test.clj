@@ -40,6 +40,24 @@
   "Pre-compiled pack fixture for integration tests."
   (edn/read-string (slurp (io/resource "test-fixtures/clojure-210-pack.edn"))))
 
+(defn- ^{:stratum 0} shebang-pack
+  "A one-rule pack shaped like compiled `workflows/bb-over-shell` (dewey
+   740): broad `.sh` include, positive shebang scan, blocking enforcement.
+   `excludes` becomes `:rule/applies-to :exclude-globs`, so the same pack
+   can be run with and without the carve-out."
+  [excludes]
+  {:pack/rules
+   [{:rule/id       :std/bb-over-shell
+     :rule/category "740"
+     :rule/title    "Babashka tasks over shell scripts"
+     :rule/severity :high
+     :rule/detection {:type    :content-scan
+                      :mode    :positive
+                      :pattern "^#!.*\\b(bash|sh|zsh|python[0-9.]*)\\b"}
+     :rule/enforcement {:action :hard-halt :message "Standard 740"}
+     :rule/applies-to (cond-> {:file-globs ["**/*.sh" "scripts/**"]}
+                        (seq excludes) (assoc :exclude-globs excludes))}]})
+
 ;; ---------------------------------------------------------------------------
 ;; Integration: scan a temp directory
 (defn- ^{:stratum 0} write-temp-file!
@@ -179,6 +197,60 @@
             (is (nil? (diff-plan/git-diff-name-only path "--invalid")))))
         (finally
           ;; Cleanup
+          (doseq [f (reverse (file-seq tmp-dir))]
+            (.delete f)))))))
+
+(deftest ^{:stratum 1} scan-repo-honours-rule-exclude-globs
+  (testing "a rule's :exclude-globs removes matching files from the scan, and
+            the same pack without it flags them — so the exclusion, not the
+            include globs, is what changed the outcome"
+    (let [tmp-dir (doto (io/file (System/getProperty "java.io.tmpdir")
+                                 (str "cs-exclude-test-" (System/currentTimeMillis)))
+                    .mkdirs)]
+      (try
+        (let [run! (partial run-in-dir! tmp-dir)]
+          (run! "git" "init")
+          (run! "git" "config" "commit.gpgsign" "false")
+          (run! "git" "-c" "user.email=test@test.com" "-c" "user.name=Test"
+                "commit" "--allow-empty" "-m" "init")
+
+          ;; Real automation — in scope.
+          (write-temp-file! tmp-dir "scripts/deploy.sh"
+                            "#!/usr/bin/env bash\nset -euo pipefail\n")
+          ;; Fixture scripts — the subject of analysis, not automation.
+          (write-temp-file! tmp-dir "examples/demo/run-demo.sh"
+                            "#!/usr/bin/env bash\necho demo\n")
+          (write-temp-file! tmp-dir "examples/demo-polyglot-repo/scripts/setup.sh"
+                            "#!/bin/sh\necho setup\n")
+
+          (run! "git" "add" ".")
+          (run! "git" "-c" "user.email=test@test.com" "-c" "user.name=Test"
+                "commit" "-m" "add scripts"))
+
+        (let [path    (.getAbsolutePath tmp-dir)
+              scan-with (fn [excludes]
+                          (->> (scan/scan-repo path path
+                                               {:rules #{:std/bb-over-shell}
+                                                :pack  (shebang-pack excludes)})
+                               :violations
+                               (map :file)
+                               set))]
+          (testing "without the carve-out all three shebang files are flagged"
+            (is (= #{"scripts/deploy.sh"
+                     "examples/demo/run-demo.sh"
+                     "examples/demo-polyglot-repo/scripts/setup.sh"}
+                   (scan-with nil))))
+
+          (testing "with examples/** excluded only the real automation is flagged"
+            (is (= #{"scripts/deploy.sh"} (scan-with ["examples/**"]))))
+
+          (testing "the rule is still scanned — exclusion narrows files, it does
+                    not disable the rule"
+            (let [result (scan/scan-repo path path
+                                         {:rules #{:std/bb-over-shell}
+                                          :pack  (shebang-pack ["examples/**"])})]
+              (is (= [:std/bb-over-shell] (:rules-scanned result))))))
+        (finally
           (doseq [f (reverse (file-seq tmp-dir))]
             (.delete f)))))))
 

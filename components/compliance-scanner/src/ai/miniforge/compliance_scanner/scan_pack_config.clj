@@ -22,8 +22,8 @@
    dispatches on, and filters pack rules by the :rules selector. Rule/
    category selector matching lives in `scan-rule-selector`.
 
-   Layer 0: Glob matching, suggest-fn building, scannable-types,
-            violation enrichment
+   Layer 0: Glob matching (includes minus excludes), suggest-fn building,
+            scannable-types, violation enrichment
    Layer 1: Pack-rule filtering by the :rules option + detection config
             conversion"
   (:require [ai.miniforge.compliance-scanner.scan-rule-selector :as rule-selector]
@@ -34,14 +34,31 @@
 
 ;; Pack-driven detection config
 (defn- ^{:stratum 0} globs->file-pred
-  "Convert a vector of glob patterns into a file-path predicate function.
-   Uses java.nio.file.PathMatcher for standard glob matching."
-  [globs]
-  (let [fs       (FileSystems/getDefault)
-        matchers (mapv #(.getPathMatcher fs (str "glob:" %)) globs)]
+  "Convert a rule's include and exclude glob patterns into a file-path
+   predicate. Uses java.nio.file.PathMatcher for standard glob matching.
+
+   A path is in scope when it matches an include pattern and no exclude
+   pattern. `excludes` is a rule's `:rule/applies-to :exclude-globs` — a
+   scope carve-out the rule declares, e.g. a fixture tree a content rule
+   must read past rather than flag. The exclusion is applied here, at file
+   selection, rather than after detection: a hard-halt rule that detects a
+   violation it is not allowed to act on still blocks the gate.
+
+   Both pattern sets are compiled once, outside the returned closure — it
+   runs once per file in the repo index.
+
+   (Matcher compilation is inline rather than a shared helper on purpose:
+   extracting it adds a call-graph layer, and this namespace is at the rule
+   210 budget of 3.)"
+  [globs excludes]
+  (let [fs               (FileSystems/getDefault)
+        matcher          #(.getPathMatcher fs (str "glob:" %))
+        include-matchers (mapv matcher globs)
+        exclude-matchers (mapv matcher (or excludes []))]
     (fn [path]
       (let [p (Paths/get path (into-array String []))]
-        (boolean (some #(.matches ^java.nio.file.PathMatcher % p) matchers))))))
+        (and (boolean (some #(.matches ^java.nio.file.PathMatcher % p) include-matchers))
+             (not-any? #(.matches ^java.nio.file.PathMatcher % p) exclude-matchers))))))
 
 (defn- ^{:stratum 0} build-suggest-fn
   "Build a suggest function from pack detection and remediation config.
@@ -91,14 +108,15 @@
   [rule]
   (let [detection   (get rule :rule/detection)
         remediation (get rule :rule/remediation)
-        globs       (get-in rule [:rule/applies-to :file-globs])]
+        globs       (get-in rule [:rule/applies-to :file-globs])
+        excludes    (get-in rule [:rule/applies-to :exclude-globs])]
     (when (= :content-scan (get detection :type))
       (cond->
         {:rule/id       (get rule :rule/id)
          :rule/category (get rule :rule/category)
          :title         (get rule :rule/title)
          :pattern       (re-pattern (get detection :pattern))
-         :file-pred     (globs->file-pred (or globs ["**/*"]))
+         :file-pred     (globs->file-pred (or globs ["**/*"]) excludes)
          :suggest-fn    (build-suggest-fn detection remediation)
          :detect-mode   (get detection :mode :positive)}
 
