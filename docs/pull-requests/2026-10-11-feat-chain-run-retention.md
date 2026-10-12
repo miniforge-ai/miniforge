@@ -65,5 +65,5 @@ Depends on #2024's resolved admission contract and #2021's distinct child-run id
 - [x] Implementation and contract tests
 - [x] Serial consumer and disk validation
 - [x] Packaged CLI verification and standards scan
-- [ ] Adversarial standards pass and normal signed hooks
+- [x] Adversarial standards pass and normal signed hooks
 - [ ] Exact-head clean review and all checks before merge
