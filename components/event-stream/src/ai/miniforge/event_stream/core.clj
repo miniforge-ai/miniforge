@@ -813,13 +813,13 @@
       (cond-> content (assoc :annotation/content content))))
 
 ;; Chain lifecycle events
-;; Chains are not workflow-scoped, so workflow-id is nil.
+;; Run-level legacy chain events have no workflow reference; steps can name a child.
 ;; Message is derived from the event-type keyword.
 (defn ^{:stratum 2} chain-envelope
-  "Create an envelope for chain events. Chains are not workflow-scoped,
-   so workflow-id is nil. Message is derived from the event-type keyword."
-  [stream event-type]
-  (create-envelope stream event-type nil (name event-type)))
+  "Create a legacy chain envelope, optionally referencing a child workflow run.
+   The reference participates in legacy sequence allocation at construction."
+  [stream event-type & [workflow-id]]
+  (create-envelope stream event-type workflow-id (name event-type)))
 
 ;; Control action events (N8)
 (defn ^{:stratum 2} control-action-requested [stream workflow-id action-id action-type & [requester]]

@@ -39,21 +39,21 @@
       (assoc :chain/id chain-id
              :chain/step-count step-count)))
 
-(defn ^{:stratum 0} chain-step-started [stream chain-id step-id step-index workflow-id]
-  (-> (core/chain-envelope stream :chain/step-started)
+(defn ^{:stratum 0} chain-step-started [stream chain-id step-id step-index workflow-id & [opts]]
+  (-> (core/chain-envelope stream :chain/step-started (:workflow/id opts))
       (assoc :chain/id chain-id
              :step/id step-id
              :step/index step-index
              :step/workflow-id workflow-id)))
 
-(defn ^{:stratum 0} chain-step-completed [stream chain-id step-id step-index]
-  (-> (core/chain-envelope stream :chain/step-completed)
+(defn ^{:stratum 0} chain-step-completed [stream chain-id step-id step-index & [opts]]
+  (-> (core/chain-envelope stream :chain/step-completed (:workflow/id opts))
       (assoc :chain/id chain-id
              :step/id step-id
              :step/index step-index)))
 
-(defn ^{:stratum 0} chain-step-failed [stream chain-id step-id step-index error & [{:keys [failure/class]}]]
-  (-> (core/chain-envelope stream :chain/step-failed)
+(defn ^{:stratum 0} chain-step-failed [stream chain-id step-id step-index error & [{:keys [failure/class] :as opts}]]
+  (-> (core/chain-envelope stream :chain/step-failed (:workflow/id opts))
       (assoc :chain/id chain-id
              :step/id step-id
              :step/index step-index
