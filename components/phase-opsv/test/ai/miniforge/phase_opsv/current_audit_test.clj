@@ -34,6 +34,18 @@
     (anomaly/anomaly :unavailable "fixture terminal audit unavailable" {})
     (publish stream draft)))
 
+(defn- ^{:stratum 0} verify-indexed-retry [ctx calls stream]
+  (let [queries (atom [])
+        query (partial swap! queries conj)]
+    (with-redefs [events/get-events query]
+      (let [output (phase/actuate ctx)
+            transaction (first (:opsv/effect-transactions output))]
+        (is (not (anomaly/anomaly? output)))
+        (is (= transaction (audit/record! ctx transaction)))))
+    (is (empty? @queries))
+    (is (= 2 (count (events/get-events stream))))
+    (is (= 2 (count @calls)))))
+
 ;------------------------------------------------------------------------------ Layer 1
 
 (deftest ^{:stratum 1} governed-mutation-uses-durable-dispositions-and-reuses-receipts
@@ -106,6 +118,9 @@
         (is (anomaly/anomaly? (phase/actuate ctx)))
         (is (empty? @calls))
         (is (empty? (events/get-events stream)))))))
+
+(deftest ^{:stratum 1} current-publication-and-retry-do-not-query-history
+  (with-current-audit verify-indexed-retry))
 
 (comment
   ::durable-opsv-audit)

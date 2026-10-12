@@ -24,8 +24,8 @@ Localize canonical OPSV messages without changing their rendered text. Reuse the
 Phase delivery now admits current drafts before retry identification and accumulates acknowledged records.
 Its admission remains OPSV-specific and converts legacy-format preparation failures to canonical phase failures.
 Current receipts require a position and matching identity. Evidence references alone cannot acknowledge current publication.
-Retries reuse the committed occurrence timestamp but resubmit the fresh draft through publication's content and
-availability checks.
+Retries submit fresh drafts directly to indexed publication, which retains the committed occurrence timestamp
+and applies content and availability checks without querying the event history.
 Legacy assembly-backed retry behavior is preserved. Workflow/gate producers and default host selection remain separate work.
 
 ## Testing Plan
@@ -33,9 +33,9 @@ Legacy assembly-backed retry behavior is preserved. Workflow/gate producers and 
 All checks ran serially after integration with merged #2034.
 
 - Four consumer projects passed event-stream and phase-opsv tests where consumed (1m55s).
-- After the final phase-only failure correction, both phase consumers passed again (39s).
-- Current audit regressions: 6 tests / 43 assertions in each phase consumer.
-- Rebuilt CLI: 39,151,489 bytes. Isolated package: 47 tests / 633 assertions, no production source overlays.
+- After the indexed-retry correction, both phase consumers passed again (40s).
+- Current audit regressions: 7 tests / 49 assertions in each phase consumer.
+- Rebuilt CLI: 39,151,390 bytes. Isolated package: 48 tests / 639 assertions, no production source overlays.
 - Clojure lint, stratum lint and workspace checks passed; pinned standards scan reported zero violations.
 
 ## Standards Review
@@ -44,6 +44,7 @@ Separate profile selection from draft decoration and keep the existing payload s
 Review found that the canonical-only anomaly macro would decorate legacy failures; both boundaries now use the dual predicate.
 Tests verify exact canonical messages, both failure formats, identity, payloads, retry receipts, and publication-time redaction.
 The retry audit also found a closed-stream bypass when returning a stored receipt directly; current retries now call publication.
+Copilot identified a redundant full-log scan; current retries now rely on the publisher's indexed deduplication.
 Cross-family current events are refused by the OPSV adapter. Both identity error formats prevent provider mutation.
 Post-mutation publication failures retain the durable outcome for audit-only retries without repeated provider calls.
 
