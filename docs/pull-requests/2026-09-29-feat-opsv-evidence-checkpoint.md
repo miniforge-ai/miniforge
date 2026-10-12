@@ -17,6 +17,8 @@ Current retries require a journal receipt, not an assembly reference. Legacy rec
 when the original event is unavailable; it never invents a position or duplicates that occurrence.
 Individual audit publications accumulate only their receipt. Checkpoint persistence collects the full workflow range
 using the stream's profile-specific query options. Collection failures prevent checkpoint success.
+Resolve all three supported runtime stream locations. Refuse to construct N6 links for sparse acknowledged ranges;
+legacy retry cannot fabricate missing positions or inflate counts to make an invalid range look complete.
 Recognize both current and legacy anomaly formats throughout phase completion. Sealed assemblies persist unchanged.
 Initial tier capture ignores caller outcome data; only a validated bound recovery snapshot supplies a retained tier.
 Provide a bound actuation snapshot that retains the sanitized preflight evidence base
@@ -44,8 +46,9 @@ After integration, all three phase/evidence consumer projects passed serially (1
 The real workflow disk test passed (1 test / 7 assertions).
 Review regressions cover legacy collection errors, immutable sealed checkpoints, untrusted outcome tiers,
 and preserving the captured tier when recovery workflow options change.
-Both phase consumers passed after the corrections (45s). Rebuilt CLI: 39,157,255 bytes.
-Isolated package checks passed 53 tests / 372 assertions, with no production source overlays.
+Both phase consumers passed after the corrections (45s), including stream aliases and sparse-range rejection.
+Rebuilt CLI: 39,157,270 bytes. Isolated package checks passed 54 tests / 375 assertions,
+with no production source overlays; the pinned standards scan reported zero violations across 4,414 files.
 Pinned standards scan, explicit owned-file strata, and Clojure warning/error checks passed.
 The new current-journal test verifies contiguous scoped positions, foreign-workflow isolation, restored snapshots,
 query-failure propagation, and idempotent retry after reopening. Cross-workflow global ordering is not assumed.

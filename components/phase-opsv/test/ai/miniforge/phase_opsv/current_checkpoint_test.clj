@@ -56,8 +56,10 @@
     (is (= (range (count records)) (map :event/sequence-number records)))
     (is (= (into {} (map (juxt :event/id :event/sequence-number)) records) (:opsv/event-sequences assembly)))
     (is (= (get-in persisted [:execution/input :opsv/evidence-assembly]) assembly))
-    (with-redefs [events/get-events (constantly failure)]
-      (is (= failure (get-in (runtime/persist restored) [:execution/input :opsv/evidence-snapshot]))))
+    (doseq [path [[:event-stream] [:execution/event-stream] [:execution/opts :event-stream]]]
+      (with-redefs [events/get-events (constantly failure)]
+        (is (= failure (get-in (runtime/persist (assoc-in (dissoc restored :event-stream) path stream))
+                              [:execution/input :opsv/evidence-snapshot])))))
     (events/close-current-event-stream! stream)
     (verify-reopened-retry restored options (conj records foreign-receipt))))
 

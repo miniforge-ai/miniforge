@@ -8,6 +8,7 @@
             [ai.miniforge.evidence-bundle.interface :as evidence]
             [ai.miniforge.phase-opsv.events :as publication]
             [ai.miniforge.phase-opsv.evidence-base :as base]
+            [ai.miniforge.phase-opsv.evidence-linkage :as linkage]
             [ai.miniforge.phase-opsv.artifact-test-support :as f]
             [ai.miniforge.phase-opsv.evidence-runtime :as runtime]
             [ai.miniforge.phase-opsv.evidence-snapshot :as snapshot]
@@ -65,7 +66,8 @@
               restored (runtime/ensure-assembly
                          (assoc (dissoc persisted :opsv/evidence-assembly-store)
                                 :event-stream (events/create-event-stream)))]
-          (is (= (count before) (get-in original [:evidence/event-links 0 :event-links/event-count] 0)))
+          (is (or (nil? (:evidence/event-links original))
+                  (= (count before) (get-in original [:evidence/event-links 0 :event-links/event-count]))))
           (is (= (:evidence/event-links original) (:evidence/event-links (base/bundle restored)))))
         (let [completed ((:leave interceptor) entered)
               result (get-in completed [:phase :result])]
@@ -81,6 +83,13 @@
     (doseq [tier [:standard nil]]
       (is (= :critical (get-in (base/bundle (assoc-in ctx [:execution/opts :opsv/evidence-base :evidence/outcome :outcome/tier] tier))
                               [:evidence/outcome :outcome/tier]))))))
+
+(deftest ^{:stratum 0} sparse-acknowledgements-cannot-produce-an-n6-link
+  (let [id (random-uuid)
+        record {:opsv/event-refs #{:first :last} :opsv/event-sequences {:first 0 :last 2}}
+        store (atom {id record})
+        ctx {:opsv/evidence-assembly-store store :execution/input {:opsv/evidence-bundle-id id}}]
+    (is (nil? (linkage/links ctx)))))
 
 (defn- ^{:stratum 0} assert-finalized-snapshot [ctx _directory]
   (let [completed (f/step ctx (first support/handlers))
