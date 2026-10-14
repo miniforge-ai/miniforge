@@ -30,6 +30,7 @@
    having already moved in slice 5) brings the parent namespace to
    budget."
   (:require
+   [ai.miniforge.policy-pack.mdc-compiler.frontmatter-values :as frontmatter-values]
    [ai.miniforge.policy-pack.schema-types :as schema-types]))
 
 ;------------------------------------------------------------------------------ Layer 0
@@ -72,7 +73,15 @@
 
 (defn ^{:stratum 1} build-remediation-config
   "Build :rule/remediation map from grouped frontmatter remediation block.
-   Returns nil if no remediation config is present."
+   Returns nil if no remediation config is present.
+
+   `template` is routed through `frontmatter-values/unescape-literal-text`, so
+   a multi-line prepend/append header can be declared as a single-line quoted
+   scalar carrying `\\n` — MDC frontmatter has no block-scalar (`|`) syntax, and
+   before this the patcher received the backslash and the `n` verbatim and wrote
+   the header on one line (miniforge-standards#129). Scoping the expansion to
+   this one field is the point: see the comment at the `template` branch for the
+   fields that must keep their backslashes."
   [remediation-map]
   (when (and remediation-map (get remediation-map "strategy"))
     (let [excludes (build-exclude-context remediation-map)]
@@ -83,8 +92,21 @@
         (get remediation-map "replacement")
         (assoc :replacement (get remediation-map "replacement"))
 
+        ;; `template` is the one remediation field that is literal text, so it
+        ;; is the one field whose backslash escapes are expanded. The generic
+        ;; value parser cannot make this call — it sees a string with no idea
+        ;; which key it came from — so the decision lives here, where the key
+        ;; is in hand.
+        ;;
+        ;; Deliberately NOT unescaped: `replacement` is a regex replacement
+        ;; string carrying `$1`-style group references (`"(get $2 $1 $3)"`,
+        ;; `"$1.$2.$3.0"`), and the `exclude*Contains` lists are matched with
+        ;; `str/includes?` against paths. Nothing in `detection` is unescaped
+        ;; either — `pattern` and `emailPattern` are regex source, and
+        ;; expanding `\n`/`\t`/`\\` there would rewrite what a rule matches on.
         (get remediation-map "template")
-        (assoc :template (get remediation-map "template"))
+        (assoc :template (frontmatter-values/unescape-literal-text
+                          (get remediation-map "template")))
 
         (some? (get remediation-map "autoFixable"))
         (assoc :auto-fixable-default (boolean (get remediation-map "autoFixable")))
