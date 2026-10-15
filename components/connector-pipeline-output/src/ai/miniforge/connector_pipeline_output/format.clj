@@ -21,9 +21,54 @@
   (:require [ai.miniforge.response.interface :as response]
             [cheshire.core :as json]
             [clojure.java.io :as io]
-            [clojure.string]))
+            [clojure.string])
+  (:import [java.io File]
+           [java.nio.file Files StandardCopyOption]))
 
 ;------------------------------------------------------------------------------ Layer 0
+
+(defn- ^{:stratum 0} atomic-move!
+  "Move `tmp` to `target` atomically, deleting `tmp` on any failure."
+  [^File tmp ^File target]
+  (try
+    (Files/move (.toPath tmp) (.toPath target)
+                (into-array StandardCopyOption
+                            [StandardCopyOption/ATOMIC_MOVE
+                             StandardCopyOption/REPLACE_EXISTING]))
+    (catch Throwable e
+      (try (Files/delete (.toPath tmp))
+           (catch Throwable c (.addSuppressed e c)))
+      (throw e))))
+
+(defn- ^{:stratum 0} write-edn-atomically!
+  "Write `content` to `path` via a sibling temp file + atomic rename,
+   so a crash mid-write never leaves a partial file visible to readers."
+  [path content]
+  (let [f   (io/file path)
+        dir (or (.getParentFile f) (io/file "."))
+        tmp (File/createTempFile ".cpo-" ".tmp" dir)]
+    (try
+      (spit tmp content :encoding "UTF-8")
+      (atomic-move! tmp f)
+      (catch Throwable e
+        (try (Files/delete (.toPath tmp))
+             (catch Throwable c (.addSuppressed e c)))
+        (throw e)))))
+
+(defn- ^{:stratum 0} write-json-atomically!
+  "Stream JSON to `path` via a sibling temp file + atomic rename."
+  [path records]
+  (let [f   (io/file path)
+        dir (or (.getParentFile f) (io/file "."))
+        tmp (File/createTempFile ".cpo-" ".tmp" dir)]
+    (try
+      (with-open [wtr (io/writer tmp :encoding "UTF-8")]
+        (json/generate-stream records wtr))
+      (atomic-move! tmp f)
+      (catch Throwable e
+        (try (Files/delete (.toPath tmp))
+             (catch Throwable c (.addSuppressed e c)))
+        (throw e)))))
 
 (defmulti ^{:stratum 0} write-records
   "Write records to the output directory in the given format.
@@ -35,7 +80,7 @@
   (let [filename "records.edn"
         path (str output-dir "/" run-id "/" filename)]
     (io/make-parents path)
-    (spit path (pr-str (vec records)))
+    (write-edn-atomically! path (pr-str (vec records)))
     filename))
 
 (defmethod ^{:stratum 0} write-records :json
@@ -43,8 +88,7 @@
   (let [filename "records.json"
         path (str output-dir "/" run-id "/" filename)]
     (io/make-parents path)
-    (with-open [wtr (io/writer path)]
-      (json/generate-stream records wtr))
+    (write-json-atomically! path records)
     filename))
 
 (defmethod ^{:stratum 0} write-records :default
@@ -65,7 +109,7 @@
   [output-dir run-id manifest]
   (let [path (str output-dir "/" run-id "/manifest.edn")]
     (io/make-parents path)
-    (spit path (pr-str manifest))
+    (write-edn-atomically! path (pr-str manifest))
     path))
 
 (defn ^{:stratum 0} write-json-schema
@@ -73,8 +117,7 @@
   [output-dir run-id json-schema-map]
   (let [path (str output-dir "/" run-id "/manifest.schema.json")]
     (io/make-parents path)
-    (with-open [wtr (io/writer path)]
-      (json/generate-stream json-schema-map wtr))
+    (write-json-atomically! path json-schema-map)
     path))
 
 ;------------------------------------------------------------------------------ Layer 1
@@ -90,9 +133,8 @@
                 path      (str output-dir "/" run-id "/" filename)]
             (io/make-parents path)
             (case format
-              :edn  (spit path (pr-str (vec records)))
-              :json (with-open [wtr (io/writer path)]
-                      (json/generate-stream records wtr)))
+              :edn  (write-edn-atomically! path (pr-str (vec records)))
+              :json (write-json-atomically! path records))
             {:dataset  dataset-name
              :filename filename
              :count    (count records)}))
