@@ -38,7 +38,8 @@
    [ai.miniforge.workflow.checkpoint-store-records :as checkpoint-records]
    [ai.miniforge.workflow.schemas :as schemas]
    [babashka.fs :as fs]
-   [clojure.edn :as edn]))
+   [clojure.edn :as edn])
+  (:import [java.nio.file Files StandardCopyOption]))
 
 ;------------------------------------------------------------------------------ Layer 0
 
@@ -93,9 +94,11 @@
         temp-path (str target-path temp-file-suffix)]
     (fs/create-dirs (fs/parent target))
     (spit temp-path (pr-str data))
-    (when (fs/exists? target-path)
-      (fs/delete target-path))
-    (fs/move temp-path target-path)
+    (Files/move (fs/path temp-path)
+                (fs/path target-path)
+                (into-array java.nio.file.CopyOption
+                            [StandardCopyOption/ATOMIC_MOVE
+                             StandardCopyOption/REPLACE_EXISTING]))
     target-path))
 
 (defn ^{:stratum 1} load-checkpoint-data
