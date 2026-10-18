@@ -22,8 +22,9 @@
    [ai.miniforge.phase.interface :as phase]
    [ai.miniforge.phase-opsv.artifact-boundary :as artifacts]
    [ai.miniforge.phase-opsv.evidence-runtime :as evidence-runtime]
-   [ai.miniforge.phase-opsv.events :as events]
+   [ai.miniforge.phase-opsv.finalization-boundary :as finalization]
    [ai.miniforge.phase-opsv.flow :as flow]
+   [ai.miniforge.phase-opsv.post-actuation-checkpoint :as checkpoint]
    [ai.miniforge.phase-opsv.lifecycle-result :as lifecycle-result]))
 
 ;------------------------------------------------------------------------------ Layer 0
@@ -45,22 +46,20 @@
           (not runtime-supplied?)
           (assoc-in [:execution/opts :opsv/adapter] adapter))))))
 
-(defn- ^{:stratum 0} result-after-publication
-  [ctx phase-key result]
-  (if-not (phase/result-succeeded? result)
-    result
-    (let [published (events/emit-phase-events! ctx phase-key (:output result))]
-      (if (anomaly/anomaly? published)
-        (lifecycle-result/phase-result
-         (assoc-in published [:anomaly/data :opsv/phase-output] (:output result)))
-        result))))
+(defn- ^{:stratum 0} transformed-phase [ctx phase-key transform config start-time]
+  (let [output (checkpoint/retain-events ctx phase-key (transform ctx))
+        retained (checkpoint/capture ctx phase-key output)
+        published (or (checkpoint/encoding-failure retained output)
+                      (artifacts/publish-with-exception-handling retained phase-key output))]
+    (phase/enter-context retained phase-key (:agent config) (:gates config)
+                         (:budget config) start-time (lifecycle-result/phase-result published))))
 
 ;------------------------------------------------------------------------------ Layer 1
 
 (defn- ^{:stratum 1} leave-phase
   [ctx]
   (let [phase-key (get-in ctx [:phase :name])
-        result (result-after-publication
+        result (lifecycle-result/after-publication
                 ctx phase-key (get-in ctx [:phase :result]))
         completed-ctx (assoc-in ctx [:phase :result] result)
         success? (phase/result-succeeded? result)
@@ -73,17 +72,14 @@
   [phase-key transform config ctx]
   (let [runtime-ctx (isolate-runtime-adapter ctx)
         assembled-ctx (evidence-runtime/ensure-assembly runtime-ctx)
-        prepared-ctx (flow/continue assembled-ctx artifacts/prepare)
+        active-ctx (flow/continue assembled-ctx artifacts/prepare)
+        prepared-ctx (flow/continue active-ctx finalization/prepare)
         start-time (System/currentTimeMillis)
-        prepared? (not (anomaly/anomaly? prepared-ctx))
-        output (if prepared?
-                 (artifacts/publish-with-exception-handling prepared-ctx phase-key (transform prepared-ctx))
-                 prepared-ctx)
-        result (lifecycle-result/phase-result output)]
-    (phase/enter-context (if prepared? prepared-ctx runtime-ctx) phase-key
-                         (:agent config)
-                         (:gates config) (:budget config)
-                         start-time result)))
+        prepared? (not (anomaly/anomaly? prepared-ctx))]
+    (if prepared?
+      (transformed-phase prepared-ctx phase-key transform config start-time)
+      (phase/enter-context runtime-ctx phase-key (:agent config) (:gates config)
+                           (:budget config) start-time (lifecycle-result/phase-result prepared-ctx)))))
 
 ;------------------------------------------------------------------------------ Layer 2
 
@@ -95,3 +91,6 @@
      :enter (partial enter-phase phase-key transform merged)
      :leave leave-phase
      :error lifecycle-result/fail-phase}))
+
+(comment
+  (interceptor {} :opsv/plan identity))

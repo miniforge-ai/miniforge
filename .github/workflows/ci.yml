@@ -225,6 +225,13 @@ jobs:
           (let [r (clojure.test/run-tests 'ai.miniforge.workflow.opsv-lifecycle-integration-test)]
           (System/exit (+ (:fail r) (:error r))))"
 
+      - name: OPSV evidence finalization and recovery
+        working-directory: projects/miniforge
+        run: >-
+          clojure -M:test -e "(require 'ai.miniforge.phase-opsv.finalization-integration-test)
+          (let [r (clojure.test/run-tests 'ai.miniforge.phase-opsv.finalization-integration-test)]
+          (System/exit (+ (:fail r) (:error r))))"
+
       - name: OPSV typed checkpoint recovery
         working-directory: projects/miniforge
         run: |

@@ -14,14 +14,29 @@
 (defn- ^{:stratum 0} deliver-next! [ctx stream result event]
   (if (anomaly/anomaly? result) (reduced result) (delivery/emit! ctx stream event)))
 
+(defn- ^{:stratum 0} project-phase-events [ctx phase-key output]
+  (let [projected (projection/phase-events (context/stream ctx) (context/workflow-id ctx)
+                   (get-in ctx [:execution/input :opsv/evidence-bundle-id]) ctx phase-key output)]
+    (mapv (partial artifacts/link output) projected)))
+
 ;------------------------------------------------------------------------------ Layer 1
 
-(defn ^{:stratum 1} emit-phase-events! [ctx phase-key output]
+(defn ^{:stratum 1} retain-actuation-events [ctx output]
+  ;; Recovery reuses occurrence timestamps and any legacy reserved positions.
+  (assoc output :opsv/actuation-events (project-phase-events ctx :opsv/actuate output)))
+
+(defn- ^{:stratum 1} phase-events [ctx phase-key output]
+  (if (and (= :opsv/actuate phase-key)
+           (contains? (:execution/opts ctx) :opsv/evidence-base)
+           (contains? output :opsv/actuation-events))
+    (:opsv/actuation-events output)
+    (project-phase-events ctx phase-key output)))
+
+;------------------------------------------------------------------------------ Layer 2
+
+(defn ^{:stratum 2} emit-phase-events! [ctx phase-key output]
   (when-let [stream (context/stream ctx)]
-    (let [projected (projection/phase-events stream (context/workflow-id ctx)
-                     (get-in ctx [:execution/input :opsv/evidence-bundle-id]) ctx phase-key output)
-          linked (map (partial artifacts/link output) projected)]
-      (reduce (partial deliver-next! ctx stream) nil linked))))
+    (reduce (partial deliver-next! ctx stream) nil (phase-events ctx phase-key output))))
 
 (comment
   (emit-phase-events! {} :opsv/plan {}))

@@ -39,7 +39,29 @@
                            :environments ["staging"]}}
    :opsv/risk-result {:score 0.1 :level :low :factors []}})
 
+(defn- ^{:stratum 0} recommendation-output []
+  {:opsv/actuation-events []
+   :opsv/actuation-record {:requested-actuation-mode :pr-only
+                           :effective-actuation-mode :recommend-only
+                           :governed-effects [] :pr-refs [] :apply-refs []}})
+
 ;------------------------------------------------------------------------------ Layer 1
+
+(deftest ^{:stratum 1} output-cannot-suppress-events-outside-host-owned-recovery
+  (let [stream (event-stream/create-event-stream {:sinks []})
+        ctx (event-context stream)]
+    (is (nil? (events/emit-phase-events! ctx :opsv/actuate (recommendation-output))))
+    (is (= [:opsv.actuation/emitted] (mapv :event/type (event-stream/get-events stream))))))
+
+(deftest ^{:stratum 1} retained-occurrences-do-not-reserve-new-legacy-positions
+  (let [stream (event-stream/create-event-stream {:sinks []})
+        ctx (assoc-in (event-context stream) [:execution/opts :opsv/evidence-base] {})
+        output (events/retain-actuation-events ctx (recommendation-output))
+        before (:sequence-numbers @stream)]
+    (is (= 1 (count (:opsv/actuation-events output))))
+    (dotimes [_ 2] (is (nil? (events/emit-phase-events! ctx :opsv/actuate output))))
+    (is (= before (:sequence-numbers @stream)))
+    (is (= [0] (mapv :event/sequence-number (event-stream/get-events stream))))))
 
 (defn- ^{:stratum 1} leave-planned-phase
   [ctx]

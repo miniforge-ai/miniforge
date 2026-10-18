@@ -13,6 +13,7 @@
         ai.miniforge/opsv-actuation {:local/root "../opsv-actuation"}
         ai.miniforge/opsv-provider-github {:local/root "../opsv-provider-github"}
         ai.miniforge/phase {:local/root "../phase"}
-        metosin/malli {:mvn/version "0.16.4"}}
+        metosin/malli {:mvn/version "0.16.4"}
+        slingshot/slingshot {:mvn/version "0.12.2"}}
  :aliases {:test {:extra-paths ["test" "test-resources"]
                   :extra-deps {ai.miniforge/response {:local/root "../response"}}}}}
