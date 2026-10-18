@@ -92,6 +92,22 @@
   :json-string "gate/failed"
   :browser?    false}
 
+ {:constructor "phase-decision"
+  :event-type :gate/decision
+  :json-string "gate/decision"
+  :browser? false
+  :scope :workflow
+  :retention-class :audit
+  :asymmetry? true
+  :asymmetry-note "Phase decision is gate evidence, not workflow lifecycle"}
+
+ {:constructor "gate-rule-applied"
+  :event-type :gate/rule-applied
+  :json-string "gate/rule-applied"
+  :browser? false
+  :scope :workflow
+  :retention-class :audit}
+
  {:constructor "tool-invoked"
   :event-type  :tool/invoked
   :json-string "tool/invoked"
