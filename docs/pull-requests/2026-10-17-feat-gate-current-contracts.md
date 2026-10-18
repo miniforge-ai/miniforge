@@ -27,7 +27,7 @@ types or bypassing current-write validation. This does not change approval polic
 - Adversarial pass traced scope, derived decisions, nil fields, redaction, failed
   acknowledgment, restart, and retries. Schemas reuse decision-envelope and
   policy-clause interfaces; pure cross-field predicates remain separate.
-- Whole PR: 323 reportable lines before this documentation update; no overrides.
+- Whole PR remains below the 600-line reportable budget; no overrides.
 
 This PR adds admission, not producer migration. Existing gate constructors and
 gate orchestration still need profile-aware creation and failure propagation.
