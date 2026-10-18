@@ -48,6 +48,9 @@ projection have separate responsibilities. No provider or schema dependency is d
   actuation does not create a terminal snapshot.
 - Restore the captured workflow tier after disk restart and reject malformed
   recovery options before modifying checkpoint state.
+- Create terminal snapshots only for evidence-opted-in runs. Legacy callers can
+  correct rejected runtime options; existing snapshots still prohibit replay even
+  when the caller removes evidence opt-in.
 - Reuse acknowledged legacy dispositions before allocating a sequence number.
   Retain unacknowledged drafts across checkpoint recovery, including their reserved
   positions. Current journals continue to use indexed acknowledgment without a

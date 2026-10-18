@@ -44,7 +44,8 @@
                                         (get-in ctx [:execution/input :opsv/terminal-snapshot])))))
 
 (defn- ^{:stratum 1} persist-terminal [ctx]
-  (if (and (= :opsv/actuate (get-in ctx [:phase :name]))
+  (if (and (contains? (:execution/opts ctx) :opsv/evidence-base)
+           (= :opsv/actuate (get-in ctx [:phase :name]))
            (= :error (get-in ctx [:phase :result :status]))
            (terminal/recoverable? (get-in ctx [:phase :result :output])))
     (assoc-in ctx [:execution/input :opsv/terminal-snapshot]
