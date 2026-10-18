@@ -200,7 +200,8 @@
         ctx-entered (execute-enter interceptor ctx-clean)
         phase-result (extract-phase-result ctx-entered)
         phase-result-gated (transition/apply-gate-validation interceptor phase-result ctx-entered)
-        ctx-left (if (entered-phase-context? phase-result-gated)
+        ctx-left (if (and (entered-phase-context? phase-result-gated)
+                          (not (:phase/gate-publication-failure phase-result-gated)))
                    (execute-leave interceptor (assoc ctx-entered :phase phase-result-gated))
                    (assoc ctx-entered :phase phase-result-gated))]
     [ctx-left (extract-phase-result ctx-left)]))
