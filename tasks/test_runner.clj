@@ -155,8 +155,6 @@
                          "ai.miniforge.phase-opsv.current-finalization-integration-test"
                          "ai.miniforge.phase-opsv.post-actuation-recovery-integration-test"
                          "ai.miniforge.phase-opsv.terminal-evidence-integration-test"
-                         "ai.miniforge.phase-opsv.terminal-boundary-integration-test"
-                         "ai.miniforge.phase-opsv.current-terminal-integration-test"
                          "ai.miniforge.workflow.opsv-terminal-integration-test"
                          "ai.miniforge.workflow.opsv-checkpoint-integration-test"
                          "ai.miniforge.event-stream.gate-contract-integration-test"
