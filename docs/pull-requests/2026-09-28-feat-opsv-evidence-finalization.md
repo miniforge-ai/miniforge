@@ -68,8 +68,13 @@ Kondo reports zero errors/warnings; explicit owned-file strata pass.
 Built CLI: 39,169,398 bytes. Final isolated packaged verification passed
 34 tests / 372 assertions, with no production-source overlay.
 Polylith validation passed. Pinned standards scan: zero violations across 4,431 files.
-The runtime and current/shared-workflow acceptance coverage will be split into
-separate PRs to respect the 600-reportable-line ceiling; no tests will be discarded.
+The full verification above includes current-journal, partial-retry and shared
+workflow acceptance coverage preserved at `work/opsv-finalization-full-20261018`
+(`75c67bf4f`). Those three suites move to the immediate follow-up acceptance PR.
+This runtime PR retains eight finalization integration tests (105 assertions),
+plus the event-retention and exception-boundary unit regressions. CI and the
+project runner explicitly execute the retained integration suite. No production
+source changed during the split; the full tested acceptance tree is preserved.
 Filesystem-heavy tests now live in the project integration suite, with shared
 fixtures and resources exposed only by its test alias.
 
@@ -106,5 +111,5 @@ that interval.
 ## Checklist
 
 - [x] Integrated consumer/package/standards verification
-- [ ] Signed integration commit and repository hooks
+- [x] Signed integration commit and repository hooks
 - [ ] Final-head review settled, all CI green and conflict-free merge
