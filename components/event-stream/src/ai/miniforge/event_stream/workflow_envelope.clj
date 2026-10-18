@@ -1,8 +1,8 @@
 ;; Title: Miniforge.ai
 ;; Copyright 2025-2026 Christopher Lester (christopher@miniforge.ai)
 ;; Licensed under the Apache License, Version 2.0.
-(ns ai.miniforge.event-stream.opsv-envelope
-  "Keep OPSV creation compatible with the stream's publication profile."
+(ns ai.miniforge.event-stream.workflow-envelope
+  "Select the publication profile for migrated workflow-scoped constructors."
   (:require [ai.miniforge.anomaly.interface :as anomaly]
             [ai.miniforge.event-stream.core :as core]
             [ai.miniforge.event-stream.current-publication :as current]
@@ -22,4 +22,4 @@
     (core/create-envelope stream event-type workflow-id message opts)))
 
 (comment
-  ::opsv-envelope-profile)
+  ::workflow-envelope-profile)
