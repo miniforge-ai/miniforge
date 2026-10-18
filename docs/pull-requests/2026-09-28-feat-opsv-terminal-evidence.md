@@ -88,5 +88,5 @@ publication and the governed PR runtime/audit chain.
 
 - [x] Focused terminal regressions pass
 - [x] Final packaged and all-consumer verification
-- [ ] Signed commits and repository hooks
+- [x] Signed commits and repository hooks
 - [ ] Settled review and all CI green

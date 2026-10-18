@@ -15,6 +15,10 @@
 
 ;------------------------------------------------------------------------------ Layer 0
 
+(defn ^{:stratum 0} reject-replay [calls _ctx _verified]
+  (swap! calls inc)
+  (throw (AssertionError. "Terminal evidence recovery repeated actuation")))
+
 (defn ^{:stratum 0} recovery-output [ctx]
   (let [recovered (opsv/recover-actuation-evidence! ctx)]
     (if (anomaly/anomaly? recovered) recovered

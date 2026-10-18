@@ -242,8 +242,12 @@ jobs:
         working-directory: projects/miniforge
         run: >-
           clojure -M:test -e "(require 'ai.miniforge.phase-opsv.terminal-evidence-integration-test
+          'ai.miniforge.phase-opsv.terminal-boundary-integration-test
+          'ai.miniforge.phase-opsv.current-terminal-integration-test
           'ai.miniforge.workflow.opsv-terminal-integration-test)
           (let [r (clojure.test/run-tests 'ai.miniforge.phase-opsv.terminal-evidence-integration-test
+          'ai.miniforge.phase-opsv.terminal-boundary-integration-test
+          'ai.miniforge.phase-opsv.current-terminal-integration-test
           'ai.miniforge.workflow.opsv-terminal-integration-test)]
           (System/exit (+ (:fail r) (:error r))))"
 
