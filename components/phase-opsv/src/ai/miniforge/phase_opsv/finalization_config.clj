@@ -7,6 +7,7 @@
             [ai.miniforge.artifact.interface :as artifact]
             [ai.miniforge.evidence-bundle.interface :as evidence]
             [ai.miniforge.phase-opsv.evidence-base :as base]
+            [ai.miniforge.phase-opsv.evidence-checkpoint :as terminal-checkpoint]
             [ai.miniforge.phase-opsv.messages :as msg]
             [ai.miniforge.phase-opsv.post-actuation-checkpoint :as checkpoint]
             [ai.miniforge.phase-opsv.runtime-context :as context]))
@@ -16,8 +17,17 @@
 (defn ^{:stratum 0} enabled? [ctx]
   (contains? (:execution/opts ctx) :opsv/evidence-base))
 
-(defn ^{:stratum 0} base-bundle [ctx]
-  (base/bundle ctx))
+(defn ^{:stratum 0} base-bundle
+  ([ctx] (base-bundle ctx nil))
+  ([ctx output]
+   (let [bundle (base/bundle ctx)
+         success? (not (or (:opsv/phase-failure output) (:opsv/stopped? output)))
+         outcome (assoc (:evidence/outcome bundle) :outcome/success success?)]
+     (assoc bundle :evidence/outcome
+            (cond-> outcome
+              (:opsv/phase-failure output)
+              (assoc :outcome/error-phase :opsv/actuate
+                     :outcome/error-message (get-in output [:opsv/phase-failure :anomaly/message])))))))
 
 (defn- ^{:stratum 0} assembly-status [ctx]
   (when-let [store (:opsv/evidence-assembly-store ctx)]
@@ -47,7 +57,7 @@
 
 (defn ^{:stratum 2} validate-context [ctx]
   (cond
-    (checkpoint/pending? ctx)
+    (or (checkpoint/pending? ctx) (terminal-checkpoint/terminal-pending? ctx))
     (anomaly/anomaly :invalid-input (msg/t :evidence/actuation-recovery-required) {})
     (and (enabled? ctx) (= :finalized (assembly-status ctx)))
     (anomaly/anomaly :invalid-input (msg/t :evidence/assembly-finalized) {})

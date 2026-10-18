@@ -23,6 +23,7 @@
    [ai.miniforge.phase-opsv.artifact-boundary :as artifacts]
    [ai.miniforge.phase-opsv.evidence-runtime :as evidence-runtime]
    [ai.miniforge.phase-opsv.finalization-boundary :as finalization]
+   [ai.miniforge.phase-opsv.terminal-evidence :as terminal]
    [ai.miniforge.phase-opsv.flow :as flow]
    [ai.miniforge.phase-opsv.post-actuation-checkpoint :as checkpoint]
    [ai.miniforge.phase-opsv.lifecycle-result :as lifecycle-result]))
@@ -54,19 +55,19 @@
     (phase/enter-context retained phase-key (:agent config) (:gates config)
                          (:budget config) start-time (lifecycle-result/phase-result published))))
 
-;------------------------------------------------------------------------------ Layer 1
-
-(defn- ^{:stratum 1} leave-phase
+(defn- ^{:stratum 0} leave-phase
   [ctx]
   (let [phase-key (get-in ctx [:phase :name])
-        result (lifecycle-result/after-publication
-                ctx phase-key (get-in ctx [:phase :result]))
+        published (lifecycle-result/after-publication ctx phase-key (get-in ctx [:phase :result]))
+        result (terminal/complete-failure! ctx phase-key published)
         completed-ctx (assoc-in ctx [:phase :result] result)
         success? (phase/result-succeeded? result)
         end-time (System/currentTimeMillis)
         duration-ms (- end-time (get-in ctx [:phase :started-at]))]
     (lifecycle-result/complete-phase completed-ctx phase-key success? end-time
                                      duration-ms)))
+
+;------------------------------------------------------------------------------ Layer 1
 
 (defn- ^{:stratum 1} enter-phase
   [phase-key transform config ctx]

@@ -8,8 +8,8 @@
             [ai.miniforge.event-stream.interface :as events]
             [ai.miniforge.phase-opsv.artifact-test-support :as fixture]
             [ai.miniforge.phase-opsv.evidence-runtime :as runtime]
-            [ai.miniforge.phase-opsv.interface :as opsv]
             [ai.miniforge.phase-opsv.test-support :as support]
+            [ai.miniforge.phase-opsv.terminal-test-support :as terminal]
             [babashka.fs :as fs]
             [clojure.test :refer [deftest is]]
             [slingshot.slingshot :refer [try+]]))
@@ -35,7 +35,7 @@
                       (update :execution/opts dissoc :opsv/adapter))]
     (try+
       (let [restored (runtime/ensure-assembly restarted)
-            first-recovery (opsv/publish-finalized-evidence! restored)
+            first-recovery (terminal/publication-output restored)
             bundle (:opsv/evidence-bundle first-recovery)
             recovered-records (events/get-events stream)
             directory (get-in ctx [:execution/opts :opsv/artifact-directory])
@@ -47,7 +47,8 @@
                            (evidence/get-opsv-assembly (:opsv/evidence-assembly-store restored)
                                                        (:evidence-bundle/id bundle)))))
         (is (= (select-keys first-recovery [:opsv/evidence-bundle :opsv/evidence-artifact-id])
-               (opsv/publish-finalized-evidence! restored)))
+               (select-keys (terminal/publication-output restored)
+                            [:opsv/evidence-bundle :opsv/evidence-artifact-id])))
         (is (= records (take (count records) recovered-records)))
         (is (= recovered-records (events/get-events stream)))
         (is (= (range (count recovered-records)) (map :event/sequence-number recovered-records)))

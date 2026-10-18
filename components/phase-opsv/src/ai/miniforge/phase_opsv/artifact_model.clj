@@ -52,7 +52,12 @@
       (update :opsv/artifact-refs append-reference id)))
 
 (defn ^{:stratum 1} records [ctx phase-key output]
-  (mapv (partial record ctx output) (get phase-materials phase-key [])))
+  (let [materials (cond-> (get phase-materials phase-key [])
+                    (and (= :opsv/actuate phase-key) (contains? output :opsv/effect-transactions))
+                    (conj [:effect-transactions :review :opsv/effect-transactions])
+                    (and (= :opsv/actuate phase-key) (contains? output :opsv/phase-failure))
+                    (conj [:actuation-failure :review :opsv/phase-failure]))]
+    (mapv (partial record ctx output) materials)))
 
 ;------------------------------------------------------------------------------ Layer 2
 

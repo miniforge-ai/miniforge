@@ -6,6 +6,7 @@
   (:require [ai.miniforge.anomaly.interface :as anomaly]
             [ai.miniforge.phase-opsv.artifact-boundary :as artifacts]
             [ai.miniforge.phase-opsv.events :as events]
+            [ai.miniforge.phase-opsv.evidence-checkpoint :as terminal-checkpoint]
             [ai.miniforge.phase-opsv.finalization :as finalization]
             [ai.miniforge.phase-opsv.finalization-model :as model]
             [ai.miniforge.phase-opsv.flow :as flow]
@@ -22,6 +23,8 @@
   (let [output (:opsv/recovered-actuation-output ctx)]
     (cond
       (anomaly/anomaly? output) output
+      (terminal-checkpoint/terminal-pending? ctx)
+      (model/failure output :terminal-recovery-required)
       (not (instance? clojure.lang.IAtom (context/stream ctx)))
       (model/failure output :invalid-recovery-context)
       (map? (:opsv/actuation-record output)) output

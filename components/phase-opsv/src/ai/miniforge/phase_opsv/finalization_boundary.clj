@@ -17,7 +17,7 @@
 (defn- ^{:stratum 0} restore-and-publish! [ctx]
   (flow/continue (runtime/ensure-assembly ctx) recovery/publish!))
 
-(defn- ^{:stratum 0} call-with-exception-handling [output operation]
+(defn ^{:stratum 0} call-with-exception-handling [output operation]
   ;; Evidence failure must retain the completed mutation rather than invite re-execution.
   (try+ (operation)
        (catch anomaly/any-anomaly? failure
