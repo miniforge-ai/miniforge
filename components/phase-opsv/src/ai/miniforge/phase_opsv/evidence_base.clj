@@ -17,8 +17,8 @@
   (let [supplied (get-in ctx [:execution/opts :opsv/evidence-base])
         base (select-keys (when (map? supplied) supplied) fields)
         id (get-in ctx [:execution/input :opsv/evidence-bundle-id])
-        tier (get (:evidence/outcome supplied) :outcome/tier
-                  (get (:execution/workflow ctx) :workflow/tier :standard))
+        tier (get-in ctx [:opsv/recovered-evidence-base :evidence/outcome :outcome/tier]
+                     (get (:execution/workflow ctx) :workflow/tier :standard))
         links (linkage/links ctx)]
     (cond-> (assoc base :evidence-bundle/id id :evidence/policy-checks []
                        :evidence/outcome {:outcome/success true :outcome/tier tier})

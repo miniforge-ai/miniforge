@@ -13,7 +13,8 @@
             [ai.miniforge.phase-opsv.lifecycle :as lifecycle]
             [ai.miniforge.phase-opsv.test-support :as support]
             [clojure.test :refer [deftest is]]
-            [malli.core :as m]))
+            [malli.core :as m]
+            [slingshot.slingshot :refer [throw+]]))
 
 ;------------------------------------------------------------------------------ Layer 0
 
@@ -23,6 +24,9 @@
 
 (defn- ^{:stratum 0} interrupt-publication []
   (throw (InterruptedException. "publication interrupted")))
+
+(defn- ^{:stratum 0} structured-publication-failure []
+  (throw+ (anomaly/anomaly :unavailable "publication unavailable" {})))
 
 (defn- ^{:stratum 0} publish-unless-bundle [publish failure root record]
   (if (= :evidence-bundle (get-in record [:artifact/metadata :opsv/material-kind]))
@@ -35,7 +39,7 @@
         bundle (:opsv/evidence-bundle output)
         assembly (get-in completed [:execution/input :opsv/evidence-assembly])]
     (is (m/validate evidence/OpsvEvidence (:evidence/opsv bundle)))
-    (is (:valid? (evidence/validate-canonical-bundle bundle)))
+    (is (:valid? (evidence/validate-published-bundle bundle)))
     (is (= [] (:evidence/policy-checks bundle)))
     (is (= :finalized (:opsv.assembly/status assembly)))
     (is (= (:evidence-bundle/id assembly) (:opsv/evidence-artifact-id output)))
@@ -128,16 +132,19 @@
            (:artifact/content (artifact/read-published directory (:opsv/evidence-artifact-id recovered)))))))
 
 (defn- ^{:stratum 1} assert-interrupted-publication [ctx _]
-  (let [ready (reduce f/step (f/configured ctx) (butlast support/handlers))
-        publish (partial publish-unless-bundle artifact/publish! interrupt-publication)
+  (doseq [[failure expected-interrupted?] [[interrupt-publication true] [structured-publication-failure false]]]
+   (let [ready (reduce f/step (f/configured ctx) (butlast support/handlers))
+        publish (partial publish-unless-bundle artifact/publish! failure)
         completed (actuate-with-publisher ready publish)
         interrupted? (Thread/interrupted)]
-    (is interrupted?)
+    (is (= expected-interrupted? interrupted?))
+    (is (= (if expected-interrupted? :fault :unavailable)
+           (get-in completed [:phase :result :output :anomaly/type])))
     (is (= :error (get-in completed [:phase :result :status])))
     (is (= :finalized (get-in completed [:execution/input :opsv/evidence-assembly :opsv.assembly/status])))
     (is (map? (get-in completed [:phase :result :output :anomaly/data :opsv/phase-output
                                  :opsv/actuation-record])))
-    (is (not (anomaly/anomaly? (opsv/publish-finalized-evidence! completed))))))
+    (is (not (anomaly/anomaly? (opsv/publish-finalized-evidence! completed)))))))
 
 (deftest ^{:stratum 1} lifecycle-finalizes-real-n6-and-publishes-preallocated-id-test
   (f/with-context assert-finalized-evidence))

@@ -15,7 +15,6 @@
 ;; WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 ;; See the License for the specific language governing permissions and
 ;; limitations under the License.
-
 (ns ai.miniforge.agent.reviewer
   "Reviewer agent implementation.
    Performs LLM-backed semantic code review plus deterministic gate validation.
@@ -40,47 +39,36 @@
    [ai.miniforge.loop.interface :as loop]
    [clojure.string :as str]))
 
+;------------------------------------------------------------------------------ Layer 0
+
 ;; Schemas (GateFeedback, ReviewIssue, ReviewArtifact) moved to
 ;; ai.miniforge.agent.reviewer.issues (PR-C decomposition).
-
 ;; Prompt loading, progress monitor, and per-call prompt assembly
 ;; (build-review-prompt, format-artifact-for-review, enumeration-retry-prompt)
 ;; moved to ai.miniforge.agent.reviewer.prompts (PR-E decomposition).
-
 ;; Gate plumbing, error classification, deterministic decision, summary,
 ;; and gate counts moved to ai.miniforge.agent.reviewer.gates (PR-D
 ;; decomposition). reviewer.clj orchestrates them via the `gates/` alias.
-
-;------------------------------------------------------------------------------ Layer 2
 ;; LLM review: response parsing
-
 ;; build-review-prompt + format-artifact-for-review moved to
 ;; ai.miniforge.agent.reviewer.prompts (PR-E decomposition).
-
 ;; Scope resolution + partitioning moved to ai.miniforge.agent.reviewer.scope
 ;; (PR #1039 decomposition).
-
 ;; Issue-shape validation / sanitization / decision normalization / issue-text
 ;; extraction moved to ai.miniforge.agent.reviewer.issues (PR-C decomposition).
-
 ;; LLM-response parsing, failure-message resolution, backend-timeout
 ;; detection, and enumeration-retry validator/recovery moved to
 ;; ai.miniforge.agent.reviewer.llm-response (PR-F decomposition).
 ;; llm-issues->recommendations moved to reviewer.issues (PR-F) — same
 ;; shape as its blocking/warning siblings already there.
-
 ;; Artifact extraction, builders, validators, lifecycle telemetry, and the
 ;; backend-timeout-only error exit moved to ai.miniforge.agent.reviewer.artifact
 ;; (PR-G decomposition).
-
-;------------------------------------------------------------------------------ Layer 5
 ;; Agent creation
-
 ;; Enumeration-retry validator + well-formed-recovery? +
 ;; recover-review-enumeration moved to ai.miniforge.agent.reviewer.llm-response
 ;; (PR-F decomposition).
-
-(def ^:private reviewer-disallowed-tools
+(def ^{:stratum 0} ^:private reviewer-disallowed-tools
   "Native tools the reviewer MUST NOT call. Forces reads onto the MCP context
    cache (context_read/grep/glob) — same mechanism as planner/implementer/
    tester — and blocks ALL mutation: the reviewer inspects, it never writes.
@@ -89,14 +77,14 @@
    related files) without native exploration or modifying anything."
   ["Read" "Grep" "Glob" "LS" "Agent" "Bash" "Write" "Edit" "MultiEdit"])
 
-(def ^:private default-context-window-reserve-tokens
+(def ^{:stratum 0} ^:private default-context-window-reserve-tokens
   "Fallback when reviewer.edn omits :prompt/context-window-reserve-tokens.
    Headroom kept below the model's context window for the agent CLI's own
    unmeasured baseline (system prompt, tool schemas, host plugins/skills).
    Matches the planner default; authority is the EDN."
   50000)
 
-(defn- assemble-review-within-budget
+(defn- ^{:stratum 0} assemble-review-within-budget
   "Reviewer-side N12 §5 budgeting — parallels the planner's
    `assemble-within-budget`. The artifact-under-review's eagerly-inlined
    file bodies are the unbounded contributor: an aggregated DAG integration
@@ -121,16 +109,11 @@
                           input reviewer-prompts/format-artifact-manifest)
       :shed-count       (count (:code/files artifact))})))
 
-(defn- estimated-input-tokens
+(defn- ^{:stratum 0} estimated-input-tokens
   [system user-prompt]
   (:estimated-input-tokens (llm/prompt-size-telemetry system user-prompt)))
 
-(defn- fits-effective-window?
-  [system user-prompt effective-window]
-  (or (nil? effective-window)
-      (< (estimated-input-tokens system user-prompt) effective-window)))
-
-(defn- addendum-units
+(defn- ^{:stratum 0} addendum-units
   "Split a policy/knowledge addendum at natural markdown paragraph
    boundaries. The greedy packer below preserves these units whenever
    possible and only falls back to character chunks for a single oversized
@@ -140,7 +123,98 @@
        (remove str/blank?)
        vec))
 
-(defn- max-fitting-prefix-length
+(def ^{:stratum 0} ^:private review-decision-rank
+  {:approved 0
+   :conditionally-approved 1
+   :changes-requested 2
+   :rejected 3})
+
+(defn- ^{:stratum 0} aggregate-cost-usd
+  [normalized-results]
+  (when-let [costs (seq (keep :cost-usd normalized-results))]
+    (reduce + 0M costs)))
+
+(defn- ^{:stratum 0} combined-review-content
+  [review]
+  (str "```clojure\n" (pr-str review) "\n```"))
+
+(defn- ^{:stratum 0} normalized-response
+  "Return the failed session response when it is a map; otherwise return an empty map."
+  [failed]
+  (let [response (get failed :response)]
+    (if (map? response) response {})))
+
+(defn- ^{:stratum 0} emit-prompt-size!
+  "Emit an :agent/prompt-size workflow event recording the reviewer's
+   pre-flight budget (N12 §3) so estimate-vs-window is visible/queryable.
+   Mirrors the planner emitter. Safe no-op without an event stream."
+  [context budget]
+  (when-let [stream (or (:event-stream context) (:execution/event-stream context))]
+    (when-let [wf-id (or (:execution/id context) (:workflow/id context))]
+      (try
+        (es/publish!
+         stream
+         (-> (es/create-envelope stream :agent/prompt-size wf-id
+                                 (str "reviewer prompt ~" (:est-full budget)
+                                      " est tokens / window " (:window budget)
+                                      (when (:shed? budget) " (shed to manifest)")))
+             (assoc :agent/id :reviewer
+                    :prompt/estimated-input-tokens (:est-full budget)
+                    :prompt/context-window (:window budget)
+                    :prompt/reserve (:reserve budget)
+                    :prompt/reserve-clamped? (:reserve-clamped? budget)
+                    :prompt/effective-window (:effective-window budget)
+                    :prompt/shed? (:shed? budget)
+                    :prompt/estimated-after-shed (:est-final budget)
+                    :prompt/file-count (:file-count budget))))
+        (catch Exception _ nil)))))
+
+(defn- ^{:stratum 0} invoke-enumeration-retry-session
+  [llm-client retry-prompt on-chunk system-prompt monitor]
+  (let [retry-opts (cond-> {:system system-prompt
+                            :max-turns
+                            (get @reviewer-prompts/reviewer-prompt-data
+                                 :prompt/enumeration-retry-max-turns
+                                 6)}
+                     monitor (assoc :progress-monitor monitor))]
+    (if on-chunk
+      (llm/chat-stream llm-client retry-prompt on-chunk retry-opts)
+      (llm/chat llm-client retry-prompt retry-opts))))
+
+;------------------------------------------------------------------------------ Layer 1
+
+(defn- ^{:stratum 1} fits-effective-window?
+  [system user-prompt effective-window]
+  (or (nil? effective-window)
+      (< (estimated-input-tokens system user-prompt) effective-window)))
+
+(defn- ^{:stratum 1} strongest-review-decision
+  [reviews]
+  (->> reviews
+       (map #(issues/normalize-llm-decision (:review/decision %)))
+       (apply max-key #(get review-decision-rank % 0))))
+
+(defn- ^{:stratum 1} invoke-reviewer-session
+  "Read-only session body for the reviewer: force the MCP-read tools, build the
+   chat opts (base-opts + session MCP opts + the disallow-list + worktree cwd),
+   and call the LLM. Returns the LLM response. Run via `with-readonly-session`
+   so reads go through the context cache and nothing is written."
+  [session llm-client user-prompt on-chunk base-opts budget-usd max-turns]
+  (artifact-session/write-cursor-permissions-for-session! session reviewer-disallowed-tools)
+  (let [opts (cond-> (merge base-opts
+                            (assoc (artifact-session/session->mcp-opts session budget-usd max-turns)
+                                   :disallowed-tools reviewer-disallowed-tools))
+               ;; Thread the worktree cwd like the other roles — CWD-dependent
+               ;; backends (e.g. Cursor's project-scoped .cursor/*) need it to
+               ;; read the session's permission allowlist and the right repo root.
+               (:workdir session) (assoc :workdir (:workdir session)))]
+    (if on-chunk
+      (llm/chat-stream llm-client user-prompt on-chunk opts)
+      (llm/chat llm-client user-prompt opts))))
+
+;------------------------------------------------------------------------------ Layer 2
+
+(defn- ^{:stratum 2} max-fitting-prefix-length
   [base-system text user-prompt effective-window]
   (loop [lo 1
          hi (count text)
@@ -153,79 +227,7 @@
           (recur (inc mid) hi mid)
           (recur lo (dec mid) best))))))
 
-(defn- split-oversized-addendum-unit
-  [base-system unit user-prompt effective-window]
-  (loop [remaining unit
-         chunks []]
-    (cond
-      (str/blank? remaining)
-      chunks
-
-      (fits-effective-window? (str base-system remaining) user-prompt effective-window)
-      (conj chunks remaining)
-
-      :else
-      (let [n (max-fitting-prefix-length base-system remaining user-prompt effective-window)]
-        (when (pos? n)
-          (recur (subs remaining n)
-                 (conj chunks (subs remaining 0 n))))))))
-
-(defn- split-addendum-into-fitting-chunks
-  "Return addendum chunks that each fit with the base system and user prompt,
-   or nil when even the base system plus user prompt is over budget."
-  [base-system addendum user-prompt effective-window]
-  (when (and (not (str/blank? addendum))
-             (fits-effective-window? base-system user-prompt effective-window))
-    (loop [remaining (addendum-units addendum)
-           current ""
-           chunks []]
-      (if (empty? remaining)
-        (cond-> chunks
-          (not (str/blank? current)) (conj current))
-        (let [unit (first remaining)
-              more (rest remaining)
-              candidate (if (str/blank? current)
-                          unit
-                          (str current "\n\n" unit))]
-          (cond
-            (fits-effective-window? (str base-system candidate) user-prompt effective-window)
-            (recur more candidate chunks)
-
-            (not (str/blank? current))
-            (recur remaining "" (conj chunks current))
-
-            :else
-            (when-let [oversized-chunks
-                       (seq (split-oversized-addendum-unit
-                             base-system unit user-prompt effective-window))]
-              (recur more "" (into chunks oversized-chunks)))))))))
-
-(defn- review-session-systems
-  "Resolve the system prompts to use for the review. Most reviews use one
-   system prompt. If the compiled policy/knowledge addendum pushes the shed
-   prompt over budget, split that addendum across multiple LLM sessions so
-   every compiled rule is still applied."
-  [base-system behavior-addendum user-prompt prompt-budget]
-  (if-not (:over-after-shed? prompt-budget)
-    [(str base-system behavior-addendum)]
-    (when-let [chunks (seq (split-addendum-into-fitting-chunks
-                            base-system behavior-addendum user-prompt
-                            (:effective-window prompt-budget)))]
-      (mapv #(str base-system %) chunks))))
-
-(def ^:private review-decision-rank
-  {:approved 0
-   :conditionally-approved 1
-   :changes-requested 2
-   :rejected 3})
-
-(defn- strongest-review-decision
-  [reviews]
-  (->> reviews
-       (map #(issues/normalize-llm-decision (:review/decision %)))
-       (apply max-key #(get review-decision-rank % 0))))
-
-(defn- combine-parsed-reviews
+(defn- ^{:stratum 2} combine-parsed-reviews
   [reviews]
   (let [multiple? (> (count reviews) 1)
         summaries (seq (keep :review/summary reviews))]
@@ -247,22 +249,37 @@
       (not multiple?) (assoc :review/summary (or (first summaries)
                                                  "Review completed.")))))
 
-(defn- aggregate-cost-usd
-  [normalized-results]
-  (when-let [costs (seq (keep :cost-usd normalized-results))]
-    (reduce + 0M costs)))
+(defn- ^{:stratum 2} invoke-reviewer-with-system
+  [context llm-client user-prompt on-chunk system-prompt monitor
+   budget-usd max-turns]
+  (let [base-opts (cond-> {:system system-prompt
+                           :max-turns max-turns}
+                    monitor (assoc :progress-monitor monitor))]
+    (artifact-session/with-readonly-session
+     context
+     #(invoke-reviewer-session % llm-client user-prompt on-chunk
+                               base-opts budget-usd max-turns))))
 
-(defn- combined-review-content
-  [review]
-  (str "```clojure\n" (pr-str review) "\n```"))
+;------------------------------------------------------------------------------ Layer 3
 
-(defn- normalized-response
-  "Return the failed session response when it is a map; otherwise return an empty map."
-  [failed]
-  (let [response (get failed :response)]
-    (if (map? response) response {})))
+(defn- ^{:stratum 3} split-oversized-addendum-unit
+  [base-system unit user-prompt effective-window]
+  (loop [remaining unit
+         chunks []]
+    (cond
+      (str/blank? remaining)
+      chunks
 
-(defn- combine-normalized-review-results
+      (fits-effective-window? (str base-system remaining) user-prompt effective-window)
+      (conj chunks remaining)
+
+      :else
+      (let [n (max-fitting-prefix-length base-system remaining user-prompt effective-window)]
+        (when (pos? n)
+          (recur (subs remaining n)
+                 (conj chunks (subs remaining 0 n))))))))
+
+(defn- ^{:stratum 3} combine-normalized-review-results
   "Combine split reviewer calls into one normalized result. Any split session
    that fails to parse or times out keeps the combined result failed; only an
    all-parseable set is merged into a ReviewArtifact."
@@ -296,89 +313,67 @@
          :cost-usd cost-usd
          :usable? true}))))
 
-(defn- emit-prompt-size!
-  "Emit an :agent/prompt-size workflow event recording the reviewer's
-   pre-flight budget (N12 §3) so estimate-vs-window is visible/queryable.
-   Mirrors the planner emitter. Safe no-op without an event stream."
-  [context budget]
-  (when-let [stream (or (:event-stream context) (:execution/event-stream context))]
-    (when-let [wf-id (or (:execution/id context) (:workflow/id context))]
-      (try
-        (es/publish!
-         stream
-         (-> (es/create-envelope stream :agent/prompt-size wf-id
-                                 (str "reviewer prompt ~" (:est-full budget)
-                                      " est tokens / window " (:window budget)
-                                      (when (:shed? budget) " (shed to manifest)")))
-             (assoc :agent/id :reviewer
-                    :prompt/estimated-input-tokens (:est-full budget)
-                    :prompt/context-window (:window budget)
-                    :prompt/reserve (:reserve budget)
-                    :prompt/reserve-clamped? (:reserve-clamped? budget)
-                    :prompt/effective-window (:effective-window budget)
-                    :prompt/shed? (:shed? budget)
-                    :prompt/estimated-after-shed (:est-final budget)
-                    :prompt/file-count (:file-count budget))))
-        (catch Exception _ nil)))))
+;------------------------------------------------------------------------------ Layer 4
 
-(defn- invoke-reviewer-session
-  "Read-only session body for the reviewer: force the MCP-read tools, build the
-   chat opts (base-opts + session MCP opts + the disallow-list + worktree cwd),
-   and call the LLM. Returns the LLM response. Run via `with-readonly-session`
-   so reads go through the context cache and nothing is written."
-  [session llm-client user-prompt on-chunk base-opts budget-usd max-turns]
-  (artifact-session/write-cursor-permissions-for-session! session reviewer-disallowed-tools)
-  (let [opts (cond-> (merge base-opts
-                            (assoc (artifact-session/session->mcp-opts session budget-usd max-turns)
-                                   :disallowed-tools reviewer-disallowed-tools))
-               ;; Thread the worktree cwd like the other roles — CWD-dependent
-               ;; backends (e.g. Cursor's project-scoped .cursor/*) need it to
-               ;; read the session's permission allowlist and the right repo root.
-               (:workdir session) (assoc :workdir (:workdir session)))]
-    (if on-chunk
-      (llm/chat-stream llm-client user-prompt on-chunk opts)
-      (llm/chat llm-client user-prompt opts))))
+(defn- ^{:stratum 4} split-addendum-into-fitting-chunks
+  "Return addendum chunks that each fit with the base system and user prompt,
+   or nil when even the base system plus user prompt is over budget."
+  [base-system addendum user-prompt effective-window]
+  (when (and (not (str/blank? addendum))
+             (fits-effective-window? base-system user-prompt effective-window))
+    (loop [remaining (addendum-units addendum)
+           current ""
+           chunks []]
+      (if (empty? remaining)
+        (cond-> chunks
+          (not (str/blank? current)) (conj current))
+        (let [unit (first remaining)
+              more (rest remaining)
+              candidate (if (str/blank? current)
+                          unit
+                          (str current "\n\n" unit))]
+          (cond
+            (fits-effective-window? (str base-system candidate) user-prompt effective-window)
+            (recur more candidate chunks)
 
-(defn- invoke-reviewer-with-system
-  [context llm-client user-prompt on-chunk system-prompt monitor
-   budget-usd max-turns]
-  (let [base-opts (cond-> {:system system-prompt
-                           :max-turns max-turns}
-                    monitor (assoc :progress-monitor monitor))]
-    (artifact-session/with-readonly-session
-     context
-     #(invoke-reviewer-session % llm-client user-prompt on-chunk
-                               base-opts budget-usd max-turns))))
+            (not (str/blank? current))
+            (recur remaining "" (conj chunks current))
 
-(defn- invoke-reviewer-sessions
+            :else
+            (when-let [oversized-chunks
+                       (seq (split-oversized-addendum-unit
+                             base-system unit user-prompt effective-window))]
+              (recur more "" (into chunks oversized-chunks)))))))))
+
+(defn- ^{:stratum 4} invoke-reviewer-sessions
   [context llm-client user-prompt on-chunk systems monitor budget-usd max-turns]
-  (let [responses (mapv #(invoke-reviewer-with-system
-                          context llm-client user-prompt on-chunk %
-                          monitor budget-usd max-turns)
-                        systems)]
-    (if (= 1 (count responses))
-      (result-boundary/normalize-llm-result
-       {:response (first responses)
-        :parse-response llm-response/parse-review-response})
-      (combine-normalized-review-results
-       (mapv #(result-boundary/normalize-llm-result
-               {:response %
-                :parse-response llm-response/parse-review-response})
-             responses)))))
+  (let [sessions (mapv #(invoke-reviewer-with-system
+                         context llm-client user-prompt on-chunk %
+                         monitor budget-usd max-turns)
+                       systems)
+        responses (mapv :llm-result sessions)
+        ;; §7.7.2: each split session has its own answers.edn; the run's
+        ;; answer record is their concatenation. nil (not []) when no
+        ;; session recorded any, matching the single-session shape.
+        codex-answers (not-empty (into [] (mapcat :codex-answers) sessions))
+        ;; Any torn per-session log marks the whole run's record as
+        ;; partially lost — see merge-answer-logs for the ordering.
+        answer-log (artifact-session/merge-answer-logs
+                    (keep :codex-answer-log sessions))
+        normalized (if (= 1 (count responses))
+                     (result-boundary/normalize-llm-result
+                      {:response (first responses)
+                       :parse-response llm-response/parse-review-response})
+                     (combine-normalized-review-results
+                      (mapv #(result-boundary/normalize-llm-result
+                              {:response %
+                               :parse-response llm-response/parse-review-response})
+                            responses)))]
+    (assoc normalized
+           :codex-answers codex-answers
+           :codex-answer-log answer-log)))
 
-(defn- invoke-enumeration-retry-session
-  [llm-client retry-prompt on-chunk system-prompt monitor]
-  (let [retry-opts (cond-> {:system system-prompt
-                            :max-turns
-                            (get @reviewer-prompts/reviewer-prompt-data
-                                 :prompt/enumeration-retry-max-turns
-                                 6)}
-                     monitor (assoc :progress-monitor monitor))]
-    (if on-chunk
-      (llm/chat-stream llm-client retry-prompt on-chunk retry-opts)
-      (llm/chat llm-client retry-prompt retry-opts))))
-
-(defn- recover-review-enumeration-across-sessions
+(defn- ^{:stratum 4} recover-review-enumeration-across-sessions
   [llm-client systems monitor on-chunk user-prompt prior-content]
   (if (= 1 (count systems))
     (llm-response/recover-review-enumeration
@@ -402,7 +397,24 @@
       (when (and re-review (llm-response/well-formed-recovery? re-review))
         re-review))))
 
-(defn create-reviewer
+;------------------------------------------------------------------------------ Layer 5
+
+(defn- ^{:stratum 5} review-session-systems
+  "Resolve the system prompts to use for the review. Most reviews use one
+   system prompt. If the compiled policy/knowledge addendum pushes the shed
+   prompt over budget, split that addendum across multiple LLM sessions so
+   every compiled rule is still applied."
+  [base-system behavior-addendum user-prompt prompt-budget]
+  (if-not (:over-after-shed? prompt-budget)
+    [(str base-system behavior-addendum)]
+    (when-let [chunks (seq (split-addendum-into-fitting-chunks
+                            base-system behavior-addendum user-prompt
+                            (:effective-window prompt-budget)))]
+      (mapv #(str base-system %) chunks))))
+
+;------------------------------------------------------------------------------ Layer 6
+
+(defn ^{:stratum 6} create-reviewer
   "Create a Reviewer agent with optional configuration overrides.
 
    The Reviewer performs LLM-backed semantic code review plus deterministic
@@ -707,7 +719,13 @@
 
                     duration (- (System/currentTimeMillis) start-time)]
 
-                (cond
+                ;; §7.7.2 explicit answers: recorded peg answers (and the
+                ;; lost-vs-unanswered answer-log marker) ride the review
+                ;; result on EVERY branch — a timed-out review may still
+                ;; have answered pegs before stalling, and that
+                ;; consultation must not be ledgered as unanswered.
+                (cond->
+                 (cond
                   context-overflow?
                   (artifact/context-overflow-error-result
                    logger normalized gate-result counts duration overflow-message)
@@ -758,7 +776,11 @@
                                           :gates-failed (:failed counts)
                                           :llm? true})
 
-                    (artifact/build-review-result review counts duration tokens :cost-usd cost-usd)))))
+                    (artifact/build-review-result review counts duration tokens :cost-usd cost-usd)))
+                 (some? (:codex-answers normalized))
+                 (assoc :codex-answers (:codex-answers normalized))
+                 (some? (:codex-answer-log normalized))
+                 (assoc :codex-answer-log (:codex-answer-log normalized)))))
 
             ;; No LLM — gate-only fallback
             (let [gate-feedbacks (gates/run-gates-on-artifact gates artifact context logger)
@@ -792,7 +814,6 @@
 ;; get-warnings, get-recommendations, get-issues, get-strengths) moved to
 ;; ai.miniforge.agent.reviewer.artifact (PR-G decomposition).
 ;; Downstream consumers reach them via agent.interface.specialized.
-
 ;------------------------------------------------------------------------------ Rich Comment
 (comment
   ;; Create a reviewer with default gates (gate-only mode)

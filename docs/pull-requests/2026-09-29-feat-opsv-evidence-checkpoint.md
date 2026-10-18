@@ -13,13 +13,19 @@ Replay reuses audit occurrences for every phase, including after snapshot failur
 Persist acknowledged event sequences with the assembly, so N6 scope links and
 counts survive a fresh runtime stream. Capture the configured workflow tier
 (N1 default: standard) in the preflight base used by recovery.
-Reject recovered references that lack a durable sequence acknowledgement when
-the original event is unavailable; never invent a sequence or duplicate that event.
+Current retries require a journal receipt, not an assembly reference. Legacy recovery requires a retained sequence
+when the original event is unavailable; it never invents a position or duplicates that occurrence.
+Individual audit publications accumulate only their receipt. Checkpoint persistence collects the full workflow range
+using the stream's profile-specific query options. Collection failures prevent checkpoint success.
+Resolve all three supported runtime stream locations. Refuse to construct N6 links for sparse acknowledged ranges;
+legacy retry cannot fabricate missing positions or inflate counts to make an invalid range look complete.
+Recognize both current and legacy anomaly formats throughout phase completion. Sealed assemblies persist unchanged.
+Initial tier capture ignores caller outcome data; only a validated bound recovery snapshot supplies a retained tier.
 Provide a bound actuation snapshot that retains the sanitized preflight evidence base
 alongside adapter output. Recovery uses that captured base even when runtime options
 are missing or changed. The finalization PR #1952 wires capture and recovery into the lifecycle.
-This PR is stacked on canonical evidence validation (#1957); retarget main after
-that prerequisite merges. The audit-retry prerequisite (#1955) is already on main.
+Base: main after merged canonical evidence validation (#1957) and current OPSV publication (#2034, #2035).
+Integrated main once at `e9a9afd5d`; preserved existing checkpoint edits in a retained stash before reconciliation.
 
 ## Standards adversarial pass
 
@@ -27,13 +33,25 @@ Separate snapshot conversion, assembly orchestration, and phase-result construct
 Reuse public artifact and evidence interfaces and canonical result constructors.
 Keep namespaces within three strata and diagnostics in the existing message catalog.
 This extracts the independently testable checkpoint portion of finalization; it performs no provider actions.
+Keep main's reviewed privacy handling, pure assembly transitions, receipt validation, and indexed current retries.
+Reject duplicate interface definitions introduced by automatic merging. Retain the first confirmed position for each event.
+Explicitly lint checkpoint-owned strata even though the normal merge hook exempts incoming files.
 
 ## Verification
 
 Exercise corruption, wrong-workflow/bundle/material-kind restoration, successful restoration, and encoding failures.
 Actuation snapshot tests cover changed or absent runtime evidence bases and reject output-only legacy snapshots.
 Run both phase consumers, the packaged checkpoint tests, and the component standards scan before merge.
-Focused checkpoint/replay regressions pass 9 tests with 75 assertions.
+After integration, all three phase/evidence consumer projects passed serially (1m10s).
+The real workflow disk test passed (1 test / 7 assertions).
+Review regressions cover legacy collection errors, immutable sealed checkpoints, untrusted outcome tiers,
+and preserving the captured tier when recovery workflow options change.
+Both phase consumers passed after the corrections (45s), including stream aliases and sparse-range rejection.
+Rebuilt CLI: 39,157,270 bytes. Isolated package checks passed 54 tests / 375 assertions,
+with no production source overlays; the pinned standards scan reported zero violations across 4,414 files.
+Pinned standards scan, explicit owned-file strata, and Clojure warning/error checks passed.
+The new current-journal test verifies contiguous scoped positions, foreign-workflow isolation, restored snapshots,
+query-failure propagation, and idempotent retry after reopening. Cross-workflow global ordering is not assumed.
 The project integration test runs a completed phase through the real workflow checkpoint writer/reader.
 It discards runtime storage and the display assembly, then restores the exact snapshot with set, list, and timestamp types.
 CI runs it explicitly.

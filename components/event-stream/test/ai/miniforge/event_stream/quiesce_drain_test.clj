@@ -24,8 +24,9 @@
    pre-BD-2a race where headless exits could land before background
    producers finished publishing or sinks finished writing."
   (:require
-   [clojure.test :refer [deftest testing is]]
-   [ai.miniforge.event-stream.core :as core]))
+   [clojure.test :refer [deftest is]]
+   [ai.miniforge.event-stream.core :as core]
+   [ai.miniforge.event-stream.publication-fence :as fence]))
 
 ;------------------------------------------------------------------------------ Layer 0
 
@@ -130,9 +131,9 @@
     (is (= :sink-error (:reason result)))
     (is (= "kaboom" (-> result :failed-sinks first :error)))))
 
-(def ^{:stratum 0} ^:private with-in-flight-var  #'core/with-in-flight)
+(def ^{:stratum 0} ^:private with-in-flight-var  #'fence/with-in-flight)
 
-(def ^{:stratum 0} ^:private quiesced-sentinel-var #'core/quiesced-sentinel)
+(def ^{:stratum 0} ^:private quiesced-sentinel-var #'fence/quiesced-sentinel)
 
 ;------------------------------------------------------------------------------ Layer 1
 
@@ -233,13 +234,13 @@
   ;; We exercise the slow path directly: bypass rejection-if-quiesced by
   ;; calling with-in-flight on a stream that is already quiesced. This
   ;; replicates the race window — rejection-if-quiesced would have returned
-  ;; nil (workflow not quiesced at the fast-path instant) but the atomic
-  ;; swap! inside try-acquire-in-flight! observes the fence.
+  ;; nil (workflow not quiesced at the fast-path instant) but the
+  ;; atomic admission inside try-acquire-in-flight! observes the fence.
   (let [[sink record] (recording-sink)
         wid     (random-uuid)
         event   (workflow-event wid :test/event)
         ;; Build a stream that is quiesced, simulating the state after a
-        ;; concurrent quiesce! landed between the fast-path check and the swap!.
+        ;; concurrent quiesce! landed between the fast-path check and atomic admission.
         stream  (atom {:in-flight 0
                        :quiesced-workflows #{wid}
                        :sinks [sink]

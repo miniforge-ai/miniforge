@@ -78,6 +78,17 @@
       (when no-strategic-coverage?
         [(msg/t :render/no-strategic-coverage)]))))
 
+(defn- ^{:stratum 0} render-peg
+  "One presented peg: id, the question, and the answer vocabulary. The
+   §7.7 answer channel records answers against these ids and strings, so
+   the agent must see both verbatim."
+  [{:keys [id title answers]}]
+  (if (seq answers)
+    (msg/t :render/peg-line
+           {:id id :title title
+            :options (str/join " | " (sort (keys answers)))})
+    (msg/t :render/peg-line-no-answers {:id id :title title})))
+
 (defn ^{:stratum 0} render-anomaly [{:codex/keys [anomaly reason available matches]}]
   (str/join "\n"
     (concat
@@ -104,4 +115,10 @@
          (render-coverage (:coverage resp))
          ""
          (msg/t :render/landings-header)]
-        (map render-landing (:landings resp))))))
+        (map render-landing (:landings resp))
+        ;; Pegs render AFTER the landings: the §7.7 answer channel needs
+        ;; the questions in front of the consumer, and an answer given
+        ;; after reading the landings is an informed one.
+        (when (seq (:pegs resp))
+          (cons (str "\n" (msg/t :render/pegs-header))
+                (map render-peg (:pegs resp))))))))

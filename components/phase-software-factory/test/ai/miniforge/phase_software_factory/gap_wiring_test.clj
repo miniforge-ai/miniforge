@@ -141,6 +141,36 @@
         (is (nil? (get-in (first entries) [:miss/consultation :pegs]))
             "writer-normalized: pegs live at :miss/pegs only")))))
 
+(deftest ^{:stratum 1} clean-phase-still-records-its-consultation
+  ;; SPEC §7.7.2.1: the retirement trigger's zero-entropy signature lives
+  ;; in the runs where nothing went wrong — which write no miss. The
+  ;; consultation record must therefore land on every consulting leave,
+  ;; with or without failure signals.
+  (testing "no failure signals → no miss entries, one consultation entry"
+    (let [dir (temp-root)
+          pegs [{:id "peg-a" :answer "yes"
+                 :landings {"yes" ["p1"] "no" ["p2"]}}]
+          ctx (run-ctx dir "run-c"
+                       :phase {:result
+                               {:output
+                                {:codex/consultation
+                                 {:pinned? true :status :pinned :anomaly nil
+                                  :situation "quality-signal-might-be-lying"
+                                  :pegs pegs :pin-read? nil}}}})]
+      (gap-wiring/record-phase-misses! ctx :review "/nonexistent/codex")
+      (is (= 0 (count (:entries (gap/read-ledger (str dir "/run-c"))))))
+      (let [{:keys [entries]} (gap/read-consultations (str dir "/run-c"))]
+        (is (= 1 (count entries)))
+        (is (= :review (:consultation/phase (first entries))))
+        (is (= pegs (:consultation/pegs (first entries))))
+        (is (= "run-c" (:consultation/run-id (first entries)))))))
+  (testing "no consultation on the result → no consultation entry invented"
+    (let [dir (temp-root)
+          ctx (run-ctx dir "run-n"
+                       :phase {:result {:output {}}})]
+      (gap-wiring/record-phase-misses! ctx :review "/nonexistent/codex")
+      (is (= 0 (count (:entries (gap/read-consultations (str dir "/run-n")))))))))
+
 (deftest ^{:stratum 1} ledger-write-failure-warns-through-the-context-logger
   ;; The workflow runner normalizes :execution/logger at context creation
   ;; (workflow.context), so this warn path is live in production runs —

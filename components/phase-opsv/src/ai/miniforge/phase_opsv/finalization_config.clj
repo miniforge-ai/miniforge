@@ -54,3 +54,6 @@
     (and (enabled? ctx) (not (valid-base? ctx)))
     (anomaly/anomaly :invalid-input (msg/t :evidence/invalid-finalization-config) {})
     :else ctx))
+
+(comment
+  (enabled? {}))

@@ -6,8 +6,8 @@
 
 # N8 — Observability Control Interface
 
-**Version:** 0.4.0-draft
-**Date:** 2026-08-06
+**Version:** 0.4.1-draft
+**Date:** 2026-10-04
 **Status:** Draft
 **Conformance:** MUST
 
@@ -18,7 +18,7 @@
 ### 0.1 Purpose
 
 This specification defines the normative requirements for the **Observability Control
-Interface** (OCI): a capability that enables external actors to listen to workflow execution,
+Interface** (OCI). This capability enables external actors to listen to workflow execution,
 advise on decisions, and (when authorized) control workflow behavior through a governed
 command surface.
 
@@ -513,17 +513,17 @@ Annotations MUST emit events per N3:
 ## 5. Privacy and Redaction
 
 **N3 owns redaction and retention.** N3 §8 defines what may never be emitted,
-the `"[REDACTED]"` marker, truncation, and the three field classes; N3 §4.3
+the `"[REDACTED]"` marker, truncation, and the three field classes. N3 §4.3
 defines the four retention classes and their minimums. This section defines
 only what is specific to *listeners* — which principal sees which class — and
 MUST NOT restate or vary those contracts.
 
 Earlier revisions of this section carried a parallel model: privacy levels
-`metadata-only | redacted | full`, a `:redaction/patterns` regex table, a
-`:redaction/field-rules` vocabulary of `:include | :redact | :exclude`, and a
+`metadata-only | redacted | full`, a `:redaction/patterns` regex table, and a
+`:redaction/field-rules` vocabulary of `:include | :redact | :exclude`. They also carried a
 `:retention/policies` schema with its own day counts. All are withdrawn. Four
 overlapping vocabularies for two concerns meant an operator configuring
-redaction here had no way to know whether N3 §8's MUST NOT still applied — it
+redaction here could not tell whether N3 §8's MUST NOT still applied. It
 does, unconditionally, and it is not configurable.
 
 ### 5.1 Per-Listener Content Visibility
@@ -538,13 +538,13 @@ principal's RBAC role (§2.3):
 | `:restricted` | Only principals whose RBAC role permits that class |
 
 `:restricted` suppression is **per-recipient at delivery**, not per-event at
-emission (N3 §8.4): two listeners on one stream may be entitled to different
+emission (N3 §8.4). Two listeners on one stream may be entitled to different
 views of the same event.
 
 A deployment MAY configure a listener type's default — for instance that
 `:fleet` listeners default to `:include-payloads? false`. It MUST NOT configure
 away N3 §8.1: no configuration, listener type, or RBAC role causes a
-never-emitted value to be emitted, because that value was never in the event
+never-emitted value to be emitted. That value was never in the event
 (N3 §8.1 redacts at construction).
 
 ### 5.2 Redaction Configuration
@@ -556,7 +556,7 @@ function as a configuration value.
 
 An earlier revision specified `:redaction/custom-fn function`. That is
 withdrawn — a function in a config map cannot be serialized, diffed, reviewed,
-or audited, which defeats the purpose of a redaction policy an auditor needs to
+or audited. This defeats the purpose of a redaction policy an auditor needs to
 inspect.
 
 Where a deployment needs a detection rule beyond N3 §8.1's set, it adds a
@@ -792,12 +792,11 @@ navigation only; their schemas are not reproduced.
 
 Two properties of that family matter to implementers of this spec:
 
-- These events take an **inherited scope** (N3 §2.3): `listener/*` takes the
+- These events take an **inherited scope** (N3 §2.3). `listener/*` takes the
   scope of the stream it annotates, and `control-action/*` and
   `annotation/created` take the scope of their target. Each carries
-  `:scope/type` naming which scope it resolved to. An earlier revision of this
-  section reproduced these schemas with a fixed `:workflow/id`, which made them
-  unusable on the five non-workflow scopes N3 §5.3.1 now streams.
+  `:scope/type` naming which scope it resolved to. Earlier revisions fixed these
+  schemas to `:workflow/id`. This excluded non-workflow scopes. N3 §2.3's registry includes chain-run scope.
 - `control-action/*` is `:audit` retention class (§5.3).
 
 The remaining event types below are specific to this spec and are defined here.
@@ -1024,12 +1023,12 @@ any requirement in §0–§14.
 - **Per-recipient `:restricted` suppression (§5.1).** Filtering is
   per-subscription, not per-recipient by role (N8.PRV.2).
 - **Inherited scope on listener events (§10.1).** Listener events carry
-  `:workflow/id`; `:scope/type` is not emitted, so the five non-workflow
+  `:workflow/id`; `:scope/type` is not emitted, so the non-workflow
   scopes of N3 §2.3 cannot be observed (N8.CTL.5).
 
 ### A.3 Structural
 
-- **Audit retention (§5.3)** is unenforced — there is no retention floor for
+**Audit retention (§5.3)** is unenforced — there is no retention floor for
   control-action events (N8.CTL.6).
 
 ---
@@ -1049,24 +1048,26 @@ any requirement in §0–§14.
 
 **Version History:**
 
+- 0.4.1-draft (2026-10-04): Defer inherited-scope coverage to N3's registry, including chain runs.
+
 - 0.4.0-draft (2026-08-06): Spec-completion pass. §5 carried a parallel model
   for concerns N3 owns — privacy levels `metadata-only | redacted | full`, a
-  `:redaction/patterns` regex table, a `:redaction/field-rules` vocabulary, and
+  `:redaction/patterns` regex table, and a `:redaction/field-rules` vocabulary. It also carried
   a `:retention/policies` schema with its own day counts. All withdrawn: N3 §8
-  owns redaction and N3 §4.3 owns retention, and four overlapping vocabularies
+  owns redaction and N3 §4.3 owns retention. Four overlapping vocabularies
   meant an operator configuring redaction here could not tell whether N3 §8.1's
   MUST NOT still applied. §5 now defines only what is listener-specific — which
   principal sees which field class. `:redaction/custom-fn function` withdrawn
   as a config-as-data violation (dewey 007): a function in a config map cannot
   be serialized, diffed, or audited. §10.1 reproduced N3 §3.15's event schemas
   with a fixed `:workflow/id`, which made them unusable on the five
-  non-workflow scopes N3 §5.3.1 streams; now a reference table. §12.4–§12.5
+  then-existing non-workflow scopes N3 §5.3.1 streamed. This became a reference table. §12.4–§12.5
   conformance requirement IDs and test obligations. Annex A records
   implementation divergence.
 
 - 0.3.0-draft (2026-04-23): Control-action surface extensions — Checkpoint Control
   (§3.1.5: request/approve/reject) for governed pause-points in Workflow Packs and
-  chained workflows (N2 §14); Model Control (§3.1.6: override/set/clear) for
+  chained workflows (N2 §14). Model Control (§3.1.6: override/set/clear) for
   policy-bounded LLM model substitution with required justification, expiration,
   and no silent fallback. Corresponding events `checkpoint/reached`,
   `checkpoint/expired`, `model/overridden`, `model/override-expired` added in §10

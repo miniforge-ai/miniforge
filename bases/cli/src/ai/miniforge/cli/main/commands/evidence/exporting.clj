@@ -24,7 +24,7 @@
 (defn- ^{:stratum 0} write-content! [content destination]
   (io/make-parents destination)
   (spit destination content :encoding "UTF-8")
-  (display/print-success (messages/t :evidence/export-raw {:path destination})))
+  (display/print-success (messages/t :evidence/export-success {:path destination})))
 
 ;------------------------------------------------------------------------------ Layer 1
 

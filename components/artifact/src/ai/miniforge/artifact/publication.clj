@@ -14,6 +14,11 @@
 
 ;------------------------------------------------------------------------------ Layer 0
 
+(defn ^{:stratum 0} canonical-directory? [directory]
+  (and (string? directory)
+       (= directory (.getAbsolutePath (io/file directory)))
+       (boundary/safe-path-with-exception-handling files/safe-directory? directory)))
+
 (defn- ^{:stratum 0} decoded [file id]
   (boundary/call-with-exception-handling id :fault :publication/read-failed
     #(let [value (some-> (files/read-bytes file) record/decode)]

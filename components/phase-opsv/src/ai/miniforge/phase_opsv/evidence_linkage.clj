@@ -17,7 +17,8 @@
     (and (seq sequences)
          (every? #(contains? indexed %) (:opsv/event-refs record))
          (every? nat-int? sequences)
-         (= (count sequences) (count (set sequences))))))
+         (= (count sequences) (count (set sequences)))
+         (= (count sequences) (inc (- (apply max sequences) (apply min sequences)))))))
 
 (defn- ^{:stratum 0} workflow-link [record]
   (let [sequences (vals (:opsv/event-sequences record))

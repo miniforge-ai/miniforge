@@ -39,7 +39,7 @@
      :experiment-pack pack}))
 
 (defn- ^{:stratum 0} invoke-with-exception-handling [adapter request]
-  ;; This component has no slingshot dependency; this is its adapter boundary.
+  ;; Adapter failures must preserve cancellation and fatal JVM outcomes.
   (try
     (port/run-verification adapter request)
     (catch InterruptedException interrupted

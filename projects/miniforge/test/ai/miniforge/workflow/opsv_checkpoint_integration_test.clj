@@ -51,7 +51,7 @@
         actual (evidence/get-opsv-assembly (:opsv/evidence-assembly-store restored) bundle-id)]
     (is (= :completed (:execution/status completed)))
     (is (string? (get-in completed [:execution/input :opsv/evidence-snapshot])))
-    (is (= assembly actual))
+    (is (= (get-in completed [:execution/input :opsv/evidence-assembly]) actual))
     (is (set? (:opsv/event-refs actual)))
     (is (set? (get-in actual [:test/typed-values :set])))
     (is (list? (get-in actual [:test/typed-values :list])))

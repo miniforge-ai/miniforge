@@ -21,6 +21,9 @@
    [ai.miniforge.anomaly.interface :as anomaly]
    [ai.miniforge.phase.interface :as phase]
    [ai.miniforge.phase-opsv.evidence-runtime :as evidence-runtime]
+   [ai.miniforge.phase-opsv.events :as events]
+   [ai.miniforge.phase-opsv.finalization-boundary :as finalization]
+   [ai.miniforge.phase-opsv.finalization-config :as finalization-config]
    [ai.miniforge.phase-opsv.lifecycle-outcome :as outcome]))
 
 ;------------------------------------------------------------------------------ Layer 0
@@ -41,13 +44,21 @@
         snapshot (get-in persisted [:execution/input :opsv/evidence-snapshot])
         output (get-in ctx [:phase :result :output])
         retained (get-in output [:anomaly/data :opsv/phase-output] output)]
-    (if (anomaly/anomaly? snapshot)
+    (if (anomaly/any-anomaly? snapshot)
       (assoc-in persisted [:phase :result]
                 (outcome/phase-result (assoc-in snapshot [:anomaly/data :opsv/phase-output]
                                    retained)))
       persisted)))
 
 ;------------------------------------------------------------------------------ Layer 1
+
+(defn- ^{:stratum 1} finalize-result [ctx phase-key result]
+  (if (and (= :opsv/actuate phase-key) (finalization-config/enabled? ctx))
+    (phase-result (finalization/finalize! ctx (:output result)))
+    result))
+
+(defn- ^{:stratum 1} publication-failure [result failure]
+  (phase-result (assoc-in failure [:anomaly/data :opsv/phase-output] (:output result))))
 
 (defn ^{:stratum 1} complete-phase
   [ctx phase-key success? end-time duration-ms]
@@ -61,3 +72,16 @@
               (assoc-in [:phase :result :metrics :duration-ms] duration-ms))
     success?
       (update-in [:execution :phases-completed] (fnil conj []) phase-key))))
+
+;------------------------------------------------------------------------------ Layer 2
+
+(defn ^{:stratum 2} after-publication [ctx phase-key result]
+  (let [successful? (phase/result-succeeded? result)
+        published (when successful? (events/emit-phase-events! ctx phase-key (:output result)))]
+    (cond
+      (not successful?) result
+      (anomaly/any-anomaly? published) (publication-failure result published)
+      :else (finalize-result ctx phase-key result))))
+
+(comment
+  (phase-result {}))

@@ -33,7 +33,7 @@
 ;------------------------------------------------------------------------------ Layer 1
 
 (defn- ^{:stratum 1} publish-with-exception-handling! [ctx drift]
-  ;; No slingshot dependency; preserve cancellation and fatal JVM outcomes.
+  ;; Preserve cancellation and fatal JVM outcomes at the adapter boundary.
   (try
     (when-let [stream (context/stream ctx)] (publish! ctx stream drift))
     (catch InterruptedException interrupted

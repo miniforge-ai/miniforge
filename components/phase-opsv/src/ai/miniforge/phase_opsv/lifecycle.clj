@@ -22,9 +22,7 @@
    [ai.miniforge.phase.interface :as phase]
    [ai.miniforge.phase-opsv.artifact-boundary :as artifacts]
    [ai.miniforge.phase-opsv.evidence-runtime :as evidence-runtime]
-   [ai.miniforge.phase-opsv.events :as events]
    [ai.miniforge.phase-opsv.finalization-boundary :as finalization]
-   [ai.miniforge.phase-opsv.finalization-config :as finalization-config]
    [ai.miniforge.phase-opsv.flow :as flow]
    [ai.miniforge.phase-opsv.post-actuation-checkpoint :as checkpoint]
    [ai.miniforge.phase-opsv.lifecycle-result :as lifecycle-result]))
@@ -48,18 +46,6 @@
           (not runtime-supplied?)
           (assoc-in [:execution/opts :opsv/adapter] adapter))))))
 
-(defn- ^{:stratum 0} result-after-publication
-  [ctx phase-key result]
-  (if-not (phase/result-succeeded? result)
-    result
-    (let [published (events/emit-phase-events! ctx phase-key (:output result))]
-      (if (anomaly/anomaly? published)
-        (lifecycle-result/phase-result
-         (assoc-in published [:anomaly/data :opsv/phase-output] (:output result)))
-        (if (and (= :opsv/actuate phase-key) (finalization-config/enabled? ctx))
-          (lifecycle-result/phase-result (finalization/finalize! ctx (:output result)))
-          result)))))
-
 (defn- ^{:stratum 0} transformed-phase [ctx phase-key transform config start-time]
   (let [output (transform ctx)
         retained (checkpoint/capture ctx phase-key output)
@@ -73,7 +59,7 @@
 (defn- ^{:stratum 1} leave-phase
   [ctx]
   (let [phase-key (get-in ctx [:phase :name])
-        result (result-after-publication
+        result (lifecycle-result/after-publication
                 ctx phase-key (get-in ctx [:phase :result]))
         completed-ctx (assoc-in ctx [:phase :result] result)
         success? (phase/result-succeeded? result)
@@ -105,3 +91,6 @@
      :enter (partial enter-phase phase-key transform merged)
      :leave leave-phase
      :error lifecycle-result/fail-phase}))
+
+(comment
+  (interceptor {} :opsv/plan identity))

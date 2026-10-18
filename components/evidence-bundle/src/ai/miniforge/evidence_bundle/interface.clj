@@ -19,6 +19,7 @@
   "Public API for the evidence-bundle component.
    Handles evidence collection, storage, and provenance tracing per N6 spec."
   (:require
+   [ai.miniforge.anomaly.interface :as anomaly]
    [ai.miniforge.content-hash.interface :as content-hash]
    [ai.miniforge.evidence-bundle.canonical-validation :as canonical]
    [ai.miniforge.evidence-bundle.chain-evidence :as chain-evidence]
@@ -76,7 +77,6 @@
   (opsv-finalization/finalize! store bundle-id base-bundle evidence
                                available-artifact-ids))
 
-;; Protocol re-exports
 (defn ^{:stratum 0} restore-finalized-opsv-bundle!
   "Adopt an existing verified seal into its matching assembly without resealing."
   [store bundle available-artifact-ids]
@@ -87,6 +87,7 @@
   [assembly bundle available-artifact-ids]
   (opsv-sealed-validation/valid-with-exception-handling? assembly bundle available-artifact-ids))
 
+;; Protocol re-exports
 (def ^{:stratum 0} EvidenceBundle
   "Protocol for creating, storing, and querying evidence bundles.
    Methods: create-bundle, get-bundle, get-bundle-by-workflow,
@@ -408,9 +409,13 @@
 ;------------------------------------------------------------------------------ Layer 7b
 ;; Chain Evidence
 (defn ^{:stratum 0} create-chain-evidence
-  "Create a chain-level evidence record from chain results."
+  "Project a run-chain result into chain evidence, retaining admitted identity/snapshot and child UUIDs.
+   Admitted results retain canonical :chain/* identity alongside compatible definition-only aliases.
+   Observed summary count is separate from declared :chain/step-count. Upstream anomalies pass through unchanged.
+   Reporting fields and the projected snapshot are redacted; this projection does not authorize recovery."
   [chain-def chain-result & [opts]]
-  (chain-evidence/create-chain-evidence chain-def chain-result opts))
+  (if (anomaly/any-anomaly? chain-result) chain-result
+      (chain-evidence/create-chain-evidence chain-def chain-result opts)))
 
 (defn ^{:stratum 0} summarize-step
   "Create a summary of a single chain step."

@@ -21,7 +21,8 @@ after an external mutation must retain the actual outcome and a recovery path.
 
 The application component composes public evidence and artifact interfaces.
 Use the canonical evidence validator from PR #1957 for both the trusted base
-and the completed bundle. No storage manager is constructed for validation.
+and assembly. Publication also requires the shared sealed/compliance validator
+from #1960. No storage manager is constructed for validation.
 
 ## Changes in detail
 
@@ -45,10 +46,13 @@ and the completed bundle. No storage manager is constructed for validation.
 
 ## Validation
 
-Both consuming projects pass their complete OPSV phase suites.
-The packaged recovery/checkpoint/finalization/audit suites pass 15 tests.
-Real shared-workflow completion and failed-publication recovery both pass from
-disk (2 tests, 22 assertions); these are registered in integration tests and CI.
+Current integration against main `8b02b8d36` is not ready to publish.
+The serial finalization suite passes 8 tests / 105 assertions. Real shared-workflow
+completion and failed-bundle-publication recovery pass from disk (2 tests / 22 assertions).
+Collection now occurs before sealing, including the latest workflow lifecycle positions.
+The new current-journal test exposes legacy `gate/decision` emission outside N3's
+registered current contracts. Partial legacy event-publication recovery also exposes
+sparse reserved positions. Neither failure is a parallel-JVM flake; both remain open.
 Regressions cover invalid host intent, mismatched workflow, unavailable material,
 changed material, uncertain publication, immutable retries, tampered recovery,
 interruption and refusal to re-execute a finalized run.
@@ -56,8 +60,11 @@ Post-actuation regressions cover artifact failure, partial event publication,
 repeated recovery, missing runtime streams and snapshot encoding failure.
 Recovery confirms both baseline and fresh candidate measurement artifacts.
 
-Polylith, kondo, strata and the scoped standards scan pass.
-The prerequisite validator PR fixes the evidence documentation scan findings.
+Kondo reports zero errors/warnings after refreshing analysis of the existing policy
+namespace; explicit owned-file strata pass. Consumer/package/standards verification
+must complete after the event-contract prerequisite is settled.
+The runtime and current/shared-workflow acceptance coverage will be split into
+separate PRs to respect the 600-reportable-line ceiling; no tests will be discarded.
 
 ## Standards adversarial pass
 
@@ -65,6 +72,9 @@ Keep projection, configuration, filesystem confirmation, orchestration and
 exception conversion separate. Each namespace has at most three dependency
 strata. Reuse the N6 validator, artifact constructors and lifecycle test fixture;
 do not duplicate their schemas or authority maps. Diagnostics use catalogs.
+Compute nested projection fields before map construction and share reference
+vector projection. The publication boundary retains completed mutation output
+when evidence storage fails; it cannot silently authorize an unsafe seal.
 
 ## Deployment and limitations
 
@@ -88,6 +98,6 @@ that interval.
 
 ## Checklist
 
-- [x] Consumer tests, packaged tests, Polylith, kondo and strata pass
-- [x] Signed commits and repository hooks
+- [ ] Integrated consumer/package/standards verification
+- [ ] Signed integration commit and repository hooks
 - [ ] Final-head review settled, all CI green and conflict-free merge
