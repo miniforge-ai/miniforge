@@ -12,17 +12,27 @@
 ;------------------------------------------------------------------------------ Layer 0
 
 (defn- ^{:stratum 0} pr-info [repo number]
-  {:pr/repo repo :pr/id number :pr/url (str "https://github.com/" repo "/pull/" number)})
+  (let [url (str "https://github.com/" repo "/pull/" number)]
+    {:pr/repo repo
+     :pr/id number
+     :pr/url url}))
 
 (defn- ^{:stratum 0} failed-phase []
   {:status :completed
    :result {:status :error
-            :error {:message "failed" :data {:stop-reason :error-data :num-turns 0}}
-            :metrics {:stop-reason :metrics :num-turns 9 :tool-call-count 0}
+            :error {:message "failed"
+                    :data {:stop-reason :error-data
+                           :num-turns 0}}
+            :metrics {:stop-reason :metrics
+                      :num-turns 9
+                      :tool-call-count 0}
             :stop-reason :legacy}
    :duration-ms nil
-   :phase/metrics {:duration-ms 20 :tokens 7}
-   :metrics {:duration-ms 30 :tokens 0 :cost-usd 0.0}})
+   :phase/metrics {:duration-ms 20
+                   :tokens 7}
+   :metrics {:duration-ms 30
+             :tokens 0
+             :cost-usd 0.0}})
 
 (defn- ^{:stratum 0} raise [value & _]
   (throw+ value))
@@ -39,7 +49,7 @@
     (is (= :error-data (get-in data [:meta :stop-reason])))
     (is (zero? (get-in data [:meta :turn-count])))
     (is (zero? (get-in data [:meta :tool-call-count])))
-    (is (= {:message "failed" :data {:stop-reason :error-data :num-turns 0}} (:error data)))
+    (is (= (get-in result [:result :error]) (:error data)))
     (is (= :metrics (get-in (phase-event/data (update-in result [:result :error] dissoc :data))
                             [:meta :stop-reason])))
     (is (= :legacy (get-in (phase-event/data (update result :result dissoc :error :metrics))

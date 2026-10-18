@@ -21,7 +21,8 @@
       (get-in result [:result :error])
       (get-in result [:phase :error])
       (when-let [errors (:phase/gate-errors result)]
-        {:message (messages/t :status/gate-failed) :details errors})
+        {:message (messages/t :status/gate-failed)
+         :details errors})
       (when-let [message (:message result)] {:message message})))
 
 (defn- ^{:stratum 0} duration [result]
@@ -61,7 +62,8 @@
         outcome (phase/outcome result succeeded?)
         error (when-not succeeded? (error-info result))
         diagnostic (when-not succeeded? (not-empty (diagnostics result)))
-        base {:outcome outcome :duration-ms (duration result)}]
+        base {:outcome outcome
+              :duration-ms (duration result)}]
     (cond-> (merge base (optional-fields result))
       error (assoc :error error)
       diagnostic (assoc :meta diagnostic))))

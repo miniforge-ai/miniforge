@@ -23,7 +23,9 @@
         url (or (:pr-url info) (:pr/url info))
         repo (or (:pr/repo info) (repo-from-url url))]
     (when (and repo number url)
-      {:pr/repo repo :pr/number number :pr/url url
+      {:pr/repo repo
+       :pr/number number
+       :pr/url url
        :pr/branch (or (:branch info) (:pr/branch info))
        :pr/title (or (:title info) (:pr/title info))
        :pr/author (or (:author info) (:pr/author info))
