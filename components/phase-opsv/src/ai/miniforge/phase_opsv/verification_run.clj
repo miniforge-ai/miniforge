@@ -7,12 +7,14 @@
             [ai.miniforge.content-hash.interface :as hash]
             [ai.miniforge.opsv.interface :as opsv]
             [ai.miniforge.phase-opsv.artifact-confirmation :as confirmation]
+            [ai.miniforge.phase-opsv.exception-policy :as exception-policy]
             [ai.miniforge.phase-opsv.messages :as msg]
             [ai.miniforge.phase-opsv.policy :as policy]
             [ai.miniforge.phase-opsv.protocol :as port]
             [ai.miniforge.phase-opsv.runtime-context :as context]
             [ai.miniforge.phase-opsv.verification-drift :as drift]
-            [malli.core :as m]))
+            [malli.core :as m]
+            [slingshot.slingshot :refer [try+]]))
 
 ;------------------------------------------------------------------------------ Layer 0
 
@@ -40,12 +42,12 @@
 
 (defn- ^{:stratum 0} invoke-with-exception-handling [adapter request]
   ;; Adapter failures must preserve cancellation and fatal JVM outcomes.
-  (try
+  (try+
     (port/run-verification adapter request)
     (catch InterruptedException interrupted
       (.interrupt (Thread/currentThread))
       (throw interrupted))
-    (catch Exception _
+    (catch exception-policy/nonfatal? _
       (anomaly/anomaly :unavailable (msg/ts :verification/failed) {}))))
 
 ;------------------------------------------------------------------------------ Layer 1

@@ -14,6 +14,8 @@
    :routing/trigger-event-id :phase/expected-agent :phase/artifacts
    :phase/outcome :phase/blocked-reason :phase/transition-request
    :failure/class :workflow/failure-phase :cancel/requested-by :cancel/source :action/id
+   :gate/phase :envelope/id :gate/decision-envelope
+   :rule/id :rule/status :rule/severity :rule/enforcement
    :chain/run-id :chain/definition-id :chain/definition-version
    :step/id :step/index :step/workflow-id
    :edge/id :edge/from-workflow-id :edge/to-workflow-id

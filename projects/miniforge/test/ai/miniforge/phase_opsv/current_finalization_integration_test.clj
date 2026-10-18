@@ -1,7 +1,7 @@
 ;; Title: Miniforge.ai
 ;; Copyright 2025-2026 Christopher Lester (christopher@miniforge.ai)
 ;; Licensed under the Apache License, Version 2.0.
-(ns ai.miniforge.phase-opsv.current-finalization-test
+(ns ai.miniforge.phase-opsv.current-finalization-integration-test
   (:require [ai.miniforge.anomaly.interface :as anomaly]
             [ai.miniforge.artifact.interface :as artifact]
             [ai.miniforge.evidence-bundle.interface :as evidence]
@@ -37,32 +37,42 @@
       (let [restored (runtime/ensure-assembly restarted)
             first-recovery (opsv/publish-finalized-evidence! restored)
             bundle (:opsv/evidence-bundle first-recovery)
+            recovered-records (events/get-events stream)
             directory (get-in ctx [:execution/opts :opsv/artifact-directory])
             stored (artifact/read-published directory (:opsv/evidence-artifact-id first-recovery))]
         (is (not (anomaly/any-anomaly? first-recovery)) (pr-str first-recovery))
         (is (:valid? (evidence/validate-published-bundle bundle)))
         (is (= bundle (:artifact/content stored)))
-        (is (= :finalized (get-in restored [:execution/input :opsv/evidence-assembly :opsv.assembly/status])))
-        (is (= first-recovery (opsv/publish-finalized-evidence! restored)))
-        (is (= records (events/get-events stream)))
-        (is (= (count records) (get-in bundle [:evidence/event-links 0 :event-links/event-count])))
+        (is (= :finalized (:opsv.assembly/status
+                           (evidence/get-opsv-assembly (:opsv/evidence-assembly-store restored)
+                                                       (:evidence-bundle/id bundle)))))
+        (is (= (select-keys first-recovery [:opsv/evidence-bundle :opsv/evidence-artifact-id])
+               (opsv/publish-finalized-evidence! restored)))
+        (is (= records (take (count records) recovered-records)))
+        (is (= recovered-records (events/get-events stream)))
+        (is (= (range (count recovered-records)) (map :event/sequence-number recovered-records)))
+        (is (= (count recovered-records) (get-in bundle [:evidence/event-links 0 :event-links/event-count])))
         (fixture/assert-blocked-transform restored))
       (finally (events/close-current-event-stream! stream)))))
 
 ;------------------------------------------------------------------------------ Layer 1
 
-(defn- ^{:stratum 1} run-current [fail-publication? ctx _directory]
+(defn- ^{:stratum 1} run-current [failure-kind ctx _directory]
   (fs/with-temp-dir [directory {:prefix "opsv-finalization-journal-"}]
     (let [path (str (fs/real-path directory))
           options {:journal-directory path}
           stream (events/create-current-event-stream options)
           configured (assoc (fixture/configured ctx) :event-stream stream)
-          publisher (if fail-publication? (partial publish-unless-bundle artifact/publish!) artifact/publish!)]
+          publisher (if (= :bundle failure-kind) (partial publish-unless-bundle artifact/publish!) artifact/publish!)
+          event-publisher (if (= :event failure-kind)
+                            (partial fixture/reject-event-type :opsv.actuation/emitted events/publish!)
+                            events/publish!)]
       (try+
         (let [ready (reduce fixture/step configured (butlast support/handlers))
               receipt (events/publish! stream (phase-start ready))
-              completed (with-redefs [artifact/publish! publisher] (fixture/run-last-phase ready))
-              expected-status (if fail-publication? :error :success)
+              completed (with-redefs [artifact/publish! publisher events/publish! event-publisher]
+                          (fixture/run-last-phase ready))
+              expected-status (if (= :none failure-kind) :success :error)
               records (events/get-events stream)]
           (is (= expected-status (get-in completed [:phase :result :status])))
           (is (nat-int? (:event/sequence-number receipt)))
@@ -74,8 +84,8 @@
 ;------------------------------------------------------------------------------ Layer 2
 
 (deftest ^{:stratum 2} current-journal-finalization-and-publication-recovery
-  (doseq [fail-publication? [false true]]
-    (fixture/with-context (partial run-current fail-publication?))))
+  (doseq [failure-kind [:none :bundle :event]]
+    (fixture/with-context (partial run-current failure-kind))))
 
 (comment
-  (clojure.test/run-tests 'ai.miniforge.phase-opsv.current-finalization-test))
+  (clojure.test/run-tests 'ai.miniforge.phase-opsv.current-finalization-integration-test))

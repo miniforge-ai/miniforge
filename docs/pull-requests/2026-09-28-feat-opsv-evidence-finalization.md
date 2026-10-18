@@ -23,6 +23,8 @@ The application component composes public evidence and artifact interfaces.
 Use the canonical evidence validator from PR #1957 for both the trusted base
 and assembly. Publication also requires the shared sealed/compliance validator
 from #1960. No storage manager is constructed for validation.
+Base: `main` at `97c74db29`; gate contracts and constructors (#2040, #2041)
+are merged prerequisites.
 
 ## Changes in detail
 
@@ -41,18 +43,20 @@ from #1960. No storage manager is constructed for validation.
 - Capture successful actuation output before publishing its artifacts or events.
   Refuse ordinary execution from that checkpoint, even if evidence options are
   removed. Resume only evidence publication; reuse confirmed actuation audit IDs.
+- Retain the original actuation event batch in that lossless snapshot. Preserve
+  occurrence timestamps and legacy reserved positions across partial-publication
+  retries, including when another workflow event arrives before recovery.
+- Admit the registered gate decision after canonical current-journal validation.
 - Use shared workflow aliases and test fixtures; remove legacy input diff refs
   from artifact-backed policy events.
 
 ## Validation
 
-Current integration against main `8b02b8d36` is not ready to publish.
-The serial finalization suite passes 8 tests / 105 assertions. Real shared-workflow
-completion and failed-bundle-publication recovery pass from disk (2 tests / 22 assertions).
-Collection now occurs before sealing, including the latest workflow lifecycle positions.
-The new current-journal test exposes legacy `gate/decision` emission outside N3's
-registered current contracts. Partial legacy event-publication recovery also exposes
-sparse reserved positions. Neither failure is a parallel-JVM flake; both remain open.
+Both affected consumer suites passed serially (1m11s).
+Project-runner verification passed 34 tests / 370 assertions, including current
+journal reopen, partial legacy publication, shared-workflow checkpoints, and
+verification exception boundaries. Collection occurs before sealing, including
+the latest workflow lifecycle positions. The two former failures are corrected.
 Regressions cover invalid host intent, mismatched workflow, unavailable material,
 changed material, uncertain publication, immutable retries, tampered recovery,
 interruption and refusal to re-execute a finalized run.
@@ -60,11 +64,14 @@ Post-actuation regressions cover artifact failure, partial event publication,
 repeated recovery, missing runtime streams and snapshot encoding failure.
 Recovery confirms both baseline and fresh candidate measurement artifacts.
 
-Kondo reports zero errors/warnings after refreshing analysis of the existing policy
-namespace; explicit owned-file strata pass. Consumer/package/standards verification
-must complete after the event-contract prerequisite is settled.
+Kondo reports zero errors/warnings; explicit owned-file strata pass.
+Built CLI: 39,169,398 bytes. Final isolated packaged verification passed
+34 tests / 372 assertions, with no production-source overlay.
+Polylith validation passed. Pinned standards scan: zero violations across 4,431 files.
 The runtime and current/shared-workflow acceptance coverage will be split into
 separate PRs to respect the 600-reportable-line ceiling; no tests will be discarded.
+Filesystem-heavy tests now live in the project integration suite, with shared
+fixtures and resources exposed only by its test alias.
 
 ## Standards adversarial pass
 
@@ -98,6 +105,6 @@ that interval.
 
 ## Checklist
 
-- [ ] Integrated consumer/package/standards verification
+- [x] Integrated consumer/package/standards verification
 - [ ] Signed integration commit and repository hooks
 - [ ] Final-head review settled, all CI green and conflict-free merge

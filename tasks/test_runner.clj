@@ -57,6 +57,7 @@
 (defn- ^{:stratum 1} run-project-tests!
   [project test-nses]
   (let [deps (slurp (str "projects/" project "/deps.edn"))
+        test-mode (if (get-in (edn/read-string deps) [:aliases :test]) "-M:test" "-M")
         clojure-cmd (proc/clojure-command)
         require-expr (apply str (map (fn [ns] (str " '" ns)) test-nses))
         run-expr (apply str (map (fn [ns] (str " '" ns)) test-nses))
@@ -64,7 +65,7 @@
                   "(let [r (clojure.test/run-tests" run-expr ")] "
                   "  (System/exit (if (zero? (+ (:fail r 0) (:error r 0))) 0 1)))")]
     (run-stream! {:dir (str "projects/" project)}
-                 clojure-cmd "-Sdeps" deps "-M" "-e" expr)))
+                 clojure-cmd "-Sdeps" deps test-mode "-e" expr)))
 
 (defn ^{:stratum 1} conformance []
   (println "🧪 Running N1 conformance tests...")
@@ -150,7 +151,11 @@
                          "ai.miniforge.self-healing.integration-test"
                          "ai.miniforge.workflow.opsv-lifecycle-integration-test"
                          "ai.miniforge.workflow.opsv-finalization-integration-test"
+                         "ai.miniforge.phase-opsv.finalization-integration-test"
+                         "ai.miniforge.phase-opsv.current-finalization-integration-test"
+                         "ai.miniforge.phase-opsv.post-actuation-recovery-integration-test"
                          "ai.miniforge.workflow.opsv-checkpoint-integration-test"
+                         "ai.miniforge.event-stream.gate-contract-integration-test"
                          "ai.miniforge.governance.e2e-test"]
         kernel-tests ["ai.miniforge.workflow.kernel-loader-integration-test"]
         miniforge-exit (run-project-tests! "miniforge" miniforge-tests)]

@@ -1,7 +1,7 @@
 ;; Title: Miniforge.ai
 ;; Copyright 2025-2026 Christopher Lester (christopher@miniforge.ai)
 ;; Licensed under the Apache License, Version 2.0.
-(ns ai.miniforge.phase-opsv.finalization-test
+(ns ai.miniforge.phase-opsv.finalization-integration-test
   (:require [ai.miniforge.anomaly.interface :as anomaly]
             [ai.miniforge.artifact.interface :as artifact]
             [ai.miniforge.content-hash.interface :as hash]
@@ -174,4 +174,4 @@
   (f/with-context assert-interrupted-publication))
 
 (comment
-  (clojure.test/run-tests 'ai.miniforge.phase-opsv.finalization-test))
+  (clojure.test/run-tests 'ai.miniforge.phase-opsv.finalization-integration-test))

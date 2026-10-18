@@ -19,7 +19,7 @@
   "N3 OPSV event constructors with preallocated N6 bundle correlation."
   (:require
    [ai.miniforge.anomaly.interface :as anomaly]
-   [ai.miniforge.event-stream.opsv-envelope :as envelope]
+   [ai.miniforge.event-stream.workflow-envelope :as envelope]
    [ai.miniforge.event-stream.schema.opsv :as schema]
    [ai.miniforge.event-stream.messages :as msg]))
 

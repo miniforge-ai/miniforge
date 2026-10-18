@@ -47,7 +47,7 @@
           (assoc-in [:execution/opts :opsv/adapter] adapter))))))
 
 (defn- ^{:stratum 0} transformed-phase [ctx phase-key transform config start-time]
-  (let [output (transform ctx)
+  (let [output (checkpoint/retain-events ctx phase-key (transform ctx))
         retained (checkpoint/capture ctx phase-key output)
         published (or (checkpoint/encoding-failure retained output)
                       (artifacts/publish-with-exception-handling retained phase-key output))]

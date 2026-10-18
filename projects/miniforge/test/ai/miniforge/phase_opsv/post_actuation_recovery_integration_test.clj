@@ -1,7 +1,7 @@
 ;; Title: Miniforge.ai
 ;; Copyright 2025-2026 Christopher Lester (christopher@miniforge.ai)
 ;; Licensed under the Apache License, Version 2.0.
-(ns ai.miniforge.phase-opsv.post-actuation-recovery-test
+(ns ai.miniforge.phase-opsv.post-actuation-recovery-integration-test
   (:require [ai.miniforge.anomaly.interface :as anomaly]
             [ai.miniforge.artifact.interface :as artifact]
             [ai.miniforge.event-stream.interface :as stream]
@@ -22,11 +22,6 @@
   (if (= :actuation (get-in record [:artifact/metadata :opsv/material-kind]))
     (anomaly/anomaly :unavailable "injected actuation publication failure" {})
     (publish directory record)))
-
-(defn- ^{:stratum 0} reject-actuation-event [publish event-stream event]
-  (if (= :opsv.actuation/emitted (:event/type event))
-    (anomaly/anomaly :unavailable "injected actuation event failure" {})
-    (publish event-stream event)))
 
 (defn- ^{:stratum 0} complete-phase [interceptor ctx]
   ((:leave interceptor) ((:enter interceptor) ctx)))
@@ -51,6 +46,9 @@
     (is (= bundle (:opsv/evidence-bundle again)))
     (is (= bundle (:artifact/content (artifact/read-published directory (:opsv/evidence-artifact-id recovered)))))
     (is (= published-events (stream/get-events (:event-stream detached))))
+    (is (= (range (count published-events)) (sort (map :event/sequence-number published-events))))
+    (is (= (count published-events)
+           (get-in @(:event-stream detached) [:sequence-numbers (:execution/id detached)])))
     (is (= 1 @calls))
     (is (anomaly/anomaly? (opsv/publish-finalized-evidence!
                           (assoc-in detached [:execution/input checkpoint/snapshot-key] "corrupt")))))
@@ -65,12 +63,14 @@
           calls (atom 0)
           interceptor (lifecycle/interceptor {} :opsv/actuate (partial counted-actuation calls))
           publish-material (partial reject-actuation-material artifact/publish!)
-          publish-event (partial reject-actuation-event stream/publish!)
+          publish-event (partial f/reject-event-type :opsv.actuation/emitted stream/publish!)
           completed (case failure-kind
                       :material (with-redefs [artifact/publish! publish-material]
                                   (complete-phase interceptor ready))
                       :event (with-redefs [stream/publish! publish-event]
                                (complete-phase interceptor ready)))]
+      (stream/publish! (:event-stream completed)
+                       (stream/phase-started (:event-stream completed) (:execution/id completed) :opsv/actuate))
       (assert-recovered completed calls directory))))
 
 (defn- ^{:stratum 1} assert-snapshot-failure [ctx _directory]
@@ -96,4 +96,4 @@
   (f/with-context assert-snapshot-failure))
 
 (comment
-  (clojure.test/run-tests 'ai.miniforge.phase-opsv.post-actuation-recovery-test))
+  (clojure.test/run-tests 'ai.miniforge.phase-opsv.post-actuation-recovery-integration-test))

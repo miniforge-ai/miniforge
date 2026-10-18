@@ -5,6 +5,7 @@
   (:require [ai.miniforge.artifact.interface :as artifact]
             [ai.miniforge.evidence-bundle.interface :as evidence]
             [ai.miniforge.event-stream.interface :as events]
+            [ai.miniforge.phase-opsv.artifact-test-support :as fixture]
             [ai.miniforge.phase-opsv.interface :as opsv]
             [ai.miniforge.workflow.interface :as workflow]
             [ai.miniforge.workflow.checkpoint-root-support :as checkpoint]
@@ -16,14 +17,7 @@
 ;------------------------------------------------------------------------------ Layer 0
 
 (defn- ^{:stratum 0} evidence-base [workflow-id]
-  {:evidence-bundle/workflow-id workflow-id
-   :evidence-bundle/created-at #inst "2026-09-29T00:00:00Z"
-   :evidence-bundle/version "1.0.0"
-   :evidence/intent {:intent/type :update
-                     :intent/description "Evaluate staging scaling."
-                     :intent/business-reason "Meet the declared service objectives."
-                     :intent/constraints []
-                     :intent/declared-at #inst "2026-09-29T00:00:00Z"}})
+  (get-in (fixture/configured {:execution/id workflow-id}) [:execution/opts :opsv/evidence-base]))
 
 (defn- ^{:stratum 0} material-input []
   (dissoc (support/workflow-input) :opsv/evidence-refs

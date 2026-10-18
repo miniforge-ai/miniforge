@@ -9,9 +9,13 @@
             [ai.miniforge.phase-opsv.lifecycle :as lifecycle]
             [ai.miniforge.phase-opsv.test-support :as support]
             [ai.miniforge.phase-opsv.verification-drift-fixtures :refer [changed-environment stale-measurement spoofed-drift]]
-            [clojure.test :refer [deftest is]]))
+            [clojure.test :refer [deftest is]]
+            [slingshot.slingshot :refer [throw+]]))
 
 ;------------------------------------------------------------------------------ Layer 0
+
+(defn- ^{:stratum 0} raise-publication-failure [failure _stream _event]
+  (throw+ failure))
 
 (defn- ^{:stratum 0} verify-phase [ctx]
   (let [interceptor (lifecycle/interceptor {} :opsv/verify phase/verify)]
@@ -51,7 +55,13 @@
         failure (get-in completed [:phase :result :output])]
     (is (= :conflict (:anomaly/type failure)))
     (is (= refused (get-in failure [:anomaly/data :opsv/drift-publication-failure])))
-    (is (empty? (drift-events completed)))))
+    (is (empty? (drift-events completed)))
+    (with-redefs [events/publish! (partial raise-publication-failure refused)]
+      (is (= :unavailable (get-in (verify-phase ready)
+                                  [:phase :result :output :anomaly/data
+                                   :opsv/drift-publication-failure :anomaly/type]))))
+    (with-redefs [events/publish! (partial raise-publication-failure (AssertionError. "fatal publication"))]
+      (is (thrown? AssertionError (verify-phase ready))))))
 
 (defn- ^{:stratum 1} assert-stale-receipt [ctx _directory]
   (let [completed (verify-phase (prepared stale-measurement ctx))]
