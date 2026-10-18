@@ -61,7 +61,13 @@
           restored (assoc ctx :event-stream empty-stream
                               :opsv/evidence-assembly-store (evidence/restore-opsv-assembly-store saved))]
       (is (nil? (events/emit-phase-events! restored :opsv/actuate output)))
-      (is (empty? (stream/get-events empty-stream))))
+      (is (empty? (stream/get-events empty-stream)))
+      (let [legacy (dissoc saved :opsv/event-sequences)
+            store (evidence/restore-opsv-assembly-store legacy)
+            old-context (assoc restored :opsv/evidence-assembly-store store)]
+        (is (anomaly/anomaly? (events/emit-phase-events! old-context :opsv/actuate output)))
+        (is (empty? (stream/get-events empty-stream)))
+        (is (= legacy (get @store (:evidence-bundle/id saved))))))
     (is (= 2 (count @calls)))))
 
 (comment

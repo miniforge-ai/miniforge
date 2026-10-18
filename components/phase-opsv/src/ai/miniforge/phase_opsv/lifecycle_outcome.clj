@@ -12,7 +12,10 @@
 ;------------------------------------------------------------------------------ Layer 1
 
 (defn ^{:stratum 1} phase-result [output]
-  (cond-> {:status (if (anomaly/anomaly? output) :error :success)
+  (cond-> {:status (if (anomaly/any-anomaly? output) :error :success)
            :output output :metrics empty-metrics}
-    (anomaly/anomaly? output)
+    (anomaly/any-anomaly? output)
     (assoc :error {:message (:anomaly/message output) :data (:anomaly/data output)})))
+
+(comment
+  (phase-result {}))

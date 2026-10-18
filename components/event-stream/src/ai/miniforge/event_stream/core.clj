@@ -18,8 +18,12 @@
 (ns ai.miniforge.event-stream.core
   "Event bus and event constructors for workflow observability."
   (:require
+   [ai.miniforge.anomaly.interface :as anomaly]
+   [ai.miniforge.event-stream.boundary.current-query :as current-query]
    [ai.miniforge.event-stream.messages :as messages]
-   [ai.miniforge.event-stream.snowflake :as snowflake]
+   [ai.miniforge.event-stream.envelope-draft :as draft]
+   [ai.miniforge.event-stream.current-publication :as current]
+   [ai.miniforge.event-stream.publication-fence :as fence]
    [ai.miniforge.logging.interface :as log]
    [ai.miniforge.redaction.interface :as redaction]
    [ai.miniforge.response.interface :as response]
@@ -28,19 +32,14 @@
 ;------------------------------------------------------------------------------ Layer 0
 
 ;; Constants
-(def ^{:stratum 0} ^:const event-version "1.0.0")
+(def ^{:stratum 0} ^:const event-version draft/event-version)
 
 ;; Event persistence via configurable sinks
 ;; Note: File persistence moved to sinks.clj for configurability
 ;; Event envelope constructor
-(defn- ^{:stratum 0} next-event-id
-  [generator]
-  (cond
-    (response/anomaly-map? generator) generator
-    generator
-    (snowflake/next-id! generator)
-    :else
-    (random-uuid)))
+(defn- ^{:stratum 0} reserve-sequence! [stream workflow-id]
+  (let [[previous _] (swap-vals! stream update-in [:sequence-numbers workflow-id] (fnil inc 0))]
+    (get-in previous [:sequence-numbers workflow-id] 0)))
 
 ;; Event bus operations
 (defn ^{:stratum 0} create-event-stream
@@ -71,7 +70,7 @@
      (create-event-stream {:config user-config})
 
      ;; With a Snowflake event-id generator (BD-2b)
-     (create-event-stream {:snowflake-generator (snowflake/create-generator)})"
+     (create-event-stream {:snowflake-generator generator})"
   [& [opts]]
   (let [;; Create sinks from config or use provided sinks or default
         event-sinks (cond
@@ -97,63 +96,6 @@
            ;; `create-envelope` calls it for `:event/id` so events sort
            ;; lexically by creation order. nil = random-uuid fallback.
            :snowflake-generator (:snowflake-generator opts)})))
-
-;; publish! helpers — small, single-purpose pieces composed by publish!
-;; itself. Each helper is testable in isolation; tests live in
-;; `publish_helpers_test.clj`.
-(defn- ^{:stratum 0} workflow-quiesced?
-  "True when `event`'s workflow id has been fenced via `quiesce!`."
-  [stream event]
-  (when-let [wid (:workflow/id event)]
-    (contains? (:quiesced-workflows @stream) wid)))
-
-(defn- ^{:stratum 0} rejection-result
-  "Build the structured rejection map returned to a publisher whose
-   workflow has been quiesced. Stable shape so callers can pattern-match."
-  [event reason]
-  {:rejected?   true
-   :reason      reason
-   :workflow-id (:workflow/id event)
-   :event-type  (:event/type event)})
-
-(defn- ^{:stratum 0} log-rejection!
-  "Surface a quiesce rejection at warn level if a logger is configured."
-  [logger event]
-  (when logger
-    (log/warn logger :event-stream :event/rejected-after-quiesce
-              {:message "publish! rejected: workflow quiesced"
-               :data    {:event-type  (:event/type event)
-                         :workflow-id (:workflow/id event)}})))
-
-(def ^{:stratum 0} ^:private quiesced-sentinel
-  "Sentinel value returned by `with-in-flight` when the event's workflow was
-   quiesced between the caller's fast-path check and the atomic increment,
-   closing the TOCTOU window. Distinct from nil so callers can distinguish
-   'quiesced-during-acquire' from 'no-workflow-id event'."
-  ::quiesced)
-
-(defn- ^{:stratum 0} try-acquire-in-flight!
-  "Atomically check the quiesce fence for `event`'s workflow and, if not
-   fenced, increment the in-flight counter.
-
-   Uses a decision volatile captured inside the `swap!` fn to signal the
-   outcome to the caller without polluting the stream map with temporary keys.
-   The `swap!` fn may be retried by the atom under contention — the volatile
-   is reset on each retry so the final value always reflects the last
-   successful swap.
-
-   Returns true when the slot was acquired (in-flight incremented), false
-   when the workflow was quiesced at the moment of the swap."
-  [stream event]
-  (let [wid      (:workflow/id event)
-        acquired (volatile! false)]
-    (swap! stream
-           (fn [s]
-             (if (and wid (contains? (:quiesced-workflows s) wid))
-               (do (vreset! acquired false) s)
-               (do (vreset! acquired true)
-                   (update s :in-flight inc)))))
-    @acquired))
 
 (defn- ^{:stratum 0} record-event!
   "Append `event` to the in-memory event log."
@@ -238,14 +180,16 @@
 
 ;; Query API
 (defn ^{:stratum 0} get-events [stream & [opts]]
-  (let [{:keys [workflow-id event-type offset limit]} opts
-        events (:events @stream)]
-    (cond->> events
-      workflow-id (filter #(= workflow-id (:workflow/id %)))
-      event-type (filter #(= event-type (:event/type %)))
-      offset (drop offset)
-      limit (take limit)
-      true vec)))
+  (let [events (:events @stream)]
+    (if (current/active? stream)
+      (current-query/events events opts)
+      (let [{:keys [workflow-id event-type offset limit]} opts]
+        (cond->> events
+          workflow-id (filter #(= workflow-id (:workflow/id %)))
+          event-type (filter #(= event-type (:event/type %)))
+          offset (drop offset)
+          limit (take limit)
+          true vec)))))
 
 (defn ^{:stratum 0} get-latest-status [stream workflow-id & [agent-id]]
   (->> (:events @stream)
@@ -294,61 +238,9 @@
   ([stream event-type workflow-id message]
    (create-envelope stream event-type workflow-id message {}))
   ([stream event-type workflow-id message opts]
-   ;; `swap-vals!` returns [old-state new-state] atomically, so we
-   ;; pull the seq value and increment it in a single CAS — no
-   ;; window where two concurrent producers see the same number.
-   ;; The previous read-then-swap pattern WAS racey; reviewers
-   ;; flagged it on PR #814.
-   (let [generator (:snowflake-generator @stream)
-         event-id  (next-event-id generator)]
-     (if (response/anomaly-map? event-id)
-       event-id
-       (let [[old _new] (swap-vals! stream
-                                    update-in
-                                    [:sequence-numbers workflow-id]
-                                    (fnil inc 0))
-             seq-num    (get-in old [:sequence-numbers workflow-id] 0)]
-         (cond-> {:event/type event-type
-                  :event/id event-id
-                  :event/timestamp (java.util.Date.)
-                  :event/version event-version
-                  :event/sequence-number seq-num
-                  :workflow/id workflow-id
-                  :message message}
-           (:org/id opts)            (assoc :org/id (:org/id opts))
-           (:workspace/id opts)      (assoc :workspace/id (:workspace/id opts))
-           (:repo/id opts)           (assoc :repo/id (:repo/id opts))
-           (:auth/context opts)      (assoc :auth/context (:auth/context opts))
-           (:event/parent-id opts)   (assoc :event/parent-id (:event/parent-id opts))
-           (:agent/id opts)          (assoc :agent/id (:agent/id opts))
-           (:agent/instance-id opts) (assoc :agent/instance-id (:agent/instance-id opts))))))))
-
-(defn- ^{:stratum 1} rejection-if-quiesced
-  "Return the structured rejection map when `event`'s workflow is fenced,
-   else nil. Logs the rejection as a side effect so callers don't have
-   to do it twice."
-  [stream event]
-  (when (workflow-quiesced? stream event)
-    (log-rejection! (:logger @stream) event)
-    (rejection-result event :workflow-quiesced)))
-
-(defn- ^{:stratum 1} with-in-flight
-  "Run `body-fn` while incrementing the stream's in-flight publish
-   counter, decrementing in a finally so an exception still releases the
-   slot. Returns body-fn's result, or `quiesced-sentinel` when the
-   workflow was fenced at the moment of the atomic acquire.
-
-   The quiesce check and increment are fused into a single `swap!` via
-   `try-acquire-in-flight!`, eliminating the TOCTOU window that existed
-   when the two operations were separate (check in `rejection-if-quiesced`
-   then increment in `swap! update :in-flight inc`)."
-  [stream event body-fn]
-  (if-not (try-acquire-in-flight! stream event)
-    quiesced-sentinel
-    (try
-      (body-fn)
-      (finally
-        (swap! stream update :in-flight dec)))))
+   (let [event (draft/create stream event-type workflow-id message opts)]
+     (if (anomaly/any-anomaly? event) event
+         (assoc event :event/sequence-number (reserve-sequence! stream workflow-id))))))
 
 (defn- ^{:stratum 1} deliver-to-sinks!
   "Fan `event` out to every configured sink. Each sink runs in
@@ -478,6 +370,9 @@
 (defn ^{:stratum 2} publish!
   "Publish `event` to the stream.
 
+   Current-profile streams delegate typed admission, durable commit and delivery
+   to current-publication. The following workflow fence applies only to legacy streams.
+
    When the event's workflow has been quiesced (BD-2a), short-circuits
    with a structured `{:rejected? true ...}` map and runs no sinks or
    subscribers. Otherwise: fan out to sinks, append to the in-memory
@@ -486,22 +381,24 @@
    In-flight publishes are tracked so `quiesce!` / `drain!` can wait
    for the stream to settle before reporting at-rest.
 
-   The quiesce fence is enforced atomically: `with-in-flight` fuses the
-   quiesce-check and the in-flight increment into a single `swap!`,
+   The quiesce fence is enforced atomically: `fence/with-in-flight` fuses the
+   quiesce-check and the in-flight increment into a single `swap-vals!`,
    eliminating the TOCTOU window that allowed a publish to slip through
    after `quiesce!` fenced the workflow."
   [stream event]
-  (if (response/anomaly-map? event)
-    event
+  (cond
+    (current/active? stream) (current/publish! stream event)
+    (response/anomaly-map? event) event
+    :else
     ;; N3 §8.1: redact before the event reaches a sink, the log, or a
     ;; subscriber. This is the last point at which no durable or
     ;; delivered copy exists yet — redacting at a sink would leave the
     ;; in-memory log and every other sink holding the secret.
     (let [event (redaction/redact event)]
       ;; Fast path: check quiesce before acquiring the in-flight slot so
-      ;; already-quiesced workflows skip the swap! entirely.
-      (or (rejection-if-quiesced stream event)
-          (let [result (with-in-flight stream event
+      ;; already-quiesced workflows skip atomic admission entirely.
+      (or (fence/rejection-if-quiesced stream event)
+          (let [result (fence/with-in-flight stream event
                          (fn []
                            (let [{:keys [sinks subscribers filters logger]} @stream]
                              (deliver-to-sinks! sinks event logger)
@@ -513,9 +410,8 @@
             ;; fenced during the atomic acquire (the TOCTOU window). Convert
             ;; to the canonical rejection shape so callers see a consistent
             ;; {:rejected? true ...} map regardless of which path triggered it.
-            (if (= result quiesced-sentinel)
-              (do (log-rejection! (:logger @stream) event)
-                  (rejection-result event :workflow-quiesced))
+            (if (= result fence/quiesced-sentinel)
+              (fence/reject! stream event)
               result))))))
 
 ;; Event constructors (N3 compliant)
@@ -784,39 +680,6 @@
               class (assoc :failure/class class)
               envelope-id (assoc :envelope/id envelope-id))))
 
-(defn ^{:stratum 2} phase-decision
-  "One event per gated phase transition carrying the DecisionEnvelope
-   (Ariadne 1d): the event-stream copy of the one truth artifact. The
-   envelope is runtime-minted; this event references it whole so replay
-   and the console see exactly what the gate core decided."
-  [stream workflow-id phase envelope]
-  (-> (create-envelope stream :gate/decision workflow-id
-                       (str "Phase " (name (or phase :unknown)) " decision: "
-                            (name (:envelope/decision envelope))))
-      (assoc :gate/phase phase
-             :envelope/id (:envelope/id envelope)
-             :gate/decision-envelope envelope)))
-
-(defn ^{:stratum 2} gate-rule-applied
-  "Per-rule policy evidence event: records that policy `rule-id` was evaluated
-   in `phase` with `status` (one of :passed, :failed, :skipped-by-phase,
-   :not-applicable). Emitted for considered AND skipped rules so the full
-   applied set for a run is reconstructable (closes the rule-visibility gap).
-
-   `extra` may carry :severity, :enforcement (the rule's enforcement action),
-   and :violation (a NON-SENSITIVE summary for a :failed rule — callers must
-   not pass raw match content; see gate/policy-pack's violation-summary)."
-  [stream workflow-id phase rule-id status & [extra]]
-  (-> (create-envelope stream :gate/rule-applied workflow-id
-                       (str "Rule " rule-id " " (name status) " in " (name phase)))
-      (assoc :gate/phase   phase
-             :rule/id       rule-id
-             :rule/status   status)
-      (cond-> (:severity extra)    (assoc :rule/severity (:severity extra))
-              (:enforcement extra) (assoc :rule/enforcement (:enforcement extra))
-              (:violation extra)   (assoc :rule/violation (:violation extra))
-              (:envelope-id extra) (assoc :envelope/id (:envelope-id extra)))))
-
 ;; Tool lifecycle events
 (defn ^{:stratum 2} tool-invoked [stream workflow-id agent-id tool-id & [params-summary]]
   (-> (create-envelope stream :tool/invoked workflow-id
@@ -917,25 +780,26 @@
       (cond-> content (assoc :annotation/content content))))
 
 ;; Chain lifecycle events
-;; Chains are not workflow-scoped, so workflow-id is nil.
+;; Run-level legacy chain events have no workflow reference; steps can name a child.
 ;; Message is derived from the event-type keyword.
 (defn ^{:stratum 2} chain-envelope
-  "Create an envelope for chain events. Chains are not workflow-scoped,
-   so workflow-id is nil. Message is derived from the event-type keyword."
-  [stream event-type]
-  (create-envelope stream event-type nil (name event-type)))
+  "Create a legacy chain envelope, optionally referencing a child workflow run.
+   The reference participates in legacy sequence allocation at construction."
+  [stream event-type & [workflow-id]]
+  (create-envelope stream event-type workflow-id (name event-type)))
 
 ;; Control action events (N8)
 (defn ^{:stratum 2} control-action-requested [stream workflow-id action-id action-type & [requester]]
   (-> (create-envelope stream :control-action/requested workflow-id
-                       (str "Control action " (name action-type) " requested"))
+                       (messages/t :control/requested
+                                   {:action-type (if (keyword? action-type) (name action-type) (pr-str action-type))}))
       (assoc :action/id action-id
              :action/type action-type)
       (cond-> requester (assoc :action/requester requester))))
 
 (defn ^{:stratum 2} control-action-executed [stream workflow-id action-id & [result]]
   (-> (create-envelope stream :control-action/executed workflow-id
-                       (str "Control action " action-id " executed"))
+                       (messages/t :control/executed {:action-id action-id}))
       (assoc :action/id action-id)
       (cond-> result (assoc :action/result result))))
 

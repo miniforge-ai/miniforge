@@ -25,7 +25,8 @@
    Layer 1: process invocations on top of Layer 0."
   (:refer-clojure :exclude [run!])
   (:require [babashka.fs :as fs]
-            [babashka.process :as p]))
+            [babashka.process :as p]
+            [clojure.string :as str]))
 
 ;------------------------------------------------------------------------------ Layer 0
 ;; Argument normalization and command planning (pure)
@@ -72,6 +73,36 @@
   []
   (resolve-command "clojure"))
 
+(def max-captured-error-chars
+  "Upper bound on the stderr carried in a failure, `truncation-marker`
+   counted within it rather than added on top. Wide enough for a CLI's
+   error block, short of pasting a build log into an exception. Must
+   exceed the marker's own length."
+  4000)
+
+(def truncation-marker
+  "Stands in for the head of a stderr block that ran past the bound, so a
+   truncated block cannot be mistaken for a complete one."
+  "...(earlier output truncated)...\n")
+
+(defn- captured-error
+  "The command's stderr, ready to report, or nil when there is nothing to say.
+
+   Returns nil when the stream was not captured as a string — a caller
+   overriding `:err` with :inherit, a file or a stream gets nil from
+   `p/sh` — and when the captured text is blank. Long output keeps its
+   tail, where a failing command states what went wrong, and the result
+   including the marker stays within `max-captured-error-chars`."
+  [value]
+  (when (string? value)
+    (let [text (str/trim value)]
+      (when-not (str/blank? text)
+        (if (<= (count text) max-captured-error-chars)
+          text
+          (let [kept (- max-captured-error-chars (count truncation-marker))]
+            (str truncation-marker
+                 (subs text (- (count text) kept)))))))))
+
 (defn- resolved-cmd
   "Resolve the executable token in `cmd`, preserving the remaining args."
   [cmd]
@@ -93,8 +124,11 @@
   (let [[opts cmd] (split-opts args)
         result     (apply p/sh (merge {:continue true} opts) (resolved-cmd cmd))]
     (when-not (zero? (:exit result))
-      (throw (ex-info (str "Command failed: " (pr-str cmd))
-                      {:exit (:exit result) :cmd cmd})))
+      (let [err (captured-error (:err result))]
+        (throw (ex-info (cond-> (str "Command failed: " (pr-str cmd))
+                          err (str \newline err))
+                        (cond-> {:exit (:exit result) :cmd cmd}
+                          err (assoc :err err))))))
     result))
 
 (defn run-bg!

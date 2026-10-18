@@ -1,0 +1,228 @@
+;; Title: Miniforge.ai
+;; Copyright 2025-2026 Christopher Lester (christopher@miniforge.ai)
+;; Licensed under the Apache License, Version 2.0.
+(ns ai.miniforge.event-stream.publication-input-test
+  (:require [ai.miniforge.anomaly.interface :as anomaly]
+            [ai.miniforge.event-stream.chain-test-support :as chain]
+            [ai.miniforge.event-stream.commit-test-support :as support]
+            [ai.miniforge.event-stream.interface :as events]
+            [ai.miniforge.event-stream.supervisory-test-support :as supervisory]
+            [ai.miniforge.redaction.interface :as redaction]
+            [ai.miniforge.response.interface :as response]
+            [clojure.test :refer [deftest is]]
+            [slingshot.slingshot :refer [try+ throw+]]))
+
+;------------------------------------------------------------------------------ Layer 0
+
+(defn- ^{:stratum 0} draft [payload]
+  (merge (support/draft) payload))
+
+(defn- ^{:stratum 0} observe-redaction [calls event]
+  (swap! calls inc)
+  event)
+
+(defn- ^{:stratum 0} throw-redaction [_]
+  (throw (ex-info "redaction fixture failure" {})))
+
+(defn- ^{:stratum 0} throw-value [value _] (throw+ value))
+
+(defn- ^{:stratum 0} unreadable-id [cause]
+  (reify clojure.lang.ILookup
+    (valAt [_ _] (throw cause))
+    (valAt [_ _ _] (throw cause))))
+
+(defn- ^{:stratum 0} dated-extension [date]
+  (with-meta {date [date #{date} (list date)]} {date date}))
+
+(defn- ^{:stratum 0} constructed-chain-draft [event-type]
+  (let [stream (events/create-event-stream {:sinks []})
+        fields (dissoc (chain/payload event-type) :event/type :event/version :scope/type)]
+    (events/create-chain-event-draft stream event-type fields)))
+
+;------------------------------------------------------------------------------ Layer 1
+
+(defn- ^{:stratum 1} chain-draft []
+  (draft (chain/payload :chain/started)))
+
+(defn- ^{:stratum 1} supported-drafts []
+  (concat (map constructed-chain-draft (keys chain/required-fields))
+          (map draft [(supervisory/request) (supervisory/change) (supervisory/snapshot)])))
+
+(deftest ^{:stratum 1} supervisory-payloads-cannot-fall-back-to-generic-envelopes
+  (doseq [payload [(dissoc (supervisory/request) :intervention/justification)
+                   (assoc (supervisory/request) :intervention/state :approved)
+                   (assoc (supervisory/change) :supervisory/entity-key (random-uuid))
+                   (dissoc (supervisory/change) :intervention/from-state)
+                   (assoc (supervisory/change) :event/version "1.0.0")
+                   (assoc (supervisory/snapshot) :event/version "99.0.0")
+                   (update (supervisory/snapshot) :supervisory/entity dissoc :spec/origin)
+                   (assoc (supervisory/snapshot) :supervisory/schema-version 2)]]
+    (is (anomaly/anomaly? (events/prepare-current-publication (draft payload))))))
+
+(deftest ^{:stratum 1} redaction-cannot-rewrite-intervention-requester-or-target
+  (doseq [field [:intervention/requested-by :intervention/target-id]]
+    (let [event (draft (assoc (supervisory/request) field "AKIAIOSFODNN7EXAMPLE"))]
+      (is (anomaly/anomaly? (events/prepare-current-publication event))))))
+
+(deftest ^{:stratum 1} redaction-cannot-rewrite-snapshot-repository-identity
+  (let [payload (assoc-in (supervisory/snapshot) [:supervisory/entity :spec/repo-url]
+                         "https://example.test/AKIAIOSFODNN7EXAMPLE")]
+    (is (anomaly/anomaly? (events/prepare-current-publication (draft payload))))))
+
+(deftest ^{:stratum 1} unreadable-diagnostic-identities-do-not-escape
+  (doseq [event [(sorted-map 1 "AKIAIOSFODNN7EXAMPLE")
+                 (unreadable-id (ex-info "AKIAIOSFODNN7EXAMPLE" {}))]]
+    (let [result (events/prepare-current-publication event)]
+      (is (anomaly/anomaly? result))
+      (is (nil? (get-in result [:anomaly/data :event/id])))
+      (is (redaction/clean? result))))
+  (doseq [cause [(AssertionError.) (InterruptedException.)]]
+    (try+
+      (events/prepare-current-publication (unreadable-id (ex-info "wrapped fixture" {} cause)))
+      (is false "Critical diagnostic lookup causes must escape")
+      (catch Throwable actual (is (identical? cause actual)))
+      (finally (Thread/interrupted)))))
+
+;------------------------------------------------------------------------------ Layer 2
+
+(deftest ^{:stratum 2} supported-profiles-select-exact-scope-without-changing-clean-drafts
+  (doseq [event (supported-drafts)]
+    (let [expected (if (:chain/run-id event) [:chain (:chain/run-id event)]
+                       [:supervisory-entity (:supervisory/entity-key event)])]
+      (is (= [expected event] (events/prepare-current-publication event)))
+      (is (= expected (first (events/prepare-current-publication
+                              (assoc event :workflow/id (random-uuid)))))))))
+
+(deftest ^{:stratum 2} invalid-drafts-are-rejected-before-redaction
+  (let [calls (atom 0)
+        event (chain-draft)]
+    (with-redefs [redaction/redact (partial observe-redaction calls)]
+      (doseq [bad [nil [] {} (support/draft) (assoc event :event/type :chain/unknown)
+                   (assoc event :event/version "1.0.0") (assoc event :event/sequence-number 0)
+                   (assoc event :timestamp nil) (assoc event :scope/type :workflow)
+                   (assoc event :chain/id nil)
+                   (assoc event :chain/step-count -1)]]
+        (is (anomaly/anomaly? (events/prepare-current-publication bad))))
+      (doseq [key [:event/id :event/type :event/timestamp :event/version :message
+                   :chain/run-id :chain/definition-id :chain/definition-version :chain/step-count]]
+        (is (anomaly/anomaly? (events/prepare-current-publication (dissoc event key)))))
+      (doseq [key [:event/parent-id :agent/instance-id :workflow/id :pr/id :org/id :workspace/id]]
+        (is (anomaly/anomaly? (events/prepare-current-publication (assoc event key :invalid)))))
+      (is (zero? @calls)))))
+
+(deftest ^{:stratum 2} malformed-identities-are-not-echoed-into-errors
+  (let [event (assoc (chain-draft) :event/id "AKIAIOSFODNN7EXAMPLE")
+        result (events/prepare-current-publication event)]
+    (is (anomaly/anomaly? result))
+    (is (nil? (get-in result [:anomaly/data :event/id])))
+    (is (redaction/clean? result))))
+
+(deftest ^{:stratum 2} prepared-dates-are-detached-from-caller-mutation
+  (let [date (java.util.Date. 0)
+        event (assoc (chain-draft) :event/timestamp date :extension/data (dated-extension date))
+        [_ prepared] (events/prepare-current-publication event)
+        expected (dated-extension (java.util.Date. 0))]
+    (.setTime date 42)
+    (is (= (java.util.Date. 0) (:event/timestamp prepared)))
+    (is (= expected (:extension/data prepared)))
+    (is (= (meta expected) (meta (:extension/data prepared))))))
+
+(deftest ^{:stratum 2} redaction-removes-sensitive-content-but-cannot-rewrite-identity
+  (let [event (assoc (chain-draft) :password "fixture-secret")
+        result (events/prepare-current-publication event)]
+    (is (= (redaction/marker) (:password (second result))))
+    (is (= (:event/id event) (:event/id (second result))))
+    (doseq [field [:chain/definition-version :pack/id :deployment/id :repo/id]]
+      (is (anomaly/anomaly? (events/prepare-current-publication
+                             (assoc event field "AKIAIOSFODNN7EXAMPLE")))))
+    (is (anomaly/anomaly? (events/prepare-current-publication
+                           (assoc event :auth/context {:principal "AKIAIOSFODNN7EXAMPLE"}))))
+    (doseq [changed [(assoc event :chain/run-id (random-uuid))
+                     (assoc event :event/id (random-uuid))
+                     (assoc event :pr/id (random-uuid))
+                     (assoc event :chain/definition-version "rewritten")
+                     (dissoc event :message)]]
+      (with-redefs [redaction/redact (constantly changed)]
+        (is (anomaly/anomaly? (events/prepare-current-publication event)))))
+    (with-redefs [redaction/redact throw-redaction]
+      (is (anomaly/anomaly? (events/prepare-current-publication event))))))
+
+(deftest ^{:stratum 2} upstream-and-redaction-anomalies-remain-values
+  (doseq [failure [(anomaly/anomaly :fault (:message (support/draft)) {})
+                   (response/make-anomaly :anomalies/fault (:message (support/draft)) {})]]
+    (is (identical? failure (events/prepare-current-publication failure)))
+    (with-redefs [redaction/redact (constantly failure)]
+      (is (identical? failure (events/prepare-current-publication (chain-draft)))))
+    (with-redefs [redaction/redact (partial throw-value failure)]
+      (is (identical? failure (events/prepare-current-publication (chain-draft)))))))
+
+(deftest ^{:stratum 2} critical-redaction-causes-are-not-downgraded
+  (doseq [cause [(AssertionError.) (InterruptedException.)]]
+    (let [wrapped (ex-info "wrapped redaction fixture" {} cause)]
+      (with-redefs [redaction/redact (partial throw-value wrapped)]
+        (try+
+          (events/prepare-current-publication (chain-draft))
+          (is false "Critical cause must escape admission")
+          (catch Throwable actual (is (identical? cause actual)))
+          (finally (Thread/interrupted)))))))
+
+(deftest ^{:stratum 2} opaque-nested-values-are-rejected-before-redaction
+  (let [calls (atom 0)
+        event (chain-draft)
+        secret "AKIAIOSFODNN7EXAMPLE"]
+    (with-redefs [redaction/redact (partial observe-redaction calls)]
+      (doseq [opaque [(atom secret) (object-array [secret])
+                     (java.util.concurrent.atomic.AtomicLong. 4111111111111111)
+                     (java.util.concurrent.atomic.AtomicInteger. 42)
+                     (java.util.ArrayList. [secret]) (java.util.HashMap. {:value secret})
+                     (delay secret) (map identity [secret])]
+              nested [[opaque] {opaque :value} (with-meta [] {:nested opaque})
+                      (with-meta 'field {:nested opaque})]]
+        (let [result (events/prepare-current-publication (assoc event :extension/data nested))]
+          (is (anomaly/anomaly? result))
+          (is (not (.contains (pr-str result) secret)))))
+      (is (zero? @calls)))))
+
+(deftest ^{:stratum 2} finite-extension-values-are-redacted-through-keys-and-metadata
+  (let [secret "AKIAIOSFODNN7EXAMPLE"
+        extension (with-meta {secret (list secret)} {:nested secret})
+        event (assoc (chain-draft) :extension/data extension)
+        result (events/prepare-current-publication event)]
+    (is (vector? result))
+    (is (redaction/clean? (second result)))
+    (is (= (list (redaction/marker))
+           (get-in (second result) [:extension/data (redaction/marker)])))))
+
+(deftest ^{:stratum 2} admitted-numeric-card-representations-are-redacted
+  (doseq [card [4111111111111111M 4111111111111111.0]
+          extension [card {card :value} (with-meta [] {:value card})]]
+    (let [event (assoc (chain-draft) :extension/data extension)
+          result (events/prepare-current-publication event)]
+      (is (vector? result))
+      (is (not (redaction/payment-card? (second result))))
+      (is (redaction/payment-card? event)))))
+
+(deftest ^{:stratum 2} extreme-decimals-are-prepared-without-expanding-their-exponents
+  (doseq [value [1E1000000000M 1E-1000000000M 1E2147483647M 1E-2147483647M]]
+    (let [event (assoc (chain-draft) :extension/value value)
+          result (events/prepare-current-publication event)]
+      (is (vector? result))
+      (is (= event (second result))))))
+
+(deftest ^{:stratum 2} protected-nested-metadata-cannot-be-silently-redacted
+  (let [principal (with-meta 'operator {:source "AKIAIOSFODNN7EXAMPLE"})
+        event (assoc (chain-draft) :auth/context {:principal principal})]
+    (is (anomaly/anomaly? (events/prepare-current-publication event)))))
+
+(deftest ^{:stratum 2} excessive-structure-is-rejected-before-recursive-redaction
+  (let [deep (nth (iterate vector nil) 4096)
+        broad (vec (repeat 100001 nil))
+        calls (atom 0)]
+    (with-redefs [redaction/redact (partial observe-redaction calls)]
+      (doseq [extension [deep broad (array-map deep :value) (with-meta [] {:nested deep})]]
+        (is (anomaly/anomaly? (events/prepare-current-publication
+                               (assoc (chain-draft) :extension/data extension)))))
+      (is (zero? @calls)))))
+
+(comment
+  (supported-drafts))

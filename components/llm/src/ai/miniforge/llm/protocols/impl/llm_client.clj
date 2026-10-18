@@ -143,21 +143,25 @@
             (update :output-tokens (fnil + 0) (:output-tokens usage)))
           (vary-meta assoc ::message-id message-id)))))
 
-(defn- ^{:stratum 0} normalize-codex-finish-reason
-  "Normalize a Codex finish_reason string to the canonical stop-reason strings
-   used across all backends.
+(defn- ^{:stratum 0} normalize-finish-reason
+  "Normalize a provider's finish reason to the canonical stop-reason
+   strings used across all backends. The canonical strings are the
+   Claude CLI's, which every consumer already compares against.
 
-   Codex → canonical mapping:
-   - \"stop\"      → \"end_turn\"     (normal completion)
-   - \"max_turns\" → \"max_turns\"    (turn budget exhausted)
-   - \"length\"    → \"max_tokens\"   (token budget exhausted)
-   - anything else → passed through unchanged"
+   - \"stop\" (Codex, OpenAI wire shape, Ollama), \"STOP\" (Gemini)
+       → \"end_turn\"   (the model finished)
+   - \"length\" (Codex, OpenAI wire shape, Ollama), \"MAX_TOKENS\" (Gemini)
+       → \"max_tokens\" (the answer was cut at the output cap)
+   - anything else → passed through unchanged (\"max_turns\",
+     \"content_filter\", \"refusal\", \"SAFETY\", ...), so Anthropic's
+     `stop_reason`, already canonical, is returned as given
+
+   A missing or non-string reason yields nil."
   [finish-reason]
-  (when finish-reason
+  (when (string? finish-reason)
     (case finish-reason
-      "stop"      "end_turn"
-      "max_turns" "max_turns"
-      "length"    "max_tokens"
+      ("stop" "STOP")         "end_turn"
+      ("length" "MAX_TOKENS") "max_tokens"
       finish-reason)))
 
 ;------------------------------------------------------------------------------ Backend configurations
@@ -304,11 +308,29 @@
 (defn- ^{:stratum 0} token-usage
   "Build the canonical usage map, keeping only numeric fields — a
    present-but-nil key defeats downstream `(get usage :input-tokens 0)`
-   defaulting (same trap `parsed-usage` guards against)."
-  [input-tokens output-tokens]
-  (cond-> {}
-    (number? input-tokens)  (assoc :input-tokens input-tokens)
-    (number? output-tokens) (assoc :output-tokens output-tokens)))
+   defaulting (same trap `parsed-usage` guards against).
+
+   `extras` carries the optional fields a backend reports beyond the two
+   totals, under these keys:
+   - `:cached-input-tokens`       input tokens served from the provider's
+                                  prompt cache. On the OpenAI wire shape and
+                                  the Codex CLI this is a SUBSET of
+                                  `:input-tokens` (unlike the Claude CLI's
+                                  `:cache-read-input-tokens`, which is counted
+                                  beside `:input-tokens`, never inside it).
+   - `:cache-write-input-tokens`  input tokens written to the prompt cache,
+                                  also a subset of `:input-tokens`.
+   - `:reasoning-output-tokens`   output tokens spent on reasoning, a subset
+                                  of `:output-tokens`.
+   Kept under their own names so no consumer double-counts them."
+  ([input-tokens output-tokens]
+   (token-usage input-tokens output-tokens nil))
+  ([input-tokens output-tokens extras]
+   (reduce-kv (fn [usage k v] (cond-> usage (number? v) (assoc k v)))
+              (cond-> {}
+                (number? input-tokens)  (assoc :input-tokens input-tokens)
+                (number? output-tokens) (assoc :output-tokens output-tokens))
+              extras)))
 
 (def ^{:stratum 0} ^:private http-too-many-requests
   "HTTP 429. `java.net.HttpURLConnection` predates RFC 6585 and has no
@@ -681,6 +703,15 @@
       ([_cmd]       (respond))
       ([_cmd _opts] (respond)))))
 
+(defn- ^{:stratum 0} openai-usage-extras
+  "The cache and reasoning breakdown an OpenAI-shaped `usage` block
+   carries under its `*_details` maps. Absent on servers that do not
+   report them (most local OpenAI-compatible servers)."
+  [usage]
+  {:cached-input-tokens (get-in usage [:prompt_tokens_details :cached_tokens])
+   :cache-write-input-tokens (get-in usage [:prompt_tokens_details :cache_write_tokens])
+   :reasoning-output-tokens (get-in usage [:completion_tokens_details :reasoning_tokens])})
+
 ;------------------------------------------------------------------------------ Layer 1
 
 (defn ^{:stratum 1} terminated-by
@@ -953,11 +984,19 @@
           ;; to bump its turn counter (Codex equivalent of num_turns).
           "turn.completed"
           (let [usage (:usage data)
-                stop-reason (normalize-codex-finish-reason (:finish_reason data))]
+                stop-reason (normalize-finish-reason (:finish_reason data))]
             (cond-> {:delta "" :done? true
                      :increment-turns true
-                     :usage {:input-tokens (:input_tokens usage)
-                             :output-tokens (:output_tokens usage)}}
+                     ;; input/output stay present even when nil (existing
+                     ;; contract); the cache and reasoning counts ride
+                     ;; along only when Codex reports a number.
+                     :usage (cond-> {:input-tokens (:input_tokens usage)
+                                     :output-tokens (:output_tokens usage)}
+                              (number? (:cached_input_tokens usage))
+                              (assoc :cached-input-tokens (:cached_input_tokens usage))
+                              (number? (:reasoning_output_tokens usage))
+                              (assoc :reasoning-output-tokens
+                                     (:reasoning_output_tokens usage)))}
               stop-reason (assoc :stop-reason stop-reason)))
 
           ;; Turn failed
@@ -989,35 +1028,24 @@
              :stream (boolean streaming?)}
       num-ctx (assoc :options {:num_ctx (long num-ctx)}))))
 
-(defn ^{:stratum 1} http-post-request
-  "Make HTTP POST request to LLM API.
-
-   Returns HTTP response map or canonical anomaly map on failure
-   (W2 convergence: `:anomaly/type :unavailable`, no subtype since
-   `:anomalies/unavailable` is a generic-standard category).
-
-   http-kit signals connection failures via either a thrown exception
-   or a `{:error <Throwable>}` response map (depending on whether the
-   error surfaces before or after the future resolves); both modes
-   collapse to the same canonical anomaly."
-  [url headers body]
-  (try
-    (let [response @(http/post url
-                               {:headers headers
-                                :body (json/generate-string body)})]
-      (if-let [cause (:error response)]
-        (http-failure-anomaly cause url)
-        response))
-    (catch Exception e
-      (http-failure-anomaly e url))))
-
 (defn- ^{:stratum 1} extraction
   "The `{:content :usage}` shape `parse-provider-response` expects from
    every extractor — built in one place so the extractors stay pure
-   field mappings."
-  [content input-tokens output-tokens]
-  {:content content
-   :usage (token-usage input-tokens output-tokens)})
+   field mappings. The optional fields:
+   - `:usage-extras`  the usage fields beyond the two totals (see
+                      `token-usage`).
+   - `:cost-usd`      the amount the provider says it billed for the
+                      call; when numeric it rides beside `:usage`, never
+                      inside it.
+   - `:finish-reason` the provider's own word for why generation
+                      stopped; it becomes the canonical `:stop-reason`
+                      (see `normalize-finish-reason`)."
+  [content input-tokens output-tokens {:keys [usage-extras cost-usd finish-reason]}]
+  (let [stop-reason (normalize-finish-reason finish-reason)]
+    (cond-> {:content content
+             :usage (token-usage input-tokens output-tokens usage-extras)}
+      (number? cost-usd) (assoc :cost-usd cost-usd)
+      stop-reason        (assoc :stop-reason stop-reason))))
 
 (defn- ^{:stratum 1} http-status->category
   "Map a non-OK provider HTTP status to the brick's legacy anomaly
@@ -1284,30 +1312,48 @@
 
 (defn- ^{:stratum 2} extract-anthropic
   "Text + usage from an Anthropic Messages response: join the `text`
-   content blocks (tool-use and thinking blocks carry no answer text)."
+   content blocks (tool-use and thinking blocks carry no answer text).
+   The finish reason is `stop_reason`."
   [body]
   (extraction (->> (:content body)
                    (keep (fn [block] (when (= "text" (:type block)) (:text block))))
                    (str/join))
               (get-in body [:usage :input_tokens])
-              (get-in body [:usage :output_tokens])))
+              (get-in body [:usage :output_tokens])
+              {:finish-reason (:stop_reason body)}))
 
 (defn- ^{:stratum 2} extract-openai
-  "Text + usage from an OpenAI Chat Completions response."
+  "Text + usage from an OpenAI Chat Completions response. The finish
+   reason is the first choice's `finish_reason`."
   [body]
   (extraction (get-in body [:choices 0 :message :content])
               (get-in body [:usage :prompt_tokens])
-              (get-in body [:usage :completion_tokens])))
+              (get-in body [:usage :completion_tokens])
+              {:usage-extras (openai-usage-extras (:usage body))
+               :finish-reason (get-in body [:choices 0 :finish_reason])}))
+
+(defn- ^{:stratum 2} extract-openrouter
+  "Text + usage from an OpenRouter response: the OpenAI shape, plus the
+   USD amount OpenRouter billed for the call (`usage.cost`)."
+  [body]
+  (extraction (get-in body [:choices 0 :message :content])
+              (get-in body [:usage :prompt_tokens])
+              (get-in body [:usage :completion_tokens])
+              {:usage-extras (openai-usage-extras (:usage body))
+               :cost-usd (get-in body [:usage :cost])
+               :finish-reason (get-in body [:choices 0 :finish_reason])}))
 
 (defn- ^{:stratum 2} extract-gemini
   "Text + usage from a Gemini generateContent response: join the text
-   parts of the first candidate."
+   parts of the first candidate. The finish reason is that candidate's
+   `finishReason`."
   [body]
   (extraction (->> (get-in body [:candidates 0 :content :parts])
                    (keep :text)
                    (str/join))
               (get-in body [:usageMetadata :promptTokenCount])
-              (get-in body [:usageMetadata :candidatesTokenCount])))
+              (get-in body [:usageMetadata :candidatesTokenCount])
+              {:finish-reason (get-in body [:candidates 0 :finishReason])}))
 
 (defn- ^{:stratum 2} start-stream-reader!
   "Start the daemon that drains `out-reader` into `line-queue`.
@@ -1443,6 +1489,23 @@
 (defn- ^{:stratum 3} default-min-activity-interval-ms
   []
   (client-default [:stream :default-min-activity-interval-ms]))
+
+(defn- ^{:stratum 3} http-idle-timeout-ms
+  "How long a direct provider call may go without a byte from the
+   server before the client gives up."
+  []
+  (client-default [:http :idle-timeout-ms]))
+
+(defn ^{:stratum 3} openrouter-request-body
+  "Build an OpenRouter request body: the OpenAI Chat Completions shape,
+   with usage accounting requested so the response reports billed cost
+   and cached-token counts, and with the configured routing preferences
+   as the `provider` object. OpenRouter serves one model from several
+   hosts; the preferences decide which hosts may see the prompt."
+  [request]
+  (assoc (openai-request-body request)
+         :usage {:include true}
+         :provider (client-default [:http :openrouter :provider])))
 
 (defn- ^{:stratum 3} stream-line-timeout-ms
   []
@@ -1596,6 +1659,33 @@
 
 ;------------------------------------------------------------------------------ Layer 4
 
+(defn ^{:stratum 4} http-post-request
+  "Make HTTP POST request to LLM API.
+
+   Returns HTTP response map or canonical anomaly map on failure
+   (W2 convergence: `:anomaly/type :unavailable`, no subtype since
+   `:anomalies/unavailable` is a generic-standard category).
+
+   http-kit signals connection failures via either a thrown exception
+   or a `{:error <Throwable>}` response map (depending on whether the
+   error surfaces before or after the future resolves); both modes
+   collapse to the same canonical anomaly.
+
+   The idle timeout is set explicitly: these calls are non-streaming, so
+   the server sends nothing until the model is done, and a long
+   completion outlasts http-kit's 60 s default."
+  [url headers body]
+  (try
+    (let [response @(http/post url
+                               {:headers headers
+                                :body (json/generate-string body)
+                                :idle-timeout (http-idle-timeout-ms)})]
+      (if-let [cause (:error response)]
+        (http-failure-anomaly cause url)
+        response))
+    (catch Exception e
+      (http-failure-anomaly e url))))
+
 (defn- ^{:stratum 4} claude-args
   "Build CLI arguments for the Claude backend.
 
@@ -1677,9 +1767,11 @@
         (response-parse-error body)
 
         :else
-        (llm-success (get-in body [:message :content] "")
-                     {:usage (token-usage (:prompt_eval_count body)
-                                          (:eval_count body))})))))
+        (let [stop-reason (normalize-finish-reason (:done_reason body))]
+          (cond-> (llm-success (get-in body [:message :content] "")
+                               {:usage (token-usage (:prompt_eval_count body)
+                                                    (:eval_count body))})
+            stop-reason (assoc :stop-reason stop-reason)))))))
 
 (defn ^{:stratum 4} anthropic-request-body
   "Build an Anthropic Messages API request body. `max_tokens` is
@@ -1705,6 +1797,8 @@
                  "anthropic-version" (anthropic-api-version)}
     "OpenAI"    {"Content-Type" "application/json"
                  "Authorization" (str "Bearer " api-key)}
+    "OpenRouter" {"Content-Type" "application/json"
+                  "Authorization" (str "Bearer " api-key)}
     ;; Compatible servers are usually credential-free; send auth only
     ;; when a key was actually supplied (vLLM behind a gateway, etc.).
     "OpenAI-Compatible" (cond-> {"Content-Type" "application/json"}
@@ -1719,12 +1813,18 @@
    transport-layer anomaly converts to the canonical http_error
    failure; otherwise JSON parse, HTTP status check, then
    provider-specific extraction. `extract-fn` takes the
-   parsed body and returns `{:content string :usage usage-map}`.
+   parsed body and returns `{:content string :usage usage-map}`, plus
+   `:cost-usd` and `:stop-reason` when the provider reported them (see
+   `extraction`).
 
    A blank `:content` on a 200 is surfaced as an error — every caller
    of this path expects generated text (an empty answer with
    `stop_reason: refusal` or a truncated candidate would otherwise
-   flow downstream as a silent success)."
+   flow downstream as a silent success).
+
+   `:stop-reason` is on the result whenever the provider gave one, so a
+   caller can tell an answer cut at the output cap (`max_tokens`) from a
+   complete one (`end_turn`)."
   [extract-fn response]
   (if (anomaly/anomaly? response)
     (llm-error :anomalies/unavailable "http_error" (:anomaly/message response))
@@ -1741,11 +1841,18 @@
         (response-parse-error body)
 
         :else
-        (let [{:keys [content usage]} (extract-fn body)]
-          (if (str/blank? content)
-            (llm-error :anomalies.agent/llm-error "empty_success_output"
-                       (msg/t :http-provider.system/no-generated-text))
-            (llm-success content {:usage usage})))))))
+        (let [{:keys [content usage cost-usd stop-reason]} (extract-fn body)]
+          ;; A provider bills a call, and says why generation stopped,
+          ;; whether or not it produced text, so both stay on the result
+          ;; either way. An empty answer cut at the output cap (every
+          ;; token spent on reasoning) and a refusal both arrive as an
+          ;; empty 200; the stop reason is what tells them apart.
+          (cond-> (if (str/blank? content)
+                    (llm-error :anomalies.agent/llm-error "empty_success_output"
+                               (msg/t :http-provider.system/no-generated-text))
+                    (llm-success content {:usage usage}))
+            (number? cost-usd) (assoc :cost-usd cost-usd)
+            stop-reason        (assoc :stop-reason stop-reason)))))))
 
 (defn ^{:stratum 4} parse-cli-output
   ([output exit-code]
@@ -1840,6 +1947,10 @@
                         :parse-fn (partial parse-provider-response
                                            extract-openai)
                         :requires-model? true}
+   "OpenRouter" {:body-fn openrouter-request-body
+                 :parse-fn (partial parse-provider-response
+                                    extract-openrouter)
+                 :requires-model? true}
    "Gemini"    {:body-fn gemini-request-body
                 :parse-fn (partial parse-provider-response extract-gemini)
                 :requires-model? true}})
@@ -1897,10 +2008,11 @@
 (defn ^{:stratum 6} http-complete
   "Complete request using an HTTP backend.
 
-   Two families share this path: the local, credential-free Ollama
-   endpoint, and the direct API-key providers (:anthropic-api /
-   :openai-api / :gemini-api) for builds where CLI-agent backends are
-   unavailable. `config` is the client config — only `:api-key` is
+   Three families share this path: the local, credential-free Ollama
+   endpoint; the direct API-key providers (:anthropic-api /
+   :openai-api / :gemini-api / :openrouter) for builds where CLI-agent
+   backends are unavailable; and :openai-compat, any server speaking
+   the OpenAI wire shape, keyed or not. `config` is the client config — only `:api-key` is
    read from it here; the caller (`complete-impl` /
    `complete-stream-impl`) has already merged the config `:model` into
    `request`, which is where this fn and the body builders read it."

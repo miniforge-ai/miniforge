@@ -18,7 +18,8 @@
 (ns ai.miniforge.event-stream.opsv
   "N3 OPSV event constructors with preallocated N6 bundle correlation."
   (:require
-   [ai.miniforge.event-stream.core :as core]
+   [ai.miniforge.anomaly.interface :as anomaly]
+   [ai.miniforge.event-stream.workflow-envelope :as envelope]
    [ai.miniforge.event-stream.schema.opsv :as schema]
    [ai.miniforge.event-stream.messages :as msg]))
 
@@ -31,10 +32,9 @@
 
 (defn- ^{:stratum 1} opsv-event
   [stream workflow-id evidence-id event-type payload-keys message data]
-  (merge (select-keys data payload-keys)
-         (core/create-envelope stream event-type workflow-id message
-                               (select-keys data identity-keys))
-         {:opsv/evidence-bundle-id evidence-id}))
+  (let [event (envelope/create stream event-type workflow-id message (select-keys data identity-keys))]
+    (if (anomaly/any-anomaly? event) event
+        (merge (select-keys data payload-keys) event {:opsv/evidence-bundle-id evidence-id}))))
 
 ;------------------------------------------------------------------------------ Layer 2
 
@@ -42,7 +42,7 @@
   [stream workflow-id evidence-id data]
   (opsv-event stream workflow-id evidence-id :opsv.experiment/planned
               [:opsv/experiment-pack-hash :opsv/targets :opsv/risk-score]
-              (str "OPSV experiment planned: " (:opsv/experiment-pack-hash data))
+              (msg/t :opsv/experiment-planned {:hash (:opsv/experiment-pack-hash data)})
               data))
 
 (defn ^{:stratum 2} experiment-started
@@ -51,8 +51,7 @@
   ;; this canonical message as well as in the structured internal payload.
   (opsv-event stream workflow-id evidence-id :opsv.experiment/started
               [:opsv/experiment-pack-hash :opsv/environment-fingerprint]
-              (str "OPSV experiment started in "
-                   (pr-str (:opsv/environment-fingerprint data)))
+              (msg/t :opsv/experiment-started {:fingerprint (pr-str (:opsv/environment-fingerprint data))})
               data))
 
 (defn ^{:stratum 2} load-step
@@ -61,9 +60,9 @@
   ;; message; consumers that need structure should still use the payload keys.
   (opsv-event stream workflow-id evidence-id :opsv/load-step
               [:opsv/step-id :opsv/intended-load :opsv/observed-load :opsv/metric-snapshot-artifact-refs]
-              (str "OPSV load step " (:opsv/step-id data) ": "
-                   (pr-str (:opsv/intended-load data)) " → "
-                   (pr-str (:opsv/observed-load data)))
+              (msg/t :opsv/load-step {:step (:opsv/step-id data)
+                                     :intended (pr-str (:opsv/intended-load data))
+                                     :observed (pr-str (:opsv/observed-load data))})
               data))
 
 (defn ^{:stratum 2} guardrail-abort
@@ -71,7 +70,7 @@
   (opsv-event stream workflow-id evidence-id :opsv.guardrail/abort
               [:opsv/trigger :opsv/threshold :opsv/observed
                :opsv/rollback-action]
-              (str "OPSV guardrail abort: " (:opsv/trigger data))
+              (msg/t :opsv/guardrail-abort {:trigger (:opsv/trigger data)})
               data))
 
 (defn ^{:stratum 2} convergence-iteration
@@ -79,14 +78,14 @@
   (opsv-event stream workflow-id evidence-id :opsv.convergence/iteration
               [:opsv/iteration-id :opsv/params
                :opsv/observed-metrics-summary :opsv/metric-snapshot-artifact-refs]
-              (str "OPSV convergence iteration " (:opsv/iteration-id data))
+              (msg/t :opsv/convergence-iteration {:iteration (:opsv/iteration-id data)})
               data))
 
 (defn ^{:stratum 2} policy-proposed
   [stream workflow-id evidence-id data]
   (opsv-event stream workflow-id evidence-id :opsv.policy/proposed
               [:opsv/policy-hash :opsv/diff-artifact-refs :opsv/confidence :opsv/policy-artifact-ref]
-              (str "OPSV policy proposed: " (:opsv/policy-hash data))
+              (msg/t :opsv/policy-proposed {:hash (:opsv/policy-hash data)})
               data))
 
 (defn ^{:stratum 2} verification-result
@@ -94,7 +93,7 @@
   (opsv-event stream workflow-id evidence-id :opsv.verification/result
               [:opsv/passed? :opsv/criteria-evaluation
                :opsv/confidence :opsv/caveats :opsv/metric-snapshot-artifact-refs]
-              (str "OPSV verification result: " (:opsv/passed? data))
+              (msg/t :opsv/verification-result {:passed? (:opsv/passed? data)})
               data))
 
 (defn ^{:stratum 2} actuation-emitted
@@ -102,8 +101,7 @@
   (opsv-event stream workflow-id evidence-id :opsv.actuation/emitted
               [:opsv/requested-actuation-mode :opsv/effective-actuation-mode
                :opsv/governed-effects :opsv/pr-refs :opsv/apply-refs]
-              (str "OPSV actuation emitted: "
-                   (:opsv/effective-actuation-mode data))
+              (msg/t :opsv/actuation-emitted {:mode (:opsv/effective-actuation-mode data)})
               data))
 
 (defn ^{:stratum 2} actuation-disposition
@@ -116,5 +114,5 @@
   [stream workflow-id evidence-id data]
   (opsv-event stream workflow-id evidence-id :opsv.drift/detected
               [:opsv/signal :opsv/deviation :opsv/suggested-rerun?]
-              (str "OPSV drift detected: " (:opsv/signal data))
+              (msg/t :opsv/drift-detected {:signal (:opsv/signal data)})
               data))

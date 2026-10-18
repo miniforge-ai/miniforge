@@ -19,16 +19,20 @@
   "Public API for the evidence-bundle component.
    Handles evidence collection, storage, and provenance tracing per N6 spec."
   (:require
+   [ai.miniforge.anomaly.interface :as anomaly]
    [ai.miniforge.content-hash.interface :as content-hash]
    [ai.miniforge.evidence-bundle.canonical-validation :as canonical]
    [ai.miniforge.evidence-bundle.chain-evidence :as chain-evidence]
    [ai.miniforge.evidence-bundle.collector :as collector]
+   [ai.miniforge.evidence-bundle.edn-codec :as edn-codec]
+   [ai.miniforge.evidence-bundle.edn-file :as edn-file]
    [ai.miniforge.evidence-bundle.extraction :as extraction]
    [ai.miniforge.evidence-bundle.extraction-bulk :as extraction-bulk]
    [ai.miniforge.evidence-bundle.opsv-assembly :as opsv-assembly]
    [ai.miniforge.evidence-bundle.opsv-finalization :as opsv-finalization]
    [ai.miniforge.evidence-bundle.opsv-sealed-validation :as opsv-sealed-validation]
    [ai.miniforge.evidence-bundle.opsv-sealed-restoration :as opsv-sealed-restoration]
+   [ai.miniforge.evidence-bundle.publication-validation :as publication-validation]
    [ai.miniforge.evidence-bundle.schema :as schema]
    [ai.miniforge.evidence-bundle.schema.compliance :as compliance]
    [ai.miniforge.evidence-bundle.schema.domain :as domain]
@@ -73,7 +77,6 @@
   (opsv-finalization/finalize! store bundle-id base-bundle evidence
                                available-artifact-ids))
 
-;; Protocol re-exports
 (defn ^{:stratum 0} restore-finalized-opsv-bundle!
   "Adopt an existing verified seal into its matching assembly without resealing."
   [store bundle available-artifact-ids]
@@ -84,6 +87,7 @@
   [assembly bundle available-artifact-ids]
   (opsv-sealed-validation/valid-with-exception-handling? assembly bundle available-artifact-ids))
 
+;; Protocol re-exports
 (def ^{:stratum 0} EvidenceBundle
   "Protocol for creating, storing, and querying evidence bundles.
    Methods: create-bundle, get-bundle, get-bundle-by-workflow,
@@ -185,20 +189,44 @@
   [bundle]
   (canonical/validate-with-exception-handling bundle))
 
+(defn ^{:stratum 0} validate-published-bundle
+  "Validate canonical domain values and a required complete N6 seal. No authenticity claim."
+  [bundle]
+  (publication-validation/validate bundle))
+
 (defn ^{:stratum 0} export-bundle
-  "Export evidence bundle to file (EDN format).
+  "Export a valid, sealed evidence bundle to canonical EDN.
+   Unsealed create-bundle values must be finalized before export.
 
    Arguments:
    - manager: Evidence manager instance
    - bundle-id: UUID of the bundle to export
    - output-path: Path to output file
 
-   Returns true on success, false on error.
+   Returns true on success. Invalid, unsealed or missing evidence returns false
+   without touching the destination; filesystem errors also return false.
 
    Example:
      (export-bundle manager bundle-id \"/tmp/evidence.edn\")"
   [manager bundle-id output-path]
   (p/export-bundle manager bundle-id output-path))
+
+(defn ^{:stratum 0} encode-bundle-edn
+  "Serialize an already-validated bundle in its canonical N6 EDN form."
+  [bundle]
+  (edn-codec/encode bundle))
+
+(defn ^{:stratum 0} decode-bundle-edn
+  "Read one bounded EDN form preserving instant precision; nil on malformed input.
+   Validate the resulting bundle before presentation or export."
+  [text]
+  (edn-codec/decode-with-exception-handling text))
+
+(defn ^{:stratum 0} read-bundle-edn
+  "Read at most 16 MiB of UTF-8 file input; nil on oversize or malformed input.
+   Validate the resulting bundle before presentation or export."
+  [file]
+  (edn-file/read-with-exception-handling file))
 
 ;; Provenance Tracing
 (defn ^{:stratum 0} query-provenance
@@ -381,9 +409,13 @@
 ;------------------------------------------------------------------------------ Layer 7b
 ;; Chain Evidence
 (defn ^{:stratum 0} create-chain-evidence
-  "Create a chain-level evidence record from chain results."
+  "Project a run-chain result into chain evidence, retaining admitted identity/snapshot and child UUIDs.
+   Admitted results retain canonical :chain/* identity alongside compatible definition-only aliases.
+   Observed summary count is separate from declared :chain/step-count. Upstream anomalies pass through unchanged.
+   Reporting fields and the projected snapshot are redacted; this projection does not authorize recovery."
   [chain-def chain-result & [opts]]
-  (chain-evidence/create-chain-evidence chain-def chain-result opts))
+  (if (anomaly/any-anomaly? chain-result) chain-result
+      (chain-evidence/create-chain-evidence chain-def chain-result opts)))
 
 (defn ^{:stratum 0} summarize-step
   "Create a summary of a single chain step."

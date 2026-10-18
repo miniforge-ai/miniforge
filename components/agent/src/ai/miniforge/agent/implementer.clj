@@ -892,6 +892,8 @@
                                       working-dir   (assoc :workdir working-dir)
                                       retry-monitor (assoc :progress-monitor retry-monitor))))})
         recovery-response   (:llm-result raw)
+        recovery-answers    (:codex-answers raw)
+        recovery-answer-log (:codex-answer-log raw)
         recovery-cut?       (and (llm/success? recovery-response)
                                  (= "max_turns" (:stop-reason recovery-response)))]
     (if recovery-cut?
@@ -909,6 +911,8 @@
                           :working-dir     working-dir
                           :recovery-turn?  true}})
         {::recovery-cut-by-max-turns? true
+         ::recovery-codex-answers recovery-answers
+         ::recovery-codex-answer-log recovery-answer-log
          :num-turns    (:num-turns recovery-response)
          :partial-files partial-files
          ;; Recovery LLM metadata for error-response: tokens/cost from the
@@ -920,10 +924,22 @@
                                :tokens      (:tokens recovery-response)
                                :cost-usd    (:cost-usd recovery-response)}})
       (let [recovered (normalize-implementer-result raw context working-dir)]
-        (when (or (:structured-artifact recovered)
-                  (:parsed-content recovered)
-                  (:derived-artifact recovered))
-          recovered)))))
+        (if (or (:structured-artifact recovered)
+                (:parsed-content recovered)
+                (:derived-artifact recovered))
+          (assoc recovered
+                 ::recovery-codex-answers recovery-answers
+                 ::recovery-codex-answer-log recovery-answer-log)
+          ;; No promotable artifact: the recovery turn still RAN, and any
+          ;; answers it recorded are observations (SPEC $7.7.2) -- carry
+          ;; them out on the sentinel-only shape the call site unwraps.
+          ;; A torn recovery answer log (:unreadable) is itself an
+          ;; observation about the channel and rides out the same way.
+          (when (or (some? recovery-answers)
+                    (= :unreadable recovery-answer-log))
+            {::no-recovered-artifact? true
+             ::recovery-codex-answers recovery-answers
+             ::recovery-codex-answer-log recovery-answer-log}))))))
 
 ;------------------------------------------------------------------------------ Layer 6
 
@@ -933,7 +949,8 @@
    existing-files input]
   (let [working-dir (workspace/resolve-execution-workdir context "implement")
         {:keys [llm-result artifact worktree-artifacts context-misses
-                context-reads pre-session-snapshot session-mode]}
+                context-reads codex-answers codex-answer-log
+                pre-session-snapshot session-mode]}
         (artifact-session/with-session context
           #(invoke-implementer-session % llm-client user-prompt effective-system-prompt
                                        config context on-chunk existing-files working-dir))
@@ -1051,9 +1068,15 @@
                         :effective-system-prompt effective-system-prompt
                         :input input :normalized normalized :logger logger}))
           ;; recover-implementer-submission returns a sentinel map when the
-          ;; recovery turn itself hits the max-turns budget.
+          ;; recovery turn itself hits the max-turns budget, and an
+          ;; answers-only sentinel when it produced no promotable artifact
+          ;; but did record peg answers (SPEC $7.7.2 -- observations
+          ;; survive artifact failure).
+          recovery-codex-answers (::recovery-codex-answers recovered)
+          recovery-answer-log (::recovery-codex-answer-log recovered)
           recovery-cut-by-max-turns? (::recovery-cut-by-max-turns? recovered)
-          final     (if recovery-cut-by-max-turns?
+          final     (if (or recovery-cut-by-max-turns?
+                            (::no-recovered-artifact? recovered))
                       normalized
                       (or recovered normalized))
           ;; Container-promotion precedence: if the agent wrote files into
@@ -1118,7 +1141,21 @@
       ;; which is a different fact from "no log surfaced" (capsule mode) —
       ;; dropping it would turn a real unread into unknown downstream.
       (cond-> result
-        (some? context-reads) (assoc :context-reads context-reads)))))
+        (some? context-reads) (assoc :context-reads context-reads)
+        ;; §7.7.2 explicit answers: same some?-not-seq reasoning as reads.
+        ;; Recovery-turn answers append AFTER the primary log so
+        ;; last-recording-wins includes an answer revised during recovery.
+        (or (some? codex-answers) (some? recovery-codex-answers))
+        (assoc :codex-answers (vec (concat codex-answers recovery-codex-answers)))
+        ;; §7.7.2 lost-vs-unanswered: the answer-log marker rides even
+        ;; when no answers parsed — :unreadable is exactly the case
+        ;; where codex-answers is nil but the record must say LOST.
+        ;; Merged over the primary and recovery sessions: a torn log in
+        ;; either means observations were lost.
+        (or (some? codex-answer-log) (some? recovery-answer-log))
+        (assoc :codex-answer-log
+               (artifact-session/merge-answer-logs
+                (keep identity [codex-answer-log recovery-answer-log])))))))
 
 ;------------------------------------------------------------------------------ Layer 7
 

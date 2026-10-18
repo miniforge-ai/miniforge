@@ -7,6 +7,7 @@
             [ai.miniforge.artifact.interface :as artifact]
             [ai.miniforge.evidence-bundle.interface :as evidence]
             [ai.miniforge.phase-opsv.artifact-model :as material]
+            [ai.miniforge.phase-opsv.event-evidence :as event-evidence]
             [ai.miniforge.phase-opsv.finalization-config :as config]
             [ai.miniforge.phase-opsv.finalization-model :as model]
             [ai.miniforge.phase-opsv.finalization-retained :as retained]
@@ -54,6 +55,13 @@
 
 ;------------------------------------------------------------------------------ Layer 1
 
+(defn- ^{:stratum 1} collected-assembly [ctx]
+  (let [record (assembly ctx)]
+    (if (= :assembling (:opsv.assembly/status record))
+      (event-evidence/capture! (:opsv/evidence-assembly-store ctx) (:evidence-bundle/id record)
+                               (context/stream ctx) (context/workflow-id ctx))
+      record)))
+
 (defn- ^{:stratum 1} confirmed-output? [ctx output]
   (let [records (mapcat #(material/records ctx % output)
                        [:opsv/discover :opsv/execute :opsv/converge :opsv/verify :opsv/actuate])]
@@ -61,14 +69,14 @@
 
 (defn- ^{:stratum 1} publish-bundle! [ctx output bundle]
   (if (or (anomaly/any-anomaly? bundle)
-          (not (:valid? (evidence/validate-canonical-bundle bundle))))
+          (not (:valid? (evidence/validate-published-bundle bundle))))
     (model/failure output :invalid-evidence)
     (publish-valid-bundle! ctx output bundle)))
 
 ;------------------------------------------------------------------------------ Layer 2
 
 (defn ^{:stratum 2} finalize! [ctx output]
-  (let [record (assembly ctx)
+  (let [record (collected-assembly ctx)
         refs (:opsv/artifact-refs record)]
     (if-not (and (= :assembling (:opsv.assembly/status record))
                  (every? (partial available? ctx) refs)

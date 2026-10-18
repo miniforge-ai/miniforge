@@ -18,8 +18,12 @@
 (ns ai.miniforge.event-stream.interface.events
   "Workflow, agent, gate, task, listener, control, chain, and control-plane event constructors."
   (:require
+   [ai.miniforge.anomaly.interface :as anomaly]
+   [ai.miniforge.event-stream.chain-draft-model :as chain-model]
+   [ai.miniforge.event-stream.chain-event-draft :as chain-draft]
    [ai.miniforge.event-stream.core :as core]
    [ai.miniforge.event-stream.compound-events :as compound]
+   [ai.miniforge.event-stream.gate-events :as gate-events]
    [ai.miniforge.event-stream.phase-events :as phase-events]))
 
 ;------------------------------------------------------------------------------ Layer 0
@@ -144,16 +148,17 @@
   core/gate-failed)
 
 (def ^{:stratum 0} phase-decision
-  "One event per gated phase transition carrying the DecisionEnvelope."
-  core/phase-decision)
+  "Carry the exact runtime DecisionEnvelope. Current streams receive a draft;
+   legacy streams retain constructor-assigned positions. Retain drafts for retries."
+  gate-events/phase-decision)
 
 (def ^{:stratum 0} gate-rule-applied
   "Build and return a :gate/rule-applied event envelope map: per-rule
    policy evidence recording rule-id evaluated in phase with status
-   (:passed, :failed, :skipped-by-phase, :not-applicable). Optional
+   (:passed, :failed, :skipped-by-phase, :not-applicable, :guidance). Optional
    extra carries :severity, :enforcement, and a NON-SENSITIVE
-   :violation summary."
-  core/gate-rule-applied)
+   :violation summary. Current streams receive sequence-free drafts."
+  gate-events/gate-rule-applied)
 
 (def ^{:stratum 0} tool-invoked
   "Build and return a :tool/invoked event envelope map for a tool an
@@ -249,6 +254,14 @@
    action id; optional result as :action/result."
   core/control-action-executed)
 
+(defn ^{:stratum 0} create-chain-event-draft
+  "Construct a validated v2 chain draft from explicit run/definition identity and
+   lifecycle fields. Optional opts supply envelope identity metadata. Retain the
+   draft for retries. No sequencing, admission, redaction, authority, or publication."
+  [stream event-type payload & [opts]]
+  (anomaly/let-ok [prepared (chain-model/prepare event-type payload)]
+    (chain-draft/create stream prepared opts)))
+
 (def ^{:stratum 0} chain-started
   "Build and return a :chain/started event envelope map (chains are not
    workflow-scoped, so :workflow/id is nil) carrying :chain/id and
@@ -257,18 +270,20 @@
 
 (def ^{:stratum 0} chain-step-started
   "Build and return a :chain/step-started event envelope map carrying
-   :chain/id, :step/id, :step/index, and :step/workflow-id."
+   :chain/id, :step/id, :step/index, and :step/workflow-id.
+   Optional final opts accept :workflow/id for child identity and legacy sequencing."
   compound/chain-step-started)
 
 (def ^{:stratum 0} chain-step-completed
   "Build and return a :chain/step-completed event envelope map carrying
-   :chain/id, :step/id, and :step/index."
+   :chain/id, :step/id, and :step/index.
+   Optional final opts accept :workflow/id for child identity and legacy sequencing."
   compound/chain-step-completed)
 
 (def ^{:stratum 0} chain-step-failed
   "Build and return a :chain/step-failed event envelope map carrying
    :chain/id, :step/id, :step/index, and :chain/error; optional
-   :failure/class."
+   :failure/class and :workflow/id in the final options map."
   compound/chain-step-failed)
 
 (def ^{:stratum 0} chain-completed

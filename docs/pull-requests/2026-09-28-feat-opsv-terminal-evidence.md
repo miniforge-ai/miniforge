@@ -20,9 +20,9 @@ provider outcome. Retrying evidence must never retry the external mutation.
 ## Layer and dependencies
 
 The OPSV application coordinates existing public artifact and evidence APIs.
-Artifact Transit extensions preserve Instant values, including nanosecond precision.
-The codec, record selection, outcome projection, recovery and exception boundaries
-have separate responsibilities. No provider or schema dependency is duplicated.
+It builds on merged finalization #1952 and acceptance #2042. Pure terminal
+classification, publication sequencing, checkpoint recovery and provider-outcome
+projection have separate responsibilities. No provider or schema dependency is duplicated.
 
 ## Changes in detail
 
@@ -40,27 +40,30 @@ have separate responsibilities. No provider or schema dependency is duplicated.
 - If publication fails after finalization, preserve the already sealed bundle's
   original outcome. Retain the later publication failure in the failed phase
   checkpoint; recovery never rewrites that immutable bundle or reports phase success.
+- Retain the original actuation event batch before terminal publication, including
+  timestamps and legacy sequence reservations. Only host-owned recovery checkpoints
+  can supply a retained batch. Partial journal retries reuse acknowledged events.
+- Block ordinary transforms while terminal evidence recovery is pending, even if
+  the caller removes evidence configuration. Preflight rejection without retained
+  actuation does not create a terminal snapshot.
 
 ## Testing plan
 
 The terminal regressions cover uncertain POST, confirmed and reconciled success,
 and transient and persistent audit failure. They cover artifact, event and bundle
 publication failures, checkpoint recovery, repeated recovery, and invalid recovery inputs.
-Artifact tests also prove exact Instant type and nanosecond round trips.
-Both phase-consuming projects pass their complete OPSV suites. The rebuilt CLI passes
-the checkpoint, terminal and finalization suites. A disk round trip uses
+Both phase-consuming projects pass their complete OPSV suites. A disk round trip uses
 the same public timestamp-normalization function as shared checkpoints.
 It removes runtime stores and phase state, then restores exact outcomes without provider replay.
-The coercion component is a test-only dependency. Runtime ports are supplied anew
+Project integration tests use the existing project test alias and shared component
+fixtures, without adding a component dependency. Runtime ports are supplied anew
 by the trusted host; snapshots cannot create provider authority.
 
-A separate shared-runner integration test passes 1 test / 10 assertions. It runs
-all seven phases, confirms simulated provider success, and forces terminal audit failure.
-It loads the real workflow checkpoint and recovers evidence with the provider runtime
-removed. The exact transaction and failed outcome survive; repeated recovery leaves
-the provider call count at one GET and one POST. CI executes this test explicitly.
-Only test-owned preparation binds the simulated diff; production host preparation
-remains a separate slice.
+Additional acceptance coverage is preserved for an immediate follow-up PR.
+It covers current-journal partial publication with disk reopen, projection failure,
+preflight correction, untrusted event batches, and shared-runner checkpoint recovery. These
+tests are verified with the full runtime before splitting to respect the PR budget.
+Production host preparation remains a separate implementation slice.
 
 ## Standards adversarial pass
 
@@ -85,5 +88,5 @@ publication and the governed PR runtime/audit chain.
 
 - [x] Focused terminal regressions pass
 - [x] Final packaged and all-consumer verification
-- [x] Signed commits and repository hooks
+- [ ] Signed commits and repository hooks
 - [ ] Settled review and all CI green

@@ -55,12 +55,16 @@
    count, horizon mix, and age of the newest scar among the landings. A
    response that reports only what is known creates false coverage.
 
-   :retirement is :untriggerable while it stays true that push delivery
-   captures no peg answers: consultations record which pegs were presented
-   (§7.7) but every one goes unanswered, so the §4.4.1 answer-distribution
-   entropy trigger has nothing to compute over and every peg is de facto
-   immortal. The value flips only when an answer-capture channel exists —
-   reporting the absence here is the §7.7 MUST."
+   :retirement is :triggerable since the §7.7.2 answer-capture channel:
+   consultations present each peg's question and answer vocabulary, the
+   answer_peg tool records explicit answers per consultation, mechanism
+   verdicts answer mechanism-backed pegs (§7.7.1), and
+   `bb codex-gap-peg-telemetry` computes the §4.4.1 signatures over both.
+   Triggerable means the trigger CAN fire given accrued observations —
+   whether any peg has fired is the telemetry report's statement, not
+   this one. Before the channel existed this slot said :untriggerable;
+   coverage maps lacking the slot entirely predate §7.7 and still render
+   as that era."
   [landings]
   (let [problems (filter #(= "problem" (:type %)) landings)
         mix (frequencies (keep :horizon problems))]
@@ -69,7 +73,7 @@
      :horizon-mix mix
      :no-strategic-coverage? (nil? (get mix "strategic"))
      :newest-scar-date (some->> problems (mapcat :scars) (keep :date) sort last)
-     :retirement :untriggerable}))
+     :retirement :triggerable}))
 
 ;------------------------------------------------------------------------------ Layer 1
 

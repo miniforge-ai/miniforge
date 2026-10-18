@@ -104,7 +104,8 @@ Protocol for semantic intent validation:
 ;; Query bundles
 (evidence/query-bundles evidence-mgr {:intent-type :import})
 
-;; Export bundle for audit
+;; Export only a finalized, sealed bundle for audit.
+;; Legacy create-bundle output is unsealed and returns false without writing.
 (evidence/export-bundle evidence-mgr bundle-id "/tmp/evidence.edn")
 ```
 

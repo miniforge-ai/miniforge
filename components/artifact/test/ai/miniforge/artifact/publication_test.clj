@@ -5,6 +5,8 @@
   (:require [ai.miniforge.anomaly.interface :as anomaly]
             [ai.miniforge.artifact.interface :as artifact]
             [ai.miniforge.artifact.publication-codec :as codec]
+            [ai.miniforge.artifact.publication-boundary :as boundary]
+            [ai.miniforge.artifact.publication :as publication]
             [ai.miniforge.artifact.publication-files :as files]
             [ai.miniforge.artifact.publication-record :as record-codec]
             [clojure.java.io :as io]
@@ -27,7 +29,39 @@
   (artifact/build-artifact {:id (random-uuid) :type :manifest :version "1.0.0"
                             :content {:evidence/hash "verified"}}))
 
+(defn- ^{:stratum 0} check-unavailable [id result]
+  (is (= :unavailable (:anomaly/type result)))
+  (is (= id (get-in result [:anomaly/data :artifact/id]))))
+
 ;------------------------------------------------------------------------------ Layer 1
+
+(defn- ^{:stratum 1} check-inventory [directory]
+  (let [values [(record) (record)]
+        target (files/target directory (:artifact/id (first values)))
+        malformed (io/file directory (str "invalid-id" files/record-suffix))]
+    (is (= [] (artifact/list-published directory)))
+    (doseq [value values] (is (= value (artifact/publish! directory value))))
+    (spit (io/file directory ".artifact-incomplete.tmp") "unfinished")
+    (is (= (set values) (set (artifact/list-published directory))))
+    (with-redefs [publication/read-record (constantly nil)]
+      (is (anomaly/anomaly? (artifact/list-published directory))))
+    (spit malformed "{}")
+    (is (anomaly/anomaly? (artifact/list-published directory)))
+    (io/delete-file malformed)
+    (spit target "corrupt")
+    (is (anomaly/anomaly? (artifact/list-published directory)))))
+
+(defn- ^{:stratum 1} check-durability-anomaly [directory]
+  (let [value (record)
+        id (:artifact/id value)
+        failure (boundary/failure :unavailable :publication/unconfirmed id)]
+    (with-redefs [files/write! (constantly failure)]
+      (check-unavailable id (artifact/publish! directory value)))
+    (is (nil? (artifact/read-published directory id)))
+    (with-redefs [files/confirm! (constantly failure)]
+      (check-unavailable id (artifact/publish! directory value)))
+    (is (= value (artifact/read-published directory id)))
+    (is (= value (artifact/publish! directory value)))))
 
 (deftest ^{:stratum 1} deferred-input-is-rejected-before-realization-test
   (with-directory
@@ -166,6 +200,7 @@
         (spit outside "untouched")
         (Files/createSymbolicLink (.toPath target) (.toPath outside) (make-array FileAttribute 0))
         (is (anomaly/anomaly? (artifact/read-published directory id)))
+        (is (anomaly/anomaly? (artifact/list-published directory)))
         (is (anomaly/anomaly? (artifact/publish! directory value)))
         (is (= "untouched" (slurp outside)))))))
 
@@ -248,3 +283,13 @@
             (is (= :fatal (:anomaly/type fatal)))
             (doseq [result [conflict fatal]]
               (is (= :unavailable (get-in result [:anomaly/data :publication/cleanup-failure :anomaly/type]))))))))))
+
+;------------------------------------------------------------------------------ Layer 2
+
+(deftest ^{:stratum 2} durability-anomaly-never-acknowledges-publication-test
+  (with-directory check-durability-anomaly))
+
+(deftest ^{:stratum 2} immutable-inventory-does-not-hide-invalid-records
+  (with-directory check-inventory)
+  (doseq [directory [nil "" "."]]
+    (is (anomaly/anomaly? (artifact/list-published directory)))))

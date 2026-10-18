@@ -6,22 +6,24 @@
             [ai.miniforge.phase-opsv.actuation-snapshot :as snapshot]
             [ai.miniforge.phase-opsv.artifact-test-support :as f]
             [ai.miniforge.phase-opsv.evidence-base :as base]
-            [ai.miniforge.phase-opsv.evidence-runtime :as runtime]
             [ai.miniforge.phase-opsv.evidence-snapshot :as envelope]
+            [ai.miniforge.phase-opsv.test-support :as support]
             [clojure.test :refer [deftest is]]))
 
 ;------------------------------------------------------------------------------ Layer 0
 
 (defn- ^{:stratum 0} assert-bound-base [ctx _directory]
-  (let [ready (runtime/ensure-assembly (f/configured ctx))
+  (let [ready (f/step (f/configured ctx) (first support/handlers))
         original (base/bundle ready)
         output {:opsv/actuation-record {:effect :completed}}
         encoded (snapshot/encode ready output)]
     (doseq [restarted [(update ready :execution/opts dissoc :opsv/evidence-base)
                        (assoc-in ready [:execution/opts :opsv/evidence-base :evidence-bundle/version] "changed")
-                       (assoc-in ready [:execution/opts :opsv/evidence-base :evidence/intent :intent/description] "changed")]]
+                       (assoc-in ready [:execution/opts :opsv/evidence-base :evidence/intent :intent/description] "changed")
+                       (assoc-in ready [:execution/workflow :workflow/tier] :critical)]]
       (let [restored (snapshot/restore-context restarted encoded)]
         (is (= original (get-in restored [:execution/opts :opsv/evidence-base])))
+        (is (= (:evidence/outcome original) (:evidence/outcome (base/bundle restored))))
         (is (= output (:opsv/recovered-actuation-output restored)))))
     (is (anomaly/anomaly? (snapshot/restore-context ready "corrupt")))
     (is (anomaly/anomaly? (snapshot/restore-context ready (envelope/encode ready :post-actuation output))))

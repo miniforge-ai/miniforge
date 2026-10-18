@@ -17,8 +17,8 @@
        (catch java.io.IOException _ false)))
 
 (defn- ^{:stratum 0} publish-and-confirm! [publish confirm]
-  (publish)
-  (confirm))
+  (let [published (publish)]
+    (if (anomaly/anomaly? published) published (confirm))))
 
 (defn- ^{:stratum 0} retain-cleanup-failure [result cleanup]
   (if (anomaly/anomaly? result)

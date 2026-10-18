@@ -4,6 +4,7 @@
 (ns ai.miniforge.artifact.publication-files
   "Filesystem primitives for complete, create-only artifact records."
   (:require [ai.miniforge.artifact.publication-codec :as codec]
+            [ai.miniforge.file-durability.interface :as durability]
             [clojure.java.io :as io])
   (:import [java.io File]
            [java.nio ByteBuffer]
@@ -15,20 +16,11 @@
 
 (def ^{:private true :stratum 0} no-follow (into-array LinkOption [LinkOption/NOFOLLOW_LINKS]))
 
-(defn ^{:stratum 0} target ^File [directory id]
-  (io/file directory (str id ".artifact.transit.json")))
+(def ^{:stratum 0} record-suffix ".artifact.transit.json")
 
-(defn- ^{:stratum 0} sync-directory! [^File directory]
-  (with-open [channel (FileChannel/open (.toPath directory)
-                                      (into-array OpenOption [StandardOpenOption/READ]))]
-    (.force channel true)))
+(def ^{:stratum 0} write! durability/write-temporary-bytes!)
 
-(defn ^{:stratum 0} write! [^File file bytes]
-  (with-open [channel (FileChannel/open (.toPath file)
-                      (into-array OpenOption [StandardOpenOption/WRITE LinkOption/NOFOLLOW_LINKS]))]
-    (let [buffer (ByteBuffer/wrap bytes)]
-      (while (.hasRemaining buffer) (.write channel buffer))
-      (.force channel true))))
+(def ^{:stratum 0} confirm! durability/confirm!)
 
 (defn ^{:stratum 0} temporary ^File [^File directory]
   (.toFile (Files/createTempFile (.toPath directory) ".artifact-" ".tmp" (make-array FileAttribute 0))))
@@ -53,6 +45,9 @@
 
 ;------------------------------------------------------------------------------ Layer 1
 
+(defn ^{:stratum 1} target ^File [directory id]
+  (io/file directory (str id record-suffix)))
+
 (defn ^{:stratum 1} safe-directory? [directory]
   (let [file (io/file directory)]
     (and (.isAbsolute file)
@@ -64,13 +59,6 @@
 
 (defn ^{:stratum 1} regular? [^File file]
   (Files/isRegularFile (.toPath file) no-follow))
-
-(defn ^{:stratum 1} confirm! [^File file]
-  (with-open [channel (FileChannel/open (.toPath file)
-                      (into-array OpenOption [StandardOpenOption/WRITE LinkOption/NOFOLLOW_LINKS]))]
-    (.force channel true))
-  (doseq [directory (take-while some? (iterate #(.getParentFile ^File %) (.getParentFile file)))]
-    (sync-directory! directory)))
 
 (comment
   (safe-directory? "/tmp"))

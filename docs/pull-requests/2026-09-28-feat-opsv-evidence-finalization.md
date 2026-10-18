@@ -21,7 +21,10 @@ after an external mutation must retain the actual outcome and a recovery path.
 
 The application component composes public evidence and artifact interfaces.
 Use the canonical evidence validator from PR #1957 for both the trusted base
-and the completed bundle. No storage manager is constructed for validation.
+and assembly. Publication also requires the shared sealed/compliance validator
+from #1960. No storage manager is constructed for validation.
+Base: `main` at `97c74db29`; gate contracts and constructors (#2040, #2041)
+are merged prerequisites.
 
 ## Changes in detail
 
@@ -40,15 +43,20 @@ and the completed bundle. No storage manager is constructed for validation.
 - Capture successful actuation output before publishing its artifacts or events.
   Refuse ordinary execution from that checkpoint, even if evidence options are
   removed. Resume only evidence publication; reuse confirmed actuation audit IDs.
+- Retain the original actuation event batch in that lossless snapshot. Preserve
+  occurrence timestamps and legacy reserved positions across partial-publication
+  retries, including when another workflow event arrives before recovery.
+- Admit the registered gate decision after canonical current-journal validation.
 - Use shared workflow aliases and test fixtures; remove legacy input diff refs
   from artifact-backed policy events.
 
 ## Validation
 
-Both consuming projects pass their complete OPSV phase suites.
-The packaged recovery/checkpoint/finalization/audit suites pass 15 tests.
-Real shared-workflow completion and failed-publication recovery both pass from
-disk (2 tests, 22 assertions); these are registered in integration tests and CI.
+Both affected consumer suites passed serially (1m11s).
+Project-runner verification passed 34 tests / 370 assertions, including current
+journal reopen, partial legacy publication, shared-workflow checkpoints, and
+verification exception boundaries. Collection occurs before sealing, including
+the latest workflow lifecycle positions. The two former failures are corrected.
 Regressions cover invalid host intent, mismatched workflow, unavailable material,
 changed material, uncertain publication, immutable retries, tampered recovery,
 interruption and refusal to re-execute a finalized run.
@@ -56,8 +64,19 @@ Post-actuation regressions cover artifact failure, partial event publication,
 repeated recovery, missing runtime streams and snapshot encoding failure.
 Recovery confirms both baseline and fresh candidate measurement artifacts.
 
-Polylith, kondo, strata and the scoped standards scan pass.
-The prerequisite validator PR fixes the evidence documentation scan findings.
+Kondo reports zero errors/warnings; explicit owned-file strata pass.
+Built CLI: 39,169,398 bytes. Final isolated packaged verification passed
+34 tests / 372 assertions, with no production-source overlay.
+Polylith validation passed. Pinned standards scan: zero violations across 4,431 files.
+The full verification above includes current-journal, partial-retry and shared
+workflow acceptance coverage preserved at `work/opsv-finalization-full-20261018`
+(`75c67bf4f`). Those three suites move to the immediate follow-up acceptance PR.
+This runtime PR retains eight finalization integration tests (105 assertions),
+plus the event-retention and exception-boundary unit regressions. CI and the
+project runner explicitly execute the retained integration suite. No production
+source changed during the split; the full tested acceptance tree is preserved.
+Filesystem-heavy tests now live in the project integration suite, with shared
+fixtures and resources exposed only by its test alias.
 
 ## Standards adversarial pass
 
@@ -65,6 +84,9 @@ Keep projection, configuration, filesystem confirmation, orchestration and
 exception conversion separate. Each namespace has at most three dependency
 strata. Reuse the N6 validator, artifact constructors and lifecycle test fixture;
 do not duplicate their schemas or authority maps. Diagnostics use catalogs.
+Compute nested projection fields before map construction and share reference
+vector projection. The publication boundary retains completed mutation output
+when evidence storage fails; it cannot silently authorize an unsafe seal.
 
 ## Deployment and limitations
 
@@ -88,6 +110,6 @@ that interval.
 
 ## Checklist
 
-- [x] Consumer tests, packaged tests, Polylith, kondo and strata pass
-- [x] Signed commits and repository hooks
+- [x] Integrated consumer/package/standards verification
+- [x] Signed integration commit and repository hooks
 - [ ] Final-head review settled, all CI green and conflict-free merge

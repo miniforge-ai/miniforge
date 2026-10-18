@@ -19,6 +19,7 @@
 (defn- ^{:stratum 0} restored-context [ctx record]
   (-> ctx
       (assoc-in [:execution/opts :opsv/evidence-base] (:opsv/evidence-base record))
+      (assoc :opsv/recovered-evidence-base (:opsv/evidence-base record))
       (assoc :opsv/recovered-actuation-output (:opsv/actuation-output record))))
 
 (defn- ^{:stratum 0} valid-record? [ctx record]

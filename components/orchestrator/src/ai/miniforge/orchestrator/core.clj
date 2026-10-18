@@ -99,32 +99,34 @@
               :spec spec
               :context context})
 
-      ;; Execute workflow through the workflow component
-      (let [wf-context (merge context
-                              {:llm-backend llm-backend
-                               :router router
-                               :budget-manager budget-mgr
-                               :knowledge-coordinator knowledge-coord
-                               :knowledge-store (:knowledge-store knowledge-coord)
-                               :artifact-store artifact-store})
-            result (wf/run-workflow workflow-mgr spec wf-context)]
+      ;; Execute workflow through the workflow component; always deregister on exit
+      (try
+        (let [wf-context (merge context
+                                {:llm-backend llm-backend
+                                 :router router
+                                 :budget-manager budget-mgr
+                                 :knowledge-coordinator knowledge-coord
+                                 :knowledge-store (:knowledge-store knowledge-coord)
+                                 :artifact-store artifact-store})
+              result (wf/run-workflow workflow-mgr spec wf-context)]
 
-        ;; Track final budget usage from workflow metrics
-        (when-let [metrics (:workflow/metrics result)]
-          (proto/track-usage budget-mgr workflow-id metrics))
+          ;; Track final budget usage from workflow metrics
+          (when-let [metrics (:workflow/metrics result)]
+            (proto/track-usage budget-mgr workflow-id metrics))
 
-        ;; Remove from active
-        (swap! active-workflows dissoc workflow-id)
+          (log/info logger :control-plane :control-plane/workflow-completed
+                    {:data {:workflow-id workflow-id
+                            :status (:workflow/status result)}})
 
-        (log/info logger :control-plane :control-plane/workflow-completed
-                  {:data {:workflow-id workflow-id
-                          :status (:workflow/status result)}})
-
-        {:workflow-id workflow-id
-         :status (:workflow/status result)
-         :results {:artifacts (:workflow/artifacts result)
-                   :learnings []}
-         :metrics (:workflow/metrics result)})))
+          {:workflow-id workflow-id
+           :status (:workflow/status result)
+           :results {:artifacts (:workflow/artifacts result)
+                     :learnings []}
+           :metrics (:workflow/metrics result)})
+        (finally
+          ;; Remove from active-workflows regardless of success or exception,
+          ;; preventing unbounded atom growth and inflated fleet active counts.
+          (swap! active-workflows dissoc workflow-id)))))
 
   (get-workflow-status [_this workflow-id]
     (when-let [state (wf/get-state workflow-mgr workflow-id)]

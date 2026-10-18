@@ -1,0 +1,40 @@
+<!-- Title: Miniforge.ai -->
+<!-- Copyright 2025-2026 Christopher Lester (christopher@miniforge.ai) -->
+<!-- Licensed under the Apache License, Version 2.0. -->
+# CLI command strata
+
+## Scope and dependencies
+
+Base: main. The evidence export adapter needs to correct positional output-path
+routing, but the CLI entry point currently has seven dependency layers. Split
+status reporting, optional dashboard construction and version presentation into
+focused namespaces before changing that route. No routing changes belong here.
+
+## Design and standards review
+
+Keep the entry point as command adapters, dispatch data and dispatch execution.
+Separate status reconstruction from presentation. Keep optional component
+resolution and dashboard setup in the composition boundary. Preserve command
+output, startup order and optional product composition. Fatal errors and thread
+interruption now propagate instead of being swallowed by optional setup/history.
+Use named functions instead of nested callbacks and share status test fixtures.
+Status discovery now uses an event-stream interface that combines configured
+live, archived and legacy workflow directories, deduplicating IDs and excluding
+operator storage. This corrects the root-only discovery bug found during review.
+
+## Verification and merge gates
+
+Run the CLI main and monitoring tests, build relevant CLI packaging, and
+exercise packaged commands. Review the extraction diff, including moved
+comments and exception paths. Require kondo, Polylith, strata, normal hooks,
+settled current-head review and all CI checks before merge. No deployment step
+is required. Keep commits within 200 and this PR within 600 reportable lines.
+
+Focused JVM and rebuilt packaged checks pass 25 tests and 82 assertions each.
+All event-stream consumers pass after integrating shared workflow discovery.
+Tests cover deferred dashboard setup order, missing history, terminal status,
+shared reconstruction fixtures, and fatal/interruption propagation.
+Reconstruction anomalies retain their original human-readable message while
+preserving structured thrown data; a command-level regression pins this behavior.
+Optional loading preserves direct and wrapped fatal/interruption causes while
+continuing to tolerate missing components. Resolver-level regressions cover both paths.
