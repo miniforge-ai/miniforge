@@ -394,15 +394,16 @@
   events/gate-failed)
 
 (def ^{:stratum 0} phase-decision
-  "One event per gated phase transition carrying the DecisionEnvelope."
+  "Carry the exact runtime DecisionEnvelope. Current streams receive a draft;
+   legacy streams retain constructor-assigned positions. Retain drafts for retries."
   events/phase-decision)
 
 (def ^{:stratum 0} gate-rule-applied
   "Build and return a :gate/rule-applied event envelope map: per-rule
    policy evidence recording rule-id evaluated in phase with status
-   (:passed, :failed, :skipped-by-phase, :not-applicable). Optional
+   (:passed, :failed, :skipped-by-phase, :not-applicable, :guidance). Optional
    extra carries :severity, :enforcement, and a NON-SENSITIVE
-   :violation summary."
+   :violation summary. Current streams receive sequence-free drafts."
   events/gate-rule-applied)
 
 (def ^{:stratum 0} tool-invoked

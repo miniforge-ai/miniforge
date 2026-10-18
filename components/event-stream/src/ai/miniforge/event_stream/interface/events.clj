@@ -23,6 +23,7 @@
    [ai.miniforge.event-stream.chain-event-draft :as chain-draft]
    [ai.miniforge.event-stream.core :as core]
    [ai.miniforge.event-stream.compound-events :as compound]
+   [ai.miniforge.event-stream.gate-events :as gate-events]
    [ai.miniforge.event-stream.phase-events :as phase-events]))
 
 ;------------------------------------------------------------------------------ Layer 0
@@ -147,16 +148,17 @@
   core/gate-failed)
 
 (def ^{:stratum 0} phase-decision
-  "One event per gated phase transition carrying the DecisionEnvelope."
-  core/phase-decision)
+  "Carry the exact runtime DecisionEnvelope. Current streams receive a draft;
+   legacy streams retain constructor-assigned positions. Retain drafts for retries."
+  gate-events/phase-decision)
 
 (def ^{:stratum 0} gate-rule-applied
   "Build and return a :gate/rule-applied event envelope map: per-rule
    policy evidence recording rule-id evaluated in phase with status
-   (:passed, :failed, :skipped-by-phase, :not-applicable). Optional
+   (:passed, :failed, :skipped-by-phase, :not-applicable, :guidance). Optional
    extra carries :severity, :enforcement, and a NON-SENSITIVE
-   :violation summary."
-  core/gate-rule-applied)
+   :violation summary. Current streams receive sequence-free drafts."
+  gate-events/gate-rule-applied)
 
 (def ^{:stratum 0} tool-invoked
   "Build and return a :tool/invoked event envelope map for a tool an

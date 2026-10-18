@@ -680,39 +680,6 @@
               class (assoc :failure/class class)
               envelope-id (assoc :envelope/id envelope-id))))
 
-(defn ^{:stratum 2} phase-decision
-  "One event per gated phase transition carrying the DecisionEnvelope
-   (Ariadne 1d): the event-stream copy of the one truth artifact. The
-   envelope is runtime-minted; this event references it whole so replay
-   and the console see exactly what the gate core decided."
-  [stream workflow-id phase envelope]
-  (-> (create-envelope stream :gate/decision workflow-id
-                       (str "Phase " (name (or phase :unknown)) " decision: "
-                            (name (:envelope/decision envelope))))
-      (assoc :gate/phase phase
-             :envelope/id (:envelope/id envelope)
-             :gate/decision-envelope envelope)))
-
-(defn ^{:stratum 2} gate-rule-applied
-  "Per-rule policy evidence event: records that policy `rule-id` was evaluated
-   in `phase` with `status` (one of :passed, :failed, :skipped-by-phase,
-   :not-applicable). Emitted for considered AND skipped rules so the full
-   applied set for a run is reconstructable (closes the rule-visibility gap).
-
-   `extra` may carry :severity, :enforcement (the rule's enforcement action),
-   and :violation (a NON-SENSITIVE summary for a :failed rule — callers must
-   not pass raw match content; see gate/policy-pack's violation-summary)."
-  [stream workflow-id phase rule-id status & [extra]]
-  (-> (create-envelope stream :gate/rule-applied workflow-id
-                       (str "Rule " rule-id " " (name status) " in " (name phase)))
-      (assoc :gate/phase   phase
-             :rule/id       rule-id
-             :rule/status   status)
-      (cond-> (:severity extra)    (assoc :rule/severity (:severity extra))
-              (:enforcement extra) (assoc :rule/enforcement (:enforcement extra))
-              (:violation extra)   (assoc :rule/violation (:violation extra))
-              (:envelope-id extra) (assoc :envelope/id (:envelope-id extra)))))
-
 ;; Tool lifecycle events
 (defn ^{:stratum 2} tool-invoked [stream workflow-id agent-id tool-id & [params-summary]]
   (-> (create-envelope stream :tool/invoked workflow-id
