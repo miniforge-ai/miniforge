@@ -12,7 +12,7 @@ This adapter layer connects existing gate evidence producers to the new contract
 
 ## Changes in Detail
 
-- Base: `feat/gate-current-contracts`; depends on #2040 before merge.
+- Base: `main`; prerequisite #2040 is merged.
 - Share workflow envelope profile selection with the existing OPSV constructors.
 - Keep gate payload construction separate from the event-stream core.
 - Localize constructor messages and test current and legacy profiles.
@@ -35,8 +35,8 @@ values are omitted; false must not silently erase invalid policy metadata.
 
 ## Deployment Plan
 
-Retarget to `main` after #2040 merges. Review every pushed head and wait for
-all CI including Build before merge. No default stream switch in this PR.
+Review every pushed head and wait for all CI including Build before merge.
+No default stream switch in this PR.
 
 ## Related Issues/PRs
 
@@ -48,5 +48,5 @@ all CI including Build before merge. No default stream switch in this PR.
 
 - [x] Constructors preserve evidence and journal ownership of positions
 - [x] Both profiles and anomaly propagation verified
-- [ ] Standards, lint, build, and serial consumers pass
+- [x] Standards, lint, build, and serial consumers pass
 - [ ] Prerequisite merged; final-head review and CI pass
