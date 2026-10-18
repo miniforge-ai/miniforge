@@ -55,9 +55,7 @@
     (phase/enter-context retained phase-key (:agent config) (:gates config)
                          (:budget config) start-time (lifecycle-result/phase-result published))))
 
-;------------------------------------------------------------------------------ Layer 1
-
-(defn- ^{:stratum 1} leave-phase
+(defn- ^{:stratum 0} leave-phase
   [ctx]
   (let [phase-key (get-in ctx [:phase :name])
         published (lifecycle-result/after-publication ctx phase-key (get-in ctx [:phase :result]))
@@ -68,6 +66,8 @@
         duration-ms (- end-time (get-in ctx [:phase :started-at]))]
     (lifecycle-result/complete-phase completed-ctx phase-key success? end-time
                                      duration-ms)))
+
+;------------------------------------------------------------------------------ Layer 1
 
 (defn- ^{:stratum 1} enter-phase
   [phase-key transform config ctx]
