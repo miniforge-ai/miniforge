@@ -36,6 +36,12 @@
   (with-redefs [audit/record! record]
     (f/run-last-phase ready)))
 
+(defn- ^{:stratum 0} refuse-disposition [publish event-stream event]
+  (if (and (= :opsv.actuation/disposition (:event/type event))
+           (= :succeeded (:opsv/effect-state event)))
+    (anomaly/anomaly :unavailable "disposition unavailable" {})
+    (publish event-stream event)))
+
 (defn- ^{:stratum 0} checkpoint-round-trip [directory completed]
   (let [file (io/file directory "terminal-checkpoint.edn")
         checkpoint (coerce/stringify-instants
@@ -160,12 +166,17 @@
 
 (defn- ^{:stratum 1} assert-checkpoint-recovery [ready directory calls]
   (let [record (partial refuse-successful-audit audit/record! (constantly true))
-        completed (actuate-with-audit ready record)
+        completed (actuate-with-audit (assoc-in ready [:execution/workflow :workflow/tier] :critical) record)
         saved (checkpoint-round-trip directory completed)
         recovered (opsv/recover-actuation-evidence! saved)
         again (opsv/recover-actuation-evidence! (checkpoint-round-trip directory recovered))
         tampered (assoc-in saved [:execution/input :opsv/terminal-snapshot] "corrupt")]
     (is (nil? (:phase saved)))
+    (is (nil? (:execution/workflow saved)))
+    (is (map? (opsv/recover-actuation-evidence! (assoc saved :execution/opts nil))))
+    (doseq [opts [42 :invalid [] "invalid"]]
+      (is (= :invalid-input (:anomaly/type (opsv/recover-actuation-evidence!
+                                           (assoc saved :execution/opts opts))))))
     (is (= :error (get-in recovered [:phase :result :status])))
     (is (= :failed (get-in recovered [:phase :status])))
     (doseq [key [:status :ended-at :duration-ms :metrics]]
@@ -175,8 +186,30 @@
     (is (= (:opsv/effect-transactions (terminal-output completed))
            (:opsv/effect-transactions (terminal-output recovered))))
     (is (false? (get-in (terminal-output recovered) [:opsv/evidence-bundle :evidence/outcome :outcome/success])))
+    (is (= :critical (get-in (terminal-output recovered) [:opsv/evidence-bundle :evidence/outcome :outcome/tier])))
     (is (= (terminal-output recovered) (terminal-output again)))
     (is (anomaly/anomaly? (opsv/recover-actuation-evidence! tampered)))
+    (is (= 2 (count @calls)))))
+
+(defn- ^{:stratum 1} assert-pending-disposition [ready directory calls]
+  (let [publish (partial refuse-disposition stream/publish!)
+        completed (with-redefs [stream/publish! publish] (f/run-last-phase ready))
+        event-stream (:event-stream ready)
+        before (stream/get-events event-stream)
+        _ (stream/publish! event-stream (stream/phase-started event-stream (:execution/id ready) :opsv/actuate))
+        recovered (opsv/recover-actuation-evidence! (checkpoint-round-trip directory completed))
+        output (terminal-output recovered)
+        records (stream/get-events event-stream)
+        bundle (:opsv/evidence-bundle output)]
+    (is (= :error (get-in completed [:phase :result :status])))
+    (is (= 1 (count (:opsv/disposition-events (terminal-output completed)))))
+    (is (= before (take (count before) records)))
+    (is (= (range (count records)) (sort (map :event/sequence-number records))))
+    (is (= (count records) (get-in @event-stream [:sequence-numbers (:execution/id ready)])))
+    (is (= (count records) (get-in bundle [:evidence/event-links 0 :event-links/event-count])))
+    (is (false? (get-in bundle [:evidence/outcome :outcome/success])))
+    (is (= bundle (:opsv/evidence-bundle (terminal/recovery-output recovered))))
+    (is (= records (stream/get-events event-stream)))
     (is (= 2 (count @calls)))))
 
 (deftest ^{:stratum 1} confirmed-provider-success-publishes-real-transaction-evidence-test
@@ -205,6 +238,9 @@
 
 (deftest ^{:stratum 2} terminal-checkpoint-restores-exact-outcome-without-provider-replay-test
   (with-ready assert-checkpoint-recovery))
+
+(deftest ^{:stratum 2} pending-disposition-retains-its-original-sequence-reservation
+  (with-ready assert-pending-disposition))
 
 (comment
   (clojure.test/run-tests 'ai.miniforge.phase-opsv.terminal-evidence-integration-test))

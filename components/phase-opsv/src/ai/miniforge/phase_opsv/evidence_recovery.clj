@@ -17,6 +17,9 @@
 
 ;------------------------------------------------------------------------------ Layer 0
 
+(defn- ^{:stratum 0} invalid-input []
+  (assoc (model/failure {} :invalid-recovery-context) :anomaly/type :invalid-input))
+
 (defn- ^{:stratum 0} recoverable? [ctx]
   (let [failure (get-in ctx [:phase :result :output])]
     (and (map? ctx) (map? (:execution/opts ctx)) (config/enabled? ctx)
@@ -43,6 +46,11 @@
 
 ;------------------------------------------------------------------------------ Layer 1
 
+(defn- ^{:stratum 1} restore-valid-context [ctx]
+  (if (and (map? ctx) (or (nil? (:execution/opts ctx)) (map? (:execution/opts ctx))))
+    (checkpoint/restore-terminal ctx)
+    (invalid-input)))
+
 (defn- ^{:stratum 1} recover! [ctx]
   (let [restored (runtime/ensure-assembly ctx)
         failure (update (get-in ctx [:phase :result :output]) :anomaly/data dissoc :opsv/evidence-failure)]
@@ -56,10 +64,10 @@
 ;------------------------------------------------------------------------------ Layer 2
 
 (defn ^{:stratum 2} recover-with-exception-handling! [ctx]
-  (let [restored (checkpoint/restore-terminal ctx)]
+  (let [restored (restore-valid-context ctx)]
     (cond
       (anomaly/anomaly? restored) restored
       (recoverable? restored)
       (boundary/call-with-exception-handling
        (get-in restored [:phase :result :output :anomaly/data :opsv/phase-output]) #(recover! restored))
-      :else (assoc (model/failure {} :invalid-recovery-context) :anomaly/type :invalid-input))))
+      :else (invalid-input))))

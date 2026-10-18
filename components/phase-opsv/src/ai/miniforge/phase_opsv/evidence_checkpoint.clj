@@ -28,17 +28,20 @@
       (:opsv/evidence-assembly input)
       (snapshot/decode ctx :checkpoint (:opsv/evidence-snapshot input)))))
 
+(defn- ^{:stratum 0} restore-phase [ctx phase]
+  (if (anomaly/any-anomaly? phase) phase
+    (-> ctx
+        (assoc :phase (dissoc phase :opsv/evidence-base))
+        (assoc :opsv/recovered-evidence-base (:opsv/evidence-base phase))
+        (assoc-in [:execution/opts :opsv/evidence-base] (:opsv/evidence-base phase)))))
+
 ;------------------------------------------------------------------------------ Layer 1
 
 (defn ^{:stratum 1} restore-terminal [ctx]
   (if-not (terminal-pending? ctx)
     ctx
-    (let [phase (snapshot/decode ctx :terminal-checkpoint
-                                 (get-in ctx [:execution/input :opsv/terminal-snapshot]))]
-      (if (anomaly/any-anomaly? phase) phase
-        (-> ctx
-            (assoc :phase (dissoc phase :opsv/evidence-base))
-            (assoc-in [:execution/opts :opsv/evidence-base] (:opsv/evidence-base phase)))))))
+    (restore-phase ctx (snapshot/decode ctx :terminal-checkpoint
+                                        (get-in ctx [:execution/input :opsv/terminal-snapshot])))))
 
 (defn- ^{:stratum 1} persist-terminal [ctx]
   (if (and (= :opsv/actuate (get-in ctx [:phase :name]))

@@ -18,10 +18,11 @@
     (if (anomaly/any-anomaly? publication) publication (finalization/finalize! ctx output))))
 
 (defn- ^{:stratum 0} confirm-disposition! [ctx retained transaction]
-  (if (anomaly/any-anomaly? retained)
-    retained
-    (let [recorded (audit/record! ctx transaction)]
-      (if (anomaly/any-anomaly? recorded) recorded retained))))
+  (let [recorded (when-not (anomaly/any-anomaly? retained) (audit/record! ctx transaction))]
+    (cond
+      (anomaly/any-anomaly? retained) retained
+      (anomaly/any-anomaly? recorded) recorded
+      :else retained)))
 
 ;------------------------------------------------------------------------------ Layer 1
 
@@ -30,7 +31,8 @@
                  (partial finalize-after-events! ctx)))
 
 (defn- ^{:stratum 1} confirm-dispositions! [ctx output]
-  (reduce (partial confirm-disposition! ctx) output (:opsv/effect-transactions output)))
+  (let [retained (assoc ctx :opsv/disposition-events (:opsv/disposition-events output))]
+    (reduce (partial confirm-disposition! retained) output (:opsv/effect-transactions output))))
 
 ;------------------------------------------------------------------------------ Layer 2
 

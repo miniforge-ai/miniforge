@@ -46,6 +46,12 @@ projection have separate responsibilities. No provider or schema dependency is d
 - Block ordinary transforms while terminal evidence recovery is pending, even if
   the caller removes evidence configuration. Preflight rejection without retained
   actuation does not create a terminal snapshot.
+- Restore the captured workflow tier after disk restart and reject malformed
+  recovery options before modifying checkpoint state.
+- Reuse acknowledged legacy dispositions before allocating a sequence number.
+  Retain unacknowledged drafts across checkpoint recovery, including their reserved
+  positions. Current journals continue to use indexed acknowledgment without a
+  history query.
 
 ## Testing plan
 
@@ -63,6 +69,8 @@ Additional acceptance coverage is preserved for an immediate follow-up PR.
 It covers current-journal partial publication with disk reopen, projection failure,
 preflight correction, untrusted event batches, and shared-runner checkpoint recovery. These
 tests are verified with the full runtime before splitting to respect the PR budget.
+The follow-up also carries confirmed, reconciled, unknown and transient-audit outcome
+acceptance cases; runtime regressions retain persistent-audit and disk-recovery coverage.
 Production host preparation remains a separate implementation slice.
 
 ## Standards adversarial pass
