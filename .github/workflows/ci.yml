@@ -230,6 +230,13 @@ jobs:
         run: |
           clojure -M -e "(require 'ai.miniforge.workflow.opsv-checkpoint-integration-test) (let [r (clojure.test/run-tests 'ai.miniforge.workflow.opsv-checkpoint-integration-test)] (System/exit (+ (:fail r) (:error r))))"
 
+      - name: Gate evidence journal contracts
+        working-directory: projects/miniforge
+        run: >-
+          clojure -M -e "(require 'ai.miniforge.event-stream.gate-contract-integration-test)
+          (let [r (clojure.test/run-tests 'ai.miniforge.event-stream.gate-contract-integration-test)]
+          (System/exit (+ (:fail r) (:error r))))"
+
       - name: Upload test logs
         if: always()
         uses: actions/upload-artifact@v4
