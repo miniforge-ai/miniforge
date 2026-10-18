@@ -18,13 +18,14 @@
 (ns ai.miniforge.workflow.execution-events
   "Events the phase executor publishes: the gate decision for a gated
    transition, and whether the DAG executor took over after the plan
-   phase. Every publisher swallows its own failures — observability must
-   not break execution.
+   phase. Gate audit publication returns failures to enforcement. DAG hints
+   retain their legacy best-effort behavior.
 
    Split out of `execution` (rule 210), which held these alongside the
    phase lifecycle, gate/transition logic and DAG integration as one
    six-stratum file."
-  (:require [ai.miniforge.event-stream.interface :as events]))
+  (:require [ai.miniforge.event-stream.interface :as events]
+            [ai.miniforge.workflow.gate-publication :as gate-publication]))
 
 ;------------------------------------------------------------------------------ Layer 0
 
@@ -35,28 +36,15 @@
       (:execution/event-stream ctx)
       (get-in ctx [:execution/opts :event-stream])))
 
-(defn- ^{:stratum 0} resolve-workflow-id
-  [ctx]
+(defn ^{:stratum 0} emit-phase-decision!
+  "Return the gate audit acknowledgment or a failure that blocks advancement."
+  [ctx phase-result envelope]
+  (gate-publication/emit! ctx phase-result envelope))
+
+(defn- ^{:stratum 0} resolve-workflow-id [ctx]
   (or (:execution/id ctx) (:workflow/id ctx) (:workflow-id ctx)))
 
 ;------------------------------------------------------------------------------ Layer 1
-
-(defn ^{:stratum 1} emit-phase-decision!
-  "Publish the :gate/decision event for a gated transition; never breaks
-   enforcement. Stream and workflow id come from the canonical resolvers
-   (same lookup as phase telemetry), so contexts carrying the stream under
-   :execution/opts publish too."
-  [ctx phase-result envelope]
-  (try
-    (when-let [stream (resolve-event-stream ctx)]
-      (when envelope
-        (events/publish! stream
-                         (events/phase-decision stream (resolve-workflow-id ctx)
-                                                (or (:phase/name phase-result)
-                                                    (:phase phase-result))
-                                                envelope))))
-    (catch Exception _ nil))
-  nil)
 
 (defn ^{:stratum 1} emit-dag-considered!
   "Emit a :workflow/dag-considered event describing whether DAG fired and why.

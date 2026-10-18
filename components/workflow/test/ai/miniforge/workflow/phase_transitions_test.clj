@@ -31,6 +31,7 @@
    [clojure.test :refer [deftest is testing]]
    [ai.miniforge.fsm.interface :as fsm]
    [ai.miniforge.workflow.execution-transition :as transition]
+   [ai.miniforge.workflow.gate-test-support :as gate-fixture]
    [ai.miniforge.workflow.fsm :as workflow-fsm]
    [ai.miniforge.workflow.runner-defaults :as runner-defaults]
    ;; loaded for its eager guard/action registration (infra-retry guards)
@@ -173,8 +174,8 @@
       (is (seq (:phase/gate-errors out)))))
   (testing "gates configured + approved verdict → pass attaches ONLY the
             :allow decision envelope (Ariadne 1d); nothing else changes"
-    (let [pr  {:result {:output {:review/decision :approved}}}
-          out (transition/apply-gate-validation {:config {:gates [:review-approved]}} pr {})]
+    (let [pr  (gate-fixture/phase-result :approved)
+          out (transition/apply-gate-validation gate-fixture/interceptor pr (gate-fixture/context))]
       (is (= pr (dissoc out :phase/decision-envelope)) "unchanged on pass, envelope aside")
       (is (= :allow (get-in out [:phase/decision-envelope :envelope/decision])))
       (is (not (contains? out :phase/status)))

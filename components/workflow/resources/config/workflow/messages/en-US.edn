@@ -17,7 +17,8 @@
 ;; limitations under the License.
 
 {:workflow/messages
- {:chain/child-incomplete "Chain child did not complete successfully."
+ {:gate/publication-unconfirmed "Gate decision publication failed or did not return a matching acknowledgment."
+  :chain/child-incomplete "Chain child did not complete successfully."
   :chain/publication-unconfirmed "Chain lifecycle publication was rejected or did not return a matching acknowledgment."
   :chain/completion-publication-failed "Chain completion publication failed."
   :chain/start-publication-failed "Chain start publication failed."

@@ -25,11 +25,10 @@
    the transitions."
   (:require [ai.miniforge.anomaly.interface :as anomaly]
             [ai.miniforge.fsm.interface :as fsm]
-            [ai.miniforge.gate.interface :as gate]
             [ai.miniforge.phase.interface :as phase]
             [ai.miniforge.response.interface :as response]
             [ai.miniforge.workflow.context :as context]
-            [ai.miniforge.workflow.execution-events :as exec-events]
+            [ai.miniforge.workflow.gate-validation :as gate-validation]
             [ai.miniforge.workflow.fsm :as workflow-fsm]
             [ai.miniforge.workflow.messages :as messages]))
 
@@ -134,58 +133,11 @@
       :phase/succeed)))
 
 (defn ^{:stratum 1} apply-gate-validation
-  "Apply gate validation to phase result.
-
-   Returns updated phase-result carrying :phase/decision-envelope (the ONE
-   truth artifact for the gated transition, Ariadne 1d) — plus
-   :phase/status :failed and :phase/gate-errors (a projection of the
-   envelope's reasons, no longer an independent shape) when the decision is
-   :deny. Skips gate checks when phase indicates work is already done. When
-   gates are configured they run even if the canonical artifact
-   ([:result :output]) is nil — a nil artifact fails the gate (fail-closed),
-   never bypasses it; the envelope carries :reason/missing-artifact."
+  "Validate configured gates and acknowledge their decision before advancement.
+   Already-completed work bypasses gate checks; missing output does not."
   [interceptor phase-result ctx]
-  (if (already-done? phase-result)
-    phase-result
-    (let [gate-keywords (get-in interceptor [:config :gates] [])
-          ;; Canonical: gates validate the phase's :output ([:result :output]) —
-          ;; one location, no shape-guessing. The old (or :artifact
-          ;; [:result :artifact] [:result :output]) could hand a gate the wrong
-          ;; map: the review gate got the code-under-review at :artifact instead
-          ;; of the verdict at :output, so it rejected every approved review.
-          artifact (response/phase-output phase-result)]
-      ;; Fail closed: when gates are configured, run them even if the canonical
-      ;; artifact is nil. Skipping on nil would let a phase that omits its
-      ;; :output bypass validation entirely — the gate runner turns a nil
-      ;; artifact into a failed gate result (loud), which is what we want.
-      (if (seq gate-keywords)
-        (let [gate-result (gate/check-gates gate-keywords artifact ctx)
-              minted (gate/gates->envelope gate-result (nil? artifact))
-              ;; envelope minting can itself anomaly; fail closed on that too
-              envelope (when (:envelope/id minted) minted)]
-          (exec-events/emit-phase-decision! ctx phase-result envelope)
-          (if (and (:passed? gate-result)
-                   envelope
-                   (gate/decision-allowed? envelope))
-            (assoc phase-result :phase/decision-envelope envelope)
-            (assoc phase-result
-                   :phase/status :failed
-                   :phase/decision-envelope envelope
-                   :phase/gate-errors (if envelope
-                                        (vec (:envelope/reasons envelope))
-                                        (vec (:failed-gates gate-result)))
-                   ;; The envelope's Reasons are schema-bound strings; the
-                   ;; repair loop needs the gates' STRUCTURED errors (which
-                   ;; gate, which token, which files). This rides the phase
-                   ;; result into :execution/phase-results, the one channel
-                   ;; a redirect re-entry can still read.
-                   ;; gate/passed? handles response-shaped results too;
-                   ;; a bare (remove :passed?) would misfile them.
-                   :phase/gate-failures (->> (:results gate-result)
-                                             (remove gate/passed?)
-                                             (mapv #(-> (select-keys % [:gate :errors])
-                                                        (update :errors (fnil vec []))))))))
-        phase-result))))
+  (if (already-done? phase-result) phase-result
+    (gate-validation/validate interceptor phase-result ctx)))
 
 ;------------------------------------------------------------------------------ Layer 2
 
