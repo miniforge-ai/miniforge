@@ -5,6 +5,7 @@
   (:require [ai.miniforge.anomaly.interface :as anomaly]
             [ai.miniforge.artifact.interface :as artifact]
             [ai.miniforge.event-stream.interface :as stream]
+            [ai.miniforge.phase-opsv.actuation :as actuation]
             [ai.miniforge.phase-opsv.artifact-test-support :as f]
             [ai.miniforge.phase-opsv.interface :as opsv]
             [ai.miniforge.phase-opsv.lifecycle :as lifecycle]
@@ -18,6 +19,10 @@
   (swap! calls inc)
   (opsv/actuate ctx))
 
+(defn- ^{:stratum 0} unexpected-actuation! [calls _ctx _verified]
+  (swap! calls inc)
+  (throw (AssertionError. "Evidence recovery invoked actuation")))
+
 (defn- ^{:stratum 0} reject-actuation-material [publish directory record]
   (if (= :actuation (get-in record [:artifact/metadata :opsv/material-kind]))
     (anomaly/anomaly :unavailable "injected actuation publication failure" {})
@@ -26,7 +31,7 @@
 (defn- ^{:stratum 0} complete-phase [interceptor ctx]
   ((:leave interceptor) ((:enter interceptor) ctx)))
 
-(defn- ^{:stratum 0} assert-recovered [completed calls directory]
+(defn- ^{:stratum 0} assert-recovered [completed directory]
   (let [detached (dissoc completed :opsv/evidence-assembly-store)
         restarted (update detached :execution/opts dissoc :opsv/evidence-base)
         recovered (opsv/publish-finalized-evidence! restarted)
@@ -49,13 +54,17 @@
     (is (= (range (count published-events)) (sort (map :event/sequence-number published-events))))
     (is (= (count published-events)
            (get-in @(:event-stream detached) [:sequence-numbers (:execution/id detached)])))
-    (is (= 1 @calls))
     (is (anomaly/anomaly? (opsv/publish-finalized-evidence!
                           (assoc-in detached [:execution/input checkpoint/snapshot-key] "corrupt")))))
   (is (anomaly/anomaly? (opsv/publish-finalized-evidence!
                         (dissoc completed :opsv/evidence-assembly-store :event-stream)))))
 
 ;------------------------------------------------------------------------------ Layer 1
+
+(deftest ^{:stratum 1} replay-guard-counts-before-its-failure-is-caught
+  (let [calls (atom 0)]
+    (is (thrown? AssertionError (unexpected-actuation! calls nil nil)))
+    (is (= 1 @calls))))
 
 (defn- ^{:stratum 1} assert-publication-recovery [ctx directory]
   (doseq [failure-kind [:material :event]]
@@ -71,7 +80,9 @@
                                (complete-phase interceptor ready)))]
       (stream/publish! (:event-stream completed)
                        (stream/phase-started (:event-stream completed) (:execution/id completed) :opsv/actuate))
-      (assert-recovered completed calls directory))))
+      (with-redefs [actuation/actuate (partial unexpected-actuation! calls)]
+        (assert-recovered completed directory))
+      (is (= 1 @calls)))))
 
 (defn- ^{:stratum 1} assert-snapshot-failure [ctx _directory]
   (let [ready (reduce f/step (f/configured ctx) (butlast support/handlers))

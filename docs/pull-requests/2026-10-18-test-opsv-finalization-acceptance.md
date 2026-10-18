@@ -26,6 +26,9 @@ under `work/opsv-finalization-full-20261018`.
 - Recover legacy artifact/event publication after an intervening workflow event.
   Confirm original sequence reservations, unchanged evidence intent, one actuation
   call, and refusal of corrupt or authority-free recovery inputs.
+- Guard the actual actuation entry point throughout recovery, not only the initial
+  interceptor transform. Count unexpected calls before throwing, so an exception
+  caught by a recovery boundary cannot hide replay from the final assertion.
 - Fail closed when the post-actuation snapshot cannot be encoded, retaining the
   actual outcome and blocking ordinary replay.
 - Run all seven OPSV phases through the shared workflow runner. Load the real
@@ -38,11 +41,11 @@ The preserved full tree passed 34 tests / 372 assertions against the isolated
 packaged CLI before the split, without production-source overlays. The runtime
 foundation additionally passed both consumer suites and all GitHub CI checks.
 The restored suites and targeted unit regressions pass through the project runner
-on merged main: 34 tests / 372 assertions. The same 34/372 pass outside the repo
+on merged main after the review fix: 35 tests / 374 assertions. The same 35/374 pass outside the repo
 against the verified CLI with test-only overlays. Production sources are identical
 to that built artifact, so no redundant rebuild was needed. Kondo reports zero
 errors/warnings; explicit strata and Polylith checks pass. The pinned standards
-scan reports zero violations across 4,438 files. Whole PR: 233 reportable lines.
+scan reports zero violations across 4,438 files.
 
 ## Standards adversarial pass
 
