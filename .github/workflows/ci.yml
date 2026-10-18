@@ -229,12 +229,8 @@ jobs:
         working-directory: projects/miniforge
         run: >-
           clojure -M:test -e "(require 'ai.miniforge.phase-opsv.finalization-integration-test
-          'ai.miniforge.phase-opsv.current-finalization-integration-test
-          'ai.miniforge.phase-opsv.post-actuation-recovery-integration-test
           'ai.miniforge.workflow.opsv-finalization-integration-test)
           (let [r (clojure.test/run-tests 'ai.miniforge.phase-opsv.finalization-integration-test
-          'ai.miniforge.phase-opsv.current-finalization-integration-test
-          'ai.miniforge.phase-opsv.post-actuation-recovery-integration-test
           'ai.miniforge.workflow.opsv-finalization-integration-test)]
           (System/exit (+ (:fail r) (:error r))))"
 

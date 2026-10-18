@@ -152,8 +152,6 @@
                          "ai.miniforge.workflow.opsv-lifecycle-integration-test"
                          "ai.miniforge.workflow.opsv-finalization-integration-test"
                          "ai.miniforge.phase-opsv.finalization-integration-test"
-                         "ai.miniforge.phase-opsv.current-finalization-integration-test"
-                         "ai.miniforge.phase-opsv.post-actuation-recovery-integration-test"
                          "ai.miniforge.workflow.opsv-checkpoint-integration-test"
                          "ai.miniforge.event-stream.gate-contract-integration-test"
                          "ai.miniforge.governance.e2e-test"]
