@@ -48,6 +48,6 @@ Gate rule publication and policy-pack decomposition remain a separate slice.
 ## Checklist
 
 - [x] Legacy and current-journal regressions
-- [ ] Standards adversarial review and composition checks
+- [x] Standards adversarial review and composition checks
 - [x] Consumer and packaged verification
 - [ ] Signed commits, settled review and passing CI
