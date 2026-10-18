@@ -62,6 +62,7 @@
         published (artifact/read-published directory id)]
     (is (= :success (get-in completed [:phase :result :status])))
     (is (true? (get-in output [:opsv/evidence-bundle :evidence/outcome :outcome/success])))
+    (is (= :standard (get-in output [:opsv/evidence-bundle :evidence/outcome :outcome/tier])))
     (is (= (:opsv/effect-transactions output) (:artifact/content published)))
     (is (= 2 (count @calls)))))
 
@@ -115,6 +116,7 @@
         records (mapv #(artifact/read-published directory %) (:opsv/artifact-refs output))]
     (is (= :error (get-in completed [:phase :result :status])))
     (is (false? (get-in bundle [:evidence/outcome :outcome/success])))
+    (is (= :standard (get-in bundle [:evidence/outcome :outcome/tier])))
     (is (m/validate evidence/OpsvEvidence (:evidence/opsv bundle)))
     (is (= :unknown-outcome (get-in output [:opsv/effect-transactions 0 :effect/state])))
     (is (= 1 (count (get-in bundle [:evidence/opsv :opsv/grant-refs]))))

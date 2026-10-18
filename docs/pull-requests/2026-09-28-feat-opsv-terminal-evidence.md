@@ -30,6 +30,7 @@ have separate responsibilities. No provider or schema dependency is duplicated.
 - Publish transaction and failure artifacts alongside the actuation record.
 - Confirm terminal disposition events before finalizing a failed bundle.
 - Record an unsuccessful N6 outcome for failures observed before finalization.
+  Preserve the canonical workflow tier while projecting the terminal outcome.
   A confirmed or matched reconciled PR remains confirmed; an uncertain POST
   does not invent a provider reference.
 - Recover from a saved failed checkpoint using only audit, artifact and bundle
@@ -42,7 +43,7 @@ have separate responsibilities. No provider or schema dependency is duplicated.
 
 ## Testing plan
 
-The eight terminal tests cover uncertain POST, confirmed and reconciled success,
+The terminal regressions cover uncertain POST, confirmed and reconciled success,
 and transient and persistent audit failure. They cover artifact, event and bundle
 publication failures, checkpoint recovery, repeated recovery, and invalid recovery inputs.
 Artifact tests also prove exact Instant type and nanosecond round trips.
