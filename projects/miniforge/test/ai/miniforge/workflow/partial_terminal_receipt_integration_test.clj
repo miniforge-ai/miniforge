@@ -23,17 +23,17 @@
 
 ;------------------------------------------------------------------------------ Layer 1
 
-(defn- ^{:stratum 1} verify-partial-publication [ready directory calls]
+(defn- ^{:stratum 1} verify-partial-publication [kind expected-count ready directory calls]
   (let [configured (assoc-in ready [:execution/opts :opsv/pr-execution :provider :run-command]
                              (partial terminal/unsuccessful-command calls))
-        completed (terminal/run-with-publication-failure configured :effect-transactions)
+        completed (terminal/run-with-publication-failure configured kind)
         result (get-in completed [:phase :result])
         failure (:output result)
         retained (get-in failure [:anomaly/data :opsv/phase-output])
         publication (get-in failure [:anomaly/data :opsv/evidence-failure])
         ids (get-in publication [:anomaly/data :opsv/phase-output :opsv/phase-produced-artifact-refs])]
     (is (= :error (:status result)))
-    (is (= 1 (count ids)))
+    (is (= expected-count (count ids)))
     (is (= :actuation (get-in (artifact/read-published directory (first ids))
                               [:artifact/metadata :opsv/material-kind])))
     (is (= ids (:opsv/phase-produced-artifact-refs retained) (:artifacts result)))
@@ -45,4 +45,7 @@
 ;------------------------------------------------------------------------------ Layer 2
 
 (deftest ^{:stratum 2} partial-terminal-publication-retains-provider-error-and-acknowledged-artifacts
-  (terminal/with-ready verify-partial-publication))
+  (terminal/with-ready (partial verify-partial-publication :effect-transactions 1)))
+
+(deftest ^{:stratum 2} refused-terminal-event-retains-provider-error-and-acknowledged-artifacts
+  (terminal/with-ready (partial verify-partial-publication :event 3)))

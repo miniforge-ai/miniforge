@@ -30,8 +30,8 @@ exact-head review and all CI gates. No storage migration; normal CLI deployment.
 ## Local verification and adversarial review
 
 - Core compatibility and actual runner/current journal: 9 tests, 47 assertions.
-- All three products consuming phase/workflow: passing, serially (1m34s).
-- Rebuilt CLI: 39,185,831 bytes; isolated package: 28 tests, 210 assertions,
+- All three products consuming phase/workflow/phase-opsv: passing, serially (1m56s).
+- Rebuilt CLI: 39,187,015 bytes; isolated package: 34 tests, 279 assertions,
   including publication refusals, native finalization and terminal recovery.
 - Kondo: no warnings/errors. Inferred strata: no changes required.
 - Reviewed state ownership, absent versus empty receipts, unchanged leave/error
@@ -39,4 +39,5 @@ exact-head review and all CI gates. No storage migration; normal CLI deployment.
   the existing millisecond representation; no copied prior output or diagnostics.
 
 This verifies phase events, not the default host or workflow-level lifecycle.
-The dependency's pending review fix must be integrated before this PR is merged.
+Both dependency review rounds are integrated and covered by the composed checks,
+including partial terminal receipts, event refusal and consecutive bundle retries.
