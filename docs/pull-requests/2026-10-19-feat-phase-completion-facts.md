@@ -40,9 +40,9 @@ Provider calls must not repeat.
 
 - Focused source tests: 16 tests, 213 assertions, passing.
 - All three product consumers of workflow and phase-opsv: passing after both
-  prerequisites merged and the review fix applied (1m51s), serially.
-- Rebuilt CLI: 39,185,681 bytes. Isolated package, no production source overlays:
-  56 tests, 774 assertions, passing, including publication refusal, current-stream
+  prerequisites merged and both review rounds applied (1m53s), serially.
+- Rebuilt CLI: 39,186,820 bytes. Isolated package, no production source overlays:
+  59 tests, 817 assertions, passing, including publication refusal, current-stream
   and terminal recovery.
 - Kondo: no warnings or errors. Inferred strata: no changes required.
 - Post-commit standards scan against actual base `677e588a1`: no violations.
@@ -64,3 +64,12 @@ The terminal result now retains only the publication's declared receipts alongsi
 pending audit events, preserving the original provider error and nested failure.
 Explicit empty receipts and absent receipts remain distinct. The rebuilt CLI
 passes the same regression and all prior recovery/publication acceptance checks.
+
+The next review found two additional cases, reproduced as nine failed assertions
+against the previous CLI. A refused terminal event now retains post-artifact
+output through shared event/finalization handling, including exception conversion.
+Successful-actuation recovery uses that same handling. Bundle-only retries clear
+old receipts and declare an empty attempt before publication; repeated refusals
+preserve the provider error and all other retained output without claiming old
+material. The integration tests exercise two consecutive refused retries and
+verify no provider replay. No new commit-budget exception is used.

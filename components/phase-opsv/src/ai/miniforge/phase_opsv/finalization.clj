@@ -11,6 +11,7 @@
             [ai.miniforge.phase-opsv.finalization-config :as config]
             [ai.miniforge.phase-opsv.finalization-model :as model]
             [ai.miniforge.phase-opsv.finalization-retained :as retained]
+            [ai.miniforge.phase-opsv.publication-boundary :as publication]
             [ai.miniforge.phase-opsv.runtime-context :as context]))
 
 ;------------------------------------------------------------------------------ Layer 0
@@ -86,13 +87,14 @@
 
 (defn ^{:stratum 2} publish-finalized! [ctx]
   (let [record (assembly ctx)
-        bundle (:opsv.assembly/bundle record)]
+        bundle (:opsv.assembly/bundle record)
+        output (material/begin-publication {})]
     (if-not (and (= :finalized (:opsv.assembly/status record))
                  (= (context/workflow-id ctx) (:evidence-bundle/workflow-id bundle))
                  (every? (partial available? ctx) (:opsv/artifact-refs record))
                  (evidence/valid-finalized-opsv-bundle? record bundle (:opsv/artifact-refs record)))
       (model/failure {} :invalid-finalized-evidence)
-      (publish-bundle! ctx {} bundle))))
+      (publication/call-with-exception-handling output #(publish-bundle! ctx output bundle)))))
 
 (comment
   (assembly {}))
