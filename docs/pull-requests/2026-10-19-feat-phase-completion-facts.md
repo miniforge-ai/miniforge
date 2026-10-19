@@ -40,16 +40,27 @@ Provider calls must not repeat.
 
 - Focused source tests: 16 tests, 213 assertions, passing.
 - All three product consumers of workflow and phase-opsv: passing after both
-  prerequisites merged (1m50s), serially.
-- Rebuilt CLI: 39,185,636 bytes. Isolated package, no production source overlays:
-  53 tests, 748 assertions, passing, including publication refusal, current-stream
+  prerequisites merged and the review fix applied (1m51s), serially.
+- Rebuilt CLI: 39,185,681 bytes. Isolated package, no production source overlays:
+  56 tests, 774 assertions, passing, including publication refusal, current-stream
   and terminal recovery.
 - Kondo: no warnings or errors. Inferred strata: no changes required.
 - Post-commit standards scan against actual base `677e588a1`: no violations.
-  Total PR: 185 reportable lines; implementation commits: 100 and 85 lines.
+  Initial implementation commits: 100 and 85 reportable lines.
 - Reviewed receipt provenance, partial publication, missing versus empty facts,
   checkpoint refusal before publication, sealed-bundle invariance and recovery
   without provider replay. Shared test factories avoid duplicate fixture maps.
 
 The native lifecycle/publisher/journal test is not a full-runner or default-host
 acceptance claim. Those remain separate work.
+
+## Review correction
+
+Partial terminal publication had retained acknowledgment facts only in the nested
+evidence failure, so the outer result omitted them. The new real-provider-fixture
+regression reproduced five failures against the pre-fix CLI: the actuation artifact
+was acknowledged, transaction publication failed, and completion was refused.
+The terminal result now retains only the publication's declared receipts alongside
+pending audit events, preserving the original provider error and nested failure.
+Explicit empty receipts and absent receipts remain distinct. The rebuilt CLI
+passes the same regression and all prior recovery/publication acceptance checks.
