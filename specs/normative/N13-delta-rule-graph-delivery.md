@@ -336,3 +336,219 @@ code:
 3. `policy/rule-unenforced`: each applicable rule classed `:unenforced` (§7.3).
 
 ---
+
+## 7. Composition with Enforcement
+
+### 7.1 Separation
+
+The rule selection of `:policy-verify` and `:policy-review` MUST NOT read the graph, the delivery set or the ledger.
+Those gates evaluate the complete applicable set (N13 §2.1). Coverage checks run in a separate gate (§7.3).
+
+### 7.2 Enforcement Classes
+
+| Class | Meaning |
+|---|---|
+| `:gated` | A check with `:hard-halt` or `:require-approval` runs, by detector or semantic judge |
+| `:checked` | A deterministic detector runs, and its findings do not block |
+| `:judged` | No check runs; the gate reports the rule as `:guidance` in `gate/rule-applied` (N3) |
+| `:unenforced` | A `:checked` or `:judged` rule that no reviewer receives for this changeset |
+
+1. The gate's predicates for whether a check runs MUST move into the `policy-pack` interface. Today they are private
+   to the gate. Gate and graph then call one definition.
+2. Classification MUST run against the pack set the gates load. A rule from a pack the gates do not load is
+   never `:gated`.
+3. A rule is applicable when it applies to the changeset at any phase of the run. A `:checked` or `:judged` rule
+   whose phases exclude `:review` has no reviewer, so it is `:unenforced`. `:std/standards` is an example.
+4. A `:checked` rule's detector often covers one pattern of a longer rule. `:std/clojure` is an example. The rest of
+   such a rule is enforced only through the reviewer.
+
+The classes describe what the gate does today, including semantic rules gated by an LLM judge. N13 §8 describes
+which rules should gate. This delta changes neither.
+
+### 7.3 Pruning and Coverage
+
+Authoring phases MAY show a rule as a manifest entry or count it in the overflow, without behavior text. That is safe
+only because review and the gates still hold the rule.
+
+1. Review delivery MUST include, with behavior text, every `:checked` and `:judged` rule applicable to the changeset.
+2. Each applicable `:unenforced` rule MUST produce a `policy/rule-unenforced` fact. It MUST NOT be reported as passed.
+3. A review without an LLM backend makes every applicable `:checked` and `:judged` rule `:unenforced`.
+4. A separate `:policy-coverage` gate reads the classes and the facts. In Stage 1 it reports only.
+5. From Stage 2, `:policy-coverage` MUST fail closed on an `:unenforced` rule unless a recorded waiver names it. The
+   switch waits until a reference workload shows zero `:unenforced` rules.
+
+### 7.4 Reviewer Inputs Are Enforcement Inputs
+
+Moving reviewer rule bodies behind `rules_get` MUST wait for a calibration result from the `policy-calibration`
+component. Judge recall with on-demand bodies MUST be non-inferior to recall with full bodies on a fixed review set.
+Until then, the bodies of `:checked` and `:judged` rules stay in the reviewer prompt. Overflow keeps the existing
+multi-session split in `review-session-systems`. That split MUST cut on rule boundaries, so each rule's id stays with
+its text.
+
+### 7.5 Correction to N13 §9
+
+N13 §9 says a pruned rule can never escape enforcement. That holds for `:gated` rules only. For `:checked` and
+`:judged` rules, the safety net is review delivery (§7.3). Ledger demotion (N13 §5.4, §6.2) MUST NOT remove such a
+rule from review delivery.
+
+### 7.6 Frontmatter Decoupling
+
+The end state: the compiler takes enforcement action and severity only from explicit fields, and a change to
+`alwaysApply` alone changes no gate outcome. The migration runs in two steps, so no rule weakens on the way.
+
+1. Stage 1. A rule without explicit values keeps its `alwaysApply`-derived values, and the compiler warns for it.
+   The §7.7 diff shows any change those values cause.
+2. Stage 2. After standards declares `enforcement.action` and severity on every rule, and miniforge re-pins, the
+   compiler MUST NOT derive either value from `alwaysApply`.
+
+Under this rule, D4's downgrade of `:std/clojure` shows in the re-pin diff. The fix is an explicit
+`enforcement.action` upstream before that re-pin.
+
+### 7.7 Pack Diff
+
+Any change to a compiled pack MUST attach a rule-by-rule diff, whether from a pin bump or a compiler change. The
+diff covers action, severity, detector, applies-to, always-on membership and enforcement class. The October 2026 pin
+analysis produced this diff by hand. It becomes a build output.
+
+### 7.8 Always-On Set
+
+The always-on set MUST be declared as data in miniforge, with a reason per entry. It MUST NOT be inferred from
+`alwaysApply`. A repo MAY add entries in `.miniforge/config.edn`; removing one MUST record a reason there. The v0
+proposal follows. Its behavior text totals 3,054 characters, about 764 tokens.
+
+| Rule | Dewey | Reason |
+|---|---|---|
+| `:std/localization` | 050 | Required always-on; the 2026-06-08 dogfood failed 0/4 when it was buried |
+| `:std/result-handling` | 003 | `:hard-halt` on any source change; a miss costs a repair cycle |
+| `:std/validation-boundaries` | 004 | same |
+| `:std/exceptions-as-data` | 005 | same |
+| `:std/named-constants` | 006 | same |
+| `:std/config-as-data` | 007 | same |
+| `:std/no-dead-code` | 008 | same |
+| `:std/self-documenting-code` | 009 | same |
+
+---
+
+## 8. IDE Path and Standards Format
+
+The `.mdc` frontmatter stays the IDE contract. Miniforge reads `globs` as file scope, with the IDE's meaning.
+Miniforge reads `alwaysApply` only for enforcement defaults during migration (§7.6) and for a drift note. The
+compiler prints that note when the IDE's always-apply set and miniforge's always-on set differ.
+
+A separate standards PR SHOULD add two things to the rule format. First, a `related:` list of rule paths with an
+optional edge type. Second, an explicit `enforcement.action` and severity on every rule. Neither reaches miniforge
+until the re-pin. Stage 1 works on the pinned content, using inferred edges.
+
+Miniforge matches globs with `registry.support/glob-matches?`, which differs from IDE matchers at edges. `**/*`
+matches the empty path, and a brace glob such as `**/*.{clj,cljc}` matches nothing. The graph and the gate MUST
+share this one function. The compiler MUST reject a glob that this function cannot match as written.
+
+---
+
+## 9. Relationship to Existing Work
+
+1. **N13 §4.1 and §4.3.** `delivery-set` covers static scope and changeset relevance. Changeset relevance moves from
+   N13 Stage 4 (MAY) into this delta: review and release in Stage 1, authoring phases in Stage 2.
+2. **N13 §7.2.** `bootstrap-seed-rule-order` moves from code to data. It becomes the rank prior, not the filter.
+3. **N12 §6.** The pull tools are the query surface for policy content. The unfold target is the pack rule at the
+   pinned version.
+4. **Knowledge component.** Rule notes loaded by `load-rules-from-directory` are a second copy of rule text. The
+   graph adds no third copy. See open question 3.
+5. **thesium-workflows.** Its `kg-mcp-tools` lookup by id and full-text search map to `rules_get` and
+   `rules_search`. Miniforge takes no dependency. `kg.datalog_query` has no counterpart (§1.1).
+
+---
+
+## 10. Conformance Staging
+
+1. **Stage 0 (this delta).** Spec and index entry. Register the §6.4 facts in N3 before Stage 1 code.
+2. **Stage 1 (MUST).** Build the resolver, the graph, `delivery-set` and `enforcement-classes`. Match per file at
+   review and release, and show ids in every block. Declare always-on as data. Emit `:unenforced` facts through a
+   reporting coverage gate. Add the §7.6 step 1 warnings and the §7.7 diff. Delivery is push only. Plan and implement filter
+   candidates by the seed list plus the always-on set.
+3. **Stage 2 (SHOULD).** Pull tools. Plan and implement switch to `delivery-set` with the seed as prior. Manifest
+   and overflow output, release narrowing, fail-closed coverage (§7.3), and §7.6 step 2.
+4. **Stage 3 (SHOULD).** Ledger rank (N13 Stage 2), `:co-violated` edges, and reviewer bodies on demand after §7.4
+   calibration passes.
+5. **Stage 4 (MAY).** A cross-repo graph store for N13 §6 promotion.
+
+Stage 1 grows the review prompt for code changes (§2.2: about 52k tokens for one `.clj` file). The existing
+multi-session review split absorbs that until Stage 3.
+
+---
+
+## 11. Metrics
+
+These extend N13 §10:
+
+1. `policy/rules-by-class`, per run and phase.
+2. `policy/unenforced-count`, with a target of zero.
+3. `guidance/injected-tokens`, per phase, split into always-on, selected and manifest.
+4. `policy/query-count`, per rule id.
+5. `review/attributed-findings-rate`, the share of reviewer findings that cite a rule id.
+
+---
+
+## 12. Open Questions
+
+1. Membership of the v0 always-on set (§7.8).
+2. The field that carries task type into `delivery-set` (§2.1 item 3).
+3. Whether to retire knowledge-store rule notes or make them views over the graph.
+4. The non-inferiority margin and review set for §7.4.
+5. Plan-phase scope when the intent names no paths. All tracked files may be too broad.
+6. A release-phase check for branch, commit and PR rules (§6.3).
+7. Whether the gates should load the same pack set as delivery (D8, §4.6). That change belongs to N4.
+
+---
+
+## 13. Conformance Requirements
+
+| ID | Level | Stage | Requirement |
+|----|-------|-------|-------------|
+| N13D.RG.1 | MUST | 1 | Build and load graphs deterministically, checked against the loaded pack's digest (§4.4). |
+| N13D.RG.2 | MUST NOT | 1 | Store rule text in the graph, or edit the graph by hand (§4.4). |
+| N13D.RG.3 | MUST | 1 | Resolve rules for delivery and classification with one `policy-pack` function (§4.6). |
+| N13D.RG.4 | MUST | 1 | Select delivered rules with `delivery-set`, keyed by phase, task type and changeset (§5.1). |
+| N13D.RG.5 | MUST | 1 | Account for every candidate as behavior text, a manifest entry or the overflow count (§5.1). |
+| N13D.RG.6 | MUST | 1 | Show the id of every delivered rule, plus pack versions and the graph digest (§6.1). |
+| N13D.RG.7 | MUST | 1 | Match review and release rules per changed file, with the gate's glob function (§5.1, §8). |
+| N13D.RG.8 | MUST NOT | 1 | Let `:policy-verify` or `:policy-review` rule selection read graph, delivery set or ledger (§7.1). |
+| N13D.RG.9 | MUST | 1 | Deliver every applicable `:checked` and `:judged` rule to review, with behavior text (§7.3). |
+| N13D.RG.10 | MUST | 1 | Emit `policy/rule-unenforced` for each applicable `:unenforced` rule; never report it passed (§7.3). |
+| N13D.RG.11 | MUST | 2 | Fail `:policy-coverage` closed on an unwaived `:unenforced` rule (§7.3). |
+| N13D.RG.12 | MUST NOT | 3 | Move reviewer rule bodies on demand before calibration shows non-inferior recall (§7.4). |
+| N13D.RG.13 | MUST NOT | 2 | Derive enforcement action or severity from `alwaysApply` (§7.6). |
+| N13D.RG.14 | MUST | 1 | Attach a rule-by-rule diff to every change of a compiled pack (§7.7). |
+| N13D.RG.15 | MUST | 1 | Declare the always-on set as data with a reason per entry, and never trim it to fit (§5.1, §7.8). |
+
+### 13.1 Test Obligations
+
+1. A one-file `.py` changeset puts `:std/python` in review delivery. A Clojure-only changeset does not.
+2. With an empty always-on set, a one-token budget and no pull tools, every candidate appears as an entry or count.
+3. With a non-empty always-on set and a one-token budget, loading fails with a configuration error.
+4. A fixture rule flipped from `alwaysApply: true` to `globs` compiles to the same action and severity in Stage 1.
+5. A review without an LLM backend emits `policy/rule-unenforced` for applicable `:checked` and `:judged` rules.
+   It reports none of them as passed.
+6. The same inputs, graph digest and ledger snapshot give byte-identical `delivery-set` output.
+7. `:policy-verify` and `:policy-review` verdicts are identical with the graph present and absent.
+8. A recompile of unchanged rules keeps every graph digest.
+
+---
+
+## Annex A — Measurement Method (informative)
+
+The §2.2 sizes come from `agent-behavior/load-all-rules`, `load-guidance-addendum` and `load-and-filter-behaviors`.
+Each phase was called with `{:task {:task/intent {:intent/type :implement}}}`. Production callers pass a different
+shape (§2.1 item 3). No rule declares task types, so the sizes match either way. The §2.3 classes come from
+`policy-pack/resolve-detector` and each rule's enforcement action.
+
+The D6 count is a regex scan of `.mdc` bodies at standards `b899758`. It matches backticked `category/slug` paths and
+three-digit Dewey references, and drops self-references. A parenthesized three-digit number that is not a rule
+reference also matches, so 97 is an upper bound.
+
+The D7 diff compiled both standards commits with `mdc-compiler/compile-standards-pack`. It compared severity,
+action, always-inject, detector and globs per rule.
+
+---
+
+**Version History:** 0.1.0-draft (2026-10-19), initial proposal.

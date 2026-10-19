@@ -6,8 +6,8 @@
 
 # miniforge Specification Index
 
-**Version:** 0.25.1-draft
-**Date:** 2026-10-17
+**Version:** 0.26.0-draft
+**Date:** 2026-10-19
 **Status:** Living specification during OSS development
 
 ---
@@ -65,7 +65,7 @@ They use RFC 2119 terminology (MUST, SHALL, SHOULD, MAY).
 | N5 supervisory deltas | Miniforge SDLC control-plane producers and consumers |
 | N7-N10 | Miniforge Fleet/SDLC capabilities |
 | N11 + runtime-adapter delta | Governed task runtimes in Core and consuming products |
-| N12-N13 | Miniforge agent context and policy-guidance runtime |
+| N12-N13 + rule-graph delta | Miniforge agent context and policy-guidance runtime |
 | N14 | Experimental Miniforge deliberation runs, scoped by N14 §0.4 |
 | N15 | minibench/workbench evaluation protocol and N14 promotion gates |
 
@@ -250,6 +250,7 @@ Defines:
 | [N5-delta-3-observational-entities.md](normative/N5-delta-3-observational-entities.md) | N5 supervisory | Miniforge entity projections |
 | [N5-delta-4-automation-edge-correlator.md](normative/N5-delta-4-automation-edge-correlator.md) | N5 supervisory | Miniforge automation causality |
 | [N11-delta-runtime-adapter.md](normative/N11-delta-runtime-adapter.md) | N11 | Governed task runtimes |
+| [N13-delta-rule-graph-delivery.md](normative/N13-delta-rule-graph-delivery.md) | N13 | Miniforge policy delivery |
 
 ### N7 — Operational Policy Synthesis With Verification ✅
 
@@ -423,6 +424,8 @@ Defines:
   re-promoted (§9)
 - Objective + metrics: minimize injected tokens s.t. gate-pass holds; unattributed findings signal missing detectors
   (§10)
+- Draft amendment through the indexed rule-graph delta: changeset-keyed rule queries (delta §4–§6), enforcement
+  classes and frontmatter decoupled from enforcement (delta §7)
 
 ---
 
@@ -636,6 +639,11 @@ Normative specs are enforced by:
 ---
 
 ## Version History
+
+- **0.26.0-draft** (2026-10-19) - Added the N13 rule-graph delivery delta as a draft proposal, not approved.
+  Under it, agents get rules from a deterministic query keyed by phase, task type and changeset, and
+  frontmatter stops deciding delivery. The delta records measured delivery paths and adds `N13D.RG.*` requirements. It also
+  corrects N13 §9 for rules that only the reviewer enforces. No runtime behavior changes.
 
 - **0.25.1-draft** (2026-10-17) - Approved N3 gate decision and rule-evidence
   registration, typed payloads, and fail-closed audit publication. N3 0.11.0→0.11.1.
