@@ -27,6 +27,8 @@ slice #2047. No default host switch or workflow runner control-flow change.
 - Propagate identity-allocation failures without decorating them as events.
 - Preserve canonical anomaly diagnostics and retryability. Message-less exceptions
   use their classified diagnostic instead of a nil failure reason on both profiles.
+- Normalize generic codes only for the shared retryability lookup; keep emitted
+  codes unchanged and nested diagnostic metadata consistent.
 
 ## Testing plan
 
@@ -34,8 +36,9 @@ Check current and legacy constructors, error projection, missing facts, publicat
 and durable replay. Run consumer suites, lint, strata, composition and the pinned
 standards scan serially; rebuild and test the isolated CLI package.
 
-All three product event-stream suites passed (2m30s). The isolated CLI package
-passed 14 tests / 221 assertions. Lint and inferred strata have zero findings.
+All three product event-stream suites passed after the final review fix (1m18s).
+The isolated CLI package passed 21 tests / 386 assertions, including both entry
+and terminal constructors. Lint and inferred strata have zero findings.
 The standards audit runs after committing: incremental scans compare committed
 revisions, and their file count describes the repository index, not audited files.
 

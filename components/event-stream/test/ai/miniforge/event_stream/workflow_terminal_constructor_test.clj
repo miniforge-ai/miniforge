@@ -43,6 +43,8 @@
     (is (not (contains? draft :event/sequence-number)))
     (is (not (contains? draft :workflow/status)))
     (is (= expected (select-keys draft (keys expected))))
+    (when (contains? (:workflow/error-details draft) :retryable?)
+      (is (= (:workflow/retryable? draft) (get-in draft [:workflow/error-details :retryable?]))))
     (is (vector? (events/prepare-current-publication draft)))
     (is (= 0 (:event/sequence-number receipt)))
     (is (= receipt (events/publish! stream draft)))
@@ -102,7 +104,8 @@
 
 (deftest ^{:stratum 2} terminal-diagnostics-preserve-canonical-and-message-less-failures
   (doseq [[error expected]
-          [[(Exception.) {:workflow/failure-reason (str Exception)
+          (concat
+           [[(Exception.) {:workflow/failure-reason (str Exception)
                           :workflow/anomaly-code :anomalies/fault :workflow/retryable? false}]
            [(anomaly/sub-anomaly :unavailable :anomalies.llm/timeout "fixture timeout" {})
             {:workflow/failure-reason "fixture timeout"
@@ -112,7 +115,15 @@
              :workflow/anomaly-code :anomalies.llm/timeout :workflow/retryable? true}]
            [(anomaly/anomaly :fault "fixture failure" {})
             {:workflow/failure-reason "fixture failure"
-             :workflow/anomaly-code :fault :workflow/retryable? false}]]]
+             :workflow/anomaly-code :fault :workflow/retryable? false}]]
+           (for [type [:unavailable :timeout]]
+             [(anomaly/anomaly type "fixture transient" {})
+              {:workflow/failure-reason "fixture transient"
+               :workflow/anomaly-code type :workflow/retryable? true}])
+           (for [code [:anomalies/busy :anomalies/interrupted]]
+             [(response/make-anomaly code "fixture transient")
+              {:workflow/failure-reason "fixture transient"
+               :workflow/anomaly-code code :workflow/retryable? true}]))]
     (let [constructor (fn [stream workflow-id] (failed stream workflow-id error))
           legacy (constructor (events/create-event-stream {:sinks []}) (random-uuid))]
       (is (= expected (select-keys legacy (keys expected))))

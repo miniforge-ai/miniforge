@@ -30,18 +30,27 @@
     (and (map? error) (:anomaly error)) (:anomaly error)
     :else nil))
 
-(defn- ^{:stratum 0} error-details [error]
-  (cond
-    (instance? Throwable error) {:message (ex-message error) :type (str (type error))}
-    (anomaly/any-anomaly? error) (response/anomaly->event-data error)
-    :else error))
+(defn- ^{:stratum 0} anomaly-data [error]
+  (let [data (response/anomaly->event-data error)
+        code (:anomaly-code data)
+        lookup-code (if (and (keyword? code) (nil? (namespace code)))
+                      (keyword "anomalies" (name code)) code)]
+    (assoc data :retryable? (response/retryable? lookup-code))))
 
 ;------------------------------------------------------------------------------ Layer 1
 
-(defn ^{:stratum 1} failed [error failure-class]
+(defn- ^{:stratum 1} error-details [error]
+  (cond
+    (instance? Throwable error) {:message (ex-message error) :type (str (type error))}
+    (anomaly/any-anomaly? error) (anomaly-data error)
+    :else error))
+
+;------------------------------------------------------------------------------ Layer 2
+
+(defn ^{:stratum 2} failed [error failure-class]
   (let [details (error-details error)
         fallback (msg/t :workflow/unknown-error)
-        event-data (response/anomaly->event-data
+        event-data (anomaly-data
                     (or (error-anomaly error)
                         (response/make-anomaly :anomalies/fault (or (:message details) fallback))))
         message (or (:message details) (:message event-data) fallback)]
