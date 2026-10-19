@@ -25,6 +25,8 @@ slice #2047. No default host switch or workflow runner control-flow change.
 - Refuse contradictory completion status; require actual duration, evidence and
   canonical failure class at current publication admission.
 - Propagate identity-allocation failures without decorating them as events.
+- Preserve canonical anomaly diagnostics and retryability. Message-less exceptions
+  use their classified diagnostic instead of a nil failure reason on both profiles.
 
 ## Testing plan
 

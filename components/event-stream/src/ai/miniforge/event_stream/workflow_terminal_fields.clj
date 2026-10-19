@@ -25,7 +25,7 @@
 
 (defn- ^{:stratum 0} error-anomaly [error]
   (cond
-    (response/anomaly-map? error) error
+    (anomaly/any-anomaly? error) error
     (instance? Throwable error) (response/from-exception error)
     (and (map? error) (:anomaly error)) (:anomaly error)
     :else nil))
@@ -33,18 +33,20 @@
 (defn- ^{:stratum 0} error-details [error]
   (cond
     (instance? Throwable error) {:message (ex-message error) :type (str (type error))}
-    (response/anomaly-map? error) (response/anomaly->event-data error)
+    (anomaly/any-anomaly? error) (response/anomaly->event-data error)
     :else error))
 
 ;------------------------------------------------------------------------------ Layer 1
 
 (defn ^{:stratum 1} failed [error failure-class]
   (let [details (error-details error)
-        message (get details :message (msg/t :workflow/unknown-error))
+        fallback (msg/t :workflow/unknown-error)
         event-data (response/anomaly->event-data
-                    (or (error-anomaly error) (response/make-anomaly :anomalies/fault message)))]
+                    (or (error-anomaly error)
+                        (response/make-anomaly :anomalies/fault (or (:message details) fallback))))
+        message (or (:message details) (:message event-data) fallback)]
     (cond-> {:message (msg/t :workflow/failed {:reason message})
-             :workflow/failure-reason (get details :message (:message event-data))
+             :workflow/failure-reason message
              :workflow/error-details details
              :workflow/anomaly-code (:anomaly-code event-data)
              :workflow/retryable? (get event-data :retryable? false)}

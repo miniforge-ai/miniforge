@@ -17,9 +17,11 @@
   (events/workflow-completed stream workflow-id :completed 0
                              {:workflow/evidence-bundle-id (random-uuid) :tokens 0 :cost-usd 0.0}))
 
-(defn- ^{:stratum 0} failed [stream workflow-id]
-  (events/workflow-failed stream workflow-id (Exception. "fixture failure")
-                          {:failure/class :failure.class/task-code :workflow/failure-phase :opsv/verify}))
+(defn- ^{:stratum 0} failed
+  ([stream workflow-id] (failed stream workflow-id (Exception. "fixture failure")))
+  ([stream workflow-id error]
+   (events/workflow-failed stream workflow-id error
+                           {:failure/class :failure.class/task-code :workflow/failure-phase :opsv/verify})))
 
 (defn- ^{:stratum 0} error-cases []
   [{:message "fixture failure" :type :fixture}
@@ -97,6 +99,24 @@
 
 (deftest ^{:stratum 2} incomplete-and-contradictory-terminal-facts-fail-closed
   (fixture/with-stream verify-refusals))
+
+(deftest ^{:stratum 2} terminal-diagnostics-preserve-canonical-and-message-less-failures
+  (doseq [[error expected]
+          [[(Exception.) {:workflow/failure-reason (str Exception)
+                          :workflow/anomaly-code :anomalies/fault :workflow/retryable? false}]
+           [(anomaly/sub-anomaly :unavailable :anomalies.llm/timeout "fixture timeout" {})
+            {:workflow/failure-reason "fixture timeout"
+             :workflow/anomaly-code :anomalies.llm/timeout :workflow/retryable? true}]
+           [(response/make-anomaly :anomalies.llm/timeout "fixture timeout")
+            {:workflow/failure-reason "fixture timeout"
+             :workflow/anomaly-code :anomalies.llm/timeout :workflow/retryable? true}]
+           [(anomaly/anomaly :fault "fixture failure" {})
+            {:workflow/failure-reason "fixture failure"
+             :workflow/anomaly-code :fault :workflow/retryable? false}]]]
+    (let [constructor (fn [stream workflow-id] (failed stream workflow-id error))
+          legacy (constructor (events/create-event-stream {:sinks []}) (random-uuid))]
+      (is (= expected (select-keys legacy (keys expected))))
+      (fixture/with-stream (partial verify-current constructor expected)))))
 
 (deftest ^{:stratum 2} identity-failures-remain-anomalies-on-both-profiles
   (fixture/with-stream verify-identity-failure)
