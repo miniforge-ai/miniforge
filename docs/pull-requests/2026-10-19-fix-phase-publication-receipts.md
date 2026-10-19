@@ -30,15 +30,16 @@ missing workflow intent, phase artifacts, or terminal evidence.
 ## Verification
 
 All three product workflow suites passed serially (1m27s). The isolated rebuilt
-CLI passed 17 tests and 103 assertions covering real closed journals, invalid
+CLI passed 25 tests and 147 assertions covering real closed journals, invalid
 drafts, durable reopen, nonfatal exceptions, interruption, callback ordering,
 legacy compatibility, and the execution refusal boundary. Inferred strata are
 unchanged and lint reports zero warnings or errors.
 
 The interruption test captures the flag before assertions: an isolated diagnostic
 confirmed Clojure's bound test report counter clears it during assertion reporting.
-Final composed acceptance must retain #2052's executing-agent projection when the
-dependency is integrated; no current-host completeness claim is made here.
+Composed acceptance includes #2052's executing-agent projection and the actual
+runner refusal path. Shared journal and runner fixtures avoid duplicated setup.
+No current-host completeness claim is made here.
 
 ## Deployment and gates
 
