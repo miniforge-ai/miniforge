@@ -19,6 +19,16 @@
     (is (= (messages/t :status/failed) (get-in data [:error :message])))
     (is (not (contains? (:options data) :workflow/failure-phase)))))
 
+(deftest ^{:stratum 0} native-string-errors-retain-their-diagnostic
+  (let [message "Deployment configuration is invalid"]
+    (doseq [phase [{:name :deploy :result {:status :error :error message}}
+                  {:name :deploy :error message}]]
+      (let [ctx {:execution/errors [] :phase phase}
+            data (facts/data ctx)]
+        (is (= message (get-in data [:error :message])))
+        (is (= :deploy (get-in data [:options :workflow/failure-phase])))
+        (is (= [] (get-in data [:error :errors])))))))
+
 ;------------------------------------------------------------------------------ Layer 1
 
 (deftest ^{:stratum 1} canonical-exception-provenance-determines-the-failure-class

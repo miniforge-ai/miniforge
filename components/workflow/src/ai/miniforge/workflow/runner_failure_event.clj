@@ -15,6 +15,10 @@
 (defn- ^{:stratum 0} as-anomaly [value]
   (when (anomaly/any-anomaly? value) value))
 
+(defn- ^{:stratum 0} error-message [error cause]
+  (or (when (string? error) error)
+      (:message error) (:anomaly/message cause) (messages/t :status/failed)))
+
 (defn- ^{:stratum 0} classified [error cause message]
   (failure/classify
    (assoc (select-keys cause [:anomaly/type :anomaly/subtype :anomaly/category])
@@ -36,7 +40,7 @@
         cause (or (as-anomaly (:anomaly error)) (as-anomaly error)
                   (when-not execution-error
                     (as-anomaly (get-in phase [:result :output]))))
-        message (or (:message error) (:anomaly/message cause) (messages/t :status/failed))
+        message (error-message error cause)
         details (cond-> {:message message :errors errors}
                   cause (assoc :anomaly cause))
         options (cond-> {:failure/class (classified error cause message)}

@@ -31,9 +31,9 @@ hooks, adversarial standards pass, exact-head review and full CI remain required
 
 ## Local verification and adversarial review
 
-- All three workflow product consumers: passing, serially (1m28s).
-- Rebuilt CLI: 39,186,367 bytes. Isolated package, no production source overlay:
-  43 tests, 177 assertions, passing after the review correction.
+- All three workflow product consumers: passing, serially (1m27s).
+- Rebuilt CLI: 39,186,393 bytes. Isolated package, no production source overlay:
+  44 tests, 183 assertions, passing after both review corrections.
 - Kondo: no warnings/errors. All changed namespaces match inferred strata.
 - Reviewed anomaly and exception precedence, failure location ownership, retained
   error records, native phase fallback and explicit unknown classification.
@@ -49,3 +49,8 @@ The projection now reads that canonical provenance as well as the legacy fields.
 A regression constructs an actual canonical SocketTimeoutException anomaly with
 a message that does not imply timeout, and verifies timeout classification while
 preserving the original anomaly and error record.
+
+A subsequent review identified native string-valued errors, used by deployment
+configuration failures. The message projection now preserves those diagnostics
+directly. Regression coverage includes result-level and phase-level strings;
+map-shaped diagnostics and execution-error precedence remain unchanged.
