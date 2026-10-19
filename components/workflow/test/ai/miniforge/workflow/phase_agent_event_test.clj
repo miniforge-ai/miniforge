@@ -4,11 +4,10 @@
 (ns ai.miniforge.workflow.phase-agent-event-test
   (:require [ai.miniforge.anomaly.interface :as anomaly]
             [ai.miniforge.event-stream.interface :as events]
+            [ai.miniforge.workflow.phase-event-test-support :as support]
             [ai.miniforge.workflow.runner-callbacks :as callbacks]
             [ai.miniforge.workflow.runner-events :as runner-events]
-            [babashka.fs :as fs]
-            [clojure.test :refer [deftest is]]
-            [slingshot.slingshot :refer [try+]]))
+            [clojure.test :refer [deftest is]]))
 
 ;------------------------------------------------------------------------------ Layer 0
 
@@ -19,19 +18,6 @@
 
 (defn- ^{:stratum 0} interceptor [config]
   {:config (assoc config :phase :verify)})
-
-(defn- ^{:stratum 0} reopened-history [options]
-  (let [stream (events/create-current-event-stream options)]
-    (try+ (events/get-events stream)
-      (finally (events/close-current-event-stream! stream)))))
-
-(defn- ^{:stratum 0} with-stream [verify]
-  (fs/with-temp-dir [directory {:prefix "phase-agent-facts-"}]
-    (let [options {:journal-directory (str (fs/canonicalize directory))}
-          stream (events/create-current-event-stream options)]
-      (is (events/current-event-stream? stream))
-      (try+ (verify stream options)
-        (finally (events/close-current-event-stream! stream))))))
 
 ;------------------------------------------------------------------------------ Layer 1
 
@@ -45,14 +31,15 @@
                  {:agent :implementer :phase/expected-agent :agent/none}]]
     ;; Repeated phase identifiers must not select the first workflow declaration.
     (with-redefs [runner-events/start-phase-heartbeat! (constantly nil)]
-      (doseq [config configs] (start ctx (interceptor config))))
+      (doseq [config configs]
+        (start ctx (assoc (interceptor config) :phase :stale-legacy-phase))))
     (let [history (events/get-events stream)]
       (is (= [:reviewer :tester :agent/none :implementer]
              (mapv :phase/expected-agent history)))
       (is (= [0 1 2 3] (mapv :event/sequence-number history)))
       (is (every? #(= :verify (:workflow/phase %)) history))
       (events/close-current-event-stream! stream)
-      (is (= history (reopened-history options))))))
+      (is (= history (support/reopened-events options))))))
 
 (defn- ^{:stratum 1} verify-missing-agent [stream _options]
   (let [ctx (context)
@@ -76,7 +63,7 @@
 ;------------------------------------------------------------------------------ Layer 2
 
 (deftest ^{:stratum 2} current-phase-entry-retains-the-executing-agent
-  (with-stream verify-executing-interceptor))
+  (support/with-stream verify-executing-interceptor))
 
 (deftest ^{:stratum 2} missing-agent-does-not-become-agentless
-  (with-stream verify-missing-agent))
+  (support/with-stream verify-missing-agent))

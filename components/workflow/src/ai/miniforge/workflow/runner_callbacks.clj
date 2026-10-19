@@ -8,7 +8,7 @@
 ;------------------------------------------------------------------------------ Layer 0
 
 (defn- ^{:stratum 0} phase-name [interceptor]
-  (get interceptor :phase (get-in interceptor [:config :phase])))
+  (get-in interceptor [:config :phase] (:phase interceptor)))
 
 (defn- ^{:stratum 0} phase-start-options [interceptor]
   (let [config (:config interceptor)
