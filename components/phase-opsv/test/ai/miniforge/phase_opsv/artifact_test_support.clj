@@ -13,6 +13,12 @@
 
 ;------------------------------------------------------------------------------ Layer 0
 
+(defn ^{:stratum 0} attempted-output [output]
+  (assoc output :opsv/phase-produced-artifact-refs []))
+
+(defn ^{:stratum 0} discovery-output [ctx]
+  {:opsv/experiment-pack (get-in ctx [:execution/input :opsv/experiment-pack])})
+
 (defn ^{:stratum 0} reject-event-type [event-type publish stream event]
   (if (= event-type (:event/type event))
     (anomaly/anomaly :unavailable "injected event publication failure" {})
