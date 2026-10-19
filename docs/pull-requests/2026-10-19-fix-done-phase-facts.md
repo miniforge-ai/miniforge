@@ -15,7 +15,8 @@ or metrics. Previous recorded phase results remain unchanged.
 
 ## Dependencies and scope
 
-Depends on #2056 before merge; #2054 is merged. The actual runner already
+Both prerequisites, #2056 and #2054, are merged. Aligned with main without
+changing the tested production or test sources. The actual runner already
 clears the active phase before entering done; there is no prior output-forwarding
 contract to change. Leave/error compatibility remains unchanged. Default current
 host migration and workflow-level lifecycle publication remain separate work.

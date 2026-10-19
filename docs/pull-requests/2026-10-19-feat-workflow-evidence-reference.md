@@ -17,7 +17,8 @@ reference; ordinary resume preserves it.
 
 ## Dependencies and scope
 
-Depends on #2056 and done-phase-facts before merge. Failed bundle publication must
+Depends on #2059 (terminal-phase facts); #2056 is merged. Main alignment changed
+no tested production or test source. Failed bundle publication must
 not expose a completion reference. Default current-host migration, workflow intent
 and workflow-level publication refusal propagation remain separate work.
 
