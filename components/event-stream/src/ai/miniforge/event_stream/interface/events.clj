@@ -24,7 +24,8 @@
    [ai.miniforge.event-stream.core :as core]
    [ai.miniforge.event-stream.compound-events :as compound]
    [ai.miniforge.event-stream.gate-events :as gate-events]
-   [ai.miniforge.event-stream.phase-events :as phase-events]))
+   [ai.miniforge.event-stream.phase-events :as phase-events]
+   [ai.miniforge.event-stream.workflow-terminal-events :as workflow-terminal]))
 
 ;------------------------------------------------------------------------------ Layer 0
 
@@ -94,16 +95,18 @@
 (def ^{:stratum 0} workflow-completed
   "Build and return a :workflow/completed event envelope map carrying a
    status keyword and optional duration plus opts (tokens, cost,
-   pr-info, pr-infos, evidence-bundle-id)."
-  core/workflow-completed)
+   pr-info, pr-infos, evidence-bundle-id). Current drafts require :completed status,
+   duration and evidence identity, and carry no competing status field."
+  workflow-terminal/workflow-completed)
 
 (def ^{:stratum 0} workflow-failed
   "Build and return a :workflow/failed event envelope map. Normalizes
    the error (Throwable, anomaly map, or plain map) into
    :workflow/failure-reason, :workflow/error-details,
    :workflow/anomaly-code, and :workflow/retryable?; optional
-   :failure/class."
-  core/workflow-failed)
+   :failure/class. Current drafts require the class and may carry
+   :workflow/failure-phase in opts."
+  workflow-terminal/workflow-failed)
 
 (def ^{:stratum 0} llm-request
   "Build and return an :llm/request event envelope map for an LLM call
