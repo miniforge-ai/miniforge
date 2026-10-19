@@ -343,7 +343,8 @@
 (def ^{:stratum 0} workflow-completed
   "Build and return a :workflow/completed event envelope map carrying a
    status keyword and optional duration plus opts (tokens, cost,
-   pr-info, pr-infos, evidence-bundle-id)."
+   pr-info, pr-infos, evidence-bundle-id). Current drafts require :completed status,
+   duration and evidence identity, and carry no competing status field."
   events/workflow-completed)
 
 (def ^{:stratum 0} workflow-failed
@@ -351,7 +352,8 @@
    the error (Throwable, anomaly map, or plain map) into
    :workflow/failure-reason, :workflow/error-details,
    :workflow/anomaly-code, and :workflow/retryable?; optional
-   :failure/class."
+   :failure/class. Current drafts require the class and may carry
+   :workflow/failure-phase in opts."
   events/workflow-failed)
 
 (def ^{:stratum 0} llm-request
