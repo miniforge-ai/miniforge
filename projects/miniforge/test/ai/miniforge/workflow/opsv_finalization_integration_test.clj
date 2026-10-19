@@ -8,6 +8,7 @@
             [ai.miniforge.phase-opsv.artifact-test-support :as fixture]
             [ai.miniforge.phase-opsv.interface :as opsv]
             [ai.miniforge.workflow.interface :as workflow]
+            [ai.miniforge.workflow.evidence-reference-support :as reference]
             [ai.miniforge.workflow.checkpoint-root-support :as checkpoint]
             [ai.miniforge.workflow.isolation-support :as isolation]
             [ai.miniforge.workflow.opsv-lifecycle-support :as support]
@@ -40,6 +41,10 @@
         measurements (mapv (partial artifact/read-published directory) metric-refs)
         stored (artifact/read-published directory (:opsv/evidence-artifact-id recovered))]
     (is (= expected-status (:execution/status completed)))
+    (if (= :completed expected-status)
+      (reference/assert-completed completed snapshot (:artifact/id stored))
+      (do (is (not (contains? completed :workflow/evidence-bundle-id)))
+          (is (not (contains? snapshot :workflow/evidence-bundle-id)))))
     (is (= workflow-id (:execution/id completed) (:evidence-bundle/workflow-id bundle)))
     (is (true? (:valid? (evidence/validate-canonical-bundle bundle))))
     (is (= bundle (:artifact/content stored)))
