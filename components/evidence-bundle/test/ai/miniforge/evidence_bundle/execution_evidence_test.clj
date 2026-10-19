@@ -25,7 +25,7 @@
   (:require
    [clojure.test :refer [deftest is testing]]
    [ai.miniforge.evidence-bundle.collectors :as collectors]
-   [ai.miniforge.dag-executor.executor :as dag-exec]
+   [ai.miniforge.dag-executor.interface :as dag-exec]
    [ai.miniforge.workflow.runner :as runner]))
 
 ;; Private fn accessor for evidence_bundle.clj
@@ -110,17 +110,17 @@
 
 (deftest ^{:stratum 0} extract-output-governed-mode-with-executor-test
   (testing "extract-output captures runtime-class from executor"
-    (with-redefs [dag-exec/executor-type (constantly :docker)]
-      (let [ctx {:execution/artifacts []
-                 :execution/phase-results {}
-                 :execution/current-phase nil
-                 :execution/status :completed
-                 :execution/mode :governed
-                 :execution/executor :mock-executor
-                 :execution/started-at (java.time.Instant/now)}
-            output (:execution/output (runner/extract-output ctx))]
-        (is (= :governed (:evidence/execution-mode output)))
-        (is (= :docker (:evidence/runtime-class output)))))))
+    (let [executor (reify dag-exec/TaskExecutor (executor-type [_] :docker))
+          ctx {:execution/artifacts []
+               :execution/phase-results {}
+               :execution/current-phase nil
+               :execution/status :completed
+               :execution/mode :governed
+               :execution/executor executor
+               :execution/started-at (java.time.Instant/now)}
+          output (:execution/output (runner/extract-output ctx))]
+      (is (= :governed (:evidence/execution-mode output)))
+      (is (= :docker (:evidence/runtime-class output))))))
 
 (deftest ^{:stratum 0} extract-output-no-executor-nil-runtime-class-test
   (testing "runtime-class is nil when no executor in context"
@@ -153,18 +153,16 @@
           output (:execution/output (runner/extract-output ctx))]
       (is (not (contains? output :evidence/image-digest))))))
 
-(deftest ^{:stratum 0} extract-output-executor-type-exception-caught-test
-  (testing "extract-output catches exception from executor-type gracefully"
-    (with-redefs [dag-exec/executor-type
-                  (fn [_] (throw (ex-info "executor disposed" {})))]
-      (let [ctx {:execution/artifacts []
-                 :execution/phase-results {}
-                 :execution/current-phase nil
-                 :execution/status :completed
-                 :execution/executor :broken
-                 :execution/mode :governed}
-            output (:execution/output (runner/extract-output ctx))]
-        (is (nil? (:evidence/runtime-class output)))))))
+(deftest ^{:stratum 0} extract-output-executor-failure-is-not-masked-test
+  (testing "a valid executor's failure is not reported as absent runtime evidence"
+    (let [executor (reify dag-exec/TaskExecutor
+                     (executor-type [_] (throw (ex-info "executor disposed" {}))))]
+      (is (thrown-with-msg? clojure.lang.ExceptionInfo #"executor disposed"
+            (runner/extract-output {:execution/executor executor}))))))
+
+(deftest ^{:stratum 0} extract-output-unsupported-executor-has-no-runtime-class-test
+  (let [output (:execution/output (runner/extract-output {:execution/executor :unsupported}))]
+    (is (nil? (:evidence/runtime-class output)))))
 
 (deftest ^{:stratum 0} extract-output-defaults-execution-mode-to-local-test
   (testing "execution-mode defaults to :local when :execution/mode absent"
