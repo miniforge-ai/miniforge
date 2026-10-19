@@ -32,6 +32,7 @@
 
 (def ^{:stratum 0} default-config
   {:agent nil
+   :phase/expected-agent :agent/none
    :gates []
    :budget {:tokens 0 :iterations 1 :time-seconds 300}})
 

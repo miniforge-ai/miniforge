@@ -9,7 +9,13 @@
 ;------------------------------------------------------------------------------ Layer 0
 
 (defn- ^{:stratum 0} phase-name [interceptor]
-  (get interceptor :phase (get-in interceptor [:config :phase])))
+  (get-in interceptor [:config :phase] (:phase interceptor)))
+
+(defn- ^{:stratum 0} phase-start-options [interceptor]
+  (let [config (:config interceptor)
+        agent (:agent config)
+        expected (if (nil? agent) (:phase/expected-agent config) agent)]
+    {:phase/expected-agent expected}))
 
 (defn- ^{:stratum 0} notify-caller [callback & args]
   (when callback (apply callback args)))
@@ -31,7 +37,8 @@
 
 (defn- ^{:stratum 1} start-phase! [stream handles heartbeat-opts callback context interceptor]
   (let [phase (phase-name interceptor)
-        receipt (when phase (events/publish-phase-started! stream context phase))]
+        receipt (when phase
+                  (events/publish-phase-started! stream context phase (phase-start-options interceptor)))]
     (if (anomaly/any-anomaly? receipt)
       receipt
       (do (start-heartbeat! stream handles context phase heartbeat-opts)
