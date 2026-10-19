@@ -21,7 +21,7 @@
    :event/version "1.0.0" :event/type :workflow/phase-started :scope/type :workflow
    :message "fixture actuation phase started"
    :workflow/id (:execution/id ctx) :workflow/phase :opsv/actuate
-   :phase/expected-agent :opsv :phase/context {}})
+   :phase/expected-agent :agent/none :phase/context {}})
 
 (defn- ^{:stratum 0} publish-unless-bundle [publish directory record]
   (if (= :evidence-bundle (get-in record [:artifact/metadata :opsv/material-kind]))

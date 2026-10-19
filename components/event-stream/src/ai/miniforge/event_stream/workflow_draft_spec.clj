@@ -48,6 +48,7 @@
    [:workflow/phase-started
     [:map
      [:workflow/phase :keyword]
+     ;; N3 reserves :agent/none for intentional agentless execution, never unknown identity.
      [:phase/expected-agent :keyword]
      [:phase/context :map]]]
    [:workflow/phase-completed
