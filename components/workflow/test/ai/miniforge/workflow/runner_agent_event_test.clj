@@ -3,12 +3,8 @@
 ;; Licensed under the Apache License, Version 2.0.
 (ns ai.miniforge.workflow.runner-agent-event-test
   (:require [ai.miniforge.event-stream.interface :as events]
-            [ai.miniforge.workflow.checkpoint-store :as checkpoints]
             [ai.miniforge.workflow.phase-event-test-support :as support]
             [ai.miniforge.workflow.phase-test-support :as fixture]
-            [ai.miniforge.workflow.runner :as runner]
-            [ai.miniforge.workflow.runner-cleanup :as cleanup]
-            [ai.miniforge.workflow.runner-environment :as environment]
             [ai.miniforge.workflow.runner-events :as publishers]
             [clojure.test :refer [deftest is use-fixtures]]))
 
@@ -22,13 +18,8 @@
 
 (defn- ^{:stratum 0} run-entry [stream definition]
   ;; Only entry publication is under test; other lifecycle facts are a separate migration.
-  (with-redefs [environment/acquire-execution-environment! (constantly nil)
-                environment/persist-workspace-at-phase-boundary! (constantly nil)
-                checkpoints/persist-execution-state! identity
-                cleanup/post-workflow-cleanup! (constantly nil)
-                publishers/start-phase-heartbeat! (constantly nil)
-                publishers/publish-phase-completed! (constantly nil)]
-    (runner/run-pipeline definition {} {:event-stream stream :skip-lifecycle-events true})))
+  (with-redefs [publishers/publish-phase-completed! (constantly nil)]
+    (support/run-phase-workflow stream definition)))
 
 ;------------------------------------------------------------------------------ Layer 1
 
