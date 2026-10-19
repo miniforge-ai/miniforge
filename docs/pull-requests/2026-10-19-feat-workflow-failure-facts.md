@@ -31,9 +31,9 @@ hooks, adversarial standards pass, exact-head review and full CI remain required
 
 ## Local verification and adversarial review
 
-- All three workflow product consumers: passing, serially (1m29s).
-- Rebuilt CLI: 39,186,391 bytes. Isolated package, no production source overlay:
-  45 tests, 193 assertions, passing after all review corrections.
+- All three workflow product consumers: passing, serially (1m57s).
+- Rebuilt CLI: 39,187,322 bytes. Isolated package, no production source overlay:
+  50 tests, 218 assertions, passing after all review corrections.
 - Kondo: no warnings/errors. All changed namespaces match inferred strata.
 - Reviewed anomaly and exception precedence, failure location ownership, retained
   error records, native phase fallback and explicit unknown classification.
@@ -61,3 +61,12 @@ errors still take precedence over both. A pre-fix CLI regression reproduced lost
 anomaly code and provenance; the rebuilt CLI preserves both through actual
 terminal publication and journal reopen. Shared verification support avoids
 duplicating the publication assertions.
+
+Matching native summaries now retain the inner response's exception data; typed
+phase anomalies still win outright. The chosen diagnostic is preserved in event
+details. Gate-only failures fall back to the latest matching phase response-chain
+entry, retaining its actual gate anomaly and policy classification. Regressions
+reproduced four failures against the previous CLI, then passed after rebuilding.
+Unrelated summaries, superseded gate entries, other-phase entries and later
+execution errors cannot borrow those diagnostics. Source selection is a separate
+small namespace from event projection; the classifier remains the single taxonomy.

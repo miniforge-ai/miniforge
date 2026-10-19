@@ -3,17 +3,11 @@
 ;; Licensed under the Apache License, Version 2.0.
 (ns ai.miniforge.workflow.runner-failure-event
   "Project authoritative execution or phase failures into terminal event facts."
-  (:require [ai.miniforge.anomaly.interface :as anomaly]
-            [ai.miniforge.failure-classifier.interface :as failure]
-            [ai.miniforge.workflow.messages :as messages]))
+  (:require [ai.miniforge.failure-classifier.interface :as failure]
+            [ai.miniforge.workflow.messages :as messages]
+            [ai.miniforge.workflow.runner-failure-source :as source]))
 
 ;------------------------------------------------------------------------------ Layer 0
-
-(defn- ^{:stratum 0} primary-error [execution-error phase]
-  (or execution-error (:error phase) (get-in phase [:result :error])))
-
-(defn- ^{:stratum 0} as-anomaly [value]
-  (when (anomaly/any-anomaly? value) value))
 
 (defn- ^{:stratum 0} error-message [error cause]
   (or (when (string? error) error)
@@ -36,12 +30,10 @@
         phase-name (or (:phase execution-error) (:execution/current-phase context)
                        (get-in context [:phase :name]))
         phase (get-in context [:execution/phase-results phase-name] (:phase context))
-        error (primary-error execution-error phase)
-        cause (or (as-anomaly (:anomaly error)) (as-anomaly error)
-                  (when-not execution-error
-                    (as-anomaly (get-in phase [:result :output]))))
+        {:keys [error cause]} (source/select-failure context phase-name execution-error phase)
         message (error-message error cause)
         details (cond-> {:message message :errors errors}
+                  error (assoc :diagnostic error)
                   cause (assoc :anomaly cause))
         options (cond-> {:failure/class (classified error cause message)}
                   (keyword? phase-name) (assoc :workflow/failure-phase phase-name))]
