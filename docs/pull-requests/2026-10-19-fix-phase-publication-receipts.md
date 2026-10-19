@@ -26,11 +26,13 @@ missing workflow intent, phase artifacts, or terminal evidence.
 - Propagate phase publisher failures through callbacks before subsequent effects.
 - Stop completion heartbeats even when the completion publication fails.
 - Restore thread interruption after constructing a current-publication anomaly.
+- Normalize returned legacy publication anomalies to observer-only results, just
+  like thrown legacy failures; current publication anomalies still refuse.
 
 ## Verification
 
 All three product workflow suites passed serially (1m27s). The isolated rebuilt
-CLI passed 25 tests and 147 assertions covering real closed journals, invalid
+CLI passed 27 tests and 155 assertions covering real closed journals, invalid
 drafts, durable reopen, nonfatal exceptions, interruption, callback ordering,
 legacy compatibility, and the execution refusal boundary. Inferred strata are
 unchanged and lint reports zero warnings or errors.
@@ -39,6 +41,8 @@ The interruption test captures the flag before assertions: an isolated diagnosti
 confirmed Clojure's bound test report counter clears it during assertion reporting.
 Composed acceptance includes #2052's executing-agent projection and the actual
 runner refusal path. Shared journal and runner fixtures avoid duplicated setup.
+Review regression coverage includes returned canonical and legacy anomalies from
+legacy publication at both phase boundaries, plus a complete runner execution.
 No current-host completeness claim is made here.
 
 ## Deployment and gates

@@ -15,6 +15,10 @@
 
 ;------------------------------------------------------------------------------ Layer 0
 
+(defn ^{:stratum 0} observe [calls action result & _args]
+  (swap! calls conj action)
+  result)
+
 (defn ^{:stratum 0} run-phase-workflow [stream definition]
   (with-redefs [environment/acquire-execution-environment! (constantly nil)
                 environment/persist-workspace-at-phase-boundary! (constantly nil)

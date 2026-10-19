@@ -49,6 +49,14 @@
     (is (= :completed (:execution/status result)))
     (is (seq (:execution/phase-results result)))))
 
+(deftest ^{:stratum 1} returned-legacy-publication-anomaly-does-not-refuse-execution
+  (let [stream (events/create-event-stream {:sinks []})
+        failure (anomaly/anomaly :unavailable "legacy publication unavailable" {})]
+    (with-redefs [events/publish! (constantly failure)]
+      (let [result (support/run-phase-workflow stream (workflow :reviewer))]
+        (is (= :completed (:execution/status result)))
+        (is (seq (:execution/phase-results result)))))))
+
 ;------------------------------------------------------------------------------ Layer 2
 
 (deftest ^{:stratum 2} closed-journal-prevents-phase-effects

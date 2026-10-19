@@ -21,6 +21,10 @@
 (defn- ^{:stratum 0} publish-current! [stream event]
   (if (anomaly/any-anomaly? event) event (es/publish! stream event)))
 
+(defn- ^{:stratum 0} publish-legacy! [stream event]
+  (let [published (es/publish! stream event)]
+    (when-not (anomaly/any-anomaly? published) published)))
+
 (defn- ^{:stratum 0} nonfatal? [value]
   (not (instance? Error value)))
 
@@ -65,7 +69,7 @@
     (cond
       (es/current-event-stream? event-stream) (publish-current! event-stream event)
       (websocket-stream? event-stream) (publish-via-websocket! event-stream event)
-      (stateful-stream? event-stream) (es/publish! event-stream event)
+      (stateful-stream? event-stream) (publish-legacy! event-stream event)
       :else nil)
     (catch nonfatal? _
       (publication-failure event-stream (:throwable &throw-context) :warn/publish-event))))
