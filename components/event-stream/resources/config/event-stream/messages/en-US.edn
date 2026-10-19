@@ -1,5 +1,8 @@
 {:event-stream/messages
  {:chain/started "Chain started."
+  :workflow/completed "Workflow {status}"
+  :workflow/failed "Workflow failed: {reason}"
+  :workflow/unknown-error "unknown error"
   :gate/decision "Phase {phase} decision: {decision}"
   :gate/rule-applied "Rule {rule-id} {status} in {phase}"
   :gate/unknown-phase "unknown"
