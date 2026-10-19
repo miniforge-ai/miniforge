@@ -21,6 +21,14 @@
 
 ;------------------------------------------------------------------------------ Layer 1
 
+(deftest ^{:stratum 1} canonical-exception-provenance-determines-the-failure-class
+  (let [cause (anomaly/exception-anomaly :fault "Socket stalled"
+                                        (java.net.SocketTimeoutException. "Socket stalled"))
+        data (facts/data (context cause))]
+    (is (= :failure.class/timeout (get-in data [:options :failure/class])))
+    (is (= cause (get-in data [:error :anomaly])))
+    (is (= [cause] (get-in data [:error :errors])))))
+
 (deftest ^{:stratum 1} canonical-and-legacy-causes-use-the-runtime-taxonomy
   (doseq [cause [(anomaly/anomaly :timeout "Connection refused" {})
                 (response/make-anomaly :anomalies/timeout "Connection refused")]]

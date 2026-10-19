@@ -18,7 +18,8 @@
 (defn- ^{:stratum 0} classified [error cause message]
   (failure/classify
    (assoc (select-keys cause [:anomaly/type :anomaly/subtype :anomaly/category])
-          :exception/class (or (:anomaly/ex-class cause)
+          :exception/class (or (get-in cause [:anomaly/data :anomaly/ex-class])
+                               (:anomaly/ex-class cause)
                                (get-in cause [:anomaly/data :exception/class])
                                (get-in error [:data :exception/class]))
           :error/message message)))

@@ -32,8 +32,8 @@ hooks, adversarial standards pass, exact-head review and full CI remain required
 ## Local verification and adversarial review
 
 - All three workflow product consumers: passing, serially (1m28s).
-- Rebuilt CLI: 39,186,356 bytes. Isolated package, no production source overlay:
-  42 tests, 174 assertions, passing.
+- Rebuilt CLI: 39,186,367 bytes. Isolated package, no production source overlay:
+  43 tests, 177 assertions, passing after the review correction.
 - Kondo: no warnings/errors. All changed namespaces match inferred strata.
 - Reviewed anomaly and exception precedence, failure location ownership, retained
   error records, native phase fallback and explicit unknown classification.
@@ -41,3 +41,11 @@ hooks, adversarial standards pass, exact-head review and full CI remain required
   or fabricated phase is introduced. Test support is shared and stays within
   three strata. Actual enter normalization and journal persistence are exercised;
   this is not a default-host or full workflow lifecycle acceptance claim.
+
+## Review correction
+
+Canonical exception anomalies store their exception class inside anomaly data.
+The projection now reads that canonical provenance as well as the legacy fields.
+A regression constructs an actual canonical SocketTimeoutException anomaly with
+a message that does not imply timeout, and verifies timeout classification while
+preserving the original anomaly and error record.
