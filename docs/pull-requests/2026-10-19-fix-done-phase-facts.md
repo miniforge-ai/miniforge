@@ -1,0 +1,42 @@
+<!--
+  Title: Miniforge.ai
+  Author: Christopher Lester (christopher@miniforge.ai)
+  Copyright 2025-2026 Christopher Lester. Licensed under Apache 2.0.
+-->
+
+# fix: Establish terminal phase completion facts
+
+## Purpose and layer
+
+Phase lifecycle integration: the native `:done` interceptor owns its completion
+state. It produces no artifacts, uses no model tokens, and reports measured
+terminal timing. It cannot inherit a previous phase's errors, transition, receipts,
+or metrics. Previous recorded phase results remain unchanged.
+
+## Dependencies and scope
+
+Depends on #2056 before merge; #2054 is merged. The actual runner already
+clears the active phase before entering done; there is no prior output-forwarding
+contract to change. Leave/error compatibility remains unchanged. Default current
+host migration and workflow-level lifecycle publication remain separate work.
+
+## Verification plan
+
+Unit coverage for owned facts and direct-interceptor isolation; actual runner with
+current journal and durable reopen; all affected product consumers; rebuilt CLI
+with isolated package tests. Normal signed commits, adversarial standards review,
+exact-head review and all CI gates. No storage migration; normal CLI deployment.
+
+## Local verification and adversarial review
+
+- Core compatibility and actual runner/current journal: 9 tests, 47 assertions.
+- All three products consuming phase/workflow: passing, serially (1m34s).
+- Rebuilt CLI: 39,185,831 bytes; isolated package: 28 tests, 210 assertions,
+  including publication refusals, native finalization and terminal recovery.
+- Kondo: no warnings/errors. Inferred strata: no changes required.
+- Reviewed state ownership, absent versus empty receipts, unchanged leave/error
+  behavior, preserved phase history and shared metrics. Aligned timestamps with
+  the existing millisecond representation; no copied prior output or diagnostics.
+
+This verifies phase events, not the default host or workflow-level lifecycle.
+The dependency's pending review fix must be integrated before this PR is merged.

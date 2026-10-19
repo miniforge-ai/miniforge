@@ -41,23 +41,34 @@
 ;; Interceptor
 (defn- ^{:stratum 0} preserve-context [ctx _error] ctx)
 
-(defn- ^{:stratum 0} enter-done
-  "Mark both the phase and the enclosing execution as completed."
-  [ctx]
-  (-> ctx
-      (assoc-in [:phase :name] :done)
-      (assoc-in [:phase :status] :completed)
-      (assoc-in [:execution :status] :completed)))
+(defn- ^{:stratum 0} completed-phase [config start end]
+  (let [duration (max 0 (- end start))
+        metrics {:tokens 0 :cost-usd 0.0 :duration-ms duration}]
+    (merge (select-keys config [:agent :gates :budget])
+           {:name :done :status :completed
+            :started-at start :ended-at end :duration-ms duration
+            :metrics metrics
+            :result {:status :success :artifacts [] :metrics metrics}})))
 
 ;------------------------------------------------------------------------------ Layer 1
 
+(defn- ^{:stratum 1} enter-done
+  "Complete the terminal phase with its own facts, without producing artifacts."
+  [config ctx]
+  (let [start (System/currentTimeMillis)
+        completed (assoc-in ctx [:execution :status] :completed)
+        end (System/currentTimeMillis)]
+    (assoc completed :phase (completed-phase config start end))))
+
+;------------------------------------------------------------------------------ Layer 2
+
 ;; Registry method
-(defmethod ^{:stratum 1} registry/get-phase-interceptor :done
+(defmethod ^{:stratum 2} registry/get-phase-interceptor :done
   [config]
   (let [merged (registry/merge-with-defaults config)]
     {:name ::done
      :config merged
-     :enter enter-done
+     :enter (partial enter-done merged)
      :leave identity
      :error preserve-context}))
 
