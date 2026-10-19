@@ -1,6 +1,9 @@
 {:event-stream/messages
  {:chain/started "Chain started."
   :gate/decision "Phase {phase} decision: {decision}"
+  :workflow/started "Workflow started"
+  :workflow/phase-started "{phase} phase started"
+  :workflow/phase-completed "{phase} phase {outcome}"
   :gate/rule-applied "Rule {rule-id} {status} in {phase}"
   :gate/unknown-phase "unknown"
   :chain/completed "Chain completed."

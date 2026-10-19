@@ -279,19 +279,22 @@
   "Build and return a :workflow/started event envelope map. Multi-arity
    for the legacy 2/3-arg call shape; the opts arity may carry
    :routing/trigger-event-id so the automation-edge-correlator links the
-   handler workflow back to its routing trigger."
+   handler workflow back to its routing trigger. Current drafts require
+   :workflow/intent in opts and do not reserve a sequence number."
   events/workflow-started)
 
 (def ^{:stratum 0} phase-started
   "Build and return a :workflow/phase-started event envelope map for the
-   given phase keyword; optional context is attached as :phase/context."
+   given phase keyword; optional context is attached as :phase/context.
+   Current drafts require a fifth options argument with :phase/expected-agent."
   events/phase-started)
 
 (def ^{:stratum 0} phase-completed
   "Build and return a :workflow/phase-completed event envelope map.
-   Records :phase/outcome (default :success) and, when present on the
+   Records :phase/outcome (legacy default :success) and, when present on the
    result, duration, artifacts, error, transition-request, redirect-to,
-   tokens, cost, meta, and termination-reason."
+   tokens, cost, meta, and termination-reason. Current drafts require explicit
+   outcome, duration and artifacts; construction does not reserve a position."
   events/phase-completed)
 
 (def ^{:stratum 0} workspace-persisted
