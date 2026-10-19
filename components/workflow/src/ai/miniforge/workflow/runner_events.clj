@@ -103,6 +103,9 @@
 (defn ^{:stratum 1} publish-workflow-started!
   "Publish workflow started event.
 
+   Current events require caller-declared :workflow/intent in execution options.
+   Free-form input text is not an authoritative intent map.
+
    When `context` carries `:routing/trigger-event-id` (set by callers that
    know which routing trigger fired this workflow — N5-delta-4 §4.3), the
    field is threaded onto the emitted envelope so the
@@ -115,8 +118,10 @@
                                                   (:execution/id context)
                                                   (select-keys (:execution/workflow context)
                                                                [:workflow/id :workflow/version])
-                                                  {:routing/trigger-event-id
-                                                   (:routing/trigger-event-id context)})
+                                                  (assoc (select-keys (:execution/opts context)
+                                                                      [:workflow/intent])
+                                                         :routing/trigger-event-id
+                                                         (:routing/trigger-event-id context)))
                              (workflow-run-fields context :running initial-phase)))
       (catch Exception e
         (println (messages/t :warn/publish-started {:error (ex-message e)}))))))
