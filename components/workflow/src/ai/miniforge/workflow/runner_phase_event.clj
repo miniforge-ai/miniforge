@@ -34,11 +34,13 @@
   (let [review (response/review-decision (response/phase-output result))
         tokens (get-in result [:metrics :tokens] (get-in result [:phase/metrics :tokens]))
         cost (get-in result [:metrics :cost-usd] (get-in result [:phase/metrics :cost-usd]))
+        artifacts (get result :artifacts (get-in result [:result :artifacts]))
         fields {:phase/blocked-reason (phase/blocked-reason result)
                 :phase/transition-request (phase/transition-request result)
                 :review-decision review
                 :tokens tokens
-                :cost-usd cost}]
+                :cost-usd cost
+                :artifacts artifacts}]
     (into {} (filter (comp boolean val)) fields)))
 
 ;------------------------------------------------------------------------------ Layer 1

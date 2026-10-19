@@ -11,14 +11,11 @@
 (defn ^{:stratum 0} retained-output [failure]
   (get-in failure [:anomaly/data :opsv/phase-output]))
 
-(defn ^{:stratum 0} attach-evidence [failure published]
-  (if (anomaly/any-anomaly? published)
-    (-> failure
-        (assoc-in [:anomaly/data :opsv/evidence-failure] published)
-        (update-in [:anomaly/data :opsv/phase-output] audit-model/retain published))
-    (assoc-in failure [:anomaly/data :opsv/phase-output] published)))
-
 ;------------------------------------------------------------------------------ Layer 1
+
+(defn- ^{:stratum 1} retain-publication [output failure]
+  (merge (audit-model/retain output failure)
+         (select-keys (retained-output failure) [:opsv/phase-produced-artifact-refs])))
 
 (defn ^{:stratum 1} recoverable? [failure]
   (let [output (retained-output failure)]
@@ -32,6 +29,15 @@
       (assoc-in failure [:anomaly/data :opsv/phase-output :opsv/phase-failure]
                 (get output :opsv/phase-failure (select-keys failure [:anomaly/type :anomaly/message])))
       failure)))
+
+;------------------------------------------------------------------------------ Layer 2
+
+(defn ^{:stratum 2} attach-evidence [failure published]
+  (if (anomaly/any-anomaly? published)
+    (-> failure
+        (assoc-in [:anomaly/data :opsv/evidence-failure] published)
+        (update-in [:anomaly/data :opsv/phase-output] retain-publication published))
+    (assoc-in failure [:anomaly/data :opsv/phase-output] published)))
 
 (comment
   (recoverable? {}))

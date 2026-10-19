@@ -3,29 +3,19 @@
 ;; Licensed under the Apache License, Version 2.0.
 (ns ai.miniforge.phase-opsv.finalization-boundary
   "Evidence-only failure boundaries preserve mutation results and recovery state."
-  (:require [ai.miniforge.anomaly.interface :as anomaly]
-            [ai.miniforge.phase-opsv.evidence-runtime :as runtime]
+  (:require [ai.miniforge.phase-opsv.evidence-runtime :as runtime]
             [ai.miniforge.phase-opsv.finalization :as finalization]
             [ai.miniforge.phase-opsv.finalization-config :as config]
             [ai.miniforge.phase-opsv.finalization-recovery :as recovery]
             [ai.miniforge.phase-opsv.flow :as flow]
-            [ai.miniforge.phase-opsv.finalization-model :as model]
-            [slingshot.slingshot :refer [try+]]))
+            [ai.miniforge.phase-opsv.publication-boundary :as publication]))
 
 ;------------------------------------------------------------------------------ Layer 0
 
 (defn- ^{:stratum 0} restore-and-publish! [ctx]
   (flow/continue (runtime/ensure-assembly ctx) recovery/publish!))
 
-(defn ^{:stratum 0} call-with-exception-handling [output operation]
-  ;; Evidence failure must retain the completed mutation rather than invite re-execution.
-  (try+ (operation)
-       (catch anomaly/any-anomaly? failure
-         (assoc-in failure [:anomaly/data :opsv/phase-output] output))
-       (catch InterruptedException _
-         (let [result (model/failure output :interrupted)] (.interrupt (Thread/currentThread)) result))
-       (catch Error _ (assoc (model/failure output :fatal-publication-error) :anomaly/type :fatal))
-       (catch Object _ (model/failure output :publication-exception))))
+(def ^{:stratum 0} call-with-exception-handling publication/call-with-exception-handling)
 
 ;------------------------------------------------------------------------------ Layer 1
 

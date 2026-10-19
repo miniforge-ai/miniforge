@@ -4,6 +4,7 @@
 (ns ai.miniforge.phase-opsv.evidence-recovery
   "Resume terminal evidence only, retaining the failed phase and its actual effects."
   (:require [ai.miniforge.anomaly.interface :as anomaly]
+            [ai.miniforge.phase-opsv.artifact-model :as material]
             [ai.miniforge.phase-opsv.evidence-checkpoint :as checkpoint]
             [ai.miniforge.phase-opsv.evidence-runtime :as runtime]
             [ai.miniforge.phase-opsv.finalization :as finalization]
@@ -33,7 +34,7 @@
   (let [published (boundary/publish-finalized! ctx)]
     (result/phase-result
      (if (anomaly/anomaly? published)
-       (assoc-in failure [:anomaly/data :opsv/evidence-failure] published)
+       (terminal-model/attach-evidence failure published)
        (update-in failure [:anomaly/data :opsv/phase-output] merge published)))))
 
 (defn- ^{:stratum 0} persist-result [ctx phase-result]
@@ -53,7 +54,9 @@
 
 (defn- ^{:stratum 1} recover! [ctx]
   (let [restored (runtime/ensure-assembly ctx)
-        failure (update (get-in ctx [:phase :result :output]) :anomaly/data dissoc :opsv/evidence-failure)]
+        failure (-> (get-in ctx [:phase :result :output])
+                    (update :anomaly/data dissoc :opsv/evidence-failure)
+                    material/without-attempt-receipts)]
     (if (anomaly/anomaly? restored)
       restored
       (let [phase-result (if (= :finalized (:opsv.assembly/status (finalization/assembly restored)))
@@ -69,5 +72,6 @@
       (anomaly/anomaly? restored) restored
       (recoverable? restored)
       (boundary/call-with-exception-handling
-       (get-in restored [:phase :result :output :anomaly/data :opsv/phase-output]) #(recover! restored))
+       (material/without-attempt-receipts
+        (get-in restored [:phase :result :output :anomaly/data :opsv/phase-output])) #(recover! restored))
       :else (invalid-input))))
