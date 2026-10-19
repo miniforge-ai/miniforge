@@ -26,6 +26,7 @@
    [ai.miniforge.self-healing.interface :as self-healing]
    [ai.miniforge.workflow.messages :as messages]
    [ai.miniforge.workflow.runner-event-dispatch :as dispatch]
+   [ai.miniforge.workflow.runner-failure-event :as failure-event]
    [ai.miniforge.workflow.runner-phase-event :as phase-event]
    [ai.miniforge.workflow.runner-pr-events :as pr-events]))
 
@@ -91,6 +92,12 @@
       (println (messages/t :warn/heartbeat-stop {:error (ex-message e)})))))
 
 ;------------------------------------------------------------------------------ Layer 1
+
+(defn- ^{:stratum 1} publish-workflow-failed! [event-stream context last-phase]
+  (let [{:keys [error options]} (failure-event/data context)]
+    (publish-event! event-stream
+                    (merge (es/workflow-failed event-stream (:execution/id context) error options)
+                           (workflow-run-fields context :failed last-phase)))))
 
 (defn- ^{:stratum 1} publish-pr-created-events!
   "Publish canonical `:pr/created` events for workflow-owned PRs."
@@ -174,11 +181,7 @@
             metrics-opts (build-completion-metrics context)
             last-phase   (or (some-> (:execution/current-phase context) name) "")]
         (if (phase/failed? context)
-          (publish-event! event-stream
-                          (merge (es/workflow-failed event-stream wf-id
-                                                    {:message (messages/t :status/failed)
-                                                     :errors (:execution/errors context)})
-                                 (workflow-run-fields context :failed last-phase)))
+          (publish-workflow-failed! event-stream context last-phase)
           (do
             (publish-event! event-stream
                             (merge (es/workflow-completed event-stream wf-id
