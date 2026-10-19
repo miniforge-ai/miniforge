@@ -131,7 +131,7 @@
                                                {:phase/index (:execution/phase-index context)})
                              (workflow-run-fields context :running (name phase-name))))
       (catch Exception e
-        (println (messages/t :warn/publish-phase-started {:error (ex-message e)}))))))
+        (dispatch/publication-failure event-stream e :warn/publish-phase-started)))))
 
 (defn ^{:stratum 1} publish-phase-completed!
   "Publish phase completed event."
@@ -142,7 +142,7 @@
                       (es/phase-completed event-stream (:execution/id context) phase-name
                                           (phase-event/data result)))
       (catch Exception e
-        (println (messages/t :warn/publish-phase-completed {:error (ex-message e)}))))))
+        (dispatch/publication-failure event-stream e :warn/publish-phase-completed)))))
 
 ;; Health check at phase boundary
 (defn ^{:stratum 1} check-backend-health-at-boundary!
