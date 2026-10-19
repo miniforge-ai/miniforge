@@ -50,7 +50,7 @@
         directory (get-in ctx [:execution/opts :opsv/artifact-directory])
         published (artifact/publish! directory expected)]
     (if (= expected published)
-      (assoc output :opsv/evidence-bundle bundle :opsv/evidence-artifact-id (:artifact/id published))
+      (model/published-output output bundle (:artifact/id published))
       (assoc-in (model/failure output :bundle-publication) [:anomaly/data :opsv/evidence-bundle] bundle))))
 
 ;------------------------------------------------------------------------------ Layer 1
