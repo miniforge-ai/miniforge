@@ -15,8 +15,8 @@ vectors. Cumulative references are not evidence of what this phase produced.
 
 ## Dependencies and scope
 
-Branched from main. Depends on #2055 (per-attempt acknowledgment
-facts) and #2054 (publication refusal propagation), both required before merge.
+Branched from main. Both prerequisites are merged: #2055 supplies per-attempt
+acknowledgment facts; #2054 propagates publication refusals.
 Keep the default-host migration, workflow intent, and terminal workflow events in
 their own later slices. Preserve error output and explicit empty receipts.
 
