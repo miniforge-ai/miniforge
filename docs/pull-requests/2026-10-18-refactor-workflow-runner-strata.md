@@ -33,6 +33,9 @@ All three workflow consumer suites passed after the final helper refinements.
 The rebuilt CLI package passed 37 tests and 101 assertions covering runner execution,
 initial context, iteration, callbacks, and OPSV finalization and terminal recovery.
 Packaged tests ran outside the repository with test-only support and fixtures.
+The review pass also corrected evidence-bundle executor fixtures to implement the
+actual protocol, with explicit unsupported-executor and unmasked-failure coverage.
+All three evidence-bundle consumer suites and the packaged evidence tests passed.
 Before committing, finish lint, inferred-strata, and composition gates; audit the
 committed diff against pinned standards before pushing.
 
