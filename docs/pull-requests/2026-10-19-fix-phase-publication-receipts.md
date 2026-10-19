@@ -15,7 +15,7 @@ best-effort printing, heartbeats, or user observer callbacks.
 ## Dependencies and scope
 
 Based on main, including merged runner integration #2050 and callback refusal
-execution #2051. Requires executing-agent facts #2052 before merge. Preserve legacy transport and nil-stream
+execution #2051 and executing-agent facts #2052 (all merged). Preserve legacy transport and nil-stream
 observer compatibility. This does not migrate the default journal or supply
 missing workflow intent, phase artifacts, or terminal evidence.
 
