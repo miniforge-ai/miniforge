@@ -31,9 +31,9 @@ hooks, adversarial standards pass, exact-head review and full CI remain required
 
 ## Local verification and adversarial review
 
-- All three workflow product consumers: passing, serially (1m27s).
-- Rebuilt CLI: 39,186,393 bytes. Isolated package, no production source overlay:
-  44 tests, 183 assertions, passing after both review corrections.
+- All three workflow product consumers: passing, serially (1m29s).
+- Rebuilt CLI: 39,186,391 bytes. Isolated package, no production source overlay:
+  45 tests, 193 assertions, passing after all review corrections.
 - Kondo: no warnings/errors. All changed namespaces match inferred strata.
 - Reviewed anomaly and exception precedence, failure location ownership, retained
   error records, native phase fallback and explicit unknown classification.
@@ -54,3 +54,10 @@ A subsequent review identified native string-valued errors, used by deployment
 configuration failures. The message projection now preserves those diagnostics
 directly. Regression coverage includes result-level and phase-level strings;
 map-shaped diagnostics and execution-error precedence remain unchanged.
+
+When both phase error fields exist, the phase-level anomaly now precedes its inner
+result diagnostic, matching review's typed backend-timeout producer. Execution
+errors still take precedence over both. A pre-fix CLI regression reproduced lost
+anomaly code and provenance; the rebuilt CLI preserves both through actual
+terminal publication and journal reopen. Shared verification support avoids
+duplicating the publication assertions.

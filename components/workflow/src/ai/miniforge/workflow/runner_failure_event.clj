@@ -10,7 +10,7 @@
 ;------------------------------------------------------------------------------ Layer 0
 
 (defn- ^{:stratum 0} primary-error [execution-error phase]
-  (or execution-error (get-in phase [:result :error]) (:error phase)))
+  (or execution-error (:error phase) (get-in phase [:result :error])))
 
 (defn- ^{:stratum 0} as-anomaly [value]
   (when (anomaly/any-anomaly? value) value))

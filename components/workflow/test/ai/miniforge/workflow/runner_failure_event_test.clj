@@ -60,9 +60,11 @@
     (is (= cause (get-in data [:error :anomaly])))))
 
 (deftest ^{:stratum 1} latest-execution-error-takes-precedence-over-earlier-phase-failure
-  (let [ctx (-> (context {:phase :opsv/actuate :message "Budget exhausted"})
-                (assoc-in [:phase :result :output]
-                          (anomaly/anomaly :timeout "Previous timeout" {})))
+  (let [cause (anomaly/anomaly :timeout "Previous timeout" {})
+        ctx (-> (context {:phase :opsv/actuate :message "Budget exhausted"})
+                (assoc-in [:phase :error] cause)
+                (assoc-in [:phase :result :error] {:message "Earlier phase failure"})
+                (assoc-in [:phase :result :output] cause))
         data (facts/data ctx)]
     (is (= "Budget exhausted" (get-in data [:error :message])))
     (is (= :opsv/actuate (get-in data [:options :workflow/failure-phase])))

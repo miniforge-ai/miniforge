@@ -22,3 +22,6 @@
 
 (deftest ^{:stratum 0} normalized-enter-exception-reaches-a-durable-failure-event
   (journal/with-stream support/verify-failure))
+
+(deftest ^{:stratum 0} typed-phase-anomaly-survives-an-inner-result-diagnostic
+  (journal/with-stream support/verify-native-failure))

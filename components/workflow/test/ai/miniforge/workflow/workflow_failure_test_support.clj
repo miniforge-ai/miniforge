@@ -20,23 +20,38 @@
 (defn- ^{:stratum 0} throw-timeout [_ctx]
   (throw (SocketTimeoutException. "Socket stalled")))
 
+(defn- ^{:stratum 0} verify-context [failed expected stream options]
+  (let [receipt (publishers/publish-workflow-completed! stream failed)
+        history (events/get-events stream)]
+    (is (= :failed (:execution/status failed)))
+    (is (= [:workflow/failed] (mapv :event/type history)))
+    (is (= receipt (first history)))
+    (is (= (:execution/current-phase failed) (:workflow/failure-phase receipt)))
+    (is (= "Socket stalled" (:workflow/failure-reason receipt)))
+    (is (= expected (select-keys receipt (keys expected))))
+    (is (= (:execution/errors failed) (get-in receipt [:workflow/error-details :errors])))
+    (events/close-current-event-stream! stream)
+    (is (= history (support/reopened-events options)))
+    receipt))
+
 ;------------------------------------------------------------------------------ Layer 1
 
 (defn ^{:stratum 1} failed-context []
   (lifecycle/execute-enter {:config {:phase :verify} :enter throw-timeout} (context)))
 
+(defn- ^{:stratum 1} native-review-failure []
+  (let [message "Socket stalled"
+        cause (response/make-anomaly :anomalies.review/backend-timeout message)]
+    (assoc (context) :execution/status :failed :execution/current-phase :review
+           :phase {:name :review :error cause :result {:error {:message message}}})))
+
 ;------------------------------------------------------------------------------ Layer 2
 
 (defn ^{:stratum 2} verify-failure [stream options]
-  (let [failed (failed-context)
-        receipt (publishers/publish-workflow-completed! stream failed)
-        history (events/get-events stream)]
-    (is (= :failed (:execution/status failed)))
-    (is (= [:workflow/failed] (mapv :event/type history)))
-    (is (= receipt (first history)))
-    (is (= :verify (:workflow/failure-phase receipt)))
-    (is (= "Socket stalled" (:workflow/failure-reason receipt)))
-    (is (= :failure.class/timeout (:failure/class receipt)))
-    (is (= (:execution/errors failed) (get-in receipt [:workflow/error-details :errors])))
-    (events/close-current-event-stream! stream)
-    (is (= history (support/reopened-events options)))))
+  (verify-context (failed-context) {:failure/class :failure.class/timeout} stream options))
+
+(defn ^{:stratum 2} verify-native-failure [stream options]
+  (let [failed (native-review-failure)
+        expected {:workflow/anomaly-code :anomalies.review/backend-timeout}
+        receipt (verify-context failed expected stream options)]
+    (is (= (get-in failed [:phase :error]) (get-in receipt [:workflow/error-details :anomaly])))))
