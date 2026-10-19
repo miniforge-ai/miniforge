@@ -15,7 +15,6 @@
 ;; WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 ;; See the License for the specific language governing permissions and
 ;; limitations under the License.
-
 (ns ai.miniforge.phase.done
   "Terminal `:done` phase interceptor.
 
@@ -30,21 +29,19 @@
   (:require [ai.miniforge.phase.registry :as registry]))
 
 ;------------------------------------------------------------------------------ Layer 0
-;; Defaults
 
-(def default-config
+;; Defaults
+(def ^{:stratum 0} default-config
   "Terminal phase has no agent, no gates, and a minimal budget."
   {:agent nil
+   :phase/expected-agent :agent/none
    :gates []
    :budget {:tokens 0 :iterations 1 :time-seconds 1}})
 
-;; Register defaults on load
-(registry/register-phase-defaults! :done default-config)
-
-;------------------------------------------------------------------------------ Layer 1
 ;; Interceptor
+(defn- ^{:stratum 0} preserve-context [ctx _error] ctx)
 
-(defn- enter-done
+(defn- ^{:stratum 0} enter-done
   "Mark both the phase and the enclosing execution as completed."
   [ctx]
   (-> ctx
@@ -52,17 +49,20 @@
       (assoc-in [:phase :status] :completed)
       (assoc-in [:execution :status] :completed)))
 
-;------------------------------------------------------------------------------ Layer 2
-;; Registry method
+;------------------------------------------------------------------------------ Layer 1
 
-(defmethod registry/get-phase-interceptor :done
+;; Registry method
+(defmethod ^{:stratum 1} registry/get-phase-interceptor :done
   [config]
   (let [merged (registry/merge-with-defaults config)]
     {:name ::done
      :config merged
      :enter enter-done
      :leave identity
-     :error (fn [ctx _ex] ctx)}))
+     :error preserve-context}))
+
+;; Register defaults on load
+(registry/register-phase-defaults! :done default-config)
 
 ;------------------------------------------------------------------------------ Rich Comment
 (comment

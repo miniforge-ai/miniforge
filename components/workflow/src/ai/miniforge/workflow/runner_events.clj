@@ -122,13 +122,13 @@
         (println (messages/t :warn/publish-started {:error (ex-message e)}))))))
 
 (defn ^{:stratum 1} publish-phase-started!
-  "Publish phase started event."
-  [event-stream context phase-name]
+  "Publish phase entry with expected-agent facts from the executing interceptor."
+  [event-stream context phase-name & [opts]]
   (when (dispatch/dispatchable-event-stream? event-stream)
     (try
       (publish-event! event-stream
                       (merge (es/phase-started event-stream (:execution/id context) phase-name
-                                               {:phase/index (:execution/phase-index context)})
+                                               {:phase/index (:execution/phase-index context)} opts)
                              (workflow-run-fields context :running (name phase-name))))
       (catch Exception e
         (println (messages/t :warn/publish-phase-started {:error (ex-message e)}))))))
