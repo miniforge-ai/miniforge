@@ -6,8 +6,8 @@
 
 # N3 — Event Stream & Observability Contract
 
-**Version:** 0.11.1-draft
-**Date:** 2026-10-17
+**Version:** 0.11.2-draft
+**Date:** 2026-10-18
 **Status:** Draft
 **Conformance:** MUST
 
@@ -261,10 +261,21 @@ table says otherwise.
  :workflow/phase :implement      ; Phase starting
 
  :phase/expected-agent :implementer
- :phase/context {...}            ; Context passed to agent
+ :phase/context {...}            ; Context passed to the phase
 
  :message "Implementation phase started"}
 ```
+
+`:phase/expected-agent` MUST be present and keyword-valued. An agent-backed phase
+MUST name its expected agent. A phase intentionally executing without an agent
+(for example, a native OPSV phase) MUST use the reserved value `:agent/none`.
+Producers MUST NOT use this value to replace unknown or missing agent configuration;
+`nil` and omission are invalid. Consumers MUST interpret `:agent/none` as no agent,
+not as an agent to dispatch or register. `:phase/context` remains the phase input
+context and follows the redaction rules in §8 for both execution modes.
+
+This clarification records the approved 2026-10-18 product decision to represent
+intentional agentless execution explicitly rather than with `nil`.
 
 #### workflow/phase-completed
 
@@ -3210,6 +3221,7 @@ withdrawn, not deleted.
 | N3.EM.8 | MUST | Preserve requested metadata and reject unknown, stale, or terminal-reactivating intervention transitions (§3.22). |
 | N3.EM.9 | MUST | Deliver train changes to every prior or current member with distinct per-PR identities and ordered after-state membership (§3.16). |
 | N3.EM.10 | MUST | Preserve runtime phase decisions and resolved rule outcomes as acknowledged audit evidence (§3.9.1). |
+| N3.EM.11 | MUST | Identify an expected agent or explicit intentional absence (`:agent/none`) on phase start; reject missing/nil identity (§3.1). |
 
 #### Storage and retention
 

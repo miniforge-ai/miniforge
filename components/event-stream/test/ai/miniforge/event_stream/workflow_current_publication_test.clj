@@ -30,6 +30,20 @@
 
 ;------------------------------------------------------------------------------ Layer 1
 
+(defn- ^{:stratum 1} verify-agentless-phase [stream options]
+  (let [workflow-id (random-uuid)
+        draft (assoc (fixture/draft workflow-id :workflow/phase-started)
+                     :workflow/phase :opsv/plan :phase/expected-agent :agent/none)]
+    (is (anomaly/anomaly? (events/publish! stream (assoc draft :phase/expected-agent nil))))
+    (is (empty? (events/get-events stream)))
+    (let [receipt (events/publish! stream draft)]
+      (is (= :agent/none (:phase/expected-agent receipt)))
+      (is (= 0 (:event/sequence-number receipt)))
+      (is (anomaly/anomaly? (events/publish! stream (assoc draft :phase/expected-agent :implementer))))
+      (is (= receipt (events/publish! stream draft)))
+      (events/close-current-event-stream! stream)
+      (verify-reopened options [:workflow workflow-id] [receipt]))))
+
 (defn- ^{:stratum 1} verify-durability [stream options]
   (let [workflow-id (random-uuid)
         drafts (successful-run workflow-id)
@@ -52,6 +66,9 @@
   (fixture/with-stream verify-refusals))
 
 ;------------------------------------------------------------------------------ Layer 2
+
+(deftest ^{:stratum 2} agentless-identity-survives-durable-replay
+  (fixture/with-stream verify-agentless-phase))
 
 (deftest ^{:stratum 2} lifecycle-receipts-have-durable-scoped-positions
   (fixture/with-stream verify-durability))
