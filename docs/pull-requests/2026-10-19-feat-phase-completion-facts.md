@@ -39,10 +39,14 @@ Provider calls must not repeat.
 ## Local verification and adversarial review
 
 - Focused source tests: 16 tests, 213 assertions, passing.
-- All three product consumers of workflow and phase-opsv: passing (3m06s), serially.
-- Rebuilt CLI: 39,185,155 bytes. Isolated package, no production source overlays:
-  38 tests, 671 assertions, passing, including current-stream and terminal recovery.
+- All three product consumers of workflow and phase-opsv: passing after both
+  prerequisites merged (1m50s), serially.
+- Rebuilt CLI: 39,185,636 bytes. Isolated package, no production source overlays:
+  53 tests, 748 assertions, passing, including publication refusal, current-stream
+  and terminal recovery.
 - Kondo: no warnings or errors. Inferred strata: no changes required.
+- Post-commit standards scan against actual base `677e588a1`: no violations.
+  Total PR: 185 reportable lines; implementation commits: 100 and 85 lines.
 - Reviewed receipt provenance, partial publication, missing versus empty facts,
   checkpoint refusal before publication, sealed-bundle invariance and recovery
   without provider replay. Shared test factories avoid duplicate fixture maps.
