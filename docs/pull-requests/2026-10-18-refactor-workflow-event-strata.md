@@ -45,6 +45,14 @@ persistence guarantee.
 No host switch or new durability claim in this refactor. Follow-up producer and
 host changes will establish current-journal acknowledgment.
 
+## Commit-size exception
+
+The user approved one 275-reportable-line integration commit on 2026-10-18.
+It atomically removes the extracted implementations and connects their new owners;
+splitting that file further would leave a partially integrated decomposition.
+The full PR is 513 reportable lines, below the 600-line limit. Signing, all normal
+hooks, adversarial standards review and exact-head PR review remain required.
+
 ## Checklist
 
 - [x] Adversarial behavior and standards review
