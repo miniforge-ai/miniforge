@@ -4,44 +4,20 @@
 (ns ai.miniforge.workflow.state-legacy
   "Compatibility API for the coarse workflow lifecycle."
   (:require [ai.miniforge.fsm.interface :as fsm]
+            [ai.miniforge.workflow.state-legacy-model :as model]
             [ai.miniforge.workflow.state-legacy-result :as result]))
 
 ;------------------------------------------------------------------------------ Layer 0
 
-(def ^{:stratum 0} workflow-machine-config
-  "Workflow execution state machine configuration."
-  {:fsm/id :workflow-execution
-   :fsm/initial :pending
-   :fsm/context {}
-   :fsm/states
-   {:pending   {:on {:start :running}}
-    :running   {:on {:complete :completed
-                     :fail :failed
-                     :pause :paused
-                     :cancel :cancelled}}
-    :paused    {:on {:resume :running
-                     :cancel :cancelled}}
-    :completed {:type :final}
-    :failed    {:type :final}
-    :cancelled {:type :final}}})
+(def ^{:stratum 0} workflow-machine model/workflow-machine)
 
-(def ^{:stratum 0} workflow-states
-  "Valid states for workflow execution."
-  #{:pending :running :completed :failed :paused :cancelled})
+(def ^{:stratum 0} workflow-machine-config model/workflow-machine-config)
 
-(def ^{:stratum 0} workflow-transitions
-  "Valid state transitions. Map of [from-state event] -> to-state."
-  {[:pending :start]      :running
-   [:running :complete]   :completed
-   [:running :fail]       :failed
-   [:running :pause]      :paused
-   [:running :cancel]     :cancelled
-   [:paused :resume]      :running
-   [:paused :cancel]      :cancelled})
+(def ^{:stratum 0} workflow-states model/workflow-states)
 
-(def ^{:stratum 0} terminal-states
-  "States that are terminal (no further transitions)."
-  #{:completed :failed :cancelled})
+(def ^{:stratum 0} workflow-transitions model/workflow-transitions)
+
+(def ^{:stratum 0} terminal-states model/terminal-states)
 
 (defn ^{:stratum 0} succeeded?
   "Check if a transition result indicates success."
@@ -55,10 +31,6 @@
   {:from from :event event :to to})
 
 ;------------------------------------------------------------------------------ Layer 1
-
-(def ^{:stratum 1} workflow-machine
-  "Compiled workflow state machine."
-  (fsm/define-machine workflow-machine-config))
 
 (defn ^{:stratum 1} valid-transition?
   "Check if a transition from current state via event is valid.
@@ -109,23 +81,21 @@
   (let [transitions (mapv graph-edge workflow-transitions)]
     {:states workflow-states :transitions transitions :terminal-states terminal-states}))
 
-;------------------------------------------------------------------------------ Layer 2
-
-(defn ^{:stratum 2} get-machine
+(defn ^{:stratum 1} get-machine
   "Get the compiled workflow state machine for direct clj-statecharts usage.
 
    Returns: Compiled state machine definition"
   []
   workflow-machine)
 
-(defn ^{:stratum 2} initialize
+(defn ^{:stratum 1} initialize
   "Initialize workflow FSM state.
 
    Returns: Initial FSM state map with :_state = :pending"
   []
   (fsm/initialize workflow-machine))
 
-(defn ^{:stratum 2} transition-fsm
+(defn ^{:stratum 1} transition-fsm
   "Transition the workflow FSM using full statecharts semantics.
 
    Arguments:
@@ -136,7 +106,7 @@
   [state event]
   (fsm/transition workflow-machine state event))
 
-(defn ^{:stratum 2} is-final?
+(defn ^{:stratum 1} is-final?
   "Check if the FSM is in a final (terminal) state.
 
    Arguments:
@@ -145,6 +115,8 @@
    Returns: boolean"
   [state]
   (fsm/final? workflow-machine state))
+
+;------------------------------------------------------------------------------ Layer 2
 
 (defn ^{:stratum 2} transition
   "Retain legacy result shapes and guard evaluation order."

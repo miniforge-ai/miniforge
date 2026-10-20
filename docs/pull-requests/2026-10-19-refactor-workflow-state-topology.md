@@ -40,9 +40,9 @@ topologies. Public identifier aliases and the private builder redefinition seam
 are retained.
 
 Integrated validation: all three workflow product consumers passed serially
-(1m37s after current-main alignment). The rebuilt CLI is 39,196,860 bytes.
+(1m37s after the legacy model follow-up). The rebuilt CLI is 39,197,409 bytes.
 Isolated packaged topology, compiled-FSM, validation, restored failure, DAG
-checkpoint and start-refusal tests passed: 37 tests / 244 assertions, without production source
+checkpoint and start-refusal tests passed: 38 tests / 258 assertions, without production source
 overlays. Adversarial review traced empty startup, default sequential success,
 explicit targets, terminal fallback, guarded retries and pause/resume. Guard
 registration remains in the compiler before resolution; extracted topology
@@ -51,6 +51,9 @@ Explicit regressions verify malformed pipelines never build topology and danglin
 guard/action references never reach compilation. Structural diagnostics retain
 their ordering and field shapes. Legacy results use named constructors; nested
 traversal and duplicated projection construction are removed.
+The legacy state, terminal-state and transition indexes now derive from the
+machine configuration instead of repeating its policy. A parity regression
+exercises every legacy transition against the actual engine.
 
 ## Deployment
 

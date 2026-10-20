@@ -3,6 +3,7 @@
 ;; Licensed under the Apache License, Version 2.0.
 (ns ai.miniforge.workflow.state-validation-test
   (:require [ai.miniforge.workflow.state-compiler :as compiler]
+            [ai.miniforge.workflow.state-legacy :as legacy]
             [ai.miniforge.workflow.state-topology :as topology]
             [ai.miniforge.workflow.state-validation :as validation]
             [clojure.test :refer [deftest is]]))
@@ -22,6 +23,11 @@
 
 (defn- ^{:stratum 0} unreachable-compiler [_]
   (throw (AssertionError. "Invalid references must not reach compilation")))
+
+(deftest ^{:stratum 0} legacy-model-and-transition-api-agree
+  (doseq [[[from event] to] legacy/workflow-transitions]
+    (is (= to (get-in legacy/workflow-machine-config [:fsm/states from :on event])))
+    (is (= {:success? true :state to} (legacy/transition from event)))))
 
 ;------------------------------------------------------------------------------ Layer 1
 
