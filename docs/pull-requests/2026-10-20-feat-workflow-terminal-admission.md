@@ -65,7 +65,12 @@ The fix passed all three consumers serially (1m31s), rebuilt CLI 39,199,999 byte
 isolated package 46 tests / 313 assertions, and the N7 JVM integration suite
 37 tests / 681 assertions. Namespace responsibilities remain separated, shared
 test fixtures avoid duplicated setup, and all inferred namespaces stay within
-three strata.
+three strata. The standards scan then required the fatal catch/rethrow to live
+at an explicit boundary. `workflow.boundary.terminal` now owns that boundary;
+terminal orchestration passes the publication operation without handling
+exceptions itself. Final verification after this decomposition passed all three
+consumers (1m33s), CLI 39,200,486 bytes, package 46 tests / 313 assertions, and
+N7 JVM 37 tests / 681 assertions.
 
 This does not yet make checkpoint I/O errors explicit or deduplicate terminal
 republication across a process restart; those remain separate durability work.
