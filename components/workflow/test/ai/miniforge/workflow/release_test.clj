@@ -71,3 +71,115 @@
     (let [temp-dir (create-temp-dir)
           file-path (fs/path temp-dir "missing.clj")]
       (is (false? (release/delete-file! file-path))))))
+
+(deftest process-file-action-path-traversal-test
+  (testing "create rejects a path with .. segments that escape the worktree"
+    (let [worktree (create-temp-dir)
+          result   (release/process-file-action worktree
+                                                {:action :create
+                                                 :path   "../../etc/evil"
+                                                 :content "bad"}
+                                                nil)]
+      (is (false? (:success? result)))
+      (is (re-find #"(?i)traversal" (:error result)))))
+
+  (testing "modify rejects a path with .. segments that escape the worktree"
+    (let [worktree (create-temp-dir)
+          result   (release/process-file-action worktree
+                                                {:action  :modify
+                                                 :path    "../../etc/evil"
+                                                 :content "bad"}
+                                                nil)]
+      (is (false? (:success? result)))
+      (is (re-find #"(?i)traversal" (:error result)))))
+
+  (testing "delete rejects a path with .. segments that escape the worktree"
+    (let [worktree (create-temp-dir)
+          result   (release/process-file-action worktree
+                                                {:action :delete
+                                                 :path   "../../etc/evil"}
+                                                nil)]
+      (is (false? (:success? result)))
+      (is (re-find #"(?i)traversal" (:error result)))))
+
+  (testing "create allows a normal relative path inside the worktree"
+    (let [worktree (create-temp-dir)
+          result   (release/process-file-action worktree
+                                                {:action  :create
+                                                 :path    "src/foo.clj"
+                                                 :content "(ns foo)"}
+                                                nil)]
+      (is (true? (:success? result))))))
+
+(deftest process-file-action-symlink-traversal-test
+  (testing "create rejects a dangling symlink pointing outside the worktree"
+    (let [worktree (create-temp-dir)
+          outside  (create-temp-dir)
+          target   (fs/path outside "never-exists.txt")
+          link     (fs/path worktree "link.txt")]
+      (fs/create-sym-link link target)
+      (let [result (release/process-file-action worktree
+                                                {:action  :create
+                                                 :path    "link.txt"
+                                                 :content "bad"}
+                                                nil)]
+        (is (false? (:success? result)))
+        (is (re-find #"(?i)traversal" (:error result)))
+        (is (false? (fs/exists? target))))))
+
+  (testing "modify rejects an existing symlink pointing outside the worktree"
+    (let [worktree (create-temp-dir)
+          outside  (create-temp-dir)
+          target   (fs/path outside "existing.txt")]
+      (spit (str target) "original")
+      (fs/create-sym-link (fs/path worktree "link.txt") target)
+      (let [result (release/process-file-action worktree
+                                                {:action  :modify
+                                                 :path    "link.txt"
+                                                 :content "bad"}
+                                                nil)]
+        (is (false? (:success? result)))
+        (is (re-find #"(?i)traversal" (:error result)))
+        (is (= "original" (slurp (str target))))))))
+
+(deftest process-file-action-symlink-ancestor-test
+  (testing "create allows a file inside a symlinked worktree root"
+    (let [actual-wt   (create-temp-dir)
+          link-parent (create-temp-dir)
+          link-wt     (fs/path link-parent "wt-link")]
+      (fs/create-sym-link link-wt actual-wt)
+      (let [result (release/process-file-action link-wt
+                                                {:action  :create
+                                                 :path    "src/foo.clj"
+                                                 :content "(ns foo)"}
+                                                nil)]
+        (is (true? (:success? result))))))
+
+  (testing "create rejects a path through a symlinked directory outside the worktree"
+    (let [worktree (create-temp-dir)
+          outside  (create-temp-dir)
+          link     (fs/path worktree "link")]
+      (fs/create-sym-link link outside)
+      (let [result (release/process-file-action worktree
+                                                {:action  :create
+                                                 :path    "link/new.txt"
+                                                 :content "bad"}
+                                                nil)]
+        (is (false? (:success? result)))
+        (is (re-find #"(?i)traversal" (:error result)))
+        (is (false? (fs/exists? (fs/path outside "new.txt")))))))
+
+  (testing "create rejects a path using .. after a symlink to escape the worktree"
+    (let [worktree (create-temp-dir)
+          outside  (create-temp-dir)
+          subdir   (fs/path outside "subdir")]
+      (fs/create-dirs subdir)
+      (fs/create-sym-link (fs/path worktree "jump") subdir)
+      ;; jump -> outside/subdir; jump/../new.txt resolves to outside/new.txt
+      (let [result (release/process-file-action worktree
+                                                {:action  :create
+                                                 :path    "jump/../new.txt"
+                                                 :content "bad"}
+                                                nil)]
+        (is (false? (:success? result)))
+        (is (false? (fs/exists? (fs/path outside "new.txt"))))))))
