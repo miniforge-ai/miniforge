@@ -55,6 +55,18 @@ recovery, typed checkpoints and native failure publication.
 Main alignment changed only the dependency documentation; the production and
 test tree remains identical to the tree used for those verification results.
 
+Review caught a fatal fallback-publication path that left cleanup reporting
+success. Failure projection and its checkpoint now precede the bounded fallback
+publication. A class-only fatal-error boundary also marks cleanup failed when the
+initial publication throws, then rethrows the same Error. Real cleanup tests
+verify the failed observation signal in both paths and the failed checkpoint
+before fallback. The old package reproduced four failures / seven assertions.
+The fix passed all three consumers serially (1m31s), rebuilt CLI 39,199,999 bytes,
+isolated package 46 tests / 313 assertions, and the N7 JVM integration suite
+37 tests / 681 assertions. Namespace responsibilities remain separated, shared
+test fixtures avoid duplicated setup, and all inferred namespaces stay within
+three strata.
+
 This does not yet make checkpoint I/O errors explicit or deduplicate terminal
 republication across a process restart; those remain separate durability work.
 

@@ -19,7 +19,7 @@
 
 ;------------------------------------------------------------------------------ Layer 1
 
-(defn- ^{:stratum 1} failed-context [ctx failure]
+(defn ^{:stratum 1} failed-context [ctx failure]
   (-> ctx
       (update :execution/errors conj
               (publication-error :workflow-terminal-publication-failed failure))
@@ -34,9 +34,8 @@
 
 ;------------------------------------------------------------------------------ Layer 2
 
-(defn ^{:stratum 2} recover! [stream ctx refusal]
-  (let [failed (failed-context ctx refusal)
-        receipt (when-not (phase/failed? ctx)
+(defn ^{:stratum 2} publish! [stream original failed]
+  (let [receipt (when-not (phase/failed? original)
                   (events/publish-workflow-completed! stream failed))]
     (retain-failure-refusal failed receipt)))
 

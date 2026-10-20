@@ -53,14 +53,17 @@
     (is (= (coerce/stringify-instants (:execution/errors result))
            (get-in persisted [:machine-snapshot :execution/errors])))))
 
-(defn ^{:stratum 1} execute [stream overrides calls]
-  (let [enter phase/enter-context]
-    (with-redefs [environment/acquire-execution-environment! (constantly nil)
-                  environment/persist-workspace-at-phase-boundary! (constantly nil)
-                  phase/enter-context (partial record-enter calls enter)
-                  cleanup/post-workflow-cleanup! (partial journal/observe calls :cleanup nil)
-                  publishers/start-phase-heartbeat! (constantly nil)]
-      (runner/run-pipeline (workflow) {} (options stream overrides)))))
+(defn ^{:stratum 1} execute
+  ([stream overrides calls]
+   (execute stream overrides calls (partial journal/observe calls :cleanup nil)))
+  ([stream overrides calls cleanup-fn]
+   (let [enter phase/enter-context]
+     (with-redefs [environment/acquire-execution-environment! (constantly nil)
+                   environment/persist-workspace-at-phase-boundary! (constantly nil)
+                   phase/enter-context (partial record-enter calls enter)
+                   cleanup/post-workflow-cleanup! cleanup-fn
+                   publishers/start-phase-heartbeat! (constantly nil)]
+       (runner/run-pipeline (workflow) {} (options stream overrides))))))
 
 ;------------------------------------------------------------------------------ Layer 2
 
