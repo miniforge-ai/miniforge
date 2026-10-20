@@ -25,5 +25,15 @@
     (cond-> (merge base (artifact-facts output))
       failed? (assoc :error {:message (:anomaly/message output) :data (:anomaly/data output)}))))
 
+;------------------------------------------------------------------------------ Layer 2
+
+(defn ^{:stratum 2} finalized-result
+  "Project the result returned by the evidence publication boundary."
+  [output]
+  (let [result (phase-result output)]
+    (cond-> result
+      (= :success (:status result))
+      (assoc :workflow/evidence-bundle-id (:opsv/evidence-artifact-id output)))))
+
 (comment
   (phase-result {}))

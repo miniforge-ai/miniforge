@@ -63,6 +63,14 @@
     (doseq [output [unconfirmed (failed-output unconfirmed) {}]]
       (is (not (contains? (outcome/phase-result output) :artifacts))))))
 
+(deftest ^{:stratum 1} only-finalization-results-declare-workflow-evidence
+  (let [id (random-uuid)
+        output {:opsv/evidence-artifact-id id}]
+    (is (not (contains? (outcome/phase-result output) :workflow/evidence-bundle-id)))
+    (is (= id (:workflow/evidence-bundle-id (outcome/finalized-result output))))
+    (is (not (contains? (outcome/finalized-result (failed-output output))
+                        :workflow/evidence-bundle-id)))))
+
 ;------------------------------------------------------------------------------ Layer 2
 
 (deftest ^{:stratum 2} native-lifecycle-exposes-only-current-phase-receipts
