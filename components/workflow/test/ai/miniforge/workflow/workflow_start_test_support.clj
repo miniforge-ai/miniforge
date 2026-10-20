@@ -34,8 +34,14 @@
 (defn ^{:stratum 0} throw-fatal [& _args]
   (throw (AssertionError. "Fatal startup failure")))
 
-(defn ^{:stratum 0} assert-refused [result calls]
-  (let [error (last (:execution/errors result))
+(defn- ^{:stratum 0} start-refusal [result]
+  (first (filter (comp #{:workflow-start-publication-failed} :type)
+                 (:execution/errors result))))
+
+;------------------------------------------------------------------------------ Layer 1
+
+(defn ^{:stratum 1} assert-refused [result calls]
+  (let [error (start-refusal result)
         persisted (checkpoints/load-checkpoint-data (:execution/id result) {})]
     (is (= :failed (:execution/status result)))
     (is (= :workflow-start-publication-failed (:type error)))
@@ -46,8 +52,6 @@
     (is (= :failed (get-in persisted [:machine-snapshot :execution/status])))
     (is (= (coerce/stringify-instants (:execution/errors result))
            (get-in persisted [:machine-snapshot :execution/errors])))))
-
-;------------------------------------------------------------------------------ Layer 1
 
 (defn ^{:stratum 1} execute [stream overrides calls]
   (let [enter phase/enter-context]
