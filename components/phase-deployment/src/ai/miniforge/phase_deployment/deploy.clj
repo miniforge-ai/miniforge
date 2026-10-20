@@ -19,7 +19,7 @@
   "Thin deploy phase interceptor over provider application flow."
   (:require [ai.miniforge.anomaly.interface :as anomaly]
             [ai.miniforge.logging.interface :as log]
-            [ai.miniforge.phase-deployment.defaults :as defaults]
+            [ai.miniforge.phase-deployment.interceptor :as interceptor]
             [ai.miniforge.phase-deployment.deploy-config :as config]
             [ai.miniforge.phase-deployment.deploy-governed :as governed]
             [ai.miniforge.phase-deployment.deploy-operations :as operations]
@@ -29,10 +29,6 @@
   (:import [java.time Instant]))
 
 ;------------------------------------------------------------------------------ Layer 0
-
-(def ^{:stratum 0} default-config
-  "Deploy phase defaults loaded from EDN."
-  (defaults/phase-defaults :deploy))
 
 (defn- ^{:stratum 0} get-logger
   "Resolve logger from ctx, creating a default if absent."
@@ -96,12 +92,9 @@
 ;------------------------------------------------------------------------------ Layer 2
 
 (defmethod ^{:stratum 2} phase/get-phase-interceptor-method :deploy
-  [_]
-  {:name :deploy
-   :enter enter-deploy
-   :leave leave-deploy
-   :error error-deploy
-   :config default-config})
+  [config]
+  (interceptor/configure config
+                         {:enter enter-deploy :leave leave-deploy :error error-deploy}))
 
 ;------------------------------------------------------------------------------ Rich Comment
 (comment

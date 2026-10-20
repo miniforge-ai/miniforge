@@ -31,10 +31,12 @@ hooks, adversarial standards pass, exact-head review and full CI remain required
 
 ## Local verification and adversarial review
 
-- All three workflow product consumers: passing, serially (1m22s).
-- Rebuilt CLI: 39,189,035 bytes. Isolated package, no production source overlay:
-  35 tests, 215 assertions, covering failure publication, diagnostics, native
-  handlers, checkpoint storage, context and synthetic DAG completion.
+- All three workflow product consumers: passing, serially (1m46s), after
+  integration with main's start admission, evidence and deployment changes.
+- Rebuilt CLI: 39,193,082 bytes. Isolated package, no production source overlay:
+  53 tests, 332 assertions, covering failure publication, diagnostics, native
+  handlers, checkpoint storage, context, synthetic DAG completion, start
+  admission, evidence references and deployment configuration.
 - Kondo: no warnings/errors. All changed namespaces match inferred strata.
 - Reviewed anomaly and exception precedence, failure location ownership, retained
   error records, native phase fallback and explicit unknown classification.

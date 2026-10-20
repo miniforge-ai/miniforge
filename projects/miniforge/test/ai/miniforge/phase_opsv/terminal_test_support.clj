@@ -11,9 +11,18 @@
             [ai.miniforge.phase-opsv.pr-fixtures :as pr]
             [ai.miniforge.phase-opsv.test-support :as support]
             [clojure.java.io :as io]
+            [clojure.test :refer [is]]
             [slingshot.slingshot :refer [try+]]))
 
 ;------------------------------------------------------------------------------ Layer 0
+
+(defn ^{:stratum 0} assert-bundle-republication [before after]
+  (let [receipt-key :opsv/phase-produced-artifact-refs
+        bundle-id (:opsv/evidence-artifact-id before)]
+    (is (uuid? bundle-id))
+    (is (some #{bundle-id} (get before receipt-key)))
+    (is (= [bundle-id] (get after receipt-key)))
+    (is (= (dissoc before receipt-key) (dissoc after receipt-key)))))
 
 (defn ^{:stratum 0} reject-replay [calls _ctx _verified]
   (swap! calls inc)

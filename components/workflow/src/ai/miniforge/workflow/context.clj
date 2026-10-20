@@ -165,6 +165,7 @@
       (dissoc :execution/ended-at
               :execution/phase-error-offset
               :execution/attempt-phase
+              :workflow/evidence-bundle-id
               :execution/output
               :execution/completed-with-warnings?)
       (assoc :execution/errors []

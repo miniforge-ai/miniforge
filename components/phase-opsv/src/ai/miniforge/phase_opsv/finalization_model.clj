@@ -9,6 +9,13 @@
 
 ;------------------------------------------------------------------------------ Layer 0
 
+(defn ^{:stratum 0} published-output [output bundle id]
+  (let [receipts (get output :opsv/phase-produced-artifact-refs [])
+        acknowledged (vec (distinct (conj receipts id)))]
+    (assoc output :opsv/evidence-bundle bundle
+                  :opsv/evidence-artifact-id id
+                  :opsv/phase-produced-artifact-refs acknowledged)))
+
 (defn ^{:stratum 0} failure [output reason]
   (anomaly/anomaly :fault (msg/t :evidence/finalization-failed)
                    {:opsv/phase-output output :opsv/finalization-reason reason}))

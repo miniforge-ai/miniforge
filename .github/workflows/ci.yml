@@ -225,6 +225,13 @@ jobs:
           (let [r (clojure.test/run-tests 'ai.miniforge.workflow.opsv-lifecycle-integration-test)]
           (System/exit (+ (:fail r) (:error r))))"
 
+      - name: Native deployment configuration and runner recovery
+        working-directory: projects/miniforge
+        run: >-
+          clojure -M:test -e "(require 'ai.miniforge.workflow.deployment-config-integration-test)
+          (let [r (clojure.test/run-tests 'ai.miniforge.workflow.deployment-config-integration-test)]
+          (System/exit (+ (:fail r) (:error r))))"
+
       - name: OPSV evidence finalization and recovery
         working-directory: projects/miniforge
         run: >-

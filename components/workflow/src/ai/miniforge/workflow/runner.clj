@@ -18,17 +18,16 @@
 (ns ai.miniforge.workflow.runner
   "Compose workflow setup, bounded execution, lifecycle publication, and cleanup."
   (:require [ai.miniforge.anomaly.interface :as anomaly]
-            [ai.miniforge.supervisory-state.interface :as supervisory]
             [ai.miniforge.workflow.checkpoint-store :as checkpoint-store]
-            [ai.miniforge.workflow.context :as ctx]
             [ai.miniforge.workflow.runner-callbacks :as callbacks]
             [ai.miniforge.workflow.runner-cleanup :as cleanup]
             [ai.miniforge.workflow.runner-defaults :as defaults]
             [ai.miniforge.workflow.runner-events :as events]
+            [ai.miniforge.workflow.runner-execution-boundary :as execution-boundary]
             [ai.miniforge.workflow.runner-iteration :as iteration]
-            [ai.miniforge.workflow.runner-loop :as pipeline-loop]
             [ai.miniforge.workflow.runner-outcome :as outcome]
             [ai.miniforge.workflow.runner-preparation :as preparation]
+            [ai.miniforge.workflow.runner-start :as start]
             [slingshot.slingshot :refer [try+]]))
 
 ;------------------------------------------------------------------------------ Layer 0
@@ -62,15 +61,11 @@
 
 (def ^{:stratum 0} extract-output outcome/extract-output)
 
-(def ^{:stratum 0} ^:private make-execution-error outcome/make-execution-error)
-
 (def ^{:stratum 0} ^:private acquire-environment preparation/acquire-environment)
 
 (def ^{:stratum 0} ^:private wrap-phase-callbacks callbacks/wrap-phase-callbacks)
 
 (def ^{:stratum 0} ^:private initial-context-anomaly->failed-context outcome/initial-context-anomaly->failed-context)
-
-(def ^{:stratum 0} ^:private execute-pipeline-loop pipeline-loop/execute-pipeline-loop)
 
 (def ^{:stratum 0} ^:private validate-completion outcome/validate-completion)
 
@@ -79,7 +74,7 @@
 (defn ^{:stratum 1} run-pipeline
   "Execute a workflow pipeline.
 
-   Pipeline: acquire environment -> build context -> execute phases
+   Pipeline: acquire environment -> build context -> admit start -> execute phases
            -> validate -> publish completion -> cleanup (always).
 
    Returns final execution context."
@@ -102,39 +97,10 @@
          output-ctx-vol      (volatile! nil)
          exception-vol       (volatile! nil)]
 
-     (when event-stream
-       (supervisory/ensure-attached! event-stream))
-
-     (checkpoint-store/persist-execution-state! initial-ctx)
-
-     (when-not skip-lifecycle?
-       (events/publish-workflow-started! event-stream initial-ctx))
-
      (try+
-       (let [final-ctx (try+
-                         (execute-pipeline-loop pipeline initial-ctx callbacks
-                                               control-state max-phases)
-                         #_{:clj-kondo/ignore [:unresolved-namespace :unresolved-symbol]}
-                         (catch [:anomaly/category :anomalies.dashboard/stop]
-                                {:keys [anomaly/message]}
-                           (vreset! exception-vol {:type :dashboard-stop
-                                                   :message message})
-                           (-> initial-ctx
-                               (update :execution/errors conj
-                                       (make-execution-error :dashboard-stop message))
-                               (ctx/transition-to-failed)))
-                         #_{:clj-kondo/ignore [:unresolved-symbol]}
-                         (catch Object e
-                           (let [throwable (:throwable &throw-context)
-                                 msg (if (instance? Throwable e) (ex-message e) (str e))]
-                             (vreset! exception-vol (or throwable
-                                                        {:type :pipeline-exception
-                                                         :message msg}))
-                             (-> initial-ctx
-                                 (update :execution/errors conj
-                                         (make-execution-error :pipeline-exception msg
-                                                               {:data (when (instance? Throwable e) (ex-data e))}))
-                                 (ctx/transition-to-failed)))))
+       (let [started-ctx (start/admit! event-stream initial-ctx skip-lifecycle?)
+             final-ctx (execution-boundary/execute-with-exception-handling
+                         pipeline started-ctx callbacks control-state max-phases exception-vol)
              output-ctx (-> final-ctx validate-completion extract-output)]
          (vreset! output-ctx-vol output-ctx)
          (checkpoint-store/persist-execution-state! output-ctx)
