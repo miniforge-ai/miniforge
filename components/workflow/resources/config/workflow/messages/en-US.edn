@@ -42,6 +42,7 @@
   :warn/publish-event        "Warning: Failed to publish event: {error}"
   :warn/publish-started      "Warning: Failed to publish workflow-started event: {error}"
   :warn/publish-completed    "Warning: Failed to publish workflow-completed event: {error}"
+  :warn/publish-pr           "Warning: Failed to publish auxiliary PR notification: {error}"
   :warn/publish-phase-started   "Warning: Failed to publish phase-started event: {error}"
   :warn/publish-phase-completed "Warning: Failed to publish phase-completed event: {error}"
   :warn/heartbeat-start      "Warning: Failed to start phase heartbeat: {error}"
