@@ -89,6 +89,9 @@
   (update ctx :execution/metrics merge-metrics-fn
           (get phase-result :metrics {})))
 
+(defn ^{:stratum 0} record-phase-evidence [ctx phase-result]
+  (merge ctx (select-keys (:result phase-result) [:workflow/evidence-bundle-id])))
+
 (defn ^{:stratum 0} track-phase-files
   "Track files written by phase for workflow supervision.
 
@@ -182,6 +185,7 @@
   (-> ctx
       (update-response-chain phase-name phase-result)
       (assoc-in [:execution/phase-results phase-name] phase-result)
+      (record-phase-evidence phase-result)
       (record-phase-metrics phase-result merge-metrics-fn)
       (record-phase-artifacts phase-result)
       (track-phase-files phase-result)))

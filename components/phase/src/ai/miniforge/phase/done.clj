@@ -15,7 +15,6 @@
 ;; WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 ;; See the License for the specific language governing permissions and
 ;; limitations under the License.
-
 (ns ai.miniforge.phase.done
   "Terminal `:done` phase interceptor.
 
@@ -30,39 +29,51 @@
   (:require [ai.miniforge.phase.registry :as registry]))
 
 ;------------------------------------------------------------------------------ Layer 0
-;; Defaults
 
-(def default-config
+;; Defaults
+(def ^{:stratum 0} default-config
   "Terminal phase has no agent, no gates, and a minimal budget."
   {:agent nil
+   :phase/expected-agent :agent/none
    :gates []
    :budget {:tokens 0 :iterations 1 :time-seconds 1}})
 
-;; Register defaults on load
-(registry/register-phase-defaults! :done default-config)
+;; Interceptor
+(defn- ^{:stratum 0} preserve-context [ctx _error] ctx)
+
+(defn- ^{:stratum 0} completed-phase [config start end]
+  (let [duration (max 0 (- end start))
+        metrics {:tokens 0 :cost-usd 0.0 :duration-ms duration}]
+    (merge (select-keys config [:agent :gates :budget])
+           {:name :done :status :completed
+            :started-at start :ended-at end :duration-ms duration
+            :metrics metrics
+            :result {:status :success :artifacts [] :metrics metrics}})))
 
 ;------------------------------------------------------------------------------ Layer 1
-;; Interceptor
 
-(defn- enter-done
-  "Mark both the phase and the enclosing execution as completed."
-  [ctx]
-  (-> ctx
-      (assoc-in [:phase :name] :done)
-      (assoc-in [:phase :status] :completed)
-      (assoc-in [:execution :status] :completed)))
+(defn- ^{:stratum 1} enter-done
+  "Complete the terminal phase with its own facts, without producing artifacts."
+  [config ctx]
+  (let [start (System/currentTimeMillis)
+        completed (assoc-in ctx [:execution :status] :completed)
+        end (System/currentTimeMillis)]
+    (assoc completed :phase (completed-phase config start end))))
 
 ;------------------------------------------------------------------------------ Layer 2
-;; Registry method
 
-(defmethod registry/get-phase-interceptor :done
+;; Registry method
+(defmethod ^{:stratum 2} registry/get-phase-interceptor :done
   [config]
   (let [merged (registry/merge-with-defaults config)]
     {:name ::done
      :config merged
-     :enter enter-done
+     :enter (partial enter-done merged)
      :leave identity
-     :error (fn [ctx _ex] ctx)}))
+     :error preserve-context}))
+
+;; Register defaults on load
+(registry/register-phase-defaults! :done default-config)
 
 ;------------------------------------------------------------------------------ Rich Comment
 (comment

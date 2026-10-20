@@ -27,8 +27,8 @@
     (is (= before (stream/get-events (:event-stream ctx))))
     (let [next-event (stream/create-envelope (:event-stream ctx) :workflow/completed
                                              (:execution/id ctx) "next occurrence")]
-      (is (> (:event/sequence-number next-event)
-             (apply max (map :event/sequence-number before)))))
+      (is (= (:event/sequence-number next-event)
+             (inc (apply max (map :event/sequence-number before))))))
     (is (= 2 (count @calls)))))
 
 (deftest ^{:stratum 0} failed-accumulation-retries-only-acknowledgment-test
@@ -61,7 +61,13 @@
           restored (assoc ctx :event-stream empty-stream
                               :opsv/evidence-assembly-store (evidence/restore-opsv-assembly-store saved))]
       (is (nil? (events/emit-phase-events! restored :opsv/actuate output)))
-      (is (empty? (stream/get-events empty-stream))))
+      (is (empty? (stream/get-events empty-stream)))
+      (let [legacy (dissoc saved :opsv/event-sequences)
+            store (evidence/restore-opsv-assembly-store legacy)
+            old-context (assoc restored :opsv/evidence-assembly-store store)]
+        (is (anomaly/anomaly? (events/emit-phase-events! old-context :opsv/actuate output)))
+        (is (empty? (stream/get-events empty-stream)))
+        (is (= legacy (get @store (:evidence-bundle/id saved))))))
     (is (= 2 (count @calls)))))
 
 (comment

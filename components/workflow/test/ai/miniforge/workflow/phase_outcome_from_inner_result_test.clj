@@ -15,7 +15,6 @@
 ;; WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 ;; See the License for the specific language governing permissions and
 ;; limitations under the License.
-
 (ns ai.miniforge.workflow.phase-outcome-from-inner-result-test
   "Regression tests: an inner :result :status of :error/:failed/:failure MUST
    propagate to the phase outcome. The phase wrapper setting :status :completed
@@ -26,47 +25,15 @@
   (:require
    [clojure.test :refer [deftest is testing]]
    [ai.miniforge.workflow.runner-events :as events]
+   [ai.miniforge.workflow.runner-phase-event :as phase-event]
    [ai.miniforge.event-stream.interface :as event-stream]))
 
-(defn- build [result]
-  ;; exercise the private fn through phase-completed which consumes it
-  (#'events/build-phase-event-data result))
+;------------------------------------------------------------------------------ Layer 0
 
-(deftest outer-completed-inner-error-reports-failure
-  (testing "phase :status :completed but inner :result :status :error → :failure"
-    (let [phase-result {:name :plan
-                        :status :completed
-                        :result {:status :error
-                                 :error {:message "planner exploded"}
-                                 :metrics {:tokens 100}}}
-          data (build phase-result)]
-      (is (= :failure (:outcome data)))
-      (is (= {:message "planner exploded"} (:error data))))))
+(defn- ^{:stratum 0} build [result]
+  (phase-event/data result))
 
-(deftest outer-completed-inner-failed-reports-failure
-  (testing "inner :status :failed also propagates"
-    (is (= :failure (:outcome (build {:name :x :status :completed
-                                       :result {:status :failed}}))))))
-
-(deftest outer-completed-inner-failure-reports-failure
-  (testing "inner :status :failure also propagates (response/failure shape)"
-    (is (= :failure (:outcome (build {:name :x :status :completed
-                                       :result {:status :failure}}))))))
-
-(deftest inner-success-false-reports-failure
-  (testing ":result :success? false propagates as failure (DAG-result shape)"
-    (is (= :failure (:outcome (build {:name :x :status :completed
-                                       :result {:success? false}}))))))
-
-(deftest genuine-success-still-success
-  (testing "both outer and inner healthy → :success"
-    (let [phase-result {:name :plan
-                        :status :completed
-                        :result {:status :success
-                                 :output {:plan/id (random-uuid)}}}]
-      (is (= :success (:outcome (build phase-result)))))))
-
-(deftest event-emitted-with-failure-on-inner-error
+(deftest ^{:stratum 0} event-emitted-with-failure-on-inner-error
   (testing "phase-completed event reports :failure when inner result errored"
     (let [stream (event-stream/create-event-stream {:sinks []})
           ctx {:execution/id (random-uuid)}
@@ -80,7 +47,43 @@
         (is (= :failure (:phase/outcome evt)))
         (is (= {:message "boom"} (:phase/error evt)))))))
 
-(deftest skipped-result-reports-skipped
+;------------------------------------------------------------------------------ Layer 1
+
+(deftest ^{:stratum 1} outer-completed-inner-error-reports-failure
+  (testing "phase :status :completed but inner :result :status :error → :failure"
+    (let [phase-result {:name :plan
+                        :status :completed
+                        :result {:status :error
+                                 :error {:message "planner exploded"}
+                                 :metrics {:tokens 100}}}
+          data (build phase-result)]
+      (is (= :failure (:outcome data)))
+      (is (= {:message "planner exploded"} (:error data))))))
+
+(deftest ^{:stratum 1} outer-completed-inner-failed-reports-failure
+  (testing "inner :status :failed also propagates"
+    (is (= :failure (:outcome (build {:name :x :status :completed
+                                       :result {:status :failed}}))))))
+
+(deftest ^{:stratum 1} outer-completed-inner-failure-reports-failure
+  (testing "inner :status :failure also propagates (response/failure shape)"
+    (is (= :failure (:outcome (build {:name :x :status :completed
+                                       :result {:status :failure}}))))))
+
+(deftest ^{:stratum 1} inner-success-false-reports-failure
+  (testing ":result :success? false propagates as failure (DAG-result shape)"
+    (is (= :failure (:outcome (build {:name :x :status :completed
+                                       :result {:success? false}}))))))
+
+(deftest ^{:stratum 1} genuine-success-still-success
+  (testing "both outer and inner healthy → :success"
+    (let [phase-result {:name :plan
+                        :status :completed
+                        :result {:status :success
+                                 :output {:plan/id (random-uuid)}}}]
+      (is (= :success (:outcome (build phase-result)))))))
+
+(deftest ^{:stratum 1} skipped-result-reports-skipped
   (testing "a phase that short-circuited (skip marker on inner :result) → :skipped"
     (is (= :skipped
            (:outcome (build {:name :release :status :completed
@@ -88,7 +91,7 @@
                                       :output {:skipped true
                                                :reason :already-implemented}}}))))))
 
-(deftest error-attached-at-phase-error-surfaces-test
+(deftest ^{:stratum 1} error-attached-at-phase-error-surfaces-test
   (testing "[:phase :error] is read when nothing higher carries the payload"
     ;; Regression: error-* interceptors that fall through to
     ;; `phase/fail-phase` attach the error map at `[:phase :error]` rather

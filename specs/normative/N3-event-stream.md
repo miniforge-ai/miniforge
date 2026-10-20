@@ -6,8 +6,8 @@
 
 # N3 — Event Stream & Observability Contract
 
-**Version:** 0.11.0-draft
-**Date:** 2026-10-04
+**Version:** 0.11.2-draft
+**Date:** 2026-10-18
 **Status:** Draft
 **Conformance:** MUST
 
@@ -261,10 +261,21 @@ table says otherwise.
  :workflow/phase :implement      ; Phase starting
 
  :phase/expected-agent :implementer
- :phase/context {...}            ; Context passed to agent
+ :phase/context {...}            ; Context passed to the phase
 
  :message "Implementation phase started"}
 ```
+
+`:phase/expected-agent` MUST be present and keyword-valued. An agent-backed phase
+MUST name its expected agent. A phase intentionally executing without an agent
+(for example, a native OPSV phase) MUST use the reserved value `:agent/none`.
+Producers MUST NOT use this value to replace unknown or missing agent configuration;
+`nil` and omission are invalid. Consumers MUST interpret `:agent/none` as no agent,
+not as an agent to dispatch or register. `:phase/context` remains the phase input
+context and follows the redaction rules in §8 for both execution modes.
+
+This clarification records the approved 2026-10-18 product decision to represent
+intentional agentless execution explicitly rather than with `nil`.
 
 #### workflow/phase-completed
 
@@ -617,6 +628,83 @@ Implementations SHOULD emit milestone events for:
 ```
 
 ---
+
+### 3.9.1 Runtime Decision and Rule Evidence
+
+These events specialize the N1 gate concept and preserve the runtime-owned
+DecisionEnvelope adopted by N10 §1.1. They MUST NOT grant authority or substitute
+for `gate/started`, `gate/passed`, or `gate/failed`. Approval policy is unchanged.
+Both types MUST use the Workflow scope and `:event/version "1.0.0"`.
+Current writers MUST declare `:scope/type :workflow`; retained legacy records
+MUST NOT be rewritten merely to add this discriminator.
+
+#### gate/decision
+
+```clojure
+{:event/type :gate/decision
+ :scope/type :workflow
+ :workflow/id uuid
+ :gate/phase keyword
+ :envelope/id uuid
+ :gate/decision-envelope map} ; Exact runtime-owned DecisionEnvelope (N10 §1.1)
+```
+
+The runtime MUST emit one decision event for each phase-level gate decision,
+including denial and allowance with obligations, before dependent execution.
+`:envelope/id` MUST equal the nested `:envelope/id`. The nested envelope MUST
+satisfy the adopted closed DecisionEnvelope contract, including runtime provenance,
+UUID identity, instant, typed reasons, obligations, and policy pins.
+Its decision MUST be `:deny`, `:allow-with-obligations`, or `:allow`. Its decision MUST equal the
+runtime's worst-wins derivation from those reasons and obligations. A structurally
+valid event MUST NOT be treated as proof of authority to execute an effect.
+
+The envelope MUST be preserved unchanged. Sensitive material MUST be excluded
+before decision minting; publication MUST fail rather than silently redact or
+replace part of the decision artifact. Section 8 still governs the event message.
+
+#### gate/rule-applied
+
+```clojure
+{:event/type :gate/rule-applied
+ :scope/type :workflow
+ :workflow/id uuid
+ :gate/phase keyword
+ :rule/id keyword
+ :rule/status keyword
+ :envelope/id uuid             ; OPTIONAL: associated DecisionEnvelope
+ :rule/severity keyword        ; OPTIONAL: canonical N4 §2.3.1 severity
+ :rule/enforcement keyword     ; OPTIONAL: adopted Ariadne enforcement action
+ :rule/violation               ; OPTIONAL: only for :failed
+ {:message string             ; OPTIONAL: non-sensitive summary
+  :artifact-path string       ; OPTIONAL: non-sensitive artifact location
+  :match-count long}}         ; REQUIRED when summary present; non-negative
+```
+
+For each resolved, enabled rule in a phase gate evaluation the runtime MUST emit
+one of these outcomes:
+
+- `:passed`: evaluated and clean.
+- `:failed`: violation found.
+- `:skipped-by-phase`: not bound to this phase.
+- `:not-applicable`: no applicable artifact.
+- `:guidance`: advisory only; no check executed.
+
+Guidance and skipped
+rules MUST NOT be reported as passed. When an associated decision exists,
+`:envelope/id` MUST reference it. Severity MUST use `:critical`, `:high`,
+`:medium`, `:low`, or `:info`; enforcement MUST use `:hard-halt`,
+`:require-approval`, `:warn`, or `:audit`. Unknown values MUST be rejected.
+
+The violation summary MUST contain only the fields above; raw matches and source
+content MUST NOT be included. Summary prose MAY be redacted per §8; rule identity,
+status, severity, enforcement, and decision references MUST NOT be silently
+rewritten. Optional fields accept absence or nil per §2.1.1.
+
+For both types, `:workflow/phase`, when non-nil, MUST equal `:gate/phase`.
+Both are audit evidence: §9.1 fail-closed acknowledgment and §9.3 sequence
+integrity apply. They MUST NOT be throttled or coalesced. Tests MUST cover all
+decision/status values, malformed payloads, identity disagreement, provenance
+redaction refusal, failure without sequence consumption, and restart replay.
 
 ### 3.10 PR Lifecycle Events (DAG Orchestration)
 
@@ -2336,7 +2424,7 @@ Implementations MUST emit events at these points:
 3. **Agent activity** - status updates (≥1 per 5 seconds during active work)
 4. **Tool invocations** - all tool uses
 5. **LLM calls** - all requests and responses
-6. **Gate execution** - start, pass, fail
+6. **Gate execution** - start, pass, fail; runtime phase decisions and each resolved rule outcome (§3.9.1)
 7. **Inter-agent messages** - all communications
 8. **Milestones** - significant progress points
 9. **Task lifecycle** - frontier entry, claims, capability binding, scope violations
@@ -2739,6 +2827,7 @@ exactly one scope, named by its `:scope/type` field.
 | 3.7b | Meta-loop halt | Workflow | audit | `meta-loop/halt-requested` |
 | 3.8 | Milestones | Workflow | operational | `milestone/reached` |
 | 3.9 | Gates | Workflow | durable | `gate/started`, `gate/passed`, `gate/failed` |
+| 3.9.1 | Gate decision and rule evidence | Workflow | audit | `gate/decision`, `gate/rule-applied` |
 | 3.10 | PR lifecycle (DAG) | Workflow | durable | `pr/opened`, `pr/ci-passed`, `pr/ci-failed`, `pr/review-approved`, `pr/review-changes-requested`, `pr/comment-actionable`, `pr/fix-pushed`, `pr/merged`, `pr/closed` |
 | 3.11 | ETL | Workflow | durable | `etl/started`, `etl/sources-classified`, `etl/safety-scan-completed`, `etl/completed`, `etl/failed`, `pack/generated` |
 | 3.11 | Pack promotion | Workflow | audit | `pack/promoted` |
@@ -3131,6 +3220,8 @@ withdrawn, not deleted.
 | N3.EM.7 | MUST | Emit intervention facts from their lifecycle owner, without coalescing; acknowledge durably before dependent execution (§3.22). |
 | N3.EM.8 | MUST | Preserve requested metadata and reject unknown, stale, or terminal-reactivating intervention transitions (§3.22). |
 | N3.EM.9 | MUST | Deliver train changes to every prior or current member with distinct per-PR identities and ordered after-state membership (§3.16). |
+| N3.EM.10 | MUST | Preserve runtime phase decisions and resolved rule outcomes as acknowledged audit evidence (§3.9.1). |
+| N3.EM.11 | MUST | Identify an expected agent or explicit intentional absence (`:agent/none`) on phase start; reject missing/nil identity (§3.1). |
 
 #### Storage and retention
 
@@ -3483,6 +3574,9 @@ resolution is an N3 amendment per §6.1, not silent acceptance.
 
 **Version History:**
 
+- 0.11.1-draft (2026-10-17): Registered runtime gate decisions and per-rule
+  evidence with typed payloads, Workflow scope, audit retention, and fail-closed
+  publication. Product-owner approval is recorded in the specification index.
 - 0.11.0-draft (2026-10-04): Added chain-run scope, distinct step and edge
   lifecycles, Spec snapshots, and audit-class intervention lifecycle facts.
   All nine chain types and both intervention lifecycle types require `2.0.0`

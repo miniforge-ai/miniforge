@@ -20,50 +20,75 @@
   (:require
    [ai.miniforge.anomaly.interface :as anomaly]
    [ai.miniforge.phase.interface :as phase]
-   [ai.miniforge.phase-opsv.evidence-runtime :as evidence-runtime]))
+   [ai.miniforge.phase-opsv.evidence-checkpoint :as checkpoint]
+   [ai.miniforge.phase-opsv.evidence-runtime :as evidence-runtime]
+   [ai.miniforge.phase-opsv.events :as events]
+   [ai.miniforge.phase-opsv.finalization-boundary :as finalization]
+   [ai.miniforge.phase-opsv.finalization-config :as finalization-config]
+   [ai.miniforge.phase-opsv.lifecycle-outcome :as outcome]))
 
 ;------------------------------------------------------------------------------ Layer 0
 
-(def ^{:stratum 0} empty-metrics
-  {:tokens 0 :cost-usd 0.0 :duration-ms 0})
+(def ^{:stratum 0} phase-result outcome/phase-result)
 
 (defn ^{:stratum 0} fail-phase
   [ctx ex]
   (assoc ctx :phase
          (phase/fail-phase (:phase ctx) (phase/exception-error ex))))
 
+(defn- ^{:stratum 0} completed-metrics
+  [duration-ms]
+  (assoc outcome/empty-metrics :duration-ms duration-ms))
+
+(defn- ^{:stratum 0} persist-evidence [ctx]
+  (let [persisted (evidence-runtime/persist ctx)
+        snapshot (checkpoint/persistence-failure persisted)
+        output (get-in ctx [:phase :result :output])
+        retained (get-in output [:anomaly/data :opsv/phase-output] output)]
+    (if (anomaly/any-anomaly? snapshot)
+      (assoc-in persisted [:phase :result]
+                (outcome/phase-result (assoc-in snapshot [:anomaly/data :opsv/phase-output]
+                                   retained)))
+      persisted)))
+
+(defn- ^{:stratum 0} finalize-result [ctx phase-key result]
+  (if (and (= :opsv/actuate phase-key) (finalization-config/enabled? ctx))
+    (outcome/finalized-result (finalization/finalize! ctx (:output result)))
+    result))
+
 ;------------------------------------------------------------------------------ Layer 1
 
-(defn- ^{:stratum 1} success
-  [output]
-  {:status :success :output output :metrics empty-metrics})
+(defn- ^{:stratum 1} publication-failure [result failure]
+  (phase-result (assoc-in failure [:anomaly/data :opsv/phase-output] (:output result))))
 
-(defn- ^{:stratum 1} failure
-  [output]
-  {:status :error
-   :output output
-   :error {:message (:anomaly/message output)
-           :data (:anomaly/data output)}
-   :metrics empty-metrics})
-
-(defn- ^{:stratum 1} completed-metrics
-  [duration-ms]
-  (assoc empty-metrics :duration-ms duration-ms))
+(defn- ^{:stratum 1} with-completion-metadata [ctx success? end-time duration-ms]
+  (-> ctx
+      (assoc-in [:phase :ended-at] end-time)
+      (assoc-in [:phase :duration-ms] duration-ms)
+      (assoc-in [:phase :status] (if success? :completed :failed))
+      (assoc-in [:phase :metrics] (completed-metrics duration-ms))
+      (assoc-in [:phase :result :metrics :duration-ms] duration-ms)))
 
 ;------------------------------------------------------------------------------ Layer 2
 
-(defn ^{:stratum 2} phase-result
-  [output]
-  (if (anomaly/anomaly? output) (failure output) (success output)))
-
 (defn ^{:stratum 2} complete-phase
   [ctx phase-key success? end-time duration-ms]
-  (cond-> (-> ctx
-              evidence-runtime/persist
-              (assoc-in [:phase :ended-at] end-time)
-              (assoc-in [:phase :duration-ms] duration-ms)
+  (let [completed (with-completion-metadata ctx success? end-time duration-ms)
+        persisted (persist-evidence completed)
+        success? (and success? (= :success (get-in persisted [:phase :result :status])))]
+    (cond-> (-> persisted
               (assoc-in [:phase :status] (if success? :completed :failed))
-              (assoc-in [:phase :metrics] (completed-metrics duration-ms))
               (assoc-in [:phase :result :metrics :duration-ms] duration-ms))
     success?
-    (update-in [:execution :phases-completed] (fnil conj []) phase-key)))
+      (update-in [:execution :phases-completed] (fnil conj []) phase-key))))
+
+(defn ^{:stratum 2} after-publication [ctx phase-key result]
+  (let [successful? (phase/result-succeeded? result)
+        published (when successful? (events/emit-phase-events! ctx phase-key (:output result)))]
+    (cond
+      (not successful?) result
+      (anomaly/any-anomaly? published) (publication-failure result published)
+      :else (finalize-result ctx phase-key result))))
+
+(comment
+  (phase-result {}))

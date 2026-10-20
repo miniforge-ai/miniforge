@@ -1,2 +1,4 @@
 {:event-stream/messages
- {:delivery/quiesced "publish! rejected: workflow quiesced"}}
+ {:delivery/quiesced "publish! rejected: workflow quiesced"
+  :workflow/invalid-completion-status "Current completion events require the completed workflow status."
+  :chain/invalid-draft "Chain draft has invalid lifecycle fields, identity, or reserved envelope fields."}}
