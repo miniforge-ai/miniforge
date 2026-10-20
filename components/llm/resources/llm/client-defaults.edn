@@ -3,8 +3,9 @@
  ;; Claude Code system prompt and prompt-cache writes cost about
  ;; $0.09-0.14 before the caller's tokens. At $0.10 ordinary single-turn
  ;; calls ran over, the CLI exited 1, and complete answers came back as
- ;; failures. Single-turn calls are bounded by :max-tokens; this only
- ;; guards a runaway.
+ ;; failures. :max-tokens is not forwarded to the CLI (it has no output-token
+ ;; flag); it only switches this default on. The CLI's own reply limit and
+ ;; --max-turns bound a call; this dollar cap is the only spend guard.
  :claude-cli
  {:default-budget-usd "1.00"}
 
