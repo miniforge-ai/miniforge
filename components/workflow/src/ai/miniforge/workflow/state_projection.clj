@@ -28,6 +28,7 @@
       (= :completed state-id) :completed
       (= :failed state-id) :failed
       (= :cancelled state-id) :cancelled
+      (= :paused state-id) :paused
       (:paused? (machine-phase-entry machine state)) :paused
       :else :running)))
 

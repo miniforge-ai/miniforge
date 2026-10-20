@@ -55,6 +55,15 @@ The legacy state, terminal-state and transition indexes now derive from the
 machine configuration instead of repeating its policy. A parity regression
 exercises every legacy transition against the actual engine.
 
+The final adversarial pass reproduced one inherited projection defect in the
+built package: an empty-pipeline machine at `:paused` reported `:running`.
+The projection now recognizes that lifecycle state explicitly; the regression
+executes pause/resume and checks both machine identity and projected status.
+This is an intentional correction, not a behavior-neutral move. All three
+consumers passed again (1m30s); rebuilt CLI 39,197,410 bytes; isolated packaged
+regressions passed 39 tests / 263 assertions. The isolated test classpath includes
+workflow and phase test fixtures, with no production source overlays.
+
 ## Deployment
 
 Normal package rollout; no persisted-state migration.
