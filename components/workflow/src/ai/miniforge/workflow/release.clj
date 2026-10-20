@@ -72,26 +72,39 @@
     false))
 
 (defn- ^{:stratum 0} inside-worktree?
-  "Return true when file-path stays inside worktree-path after full resolution.
-  Uses NIO toRealPath to follow symlinks for existing paths: outside-pointing
-  and dangling symlinks are both rejected (toRealPath throws NoSuchFileException
-  for dangling targets, which is treated as rejection). New non-symlink paths
-  are verified by normalised absolute path. Fails closed on IO errors."
+  "Return true when writing to file-path would remain inside worktree-path.
+  Both the worktree root and the target are resolved with NIO toRealPath, which
+  follows symlinks exactly as the kernel does. For not-yet-existing paths, walks
+  up to the deepest existing ancestor, resolves that physically, and reattaches
+  the remaining suffix (normalised to collapse any '..' escapes). Does NOT
+  pre-normalise: pre-normalisation would collapse symlink hops like link/../x
+  before resolution, allowing bypass. Fails closed on IO errors."
   [worktree-path file-path]
   (try
-    (let [root    (-> (java.nio.file.Paths/get (str worktree-path) (into-array String []))
-                      .toAbsolutePath .normalize str)
-          nio     (-> (java.nio.file.Paths/get (str file-path) (into-array String []))
-                      .toAbsolutePath .normalize)
-          within? #(or (= % root)
-                       (.startsWith % (str root java.io.File/separator)))]
+    (let [root     (.toRealPath
+                     (java.nio.file.Paths/get (str worktree-path) (into-array String []))
+                     (into-array java.nio.file.LinkOption []))
+          root-str (str root)
+          nio-abs  (.toAbsolutePath
+                     (java.nio.file.Paths/get (str file-path) (into-array String [])))
+          within?  #(let [s (str %)]
+                      (or (= s root-str)
+                          (.startsWith s (str root-str java.io.File/separator))))]
       (try
-        (within? (-> (.toRealPath nio (into-array java.nio.file.LinkOption []))
-                     str))
+        (within? (.toRealPath nio-abs (into-array java.nio.file.LinkOption [])))
         (catch java.nio.file.NoSuchFileException _
-          (if (java.nio.file.Files/isSymbolicLink nio)
+          (if (java.nio.file.Files/isSymbolicLink nio-abs)
             false
-            (within? (str nio))))))
+            (loop [candidate (.getParent nio-abs)
+                   suffix    (.getFileName nio-abs)]
+              (if (nil? candidate)
+                false
+                (try
+                  (let [phys (.toRealPath candidate (into-array java.nio.file.LinkOption []))]
+                    (within? (.normalize (.resolve phys suffix))))
+                  (catch java.nio.file.NoSuchFileException _
+                    (recur (.getParent candidate)
+                           (.resolve (.getFileName candidate) suffix))))))))))
     (catch Exception _ false)))
 
 ;------------------------------------------------------------------------------ Layer 1

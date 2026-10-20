@@ -141,3 +141,45 @@
         (is (false? (:success? result)))
         (is (re-find #"(?i)traversal" (:error result)))
         (is (= "original" (slurp (str target))))))))
+
+(deftest process-file-action-symlink-ancestor-test
+  (testing "create allows a file inside a symlinked worktree root"
+    (let [actual-wt   (create-temp-dir)
+          link-parent (create-temp-dir)
+          link-wt     (fs/path link-parent "wt-link")]
+      (fs/create-sym-link link-wt actual-wt)
+      (let [result (release/process-file-action link-wt
+                                                {:action  :create
+                                                 :path    "src/foo.clj"
+                                                 :content "(ns foo)"}
+                                                nil)]
+        (is (true? (:success? result))))))
+
+  (testing "create rejects a path through a symlinked directory outside the worktree"
+    (let [worktree (create-temp-dir)
+          outside  (create-temp-dir)
+          link     (fs/path worktree "link")]
+      (fs/create-sym-link link outside)
+      (let [result (release/process-file-action worktree
+                                                {:action  :create
+                                                 :path    "link/new.txt"
+                                                 :content "bad"}
+                                                nil)]
+        (is (false? (:success? result)))
+        (is (re-find #"(?i)traversal" (:error result)))
+        (is (false? (fs/exists? (fs/path outside "new.txt")))))))
+
+  (testing "create rejects a path using .. after a symlink to escape the worktree"
+    (let [worktree (create-temp-dir)
+          outside  (create-temp-dir)
+          subdir   (fs/path outside "subdir")]
+      (fs/create-dirs subdir)
+      (fs/create-sym-link (fs/path worktree "jump") subdir)
+      ;; jump -> outside/subdir; jump/../new.txt resolves to outside/new.txt
+      (let [result (release/process-file-action worktree
+                                                {:action  :create
+                                                 :path    "jump/../new.txt"
+                                                 :content "bad"}
+                                                nil)]
+        (is (false? (:success? result)))
+        (is (false? (fs/exists? (fs/path outside "new.txt"))))))))
