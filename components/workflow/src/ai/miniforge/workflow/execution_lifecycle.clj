@@ -31,6 +31,13 @@
 ;------------------------------------------------------------------------------ Layer 0
 
 ;; Atomic operations
+(defn- ^{:stratum 0} begin-phase-attempt [interceptor ctx]
+  (let [phase-name (get-in interceptor [:config :phase] (:name interceptor))]
+    (-> ctx
+        (dissoc :phase)
+        (assoc :execution/attempt-phase phase-name
+               :execution/phase-error-offset (count (:execution/errors ctx))))))
+
 (defn- ^{:stratum 0} enter-error-record
   "Build the canonical entry recorded against `:execution/errors` for a
    phase-enter exception. Used uniformly whether or not the interceptor
@@ -197,9 +204,7 @@
   [interceptor ctx]
   ;; Clear :phase map before each phase to prevent stale transition requests
   ;; from leaking across phase boundaries.
-  (let [ctx-clean (-> ctx
-                      (dissoc :phase)
-                      (assoc :execution/phase-error-offset (count (:execution/errors ctx))))
+  (let [ctx-clean (begin-phase-attempt interceptor ctx)
         ctx-entered (execute-enter interceptor ctx-clean)
         phase-result (extract-phase-result ctx-entered)
         phase-result-gated (transition/apply-gate-validation interceptor phase-result ctx-entered)

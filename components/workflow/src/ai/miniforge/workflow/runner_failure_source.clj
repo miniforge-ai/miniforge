@@ -3,8 +3,8 @@
 ;; Licensed under the Apache License, Version 2.0.
 (ns ai.miniforge.workflow.runner-failure-source
   "Select failure diagnostics without mixing unrelated execution or phase attempts."
-  (:require [ai.miniforge.anomaly.interface :as anomaly]
-            [ai.miniforge.phase.interface :as phase]))
+  (:require [ai.miniforge.phase.interface :as phase]
+            [ai.miniforge.workflow.failure-diagnostic :as diagnostic]))
 
 ;------------------------------------------------------------------------------ Layer 0
 
@@ -12,7 +12,7 @@
   (last (drop (get context :execution/phase-error-offset 0) (:execution/errors context))))
 
 (defn ^{:stratum 0} as-anomaly [value]
-  (when (anomaly/any-anomaly? value) value))
+  (diagnostic/as-anomaly value))
 
 (defn- ^{:stratum 0} matching-summary? [summary diagnostic]
   (and (map? summary) (map? diagnostic) (string? (:message summary))

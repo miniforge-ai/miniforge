@@ -63,6 +63,7 @@
    :execution/response-chain
    :execution/errors
    :execution/phase-error-offset
+   :execution/attempt-phase
    :execution/phase-handoffs
    :execution/artifacts
    :execution/dag-result

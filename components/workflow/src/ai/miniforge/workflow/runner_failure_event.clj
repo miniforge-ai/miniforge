@@ -28,6 +28,7 @@
   (let [errors (:execution/errors context)
         execution-error (source/execution-error context)
         phase-name (or (:phase execution-error) (:execution/current-phase context)
+                       (:execution/attempt-phase context)
                        (get-in context [:phase :name]))
         phase (get-in context [:execution/phase-results phase-name] (:phase context))
         {:keys [error cause]} (source/select-failure context phase-name execution-error phase)

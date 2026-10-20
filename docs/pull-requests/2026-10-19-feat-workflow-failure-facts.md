@@ -31,9 +31,9 @@ hooks, adversarial standards pass, exact-head review and full CI remain required
 
 ## Local verification and adversarial review
 
-- All three workflow product consumers: passing, serially (1m45s).
-- Rebuilt CLI: 39,188,223 bytes. Isolated package, no production source overlay:
-  58 tests, 296 assertions, passing after all review corrections.
+- All three workflow product consumers: passing, serially (1m38s).
+- Rebuilt CLI: 39,188,937 bytes. Isolated package, no production source overlay:
+  60 tests, 314 assertions, passing after all review corrections.
 - Kondo: no warnings/errors. All changed namespaces match inferred strata.
 - Reviewed anomaly and exception precedence, failure location ownership, retained
   error records, native phase fallback and explicit unknown classification.
@@ -85,3 +85,22 @@ available in the event's complete history. The attempt boundary survives durable
 checkpoint/resume and is removed on explicit rewind. Legacy snapshots without the
 field retain their existing selection behavior. This prevents a recovered earlier
 exception from overriding a later native failure without deleting audit history.
+
+Terminal FSM projections intentionally clear the active phase. Native failures
+therefore also persist the explicit attempted phase, independently of the active
+state projection. Failure publication uses that identity when no current phase or
+execution-error phase is available; it does not guess from pipeline ordering.
+Explicit rewind removes it. A real execution-step failure is checkpointed,
+restored into its terminal FSM state, published and verified through journal
+reopen. The preceding package reproduced three lost-identity/diagnostic assertions.
+
+The checkpoint encoding also turns canonical anomaly timestamps into strings.
+A small diagnostic reader decodes only that timestamp representation and validates
+against the existing anomaly contract; invalid timestamps or malformed anomalies
+remain rejected. Live and legacy causes remain supported. The original checkpoint
+and error-history values are not mutated. Negative decoding tests accompany the
+durable restore regression.
+
+Native and restored publication regressions have an explicit project-level CI step
+and the shared workflow test path in the test alias. The exact CI command passes
+locally: 3 tests / 67 assertions, without custom classpath expansion.
