@@ -95,16 +95,16 @@
         (catch java.nio.file.NoSuchFileException _
           (if (java.nio.file.Files/isSymbolicLink nio-abs)
             false
-            (loop [candidate (.getParent nio-abs)
-                   suffix    (.getFileName nio-abs)]
-              (if (nil? candidate)
-                false
-                (try
-                  (let [phys (.toRealPath candidate (into-array java.nio.file.LinkOption []))]
-                    (within? (.normalize (.resolve phys suffix))))
-                  (catch java.nio.file.NoSuchFileException _
-                    (recur (.getParent candidate)
-                           (.resolve (.getFileName candidate) suffix))))))))))
+            (letfn [(walk [candidate suffix]
+                      (if (nil? candidate)
+                        false
+                        (try
+                          (let [phys (.toRealPath candidate (into-array java.nio.file.LinkOption []))]
+                            (within? (.normalize (.resolve phys suffix))))
+                          (catch java.nio.file.NoSuchFileException _
+                            (walk (.getParent candidate)
+                                  (.resolve (.getFileName candidate) suffix))))))]
+              (walk (.getParent nio-abs) (.getFileName nio-abs)))))))
     (catch Exception _ false)))
 
 ;------------------------------------------------------------------------------ Layer 1
