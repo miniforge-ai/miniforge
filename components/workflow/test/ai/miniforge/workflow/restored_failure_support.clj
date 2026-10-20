@@ -14,19 +14,29 @@
 
 (defn- ^{:stratum 0} definition []
   {:workflow/id :restored-failure :workflow/version "1.0.0"
-   :workflow/pipeline [{:phase :done}]})
+   :workflow/pipeline [{:phase :implement} {:phase :review :on-fail :implement}]})
 
 (defn- ^{:stratum 0} enter-failure [ctx]
   (let [cause (anomaly/anomaly :timeout "Socket stalled" {})
         result (phase/error nil "Failed" "Socket stalled" {})]
-    (assoc ctx :phase {:name :done :status :failed :error cause :result result})))
+    (assoc ctx :phase {:name :implement :status :failed :error cause :result result})))
 
 ;------------------------------------------------------------------------------ Layer 1
 
 (defn- ^{:stratum 1} failed-context [root]
   (let [ctx (context/create-context (definition) {} {:checkpoint/root root})
-        interceptor {:name :done :config {:phase :done} :enter enter-failure}]
-    (execution/execute-phase-step [interceptor] ctx {} context/merge-metrics
+        earlier (assoc ctx :execution/phase-results
+                       {:implement {:name :implement :status :success}
+                        :review {:name :review :status :failed}})
+        review (context/transition-execution earlier :phase/succeed)
+        redirected (context/transition-execution review
+                                                 {:type :phase/fail :phase/verdict :repair-requested})
+        interceptor {:name :implement :config {:phase :implement} :enter enter-failure}]
+    (checkpoints/persist-execution-state! earlier)
+    (checkpoints/persist-execution-state! review)
+    (is (= :implement (:execution/current-phase redirected)))
+    (is (= 1 (:execution/redirect-count redirected)))
+    (execution/execute-phase-step [interceptor] redirected {} context/merge-metrics
                                   context/transition-to-completed context/transition-to-failed)))
 
 ;------------------------------------------------------------------------------ Layer 2
@@ -39,12 +49,12 @@
           restored (context/restore-context (definition) {} machine-snapshot phase-results opts)
           rewound (context/restore-context (definition) {} machine-snapshot phase-results
                                             (assoc opts :resume-reset-terminal? true))
-          expected {:workflow/failure-phase :done :failure/class :failure.class/timeout
+          expected {:workflow/failure-phase :implement :failure/class :failure.class/timeout
                     :workflow/failure-reason "Socket stalled"}]
       (is (= :failed (:execution/status failed) (:execution/status restored)))
       (is (nil? (:execution/current-phase restored)))
       (is (not (contains? restored :phase)))
       (is (empty? (:execution/errors restored)))
-      (is (= :done (:execution/attempt-phase restored)))
+      (is (= :implement (:execution/attempt-phase restored)))
       (is (not (contains? rewound :execution/attempt-phase)))
       (support/verify-context restored expected stream options))))
