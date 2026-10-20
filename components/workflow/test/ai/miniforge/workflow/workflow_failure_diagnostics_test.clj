@@ -2,13 +2,19 @@
 ;; Copyright 2025-2026 Christopher Lester (christopher@miniforge.ai)
 ;; Licensed under the Apache License, Version 2.0.
 (ns ai.miniforge.workflow.workflow-failure-diagnostics-test
-  (:require [ai.miniforge.response.interface :as response]
+  (:require [ai.miniforge.anomaly.interface :as anomaly]
+            [ai.miniforge.response.interface :as response]
             [ai.miniforge.workflow.phase-event-test-support :as journal]
             [ai.miniforge.workflow.runner-failure-event :as facts]
             [ai.miniforge.workflow.workflow-failure-diagnostics-support :as support]
             [clojure.test :refer [deftest is]]))
 
 ;------------------------------------------------------------------------------ Layer 0
+
+(defn- ^{:stratum 0} gate-summary-context [result summary]
+  (-> (support/gate-failure)
+      (assoc-in [:execution/phase-results :verify :result] result)
+      (assoc-in [:execution/phase-results :verify :error] summary)))
 
 (deftest ^{:stratum 0} unrelated-inner-diagnostics-do-not-classify-the-summary
   (let [data (facts/data (support/summary-failure "Different failure"))]
@@ -37,3 +43,19 @@
 
 (deftest ^{:stratum 0} gate-only-failure-retains-the-recorded-policy-diagnostic
   (journal/with-stream support/verify-gate))
+
+;------------------------------------------------------------------------------ Layer 1
+
+(deftest ^{:stratum 1} agent-failure-is-not-replaced-by-a-gate-summary
+  (let [result {:status :error :error {:message "Backend stalled"}}
+        summary {:message "Backend stalled" :gate-failed? true}
+        data (facts/data (gate-summary-context result summary))]
+    (is (not (contains? (:error data) :anomaly)))
+    (is (= "Backend stalled" (get-in data [:error :message])))))
+
+(deftest ^{:stratum 1} typed-phase-cause-wins-over-gate-summary-fallback
+  (let [cause (anomaly/anomaly :timeout "Socket stalled" {})
+        summary {:message "Socket stalled" :gate-failed? true :anomaly cause}
+        data (facts/data (gate-summary-context {:status :success} summary))]
+    (is (= cause (get-in data [:error :anomaly])))
+    (is (= :failure.class/timeout (get-in data [:options :failure/class])))))

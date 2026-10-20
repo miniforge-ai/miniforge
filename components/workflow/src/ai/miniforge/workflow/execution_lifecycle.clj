@@ -24,6 +24,7 @@
    `execution-transition`."
   (:require [ai.miniforge.response.interface :as response]
             [ai.miniforge.workflow.context :as context]
+            [ai.miniforge.workflow.execution-error-handler :as error-handler]
             [ai.miniforge.workflow.execution-transition :as transition]
             [ai.miniforge.workflow.messages :as messages]))
 
@@ -47,7 +48,7 @@
 
    Returns updated context."
   [interceptor ctx]
-  (let [phase-name (get-in interceptor [:config :phase])]
+  (let [phase-name (get-in interceptor [:config :phase] (:name interceptor))]
     (if-let [leave-fn (:leave interceptor)]
       (try
         (leave-fn ctx)
@@ -153,7 +154,7 @@
    but the workflow-level error list is the authoritative source for
    downstream consumers such as the CLI and bridge surfaces)."
   [interceptor ctx]
-  (let [phase-name (get-in interceptor [:config :phase])]
+  (let [phase-name (get-in interceptor [:config :phase] (:name interceptor))]
     (if-let [enter-fn (:enter interceptor)]
       (try
         (enter-fn ctx)
@@ -170,7 +171,7 @@
                                            {:error (ex-message ex)
                                             :data (ex-data ex)}))]
             (if-let [error-fn (:error interceptor)]
-              (error-fn ctx-with-error ex)
+              (error-handler/invoke error-fn ctx-with-error ex error-record)
               (context/transition-to-failed ctx-with-error)))))
       ctx)))
 
@@ -196,7 +197,9 @@
   [interceptor ctx]
   ;; Clear :phase map before each phase to prevent stale transition requests
   ;; from leaking across phase boundaries.
-  (let [ctx-clean (dissoc ctx :phase)
+  (let [ctx-clean (-> ctx
+                      (dissoc :phase)
+                      (assoc :execution/phase-error-offset (count (:execution/errors ctx))))
         ctx-entered (execute-enter interceptor ctx-clean)
         phase-result (extract-phase-result ctx-entered)
         phase-result-gated (transition/apply-gate-validation interceptor phase-result ctx-entered)

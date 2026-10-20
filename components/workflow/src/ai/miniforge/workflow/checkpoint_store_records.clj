@@ -62,6 +62,7 @@
    :execution/fsm-state
    :execution/response-chain
    :execution/errors
+   :execution/phase-error-offset
    :execution/phase-handoffs
    :execution/artifacts
    :execution/dag-result

@@ -9,7 +9,7 @@
 ## Purpose and layer
 
 Workflow producer integration for N3 terminal events: preserve the actual failure
-reason and classify it with the existing runtime taxonomy. Execution errors take
+reason and classify it with the existing runtime taxonomy. Current-attempt execution errors take
 precedence; native phase anomalies supply facts when no execution error exists.
 Missing diagnostic facts remain the explicit canonical unknown class. Preserve
 the original error records and known failure phase.
@@ -31,9 +31,9 @@ hooks, adversarial standards pass, exact-head review and full CI remain required
 
 ## Local verification and adversarial review
 
-- All three workflow product consumers: passing, serially (1m57s).
-- Rebuilt CLI: 39,187,322 bytes. Isolated package, no production source overlay:
-  50 tests, 218 assertions, passing after all review corrections.
+- All three workflow product consumers: passing, serially (1m45s).
+- Rebuilt CLI: 39,188,223 bytes. Isolated package, no production source overlay:
+  58 tests, 296 assertions, passing after all review corrections.
 - Kondo: no warnings/errors. All changed namespaces match inferred strata.
 - Reviewed anomaly and exception precedence, failure location ownership, retained
   error records, native phase fallback and explicit unknown classification.
@@ -70,3 +70,18 @@ reproduced four failures against the previous CLI, then passed after rebuilding.
 Unrelated summaries, superseded gate entries, other-phase entries and later
 execution errors cannot borrow those diagnostics. Source selection is a separate
 small namespace from event projection; the classifier remains the single taxonomy.
+
+Actual deployment error handlers append summary-only diagnostics after the caught
+exception. The error-handler boundary now retains provenance only on newly appended
+matching phase/message/data records from that same invocation. Existing causes and
+historical or unrelated records remain unchanged. Exception recording accepts the
+interceptor name when its config omits the phase, as native deployment producers do.
+The integration regression uses all three real deployment handlers, plus verify's
+real leave handler for a gate-failed summary with a successful agent result.
+
+Each phase attempt records the existing error-history length before entering.
+Terminal facts select only subsequent execution errors, leaving older diagnostics
+available in the event's complete history. The attempt boundary survives durable
+checkpoint/resume and is removed on explicit rewind. Legacy snapshots without the
+field retain their existing selection behavior. This prevents a recovered earlier
+exception from overriding a later native failure without deleting audit history.

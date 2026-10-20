@@ -3,9 +3,13 @@
 ;; Licensed under the Apache License, Version 2.0.
 (ns ai.miniforge.workflow.runner-failure-source
   "Select failure diagnostics without mixing unrelated execution or phase attempts."
-  (:require [ai.miniforge.anomaly.interface :as anomaly]))
+  (:require [ai.miniforge.anomaly.interface :as anomaly]
+            [ai.miniforge.phase.interface :as phase]))
 
 ;------------------------------------------------------------------------------ Layer 0
+
+(defn ^{:stratum 0} execution-error [context]
+  (last (drop (get context :execution/phase-error-offset 0) (:execution/errors context))))
 
 (defn ^{:stratum 0} as-anomaly [value]
   (when (anomaly/any-anomaly? value) value))
@@ -18,6 +22,9 @@
   (let [data (merge (:data diagnostic) (:data summary))]
     (cond-> (merge diagnostic summary)
       (seq data) (assoc :data data))))
+
+(defn- ^{:stratum 0} gate-summary? [error phase-result]
+  (and (true? (:gate-failed? error)) (phase/result-succeeded? (:result phase-result))))
 
 (defn- ^{:stratum 0} gate-cause [context phase-name phase]
   (let [entries (get-in context [:execution/response-chain :response-chain])
@@ -38,7 +45,8 @@
 
 (defn- ^{:stratum 1} phase-cause [context phase-name phase error]
   (or (as-anomaly (get-in phase [:result :output]))
-      (when-not error (gate-cause context phase-name phase))))
+      (when (or (nil? error) (gate-summary? error phase))
+        (gate-cause context phase-name phase))))
 
 ;------------------------------------------------------------------------------ Layer 2
 

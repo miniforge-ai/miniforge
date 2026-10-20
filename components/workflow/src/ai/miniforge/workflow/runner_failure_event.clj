@@ -26,7 +26,7 @@
 
 (defn ^{:stratum 1} data [context]
   (let [errors (:execution/errors context)
-        execution-error (last errors)
+        execution-error (source/execution-error context)
         phase-name (or (:phase execution-error) (:execution/current-phase context)
                        (get-in context [:phase :name]))
         phase (get-in context [:execution/phase-results phase-name] (:phase context))

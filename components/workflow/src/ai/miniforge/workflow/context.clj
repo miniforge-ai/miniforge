@@ -163,6 +163,7 @@
   [machine-snapshot workflow]
   (-> machine-snapshot
       (dissoc :execution/ended-at
+              :execution/phase-error-offset
               :execution/output
               :execution/completed-with-warnings?)
       (assoc :execution/errors []
