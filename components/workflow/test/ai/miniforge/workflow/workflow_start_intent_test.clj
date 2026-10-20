@@ -10,6 +10,12 @@
 
 ;------------------------------------------------------------------------------ Layer 0
 
+(defn- ^{:stratum 0} constructor-exception [& _args]
+  (throw (IllegalStateException. "Start constructor unavailable")))
+
+(defn- ^{:stratum 0} constructor-fatal [& _args]
+  (throw (AssertionError. "Fatal start constructor failure")))
+
 (defn- ^{:stratum 0} context [opts]
   {:execution/id (random-uuid)
    :execution/workflow {:workflow/id :start-intent :workflow/version "1.0.0"}
@@ -18,6 +24,20 @@
    :routing/trigger-event-id (random-uuid)})
 
 ;------------------------------------------------------------------------------ Layer 1
+
+(defn- ^{:stratum 1} verify-construction-exception [stream _options]
+  (with-redefs [events/workflow-started constructor-exception]
+    (is (anomaly/any-anomaly? (publishers/publish-workflow-started! stream (context {}))))
+    (is (empty? (events/get-events stream)))))
+
+(defn- ^{:stratum 1} verify-fatal-construction [stream _options]
+  (with-redefs [events/workflow-started constructor-fatal]
+    (is (thrown? AssertionError (publishers/publish-workflow-started! stream (context {}))))))
+
+(deftest ^{:stratum 1} legacy-constructor-exception-retains-warning-only-behavior
+  (with-redefs [events/workflow-started constructor-exception]
+    (is (nil? (publishers/publish-workflow-started!
+                (events/create-event-stream {:sinks []}) (context {}))))))
 
 (defn- ^{:stratum 1} verify-start [stream options]
   (let [intent {:intent/operation :verify :intent/target :operational-policy}
@@ -46,6 +66,12 @@
     (is (= 1 (count (events/get-events stream))))))
 
 ;------------------------------------------------------------------------------ Layer 2
+
+(deftest ^{:stratum 2} current-constructor-exception-is-returned-as-anomaly
+  (journal/with-stream verify-construction-exception))
+
+(deftest ^{:stratum 2} fatal-constructor-errors-are-not-converted
+  (journal/with-stream verify-fatal-construction))
 
 (deftest ^{:stratum 2} caller-declared-intent-reaches-the-current-journal
   (journal/with-stream verify-start))
