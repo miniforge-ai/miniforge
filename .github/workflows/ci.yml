@@ -270,6 +270,15 @@ jobs:
           (let [r (clojure.test/run-tests 'ai.miniforge.event-stream.gate-contract-integration-test)]
           (System/exit (+ (:fail r) (:error r))))"
 
+      - name: Native and restored workflow failure publication
+        working-directory: projects/miniforge
+        run: >-
+          clojure -M:test -e "(require 'ai.miniforge.workflow.native-failure-publication-test
+          'ai.miniforge.workflow.restored-failure-test 'ai.miniforge.workflow.dag-terminal-checkpoint-test)
+          (let [r (clojure.test/run-tests 'ai.miniforge.workflow.native-failure-publication-test
+          'ai.miniforge.workflow.restored-failure-test 'ai.miniforge.workflow.dag-terminal-checkpoint-test)]
+          (System/exit (+ (:fail r) (:error r))))"
+
       - name: Upload test logs
         if: always()
         uses: actions/upload-artifact@v4
