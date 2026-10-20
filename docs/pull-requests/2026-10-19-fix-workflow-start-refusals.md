@@ -19,8 +19,8 @@ journal refuses admission. Logging a warning is not acknowledgement.
 ## Layer and dependencies
 
 Application integration. Base: refreshed `main` at `f1b83e973`.
-Depends on #2058 (explicit workflow-start intent); incorporate that reviewed
-dependency before implementation. Workflow-completion refusal, default-host
+Depends on #2058 (explicit workflow-start intent), now merged and incorporated.
+Workflow-completion refusal, default-host
 migration, and gate acknowledgement remain separate changes.
 
 ## Changes in detail
@@ -28,6 +28,8 @@ migration, and gate acknowledgement remain separate changes.
 - Propagate start publication anomalies into the execution failure context.
 - Persist the failed terminal snapshot and run existing cleanup.
 - Preserve nil, legacy, and explicitly skipped lifecycle behavior.
+- Extract the existing pipeline exception conversion into named boundary functions,
+  retaining dashboard-stop and general failure behavior without expanding the runner.
 
 ## Testing plan
 
@@ -35,6 +37,23 @@ Actual runner with current journals: closed journal, missing intent, constructio
 exception, zero phase-entry effects, failed disk checkpoint, and cleanup.
 Retain accepted, nil, legacy, and skipped lifecycle cases. Run workflow consumers
 serially, build CLI, test the isolated package, and audit standards before push.
+
+## Local verification
+
+- All three workflow consumers pass, serially (2m19s).
+- CLI rebuilt: 39,188,425 bytes; isolated package: 89 tests, 312 assertions passed.
+- Additional constructor-boundary coverage: start suites pass 13 tests and 74
+  assertions using that same CLI, without production source overlays.
+- Kondo reports no warnings/errors; changed namespaces match inferred strata.
+- Previous CLI reproduced phase effects after missing intent and constructor
+  failure, and missing cleanup after fatal startup failure. Checkpoint assertions
+  use the store's existing instant-string normalization contract.
+- One publisher correction and one runner integration commit stay within normal
+  budgets (31 and 198 reportable lines). No additional budget exception.
+
+Terminal publication acknowledgement and terminal-snapshot re-publication are
+separate follow-up work, including authoritative FSM state on refusal. These tests
+prove active-run start admission; they are not default-host or N7 completion claims.
 
 ## Deployment plan
 
