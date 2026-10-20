@@ -31,10 +31,10 @@ hooks, adversarial standards pass, exact-head review and full CI remain required
 
 ## Local verification and adversarial review
 
-- All three workflow product consumers: passing, serially (1m24s).
-- Rebuilt CLI: 39,189,005 bytes. Isolated package, no production source overlay:
-  34 tests, 210 assertions, covering failure publication, diagnostics, native
-  handlers, checkpoint storage and context after the redirect correction.
+- All three workflow product consumers: passing, serially (1m22s).
+- Rebuilt CLI: 39,189,035 bytes. Isolated package, no production source overlay:
+  35 tests, 215 assertions, covering failure publication, diagnostics, native
+  handlers, checkpoint storage, context and synthetic DAG completion.
 - Kondo: no warnings/errors. All changed namespaces match inferred strata.
 - Reviewed anomaly and exception precedence, failure location ownership, retained
   error records, native phase fallback and explicit unknown classification.
@@ -104,7 +104,7 @@ durable restore regression.
 
 Native and restored publication regressions have an explicit project-level CI step
 and the shared workflow test path in the test alias. The exact CI command passes
-locally: 3 tests / 69 assertions, without custom classpath expansion.
+locally: 4 tests / 74 assertions, without custom classpath expansion.
 
 The restore fixture now includes a backward review-to-implement transition and
 existing checkpoints for both phases before implement fails natively. This caught
@@ -113,3 +113,11 @@ Checkpoint and output selectors now use the persisted attempt identity after the
 active phase and before their legacy ordering fallback. The old package fails the
 new diagnostic assertion; the exact project regression passes 1 test / 16
 assertions. All three consumers and rebuilt-package revalidation pass, as above.
+
+Synthetic DAG success now opens the implementation attempt through the same
+boundary helper as ordinary lifecycle entry. Otherwise the preceding plan attempt
+would cause terminal output and checkpoint selection to omit the synthesized
+implementation result. The DAG regression reproduces four old-package failures,
+then verifies terminal output and checkpoint/reopen through the real DAG success
+path. It is included in the explicit CI step. Attempt error offsets and stale
+phase clearing are shared, not separately reimplemented.
