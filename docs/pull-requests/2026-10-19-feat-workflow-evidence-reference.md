@@ -17,10 +17,11 @@ reference; ordinary resume preserves it.
 
 ## Dependencies and scope
 
-Depends on #2059 (terminal-phase facts); #2056 is merged. Main alignment changed
-no tested production or test source. Failed bundle publication must
-not expose a completion reference. Default current-host migration, workflow intent
-and workflow-level publication refusal propagation remain separate work.
+Depends on #2059 (terminal-phase facts) and #2056, both merged. Final main alignment
+also incorporates the separately verified workflow-intent forwarding from #2058.
+Failed bundle publication must not expose a completion reference. Default
+current-host migration and workflow-level publication refusal propagation remain
+separate work. Composed consumers and package were rechecked after main alignment.
 
 ## Verification plan
 
@@ -33,8 +34,8 @@ no rewrite/migration is required. Normal CLI deployment.
 
 ## Local verification and adversarial review
 
-- All three phase/workflow/phase-opsv consumers: passing, serially (1m51s).
-- Rebuilt CLI: 39,187,209 bytes. Isolated package: 41 tests, 339 assertions,
+- All three phase/workflow/phase-opsv consumers: passing, serially (2m19s).
+- Rebuilt CLI: 39,187,288 bytes. Isolated package: 44 tests, 360 assertions,
   passing without production source overlays.
 - Kondo: no warnings/errors. All nine changed namespaces match inferred strata.
 - Reviewed provenance at the successful finalization boundary, generic workflow
