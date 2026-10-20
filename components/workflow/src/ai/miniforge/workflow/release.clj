@@ -72,15 +72,26 @@
     false))
 
 (defn- ^{:stratum 0} inside-worktree?
-  "Return true when file-path stays inside worktree-path after canonical
-  resolution. Symlinks and '..' segments are resolved before comparison.
-  Fails closed (returns false) on IO errors."
+  "Return true when file-path stays inside worktree-path after full resolution.
+  Uses NIO toRealPath to follow symlinks for existing paths: outside-pointing
+  and dangling symlinks are both rejected (toRealPath throws NoSuchFileException
+  for dangling targets, which is treated as rejection). New non-symlink paths
+  are verified by normalised absolute path. Fails closed on IO errors."
   [worktree-path file-path]
   (try
-    (let [root   (.getCanonicalPath (java.io.File. (str worktree-path)))
-          target (.getCanonicalPath (java.io.File. (str file-path)))]
-      (or (= target root)
-          (.startsWith target (str root java.io.File/separator))))
+    (let [root    (-> (java.nio.file.Paths/get (str worktree-path) (into-array String []))
+                      .toAbsolutePath .normalize str)
+          nio     (-> (java.nio.file.Paths/get (str file-path) (into-array String []))
+                      .toAbsolutePath .normalize)
+          within? #(or (= % root)
+                       (.startsWith % (str root java.io.File/separator)))]
+      (try
+        (within? (-> (.toRealPath nio (into-array java.nio.file.LinkOption []))
+                     str))
+        (catch java.nio.file.NoSuchFileException _
+          (if (java.nio.file.Files/isSymbolicLink nio)
+            false
+            (within? (str nio))))))
     (catch Exception _ false)))
 
 ;------------------------------------------------------------------------------ Layer 1

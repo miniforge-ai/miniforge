@@ -110,3 +110,34 @@
                                                  :content "(ns foo)"}
                                                 nil)]
       (is (true? (:success? result))))))
+
+(deftest process-file-action-symlink-traversal-test
+  (testing "create rejects a dangling symlink pointing outside the worktree"
+    (let [worktree (create-temp-dir)
+          outside  (create-temp-dir)
+          target   (fs/path outside "never-exists.txt")
+          link     (fs/path worktree "link.txt")]
+      (fs/create-sym-link link target)
+      (let [result (release/process-file-action worktree
+                                                {:action  :create
+                                                 :path    "link.txt"
+                                                 :content "bad"}
+                                                nil)]
+        (is (false? (:success? result)))
+        (is (re-find #"(?i)traversal" (:error result)))
+        (is (false? (fs/exists? target))))))
+
+  (testing "modify rejects an existing symlink pointing outside the worktree"
+    (let [worktree (create-temp-dir)
+          outside  (create-temp-dir)
+          target   (fs/path outside "existing.txt")]
+      (spit (str target) "original")
+      (fs/create-sym-link (fs/path worktree "link.txt") target)
+      (let [result (release/process-file-action worktree
+                                                {:action  :modify
+                                                 :path    "link.txt"
+                                                 :content "bad"}
+                                                nil)]
+        (is (false? (:success? result)))
+        (is (re-find #"(?i)traversal" (:error result)))
+        (is (= "original" (slurp (str target)))))))
