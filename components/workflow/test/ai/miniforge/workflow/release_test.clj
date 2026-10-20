@@ -140,4 +140,4 @@
                                                 nil)]
         (is (false? (:success? result)))
         (is (re-find #"(?i)traversal" (:error result)))
-        (is (= "original" (slurp (str target)))))))
+        (is (= "original" (slurp (str target))))))))
