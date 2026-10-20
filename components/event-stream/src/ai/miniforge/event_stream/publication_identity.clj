@@ -14,6 +14,8 @@
    :routing/trigger-event-id :phase/expected-agent :phase/artifacts
    :phase/outcome :phase/blocked-reason :phase/transition-request
    :failure/class :workflow/failure-phase :cancel/requested-by :cancel/source :action/id
+   :phase/name :machine/state :checkpoint/path :checkpoint/size-bytes
+   :snapshot/path :snapshot/size-bytes :from-state :from-phase :skipping :expected-hash :actual-hash
    :gate/phase :envelope/id :gate/decision-envelope
    :rule/id :rule/status :rule/severity :rule/enforcement
    :chain/run-id :chain/definition-id :chain/definition-version
