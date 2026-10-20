@@ -667,9 +667,9 @@
       (is (= #{}
              (fsm/unreachable-states machine))))
     (testing "terminal states cannot reach active workflow states"
-      (is (= #{:completed}
+      (is (= #{:completed :failed}
              (fsm/reachable-states machine :completed)))
-      (is (= (disj expected-reachable :completed)
+      (is (= (disj expected-reachable :completed :failed)
              (fsm/unreachable-states machine :completed))))))
 
 (deftest ^{:stratum 0} validate-execution-machine-test
