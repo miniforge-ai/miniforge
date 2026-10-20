@@ -26,7 +26,7 @@ and all CI including Build. No size exception applies.
 
 ## Verified implementation
 
-The runner delegates finalization to a three-stratum internal namespace.
+The runner delegates finalization and failure recovery to focused internal namespaces.
 Terminal refusal appends a typed error without losing earlier failures, applies
 the authoritative refusal transition, and regenerates output status before the
 final checkpoint. Cleanup receives execution facts even if publication is fatal.
@@ -42,6 +42,13 @@ isolated packaged regressions passed 43 tests / 290 assertions with test fixture
 only, no production source overlays. Nil/legacy and explicit skip behavior remain
 covered. Adversarial review traced receipt ownership, output projection,
 checkpoint ordering, retained phase facts and the fatal-error cleanup path.
+
+The N3 §9.1 cross-check added one bounded failure-publication attempt when a
+non-failed terminal outcome is refused. A second refusal is retained as a typed
+diagnostic, never retried recursively; an already-failed outcome is not
+republished. Real-journal regressions cover the available failure path and the
+double-refusal case. The follow-up passed all three consumers (1m34s), rebuilt
+CLI 39,199,812 bytes, and isolated package 44 tests / 300 assertions.
 
 This does not yet make checkpoint I/O errors explicit or deduplicate terminal
 republication across a process restart; those remain separate durability work.

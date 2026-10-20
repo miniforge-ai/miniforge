@@ -27,4 +27,7 @@
 (deftest ^{:stratum 0} explicit-lifecycle-skip-retains-completion
   (journal/with-stream support/verify-skipped))
 
+(deftest ^{:stratum 0} failure-path-refusal-is-retained-without-a-retry-loop
+  (journal/with-stream support/verify-double-refusal))
+
 (comment ::terminal-runner-regressions)

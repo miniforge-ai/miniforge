@@ -23,6 +23,10 @@
 (defn- ^{:stratum 0} with-evidence [extract ctx]
   (assoc (extract ctx) :workflow/evidence-bundle-id (random-uuid)))
 
+(defn- ^{:stratum 0} count-failure-attempt [attempts & _args]
+  (swap! attempts inc)
+  (runner/throw-construction))
+
 (defn- ^{:stratum 0} assert-outcome [result status calls]
   (let [{:keys [machine-snapshot phase-results]}
         (checkpoints/load-checkpoint-data (:execution/id result) {})
@@ -43,6 +47,7 @@
     (assert-outcome result :failed calls)
     (is (= :workflow-terminal-publication-failed (:type error)))
     (is (anomaly/any-anomaly? (:anomaly error)))
+    (is (= :workflow/failed (:event/type (last (events/get-events stream)))))
     (is (not-any? #(= :workflow/completed (:event/type %)) (events/get-events stream)))))
 
 (defn ^{:stratum 1} verify-accepted [stream _options]
@@ -63,6 +68,16 @@
     (assert-outcome (execute stream {:skip-lifecycle-events true} calls)
                     :completed calls)
     (is (not-any? #(= :workflow/completed (:event/type %)) (events/get-events stream)))))
+
+(defn ^{:stratum 1} verify-double-refusal [stream _options]
+  (let [calls (atom [])
+        attempts (atom 0)]
+    (with-redefs [events/workflow-failed (partial count-failure-attempt attempts)]
+      (let [result (execute stream {} calls)]
+        (assert-outcome result :failed calls)
+        (is (= :workflow-failure-publication-failed
+               (:type (last (:execution/errors result)))))
+        (is (= 1 @attempts))))))
 
 ;------------------------------------------------------------------------------ Layer 2
 
