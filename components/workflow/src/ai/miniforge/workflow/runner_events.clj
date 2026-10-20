@@ -21,6 +21,7 @@
    Extracted from runner.clj for single-responsibility.
    All functions are safe to call with nil event-stream (no-op)."
   (:require
+   [ai.miniforge.anomaly.interface :as anomaly]
    [ai.miniforge.event-stream.interface :as es]
    [ai.miniforge.phase.interface :as phase]
    [ai.miniforge.self-healing.interface :as self-healing]
@@ -93,12 +94,35 @@
 
 ;------------------------------------------------------------------------------ Layer 1
 
+(defn- ^{:stratum 1} publish-workflow-failed! [event-stream context last-phase]
+  (publish-event! event-stream
+                  (merge (es/workflow-failed event-stream (:execution/id context)
+                                            {:message (messages/t :status/failed)
+                                             :errors (:execution/errors context)})
+                         (workflow-run-fields context :failed last-phase))))
+
+(defn- ^{:stratum 1} publish-workflow-success! [event-stream context last-phase]
+  (let [metrics (build-completion-metrics context)
+        event (es/workflow-completed event-stream (:execution/id context)
+                                     (:execution/status context)
+                                     (get-in context [:execution/metrics :duration-ms])
+                                     (when (seq metrics) metrics))]
+    (publish-event! event-stream
+                    (merge event (workflow-run-fields context :completed last-phase)))))
+
 (defn- ^{:stratum 1} publish-pr-created-events!
   "Publish canonical `:pr/created` events for workflow-owned PRs."
   [event-stream context]
-  (doseq [pr (pr-events/completion-prs context)]
-    (publish-event! event-stream
-                    (es/pr-created event-stream (:execution/id context) pr))))
+  (try+
+    (doseq [pr (pr-events/completion-prs context)]
+      (let [receipt (publish-event! event-stream
+                                    (es/pr-created event-stream (:execution/id context) pr))]
+        (when (anomaly/any-anomaly? receipt)
+          (println (messages/t :warn/publish-pr {:error (:anomaly/message receipt)})))))
+    #_{:clj-kondo/ignore [:unresolved-symbol]}
+    (catch dispatch/nonfatal? _
+      (println (messages/t :warn/publish-pr
+                          {:error (ex-message (:throwable &throw-context))})))))
 
 ;; Lifecycle event publishers
 (defn ^{:stratum 1} publish-workflow-started!
@@ -173,26 +197,18 @@
 ;------------------------------------------------------------------------------ Layer 2
 
 (defn ^{:stratum 2} publish-workflow-completed!
-  "Publish workflow completed/failed event."
+  "Return the terminal receipt or current-stream refusal.
+   Auxiliary PR notifications cannot replace an acknowledged terminal receipt."
   [event-stream context]
   (when (dispatch/dispatchable-event-stream? event-stream)
-    (try
-      (let [wf-id        (:execution/id context)
-            metrics-opts (build-completion-metrics context)
-            last-phase   (or (some-> (:execution/current-phase context) name) "")]
-        (if (phase/failed? context)
-          (publish-event! event-stream
-                          (merge (es/workflow-failed event-stream wf-id
-                                                    {:message (messages/t :status/failed)
-                                                     :errors (:execution/errors context)})
-                                 (workflow-run-fields context :failed last-phase)))
-          (do
-            (publish-event! event-stream
-                            (merge (es/workflow-completed event-stream wf-id
-                                                         (:execution/status context)
-                                                         (get-in context [:execution/metrics :duration-ms])
-                                                         (when (seq metrics-opts) metrics-opts))
-                                   (workflow-run-fields context :completed last-phase)))
-            (publish-pr-created-events! event-stream context))))
-      (catch Exception e
-        (println (messages/t :warn/publish-completed {:error (ex-message e)}))))))
+    (try+
+      (let [last-phase (or (some-> (:execution/current-phase context) name) "")
+            failed? (phase/failed? context)
+            publisher (if failed? publish-workflow-failed! publish-workflow-success!)
+            receipt (publisher event-stream context last-phase)]
+        (when (and (not failed?) (not (anomaly/any-anomaly? receipt)))
+          (publish-pr-created-events! event-stream context))
+        receipt)
+      #_{:clj-kondo/ignore [:unresolved-symbol]}
+      (catch dispatch/nonfatal? _
+        (dispatch/publication-failure event-stream (:throwable &throw-context) :warn/publish-completed)))))
