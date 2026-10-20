@@ -43,3 +43,11 @@ no rewrite/migration is required. Normal CLI deployment.
   rewind clearing. Existing snapshots remain readable without the optional key.
   Shared assertion support checks actual artifact identity and current journal
   reopen; no allocated ID or arbitrary private phase output is promoted.
+
+## CI composition correction
+
+The explicit OPSV finalization CI command exposed a missing test-only dependency:
+the project test alias did not include the shared workflow journal support path.
+Added that path rather than duplicating the journal helper. The exact CI command
+is verified locally from `projects/miniforge`, without an expanded custom classpath.
+Production dependencies and code are unchanged by this correction.
