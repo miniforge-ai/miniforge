@@ -275,6 +275,30 @@
   "Construct an N3 governed OPSV effect disposition event."
   opsv/actuation-disposition)
 
+(def ^{:stratum 0} checkpoint-written
+  "Construct a checkpoint write fact: stream, workflow UUID, phase, path, byte size."
+  events/checkpoint-written)
+
+(def ^{:stratum 0} checkpoint-write-failed
+  "Construct a failed write fact: stream, workflow UUID, phase, error-message/class map."
+  events/checkpoint-write-failed)
+
+(def ^{:stratum 0} machine-snapshot-written
+  "Construct a snapshot write fact: stream, workflow UUID, state, path, byte size."
+  events/machine-snapshot-written)
+
+(def ^{:stratum 0} machine-snapshot-write-failed
+  "Construct a failed snapshot fact: stream, workflow UUID, state, error-message/class map."
+  events/machine-snapshot-write-failed)
+
+(def ^{:stratum 0} workflow-resumed
+  "Construct a resume fact: stream, original workflow UUID, state, phase, skipped phases."
+  events/workflow-resumed)
+
+(def ^{:stratum 0} workflow-spec-hash-mismatch
+  "Construct a drift fact: stream, workflow UUID, expected hash, actual hash."
+  events/workflow-spec-hash-mismatch)
+
 (def ^{:stratum 0} workflow-started
   "Build and return a :workflow/started event envelope map. Multi-arity
    for the legacy 2/3-arg call shape; the opts arity may carry
