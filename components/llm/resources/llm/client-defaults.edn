@@ -1,5 +1,13 @@
-{:claude-cli
- {:default-budget-usd "0.10"}
+{;; The Claude CLI's --max-budget-usd when a request sets :max-tokens and no
+ ;; :budget-usd. It must clear the CLI's own fixed cost per call: the
+ ;; Claude Code system prompt and prompt-cache writes cost about
+ ;; $0.09-0.14 before the caller's tokens. At $0.10 ordinary single-turn
+ ;; calls ran over, the CLI exited 1, and complete answers came back as
+ ;; failures. :max-tokens is not forwarded to the CLI (it has no output-token
+ ;; flag); it only switches this default on. The CLI's own reply limit and
+ ;; --max-turns bound a call; this dollar cap is the only spend guard.
+ :claude-cli
+ {:default-budget-usd "1.00"}
 
  ;; Direct HTTPS provider backends (:anthropic-api / :openai-api /
  ;; :gemini-api). Only Anthropic's Messages API REQUIRES max_tokens on
