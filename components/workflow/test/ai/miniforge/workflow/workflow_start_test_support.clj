@@ -34,8 +34,14 @@
 (defn ^{:stratum 0} throw-fatal [& _args]
   (throw (AssertionError. "Fatal startup failure")))
 
-(defn ^{:stratum 0} assert-refused [result calls]
-  (let [error (last (:execution/errors result))
+(defn- ^{:stratum 0} start-refusal [result]
+  (first (filter (comp #{:workflow-start-publication-failed} :type)
+                 (:execution/errors result))))
+
+;------------------------------------------------------------------------------ Layer 1
+
+(defn ^{:stratum 1} assert-refused [result calls]
+  (let [error (start-refusal result)
         persisted (checkpoints/load-checkpoint-data (:execution/id result) {})]
     (is (= :failed (:execution/status result)))
     (is (= :workflow-start-publication-failed (:type error)))
@@ -47,16 +53,17 @@
     (is (= (coerce/stringify-instants (:execution/errors result))
            (get-in persisted [:machine-snapshot :execution/errors])))))
 
-;------------------------------------------------------------------------------ Layer 1
-
-(defn ^{:stratum 1} execute [stream overrides calls]
-  (let [enter phase/enter-context]
-    (with-redefs [environment/acquire-execution-environment! (constantly nil)
-                  environment/persist-workspace-at-phase-boundary! (constantly nil)
-                  phase/enter-context (partial record-enter calls enter)
-                  cleanup/post-workflow-cleanup! (partial journal/observe calls :cleanup nil)
-                  publishers/start-phase-heartbeat! (constantly nil)]
-      (runner/run-pipeline (workflow) {} (options stream overrides)))))
+(defn ^{:stratum 1} execute
+  ([stream overrides calls]
+   (execute stream overrides calls (partial journal/observe calls :cleanup nil)))
+  ([stream overrides calls cleanup-fn]
+   (let [enter phase/enter-context]
+     (with-redefs [environment/acquire-execution-environment! (constantly nil)
+                   environment/persist-workspace-at-phase-boundary! (constantly nil)
+                   phase/enter-context (partial record-enter calls enter)
+                   cleanup/post-workflow-cleanup! cleanup-fn
+                   publishers/start-phase-heartbeat! (constantly nil)]
+       (runner/run-pipeline (workflow) {} (options stream overrides))))))
 
 ;------------------------------------------------------------------------------ Layer 2
 

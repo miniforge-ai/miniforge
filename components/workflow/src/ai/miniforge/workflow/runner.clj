@@ -18,7 +18,6 @@
 (ns ai.miniforge.workflow.runner
   "Compose workflow setup, bounded execution, lifecycle publication, and cleanup."
   (:require [ai.miniforge.anomaly.interface :as anomaly]
-            [ai.miniforge.workflow.checkpoint-store :as checkpoint-store]
             [ai.miniforge.workflow.runner-callbacks :as callbacks]
             [ai.miniforge.workflow.runner-cleanup :as cleanup]
             [ai.miniforge.workflow.runner-defaults :as defaults]
@@ -28,6 +27,7 @@
             [ai.miniforge.workflow.runner-outcome :as outcome]
             [ai.miniforge.workflow.runner-preparation :as preparation]
             [ai.miniforge.workflow.runner-start :as start]
+            [ai.miniforge.workflow.runner-terminal :as terminal]
             [slingshot.slingshot :refer [try+]]))
 
 ;------------------------------------------------------------------------------ Layer 0
@@ -75,7 +75,7 @@
   "Execute a workflow pipeline.
 
    Pipeline: acquire environment -> build context -> admit start -> execute phases
-           -> validate -> publish completion -> cleanup (always).
+           -> validate -> admit terminal publication -> checkpoint -> cleanup (always).
 
    Returns final execution context."
   ([workflow input]
@@ -102,11 +102,7 @@
              final-ctx (execution-boundary/execute-with-exception-handling
                          pipeline started-ctx callbacks control-state max-phases exception-vol)
              output-ctx (-> final-ctx validate-completion extract-output)]
-         (vreset! output-ctx-vol output-ctx)
-         (checkpoint-store/persist-execution-state! output-ctx)
-         (when-not skip-lifecycle?
-           (events/publish-workflow-completed! event-stream output-ctx))
-         output-ctx)
+         (terminal/finalize! event-stream output-ctx skip-lifecycle? output-ctx-vol))
       (finally
         (when-let [stop-heartbeats! (:stop-phase-heartbeats! callbacks)]
           (stop-heartbeats!))
