@@ -14,7 +14,7 @@ structural validation, and the legacy compatibility API into focused namespaces.
 
 ## Scope
 
-Base: main `1b6c46641`. No dependencies on open PRs. Preserve phase ordering,
+Base: main, aligned to `ac186fcac`. No dependencies on open PRs. Preserve phase ordering,
 explicit transitions, verdict guard order, retry/redirect accounting, and public
 state identifiers. New implementation namespaces must have at most three inferred
 strata. The FSM itself becomes a delegation surface with a retained raw-builder
@@ -40,8 +40,9 @@ topologies. Public identifier aliases and the private builder redefinition seam
 are retained.
 
 Integrated validation: all three workflow product consumers passed serially
-(1m54s). The rebuilt CLI is 39,192,938 bytes. Isolated packaged topology,
-compiled-FSM and validation tests passed: 28 tests / 176 assertions, without production source
+(1m37s after current-main alignment). The rebuilt CLI is 39,196,860 bytes.
+Isolated packaged topology, compiled-FSM, validation, restored failure, DAG
+checkpoint and start-refusal tests passed: 37 tests / 244 assertions, without production source
 overlays. Adversarial review traced empty startup, default sequential success,
 explicit targets, terminal fallback, guarded retries and pause/resume. Guard
 registration remains in the compiler before resolution; extracted topology
