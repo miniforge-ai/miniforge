@@ -279,19 +279,22 @@
   "Build and return a :workflow/started event envelope map. Multi-arity
    for the legacy 2/3-arg call shape; the opts arity may carry
    :routing/trigger-event-id so the automation-edge-correlator links the
-   handler workflow back to its routing trigger."
+   handler workflow back to its routing trigger. Current drafts require
+   :workflow/intent in opts and do not reserve a sequence number."
   events/workflow-started)
 
 (def ^{:stratum 0} phase-started
   "Build and return a :workflow/phase-started event envelope map for the
-   given phase keyword; optional context is attached as :phase/context."
+   given phase keyword; optional context is attached as :phase/context.
+   Current drafts require a fifth options argument with :phase/expected-agent."
   events/phase-started)
 
 (def ^{:stratum 0} phase-completed
   "Build and return a :workflow/phase-completed event envelope map.
-   Records :phase/outcome (default :success) and, when present on the
+   Records :phase/outcome (legacy default :success) and, when present on the
    result, duration, artifacts, error, transition-request, redirect-to,
-   tokens, cost, meta, and termination-reason."
+   tokens, cost, meta, and termination-reason. Current drafts require explicit
+   outcome, duration and artifacts; construction does not reserve a position."
   events/phase-completed)
 
 (def ^{:stratum 0} workspace-persisted
@@ -340,7 +343,8 @@
 (def ^{:stratum 0} workflow-completed
   "Build and return a :workflow/completed event envelope map carrying a
    status keyword and optional duration plus opts (tokens, cost,
-   pr-info, pr-infos, evidence-bundle-id)."
+   pr-info, pr-infos, evidence-bundle-id). Current drafts require :completed status,
+   duration and evidence identity, and carry no competing status field."
   events/workflow-completed)
 
 (def ^{:stratum 0} workflow-failed
@@ -348,7 +352,8 @@
    the error (Throwable, anomaly map, or plain map) into
    :workflow/failure-reason, :workflow/error-details,
    :workflow/anomaly-code, and :workflow/retryable?; optional
-   :failure/class."
+   :failure/class. Current drafts require the class and may carry
+   :workflow/failure-phase in opts."
   events/workflow-failed)
 
 (def ^{:stratum 0} llm-request
@@ -394,15 +399,16 @@
   events/gate-failed)
 
 (def ^{:stratum 0} phase-decision
-  "One event per gated phase transition carrying the DecisionEnvelope."
+  "Carry the exact runtime DecisionEnvelope. Current streams receive a draft;
+   legacy streams retain constructor-assigned positions. Retain drafts for retries."
   events/phase-decision)
 
 (def ^{:stratum 0} gate-rule-applied
   "Build and return a :gate/rule-applied event envelope map: per-rule
    policy evidence recording rule-id evaluated in phase with status
-   (:passed, :failed, :skipped-by-phase, :not-applicable). Optional
+   (:passed, :failed, :skipped-by-phase, :not-applicable, :guidance). Optional
    extra carries :severity, :enforcement, and a NON-SENSITIVE
-   :violation summary."
+   :violation summary. Current streams receive sequence-free drafts."
   events/gate-rule-applied)
 
 (def ^{:stratum 0} tool-invoked

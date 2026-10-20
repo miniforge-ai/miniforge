@@ -11,6 +11,15 @@
 
 ;------------------------------------------------------------------------------ Layer 0
 
+(defn ^{:stratum 0} without-attempt-receipts [output]
+  (let [cleared (dissoc output :opsv/phase-produced-artifact-refs)]
+    (if (contains? (:anomaly/data cleared) :opsv/phase-output)
+      (update-in cleared [:anomaly/data :opsv/phase-output] dissoc :opsv/phase-produced-artifact-refs)
+      cleared)))
+
+(defn ^{:stratum 0} begin-publication [output]
+  (assoc output :opsv/phase-produced-artifact-refs []))
+
 (def ^{:stratum 0} phase-materials
   {:opsv/discover [[:experiment-pack :manifest :opsv/experiment-pack]]
    :opsv/execute [[:metric-snapshot :telemetry :opsv/ramp-steps]]
@@ -49,10 +58,16 @@
 (defn- ^{:stratum 1} attach-reference [output id kind]
   (-> output
       (assoc-in [:opsv/phase-artifact-ids kind] id)
+      (update :opsv/phase-produced-artifact-refs append-reference id)
       (update :opsv/artifact-refs append-reference id)))
 
 (defn ^{:stratum 1} records [ctx phase-key output]
-  (mapv (partial record ctx output) (get phase-materials phase-key [])))
+  (let [materials (cond-> (get phase-materials phase-key [])
+                    (and (= :opsv/actuate phase-key) (contains? output :opsv/effect-transactions))
+                    (conj [:effect-transactions :review :opsv/effect-transactions])
+                    (and (= :opsv/actuate phase-key) (contains? output :opsv/phase-failure))
+                    (conj [:actuation-failure :review :opsv/phase-failure]))]
+    (mapv (partial record ctx output) materials)))
 
 ;------------------------------------------------------------------------------ Layer 2
 

@@ -15,487 +15,66 @@
 ;; WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 ;; See the License for the specific language governing permissions and
 ;; limitations under the License.
-
 (ns ai.miniforge.workflow.runner
-  "Workflow pipeline orchestration.
-
-   Thin pipeline composer that delegates to:
-   - runner-defaults    — configuration as data
-   - runner-events      — event publishing
-   - runner-environment — execution environment lifecycle
-   - runner-cleanup     — post-execution hooks
-   - context            — context management
-   - execution          — phase execution
-   - monitoring         — health monitoring"
+  "Compose workflow setup, bounded execution, lifecycle publication, and cleanup."
   (:require [ai.miniforge.anomaly.interface :as anomaly]
-            [ai.miniforge.dag-executor.interface :as dag-exec]
-            [ai.miniforge.llm.interface :as llm-impl]
-            [ai.miniforge.logging.interface :as log]
-            [ai.miniforge.phase.interface :as phase]
-            [ai.miniforge.response.interface :as response]
-            [ai.miniforge.supervisory-state.interface :as supervisory]
             [ai.miniforge.workflow.checkpoint-store :as checkpoint-store]
-            [ai.miniforge.workflow.context :as ctx]
-            [ai.miniforge.workflow.dag-resilience :as resilience]
-            [ai.miniforge.workflow.execution :as exec]
-            [ai.miniforge.workflow.fsm :as workflow-fsm]
-            [ai.miniforge.workflow.messages :as messages]
-            [ai.miniforge.workflow.monitoring :as monitoring]
+            [ai.miniforge.workflow.runner-callbacks :as callbacks]
             [ai.miniforge.workflow.runner-cleanup :as cleanup]
             [ai.miniforge.workflow.runner-defaults :as defaults]
-            [ai.miniforge.workflow.runner-environment :as env]
             [ai.miniforge.workflow.runner-events :as events]
+            [ai.miniforge.workflow.runner-execution-boundary :as execution-boundary]
+            [ai.miniforge.workflow.runner-iteration :as iteration]
+            [ai.miniforge.workflow.runner-outcome :as outcome]
+            [ai.miniforge.workflow.runner-preparation :as preparation]
+            [ai.miniforge.workflow.runner-start :as start]
             [slingshot.slingshot :refer [try+]]))
 
-(defonce ^:private runner-logger
-  (log/create-logger {:min-level :debug :output :human}))
+;------------------------------------------------------------------------------ Layer 0
 
-;; Re-export public API from extracted namespaces so external callers
-;; (tests, interface/pipeline.clj) continue to work unchanged.
-(def publish-event!              events/publish-event!)
-(def publish-workflow-started!   events/publish-workflow-started!)
-(def publish-workflow-completed! events/publish-workflow-completed!)
-(def publish-phase-started!      events/publish-phase-started!)
-(def publish-phase-completed!    events/publish-phase-completed!)
-(def promote-mature-learnings!   cleanup/promote-mature-learnings!)
+;; Preserve the public runner API while implementation dependencies flow downward.
+(def ^{:stratum 0} publish-event! events/publish-event!)
 
-;------------------------------------------------------------------------------ Layer 0: Result factories
+(def ^{:stratum 0} publish-workflow-started! events/publish-workflow-started!)
 
-(defn- make-execution-error
-  "Build a canonical execution error map."
-  [error-type msg & [extra]]
-  (cond-> {:type error-type :message msg}
-    extra (merge extra)))
+(def ^{:stratum 0} publish-workflow-completed! events/publish-workflow-completed!)
 
-;------------------------------------------------------------------------------ Layer 0: Pipeline construction
+(def ^{:stratum 0} publish-phase-started! events/publish-phase-started!)
 
-(defn- legacy-phase-interceptor
-  [phase-def]
-  (phase/get-phase-interceptor
-   {:phase (:phase/id phase-def)
-    :config phase-def}))
+(def ^{:stratum 0} publish-phase-completed! events/publish-phase-completed!)
 
-(defn build-pipeline
-  "Build interceptor pipeline from workflow config."
-  [workflow]
-  (let [pipeline-config (:workflow/pipeline workflow)]
-    (if (seq pipeline-config)
-      (mapv phase/get-phase-interceptor pipeline-config)
-      (mapv legacy-phase-interceptor
-            (:workflow/phases workflow)))))
+(def ^{:stratum 0} promote-mature-learnings! cleanup/promote-mature-learnings!)
 
-(defn validate-pipeline
-  "Validate a workflow pipeline. Returns {:valid? bool :errors [] :warnings []}."
-  [workflow]
-  (let [phase-validation (phase/validate-pipeline workflow)
-        machine-validation (workflow-fsm/validate-execution-machine workflow)]
-    {:valid? (and (:valid? phase-validation)
-                  (:valid? machine-validation))
-     :errors (vec (concat (:errors phase-validation)
-                          (:errors machine-validation)))
-     :warnings (vec (concat (:warnings phase-validation)
-                            (:warnings machine-validation)))}))
+(def ^{:stratum 0} build-pipeline preparation/build-pipeline)
 
-;------------------------------------------------------------------------------ Layer 1: Orchestration helpers
+(def ^{:stratum 0} validate-pipeline preparation/validate-pipeline)
 
-(defn handle-empty-pipeline
-  "Handle error case of empty pipeline."
-  [context]
-  (let [msg (messages/t :status/no-phases)]
-    (-> context
-        (update :execution/errors conj (make-execution-error :empty-pipeline msg))
-        (update :execution/response-chain
-                response/add-failure :pipeline
-                :anomalies.workflow/empty-pipeline {:error msg})
-        (ctx/transition-to-failed))))
+(def ^{:stratum 0} handle-empty-pipeline outcome/handle-empty-pipeline)
 
-(defn handle-max-phases-exceeded
-  "Handle error case of max phases exceeded."
-  [context max-phases]
-  (let [msg (messages/t :status/max-phases {:max-phases max-phases})]
-    (-> context
-        (update :execution/errors conj (make-execution-error :max-phases-exceeded msg))
-        (update :execution/response-chain
-                response/add-failure :pipeline
-                :anomalies.workflow/max-phases {:error msg :max-phases max-phases})
-        (ctx/transition-to-failed))))
+(def ^{:stratum 0} handle-max-phases-exceeded outcome/handle-max-phases-exceeded)
 
-(defn handle-phase-retry-exhausted
-  "Runaway guard: the same phase has run in too many consecutive pipeline
-   iterations (in-place retries — e.g. implement re-entering on every agent
-   stall). Fail the workflow loud with a typed anomaly so the loop stops now
-   instead of grinding up to `max-phases` iterations (hours of tokens)."
-  [context phase retries]
-  (let [msg (messages/t :status/phase-retries-exhausted
-                        {:phase (name phase) :retries retries})]
-    (-> context
-        (update :execution/errors conj
-                (make-execution-error :phase-retries-exhausted msg))
-        (update :execution/response-chain
-                response/add-failure :pipeline
-                :anomalies.workflow/phase-retries-exhausted
-                {:error msg :phase phase :retries retries})
-        (ctx/transition-to-failed))))
+(def ^{:stratum 0} handle-phase-retry-exhausted outcome/handle-phase-retry-exhausted)
 
-(defn terminal-state?
-  "Check if workflow is in terminal state."
-  [context]
-  (or (phase/succeeded? context) (phase/failed? context)))
+(def ^{:stratum 0} terminal-state? outcome/terminal-state?)
 
-;------------------------------------------------------------------------------ Layer 1: Iteration helpers
+(def ^{:stratum 0} execute-single-iteration iteration/execute-single-iteration)
 
-(def ^:private inline-rate-limit-pattern
-  "Permissive noun-form fallback (`rate limit`, `429`, `hit your
-   limit`, `quota exceeded`) the central error-patterns table doesn't
-   carry — those patterns are vendor-scoped or anchored on verbs
-   (`exceeded`, `reached`). Both matchers union so the workflow-phase
-   path catches everything either side knows."
-  #"(?i)rate.?limit|429|hit your limit|quota.?exceeded")
+(def ^{:stratum 0} extract-output outcome/extract-output)
 
-(defn- rate-limited?
-  "True when a phase error message indicates API rate limiting.
+(def ^{:stratum 0} ^:private acquire-environment preparation/acquire-environment)
 
-   Union of two matchers:
-   - `dag-resilience/rate-limit-in-text?` — loads per-provider patterns
-     from `error-patterns/external.edn`, so the workflow-phase path
-     catches the same shapes the DAG-batch resilience layer does
-     (Anthropic 529, OpenAI 503 / `model overloaded`, free-text
-     throttle prose, etc.).
-   - `inline-rate-limit-pattern` — permissive noun-form fallback.
+(def ^{:stratum 0} ^:private wrap-phase-callbacks callbacks/wrap-phase-callbacks)
 
-   Without this matcher unification a 529 in mid-implement would fall
-   through to plain backoff instead of `apply-rate-limit-failure`
-   (which writes a typed terminal so the workflow can be resumed
-   cleanly via `mf resume`)."
-  [error-msg]
-  (let [s (str error-msg)]
-    (boolean (or (re-find inline-rate-limit-pattern s)
-                 (resilience/rate-limit-in-text? s)))))
+(def ^{:stratum 0} ^:private initial-context-anomaly->failed-context outcome/initial-context-anomaly->failed-context)
 
-(defn- backoff-ms
-  "Exponential backoff duration for retry iteration, capped."
-  [retry-count]
-  (let [raw (* (defaults/backoff-base-ms) (Math/pow 2 (dec retry-count)))]
-    (long (min (defaults/max-backoff-ms) raw))))
+(def ^{:stratum 0} ^:private validate-completion outcome/validate-completion)
 
-(defn- await-resume!
-  "Block while the control state is paused."
-  [control-state]
-  (when (:paused @control-state)
-    (log/debug runner-logger :system :workflow/execution-paused
-               {:message (messages/t :status/paused)})
-    (while (:paused @control-state)
-      (Thread/sleep (defaults/pause-poll-interval-ms)))))
+;------------------------------------------------------------------------------ Layer 1
 
-(defn- check-stopped
-  "Return a dashboard-stop anomaly when the control state is stopped."
-  [control-state]
-  (when (:stopped @control-state)
-    (log/warn runner-logger :system :workflow/execution-stopped
-              {:message (messages/t :status/stopped-dashboard)
-               :data {:reason :dashboard-stop}})
-    (anomaly/sub-anomaly :conflict
-                         :anomalies.dashboard/stop
-                         (messages/t :status/stopped-control)
-                         {:reason :dashboard-stop})))
-
-(defn- apply-dashboard-stop
-  "Mark context failed after a dashboard stop request."
-  [context stop-anomaly]
-  (-> context
-      (update :execution/errors conj
-              (make-execution-error :dashboard-stop
-                                    (:anomaly/message stop-anomaly)
-                                    {:data (:anomaly/data stop-anomaly)}))
-      (ctx/transition-to-failed)))
-
-(defn- apply-rate-limit-failure
-  "Mark context as failed due to rate limiting."
-  [phase-ctx error-msg]
-  (-> phase-ctx
-      (ctx/transition-to-failed)
-      (update :execution/errors conj (make-execution-error :rate-limited error-msg))))
-
-(defn- apply-backoff-if-retrying!
-  "Sleep with exponential backoff when a phase is being retried."
-  [phase-ctx _context]
-  (let [current-phase (:execution/current-phase phase-ctx)
-        retrying? (phase/retrying?
-                   (get-in phase-ctx [:execution/phase-results current-phase]))
-        retry-count (get-in phase-ctx [:phase :iterations] 1)]
-    (when (and retrying? (> retry-count 1))
-      (Thread/sleep (backoff-ms retry-count)))))
-
-(defn- apply-health-switch
-  "Check backend health and apply switch result if needed."
-  [phase-ctx]
-  (let [event-stream (get-in phase-ctx [:execution/opts :event-stream])
-        switch-result (events/check-backend-health-at-boundary! event-stream phase-ctx)]
-    (cond-> phase-ctx
-      switch-result (assoc :self-healing/backend-switch switch-result))))
-
-(defn execute-single-iteration
-  "Execute single pipeline iteration: control check -> health -> phase -> backoff."
-  [pipeline context callbacks iteration control-state]
-  (await-resume! control-state)
-  (let [iteration-result
-        (if-let [stop-anomaly (check-stopped control-state)]
-          (apply-dashboard-stop context stop-anomaly)
-          (let [supervision-runtime (:execution/supervision-runtime context)
-                workflow-state (monitoring/build-supervision-state context iteration)
-                supervision-result (monitoring/check-workflow-supervision
-                                    supervision-runtime
-                                    workflow-state)]
-            (if (= :halt (:status supervision-result))
-              (monitoring/handle-supervision-halt
-               context
-               supervision-result
-               ctx/transition-to-failed)
-              (let [phase-ctx (-> (exec/execute-phase-step pipeline context callbacks
-                                                           ctx/merge-metrics
-                                                           ctx/transition-to-completed
-                                                           ctx/transition-to-failed)
-                                  (monitoring/clear-transient-state))
-                    _ (env/persist-workspace-at-phase-boundary! context phase-ctx)
-                    phase-error-msg (get-in phase-ctx
-                                            [:execution/phase-results
-                                             (:execution/current-phase phase-ctx)
-                                             :error :message] "")]
-                (if (rate-limited? phase-error-msg)
-                  (apply-rate-limit-failure phase-ctx phase-error-msg)
-                  (do (apply-backoff-if-retrying! phase-ctx context)
-                      (apply-health-switch phase-ctx)))))))]
-    (checkpoint-store/persist-execution-state! iteration-result)
-    iteration-result))
-
-;------------------------------------------------------------------------------ Layer 1.5: Output extraction
-
-(defn- resolve-runtime-class
-  "Return the executor's runtime class (:docker, :worktree, etc.) or nil."
-  [executor]
-  (when executor
-    (try (dag-exec/executor-type executor) (catch Exception _ nil))))
-
-(defn extract-output
-  "Synthesize :execution/output from completed pipeline context.
-   Includes N11 §9.1 evidence fields."
-  [ctx]
-  (let [phase-results (:execution/phase-results ctx)
-        current-phase (ctx/active-or-last-phase ctx)
-        image-digest  (get-in ctx [:execution/environment-metadata :image-digest])]
-    (assoc ctx :execution/output
-           (cond-> {:artifacts              (:execution/artifacts ctx)
-                    :phase-results          phase-results
-                    :last-phase-result      (get phase-results current-phase)
-                    :status                 (:execution/status ctx)
-                    :evidence/execution-mode  (get ctx :execution/mode :local)
-                    :evidence/runtime-class   (resolve-runtime-class (:execution/executor ctx))
-                    :evidence/task-started-at (:execution/started-at ctx)
-                    :evidence/task-finished-at (java.time.Instant/now)}
-             image-digest (assoc :evidence/image-digest image-digest)))))
-
-;------------------------------------------------------------------------------ Layer 2: Pipeline stages
-
-(declare run-pipeline)
-
-(defn- acquire-environment
-  "Acquire an isolated execution environment (worktree or Docker capsule).
-   Returns [acquired-env opts'] where acquired-env is nil when pre-acquired."
-  [workflow input opts]
-  (if (and (:executor opts) (:environment-id opts))
-    [nil opts]
-    (let [repo-url (get opts :repo-url (get input :repo-url))
-          branch   (get opts :branch (get input :branch "main"))
-          repo-path (get opts :repo-path (get input :repo-path "."))
-          acquired (env/acquire-execution-environment!
-                    (:workflow/id workflow)
-                    {:repo-url        repo-url
-                     :branch          branch
-                     :repo-path       repo-path
-                     :execution-mode  (:execution-mode opts)
-                     :executor-config (:executor-config opts)
-                     :resume-workspace (:resume-workspace opts)})]
-      [acquired (if acquired
-                  (merge opts {:branch branch} acquired)
-                  opts)])))
-
-(defn- wrap-phase-callbacks
-  "Wrap caller callbacks with event publishing."
-  [event-stream opts]
-  (let [heartbeat-handles (atom {})
-        heartbeat-opts (cond-> {}
-                         (:phase-heartbeat-interval-ms opts)
-                         (assoc :interval-ms (:phase-heartbeat-interval-ms opts)))
-        stop-heartbeat! (fn [phase-name']
-                          (when-let [handle (get @heartbeat-handles phase-name')]
-                            (events/stop-phase-heartbeat! handle)
-                            (swap! heartbeat-handles dissoc phase-name')))
-        stop-all-heartbeats! (fn []
-                               (doseq [phase-name' (keys @heartbeat-handles)]
-                                 (stop-heartbeat! phase-name')))]
-    (letfn [(phase-name [interceptor]
-              (get interceptor :phase
-                   (get-in interceptor [:config :phase])))
-            (on-phase-start [ctx interceptor]
-              (when-let [phase-name' (phase-name interceptor)]
-                (events/publish-phase-started! event-stream ctx phase-name')
-                (when-let [handle (events/start-phase-heartbeat! event-stream ctx phase-name'
-                                                                  heartbeat-opts)]
-                  (swap! heartbeat-handles assoc phase-name' handle)))
-              (when-let [callback (:on-phase-start opts)]
-                (callback ctx interceptor)))
-            (on-phase-complete [ctx interceptor result]
-              (when-let [phase-name' (phase-name interceptor)]
-                (stop-heartbeat! phase-name')
-                (events/publish-phase-completed! event-stream ctx phase-name' result))
-              (when-let [callback (:on-phase-complete opts)]
-                (callback ctx interceptor result)))]
-      {:on-phase-start on-phase-start
-       :on-phase-complete on-phase-complete
-       :stop-phase-heartbeats! stop-all-heartbeats!})))
-
-(defn- governed-capsule-missing-anomaly
-  "Return an `:invalid-input` anomaly when `:governed` mode is requested
-   without a pre-acquired capsule executor + environment-id, otherwise nil.
-
-   Governed mode forbids worktree fallback (N11 §7.4); the runner refuses
-   to silently downgrade. Pre-flight check shared between the throwing
-   and anomaly-returning context builders."
-  [opts]
-  (let [mode      (get opts :execution-mode :local)
-        governed? (and (= :governed mode)
-                       (get opts :executor)
-                       (get opts :environment-id))]
-    (when (and (= :governed mode) (not governed?))
-      (anomaly/anomaly :invalid-input
-                       (messages/t :governed/no-capsule)
-                       {:execution-mode :governed
-                        :has-executor? (some? (get opts :executor))
-                        :has-environment-id? (some? (get opts :environment-id))}))))
-
-(defn- assemble-initial-context
-  "Construct the initial execution context map. Caller is responsible for
-   running [[governed-capsule-missing-anomaly]] first; reaching this function
-   with `:governed` mode but no capsule is a programmer error."
-  [workflow input opts]
-  (let [resume-machine-snapshot (:resume-machine-snapshot opts)
-        resume-phase-results (:resume-phase-results opts)
-        mode      (get opts :execution-mode :local)
-        governed? (and (= :governed mode)
-                       (get opts :executor)
-                       (get opts :environment-id))
-        capsule-exec-fn (when governed?
-                          (llm-impl/capsule-exec-fn
-                           dag-exec/execute!
-                           (get opts :executor)
-                           (get opts :environment-id)
-                           (get opts :worktree-path (defaults/default-workdir))))
-        base-context (if (and resume-machine-snapshot resume-phase-results)
-                       (ctx/restore-context workflow input
-                                            resume-machine-snapshot
-                                            resume-phase-results
-                                            opts)
-                       (ctx/create-context workflow input opts))
-        environment-metadata (or (get opts :environment-metadata)
-                                 (:execution/environment-metadata base-context))]
-    (-> base-context
-        (assoc :execution/executor (get opts :executor)
-               :execution/environment-id (get opts :environment-id)
-               :execution/worktree-path (get opts :worktree-path
-                                             (get opts :sandbox-workdir))
-               :execution/mode mode
-               :execution/started-at (java.time.Instant/now)
-               :execution/environment-metadata environment-metadata
-               :execution/execute-fn (when governed? dag-exec/execute!)
-               :execution/exec-fn capsule-exec-fn
-               :execution/task-branch (when governed?
-                                        (str (defaults/task-branch-prefix)
-                                             (get opts :environment-id
-                                                  (subs (str (random-uuid)) 0 8))))
-               :execution/run-pipeline-fn run-pipeline))))
-
-(defn build-initial-context
-  "Build the initial execution context from workflow, input, and opts.
-
-   Returns the assembled execution context on success, or an
-   `:invalid-input` anomaly when `:governed` mode is requested but no
-   capsule executor + `:environment-id` were supplied in `opts`. Governed
-   mode forbids worktree fallback (N11 §7.4).
-
-   This is the canonical, anomaly-returning entry point. The single
-   in-component caller (`run-pipeline`) converts the anomaly into a
-   failed execution context so external callers still receive the
-   runner's normal context-shaped result."
-  [workflow input opts]
-  (or (governed-capsule-missing-anomaly opts)
-      (assemble-initial-context workflow input opts)))
-
-(defn- initial-context-anomaly->failed-context
-  [workflow input opts context-anomaly]
-  (-> (ctx/create-context workflow input opts)
-      (update :execution/errors conj
-              (make-execution-error :initial-context-anomaly
-                                    (:anomaly/message context-anomaly)
-                                    {:data (:anomaly/data context-anomaly)
-                                     :anomaly context-anomaly}))
-      (ctx/transition-to-failed)))
-
-(defn- execute-pipeline-loop
-  "Execute the phase pipeline loop. Returns final context."
-  [pipeline initial-ctx callbacks control-state max-phases]
-  (cond
-    (terminal-state? initial-ctx)
-    initial-ctx
-
-    (empty? pipeline)
-    (handle-empty-pipeline initial-ctx)
-
-    :else
-    (let [max-phase-retries (defaults/max-consecutive-phase-retries)]
-      ;; `consecutive` counts how many times the phase about to run has been
-      ;; the active phase in immediately consecutive iterations. A healthy
-      ;; workflow advances to a new phase each iteration, so a count > the cap
-      ;; means one phase is stuck retrying in place — abort before it grinds
-      ;; up to `max-phases` (the runaway that burned ~17h overnight).
-      (loop [context     initial-ctx
-             iteration   0
-             prev-phase  nil
-             consecutive 1]
-        (let [phase       (:execution/current-phase context)
-              consecutive (if (= phase prev-phase) (inc consecutive) 1)]
-          (cond
-            (terminal-state? context)      context
-            (>= iteration max-phases)      (handle-max-phases-exceeded context max-phases)
-            (and phase (> consecutive max-phase-retries))
-            (handle-phase-retry-exhausted context phase max-phase-retries)
-            :else (recur (execute-single-iteration pipeline context callbacks iteration control-state)
-                         (inc iteration)
-                         phase
-                         consecutive)))))))
-
-(defn- validate-completion
-  "Warn when a succeeded workflow produced no results."
-  [final-ctx]
-  (if (and (phase/succeeded? final-ctx)
-           (empty? (:execution/artifacts final-ctx))
-           (empty? (:execution/phase-results final-ctx)))
-    (let [ctx' (-> final-ctx
-                   (update :execution/errors conj
-                           (make-execution-error :empty-completion
-                                                (messages/t :status/empty-completion))))]
-      (if (:execution/fsm-machine ctx')
-        (-> ctx'
-            (assoc :execution/completed-with-warnings? true)
-            (ctx/sync-machine-projections))
-        (assoc ctx' :execution/status :completed-with-warnings)))
-    final-ctx))
-
-;------------------------------------------------------------------------------ Layer 3: Main entry point
-
-(defn run-pipeline
+(defn ^{:stratum 1} run-pipeline
   "Execute a workflow pipeline.
 
-   Pipeline: acquire environment -> build context -> execute phases
+   Pipeline: acquire environment -> build context -> admit start -> execute phases
            -> validate -> publish completion -> cleanup (always).
 
    Returns final execution context."
@@ -510,7 +89,7 @@
          event-stream        (:event-stream opts)
          callbacks           (wrap-phase-callbacks event-stream opts)
          skip-lifecycle?     (:skip-lifecycle-events opts)
-         ctx-or-anomaly      (build-initial-context workflow input opts)
+         ctx-or-anomaly      (preparation/build-initial-context workflow input opts run-pipeline)
          initial-ctx         (if (anomaly/anomaly? ctx-or-anomaly)
                                (initial-context-anomaly->failed-context workflow input opts
                                                                         ctx-or-anomaly)
@@ -518,39 +97,10 @@
          output-ctx-vol      (volatile! nil)
          exception-vol       (volatile! nil)]
 
-     (when event-stream
-       (supervisory/ensure-attached! event-stream))
-
-     (checkpoint-store/persist-execution-state! initial-ctx)
-
-     (when-not skip-lifecycle?
-       (events/publish-workflow-started! event-stream initial-ctx))
-
      (try+
-       (let [final-ctx (try+
-                         (execute-pipeline-loop pipeline initial-ctx callbacks
-                                               control-state max-phases)
-                         #_{:clj-kondo/ignore [:unresolved-namespace :unresolved-symbol]}
-                         (catch [:anomaly/category :anomalies.dashboard/stop]
-                                {:keys [anomaly/message]}
-                           (vreset! exception-vol {:type :dashboard-stop
-                                                   :message message})
-                           (-> initial-ctx
-                               (update :execution/errors conj
-                                       (make-execution-error :dashboard-stop message))
-                               (ctx/transition-to-failed)))
-                         #_{:clj-kondo/ignore [:unresolved-symbol]}
-                         (catch Object e
-                           (let [throwable (:throwable &throw-context)
-                                 msg (if (instance? Throwable e) (ex-message e) (str e))]
-                             (vreset! exception-vol (or throwable
-                                                        {:type :pipeline-exception
-                                                         :message msg}))
-                             (-> initial-ctx
-                                 (update :execution/errors conj
-                                         (make-execution-error :pipeline-exception msg
-                                                               {:data (when (instance? Throwable e) (ex-data e))}))
-                                 (ctx/transition-to-failed)))))
+       (let [started-ctx (start/admit! event-stream initial-ctx skip-lifecycle?)
+             final-ctx (execution-boundary/execute-with-exception-handling
+                         pipeline started-ctx callbacks control-state max-phases exception-vol)
              output-ctx (-> final-ctx validate-completion extract-output)]
          (vreset! output-ctx-vol output-ctx)
          (checkpoint-store/persist-execution-state! output-ctx)
@@ -562,6 +112,21 @@
           (stop-heartbeats!))
         (cleanup/post-workflow-cleanup! opts @output-ctx-vol workflow
                                         @exception-vol acquired-env))))))
+
+;------------------------------------------------------------------------------ Layer 2
+
+(defn ^{:stratum 2} build-initial-context
+  "Build the initial execution context from workflow, input, and opts.
+
+   Returns the assembled execution context on success, or an
+   `:invalid-input` anomaly when `:governed` mode is requested but no
+   capsule executor + `:environment-id` were supplied in `opts`. Governed
+   mode forbids worktree fallback (N11 §7.4).
+
+   Supplies the public runner as an explicit execution port; context
+   preparation never depends back on this namespace."
+  [workflow input opts]
+  (preparation/build-initial-context workflow input opts run-pipeline))
 
 ;------------------------------------------------------------------------------ Rich Comment
 (comment

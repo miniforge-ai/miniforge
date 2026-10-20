@@ -13,11 +13,9 @@
 
 (defn- ^{:stratum 0} evidence-drafts [stream workflow-id]
   (let [envelope (decision/envelope [] [] {:pins/pack-revision nil :pins/rule-ids [:fixture/rule] :pins/event-watermark nil})
-        common {:scope/type :workflow :gate/phase :opsv/actuate :envelope/id (:envelope/id envelope)}
-        decision-draft (events/create-event-draft stream :gate/decision workflow-id "fixture decision")
-        rule-draft (events/create-event-draft stream :gate/rule-applied workflow-id "fixture rule")]
-    [(merge decision-draft common {:gate/decision-envelope envelope})
-     (merge rule-draft common {:rule/id :fixture/rule :rule/status :passed})]))
+        options {:envelope-id (:envelope/id envelope)}]
+    [(events/phase-decision stream workflow-id :opsv/actuate envelope)
+     (events/gate-rule-applied stream workflow-id :opsv/actuate :fixture/rule :passed options)]))
 
 (defn- ^{:stratum 0} reopen-and-verify [options scope drafts receipts]
   (let [stream (events/create-current-event-stream options)]

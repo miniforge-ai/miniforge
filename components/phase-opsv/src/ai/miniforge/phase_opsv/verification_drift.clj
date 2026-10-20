@@ -7,8 +7,10 @@
             [ai.miniforge.artifact.interface :as artifact]
             [ai.miniforge.event-stream.interface :as events]
             [ai.miniforge.phase-opsv.event-delivery :as delivery]
+            [ai.miniforge.phase-opsv.exception-policy :as exception-policy]
             [ai.miniforge.phase-opsv.messages :as msg]
-            [ai.miniforge.phase-opsv.runtime-context :as context]))
+            [ai.miniforge.phase-opsv.runtime-context :as context]
+            [slingshot.slingshot :refer [try+]]))
 
 ;------------------------------------------------------------------------------ Layer 0
 
@@ -33,13 +35,13 @@
 ;------------------------------------------------------------------------------ Layer 1
 
 (defn- ^{:stratum 1} publish-with-exception-handling! [ctx drift]
-  ;; No slingshot dependency; preserve cancellation and fatal JVM outcomes.
-  (try
+  ;; Preserve cancellation and fatal JVM outcomes at the adapter boundary.
+  (try+
     (when-let [stream (context/stream ctx)] (publish! ctx stream drift))
     (catch InterruptedException interrupted
       (.interrupt (Thread/currentThread))
       (throw interrupted))
-    (catch Exception _
+    (catch exception-policy/nonfatal? _
       (anomaly/anomaly :unavailable (msg/ts :event/publication-failed) {}))))
 
 ;------------------------------------------------------------------------------ Layer 2
