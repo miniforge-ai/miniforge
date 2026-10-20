@@ -25,7 +25,7 @@
   (let [published (es/publish! stream event)]
     (when-not (anomaly/any-anomaly? published) published)))
 
-(defn- ^{:stratum 0} nonfatal? [value]
+(defn ^{:stratum 0} nonfatal? [value]
   (not (instance? Error value)))
 
 (defn ^{:stratum 0} websocket-stream?

@@ -27,7 +27,8 @@
    [ai.miniforge.workflow.messages :as messages]
    [ai.miniforge.workflow.runner-event-dispatch :as dispatch]
    [ai.miniforge.workflow.runner-phase-event :as phase-event]
-   [ai.miniforge.workflow.runner-pr-events :as pr-events]))
+   [ai.miniforge.workflow.runner-pr-events :as pr-events]
+   [slingshot.slingshot :refer [try+]]))
 
 ;------------------------------------------------------------------------------ Layer 0
 
@@ -112,7 +113,7 @@
    automation-edge-correlator can correlate via the explicit-id path."
   [event-stream context]
   (when (dispatch/dispatchable-event-stream? event-stream)
-    (try
+    (try+
       (publish-event! event-stream
                       (merge (es/workflow-started event-stream
                                                   (:execution/id context)
@@ -123,8 +124,9 @@
                                                          :routing/trigger-event-id
                                                          (:routing/trigger-event-id context)))
                              (workflow-run-fields context :running initial-phase)))
-      (catch Exception e
-        (println (messages/t :warn/publish-started {:error (ex-message e)}))))))
+      #_{:clj-kondo/ignore [:unresolved-symbol]}
+      (catch dispatch/nonfatal? _
+        (dispatch/publication-failure event-stream (:throwable &throw-context) :warn/publish-started)))))
 
 (defn ^{:stratum 1} publish-phase-started!
   "Publish phase entry with expected-agent facts from the executing interceptor."
