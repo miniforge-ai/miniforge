@@ -8,9 +8,9 @@
 
 ## Plan and scope
 
-Application layer, based on main `48afacd9e`. Depends on merged receipt
-preservation #2067 and the forthcoming authoritative publication-state policy
-(which depends on #2066). Admit the terminal receipt before returning and
+Application layer, aligned to main `2493d519b`. Depends on merged receipt
+preservation #2067 and authoritative publication-state policy #2068
+(built on #2066). Admit the terminal receipt before returning and
 checkpointing the final runner outcome. Refusal must become a failed machine
 state, not just a contradictory projected status. Preserve nil/legacy and
 explicit skip-lifecycle behavior, original phase facts, and cleanup.
@@ -49,11 +49,16 @@ diagnostic, never retried recursively; an already-failed outcome is not
 republished. Real-journal regressions cover the available failure path and the
 double-refusal case. The follow-up passed all three consumers (1m34s), rebuilt
 CLI 39,199,812 bytes, and isolated package 44 tests / 300 assertions.
+An additional serialized JVM run passed 37 tests / 681 assertions across N7 OPSV
+shared lifecycle, finalization, current terminal evidence, post-actuation
+recovery, typed checkpoints and native failure publication.
+Main alignment changed only the dependency documentation; the production and
+test tree remains identical to the tree used for those verification results.
 
 This does not yet make checkpoint I/O errors explicit or deduplicate terminal
 republication across a process restart; those remain separate durability work.
 
 ## Deployment
 
-Normal package rollout after the state-policy dependency merges.
+Normal package rollout; the state-policy dependency is merged.
 No new emitted event type. No claim of N7 completion from this slice alone.
