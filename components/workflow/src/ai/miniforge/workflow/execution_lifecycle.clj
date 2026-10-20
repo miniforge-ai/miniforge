@@ -24,12 +24,19 @@
    `execution-transition`."
   (:require [ai.miniforge.response.interface :as response]
             [ai.miniforge.workflow.context :as context]
+            [ai.miniforge.workflow.execution-error-handler :as error-handler]
             [ai.miniforge.workflow.execution-transition :as transition]
             [ai.miniforge.workflow.messages :as messages]))
 
 ;------------------------------------------------------------------------------ Layer 0
 
 ;; Atomic operations
+(defn ^{:stratum 0} begin-phase-attempt [phase-name ctx]
+  (-> ctx
+      (dissoc :phase)
+      (assoc :execution/attempt-phase phase-name
+             :execution/phase-error-offset (count (:execution/errors ctx)))))
+
 (defn- ^{:stratum 0} enter-error-record
   "Build the canonical entry recorded against `:execution/errors` for a
    phase-enter exception. Used uniformly whether or not the interceptor
@@ -47,7 +54,7 @@
 
    Returns updated context."
   [interceptor ctx]
-  (let [phase-name (get-in interceptor [:config :phase])]
+  (let [phase-name (get-in interceptor [:config :phase] (:name interceptor))]
     (if-let [leave-fn (:leave interceptor)]
       (try
         (leave-fn ctx)
@@ -88,6 +95,9 @@
   [ctx phase-result merge-metrics-fn]
   (update ctx :execution/metrics merge-metrics-fn
           (get phase-result :metrics {})))
+
+(defn ^{:stratum 0} record-phase-evidence [ctx phase-result]
+  (merge ctx (select-keys (:result phase-result) [:workflow/evidence-bundle-id])))
 
 (defn ^{:stratum 0} track-phase-files
   "Track files written by phase for workflow supervision.
@@ -153,7 +163,7 @@
    but the workflow-level error list is the authoritative source for
    downstream consumers such as the CLI and bridge surfaces)."
   [interceptor ctx]
-  (let [phase-name (get-in interceptor [:config :phase])]
+  (let [phase-name (get-in interceptor [:config :phase] (:name interceptor))]
     (if-let [enter-fn (:enter interceptor)]
       (try
         (enter-fn ctx)
@@ -170,7 +180,7 @@
                                            {:error (ex-message ex)
                                             :data (ex-data ex)}))]
             (if-let [error-fn (:error interceptor)]
-              (error-fn ctx-with-error ex)
+              (error-handler/invoke error-fn ctx-with-error ex error-record)
               (context/transition-to-failed ctx-with-error)))))
       ctx)))
 
@@ -182,6 +192,7 @@
   (-> ctx
       (update-response-chain phase-name phase-result)
       (assoc-in [:execution/phase-results phase-name] phase-result)
+      (record-phase-evidence phase-result)
       (record-phase-metrics phase-result merge-metrics-fn)
       (record-phase-artifacts phase-result)
       (track-phase-files phase-result)))
@@ -196,7 +207,7 @@
   [interceptor ctx]
   ;; Clear :phase map before each phase to prevent stale transition requests
   ;; from leaking across phase boundaries.
-  (let [ctx-clean (dissoc ctx :phase)
+  (let [ctx-clean (begin-phase-attempt (get-in interceptor [:config :phase] (:name interceptor)) ctx)
         ctx-entered (execute-enter interceptor ctx-clean)
         phase-result (extract-phase-result ctx-entered)
         phase-result-gated (transition/apply-gate-validation interceptor phase-result ctx-entered)

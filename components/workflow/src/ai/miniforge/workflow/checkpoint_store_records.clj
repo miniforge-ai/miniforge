@@ -51,6 +51,7 @@
    deliberately — identity that did not survive a checkpoint would let a
    resumed run be reattributed to whoever resumed it."
   [:execution/id
+   :workflow/evidence-bundle-id
    :execution/acting
    :execution/workflow-id
    :execution/workflow-version
@@ -62,6 +63,8 @@
    :execution/fsm-state
    :execution/response-chain
    :execution/errors
+   :execution/phase-error-offset
+   :execution/attempt-phase
    :execution/phase-handoffs
    :execution/artifacts
    :execution/dag-result
@@ -88,10 +91,11 @@
 ;------------------------------------------------------------------------------ Layer 1
 
 (defn ^{:stratum 1} active-or-last-phase
-  "Current phase when present, otherwise the last checkpointed phase."
+  "Current or latest attempted phase, then the legacy checkpoint-order fallback."
   [ctx]
-  (or (:execution/current-phase ctx)
-      (last (ordered-phase-ids ctx))))
+  (if-some [phase (or (:execution/current-phase ctx) (:execution/attempt-phase ctx))]
+    phase
+    (last (ordered-phase-ids ctx))))
 
 (defn ^{:stratum 1} build-machine-snapshot
   "Build the durable machine snapshot for an execution context.

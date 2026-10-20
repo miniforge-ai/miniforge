@@ -51,12 +51,12 @@
                                    retained)))
       persisted)))
 
-;------------------------------------------------------------------------------ Layer 1
-
-(defn- ^{:stratum 1} finalize-result [ctx phase-key result]
+(defn- ^{:stratum 0} finalize-result [ctx phase-key result]
   (if (and (= :opsv/actuate phase-key) (finalization-config/enabled? ctx))
-    (phase-result (finalization/finalize! ctx (:output result)))
+    (outcome/finalized-result (finalization/finalize! ctx (:output result)))
     result))
+
+;------------------------------------------------------------------------------ Layer 1
 
 (defn- ^{:stratum 1} publication-failure [result failure]
   (phase-result (assoc-in failure [:anomaly/data :opsv/phase-output] (:output result))))

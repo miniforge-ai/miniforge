@@ -15,8 +15,8 @@ it in the subsequent admission change.
 
 ## Scope and layers
 
-Base: main `f4fa22290`. Application publication boundary. Align #2057's failure
-diagnostic enrichment before opening this PR, preserving both changes.
+Base: main, aligned to `ac186fcac` after #2057 merged. Application publication
+boundary. Preserve #2057's enriched failure diagnostics alongside terminal receipts.
 Keep PR notifications outside the terminal receipt's failure boundary. Do not
 publish PR notifications after refused completion. Fatal errors still propagate.
 Legacy warning behavior and nil-stream no-op remain supported.
@@ -33,9 +33,11 @@ standards review, normal signed hooks, exact-head review and full CI before merg
 
 ## Verification so far
 
-- All three workflow product consumers pass serially (1m33s).
-- CLI rebuild succeeds: 39,188,825 bytes. Isolated packaged verification passes
-  38 tests / 127 assertions, with test-only support paths and no production overlay.
+- All three workflow product consumers pass serially (1m43s), aligned with current main.
+- CLI rebuild succeeds: 39,193,514 bytes. Isolated packaged verification passes
+  50 tests / 200 assertions, with test-only support paths and no production overlay.
+  This includes the merged failure diagnostics, durable restore and DAG checkpoint
+  regressions alongside terminal receipts and existing runner lifecycle tests.
 - The pre-fix package reproduced eight failures in the terminal receipt suite.
 - Changed namespaces match inferred strata and have no kondo warnings/errors.
 - Current legacy-form PR notifications are refused by the journal. The test
