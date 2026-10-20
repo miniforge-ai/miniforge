@@ -131,6 +131,7 @@
 
  :aliases
  {:test {:extra-paths ["../../components/phase-opsv/test"
+                       "../../components/workflow/test"
                        "../../components/phase-opsv/test-resources"]}
   :uberjar
   {:main ai.miniforge.cli.main}}}

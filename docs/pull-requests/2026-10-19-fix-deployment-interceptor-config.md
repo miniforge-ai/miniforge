@@ -50,6 +50,11 @@ stale-context replacement, named entry binding, unchanged leave/error ports and
 native failure/recovery routing. Removed the now-unused local default-config
 value. Registry merging remains authoritative; no duplicate gate policy is added.
 
+The actual runner regression has an explicit project-level CI step. Its test alias
+includes shared workflow test support, and the exact CI command passes locally
+(1 test / 6 assertions) without a custom classpath. This avoids relying solely
+on the broader local package setup for integration coverage.
+
 ## Deployment
 
 Normal CLI/package deployment. No stored-data migration is required.
