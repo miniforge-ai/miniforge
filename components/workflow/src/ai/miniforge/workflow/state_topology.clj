@@ -5,6 +5,7 @@
   "Compose unresolved execution states before guard/action resolution."
   (:require [ai.miniforge.workflow.definition :as definition]
             [ai.miniforge.workflow.state-identity :as identity]
+            [ai.miniforge.workflow.state-publication :as publication]
             [ai.miniforge.workflow.state-transitions :as transitions]))
 
 ;------------------------------------------------------------------------------ Layer 0
@@ -37,8 +38,9 @@
 (defn ^{:stratum 1} build-raw-states [workflow]
   (let [pipeline (definition/execution-pipeline workflow)
         entries (mapv identity/phase-entry (range) pipeline)
-        states (merge (lifecycle-states entries) (phase-states entries) (paused-states entries))]
-    {:states states
+        states (merge (lifecycle-states entries) (phase-states entries) (paused-states entries))
+        publishable-states (publication/with-refusal-transitions states)]
+    {:states publishable-states
      :phase-entries entries}))
 
 (comment ::unresolved-execution-topology)
