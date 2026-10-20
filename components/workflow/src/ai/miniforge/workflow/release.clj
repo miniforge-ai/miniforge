@@ -71,6 +71,18 @@
       true)
     false))
 
+(defn- ^{:stratum 0} inside-worktree?
+  "Return true when file-path stays inside worktree-path after canonical
+  resolution. Symlinks and '..' segments are resolved before comparison.
+  Fails closed (returns false) on IO errors."
+  [worktree-path file-path]
+  (try
+    (let [root   (.getCanonicalPath (java.io.File. (str worktree-path)))
+          target (.getCanonicalPath (java.io.File. (str file-path)))]
+      (or (= target root)
+          (.startsWith target (str root java.io.File/separator))))
+    (catch Exception _ false)))
+
 ;------------------------------------------------------------------------------ Layer 1
 ;; Git operations
 
@@ -115,13 +127,19 @@
   [worktree-path {:keys [path content]} logger]
   (try
     (let [full-path (fs/path worktree-path path)]
-      (write-file! full-path content)
-      (when logger
-        (log/debug logger :workflow :release/file-created
-                  {:data {:path path}}))
-      {:success? true
-       :action :create
-       :path path})
+      (if-not (inside-worktree? worktree-path full-path)
+        {:success? false
+         :action :create
+         :path path
+         :error (str "Path traversal rejected: " path " escapes worktree root")}
+        (do
+          (write-file! full-path content)
+          (when logger
+            (log/debug logger :workflow :release/file-created
+                      {:data {:path path}}))
+          {:success? true
+           :action :create
+           :path path})))
     (catch Exception e
       (when logger
         (log/error logger :workflow :release/file-create-failed
@@ -136,13 +154,19 @@
   [worktree-path {:keys [path content]} logger]
   (try
     (let [full-path (fs/path worktree-path path)]
-      (write-file! full-path content)
-      (when logger
-        (log/debug logger :workflow :release/file-modified
-                  {:data {:path path}}))
-      {:success? true
-       :action :modify
-       :path path})
+      (if-not (inside-worktree? worktree-path full-path)
+        {:success? false
+         :action :modify
+         :path path
+         :error (str "Path traversal rejected: " path " escapes worktree root")}
+        (do
+          (write-file! full-path content)
+          (when logger
+            (log/debug logger :workflow :release/file-modified
+                      {:data {:path path}}))
+          {:success? true
+           :action :modify
+           :path path})))
     (catch Exception e
       (when logger
         (log/error logger :workflow :release/file-modify-failed
@@ -156,15 +180,20 @@
 (defmethod process-file-action :delete
   [worktree-path {:keys [path]} logger]
   (try
-    (let [full-path (fs/path worktree-path path)
-          deleted? (delete-file! full-path)]
-      (when logger
-        (log/debug logger :workflow :release/file-deleted
-                  {:data {:path path :existed? deleted?}}))
-      {:success? true
-       :action :delete
-       :path path
-       :deleted? deleted?})
+    (let [full-path (fs/path worktree-path path)]
+      (if-not (inside-worktree? worktree-path full-path)
+        {:success? false
+         :action :delete
+         :path path
+         :error (str "Path traversal rejected: " path " escapes worktree root")}
+        (let [deleted? (delete-file! full-path)]
+          (when logger
+            (log/debug logger :workflow :release/file-deleted
+                      {:data {:path path :existed? deleted?}}))
+          {:success? true
+           :action :delete
+           :path path
+           :deleted? deleted?})))
     (catch Exception e
       (when logger
         (log/error logger :workflow :release/file-delete-failed

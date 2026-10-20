@@ -71,3 +71,42 @@
     (let [temp-dir (create-temp-dir)
           file-path (fs/path temp-dir "missing.clj")]
       (is (false? (release/delete-file! file-path))))))
+
+(deftest process-file-action-path-traversal-test
+  (testing "create rejects a path with .. segments that escape the worktree"
+    (let [worktree (create-temp-dir)
+          result   (release/process-file-action worktree
+                                                {:action :create
+                                                 :path   "../../etc/evil"
+                                                 :content "bad"}
+                                                nil)]
+      (is (false? (:success? result)))
+      (is (re-find #"(?i)traversal" (:error result)))))
+
+  (testing "modify rejects a path with .. segments that escape the worktree"
+    (let [worktree (create-temp-dir)
+          result   (release/process-file-action worktree
+                                                {:action  :modify
+                                                 :path    "../../etc/evil"
+                                                 :content "bad"}
+                                                nil)]
+      (is (false? (:success? result)))
+      (is (re-find #"(?i)traversal" (:error result)))))
+
+  (testing "delete rejects a path with .. segments that escape the worktree"
+    (let [worktree (create-temp-dir)
+          result   (release/process-file-action worktree
+                                                {:action :delete
+                                                 :path   "../../etc/evil"}
+                                                nil)]
+      (is (false? (:success? result)))
+      (is (re-find #"(?i)traversal" (:error result)))))
+
+  (testing "create allows a normal relative path inside the worktree"
+    (let [worktree (create-temp-dir)
+          result   (release/process-file-action worktree
+                                                {:action  :create
+                                                 :path    "src/foo.clj"
+                                                 :content "(ns foo)"}
+                                                nil)]
+      (is (true? (:success? result))))))
