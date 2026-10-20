@@ -47,6 +47,31 @@
 
  ;; ── Events with no browser handler ──────────────────────────────────────
 
+ {:constructor "checkpoint-written"
+  :event-type :workflow/checkpoint-written
+  :json-string "workflow/checkpoint-written"
+  :browser? false}
+ {:constructor "checkpoint-write-failed"
+  :event-type :workflow/checkpoint-write-failed
+  :json-string "workflow/checkpoint-write-failed"
+  :browser? false}
+ {:constructor "machine-snapshot-written"
+  :event-type :workflow/machine-snapshot-written
+  :json-string "workflow/machine-snapshot-written"
+  :browser? false}
+ {:constructor "machine-snapshot-write-failed"
+  :event-type :workflow/machine-snapshot-write-failed
+  :json-string "workflow/machine-snapshot-write-failed"
+  :browser? false}
+ {:constructor "workflow-resumed"
+  :event-type :workflow/resumed
+  :json-string "workflow/resumed"
+  :browser? false}
+ {:constructor "workflow-spec-hash-mismatch"
+  :event-type :workflow/spec-hash-mismatch
+  :json-string "workflow/spec-hash-mismatch"
+  :browser? false}
+
  {:constructor "agent-status"
   :event-type  :agent/status
   :json-string "agent/status"
