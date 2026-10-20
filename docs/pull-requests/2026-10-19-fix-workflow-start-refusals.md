@@ -18,7 +18,7 @@ journal refuses admission. Logging a warning is not acknowledgement.
 
 ## Layer and dependencies
 
-Application integration. Base: refreshed `main` at `f1b83e973`.
+Application integration. Base: refreshed `main` at `26bbbd589`.
 Depends on #2058 (explicit workflow-start intent), now merged and incorporated.
 Workflow-completion refusal, default-host
 migration, and gate acknowledgement remain separate changes.
@@ -40,10 +40,10 @@ serially, build CLI, test the isolated package, and audit standards before push.
 
 ## Local verification
 
-- All three workflow consumers pass, serially (2m19s).
-- CLI rebuilt: 39,188,425 bytes; isolated package: 89 tests, 312 assertions passed.
-- Additional constructor-boundary coverage: start suites pass 13 tests and 74
-  assertions using that same CLI, without production source overlays.
+- All three workflow/phase consumers pass, serially (1m40s), after main alignment.
+- CLI rebuilt: 39,188,620 bytes; isolated package: 96 tests, 349 assertions passed,
+  including constructor-boundary and merged terminal-phase coverage without
+  production source overlays.
 - Kondo reports no warnings/errors; changed namespaces match inferred strata.
 - Previous CLI reproduced phase effects after missing intent and constructor
   failure, and missing cleanup after fatal startup failure. Checkpoint assertions
