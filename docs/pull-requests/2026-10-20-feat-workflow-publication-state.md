@@ -8,11 +8,10 @@
 
 ## Plan and scope
 
-Base: main `ac186fcac`. Domain state-machine policy supporting the N3 fail-closed
+Base: main `35625de47`. Domain state-machine policy supporting the N3 fail-closed
 publication boundary needed by N7. Add an explicit refusal transition from
 terminal workflow states to failed; preserve terminal markers and existing
-transitions. Wire it into the decomposed topology from #2066, which must merge
-before this PR. The dependency is integrated locally for verification.
+transitions. Wire it into the decomposed topology from merged #2066.
 The runner admission/persistence integration follows separately after terminal
 receipt preservation. No independent success claim from an unacknowledged event.
 
@@ -37,6 +36,12 @@ restore. The policy preserves final markers, existing transitions, phase guards
 and accounting, and is idempotent. `:publication/fail` is an internal machine
 event, not a newly emitted N3 lifecycle event. Runner receipt enforcement is not
 part of this domain-policy change.
+
+Main alignment also includes merged terminal receipts #2067. The topology
+add/add conflict retained the refusal decorator; the actual-main diff contains
+only the policy and its tests. Aligned consumers passed (1m28s), rebuilt CLI
+39,198,244 bytes, and isolated package 48 tests / 306 assertions passed including
+the receipt regressions.
 
 ## Deployment
 
