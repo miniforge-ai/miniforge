@@ -48,6 +48,7 @@
   (:require
    [ai.miniforge.observer.alert-subscriber :as alert-subscriber]
    [ai.miniforge.observer.alerts :as alerts]
+   [ai.miniforge.observer.boundary.heartbeat-progress :as progress]
    [ai.miniforge.observer.core :as core]
    [ai.miniforge.observer.protocol :as proto]))
 
@@ -289,12 +290,20 @@
   "Evaluate alert rule maps against an event; returns fired alert maps."
   alerts/evaluate-rules)
 
+(def ^{:stratum 0} heartbeat-progress
+  "Interpret heartbeat progress as an explicit available/unavailable value.
+   Current 2.x gaps mean substantive progress; legacy 1.x gaps retain liveness
+   semantics. Unknown coverage and unsupported versions never imply health."
+  progress/interpret)
+
 (def ^{:stratum 0} alert-fired
   "Build an :observer/alert-fired event from workflow id and fired alert map."
   alerts/alert-fired)
 
 (def ^{:stratum 0} start-alert-subscriber!
-  "Subscribe to workflow heartbeat/tool events and publish fired alert events."
+  "Subscribe to workflow heartbeat/tool events. Legacy streams publish alerts;
+   current streams retain the latest alert per rule in the handle's :alert-state
+   under :alerts/latest, alongside explicit :heartbeat/progress availability."
   alert-subscriber/start-alert-subscriber!)
 
 (def ^{:stratum 0} stop-alert-subscriber!
