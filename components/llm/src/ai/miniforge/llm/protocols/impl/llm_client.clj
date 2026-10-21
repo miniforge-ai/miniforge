@@ -379,13 +379,17 @@
   [k]
   (System/getenv k))
 
-(defn ^{:stratum 0} rate-limited?
-  "Detect Claude CLI rate limit messages in content.
-   Claude CLI returns exit 0 but emits a rate limit message as content."
-  [content]
-  (and (string? content)
-       (re-find #"(?i)you've hit your limit|too many requests|\b429\b|rate limit(?:ed| exceeded)?\b|resets \d+[ap]m"
-                content)))
+(def ^{:stratum 0} ^:private rate-limit-notice-max-chars
+  "Longest content read as a rate-limit notice. The Claude CLI's notice is
+   one short line (\"You've hit your limit - resets 7pm (...)\"). A model
+   answer that only mentions rate limits, HTTP 429, or a reset time is
+   longer, and must not be thrown away as a limit."
+  500)
+
+(def ^{:stratum 0} ^:private structured-answer-pattern
+  "Content opening with JSON or a fenced block is a model answer, never the
+   CLI's notice."
+  #"^\s*(?:[\[{]|```)")
 
 (defn ^{:stratum 0} format-timeout-error [{:keys [message type elapsed-ms]}]
   (format "Adaptive timeout: %s (type: %s, elapsed: %dms)"
@@ -713,6 +717,18 @@
    :reasoning-output-tokens (get-in usage [:completion_tokens_details :reasoning_tokens])})
 
 ;------------------------------------------------------------------------------ Layer 1
+
+(defn ^{:stratum 1} rate-limited?
+  "Detect Claude CLI rate limit messages in content.
+   Claude CLI returns exit 0 but emits a rate limit message as content.
+   Only short, unstructured content can be that notice: a long or JSON
+   answer that mentions rate limits is a real answer."
+  [content]
+  (and (string? content)
+       (<= (count (str/trim content)) rate-limit-notice-max-chars)
+       (not (re-find structured-answer-pattern content))
+       (re-find #"(?i)you've hit your limit|too many requests|\b429\b|rate limit(?:ed| exceeded)?\b|resets \d+[ap]m"
+                content)))
 
 (defn ^{:stratum 1} terminated-by
   "Return the `:llm/terminated-by` marker for an adaptive-timeout envelope,
