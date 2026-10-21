@@ -29,7 +29,7 @@
    [ai.miniforge.event-stream.interface.opsv :as opsv]
    [ai.miniforge.event-stream.interface.stream :as stream]
    [ai.miniforge.event-stream.digest :as digest]
-   [ai.miniforge.event-stream.heartbeat :as heartbeat]
+   [ai.miniforge.event-stream.boundary.heartbeat :as heartbeat]
    [ai.miniforge.event-stream.operator-requests :as operator-requests]
    [ai.miniforge.event-stream.reader :as reader]
    [ai.miniforge.event-stream.sinks :as sinks]
@@ -218,20 +218,29 @@
 
 ;; Phase heartbeat scheduler — start/stop liveness signalling for long-running phases.
 (def ^{:stratum 0} start-heartbeat!
-  "Start periodic :workflow/phase-heartbeat emission for a phase on a
-   daemon scheduled executor. Returns an opaque stop handle map
-   (:heartbeat/executor, :heartbeat/future, :heartbeat/phase-id,
-   :heartbeat/last-tick, :heartbeat/seq-num) to pass to stop-heartbeat!.
-   Throws ex-info when event-stream is not IDeref, or when :interval-ms
-   is not a positive integer. opts: {:interval-ms long} (default 30s)."
+  "Start profile-aware phase heartbeats; return an owned stop handle or anomaly.
+   Current opts: positive :interval-ms (default 30s), :progress-sources (default
+   :unknown). Declare sources only when substantive-work ports are instrumented
+   continuously from entry. Every start creates a fresh activation; no replay
+   inference. Legacy construction and invalid-interval exceptions are retained."
   heartbeat/start-heartbeat!)
 
 (def ^{:stratum 0} stop-heartbeat!
-  "Stop a heartbeat scheduler returned by start-heartbeat!. Nil-safe.
-   Cancels the periodic ScheduledFuture (does not interrupt an in-flight
-   tick unless opts :may-interrupt? is true) then shuts down the backing
-   executor. Returns nil."
+  "Stop an owned scheduler. Nil-safe. Current handles close admission and cancel
+   before waiting for an in-flight tick; successful stop leaves no running tick.
+   Optional :may-interrupt? defaults false. Returns nil or a current anomaly."
   heartbeat/stop-heartbeat!)
+
+(def ^{:stratum 0} observe-heartbeat-progress!
+  "Report substantive progress through a captured current activation handle.
+   Source must be declared at entry; position is positive, strictly increasing
+   per source and activation. Repeats, stale positions and stopped handles cannot
+   advance progress. Unknown coverage remains unknown. Returns nil or anomaly."
+  heartbeat/observe-heartbeat-progress!)
+
+(def ^{:stratum 0} heartbeat-dropped-count
+  "Return the current activation's failed ephemeral publication count or anomaly."
+  heartbeat/heartbeat-dropped-count)
 
 ;; ────────────────────────────────────────────────────────────────────────────
 ;; Event constructors
