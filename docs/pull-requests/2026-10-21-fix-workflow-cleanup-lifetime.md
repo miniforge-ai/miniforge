@@ -39,3 +39,7 @@ tests measured 0.7–66 ms on the JVM, so they remain in the brick suite.
 
 The implementation is split into normal-budget commits for lifetime/session
 helpers and heartbeat boundary, then the public runner integration and regressions.
+
+The final adversarial pass reused the parent's cleanup-attempt boundary for
+heartbeat warnings rather than duplicating critical-cause policy. JVM lifetime,
+heartbeat and terminal regressions still pass twelve tests/61 assertions.

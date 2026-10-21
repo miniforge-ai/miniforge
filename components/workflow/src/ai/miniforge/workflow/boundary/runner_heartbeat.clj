@@ -4,19 +4,14 @@
 (ns ai.miniforge.workflow.boundary.runner-heartbeat
   "Preserve critical heartbeat failures while retaining legacy warning behavior."
   (:require [ai.miniforge.event-stream.interface :as events]
-            [ai.miniforge.resource-cleanup.interface :as cleanup]
+            [ai.miniforge.workflow.boundary.cleanup-attempt :as attempt]
             [ai.miniforge.workflow.messages :as messages]
-            [ai.miniforge.workflow.runner-event-dispatch :as dispatch]
-            [slingshot.slingshot :refer [try+]]))
+            [ai.miniforge.workflow.runner-event-dispatch :as dispatch]))
 
 ;------------------------------------------------------------------------------ Layer 0
 
-(defn- ^{:stratum 0} attempt! [operation warning]
-  (try+ (operation)
-    (catch Object _
-      (let [throwable (:throwable &throw-context)]
-        (when-let [fatal (cleanup/fatal-cause throwable)] (cleanup/propagate! fatal))
-        (println (messages/t warning {:error (ex-message throwable)}))))))
+(defn- ^{:stratum 0} warn-failure! [warning throwable]
+  (println (messages/t warning {:error (ex-message throwable)})))
 
 ;------------------------------------------------------------------------------ Layer 1
 
@@ -24,10 +19,11 @@
   ([stream context phase] (start! stream context phase {}))
   ([stream context phase opts]
    (when (dispatch/stateful-stream? stream)
-     (attempt! (partial events/start-heartbeat! stream (:execution/id context) phase opts)
-               :warn/heartbeat-start))))
+     (attempt/attempt! (partial events/start-heartbeat! stream (:execution/id context) phase opts)
+                       (partial warn-failure! :warn/heartbeat-start)))))
 
 (defn ^{:stratum 1} stop! [handle]
-  (attempt! (partial events/stop-heartbeat! handle) :warn/heartbeat-stop))
+  (attempt/attempt! (partial events/stop-heartbeat! handle)
+                    (partial warn-failure! :warn/heartbeat-stop)))
 
 (comment ::heartbeat-effect-boundary)
