@@ -51,3 +51,9 @@ conversion and reach lifetime cleanup unchanged. The regression passes, all thre
 consumer suites pass (1m26s), and the rebuilt CLI (39,229,236 bytes) passes fifteen
 isolated lifetime/heartbeat/terminal tests with 78 assertions. Fatal phase-boundary
 cleanup receives the original exception and no fabricated finalized output.
+
+CI's full-workspace lint exposed an inferred nil throwable in Slingshot capture.
+The lifetime boundary now directly catches the actual Throwable, preserving its
+identity without macro-context lookup. Full-workspace lint has zero errors;
+all three consumers pass (1m33s), and CLI39,229,195 passes the same fifteen
+isolated tests/78 assertions. No lint suppression or gate bypass was introduced.

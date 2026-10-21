@@ -6,17 +6,15 @@
   (:require [ai.miniforge.anomaly.interface :as anomaly]
             [ai.miniforge.resource-cleanup.interface :as resources]
             [ai.miniforge.workflow.messages :as messages]
-            [ai.miniforge.workflow.runner-cleanup :as cleanup]
-            [slingshot.slingshot :refer [try+]]))
+            [ai.miniforge.workflow.runner-cleanup :as cleanup]))
 
 ;------------------------------------------------------------------------------ Layer 0
 
 (defn- ^{:stratum 0} capture! [result exception operation]
-  (try+ (vreset! result (operation))
-    (catch Object _
-      (let [throwable (:throwable &throw-context)]
-        (vreset! exception throwable)
-        (throw throwable)))))
+  (try (vreset! result (operation))
+    (catch Throwable throwable
+      (vreset! exception throwable)
+      (throw throwable))))
 
 (defn- ^{:stratum 0} warn-refusal! [result]
   (when (anomaly/any-anomaly? result)
