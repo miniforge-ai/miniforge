@@ -352,7 +352,12 @@
  {:constructor "phase-heartbeat"
   :event-type  :workflow/phase-heartbeat
   :json-string "workflow/phase-heartbeat"
-  :browser?    false}
+  :browser? false
+  :scope :workflow
+  :retention-class :ephemeral
+  :minimum-retention-hours 24
+  :payload-version "2.0.0"
+  :note "Current writes use separate liveness/progress fields; legacy ticks are not progress."}
 
  ;; GROUP 1+4 / GROUP 2 agent stream-stall + session events
  {:constructor "agent-stream-stalled"

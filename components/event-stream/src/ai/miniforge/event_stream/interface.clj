@@ -358,10 +358,9 @@
   events/tool-call-completed)
 
 (def ^{:stratum 0} phase-heartbeat
-  "Build and return a :workflow/phase-heartbeat event envelope map for
-   long-running phase liveness (:phase/active-since,
-   :phase/events-emitted, :phase/last-event-at,
-   :phase/gap-since-last-event-ms)."
+  "Build a heartbeat without publishing. Current streams require N3 §3.1.1
+   liveness and explicit progress coverage; legacy streams retain tick fields.
+   Current drafts acquire their journal sequence only on publication."
   events/phase-heartbeat)
 
 (def ^{:stratum 0} workflow-completed
