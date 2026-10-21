@@ -20,9 +20,8 @@
 (defn- ^{:stratum 0} prepare! [failure original definition]
   (if failure (throw failure) (original definition)))
 
-(defn- ^{:stratum 0} stop! [calls failure _handle]
-  (swap! calls conj :stop)
-  (when failure (throw failure)))
+(defn- ^{:stratum 0} stop-error! [failure once?]
+  (if once? (first (swap-vals! failure (constantly nil))) @failure))
 
 (defn- ^{:stratum 0} release! [calls captured failure _opts ctx _workflow exception _acquired]
   (swap! calls conj :cleanup)
@@ -31,13 +30,20 @@
 
 ;------------------------------------------------------------------------------ Layer 1
 
-(defn ^{:stratum 1} execute [failures]
-  (let [calls (atom []) captured (atom nil) original runner/build-pipeline]
+(defn- ^{:stratum 1} stop! [calls failure once? _handle]
+  (swap! calls conj :stop)
+  (when-let [error (stop-error! failure once?)] (throw error)))
+
+;------------------------------------------------------------------------------ Layer 2
+
+(defn ^{:stratum 2} execute [failures]
+  (let [calls (atom []) captured (atom nil) original runner/build-pipeline
+        stop-failure (atom (:stop failures))]
     (with-redefs [environment/acquire-execution-environment! (constantly nil)
                   environment/persist-workspace-at-phase-boundary! (constantly nil)
                   runner/build-pipeline (partial prepare! (:prepare failures) original)
                   events/start-phase-heartbeat! (constantly :owned)
-                  events/stop-phase-heartbeat! (partial stop! calls (:stop failures))
+                  events/stop-phase-heartbeat! (partial stop! calls stop-failure (:stop-once? failures))
                   cleanup/post-workflow-cleanup! (partial release! calls captured (:cleanup failures))]
       (let [result (try+ (runner/run-pipeline (workflow) {} {:skip-lifecycle-events true})
                      (catch Object _ (:throwable &throw-context)))]

@@ -8,9 +8,9 @@
 
 ## Scope and dependencies
 
-Dependent application integration branch from fix/workflow-cleanup-sequence,
-which follows workflow ownership #2080 and merged resource cleanup #2079.
-Open only after those parents merge and the branch is aligned with main.
+Application integration following merged cleanup sequence #2082, workflow
+ownership #2080 and resource cleanup #2079. The branch is aligned with main,
+including activation-local progress ports #2083.
 
 Protect execution and preparation after environment acquisition, attempt heartbeat
 shutdown and post-workflow cleanup independently, and preserve the original
@@ -43,3 +43,11 @@ helpers and heartbeat boundary, then the public runner integration and regressio
 The final adversarial pass reused the parent's cleanup-attempt boundary for
 heartbeat warnings rather than duplicating critical-cause policy. JVM lifetime,
 heartbeat and terminal regressions still pass twelve tests/61 assertions.
+
+After alignment with main, a new regression failed when a fatal phase-boundary
+stop succeeded on cleanup retry: the execution wrapper had converted the original
+fatal error into an ordinary failure result. Critical causes now escape that
+conversion and reach lifetime cleanup unchanged. The regression passes, all three
+consumer suites pass (1m26s), and the rebuilt CLI (39,229,236 bytes) passes fifteen
+isolated lifetime/heartbeat/terminal tests with 78 assertions. Fatal phase-boundary
+cleanup receives the original exception and no fabricated finalized output.

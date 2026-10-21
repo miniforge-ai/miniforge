@@ -23,7 +23,15 @@
         result (fixture/execute {:stop failure})]
     (is (identical? failure (:result result)))
     (is (= [:stop :stop :cleanup] (:calls result)))
-    (is (= :failed (get-in result [:cleanup :output :execution/status])))))
+    (is (nil? (get-in result [:cleanup :output])))
+    (is (identical? failure (get-in result [:cleanup :exception])))))
+
+(deftest ^{:stratum 0} successful-cleanup-retry-cannot-hide-a-fatal-phase-boundary
+  (let [failure (Error. "fixture transient fatal heartbeat stop")
+        result (fixture/execute {:stop failure :stop-once? true})]
+    (is (identical? failure (:result result)))
+    (is (= [:stop :stop :cleanup] (:calls result)))
+    (is (identical? failure (get-in result [:cleanup :exception])))))
 
 (deftest ^{:stratum 0} cleanup-failure-cannot-mask-preparation-failure
   (let [primary (Exception. "fixture preparation failure")
