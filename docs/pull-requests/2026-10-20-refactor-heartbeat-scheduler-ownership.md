@@ -1,5 +1,6 @@
 <!--
   Title: Miniforge.ai
+  Author: Christopher Lester (christopher@miniforge.ai)
   Copyright 2025-2026 Christopher Lester. Licensed under Apache 2.0.
 -->
 
@@ -35,3 +36,14 @@ package tests: 10 tests, 30 assertions. Additional JVM-only executor fault tests
 passed (one test, six assertions) within all four consumer suites; Babashka
 does not support the required executor proxy. The final run includes the required
 Slingshot boundary forms. Lint, inferred strata and standards checks passed.
+
+## Review hardening
+
+Scheduling and shutdown now catch all Slingshot values while preserving the
+original Throwable wrapper. A shared cleanup boundary governs both failed start
+and stop: always attempt cleanup, preserve fatal priority, and suppress ordinary
+secondary failures without introducing cause cycles. This addresses all three
+review findings, including fatal cancellation masked by shutdown failure.
+
+Fresh four-consumer run: 1m38s, including two JVM cleanup tests/24 assertions per
+project. Fresh CLI: 39,204,243 bytes. Isolated package: 10 tests/32 assertions.
