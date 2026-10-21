@@ -4,6 +4,7 @@
 (ns ai.miniforge.event-stream.boundary.heartbeat-cleanup
   "Run owned cleanup without masking primary, fatal or structured failures."
   (:require [ai.miniforge.event-stream.boundary.critical :as critical]
+            [ai.miniforge.event-stream.boundary.throwable-graph :as graph]
             [slingshot.slingshot :refer [try+]]))
 
 ;------------------------------------------------------------------------------ Layer 0
@@ -16,8 +17,7 @@
   (or (critical/cause primary) (critical/cause cleanup) primary cleanup))
 
 (defn- ^{:stratum 0} suppress! [failure other]
-  (when (and other (not (identical? failure other))
-             (not (identical? failure (critical/cause other))))
+  (when (and other (not (graph/reaches? other failure)))
     (.addSuppressed ^Throwable failure other)))
 
 ;------------------------------------------------------------------------------ Layer 1
