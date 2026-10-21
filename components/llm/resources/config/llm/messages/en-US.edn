@@ -26,6 +26,9 @@
   :rate-limit-test.system/normal-implementation
   "Here is the implementation..."
 
+  :rate-limit-test.system/limits-claim
+  "Added a rate limit to the export API and retries on HTTP 429; the quota resets 3pm daily."
+
   :rate-limit-test.system/waf-claim
   "WAF-based rate limiting on mobile auth endpoints remained in progress."
 
