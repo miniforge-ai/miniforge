@@ -1,9 +1,9 @@
 ;; Title: Miniforge.ai
 ;; Copyright 2025-2026 Christopher Lester (christopher@miniforge.ai)
 ;; Licensed under the Apache License, Version 2.0.
-(ns ai.miniforge.event-stream.heartbeat-cleanup-graph-test
-  (:require [ai.miniforge.event-stream.boundary.heartbeat-cleanup :as cleanup]
-            [ai.miniforge.event-stream.boundary.throwable-graph :as graph]
+(ns ai.miniforge.resource-cleanup.graph-test
+  (:require [ai.miniforge.resource-cleanup.interface :as cleanup]
+            [ai.miniforge.resource-cleanup.boundary.throwable-graph :as graph]
             [clojure.test :refer [deftest is]]
             [slingshot.slingshot :refer [try+]]))
 

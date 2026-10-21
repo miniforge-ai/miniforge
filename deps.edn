@@ -14,6 +14,7 @@
                        "components/content-hash/src"
                        "components/file-durability/src"
                        "components/file-durability/resources"
+                       "components/resource-cleanup/src"
                        "components/redaction/src"
                        "components/redaction/resources"
                        "components/opsv/src"
@@ -254,6 +255,7 @@
                       ai.miniforge/content-hash {:local/root "components/content-hash"}
                       ai.miniforge/file-durability {:local/root "components/file-durability"}
                       ai.miniforge/redaction {:local/root "components/redaction"}
+                      ai.miniforge/resource-cleanup {:local/root "components/resource-cleanup"}
                       ai.miniforge/opsv {:local/root "components/opsv"}
                       ai.miniforge/opsv-actuation {:local/root "components/opsv-actuation"}
                       ai.miniforge/opsv-provider-github {:local/root "components/opsv-provider-github"}
@@ -450,6 +452,7 @@
                        "components/decision-envelope/test"
                        "components/execution-grant/test"
                        "components/file-durability/test"
+                       "components/resource-cleanup/test"
                        "components/tenancy/test"
                        "components/effect-transaction/test"
                        "components/policy-clause/test"
@@ -549,6 +552,7 @@
                       ai.miniforge/content-hash {:local/root "components/content-hash"}
                       ai.miniforge/file-durability {:local/root "components/file-durability"}
                       ai.miniforge/opsv {:local/root "components/opsv"}
+                      ai.miniforge/resource-cleanup {:local/root "components/resource-cleanup"}
                       ai.miniforge/opsv-actuation {:local/root "components/opsv-actuation"}
                       ai.miniforge/opsv-provider-github {:local/root "components/opsv-provider-github"}
                       ai.miniforge/logging {:local/root "components/logging"}
@@ -727,6 +731,7 @@
                              ai.miniforge/algorithms {:local/root "components/algorithms"}
                              ai.miniforge/content-hash {:local/root "components/content-hash"}
                              ai.miniforge/file-durability {:local/root "components/file-durability"}
+                             ai.miniforge/resource-cleanup {:local/root "components/resource-cleanup"}
                              ai.miniforge/opsv {:local/root "components/opsv"}
                              ai.miniforge/logging {:local/root "components/logging"}
                              ai.miniforge/llm {:local/root "components/llm"}

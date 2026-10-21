@@ -10,6 +10,7 @@
         ai.miniforge/policy-clause {:local/root "../policy-clause"}
         ai.miniforge/redaction {:local/root "../redaction"}
         ai.miniforge/response {:local/root "../response"}
+        ai.miniforge/resource-cleanup {:local/root "../resource-cleanup"}
         ai.miniforge/schema {:local/root "../schema"}
         cheshire/cheshire {:mvn/version "5.13.0"}
         com.cognitect/transit-clj {:mvn/version "1.0.333"}
