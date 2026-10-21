@@ -39,3 +39,8 @@ Adversarial review checked unsupported-major skip recording and position handlin
 absence of unregistered current alert publication, shared alert factories, bounded
 latest-per-rule storage and dependency direction. This is a scoped observer
 integration, not a claim that N7 or workflow progress instrumentation is complete.
+
+Measured canonical-journal acceptance runtime is 163 ms, so it lives in the
+miniforge project integration suite under the Polylith 100 ms test-placement rule,
+not the observer brick's fast unit-test suite. The same packaged test is rerun
+after relocation; no production behavior changes with the move.

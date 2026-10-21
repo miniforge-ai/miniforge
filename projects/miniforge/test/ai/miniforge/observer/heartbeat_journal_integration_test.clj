@@ -1,7 +1,7 @@
 ;; Title: Miniforge.ai
 ;; Copyright 2025-2026 Christopher Lester (christopher@miniforge.ai)
 ;; Licensed under the Apache License, Version 2.0.
-(ns ai.miniforge.observer.heartbeat-journal-test
+(ns ai.miniforge.observer.heartbeat-journal-integration-test
   (:require [ai.miniforge.anomaly.interface :as anomaly]
             [ai.miniforge.event-stream.interface :as events]
             [ai.miniforge.observer.interface :as observer]
