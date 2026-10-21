@@ -29,6 +29,7 @@
    [ai.miniforge.workflow.context :as context]
    [ai.miniforge.workflow.environment-notifications :as notifications]
    [ai.miniforge.workflow.environment-records :as records]
+   [ai.miniforge.workflow.governed-environment :as governed]
    [ai.miniforge.workflow.messages :as messages]
    [ai.miniforge.workflow.runner-defaults :as defaults]))
 
@@ -150,20 +151,6 @@
                    :data checkpoint})
         nil))))
 
-(defn- ^{:stratum 1} acquire-worktree-and-capsule
-  "Acquire both a host worktree and a capsule for governed mode."
-  [executor workflow-id mode env-config fns]
-  (let [wt-registry  ((:create-registry fns) {:worktree {}})
-        wt-executor  ((:select-exec fns) wt-registry :preferred :worktree)
-        wt-result    (when wt-executor
-                       (build-env-record wt-executor workflow-id mode env-config fns))
-        capsule      (build-env-record executor workflow-id mode env-config fns)]
-    (when (and wt-result capsule)
-      (assoc capsule
-             :worktree-path (:worktree-path wt-result)
-             :worktree-executor wt-executor
-             :worktree-environment-id (:environment-id wt-result)))))
-
 (defn ^{:stratum 1} persist-workspace-at-phase-boundary!
   "Persist workspace at phase completion.
 
@@ -275,7 +262,7 @@
           (restore-local-workspace-checkpoint! executor repo-path resume-workspace))
         (when executor
           (if (= :governed mode)
-            (acquire-worktree-and-capsule executor workflow-id mode env-config fns)
+            (governed/acquire! executor workflow-id mode env-config fns)
             (build-env-record executor workflow-id mode env-config fns))))
       (catch Exception e
         (boundary/preserve-critical! e)
