@@ -13,7 +13,7 @@
 
 ;------------------------------------------------------------------------------ Layer 0
 
-(defn- ^{:stratum 0} preserve-critical! [throwable]
+(defn ^{:stratum 0} preserve-critical! [throwable]
   (when-let [fatal (cleanup/fatal-cause throwable)] (cleanup/propagate! fatal)))
 
 (defn- ^{:stratum 0} warn-release! [message]

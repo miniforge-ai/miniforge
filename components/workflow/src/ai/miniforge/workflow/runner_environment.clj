@@ -143,6 +143,7 @@
                      :data checkpoint}))
         result)
       (catch Exception e
+        (boundary/preserve-critical! e)
         (log/warn env-logger :workflow :workflow/restore-failed
                   {:message (messages/t :env/restore-failed
                                         {:error (ex-message e)})
@@ -230,6 +231,7 @@
                        :data {:phase phase :branch (:branch data)}}))
           result)
         (catch Exception e
+          (boundary/preserve-critical! e)
           (log/warn env-logger :workflow :workflow/persist-failed
                     {:message (messages/t :env/persist-failed
                                           {:error (ex-message e)})
@@ -276,6 +278,7 @@
             (acquire-worktree-and-capsule executor workflow-id mode env-config fns)
             (build-env-record executor workflow-id mode env-config fns))))
       (catch Exception e
+        (boundary/preserve-critical! e)
         (when (= :governed mode) (throw e))
         (log/warn env-logger :workflow :workflow/env-acquisition-failed
                   {:message (messages/t :env/acquisition-failed {:error (ex-message e)})})

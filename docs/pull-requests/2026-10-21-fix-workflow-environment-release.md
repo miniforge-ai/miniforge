@@ -8,8 +8,8 @@
 
 ## Scope and dependencies
 
-Main-based workflow boundary change after shared cleanup #2079, dependent on
-cleanup sequencing #2082 before opening/merge. Environment
+Main-based workflow boundary change after merged shared cleanup #2079 and
+cleanup sequencing #2082, aligned with activation-local progress ports #2083. Environment
 release must preserve fatal and interrupted causes instead of swallowing them
 as ordinary warnings. Keep nil-safe and best-effort ordinary failure behavior.
 Separate environment records and persistence notifications so the touched runner
@@ -43,3 +43,13 @@ silent. The boundary now warns for those results and returns the original value;
 the regression fixture uses the executor's real success/error constructors.
 All three consumers pass again (1m27s); the rebuilt CLI is 39,226,360 bytes and
 the isolated regression suite passes twelve tests/45 assertions.
+
+After aligning with main, all three consumer suites pass again (1m27s).
+The rebuilt CLI is 39,228,667 bytes.
+
+The public-path adversarial pass found acquisition, restoration and persistence
+handlers could swallow an interruption. All now apply the same critical-cause
+policy before ordinary warning behavior. The new public-path regressions fail
+against the prior packages and pass against the corrected CLI. Final consuming
+project suites pass (1m29s); CLI39,228,684 passes fifteen isolated tests with
+51 assertions. The whole PR remains within its normal budget (473 reportable).
