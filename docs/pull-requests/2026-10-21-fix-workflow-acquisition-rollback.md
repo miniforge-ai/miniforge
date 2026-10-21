@@ -8,8 +8,9 @@
 
 ## Scope and dependency
 
-Depends on environment release #2086. Do not open against main until that parent
-is merged and this branch is aligned. Keep the parent's branch intact.
+Follows merged environment release #2086 and is aligned with main. The parent's
+signed branch is retained. Squash-parent conflict resolution preserves the exact
+tested rollback tree; alignment introduced no source changes.
 
 Transfer acquired resource ownership only after constructing its record. A failed
 record construction releases the environment. Governed acquisition obtains its
@@ -27,11 +28,12 @@ Public acquisition regressions cover missing/rejected worktrees, refused and
 throwing capsules, record-construction interruption, rollback failure priority,
 and successful ownership transfer. Run JVM consumers serially, verify the built
 CLI without production overlays, and retain all standards, budget, signing,
-fresh-review and CI gates. No verification is claimed until those runs complete.
+fresh-review and CI gates.
 
 The parent CLI fails ten assertions in the six new ownership tests; the corrected
 implementation passes all three workflow consumers (1m28s). The rebuilt CLI is
 39,230,020 bytes and passes fourteen isolated acquisition/release/notification
 tests with 54 assertions. New tests take 0.2–7.9 ms on the JVM and remain in the
 brick suite. The standards scan is clean; the scoped change is 158 reportable
-lines, within the normal commit budget. Parent alignment and PR gates remain.
+lines, within the normal commit budget. Normal signed hooks pass; PR review and
+all CI gates remain required before merge.
