@@ -1,7 +1,7 @@
 ;; Title: Miniforge.ai
 ;; Copyright 2025-2026 Christopher Lester (christopher@miniforge.ai)
 ;; Licensed under the Apache License, Version 2.0.
-(ns ai.miniforge.event-stream.boundary.throwable-graph
+(ns ai.miniforge.resource-cleanup.boundary.throwable-graph
   "Identity-based reachability for exception suppression safety.")
 
 ;------------------------------------------------------------------------------ Layer 0
