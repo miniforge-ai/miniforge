@@ -29,17 +29,20 @@
                         :cancel/source :cli
                         :workflow/duration-ms 2}})
 
-(defn ^{:stratum 0} with-stream [operation]
-  (fs/with-temp-dir [directory {:prefix "workflow-current-admission-"}]
-    (let [path (str (fs/real-path directory))
-          options {:journal-directory path}
-          stream (events/create-current-event-stream options)]
-      (is (not (anomaly/anomaly? stream)) (pr-str stream))
-      (when-not (anomaly/anomaly? stream)
-        (try+ (operation stream options)
-          (finally (events/close-current-event-stream! stream)))))))
+(defn ^{:stratum 0} with-options [options operation]
+  (let [stream (events/create-current-event-stream options)]
+    (is (not (anomaly/anomaly? stream)) (pr-str stream))
+    (when-not (anomaly/anomaly? stream)
+      (try+ (operation stream options)
+        (finally (events/close-current-event-stream! stream))))))
 
 ;------------------------------------------------------------------------------ Layer 1
+
+(defn ^{:stratum 1} with-stream [operation]
+  (fs/with-temp-dir [directory {:prefix "workflow-current-admission-"}]
+    (let [path (str (fs/real-path directory))
+          options {:journal-directory path}]
+      (with-options options operation))))
 
 (defn ^{:stratum 1} draft [workflow-id event-type]
   (merge (envelope/draft) (get payloads event-type)
