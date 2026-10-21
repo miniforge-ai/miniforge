@@ -47,3 +47,11 @@ review findings, including fatal cancellation masked by shutdown failure.
 
 Fresh four-consumer run: 1m38s, including two JVM cleanup tests/24 assertions per
 project. Fresh CLI: 39,204,243 bytes. Isolated package: 10 tests/32 assertions.
+
+The subsequent review identified ordinary wrapping cleanup exceptions as another
+cycle risk. Suppression now checks identity-based reachability through both causes
+and suppressed exceptions, terminating on existing cycles. Five regressions cover
+indirect wrappers, suppressed links, existing cycles, self-suppression and retention
+of independent failures. Four consumer projects passed (1m45s); fresh CLI is
+39,204,920 bytes. Isolated package: 15 tests, 42 assertions. The cycle fixture tests
+the graph directly because Slingshot itself cannot traverse a cyclic cause chain.
