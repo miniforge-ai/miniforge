@@ -3,7 +3,7 @@
 ;; Licensed under the Apache License, Version 2.0.
 (ns ai.miniforge.event-stream.boundary.heartbeat-scheduler
   "Own scheduler resources independently of heartbeat publication semantics."
-  (:require [ai.miniforge.event-stream.boundary.critical :as critical]
+  (:require [ai.miniforge.event-stream.boundary.heartbeat-cleanup :as cleanup]
             [slingshot.slingshot :refer [try+]])
   (:import [java.util.concurrent Executors ScheduledExecutorService ScheduledFuture ThreadFactory TimeUnit]
            [java.util.concurrent.atomic AtomicLong]))
@@ -19,26 +19,18 @@
   (.scheduleAtFixedRate executor ^Runnable task ^long interval-ms
                        ^long interval-ms TimeUnit/MILLISECONDS))
 
-(defn- ^{:stratum 0} release-failed! [^ScheduledExecutorService executor failure]
-  (try+
-    (.shutdownNow executor)
-    (catch Throwable cleanup
-      (when-let [fatal (or (critical/cause failure) (critical/cause cleanup))]
-        (critical/propagate! fatal))
-      (when-not (identical? failure cleanup) (.addSuppressed ^Throwable failure cleanup)))))
+(defn- ^{:stratum 0} shutdown! [handle]
+  (when-let [^ScheduledExecutorService executor (:heartbeat/executor handle)]
+    (.shutdown executor)))
+
+(defn- ^{:stratum 0} shutdown-now! [^ScheduledExecutorService executor]
+  (.shutdownNow executor))
 
 ;------------------------------------------------------------------------------ Layer 1
 
-(defn ^{:stratum 1} stop!
-  ([handle] (stop! handle {}))
-  ([handle {:keys [may-interrupt?] :or {may-interrupt? false}}]
-   (try+
-     (when-let [^ScheduledFuture future (:heartbeat/future handle)]
-       (cancel-future! future may-interrupt?))
-     (finally
-       (when-let [^ScheduledExecutorService executor (:heartbeat/executor handle)]
-         (.shutdown executor))))
-   nil))
+(defn- ^{:stratum 1} cancel! [handle opts]
+  (when-let [future (:heartbeat/future handle)]
+    (cancel-future! future (get opts :may-interrupt? false))))
 
 (defn- ^{:stratum 1} daemon-thread-factory [phase-id]
   (let [n (.incrementAndGet ^AtomicLong thread-counter)]
@@ -54,11 +46,15 @@
   (try+
     (let [future (schedule-future! executor interval-ms task)]
       {:heartbeat/executor executor :heartbeat/future future})
-    (catch Throwable failure
-      (release-failed! executor failure)
-      (throw failure))))
+    (catch Object _
+      (cleanup/after-failure! (:throwable &throw-context) (partial shutdown-now! executor)))))
 
 ;------------------------------------------------------------------------------ Layer 2
+
+(defn ^{:stratum 2} stop!
+  ([handle] (stop! handle {}))
+  ([handle opts]
+   (cleanup/finish! (partial cancel! handle opts) (partial shutdown! handle))))
 
 (defn ^{:stratum 2} start! [phase-id interval-ms task]
   (let [executor (Executors/newSingleThreadScheduledExecutor (daemon-thread-factory phase-id))]
