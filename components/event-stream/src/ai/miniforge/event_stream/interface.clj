@@ -226,8 +226,8 @@
   heartbeat/start-heartbeat!)
 
 (def ^{:stratum 0} stop-heartbeat!
-  "Stop an owned scheduler. Nil-safe. Current handles fence ticks and progress
-   before cancelling; an in-flight tick finishes before the fence returns.
+  "Stop an owned scheduler. Nil-safe. Current handles close admission and cancel
+   before waiting for an in-flight tick; successful stop leaves no running tick.
    Optional :may-interrupt? defaults false. Returns nil or a current anomaly."
   heartbeat/stop-heartbeat!)
 

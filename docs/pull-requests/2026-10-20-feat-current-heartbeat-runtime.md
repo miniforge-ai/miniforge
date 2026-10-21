@@ -49,3 +49,17 @@ test composition includes the shared event-stream fixtures. This enforces the
 Polylith 100 ms placement rule without duplicating fixtures or losing CI coverage.
 After relocation, the real project JVM passed four tests/33 assertions, and the
 isolated package passed all 15 tests/80 assertions again.
+
+Review identified a shutdown ordering deadlock: waiting for the publication
+monitor before cancellation prevented an interruptible listener from unwinding.
+Close admission atomically, cancel and shut down the scheduler, then await the
+in-flight tick. The real blocked-listener regression fails against the previous
+ordering and passes with this fix. Cancellation failure still preserves closure
+and attempts executor cleanup. No cleanup policy is duplicated.
+
+After this fix, all four consumer suites passed (1m32s), the rebuilt CLI is
+39,214,062 bytes, the real project JVM passed 11 tests/77 assertions, and isolated
+package tests passed 17 tests/90 assertions without production source overlays.
+The standards scan reports no violations. The whole PR is 445 reportable code
+lines before this documentation update; the review fix remains a normal-budget
+commit. CI and a fresh exact-head review remain required before merge.

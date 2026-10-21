@@ -11,8 +11,11 @@
 ;------------------------------------------------------------------------------ Layer 0
 
 (defn ^{:stratum 0} fence! [state]
-  (locking state (swap! state assoc :closed? true))
+  (swap! state assoc :closed? true)
   nil)
+
+(defn ^{:stratum 0} await-idle! [state]
+  (locking state nil))
 
 (defn- ^{:stratum 0} observation [model source position]
   (merge (:identity model)

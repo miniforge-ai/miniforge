@@ -61,6 +61,16 @@
         (is false "fatal scheduling errors must propagate")
         (catch Error caught (is (identical? fatal caught)))))))
 
+(defn- ^{:stratum 1} verify-cancellation-failure [stream _]
+  (let [handle (events/start-heartbeat! stream (random-uuid) :opsv/execute {:interval-ms 60000})
+        failure (anomaly/anomaly :unavailable "fixture cancellation unavailable" {})]
+    (try+
+      (with-redefs [scheduler/cancel-future! (partial throw-failure failure)]
+        (is (identical? failure (events/stop-heartbeat! handle {:may-interrupt? true}))))
+      (is (.isShutdown ^java.util.concurrent.ScheduledExecutorService (:heartbeat/executor handle)))
+      (is (nil? (events/observe-heartbeat-progress! handle :fixture/work 1)))
+      (finally (events/stop-heartbeat! handle)))))
+
 (deftest ^{:stratum 1} invalid-or-closed-current-starts-allocate-no-executor
   (fixture/with-runtime verify-invalid-starts))
 
@@ -74,5 +84,8 @@
 
 (deftest ^{:stratum 2} scheduler-start-failures-preserve-anomalies-and-fatal-errors
   (journal/with-stream verify-start-failures))
+
+(deftest ^{:stratum 2} cancellation-failure-keeps-closure-and-attempts-executor-cleanup
+  (journal/with-stream verify-cancellation-failure))
 
 (comment ::current-heartbeat-boundary-acceptance)

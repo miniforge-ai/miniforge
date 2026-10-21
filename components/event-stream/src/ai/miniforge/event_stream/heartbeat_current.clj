@@ -19,7 +19,8 @@
 
 (defn ^{:stratum 0} stop! [handle opts]
   (observation/fence! (:heartbeat/state handle))
-  (scheduler/stop! handle opts))
+  (scheduler/stop! handle opts)
+  (observation/await-idle! (:heartbeat/state handle)))
 
 (defn ^{:stratum 0} observe! [handle source position]
   (observation/observe! (:heartbeat/state handle) source position))

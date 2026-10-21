@@ -161,6 +161,7 @@
                          "ai.miniforge.workflow.opsv-checkpoint-integration-test"
                          "ai.miniforge.event-stream.gate-contract-integration-test"
                          "ai.miniforge.event-stream.heartbeat-runtime-integration-test"
+                         "ai.miniforge.event-stream.heartbeat-stop-integration-test"
                          "ai.miniforge.governance.e2e-test"]
         kernel-tests ["ai.miniforge.workflow.kernel-loader-integration-test"]
         miniforge-exit (run-project-tests! "miniforge" miniforge-tests)]
