@@ -4,6 +4,7 @@
 (ns ai.miniforge.workflow.runner-callbacks
   "Own phase event callbacks and their heartbeat lifetime."
   (:require [ai.miniforge.anomaly.interface :as anomaly]
+            [ai.miniforge.workflow.runner-heartbeats :as heartbeats]
             [ai.miniforge.workflow.runner-events :as events]))
 
 ;------------------------------------------------------------------------------ Layer 0
@@ -20,37 +21,28 @@
 (defn- ^{:stratum 0} notify-caller [callback & args]
   (when callback (apply callback args)))
 
-(defn- ^{:stratum 0} start-heartbeat! [stream handles context phase opts]
-  (when-let [handle (and phase (events/start-phase-heartbeat! stream context phase opts))]
-    (swap! handles assoc phase handle)))
-
-(defn- ^{:stratum 0} stop-heartbeat! [handles phase]
-  (when-let [handle (get @handles phase)]
-    (events/stop-phase-heartbeat! handle)
-    (swap! handles dissoc phase)))
-
 ;------------------------------------------------------------------------------ Layer 1
-
-(defn- ^{:stratum 1} stop-all-heartbeats! [handles]
-  (doseq [phase (keys @handles)]
-    (stop-heartbeat! handles phase)))
 
 (defn- ^{:stratum 1} start-phase! [stream handles heartbeat-opts callback context interceptor]
   (let [phase (phase-name interceptor)
         receipt (when phase
-                  (events/publish-phase-started! stream context phase (phase-start-options interceptor)))]
-    (if (anomaly/any-anomaly? receipt)
-      receipt
-      (do (start-heartbeat! stream handles context phase heartbeat-opts)
-          (notify-caller callback context interceptor)))))
+                  (events/publish-phase-started! stream context phase (phase-start-options interceptor)))
+        heartbeat (when-not (anomaly/any-anomaly? receipt)
+                    (heartbeats/start! stream handles context phase heartbeat-opts))]
+    (cond
+      (anomaly/any-anomaly? receipt) receipt
+      (anomaly/any-anomaly? heartbeat) heartbeat
+      :else (notify-caller callback context interceptor))))
 
 (defn- ^{:stratum 1} complete-phase! [stream handles callback context interceptor result]
   (let [phase (phase-name interceptor)
-        _ (stop-heartbeat! handles phase)
-        receipt (when phase (events/publish-phase-completed! stream context phase result))]
-    (if (anomaly/any-anomaly? receipt)
-      receipt
-      (notify-caller callback context interceptor result))))
+        stopped (heartbeats/stop! handles phase)
+        receipt (when (and phase (not (anomaly/any-anomaly? stopped)))
+                  (events/publish-phase-completed! stream context phase result))]
+    (cond
+      (anomaly/any-anomaly? stopped) stopped
+      (anomaly/any-anomaly? receipt) receipt
+      :else (notify-caller callback context interceptor result))))
 
 ;------------------------------------------------------------------------------ Layer 2
 
@@ -64,6 +56,6 @@
                          (assoc :interval-ms (:phase-heartbeat-interval-ms opts)))]
     {:on-phase-start (partial start-phase! stream handles heartbeat-opts (:on-phase-start opts))
      :on-phase-complete (partial complete-phase! stream handles (:on-phase-complete opts))
-     :stop-phase-heartbeats! (partial stop-all-heartbeats! handles)}))
+     :stop-phase-heartbeats! (partial heartbeats/stop-all! handles)}))
 
 (comment ::phase-callback-lifetime)
