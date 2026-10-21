@@ -17,18 +17,14 @@
 ;; limitations under the License.
 (ns ai.miniforge.workflow.runner
   "Compose workflow setup, bounded execution, lifecycle publication, and cleanup."
-  (:require [ai.miniforge.anomaly.interface :as anomaly]
+  (:require [ai.miniforge.workflow.boundary.runner-lifetime :as lifetime]
             [ai.miniforge.workflow.runner-callbacks :as callbacks]
             [ai.miniforge.workflow.runner-cleanup :as cleanup]
-            [ai.miniforge.workflow.runner-defaults :as defaults]
             [ai.miniforge.workflow.runner-events :as events]
-            [ai.miniforge.workflow.runner-execution-boundary :as execution-boundary]
             [ai.miniforge.workflow.runner-iteration :as iteration]
             [ai.miniforge.workflow.runner-outcome :as outcome]
             [ai.miniforge.workflow.runner-preparation :as preparation]
-            [ai.miniforge.workflow.runner-start :as start]
-            [ai.miniforge.workflow.runner-terminal :as terminal]
-            [slingshot.slingshot :refer [try+]]))
+            [ai.miniforge.workflow.runner-session :as session]))
 
 ;------------------------------------------------------------------------------ Layer 0
 
@@ -65,10 +61,6 @@
 
 (def ^{:stratum 0} ^:private wrap-phase-callbacks callbacks/wrap-phase-callbacks)
 
-(def ^{:stratum 0} ^:private initial-context-anomaly->failed-context outcome/initial-context-anomaly->failed-context)
-
-(def ^{:stratum 0} ^:private validate-completion outcome/validate-completion)
-
 ;------------------------------------------------------------------------------ Layer 1
 
 (defn ^{:stratum 1} run-pipeline
@@ -82,32 +74,11 @@
    (run-pipeline workflow input {}))
   ([workflow input opts]
    (let [[acquired-env opts] (acquire-environment workflow input opts)
-         pipeline            (build-pipeline workflow)
-         max-phases          (get opts :max-phases (defaults/max-phases))
-         control-state       (get opts :control-state
-                                  (atom {:paused false :stopped false :adjustments {}}))
-         event-stream        (:event-stream opts)
-         callbacks           (wrap-phase-callbacks event-stream opts)
-         skip-lifecycle?     (:skip-lifecycle-events opts)
-         ctx-or-anomaly      (preparation/build-initial-context workflow input opts run-pipeline)
-         initial-ctx         (if (anomaly/anomaly? ctx-or-anomaly)
-                               (initial-context-anomaly->failed-context workflow input opts
-                                                                        ctx-or-anomaly)
-                               ctx-or-anomaly)
-         output-ctx-vol      (volatile! nil)
-         exception-vol       (volatile! nil)]
-
-     (try+
-       (let [started-ctx (start/admit! event-stream initial-ctx skip-lifecycle?)
-             final-ctx (execution-boundary/execute-with-exception-handling
-                         pipeline started-ctx callbacks control-state max-phases exception-vol)
-             output-ctx (-> final-ctx validate-completion extract-output)]
-         (terminal/finalize! event-stream output-ctx skip-lifecycle? output-ctx-vol))
-      (finally
-        (when-let [stop-heartbeats! (:stop-phase-heartbeats! callbacks)]
-          (stop-heartbeats!))
-        (cleanup/post-workflow-cleanup! opts @output-ctx-vol workflow
-                                        @exception-vol acquired-env))))))
+         owned (session/create (wrap-phase-callbacks (:event-stream opts) opts)
+                               build-pipeline extract-output)
+         execute (partial session/execute! workflow input opts owned run-pipeline)
+         release (partial lifetime/release! opts workflow acquired-env owned)]
+     (lifetime/protect! owned execute release))))
 
 ;------------------------------------------------------------------------------ Layer 2
 

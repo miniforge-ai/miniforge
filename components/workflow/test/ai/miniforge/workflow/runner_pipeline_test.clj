@@ -26,13 +26,14 @@
    [ai.miniforge.workflow.runner :as runner]
    [ai.miniforge.workflow.runner-iteration :as iteration]
    [ai.miniforge.workflow.runner-loop :as pipeline-loop]
+   [ai.miniforge.workflow.runner-outcome :as outcome]
    [ai.miniforge.workflow.runner-events :as events]
    [ai.miniforge.workflow.runner-cleanup :as cleanup]))
 
 ;------------------------------------------------------------------------------ Layer 0
 
 ;; Factories — access private fns via var
-(def ^{:stratum 0} ^:private validate-completion #'runner/validate-completion)
+(def ^{:stratum 0} ^:private validate-completion outcome/validate-completion)
 
 (def ^{:stratum 0} ^:private execute-pipeline-loop pipeline-loop/execute-pipeline-loop)
 
