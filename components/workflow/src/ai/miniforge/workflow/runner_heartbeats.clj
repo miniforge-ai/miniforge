@@ -4,6 +4,7 @@
 (ns ai.miniforge.workflow.runner-heartbeats
   "Own sequential runner phase handles; retain refused cleanup for final retry."
   (:require [ai.miniforge.anomaly.interface :as anomaly]
+            [ai.miniforge.event-stream.interface :as stream]
             [ai.miniforge.resource-cleanup.interface :as cleanup]
             [ai.miniforge.workflow.runner-events :as events]))
 
@@ -12,6 +13,15 @@
 (defn- ^{:stratum 0} retain! [handles phase handle]
   (swap! handles assoc phase handle)
   nil)
+
+(defn ^{:stratum 0} phase-context
+  "Capture the activation now; late reports must not look up a newer handle."
+  [handles context phase]
+  (let [handle (get @handles phase)
+        clean (dissoc context :execution/report-progress!)]
+    (if (:heartbeat/current? handle)
+      (assoc clean :execution/report-progress! (partial stream/observe-heartbeat-progress! handle))
+      clean)))
 
 (defn ^{:stratum 0} stop! [handles phase]
   (let [result (when-let [handle (get @handles phase)]

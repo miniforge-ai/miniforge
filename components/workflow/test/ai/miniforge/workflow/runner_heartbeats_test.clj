@@ -13,7 +13,7 @@
 (defn- ^{:stratum 0} refusal []
   (anomaly/anomaly :unavailable "fixture heartbeat unavailable" {}))
 
-(defn- ^{:stratum 0} handles [] (atom {:plan :first :execute :second}))
+(defn- ^{:stratum 0} handles [] (atom (array-map :execute :second :plan :first)))
 
 (defn- ^{:stratum 0} stop-recording [calls failure handle]
   (swap! calls conj handle)
@@ -49,7 +49,7 @@
       (try+ (heartbeats/stop-all! owned)
         (is false "fatal failure must propagate")
         (catch Error caught (is (identical? failure caught)))))
-    (is (= #{:first :second} (set @calls)))
+    (is (= [:first :second] @calls))
     (is (= {:plan :first} @owned))
     (with-redefs [events/stop-phase-heartbeat! (constantly nil)]
       (is (nil? (heartbeats/stop-all! owned))))

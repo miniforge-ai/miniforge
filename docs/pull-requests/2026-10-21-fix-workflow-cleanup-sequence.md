@@ -8,9 +8,8 @@
 
 ## Scope and dependencies
 
-Dependent application-layer branch from fix/workflow-heartbeat-ownership; shared
-resource-cleanup foundation #2079 is merged. Open after the ownership parent
-merges and align with main. Make post-workflow cleanup attempt every stage and
+Application-layer change following merged heartbeat ownership #2080 and shared
+resource-cleanup foundation #2079, aligned with main. Make post-workflow cleanup attempt every stage and
 both environment releases even if an earlier stage throws. Preserve primary and
 fatal failure identity using the shared cleanup policy, not duplicated catch logic.
 
@@ -33,3 +32,22 @@ All three workflow consumers passed serially (1m29s). The fresh CLI is
 production source overlays. The parent-relative standards scan is clean and
 inferred strata stay within three. The change is split into two normal commits:
 tested signal/knowledge/boundary helpers, then orchestration and fault regressions.
+
+After #2080 merged, all three consumers passed again (1m29s); the final CLI is
+39,226,563 bytes. The actual-main standards scan has no violations and the change
+is 285 reportable lines before this proof update. Parent conflicts retained the
+reviewed ordered failure fixture and documentation unchanged.
+
+Final adversarial review consolidated repeated execution-context fixtures and
+added assertions for phase-result and metric preservation. The packaged suite
+now passes 13 tests/33 assertions; production code and the built artifact are
+unchanged by this final test-only refinement.
+
+Review exposed premature interrupt restoration: an interruptible release could
+abort before completing. The strengthened workflow regression failed with the
+old code. The shared cleanup boundary now temporarily clears an existing interrupt
+while running cleanup, then restores it; critical helpers retain their standalone
+propagation contract. Both `finish!` and `after-failure!` use the same boundary.
+All four consumers of workflow/event-stream/resource-cleanup pass (2m30s); the
+rebuilt CLI is 39,226,625 bytes and isolated interrupt regressions pass nine tests/
+39 assertions. No sleeps or external processes are needed for the failure probe.
