@@ -16,7 +16,14 @@
 (defn- ^{:stratum 0} preserve-critical! [throwable]
   (when-let [fatal (cleanup/fatal-cause throwable)] (cleanup/propagate! fatal)))
 
+(defn- ^{:stratum 0} warn-release! [message]
+  (println (messages/t :env/release-failed {:error message})))
+
 ;------------------------------------------------------------------------------ Layer 1
+
+(defn- ^{:stratum 1} report-release [result]
+  (when (dag/err? result) (warn-release! (get-in result [:error :message])))
+  result)
 
 (defn ^{:stratum 1} publish-persisted! [stream workflow-id data]
   (try+ (events/publish! stream (events/workspace-persisted stream workflow-id data))
@@ -29,12 +36,14 @@
         (when (zero? exit) (str/trim out)))
       (catch Object _ (preserve-critical! (:throwable &throw-context)) nil))))
 
-(defn ^{:stratum 1} release! [executor environment-id]
+;------------------------------------------------------------------------------ Layer 2
+
+(defn ^{:stratum 2} release! [executor environment-id]
   (when (and executor environment-id)
-    (try+ (dag/release-environment! executor environment-id)
+    (try+ (report-release (dag/release-environment! executor environment-id))
       (catch Object _
         (let [error (:throwable &throw-context)]
           (preserve-critical! error)
-          (println (messages/t :env/release-failed {:error (ex-message error)})))))))
+          (warn-release! (ex-message error)))))))
 
 (comment ::environment-effect-boundary)

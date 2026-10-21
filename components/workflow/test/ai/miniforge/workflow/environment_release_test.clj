@@ -14,7 +14,9 @@
 
 (defn- ^{:stratum 0} fail! [failure & _] (throw failure))
 
-(defn- ^{:stratum 0} record! [calls & args] (swap! calls conj args))
+(defn- ^{:stratum 0} record! [calls & args]
+  (swap! calls conj args)
+  (dag/ok {:released? true}))
 
 ;------------------------------------------------------------------------------ Layer 1
 
@@ -23,7 +25,7 @@
     (with-redefs [dag/release-environment! (partial record! calls)]
       (release! nil :environment)
       (release! :executor nil)
-      (release! :executor :environment)
+      (is (dag/ok? (release! :executor :environment)))
       (is (= [[:executor :environment]] @calls)))))
 
 (deftest ^{:stratum 1} ordinary-release-failure-remains-a-localized-warning
@@ -31,6 +33,15 @@
         expected (messages/t :env/release-failed {:error (ex-message error)})]
     (with-redefs [dag/release-environment! (partial fail! error)]
       (is (= (str expected "\n") (with-out-str (release! :executor :environment)))))))
+
+(deftest ^{:stratum 1} returned-release-failure-is-visible-and-preserved
+  (let [failure (dag/err :release-failed "fixture release failure")
+        seen (volatile! nil)
+        expected (messages/t :env/release-failed {:error (get-in failure [:error :message])})]
+    (with-redefs [dag/release-environment! (constantly failure)]
+      (is (= (str expected "\n")
+             (with-out-str (vreset! seen (release! :executor :environment)))))
+      (is (identical? failure @seen)))))
 
 (deftest ^{:stratum 1} release-preserves-critical-cause-and-interruption
   (doseq [cause [(Error. "fixture fatal release")

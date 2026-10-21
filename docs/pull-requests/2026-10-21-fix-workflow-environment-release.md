@@ -37,3 +37,9 @@ and runner wiring independently reviewable; no size exception is required.
 
 Catalog section loading is covered through the public persistence path; the
 rebuilt CLI (39,226,284 bytes) passes eleven isolated tests/42 assertions.
+
+Tracing real executor release paths also found returned error results were
+silent. The boundary now warns for those results and returns the original value;
+the regression fixture uses the executor's real success/error constructors.
+All three consumers pass again (1m27s); the rebuilt CLI is 39,226,360 bytes and
+the isolated regression suite passes twelve tests/45 assertions.
