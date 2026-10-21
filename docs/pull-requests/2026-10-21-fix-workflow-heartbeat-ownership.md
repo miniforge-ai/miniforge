@@ -44,3 +44,7 @@ and resolved only the parent's documentation conflict. All three workflow
 consumers passed again (1m29s), the rebuilt CLI is 39,224,633 bytes, isolated
 regressions passed 11 tests/43 assertions, and all task entry classpaths loaded.
 The actual-main standards scan is clean and the whole PR is 166 reportable lines.
+
+Review strengthened the fatal-stop regression: the ordered fixture now executes
+the failing handle first and asserts the exact call sequence, so cleanup that
+aborts on that exception cannot pass by stopping the other handle beforehand.
