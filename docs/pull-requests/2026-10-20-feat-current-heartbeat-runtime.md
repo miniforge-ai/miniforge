@@ -34,3 +34,10 @@ build: 39,213,354 bytes. Isolated package tests passed: 10 tests, 70 assertions,
 including the closed-activation fence. No production source overlays were used
 for the package check. The implementation commit is 193 reportable lines;
 the integration fixtures and scenarios are a separate normal-budget commit.
+
+After merging the final reviewed scheduler cleanup, the four consuming projects
+passed again (1m48s). Final CLI: 39,214,031 bytes. Isolated runtime, fence and
+cleanup-graph tests passed: 15 tests, 80 assertions. The actual PR diff against
+merged main contains 385 reportable lines; parent implementation changes are
+excluded. Merge conflict resolution retained the reviewed cleanup implementation
+and the corrected documentation author header.
