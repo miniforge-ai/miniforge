@@ -23,6 +23,9 @@
 
 ;------------------------------------------------------------------------------ Layer 1
 
+(defn- ^{:stratum 1} phase-context [handles context interceptor]
+  (heartbeats/phase-context handles context (phase-name interceptor)))
+
 (defn- ^{:stratum 1} start-phase! [stream handles heartbeat-opts callback context interceptor]
   (let [phase (phase-name interceptor)
         receipt (when phase
@@ -55,6 +58,7 @@
                          (:phase-heartbeat-interval-ms opts)
                          (assoc :interval-ms (:phase-heartbeat-interval-ms opts)))]
     {:on-phase-start (partial start-phase! stream handles heartbeat-opts (:on-phase-start opts))
+     :phase-context (partial phase-context handles)
      :on-phase-complete (partial complete-phase! stream handles (:on-phase-complete opts))
      :stop-phase-heartbeats! (partial heartbeats/stop-all! handles)}))
 

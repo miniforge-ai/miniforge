@@ -15,6 +15,16 @@
 (defn- ^{:stratum 0} invoke [callback & args]
   (when callback (apply callback args)))
 
+(defn- ^{:stratum 0} active-context [context interceptor]
+  (-> context
+      (dissoc :execution/report-progress!)
+      (assoc :execution/current-phase (get-in interceptor [:config :phase]))))
+
+(defn- ^{:stratum 0} phase-context [callbacks context interceptor]
+  (if-let [prepare (:phase-context callbacks)]
+    (prepare context interceptor)
+    context))
+
 (defn- ^{:stratum 0} refused [context boundary failure fail]
   (let [message (:message (response/anomaly->event-data failure))
         data {:phase (:execution/current-phase context)
@@ -34,7 +44,8 @@
 ;------------------------------------------------------------------------------ Layer 1
 
 (defn- ^{:stratum 1} execute-entered [pipeline context callbacks interceptor ports]
-  (let [[updated result] (lifecycle/execute-phase-lifecycle interceptor context)
+  (let [entered (phase-context callbacks context interceptor)
+        [updated result] (lifecycle/execute-phase-lifecycle interceptor entered)
         phase (:execution/current-phase context)
         processed (lifecycle/process-phase-result updated phase result (:merge-metrics ports))
         receipt (invoke (:on-phase-complete callbacks) processed interceptor result)]
@@ -48,7 +59,7 @@
   "Nil/non-anomaly callback results retain legacy observer semantics.
    An anomaly refuses the boundary; no subsequent phase effect or transition runs."
   [pipeline context callbacks interceptor ports]
-  (let [active (assoc context :execution/current-phase (get-in interceptor [:config :phase]))
+  (let [active (active-context context interceptor)
         receipt (invoke (:on-phase-start callbacks) active interceptor)]
     (if (anomaly/any-anomaly? receipt)
       (refused active :on-phase-start receipt (:fail ports))

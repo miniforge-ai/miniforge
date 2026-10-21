@@ -22,6 +22,12 @@
 
 ;------------------------------------------------------------------------------ Layer 1
 
+(defn- ^{:stratum 1} capture-cleanup [cleanup]
+  (let [interrupted? (Thread/interrupted)]
+    (try+ (capture cleanup)
+      (finally
+        (when interrupted? (.interrupt (Thread/currentThread)))))))
+
 (defn- ^{:stratum 1} propagate! [primary cleanup]
   (when-let [failure (preferred primary cleanup)]
     (suppress! failure primary)
@@ -31,11 +37,11 @@
 ;------------------------------------------------------------------------------ Layer 2
 
 (defn ^{:stratum 2} after-failure! [failure cleanup]
-  (propagate! failure (capture cleanup)))
+  (propagate! failure (capture-cleanup cleanup)))
 
 (defn ^{:stratum 2} finish! [operation cleanup]
   (let [primary (capture operation)
-        secondary (capture cleanup)]
+        secondary (capture-cleanup cleanup)]
     (propagate! primary secondary)))
 
 (comment ::cleanup-failure-priority)
