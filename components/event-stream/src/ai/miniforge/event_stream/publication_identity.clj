@@ -13,6 +13,9 @@
    :workflow/spec :workflow/intent :workflow/phase :workflow/evidence-bundle-id
    :routing/trigger-event-id :phase/expected-agent :phase/artifacts
    :phase/outcome :phase/blocked-reason :phase/transition-request
+   :phase/active-since :heartbeat/activation-id :heartbeat/sequence
+   :heartbeat/observed-at :heartbeat/interval-ms :heartbeat/elapsed-ms
+   :phase/progress-status :phase/progress-count :phase/last-progress-at :phase/progress-gap-ms
    :failure/class :workflow/failure-phase :cancel/requested-by :cancel/source :action/id
    :phase/name :machine/state :checkpoint/path :checkpoint/size-bytes
    :snapshot/path :snapshot/size-bytes :from-state :from-phase :skipping :expected-hash :actual-hash
