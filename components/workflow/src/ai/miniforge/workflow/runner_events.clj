@@ -25,6 +25,7 @@
    [ai.miniforge.event-stream.interface :as es]
    [ai.miniforge.phase.interface :as phase]
    [ai.miniforge.self-healing.interface :as self-healing]
+   [ai.miniforge.workflow.boundary.runner-heartbeat :as heartbeat]
    [ai.miniforge.workflow.messages :as messages]
    [ai.miniforge.workflow.runner-event-dispatch :as dispatch]
    [ai.miniforge.workflow.runner-failure-event :as failure-event]
@@ -74,24 +75,11 @@
                                       (:execution/id context))}))
 
 ;; Phase heartbeat lifecycle
-(defn ^{:stratum 0} start-phase-heartbeat!
-  ([event-stream context phase-name]
-   (start-phase-heartbeat! event-stream context phase-name {}))
-  ([event-stream context phase-name opts]
-   (when (dispatch/stateful-stream? event-stream)
-     (try
-       (es/start-heartbeat! event-stream (:execution/id context) phase-name opts)
-       (catch Exception e
-         (println (messages/t :warn/heartbeat-start {:error (ex-message e)}))
-         nil)))))
+(def ^{:stratum 0} start-phase-heartbeat! heartbeat/start!)
 
-(defn ^{:stratum 0} stop-phase-heartbeat!
+(def ^{:stratum 0} stop-phase-heartbeat!
   "Stop a phase heartbeat handle. Nil-safe."
-  [handle]
-  (try
-    (es/stop-heartbeat! handle)
-    (catch Exception e
-      (println (messages/t :warn/heartbeat-stop {:error (ex-message e)})))))
+  heartbeat/stop!)
 
 ;------------------------------------------------------------------------------ Layer 1
 
