@@ -16,7 +16,9 @@
 ;; See the License for the specific language governing permissions and
 ;; limitations under the License.
 (ns ai.miniforge.observer.alerts
-  (:require [ai.miniforge.observer.alert-presentation :refer [alert]]))
+  (:require [ai.miniforge.observer.alert-presentation :refer [alert]]
+            [ai.miniforge.observer.alert-state :as state]
+            [ai.miniforge.observer.boundary.alert-clock :as clock]))
 
 ;------------------------------------------------------------------------------ Layer 0
 
@@ -47,20 +49,7 @@
                  [:alert/severity [:enum :info :warning :critical]]
                  [:alert/message string?] [:alert/data map?] [:alert/timestamp inst?]])
 
-(def ^{:stratum 0} ^:private window-size 100)
-
-(defn ^{:stratum 0} create-alert-state []
-  (atom {:outstanding-calls {} :tool-outcomes []}))
-
-(defn- ^{:stratum 0} event-ms [event]
-  (try
-    (let [ts (:event/timestamp event)]
-      (cond
-        (instance? java.util.Date ts) (.getTime ^java.util.Date ts)
-        (number? ts) (long ts)
-        (string? ts) (.toEpochMilli (java.time.Instant/parse ts))
-        :else (System/currentTimeMillis)))
-    (catch Exception _ (System/currentTimeMillis))))
+(def ^{:stratum 0} create-alert-state state/create)
 
 (defn ^{:stratum 0} alert-fired [_stream workflow-id alert-map]
   (merge {:event/type :observer/alert-fired
@@ -89,32 +78,10 @@
                          :total-count (count xs)
                          :threshold-pct threshold})))))))
 
-;------------------------------------------------------------------------------ Layer 1
-
-(defn- ^{:stratum 1} update-state! [state event]
-  (case (:event/type event)
-    :agent/tool-call-started
-    (when-let [call-id (:tool/call-id event)]
-      (swap! state assoc-in [:outstanding-calls call-id] {:started-at (event-ms event)}))
-
-    :tool/call-completed
-    (let [call-id (:tool/call-id event)]
-      (swap! state
-             (fn [s]
-               (cond-> (update s :outstanding-calls dissoc call-id)
-                 (contains? event :tool/success?)
-                 (update :tool-outcomes
-                         (fn [xs]
-                           (let [xs' (conj (vec xs) (:tool/success? event))]
-                             (if (> (count xs') window-size)
-                               (subvec xs' (- (count xs') window-size))
-                               xs'))))))))
-    nil))
-
-(defn- ^{:stratum 1} timeouts [rule event state]
+(defn- ^{:stratum 0} timeouts [rule event state]
   (when (= :workflow/phase-heartbeat (:event/type event))
     (let [threshold (get-in rule [:alert/threshold :threshold-ms])
-          now (event-ms event)]
+          now (clock/event-ms event)]
       (->> (:outstanding-calls @state)
            (keep (fn [[call-id {:keys [started-at alerted?]}]]
                    (let [elapsed (- now started-at)]
@@ -124,10 +91,10 @@
                                     :threshold-ms threshold})))))
            vec))))
 
-;------------------------------------------------------------------------------ Layer 2
+;------------------------------------------------------------------------------ Layer 1
 
-(defn ^{:stratum 2} evaluate-rules [rules event state]
-  (update-state! state event)
+(defn ^{:stratum 1} evaluate-rules [rules event state]
+  (state/observe! state event)
   (into []
         (mapcat (fn [rule]
                   (let [x (case (:alert/type rule)
