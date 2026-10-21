@@ -159,6 +159,7 @@
                          "ai.miniforge.phase-opsv.terminal-boundary-integration-test"
                          "ai.miniforge.workflow.opsv-terminal-integration-test"
                          "ai.miniforge.workflow.opsv-checkpoint-integration-test"
+                         "ai.miniforge.workflow.isolation-support-test"
                          "ai.miniforge.event-stream.gate-contract-integration-test"
                          "ai.miniforge.governance.e2e-test"]
         kernel-tests ["ai.miniforge.workflow.kernel-loader-integration-test"]
