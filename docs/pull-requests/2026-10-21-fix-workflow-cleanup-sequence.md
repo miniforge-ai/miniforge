@@ -8,9 +8,8 @@
 
 ## Scope and dependencies
 
-Dependent application-layer branch from fix/workflow-heartbeat-ownership; shared
-resource-cleanup foundation #2079 is merged. Open after the ownership parent
-merges and align with main. Make post-workflow cleanup attempt every stage and
+Application-layer change following merged heartbeat ownership #2080 and shared
+resource-cleanup foundation #2079, aligned with main. Make post-workflow cleanup attempt every stage and
 both environment releases even if an earlier stage throws. Preserve primary and
 fatal failure identity using the shared cleanup policy, not duplicated catch logic.
 
@@ -33,3 +32,8 @@ All three workflow consumers passed serially (1m29s). The fresh CLI is
 production source overlays. The parent-relative standards scan is clean and
 inferred strata stay within three. The change is split into two normal commits:
 tested signal/knowledge/boundary helpers, then orchestration and fault regressions.
+
+After #2080 merged, all three consumers passed again (1m29s); the final CLI is
+39,226,563 bytes. The actual-main standards scan has no violations and the change
+is 285 reportable lines before this proof update. Parent conflicts retained the
+reviewed ordered failure fixture and documentation unchanged.
