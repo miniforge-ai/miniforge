@@ -20,7 +20,9 @@
             [ai.miniforge.observer.alert-presentation :refer [alert]]
             [ai.miniforge.observer.alert-spec :as spec]
             [ai.miniforge.observer.alert-state :as state]
-            [ai.miniforge.observer.alert-timeouts :as timeouts]))
+            [ai.miniforge.observer.alert-timeouts :as timeouts]
+            [ai.miniforge.observer.boundary.heartbeat-progress :as progress]
+            [ai.miniforge.observer.heartbeat-observation :as heartbeat]))
 
 ;------------------------------------------------------------------------------ Layer 0
 
@@ -41,7 +43,7 @@
 
 (defn- ^{:stratum 0} phase-gap [rule event]
   (when-let [data (conditions/phase-gap (get-in rule [:alert/threshold :threshold-ms])
-                                      (:phase/gap-since-last-event-ms event))]
+                                      (:progress/gap-ms (progress/interpret event)))]
     [(alert rule data)]))
 
 (defn- ^{:stratum 0} error-rate [rule state]
@@ -62,6 +64,7 @@
 
 (defn ^{:stratum 2} evaluate-rules [rules event state]
   (state/observe! state event)
-  (if (= :workflow/phase-heartbeat (:event/type event))
+  (if (and (= :workflow/phase-heartbeat (:event/type event))
+           (heartbeat/record! state event))
     (into [] (mapcat (partial evaluate-rule event state)) rules)
     []))

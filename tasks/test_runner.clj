@@ -145,6 +145,7 @@
                          "ai.miniforge.artifact.interface-integration-test"
                          "ai.miniforge.loop.interface-integration-test"
                          "ai.miniforge.observer.interface-integration-test"
+                         "ai.miniforge.observer.heartbeat-journal-integration-test"
                          "ai.miniforge.task.interface-integration-test"
                          "ai.miniforge.release-executor.artifact-validation-integration-test"
                          "ai.miniforge.web-dashboard.fleet-onboarding-integration-test"
