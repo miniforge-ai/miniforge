@@ -38,3 +38,9 @@ handle before acquisition, and refused cleanup retains that handle for retry.
 Callbacks propagate refusals before notifying callers or publishing completion.
 Actual activation-captured progress ports and runner-wide environment cleanup
 remain subsequent integration steps rather than implicit claims of this PR.
+
+After #2079 merged, alignment with main retained the reviewed heartbeat runtime
+and resolved only the parent's documentation conflict. All three workflow
+consumers passed again (1m29s), the rebuilt CLI is 39,224,633 bytes, isolated
+regressions passed 11 tests/43 assertions, and all task entry classpaths loaded.
+The actual-main standards scan is clean and the whole PR is 166 reportable lines.
