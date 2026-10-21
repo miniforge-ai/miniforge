@@ -130,7 +130,8 @@
         ai.miniforge/evaluation {:local/root "../../components/evaluation"}}
 
  :aliases
- {:test {:extra-paths ["../../components/phase-opsv/test"
+ {:test {:extra-paths ["../../components/event-stream/test"
+                       "../../components/phase-opsv/test"
                        "../../components/workflow/test"
                        "../../components/phase-opsv/test-resources"]}
   :uberjar

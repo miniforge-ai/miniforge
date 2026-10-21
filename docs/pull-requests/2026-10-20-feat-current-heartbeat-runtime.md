@@ -38,6 +38,14 @@ the integration fixtures and scenarios are a separate normal-budget commit.
 After merging the final reviewed scheduler cleanup, the four consuming projects
 passed again (1m48s). Final CLI: 39,214,031 bytes. Isolated runtime, fence and
 cleanup-graph tests passed: 15 tests, 80 assertions. The actual PR diff against
-merged main contains 385 reportable lines; parent implementation changes are
+merged main contains 389 reportable lines; parent implementation changes are
 excluded. Merge conflict resolution retained the reviewed cleanup implementation
 and the corrected documentation author header.
+
+Runtime measurements identified journal scenarios at 102–289 ms. Those scenarios
+now live in the miniforge project integration suite and are registered with the
+integration runner; the fast boundary/fence tests remain in the brick. Project
+test composition includes the shared event-stream fixtures. This enforces the
+Polylith 100 ms placement rule without duplicating fixtures or losing CI coverage.
+After relocation, the real project JVM passed four tests/33 assertions, and the
+isolated package passed all 15 tests/80 assertions again.

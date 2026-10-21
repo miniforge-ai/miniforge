@@ -1,7 +1,7 @@
 ;; Title: Miniforge.ai
 ;; Copyright 2025-2026 Christopher Lester (christopher@miniforge.ai)
 ;; Licensed under the Apache License, Version 2.0.
-(ns ai.miniforge.event-stream.heartbeat-runtime-test
+(ns ai.miniforge.event-stream.heartbeat-runtime-integration-test
   (:require [ai.miniforge.anomaly.interface :as anomaly]
             [ai.miniforge.event-stream.current-publication :as publication]
             [ai.miniforge.event-stream.heartbeat-runtime-fixtures :as fixture]
