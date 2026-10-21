@@ -111,6 +111,32 @@
     (let [args ((private-fn 'claude-args) {:prompt "p"})]
       (is (not (some #(= "--strict-mcp-config" %) args))))))
 
+(deftest ^{:stratum 1} claude-args-isolated-test
+  (testing "isolated? turns off tools, user settings, and skills, and ignores host MCP config"
+    (let [args ((private-fn 'claude-args) {:prompt "p" :isolated? true})]
+      (is (= ["--tools" "" "--setting-sources" "" "--disable-slash-commands" "--strict-mcp-config"]
+             (->> args (drop-while #(not= "--tools" %)) (take 6))))
+      (is (= "p" (last args)))))
+
+  (testing "with an --mcp-config, isolation does not repeat --strict-mcp-config"
+    (let [args ((private-fn 'claude-args) {:prompt "p" :isolated? true :mcp-config "/tmp/mcp.json"})]
+      (is (= 1 (count (filter #(= "--strict-mcp-config" %) args))))))
+
+  (testing "without isolated? none of the flags appear"
+    (let [args ((private-fn 'claude-args) {:prompt "p"})]
+      (is (not-any? #{"--tools" "--setting-sources" "--disable-slash-commands"} args)))))
+
+(deftest ^{:stratum 1} with-client-config-test
+  (testing "an isolated client isolates every request"
+    (is (true? (:isolated? ((private-fn 'with-client-config) {:prompt "p"} {:isolated? true})))))
+
+  (testing "a request may ask for isolation on a plain client"
+    (is (true? (:isolated? ((private-fn 'with-client-config) {:prompt "p" :isolated? true} {})))))
+
+  (testing "model and context size still pass through"
+    (is (= {:prompt "p" :model "m" :num-ctx 8}
+           ((private-fn 'with-client-config) {:prompt "p"} {:model "m" :num-ctx 8})))))
+
 (deftest ^{:stratum 1} claude-args-allowed-tools-test
   (testing "mcp maps format as mcp__<server>__<tool>, joined with commas"
     (let [args ((private-fn 'claude-args)

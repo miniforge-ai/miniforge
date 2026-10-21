@@ -58,6 +58,10 @@
                 backend (LM Studio, llama.cpp server, vLLM, ...);
                 falls back to the backend's :base-url-env variable,
                 then its default endpoint
+   - :isolated? - Optional; true keeps every call off the operator's
+                Claude Code setup (no built-in tools, user settings,
+                hooks, plugins, or skills). For single-turn completions
+                that need no tools; claude backend only.
    - :logger  - Optional logger for request/response logging
    - :exec-fn - Optional execution function override (for testing)
 
@@ -69,7 +73,7 @@
      (create-client {:backend :anthropic-api :model \"claude-opus-4-8\"})"
   ([] (create-client {}))
   ([{:keys [backend logger exec-fn stream-exec-fn model api-key num-ctx
-            base-url]
+            base-url isolated?]
      :or {backend :codex}}]
    (when-not (contains? impl/backends backend)
      (response/throw-anomaly! :anomalies/incorrect
@@ -80,7 +84,8 @@
                   model (assoc :model model)
                   api-key (assoc :api-key api-key)
                   num-ctx (assoc :num-ctx num-ctx)
-                  base-url (assoc :base-url base-url))
+                  base-url (assoc :base-url base-url)
+                  isolated? (assoc :isolated? true))
                 logger
                 ;; Normalize so 1-arity user-supplied exec-fns keep
                 ;; working when the impl invokes 2-arity (the

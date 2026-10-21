@@ -186,6 +186,17 @@
                    (str "mcp__" (name server) "__" (name tool))))))
        (str/join ",")))
 
+(def ^{:stratum 0} ^:private claude-isolation-args
+  "Flags that keep a call off the operator's Claude Code setup: no
+   built-in tools, no user/project/local settings (so no hooks and no
+   plugins), and no skills or slash commands. Without them a single-turn
+   completion loads the operator's hooks and plugins: a SessionStart hook
+   that tells the model to load a skill ends a one-turn call on a tool
+   call with no answer, and the setup adds ~36K tokens of context to every
+   call. Paired with --strict-mcp-config, added in `claude-args` when no
+   --mcp-config is given."
+  ["--tools" "" "--setting-sources" "" "--disable-slash-commands"])
+
 (def ^{:stratum 0} ^:private claude-input-format-flag
   "Claude CLI flag that selects how the user prompt is delivered. Paired
    with `claude-input-format-stdin` (the only value we use today), this
@@ -505,6 +516,16 @@
    :stats          (select-keys diag
                                 [:consecutive-failures :failure-threshold
                                  :probe-interval-ms])})
+
+(defn- ^{:stratum 0} with-client-config
+  "`request` with the client's per-call settings: the model, the Ollama
+   context size, and isolation. A client created `:isolated?` isolates
+   every call; a request may also ask for it alone."
+  [request {:keys [model num-ctx isolated?]}]
+  (cond-> request
+    model (assoc :model model)
+    num-ctx (assoc :num-ctx num-ctx)
+    isolated? (assoc :isolated? true)))
 
 (defn- ^{:stratum 0} resolve-prompt-via
   "Read the backend's declared prompt-delivery mode. Defaults to :argv
@@ -1709,7 +1730,7 @@
    string into the process via the exec layer's `:stdin` option."
   [{:keys [prompt system max-tokens streaming? mcp-config mcp-allowed-tools
            disallowed-tools supervision budget-usd max-turns model resume
-           prompt-via]
+           prompt-via isolated?]
     :or   {prompt-via :argv}}]
   (let [budget (or budget-usd
                    (when max-tokens (default-claude-cli-budget-usd)))
@@ -1733,6 +1754,8 @@
       ;; codex builder's --ignore-user-config.
       mcp-config                   (into ["--mcp-config" mcp-config
                                           "--strict-mcp-config"])
+      isolated?                    (into claude-isolation-args)
+      (and isolated? (not mcp-config)) (conj "--strict-mcp-config")
       (seq mcp-allowed-tools)      (into ["--allowedTools" (claude-mcp-allowlist-string mcp-allowed-tools)])
       (seq disallowed-tools)       (into ["--disallowedTools" (str/join "," disallowed-tools)])
       (:settings-path supervision) (into ["--settings" (:settings-path supervision)])
@@ -2087,12 +2110,10 @@
 
 (defn ^{:stratum 7} complete-impl [client request]
   (let [{:keys [config logger exec-fn]} client
-        {:keys [backend model num-ctx]} config
+        {:keys [backend]} config
         backend-config (get backends backend)
         {:keys [cmd args-fn]} backend-config
-        request-with-model (cond-> request
-                             model (assoc :model model)
-                             num-ctx (assoc :num-ctx num-ctx))]
+        request-with-model (with-client-config request config)]
     (log-prompt-sent logger backend (build-request-prompt request))
 
     ;; Handle HTTP backends differently from CLI backends
@@ -2237,13 +2258,11 @@
 (defn ^{:stratum 9} handle-streaming [client request on-chunk backend-config progress-monitor]
   (let [{:keys [logger config]} client
         stream-fn (or (:stream-exec-fn client) stream-exec-fn)
-        {:keys [backend model num-ctx]} config
+        {:keys [backend model]} config
         {:keys [cmd args-fn stream-parser]} backend-config
         prompt     (build-request-prompt request)
         prompt-via (resolve-prompt-via backend-config)
-        request-with-model (cond-> request
-                             model (assoc :model model)
-                             num-ctx (assoc :num-ctx num-ctx))
+        request-with-model (with-client-config request config)
         args     (args-fn (assoc request-with-model
                                  :prompt prompt
                                  :streaming? true
@@ -2363,7 +2382,7 @@
 
 (defn ^{:stratum 10} complete-stream-impl [client request on-chunk]
   (let [{:keys [config]} client
-        {:keys [backend model num-ctx]} config
+        {:keys [backend]} config
         backend-config (get backends backend)
         {:keys [streaming? cmd]} backend-config
         progress-monitor (or (:progress-monitor request)
@@ -2374,9 +2393,7 @@
     ;; Handle HTTP backends
     (if (= cmd "http")
       (http-stream-complete backend-config
-                            (cond-> request
-                              model (assoc :model model)
-                              num-ctx (assoc :num-ctx num-ctx))
+                            (with-client-config request config)
                             on-chunk
                             config)
 
