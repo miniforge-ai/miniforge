@@ -42,3 +42,12 @@ Final adversarial review consolidated repeated execution-context fixtures and
 added assertions for phase-result and metric preservation. The packaged suite
 now passes 13 tests/33 assertions; production code and the built artifact are
 unchanged by this final test-only refinement.
+
+Review exposed premature interrupt restoration: an interruptible release could
+abort before completing. The strengthened workflow regression failed with the
+old code. The shared cleanup boundary now temporarily clears an existing interrupt
+while running cleanup, then restores it; critical helpers retain their standalone
+propagation contract. Both `finish!` and `after-failure!` use the same boundary.
+All four consumers of workflow/event-stream/resource-cleanup pass (2m30s); the
+rebuilt CLI is 39,226,625 bytes and isolated interrupt regressions pass nine tests/
+39 assertions. No sleeps or external processes are needed for the failure probe.
