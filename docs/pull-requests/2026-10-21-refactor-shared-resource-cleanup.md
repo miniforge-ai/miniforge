@@ -43,3 +43,7 @@ through the normal package build; reverting this PR restores the local policy.
 - [x] Trace ordinary, fatal, structured, interrupted and cyclic failure paths.
 - [x] Verify consumers, package and standards without concurrent JVM runs.
 - [ ] Complete signed hooks, exact-head review and all CI checks before merge.
+
+CI's task-entry load check identified an additional composition: the direct
+`bb miniforge` development task. Its explicit classpath now includes the shared
+component as well. Validate all task entry namespaces, not only the packaged CLI.
