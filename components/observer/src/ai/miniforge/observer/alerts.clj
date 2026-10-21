@@ -16,7 +16,7 @@
 ;; See the License for the specific language governing permissions and
 ;; limitations under the License.
 (ns ai.miniforge.observer.alerts
-  (:require [clojure.string :as str]))
+  (:require [ai.miniforge.observer.alert-presentation :refer [alert]]))
 
 ;------------------------------------------------------------------------------ Layer 0
 
@@ -62,15 +62,32 @@
         :else (System/currentTimeMillis)))
     (catch Exception _ (System/currentTimeMillis))))
 
-(defn- ^{:stratum 0} template [s data]
-  (str/replace s #"\{\{([\w][\w/-]*)\}\}" #(str (get data (keyword (second %)) ""))))
-
 (defn ^{:stratum 0} alert-fired [_stream workflow-id alert-map]
   (merge {:event/type :observer/alert-fired
           :event/workflow-id workflow-id
           :event/timestamp (java.util.Date.)}
          (select-keys alert-map [:alert/rule-id :alert/type :alert/severity
                                  :alert/message :alert/data :alert/timestamp])))
+
+(defn- ^{:stratum 0} phase-gap [rule event]
+  (when (= :workflow/phase-heartbeat (:event/type event))
+    (let [gap (:phase/gap-since-last-event-ms event)
+          threshold (get-in rule [:alert/threshold :threshold-ms])]
+      (when (and gap threshold (> gap threshold))
+        (alert rule {:gap-ms gap :threshold-ms threshold})))))
+
+(defn- ^{:stratum 0} error-rate [rule event state]
+  (when (= :workflow/phase-heartbeat (:event/type event))
+    (let [xs (:tool-outcomes @state)
+          threshold (get-in rule [:alert/threshold :threshold-pct])]
+      (when (and (seq xs) threshold)
+        (let [failures (count (remove true? xs))
+              rate (double (/ failures (count xs)))]
+          (when (> rate threshold)
+            (alert rule {:error-rate rate
+                         :failure-count failures
+                         :total-count (count xs)
+                         :threshold-pct threshold})))))))
 
 ;------------------------------------------------------------------------------ Layer 1
 
@@ -94,35 +111,7 @@
                                xs'))))))))
     nil))
 
-(defn- ^{:stratum 1} message [rule data]
-  (if-let [s (:alert/message-template rule)]
-    (template s data)
-    (case (:alert/type rule)
-      :phase-gap (str "Phase gap of " (:gap-ms data) "ms exceeds threshold")
-      :tool-call-timeout (str "Tool call " (:call-id data) " timed out")
-      :tool-error-rate (format "Tool error rate %.1f%% exceeds threshold"
-                               (* 100.0 (double (:error-rate data)))))))
-
-;------------------------------------------------------------------------------ Layer 2
-
-(defn- ^{:stratum 2} alert [rule data]
-  {:alert/rule-id (:alert/id rule)
-   :alert/type (:alert/type rule)
-   :alert/severity (get rule :alert/severity :warning)
-   :alert/message (message rule data)
-   :alert/data data
-   :alert/timestamp (java.util.Date.)})
-
-;------------------------------------------------------------------------------ Layer 3
-
-(defn- ^{:stratum 3} phase-gap [rule event]
-  (when (= :workflow/phase-heartbeat (:event/type event))
-    (let [gap (:phase/gap-since-last-event-ms event)
-          threshold (get-in rule [:alert/threshold :threshold-ms])]
-      (when (and gap threshold (> gap threshold))
-        (alert rule {:gap-ms gap :threshold-ms threshold})))))
-
-(defn- ^{:stratum 3} timeouts [rule event state]
+(defn- ^{:stratum 1} timeouts [rule event state]
   (when (= :workflow/phase-heartbeat (:event/type event))
     (let [threshold (get-in rule [:alert/threshold :threshold-ms])
           now (event-ms event)]
@@ -135,22 +124,9 @@
                                     :threshold-ms threshold})))))
            vec))))
 
-(defn- ^{:stratum 3} error-rate [rule event state]
-  (when (= :workflow/phase-heartbeat (:event/type event))
-    (let [xs (:tool-outcomes @state)
-          threshold (get-in rule [:alert/threshold :threshold-pct])]
-      (when (and (seq xs) threshold)
-        (let [failures (count (remove true? xs))
-              rate (double (/ failures (count xs)))]
-          (when (> rate threshold)
-            (alert rule {:error-rate rate
-                         :failure-count failures
-                         :total-count (count xs)
-                         :threshold-pct threshold})))))))
+;------------------------------------------------------------------------------ Layer 2
 
-;------------------------------------------------------------------------------ Layer 4
-
-(defn ^{:stratum 4} evaluate-rules [rules event state]
+(defn ^{:stratum 2} evaluate-rules [rules event state]
   (update-state! state event)
   (into []
         (mapcat (fn [rule]
