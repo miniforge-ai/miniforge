@@ -34,3 +34,6 @@ The initial three-consumer workflow run passes (1m27s). The fresh CLI is
 39,226,265 bytes; isolated regression tests pass ten tests/30 assertions.
 The standards scan is clean. Split normal commits keep helpers, test fixtures,
 and runner wiring independently reviewable; no size exception is required.
+
+Catalog section loading is covered through the public persistence path; the
+rebuilt CLI (39,226,284 bytes) passes eleven isolated tests/42 assertions.

@@ -3,14 +3,14 @@
 ;; Licensed under the Apache License, Version 2.0.
 (ns ai.miniforge.workflow.environment-release-test
   (:require [ai.miniforge.dag-executor.interface :as dag]
-            [ai.miniforge.workflow.boundary.environment :as boundary]
+            [ai.miniforge.workflow.runner-environment :as environment]
             [ai.miniforge.workflow.messages :as messages]
             [clojure.test :refer [deftest is]]
             [slingshot.slingshot :refer [try+]]))
 
 ;------------------------------------------------------------------------------ Layer 0
 
-(def ^{:stratum 0} ^:private release! boundary/release!)
+(def ^{:stratum 0} ^:private release! environment/release-execution-environment!)
 
 (defn- ^{:stratum 0} fail! [failure & _] (throw failure))
 
