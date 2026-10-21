@@ -1,4 +1,5 @@
 ;; Title: Miniforge.ai
 ;; Copyright 2025-2026 Christopher Lester (christopher@miniforge.ai)
 ;; Licensed under the Apache License, Version 2.0.
-{:env/persisted "Workspace persisted: {reference}"}
+{:workflow/system-messages
+ {:env/persisted "Workspace persisted: {reference}"}}
