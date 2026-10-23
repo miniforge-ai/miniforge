@@ -1,7 +1,6 @@
 (ns ai.miniforge.pipeline-config.env
   "Environment-specific configuration loading and merging."
   (:require [clojure.edn :as edn]
-            [clojure.java.io :as io]
             [clojure.string :as str]
             [clojure.walk :as walk]
             [ai.miniforge.pipeline-config.messages :as msg]
@@ -36,11 +35,10 @@
       :env/stages {\"Stage Name\" {:key val} ...}}"
   [path]
   (try
-    (let [f (io/file path)]
-      (if (.exists f)
-        (let [config (-> (slurp f) edn/read-string resolve-env-vars)]
-          (schema/success :env-config config))
-        (schema/failure :env-config (msg/t :env/file-not-found {:path path}))))
+    (let [config (-> (slurp path) edn/read-string resolve-env-vars)]
+      (schema/success :env-config config))
+    (catch java.io.FileNotFoundException _
+      (schema/failure :env-config (msg/t :env/file-not-found {:path path})))
     (catch Exception e
       (schema/exception-failure :env-config e))))
 
