@@ -15,7 +15,8 @@
    [ai.miniforge.response.interface :as response]
    [ai.miniforge.tool-registry.interface :as tool-registry]
    [clojure.java.io :as io]
-   [clojure.string :as str]))
+   [clojure.string :as str])
+  (:import [java.nio.file Files StandardCopyOption]))
 
 ;------------------------------------------------------------------------------ Layer 0
 
@@ -124,8 +125,21 @@
   (when (:success? result)
     (let [edits (:result result)]
       (when (seq edits)
-        (let [content (slurp file)]
-          (spit file (apply-text-edits content edits))))
+        (let [content   (slurp file)
+              formatted (apply-text-edits content edits)
+              f         (io/file file)
+              dir       (or (.getParentFile f) (io/file "."))
+              tmp       (java.io.File/createTempFile ".fmt-" ".tmp" dir)]
+          (try
+            (spit tmp formatted)
+            (Files/move (.toPath tmp) (.toPath f)
+                        (into-array StandardCopyOption
+                                    [StandardCopyOption/ATOMIC_MOVE
+                                     StandardCopyOption/REPLACE_EXISTING]))
+            (catch Throwable e
+              (try (Files/delete (.toPath tmp))
+                   (catch Throwable cleanup-e (.addSuppressed e cleanup-e)))
+              (throw e)))))
       true)))
 
 ;; Gate check/repair
