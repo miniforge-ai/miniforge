@@ -25,6 +25,7 @@
    [ai.miniforge.pr-lifecycle.events :as events]
    [ai.miniforge.pr-lifecycle.github-conversation :as conversation]
    [ai.miniforge.pr-lifecycle.policy-eval.fs :as policy-fs]
+   [ai.miniforge.pr-lifecycle.policy-eval.git-dir :as git-dir]
    [ai.miniforge.pr-lifecycle.triage :as triage]
    [ai.miniforge.loop.interface :as loop]
    [ai.miniforge.logging.interface :as log]
@@ -226,7 +227,9 @@
           (dag/err :fix-apply-failed (.getMessage e)))))))
 
 (defn ^{:stratum 0} commit-fix
-  "Commit fix changes and push to the PR branch.
+  "Commit fix changes and push to the PR branch, with every git hook
+   disabled: the fix just wrote LLM-proposed files, and a hook they
+   changed must not run inside the loop.
 
    Arguments:
    - worktree-path: Path to git worktree
@@ -251,9 +254,11 @@
                  :data {:branch branch :fix-type fix-type}}))
 
     ;; Stage and commit changes
-    (let [stage-result (release/commit-changes! worktree-path commit-msg)]
+    (let [stage-result (release/commit-changes! worktree-path commit-msg
+                                                git-dir/hooks-disabled-args)]
       (if (:success? stage-result)
-        (let [push-result (release/push-branch! worktree-path branch)]
+        (let [push-result (release/push-branch! worktree-path branch nil
+                                                git-dir/hooks-disabled-args)]
           (if (:success? push-result)
             (dag/ok {:commit-sha (:commit-sha stage-result)
                      :branch branch})

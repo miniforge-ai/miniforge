@@ -493,3 +493,31 @@
         (fs/create-sym-link (fs/path worktree ".git" "config") (fs/path ".." "gitconfig"))
         (is (refused? worktree "gitconfig" :modify)))
       (finally (fs/delete-tree base)))))
+
+(deftest ^{:stratum 1} commit-fix-runs-git-with-hooks-disabled-test
+  (testing "the fix loop's commit and push run no hook"
+    (let [{:keys [base worktree]} (temp-layout)
+          remote (str (fs/path base "remote.git"))
+          ran    (str (fs/path base "hook-ran"))]
+      (try
+        (git! base "init" "-q" "--bare" remote)
+        (doseq [args [["config" "user.email" "t@example.com"] ["config" "user.name" "t"]
+                      ["remote" "add" "origin" remote] ["checkout" "-q" "-b" "fix/x"]]]
+          (apply git! worktree args))
+        (spit (str (fs/path worktree "a.txt")) "1\n")
+        (git! worktree "add" "a.txt")
+        (git! worktree "commit" "-q" "-m" "init")
+        (doseq [hook ["pre-commit" "commit-msg" "post-commit" "reference-transaction" "pre-push"]]
+          (let [f (fs/path worktree ".git" "hooks" hook)]
+            (spit (str f) (str "#!/bin/sh\necho " hook " >> '" ran "'\n"))
+            (fs/set-posix-file-permissions f "rwxr-xr-x")))
+        (spit (str (fs/path worktree "a.txt")) "2\n")
+        (git! worktree "add" "a.txt")
+        (let [result (fix/commit-fix worktree {:fix/type :review-changes
+                                               :fix/affected-files ["a.txt"]}
+                                     "fix/x" nil)]
+          (is (dag/ok? result))
+          (is (not (fs/exists? ran)))
+          (is (= (get-in result [:data :commit-sha])
+                 (str/trim (:out (git! remote "rev-parse" "fix/x"))))))
+        (finally (fs/delete-tree base))))))

@@ -25,6 +25,7 @@
             [ai.miniforge.compliance-scanner.interface :as scanner]
             [ai.miniforge.dag-executor.interface :as dag]
             [ai.miniforge.pr-lifecycle.github :as github]
+            [ai.miniforge.pr-lifecycle.policy-eval.git :as pe-git]
             [ai.miniforge.pr-lifecycle.policy-eval.git-dir :as git-dir]
             [ai.miniforge.pr-lifecycle.policy-eval-responder :as sut]))
 
@@ -202,6 +203,24 @@
              *worktree* ".git/config" 2 "\thooksPath = tools/hooks")]
       (is (= :policy-eval/path-traversal (get-in r [:error :code])))
       (is (= "[core]\n\tbare = false\n" (read-file ".git/config"))))))
+
+(deftest ^{:stratum 2} commit-and-push-runs-git-with-hooks-disabled
+  (testing "the policy-eval commit runs no hook the applied fixes could have changed"
+    (let [ran  (str *worktree* "-hook-ran")
+          git! (fn [& args] (apply process/sh {:dir *worktree* :env (git-dir/git-env)} "git" args))]
+      (try
+        (git! "config" "user.email" "t@example.com")
+        (git! "config" "user.name" "t")
+        (doseq [hook ["pre-commit" "commit-msg" "post-commit"]]
+          (let [f (fs/path *worktree* ".git" "hooks" hook)]
+            (spit (str f) (str "#!/bin/sh\necho " hook " >> '" ran "'\n"))
+            (fs/set-posix-file-permissions f "rwxr-xr-x")))
+        (write-file! "src/a.clj" "(ns a)\n")
+        ;; No remote, so the push fails; the commit before it is what is checked.
+        (pe-git/commit-and-push! *worktree* [{:path "src/a.clj" :line 1}])
+        (is (zero? (:exit (git! "rev-parse" "--verify" "HEAD"))))
+        (is (not (fs/exists? ran)))
+        (finally (fs/delete-if-exists ran))))))
 
 (deftest ^{:stratum 2} apply-single-line-replacement-no-op-when-already-applied
   (testing "before == replacement → :already-applied, no file rewrite, no spurious diff"
