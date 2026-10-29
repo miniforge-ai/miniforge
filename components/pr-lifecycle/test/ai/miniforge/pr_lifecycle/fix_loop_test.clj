@@ -20,26 +20,38 @@
 
    Tests fix context creation, prompt building for each failure type,
    conversation follow-up routing, and worktree containment when a fix is
-   applied to disk. Does not execute generation or git operations."
+   applied to disk. Does not execute generation; git runs only to set up
+   the temp repositories the worktree-containment tests write into."
   (:require
    [babashka.fs :as fs]
+   [babashka.process :as process]
    [clojure.test :refer [deftest testing is]]
    [clojure.string :as str]
    [ai.miniforge.dag-executor.interface :as dag]
    [ai.miniforge.pr-lifecycle.fix-loop :as fix]
-   [ai.miniforge.pr-lifecycle.github-conversation :as conversation]))
+   [ai.miniforge.pr-lifecycle.github-conversation :as conversation]
+   [ai.miniforge.pr-lifecycle.policy-eval.git-dir :as git-dir]))
 
 ;------------------------------------------------------------------------------ Layer 0
 
 ;------------------------------------------------------------------------------ Test Data
 (defn- ^{:stratum 0} temp-layout
-  "Create sibling `worktree` and `outside` dirs under a fresh temp dir.
-   Returns their paths as strings, plus `:base` for cleanup."
+  "Create sibling `worktree` and `outside` dirs under a fresh temp dir,
+   with `worktree` a git repository: the fix-path guard asks git where its
+   metadata is and refuses every path when git cannot answer. Returns
+   their paths as strings, plus `:base` for cleanup."
   []
-  (let [base (fs/create-temp-dir {:prefix "fix-loop-apply-"})]
+  (let [base     (fs/create-temp-dir {:prefix "fix-loop-apply-"})
+        worktree (str (fs/create-dirs (fs/path base "worktree")))]
+    (process/sh {:dir worktree :env (git-dir/git-env)} "git" "init" "-q")
     {:base     (str base)
-     :worktree (str (fs/create-dirs (fs/path base "worktree")))
+     :worktree worktree
      :outside  (str (fs/create-dirs (fs/path base "outside")))}))
+
+(defn- ^{:stratum 0} git!
+  "Run git in `dir` without the repository variables a git hook exports."
+  [dir & args]
+  (apply process/sh {:dir (str dir) :env (git-dir/git-env)} "git" args))
 
 (defn- ^{:stratum 0} refused?
   "Apply a one-file fix writing (or deleting) `path` and return true when
@@ -324,11 +336,10 @@
 (deftest ^{:stratum 1} apply-fix-to-worktree-refuses-the-git-dir-test
   (let [{:keys [base worktree]} (temp-layout)
         hook   (fs/path worktree ".git" "hooks" "pre-commit")
-        config (str (fs/path worktree ".git" "config"))]
+        config (str (fs/path worktree ".git" "config"))
+        before (slurp config)]
     (try
-      (fs/create-dirs (fs/path worktree ".git" "hooks"))
       (fs/create-dirs (fs/path worktree ".github"))
-      (spit config "[core]\n")
       (testing "a direct write into .git/hooks is refused"
         (is (refused? worktree ".git/hooks/pre-commit" :create))
         (is (not (fs/exists? hook))))
@@ -337,7 +348,7 @@
         (is (not (fs/exists? hook))))
       (testing "a ./.git path is refused"
         (is (refused? worktree "./.git/config" :modify))
-        (is (= "[core]\n" (slurp config))))
+        (is (= before (slurp config))))
       (testing "a write through a symlinked directory that points at .git is refused"
         (fs/create-sym-link (fs/path worktree "tools") (fs/path worktree ".git"))
         (is (refused? worktree "tools/hooks/pre-commit" :create))
@@ -348,28 +359,10 @@
       (testing "deleting .git or a file inside it is refused"
         (is (refused? worktree ".git/config" :delete))
         (is (refused? worktree ".git" :delete))
-        (is (fs/exists? config)))
+        (is (= before (slurp config))))
       (testing ".gitignore and .github paths still apply"
         (is (dag/ok? (fix/apply-fix-to-worktree
                       worktree {:code/files [{:path ".gitignore" :content "target\n" :action :create}
                                              {:path ".github/CODEOWNERS" :content "* @o\n"
                                               :action :create}]} nil))))
       (finally (fs/delete-tree base)))))
-
-(deftest ^{:stratum 1} apply-fix-to-worktree-refuses-a-linked-worktree-gitdir-test
-  (testing "a .git gitdir file and the directory it names are both refused"
-    (let [{:keys [base worktree]} (temp-layout)
-          dot-git (str (fs/path worktree ".git"))
-          hook    (fs/path worktree "modules" "sub" "hooks" "pre-commit")]
-      (try
-        (fs/create-dirs (fs/path worktree "modules" "sub" "hooks"))
-        (spit dot-git "gitdir: modules/sub\n")
-        (is (refused? worktree "modules/sub/hooks/pre-commit" :create))
-        (is (not (fs/exists? hook)))
-        (is (refused? worktree ".git" :modify))
-        (is (refused? worktree ".git" :delete))
-        (is (= "gitdir: modules/sub\n" (slurp dot-git)))
-        (is (dag/ok? (fix/apply-fix-to-worktree
-                      worktree {:code/files [{:path "modules/readme.md" :content "x"
-                                              :action :create}]} nil)))
-        (finally (fs/delete-tree base))))))

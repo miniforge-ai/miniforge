@@ -61,9 +61,12 @@
       the canonical worktree root, and not be a dangling symlink:
       `getCanonicalPath` cannot resolve one, so it looks inside, but a
       write follows it and creates the file wherever it points.
-   4. Git dir — refuse a canonical target in the worktree's git dir
-      (see `policy-eval.git-dir`): a written hook or config runs on the
-      fix loop's next git command."
+   4. Git metadata — refuse a `.git` segment in the path as given,
+      before anything resolves it, and a path whose canonical target or
+      any canonical directory on the way to it is in the git dir, common
+      dir, or hooks dir git reports (see `policy-eval.git-dir`). A
+      written hook or config runs on the fix loop's next git command.
+      When git cannot report them, every path is refused."
   ([worktree-root relative-path]
    (safe-worktree-path worktree-root relative-path nil))
   ([worktree-root relative-path {:keys [allow-root?]}]
@@ -81,13 +84,16 @@
          (some #{".."} (str/split path-str #"[/\\\\]"))
          nil
 
+         (some git-dir/git-dir-name? (git-dir/segments path-str))
+         nil
+
          :else
          (let [root   (.getCanonicalPath (io/file (str worktree-root)))
                target (.getCanonicalPath (io/file (str worktree-root) path-str))]
            (when (and (or (str/starts-with? target (str root java.io.File/separator))
                           (and allow-root? (= target root)))
                       (not (and (fs/sym-link? target) (not (fs/exists? target))))
-                      (not (git-dir/inside-git-dir? root target)))
+                      (not (git-dir/reaches-metadata? root path-str)))
              target))))
      (catch java.io.IOException _ nil)
      (catch SecurityException _ nil))))
@@ -135,18 +141,20 @@
    outside and `outside/back` pointing back in, `link/back` resolves
    inside while the delete removes `outside/back`.
 
-   The entry itself must not be a git dir either: deleting a linked
+   The entry itself must not be git metadata either: deleting a linked
    worktree's `.git` file sends the next git command to whatever
    repository contains the worktree directory."
   [worktree-root relative-path]
   (let [file   (io/file (str relative-path))
         leaf   (.getName file)
         parent (.getParent file)]
-    (when-not (or (str/blank? leaf) (contains? #{"." ".."} leaf))
+    (when-not (or (str/blank? leaf)
+                  (contains? #{"." ".."} leaf)
+                  (git-dir/git-dir-name? leaf))
       (let [entry (some-> (safe-worktree-path worktree-root (or parent ".") {:allow-root? true})
                           (io/file leaf)
                           str)]
-        (when-not (and entry (git-dir/inside-git-dir? worktree-root entry))
+        (when-not (and entry (git-dir/metadata-entry? worktree-root entry))
           entry)))))
 
 ;; ── pipeline guards ──────────────────────────────────────────────────
@@ -158,7 +166,7 @@
 (defn- ^{:stratum 1} guard-path
   "Step 1: resolve `relative-path` under `worktree-path`. Bails out
    with `:policy-eval/path-traversal` on absolute paths, ..-segments,
-   canonicalization escapes, or a target in the git dir."
+   canonicalization escapes, or a path that reaches git metadata."
   [worktree-path relative-path]
   (if-let [abs (safe-worktree-path worktree-path relative-path)]
     (dag/ok {:abs abs :relative-path relative-path :worktree-path worktree-path})

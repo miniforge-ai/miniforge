@@ -25,6 +25,7 @@
             [ai.miniforge.compliance-scanner.interface :as scanner]
             [ai.miniforge.dag-executor.interface :as dag]
             [ai.miniforge.pr-lifecycle.github :as github]
+            [ai.miniforge.pr-lifecycle.policy-eval.git-dir :as git-dir]
             [ai.miniforge.pr-lifecycle.policy-eval-responder :as sut]))
 
 ;------------------------------------------------------------------------------ Layer 0
@@ -34,6 +35,9 @@
 
 (defn ^{:stratum 0} worktree-fixture [f]
   (let [w (str (fs/create-temp-dir {:prefix "policy-eval-responder-test-"}))]
+    ;; A repository: the path guard asks git where its metadata is and
+    ;; refuses every path when git cannot answer.
+    (process/sh {:dir w :env (git-dir/git-env)} "git" "init" "-q")
     (try
       (binding [*worktree* w] (f))
       (finally (try (fs/delete-tree w) (catch Throwable _ nil))))))
