@@ -24,6 +24,7 @@
    `relist-min-ms`) and every `sweep-ms`. Runs active at startup are read
    in full; older files are left to the archive scan and history."
   (:require
+   [ai.miniforge.event-stream.interface :as es]
    [ai.miniforge.web-dashboard.config :as dashboard-config]
    [ai.miniforge.web-dashboard.event-files :as event-files]
    [clojure.edn :as edn]
@@ -56,8 +57,8 @@
 
 (defn ^{:stratum 0} relist
   "`state` with its active directories recomputed at `now`. A directory
-   idle for `window-ms` was listed after its last write, so its seen
-   names give way to the time `now - window-ms`."
+   idle for `window-ms` was listed after its last write, so its file
+   tracking gives way to the time `now - window-ms`."
   [state events-dir roots window-ms now]
   (let [active  (event-files/active-dirs events-dir (- now window-ms))
         dropped (remove (set (keys active)) (keys (:seen state)))]
@@ -72,25 +73,29 @@
 
 (defn ^{:stratum 0} tail-dir
   "Publish the unseen events of directory `dir` (workflow `wf-name`) in
-   creation order. Seen names (a file is named after its event, under
-   either root) only grow, and a file gone before decoding is not
-   counted, so a move to archived/ neither skips nor repeats events."
+   creation order. Tracking is bounded like the dashboard's retention; a
+   file that turns up below it republishes the directory, which the
+   views dedupe by event id. Tracking never moves back: a directory gone
+   when listed keeps it, and a file gone before decoding is left to the
+   archived path."
   [publish-fn state wf-name dir]
-  (let [seen          (get-in state [:seen wf-name])
-        [names files] (event-files/unseen-files
-                       dir seen (get-in state [:since wf-name] (:since-ms state)))
-        events        (event-files/read-ordered files)
-        decoded       (into #{} (map event-files/source-file) events)
-        vanished      (into #{}
-                            (comp (remove decoded)
-                                  (remove #(.exists ^java.io.File %))
-                                  (map event-files/file-name))
-                            files)]
+  (let [seen            (get-in state [:seen wf-name])
+        [tracked files] (event-files/unseen-files
+                         dir seen
+                         (:max-events-per-workflow es/bounded-retention)
+                         (get-in state [:since wf-name] (:since-ms state)))
+        events          (event-files/read-ordered files)
+        decoded         (into #{} (map event-files/source-file) events)
+        moved?          (or (and (:floor seen) (nil? (:floor tracked)))
+                            (some #(not (or (decoded %) (.exists ^java.io.File %))) files))]
     (doseq [event events]
       (try+
         (publish-fn event)
         (catch Exception _ nil)))
-    (assoc-in state [:seen wf-name] (into (or seen #{}) (remove vanished) names))))
+    (assoc-in state [:seen wf-name]
+              (if moved?
+                (update seen :names (fnil into #{}) (map event-files/file-name) decoded)
+                tracked))))
 
 ;------------------------------------------------------------------------------ Layer 1
 
@@ -101,7 +106,7 @@
   (let [roots (event-files/root-mtimes events-dir)
         state (relist {:since-ms (- now mtime-slack-ms) :seen {}}
                       events-dir roots active-window-ms now)]
-    (assoc state :seen (zipmap (keys (:active state)) (repeat #{})))))
+    (assoc state :seen (zipmap (keys (:active state)) (repeat {})))))
 
 (defn ^{:stratum 1} poll-once!
   "One poll at `now`: relist when a sweep is due or a root changed (or
