@@ -15,7 +15,6 @@
 ;; WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 ;; See the License for the specific language governing permissions and
 ;; limitations under the License.
-
 (ns ai.miniforge.agent.tool-supervisor
   "Uniform tool-use supervision for inner LLM agents.
 
@@ -43,9 +42,9 @@
    [java.io PushbackReader]))
 
 ;------------------------------------------------------------------------------ Layer 0
-;; Bash command policy
 
-(def dangerous-patterns
+;; Bash command policy
+(def ^{:stratum 0} dangerous-patterns
   "Regex patterns for commands that should be denied.
    These are destructive or exfiltration-risk commands."
   [#"rm\s+-rf\s+/"
@@ -68,12 +67,61 @@
    #"halt\b"
    #"poweroff\b"])
 
-(defn matches-dangerous-pattern?
+;------------------------------------------------------------------------------ Layer 1.5
+;; Semantic meta-evaluation (LLM-powered quality/relevance check)
+(defn ^{:stratum 0} trivially-safe-tool?
+  "Tools that are always on-task and never need semantic review."
+  [tool-name]
+  (contains? #{"Read" "Glob" "Grep" "WebSearch" "WebFetch" "LS"
+               "mcp__context__context_read"
+               "mcp__context__context_grep"
+               "mcp__context__context_glob"}
+             tool-name))
+
+;------------------------------------------------------------------------------ Layer 1.7
+;; Event emission
+(defn ^{:stratum 0} emit-tool-use-event!
+  "Emit a tool-use-evaluated event to the event stream (if available).
+
+   Silently no-ops if no event stream or workflow id is bound."
+  [tool-name result & [{:keys [event-stream workflow-id phase]}]]
+  (try
+    (when (and event-stream workflow-id)
+      (let [meta-eval (:meta-eval result)
+            event (events/tool-use-evaluated
+                    event-stream workflow-id tool-name
+                    (:decision result)
+                    (cond-> {}
+                      (:reasoning meta-eval) (assoc :reasoning (:reasoning meta-eval))
+                      (:meta-eval? meta-eval) (assoc :meta-eval? true)
+                      (:confidence meta-eval) (assoc :confidence (:confidence meta-eval))
+                      phase (assoc :phase phase)))]
+        (events/publish! event-stream event)))
+    (catch Exception _e
+      ;; Silently ignore — event emission is observability, not critical path
+      nil)))
+
+;; Claude hook protocol (stdin/stdout JSON)
+(defn- ^{:stratum 0} read-hook-request
+  "Parse a single Claude hook JSON payload from stdin without waiting for EOF.
+
+   Claude's PreToolUse hook contract is request/response over a live stream.
+   Reading with `slurp` waits for stream closure and can deadlock before the
+   first tool approval. `parse-stream` reads one JSON value and returns as soon
+   as the object is complete."
+  []
+  (json/parse-stream (PushbackReader. *in*) true))
+
+;------------------------------------------------------------------------------ Layer 1
+
+(defn ^{:stratum 1} matches-dangerous-pattern?
   "Check if a command matches any dangerous pattern."
   [command]
   (some #(re-find % command) dangerous-patterns))
 
-(defn evaluate-bash-command
+;------------------------------------------------------------------------------ Layer 2
+
+(defn ^{:stratum 2} evaluate-bash-command
   "Evaluate a Bash command against policy.
 
    Returns {:decision \"allow\"} or {:decision \"deny\" :reason string}."
@@ -90,10 +138,10 @@
     :else
     {:decision "allow"}))
 
-;------------------------------------------------------------------------------ Layer 1
-;; Core evaluation function
+;------------------------------------------------------------------------------ Layer 3
 
-(defn evaluate-tool-use
+;; Core evaluation function
+(defn ^{:stratum 3} evaluate-tool-use
   "Evaluate a tool use request against policy.
 
    Returns {:decision \"allow\"} or {:decision \"deny\" :reason string}.
@@ -124,19 +172,9 @@
     ;; Default: allow (permissive — only deny known-dangerous)
     {:decision "allow"}))
 
-;------------------------------------------------------------------------------ Layer 1.5
-;; Semantic meta-evaluation (LLM-powered quality/relevance check)
+;------------------------------------------------------------------------------ Layer 4
 
-(defn trivially-safe-tool?
-  "Tools that are always on-task and never need semantic review."
-  [tool-name]
-  (contains? #{"Read" "Glob" "Grep" "WebSearch" "WebFetch" "LS"
-               "mcp__context__context_read"
-               "mcp__context__context_grep"
-               "mcp__context__context_glob"}
-             tool-name))
-
-(defn evaluate-with-meta
+(defn ^{:stratum 4} evaluate-with-meta
   "Two-layer evaluation: regex guardrails first, then semantic LLM check.
 
    Arguments:
@@ -179,44 +217,9 @@
           {:decision "allow"
            :meta-eval eval-result})))))
 
-;------------------------------------------------------------------------------ Layer 1.7
-;; Event emission
+;------------------------------------------------------------------------------ Layer 5
 
-(defn emit-tool-use-event!
-  "Emit a tool-use-evaluated event to the event stream (if available).
-
-   Silently no-ops if no event stream or workflow id is bound."
-  [tool-name result & [{:keys [event-stream workflow-id phase]}]]
-  (try
-    (when (and event-stream workflow-id)
-      (let [meta-eval (:meta-eval result)
-            event (events/tool-use-evaluated
-                    event-stream workflow-id tool-name
-                    (:decision result)
-                    (cond-> {}
-                      (:reasoning meta-eval) (assoc :reasoning (:reasoning meta-eval))
-                      (:meta-eval? meta-eval) (assoc :meta-eval? true)
-                      (:confidence meta-eval) (assoc :confidence (:confidence meta-eval))
-                      phase (assoc :phase phase)))]
-        (events/publish! event-stream event)))
-    (catch Exception _e
-      ;; Silently ignore — event emission is observability, not critical path
-      nil)))
-
-;------------------------------------------------------------------------------ Layer 2
-;; Claude hook protocol (stdin/stdout JSON)
-
-(defn- read-hook-request
-  "Parse a single Claude hook JSON payload from stdin without waiting for EOF.
-
-   Claude's PreToolUse hook contract is request/response over a live stream.
-   Reading with `slurp` waits for stream closure and can deadlock before the
-   first tool approval. `parse-stream` reads one JSON value and returns as soon
-   as the object is complete."
-  []
-  (json/parse-stream (PushbackReader. *in*) true))
-
-(defn hook-eval-stdin!
+(defn ^{:stratum 5} hook-eval-stdin!
   "CLI entry point for `miniforge hook-eval`.
 
    Reads Claude PreToolUse JSON from stdin:
