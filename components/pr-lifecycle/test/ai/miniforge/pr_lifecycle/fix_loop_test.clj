@@ -283,22 +283,30 @@
           (is (not (fs/exists? (fs/path outside "pwned.txt")))))
         (finally (fs/delete-tree base))))))
 
-(deftest ^{:stratum 1} apply-fix-to-worktree-resolves-each-op-in-order-test
-  (testing "deleting a symlink and recreating its name writes a new file, not the old target"
-    (let [{:keys [base worktree]} (temp-layout)
-          target (str (fs/path worktree "target.txt"))
-          link   (fs/path worktree "link.txt")]
-      (try
-        (spit target "orig")
-        (fs/create-sym-link link target)
-        (let [result (fix/apply-fix-to-worktree
-                      worktree {:code/files [{:path "link.txt" :action :delete}
-                                             {:path "link.txt" :content "new" :action :create}]} nil)]
-          (is (dag/ok? result))
-          (is (= "orig" (slurp target)))
-          (is (not (fs/sym-link? link)))
-          (is (= "new" (slurp (str link)))))
-        (finally (fs/delete-tree base))))))
+(deftest ^{:stratum 1} apply-fix-to-worktree-refuses-every-symlink-test
+  (let [{:keys [base worktree]} (temp-layout)
+        target (str (fs/path worktree "docs" "a.md"))]
+    (try
+      (fs/create-dirs (fs/path worktree "docs"))
+      (spit target "orig")
+      (testing "a write through a link to an ordinary in-tree dir is refused"
+        (fs/create-sym-link (fs/path worktree "docs-link") (fs/path worktree "docs"))
+        (is (refused? worktree "docs-link/a.md" :modify))
+        (is (= "orig" (slurp target))))
+      (testing "deleting a link is refused, and the link and its target stay"
+        (fs/create-sym-link (fs/path worktree "a-link.md") target)
+        (is (refused? worktree "a-link.md" :delete))
+        (is (fs/sym-link? (fs/path worktree "a-link.md")))
+        (is (= "orig" (slurp target))))
+      (testing "a dangling link as the last component is refused"
+        (fs/create-sym-link (fs/path worktree "new.md") (fs/path worktree "docs" "new.md"))
+        (is (refused? worktree "new.md" :create))
+        (is (not (fs/exists? (fs/path worktree "docs" "new.md")))))
+      (testing "a chain of directory links into .git is refused"
+        (fs/create-sym-link (fs/path worktree "b") (fs/path worktree ".git"))
+        (fs/create-sym-link (fs/path worktree "a") (fs/path worktree "b"))
+        (is (refused? worktree "a/config" :modify)))
+      (finally (fs/delete-tree base)))))
 
 (deftest ^{:stratum 1} apply-fix-to-worktree-deletes-under-a-root-parent-test
   (testing "a delete whose parent resolves to the worktree root itself applies"
@@ -306,9 +314,8 @@
       (try
         (spit (str (fs/path worktree "a.txt")) "a")
         (spit (str (fs/path worktree "b.txt")) "b")
-        (fs/create-sym-link (fs/path worktree "self") worktree)
         (let [result (fix/apply-fix-to-worktree
-                      worktree {:code/files [{:path "self/a.txt" :action :delete}
+                      worktree {:code/files [{:path "a.txt" :action :delete}
                                              {:path "././b.txt" :action :delete}]} nil)]
           (is (dag/ok? result))
           (is (not (fs/exists? (fs/path worktree "a.txt"))))
@@ -508,15 +515,38 @@
 ")
         (git! worktree "add" "refs/README")
         (git! worktree "commit" "-q" "-m" "init")
+        (spit (str (fs/path worktree "refs" "NOTES")) "untracked\n")
         (let [sha (slurp ref)]
           (is (refused? worktree "refs/heads/work" :modify))
           (is (refused? worktree "refs/heads/work" :delete))
           (is (refused? worktree "refs/tags/v1" :create))
+          (is (refused? worktree "refs/NOTES" :modify) "an untracked sibling of a tracked file")
           (is (= sha (slurp ref))))
+        (testing "deleting even the tracked refs/README is refused: its directory is where .git/refs resolves"
+          (is (refused? worktree "refs/README" :delete))
+          (is (fs/exists? (fs/path worktree "refs" "README"))))
         (is (dag/ok? (fix/apply-fix-to-worktree
                       worktree {:code/files [{:path "refs/README" :content "x"
                                               :action :modify}]} nil)))
         (finally (fs/delete-tree base))))))
+
+(deftest ^{:stratum 1} apply-fix-to-worktree-protects-a-dangling-config-link-target-test
+  (let [{:keys [base worktree]} (temp-layout)
+        config (fs/path worktree ".git" "config")]
+    (try
+      (testing "with .git/config -> ../gitconfig missing, creating gitconfig is refused"
+        (fs/delete config)
+        (fs/create-sym-link config (fs/path ".." "gitconfig"))
+        (is (refused? worktree "gitconfig" :create))
+        (is (not (fs/exists? (fs/path worktree "gitconfig")))))
+      (testing "with .git/config -> ../conf-a -> conf-b missing, neither link nor target is writable"
+        (fs/delete config)
+        (fs/create-sym-link config (fs/path ".." "conf-a"))
+        (fs/create-sym-link (fs/path worktree "conf-a") "conf-b")
+        (is (refused? worktree "conf-b" :create))
+        (is (refused? worktree "conf-a" :modify))
+        (is (not (fs/exists? (fs/path worktree "conf-b")))))
+      (finally (fs/delete-tree base)))))
 
 (deftest ^{:stratum 1} commit-fix-runs-git-with-hooks-disabled-test
   (testing "the fix loop's commit and push run no hook"
