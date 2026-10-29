@@ -163,6 +163,13 @@
    ~/.miniforge/events; (base-dir workflow-id)."
   sinks/workflow-dir)
 
+(def ^{:stratum 0} retention-hold
+  "Multimethod `(retention-hold hold-key workflow-id)`: register a method
+   under your own hold key to keep a workflow's archived events past
+   their TTL while your store still needs them (the event cleanup asks
+   every registered hold). Workflow id is the events directory name."
+  sinks/retention-hold)
+
 (def ^{:stratum 0} default-events-dir
   "The default events root (`~/.miniforge/events`) as a java.io.File —
    the base every other path fn in this family defaults to. Exposed so
