@@ -6,10 +6,9 @@
 
 # Platform Support
 
-Miniforge runs on macOS, Linux, and Windows. The runtime is Babashka (a
-fast Clojure interpreter) plus a JVM uberjar for heavier work — both are
-JVM-portable, so the workflow engine itself is the same code on every
-platform. Differences are concentrated in install paths, the bash demo
+Miniforge runs on macOS, Linux, and Windows.
+The runtime uses Babashka, a fast Clojure interpreter, plus a JVM uberjar for heavier work.
+The workflow engine uses the same code on every platform. Differences are concentrated in install paths, the bash demo
 script, and a handful of `bb` tasks that still assume a Unix shell.
 
 ## Status Matrix
@@ -153,10 +152,8 @@ bb test
   elevated shell.
 - **Line endings** — set `git config --global core.autocrlf input` before
   cloning to keep LF in checked-in files; mismatched CRLF will fail
-  `bb fmt:md` and pre-commit. Critically, this also affects the SHA-256
-  digests baked into governance config integrity checks — those are
-  computed on LF content and a CRLF checkout will fail
-  `ai.miniforge.config.governance/verify-and-warn` at startup.
+  `bb fmt:md` and pre-commit. Governance config integrity checks also compute SHA-256 digests from LF content.
+  A CRLF checkout fails `ai.miniforge.config.governance/verify-and-warn` at startup.
 - **Java cannot delete `.git/objects` pack files** — integration tests
   that create temp git repos (e.g.
   `ai.miniforge.workflow.release-integration-test`) fail on Windows
