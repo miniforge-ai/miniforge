@@ -31,6 +31,7 @@
    [ai.miniforge.cli.backends :as backends]
    [ai.miniforge.cli.backends.config :as backend-config]
    [ai.miniforge.cli.backends.status :as backend-status]
+   [ai.miniforge.cli.color :as color]
    [ai.miniforge.cli.main.commands.shared :as shared]
    [ai.miniforge.cli.messages :as messages]
    [ai.miniforge.cli.resource-config :as resource-config]))
@@ -46,10 +47,13 @@
   "config/cli/user-defaults.edn")
 
 (defn ^{:stratum 0} style
-  "Apply terminal styling using ANSI escape codes."
+  "Apply terminal styling using ANSI escape codes, or return `text` as is
+   when color is off (NO_COLOR, or stdout not a terminal)."
   [text color]
   (let [colors {:red "31" :green "32" :yellow "33" :cyan "36"}]
-    (str "\033[" (get colors color "37") "m" text "\033[0m")))
+    (if (color/enabled?)
+      (str "\033[" (get colors color "37") "m" text "\033[0m")
+      text)))
 
 (defn ^{:stratum 0} write-config-file
   "Replace the config file under the shared config lock. `config` or an anomaly."
