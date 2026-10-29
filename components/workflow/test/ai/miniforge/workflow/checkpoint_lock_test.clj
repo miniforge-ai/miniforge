@@ -3,7 +3,9 @@
 ;; Licensed under the Apache License, Version 2.0.
 (ns ai.miniforge.workflow.checkpoint-lock-test
   "A run's checkpoint lock held past the timeout makes the GC report a
-   failure for that run and leave it alone."
+   failure for that run and leave it alone. Locks use fixed slot files,
+   none per run, and take an older version's per-run lock file when it
+   exists without creating or removing it."
   (:require [ai.miniforge.anomaly.interface :as anomaly]
             [ai.miniforge.workflow.checkpoint-store :as store]
             [ai.miniforge.workflow.checkpoint-store-lock :as checkpoint-lock]
@@ -12,6 +14,7 @@
             [ai.miniforge.workflow.interface :as workflow]
             [babashka.fs :as fs]
             [clojure.java.io :as io]
+            [clojure.string :as str]
             [clojure.test :refer [deftest is testing]])
   (:import (java.util.concurrent CountDownLatch TimeUnit)))
 
@@ -34,13 +37,52 @@
         (is (empty? (:deleted result)))
         (is (.isDirectory (io/file root (str id))))))))
 
-(deftest ^{:stratum 0} lock-files-stay-after-the-run-is-deleted
+(defn- ^{:stratum 0} gc! [root events-dir]
+  (workflow/gc-checkpoints! {:checkpoint/root root :events-dir (fs/file events-dir)}))
+
+(deftest ^{:stratum 0} locks-leave-no-file-per-run
+  (fs/with-temp-dir [root {:prefix "pin-lock-"}]
+    (let [root (str root)]
+      (dotimes [_ 5] (checkpoint-lock/with-run-lock root (random-uuid) (constantly nil)))
+      (is (every? #(str/starts-with? (str (fs/file-name %)) "slot-")
+                  (fs/list-dir (fs/path root ".locks")))))))
+
+(deftest ^{:stratum 0} a-symlinked-lock-file-or-directory-is-refused
+  (fs/with-temp-dir [root {:prefix "pin-lock-"}]
+    (fs/with-temp-dir [outside {:prefix "pin-lock-outside-"}]
+      (let [root (str root)
+            target (fs/path outside "target")
+            id (random-uuid)]
+        (spit (str target) "keep")
+        (testing "a slot file that is a link: refused, the target untouched"
+          (fs/create-dirs (fs/path root ".locks"))
+          (fs/create-sym-link (checkpoint-lock/lock-file root id) target)
+          (let [result (checkpoint-lock/with-run-lock root id (constantly :entered))]
+            (is (anomaly/anomaly? result))
+            (is (= "keep" (slurp (str target))))))
+        (testing "a lock directory that is a link: refused, nothing made there"
+          (fs/delete-tree (fs/path root ".locks"))
+          (fs/create-sym-link (fs/path root ".locks") outside)
+          (let [other (random-uuid)
+                result (checkpoint-lock/with-run-lock root other (constantly :entered))]
+            (is (anomaly/anomaly? result))
+            (is (not (fs/exists? (fs/path outside (checkpoint-lock/slot-name other)))))))))))
+
+(deftest ^{:stratum 0} an-uncreatable-lock-file-fails-at-once
   (fs/with-temp-dir [root {:prefix "pin-lock-"}]
     (let [root (str root)
-          id (fixture/expired-run! root)]
-      (is (= [id] (:deleted (workflow/gc-checkpoints! {:checkpoint/root root}))))
-      (is (fs/exists? (checkpoint-lock/lock-file root id))
-          "unlinking it would let a new caller lock a fresh file while a waiter holds the old one"))))
+          locks (fs/path root ".locks")]
+      (fs/create-dirs locks)
+      (fs/set-posix-file-permissions locks "r-x------")
+      (try
+        (when-not (fs/writable? locks)
+          (let [started (System/nanoTime)
+                result (checkpoint-lock/with-run-lock root (random-uuid) (constantly :entered))
+                elapsed-ms (quot (- (System/nanoTime) started) 1000000)]
+            (is (anomaly/anomaly? result))
+            (is (= :unavailable (:anomaly/type result)))
+            (is (< elapsed-ms 2000) (str "took " elapsed-ms " ms, not the lock timeout"))))
+        (finally (fs/set-posix-file-permissions locks "rwx------"))))))
 
 (deftest ^{:stratum 0} a-run-started-pinned-pins-under-the-lock
   ;; The marker a pinned run's first checkpoint writes goes through the
@@ -101,5 +143,23 @@
         (.countDown release)
         @holder
         (is (= :entered (deref through-alias 10000 ::timed-out)))))))
+
+;------------------------------------------------------------------------------ Layer 1
+
+(deftest ^{:stratum 1} a-legacy-lock-file-is-never-created-or-removed
+  ;; Older processes lock <run-id>.lock; a newer one takes that lock when
+  ;; the file exists but never makes or deletes it.
+  (fs/with-temp-dir [root {:prefix "pin-lock-"}]
+    (fs/with-temp-dir [events-dir {:prefix "pin-lock-events-"}]
+      (let [root (str root)
+            id (fixture/expired-run! root)
+            fresh (random-uuid)
+            legacy (checkpoint-lock/legacy-lock-file root id)]
+        (fs/create-dirs (fs/parent legacy))
+        (spit (str legacy) "")
+        (is (= [id] (:deleted (gc! root events-dir))))
+        (is (fs/exists? legacy) "the old process's lock file stays")
+        (checkpoint-lock/with-run-lock root fresh (constantly nil))
+        (is (not (fs/exists? (checkpoint-lock/legacy-lock-file root fresh))))))))
 
 (comment ::checkpoint-lock)

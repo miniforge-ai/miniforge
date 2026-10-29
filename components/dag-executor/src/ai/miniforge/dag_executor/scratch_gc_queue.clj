@@ -69,7 +69,9 @@
    [java.io PushbackReader StringReader]
    [java.nio.channels FileChannel]
    [java.nio.file Paths StandardOpenOption]
-   [java.time Instant]))
+   [java.time Instant]
+   [java.util.concurrent TimeUnit]
+   [java.util.concurrent.locks ReentrantLock]))
 
 ;------------------------------------------------------------------------------ Layer 0
 
@@ -179,6 +181,9 @@
         Long/MAX_VALUE))
     (catch Exception _ Long/MAX_VALUE)))
 
+;; One in-process lock per canonical sidecar path; see `with-queue-lock!`.
+(defonce ^{:stratum 0} ^:private queue-process-locks (atom {}))
+
 ;------------------------------------------------------------------------------ Layer 1
 
 (defn ^{:stratum 1} gc-queue-path
@@ -203,42 +208,58 @@
         (assoc-in [:error :data :quarantined] copy))))
 
 (defn- ^{:stratum 1} with-queue-lock!
-  "Acquire an exclusive advisory JVM file lock on `path`, execute `thunk`,
-   then release the lock.
+  "Acquire an exclusive advisory file lock on the queue at `path`, execute
+   `thunk`, then release the lock.
+
+   The lock is on a sidecar `<path>.lock`, never on the queue file that
+   `thunk` reads and writes: POSIX record locks belong to the process,
+   and closing any descriptor of the locked file (each slurp and spit
+   opens one) would release the lock while `thunk` still runs. For the
+   same reason a timed in-process lock on the sidecar's canonical path is
+   taken first and held until the channel is closed: a second caller in
+   this process never opens the sidecar while the first holds it, so its
+   channel close cannot drop the first caller's lock.
 
    Polls for up to 500 ms in 25 ms increments before giving up.  Returns
    `result/err :scratch-gc-queue/locked` when the lock cannot be acquired
-   — this is the expected no-op for concurrent best-effort GC callers.
-
-   The file is created at `path` if it does not already exist (needed so
-   the FileChannel can be opened before the queue contains any entries)."
+   — this is the expected no-op for concurrent best-effort GC callers."
   [path thunk]
-  (let [nio-path (Paths/get path (make-array String 0))
+  (let [lock-path (str path ".lock")
+        nio-path (Paths/get lock-path (make-array String 0))
         opts     (into-array StandardOpenOption
-                             [StandardOpenOption/READ
-                              StandardOpenOption/WRITE
-                              StandardOpenOption/CREATE])]
+                             [StandardOpenOption/WRITE
+                              StandardOpenOption/CREATE])
+        lock-key (.getCanonicalPath (io/file lock-path))
+        ^ReentrantLock in-process (get (swap! queue-process-locks update lock-key
+                                              #(or % (ReentrantLock.)))
+                                       lock-key)]
     (try
-      (with-open [^FileChannel ch (FileChannel/open nio-path opts)]
-        (let [deadline (+ (System/currentTimeMillis) lock-acquire-timeout-ms)]
-          (loop []
-            (if-let [^java.lang.AutoCloseable lk (.tryLock ch)]
-              ;; FileLock implements AutoCloseable; .close releases the lock.
-              ;; Hinting AutoCloseable (not FileLock) keeps the ns loadable
-              ;; under babashka, which does not expose java.nio.channels.FileLock.
-              (try (thunk) (finally (.close lk)))
-              ;; Why Thread/sleep here is acceptable: an OS advisory file lock
-              ;; has no blocking-with-timeout acquire API — `.tryLock` is
-              ;; non-blocking and the blocking `.lock` waits forever (no
-              ;; timeout), which we must avoid for a best-effort GC. So we
-              ;; poll: brief sleep, retry, give up at the bounded deadline.
-              ;; This runs on the calling CLI/workflow thread (no pool starved)
-              ;; and the total wait is capped at lock-acquire-timeout-ms.
-              (if (< (System/currentTimeMillis) deadline)
-                (do (Thread/sleep lock-poll-interval-ms) (recur))
-                (result/err :scratch-gc-queue/locked
-                            "queue file is locked by another process"
-                            {:path path}))))))
+      (if-not (.tryLock in-process lock-acquire-timeout-ms TimeUnit/MILLISECONDS)
+        (result/err :scratch-gc-queue/locked
+                    "queue file is locked by another caller in this process"
+                    {:path path})
+        (try
+          (with-open [^FileChannel ch (FileChannel/open nio-path opts)]
+            (let [deadline (+ (System/currentTimeMillis) lock-acquire-timeout-ms)]
+              (loop []
+                (if-let [^java.lang.AutoCloseable lk (.tryLock ch)]
+                  ;; FileLock implements AutoCloseable; .close releases the lock.
+                  ;; Hinting AutoCloseable (not FileLock) keeps the ns loadable
+                  ;; under babashka, which does not expose java.nio.channels.FileLock.
+                  (try (thunk) (finally (.close lk)))
+                  ;; Why Thread/sleep here is acceptable: an OS advisory file lock
+                  ;; has no blocking-with-timeout acquire API — `.tryLock` is
+                  ;; non-blocking and the blocking `.lock` waits forever (no
+                  ;; timeout), which we must avoid for a best-effort GC. So we
+                  ;; poll: brief sleep, retry, give up at the bounded deadline.
+                  ;; This runs on the calling CLI/workflow thread (no pool starved)
+                  ;; and the total wait is capped at lock-acquire-timeout-ms.
+                  (if (< (System/currentTimeMillis) deadline)
+                    (do (Thread/sleep lock-poll-interval-ms) (recur))
+                    (result/err :scratch-gc-queue/locked
+                                "queue file is locked by another process"
+                                {:path path}))))))
+          (finally (.unlock in-process))))
       (catch InterruptedException _
         ;; Restore the interrupt flag so callers using cooperative cancellation
         ;; (e.g. shutdown hooks, async frameworks) still see the signal.
