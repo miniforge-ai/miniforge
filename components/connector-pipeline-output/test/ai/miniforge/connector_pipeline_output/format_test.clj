@@ -106,10 +106,12 @@
           java.nio.file.attribute.PosixFilePermission/OWNER_READ
           java.nio.file.attribute.PosixFilePermission/OWNER_EXECUTE))
         (try
-          (is (thrown? java.io.IOException
-                       (format/write-manifest (str dir) "run-1" {:version 2})))
-          (is (= original (slurp path)) "original bytes intact after failed overwrite")
-          (is (empty? (leftover-temp-files out-dir)) "no temp file survives")
+          ;; Root writes into a read-only directory anyway; nothing to assert there.
+          (when-not (.canWrite out-dir)
+            (is (thrown? java.io.IOException
+                         (format/write-manifest (str dir) "run-1" {:version 2})))
+            (is (= original (slurp path)) "original bytes intact after failed overwrite")
+            (is (empty? (leftover-temp-files out-dir)) "no temp file survives"))
           (finally
             (java.nio.file.Files/setPosixFilePermissions
              (.toPath out-dir)

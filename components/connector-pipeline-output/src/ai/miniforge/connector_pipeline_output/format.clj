@@ -22,8 +22,7 @@
             [cheshire.core :as json]
             [clojure.java.io :as io]
             [clojure.string])
-  (:import [java.io File]
-           [java.nio.file Files StandardCopyOption]))
+  (:import [java.nio.file Files StandardCopyOption]))
 
 ;------------------------------------------------------------------------------ Layer 0
 
