@@ -20,6 +20,7 @@
    Public API groups live under ai.miniforge.workflow.interface.* namespaces,
    while this namespace remains the Polylith entrypoint."
   (:require
+   [ai.miniforge.workflow.checkpoint-store :as checkpoint-store]
    [ai.miniforge.workflow.checkpoint-store-gc :as checkpoint-gc]
    [ai.miniforge.workflow.checkpoint-store-spec :as checkpoint-spec]
    [ai.miniforge.workflow.fsm :as fsm]
@@ -494,3 +495,19 @@
    :spec/expected-hash :spec/actual-hash}; actual is nil when the file is
    gone."
   checkpoint-spec/spec-drift)
+
+(def ^{:stratum 0} spec-file-hash
+  "The SHA-256 digest a run's manifest records for its spec file, or nil
+   when `path` is not a readable file. Args: [path]."
+  checkpoint-spec/spec-file-hash)
+
+(def ^{:stratum 0} read-checkpoint-manifest
+  "A run's checkpoint manifest alone, readable even when its snapshot is
+   not. Args: [workflow-run-id] or [workflow-run-id opts]. Returns the
+   manifest, nil when absent, or an anomaly naming an unreadable file."
+  checkpoint-store/read-checkpoint-manifest)
+
+(def ^{:stratum 0} record-spec-path!
+  "Point a run's manifest at where its spec file now lives, keeping the
+   recorded hash. Args: [workflow-run-id spec-path] or [... opts]."
+  checkpoint-store/record-spec-path!)

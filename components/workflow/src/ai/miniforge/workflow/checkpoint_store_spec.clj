@@ -17,8 +17,9 @@
 
 ;------------------------------------------------------------------------------ Layer 0
 
-(defn- ^{:stratum 0} file-hash
-  "SHA-256 of the file at `path`, nil when it is not a readable file."
+(defn ^{:stratum 0} spec-file-hash
+  "SHA-256 of the file at `path`, nil when it is not a readable file. The
+   one digest both the recorded hash and the resume check use."
   [path]
   (try+
     (when (fs/regular-file? path)
@@ -28,18 +29,32 @@
 ;------------------------------------------------------------------------------ Layer 1
 
 (defn ^{:stratum 1} spec-fields
-  "The spec fields a run's manifest carries. Once recorded they are kept,
-   so the hash stays the one taken at the run's first checkpoint. Until
-   then: the absolute path and hash of the run's input spec file
-   (`:spec/path`), or none when the run has no readable spec file."
+  "The spec fields a run's manifest carries, first found of:
+   1. the existing manifest's, so the hash stays the one taken when the
+      run started (and a path the CLI updated after moving the file);
+   2. `:checkpoint/spec` in the run's options: a resume under a new run
+      id carries the source run's recorded path and hash;
+   3. the run's input: `:spec/location` (absolute) and `:spec/hash`, which
+      the CLI takes before it moves a work spec to in-progress;
+   4. the input's `:spec/path`, hashed now (a run started without the
+      CLI's digest).
+   None when the run has no readable spec file."
   [ctx existing-manifest]
-  (if (:workflow/spec-hash existing-manifest)
-    (select-keys existing-manifest [:workflow/spec-path :workflow/spec-hash])
-    (let [path (get-in ctx [:execution/input :spec/path])
-          spec-hash (some-> path file-hash)]
-      (if spec-hash
-        {:workflow/spec-path (str (fs/absolutize path)) :workflow/spec-hash spec-hash}
-        {}))))
+  (let [carried (get-in ctx [:execution/opts :checkpoint/spec])]
+    (cond
+      (:workflow/spec-hash existing-manifest)
+      (select-keys existing-manifest [:workflow/spec-path :workflow/spec-hash])
+
+      (:workflow/spec-hash carried)
+      (select-keys carried [:workflow/spec-path :workflow/spec-hash])
+
+      :else
+      (let [{:spec/keys [location path] input-hash :spec/hash} (:execution/input ctx)
+            spec-path (or location path)
+            spec-hash (or input-hash (some-> spec-path spec-file-hash))]
+        (if (and spec-path spec-hash)
+          {:workflow/spec-path (str (fs/absolutize spec-path)) :workflow/spec-hash spec-hash}
+          {})))))
 
 (defn ^{:stratum 1} spec-drift
   "How the spec a run started from has changed, nil when it has not or the
@@ -50,7 +65,7 @@
   [manifest]
   (let [{:workflow/keys [spec-path spec-hash]} manifest]
     (when spec-hash
-      (let [actual (file-hash spec-path)]
+      (let [actual (spec-file-hash spec-path)]
         (when (not= spec-hash actual)
           {:workflow/spec-path spec-path
            :spec/expected-hash spec-hash

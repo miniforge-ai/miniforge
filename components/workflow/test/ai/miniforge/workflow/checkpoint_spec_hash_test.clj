@@ -61,4 +61,47 @@
            (is (= (config/sha256-hex "{:spec/title \"v1\"}")
                   (:workflow/spec-hash (manifest root ctx))))))))))
 
+(deftest ^{:stratum 1} the-digest-taken-before-a-move-is-recorded
+  ;; The CLI moves a work spec to in-progress before the run starts; the
+  ;; file at :spec/path is gone by the first checkpoint.
+  (fixture/call-with-temp-checkpoint-root
+   (fn [root]
+     (fs/with-temp-dir [dir {:prefix "spec-hash-"}]
+       (let [moved (str (fs/path dir "in-progress" "task.spec.edn"))
+             ctx (context/create-context {:workflow/id :spec-hash :workflow/version "1.0.0"
+                                          :workflow/pipeline [{:phase :plan}]}
+                                         {:spec/path (str (fs/path dir "task.spec.edn"))
+                                          :spec/location moved
+                                          :spec/hash (config/sha256-hex "v1")}
+                                         {:checkpoint/root root})]
+         (store/persist-execution-state! ctx)
+         (is (= moved (:workflow/spec-path (manifest root ctx))))
+         (is (= (config/sha256-hex "v1") (:workflow/spec-hash (manifest root ctx)))))))))
+
+(deftest ^{:stratum 1} a-new-attempt-carries-the-source-runs-spec
+  (fixture/call-with-temp-checkpoint-root
+   (fn [root]
+     (let [carried {:workflow/spec-path "/elsewhere/task.spec.edn"
+                    :workflow/spec-hash (config/sha256-hex "original")}
+           ctx (context/create-context {:workflow/id :spec-hash :workflow/version "1.0.0"
+                                        :workflow/pipeline [{:phase :plan}]}
+                                       {:spec/path "task.spec.edn"}
+                                       {:checkpoint/root root :checkpoint/spec carried})]
+       (store/persist-execution-state! ctx)
+       (is (= carried (select-keys (manifest root ctx)
+                                   [:workflow/spec-path :workflow/spec-hash])))))))
+
+(deftest ^{:stratum 1} the-recorded-path-follows-the-spec
+  (fixture/call-with-temp-checkpoint-root
+   (fn [root]
+     (fs/with-temp-dir [dir {:prefix "spec-hash-"}]
+       (let [spec (str (fs/path dir "task.spec.edn"))
+             _ (spit spec "v1")
+             ctx (spec-run root spec)
+             failed (str (fs/path dir "failed" "task.spec.edn"))]
+         (store/persist-execution-state! ctx)
+         (workflow/record-spec-path! (:execution/id ctx) failed {:checkpoint/root root})
+         (is (= failed (:workflow/spec-path (manifest root ctx))))
+         (is (= (config/sha256-hex "v1") (:workflow/spec-hash (manifest root ctx)))))))))
+
 (comment ::checkpoint-spec-hash)
