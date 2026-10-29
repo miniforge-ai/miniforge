@@ -1,7 +1,49 @@
 ;; Tool policy for inner LLM agents, enforced by the PreToolUse hook
-;; (`miniforge hook-eval`, tool_supervisor.clj).
+;; (`miniforge hook-eval --role <role>`, tool_supervisor.clj).
+;;
+;; Default-deny: the hook refuses a tool that is in neither :common nor the
+;; role's set under :roles, and refuses every tool when it gets no role or
+;; a role this file does not list. A tool that passes still has its input
+;; checked (Bash commands against :bash/deny-patterns).
+;;
+;; Claude names MCP tools mcp__<server>__<tool>. The server is the
+;; "context" key artifact_session writes into mcp-config.json; the tools
+;; are the ones bases/mcp-context-server's tool-registry.edn serves.
+;;
+;; Each role's set is the hook's half of the policy its --disallowedTools
+;; list (planner.clj, implementer.clj, tester.clj, reviewer.clj) gives the
+;; agent CLI. Keep the two in step: a tool missing here is refused even
+;; when the CLI offers it.
 
-{;; Bash commands the hook refuses: java.util.regex patterns, each matched
+{:common #{"mcp__context__context_read"
+           "mcp__context__context_grep"
+           "mcp__context__context_glob"
+           "mcp__context__consider_situation"
+           "mcp__context__answer_peg"
+           "TodoWrite"
+           "ToolSearch"}
+
+ :roles
+ {;; Writes .miniforge/plan.edn. Web search stays until a cached
+  ;; replacement ships (planner-disallowed-tools).
+  :planner     #{"mcp__context__context_write" "Write" "Edit" "MultiEdit"
+                 "WebSearch" "WebFetch"}
+
+  ;; Edits the worktree and runs build and git steps.
+  :implementer #{"mcp__context__context_write" "Write" "Edit" "MultiEdit"
+                 "NotebookEdit" "Bash"}
+
+  ;; Writes test files and runs them.
+  :tester      #{"mcp__context__context_write" "Write" "Edit" "MultiEdit" "Bash"}
+
+  ;; Inspects only: no write path, MCP or native, and no shell.
+  :reviewer    #{}
+
+  ;; Writes .miniforge/release.edn. It has no --disallowedTools list, so
+  ;; it keeps the read tools.
+  :releaser    #{"mcp__context__context_write" "Write" "Read" "Glob" "Grep" "LS"}}
+
+ ;; Bash commands the hook refuses: java.util.regex patterns, each matched
  ;; anywhere in the command (re-find). Destructive or exfiltration-risk
  ;; commands.
  :bash/deny-patterns
