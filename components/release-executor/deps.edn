@@ -5,5 +5,6 @@
         ai.miniforge/dag-executor {:local/root "../dag-executor"}
         ai.miniforge/logging {:local/root "../logging"}
         ai.miniforge/messages {:local/root "../messages"}
+        ai.miniforge/redaction {:local/root "../redaction"}
         babashka/fs {:mvn/version "0.5.34"}
         babashka/process {:mvn/version "0.5.22"}}}

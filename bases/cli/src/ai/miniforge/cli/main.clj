@@ -50,6 +50,7 @@
    [ai.miniforge.cli.main.display :as display]
    [ai.miniforge.cli.main.util :as util]
    [ai.miniforge.cli.main.launchers :as launchers]
+   [ai.miniforge.cli.main.parse-errors :as parse-errors]
    [ai.miniforge.cli.main.status.history :as status-history]
    [ai.miniforge.cli.main.status.presentation :as status-presentation]
    [ai.miniforge.cli.main.status.summary :as status-summary]
@@ -148,29 +149,6 @@
                   (str/join "\n" (map #(str "  " (app-config/command-string %))
                                       (app-config/help-examples)))
                   "\n"))))
-
-(defn- ^{:stratum 0} handle-unknown-command
-  "Print help for an unrecognized CLI command."
-  [{:keys [wrong-input dispatch all-commands]}]
-  (display/print-error (messages/t :main/unknown-command
-                                   {:command (str/join " " (conj (vec dispatch) wrong-input))}))
-  (println)
-  (when (and (= (first dispatch) "fleet")
-             (contains? #{"web" "dashboard" "tui"} wrong-input))
-    (println (messages/t :main/did-you-mean))
-    (println (str "  " (app-config/command-string (if (= wrong-input "dashboard") "web" wrong-input))))
-    (println))
-  (when (seq all-commands)
-    (println (messages/t :main/available-commands
-                         {:scope (if (seq dispatch)
-                                   (str "'" (str/join " " dispatch) "' ")
-                                   "")}))
-    (doseq [cmd all-commands]
-      (println (str "  " (app-config/command-string (str/join " " (conj (vec dispatch) cmd))))))
-    (println))
-  (println (messages/t :main/run-help
-                       {:command (app-config/command-string "help")}))
-  (System/exit 1))
 
 ;; TUI components loaded conditionally (only in JVM/jlink bundled runtime).
 ;; This is an optional composition seam: miniforge-core includes the CLI
@@ -412,7 +390,7 @@
     :spec {:backend        {:coerce :keyword :alias :b}
            :execution-mode {:coerce :keyword :alias :m}}}
    {:cmds ["help"]    :fn help-cmd}
-   {:cmds []          :fn help-cmd}  ; default
+   {:cmds []          :fn (parse-errors/help-unless-unknown help-cmd)}  ; default
 
    ;; Tool-use supervision hook (Claude PreToolUse)
    {:cmds ["hook-eval"]
@@ -430,7 +408,6 @@
     :fn lsp-mcp-bridge-cmd}
 
    ;; LSP management commands (user-facing)
-   {:cmds ["lsp"]          :fn help-cmd}
    {:cmds ["lsp" "status"] :fn lsp-status-cmd}
    {:cmds ["lsp" "install"] :fn lsp-install-cmd}
    {:cmds ["lsp" "setup"] :fn lsp-setup-cmd}
@@ -446,7 +423,6 @@
     :spec {:path {:alias :p}}}
 
    ;; Runtime adapter (N11-delta Phase 3) — info / pass-through run
-   {:cmds ["runtime"]      :fn help-cmd}
    {:cmds ["runtime" "info"] :fn runtime-info-cmd}
    {:cmds ["runtime" "run"]  :fn runtime-run-cmd}
 
@@ -454,6 +430,7 @@
    {:cmds ["scan"]
     :fn scan-cmd
     :args->opts [:repo]
+    :restrict true
     :spec {:pack      {:alias :p}
            :rules     {:alias :r}
            :since     {:alias :s}
@@ -463,22 +440,32 @@
            :no-lint   {:coerce :boolean}
            :semantic  {:coerce :boolean}}}
 
-   ;; Run command
+   ;; Run command. The spec declares every option run-cmd or its delegates
+   ;; read: the spec workflow, the plan executor (--quiet) and, with
+   ;; --resume, resume-workflow (--quiet, --run-id, --correlation-id,
+   ;; --from-phase), the same flags `resume` declares.
    {:cmds ["run"]
     :fn run-cmd
     :args->opts [:spec]
+    :restrict true
     :spec {:interactive     {:coerce :boolean :alias :i}
            :worktree        {:alias :w}
            :resume          {:alias :r}
            :backend         {:coerce :keyword :alias :b}
-           :execution-mode  {:coerce :keyword :alias :m}}}
+           :execution-mode  {:coerce :keyword :alias :m}
+           :quiet           {:coerce :boolean :alias :q}
+           :run-id          {}
+           :correlation-id  {}
+           :from-phase      {:coerce :keyword}}}
 
    ;; Resume — first-class subcommand. Reuses `run --resume`'s
    ;; underlying logic through the workflow-resume component.
    {:cmds ["resume"]
     :fn resume-cmd
     :args->opts [:workflow-id]
+    :restrict true
     :spec {:workflow-id {:alias :w}
+           :resume      {:alias :r}
            :quiet       {:coerce :boolean :alias :q}
            :run-id      {}
            :correlation-id {}
@@ -487,11 +474,13 @@
    ;; Status command
    {:cmds ["status"]
     :fn status-cmd
-    :args->opts [:workflow-id]}
+    :args->opts [:workflow-id]
+    :restrict true}
 
    ;; Monitoring commands
    {:cmds ["web"]
     :fn web-cmd
+    :restrict true
     :spec {:port {:coerce :int :alias :p :default 7878}
            :open {:coerce :boolean :alias :o}}}
 
@@ -502,7 +491,8 @@
    ;; Workflow parent — `mf workflow --help` / `mf workflow` lists the
    ;; group's subcommands with their one-line summaries.
    {:cmds ["workflow"]
-    :fn (wr-help/group-handler wr-help-registry/workflow-group-help)}
+    :fn (parse-errors/help-unless-unknown
+         (wr-help/group-handler wr-help-registry/workflow-group-help))}
 
    ;; Workflow commands (each subcommand carries a `--help` / `-h`
    ;; flag wired through `wr-help/handler-with-help`; the spec from
@@ -511,10 +501,12 @@
    {:cmds ["workflow" "run"]
     :fn (wr-help/handler-with-help :workflow-run workflow-run-cmd)
     :args->opts [:workflow-id]
+    :restrict true
     :spec (wr-help-registry/spec-for :workflow-run)}
 
    {:cmds ["workflow" "list"]
     :fn (wr-help/handler-with-help :workflow-list workflow-list-cmd)
+    :restrict true
     :spec (wr-help-registry/spec-for :workflow-list)}
 
    ;; Workflow subcommands — spec-driven execution and lifecycle (N5)
@@ -526,39 +518,45 @@
    {:cmds ["workflow" "status"]
     :fn (wr-help/handler-with-help :workflow-status workflow-status-cmd)
     :args->opts [:id]
+    :restrict true
     :spec (wr-help-registry/spec-for :workflow-status)}
 
    {:cmds ["workflow" "inspect"]
     :fn (wr-help/handler-with-help :workflow-inspect workflow-inspect-cmd)
     :args->opts [:path]
+    :restrict true
     :spec (wr-help-registry/spec-for :workflow-inspect)}
 
    {:cmds ["workflow" "cancel"]
     :fn (wr-help/handler-with-help :workflow-cancel workflow-cancel-cmd)
     :args->opts [:id]
+    :restrict true
     :spec (wr-help-registry/spec-for :workflow-cancel)}
 
    {:cmds ["workflow" "gc-scratch"]
     :fn (wr-help/handler-with-help :workflow-gc-scratch workflow-gc-scratch-cmd)
+    :restrict true
     :spec (wr-help-registry/spec-for :workflow-gc-scratch)}
 
    ;; Chain parent — `mf chain --help` / `mf chain` lists the group's
    ;; subcommands with their one-line summaries.
    {:cmds ["chain"]
-    :fn (wr-help/group-handler wr-help-registry/chain-group-help)}
+    :fn (parse-errors/help-unless-unknown
+         (wr-help/group-handler wr-help-registry/chain-group-help))}
 
    ;; Chain commands
    {:cmds ["chain" "run"]
     :fn (wr-help/handler-with-help :chain-run chain-run-cmd)
     :args->opts [:chain-id]
+    :restrict true
     :spec (wr-help-registry/spec-for :chain-run)}
 
    {:cmds ["chain" "list"]
     :fn (wr-help/handler-with-help :chain-list chain-list-cmd)
+    :restrict true
     :spec (wr-help-registry/spec-for :chain-list)}
 
    ;; Config subcommands
-   {:cmds ["config"] :fn help-cmd}
    {:cmds ["config" "init"] :fn config-init-cmd}
    {:cmds ["config" "list"] :fn config-list-cmd}
    {:cmds ["config" "get"]  :fn config-get-cmd  :args->opts [:key]}
@@ -573,6 +571,7 @@
    {:cmds ["logs" "tail"]
     :fn logs-tail-cmd
     :args->opts [:workflow-id]
+    :restrict true
     :spec {:file {:alias :f}
            :lines {:coerce :int :alias :n :default 10}
            :follow {:coerce :boolean :default true}
@@ -584,6 +583,7 @@
    {:cmds ["events" "tail"]
     :fn events-tail-cmd
     :args->opts [:workflow-id]
+    :restrict true
     :spec {:file {:alias :f}
            :lines {:coerce :int :alias :n :default 20}
            :follow {:coerce :boolean :default true}
@@ -596,6 +596,7 @@
    {:cmds ["events" "show"]
     :fn events-show-cmd
     :args->opts [:workflow-id]
+    :restrict true
     :spec {:gap-threshold {:coerce :int    :alias :g :default 60}
            :raw           {:coerce :boolean :alias :r :default false}}}
 
@@ -622,13 +623,15 @@
            :pr-number {:coerce :long}}}
    {:cmds ["pr" "respond"] :fn pr-respond-cmd :args->opts [:url]}
    {:cmds ["pr" "merge"]   :fn pr-merge-cmd   :args->opts [:url]}
-   {:cmds ["pr" "monitor"] :fn pr-monitor-cmd :spec {:author {:alias :a}
-                                                      :poll-interval {:alias :p}
-                                                      :repo {}}}
+   {:cmds ["pr" "monitor"] :fn pr-monitor-cmd :restrict true
+    :spec {:author        {:alias :a}
+           :poll-interval {:alias :p}
+           :repo          {}}}
 
    ;; N13 §2.2 Standards Reviewer auto-trigger (single-pass v0)
    {:cmds ["pr" "review-monitor"]
     :fn pr-review-monitor-cmd
+    :restrict true
     :spec {:repo      {}
            :author    {:alias :a}
            :standards {:default "standards/miniforge"}
@@ -639,6 +642,7 @@
    ;; N13 §2.7 Resume Signal Dispatcher (single-pass v0)
    {:cmds ["pr" "resume-dispatch"]
     :fn pr-resume-dispatcher-cmd
+    :restrict true
     :spec {:repo {}
            :once {:coerce :boolean :default true}}}
 
@@ -652,33 +656,29 @@
    {:cmds ["control-plane" "decisions"] :fn cp-decisions-cmd}
    {:cmds ["control-plane" "resolve"]   :fn cp-resolve-cmd
     :args->opts [:decision-id :resolution]
+    :restrict true
     :spec {:comment {:alias :c}}}
    {:cmds ["control-plane" "terminate"] :fn cp-terminate-cmd
     :args->opts [:agent-id]}
 
    ;; Operator channel — `control-plane` above is the dashboard's HTTP API
-   {:cmds ["operator"]          :fn help-cmd}
    {:cmds ["operator" "serve"] :fn operator-serve-cmd}
 
    ;; Policy pack commands (N5)
-   {:cmds ["policy"]           :fn help-cmd}
    {:cmds ["policy" "list"]    :fn policy-list-cmd}
    {:cmds ["policy" "show"]    :fn policy-show-cmd    :args->opts [:pack-id]}
    {:cmds ["policy" "install"] :fn policy-install-cmd :args->opts [:path]}
 
    ;; Evidence bundle commands (N5)
-   {:cmds ["evidence"]           :fn help-cmd}
    {:cmds ["evidence" "list"]    :fn evidence-list-cmd}
    {:cmds ["evidence" "show"]    :fn evidence-show-cmd   :args->opts [:id]}
    {:cmds ["evidence" "export"]  :fn evidence-export-cmd :args->opts [:id :output-path]}
 
    ;; Artifact commands (N5)
-   {:cmds ["artifact"]              :fn help-cmd}
    {:cmds ["artifact" "list"]       :fn artifact-list-cmd}
    {:cmds ["artifact" "provenance"] :fn artifact-provenance-cmd :args->opts [:id]}
 
    ;; ETL commands (N5)
-   {:cmds ["etl"]             :fn help-cmd}
    {:cmds ["etl" "repo"]      :fn etl-repo-cmd     :args->opts [:url]}
    {:cmds ["etl" "run"]       :fn etl-run-cmd      :args->opts [:pack]}
    {:cmds ["etl" "list"]      :fn etl-list-cmd     :args->opts [:paths]}
@@ -688,13 +688,22 @@
 ;------------------------------------------------------------------------------ Layer 2
 
 (defn ^{:stratum 2} -main
-  "CLI entry point."
+  "CLI entry point. A command-line error exits 2: an unknown command lists
+   the available ones, and a bad, unknown or missing option prints that
+   command's usage (see `parse-errors`). A command group named without a
+   subcommand lists its subcommands."
   [& args]
   (try+
-    (cli/dispatch dispatch-table args)
+    (cli/dispatch (mapv parse-errors/guard-entry dispatch-table) args)
     #_{:clj-kondo/ignore [:unresolved-symbol]}
     (catch [:type :org.babashka/cli :cause :no-match] data
-      (handle-unknown-command data))))
+      (parse-errors/handle-unknown-command! data))
+    #_{:clj-kondo/ignore [:unresolved-symbol]}
+    (catch [:type :org.babashka/cli :cause :input-exhausted] data
+      (parse-errors/print-group-usage! data))
+    #_{:clj-kondo/ignore [:unresolved-symbol]}
+    (catch [:type :org.babashka/cli] data
+      (parse-errors/handle-parse-error! data))))
 
 (alter-var-root #'cmd-monitoring/*web-available?* (constantly web-available?))
 
