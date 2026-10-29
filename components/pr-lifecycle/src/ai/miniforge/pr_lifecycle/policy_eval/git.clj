@@ -24,19 +24,23 @@
    `dag/when-let-ok` and short-circuits on the first failure."
   (:require
    [ai.miniforge.dag-executor.interface :as dag]
+   [ai.miniforge.pr-lifecycle.policy-eval.git-dir :as git-dir]
    [babashka.process :as process]
    [clojure.string :as str]))
 
 ;------------------------------------------------------------------------------ Layer 0
 
 (defn- ^{:stratum 0} git-sh
-  "Run `git -C worktree-path <args>`. Returns DAG result."
+  "Run `git -C worktree-path <args>` with hooks disabled: the commit
+   follows comment-driven file writes, and a hook those writes changed
+   must not run. Returns DAG result."
   [worktree-path & args]
   (try
     (let [r (apply process/shell
                    {:dir (str worktree-path)
                     :out :string :err :string :continue true}
-                   "git" "-C" (str worktree-path) args)]
+                   "git" "-C" (str worktree-path)
+                   (concat git-dir/hooks-disabled-args args))]
       (if (zero? (:exit r))
         (dag/ok {:output (str/trim (:out r ""))})
         (dag/err :policy-eval/git-failed

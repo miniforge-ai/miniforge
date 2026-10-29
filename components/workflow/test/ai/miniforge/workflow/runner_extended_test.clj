@@ -321,7 +321,9 @@
                                                   ctx/transition-to-completed
                                                   ctx/transition-to-failed)]
       (is (= :running (:execution/status result)))
-      (is (= runner-test-verify (:execution/current-phase result)))
+      ;; The fast path skips the next phase only when it is :implement
+      ;; (dag-success-next-phase-test); this pipeline's next phase runs.
+      (is (= runner-test-implement (:execution/current-phase result)))
       (is (= 0 (:execution/redirect-count result))))))
 
 (def ^{:stratum 1} ^:private dag-failure-fixture-metrics

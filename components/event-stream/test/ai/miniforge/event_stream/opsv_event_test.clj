@@ -37,7 +37,7 @@
 ;------------------------------------------------------------------------------ Layer 1
 
 (deftest ^{:stratum 1} test-opsv-constructor-propagates-identity-without-overrides
-  (let [stream (event-stream/create-event-stream)
+  (let [stream (event-stream/create-event-stream {:sinks []})
         org-id #uuid "00000000-0000-0000-0000-000000000012"
         event (event-stream/drift-detected
                stream workflow-id evidence-id
@@ -52,14 +52,14 @@
     (is (= evidence-id (:opsv/evidence-bundle-id event)))))
 
 (deftest ^{:stratum 1} disposition-rejects-unknown-state-and-substituted-decision-test
-  (let [stream (event-stream/create-event-stream)
+  (let [stream (event-stream/create-event-stream {:sinks []})
         event (event-stream/actuation-disposition stream workflow-id evidence-id disposition-payload)]
     (is (not (m/validate opsv/ActuationDisposition (assoc event :opsv/effect-state :invented))))
     (is (not (m/validate opsv/ActuationDisposition
                         (assoc-in event [:opsv/governed-effect :evidence/envelope-id] (random-uuid)))))))
 
 (deftest ^{:stratum 1} disposition-requires-a-derived-allow-at-both-public-boundaries-test
-  (let [stream (event-stream/create-event-stream)
+  (let [stream (event-stream/create-event-stream {:sinks []})
         envelope (:opsv/decision-envelope disposition-payload)]
     (doseq [invalid [nil 42 (assoc disposition-payload :unexpected true)]]
       (is (anomaly/anomaly? (event-stream/actuation-disposition stream workflow-id evidence-id invalid))))
@@ -77,7 +77,7 @@
                                                           (assoc disposition-payload :opsv/effect-state state)))))))
 
 (deftest ^{:stratum 1} invalid-disposition-does-not-consume-event-sequence-test
-  (let [stream (event-stream/create-event-stream)
+  (let [stream (event-stream/create-event-stream {:sinks []})
         construct #(event-stream/actuation-disposition stream workflow-id evidence-id %)
         before (construct disposition-payload)
         invalid (construct (assoc disposition-payload :opsv/effect-state :invented))
@@ -86,7 +86,7 @@
     (is (= (inc (:event/sequence-number before)) (:event/sequence-number after)))))
 
 (deftest ^{:stratum 1} disposition-preserves-identity-and-refuses-premature-observations-test
-  (let [stream (event-stream/create-event-stream)
+  (let [stream (event-stream/create-event-stream {:sinks []})
         identity {:org/id (random-uuid) :workspace/id (random-uuid)
                   :repo/id "miniforge-ai/miniforge" :auth/context {:actor :test}}
         payload (merge disposition-payload identity)
@@ -99,7 +99,7 @@
         (is (not (m/validate opsv/ActuationDisposition (merge event invalid))))))))
 
 (deftest ^{:stratum 1} test-all-opsv-constructors-emit-canonical-events
-  (let [stream (event-stream/create-event-stream)]
+  (let [stream (event-stream/create-event-stream {:sinks []})]
     (doseq [[constructor schema event-type payload] cases/constructors]
       (let [event (constructor stream workflow-id evidence-id payload)]
         (is (= event-type (:event/type event)))

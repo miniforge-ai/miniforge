@@ -127,6 +127,10 @@
   :doctor/runtime-optional "Required only for --execution-mode governed"
   :doctor/config-exists "{config-path}"
   :doctor/no-config "none, defaults apply; create one with '{command}'"
+  :doctor/label-checkpoints "Checkpoints"
+  :doctor/checkpoints-summary "{runs} run(s) under {root}; oldest {oldest-days} days"
+  :doctor/checkpoints-none "none under {root}"
+  :doctor/hint-checkpoints-gc "{older} unchanged for over {days} days; delete them with '{command}'"
   :doctor/summary-ok "All required checks passed."
   :doctor/summary-failed "{count} required check(s) failed."
 

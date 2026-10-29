@@ -85,7 +85,7 @@
   (let [source-dir (str (fs/parent (fs/absolutize spec-path)))
         execution-opts (cond-> {}
                          (:worktree opts) (assoc :worktree-path (:worktree opts)))
-        parsed-spec (-> (spec-parser/parse-spec-file spec-path)
+        parsed-spec (-> (spec-parser/read-spec-file spec-path)
                         (assoc :spec/source-dir source-dir))
         validation  (spec-parser/validate-spec parsed-spec)
         runner-opts (cond-> {:output :pretty :quiet false}

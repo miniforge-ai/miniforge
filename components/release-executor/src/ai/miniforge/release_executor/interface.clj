@@ -61,12 +61,15 @@
   git/create-branch!)
 
 (def ^{:stratum 0} commit-changes!
-  "Commit staged changes.
+  "Commit staged changes. Args: [worktree-path message] or
+   [worktree-path message git-args], git-args being global git options
+   placed before `commit` (e.g. to disable hooks).
    Returns {:success? bool :commit-sha string :error string}"
   git/commit-changes!)
 
 (def ^{:stratum 0} push-branch!
-  "Push branch to remote.
+  "Push branch to remote. Args: [worktree-path branch], plus optional
+   github-token and git-args (global git options placed before `push`).
    Returns {:success? bool :error string}"
   git/push-branch!)
 

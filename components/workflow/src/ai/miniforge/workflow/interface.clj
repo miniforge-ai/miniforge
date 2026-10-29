@@ -479,6 +479,12 @@
   visualize/machine->mermaid)
 
 ;; Checkpoint retention
+(def ^{:stratum 0} checkpoint-usage
+  "Read-only summary of the checkpoint root for `mf doctor`: {:checkpoint/root
+   :runs :older :oldest-days :max-age-days}, ages from run directory mtimes.
+   Args: [opts], as `gc-checkpoints!`. Deletes nothing."
+  checkpoint-gc/checkpoint-usage)
+
 (def ^{:stratum 0} gc-checkpoints!
   "Delete checkpoint directories unchanged for the retention period
    (default 30 days), keeping pinned runs, runs whose manifest does not
@@ -495,6 +501,11 @@
    :spec/expected-hash :spec/actual-hash}; actual is nil when the file is
    gone."
   checkpoint-spec/spec-drift)
+
+(def ^{:stratum 0} spec-content-hash
+  "The digest `spec-file-hash` records, of spec text already read. Args:
+   [content]."
+  checkpoint-spec/spec-content-hash)
 
 (def ^{:stratum 0} spec-file-hash
   "The SHA-256 digest a run's manifest records for its spec file, or nil

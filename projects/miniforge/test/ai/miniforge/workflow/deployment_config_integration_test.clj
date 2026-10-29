@@ -6,6 +6,7 @@
             [ai.miniforge.phase.interface :as phase]
             [ai.miniforge.phase-deployment.interface]
             [ai.miniforge.phase-deployment.shell :as shell]
+            [ai.miniforge.phase-deployment.shell.exec :as exec]
             [ai.miniforge.response.interface :as response]
             [ai.miniforge.workflow.execution-lifecycle :as lifecycle]
             [ai.miniforge.workflow.phase-event-test-support :as support]
@@ -21,6 +22,14 @@
 (defn- ^{:stratum 0} command [parsed]
   {:success? true :stdout "" :stderr "" :exit-code 0 :duration-ms 1
    :command "pulumi" :parsed parsed})
+
+(def ^{:stratum 0} destructive-preview-json
+  "`pulumi preview --json` output deleting a production database."
+  (str "{\"config\":{},\"steps\":[{\"op\":\"delete\","
+       "\"urn\":\"urn:pulumi:prod::infra::gcp:sql/databaseInstance:DatabaseInstance::prod-db\","
+       "\"oldState\":{\"type\":\"gcp:sql/databaseInstance:DatabaseInstance\","
+       "\"inputs\":{\"name\":\"prod-db\"}}}],"
+       "\"changeSummary\":{\"delete\":1},\"duration\":1200}"))
 
 (defn- ^{:stratum 0} provision-context [stream]
   {:execution/id (random-uuid)
@@ -82,3 +91,13 @@
       (is (contains? result :phase/decision-unacknowledged))
       (is (= :failed (:status result)))
       (is (zero? applied)))))
+
+(deftest ^{:stratum 2} provision-halts-a-preview-that-destroys-production
+  (let [parsed (:parsed (exec/with-parsed-json (assoc (command nil) :stdout destructive-preview-json)))
+        [result applied] (provision parsed (provision-context (events/create-event-stream {:sinks []})))
+        gate-errors (mapcat :errors (:phase/gate-failures result))]
+    (is (= "delete" (get-in parsed [:steps 0 :op])) "precondition: the real JSON parse")
+    (is (= :deny (get-in result [:phase/decision-envelope :envelope/decision])))
+    (is (some #(= :deploy/no-destroy-production (:code %)) gate-errors))
+    (is (= :failed (:status result)))
+    (is (zero? applied) "pulumi up never runs")))
