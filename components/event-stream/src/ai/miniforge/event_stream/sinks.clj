@@ -221,34 +221,64 @@
   [^java.io.File dir]
   (not-any? #(str/ends-with? (.getName ^java.io.File %) ".json") (.listFiles dir)))
 
-(defn- ^{:stratum 0} finished-run?
-  "True when one of the 20 newest files of workflow directory `dir`
-   records a terminal workflow event (completed, failed or cancelled),
-   read from the transit-JSON this namespace writes."
-  [^java.io.File dir]
-  (let [event-type (fn [^java.io.File f]
-                     (try+ (get (json/parse-string (slurp f :encoding "UTF-8")) "~:event/type")
-                           (catch Exception _ nil)))]
-    (->> (.listFiles dir)
-         (filter #(str/ends-with? (.getName ^java.io.File %) ".json"))
-         (sort-by #(- (.lastModified ^java.io.File %)))
-         (take 20)
-         (keep event-type)
-         (some #{"~:workflow/completed" "~:workflow/failed" "~:workflow/cancelled"}))))
+(defn- ^{:stratum 0} idle-unmanaged-run?
+  "True when live workflow directory `dir` has a visible name, no
+   manifest (no JVM runner manages it), nothing but event and temp files
+   besides an `archived.marker` an interrupted archive left, and neither
+   it nor any event file was modified since `cutoff`."
+  [^java.io.File dir cutoff manifest-name marker-name]
+  (let [children (.listFiles dir)]
+    (and (some? children)
+         (not (str/starts-with? (.getName dir) "."))
+         (< (.lastModified dir) cutoff)
+         (every? (fn [^java.io.File f]
+                   (let [n (.getName f)]
+                     (or (= marker-name n)
+                         (and (.isFile f)
+                              (not= manifest-name n)
+                              (or (str/ends-with? n ".json") (str/ends-with? n ".transit.tmp"))
+                              (< (.lastModified f) cutoff)))))
+                 children))))
 
-(defn- ^{:stratum 0} archive-finished-run!
-  "Move live workflow directory `dir` into `archived-root` and mark it
-   archived, as the JVM runner's archive does when a run ends. Returns 1
-   when moved, 0 when that name is already archived or the move fails."
-  [^java.io.File dir ^java.io.File archived-root]
+(defn- ^{:stratum 0} completed-run?
+  "True when the newest workflow lifecycle event in `dir`, among its 50
+   newest files, is a successful :workflow/completed. A started, resumed,
+   failed or cancelled run is not: resume can still write to it. Reads
+   the transit-JSON this namespace writes."
+  [^java.io.File dir]
+  (let [parse (fn [^java.io.File f]
+                (try+ (json/parse-string (slurp f :encoding "UTF-8"))
+                      (catch Exception _ nil)))
+        order (fn [e] [(some-> (get e "~:event/timestamp") (subs 2) Instant/parse .toEpochMilli)
+                       (get e "~:event/sequence-number" 0)])
+        lifecycle #{"~:workflow/started" "~:workflow/resumed" "~:workflow/completed"
+                    "~:workflow/failed" "~:workflow/cancelled"}
+        newest (->> (.listFiles dir)
+                    (filter #(str/ends-with? (.getName ^java.io.File %) ".json"))
+                    (sort-by #(- (.lastModified ^java.io.File %)))
+                    (take 50)
+                    (keep parse)
+                    (filter #(lifecycle (get % "~:event/type")))
+                    (sort-by order #(compare %2 %1))
+                    first)]
+    (and (= "~:workflow/completed" (get newest "~:event/type"))
+         (not (#{"~:failure" "~:failed" "~:cancelled"} (get newest "~:workflow/status"))))))
+
+(defn- ^{:stratum 0} archive-completed-run!
+  "Archive live workflow directory `dir` into `archived-root` as the JVM
+   runner does at the end of a run: write its `archived.marker` first,
+   then move the directory in one atomic rename, so an archived
+   directory always has its marker; an interrupted attempt leaves the
+   run in live/ for the next cleanup. Returns 1 when moved, else 0."
+  [^java.io.File dir ^java.io.File archived-root marker-name]
   (let [target (io/file archived-root (.getName dir))]
     (if (.exists target)
       0
       (try+
         (.mkdirs archived-root)
+        (spit (io/file dir marker-name) "")
         (Files/move (.toPath dir) (.toPath target)
                     (into-array StandardCopyOption [StandardCopyOption/ATOMIC_MOVE]))
-        (spit (io/file target (layout/archived-marker-filename)) "")
         1
         (catch Exception _ 0)))))
 
@@ -423,10 +453,11 @@
                       runner's; its archive moves it) or that is still
                       written to: resume replays it. A manifest-less run
                       (a Babashka run, which never archives) idle for
-                      the TTL is archived here if one of its newest
-                      events is terminal (completed, failed, cancelled),
-                      so the archived/ rules below apply to it next; if
-                      it holds no event file, its directory goes.
+                      the TTL is archived here when its newest lifecycle
+                      event is a successful completion (a failed or
+                      cancelled run may still be resumed), so the
+                      archived/ rules below apply to it next; if it
+                      holds no event file, its directory goes.
      archived/{wid}/  The whole directory, once its archive is older
                       than the TTL (by its `archived.marker`). One still
                       missing the marker is left for archive recovery.
@@ -498,14 +529,15 @@
             temps (->> (walk-tree events-dir)
                        (filter #(stale? % ".transit.tmp"))
                        delete-all!)
+            marker    (layout/archived-marker-filename)
             idle-live (when live-root
-                        (filter #(legacy-workflow-expired? % cutoff manifest-filename)
+                        (filter #(idle-unmanaged-run? % cutoff manifest-filename marker)
                                 (child-dirs live-root)))
             emptied (reduce + 0 (map #(delete-all! (reverse (walk-tree %)))
                                      (filter no-events? idle-live)))]
         (when archived-root
-          (doseq [dir (filter finished-run? (remove no-events? idle-live))]
-            (archive-finished-run! dir archived-root)))
+          (doseq [dir (filter completed-run? (remove no-events? idle-live))]
+            (archive-completed-run! dir archived-root marker)))
         (+ pruned operator temps emptied))
       0)))
 

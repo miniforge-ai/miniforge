@@ -66,30 +66,46 @@
 (defmethod ^{:stratum 1} sinks/retention-hold ::checkpoint [_ workflow-id _]
   (= workflow-id *held-id*))
 
-(deftest ^{:stratum 1} a-finished-idle-run-moves-to-archived
+(deftest ^{:stratum 1} a-completed-idle-run-moves-to-archived
   (let [dir   (temp-events-dir)
         wf-id (write-run! dir :workflow/started :workflow/completed)]
     (age-tree! (live dir wf-id))
     (sinks/cleanup-stale-events! {:events-dir dir})
     (is (not (.exists (live dir wf-id))))
     (is (.isFile (io/file (archived dir wf-id) "archived.marker")))
-    (is (= [:workflow/started :workflow/completed]
-           (mapv :event/type (es/read-workflow-events-by-id (str dir) wf-id)))
+    (is (= #{:workflow/started :workflow/completed}
+           (set (map :event/type (es/read-workflow-events-by-id (str dir) wf-id))))
         "its events stay readable, now from archived/")))
+
+(deftest ^{:stratum 1} an-interrupted-archive-is-finished-later
+  (let [dir   (temp-events-dir)
+        wf-id (write-run! dir :workflow/started :workflow/completed)]
+    ;; A cleanup wrote the marker, then stopped before the rename.
+    (spit (io/file (live dir wf-id) "archived.marker") "")
+    (age-tree! (live dir wf-id))
+    (sinks/cleanup-stale-events! {:events-dir dir})
+    (is (not (.exists (live dir wf-id))))
+    (is (.isFile (io/file (archived dir wf-id) "archived.marker")))))
 
 (deftest ^{:stratum 1} live-runs-that-may-still-matter-stay
   (let [dir      (temp-events-dir)
         running  (write-run! dir :workflow/started :workflow/phase-started)
-        recent   (write-run! dir :workflow/started :workflow/failed)
+        recent   (write-run! dir :workflow/started :workflow/completed)
+        failed   (write-run! dir :workflow/started :workflow/failed)
+        resumed  (write-run! dir :workflow/started :workflow/failed
+                             :workflow/started :workflow/phase-started)
         jvm-run  (write-run! dir :workflow/started :workflow/completed)]
     (spit (io/file (live dir jvm-run) "manifest.json") "{}")
-    (age-tree! (live dir running))
-    (age-tree! (live dir jvm-run))
+    (run! #(age-tree! (live dir %)) [running failed resumed jvm-run])
     (sinks/cleanup-stale-events! {:events-dir dir})
     (testing "no terminal event: running, or crashed"
       (is (.isDirectory (live dir running))))
-    (testing "finished, but written within the TTL"
+    (testing "completed, but written within the TTL"
       (is (.isDirectory (live dir recent))))
+    (testing "failed: mf resume may still reuse its id"
+      (is (.isDirectory (live dir failed))))
+    (testing "failed, then resumed and running: the failure is not the newest"
+      (is (.isDirectory (live dir resumed))))
     (testing "a manifest: the JVM runner's archive owns it"
       (is (.isDirectory (live dir jvm-run))))))
 
@@ -104,13 +120,13 @@
 
 (deftest ^{:stratum 1} an-archived-run-a-hold-keeps-is-not-pruned
   (let [dir   (temp-events-dir)
-        wf-id (write-run! dir :workflow/started :workflow/failed)]
+        wf-id (write-run! dir :workflow/started :workflow/completed)]
     (age-tree! (live dir wf-id))
     (sinks/cleanup-stale-events! {:events-dir dir})
     (age-tree! (archived dir wf-id))
     (binding [*held-id* (str wf-id)]
       (sinks/cleanup-stale-events! {:events-dir dir}))
     (is (.isDirectory (archived dir wf-id))
-        "a paused run's checkpoint holds its events past the archived TTL")
+        "a run's checkpoint holds its events past the archived TTL")
     (sinks/cleanup-stale-events! {:events-dir dir})
     (is (not (.exists (archived dir wf-id))) "without the hold it goes")))
