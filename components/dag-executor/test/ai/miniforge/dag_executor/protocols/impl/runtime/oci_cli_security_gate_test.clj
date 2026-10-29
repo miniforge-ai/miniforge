@@ -169,6 +169,7 @@
     (let [image-env {"GH_TOKEN" "t" "DB_PASSPHRASE" "p" "DEPLOY_KEY" "k" "GITHUB_PAT" "p"
                      "MYSQL_PWD" "p" "NPM_CONFIG__AUTH" "a"
                      "DATABASE_URL" "postgres://app:s3cret@db:5432/app"
+                     "REDIS_URL" "redis://:s3cret@redis:6379/0"
                      "GIT_CONFIG_VALUE_0" "v" "GIT_CONFIG_PARAMETERS" "p"
                      "ANTHROPIC_API_KEY" "k" "JAVA_HOME" "/opt/java"
                      "CLAUDE_CODE_MAX_OUTPUT_TOKENS" "8000"}
@@ -178,7 +179,7 @@
       (is (= (merge proxy-blanks
                     {"HTTPS_PROXY" "http://proxy:3128"}
                     (zipmap ["GH_TOKEN" "DB_PASSPHRASE" "DEPLOY_KEY" "GITHUB_PAT" "MYSQL_PWD"
-                             "NPM_CONFIG__AUTH" "DATABASE_URL" "GIT_CONFIG_VALUE_0"
+                             "NPM_CONFIG__AUTH" "DATABASE_URL" "REDIS_URL" "GIT_CONFIG_VALUE_0"
                              "GIT_CONFIG_PARAMETERS"]
                             (repeat "")))
              (:env plan)))
