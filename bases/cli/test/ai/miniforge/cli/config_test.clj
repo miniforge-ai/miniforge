@@ -18,8 +18,11 @@
 (ns ai.miniforge.cli.config-test
   "Tests for Aero configuration management."
   (:require [clojure.test :refer [deftest testing is]]
+            [ai.miniforge.cli.backends.status :as backend-status]
             [ai.miniforge.cli.config :as config]
-            [clojure.java.io :as io]))
+            [ai.miniforge.cli.main.commands.shared :as shared]
+            [clojure.java.io :as io]
+            [clojure.string :as str]))
 
 ;------------------------------------------------------------------------------ Layer 0
 
@@ -144,3 +147,22 @@
         (spit tmp "{:llm {:backend :anthropic}}")
         (is (= {:llm {:backend :anthropic}} (config/read-config-file (.getPath tmp))))
         (finally (.delete tmp))))))
+
+(deftest ^{:stratum 0} writers-refuse-unparseable-config-test
+  (doseq [[label run-cmd] [["config set" #(config/cmd-set {:config % :key "llm.backend" :value "codex"})]
+                           ["config backend" #(config/cmd-backend {:config % :backend "claude"})]]]
+    (testing (str label " leaves a config that does not parse untouched and exits 1")
+      (let [tmp     (java.io.File/createTempFile "unparseable-config" ".edn")
+            garbage "{:llm {:backend :claude} :policy-packs [:core"
+            exits   (atom [])
+            err     (java.io.StringWriter.)]
+        (try
+          (spit tmp garbage)
+          (with-redefs [shared/exit! (fn [code] (swap! exits conj code) (throw (ex-info "exit" {})))
+                        backend-status/validate-backend (constantly {:valid? true})]
+            (binding [*err* err]
+              (is (thrown? clojure.lang.ExceptionInfo (with-out-str (run-cmd (.getPath tmp)))))))
+          (is (= garbage (slurp tmp)))
+          (is (= [1] @exits))
+          (is (str/includes? (str err) (.getPath tmp)))
+          (finally (.delete tmp)))))))

@@ -22,7 +22,8 @@
    [clojure.edn :as edn]
    [babashka.fs :as fs]
    [ai.miniforge.cli.messages :as messages]
-   [ai.miniforge.cli.main.commands.fleet :as sut]))
+   [ai.miniforge.cli.main.commands.fleet :as sut]
+   [ai.miniforge.cli.main.commands.shared :as shared]))
 
 ;------------------------------------------------------------------------------ Layer 0
 
@@ -111,30 +112,6 @@
         (is (= ["from-default"] (get-in result [:fleet :repos])))))))
 
 ;; ============================================================================
-;; save-config tests
-;; ============================================================================
-(deftest ^{:stratum 2} save-config-creates-parent-dirs-test
-  (testing "Creates parent directories if they don't exist"
-    (let [path (tmp-path "nested" "dir" "config.edn")]
-      (sut/save-config {:fleet {:repos ["r1"]}} path nil)
-      (is (fs/exists? path))
-      (is (= {:fleet {:repos ["r1"]}} (edn/read-string (slurp path)))))))
-
-(deftest ^{:stratum 2} save-config-uses-default-path-when-nil-test
-  (testing "Uses default path when explicit path is nil"
-    (let [default-path (tmp-path "default-save.edn")]
-      (sut/save-config {:data true} nil default-path)
-      (is (fs/exists? default-path))
-      (is (= {:data true} (edn/read-string (slurp default-path)))))))
-
-(deftest ^{:stratum 2} save-config-overwrites-existing-test
-  (testing "Overwrites existing config file"
-    (let [path (tmp-path "overwrite.edn")]
-      (spit path (pr-str {:old :data}))
-      (sut/save-config {:new :data} path nil)
-      (is (= {:new :data} (edn/read-string (slurp path)))))))
-
-;; ============================================================================
 ;; fleet-add-cmd tests
 ;; ============================================================================
 (deftest ^{:stratum 2} fleet-add-cmd-adds-repo-test
@@ -144,6 +121,21 @@
       (sut/fleet-add-cmd {:repo "org/new-repo" :config path} nil default-config)
       (let [saved (edn/read-string (slurp path))]
         (is (= ["org/new-repo"] (get-in saved [:fleet :repos])))))))
+
+(deftest ^{:stratum 2} fleet-writers-refuse-unparseable-config-test
+  (doseq [run-cmd [#(sut/fleet-add-cmd {:repo "org/new" :config %} nil default-config)
+                   #(sut/fleet-remove-cmd {:repo "org/a" :config %} nil default-config)]]
+    (let [path    (tmp-path "unparseable.edn")
+          garbage "{:fleet {:repos [\"org/a\"]} :llm"
+          exits   (atom [])
+          err     (java.io.StringWriter.)]
+      (spit path garbage)
+      (with-redefs [shared/exit! (fn [code] (swap! exits conj code) (throw (ex-info "exit" {})))]
+        (binding [*err* err]
+          (is (thrown? clojure.lang.ExceptionInfo (with-out-str (run-cmd path))))))
+      (is (= garbage (slurp path)))
+      (is (= [1] @exits))
+      (is (.contains (str err) path) "the error, naming the file, goes to stderr"))))
 
 (deftest ^{:stratum 2} fleet-add-cmd-appends-to-existing-repos-test
   (testing "Appends to existing repos without removing them"

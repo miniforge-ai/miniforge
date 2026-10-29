@@ -33,12 +33,15 @@
    `persisted-execution-keys`, the allowlist deciding what survives a
    checkpoint."
   (:require
+   [ai.miniforge.anomaly.interface :as anomaly]
    [ai.miniforge.coerce.interface :as coerce]
    [ai.miniforge.workflow.checkpoint-store-paths :as checkpoint-paths]
    [ai.miniforge.workflow.checkpoint-store-records :as checkpoint-records]
+   [ai.miniforge.workflow.messages :as messages]
    [ai.miniforge.workflow.schemas :as schemas]
    [babashka.fs :as fs]
-   [clojure.edn :as edn])
+   [clojure.edn :as edn]
+   [slingshot.slingshot :refer [try+]])
   (:import [java.nio.file Files StandardCopyOption]))
 
 ;------------------------------------------------------------------------------ Layer 0
@@ -70,6 +73,40 @@
    Same append discipline as the codex-gap ledger: one O_APPEND write, a
    failed append cannot damage prior entries."
   "gate-history.edn")
+
+(defn- ^{:stratum 0} write-failure
+  "The anomaly `persist-execution-state!` returns when a write fails: a
+   full disk, a checkpoint root the process cannot write, an unreadable
+   manifest. It names the run, the phase being checkpointed and the
+   root, and keeps the exception's class and message (an I/O exception's
+   message is usually the path), so the runner can say which write
+   failed and why."
+  [checkpoint-root workflow-run-id phase-name ex]
+  (anomaly/exception-anomaly :unavailable
+                             (messages/t :checkpoint/write-failed
+                                         {:run-id workflow-run-id
+                                          :error (or (ex-message ex) (.getName (class ex)))})
+                             {:checkpoint/root checkpoint-root
+                              :workflow/run-id workflow-run-id
+                              :phase/name phase-name}
+                             ex))
+
+(defn- ^{:stratum 0} invalid-manifest
+  "The anomaly `persist-execution-state!` returns, before writing
+   anything, when the manifest already on disk parses but merges into a
+   manifest that fails the checkpoint schema. Saving over it would
+   persist metadata the loader rejects."
+  [checkpoint-root workflow-run-id phase-name manifest-path validation]
+  (anomaly/anomaly :invalid-input
+                   (messages/t :checkpoint/write-failed
+                               {:run-id workflow-run-id
+                                :error (messages/t :checkpoint/manifest-invalid
+                                                   {:path manifest-path})})
+                   {:checkpoint/root checkpoint-root
+                    :checkpoint/path manifest-path
+                    :workflow/run-id workflow-run-id
+                    :phase/name phase-name
+                    :checkpoint/errors (get-in validation [:anomaly/data :errors])}))
 
 ;; Existence
 (defn ^{:stratum 0} checkpoint-present?
@@ -165,7 +202,15 @@
    append-only gate history. A resumed run also gets a checkpoint for
    each result it was started holding (`:resume-phase-results`) that has
    none under its id: a resume under a new run id (a retried attempt, a
-   rewind) can then itself be resumed with them."
+   rewind) can then itself be resumed with them.
+
+   Returns the written paths, nil for a context with no run id, or —
+   when a read or write fails — an `:unavailable` anomaly naming the
+   run, phase and root; an existing manifest that would merge into an
+   invalid one is an `:invalid-input` anomaly, with nothing written. A failed write is reported, not thrown: the
+   caller decides whether the run goes on without a checkpoint. A
+   context that fails the checkpoint schema still throws; that is a
+   programmer error, not an I/O condition."
   [ctx]
   (when-let [workflow-run-id (:execution/id ctx)]
     (let [checkpoint-root (checkpoint-paths/resolve-checkpoint-root ctx)
@@ -174,30 +219,41 @@
           snapshot-path (checkpoint-paths/machine-snapshot-path checkpoint-root
                                                                 workflow-run-id)
           manifest-path (checkpoint-paths/manifest-path checkpoint-root workflow-run-id)
-          existing-manifest (read-edn-file manifest-path)
           snapshot (checkpoint-records/build-machine-snapshot ctx)
-          manifest (checkpoint-records/build-manifest ctx checkpoint-root existing-manifest)
+          manifest (checkpoint-records/build-manifest ctx checkpoint-root)
           checkpoint-data {:checkpoint/root checkpoint-root
                            :manifest manifest
                            :machine-snapshot snapshot
                            :phase-results (or (:execution/phase-results ctx) {})}]
       (schemas/validate-checkpoint-data! checkpoint-data)
-      (try
-        (doseq [[resumed-phase resumed-result] (get-in ctx [:execution/opts :resume-phase-results])
-                :let [path (checkpoint-paths/phase-checkpoint-path checkpoint-root workflow-run-id resumed-phase)]
-                :when (and resumed-result (not (fs/exists? path)))]
-          (write-edn-atomically! path (checkpoint-records/build-phase-checkpoint ctx resumed-phase resumed-result)))
-        (when (and phase-name phase-result)
-          (write-edn-atomically!
-           (checkpoint-paths/phase-checkpoint-path checkpoint-root
-                                                   workflow-run-id
-                                                   phase-name)
-           (checkpoint-records/build-phase-checkpoint ctx phase-name phase-result))
-          (append-gate-history! checkpoint-root workflow-run-id phase-name phase-result ctx))
-        (write-edn-atomically! snapshot-path snapshot)
-        (write-edn-atomically! manifest-path manifest)
-        {:checkpoint/root checkpoint-root
-         :checkpoint/machine-snapshot-path snapshot-path
-         :checkpoint/manifest-path manifest-path}
-        (catch Exception _
-          nil)))))
+      ;; Every read and write below is I/O: a failure becomes the returned
+      ;; anomaly, never an exception that would end the run. The existing
+      ;; manifest is read here, inside the guard, for the same reason, and
+      ;; the manifest actually written (merged with it) is validated
+      ;; before anything is written.
+      (try+
+        (let [merged-manifest (checkpoint-records/build-manifest ctx checkpoint-root
+                                                                 (read-edn-file manifest-path))
+              validation (schemas/validate-checkpoint-data
+                          (assoc checkpoint-data :manifest merged-manifest))]
+          (if (anomaly/anomaly? validation)
+            (invalid-manifest checkpoint-root workflow-run-id phase-name manifest-path validation)
+            (do
+              (doseq [[resumed-phase resumed-result] (get-in ctx [:execution/opts :resume-phase-results])
+                      :let [path (checkpoint-paths/phase-checkpoint-path checkpoint-root workflow-run-id resumed-phase)]
+                      :when (and resumed-result (not (fs/exists? path)))]
+                (write-edn-atomically! path (checkpoint-records/build-phase-checkpoint ctx resumed-phase resumed-result)))
+              (when (and phase-name phase-result)
+                (write-edn-atomically!
+                 (checkpoint-paths/phase-checkpoint-path checkpoint-root
+                                                         workflow-run-id
+                                                         phase-name)
+                 (checkpoint-records/build-phase-checkpoint ctx phase-name phase-result))
+                (append-gate-history! checkpoint-root workflow-run-id phase-name phase-result ctx))
+              (write-edn-atomically! snapshot-path snapshot)
+              (write-edn-atomically! manifest-path merged-manifest)
+              {:checkpoint/root checkpoint-root
+               :checkpoint/machine-snapshot-path snapshot-path
+               :checkpoint/manifest-path manifest-path})))
+        (catch Exception e
+          (write-failure checkpoint-root workflow-run-id phase-name e))))))
