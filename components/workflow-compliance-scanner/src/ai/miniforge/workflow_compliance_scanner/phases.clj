@@ -31,7 +31,8 @@
      :compliance-execute  reads plan, applies fixes, commits, creates PRs"
   (:require
    [ai.miniforge.compliance-scanner.interface :as compliance-scanner]
-   [ai.miniforge.phase.interface              :as phase]))
+   [ai.miniforge.phase.interface              :as phase]
+   [ai.miniforge.phase.interface.gate :as phase-gate]))
 
 ;------------------------------------------------------------------------------ Layer 0
 
@@ -92,12 +93,12 @@
     (-> ctx
         (assoc-in [:phase :ended-at] end-time)
         (assoc-in [:phase :duration-ms] duration-ms)
-        (assoc-in [:phase :status] :completed)
+        (assoc-in [:phase :status] (phase-gate/completed-status (:phase ctx)))
         (assoc-in [:phase :metrics] {:violation-count violation-count
                                      :duration-ms     duration-ms})
         (assoc-in [:execution/phase-results :compliance-scan :result]
                   (get-in ctx [:phase :result]))
-        (update-in [:execution :phases-completed] (fnil conj []) :compliance-scan)
+        (phase-gate/count-completed :compliance-scan)
         (update-in [:execution/metrics :duration-ms] (fnil + 0) duration-ms))))
 
 (defn ^{:stratum 0} error-compliance-scan
@@ -121,13 +122,13 @@
     (-> ctx
         (assoc-in [:phase :ended-at] end-time)
         (assoc-in [:phase :duration-ms] duration-ms)
-        (assoc-in [:phase :status] :completed)
+        (assoc-in [:phase :status] (phase-gate/completed-status (:phase ctx)))
         (assoc-in [:phase :metrics] {:auto-fixable  auto-fixable
                                      :needs-review  needs-review
                                      :duration-ms   duration-ms})
         (assoc-in [:execution/phase-results :compliance-classify :result]
                   (get-in ctx [:phase :result]))
-        (update-in [:execution :phases-completed] (fnil conj []) :compliance-classify)
+        (phase-gate/count-completed :compliance-classify)
         (update-in [:execution/metrics :duration-ms] (fnil + 0) duration-ms))))
 
 (defn ^{:stratum 0} error-compliance-classify
@@ -149,12 +150,12 @@
     (-> ctx
         (assoc-in [:phase :ended-at] end-time)
         (assoc-in [:phase :duration-ms] duration-ms)
-        (assoc-in [:phase :status] :completed)
+        (assoc-in [:phase :status] (phase-gate/completed-status (:phase ctx)))
         (assoc-in [:phase :metrics] {:task-count  task-count
                                      :duration-ms duration-ms})
         (assoc-in [:execution/phase-results :compliance-plan :result]
                   (get-in ctx [:phase :result]))
-        (update-in [:execution :phases-completed] (fnil conj []) :compliance-plan)
+        (phase-gate/count-completed :compliance-plan)
         (update-in [:execution/metrics :duration-ms] (fnil + 0) duration-ms))))
 
 (defn ^{:stratum 0} error-compliance-plan
@@ -178,14 +179,14 @@
     (-> ctx
         (assoc-in [:phase :ended-at] end-time)
         (assoc-in [:phase :duration-ms] duration-ms)
-        (assoc-in [:phase :status] :completed)
+        (assoc-in [:phase :status] (phase-gate/completed-status (:phase ctx)))
         (assoc-in [:phase :metrics] {:pr-count         pr-count
                                      :violations-fixed violations-fixed
                                      :files-changed    files-changed
                                      :duration-ms      duration-ms})
         (assoc-in [:execution/phase-results :compliance-execute :result]
                   (get-in ctx [:phase :result]))
-        (update-in [:execution :phases-completed] (fnil conj []) :compliance-execute)
+        (phase-gate/count-completed :compliance-execute)
         (update-in [:execution/metrics :duration-ms] (fnil + 0) duration-ms))))
 
 (defn ^{:stratum 0} error-compliance-execute
