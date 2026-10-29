@@ -515,11 +515,16 @@
 ")
         (git! worktree "add" "refs/README")
         (git! worktree "commit" "-q" "-m" "init")
+        (spit (str (fs/path worktree "refs" "NOTES")) "untracked\n")
         (let [sha (slurp ref)]
           (is (refused? worktree "refs/heads/work" :modify))
           (is (refused? worktree "refs/heads/work" :delete))
           (is (refused? worktree "refs/tags/v1" :create))
+          (is (refused? worktree "refs/NOTES" :modify) "an untracked sibling of a tracked file")
           (is (= sha (slurp ref))))
+        (testing "deleting even the tracked refs/README is refused: its directory is where .git/refs resolves"
+          (is (refused? worktree "refs/README" :delete))
+          (is (fs/exists? (fs/path worktree "refs" "README"))))
         (is (dag/ok? (fix/apply-fix-to-worktree
                       worktree {:code/files [{:path "refs/README" :content "x"
                                               :action :modify}]} nil)))

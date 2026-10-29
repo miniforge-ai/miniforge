@@ -166,60 +166,45 @@
    (catch Exception _ false)))
 
 (defn ^{:stratum 1} in-metadata?
-  "True when canonical `path` is metadata of the worktree at canonical
-   `root`: a component below `root` is named `.git`, `path` is at or under
-   one of `found`'s `:dirs`, or, when `tracked?` is given, `path` is at or
-   under one of its `:links` and `(tracked? path)` is false."
-  [root {:keys [dirs links]} path tracked?]
-  (let [root-p   (java.nio.file.Paths/get (str root) (make-array String 0))
-        path-p   (java.nio.file.Paths/get (str path) (make-array String 0))
-        relative (if (.startsWith path-p root-p) (.relativize root-p path-p) path-p)]
-    (boolean (or (some git-dir-name? (segments relative))
-                 (some #(under? % path) dirs)
-                 (and tracked?
-                      (some #(under? % path) links)
-                      (not (tracked? path)))))))
+  "True when canonical `path` is at or under one of `found`'s `:dirs`, or
+   at or under one of its `:links` and `(tracked? path)` is false."
+  [{:keys [dirs links]} path tracked?]
+  (boolean (or (some #(under? % path) dirs)
+               (and (some #(under? % path) links)
+                    (not (tracked? path))))))
 
 ;------------------------------------------------------------------------------ Layer 2
 
 (defn ^{:stratum 2} reaches-metadata?
-  "True when following `relative-path` from `worktree-root` reaches git
-   metadata: the canonical target, or the canonical directory at any step
-   on the way to it, is `in-metadata?`. Checking every step catches a
-   symlink into the git dir followed by one back out. Symlinked metadata
-   targets (`:links`) apply to the final target only, where tracked-ness is
-   decided for that exact path. Also true when git cannot say where the
-   metadata is."
+  "True when `relative-path` under `worktree-root` names git metadata: its
+   canonical target is `in-metadata?`, or git cannot say where the
+   metadata is. Callers refuse paths with a symlink component first
+   (`symlink-on-path?`), so the canonical target is the path itself."
   [worktree-root relative-path]
-  (let [root   (.getCanonicalPath (io/file (str worktree-root)))
-        found  (metadata root)
-        root-p (java.nio.file.Paths/get root (make-array String 0))
-        rel    (java.nio.file.Paths/get (str relative-path) (make-array String 0))]
+  (let [root  (.getCanonicalPath (io/file (str worktree-root)))
+        found (metadata root)]
     (boolean
      (or (nil? found)
-         (some (fn [n]
-                 (in-metadata? root found
-                               (.getCanonicalPath (.toFile (.resolve root-p (.subpath rel 0 n))))
-                               (when (= n (.getNameCount rel)) #(tracked-exactly? root %))))
-               (range 1 (inc (.getNameCount rel))))))))
+         (in-metadata? found (.getCanonicalPath (io/file root (str relative-path)))
+                       #(tracked-exactly? root %))))))
 
 (defn ^{:stratum 2} metadata-entry?
   "True when the directory entry `entry` (an absolute path whose parent is
-   canonical; the entry itself is not followed) is git metadata of the
-   worktree at `worktree-root`, or git cannot say where that is. For
-   deletes, which remove the entry and not what it points at. A name the
-   file system cannot represent counts as metadata."
+   canonical) is git metadata of the worktree at `worktree-root`, or git
+   cannot say where that is. For deletes. A name the file system cannot
+   represent counts as metadata."
   [worktree-root entry]
   (try+
    (let [root  (.getCanonicalPath (io/file (str worktree-root)))
          found (metadata root)]
      (or (nil? found)
-         (in-metadata? root found (str entry) #(tracked-exactly? root %))))
+         (in-metadata? found (str entry) #(tracked-exactly? root %))))
    (catch IllegalArgumentException _ true)))
 
 ;------------------------------------------------------------------------------ Rich Comment
 (comment
   (git-dir-name? ".GIT")                                  ; => true
+  (symlink-on-path? "/repo" "tools/hooks/pre-commit")     ; => true when tools is a link
   (reaches-metadata? "/repo" ".githooks/pre-commit")      ; => true when core.hooksPath = .githooks
   (reaches-metadata? "/repo" "src/core.clj")              ; => false in a repository
 
