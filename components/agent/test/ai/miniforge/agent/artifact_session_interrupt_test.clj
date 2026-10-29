@@ -49,6 +49,23 @@
     (swap! log conj command)
     (result/ok {:stdout "" :stderr "" :exit-code 0})))
 
+(defn- ^{:stratum 0} throwing-cleanup-execute!
+  "Fake executor whose session-directory removal throws ex-info (as an
+   executor wrapper might); every other command succeeds."
+  [_executor _env-id command & [_opts]]
+  (if (.startsWith ^String command "rm -rf ")
+    (throw (ex-info "executor lost the capsule" {:command command}))
+    (result/ok {:stdout "" :stderr "" :exit-code 0})))
+
+(defn- ^{:stratum 0} capsule-context
+  "Governed execution context for the fake capsule, using `execute-fn`."
+  [execute-fn]
+  {:execution/mode :governed
+   :execution/executor :mock
+   :execution/environment-id "env-interrupt"
+   :execution/worktree-path "/workspace"
+   :execution/execute-fn execute-fn})
+
 (defn- ^{:stratum 0} interrupted-agent-call!
   "Body that fails the way an interrupted stream-exec-fn does: flag set,
    InterruptedException thrown."
@@ -79,6 +96,24 @@
           "the session directory removal ran to completion")
       (is (true? flag-restored?)
           "the interrupt flag is set again after the cleanup"))))
+
+(deftest ^{:stratum 1} cleanup-failure-does-not-replace-session-outcome-test
+  (testing "an ex-info from the cleanup does not replace the interruption, and the flag survives"
+    (let [thrown (try
+                   (session/with-session (capsule-context throwing-cleanup-execute!)
+                                         interrupted-agent-call!)
+                   nil
+                   (catch Throwable e
+                     e))
+          flag-restored? (Thread/interrupted)]
+      (is (instance? InterruptedException thrown)
+          "the caller still sees the interruption, not the cleanup failure")
+      (is (true? flag-restored?))))
+
+  (testing "an ex-info from the cleanup does not fail a session that succeeded"
+    (let [outcome (session/with-session (capsule-context throwing-cleanup-execute!)
+                                        (constantly :agent-result))]
+      (is (= :agent-result (:llm-result outcome))))))
 
 ;------------------------------------------------------------------------------ Rich Comment
 (comment

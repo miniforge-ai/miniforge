@@ -1157,7 +1157,8 @@
                   (fn []
                     (try+
                       (.close out-reader)
-                      (catch Exception _
+                      ;; Catch-all (`Object` also matches ex-info).
+                      (catch Object _
                         nil))))
   (.interrupt reader-thread)
   (.join reader-thread stream-reader-join-timeout-ms))
