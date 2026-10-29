@@ -1095,10 +1095,10 @@
    :execution-plan.
 
    A plan env name that is not a plain identifier, or is in
-   `refused-env-names`, is a hard-stop at every trust level: the launch
-   passes each name as `-e NAME`, and Podman reads `*` or a trailing `*`
-   there as a pattern that copies every matching variable of its own
-   environment into the container."
+   `refused-env-names`, is a hard-stop at every trust level: such a name
+   is not one env-file assignment, and Podman reads `*` or a trailing `*`
+   in `-e NAME` as a pattern that copies every matching variable of its
+   own environment into the container."
   [descriptor image env-config digest-fn]
   (let [plan            (build-launch-plan (digest-fn descriptor image) env-config)
         security-config {:host-path-allowlist #{(get env-config :workdir default-workdir)}
