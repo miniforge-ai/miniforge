@@ -35,6 +35,7 @@
   (:require
    [ai.miniforge.anomaly.interface :as anomaly]
    [ai.miniforge.coerce.interface :as coerce]
+   [ai.miniforge.workflow.checkpoint-store-lock :as checkpoint-lock]
    [ai.miniforge.workflow.checkpoint-store-paths :as checkpoint-paths]
    [ai.miniforge.workflow.checkpoint-store-records :as checkpoint-records]
    [ai.miniforge.workflow.checkpoint-store-spec :as checkpoint-spec]
@@ -207,41 +208,43 @@
       (catch Exception _ nil))))
 
 (defn ^{:stratum 1} pin-checkpoint!
-  "Pin a run's checkpoint: write its pin marker (atomically), which the
-   checkpoint GC never collects past. The marker is its own file, so a
-   checkpoint write rewriting the manifest at the same time cannot drop
-   it, and it goes into the run directory by path, so a GC deleting the
-   run either sees it or makes the pin fail (see `checkpoint-store-gc`). Returns the marker path, or an anomaly: `:not-found` when the run
-   has no checkpoint, `:unavailable` when the marker cannot be written."
+  "Pin a run's checkpoint: write its pin marker, which the checkpoint GC
+   never collects past. The marker is its own file, so a checkpoint write
+   rewriting the manifest at the same time cannot drop it, and it is
+   written under the run's lock (`checkpoint-store-lock`), which the GC
+   holds while it decides to delete the run: the pin lands before that
+   decision or finds the run gone. Returns the marker path, or an anomaly:
+   `:not-found` when the run has no checkpoint, `:unavailable` when the
+   lock stays busy or the marker cannot be written."
   ([workflow-run-id]
    (pin-checkpoint! workflow-run-id {}))
   ([workflow-run-id opts]
    (let [checkpoint-root (checkpoint-paths/resolve-checkpoint-root opts)
          path (checkpoint-paths/pin-marker-path checkpoint-root workflow-run-id)
          data {:workflow/run-id workflow-run-id :checkpoint/path path}]
-     (if-not (fs/exists? (checkpoint-paths/manifest-path checkpoint-root workflow-run-id))
-       (anomaly/anomaly :not-found
-                        (messages/t :checkpoint/pin-no-manifest {:run-id workflow-run-id})
-                        data)
-       ;; Written into the run directory by path, never creating it: when
-       ;; the GC has renamed the directory aside, the write fails and the
-       ;; pin is reported as failed instead of landing in a fresh empty
-       ;; directory beside a deleted run.
-       (try+
-         (let [temp (str path temp-file-suffix)]
-           (spit temp (pr-str {:pinned-at (str (java.time.Instant/now))}))
-           (Files/move (fs/path temp) (fs/path path)
-                       (into-array java.nio.file.CopyOption
-                                   [StandardCopyOption/ATOMIC_MOVE
-                                    StandardCopyOption/REPLACE_EXISTING]))
-           path)
-         (catch Exception e
-           (anomaly/exception-anomaly :unavailable
-                                      (messages/t :checkpoint/pin-failed
-                                                  {:run-id workflow-run-id
-                                                   :error (or (ex-message e) (.getName (class e)))})
-                                      data
-                                      e)))))))
+     (checkpoint-lock/with-run-lock
+      checkpoint-root workflow-run-id
+      (fn []
+        (if-not (fs/exists? (checkpoint-paths/manifest-path checkpoint-root workflow-run-id))
+          (anomaly/anomaly :not-found
+                           (messages/t :checkpoint/pin-no-manifest {:run-id workflow-run-id})
+                           data)
+          ;; Into the run directory by path, never creating it.
+          (try+
+            (let [temp (str path temp-file-suffix)]
+              (spit temp (pr-str {:pinned-at (str (java.time.Instant/now))}))
+              (Files/move (fs/path temp) (fs/path path)
+                          (into-array java.nio.file.CopyOption
+                                      [StandardCopyOption/ATOMIC_MOVE
+                                       StandardCopyOption/REPLACE_EXISTING]))
+              path)
+            (catch Exception e
+              (anomaly/exception-anomaly :unavailable
+                                         (messages/t :checkpoint/pin-failed
+                                                     {:run-id workflow-run-id
+                                                      :error (or (ex-message e) (.getName (class e)))})
+                                         data
+                                         e)))))))))
 
 ;------------------------------------------------------------------------------ Layer 2
 

@@ -52,14 +52,6 @@
    pinning never shares a read-modify-write with a checkpoint write."
   "pinned")
 
-(def ^{:stratum 0} deleting-prefix
-  "The checkpoint GC first renames a run directory to
-   `<deleting-prefix><run-id>` beside it, then decides between deleting it
-   and moving it back. A directory left with this prefix is a delete that
-   did not finish. The name is fixed per run so the event-retention hold
-   can find a run mid-delete with one stat."
-  ".deleting-")
-
 (def ^{:stratum 0} phase-checkpoints-directory-name
   "Directory name for per-phase checkpoint files."
   "phases")
@@ -94,12 +86,6 @@
   [checkpoint-root workflow-run-id]
   (str (fs/path (workflow-checkpoint-dir checkpoint-root workflow-run-id)
                 manifest-filename)))
-
-(defn ^{:stratum 1} aside-path
-  "Where the checkpoint GC moves a run's directory while deciding to delete
-   it."
-  [checkpoint-root workflow-run-id]
-  (str (fs/path checkpoint-root (str deleting-prefix workflow-run-id))))
 
 (defn ^{:stratum 1} pin-marker-path
   "Path to the pin marker of a workflow run."

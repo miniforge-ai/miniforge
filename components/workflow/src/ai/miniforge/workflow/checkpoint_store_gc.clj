@@ -22,6 +22,7 @@
    [ai.miniforge.anomaly.interface :as anomaly]
    [ai.miniforge.event-stream.interface :as es]
    [ai.miniforge.workflow.checkpoint-store :as checkpoint-store]
+   [ai.miniforge.workflow.checkpoint-store-lock :as checkpoint-lock]
    [ai.miniforge.workflow.checkpoint-store-paths :as checkpoint-paths]
    [ai.miniforge.workflow.messages :as messages]
    [babashka.fs :as fs]
@@ -110,74 +111,40 @@
   [dir]
   (fs/exists? (fs/file dir checkpoint-paths/pin-marker-filename)))
 
-(defn- ^{:stratum 0} held-under?
-  "A checkpoint for `workflow-id` under `root`: its run directory, or that
-   directory moved aside by a GC deciding whether to delete it."
-  [root workflow-id]
-  (or (checkpoint-store/checkpoint-present? workflow-id {:checkpoint/root root})
-      (fs/exists? (checkpoint-paths/aside-path root workflow-id))))
-
 ;------------------------------------------------------------------------------ Layer 1
 
 (defn- ^{:stratum 1} delete-run!
-  "Delete one run's checkpoint directory without racing a pin, and without
-   a lock. The directory is first renamed aside, atomically, so a pin
-   writing into it by path either lands before the rename (and moves with
-   it) or fails; the event-retention hold still sees the run there. Then a pin marker in the moved directory sends it back;
-   otherwise it is deleted. Returns the run id when deleted,
-   `{:pinned id}` when moved back, or an anomaly."
-  [dir id]
-  (let [aside (checkpoint-paths/aside-path (fs/parent dir) id)]
-    (try+
-      (fs/move dir aside {:atomic-move true})
-      (if (pinned-dir? aside)
-        (do (fs/move aside dir {:atomic-move true})
-            {:pinned id})
-        (do (fs/delete-tree aside)
-            id))
-      (catch Exception e
-        (delete-failure dir id e)))))
-
-(defn- ^{:stratum 1} finish-aside!
-  "Finish what a GC that died mid-delete left beside the runs: a moved-aside
-   directory holding a pin marker goes back under its run id, any other is
-   deleted. Returns an anomaly for each it could not finish, a pinned one
-   whose run id is taken included: GC reports them rather than leave a
-   pinned checkpoint hidden in silence."
-  [root]
-  (into []
-        (keep
-         (fn [dir]
-           (let [name (str (fs/file-name dir))
-                 id-start (count checkpoint-paths/deleting-prefix)
-                 id (subs name id-start (+ id-start 36))
-                 run-dir (fs/path root id)]
-             (try+
-               (cond
-                 (not (pinned-dir? dir)) (do (fs/delete-tree dir) nil)
-                 (not (fs/exists? run-dir)) (do (fs/move dir run-dir {:atomic-move true}) nil)
-                 :else (anomaly/anomaly :conflict
-                                        (messages/t :checkpoint/gc-restore-taken
-                                                    {:path (str dir) :run-id id})
-                                        {:workflow/run-id id :checkpoint/path (str dir)}))
-               (catch Exception e
-                 (delete-failure dir id e))))))
-        (filter #(let [name (str (fs/file-name %))]
-                   (and (str/starts-with? name checkpoint-paths/deleting-prefix)
-                        (>= (count name) (+ (count checkpoint-paths/deleting-prefix) 36))
-                        (fs/directory? % {:nofollow-links true})))
-                (fs/list-dir root))))
+  "Delete one run's checkpoint directory under the run's lock, which a pin
+   takes too. The pin marker is checked again under it, so a pin that
+   landed after the run was classified keeps the run, and a pin that comes
+   later finds the run gone and fails. Returns the run id when deleted,
+   `{:pinned id}` when a pin arrived first, or an anomaly (lock busy, I/O)."
+  [root dir id]
+  (checkpoint-lock/with-run-lock
+   root id
+   (fn []
+     (try+
+       (if (pinned-dir? dir)
+         {:pinned id}
+         (do (fs/delete-tree dir)
+             ;; With the run gone, a later holder of this lock (a late
+             ;; pin) finds nothing to act on, so the lock file can go.
+             (fs/delete-if-exists (checkpoint-lock/lock-file root id))
+             id))
+       (catch Exception e
+         (delete-failure dir id e))))))
 
 (defmethod ^{:stratum 1} es/retention-hold ::checkpoint
   [_hold workflow-id events-dir]
-  (or (held-under? (checkpoint-paths/resolve-checkpoint-root {}) workflow-id)
+  (or (checkpoint-store/checkpoint-present? workflow-id)
       (let [run-dir (announced-run-dir events-dir workflow-id)]
         (cond
           ;; An unreadable file newer than any announcement may be the
           ;; one naming the root: the events are kept, not guessed about.
           (= :unknown run-dir) true
           (and run-dir (= (str workflow-id) (str (fs/file-name run-dir))))
-          (held-under? (str (fs/parent run-dir)) workflow-id)
+          (checkpoint-store/checkpoint-present? workflow-id
+                                                {:checkpoint/root (str (fs/parent run-dir))})
           :else false))))
 
 (defn- ^{:stratum 1} disposition
@@ -211,11 +178,10 @@
         days (get opts :max-age-days default-retention-days)
         cutoff-ms (- (get opts :now-ms (System/currentTimeMillis)) (* days day-ms))
         events-dir (get opts :events-dir (es/default-events-dir))
-        aside-failures (if (fs/directory? root) (finish-aside! root) [])
         runs (when (fs/directory? root)
                (filter #(fs/directory? % {:nofollow-links true}) (fs/list-dir root)))
         by-disposition (group-by #(disposition % cutoff-ms events-dir) runs)
-        results (mapv #(delete-run! % (run-id %)) (get by-disposition :expired))
+        results (mapv #(delete-run! root % (run-id %)) (get by-disposition :expired))
         pinned-late (keep :pinned (filter map? (remove anomaly/anomaly? results)))]
     {:checkpoint/root root
      :deleted (filterv uuid? results)
@@ -223,7 +189,7 @@
                          (map (fn [[k dirs]] [k (mapv run-id dirs)]))
                          (dissoc by-disposition :expired nil))
              (seq pinned-late) (update :pinned (fnil into []) pinned-late))
-     :failures (into aside-failures (filter anomaly/anomaly?) results)}))
+     :failures (filterv anomaly/anomaly? results)}))
 
 (comment
   (gc-checkpoints! {:max-age-days 30}))
