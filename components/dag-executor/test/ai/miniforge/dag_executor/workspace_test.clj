@@ -307,3 +307,11 @@
                                               "git rev-list" (shell-result "0\n")})]
       (is (true? (:no-changes? (result/unwrap (sut/git-persist! exec-fn {:branch "task/x"})))))
       (is (not-any? #(cmd-has? % "push") @calls)))))
+
+(deftest ^{:stratum 2} git-persist!-pending-check-failure-is-an-error-test
+  (testing "a failed rev-list on a clean worktree is an error, not :no-changes?"
+    (let [[exec-fn calls] (recording-exec-fn {"git status"   (shell-result "")
+                                              "git rev-list" {:data {:exit-code 128 :stderr "bad"}}})
+          r (sut/git-persist! exec-fn {:branch "task/x"})]
+      (is (= :persist-pending-failed (get-in r [:error :code])))
+      (is (not-any? #(cmd-has? % "push") @calls)))))

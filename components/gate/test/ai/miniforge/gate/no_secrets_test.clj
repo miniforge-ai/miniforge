@@ -206,6 +206,23 @@
           (is (= [{:file "src/app.py" :line 2 :commit leaky}] (-> result :errors first :locations)))
           (is (str/includes? (-> result :errors first :message) (subs leaky 0 12))))))))
 
+(deftest ^{:stratum 1} unreadable-history-is-uninspectable-test
+  (testing "a git show that fails while scanning history fails the gate"
+    (let [dir  (temp-git-repo {"a.py" "x = 1\n"})
+          base (str/trim (:out (sh! dir "rev-parse" "HEAD")))
+          ctx  (capsule-ctx dir)
+          real (:execution/execute-fn ctx)]
+      (spit (str dir "/a.py") "x = 2\n")
+      (sh! dir "commit" "-qam" "change")
+      (is (= :worktree-uninspectable
+             (-> (check {:code/files [] :code/base-refs [base]}
+                        (assoc ctx :execution/execute-fn
+                               (fn [executor env-id cmd opts]
+                                 (if (str/includes? cmd "'show'")
+                                   {:ok? true :data {:exit-code 128 :stdout ""}}
+                                   (real executor env-id cmd opts)))))
+                 :errors first :type))))))
+
 ;------------------------------------------------------------------------------ Layer 2
 
 (deftest ^{:stratum 2} an-added-copy-of-an-existing-line-counts-test
@@ -250,3 +267,39 @@
     (let [dir (temp-git-repo {"README.md" "x\n"})]
       (spit (str dir "/blob.dat") (str "head\u0000\napi_key = '" gh-token "'\n"))
       (is (= #{{:file "blob.dat" :line 2}} (locations {:code/files []} dir))))))
+
+(deftest ^{:stratum 2} git-defaults-cannot-hide-content-test
+  (testing "a textconv driver that masks content does not hide the working change or its commit"
+    (let [dir  (temp-git-repo {".gitattributes" "*.env diff=mask\n" "app.env" "x\n"})
+          base (str/trim (:out (sh! dir "rev-parse" "HEAD")))]
+      (sh! dir "config" "diff.mask.textconv" "sed s/./x/g")
+      (spit (str dir "/app.env") "x\nDB_PASSWORD=opaqueVALUE123\n")
+      (sh! dir "commit" "-qam" "env")
+      (is (= #{{:file "app.env" :line 2}
+               {:file "app.env" :line 2 :commit (str/trim (:out (sh! dir "rev-parse" "HEAD")))}}
+             (locations {:code/files [] :code/base-refs [base]} dir)))))
+  (testing "a file named like pathspec magic is selected literally"
+    (let [dir (temp-git-repo {":(literal)deploy.env" "x\n"})]
+      (spit (str dir "/:(literal)deploy.env") "x\nDB_PASSWORD=opaqueVALUE123\n")
+      (is (= #{{:file ":(literal)deploy.env" :line 2}} (locations {:code/files []} dir))))))
+
+(deftest ^{:stratum 2} a-secret-added-while-merging-is-found-test
+  (testing "an edit made while resolving a merge counts, even once a later commit removes it"
+    (let [dir  (temp-git-repo {"a.txt" "a\n" "b.txt" "b\n"})
+          base (str/trim (:out (sh! dir "rev-parse" "HEAD")))
+          main (str/trim (:out (sh! dir "symbolic-ref" "--short" "HEAD")))]
+      (sh! dir "checkout" "-qb" "side")
+      (spit (str dir "/b.txt") "b\nside\n")
+      (sh! dir "commit" "-qam" "side")
+      (sh! dir "checkout" "-q" main)
+      (spit (str dir "/a.txt") "a\nmain\n")
+      (sh! dir "commit" "-qam" "main")
+      (sh! dir "merge" "-q" "--no-commit" "side")
+      (spit (str dir "/a.txt") (str "a\nmain\napi_key = '" gh-token "'\n"))
+      (sh! dir "add" "-A")
+      (sh! dir "commit" "-qm" "merge side")
+      (let [merge (str/trim (:out (sh! dir "rev-parse" "HEAD")))]
+        (spit (str dir "/a.txt") "a\nmain\n")
+        (sh! dir "commit" "-qam" "remove")
+        (is (= #{{:file "a.txt" :line 3 :commit merge}}
+               (locations {:code/files [] :code/base-refs [base]} dir)))))))
