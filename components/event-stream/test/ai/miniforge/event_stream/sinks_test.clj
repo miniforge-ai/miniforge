@@ -98,6 +98,33 @@
 
 ;------------------------------------------------------------------------------ Layer 1
 
+(deftest ^{:stratum 1} file-sink-keeps-the-dir-it-was-created-with-test
+  ;; The sink is made while the default points at `dir`. The background
+  ;; cleanup is held until the default has moved on to `other`, then
+  ;; released, and an event is written then too: both must still use
+  ;; `dir`. Deletion is stubbed: the stub only records what it was given.
+  (with-temp-dir
+    (fn [dir]
+      (with-temp-dir
+        (fn [other]
+          (let [release (java.util.concurrent.CountDownLatch. 1)
+                seen (promise)
+                wf (random-uuid)]
+            (with-redefs [sinks/cleanup-stale-events! (fn [opts]
+                                                        (.await release 10 java.util.concurrent.TimeUnit/SECONDS)
+                                                        (deliver seen opts)
+                                                        0)]
+              (let [sink (with-redefs [sinks/default-events-dir (constantly dir)]
+                           (sinks/file-sink))]
+                (with-redefs [sinks/default-events-dir (constantly other)]
+                  (.countDown release)
+                  (sink (sample-event {:workflow/id wf}))
+                  (is (= (str dir) (str (:events-dir (deref seen 10000 ::never))))
+                      "cleanup runs on the creation-time dir")
+                  (is (seq (list-files (io/file dir "live" (str wf))))
+                      "writes go to the creation-time dir")
+                  (is (empty? (list-files (io/file other "live" (str wf))))))))))))))
+
 (deftest ^{:stratum 1} file-sink-with-an-explicit-nil-dir-uses-the-default-test
   (with-temp-dir
     (fn [dir]
