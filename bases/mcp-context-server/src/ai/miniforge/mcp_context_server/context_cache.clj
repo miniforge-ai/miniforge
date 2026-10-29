@@ -97,6 +97,20 @@
 
 (def ^{:stratum 0} ^:private persistent-cache-relpath ".miniforge/context-cache.edn")
 
+(defn- ^{:stratum 0} confined-path
+  "Resolve `path` against `root` (an absolute path is taken as is) and
+   return it when it canonicalizes to `root` or somewhere beneath it, else
+   nil. Canonicalizing resolves `..` and symlinks, so neither steps out."
+  [root path]
+  (when path
+    (let [f        (io/file path)
+          resolved (if (.isAbsolute f) f (io/file root path))
+          root-c   (.getCanonicalPath (io/file root))
+          target-c (.getCanonicalPath resolved)]
+      (when (or (= target-c root-c)
+                (str/starts-with? target-c (str root-c java.io.File/separator)))
+        (.getPath resolved)))))
+
 (defn- ^{:stratum 0} read-cache-edn
   "Read {:files .. :mtimes ..} from an EDN cache file, or nil on missing/bad."
   [path]
@@ -252,24 +266,30 @@
 ;------------------------------------------------------------------------------ Layer 2
 
 (defn ^{:stratum 2} shell-grep
-  "Fall back to ripgrep for files not in cache.
-   Returns vector of {:path :line-number :text} or nil."
-  [pattern-str path-or-glob]
+  "Fall back to ripgrep for files not in cache. The pattern goes in after
+   `-e` and the path after `--`, so neither is ever read as an rg flag
+   (`--pre=<cmd>` would run a program on every file); a path outside
+   source-root is refused. With no path, `.` is passed explicitly: rg
+   given no path searches stdin when it is a pipe, which it is under
+   shell/sh. Returns vector of {:path :line-number :text} or nil."
+  [pattern-str target-path glob-filter]
   (try
-    (let [args (cond-> ["rg" "--no-heading" "-n" pattern-str]
-                 path-or-glob (conj path-or-glob))
-          {:keys [out]} (apply shell/sh (concat args [:dir (source-root)]))]
+    (when (or (nil? target-path) (confined-path (source-root) target-path))
+      (let [args (cond-> ["rg" "--no-heading" "-n" "-e" pattern-str]
+                   glob-filter (into ["--glob" glob-filter])
+                   true        (conj "--" (or target-path ".")))
+            {:keys [out]} (apply shell/sh (concat args [:dir (source-root)]))]
       (when-not (str/blank? out)
         (->> (str/split-lines out)
              (map (fn [line]
                     (let [[file-part & rest-parts] (str/split line #":" 3)]
                       (when (>= (count rest-parts) 1)
-                        {:path file-part
+                        {:path (str/replace-first file-part #"^\./" "")
                          :line-number (try (Integer/parseInt (first rest-parts))
                                            (catch Exception _ 0))
                          :text (str/join ":" (rest rest-parts))}))))
              (filter some?)
-             vec)))
+             vec))))
     (catch Exception _e nil)))
 
 (defn ^{:stratum 2} shell-glob
@@ -303,11 +323,12 @@
   (or (:workdir @cache-state) (source-root)))
 
 (defn- ^{:stratum 2} resolve-source-path
+  "Resolve a read path against source-root, or nil when it would land
+   outside it (an absolute path elsewhere, `..`, a symlink out). Reads are
+   served to the LLM provider and cached to disk, so they stay inside the
+   repository the agent works on."
   [path]
-  (let [f (io/file path)]
-    (if (.isAbsolute f)
-      (.getPath f)
-      (.getPath (io/file (source-root) path)))))
+  (confined-path (source-root) path))
 
 (defn ^{:stratum 2} save-cache!
   "Persist the accumulated in-memory cache (pre-populated + read-through
@@ -353,9 +374,10 @@
 (defn- ^{:stratum 3} file-mtime
   "Last-modified epoch-ms of the resolved source file, or nil if absent."
   [path]
-  (let [f (io/file (resolve-source-path path))]
-    (when (.exists f)
-      (.lastModified f))))
+  (when-let [resolved (resolve-source-path path)]
+    (let [f (io/file resolved)]
+      (when (.exists f)
+        (.lastModified f)))))
 
 ;; Glob helpers
 (defn- ^{:stratum 3} glob-with-union
@@ -378,10 +400,9 @@
    Blocks absolute paths and `..` traversal that would let an MCP client
    overwrite files outside the worktree."
   [target]
-  (let [root-c   (.getCanonicalPath (io/file (write-root)))
-        target-c (.getCanonicalPath (io/file target))]
-    (or (= target-c root-c)
-        (str/starts-with? target-c (str root-c java.io.File/separator)))))
+  ;; `target` is already resolved; make it absolute so it is not joined to
+  ;; write-root a second time.
+  (some? (confined-path (write-root) (.getAbsolutePath (io/file target)))))
 
 ;------------------------------------------------------------------------------ Layer 4
 
@@ -528,7 +549,7 @@
         cache-results (search-cached-files searchable pattern-str)]
     (if (seq cache-results)
       cache-results
-      (let [rg-results (or (shell-grep pattern-str (or target-path glob-filter)) [])]
+      (let [rg-results (or (shell-grep pattern-str target-path glob-filter) [])]
         (if (seq rg-results)
           (do (cache-new-files! rg-results pattern-str files)
               rg-results)
