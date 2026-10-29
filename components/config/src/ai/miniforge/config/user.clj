@@ -18,17 +18,17 @@
 (ns ai.miniforge.config.user
   "User configuration management for Miniforge.
 
-   Provides loading, merging, and saving of user configuration.
-   Configuration precedence: repo > user > env > defaults.
+   Provides loading and merging of user configuration. Nothing here writes
+   the config file: writers go through ai.miniforge.config.interface.file,
+   which holds the config lock and writes atomically.
+   Configuration precedence, highest first: env > repo > user > defaults.
 
    Default configuration is loaded from resources/config/default-user-config.edn"
   (:require
    [ai.miniforge.messages.interface :as messages]
    [clojure.edn :as edn]
    [clojure.java.io :as io]
-   [clojure.pprint]
-   [babashka.fs :as fs]
-   [babashka.process]))
+   [babashka.fs :as fs]))
 
 ;------------------------------------------------------------------------------ Layer 0
 
@@ -55,12 +55,6 @@
 
 (def ^{:stratum 0} ^:private t
   (messages/create-translator "config/config/messages/system.edn" :config/system))
-
-(defn ^{:stratum 0} write-edn-file
-  "Write EDN data to a file, creating parent directories if needed."
-  [path data]
-  (fs/create-dirs (fs/parent path))
-  (spit path (with-out-str (clojure.pprint/pprint data))))
 
 ;; Repo-level configuration
 (def ^{:stratum 0} repo-config-dir-name
@@ -193,13 +187,6 @@
                     configs)]
     (apply-env-overrides base)))
 
-;; Config saving and initialization
-(defn ^{:stratum 2} save-user-config
-  ([config] (save-user-config config default-user-config-path))
-  ([config path]
-   (write-edn-file path config)
-   config))
-
 ;------------------------------------------------------------------------------ Layer 3
 
 (def ^{:stratum 3} default-config
@@ -239,44 +226,3 @@
    (merge-configs default-config
                   (load-user-config user-path)
                   (load-repo-config repo-path))))
-
-(defn ^{:stratum 4} init-user-config
-  "Initialize user config file with defaults if it doesn't exist.
-   Returns path to config file."
-  ([] (init-user-config default-user-config-path))
-  ([path]
-   (when-not (fs/exists? path)
-     (save-user-config default-config path))
-   path))
-
-(defn ^{:stratum 4} update-user-config
-  "Update a specific key in user config.
-   Loads existing config, updates key, and saves.
-
-   key-path: vector of keys (e.g., [:llm :backend])
-   value: new value to set"
-  ([key-path value]
-   (update-user-config key-path value default-user-config-path))
-  ([key-path value path]
-   (let [current-config (or (load-user-config path) default-config)
-         updated-config (assoc-in current-config key-path value)]
-     (save-user-config updated-config path))))
-
-(defn ^{:stratum 4} reset-user-config
-  ([] (reset-user-config default-user-config-path))
-  ([path]
-   (save-user-config default-config path)))
-
-;------------------------------------------------------------------------------ Layer 5
-
-(defn ^{:stratum 5} edit-user-config
-  "Open user config in $EDITOR.
-   Creates config file if it doesn't exist.
-   Returns path to config file."
-  ([] (edit-user-config default-user-config-path))
-  ([path]
-   (init-user-config path)
-   (let [editor (or (System/getenv "EDITOR") "vim")
-         result (babashka.process/shell editor (str path))]
-     (when (zero? (:exit result))
-       path))))

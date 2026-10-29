@@ -93,31 +93,6 @@
   ([] (user/load-merged-config-with-repo))
   ([user-path repo-path] (user/load-merged-config-with-repo user-path repo-path)))
 
-(defn ^{:stratum 0} save-user-config
-  "Save user configuration to file."
-  ([config] (user/save-user-config config))
-  ([config path] (user/save-user-config config path)))
-
-(defn ^{:stratum 0} init-user-config
-  "Initialize user config file with defaults."
-  ([] (user/init-user-config))
-  ([path] (user/init-user-config path)))
-
-(defn ^{:stratum 0} update-user-config
-  "Update a specific key in user config."
-  ([key-path value] (user/update-user-config key-path value))
-  ([key-path value path] (user/update-user-config key-path value path)))
-
-(defn ^{:stratum 0} reset-user-config
-  "Reset user config to defaults."
-  ([] (user/reset-user-config))
-  ([path] (user/reset-user-config path)))
-
-(defn ^{:stratum 0} edit-user-config
-  "Open user config in $EDITOR."
-  ([] (user/edit-user-config))
-  ([path] (user/edit-user-config path)))
-
 (defn ^{:stratum 0} merge-configs
   "Merge configurations with precedence."
   [& configs]

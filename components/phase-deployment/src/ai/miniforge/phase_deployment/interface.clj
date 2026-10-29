@@ -23,5 +23,8 @@
    and evidence helpers used by workflows that include this component."
   (:require
    [ai.miniforge.phase-deployment.deploy]
+   ;; Registers :provision-validated, :deploy-healthy and :health-check.
+   ;; Without it every deployment gate is unknown and fails closed.
+   [ai.miniforge.phase-deployment.gates]
    [ai.miniforge.phase-deployment.provision]
    [ai.miniforge.phase-deployment.validate]))

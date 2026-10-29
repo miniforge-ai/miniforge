@@ -492,8 +492,10 @@
                   ;; on aggregated DAG integration tasks (full file contents +
                   ;; standards addendum) → CLI 'Prompt is too long' kills the
                   ;; review phase.
+                  ;; Against the model the client sends, not the config's
+                  ;; :model, which follows the configured backend.
                   prompt-budget (assemble-review-within-budget
-                                 input effective-system (:model review-config)
+                                 input effective-system (llm/client-model llm-client)
                                  (get @reviewer-prompts/reviewer-prompt-data
                                       :prompt/context-window-reserve-tokens
                                       default-context-window-reserve-tokens))

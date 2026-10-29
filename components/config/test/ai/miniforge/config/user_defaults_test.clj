@@ -30,12 +30,11 @@
 (deftest ^{:stratum 0} default-config-prefers-opencode-test
   (let [cfg config/default-config]
     (testing "default llm backend routes provider auth through OpenCode"
-      (is (= :opencode (get-in cfg [:llm :backend])))
-      (is (= "anthropic/claude-sonnet-4-5" (get-in cfg [:llm :model]))))
+      (is (= :opencode (get-in cfg [:llm :backend]))))
 
-    (testing "default agent models are OpenCode provider/model selectors"
-      (is (= "anthropic/claude-opus-4-6" (get-in cfg [:agents :default-models :thinking])))
-      (is (= "anthropic/claude-sonnet-4-6" (get-in cfg [:agents :default-models :execution]))))
+    (testing "defaults name no model, which would reach every backend"
+      (is (nil? (get-in cfg [:llm :model])))
+      (is (nil? (get-in cfg [:agents :default-models]))))
 
     (testing "default self-healing keeps failover inside OpenCode"
       (is (= [:opencode] (get-in cfg [:self-healing :allowed-failover-backends]))))
@@ -60,7 +59,8 @@
                                          nil))]
       (let [cfg (user/load-default-config)]
         (is (= :opencode (get-in cfg [:llm :backend])))
-        (is (= "anthropic/claude-sonnet-4-6" (get-in cfg [:agents :default-models :execution])))
+        (is (nil? (get-in cfg [:llm :model])))
+        (is (nil? (get-in cfg [:agents :default-models])))
         (is (= "~/.miniforge/checkpoints"
                (get-in cfg [:workflow :checkpoint-root])))
         (is (= "~/.miniforge/worktrees"

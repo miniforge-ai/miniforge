@@ -25,7 +25,8 @@
             [ai.miniforge.phase-deployment.deploy-operations :as operations]
             [ai.miniforge.phase-deployment.deploy-result :as result]
             [ai.miniforge.phase-deployment.messages :as msg]
-            [ai.miniforge.phase.interface :as phase])
+            [ai.miniforge.phase.interface :as phase]
+            [ai.miniforge.phase.interface.gate :as phase-gate])
   (:import [java.time Instant]))
 
 ;------------------------------------------------------------------------------ Layer 0
@@ -47,9 +48,10 @@
                  :error (msg/t :deploy/invalid-config {:error error})})))
 
 (defn ^{:stratum 0} leave-deploy
-  "Post-deploy: record final metrics."
+  "Post-deploy: record final metrics. A deploy its gates failed is :failed."
   [ctx]
-  (if (= :completed (get-in ctx [:phase :status]))
+  (if (and (= :completed (get-in ctx [:phase :status]))
+           (not (phase-gate/gate-failed? (:phase ctx))))
     ctx
     (assoc-in ctx [:phase :status] :failed)))
 
