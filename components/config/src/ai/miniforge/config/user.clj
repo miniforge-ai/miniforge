@@ -28,15 +28,29 @@
    [ai.miniforge.messages.interface :as messages]
    [clojure.edn :as edn]
    [clojure.java.io :as io]
+   [clojure.string :as str]
    [babashka.fs :as fs]))
 
 ;------------------------------------------------------------------------------ Layer 0
 
 ;; Constants and utilities
-(defn ^{:stratum 0} miniforge-home
+(defn ^{:stratum 0} default-miniforge-home
+  "The miniforge home when MINIFORGE_HOME is not set: <user.home>/.miniforge."
   []
-  (or (System/getenv "MINIFORGE_HOME")
-      (str (System/getProperty "user.home") "/.miniforge")))
+  (str (System/getProperty "user.home") "/.miniforge"))
+
+(defn ^{:stratum 0} miniforge-home-override
+  "MINIFORGE_HOME (or `value`) when it is set and not blank, else nil: a
+   home the user chose. The one place MINIFORGE_HOME is read, so a blank
+   value counts as unset for every path."
+  ([] (miniforge-home-override (System/getenv "MINIFORGE_HOME")))
+  ([value] (when-not (str/blank? value) value)))
+
+(defn ^{:stratum 0} path-outside?
+  "True when `path` does not resolve inside directory `home` (symlinks are
+   resolved as far as each path exists)."
+  [home path]
+  (not (fs/starts-with? (fs/canonicalize path) (fs/canonicalize home))))
 
 (def ^{:stratum 0} ^:private default-config-resource-path
   "Primary resource path for shipped user config defaults."
@@ -73,8 +87,11 @@
 
 ;------------------------------------------------------------------------------ Layer 1
 
-(def ^{:stratum 1} default-user-config-path
-  (str (miniforge-home) "/config.edn"))
+(defn ^{:stratum 1} miniforge-home
+  "The miniforge home: MINIFORGE_HOME when set and not blank, else
+   <user.home>/.miniforge."
+  []
+  (or (miniforge-home-override) (default-miniforge-home)))
 
 (defn ^{:stratum 1} read-edn-file
   "Read an EDN file; nil when it is absent or does not parse. A parse failure
@@ -148,6 +165,9 @@
 
 ;------------------------------------------------------------------------------ Layer 2
 
+(def ^{:stratum 2} default-user-config-path
+  (str (miniforge-home) "/config.edn"))
+
 (defn ^{:stratum 2} load-default-config
   "Load default configuration from resources.
 
@@ -173,14 +193,6 @@
   ([path]
    (read-edn-file path)))
 
-;; Config loading and merging
-(defn ^{:stratum 2} load-user-config
-  "Load user configuration from file.
-   Returns nil if file doesn't exist."
-  ([] (load-user-config default-user-config-path))
-  ([path]
-   (read-edn-file path)))
-
 (defn ^{:stratum 2} merge-configs
   "Merge configurations with precedence: user > env > defaults.
 
@@ -195,6 +207,14 @@
     (apply-env-overrides base)))
 
 ;------------------------------------------------------------------------------ Layer 3
+
+;; Config loading and merging
+(defn ^{:stratum 3} load-user-config
+  "Load user configuration from file.
+   Returns nil if file doesn't exist."
+  ([] (load-user-config default-user-config-path))
+  ([path]
+   (read-edn-file path)))
 
 (def ^{:stratum 3} default-config
   (load-default-config))

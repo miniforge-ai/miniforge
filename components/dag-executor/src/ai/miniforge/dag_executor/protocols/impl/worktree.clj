@@ -22,6 +22,7 @@
    when no container runtime is available. Isolation is limited to filesystem
    separation - processes run on the host."
   (:require
+   [ai.miniforge.config.interface :as config]
    [ai.miniforge.dag-executor.result :as result]
    [ai.miniforge.dag-executor.scratch-commit :as scratch-commit]
    [ai.miniforge.dag-executor.protocols.executor :as proto]
@@ -56,11 +57,11 @@
 (def ^{:stratum 0} default-max-concurrent 4)
 
 (defn ^{:stratum 0} default-archive-dir
-  "Default location for persisted task work archives.
-   Lives under the user home rather than /tmp so checkpoints survive reboots
+  "Default location for persisted task work archives:
+   `<miniforge-home>/checkpoints`, not /tmp, so checkpoints survive reboots
    and can be referenced from evidence bundles long after the run ends."
   []
-  (str (System/getProperty "user.home") "/.miniforge/checkpoints"))
+  (str (config/miniforge-home) "/checkpoints"))
 
 ;; ============================================================================
 ;; Legacy /tmp detection
@@ -237,7 +238,8 @@
 (defn ^{:stratum 1} default-base-path
   "Default location for git worktrees acquired by the worktree executor.
 
-   Arity 0: returns the hardcoded default `~/.miniforge/worktrees`.
+   Arity 0: returns `<miniforge-home>/worktrees` (MINIFORGE_HOME, else
+   `~/.miniforge`).
 
    Arity 1 (config map): reads `:workflow/worktree-root` from the supplied
    map, expands any leading `~/`, and falls back to the no-arg default when
@@ -257,7 +259,7 @@
    in their user config, or by passing `:base-path` directly to
    `create-worktree-executor`."
   ([]
-   (str (System/getProperty "user.home") "/.miniforge/worktrees"))
+   (str (config/miniforge-home) "/worktrees"))
   ([config]
    (let [configured (get config :workflow/worktree-root)]
      (if (and configured (not (str/blank? (str configured))))

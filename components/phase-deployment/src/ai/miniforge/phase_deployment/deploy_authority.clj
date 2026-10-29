@@ -19,6 +19,7 @@
   "Runtime authority preparation for one exact Kubernetes deployment."
   (:require
    [ai.miniforge.anomaly.interface :as anomaly]
+   [ai.miniforge.config.interface :as config]
    [ai.miniforge.execution-grant.interface :as grant]
    [ai.miniforge.gate.interface :as gate]
    ;; Registers the :deploy/no-secrets-in-manifests detector.
@@ -48,7 +49,7 @@
    :pins/event-watermark nil})
 
 (def ^{:stratum 0} default-breach-dir-relative-path
-  ".miniforge/grant-breaches")
+  "grant-breaches")
 
 (defn- ^{:stratum 0} policy-blocker
   [violation]
@@ -137,8 +138,7 @@
 (defn ^{:stratum 1} breach-dir
   [context]
   (or (:grant-breach-dir context)
-      (str (System/getProperty "user.home") "/"
-           default-breach-dir-relative-path)))
+      (str (config/miniforge-home) "/" default-breach-dir-relative-path)))
 
 (defn ^{:stratum 1} policy-classification
   "Evaluate deployment policy before anything applies: resource limits against
