@@ -179,7 +179,9 @@
         loader (fn [file] (load-markdown-file file :hub))
         result (load-files-from-directory knowledge-store existing-files loader)]
     (-> result
-        (assoc :files (mapv #(.getName %) (:items result)))
+        ;; :items are the loaded zettels, not Files; each records its
+        ;; file name as its source origin.
+        (assoc :files (mapv #(get-in % [:zettel/source :origin]) (:items result)))
         (dissoc :items))))
 
 ;------------------------------------------------------------------------------ Layer 2

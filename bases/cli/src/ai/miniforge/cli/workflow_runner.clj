@@ -23,6 +23,7 @@
    [ai.miniforge.workflow.interface.resume :as workflow-resume]
    [ai.miniforge.agent.interface :as agent]
    [ai.miniforge.cli.messages :as messages]
+   [ai.miniforge.cli.runtime-env :as runtime-env]
    [ai.miniforge.cli.workflow-runner.chain :as chain]
    [ai.miniforge.cli.workflow-runner.display :as display]
    [ai.miniforge.cli.workflow-runner.execution :as execution]
@@ -183,7 +184,9 @@
                                      :data (ex-data e)}
                                     opts))
             (when-not quiet
-              (println (display/colorize :red (messages/t :workflow-runner/run-error {:error (ex-message e)})))))
+              (println (display/colorize :red (messages/t :workflow-runner/run-error
+                                                          {:error (or (:anomaly/message (ex-data e))
+                                                                      (ex-message e))})))))
           (throw e))))))
 
 (defn ^{:stratum 1} run-workflow-from-spec! [spec {:keys [quiet] :or {quiet false} :as opts}]
@@ -235,11 +238,14 @@
                               :execution-opts (:execution-opts opts)
                               :source-dir (:spec/source-dir spec)})]
                         ;; Assoc repo-url, branch, and (optionally) execution-mode
-                        ;; so runner.clj can clone into Docker or create a worktree.
+                        ;; so runner.clj can clone into a container or create a
+                        ;; worktree. runtime-config carries MINIFORGE_RUNTIME to
+                        ;; the governed capsule's runtime selection.
                         (cond-> (assoc ctx
                                        :repo-url repo-url
                                        :branch branch
-                                       :execution-mode (get opts :execution-mode :local))
+                                       :execution-mode (get opts :execution-mode :local)
+                                       :runtime-config (runtime-env/selection-config))
 ))
           sandbox? (or (:sandbox opts) (:spec/sandbox spec))
           [context sandbox-cleanup] (sandbox/setup-sandbox-context base-context sandbox? spec enriched-spec quiet)
@@ -256,10 +262,11 @@
         (assert-runtime-alignment! spec context)
         (provenance/print-runtime-provenance! quiet context)
         (preflight/run-backend-preflight! quiet llm-client context)
-        (let [provenance (spec-kanban/move-spec-to-in-progress! (:spec/provenance enriched-spec))
+        (let [[provenance run-input] (spec-kanban/start-spec! workflow-input
+                                                               (:spec/provenance enriched-spec))
               result (execution/execute-with-events {:run-pipeline run-pipeline
                                            :workflow workflow
-                                           :workflow-input workflow-input
+                                           :workflow-input run-input
                                            :context context
                                            :artifact-store artifact-store
                                            :event-stream event-stream
@@ -267,7 +274,7 @@
                                            :sandbox-cleanup sandbox-cleanup
                                            :opts opts})
               outcome-status (if (phase/succeeded? result) :completed :failed)]
-          (spec-kanban/move-spec-on-completion! provenance result)
+          (spec-kanban/finish-spec! provenance result)
           ;; Trigger meta-loop learning cycle in background
           (trigger-meta-loop-after-workflow! workflow-id outcome-status nil)
           result)
@@ -280,7 +287,9 @@
     (catch Object _
       (let [e (:throwable &throw-context)]
         (when-not quiet
-          (println (display/colorize :red (messages/t :workflow-runner/spec-execution-failed {:error (ex-message e)})))
+          (println (display/colorize :red (messages/t :workflow-runner/spec-execution-failed
+                                                      {:error (or (:anomaly/message (ex-data e))
+                                                                  (ex-message e))})))
           (flush))
         (throw+)))))
 

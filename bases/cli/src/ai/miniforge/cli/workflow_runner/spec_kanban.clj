@@ -24,7 +24,8 @@
   (:require
    [babashka.fs :as fs]
    [clojure.string :as str]
-   [ai.miniforge.phase.interface :as phase]))
+   [ai.miniforge.phase.interface :as phase]
+   [ai.miniforge.workflow.interface :as workflow]))
 
 ;------------------------------------------------------------------------------ Layer 0
 
@@ -72,3 +73,38 @@
   (if (phase/succeeded? result)
     (move-spec! provenance :done)
     (move-spec! provenance :failed)))
+
+(defn ^{:stratum 2} start-spec!
+  "`move-spec-to-in-progress!` for a run's input, keeping its spec
+   traceable. Takes the spec file's digest before the move and returns
+   `[provenance workflow-input]`: the provenance updated as
+   `move-spec-to-in-progress!` does, and the input carrying the file's
+   absolute location after the move (`:spec/location`) and that digest
+   (`:spec/hash`). The run's checkpoint manifest records both, so resume
+   can check the spec. `:spec/path` stays as given: PR provenance uses it."
+  [workflow-input provenance]
+  (let [spec-path (:spec/path workflow-input)
+        spec-hash (some-> spec-path workflow/spec-file-hash)
+        new-path (move-spec! provenance :in-progress)
+        location (or new-path spec-path)]
+    [(cond-> provenance new-path (assoc :source-file new-path))
+     (cond-> workflow-input
+       location (assoc :spec/location (str (fs/absolutize location)))
+       spec-hash (assoc :spec/hash spec-hash))]))
+
+(defn ^{:stratum 2} finish-spec!
+  "`move-spec-on-completion!` that also points the run's checkpoint
+   manifest at the spec's new place (work/done or work/failed), so a later
+   resume still finds it. The manifest is the one the pipeline wrote,
+   under the result's `:execution/id` and `:execution/checkpoint-root`;
+   a run that never reached the pipeline has none. Returns the new path, nil when nothing moved."
+  [provenance result]
+  (when-let [new-path (move-spec! provenance (if (phase/succeeded? result) :done :failed))]
+    (when-let [run-id (:execution/id result)]
+      ;; Under the root the run checkpointed to, which a per-execution
+      ;; :checkpoint/root moves away from the default.
+      (workflow/record-spec-path! (str run-id) (str (fs/absolutize new-path))
+                                  (if-let [root (:execution/checkpoint-root result)]
+                                    {:checkpoint/root root}
+                                    {})))
+    new-path))

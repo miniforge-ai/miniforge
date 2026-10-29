@@ -15,8 +15,9 @@
    so without a hold a failed run resumed after a week would find its
    checkpoint and no events. The `retention-hold` method below keeps a
    run's archived events while its checkpoint exists, under the default
-   root or the one its `:workflow/checkpoint-written` events name; once
-   the GC deletes the checkpoint, the next event cleanup prunes them."
+   root or the one its newest checkpoint-written or snapshot-written event
+   names; once the GC deletes the checkpoint, the next event cleanup
+   prunes them."
   (:require
    [ai.miniforge.anomaly.interface :as anomaly]
    [ai.miniforge.event-stream.interface :as es]
@@ -25,6 +26,7 @@
    [ai.miniforge.workflow.messages :as messages]
    [babashka.fs :as fs]
    [clojure.edn :as edn]
+   [clojure.string :as str]
    [slingshot.slingshot :refer [try+]]))
 
 ;------------------------------------------------------------------------------ Layer 0
@@ -42,18 +44,30 @@
   [dir]
   (parse-uuid (str (fs/file-name dir))))
 
-(defn- ^{:stratum 0} recorded-root
-  "The checkpoint root `events` (a run's own) say it wrote to: the root
-   above the run directory of the phase file its last
-   `:workflow/checkpoint-written` names; nil when there is none."
-  [events workflow-id]
-  (let [phase-path (some->> events
-                            (filter #(= :workflow/checkpoint-written (:event/type %)))
-                            last
-                            :checkpoint/path)
-        run-dir (some-> phase-path fs/parent fs/parent)]
-    (when (and run-dir (= (str workflow-id) (str (fs/file-name run-dir))))
-      (str (fs/parent run-dir)))))
+(defn- ^{:stratum 0} announced-run-dir
+  "The checkpoint run directory a run's own events last announced writing
+   to, scanning its event files newest first and stopping at the first
+   announcement: the run directory above the phase file or snapshot it
+   names. `:unknown` when a file that does not read comes first (it may
+   be the announcement); nil when no event announces a write."
+  [events-dir workflow-id]
+  (let [dir (es/workflow-events-dir events-dir workflow-id)
+        files (when dir
+                (->> (fs/list-dir dir)
+                     (filter #(str/ends-with? (str (fs/file-name %)) ".json"))
+                     (sort-by #(str (fs/file-name %)))
+                     reverse))]
+    (reduce (fn [_ file]
+              (let [event (es/read-event-file (fs/file file))]
+                (cond
+                  (nil? event) (reduced :unknown)
+                  (= :workflow/checkpoint-written (:event/type event))
+                  (reduced (some-> (:checkpoint/path event) fs/parent fs/parent))
+                  (= :workflow/machine-snapshot-written (:event/type event))
+                  (reduced (some-> (:snapshot/path event) fs/parent))
+                  :else nil)))
+            nil
+            files)))
 
 (defn- ^{:stratum 0} last-change-ms
   "When anything in `dir` last changed: the newest mtime in its own tree.
@@ -101,13 +115,15 @@
 (defmethod ^{:stratum 1} es/retention-hold ::checkpoint
   [_hold workflow-id events-dir]
   (or (checkpoint-store/checkpoint-present? workflow-id)
-      (let [events (es/read-workflow-events-by-id events-dir workflow-id)]
-        ;; A file the reader skipped may be the one naming the root: with
-        ;; an incomplete history the events are kept, not guessed about.
-        (or (boolean (seq (:event-stream/unreadable-files (meta events))))
-            (boolean
-             (when-let [root (recorded-root events workflow-id)]
-               (checkpoint-store/checkpoint-present? workflow-id {:checkpoint/root root})))))))
+      (let [run-dir (announced-run-dir events-dir workflow-id)]
+        (cond
+          ;; An unreadable file newer than any announcement may be the
+          ;; one naming the root: the events are kept, not guessed about.
+          (= :unknown run-dir) true
+          (and run-dir (= (str workflow-id) (str (fs/file-name run-dir))))
+          (checkpoint-store/checkpoint-present? workflow-id
+                                                {:checkpoint/root (str (fs/parent run-dir))})
+          :else false))))
 
 (defn- ^{:stratum 1} disposition
   "What the GC does with run directory `dir`: `:recent`, `:live`,

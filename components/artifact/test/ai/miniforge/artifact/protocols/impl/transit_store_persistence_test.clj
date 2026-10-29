@@ -17,8 +17,9 @@
 ;; limitations under the License.
 (ns ai.miniforge.artifact.protocols.impl.transit-store-persistence-test
   "Disk persistence of the transit store: atomic file writes, close
-   waiting for queued writes, and index merge and link preservation
-   across stores that share a directory."
+   waiting for queued writes, index merge and link preservation across
+   stores that share a directory, recovery from an unreadable index, file
+   modes kept on replacement, and close reporting unindexed artifacts."
   (:require [ai.miniforge.artifact.interface.protocols.artifact-store :as p]
             [ai.miniforge.artifact.protocols.impl.transit-store :as impl]
             [ai.miniforge.artifact.protocols.records.transit-store :as store]
@@ -28,8 +29,9 @@
             [clojure.test :refer [deftest is testing]]
             [cognitect.transit :as transit])
   (:import [java.io File]
-           [java.nio.file Files]
-           [java.nio.file.attribute FileAttribute]))
+           [java.nio.file Files LinkOption OpenOption]
+           [java.nio.file.attribute FileAttribute PosixFilePermissions]
+           [java.util Arrays]))
 
 ;------------------------------------------------------------------------------ Layer 0
 
@@ -76,6 +78,12 @@
 
 (defn- ^{:stratum 0} logged-events [entries]
   (set (map :log/event @entries)))
+
+(defn- ^{:stratum 0} truncate-to-half! [path]
+  (let [p (.toPath (io/file path))
+        bytes (Files/readAllBytes p)]
+    (Files/write p (Arrays/copyOf bytes (quot (alength bytes) 2))
+                 (make-array OpenOption 0))))
 
 ;------------------------------------------------------------------------------ Layer 1
 
@@ -376,5 +384,209 @@
         (is (false? (p/link s "a" "a")))
         (p/close s))
       (is (= [] (:artifact/parents (read-or-unreadable (impl/artifact-file-path (artifacts-path dir) "a")))))
+      (finally
+        (delete-dir! dir)))))
+
+(deftest ^{:stratum 1} test-unreadable-index-is-rebuilt-from-artifact-files
+  (let [dir (temp-dir)
+        index-path (impl/index-file-path (artifacts-path dir))
+        [logger entries] (log/collecting-logger)]
+    (try
+      (let [s (open-store dir)]
+        (p/save s (artifact "parent"))
+        (p/save s (artifact "child"))
+        (p/link s "parent" "child")
+        (p/close s))
+      ;; An index write cut off half-way, and a torn artifact file.
+      (truncate-to-half! index-path)
+      (spit (impl/artifact-file-path (artifacts-path dir) "torn") "[\"^ \",\"~:artifact/id")
+      (let [s (open-store dir {:logger logger})]
+        (testing "the store opens and finds the artifacts"
+          (is (= #{"parent" "child"} (set (map :artifact/id (p/query s {}))))))
+        (testing "links are read back from the artifact files"
+          (is (= ["child"] (:artifact/children (p/load-artifact s "parent"))))
+          (is (= ["parent"] (get-in (read-or-unreadable index-path) ["child" :artifact/parents]))))
+        (testing "the rebuilt index is on disk and the unreadable one is kept aside"
+          (is (= #{"parent" "child"} (on-disk-ids dir)))
+          (is (= 1 (count (filter #(str/starts-with? % "index.transit.json.corrupt-")
+                                  (file-names (artifacts-path dir)))))))
+        (testing "with a warning naming the skipped file"
+          (is (contains? (logged-events entries) :artifact/index-rebuilt))
+          (is (= [["torn.transit.json"]]
+                 (keep #(get-in % [:data :skipped]) @entries))))
+        (p/close s))
+      (finally
+        (delete-dir! dir)))))
+
+(deftest ^{:stratum 1} test-failed-recovery-keeps-the-index-in-place
+  (let [dir (temp-dir)
+        index-path (impl/index-file-path (artifacts-path dir))
+        write impl/write-transit]
+    (try
+      (let [s (open-store dir)]
+        (p/save s (artifact "a1"))
+        (p/close s))
+      (truncate-to-half! index-path)
+      (testing "a recovery whose index write fails leaves the index file in place"
+        (with-redefs [impl/write-transit (fn [path data]
+                                           (when (= path index-path) (throw (ex-info "disk full" {})))
+                                           (write path data))]
+          (is (thrown? Exception (open-store dir))))
+        (is (.exists (io/file index-path))))
+      (testing "so the next open still recovers every artifact"
+        (let [s (open-store dir)]
+          (is (= #{"a1"} (set (map :artifact/id (p/query s {})))))
+          (p/close s)))
+      (finally
+        (delete-dir! dir)))))
+
+(deftest ^{:stratum 1} test-open-store-quarantines-an-index-gone-unreadable
+  (let [dir (temp-dir)
+        [logger entries] (log/collecting-logger)]
+    (try
+      (let [s (open-store dir {:logger logger})]
+        (p/save s (artifact "a1"))
+        (p/close s)
+        (truncate-to-half! (impl/index-file-path (artifacts-path dir)))
+        (p/save s (artifact "a2"))
+        (p/close s))
+      (testing "the unreadable index is kept aside, with a warning"
+        (is (= 1 (count (filter #(str/starts-with? % "index.transit.json.corrupt-")
+                                (file-names (artifacts-path dir))))))
+        (is (contains? (logged-events entries) :artifact/index-rebuilt)))
+      (testing "and the index on disk holds both artifacts"
+        (is (= #{"a1" "a2"} (on-disk-ids dir))))
+      (finally
+        (delete-dir! dir)))))
+
+(deftest ^{:stratum 1} test-replacing-a-file-keeps-its-permissions
+  (let [dir (temp-dir)
+        file (.toPath (io/file dir "private.transit.json"))
+        path (str file)]
+    (try
+      (when (contains? (.supportedFileAttributeViews (.getFileSystem file)) "posix")
+        (impl/write-transit path {:version 1})
+        (Files/setPosixFilePermissions file (PosixFilePermissions/fromString "rw-------"))
+        (impl/write-transit path {:version 2})
+        (testing "a replaced owner-only file stays owner-only"
+          (is (= "rw-------" (PosixFilePermissions/toString
+                              (Files/getPosixFilePermissions file (make-array LinkOption 0)))))
+          (is (= {:version 2} (read-or-unreadable path))))
+        (Files/setPosixFilePermissions file (PosixFilePermissions/fromString "r--------"))
+        (impl/write-transit path {:version 3})
+        (testing "a read-only file can still be replaced, and stays read-only"
+          (is (= "r--------" (PosixFilePermissions/toString
+                              (Files/getPosixFilePermissions file (make-array LinkOption 0)))))
+          (is (= {:version 3} (read-or-unreadable path)))))
+      (finally
+        (delete-dir! dir)))))
+
+(deftest ^{:stratum 1} test-close-reports-unindexed-artifacts
+  (let [dir (temp-dir)
+        write impl/write-transit
+        [logger entries] (log/collecting-logger)]
+    (try
+      (with-redefs [impl/write-transit (fn [path data]
+                                         (when (str/ends-with? path "/index.transit.json")
+                                           (throw (ex-info "disk full" {})))
+                                         (write path data))]
+        (let [s (open-store dir {:logger logger})]
+          (p/save s (artifact "a1"))
+          (testing "close returns false and warns when a written artifact is not indexed"
+            (is (false? (p/close s)))
+            (is (contains? (logged-events entries) :artifact/store-close-incomplete)))))
+      (finally
+        (delete-dir! dir)))))
+
+(deftest ^{:stratum 1} test-index-that-decodes-to-nil-is-recovered
+  (let [dir (temp-dir)]
+    (try
+      (let [s (open-store dir)]
+        (p/save s (artifact "a1"))
+        (p/close s))
+      (impl/write-transit (impl/index-file-path (artifacts-path dir)) nil)
+      (let [s (open-store dir)]
+        (testing "an index file holding nil is recovered, not read as empty"
+          (is (= #{"a1"} (set (map :artifact/id (p/query s {}))))))
+        (p/close s))
+      (finally
+        (delete-dir! dir)))))
+
+(deftest ^{:stratum 1} test-rebuild-skips-a-file-whose-id-points-elsewhere
+  (let [dir (temp-dir)
+        adir (artifacts-path dir)]
+    (try
+      (let [s (open-store dir)]
+        (p/save s (artifact "b"))
+        (p/close s))
+      (impl/write-transit (str adir "/a.transit.json") (artifact "../a"))
+      (truncate-to-half! (impl/index-file-path adir))
+      (let [s (open-store dir)]
+        (testing "a.transit.json claiming id ../a is not indexed"
+          (is (= #{"b"} (set (keys @(:index s))))))
+        (p/close s))
+      (finally
+        (delete-dir! dir)))))
+
+(deftest ^{:stratum 1} test-unlistable-directory-leaves-the-index-for-a-later-recovery
+  (let [dir (temp-dir)
+        adir (.toPath (io/file (artifacts-path dir)))]
+    (try
+      (let [s (open-store dir)]
+        (p/save s (artifact "a1"))
+        (p/close s))
+      (truncate-to-half! (impl/index-file-path (artifacts-path dir)))
+      (when (contains? (.supportedFileAttributeViews (.getFileSystem adir)) "posix")
+        ;; Write and search but no read: files open by name, listing fails.
+        (Files/setPosixFilePermissions adir (PosixFilePermissions/fromString "-wx------"))
+        (try
+          (p/close (open-store dir))
+          (finally
+            (Files/setPosixFilePermissions adir (PosixFilePermissions/fromString "rwx------"))))
+        (let [s (open-store dir)]
+          (testing "a later open still recovers the artifact"
+            (is (= #{"a1"} (set (map :artifact/id (p/query s {}))))))
+          (p/close s)))
+      (finally
+        (delete-dir! dir)))))
+
+(deftest ^{:stratum 1} test-close-reports-failed-writes-and-queued-changes
+  (let [dir (temp-dir)
+        write impl/write-transit]
+    (try
+      (let [s (open-store dir)]
+        (with-redefs [impl/write-transit (fn [path data]
+                                           (when (str/ends-with? path "/a1.transit.json")
+                                             (throw (ex-info "disk full" {})))
+                                           (write path data))]
+          (p/save s (artifact "a1"))
+          (testing "close returns false after a failed artifact-file write"
+            (is (false? (p/close s)))))
+        (p/save s (artifact "a1"))
+        (testing "and true once a later write of that artifact succeeds"
+          (is (true? (p/close s))))
+        ;; A directory where the lock file goes: taking the lock fails.
+        (let [lock (io/file (impl/lock-file-path (artifacts-path dir)))]
+          (io/delete-file lock true)
+          (.mkdirs lock))
+        (p/save s (artifact "a2"))
+        (testing "close returns false while a change is still queued"
+          (is (false? (p/close s)))))
+      (finally
+        (delete-dir! dir)))))
+
+(deftest ^{:stratum 1} test-rebuild-skips-an-id-that-is-not-a-valid-path
+  (let [dir (temp-dir)
+        adir (artifacts-path dir)]
+    (try
+      (let [s (open-store dir)]
+        (p/save s (artifact "b"))
+        (p/close s))
+      (impl/write-transit (str adir "/x.transit.json") (artifact "a\u0000b"))
+      (truncate-to-half! (impl/index-file-path adir))
+      (let [s (open-store dir)]
+        (testing "an id with NUL is skipped and the rest is still recovered"
+          (is (= #{"b"} (set (keys @(:index s))))))
+        (p/close s))
       (finally
         (delete-dir! dir)))))
