@@ -237,14 +237,20 @@
    :failures [anomaly]}`. Only directories named by a run id are
    considered; a symlinked one is never followed.
 
-   With MINIFORGE_HOME set, a root taken from config that lies outside it
-   is refused: a `:conflict` anomaly, nothing read or deleted. Only an
-   explicit `:checkpoint/root` collects there."
+   With MINIFORGE_HOME set, a root that lies outside it is refused: a
+   `:conflict` anomaly, nothing read or deleted. The one exception is a
+   root named by `:checkpoint/root` that is also the root that resolved;
+   `:execution/checkpoint-root` takes precedence over it, so naming one
+   root must never let GC collect another."
   [opts]
   (let [root (checkpoint-paths/resolve-checkpoint-root opts)
-        home (config/miniforge-home-override)]
+        home (config/miniforge-home-override)
+        named (get opts checkpoint-paths/checkpoint-root-option-key)
+        named-and-resolved? (and named
+                                 (= root (checkpoint-paths/resolve-checkpoint-root
+                                          {checkpoint-paths/checkpoint-root-option-key named})))]
     (if (and home
-             (nil? (get opts checkpoint-paths/checkpoint-root-option-key))
+             (not named-and-resolved?)
              (config/path-outside? home root))
       (anomaly/anomaly :conflict
                        (messages/t :checkpoint/gc-outside-home {:root root :home home})

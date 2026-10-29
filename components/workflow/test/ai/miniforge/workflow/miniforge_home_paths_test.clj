@@ -82,4 +82,19 @@
            (let [result (workflow/gc-checkpoints! {:checkpoint/root elsewhere})]
              (is (= [id] (:deleted result))))))))))
 
+(deftest ^{:stratum 2} a-named-root-that-did-not-resolve-is-no-escape
+  ;; :execution/checkpoint-root takes precedence over :checkpoint/root:
+  ;; naming a root inside the home must not let GC collect one outside it.
+  (fs/with-temp-dir [elsewhere {:prefix "mf-elsewhere-"}]
+    (let [elsewhere (str elsewhere)
+          id (fixture/expired-run! elsewhere)]
+      (call-with-miniforge-home
+       (fn [home]
+         (let [[result deleted] (gc-recording-deletes home {:execution/checkpoint-root elsewhere
+                                                             :checkpoint/root (str home "/checkpoints")})]
+           (is (anomaly/anomaly? result))
+           (is (= :conflict (:anomaly/type result)))
+           (is (empty? deleted))
+           (is (fs/exists? (fs/file elsewhere (str id))))))))))
+
 (comment ::miniforge-home-paths)
