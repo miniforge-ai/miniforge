@@ -28,15 +28,21 @@
    Solution: a two-phase deferred GC driven by normal workflow traffic.
 
    **Phase 1 — enqueue on finish**
-   `enqueue-workflow-gc!` appends `{:workflow-id wid :finished-at #inst <now>}`
-   to `<miniforge-home>/scratch-gc-queue.edn` (MINIFORGE_HOME, else
-   ~/.miniforge).  The file is an EDN vector that survives process restarts.
+   `enqueue-workflow-gc!` appends
+   `{:workflow-id wid :finished-at #inst <now> :repo-path <repo>}` to
+   `<miniforge-home>/scratch-gc-queue.edn` (MINIFORGE_HOME, else ~/.miniforge).
+   The file is an EDN vector that survives process restarts. `:repo-path` is
+   the canonical path of the repository that holds the ref (see `repo-key`),
+   the same for every worktree of that repository.
 
    **Phase 2 — GC pass on next start (or explicit subcommand)**
-   `run-deferred-gc!` reads the queue, partitions entries into stale (≥ max-age-days
-   old) and fresh.  If any stale entries exist it calls `gc-scratch-refs!` once on
-   the supplied parent-repo-path with `max-age-days`, then writes only the fresh
-   entries back.  No background daemon needed.
+   `run-deferred-gc!` reads the queue and looks only at entries whose
+   `:repo-path` is the repository it was given, partitioning them into stale
+   (≥ max-age-days old) and fresh.  If any are stale it calls
+   `gc-scratch-refs!` once on that repository with `max-age-days`, then removes
+   only those stale entries.  Entries of other repositories, and entries
+   without `:repo-path` (written before it existed), are kept as they are:
+   removing them here would drop them without deleting their refs.
 
    **Unreadable queue**
    A queue file that is not an EDN vector is never silently read as empty.
@@ -50,6 +56,7 @@
    `:scratch-gc-queue/locked` error — acceptable for the best-effort GC contract."
   (:require
    [ai.miniforge.config.interface :as mf-config]
+   [ai.miniforge.dag-executor.protocols.impl.worktree :as worktree-impl]
    [ai.miniforge.dag-executor.result :as result]
    [ai.miniforge.dag-executor.scratch-commit :as scratch-commit]
    [clojure.edn :as edn]
@@ -90,6 +97,18 @@
    Small relative to [[lock-acquire-timeout-ms]] so contention resolves
    promptly without busy-spinning."
   25)
+
+(defn ^{:stratum 0} repo-key
+  "Canonical path of the repository that owns `path`: the parent of its git
+   common dir, so every worktree of one repository gets the same key.
+   result/ok string, or result/err `:scratch-gc-queue/no-repo`."
+  [path]
+  (let [derived (worktree-impl/derive-parent-repo-path (str path))]
+    (if (result/ok? derived)
+      (result/ok (.getCanonicalPath (io/file (:parent-repo-path (result/unwrap derived)))))
+      (result/err :scratch-gc-queue/no-repo
+                  (str "not inside a git repository: " path)
+                  {:path (str path)}))))
 
 ;; Queue I/O helpers
 (defn- ^{:stratum 0} read-gc-queue
@@ -239,8 +258,10 @@
 (defn ^{:stratum 2} enqueue-workflow-gc!
   "Append a GC entry for `workflow-id` to the queue at `gc-queue-path`.
 
-   Writes `{:workflow-id <str> :finished-at #inst <now>}` at the end of the
-   queue vector.  The file is created when absent.
+   Writes `{:workflow-id <str> :finished-at #inst <now> :repo-path <repo>}`
+   at the end of the queue vector, `<repo>` being the `repo-key` of
+   `repo-path` (default: the current directory).  The file is created when
+   absent.
 
    Intended to be called at workflow completion (success or failure) so the
    corresponding scratch ref becomes eligible for GC after `default-max-age-days`.
@@ -250,48 +271,56 @@
 
    Returns:
      result/ok  `{:workflow-id str :queue-size int}`
+     result/err `:scratch-gc-queue/no-repo` when `repo-path` is not in a git repository
      result/err `:scratch-gc-queue/corrupt` when the queue was unreadable (it is
                 quarantined, nothing is enqueued, the next call starts empty)
      result/err `:scratch-gc-queue/enqueue-failed` on I/O failure during write
      result/err `:scratch-gc-queue/locked` when the lock is contended"
-  [workflow-id]
-  (try
-    (let [path (gc-queue-path)]
-      (with-queue-lock! path
-        (fn []
-          (let [queue (read-gc-queue path)]
-            (if (result/err? queue)
-              (quarantine-corrupt-queue! path queue)
-              ;; java.util.Date is serialised as #inst by pr-str and round-trips
-              ;; through edn/read-string — do not substitute Instant here.
-              (let [entry   {:workflow-id (str workflow-id)
-                             :finished-at (java.util.Date/from (Instant/now))}
-                    updated (conj (result/unwrap queue) entry)]
-                ;; Nested try so that spit failures surface as :enqueue-failed
-                ;; rather than being re-caught by with-queue-lock!'s outer handler
-                ;; (which would return the less-specific :lock-failed code).
-                (try
-                  (write-gc-queue! path updated)
-                  (result/ok {:workflow-id (str workflow-id)
-                              :queue-size  (count updated)})
-                  (catch Exception e
-                    (result/err :scratch-gc-queue/enqueue-failed
-                                (str "failed to write GC queue: " (.getMessage e))
-                                {:workflow-id (str workflow-id) :path path})))))))))
-    (catch Exception e
-      (result/err :scratch-gc-queue/enqueue-failed
-                  (str "failed to enqueue workflow GC entry: " (.getMessage e))
-                  {:workflow-id (str workflow-id)}))))
+  ([workflow-id]
+   (enqueue-workflow-gc! workflow-id (System/getProperty "user.dir")))
+  ([workflow-id repo-path]
+   (try
+     (result/and-then
+      (repo-key repo-path)
+      (fn [repo]
+        (let [path (gc-queue-path)]
+          (with-queue-lock! path
+            (fn []
+              (let [queue (read-gc-queue path)]
+                (if (result/err? queue)
+                  (quarantine-corrupt-queue! path queue)
+                  ;; java.util.Date is serialised as #inst by pr-str and round-trips
+                  ;; through edn/read-string — do not substitute Instant here.
+                  (let [entry   {:workflow-id (str workflow-id)
+                                 :finished-at (java.util.Date/from (Instant/now))
+                                 :repo-path   repo}
+                        updated (conj (result/unwrap queue) entry)]
+                    ;; Nested try so that spit failures surface as :enqueue-failed
+                    ;; rather than being re-caught by with-queue-lock!'s outer handler
+                    ;; (which would return the less-specific :lock-failed code).
+                    (try
+                      (write-gc-queue! path updated)
+                      (result/ok {:workflow-id (str workflow-id)
+                                  :queue-size  (count updated)})
+                      (catch Exception e
+                        (result/err :scratch-gc-queue/enqueue-failed
+                                    (str "failed to write GC queue: " (.getMessage e))
+                                    {:workflow-id (str workflow-id) :path path})))))))))))
+     (catch Exception e
+       (result/err :scratch-gc-queue/enqueue-failed
+                   (str "failed to enqueue workflow GC entry: " (.getMessage e))
+                   {:workflow-id (str workflow-id)})))))
 
 (defn ^{:stratum 2} prune-stale-queue-entries!
   "Core of a deferred-GC pass, run while holding the queue lock.
 
-   Reads the queue at `path`, partitions entries into stale (age ≥
-   `max-age-days`) and fresh, and — only when stale entries exist — runs
-   `gc-scratch-refs!` once on `parent-repo-path`, then writes back only the
-   fresh entries. On git-level GC failure the queue is left untouched (the
-   error propagates) so stale entries are retried next pass.  An unreadable
-   queue is quarantined and reported.
+   Reads the queue at `path` and takes the entries whose `:repo-path` is
+   `repo` (a `repo-key`).  When any of them is stale (age ≥ `max-age-days`)
+   it runs `gc-scratch-refs!` once on `repo`, then writes back every other
+   entry: this repository's fresh ones and all entries of other
+   repositories or without `:repo-path`.  On git-level GC failure the queue
+   is left untouched (the error propagates) so stale entries are retried
+   next pass.  An unreadable queue is quarantined and reported.
 
    Extracted from `run-deferred-gc!`'s lock thunk so the partition/write-back
    logic is independently testable.
@@ -300,17 +329,18 @@
      result/ok  `{:pruned int :pruned-ids [str ...] :remaining int :gc-result map-or-nil}`
      result/err the propagated `gc-scratch-refs!` error when GC fails
      result/err `:scratch-gc-queue/corrupt` when the queue was unreadable"
-  [path parent-repo-path max-age-days]
+  [path repo max-age-days]
   (let [queue (read-gc-queue path)]
     (if (result/err? queue)
       (quarantine-corrupt-queue! path queue)
       (let [entries   (result/unwrap queue)
             max-age-s (* (long max-age-days) seconds-per-day)
             now-s     (epoch-seconds)
-            stale?    (fn [e] (>= (- now-s (finished-at-epoch-seconds e)) max-age-s))
+            stale?    (fn [e] (and (= repo (:repo-path e))
+                                   (>= (- now-s (finished-at-epoch-seconds e)) max-age-s)))
             {stale true kept false} (group-by (comp boolean stale?) entries)]
         (if (seq stale)
-          (let [gc-result (scratch-commit/gc-scratch-refs! parent-repo-path max-age-days)]
+          (let [gc-result (scratch-commit/gc-scratch-refs! repo max-age-days)]
             (if (result/ok? gc-result)
               (do
                 (write-gc-queue! path (or kept []))
@@ -328,29 +358,34 @@
 ;------------------------------------------------------------------------------ Layer 3
 
 (defn ^{:stratum 3} run-deferred-gc!
-  "Scan the GC queue and delete stale scratch refs if any entries are overdue.
+  "Scan the GC queue and delete stale scratch refs of one repository.
 
    Steps:
-   1. Acquire an exclusive file lock on the queue file.
-   2. Read the queue and partition entries into stale (age ≥ max-age-days) and fresh.
-   3. If stale entries exist, call `gc-scratch-refs!` once on `parent-repo-path`
-      with `max-age-days` — this deletes *all* refs in that repo older than the
+   1. Resolve `parent-repo-path` to its `repo-key`.
+   2. Acquire an exclusive file lock on the queue file.
+   3. Take the entries of that repository and find the stale ones
+      (age ≥ max-age-days).
+   4. If any are stale, call `gc-scratch-refs!` once on the repository with
+      `max-age-days` — this deletes *all* scratch refs in it older than the
       threshold, not just the stale queue entries.
-   4. **Only on success** write the fresh entries back; on git-level failure the
-      queue is left unchanged so stale entries are retried on the next call.
-   5. Release the lock.
+   5. **Only on success** remove those stale entries; on git-level failure the
+      queue is left unchanged so they are retried on the next call.  Entries of
+      other repositories are never removed here.
+   6. Release the lock.
 
    When there are no stale entries the queue file is left unchanged and the
    git plumbing is not invoked.
 
    Arguments:
-   - `parent-repo-path`  Absolute path to the parent git repository whose
-                         `refs/miniforge/scratch/` namespace is cleaned.
+   - `parent-repo-path`  A path inside the git repository whose
+                         `refs/miniforge/scratch/` namespace is cleaned (any
+                         of its worktrees will do).
    - `max-age-days`      Retention period; entries older than this trigger GC.
                          Defaults to [[default-max-age-days]] (7 days).
 
    Returns:
      result/ok  `{:pruned int :pruned-ids [str ...] :remaining int :gc-result map-or-nil}`
+     result/err `:scratch-gc-queue/no-repo` when the path is not in a git repository
      result/err `:scratch-gc-queue/corrupt` when the queue was unreadable (quarantined)
      result/err `:scratch-gc-queue/run-failed` on unexpected failure
      result/err `:scratch-gc-queue/locked` when the lock is contended"
@@ -358,9 +393,12 @@
    (run-deferred-gc! parent-repo-path default-max-age-days))
   ([parent-repo-path max-age-days]
    (try
-     (let [path (gc-queue-path)]
-       (with-queue-lock! path
-         (fn [] (prune-stale-queue-entries! path parent-repo-path max-age-days))))
+     (result/and-then
+      (repo-key parent-repo-path)
+      (fn [repo]
+        (let [path (gc-queue-path)]
+          (with-queue-lock! path
+            (fn [] (prune-stale-queue-entries! path repo max-age-days))))))
      (catch Exception e
        (result/err :scratch-gc-queue/run-failed
                    (str "deferred GC pass failed: " (.getMessage e))
@@ -378,7 +416,7 @@
   ;=> {:ok? true :data {:workflow-id "task-a5a93af5" :queue-size 1}}
 
   ;; Run GC piggybacking on next workflow start.
-  ;; Deletes scratch refs older than 7 days; writes fresh entries back to queue.
+  ;; Deletes scratch refs older than 7 days; removes this repo's stale entries.
   (run-deferred-gc! "/path/to/parent-repo")
   ;=> {:ok? true :data {:pruned 0 :pruned-ids [] :remaining 1 :gc-result nil}}
 
