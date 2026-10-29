@@ -37,6 +37,15 @@
   [branch]
   (and (string? branch) (not (str/blank? branch)) (not (str/starts-with? branch "-"))))
 
+(defn- ^{:stratum 0} fetch-cmd
+  "git fetch of `branch` from `remote`. A fetch from a URL updates no
+   remote-tracking ref by itself, so the refspec writes
+   refs/remotes/origin/<branch> for the checkout that follows."
+  [remote branch]
+  (if (= "origin" remote)
+    ["git" "fetch" "origin" branch]
+    ["git" "fetch" remote (str "+refs/heads/" branch ":refs/remotes/origin/" branch)]))
+
 (defn- ^{:stratum 0} failed-step
   "Why the step failed, or nil: the error message when exec-fn returned
    a result/err, the stderr when the exit code is non-zero. A nil step
@@ -58,12 +67,14 @@
    - exec-fn: (fn [cmd] -> result-map) — executes a command in the environment;
               cmd may be a string (passed to sh -c) or a vector (exec'd directly,
               no shell — preferred for user-supplied values to avoid injection)
-   - opts: {:branch string, :message string}
+   - opts: {:branch string, :message string, :remote string}; :remote is
+           the remote name or URL to push to (default \"origin\")
 
    Returns result monad with {:persisted? bool :commit-sha string :branch string}.
    Every git step's exit code is checked: a failed commit or push that
    still reported :persisted? true was a silent loss of work."
-  [exec-fn {:keys [branch message] :or {branch "task/unknown" message "phase checkpoint"}}]
+  [exec-fn {:keys [branch message remote]
+            :or {branch "task/unknown" message "phase checkpoint" remote "origin"}}]
   (if (not (safe-branch? branch))
     (result/err :invalid-branch (str "Branch must be a non-empty string not starting with '-': " (pr-str branch)))
     (try
@@ -80,7 +91,7 @@
           ;; operator's signing agent (see worktree tier commit-staged!).
           (let [commit-r (exec-fn ["git" "-c" "commit.gpgsign=false" "commit" "-m" (str message)])
                 push-r (when-not (failed-step commit-r "")
-                         (exec-fn ["git" "push" "origin" (str "HEAD:" branch) "--force"]))
+                         (exec-fn ["git" "push" remote (str "HEAD:" branch) "--force"]))
                 sha-r (when (and push-r (not (failed-step push-r "")))
                         (exec-fn "git rev-parse HEAD"))]
             (cond
@@ -100,14 +111,15 @@
    - exec-fn: (fn [cmd] -> result-map) — executes a command in the environment;
               cmd may be a string (passed to sh -c) or a vector (exec'd directly,
               no shell — preferred for user-supplied values to avoid injection)
-   - opts: {:branch string}
+   - opts: {:branch string, :remote string}; :remote is the remote name or
+           URL to fetch from (default \"origin\")
 
    Returns result monad with {:restored? bool :commit-sha string :branch string}"
-  [exec-fn {:keys [branch] :or {branch "task/unknown"}}]
+  [exec-fn {:keys [branch remote] :or {branch "task/unknown" remote "origin"}}]
   (if (not (safe-branch? branch))
     (result/err :invalid-branch (str "Branch must be a non-empty string not starting with '-': " (pr-str branch)))
     (try
-      (let [fetch-r (exec-fn ["git" "fetch" "origin" branch])]
+      (let [fetch-r (exec-fn (fetch-cmd remote branch))]
         (if-let [e (failed-step fetch-r "git fetch failed")]
           (result/err :restore-fetch-failed e)
           (let [co-r (exec-fn ["git" "checkout" branch])]

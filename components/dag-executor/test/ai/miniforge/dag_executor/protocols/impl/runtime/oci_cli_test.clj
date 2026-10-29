@@ -283,6 +283,19 @@
         (is (= 130 (:exit result)))
         (is (clojure.string/includes? (:err result) "interrupted"))))))
 
+(defn- ^{:stratum 0} recorded-remote-executor
+  "An executor that bootstrapped `c1` from https://github.com/o/r.git."
+  []
+  (doto (oci-cli/create-docker-executor {:image "test:latest"})
+    (-> :git-remotes (reset! {"c1" {:repo-url  "https://github.com/o/r.git"
+                                    :https-url "https://github.com/o/r.git"
+                                    :host-kind :github}}))))
+
+(defn- ^{:stratum 0} credentialed-calls
+  "The [cmd opts] in `calls` that carried an env."
+  [calls]
+  (filter (fn [[_ opts]] (:env opts)) calls))
+
 ;------------------------------------------------------------------------------ Layer 1
 
 (defn- ^{:stratum 1} token-in? [s]
@@ -672,14 +685,12 @@
                                         "could not read password")))))))
 
 (deftest ^{:stratum 1} persist-workspace-authenticates-push-only-test
-  (testing "a recorded remote's credential goes to push alone, with hooks
-            off; add/commit (which run workspace hooks) never see it"
-    (let [executor (oci-cli/create-docker-executor {:image "test:latest"})
+  (testing "with a recorded remote, only the push gets the credential, with
+            hooks off, and it pushes to the recorded URL rather than the
+            capsule's origin; add/commit (which run workspace hooks) never
+            see it"
+    (let [executor (recorded-remote-executor)
           calls    (atom [])]
-      (reset! (:git-remotes executor)
-              {"c1" {:repo-url  "https://github.com/o/r.git"
-                     :https-url "https://github.com/o/r.git"
-                     :host-kind :github}})
       (with-redefs [oci-cli/resolve-git-token (fn [_url _opts] fake-token)
                     oci-cli/stop-container    (fn [& _] {:exit 0})
                     oci-cli/remove-container  (fn [& _] (result/ok {:released? true}))
@@ -690,14 +701,31 @@
                               :stdout (if (= cmd "git status --porcelain") " M f" "sha")}})]
         (is (true? (get-in (proto/persist-workspace! executor "c1" {:branch "task/x"})
                            [:data :persisted?])))
-        (let [[push & more] (filter (fn [[_ opts]] (:env opts)) @calls)]
+        (let [[[cmd opts] & more] (credentialed-calls @calls)]
           (is (empty? more))
-          (is (= ["git" "-c" "core.hooksPath=/dev/null" "push" "origin" "HEAD:task/x" "--force"]
-                 (first push)))
+          (is (= ["git" "-c" "core.hooksPath=/dev/null" "push" "https://github.com/o/r.git"
+                  "HEAD:task/x" "--force"]
+                 cmd))
           (is (= (str "Authorization: Basic " (basic-auth "x-access-token" fake-token))
-                 (get-in push [1 :env "GIT_CONFIG_VALUE_0"]))))
+                 (get-in opts [:env "GIT_CONFIG_VALUE_0"]))))
         (proto/release-environment! executor "c1")
         (is (= {} @(:git-remotes executor)))))))
+
+(deftest ^{:stratum 1} restore-workspace-fetches-recorded-url-test
+  (testing "with a recorded remote, restore fetches the recorded URL into
+            origin's tracking ref, with the credential on the fetch alone"
+    (let [calls (atom [])]
+      (with-redefs [oci-cli/resolve-git-token (fn [_url _opts] fake-token)
+                    oci-cli/exec-in-container
+                    (fn [_d _id cmd opts]
+                      (swap! calls conj [cmd opts])
+                      {:data {:exit-code 0 :stdout "sha"}})]
+        (is (true? (get-in (proto/restore-workspace! (recorded-remote-executor) "c1"
+                                                     {:branch "task/x"})
+                           [:data :restored?])))
+        (is (= [["git" "-c" "core.hooksPath=/dev/null" "fetch" "https://github.com/o/r.git"
+                 "+refs/heads/task/x:refs/remotes/origin/task/x"]]
+               (map first (credentialed-calls @calls))))))))
 
 ;------------------------------------------------------------------------------ Layer 2
 

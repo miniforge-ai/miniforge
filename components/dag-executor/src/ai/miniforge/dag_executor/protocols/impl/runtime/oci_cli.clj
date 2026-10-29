@@ -362,6 +362,15 @@
         (map (fn [[k v]] [(name k) (str v)]))
         env))
 
+(defn- ^{:stratum 0} workspace-opts
+  "persist/restore opts. With a credential, push and fetch target the
+   recorded repository URL rather than the capsule's `origin`, which
+   untrusted code can repoint at another repository on the same host."
+  [opts git-remotes environment-id cred-env]
+  (if (seq cred-env)
+    (assoc opts :remote (get-in @git-remotes [environment-id :https-url]))
+    opts))
+
 ;------------------------------------------------------------------------------ Layer 1
 
 (defn- ^{:stratum 1} split-userinfo
@@ -1157,16 +1166,16 @@
         (result/ok {:status :unknown :error (.getMessage e)}))))
 
   (persist-workspace! [_this environment-id opts]
-    (let [exec! (workspace-exec-fn descriptor environment-id
-                                   (get opts :workdir default-workdir)
-                                   (remote-credential-env git-remotes environment-id))]
-      (workspace/git-persist! exec! opts)))
+    (let [cred-env (remote-credential-env git-remotes environment-id)
+          exec!    (workspace-exec-fn descriptor environment-id
+                                      (get opts :workdir default-workdir) cred-env)]
+      (workspace/git-persist! exec! (workspace-opts opts git-remotes environment-id cred-env))))
 
   (restore-workspace! [_this environment-id opts]
-    (let [exec! (workspace-exec-fn descriptor environment-id
-                                   (get opts :workdir default-workdir)
-                                   (remote-credential-env git-remotes environment-id))]
-      (workspace/git-restore! exec! opts))))
+    (let [cred-env (remote-credential-env git-remotes environment-id)
+          exec!    (workspace-exec-fn descriptor environment-id
+                                      (get opts :workdir default-workdir) cred-env)]
+      (workspace/git-restore! exec! (workspace-opts opts git-remotes environment-id cred-env)))))
 
 ;------------------------------------------------------------------------------ Layer 6
 

@@ -254,6 +254,21 @@
         (is (some #(and (vector? %) (cmd-has? % "git checkout feature/restore")) cmds)
             "checkout must be an arg vector, not a shell string")))))
 
+(deftest ^{:stratum 2} remote-url-replaces-origin-test
+  (testing "a :remote URL is the push target, and the fetch from it writes
+            origin's tracking ref so the checkout still finds the branch"
+    (let [url "https://github.com/o/r.git"
+          [persist-fn persist-calls] (recording-exec-fn
+                                      {"git status" (shell-result " M f")
+                                       "git rev-parse" (shell-result head-sha)})
+          [restore-fn restore-calls] (recording-exec-fn
+                                      {"git rev-parse" (shell-result head-sha)})]
+      (sut/git-persist! persist-fn {:branch "task/x" :remote url})
+      (sut/git-restore! restore-fn {:branch "task/x" :remote url})
+      (is (some #{["git" "push" url "HEAD:task/x" "--force"]} @persist-calls))
+      (is (some #{["git" "fetch" url "+refs/heads/task/x:refs/remotes/origin/task/x"]}
+                @restore-calls)))))
+
 (deftest ^{:stratum 2} git-restore!-defaults-branch-test
   (testing "Missing :branch defaults to 'task/unknown'"
     (let [[exec-fn calls] (recording-exec-fn
