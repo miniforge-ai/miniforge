@@ -67,4 +67,14 @@
   "in-progress"
 
   :rate-limit-test.system/risk-tag
-  "risk"}}
+  "risk"
+
+  ;; Network-drop monitor: a proxy answering the probe with 407.
+  :network-monitor.system/proxy-auth-required
+  "Proxy {proxy} answered the network probe for {probe-url} with 407 (credentials required); network-drop detection is paused until the proxy accepts the probe"
+
+  :network-monitor.system/unknown-proxy
+  "(not found in the proxy environment variables)"
+
+  :network-monitor.system/proxy-auth-cleared
+  "The network probe for {probe-url} no longer gets a 407 from the proxy (probe status: {status}); network-drop detection resumed"}}

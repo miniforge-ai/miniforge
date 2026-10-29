@@ -70,20 +70,33 @@
   (when key-str
     (mapv keyword (str/split key-str #"\."))))
 
+(def ^{:stratum 0} keyword-valued-keys
+  "Config keys whose values are keywords. `config set llm.backend opencode` must
+   store :opencode: as a string or symbol it names no backend. Only keys a run
+   reads belong here."
+  #{[:llm :backend]})
+
 (defn ^{:stratum 0} parse-config-value
-  "Parse config value from string."
+  "Parse config value from string. A bare word, which EDN reads as a symbol,
+   stays a string (`anthropic/claude-sonnet-4-5` is a model id, not a symbol)."
   [value-str]
-  (try
-    (edn/read-string value-str)
-    (catch Exception _
-      value-str)))
+  (let [value (try
+                (edn/read-string value-str)
+                (catch Exception _
+                  value-str))]
+    (if (symbol? value) (str value) value)))
 
 (defn ^{:stratum 0} get-llm-backend
-  "Get LLM backend from config, with workflow override support."
+  "Get LLM backend from config, with workflow override support. A string or
+   symbol (as an older `config set` wrote) is read as the keyword of its full
+   text, namespace included, so `vendor/opencode` stays unknown either way."
   [config workflow-override]
-  (or workflow-override
-      (get-in config [:llm :backend])
-      :opencode))
+  (let [backend (or workflow-override
+                    (get-in config [:llm :backend])
+                    :opencode)]
+    (if (or (string? backend) (symbol? backend))
+      (keyword (str backend))
+      backend)))
 
 (defn ^{:stratum 0} get-llm-timeout
   "Get LLM timeout from config."
@@ -121,6 +134,14 @@
     (println (style (messages/t :config/error-prefix {:message (:anomaly/message anomaly)}) :red)))
   (shared/exit! 1))
 
+(defn ^{:stratum 1} coerce-config-value
+  "`value` as `config set` stores it under `key-path`: a keyword for the
+   `keyword-valued-keys`."
+  [key-path value]
+  (if (and (contains? keyword-valued-keys key-path) (string? value))
+    (keyword value)
+    value))
+
 ;; Config file operations
 (defn ^{:stratum 1} read-config-file
   "Read config file, returns nil if doesn't exist."
@@ -147,20 +168,12 @@
                                               [(get-in config [:llm :backend]) :provider])
                                       (messages/t :config/llm-backend-provider-unknown))}))
   (println (messages/t :config/llm-model {:model (get-in config [:llm :model])}))
-  (println (messages/t :config/llm-max-tokens {:max-tokens (get-in config [:llm :max-tokens])}))
-  (println (messages/t :config/llm-timeout {:minutes (quot (get-in config [:llm :timeout-ms]) 60000)}))
   (println)
 
-  ;; Workflow Settings
-  (println (messages/t :config/section-workflow))
-  (println (messages/t :config/workflow-max-iterations {:max-iterations (get-in config [:workflow :max-iterations])}))
-  (println (messages/t :config/workflow-max-tokens {:max-tokens (get-in config [:workflow :max-tokens])}))
-  (println (messages/t :config/workflow-failure-strategy {:failure-strategy (format-config-value (get-in config [:workflow :failure-strategy]))}))
-  (println)
-
-  ;; Artifacts
+  ;; Artifacts. The directory comes from MINIFORGE_HOME, not from
+  ;; [:artifacts :dir], so show the one the artifact commands use.
   (println (messages/t :config/section-artifacts))
-  (println (messages/t :config/artifacts-dir {:dir (get-in config [:artifacts :dir])}))
+  (println (messages/t :config/artifacts-dir {:dir (app-config/artifacts-dir)}))
   (println)
 
   ;; Config file location
@@ -210,7 +223,7 @@
         (println (messages/t :config/set-usage {:command (app-config/command-string "config set <key> <value>")}))
         (println (messages/t :config/set-example {:command (app-config/command-string "config set llm.backend opencode")})))
       (let [key-path (parse-config-key key-str)
-            value (parse-config-value value-str)
+            value (coerce-config-value key-path (parse-config-value value-str))
             result (config-file/update-config! config-path #(assoc-in (or % default-config) key-path value))]
         (when (anomaly/anomaly? result)
           (exit-with-anomaly! result))

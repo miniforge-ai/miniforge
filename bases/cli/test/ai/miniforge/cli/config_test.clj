@@ -18,9 +18,11 @@
 (ns ai.miniforge.cli.config-test
   "Tests for Aero configuration management."
   (:require [clojure.test :refer [deftest testing is]]
+            [ai.miniforge.cli.app-config :as app-config]
             [ai.miniforge.cli.backends.status :as backend-status]
             [ai.miniforge.cli.config :as config]
             [ai.miniforge.cli.main.commands.shared :as shared]
+            [clojure.edn :as edn]
             [clojure.java.io :as io]
             [clojure.string :as str]))
 
@@ -31,8 +33,6 @@
     (let [cfg (config/load-config)]
       (is (map? cfg))
       (is (contains? cfg :llm))
-      (is (contains? cfg :workflow))
-      (is (contains? cfg :meta-loop))
       (is (contains? cfg :artifacts))))
 
   (testing "load-config with :dev profile"
@@ -65,6 +65,13 @@
     (is (= :opencode (config/get-llm-backend {} nil)))
     (is (= :opencode (config/get-llm-backend {:llm {}} nil)))))
 
+(deftest ^{:stratum 0} get-llm-backend-reads-words-as-keywords-test
+  (is (= :opencode (config/get-llm-backend {:llm {:backend 'opencode}} nil)))
+  (is (= :claude (config/get-llm-backend {} "claude")))
+  (testing "a namespace is kept, so a symbol and a string with the same text resolve alike"
+    (is (= :vendor/opencode (config/get-llm-backend {:llm {:backend 'vendor/opencode}} nil)))
+    (is (= :vendor/opencode (config/get-llm-backend {:llm {:backend "vendor/opencode"}} nil)))))
+
 (deftest ^{:stratum 0} get-llm-timeout-test
   (testing "get-llm-timeout returns config value"
     (let [cfg {:llm {:timeout-ms 600000}}]
@@ -87,20 +94,7 @@
   (testing "config.edn has expected structure"
     (let [cfg (config/load-config)]
       (testing "llm config section"
-        (is (keyword? (get-in cfg [:llm :backend])))
-        (is (number? (get-in cfg [:llm :timeout-ms])))
-        (is (number? (get-in cfg [:llm :line-timeout-ms])))
-        (is (number? (get-in cfg [:llm :max-tokens]))))
-
-      (testing "workflow config section"
-        (is (number? (get-in cfg [:workflow :max-iterations])))
-        (is (number? (get-in cfg [:workflow :max-tokens])))
-        (is (keyword? (get-in cfg [:workflow :failure-strategy]))))
-
-      (testing "meta-loop config section"
-        (is (boolean? (get-in cfg [:meta-loop :enabled])))
-        (is (number? (get-in cfg [:meta-loop :max-convergence-iterations])))
-        (is (number? (get-in cfg [:meta-loop :convergence-threshold]))))
+        (is (keyword? (get-in cfg [:llm :backend]))))
 
       (testing "artifacts config section"
         (is (string? (get-in cfg [:artifacts :dir])))))))
@@ -113,8 +107,29 @@
       ;; Config should be loaded successfully
       (is (map? cfg))
       ;; Values should be present (either from env or defaults)
-      (is (some? (get-in cfg [:llm :backend])))
-      (is (some? (get-in cfg [:llm :timeout-ms]))))))
+      (is (some? (get-in cfg [:llm :backend]))))))
+
+;; Keys the defaults used to carry and `config list` used to print, although
+;; nothing in a run reads them.
+(def ^{:stratum 0} ^:private unread-keys
+  [[:llm :timeout-ms] [:llm :line-timeout-ms] [:llm :max-tokens]
+   [:workflow :max-iterations] [:workflow :max-tokens] [:workflow :failure-strategy]
+   [:meta-loop]])
+
+(deftest ^{:stratum 0} config-list-shows-no-unread-setting-test
+  (let [stale-dir "/stale/artifacts/from/config.edn"
+        cfg (merge config/default-config
+                   {:llm {:backend :opencode :model "m"
+                          :timeout-ms 600000 :line-timeout-ms 60000 :max-tokens 5}
+                    :workflow {:max-iterations 7 :max-tokens 9 :failure-strategy :retry}
+                    :artifacts {:dir stale-dir}})
+        out (with-out-str (config/display-config cfg "/nonexistent/config.edn"))]
+    (testing "config list does not print LLM or workflow limits that nothing enforces"
+      (doseq [label ["timeout" "max-tokens" "max-iterations" "failure-strategy"]]
+        (is (not (str/includes? out label)) label)))
+    (testing "config list prints the artifacts directory the artifact commands use"
+      (is (str/includes? out (app-config/artifacts-dir)))
+      (is (not (str/includes? out stale-dir))))))
 
 (deftest ^{:stratum 0} parse-config-value-rejects-reader-eval-test
   (testing "parse-config-value returns the raw string for #=() reader-eval forms"
@@ -166,3 +181,21 @@
           (is (= [1] @exits))
           (is (str/includes? (str err) (.getPath tmp)))
           (finally (.delete tmp)))))))
+
+(deftest ^{:stratum 0} config-set-stores-typed-values-test
+  (testing "the usage example `config set llm.backend opencode` stores a keyword; a model id stays a string"
+    (let [dir  (java.nio.file.Files/createTempDirectory "config-set" (make-array java.nio.file.attribute.FileAttribute 0))
+          path (str (.resolve dir "config.edn"))]
+      (with-out-str
+        (config/cmd-set {:config path :key "llm.backend" :value "opencode"})
+        (config/cmd-set {:config path :key "llm.model" :value "anthropic/claude-sonnet-4-5"}))
+      (let [saved (edn/read-string (slurp path))]
+        (is (= :opencode (get-in saved [:llm :backend])))
+        (is (= "anthropic/claude-sonnet-4-5" (get-in saved [:llm :model])))))))
+
+;------------------------------------------------------------------------------ Layer 1
+
+(deftest ^{:stratum 1} defaults-carry-no-unread-keys-test
+  (testing "config init/reset do not write settings that nothing reads"
+    (doseq [path unread-keys]
+      (is (nil? (get-in config/default-config path)) (str path)))))

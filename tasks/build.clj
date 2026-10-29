@@ -15,15 +15,17 @@
 ;; WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 ;; See the License for the specific language governing permissions and
 ;; limitations under the License.
-
 (ns build
   (:require
    [ai.miniforge.bb-proc.interface :as proc]
    [babashka.fs :as fs]
    [babashka.process :as p]
-   [clojure.string :as str]))
+   [clojure.string :as str]
+   [version-stamp]))
 
-(defn- print-command-output!
+;------------------------------------------------------------------------------ Layer 0
+
+(defn- ^{:stratum 0} print-command-output!
   [{:keys [out err]}]
   (when-not (str/blank? out)
     (println out))
@@ -31,11 +33,13 @@
     (binding [*out* *err*]
       (println err))))
 
-(defn- build-command
+(defn- ^{:stratum 0} build-command
   [& args]
   (into [(proc/clojure-command) "-T:build"] args))
 
-(defn- run-build-command!
+;------------------------------------------------------------------------------ Layer 1
+
+(defn- ^{:stratum 1} run-build-command!
   [command failure-message]
   (println "Command:" (str/join " " command))
   (let [{:keys [exit] :as result} (apply p/sh {:out :string :err :string} command)]
@@ -44,17 +48,7 @@
       (println failure-message exit)
       (System/exit exit))))
 
-(defn cli []
-  (println "🔨 Building miniforge CLI uberjar...")
-  (let [command (build-command "bb-uberjar" ":project" "miniforge")]
-    (run-build-command! command "❌ Build failed with exit code:")))
-
-(defn kernel []
-  (println "🔨 Building miniforge-core CLI uberjar...")
-  (let [command (build-command "bb-uberjar" ":project" "miniforge-core")]
-    (run-build-command! command "❌ Build failed with exit code:")))
-
-(defn tui []
+(defn ^{:stratum 1} tui []
   (let [jar-file      "dist/miniforge-tui.jar"
         jlink-dir     "dist/miniforge-tui-runtime"
         dist-dir      "dist/miniforge-tui"
@@ -128,7 +122,20 @@
     (println "✅ Distribution ready:" dist-dir)
     (println "   Run with:" (str dist-dir "/bin/miniforge-tui"))))
 
-(defn compile-all []
+;------------------------------------------------------------------------------ Layer 2
+
+(defn ^{:stratum 2} cli []
+  (println "🔨 Building miniforge CLI uberjar...")
+  (let [command (build-command "bb-uberjar" ":project" "miniforge")]
+    (run-build-command! command "❌ Build failed with exit code:"))
+  (version-stamp/stamp-from-env! "dist/miniforge.jar"))
+
+(defn ^{:stratum 2} kernel []
+  (println "🔨 Building miniforge-core CLI uberjar...")
+  (let [command (build-command "bb-uberjar" ":project" "miniforge-core")]
+    (run-build-command! command "❌ Build failed with exit code:")))
+
+(defn ^{:stratum 2} compile-all []
   (println "⚙️  Compiling all code for syntax check...")
   (let [command (build-command "compile-all")]
     (run-build-command! command "❌ Compilation failed with exit code:")))
