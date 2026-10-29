@@ -76,6 +76,18 @@
       (is (= "rwx------" (fs/posix->str (fs/posix-file-permissions dir))))
       (finally (fs/delete-tree dir)))))
 
+(defn ^{:stratum 0} capsule-ctx
+  "A governed-run context whose worktree path exists only inside the
+   \"capsule\": the execute-fn runs each command in DIR, so only the
+   execution environment can read it, as in a real capsule."
+  [dir]
+  {:execution/worktree-path "/workspace/not-on-this-host"
+   :execution/executor ::capsule
+   :execution/environment-id "env-1"
+   :execution/execute-fn (fn [_executor _env-id cmd _opts]
+                           (let [r (shell/sh "sh" "-c" cmd :dir dir)]
+                             {:ok? true :data {:exit-code (:exit r) :stdout (:out r)}}))})
+
 ;------------------------------------------------------------------------------ Layer 1
 
 (deftest ^{:stratum 1} code-files-are-scanned-test
@@ -160,6 +172,26 @@
   "The set of {:file :line} findings for ARTIFACT checked in worktree DIR."
   [artifact dir]
   (-> (check artifact {:execution/worktree-path dir}) :errors first :locations set))
+
+(deftest ^{:stratum 1} the-capsule-worktree-is-read-through-the-executor-test
+  (let [dir (temp-git-repo {"README.md" "x\n"})]
+    (testing "a clean governed change passes: the executor's worktree is readable"
+      (spit (str dir "/notes.md") "nothing secret\n")
+      (is (:passed? (check {:code/files []} (capsule-ctx dir)))))
+    (testing "a credential only on the capsule's disk is found there"
+      (spit (str dir "/deploy.env") "DB_PASSWORD=opaqueVALUE123\n")
+      (is (= [{:file "deploy.env" :line 1}]
+             (-> (check {:code/files []} (capsule-ctx dir)) :errors first :locations))))))
+
+(deftest ^{:stratum 1} an-uninspectable-worktree-fails-the-gate-test
+  (testing "a supplied worktree git cannot read is a failure, not an artifact-only pass"
+    (let [dir (str (Files/createTempDirectory "no-secrets-not-git" (make-array FileAttribute 0)))]
+      (is (= :worktree-uninspectable
+             (-> (check {:code/files [{:path "a.py" :content "x = 1\n"}]}
+                        {:execution/worktree-path dir})
+                 :errors first :type)))))
+  (testing "with no worktree supplied, the artifact alone is checked"
+    (is (:passed? (check {:code/files [{:path "a.py" :content "x = 1\n"}]} {})))))
 
 ;------------------------------------------------------------------------------ Layer 2
 

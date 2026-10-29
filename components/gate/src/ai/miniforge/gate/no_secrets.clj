@@ -20,8 +20,8 @@
 
    What a change added comes from git, not from comparing line sets.
    Every path git reports changed against the task's base commit, every
-   untracked path, and every path the artifact names is diffed
-   (`git diff --no-index -U0`) against its content at that base -- the
+   untracked path (new in full), and every path the artifact names is
+   diffed (`git diff -U0`) against its content at that base -- the
    on-disk version and the artifact's version both, so a stale artifact
    cannot hide what is on disk -- and only added lines are scanned, so
    an added copy of an existing line still counts.
@@ -30,8 +30,10 @@
    the implement phase: the refs its artifact collector diffs against),
    the environment's base SHA, or HEAD that git resolves. Task work
    already committed, or restored on resume, is therefore still judged.
-   With no worktree or no git, every line the artifact carries is
-   scanned.
+   Git runs where the worktree is: in the execution environment when the
+   context carries :execution/execute-fn (governed runs), else on the
+   host. With no worktree, every line the artifact carries is scanned; a
+   supplied worktree that cannot be inspected fails the gate.
 
    Detection is redaction/pattern-secret-string?: the shared secret
    patterns, without the payment-card checksum that ordinary numbers in
@@ -46,15 +48,22 @@
 
 ;------------------------------------------------------------------------------ Layer 0
 
-(defn- ^{:stratum 0} git
-  "Run git ARGS, in DIR when given, with paths never quoted. Returns
-   {:exit :out}, :out decoded as OUT-ENC (\"UTF-8\" or :bytes), or nil
-   when git cannot be run."
-  [dir out-enc & args]
-  (try+
-    (apply shell/sh (concat ["git"] (when dir ["-C" (str dir)])
-                            ["-c" "core.quotePath=false"] args [:out-enc out-enc]))
-    (catch Exception _ nil)))
+(defn- ^{:stratum 0} run
+  "Run ARGV where CTX's worktree is and return {:exit :out}, or nil when
+   it cannot be run. Inside the execution environment when CTX carries
+   :execution/execute-fn, in :execution/worktree-path there; otherwise on
+   the host, in that directory when present."
+  [ctx argv]
+  (let [dir (get ctx :execution/worktree-path)]
+    (try+
+      (if-let [exec! (get ctx :execution/execute-fn)]
+        (let [quote #(str "'" (str/replace (str %) "'" "'\"'\"'") "'")
+              r (exec! (get ctx :execution/executor) (get ctx :execution/environment-id)
+                       (str/join " " (map quote argv)) {:workdir dir})]
+          {:exit (get-in r [:data :exit-code] (if (:ok? r) 0 1))
+           :out  (str (get-in r [:data :stdout] ""))})
+        (apply shell/sh (concat argv (when dir [:dir (str dir)]))))
+      (catch Exception _ nil))))
 
 (defn- ^{:stratum 0} nul-split
   "NUL-terminated git output as paths, untrimmed: a name may start or end
@@ -80,6 +89,11 @@
   []
   (fs/file (fs/create-temp-dir {:prefix "mf-no-secrets-"
                                 :posix-file-permissions "rwx------"})))
+
+(defn- ^{:stratum 0} all-lines
+  "Every line of TEXT, numbered from 1."
+  [text]
+  (map-indexed (fn [i line] [(inc i) line]) (str/split-lines (str text))))
 
 (defn- ^{:stratum 0} findings
   "{:file :line} for each numbered line that carries a secret-shaped value."
@@ -112,45 +126,52 @@
 (defn- ^{:stratum 1} resolve-base
   "The commit the first resolvable candidate names, or nil. A range
    `A...B` (a resumed workspace) resolves to the merge base of A and B."
-  [dir candidates]
+  [ctx candidates]
   (some (fn [ref]
           (let [[a b] (str/split ref #"\.\.\." 2)
-                r (if b
-                    (git dir "UTF-8" "merge-base" a b)
-                    (git dir "UTF-8" "rev-parse" "--verify" "--quiet" (str ref "^{commit}")))]
+                r (run ctx (if b
+                             ["git" "merge-base" a b]
+                             ["git" "rev-parse" "--verify" "--quiet" (str ref "^{commit}")]))]
             (when (zero? (get r :exit 1))
               (not-empty (str/trim (:out r))))))
         (filter #(and (string? %) (not (str/blank? %))) candidates)))
 
 (defn- ^{:stratum 1} changed-paths
-  "Paths changed against BASE (committed, staged or not) and untracked
-   paths, or nil when git cannot list them."
-  [dir base]
-  (let [diff      (git dir "UTF-8" "diff" "-z" "--name-only" "--no-renames" base "--")
-        untracked (git dir "UTF-8" "ls-files" "-z" "--others" "--exclude-standard")]
+  "{:tracked [...] :untracked [...]} against BASE, or nil when git cannot
+   list them."
+  [ctx base]
+  (let [diff      (run ctx ["git" "-c" "core.quotePath=false" "diff" "-z" "--name-only"
+                            "--no-renames" base "--"])
+        untracked (run ctx ["git" "-c" "core.quotePath=false" "ls-files" "-z" "--others"
+                            "--exclude-standard"])]
     (when (and (zero? (get diff :exit 1)) (zero? (get untracked :exit 1)))
-      (into (nul-split (:out diff)) (nul-split (:out untracked))))))
+      {:tracked (nul-split (:out diff)) :untracked (nul-split (:out untracked))})))
 
-(defn- ^{:stratum 1} base-file
-  "A file holding PATH's content at BASE (written under TMP as NAME), or
-   /dev/null when PATH did not exist there."
-  [dir base path tmp name]
-  (let [r (when path (git dir :bytes "show" (str base ":" path)))]
-    (if (zero? (get r :exit 1))
-      (let [f (io/file tmp name)]
-        (with-open [out (io/output-stream f)] (.write out ^bytes (:out r)))
-        f)
-      (io/file "/dev/null"))))
-
-(defn- ^{:stratum 1} added-against
-  "Numbered lines NEW adds over OLD (files), or nil when git cannot diff."
-  [old new]
+(defn- ^{:stratum 1} disk-added
+  "Numbered lines the worktree's PATH adds over BASE (all of an untracked
+   file), or nil when they cannot be read."
+  [ctx base path untracked?]
   ;; --text: a version holding a NUL byte would otherwise come back as a
   ;; hunk-less "Binary files differ" and its added lines would go unseen.
-  (let [r (git nil "UTF-8" "diff" "--no-index" "--text" "--no-color" "--no-ext-diff" "-U0" "--"
-               (str old) (str new))]
-    (when (#{0 1} (:exit r))
-      (added-lines (:out r)))))
+  (let [r (run ctx (if untracked?
+                     ["cat" "--" path]
+                     ["git" "diff" "--text" "-U0" "--no-color" "--no-ext-diff" "--no-renames"
+                      base "--" path]))]
+    (when (zero? (get r :exit 1))
+      (if untracked? (all-lines (:out r)) (added-lines (:out r))))))
+
+(defn- ^{:stratum 1} artifact-added
+  "Numbered lines TEXT adds over PATH's content at BASE, diffed on the
+   host in the owner-only TMP; every line when git cannot diff."
+  [ctx base path text tmp name]
+  (let [shown (when path (run ctx ["git" "show" (str base ":" path)]))
+        old   (if (zero? (get shown :exit 1))
+                (doto (io/file tmp (str name "-base")) (spit (:out shown)))
+                (io/file "/dev/null"))
+        new   (doto (io/file tmp name) (spit text))
+        r     (run {} ["git" "diff" "--no-index" "--text" "-U0" "--no-color" "--no-ext-diff"
+                       "--" (str old) (str new)])]
+    (if (#{0 1} (:exit r)) (added-lines (:out r)) (all-lines text))))
 
 ;------------------------------------------------------------------------------ Layer 2
 
@@ -160,41 +181,40 @@
    quoting the secret would copy it into both."
   [artifact ctx]
   (let [dir      (get ctx :execution/worktree-path)
-        base     (when dir (resolve-base dir (base-candidates artifact ctx)))
         versions (artifact-versions artifact)
-        on-disk  (when base (changed-paths dir base))
-        locations
-        (if-not on-disk
-          (into [] (mapcat (fn [[path texts]]
-                             (mapcat #(findings path (map-indexed (fn [i l] [(inc i) l])
-                                                                  (str/split-lines %)))
-                                     texts)))
-                versions)
+        base     (when dir (resolve-base ctx (base-candidates artifact ctx)))
+        listed   (when base (changed-paths ctx base))
+        scanned
+        (cond
+          (nil? dir)
+          (vec (distinct (for [[path texts] versions, text texts, f (findings path (all-lines text))] f)))
+
+          (nil? listed) nil
+
+          :else
           (let [tmp (scratch-dir)]
             (try
-              (into []
-                    (comp (map-indexed
-                           (fn [i path]
-                             (let [old  (base-file dir base path tmp (str i "-base"))
-                                   disk (when path (io/file dir path))
-                                   news (concat (when (and disk (.isFile disk)) [disk])
-                                                (map-indexed (fn [j text]
-                                                               (doto (io/file tmp (str i "-" j))
-                                                                 (spit text)))
-                                                             (get versions path)))]
-                               ;; A diff git could not produce scans the whole
-                               ;; version: fail closed, never open.
-                               (mapcat #(findings path (or (added-against old %)
-                                                           (map-indexed (fn [n l] [(inc n) l])
-                                                                        (str/split-lines (slurp %)))))
-                                       news))))
-                          cat
-                          (distinct))
-                    (distinct (concat on-disk (keys versions))))
+              (let [disk (concat (for [p (:tracked listed)] [p (disk-added ctx base p false)])
+                                 (for [p (:untracked listed)] [p (disk-added ctx base p true)]))
+                    arts (for [[i [path texts]] (map-indexed vector versions)
+                               [j text] (map-indexed vector texts)]
+                           [path (artifact-added ctx base path text tmp (str i "-" j))])]
+                ;; A changed file whose lines could not be read leaves the
+                ;; change unchecked: that is a failure, not a pass.
+                (when (every? (comp some? second) disk)
+                  (vec (distinct (mapcat (fn [[p ls]] (findings p ls)) (concat disk arts))))))
               (finally
                 (fs/delete-tree tmp)))))]
-    (if (empty? locations)
+    (cond
+      (nil? scanned)
+      {:passed? false
+       :errors [{:type    :worktree-uninspectable
+                 :message (msg/t :no-secrets/uninspectable {:path (str dir)})}]}
+
+      (empty? scanned)
       {:passed? true}
+
+      :else
       {:passed? false
        :errors [{:type      :secrets-detected
                  :message   (msg/t :no-secrets/detected
@@ -202,8 +222,8 @@
                                                          (map (fn [{:keys [file line]}]
                                                                 (str (or file (msg/t :no-secrets/artifact-content))
                                                                      ":" line))
-                                                              locations))})
-                 :locations locations}]})))
+                                                              scanned))})
+                 :locations scanned}]})))
 
 ;------------------------------------------------------------------------------ Rich Comment
 (comment

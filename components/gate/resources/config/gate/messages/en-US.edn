@@ -11,6 +11,10 @@
   :no-secrets/detected
   "Secret-shaped values at {locations}. Remove them and read the credential from the environment or a secret store."
 
+  ;; No-secrets gate — a supplied worktree could not be read
+  :no-secrets/uninspectable
+  "Could not inspect the worktree at {path} (base commit or changed files unreadable); the change is unchecked."
+
   ;; No-secrets gate — location label for the artifact's own content
   :no-secrets/artifact-content
   "artifact content"
