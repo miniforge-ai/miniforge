@@ -136,6 +136,12 @@
    Disables DAG execution to prevent recursion and skips lifecycle events
    (parent workflow owns those).
 
+   Carries the parent run's `:control-state` (installed on context by
+   `execute-dag-loop`), so a pause or cancel aimed at the parent reaches
+   the sub-workflow's runner at its next phase boundary. Without it the
+   runner session creates a fresh control atom nothing can reach, and
+   the task runs through release and opens its PR after a cancel.
+
    When `task-def` is supplied, resolves its dependency to a persisted
    branch and passes it as `:branch` so the sub-workflow's
    `acquire-environment!` forks off that branch instead of the spec
@@ -213,6 +219,7 @@
        (:event-stream context)     (assoc :event-stream (:event-stream context))
        (get-in context [:execution/opts :event-stream])
        (assoc :event-stream (get-in context [:execution/opts :event-stream]))
+       (:control-state context) (assoc :control-state (:control-state context))
        resolved-branch (assoc :branch resolved-branch)
        pr-base-branch  (assoc :release/base-branch pr-base-branch)
        merge-anomaly  (assoc :dag/merge-anomaly merge-anomaly)))))

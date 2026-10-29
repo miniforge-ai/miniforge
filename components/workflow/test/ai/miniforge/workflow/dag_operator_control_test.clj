@@ -28,7 +28,9 @@
    [ai.miniforge.dag-executor.interface :as dag]
    [ai.miniforge.event-stream.interface :as es]
    [ai.miniforge.logging.interface :as log]
+   [ai.miniforge.workflow.context :as context]
    [ai.miniforge.workflow.dag-orchestrator :as dag-orch]
+   [ai.miniforge.workflow.execution-dag :as execution-dag]
    [ai.miniforge.workflow.messages :as messages]
    [ai.miniforge.workflow.runner-defaults :as runner-defaults]
    [clojure.test :refer [deftest is testing]]))
@@ -89,6 +91,15 @@
 (defn- ^{:stratum 0} logged?
   [entries event]
   (boolean (some #(= event (:log/event %)) @entries)))
+
+(defn- ^{:stratum 0} completed-sub-workflow
+  "A run-pipeline result in the shape the workflow runner returns for a
+   sub-workflow that finished."
+  []
+  {:execution/status :completed
+   :execution/artifacts [{:status :success}]
+   :execution/metrics {:tokens 0 :cost-usd 0.0 :duration-ms 0}
+   :execution/phase-results {}})
 
 ;------------------------------------------------------------------------------ Layer 1
 
@@ -227,6 +238,49 @@
           (is (true? (:cancelled? result)))
           (is (= [root-id] @launched))
           (is (= 2 (:tasks-unreached result))))))))
+
+(deftest ^{:stratum 2} sub-workflow-shares-the-parent-control-state-test
+  (doseq [[shape ->context]
+          {"mf run plan.edn: control state on the context"
+           (fn [control] {:control-state control})
+           "workflow runner: control state in :execution/opts"
+           (fn [control] {:execution/opts {:control-state control :branch "main"}})}]
+    (testing shape
+      (let [control (es/create-control-state)
+            sub-opts (atom [])
+            [logger _] (log/collecting-logger)
+            run-pipeline (fn [_workflow _input opts]
+                           (swap! sub-opts conj opts)
+                           (completed-sub-workflow))
+            ctx (merge {:logger logger
+                        :llm-backend ::backend
+                        :execution/run-pipeline-fn run-pipeline
+                        :execution/workflow {:workflow/pipeline [{:phase :implement}
+                                                                 {:phase :release}]}}
+                       (->context control))
+            result (dag-orch/execute-plan-as-dag fan-out-plan ctx)]
+        (is (true? (:success? result)))
+        (is (= 3 (count @sub-opts)))
+        (is (every? #(identical? control (:control-state %)) @sub-opts)
+            "each sub-workflow runs on the parent's atom, not a fresh one")))))
+
+(deftest ^{:stratum 2} parent-records-a-dag-cancel-as-a-dashboard-stop-test
+  (let [control (es/create-control-state)
+        [logger _] (log/collecting-logger)
+        _ (es/cancel! control)
+        dag-result (dag-orch/execute-plan-as-dag fan-out-plan {:logger logger :control-state control})
+        workflow {:workflow/id :dag-cancel :workflow/version "1.0.0"
+                  :workflow/pipeline [{:phase :plan} {:phase :implement}]}
+        failed (execution-dag/apply-dag-failure (context/create-context workflow {} {})
+                                                dag-result
+                                                context/transition-to-failed)]
+    (is (= :failed (:execution/status failed)))
+    (is (= dag-result (:execution/dag-result failed)))
+    (is (= {:type :dashboard-stop
+            :message (messages/t :status/stopped-control)
+            :data {:reason :dashboard-stop}}
+           (last (:execution/errors failed)))
+        "the entry the runner writes for a stop seen at a phase boundary")))
 
 ;------------------------------------------------------------------------------ Rich Comment
 (comment
