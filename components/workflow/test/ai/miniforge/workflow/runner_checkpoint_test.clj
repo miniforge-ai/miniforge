@@ -51,4 +51,19 @@
                       @entries))))
         (finally (es/close-current-event-stream! stream))))))
 
+(deftest ^{:stratum 1} failed-write-without-an-event-stream-still-continues
+  (fs/with-temp-dir [dir {:prefix "runner-checkpoint-"}]
+    (let [[logger entries] (log/collecting-logger {:min-level :debug})
+          ctx (fixture/plan-completed-context (fixture/unwritable-checkpoint-root dir)
+                                              {:logger logger})
+          result (with-redefs [monitoring/check-workflow-supervision halted]
+                   (runner/execute-single-iteration
+                    [] ctx {} 1 (atom {:paused false :stopped false})))]
+      (testing "no stream to publish on: the iteration still returns its context"
+        (is (= (:execution/id ctx) (:execution/id result))))
+      (testing "the operator is still warned"
+        (is (some #(and (= :warn (:log/level %))
+                        (= :workflow/checkpoint-write-failed (:log/event %)))
+                  @entries))))))
+
 (comment ::runner-checkpoint)

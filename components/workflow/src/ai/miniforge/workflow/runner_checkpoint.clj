@@ -38,8 +38,10 @@
 (defn- ^{:stratum 1} report-write-failure!
   "Warn on the run's logger and publish `:workflow/checkpoint-write-failed`.
    The event names a phase, so a failure with none (a context checkpointed
-   before any phase ran) is logged only. A refused publication is logged
-   too; it never fails the run."
+   before any phase ran) is logged only. So is one with no stateful event
+   stream: the constructor dereferences the stream, which throws on nil
+   and on a WebSocket transport map. A refused publication is logged too;
+   it never fails the run."
   [context write-failure]
   (let [logger (:execution/logger context)
         stream (get-in context [:execution/opts :event-stream])
@@ -50,7 +52,7 @@
                                     {:phase (some-> phase name)
                                      :error (:error/message fields)})
                :data (:anomaly/data write-failure)})
-    (when (keyword? phase)
+    (when (and (keyword? phase) (dispatch/stateful-stream? stream))
       (let [receipt (dispatch/publish-event!
                      stream
                      (es/checkpoint-write-failed stream (:execution/id context) phase fields))]
