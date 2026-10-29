@@ -40,10 +40,11 @@ Foundation plus CLI adapters, based on main. The follow-up PR for the TUI
    load `config.interface` on a minimal classpath, need no anomaly,
    file-durability or slingshot.
 4. CLI: `config set` and `config backend` use `update-config!`; on an anomaly
-   they print it to stderr and exit 1. `init`, `edit` and `reset` use
+   they print it to stderr and exit 1. `init` and `edit` create the file under
+   the lock, keeping one another writer created first; `reset` uses
    `write-config!`. `fleet add` and `fleet remove` update only
-   `[:fleet :repos]` under the same lock and no longer copy the defaults into
-   the file.
+   `[:fleet :repos]` under the same lock, report errors on stderr, and no
+   longer copy the defaults into the file.
 5. `config.user/read-edn-file` prints a warning naming the file and the parse
    error to stderr instead of returning nil silently. Reads still fall back to
    the defaults.
@@ -62,10 +63,22 @@ They run on the JVM and under babashka.
 ## Scope and deployment
 
 Normal CLI deployment; no config format change. A `config.edn.lock` file now
-appears beside `config.edn`.
+appears beside `config.edn`. A config.edn created by the new writer is 0600
+(the temp file's mode); an existing file keeps its mode but not its owner, so a
+`sudo` write leaves a root-owned file.
+
+If fsyncing the parent directories fails after the rename, the writer returns a
+distinct anomaly saying the file was replaced but may not survive a crash.
+Windows skips that directory fsync, since Java cannot open a directory there.
+
+The 500 ms lock bound covers other processes. Threads in one JVM queue on a
+monitor with no timeout. A dangling symlink at the config path is replaced by a
+regular file.
 
 A process still running the old code locks `config.edn` itself, so during an
-upgrade old and new writers do not exclude each other. Comments in a config
+upgrade old and new writers do not exclude each other. For the same reason, the
+pr-sync PR (TUI writers) should merge before the dashboard PR; until it does,
+the TUI still locks `config.edn` itself. Comments in a config
 file are still lost on any rewrite (unchanged).
 
 ## Related work

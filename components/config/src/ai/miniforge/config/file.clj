@@ -91,8 +91,14 @@
         (if (anomaly/anomaly? written)
           (failed written)
           (do (fs/move tmp target {:atomic-move true :replace-existing true})
-              (let [confirmed (durability/confirm! (fs/file target))]
-                (when (anomaly/anomaly? confirmed) (failed confirmed))))))
+              ;; The new content is in place now; a failed fsync of the parent
+              ;; directories means it may not survive a crash, not that the write
+              ;; failed. Windows cannot open a directory to fsync it.
+              (when-not (fs/windows?)
+                (let [confirmed (durability/confirm! (fs/file target))]
+                  (when (anomaly/anomaly? confirmed)
+                    (anomaly/anomaly :fault (t :config-file/not-synced {:path path :error (:anomaly/message confirmed)})
+                                     {:config/path (str path) :config/cause confirmed})))))))
       (finally
         (fs/delete-if-exists tmp)))))
 

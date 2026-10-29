@@ -46,7 +46,8 @@
   [path f]
   (let [result (config-file/update-config! path #(update-in % [:fleet :repos] (fnil f [])))]
     (when (anomaly/anomaly? result)
-      (display/print-error (:anomaly/message result))
+      (binding [*out* *err*]
+        (display/print-error (:anomaly/message result)))
       (shared/exit! 1))
     result))
 

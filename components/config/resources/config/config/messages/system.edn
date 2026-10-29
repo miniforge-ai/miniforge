@@ -35,6 +35,9 @@
   :config-file/write-failed
   "Could not write config file {path}: {error}"
 
+  :config-file/not-synced
+  "Config file {path} was replaced, but flushing it to disk failed ({error}); the change may not survive a crash."
+
   ;; Printed to stderr by config.user when a config file it reads does not
   ;; parse, instead of silently running on defaults.
   :config-file/ignored

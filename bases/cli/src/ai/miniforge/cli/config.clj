@@ -227,7 +227,7 @@
       (do
         (print-info (messages/t :config/init-exists {:path config-path}))
         (println (messages/t :config/init-modify-hint {:command (app-config/command-string "config set <key> <value>")})))
-      (let [result (write-config-file config-path default-config)]
+      (let [result (config-file/update-config! config-path #(or % default-config))]
         (when (anomaly/anomaly? result)
           (exit-with-anomaly! result))
         (println)
@@ -244,7 +244,7 @@
         editor (or (System/getenv "EDITOR") "vim")]
     ;; Create config if it doesn't exist
     (when-not (fs/exists? config-path)
-      (let [result (write-config-file config-path default-config)]
+      (let [result (config-file/update-config! config-path #(or % default-config))]
         (when (anomaly/anomaly? result)
           (exit-with-anomaly! result))))
 

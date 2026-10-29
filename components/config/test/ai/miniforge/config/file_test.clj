@@ -83,12 +83,12 @@
 (deftest ^{:stratum 1} write-keeps-mode-and-symlink-test
   (let [real (temp-config-path "{:llm {}}")
         link (str (fs/path (fs/create-temp-dir) "config.edn"))]
-    (fs/set-posix-file-permissions real "rw-------")
+    (fs/set-posix-file-permissions real "rw-r-----")
     (fs/create-sym-link link real)
     (config-file/update-config! link #(assoc % :a 1))
     (is (fs/sym-link? link))
     (is (= {:llm {} :a 1} (edn/read-string (slurp real))))
-    (is (= "rw-------" (fs/posix->str (fs/posix-file-permissions real))))))
+    (is (= "rw-r-----" (fs/posix->str (fs/posix-file-permissions real))))))
 
 (deftest ^{:stratum 1} concurrent-writers-share-the-lock-test
   (let [path    (temp-config-path "{}")

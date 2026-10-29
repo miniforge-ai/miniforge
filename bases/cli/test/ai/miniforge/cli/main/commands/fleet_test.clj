@@ -125,12 +125,15 @@
                    #(sut/fleet-remove-cmd {:repo "org/a" :config %} nil default-config)]]
     (let [path    (tmp-path "unparseable.edn")
           garbage "{:fleet {:repos [\"org/a\"]} :llm"
-          exits   (atom [])]
+          exits   (atom [])
+          err     (java.io.StringWriter.)]
       (spit path garbage)
       (with-redefs [shared/exit! (fn [code] (swap! exits conj code) (throw (ex-info "exit" {})))]
-        (is (thrown? clojure.lang.ExceptionInfo (with-out-str (run-cmd path)))))
+        (binding [*err* err]
+          (is (thrown? clojure.lang.ExceptionInfo (with-out-str (run-cmd path))))))
       (is (= garbage (slurp path)))
-      (is (= [1] @exits)))))
+      (is (= [1] @exits))
+      (is (.contains (str err) path) "the error, naming the file, goes to stderr"))))
 
 (deftest ^{:stratum 2} fleet-add-cmd-appends-to-existing-repos-test
   (testing "Appends to existing repos without removing them"
