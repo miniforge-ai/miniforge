@@ -470,6 +470,9 @@
 
 (defn ^{:stratum 1} filter-env-by-trust
   "Return env-map with sensitive entries removed for :untrusted trust level.
+   `build-launch-plan` applies it to the container env, which every process
+   in the capsule inherits; host-side callers that need a secret for one
+   command (release's GH_TOKEN for `gh`) pass it on that exec instead.
 
    For :trusted and :privileged trust levels the map is returned unchanged.
    A var is considered sensitive when its name contains any of:
@@ -493,29 +496,6 @@
 
        (:cpu merged)
        (into ["--cpus" (str (:cpu merged))])))))
-
-(defn ^{:stratum 1} build-launch-plan
-  "Assemble the execution plan for a pending launch from what the launch site
-   actually knows: the resolved image digest, the caller's mounts / env /
-   trust level from env-config, and the capsule's keep-alive command. Optional
-   fields (:time-limit-ms :memory-limit-mb :network-profile :secrets-refs)
-   pass through only when env-config carries them — absent fields stay absent
-   rather than being filled with guesses. The :env keys are normalized to
-   strings so the plan conforms to ExecutionPlanSchema.
-
-   This one plan is both what `check-plan-security` inspects and what
-   `create-container` receives as :execution-plan, so the plan the gate
-   checked is the plan that runs."
-  [image-digest env-config]
-  (cond-> {:image-digest image-digest
-           :command      ["sleep" "infinity"]
-           :mounts       (get env-config :mounts [])
-           :env          (normalize-plan-env (get env-config :env {}))
-           :trust-level  (get env-config :trust-level :untrusted)}
-    (:time-limit-ms env-config)   (assoc :time-limit-ms (:time-limit-ms env-config))
-    (:memory-limit-mb env-config) (assoc :memory-limit-mb (:memory-limit-mb env-config))
-    (:network-profile env-config) (assoc :network-profile (:network-profile env-config))
-    (:secrets-refs env-config)    (assoc :secrets-refs (:secrets-refs env-config))))
 
 ;------------------------------------------------------------------------------ Layer 2
 
@@ -644,33 +624,32 @@
   (let [result (run-runtime-timed default-release-timeout-ms descriptor "rm" "-f" container-id)]
     (result/ok {:released? (zero? (:exit result))})))
 
-(defn ^{:stratum 2} security-gate-check
-  "Run the capsule-isolation security gate for a pending launch. Resolves the
-   image's content-addressed digest via `digest-fn` (injected for testing),
-   builds the launch plan the gate inspects via `build-launch-plan`, and
-   applies `plan-security/check-plan-security`. The host-path allowlist is the
-   sandbox workdir (the only host path a well-formed plan mounts today).
+(defn ^{:stratum 2} build-launch-plan
+  "Assemble the execution plan for a pending launch from what the launch site
+   actually knows: the resolved image digest, the caller's mounts / env /
+   trust level from env-config, and the capsule's keep-alive command. Optional
+   fields (:time-limit-ms :memory-limit-mb :network-profile :secrets-refs)
+   pass through only when env-config carries them — absent fields stay absent
+   rather than being filled with guesses. The :env keys are normalized to
+   strings so the plan conforms to ExecutionPlanSchema, and secrets are
+   dropped for an :untrusted plan (`filter-env-by-trust`).
 
-   Returns `result/ok` carrying the gate decision when the launch may proceed
-   (a passing gate may still carry non-blocking :security/warnings — e.g. a
-   non-rootless runtime in OSS), or `result/err :security-policy-violation`
-   with the findings on a hard-stop. A nil digest fails closed (hard-stop),
-   since a plan with no pinned digest cannot satisfy require-image-digest-pin.
-
-   A passing result also carries the checked `:launch-plan`;
-   `acquire-environment!` creates the container FROM that plan — its digest as
-   the immutable image reference, the plan itself as create-container's
-   :execution-plan."
-  [descriptor image env-config digest-fn]
-  (let [plan            (build-launch-plan (digest-fn descriptor image) env-config)
-        security-config {:host-path-allowlist #{(get env-config :workdir default-workdir)}
-                         :rootless-action     plan-security/default-rootless-action}
-        decision        (plan-security/check-plan-security plan descriptor security-config)]
-    (if (response/anomaly-map? decision)
-      (result/err :security-policy-violation
-                  (:anomaly/message decision)
-                  {:security/findings (:security/findings decision)})
-      (result/ok (assoc (:output decision) :launch-plan plan)))))
+   This one plan is both what `check-plan-security` inspects and what
+   `create-container` receives as :execution-plan, so the plan the gate
+   checked is the plan that runs."
+  [image-digest env-config]
+  (let [trust-level (get env-config :trust-level :untrusted)]
+    (cond-> {:image-digest image-digest
+             :command      ["sleep" "infinity"]
+             :mounts       (get env-config :mounts [])
+             :env          (filter-env-by-trust
+                            (normalize-plan-env (get env-config :env {}))
+                            trust-level)
+             :trust-level  trust-level}
+      (:time-limit-ms env-config)   (assoc :time-limit-ms (:time-limit-ms env-config))
+      (:memory-limit-mb env-config) (assoc :memory-limit-mb (:memory-limit-mb env-config))
+      (:network-profile env-config) (assoc :network-profile (:network-profile env-config))
+      (:secrets-refs env-config)    (assoc :secrets-refs (:secrets-refs env-config)))))
 
 ;------------------------------------------------------------------------------ Layer 3
 
@@ -849,6 +828,34 @@
                        :stderr stderr
                        :exit (get-in r [:data :exit-code])}))
         r))))
+
+(defn ^{:stratum 3} security-gate-check
+  "Run the capsule-isolation security gate for a pending launch. Resolves the
+   image's content-addressed digest via `digest-fn` (injected for testing),
+   builds the launch plan the gate inspects via `build-launch-plan`, and
+   applies `plan-security/check-plan-security`. The host-path allowlist is the
+   sandbox workdir (the only host path a well-formed plan mounts today).
+
+   Returns `result/ok` carrying the gate decision when the launch may proceed
+   (a passing gate may still carry non-blocking :security/warnings — e.g. a
+   non-rootless runtime in OSS), or `result/err :security-policy-violation`
+   with the findings on a hard-stop. A nil digest fails closed (hard-stop),
+   since a plan with no pinned digest cannot satisfy require-image-digest-pin.
+
+   A passing result also carries the checked `:launch-plan`;
+   `acquire-environment!` creates the container FROM that plan — its digest as
+   the immutable image reference, the plan itself as create-container's
+   :execution-plan."
+  [descriptor image env-config digest-fn]
+  (let [plan            (build-launch-plan (digest-fn descriptor image) env-config)
+        security-config {:host-path-allowlist #{(get env-config :workdir default-workdir)}
+                         :rootless-action     plan-security/default-rootless-action}
+        decision        (plan-security/check-plan-security plan descriptor security-config)]
+    (if (response/anomaly-map? decision)
+      (result/err :security-policy-violation
+                  (:anomaly/message decision)
+                  {:security/findings (:security/findings decision)})
+      (result/ok (assoc (:output decision) :launch-plan plan)))))
 
 ;------------------------------------------------------------------------------ Layer 4
 

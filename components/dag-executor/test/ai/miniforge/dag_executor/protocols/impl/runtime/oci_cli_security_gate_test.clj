@@ -95,6 +95,17 @@
       (is (= {:valid? true} (execution-plan/validate-plan plan))
           "a fully-threaded launch plan conforms to ExecutionPlanSchema"))))
 
+(deftest ^{:stratum 1} build-launch-plan-drops-secrets-for-untrusted-test
+  (testing "an :untrusted plan (the default) launches without secret-named
+            env, so no process in the capsule inherits them; :trusted keeps
+            them"
+    (let [env {:GH_TOKEN "t" :ANTHROPIC_API_KEY "k" :LANG "C.UTF-8"}]
+      (is (= {"LANG" "C.UTF-8"}
+             (:env (oci-cli/build-launch-plan valid-digest {:env env}))))
+      (is (= {"GH_TOKEN" "t" "ANTHROPIC_API_KEY" "k" "LANG" "C.UTF-8"}
+             (:env (oci-cli/build-launch-plan valid-digest
+                                              {:env env :trust-level :trusted})))))))
+
 (deftest ^{:stratum 1} acquire-launches-from-checked-plan-test
   (testing "acquire-environment! creates the container from the gate-checked
             plan: its digest as the image reference, the plan as the
