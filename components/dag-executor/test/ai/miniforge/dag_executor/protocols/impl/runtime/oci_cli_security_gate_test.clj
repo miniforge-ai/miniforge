@@ -15,7 +15,6 @@
 ;; WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 ;; See the License for the specific language governing permissions and
 ;; limitations under the License.
-
 (ns ai.miniforge.dag-executor.protocols.impl.runtime.oci-cli-security-gate-test
   "Capsule security gate: unit tests for `security-gate-check`, the gate step
    `acquire-environment!` runs on the resolved plan before launch. The digest
@@ -28,77 +27,36 @@
    [ai.miniforge.dag-executor.result :as result]
    [clojure.test :refer [deftest is testing]]))
 
-(def ^:private valid-digest (str "sha256:" (apply str (repeat 64 \a))))
-(def ^:private good-digest-fn (fn [_descriptor _image] valid-digest))
-(def ^:private rootless-descriptor {:runtime/capabilities #{:rootless}})
-(def ^:private rooted-descriptor {:runtime/capabilities #{}})
-(def ^:private base-env {:workdir "/workspace" :mounts []})
+;------------------------------------------------------------------------------ Layer 0
 
-(defn- err-rules [r] (set (map :security/rule (get-in r [:error :data :security/findings]))))
+(def ^{:stratum 0} ^:private valid-digest (str "sha256:" (apply str (repeat 64 \a))))
 
-(deftest clean-launch-passes-test
-  (testing "pinned digest, rootless runtime, no mounts -> ok, decision :pass"
-    (let [r (oci-cli/security-gate-check rootless-descriptor "img" base-env good-digest-fn)]
-      (is (result/ok? r))
-      (is (= :pass (get-in r [:data :security/decision])))
-      (is (empty? (get-in r [:data :security/warnings]))))))
+(def ^{:stratum 0} ^:private rootless-descriptor {:runtime/capabilities #{:rootless}})
 
-(deftest nil-digest-fails-closed-test
+(def ^{:stratum 0} ^:private rooted-descriptor {:runtime/capabilities #{}})
+
+(def ^{:stratum 0} ^:private base-env {:workdir "/workspace" :mounts []})
+
+(defn- ^{:stratum 0} err-rules [r] (set (map :security/rule (get-in r [:error :data :security/findings]))))
+
+;------------------------------------------------------------------------------ Layer 1
+
+(def ^{:stratum 1} ^:private good-digest-fn (fn [_descriptor _image] valid-digest))
+
+(deftest ^{:stratum 1} nil-digest-fails-closed-test
   (testing "a nil resolved digest (resolution failed) is a hard-stop, not a silent pass"
     (let [r (oci-cli/security-gate-check rootless-descriptor "img" base-env (fn [_ _] nil))]
       (is (result/err? r))
       (is (= :security-policy-violation (get-in r [:error :code])))
       (is (contains? (err-rules r) :std/runtime-require-image-digest-pin)))))
 
-(deftest unpinned-digest-hard-stops-test
+(deftest ^{:stratum 1} unpinned-digest-hard-stops-test
   (testing "a tag / non-sha256 digest is a hard-stop"
     (let [r (oci-cli/security-gate-check rootless-descriptor "img" base-env (fn [_ _] "latest"))]
       (is (result/err? r))
       (is (contains? (err-rules r) :std/runtime-require-image-digest-pin)))))
 
-(deftest socket-mount-hard-stops-test
-  (testing "a host runtime-socket mount aborts the launch"
-    (let [env (assoc base-env :mounts
-                     [{:host-path "/var/run/docker.sock" :container-path "/x" :read-only? false}])
-          r   (oci-cli/security-gate-check rootless-descriptor "img" env good-digest-fn)]
-      (is (result/err? r))
-      (is (contains? (err-rules r) :std/runtime-no-host-docker-socket)))))
-
-(deftest non-rootless-warns-does-not-block-test
-  (testing "OSS default: a non-rootless runtime warns but the launch proceeds"
-    (let [r (oci-cli/security-gate-check rooted-descriptor "img" base-env good-digest-fn)]
-      (is (result/ok? r) "rootless is a warning in OSS, not a block")
-      (is (= #{:std/runtime-require-rootless}
-             (set (map :security/rule (get-in r [:data :security/warnings]))))))))
-
-(deftest non-allowlisted-mount-reviews-not-blocks-test
-  (testing "a host mount outside the workdir allowlist is a review, launch proceeds"
-    (let [env (assoc base-env :mounts
-                     [{:host-path "/Users/alice" :container-path "/home" :read-only? false}])
-          r   (oci-cli/security-gate-check rootless-descriptor "img" env good-digest-fn)]
-      (is (result/ok? r))
-      (is (= :review (get-in r [:data :security/decision])))
-      (is (= #{:std/runtime-restrict-host-mounts}
-             (set (map :security/rule (get-in r [:data :security/review]))))))))
-
-(deftest workdir-mount-is-allowlisted-test
-  (testing "a mount of the sandbox workdir itself is on the allowlist -> no review"
-    (let [env (assoc base-env :mounts
-                     [{:host-path "/workspace" :container-path "/work" :read-only? false}])
-          r   (oci-cli/security-gate-check rootless-descriptor "img" env good-digest-fn)]
-      (is (result/ok? r))
-      (is (= :pass (get-in r [:data :security/decision]))))))
-
-(deftest gate-ok-carries-launch-plan-test
-  (testing "a passing gate returns the checked launch plan for the launch to use"
-    (let [r    (oci-cli/security-gate-check rootless-descriptor "img" base-env good-digest-fn)
-          plan (get-in r [:data :launch-plan])]
-      (is (result/ok? r))
-      (is (= valid-digest (:image-digest plan)))
-      (is (= :untrusted (:trust-level plan)))
-      (is (= ["sleep" "infinity"] (:command plan))))))
-
-(deftest build-launch-plan-defaults-test
+(deftest ^{:stratum 1} build-launch-plan-defaults-test
   (testing "a minimal env-config yields the untrusted keep-alive plan with no
             invented optional fields"
     (let [plan (oci-cli/build-launch-plan valid-digest {:workdir "/workspace"})]
@@ -110,7 +68,7 @@
              plan))
       (is (= {:valid? true} (execution-plan/validate-plan plan))))))
 
-(deftest build-launch-plan-passes-optional-fields-through-test
+(deftest ^{:stratum 1} build-launch-plan-passes-optional-fields-through-test
   (testing "optional plan fields thread from env-config when present"
     (let [plan (oci-cli/build-launch-plan
                 valid-digest
@@ -137,7 +95,7 @@
       (is (= {:valid? true} (execution-plan/validate-plan plan))
           "a fully-threaded launch plan conforms to ExecutionPlanSchema"))))
 
-(deftest acquire-launches-from-checked-plan-test
+(deftest ^{:stratum 1} acquire-launches-from-checked-plan-test
   (testing "acquire-environment! creates the container from the gate-checked
             plan: its digest as the image reference, the plan as the
             :execution-plan"
@@ -162,3 +120,54 @@
           (is (= valid-digest (:image @launched)))
           (is (= valid-digest (get-in @launched [:plan :image-digest])))
           (is (= :untrusted (get-in @launched [:plan :trust-level]))))))))
+
+;------------------------------------------------------------------------------ Layer 2
+
+(deftest ^{:stratum 2} clean-launch-passes-test
+  (testing "pinned digest, rootless runtime, no mounts -> ok, decision :pass"
+    (let [r (oci-cli/security-gate-check rootless-descriptor "img" base-env good-digest-fn)]
+      (is (result/ok? r))
+      (is (= :pass (get-in r [:data :security/decision])))
+      (is (empty? (get-in r [:data :security/warnings]))))))
+
+(deftest ^{:stratum 2} socket-mount-hard-stops-test
+  (testing "a host runtime-socket mount aborts the launch"
+    (let [env (assoc base-env :mounts
+                     [{:host-path "/var/run/docker.sock" :container-path "/x" :read-only? false}])
+          r   (oci-cli/security-gate-check rootless-descriptor "img" env good-digest-fn)]
+      (is (result/err? r))
+      (is (contains? (err-rules r) :std/runtime-no-host-docker-socket)))))
+
+(deftest ^{:stratum 2} non-rootless-warns-does-not-block-test
+  (testing "OSS default: a non-rootless runtime warns but the launch proceeds"
+    (let [r (oci-cli/security-gate-check rooted-descriptor "img" base-env good-digest-fn)]
+      (is (result/ok? r) "rootless is a warning in OSS, not a block")
+      (is (= #{:std/runtime-require-rootless}
+             (set (map :security/rule (get-in r [:data :security/warnings]))))))))
+
+(deftest ^{:stratum 2} non-allowlisted-mount-reviews-not-blocks-test
+  (testing "a host mount outside the workdir allowlist is a review, launch proceeds"
+    (let [env (assoc base-env :mounts
+                     [{:host-path "/Users/alice" :container-path "/home" :read-only? false}])
+          r   (oci-cli/security-gate-check rootless-descriptor "img" env good-digest-fn)]
+      (is (result/ok? r))
+      (is (= :review (get-in r [:data :security/decision])))
+      (is (= #{:std/runtime-restrict-host-mounts}
+             (set (map :security/rule (get-in r [:data :security/review]))))))))
+
+(deftest ^{:stratum 2} workdir-mount-is-allowlisted-test
+  (testing "a mount of the sandbox workdir itself is on the allowlist -> no review"
+    (let [env (assoc base-env :mounts
+                     [{:host-path "/workspace" :container-path "/work" :read-only? false}])
+          r   (oci-cli/security-gate-check rootless-descriptor "img" env good-digest-fn)]
+      (is (result/ok? r))
+      (is (= :pass (get-in r [:data :security/decision]))))))
+
+(deftest ^{:stratum 2} gate-ok-carries-launch-plan-test
+  (testing "a passing gate returns the checked launch plan for the launch to use"
+    (let [r    (oci-cli/security-gate-check rootless-descriptor "img" base-env good-digest-fn)
+          plan (get-in r [:data :launch-plan])]
+      (is (result/ok? r))
+      (is (= valid-digest (:image-digest plan)))
+      (is (= :untrusted (:trust-level plan)))
+      (is (= ["sleep" "infinity"] (:command plan))))))
