@@ -84,6 +84,8 @@
         (cond
           (failed-step add-r "") (result/err :persist-add-failed (failed-step add-r "git add failed"))
           (failed-step status-r "") (result/err :persist-status-failed (failed-step status-r "git status failed"))
+          ;; Not knowing whether a held commit is owed is not "nothing to do".
+          (failed-step pending-r "") (result/err :persist-pending-failed (failed-step pending-r "git rev-list failed"))
           (and (not has-changes?) (not pending?))
           (result/ok {:persisted? false :commit-sha nil :no-changes? true :branch branch})
           :else
