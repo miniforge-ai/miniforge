@@ -132,7 +132,9 @@ gate never checks.
    `clojure-exception-handling` and `header-copyright`.
 8. **D8.** No single rule resolution. Delivery concatenates packs without override-by-id, so a duplicate id yields
    two entries. The always-inject branch skips `:rule/enabled?`. Delivery honors `:disabled-pack-ids` and the gate
-   does not. The standards pack id is a string, while the documented config uses keywords.
+   does not. The standards pack id is a string, while the documented config uses keywords. Applicability has two
+   predicates: `filter-applicable-rules`, used by the gate and delivery, ignores `:repo-types`. The registry's
+   `rule-applies?` checks it. No compiled standards rule declares repo types today.
 9. **D9.** The semantic judge skips files. The batched judge drops any changed file of 50,000 bytes or more without
    a call. The gate still reports the rule `:passed`, because it counts glob applicability, not judged files.
    Fixing that report belongs to the gate (open question 8).
@@ -218,7 +220,9 @@ small: 59 rules and about 100 rule-to-rule edges. The ledger is per-repo runtime
 
 Delivery and classification MUST consume one resolved rule set from one `policy-pack` function. That function
 applies the pack set, `:disabled-pack-ids` with one normalized id type, override-by-id (`resolve-rules`) and
-`:rule/enabled?`. This fixes D8 for delivery. Whether the gates adopt the same pack set is for N4 (open question 7).
+`:rule/enabled?`. Applicability MUST use one predicate for every `:rule/applies-to` field, the one the gates use.
+Delivery then never filters on a field the gates ignore, or the reverse. This fixes D8 for delivery. Whether the
+gates adopt the same pack set, or check `:repo-types`, is for N4 (open question 7).
 
 ---
 
@@ -257,8 +261,8 @@ The query runs these steps in order:
 
 1. **Candidates.** Keep resolved rules whose phase and task type match. Keep a file-scoped rule only when a glob
    matches a path. At review and release, paths are the changeset only. At plan and implement, paths are the
-   changeset; when it is empty, the scope paths; when those are empty, the repo paths. Glob matching MUST use the
-   gate's function. At plan and implement, always-on rules bypass phase, task and
+   changeset; when it is empty, the scope paths; when those are empty, the repo paths. Every applicability test,
+   globs included, MUST use the gate's predicate (§4.6). At plan and implement, always-on rules bypass phase, task and
    file filtering. At review they are filtered like any rule. At release they are not delivered (§6.3).
 2. **Classify.** Compute each candidate's enforcement class (§7.2).
 3. **Rank.** Always-on rules come first, then failed rules, then rules one edge from a failed rule. Next comes ledger
