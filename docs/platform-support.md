@@ -30,7 +30,9 @@ but isn't yet a release blocker — please report issues.
 
 ## Container Runtime Matrix
 
-Miniforge runs each task inside an OCI container. Any OCI-compatible
+In governed mode (`--execution-mode governed`) miniforge runs each task
+inside an OCI container; the default local mode runs it in a host git
+worktree, without isolation. Any OCI-compatible
 local runtime works; Podman is the recommended default per N11-delta §3.
 
 | Runtime    | macOS arm64 | macOS x86_64 | Linux x86_64 | Linux arm64 | Windows |
