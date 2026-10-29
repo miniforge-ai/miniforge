@@ -85,13 +85,17 @@
 (defn ^{:stratum 0} known-phases
   "Every phase the target run actually recorded, drawn from the
    reconstructed resume context: phases it completed, phases it produced
-   a result for (a failed phase has a result but is not completed), and
-   the phase its FSM snapshot parked on. A `:retry-from-phase` request
-   naming anything outside this set is rejected rather than guessed at."
+   a result for (a failed phase has a result but is not completed),
+   phases its checkpoint manifest records (one whose result file did not
+   read is in neither of the first two), and the phase its FSM snapshot
+   parked on. A `:retry-from-phase` request naming anything outside this
+   set is rejected rather than guessed at; `mf resume --from-phase`
+   accepts the same phases."
   [context]
   (let [current-phase (get-in context [:machine-snapshot :execution/current-phase])]
     (cond-> (into (set (:completed-phases context))
-                  (keys (:phase-results context)))
+                  (concat (keys (:phase-results context))
+                          (get-in context [:checkpoint-manifest :workflow/phases-completed])))
       current-phase (conj current-phase))))
 
 (defn ^{:stratum 0} phases-before

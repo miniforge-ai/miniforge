@@ -17,7 +17,9 @@
             [ai.miniforge.logging.interface :as log]
             [ai.miniforge.workflow.checkpoint-store :as checkpoint-store]
             [ai.miniforge.workflow.messages :as messages]
-            [ai.miniforge.workflow.runner-event-dispatch :as dispatch]))
+            [ai.miniforge.workflow.runner-event-dispatch :as dispatch]
+            [babashka.fs :as fs]
+            [slingshot.slingshot :refer [try+]]))
 
 ;------------------------------------------------------------------------------ Layer 0
 
@@ -32,6 +34,37 @@
     {:error/message message
      :failure/class (failure/classify {:exception/class (:anomaly/ex-class data)
                                        :error/message message})}))
+
+(defn- ^{:stratum 0} announce-write!
+  "Publish `:workflow/checkpoint-written` for the phase checkpoint just
+   written, naming its absolute path (a relative root resolves against
+   this process's working directory, which a later event cleanup does not
+   share). The run's events then name its checkpoint root, which the
+   event cleanup's retention hold reads to keep those events while the
+   checkpoint exists, wherever the run wrote it. Needs a stateful stream
+   (see `report-write-failure!`). The write already succeeded, so a
+   failed or refused announcement is logged and never thrown; an Error
+   still propagates."
+  [context {:checkpoint/keys [phase phase-path]}]
+  (let [stream (get-in context [:execution/opts :event-stream])
+        logger (:execution/logger context)
+        warn! (fn [error]
+                (log/warn logger :system :workflow/checkpoint-written
+                          {:message (messages/t :warn/checkpoint-announce-failed
+                                                {:phase (some-> phase name) :error error})}))]
+    (when (and phase-path (dispatch/stateful-stream? stream))
+      (try+
+        (let [path (str (fs/absolutize phase-path))
+              receipt (dispatch/publish-event!
+                       stream
+                       (es/checkpoint-written stream (:execution/id context) phase
+                                              path (fs/size path)))]
+          (when (anomaly/any-anomaly? receipt)
+            (warn! (:anomaly/message receipt))))
+        #_{:clj-kondo/ignore [:unresolved-symbol]}
+        (catch dispatch/nonfatal? _
+          (let [thrown (:throwable &throw-context)]
+            (warn! (or (ex-message thrown) (some-> thrown class .getName)))))))))
 
 ;------------------------------------------------------------------------------ Layer 1
 
@@ -65,12 +98,14 @@
 
 (defn ^{:stratum 2} checkpoint!
   "Persist `context`'s checkpoint and return what the store returned. A
-   write failure is reported (warning plus event) and returned as the
+   written phase checkpoint is announced with `:workflow/checkpoint-written`.
+   A write failure is reported (warning plus event) and returned as the
    store's anomaly; it is never thrown, so the caller keeps running."
   [context]
   (let [written (checkpoint-store/persist-execution-state! context)]
-    (when (anomaly/anomaly? written)
-      (report-write-failure! context written))
+    (if (anomaly/anomaly? written)
+      (report-write-failure! context written)
+      (announce-write! context written))
     written))
 
 (comment

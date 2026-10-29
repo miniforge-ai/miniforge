@@ -39,7 +39,6 @@
    to fuller JVM code paths when the CLI only needs thin orchestration."
   (:require
    [babashka.cli :as cli]
-   [babashka.fs :as fs]
    [clojure.string :as str]
    [ai.miniforge.cli.app-config :as app-config]
    [ai.miniforge.cli.messages :as messages]
@@ -71,6 +70,7 @@
    [ai.miniforge.cli.main.commands.init :as cmd-init]
    [ai.miniforge.cli.main.commands.worktree :as cmd-worktree]
    [ai.miniforge.cli.main.commands.runtime :as cmd-runtime]
+   [ai.miniforge.cli.main.commands.doctor :as cmd-doctor]
    ;; N5 command modules
    [ai.miniforge.cli.main.commands.workflow-commands :as cmd-workflow]
    [ai.miniforge.cli.main.commands.policy :as cmd-policy]
@@ -156,38 +156,7 @@
 (def ^{:stratum 0} tui-launcher
   (util/optional-composition-var 'ai.miniforge.tui-views.interface 'start-standalone-tui!))
 
-(defn ^{:stratum 0} doctor-cmd
-  [_m]
-  (println "\n" (display/style (app-config/system-check-title) :foreground :cyan :bold true) "\n")
-
-  (let [checks (messages/t :doctor/checks)]
-
-    (doseq [[cmd name desc] checks]
-      (let [available? (util/check-command cmd)
-            status (if available?
-                     (display/style "✓" :foreground :green)
-                     (display/style "✗" :foreground :red))
-            name-styled (if available? name (display/style name :foreground :red))]
-        (println (format "  %s %-12s %s" status name-styled desc))))
-
-    (println)
-
-    ;; Container runtime (N11-delta Phase 3)
-    (println (display/style (messages/t :runtime/doctor-section-title)
-                            :foreground :cyan :bold true))
-    (cmd-runtime/print-doctor-runtime-section)
-    (println)
-
-    ;; Check config
-    (if (fs/exists? config/default-user-config-path)
-      (println (display/style "✓" :foreground :green)
-               (messages/t :doctor/config-exists
-                           {:config-path config/default-user-config-path}))
-      (println (display/style "!" :foreground :yellow)
-               (messages/t :doctor/no-config
-                           {:command (app-config/command-string "config init")})))
-
-    (println)))
+(defn ^{:stratum 0} doctor-cmd [m] (cmd-doctor/doctor-cmd (util/get-opts m)))
 
 ;; Config commands — one-liner delegates
 (defn ^{:stratum 0} config-init-cmd [m] (config/cmd-init (util/get-opts m)))
@@ -282,9 +251,10 @@
    can be passed positionally, or via `--workflow-id`/`-w` / the legacy
    `--resume`/`-r` flag (kept so existing docs keep working).
 
-   Exits 1 when the id is missing and when the resumed run ends in
+   Exits 1 when the id is missing, when the resume throws (reported on
+   stderr, not as a stack trace) and when the resumed run ends in
    anything but success. resume-workflow returns nil only after reporting
-   the run already complete, a no-op success; its failures throw."
+   the run already complete, a no-op success."
   [m]
   (let [opts (util/get-opts m)
         args (:args m)
@@ -294,7 +264,17 @@
     (if (str/blank? (str wf-id))
       (do (display/print-error (messages/t :resume/missing-workflow-id))
           (cmd-shared/exit! 1))
-      (some-> (cmd-resume/resume-workflow wf-id opts) cmd-run/finish!))))
+      (some-> (try+
+                (cmd-resume/resume-workflow wf-id opts)
+                (catch InterruptedException interrupted
+                  (.interrupt (Thread/currentThread))
+                  (throw interrupted))
+                (catch Error fatal (throw fatal))
+                (catch Object caught
+                  (cmd-resume/print-resume-failure caught (:throwable &throw-context))
+                  (cmd-shared/exit! 1)
+                  nil))
+              cmd-run/finish!))))
 
 (defn ^{:stratum 0} scan-cmd [m] (cmd-scan/scan-cmd (util/get-opts m)))
 
@@ -416,7 +396,11 @@
 ;; CLI dispatch
 (def ^{:stratum 1} dispatch-table
   [{:cmds ["version"] :fn version-cmd}
-   {:cmds ["doctor"]  :fn doctor-cmd}
+   {:cmds ["doctor"]
+    :fn doctor-cmd
+    :restrict true
+    :spec {:backend        {:coerce :keyword :alias :b}
+           :execution-mode {:coerce :keyword :alias :m}}}
    {:cmds ["help"]    :fn help-cmd}
    {:cmds []          :fn (parse-errors/help-unless-unknown help-cmd)}  ; default
 
@@ -566,6 +550,11 @@
     :fn (wr-help/handler-with-help :workflow-gc-scratch workflow-gc-scratch-cmd)
     :restrict true
     :spec (wr-help-registry/spec-for :workflow-gc-scratch)}
+
+   {:cmds ["workflow" "gc-checkpoints"]
+    :fn (wr-help/handler-with-help :workflow-gc-checkpoints cmd-workflow/workflow-gc-checkpoints-cmd)
+    :restrict true
+    :spec (wr-help-registry/spec-for :workflow-gc-checkpoints)}
 
    ;; Chain parent — `mf chain --help` / `mf chain` lists the group's
    ;; subcommands with their one-line summaries.

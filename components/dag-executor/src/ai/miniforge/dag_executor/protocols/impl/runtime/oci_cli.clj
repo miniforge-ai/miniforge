@@ -172,6 +172,13 @@
    tasks. `filter-env-by-trust` keeps these."
   #{"ANTHROPIC_API_KEY"})
 
+(def ^{:stratum 0} git-config-env-pattern
+  "GIT_CONFIG_COUNT / GIT_CONFIG_KEY_n / GIT_CONFIG_VALUE_n: one config tuple
+   whose values can carry a credential (an Authorization header), so the
+   trust filter drops all of it, not just the KEY_n names `secret-pattern`
+   matches."
+  #"GIT_CONFIG_(COUNT|KEY_\d+|VALUE_\d+)")
+
 (defn ^{:stratum 0} build-mount-args
   "Build -v mount arguments from an execution plan map.
 
@@ -549,14 +556,17 @@
    command (release's GH_TOKEN for `gh`) pass it on that exec instead.
 
    A var is considered sensitive when its name contains any of:
-   KEY, SECRET, TOKEN, PASSWORD, CREDENTIAL (case-insensitive), except the
-   agent's own credentials (`agent-credential-names`), which N11 §8.1
-   injects at every trust level."
+   KEY, SECRET, TOKEN, PASSWORD, CREDENTIAL (case-insensitive) or belongs to
+   a GIT_CONFIG_* tuple (`git-config-env-pattern`), except the agent's own
+   credentials (`agent-credential-names`), which N11 §8.1 injects at every
+   trust level."
   [env-map trust-level]
   (if (contains? #{:trusted :privileged} trust-level)
     env-map
-    (into {} (remove (fn [[k _]] (and (re-find secret-pattern (name k))
-                                      (not (contains? agent-credential-names (name k)))))
+    (into {} (remove (fn [[k _]]
+                       (let [n (name k)]
+                         (and (or (re-find secret-pattern n) (re-matches git-config-env-pattern n))
+                              (not (contains? agent-credential-names n)))))
                      env-map))))
 
 (defn ^{:stratum 1} build-resource-args
@@ -1175,12 +1185,16 @@
                                                    bootstrap-metadata)
                                      image-digest (assoc :image-digest image-digest)
                                      (seq gate-warnings) (assoc :security/warnings gate-warnings)
-                                     (seq gate-review)   (assoc :security/review gate-review))]
-                      (when-let [remote (git-remote env-config)]
+                                     (seq gate-review)   (assoc :security/review gate-review))
+                          remote   (git-remote env-config)]
+                      (when remote
                         (some-> git-remotes (swap! assoc container-name remote)))
+                      ;; The record is returned to callers, so it carries the
+                      ;; repo URL without any user:password@ it was given.
                       (result/ok (proto/create-environment-record
                                   container-name (descriptor/kind descriptor) task-id workdir
-                                  (assoc env-config :metadata metadata))))
+                                  (cond-> (assoc env-config :metadata metadata)
+                                    remote (assoc :repo-url (:repo-url remote))))))
                     bootstrap-result))
                 create-result)))))))
 
@@ -1204,10 +1218,14 @@
         (result/err :copy-failed (.getMessage e)))))
 
   (release-environment! [_this environment-id]
-    (some-> git-remotes (swap! dissoc environment-id))
     (try
       (stop-container descriptor environment-id default-stop-timeout)
-      (remove-container descriptor environment-id)
+      (let [removed (remove-container descriptor environment-id)]
+        ;; Keep the recorded remote until the container is really gone: a
+        ;; capsule that is still there may still have work to persist.
+        (when (get-in removed [:data :released?])
+          (some-> git-remotes (swap! dissoc environment-id)))
+        removed)
       (catch Exception e
         (result/err :release-failed (.getMessage e)))))
 
