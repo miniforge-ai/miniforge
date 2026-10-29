@@ -23,6 +23,7 @@
    [ai.miniforge.config.interface :as config]
    [ai.miniforge.logging.format :as log-format]
    [ai.miniforge.logging.sinks :as sinks]
+   [ai.miniforge.redaction.interface :as redaction]
    [clojure.java.io :as io]))
 
 ;------------------------------------------------------------------------------ Layer 0
@@ -160,8 +161,13 @@
   Logger
   (log* [_this level category event opts]
     (when (level-enabled? (:min-level config :trace) level)
+      ;; Every sink (file, stdout, stderr, fleet, or a caller's own
+      ;; output fn) receives the entry from here and nowhere else, so
+      ;; this is the one place secrets are removed before a log line
+      ;; becomes durable. Message, :data and context are all covered.
       (let [entry (-> (apply make-entry level category event (mapcat identity opts))
-                      (merge-context context))]
+                      (merge-context context)
+                      redaction/redact)]
         (output-fn entry)
         entry)))
 
