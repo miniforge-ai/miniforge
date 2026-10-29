@@ -88,6 +88,15 @@
                            (let [r (shell/sh "sh" "-c" cmd :dir dir)]
                              {:ok? true :data {:exit-code (:exit r) :stdout (:out r)}}))})
 
+(def ^{:stratum 0} pem-body
+  "Base64-looking key material; not a key."
+  "MIIEpAIBAAKCAQEAvxQ8kZ2mNqR7wTc3d4e5f6g7h8i9j0kLmNoPqRsTuVwX")
+
+(defn ^{:stratum 0} pem
+  "A PEM private-key block around BODY."
+  [body]
+  (str "-----BEGIN RSA PRIVATE KEY-----\n" body "\n-----END RSA PRIVATE KEY-----\n"))
+
 ;------------------------------------------------------------------------------ Layer 1
 
 (deftest ^{:stratum 1} code-files-are-scanned-test
@@ -303,3 +312,17 @@
         (sh! dir "commit" "-qam" "remove")
         (is (= #{{:file "a.txt" :line 3 :commit merge}}
                (locations {:code/files [] :code/base-refs [base]} dir)))))))
+
+(deftest ^{:stratum 2} matches-spanning-lines-are-found-test
+  (testing "a PEM body replaced between unchanged BEGIN/END markers"
+    (let [dir (temp-git-repo {"key.pem" (pem "placeholder")})]
+      (spit (str dir "/key.pem") (pem pem-body))
+      (is (= #{{:file "key.pem" :line 2}} (locations {:code/files []} dir)))))
+  (testing "a Bearer value folded onto the line after the header"
+    (let [dir (temp-git-repo {"api.yaml" "headers:\n  Authorization: Bearer\n"})]
+      (spit (str dir "/api.yaml") (str "headers:\n  Authorization: Bearer\n    " opaque opaque "\n"))
+      (is (= #{{:file "api.yaml" :line 3}} (locations {:code/files []} dir)))))
+  (testing "a multi-line match wholly in unchanged lines stays exempt"
+    (let [dir (temp-git-repo {"key.pem" (pem pem-body)})]
+      (spit (str dir "/key.pem") (str (pem pem-body) "# rotated yearly\n"))
+      (is (= #{} (locations {:code/files []} dir))))))

@@ -24,7 +24,11 @@
    diffed (`git diff -U0`) against its content at that base -- the
    on-disk version and the artifact's version both, so a stale artifact
    cannot hide what is on disk -- and only added lines are scanned, so
-   an added copy of an existing line still counts. Each commit between the base and HEAD is also scanned on its own,
+   an added copy of an existing line still counts. Patterns run over the
+   whole new content, so a match spanning lines (a PEM block, a header
+   folded onto the next line) is found; it is reported when it touches
+   an added line and exempt only when it lies wholly in unchanged ones.
+   Each commit between the base and HEAD is also scanned on its own,
    against its first parent so a merge's own edits count: a credential
    committed and later removed is still found, since pushing the branch
    publishes that commit.
@@ -121,14 +125,18 @@
    :added   (set (range 1 (inc (count (str/split-lines (str text))))))})
 
 (defn- ^{:stratum 0} findings
-  "{:file :line} (and :commit, when given) for each ADDED line number of
-   CONTENT that carries a secret-shaped value."
+  "{:file :line} (and :commit, when given) for each secret-shaped match
+   in CONTENT that touches an ADDED line number, reported at the first
+   added line it covers."
   ([path version] (findings path version nil))
   ([path {:keys [content added]} commit]
-   (let [lines (vec (str/split-lines content))]
-     (for [n (sort added)
-           :when (redaction/pattern-secret-string? (get lines (dec n)))]
-       (cond-> {:file path :line n} commit (assoc :commit commit))))))
+   (let [starts  (into [0] (keep-indexed (fn [i c] (when (= c \newline) (inc i)))) content)
+         line-of (fn [offset] (count (take-while #(<= % offset) starts)))]
+     (for [[start end] (redaction/pattern-secret-spans content)
+           :let [hit (first (filter added (range (line-of start)
+                                                 (inc (line-of (max start (dec end)))))))]
+           :when hit]
+       (cond-> {:file path :line hit} commit (assoc :commit commit))))))
 
 (defn- ^{:stratum 0} base-candidates
   "Refs to try, in order, for the commit the change is measured from."

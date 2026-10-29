@@ -69,6 +69,14 @@
   [s]
   (match/pattern-secret-string? s))
 
+(defn ^{:stratum 0} pattern-secret-spans
+  "[start end] of every match of the secret value patterns in S, matched
+   over the whole string so a match spanning lines (a PEM block, a header
+   folded onto the next line) is found whole. Payment-card candidates
+   are not checked, as in `pattern-secret-string?`."
+  [s]
+  (match/pattern-secret-spans s))
+
 (defn ^{:stratum 0} marker
   "The redaction marker substituted for an excluded value."
   []
