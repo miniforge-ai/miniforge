@@ -83,12 +83,6 @@
       [taken groups]
       (recur (into taken (first groups)) (rest groups)))))
 
-(defn ^{:stratum 0} unread?
-  "True when file name `n` is not covered by `tracked` (see `unseen-files`)."
-  [{:keys [names floor]} n]
-  (and (not (contains? names n))
-       (or (nil? floor) (pos? (compare n floor)))))
-
 ;------------------------------------------------------------------------------ Layer 1
 
 (defn ^{:stratum 1} event-files
@@ -116,18 +110,15 @@
 ;------------------------------------------------------------------------------ Layer 2
 
 (defn ^{:stratum 2} unseen-files
-  "[tracked files] for workflow directory `dir`: its event files not
-   covered by `tracked`, in name order, and the tracking state after them.
-   Tracking keeps the newest `keep-names` names and counts every name
-   sorting below them as read, so it stays bounded for a long run: a file
-   appears moments after the name it sorts by, long before that many newer
-   ones."
-  [dir tracked keep-names]
-  (let [files (event-files dir)
-        kept  (take-last keep-names files)]
-    [{:names (into #{} (map file-name) kept)
-      :floor (some-> (first kept) file-name)}
-     (filterv #(unread? tracked (file-name %)) files)]))
+  "[names files] for workflow directory `dir`: the names of all its event
+   files, and the event files whose names are not in `seen`, in name
+   order. The sink names each file after its event, so a name read once
+   need not be read again; a file that turns up late is read whatever
+   its name."
+  [dir seen]
+  (let [files (event-files dir)]
+    [(into #{} (map file-name) files)
+     (filterv #(not (contains? seen (file-name %))) files)]))
 
 (defn ^{:stratum 2} workflow-events
   "Every event of `workflow-id` in the sink layout (its archived, live or

@@ -102,30 +102,7 @@
            (mapv :event/type (state-archive/get-archived-workflow-events
                               (atom {:archived-workflows (atom @found)}) wf-id))))))
 
-(deftest ^{:stratum 1} the-archive-wide-history-keeps-a-bounded-window-per-workflow
-  (let [events-dir (temp-events-dir)
-        stream     (file-sink-stream events-dir)
-        dashboard  (core/create-state {:event-stream (es/create-event-stream {:sinks []})})
-        wf-id      (random-uuid)
-        chunk!     #(es/publish! stream (envelope stream :agent/chunk wf-id :chunk/delta %))
-        disk-events #(filter (comp #{wf-id} :workflow/id) (workflows/get-events dashboard {:limit 1000}))]
-    (es/publish! stream (envelope stream :workflow/started wf-id :workflow/spec {:name "Long run"}))
-    (es/publish! stream (envelope stream :workflow/phase-started wf-id :workflow/phase :implement))
-    (run! chunk! (map str (range 20)))
-    (es/publish! stream (envelope stream :workflow/completed wf-id :workflow/status :success))
-    (with-redefs [workflows/events-dir-path (str events-dir)
-                  workflows/disk-retention (merge es/bounded-retention {:max-events-per-workflow 5})]
-      (let [events (disk-events)]
-        (is (= 8 (count events)) "3 lifecycle events and the newest 5 others")
-        (is (= #{"15" "16" "17" "18" "19"} (set (keep :chunk/delta events)))))
-      (chunk! "20")
-      (is (contains? (set (keep :chunk/delta (disk-events))) "20") "a later file is still read")
-      (is (<= (count (get-in @@#'workflows/recent-dir-reads
-                             [(str (es/workflow-dir (str events-dir) wf-id)) :tracked :names]))
-              5)
-          "file tracking is bounded too"))))
-
-(deftest ^{:stratum 1} a-same-millisecond-group-across-a-cutoff-keeps-every-reader-in-order
+(deftest ^{:stratum 1} a-same-millisecond-group-across-a-cutoff-keeps-the-readers-in-order
   (let [events-dir (temp-events-dir)
         stream     (es/create-event-stream {:sinks []})
         wf-id      (random-uuid)
@@ -134,7 +111,7 @@
         chunks     (mapv #(envelope stream :agent/chunk wf-id :chunk/delta (str %)) (range 1 204))
         completed  (envelope stream :workflow/completed wf-id :workflow/status :success)
         ;; 204 files in one millisecond, named against publish order, so the
-        ;; newest events sort first and every cutoff (10, 200, 5) falls inside it.
+        ;; newest events sort first and both cutoffs (10, 200) fall inside it.
         tied-name  #(format "20260101T000000001Z-%08x-0000-4000-8000-000000000000.json"
                             (- 0xffffffff (:event/sequence-number %)))
         found      (atom {})]
@@ -150,14 +127,7 @@
                                                  (:chunk/delta (second newest))
                                                  (:chunk/delta (nth newest 2))])
           "the archive endpoint's newest 200, newest first")
-      (is (= 200 (count newest))))
-    (with-redefs [workflows/events-dir-path (str events-dir)
-                  workflows/disk-retention (merge es/bounded-retention {:max-events-per-workflow 5})]
-      (is (= #{"199" "200" "201" "202" "203"}
-             (->> (workflows/get-events (core/create-state {:event-stream stream}) {:limit 1000})
-                  (keep :chunk/delta)
-                  set))
-          "the history's 5-file batches keep the newest 5 chunks"))))
+      (is (= 200 (count newest))))))
 
 ;------------------------------------------------------------------------------ Layer 2
 
