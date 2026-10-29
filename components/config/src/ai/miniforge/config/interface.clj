@@ -62,6 +62,16 @@
    `<user.home>/.miniforge`. Never nil."
   user/miniforge-home)
 
+(def ^{:stratum 0} miniforge-home-override
+  "Function returning MINIFORGE_HOME when it is set, else nil. Args: none."
+  user/miniforge-home-override)
+
+(def ^{:stratum 0} path-outside?
+  "True when `path` does not resolve inside directory `home`. Args:
+   [home path]. With `miniforge-home-override`, a command that deletes
+   under a root can refuse one outside the home the user chose."
+  user/path-outside?)
+
 (def ^{:stratum 0} repo-config-dir-name
   "String naming the repo-level config directory: \".miniforge\"."
   user/repo-config-dir-name)

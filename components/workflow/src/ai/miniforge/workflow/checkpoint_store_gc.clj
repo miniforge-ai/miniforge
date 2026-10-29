@@ -21,6 +21,7 @@
    prunes them."
   (:require
    [ai.miniforge.anomaly.interface :as anomaly]
+   [ai.miniforge.config.interface :as config]
    [ai.miniforge.event-stream.interface :as es]
    [ai.miniforge.workflow.checkpoint-store :as checkpoint-store]
    [ai.miniforge.workflow.checkpoint-store-lock :as checkpoint-lock]
@@ -234,24 +235,35 @@
 
    Returns `{:checkpoint/root :deleted [run-id] :kept {disposition [run-id]}
    :failures [anomaly]}`. Only directories named by a run id are
-   considered; a symlinked one is never followed."
+   considered; a symlinked one is never followed.
+
+   With MINIFORGE_HOME set, a root taken from config that lies outside it
+   is refused: a `:conflict` anomaly, nothing read or deleted. Only an
+   explicit `:checkpoint/root` collects there."
   [opts]
   (let [root (checkpoint-paths/resolve-checkpoint-root opts)
-        days (get opts :max-age-days default-retention-days)
-        cutoff-ms (- (get opts :now-ms (System/currentTimeMillis)) (* days day-ms))
-        events-dir (get opts :events-dir (es/default-events-dir))
-        runs (when (fs/directory? root)
-               (filter #(fs/directory? % {:nofollow-links true}) (fs/list-dir root)))
-        by-disposition (group-by #(disposition % cutoff-ms events-dir) runs)
-        results (mapv #(delete-run! root % (run-id %)) (get by-disposition :expired))
-        pinned-late (keep :pinned (filter map? (remove anomaly/anomaly? results)))]
-    {:checkpoint/root root
-     :deleted (filterv uuid? results)
-     :kept (cond-> (into {}
-                         (map (fn [[k dirs]] [k (mapv run-id dirs)]))
-                         (dissoc by-disposition :expired nil))
-             (seq pinned-late) (update :pinned (fnil into []) pinned-late))
-     :failures (filterv anomaly/anomaly? results)}))
+        home (config/miniforge-home-override)]
+    (if (and home
+             (nil? (get opts checkpoint-paths/checkpoint-root-option-key))
+             (config/path-outside? home root))
+      (anomaly/anomaly :conflict
+                       (messages/t :checkpoint/gc-outside-home {:root root :home home})
+                       {:checkpoint/root root :miniforge/home home})
+      (let [days (get opts :max-age-days default-retention-days)
+            cutoff-ms (- (get opts :now-ms (System/currentTimeMillis)) (* days day-ms))
+            events-dir (get opts :events-dir (es/default-events-dir))
+            runs (when (fs/directory? root)
+                   (filter #(fs/directory? % {:nofollow-links true}) (fs/list-dir root)))
+            by-disposition (group-by #(disposition % cutoff-ms events-dir) runs)
+            results (mapv #(delete-run! root % (run-id %)) (get by-disposition :expired))
+            pinned-late (keep :pinned (filter map? (remove anomaly/anomaly? results)))]
+        {:checkpoint/root root
+         :deleted (filterv uuid? results)
+         :kept (cond-> (into {}
+                             (map (fn [[k dirs]] [k (mapv run-id dirs)]))
+                             (dissoc by-disposition :expired nil))
+                 (seq pinned-late) (update :pinned (fnil into []) pinned-late))
+         :failures (filterv anomaly/anomaly? results)}))))
 
 (comment
   (gc-checkpoints! {:max-age-days 30}))

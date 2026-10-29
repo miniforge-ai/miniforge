@@ -38,6 +38,17 @@
   (or (System/getenv "MINIFORGE_HOME")
       (str (System/getProperty "user.home") "/.miniforge")))
 
+(defn ^{:stratum 0} miniforge-home-override
+  "MINIFORGE_HOME when it is set, else nil: a home the user chose."
+  []
+  (not-empty (System/getenv "MINIFORGE_HOME")))
+
+(defn ^{:stratum 0} path-outside?
+  "True when `path` does not resolve inside directory `home` (symlinks are
+   resolved as far as each path exists)."
+  [home path]
+  (not (fs/starts-with? (fs/canonicalize path) (fs/canonicalize home))))
+
 (def ^{:stratum 0} ^:private default-config-resource-path
   "Primary resource path for shipped user config defaults."
   "config/default-user-config.edn")

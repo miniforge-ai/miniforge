@@ -164,6 +164,7 @@
   ;; Checkpoint retention
   :checkpoint/usage-failed   "Could not read the checkpoint root {root}: {error}"
   :checkpoint/gc-delete-failed "Could not delete checkpoint {path}: {error}"
+  :checkpoint/gc-outside-home "Refusing to collect checkpoints under {root}: MINIFORGE_HOME is {home} and that root is outside it. Pass --root {root} to collect it anyway."
   :checkpoint/lock-busy      "The checkpoint of run {run-id} is locked by another process"
   :checkpoint/lock-failed    "Could not take the checkpoint lock of run {run-id}: {error}"
   :checkpoint/pin-no-manifest "Run {run-id} has no checkpoint manifest to pin."
