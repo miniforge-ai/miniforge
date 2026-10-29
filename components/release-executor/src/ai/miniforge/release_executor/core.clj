@@ -36,6 +36,7 @@
   (:require
    [ai.miniforge.artifact.interface :as artifact]
    [ai.miniforge.logging.interface :as log]
+   [ai.miniforge.redaction.interface :as redaction]
    [ai.miniforge.release-executor.git :as git]
    [ai.miniforge.release-executor.messages :as msg]
    [ai.miniforge.release-executor.metadata :as metadata]
@@ -517,8 +518,12 @@
     (let [{:keys [release-meta host-mode? worktree-path executor environment-id]} state
           result (if host-mode?
                    (git/commit-changes! worktree-path (:release/commit-message release-meta))
+                   ;; git/commit-changes! redacts its own message;
+                   ;; sandbox/commit-changes! records what it is given, and
+                   ;; this is its only caller.
                    (sandbox/commit-changes! executor environment-id
-                                            (:release/commit-message release-meta)))]
+                                            (redaction/redact
+                                             (:release/commit-message release-meta))))]
       (if (result/succeeded? result)
         (assoc state :commit-sha (:commit-sha result))
         (fail state :commit-failed (:error result))))))
@@ -584,12 +589,14 @@
     :else
     (let [{:keys [release-meta pr-number pr-url branch
                   executor environment-id logger]} state
-          filename (pr-doc-filename (:release/pr-title release-meta))
+          ;; The doc and its file name are committed and pushed: redact both.
+          filename (pr-doc-filename (redaction/redact (:release/pr-title release-meta)))
           rel-path (str "docs/pull-requests/" filename)
-          content  (render-pr-doc release-meta
-                                  {:pr-number pr-number
-                                   :pr-url    pr-url
-                                   :branch    branch})]
+          content  (redaction/redact
+                    (render-pr-doc release-meta
+                                   {:pr-number pr-number
+                                    :pr-url    pr-url
+                                    :branch    branch}))]
       (try
         (let [write-r (sandbox/write-file! executor environment-id rel-path content)]
           (if (result/succeeded? write-r)
@@ -702,13 +709,17 @@
     (let [{:keys [release-meta pr-number pr-url branch
                   host-mode? worktree-path executor environment-id
                   logger code-artifacts workflow-data]} state
-          filename (pr-doc-filename (:release/pr-title release-meta))
+          ;; The doc and its file name are committed and pushed: redact both.
+          ;; The doc quotes agent-written summaries, so a token one of them
+          ;; quotes would otherwise land in the repository's history.
+          filename (pr-doc-filename (redaction/redact (:release/pr-title release-meta)))
           rel-path (str "docs/pull-requests/" filename)
-          content  (render-pr-doc-full
-                    release-meta
-                    {:pr-number pr-number :pr-url pr-url :branch branch}
-                    code-artifacts
-                    workflow-data)]
+          content  (redaction/redact
+                    (render-pr-doc-full
+                     release-meta
+                     {:pr-number pr-number :pr-url pr-url :branch branch}
+                     code-artifacts
+                     workflow-data))]
       (try
         (let [write-r (if host-mode?
                         (git/write-file! worktree-path rel-path content)
