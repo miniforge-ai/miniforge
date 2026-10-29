@@ -28,8 +28,8 @@ config block, which nothing read.
 ;;     :backend :claude :task-type :thinking-heavy :confidence 0.9
 ;;     :strategy :automatic :rationale "..." :fallback-used false}
 
-;; Optional config and constraints. Only :require-local is enforced on the
-;; result (see below and Known limitations).
+;; Optional config and constraints. A result that fails one is a :not-found
+;; anomaly naming the unmet constraints instead of a selection.
 (llm/select-model classification
                   {:strategy :cost-optimized}     ; :automatic (default), :cost-optimized, :speed
                   {:context-size 500000           ; tokens
@@ -46,9 +46,9 @@ config block, which nothing read.
 (agent/create-agent :implementer {:privacy-required true :cost-limit 0.05})
 ```
 
-When nothing qualifies, `select-model` returns Claude Sonnet 4.6 with `:fallback-used true`, whether or not Sonnet
-meets `:context-size` and `:cost-limit`. With `:require-local`, it returns a `:not-found` anomaly rather than a model
-that is not local; that is the only constraint checked on the result.
+When nothing qualifies, `select-model` returns Claude Sonnet 4.6 with `:fallback-used true`. The result, the
+fallback included, is checked against each constraint the caller set (`:require-local`, `:context-size`,
+`:cost-limit`); a model that fails one becomes a `:not-found` anomaly naming the unmet constraints.
 
 **Selection routes nothing.** A selection is a model id, not a client. `create-agent` stores the id in the agent's
 config, but the agent's `invoke` sends the task to the `:llm-backend` client in the invocation context, with that
@@ -62,13 +62,8 @@ The models, their profiles and the recommendation tiers per task type are in
 
 ## Known limitations
 
-1. `:context-size` and `:cost-limit` can be bypassed. `:automatic` takes any available model when none meets them
-   and reports `:fallback-used false`, and the Sonnet fallback is returned without checking them, on any strategy
-   (a 500,000-token request can get Sonnet's 200,000-token window). With `:require-local`, `:automatic` reads only
-   `-local` tier keys, which `:large-context` and `:cost-optimized` do not define. Fixed in #2203. Until then, check
-   the selected model's context window and price yourself.
-2. `:cost-limit` filters models by price tier; it does not cap what a task spends.
-3. A cloud model counts as available only when its provider's API-key variable is set (`ANTHROPIC_API_KEY`,
+1. `:cost-limit` filters models by price tier; it does not cap what a task spends.
+2. A cloud model counts as available only when its provider's API-key variable is set (`ANTHROPIC_API_KEY`,
    `OPENAI_API_KEY`, `GOOGLE_API_KEY`, `GROQ_API_KEY`; see `:provider-env-vars` in
    `components/llm/resources/llm/model-selector.edn`). The selector only checks that the variable is set.
-4. `explain-selection` ends with a line naming `:spec/model-override`; nothing reads that key.
+3. `explain-selection` ends with a line naming `:spec/model-override`; nothing reads that key.
