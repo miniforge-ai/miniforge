@@ -453,21 +453,18 @@
 ;------------------------------------------------------------------------------ Layer 4
 
 (defn ^{:stratum 4} save-artifact
-  "Save artifact implementation. Under the writer's monitor (so queue
-   order matches update order when a link or another save runs at the
-   same time): carries the cached and indexed links into the artifact
-   (carry-links), marks it changed, updates cache and index, and queues
-   the file and index writes.
-   An index entry whose file never landed loads as nil; query skips it."
-  [{:keys [artifacts-dir cache index logger writer changed]} saved]
+  "Save artifact implementation. Under the writer's monitor, carries the
+   cached and indexed links into the artifact (carry-links), puts it in
+   the cache and index, and queues it for drain-action. An index entry
+   whose file never landed loads as nil; query skips it."
+  [{:keys [cache index pending writer] :as store} saved]
   (let [id (:artifact/id saved)]
     (locking writer
       (let [artifact (carry-links (get @index id) (carry-links (get @cache id) saved))]
-        (swap! changed update id (fnil inc 0))
         (swap! cache assoc id artifact)
         (swap! index add-to-index artifact)
-        (send-off writer persist-artifact-action artifacts-dir artifact logger)
-        (send-off writer persist-index-action artifacts-dir index changed logger)))
+        (swap! pending conj [:save artifact])
+        (send-off writer drain-action store)))
     id))
 
 (defn ^{:stratum 4} query-artifacts
@@ -485,7 +482,7 @@
 (defn ^{:stratum 4} link-artifacts
   "Link artifacts, preserving the ArtifactStore boolean facade.
    Missing link targets are represented as anomalies internally and logged."
-  [{:keys [artifacts-dir cache index logger writer changed] :as record} parent-id child-id]
+  [{:keys [cache index logger pending writer] :as record} parent-id child-id]
   (let [parent-result (find-link-target record parent-id :parent)
         child-result  (find-link-target record child-id  :child)]
     (if (or (anomaly? parent-result) (anomaly? child-result))
@@ -502,12 +499,12 @@
       (do
         ;; Under the writer's monitor, as in save-artifact
         (locking writer
-          (swap! changed #(-> % (update parent-id (fnil inc 0)) (update child-id (fnil inc 0))))
-          (swap! index update-index-links parent-id child-id)
-          (update-cache-links cache parent-id child-id)
-          ;; Re-persist both artifacts, then the index, on the writer
-          (send-off writer persist-linked-artifacts record artifacts-dir parent-id child-id logger)
-          (send-off writer persist-index-action artifacts-dir index changed logger))
+          (let [parent (add-link (get @cache parent-id parent-result) :artifact/children child-id)
+                child (add-link (get @cache child-id child-result) :artifact/parents parent-id)]
+            (swap! cache assoc parent-id parent child-id child)
+            (swap! index #(-> % (add-to-index parent) (add-to-index child)))
+            (swap! pending conj [:link parent child])
+            (send-off writer drain-action record)))
 
         (when logger
           (log/debug logger :system :artifact/linked
