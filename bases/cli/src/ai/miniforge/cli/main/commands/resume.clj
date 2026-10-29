@@ -158,28 +158,36 @@
   (some? (es/workflow-events-dir events-dir (str id))))
 
 (defn- ^{:stratum 0} resumable-in-place?
-  "True when a run resumed under `id` writes its events where readers of
-   `id` look, and they stay there: `id` has no run directory yet, or a
-   live one whose newest lifecycle event does not end the run. An
-   archived run's readers keep reading the archive, and a legacy run's
-   are pointed away from its own events by the new live directory. A live
-   run that ended (completed, failed or cancelled) is archived by the
-   event cleanup once idle, which may happen between choosing the id and
-   the attempt's first event, so it is not resumed in place either."
+  "True only when a run resumed under `id` writes its events where readers
+   of `id` look, and they stay there: its run directory is under live/,
+   its events read completely (none unreadable, the run found), its newest
+   lifecycle event does not end it (completed, failed or cancelled), and
+   it is still under live/ after the read. Anything else, a missing run
+   directory included, is a new attempt under a fresh id. An archived
+   run's readers keep reading the archive, a legacy run's are pointed away
+   from its own events by a new live directory, and a run that ended is
+   archived by the event cleanup once idle, possibly while it is being
+   resumed; an archive during the read shows up as an incomplete scan or
+   a moved directory."
   [events-dir id]
-  (let [dir (es/workflow-events-dir events-dir (str id))]
-    (or (nil? dir)
-        (and (= dir (es/workflow-dir events-dir (str id)))
-             (not (#{:workflow/completed :workflow/failed :workflow/cancelled}
-                   (->> (es/read-workflow-events-by-id events-dir (str id))
-                        (filter (comp #{:workflow/started :workflow/resumed :workflow/completed
-                                        :workflow/failed :workflow/cancelled}
-                                      :event/type))
-                        ;; Not file order: same-second legacy names sort by
-                        ;; their uuid suffix.
-                        (sort-by es/event-order-key)
-                        last
-                        :event/type)))))))
+  (let [id     (str id)
+        live   (es/workflow-dir events-dir id)
+        live?  #(= live (es/workflow-events-dir events-dir id))
+        events (when (live?) (es/read-workflow-events-by-id events-dir id))]
+    (boolean
+     (and (some? events)
+          (empty? (:event-stream/unreadable-files (meta events)))
+          (not (#{:workflow/completed :workflow/failed :workflow/cancelled}
+                (->> events
+                     (filter (comp #{:workflow/started :workflow/resumed :workflow/completed
+                                     :workflow/failed :workflow/cancelled}
+                                   :event/type))
+                     ;; Not file order: same-second legacy names sort by
+                     ;; their uuid suffix.
+                     (sort-by es/event-order-key)
+                     last
+                     :event/type)))
+          (live?)))))
 
 (defn- ^{:stratum 0} checkpointed?
   "True when anything is stored under `run-id`'s checkpoint directory. Not
