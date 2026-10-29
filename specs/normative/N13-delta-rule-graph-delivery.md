@@ -162,7 +162,7 @@ pack: ids and behavior first, bodies only on demand.
 | Node | Key | Attributes |
 |---|---|---|
 | rule | `:rule/id` | Dewey code, text digests and sizes, detector, action, severity, static check kind, enabled, pack, source path |
-| category | taxonomy id | Dewey range, label |
+| category | taxonomy id, taxonomy version, category id | Dewey range, label |
 | scope | glob, phase or task type | none |
 | detector | detector kind | deterministic or semantic |
 
@@ -242,6 +242,7 @@ Every query takes and returns data. The same inputs, graph digest and ledger sna
  :scope-paths  [string]                         ; intent scope, files-in-scope, explore results
  :repo-paths   [string]                         ; tracked files, passed in by the caller
  :failed-rules [keyword]                        ; ids failed by the prior attempt's gate or review
+ :always-on    [keyword]                        ; resolved always-on ids: defaults plus repo edits (§7.8)
  :enforcement  {:gate-checks {keyword {:check keyword :rule/digest string :paths [string]}}
                 :reviewer?   boolean}           ; an LLM reviewer runs for this changeset
  :budget       {:behavior-tokens int :manifest-tokens int}}
@@ -462,8 +463,9 @@ analysis produced this diff by hand. It becomes a build output.
 
 The always-on set MUST be declared as data in miniforge, with a reason per entry. It MUST NOT be inferred from
 `alwaysApply`. At plan and implement, always-on rules reach the agent whatever the phase, task or file scope. A
-repo MAY add entries in `.miniforge/config.edn`; removing one MUST record a reason there. The v0 proposal follows.
-Its behavior text totals 3,054 characters, about 764 tokens.
+repo MAY add entries in `.miniforge/config.edn`; removing one MUST record a reason there. The caller resolves the
+defaults and the repo's edits and passes the result to `delivery-set` as `:always-on`, so the query reads no
+configuration. The v0 proposal follows. Its behavior text totals 3,054 characters, about 764 tokens.
 
 | Rule | Dewey | Reason |
 |---|---|---|
@@ -586,6 +588,7 @@ Each obligation names the stage from which it applies.
 6. Stage 1. A review without an LLM backend emits `policy/rule-unenforced` for applicable `:checked` and `:judged`
    rules. It reports none of them as passed.
 7. Stage 1. The same inputs, graph digest, enforcement snapshot and ledger snapshot give byte-identical output.
+   Inputs include the resolved always-on set.
 8. Stage 1. `:policy-verify` and `:policy-review` verdicts are identical with the graph present and absent.
 9. Stage 1. A recompile of unchanged rules keeps every graph digest.
 10. Stage 1. A shipped graph edited to drop a rule is not used; the load-time rebuild is, and a fact is emitted.
