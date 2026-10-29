@@ -3,7 +3,27 @@
 ;; Copyright 2025-2026 Christopher Lester. Licensed under Apache 2.0.
 
 {:gate/messages
- {;; Stale-references gate — registry description
+ {;; No-secrets gate — registry description
+  :no-secrets/description
+  "Fails when a change puts a secret-shaped value (token, key, password literal) in a file"
+
+  ;; No-secrets gate — findings, as file:line pairs; never the value itself
+  :no-secrets/detected
+  "Secret-shaped values at {locations}. Remove them and read the credential from the environment or a secret store."
+
+  ;; No-secrets gate — some findings sit in commits after the task base
+  :no-secrets/in-history
+  "Findings marked with a commit id were committed after the task base; those commits must be rewritten or dropped, since a push sends history."
+
+  ;; No-secrets gate — a supplied worktree could not be read
+  :no-secrets/uninspectable
+  "Could not inspect the worktree at {path} (base commit, changed files or history unreadable); the change is unchecked."
+
+  ;; No-secrets gate — location label for the artifact's own content
+  :no-secrets/artifact-content
+  "artifact content"
+
+  ;; Stale-references gate — registry description
   :stale-references/description
   "Fails when a removed keyword or def'd name is still referenced elsewhere in the repo (contract drift)"
 

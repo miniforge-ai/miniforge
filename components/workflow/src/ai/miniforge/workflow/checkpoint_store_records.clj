@@ -43,6 +43,13 @@
   []
   (str (java.time.Instant/now)))
 
+(def ^{:stratum 0} checkpoint-format-version
+  "The checkpoint format this build writes, stamped on every record as
+   `:checkpoint/format-version`, and the newest one it reads. Bump it when
+   a record's shape changes in a way an older reader would misread. A
+   record with no version predates the stamp and reads as legacy."
+  1)
+
 (def ^{:stratum 0} persisted-execution-keys
   "Serializable execution fields kept in the durable machine snapshot.
 
@@ -76,6 +83,7 @@
    :execution/environment-id
    :execution/environment-metadata
    :execution/worktree-path
+   :execution/task-base-refs
    :execution/mode
    :execution/completed-with-warnings?])
 
@@ -89,6 +97,16 @@
     (vec (concat ordered-phase-ids remaining-phase-ids))))
 
 ;------------------------------------------------------------------------------ Layer 1
+
+(defn ^{:stratum 1} readable-format?
+  "True when this build can read `record`: it has no format-version key
+   (legacy, or no record at all), or an integer version no newer than
+   `checkpoint-format-version`. A newer or malformed version, an explicit
+   nil included, is not guessed at."
+  [record]
+  (let [version (:checkpoint/format-version record)]
+    (or (not (contains? record :checkpoint/format-version))
+        (and (integer? version) (<= version checkpoint-format-version)))))
 
 (defn ^{:stratum 1} active-or-last-phase
   "Current or latest attempted phase, then the legacy checkpoint-order fallback."
@@ -108,6 +126,7 @@
    from one writer and a live Date from another for the same key."
   [ctx]
   (-> (select-keys ctx persisted-execution-keys)
+      (assoc :checkpoint/format-version checkpoint-format-version)
       coerce/stringify-instants))
 
 (defn ^{:stratum 1} build-phase-checkpoint
@@ -115,7 +134,8 @@
   [ctx phase-name phase-result]
   (let [checkpointed-at (current-checkpoint-timestamp)]
     (coerce/stringify-instants
-     {:workflow/id (:execution/id ctx)
+     {:checkpoint/format-version checkpoint-format-version
+      :workflow/id (:execution/id ctx)
       :workflow/workflow-id (:execution/workflow-id ctx)
       :workflow/workflow-version (:execution/workflow-version ctx)
       :workflow/phase phase-name
@@ -123,7 +143,9 @@
       :phase/result phase-result})))
 
 (defn ^{:stratum 1} build-manifest
-  "Build the durable checkpoint manifest for an execution context."
+  "Build the durable checkpoint manifest for an execution context. It
+   keeps a legacy `:pinned? true` from the existing manifest (a run pinned
+   before pins moved to their own marker file), so the GC still keeps it."
   ([ctx checkpoint-root]
    (build-manifest ctx checkpoint-root nil))
   ([ctx checkpoint-root existing-manifest]
@@ -145,11 +167,15 @@
                                    current-phase-ids)
          phase-paths (merge existing-phase-paths current-phase-paths)]
      (coerce/stringify-instants
-      {:workflow/id workflow-run-id
-       :workflow/workflow-id (:execution/workflow-id ctx)
-       :workflow/workflow-version (:execution/workflow-version ctx)
-       :workflow/phases-completed phase-ids
-       :workflow/machine-snapshot-path
-       (checkpoint-paths/machine-snapshot-path checkpoint-root workflow-run-id)
-       :workflow/phase-checkpoints phase-paths
-       :workflow/last-checkpoint-at (current-checkpoint-timestamp)}))))
+      (cond-> {:checkpoint/format-version checkpoint-format-version
+               :workflow/id workflow-run-id
+               :workflow/workflow-id (:execution/workflow-id ctx)
+               :workflow/workflow-version (:execution/workflow-version ctx)
+               :workflow/phases-completed phase-ids
+               :workflow/machine-snapshot-path
+               (checkpoint-paths/machine-snapshot-path checkpoint-root workflow-run-id)
+               :workflow/phase-checkpoints phase-paths
+               :workflow/last-checkpoint-at (current-checkpoint-timestamp)}
+        ;; A legacy manifest pin stays: the checkpoint GC never collects it.
+        (true? (:pinned? existing-manifest))
+        (assoc :pinned? true))))))

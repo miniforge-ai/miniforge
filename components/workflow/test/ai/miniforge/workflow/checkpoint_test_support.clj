@@ -34,14 +34,11 @@
    also needs the path, to pass as `:checkpoint/root` or to read back.
 
    The override is a `with-redefs` on the single resolution point, below
-   config. Nothing above it works from inside a test: `MINIFORGE_HOME`
-   is process environment a running JVM cannot change, and it would not
-   move the root anyway — the default config resource
-   (`config/default-user-config-fallback.edn`) sets
-   `[:workflow :checkpoint-root]` to `~/.miniforge/checkpoints`, so the
-   merged config carries that value even under an empty home."
+   config: `MINIFORGE_HOME` is process environment a running JVM cannot
+   change, and a user's own config.edn may name a root of its own."
   (:require
    [ai.miniforge.workflow.checkpoint-store-paths :as checkpoint-paths]
+   [ai.miniforge.workflow.context :as context]
    [babashka.fs :as fs]
    [slingshot.slingshot :refer [try+]])
   (:import
@@ -69,6 +66,39 @@
     (fs/delete-tree root)
     (catch Exception _
       nil)))
+
+(defn ^{:stratum 0} unwritable-checkpoint-root
+  "A checkpoint root beneath a regular file in `dir`: creating a run
+   directory under it fails with an I/O exception whatever the process's
+   permissions, so a test using it holds when run as root too."
+  [dir]
+  (let [blocker (fs/file dir "not-a-directory")]
+    (spit blocker "")
+    (str (fs/path blocker "checkpoints"))))
+
+(defn ^{:stratum 0} plan-completed-context
+  "A one-phase run that has just completed :plan, checkpointing under
+   `root`; `opts` are merged into its execution options."
+  [root opts]
+  (-> (context/create-context {:workflow/id :checkpoint-test
+                               :workflow/version "1.0.0"
+                               :workflow/pipeline [{:phase :plan}]}
+                              {:task "Test"}
+                              (assoc opts :checkpoint/root root))
+      (assoc :execution/current-phase :plan
+             :execution/phase-results {:plan {:status :completed}})))
+
+(defn ^{:stratum 0} expired-run!
+  "A run checkpoint directory under `root`, last changed 90 days ago, with
+   a minimal manifest. Returns its id."
+  [root]
+  (let [id (random-uuid)
+        dir (fs/file root (str id))]
+    (fs/create-dirs dir)
+    (spit (fs/file dir "manifest.edn") "{:workflow/id 1}")
+    (doseq [f (reverse (file-seq dir))]
+      (.setLastModified ^java.io.File f (- (System/currentTimeMillis) (* 90 24 60 60 1000))))
+    id))
 
 ;------------------------------------------------------------------------------ Layer 1
 

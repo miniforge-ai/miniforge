@@ -21,6 +21,7 @@
    [clojure.string :as str]
    [clojure.java.io :as io]
    [clojure.test :refer [deftest is testing]]
+   [ai.miniforge.anomaly.interface :as anomaly]
    [ai.miniforge.workflow.checkpoint-store :as checkpoint-store]
    [ai.miniforge.workflow.checkpoint-store-paths :as checkpoint-paths]
    [ai.miniforge.workflow.checkpoint-test-support :as checkpoint-test-support]
@@ -80,7 +81,7 @@
           (is (nil? (workflow/load-checkpoint-data orphan opts)))
           (is (true? (workflow/checkpoint-present? orphan opts))))
         (testing "a snapshot the loader cannot read holds the id"
-          (is (nil? (workflow/load-checkpoint-data unreadable opts)))
+          (is (anomaly/anomaly? (workflow/load-checkpoint-data unreadable opts)))
           (is (true? (workflow/checkpoint-present? unreadable opts))))))))
 
 (deftest ^{:stratum 0} persist-execution-state-validates-before-saving-test
@@ -202,6 +203,21 @@
               "Instants inside gate errors are normalized to strings so the history stays EDN-readable")
           (is (= :allow (get-in phase-file [:phase/result :phase/decision-envelope :envelope/decision]))
               "the phase checkpoint holds only the last iteration — the reason the history exists"))))))
+
+(deftest ^{:stratum 0} task-base-refs-survive-a-checkpoint-test
+  ;; A resumed implement measures the change from the base it recorded;
+  ;; dropped at checkpoint, it would recompute from the restored HEAD and
+  ;; exempt the task's earlier commits from the :no-secrets scan.
+  (checkpoint-test-support/call-with-temp-checkpoint-root
+    (fn [checkpoint-root]
+      (let [refs     ["spec-sha...HEAD" "task-base-sha"]
+            workflow {:workflow/id :test :workflow/version "1.0.0" :workflow/pipeline [{:phase :done}]}
+            ctx      (assoc (ctx/create-context workflow {:task "Test"} {:checkpoint/root checkpoint-root})
+                            :execution/task-base-refs refs)
+            _        (checkpoint-store/persist-execution-state! ctx)
+            snapshot (:machine-snapshot (checkpoint-store/load-checkpoint-data
+                                         (:execution/id ctx) {:checkpoint/root checkpoint-root}))]
+        (is (= refs (:execution/task-base-refs snapshot)))))))
 
 ;------------------------------------------------------------------------------ Layer 1
 

@@ -79,13 +79,15 @@
 
 (deftest ^{:stratum 1} no-auth-keeps-machine-endpoints-open
   (testing "intentional machine ingest endpoints are not treated as operator control"
-    (let [handler (server/create-handler (no-auth-state))
+    (let [state (doto (no-auth-state) (swap! assoc :ingest-token "start-token"))
+          handler (server/create-handler state)
           response (handler {:uri "/api/events/ingest"
                              :request-method :post
-                             :headers {"content-type" "application/json"}
+                             :headers {"content-type" "application/json"
+                                       "x-miniforge-ingest-token" "start-token"}
                              :body (body-stream "{}")})]
-      (is (not= 401 (:status response))
-          "event ingest stays public — it carries no operator authority to gate"))))
+      (is (= 202 (:status response))
+          "event ingest needs this start's token, not an operator session"))))
 
 (deftest ^{:stratum 1} no-auth-refuses-other-mutations
   (testing "the gate covers every mutation, not just the workflow command endpoint"

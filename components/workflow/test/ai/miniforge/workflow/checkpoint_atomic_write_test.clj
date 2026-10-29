@@ -2,7 +2,8 @@
 ;; Copyright 2025-2026 Christopher Lester (christopher@miniforge.ai)
 ;; Licensed under the Apache License, Version 2.0.
 (ns ai.miniforge.workflow.checkpoint-atomic-write-test
-  (:require [ai.miniforge.workflow.checkpoint-store :as store]
+  (:require [ai.miniforge.anomaly.interface :as anomaly]
+            [ai.miniforge.workflow.checkpoint-store :as store]
             [ai.miniforge.workflow.boundary.checkpoint-permissions :as permissions]
             [ai.miniforge.workflow.checkpoint-test-support :as fixture]
             [ai.miniforge.workflow.context :as context]
@@ -52,8 +53,8 @@
         discard! (partial discard-prepared-file! permissions/prepare! prepared)]
     (is (map? persisted))
     (with-redefs [permissions/prepare! discard!]
-      (is (nil? (store/persist-execution-state!
-                 (assoc ctx :execution/redirect-count 1)))))
+      (is (anomaly/anomaly? (store/persist-execution-state!
+                            (assoc ctx :execution/redirect-count 1)))))
     (is (= 1 @prepared))
     (is (= before (workflow/load-checkpoint-data run-id opts)))
     (is (fs/exists? (:checkpoint/machine-snapshot-path persisted)))

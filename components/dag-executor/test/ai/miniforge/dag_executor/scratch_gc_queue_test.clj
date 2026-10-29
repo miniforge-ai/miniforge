@@ -15,7 +15,6 @@
 ;; WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 ;; See the License for the specific language governing permissions and
 ;; limitations under the License.
-
 (ns ai.miniforge.dag-executor.scratch-gc-queue-test
   "Unit tests for the deferred GC queue module.
 
@@ -24,9 +23,9 @@
    `clojure.java.shell/sh` has NO built-in timeout.  Any hung git subprocess
    will block the entire Polylith test runner for the full 30-minute window.
 
-   Tests that do NOT trigger GC (empty queue, fresh-only entries, default
-   arity) pass \"/unused\" as `parent-repo-path` — the function never reaches
-   the git call so the value is irrelevant.
+   `repo-key` is stubbed with `one-repo`, which puts every path in the
+   repository \"/unused\", so neither enqueue nor a GC pass runs git, and
+   hand-written entries carry `:git-dir \"/unused\"` to belong to it.
 
    Tests that DO trigger GC use `with-redefs` to mock
    `scratch-commit/gc-scratch-refs!` so no git subprocess is ever spawned.
@@ -35,6 +34,7 @@
   (:require
    [clojure.test :refer [deftest is testing]]
    [clojure.edn :as edn]
+   [ai.miniforge.config.interface :as mf-config]
    [ai.miniforge.dag-executor.scratch-gc-queue :as sut]
    [ai.miniforge.dag-executor.scratch-commit :as scratch-commit]
    [ai.miniforge.dag-executor.result :as result])
@@ -43,16 +43,17 @@
    [java.nio.file Files]
    [java.nio.file.attribute FileAttribute]))
 
-;;------------------------------------------------------------------------------ Test helpers
+;------------------------------------------------------------------------------ Layer 0
 
-(defn- make-temp-dir!
+;;------------------------------------------------------------------------------ Test helpers
+(defn- ^{:stratum 0} make-temp-dir!
   "Create a temp directory and return its absolute path string."
   []
   (.getAbsolutePath
    (.toFile (Files/createTempDirectory "gc-queue-test-"
                                        (make-array FileAttribute 0)))))
 
-(defn- delete-dir-recursive!
+(defn- ^{:stratum 0} delete-dir-recursive!
   "Recursively delete `path` and everything under it (best-effort)."
   [path]
   (let [f (File. ^String path)]
@@ -60,7 +61,12 @@
       (doseq [child (reverse (file-seq f))]
         (.delete ^File child)))))
 
-(defn- read-raw-queue
+(defn- ^{:stratum 0} one-repo
+  "`repo-key` stub: every path belongs to the repository \"/unused\"."
+  [_path]
+  (result/ok "/unused"))
+
+(defn- ^{:stratum 0} read-raw-queue
   "Slurp and parse the queue file at `path`.  Returns [] when absent."
   [path]
   (let [f (File. ^String path)]
@@ -69,15 +75,14 @@
       [])))
 
 ;;------------------------------------------------------------------------------ gc-queue-path
-
-(deftest gc-queue-path-returns-string-test
+(deftest ^{:stratum 0} gc-queue-path-returns-string-test
   (testing "gc-queue-path returns a non-blank string ending in .edn"
     (let [p (sut/gc-queue-path)]
       (is (string? p))
       (is (not (clojure.string/blank? p)))
       (is (clojure.string/ends-with? p ".edn")))))
 
-(deftest gc-queue-path-creates-miniforge-dir-test
+(deftest ^{:stratum 0} gc-queue-path-creates-miniforge-dir-test
   (testing "Calling gc-queue-path creates the ~/.miniforge directory if absent"
     ;; Bind user.home to a temp dir so the test never writes the real
     ;; ~/.miniforge; verify the function returns a path whose parent
@@ -94,14 +99,17 @@
         (finally
           (System/setProperty "user.home" orig))))))
 
-;;------------------------------------------------------------------------------ enqueue-workflow-gc!
+;------------------------------------------------------------------------------ Layer 1
 
-(deftest enqueue-workflow-gc!-first-entry-test
+;;------------------------------------------------------------------------------ enqueue-workflow-gc!
+(deftest ^{:stratum 1} enqueue-workflow-gc!-first-entry-test
   (testing "Enqueueing a workflow ID returns ok with queue-size 1"
     (let [tmp-dir  (make-temp-dir!)
           tmp-path (str tmp-dir "/scratch-gc-queue.edn")]
       (try
-        (with-redefs [sut/gc-queue-path (constantly tmp-path)]
+        (with-redefs [sut/gc-queue-path (constantly tmp-path)
+                      mf-config/miniforge-home-override (constantly (str tmp-dir))
+                      sut/repo-key one-repo]
           (let [r (sut/enqueue-workflow-gc! "wf-test-001")]
             (is (result/ok? r))
             (let [data (result/unwrap r)]
@@ -109,12 +117,14 @@
               (is (= 1 (:queue-size data))))))
         (finally (delete-dir-recursive! tmp-dir))))))
 
-(deftest enqueue-workflow-gc!-accumulates-entries-test
+(deftest ^{:stratum 1} enqueue-workflow-gc!-accumulates-entries-test
   (testing "Multiple enqueues accumulate entries in the queue"
     (let [tmp-dir  (make-temp-dir!)
           tmp-path (str tmp-dir "/scratch-gc-queue.edn")]
       (try
-        (with-redefs [sut/gc-queue-path (constantly tmp-path)]
+        (with-redefs [sut/gc-queue-path (constantly tmp-path)
+                      mf-config/miniforge-home-override (constantly (str tmp-dir))
+                      sut/repo-key one-repo]
           (sut/enqueue-workflow-gc! "wf-a")
           (sut/enqueue-workflow-gc! "wf-b")
           (let [r (sut/enqueue-workflow-gc! "wf-c")]
@@ -122,12 +132,14 @@
             (is (= 3 (:queue-size (result/unwrap r))))))
         (finally (delete-dir-recursive! tmp-dir))))))
 
-(deftest enqueue-workflow-gc!-writes-workflow-id-and-finished-at-test
+(deftest ^{:stratum 1} enqueue-workflow-gc!-writes-workflow-id-and-finished-at-test
   (testing "Enqueued entry contains :workflow-id and a :finished-at timestamp"
     (let [tmp-dir  (make-temp-dir!)
           tmp-path (str tmp-dir "/scratch-gc-queue.edn")]
       (try
-        (with-redefs [sut/gc-queue-path (constantly tmp-path)]
+        (with-redefs [sut/gc-queue-path (constantly tmp-path)
+                      mf-config/miniforge-home-override (constantly (str tmp-dir))
+                      sut/repo-key one-repo]
           (sut/enqueue-workflow-gc! "wf-ts-test")
           (let [entries (read-raw-queue tmp-path)
                 entry   (first entries)]
@@ -139,13 +151,14 @@
 ;;------------------------------------------------------------------------------ run-deferred-gc! — no stale entries
 ;; No GC branch is reached in these tests so the repo path is irrelevant —
 ;; we pass "/unused" to avoid any git subprocess whatsoever.
-
-(deftest run-deferred-gc!-empty-queue-returns-ok-test
+(deftest ^{:stratum 1} run-deferred-gc!-empty-queue-returns-ok-test
   (testing "Empty queue returns ok with pruned=0 and gc-result=nil"
     (let [tmp-dir  (make-temp-dir!)
           tmp-path (str tmp-dir "/scratch-gc-queue.edn")]
       (try
-        (with-redefs [sut/gc-queue-path (constantly tmp-path)]
+        (with-redefs [sut/gc-queue-path (constantly tmp-path)
+                      mf-config/miniforge-home-override (constantly (str tmp-dir))
+                      sut/repo-key one-repo]
           (let [r (sut/run-deferred-gc! "/unused" 7)]
             (is (result/ok? r))
             (let [data (result/unwrap r)]
@@ -154,12 +167,14 @@
               (is (nil? (:gc-result data))))))
         (finally (delete-dir-recursive! tmp-dir))))))
 
-(deftest run-deferred-gc!-fresh-entries-not-pruned-test
+(deftest ^{:stratum 1} run-deferred-gc!-fresh-entries-not-pruned-test
   (testing "Entries younger than max-age-days are not pruned"
     (let [tmp-dir  (make-temp-dir!)
           tmp-path (str tmp-dir "/scratch-gc-queue.edn")]
       (try
-        (with-redefs [sut/gc-queue-path (constantly tmp-path)]
+        (with-redefs [sut/gc-queue-path (constantly tmp-path)
+                      mf-config/miniforge-home-override (constantly (str tmp-dir))
+                      sut/repo-key one-repo]
           ;; Enqueue a just-created entry.
           (sut/enqueue-workflow-gc! "wf-fresh")
           ;; Run GC with a large max-age so nothing qualifies.
@@ -174,14 +189,15 @@
 ;;------------------------------------------------------------------------------ run-deferred-gc! — stale entries (gc-scratch-refs! mocked)
 ;; gc-scratch-refs! is mocked so no git subprocess is spawned.
 ;; These tests exercise the queue partitioning and write-back logic.
-
-(deftest run-deferred-gc!-zero-age-prunes-all-test
+(deftest ^{:stratum 1} run-deferred-gc!-zero-age-prunes-all-test
   (testing "max-age-days=0 prunes all entries (age >= 0)"
     (let [tmp-dir   (make-temp-dir!)
           tmp-path  (str tmp-dir "/scratch-gc-queue.edn")
           gc-result {:deleted ["refs/miniforge/scratch/wf-stale-001"] :retained 0}]
       (try
         (with-redefs [sut/gc-queue-path             (constantly tmp-path)
+                      mf-config/miniforge-home-override (constantly (str tmp-dir))
+                      sut/repo-key                  one-repo
                       scratch-commit/gc-scratch-refs! (fn [_ _]
                                                         (result/ok gc-result))]
           ;; Enqueue the workflow — its :finished-at is "now", so age=0 makes
@@ -198,7 +214,7 @@
           (is (= [] (read-raw-queue tmp-path))))
         (finally (delete-dir-recursive! tmp-dir))))))
 
-(deftest run-deferred-gc!-mixed-fresh-and-stale-test
+(deftest ^{:stratum 1} run-deferred-gc!-mixed-fresh-and-stale-test
   (testing "Only stale entries are pruned; fresh entries remain in the queue"
     (let [tmp-dir        (make-temp-dir!)
           tmp-path       (str tmp-dir "/scratch-gc-queue.edn")
@@ -208,13 +224,15 @@
                              (* 8 24 60 60 1000)))]
       (try
         (with-redefs [sut/gc-queue-path             (constantly tmp-path)
+                      mf-config/miniforge-home-override (constantly (str tmp-dir))
+                      sut/repo-key                  one-repo
                       scratch-commit/gc-scratch-refs! (fn [_ _]
                                                         (result/ok
                                                          {:deleted ["refs/miniforge/scratch/wf-old"]
                                                           :retained 0}))]
           ;; Write a stale entry directly to the queue file, bypassing
           ;; enqueue! so we can control the :finished-at timestamp.
-          (spit tmp-path (pr-str [{:workflow-id "wf-old"
+          (spit tmp-path (pr-str [{:git-dir "/unused" :workflow-id "wf-old"
                                    :finished-at eight-days-ago}]))
           ;; Enqueue a fresh entry via the normal API.
           (sut/enqueue-workflow-gc! "wf-fresh-2")
@@ -231,8 +249,7 @@
         (finally (delete-dir-recursive! tmp-dir))))))
 
 ;;------------------------------------------------------------------------------ prune-stale-queue-entries! — extracted lock-body logic
-
-(deftest prune-stale-queue-entries!-partitions-and-writes-back-test
+(deftest ^{:stratum 1} prune-stale-queue-entries!-partitions-and-writes-back-test
   (testing "the extracted GC step prunes stale entries, retains fresh, writes back only fresh"
     (let [tmp-dir        (make-temp-dir!)
           tmp-path       (str tmp-dir "/scratch-gc-queue.edn")
@@ -243,8 +260,8 @@
         (with-redefs [scratch-commit/gc-scratch-refs! (fn [_ _]
                                                          (result/ok {:deleted ["refs/miniforge/scratch/wf-old"]
                                                                      :retained 0}))]
-          (spit tmp-path (pr-str [{:workflow-id "wf-old"   :finished-at eight-days-ago}
-                                  {:workflow-id "wf-fresh" :finished-at now}]))
+          (spit tmp-path (pr-str [{:git-dir "/unused" :workflow-id "wf-old"   :finished-at eight-days-ago}
+                                  {:git-dir "/unused" :workflow-id "wf-fresh" :finished-at now}]))
           ;; Call the extracted fn directly (no lock thunk) with a 7-day window.
           (let [r    (sut/prune-stale-queue-entries! tmp-path "/unused" 7)
                 data (result/unwrap r)]
@@ -257,14 +274,14 @@
             (is (= ["wf-fresh"] (mapv :workflow-id remaining)))))
         (finally (delete-dir-recursive! tmp-dir))))))
 
-(deftest prune-stale-queue-entries!-no-stale-leaves-queue-untouched-test
+(deftest ^{:stratum 1} prune-stale-queue-entries!-no-stale-leaves-queue-untouched-test
   (testing "with no stale entries the queue is left unchanged and GC is not invoked"
     (let [tmp-dir  (make-temp-dir!)
           tmp-path (str tmp-dir "/scratch-gc-queue.edn")
           gc-calls (atom 0)]
       (try
         (with-redefs [scratch-commit/gc-scratch-refs! (fn [_ _] (swap! gc-calls inc) (result/ok {}))]
-          (spit tmp-path (pr-str [{:workflow-id "wf-fresh" :finished-at (java.util.Date.)}]))
+          (spit tmp-path (pr-str [{:git-dir "/unused" :workflow-id "wf-fresh" :finished-at (java.util.Date.)}]))
           (let [r    (sut/prune-stale-queue-entries! tmp-path "/unused" 7)
                 data (result/unwrap r)]
             (is (result/ok? r))
@@ -274,7 +291,7 @@
             (is (zero? @gc-calls) "gc-scratch-refs! must not run when nothing is stale")))
         (finally (delete-dir-recursive! tmp-dir))))))
 
-(deftest prune-stale-queue-entries!-propagates-gc-failure-test
+(deftest ^{:stratum 1} prune-stale-queue-entries!-propagates-gc-failure-test
   (testing "a git-level GC failure propagates and leaves the queue untouched"
     (let [tmp-dir  (make-temp-dir!)
           tmp-path (str tmp-dir "/scratch-gc-queue.edn")
@@ -282,7 +299,7 @@
       (try
         (with-redefs [scratch-commit/gc-scratch-refs! (fn [_ _]
                                                          (result/err :scratch-commit/gc-list-failed "boom" {}))]
-          (spit tmp-path (pr-str [{:workflow-id "wf-old" :finished-at stale}]))
+          (spit tmp-path (pr-str [{:git-dir "/unused" :workflow-id "wf-old" :finished-at stale}]))
           (let [r (sut/prune-stale-queue-entries! tmp-path "/unused" 7)]
             (is (result/err? r) "the GC error must propagate"))
           ;; Queue is untouched so the stale entry is retried next pass.
@@ -290,13 +307,14 @@
         (finally (delete-dir-recursive! tmp-dir))))))
 
 ;;------------------------------------------------------------------------------ run-deferred-gc! — arity
-
-(deftest run-deferred-gc!-default-arity-test
+(deftest ^{:stratum 1} run-deferred-gc!-default-arity-test
   (testing "Single-arity run-deferred-gc! defaults to 7-day retention"
     (let [tmp-dir  (make-temp-dir!)
           tmp-path (str tmp-dir "/scratch-gc-queue.edn")]
       (try
-        (with-redefs [sut/gc-queue-path (constantly tmp-path)]
+        (with-redefs [sut/gc-queue-path (constantly tmp-path)
+                      mf-config/miniforge-home-override (constantly (str tmp-dir))
+                      sut/repo-key one-repo]
           ;; Fresh entry — must not be pruned with default 7-day window.
           (sut/enqueue-workflow-gc! "wf-arity-test")
           (let [r (sut/run-deferred-gc! "/unused")]
@@ -305,15 +323,16 @@
         (finally (delete-dir-recursive! tmp-dir))))))
 
 ;;------------------------------------------------------------------------------ run-deferred-gc! — missing :finished-at (Long/MAX_VALUE sentinel)
-
-(deftest run-deferred-gc!-entry-with-missing-finished-at-never-pruned-test
+(deftest ^{:stratum 1} run-deferred-gc!-entry-with-missing-finished-at-never-pruned-test
   (testing "Entries missing :finished-at are treated as never-stale (Long/MAX_VALUE sentinel)"
     (let [tmp-dir  (make-temp-dir!)
           tmp-path (str tmp-dir "/scratch-gc-queue.edn")]
       (try
-        (with-redefs [sut/gc-queue-path (constantly tmp-path)]
+        (with-redefs [sut/gc-queue-path (constantly tmp-path)
+                      mf-config/miniforge-home-override (constantly (str tmp-dir))
+                      sut/repo-key one-repo]
           ;; Write an entry with no :finished-at (manually crafted or migrated).
-          (spit tmp-path (pr-str [{:workflow-id "wf-no-timestamp"}]))
+          (spit tmp-path (pr-str [{:git-dir "/unused" :workflow-id "wf-no-timestamp"}]))
           ;; Even with max-age-days=0 the entry must NOT be pruned.
           ;; finished-at-epoch-seconds returns Long/MAX_VALUE for absent values,
           ;; so the age check never qualifies → gc-scratch-refs! is never called
@@ -329,8 +348,7 @@
           (delete-dir-recursive! tmp-dir))))))
 
 ;;------------------------------------------------------------------------------ run-deferred-gc! — gc error path
-
-(deftest run-deferred-gc!-gc-failure-leaves-queue-intact-test
+(deftest ^{:stratum 1} run-deferred-gc!-gc-failure-leaves-queue-intact-test
   (testing "When gc-scratch-refs! fails the queue is not modified and result is err"
     ;; Write a stale entry manually (8 days old) so it qualifies for GC.
     ;; We mock gc-scratch-refs! to return an error so no git subprocess is
@@ -343,12 +361,14 @@
                              (* 8 24 60 60 1000)))]
       (try
         (with-redefs [sut/gc-queue-path             (constantly tmp-path)
+                      mf-config/miniforge-home-override (constantly (str tmp-dir))
+                      sut/repo-key                  one-repo
                       scratch-commit/gc-scratch-refs! (fn [_ _]
                                                         (result/err
                                                          :scratch-commit/gc-list-failed
                                                          "simulated git failure"
                                                          {}))]
-          (spit tmp-path (pr-str [{:workflow-id "wf-stale-err"
+          (spit tmp-path (pr-str [{:git-dir "/unused" :workflow-id "wf-stale-err"
                                    :finished-at eight-days-ago}]))
           ;; age=0 → entry is stale immediately; gc-scratch-refs! is mocked to fail.
           (let [r (sut/run-deferred-gc! "/any-path" 0)]

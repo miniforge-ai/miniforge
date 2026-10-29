@@ -21,33 +21,62 @@
 ;; llm_client.clj and are merged onto these maps at load time. See the
 ;; `backends` var there for the merge and for the rationale of each
 ;; field (prompt delivery, probe endpoints, credential handling).
+;;
+;; :probe-endpoint-routes point the network-drop probe at the endpoint
+;; the CLI is configured to use (llm-client/probe-endpoint-for). The
+;; first route that applies decides: a route with :when-env applies
+;; only when that switch is set and not off. It yields the URL in
+;; :base-url-env, else :global-url or :regional-url (%s = region) for
+;; the region in :region-env; when it yields nothing the static
+;; :probe-endpoint is used. Bedrock and Vertex come first because the
+;; Claude CLI does not use ANTHROPIC_BASE_URL when either is on.
+;;
+;; :catalog-backend names the model-catalog backend whose models a
+;; single-provider backend serves (the Anthropic API serves the catalog's
+;; :claude models). A backend without one routes to many providers and
+;; takes any model. See llm.interface/backend-serves-model?.
 {:claude {:cmd "claude"
           :streaming? true
           :description "Claude via Anthropic CLI"
           :provider "Anthropic"
           :requires-cli? true
+          :catalog-backend :claude
           ;; Prompt delivery: stdin. The planner path's system-prompt +
           ;; spec text + existing-files context regularly pushes argv
           ;; past POSIX ARG_MAX. Claude CLI supports --input-format text
           ;; to read the user prompt from stdin; we use that instead.
           :prompt-via :stdin
-          :probe-endpoint "https://api.anthropic.com/"}
+          :probe-endpoint "https://api.anthropic.com/"
+          :probe-endpoint-routes
+          [{:when-env "CLAUDE_CODE_USE_BEDROCK"
+            :base-url-env "ANTHROPIC_BEDROCK_BASE_URL"
+            :region-env "AWS_REGION"
+            :regional-url "https://bedrock-runtime.%s.amazonaws.com/"}
+           {:when-env "CLAUDE_CODE_USE_VERTEX"
+            :base-url-env "ANTHROPIC_VERTEX_BASE_URL"
+            :region-env "CLOUD_ML_REGION"
+            :global-url "https://aiplatform.googleapis.com/"
+            :regional-url "https://%s-aiplatform.googleapis.com/"}
+           {:base-url-env "ANTHROPIC_BASE_URL"}]}
 
  :codex {:cmd "codex"
          :streaming? true
          :description "Codex via Codex CLI"
          :provider "Codex"
          :requires-cli? true
+         :catalog-backend :codex
          ;; Prompt delivery: stdin. Codex supports `-` as the prompt
          ;; placeholder; this keeps large synthesis prompts off argv.
          :prompt-via :stdin
-         :probe-endpoint "https://api.openai.com/"}
+         :probe-endpoint "https://api.openai.com/"
+         :probe-endpoint-routes [{:base-url-env "OPENAI_BASE_URL"}]}
 
  :ollama {:cmd "http"
           :streaming? true
           :description "Local models via Ollama"
           :provider "Ollama"
           :requires-cli? false
+          :catalog-backend :ollama
           :api-endpoint "http://localhost:11434/api/chat"
           :default-model "codellama"
           :models ["codellama" "llama2" "mistral"]
@@ -63,6 +92,7 @@
                  :description "Claude via Anthropic Messages API"
                  :provider "Anthropic"
                  :requires-cli? false
+                 :catalog-backend :claude
                  :api-endpoint "https://api.anthropic.com/v1/messages"
                  :api-key-env "ANTHROPIC_API_KEY"
                  :probe-endpoint "https://api.anthropic.com/"}
@@ -72,6 +102,7 @@
               :description "GPT via OpenAI Chat Completions API"
               :provider "OpenAI"
               :requires-cli? false
+              :catalog-backend :codex
               :api-endpoint "https://api.openai.com/v1/chat/completions"
               :api-key-env "OPENAI_API_KEY"
               :probe-endpoint "https://api.openai.com/"}
@@ -117,6 +148,7 @@
               :description "Gemini via Google Generative Language API"
               :provider "Gemini"
               :requires-cli? false
+              :catalog-backend :gemini-api
               :api-endpoint "https://generativelanguage.googleapis.com/v1beta/models/%s:generateContent"
               :model-in-url? true
               :api-key-env "GEMINI_API_KEY"

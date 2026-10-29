@@ -2,7 +2,9 @@
 ;; Copyright 2025-2026 Christopher Lester (christopher@miniforge.ai)
 ;; Licensed under the Apache License, Version 2.0.
 (ns ai.miniforge.workflow.checkpoint-directory-support
-  (:require [ai.miniforge.workflow.checkpoint-temporary-support :as support]
+  (:require [ai.miniforge.workflow.boundary.checkpoint-permissions :as permissions]
+            [ai.miniforge.workflow.checkpoint-temporary-support :as support]
+            [ai.miniforge.workflow.checkpoint-test-support :as fixture]
             [babashka.fs :as fs]
             [clojure.edn :as edn]
             [clojure.test :refer [is]])
@@ -16,6 +18,12 @@
 
 (def ^{:stratum 0} unsafe-directories ["rwxrwx---" "rwxrwxrwx"])
 
+(def ^{:stratum 0} lock-poll-failure "injected lock polling failure")
+
+(defn ^{:stratum 0} call-with-posix-root [f]
+  (fixture/call-with-temp-checkpoint-root
+   (fn [root] (when (permissions/posix? root) (f root)))))
+
 (defn ^{:stratum 0} read-value [path]
   (edn/read-string (slurp (fs/file path))))
 
@@ -25,6 +33,10 @@
   (fs/create-sym-link alias replacement))
 
 ;------------------------------------------------------------------------------ Layer 1
+
+(defn ^{:stratum 1} fail-lock-poll! [observed channel _deadline]
+  (reset! observed channel)
+  (throw (IOException. lock-poll-failure)))
 
 (defn ^{:stratum 1} verify-unsafe-directory [root mode]
   (let [directory (fs/path root "shared")

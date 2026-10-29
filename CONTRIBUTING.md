@@ -6,7 +6,7 @@
 
 # Contributing to Miniforge
 
-Thank you for contributing to Miniforge! This guide will help you get started.
+Thank you for contributing to Miniforge. This guide will help you get started.
 
 ## Quick Start
 
@@ -179,7 +179,7 @@ bb test
 bb run workflow list
 
 # Via JVM (full features)
-clojure -M:cli workflow run :simple-v2
+clojure -M:cli workflow run :quick-fix
 ```
 
 ### Debug a Test Failure
@@ -251,4 +251,4 @@ By contributing, you agree that your contributions will be licensed under the sa
 
 **Ready to contribute?** Start with a
 [good first issue](https://github.com/miniforge-ai/miniforge/labels/good%20first%20issue)
-or read the [Development Guidelines](docs/development-guidelines.md)!
+or read the [Development Guidelines](docs/development-guidelines.md).

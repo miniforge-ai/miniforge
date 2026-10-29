@@ -165,11 +165,17 @@
    :requires ([test-runner])
    :task (test-runner/integration)}
 
+  test:dev
+  {:doc  "Run development/test (task and tooling tests; poly test :all skips the development project)"
+   :requires ([test-runner])
+   :task (test-runner/development)}
+
   test:all
-  {:doc  "Run full suite (unit bricks + project integration tests)"
+  {:doc  "Run full suite (unit bricks + project integration + development tests)"
    :task (do
            (run 'test:poly)
-           (run 'test:integration))}
+           (run 'test:integration)
+           (run 'test:dev))}
 
   ccov
   {:doc  "Run the repo coverage toolset from bb-tools.edn"
@@ -282,7 +288,7 @@
              (println "Usage: bb build:script <project>")))}
 
   build:cli
-  {:doc  "Build miniforge CLI as distributable uberjar"
+  {:doc  "Build miniforge CLI as distributable uberjar (MINIFORGE_VERSION=<v> stamps its version)"
    :requires ([build])
    :task (build/cli)}
 
@@ -474,24 +480,26 @@
              (println "❌ Failed to configure git hooks")))}
 
   setup:email
-  {:doc  "Verify git email configuration"
-   :task (let [{:keys [out]} (p/sh "git" "config" "user.email")
-               email (str/trim out)]
-           (if (str/ends-with? email "@miniforge.ai")
-             (println "✅ Git email:" email)
-             (do
-               (println "⚠️  Git email not set to @miniforge.ai")
-               (println "   Current:" (if (str/blank? email) "(not set)" email))
-               (println "   Fix with: git config user.email 'yourname@miniforge.ai'"))))}
+  {:doc      "Verify git email configuration (the repo hooks accept only @miniforge.ai)"
+   :requires ([bootstrap])
+   :task     (doseq [line (:lines (bootstrap/hooks-plan (bootstrap/git-email)))]
+               (println line))}
 
   bootstrap
-  {:doc     "Full project bootstrap: install deps + configure environment"
-   :depends [install:deps install:coverage]
-   :task    (do
-              (println "\n🔧 Configuring development environment...\n")
-              (run 'setup:hooks)
-              (run 'setup:email)
-              (println "\n🎉 Bootstrap complete! Run 'bb' to see available tasks.\n"))}
+  {:doc      "Full project bootstrap: install deps, configure the clone, install `mf` to ~/.local/bin"
+   :requires ([bootstrap])
+   :depends  [install:deps install:coverage]
+   :task     (let [{:keys [install-hooks? lines]} (bootstrap/hooks-plan (bootstrap/git-email))]
+               (println "\n🔧 Configuring development environment...\n")
+               (doseq [line lines] (println line))
+               ;; Hooks only for org emails: the pre-commit hook rejects any
+               ;; other author, including mf's own release commit in this clone.
+               (when install-hooks? (run 'setup:hooks))
+               (println "\n📦 Installing the mf CLI...\n")
+               (bootstrap/check-private-dep-access!)
+               (run 'install:local)
+               (bootstrap/check-mf-install! (str (fs/home) "/.local/bin/mf"))
+               (println "\n🎉 Bootstrap complete. Run 'mf version' to check the CLI, 'bb' to list tasks.\n"))}
 
   setup
   {:doc     "Configure development environment (alias for bootstrap)"
@@ -845,6 +853,7 @@
                  "components/reporting/src"
                  "components/reporting/resources"
                  "components/observer/src"
+                 "components/observer/resources"
                  "components/tool-registry/src"
                  "components/tool-registry/resources"
                  "components/pr-train/src"

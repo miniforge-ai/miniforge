@@ -18,6 +18,7 @@
 (ns ai.miniforge.workflow.interface.checkpoints
   "Workflow checkpointing and resume data APIs."
   (:require
+   [ai.miniforge.anomaly.interface :as anomaly]
    [ai.miniforge.workflow.checkpoint-store :as checkpoint-store]
    [ai.miniforge.workflow.schemas :as schemas]))
 
@@ -28,9 +29,17 @@
   checkpoint-store/checkpoint-present?)
 
 (defn ^{:stratum 0} load-checkpoint-data
-  "Load checkpoint data and validate it at the public boundary."
+  "Load checkpoint data and validate it at the public boundary. An
+   unreadable checkpoint comes back as the store's anomaly, unvalidated:
+   it is a report about files on disk, not checkpoint data."
   ([workflow-run-id]
    (load-checkpoint-data workflow-run-id {}))
   ([workflow-run-id opts]
-   (some-> (checkpoint-store/load-checkpoint-data workflow-run-id opts)
-           schemas/validate-checkpoint-data!)))
+   (let [loaded (checkpoint-store/load-checkpoint-data workflow-run-id opts)]
+     (if (anomaly/anomaly? loaded)
+       loaded
+       (some-> loaded schemas/validate-checkpoint-data!)))))
+
+(def ^{:stratum 0} pin-checkpoint!
+  "Pin a run's checkpoint so the checkpoint GC keeps it."
+  checkpoint-store/pin-checkpoint!)

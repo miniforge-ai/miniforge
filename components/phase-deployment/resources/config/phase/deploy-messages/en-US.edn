@@ -68,6 +68,12 @@
   "Creating {node-pools} node pools (limit: {limit})"
   :policy/provision-preview-required
   "A successful Pulumi provision preview is required before deployment"
+  :policy/manifest-credentials
+  "Plaintext credentials in rendered manifests: {findings}"
+  :policy/manifest-not-yaml
+  "rendered manifests are not YAML and match a credential pattern"
+  :policy/deployment-pack-missing
+  "The deployment-safety policy pack is not on the classpath; deployment is refused"
 
   :shell/command-timeout
   "Command timed out after {timeout-ms}ms"
@@ -80,4 +86,6 @@
   :shell/kustomize-build-failed
   "kustomize build failed: {error}"
   :shell/kubectl-apply-failed
-  "kubectl apply failed"}}
+  "kubectl apply failed"
+  :shell/pulumi-plan-missing
+  "No saved Pulumi plan at {plan-file}; pulumi up applies only the plan its gated preview saved"}}

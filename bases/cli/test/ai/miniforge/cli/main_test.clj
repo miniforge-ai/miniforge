@@ -27,6 +27,7 @@
    [ai.miniforge.cli.main.status.summary :as summary]
    [ai.miniforge.cli.main.util :as util]
    [ai.miniforge.cli.main.commands.pr-monitor :as cmd-pr-monitor]
+   [ai.miniforge.cli.main.commands.shared :as cmd-shared]
    [ai.miniforge.event-stream.interface :as es]
    [ai.miniforge.pr-train.interface :as pr-train]
    [ai.miniforge.repo-dag.interface :as repo-dag]
@@ -114,11 +115,15 @@
 (deftest ^{:stratum 0} reconstruction-failure-preserves-the-human-readable-message
   (let [message (messages/t :status/value-unknown)
         failure (anomaly/anomaly :not-found message {})]
-    (with-redefs [es/read-workflow-events-by-id (constantly [])
-                  wr/reconstruct-context (constantly failure)
-                  display/print-error identity]
-      (is (= (messages/t :status/read-failed {:message message})
-             (sut/status-cmd {:workflow-id "missing"}))))))
+    (let [printed (atom nil)
+          exits   (atom [])]
+      (with-redefs [es/read-workflow-events-by-id (constantly [])
+                    wr/reconstruct-context (constantly failure)
+                    display/print-error (fn [msg] (reset! printed msg))
+                    cmd-shared/exit! (fn [code] (swap! exits conj code) nil)]
+        (sut/status-cmd {:workflow-id "missing"}))
+      (is (= (messages/t :status/read-failed {:message message}) @printed))
+      (is (= [1] @exits)))))
 
 ;; pr-monitor-cmd helpers
 (def ^{:stratum 0} ^:private test-bounds {:min-poll-interval-s 5 :max-poll-interval-s 3600})
@@ -139,11 +144,13 @@
     (is (nil? (#'cmd-pr-monitor/parse-poll-interval nil test-bounds))))
   (testing "Out-of-bounds interval returns nil with error message"
     (let [output (with-out-str
-                   (is (nil? (#'cmd-pr-monitor/parse-poll-interval "1" test-bounds))))]
+                   (binding [*err* *out*]
+                     (is (nil? (#'cmd-pr-monitor/parse-poll-interval "1" test-bounds)))))]
       (is (re-find #"5-3600" output))))
   (testing "Non-numeric interval returns nil with error message"
     (let [output (with-out-str
-                   (is (nil? (#'cmd-pr-monitor/parse-poll-interval "abc" test-bounds))))]
+                   (binding [*err* *out*]
+                     (is (nil? (#'cmd-pr-monitor/parse-poll-interval "abc" test-bounds)))))]
       (is (re-find #"Invalid" output)))))
 
 ;------------------------------------------------------------------------------ Layer 2

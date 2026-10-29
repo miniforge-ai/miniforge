@@ -29,11 +29,13 @@
   (:require
    [ai.miniforge.agent.file-artifacts :as file-artifacts]
    [ai.miniforge.anomaly.interface :as anomaly]
+   [babashka.fs :as fs]
    [cheshire.core :as json]
    [clojure.edn :as edn]
    [clojure.java.io :as io]
    [clojure.string :as str]
-   [malli.core :as m])
+   [malli.core :as m]
+   [slingshot.slingshot :refer [try+]])
   (:import
    [java.nio.file Files]
    [java.nio.file.attribute FileAttribute]))
@@ -75,20 +77,33 @@
    "INFO: MCP artifact not submitted — worktree-promotion succeeded (workdir: %s)"})
 
 (defn ^{:stratum 0} command-on-path?
-  "Check if a command exists on PATH."
+  "Check if a command exists on PATH. `fs/which` resolves it on every OS
+   (with PATHEXT on Windows, which has no `which` binary)."
   [cmd]
-  (try
-    (let [proc (.exec (Runtime/getRuntime) (into-array String ["which" cmd]))]
-      (zero? (.waitFor proc)))
-    (catch Exception _ false)))
+  (boolean (some-> cmd fs/which)))
 
 (defn- ^{:stratum 0} find-bb-root
-  "Find the nearest ancestor directory containing bb.edn."
+  "Find the nearest ancestor directory whose bb.edn is miniforge's own: its
+   :tasks define the `miniforge` and `mcp-context-server` tasks that the
+   MCP server and PreToolUse hook commands run.
+
+   Any other bb.edn (a user repository's own, or one that does not parse)
+   is skipped. Taking it would point both commands at tasks that do not
+   exist there, and a failing PreToolUse hook does not block the tool."
   []
   (loop [dir (.getCanonicalFile (io/file (System/getProperty "user.dir")))]
-    (let [bb-file (io/file dir "bb.edn")]
+    (let [bb-file (io/file dir "bb.edn")
+          tasks   (when (.isFile bb-file)
+                    (try+
+                     (:tasks (edn/read-string {:default tagged-literal}
+                                              (slurp bb-file)))
+                     (catch Exception _ nil)))]
       (cond
-        (.exists bb-file) (.getPath dir)
+        (and (map? tasks)
+             (contains? tasks 'miniforge)
+             (contains? tasks 'mcp-context-server))
+        (.getPath dir)
+
         (nil? (.getParentFile dir)) nil
         :else (recur (.getParentFile dir))))))
 
@@ -332,12 +347,29 @@
                    :component :agent/artifact-session})))
 
 (defn ^{:stratum 0} cleanup-capsule-session!
-  "Remove the session directory inside the capsule."
+  "Remove the session directory inside the capsule.
+
+   Runs with the thread's interrupt flag cleared and sets it again
+   afterwards. An interrupted agent call (the implement watchdog's kill)
+   unwinds through here with the flag set, and the executor's wait on
+   `docker exec` is interruptible, so the removal would otherwise stop
+   before it ran."
   [session]
-  (try
-    ((:exec! session) (:executor session) (:environment-id session)
-                      (str "rm -rf " (file-artifacts/shell-quote (:dir session))) {:workdir (:workdir session)})
-    (catch Exception _ nil)))
+  (let [interrupted? (Thread/interrupted)]
+    (try+
+      ((:exec! session) (:executor session) (:environment-id session)
+                        (str "rm -rf " (file-artifacts/shell-quote (:dir session))) {:workdir (:workdir session)})
+      ;; JVM Errors stay fatal. A new interrupt during the cleanup is
+      ;; kept visible as the flag, without replacing the session outcome.
+      (catch Error fatal (throw fatal))
+      (catch InterruptedException _ (.interrupt (Thread/currentThread)))
+      ;; `Object`, not `Exception`: try+ matches an ex-info by its data
+      ;; map, so a class selector would let it escape and replace the
+      ;; outcome of the session being cleaned up.
+      (catch Object _ nil)
+      (finally
+        (when interrupted?
+          (.interrupt (Thread/currentThread)))))))
 
 ;------------------------------------------------------------------------------ Layer 2.75
 ;; Session → MCP opts
@@ -426,6 +458,17 @@
     (some #{:recorded} logs)   :recorded
     :else                      :absent))
 
+(defn ^{:stratum 0} pre-tool-use-settings
+  "Claude Code settings that run `hook-cmd` before every tool call. Each
+   PreToolUse entry is a matcher group, {\"matcher\" ... \"hooks\" [handler]},
+   as https://code.claude.com/docs/en/hooks and the settings JSON schema
+   require (the group's \"hooks\" key is required, and no other keys are
+   allowed); \"*\" matches every tool. A handler placed directly in the
+   PreToolUse array is not a valid entry, so Claude never runs it."
+  [hook-cmd]
+  {"hooks" {"PreToolUse" [{"matcher" "*"
+                           "hooks"   [{"type" "command" "command" hook-cmd}]}]}})
+
 ;------------------------------------------------------------------------------ Layer 1
 
 (defn- ^{:stratum 1} split-answers-segment
@@ -464,9 +507,10 @@
    Resolution order:
    1. MINIFORGE_CMD env var (explicit override, e.g. \"/usr/local/bin/mf\")
    2. [\"bb\" \"--config\" <root>/bb.edn \"--deps-root\" <root> \"miniforge\"]
-      (dev mode — location-independent bb.edn task)
-   3. \"miniforge\" on PATH (installed binary)
-   4. [\"bb\" \"miniforge\"] as a final fallback"
+      (dev mode — miniforge's own bb.edn in an ancestor directory)
+   3. \"mf\" on PATH (installed binary: Homebrew, scoop, `bb install:local`)
+   4. \"miniforge\" on PATH (full binary name)
+   5. [\"bb\" \"miniforge\"] as a final fallback"
   []
   (let [bb-root (find-bb-root)]
     (cond
@@ -478,11 +522,15 @@
       bb-root
       ["bb" "--config" (str bb-root "/bb.edn") "--deps-root" bb-root "miniforge"]
 
-      ;; 3. Installed binary on PATH
+      ;; 3. Installed binary on PATH, under the name the installers use
+      (command-on-path? "mf")
+      ["mf"]
+
+      ;; 4. Installed binary under its full name
       (command-on-path? "miniforge")
       ["miniforge"]
 
-      ;; 4. Last-resort fallback
+      ;; 5. Last-resort fallback
       :else
       ["bb" "miniforge"])))
 
@@ -532,7 +580,7 @@
 
    Resolution order:
    1. MINIFORGE_MCP_CMD env var (explicit override)
-   2. bb task (dev mode — bb.edn found in ancestor directory)
+   2. bb task (dev mode — miniforge's own bb.edn in an ancestor directory)
    3. mf context-server (production — bundled in the miniforge binary)
    4. miniforge context-server (fallback binary name)
 
@@ -697,23 +745,23 @@
 
 (defn ^{:stratum 1} write-capsule-mcp-config!
   "Write MCP config and Claude settings inside the capsule.
-   The server command resolves to capsule-local bb/miniforge binary."
+   The server command resolves to capsule-local bb/miniforge binary:
+   `bb miniforge` runs the CLI, whose subcommand is `context-server`
+   (`mcp-context-server` is the name of the bb task, not a CLI command)."
   [session]
   (let [exec!       (:exec! session)
         executor    (:executor session)
         env-id      (:environment-id session)
         session-dir (:dir session)
         ;; Inside the capsule, bb and miniforge are available directly
-        srv-cmd     {:command "bb" :args ["miniforge" "mcp-context-server"
+        srv-cmd     {:command "bb" :args ["miniforge" "context-server"
                                           "--artifact-dir" session-dir]}
         mcp-config  (json/generate-string
                      {"mcpServers" {"context" {"command" (:command srv-cmd)
                                                "args"    (:args srv-cmd)}}}
                      {:pretty true})
         hook-cmd    "bb miniforge hook-eval"
-        settings    (json/generate-string
-                     {"hooks" {"PreToolUse" [{"type" "command" "command" hook-cmd}]}}
-                     {:pretty true})]
+        settings    (json/generate-string (pre-tool-use-settings hook-cmd) {:pretty true})]
     ;; Write configs inside capsule
     (exec! executor env-id (str "cat > " (file-artifacts/shell-quote (:mcp-config-path session)) " << 'MCPEOF'\n" mcp-config "\nMCPEOF")
            {:workdir (:workdir session)})
@@ -817,19 +865,16 @@
 (defn ^{:stratum 2} write-claude-settings!
   "Write Claude CLI settings JSON with PreToolUse hook for supervision.
 
-   The hook invokes `bb miniforge hook-eval` which reads the tool request
-   from stdin and returns allow/deny on stdout.
+   The hook runs `hook-eval` on the command `resolve-miniforge-command`
+   returns (e.g. `mf hook-eval`), which reads the tool request from stdin
+   and returns allow/deny on stdout.
 
    Returns the path to the settings file."
   [session-dir]
   (let [[cmd & args] (resolve-miniforge-command)
         hook-command (str/join " " (concat [cmd] args ["hook-eval"]))
-        settings {"hooks"
-                  {"PreToolUse"
-                   [{"type" "command"
-                     "command" hook-command}]}}
         path (str session-dir "/claude-settings.json")]
-    (spit path (json/generate-string settings {:pretty true}))
+    (spit path (json/generate-string (pre-tool-use-settings hook-command) {:pretty true}))
     path))
 
 ;; High-level session helpers
@@ -1266,7 +1311,7 @@
     (if (governed? context)
       (let [executor (:execution/executor context)
             env-id   (:execution/environment-id context)
-            workdir  (or (:execution/worktree-path context) "/workspace")
+            workdir  (or (:execution/capsule-workdir context) (:execution/worktree-path context) "/workspace")
             exec!    (or (:execution/execute-fn context) (missing-execute-fn!))
             session  (-> (create-capsule-session! executor env-id workdir exec!)
                          write-capsule-mcp-config!)]
@@ -1456,7 +1501,7 @@
     (if (governed? context)
       (let [executor (:execution/executor context)
             env-id   (:execution/environment-id context)
-            workdir  (or (:execution/worktree-path context) "/workspace")
+            workdir  (or (:execution/capsule-workdir context) (:execution/worktree-path context) "/workspace")
             exec!    (or (:execution/execute-fn context) (missing-execute-fn!))
             session  (-> (create-capsule-session! executor env-id workdir exec!)
                        write-capsule-mcp-config!)]

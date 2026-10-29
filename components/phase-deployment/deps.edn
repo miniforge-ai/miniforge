@@ -1,5 +1,6 @@
 {:paths ["src" "resources"]
- :deps {ai.miniforge/effect-transaction {:local/root "../effect-transaction"}
+ :deps {ai.miniforge/config {:local/root "../config"}
+        ai.miniforge/effect-transaction {:local/root "../effect-transaction"}
         ai.miniforge/execution-grant {:local/root "../execution-grant"}
         ai.miniforge/anomaly {:local/root "../anomaly"}
         ai.miniforge/messages {:local/root "../messages"}
@@ -11,6 +12,7 @@
         ai.miniforge/evidence-bundle {:local/root "../evidence-bundle"}
         ai.miniforge/policy-pack {:local/root "../policy-pack"}
         cheshire/cheshire {:mvn/version "5.13.0"}
+        clj-commons/clj-yaml {:mvn/version "1.0.29"}
         metosin/malli {:mvn/version "0.16.4"}}
  :aliases
  {:test {:extra-paths ["test"]

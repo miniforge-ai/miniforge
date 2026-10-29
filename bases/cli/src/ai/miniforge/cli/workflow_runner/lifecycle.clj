@@ -97,9 +97,12 @@
    `{:dir java.io.File :heartbeat ScheduledExecutorService :marked? atom}`
    for the matching `finish-workflow-manifest!`. Returns nil when no
    event stream is configured (dashboard-only run) — no on-disk
-   manifest to maintain in that case."
+   manifest to maintain in that case — and under Babashka, where the
+   manifest operations are JVM-only (`es-manifest/supported?`): the run
+   then goes on without a manifest, like a spec run. Every later
+   lifecycle step is a no-op on nil."
   [workflow-id event-stream]
-  (when event-stream
+  (when (and event-stream es-manifest/supported?)
     (let [dir (es/workflow-dir workflow-id)]
       ((:save-manifest! *manifest-ops*) dir ((:init-active *manifest-ops*) workflow-id))
       {:dir       dir
@@ -177,7 +180,7 @@
   "Run the BD-2a shutdown sequence on `es`: quiesce publishers for
    `workflow-id`, then drain sinks. Returns the structured drain result
    for inclusion in the run result map, or `nil` when no event stream
-   exists (dashboard-url runs).
+   exists (its creation failed).
 
    On a non-OK drain in normal mode (best-effort off), throws an
    ex-info carrying the drain result so the caller's catch path renders

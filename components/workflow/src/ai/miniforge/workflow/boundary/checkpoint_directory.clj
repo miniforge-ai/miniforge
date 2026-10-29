@@ -31,6 +31,11 @@
 
 ;------------------------------------------------------------------------------ Layer 1
 
+(defn ^{:stratum 1} existing! [directory]
+  (let [path (fs/real-path directory)]
+    (when (permissions/posix? path) (check-ancestry! path true))
+    path))
+
 (defn ^{:stratum 1} prepare! [directory]
   (let [[ancestor segments] (existing-ancestor directory)]
     (if (permissions/posix? ancestor)

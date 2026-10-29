@@ -23,7 +23,10 @@
   (:require
    [ai.miniforge.dag-executor.interface :as dag]
    [ai.miniforge.pr-lifecycle.events :as events]
+   [ai.miniforge.pr-lifecycle.fix-stage :as fix-stage]
    [ai.miniforge.pr-lifecycle.github-conversation :as conversation]
+   [ai.miniforge.pr-lifecycle.policy-eval.fs :as policy-fs]
+   [ai.miniforge.pr-lifecycle.policy-eval.git-dir :as git-dir]
    [ai.miniforge.pr-lifecycle.triage :as triage]
    [ai.miniforge.loop.interface :as loop]
    [ai.miniforge.logging.interface :as log]
@@ -162,6 +165,16 @@
 (defn ^{:stratum 0} apply-fix-to-worktree
   "Apply a fix artifact to the git worktree.
 
+   Each `:path` comes from the LLM, so every one is resolved before
+   anything touches disk: writes must stay inside the worktree, and a
+   `:delete` must name an entry inside it (the policy-eval.fs guards).
+   Neither may pass through a symlink (a fix never needs to) or reach the
+   worktree's git dir, where a planted hook or config would run on the
+   commit that follows. One refused path rejects the whole artifact with
+   `:fix-path-traversal`, so a hostile fix writes nothing. Each path is
+   resolved again just before its own op, since an earlier op in the
+   same artifact changes the tree the later ones are checked against.
+
    Arguments:
    - worktree-path: Path to git worktree
    - fix-artifact: Code artifact with file changes
@@ -174,37 +187,68 @@
                :data {:worktree-path worktree-path
                       :file-count (count (:code/files fix-artifact))}}))
 
-  ;; The fix artifact should contain file changes
-  ;; This would write files to the worktree
-  (let [files (:code/files fix-artifact)]
-    (try
-      (doseq [{:keys [path content action]} files]
-        (let [full-path (str worktree-path "/" path)]
-          (case action
-            :create (spit full-path content)
-            :modify (spit full-path content)
-            :delete (io/delete-file full-path true)
-            ;; Default to modify
-            (spit full-path content))))
-      (dag/ok {:files-modified (count files)
-               :paths (mapv :path files)})
-      (catch Exception e
+  (let [files        (:code/files fix-artifact)
+        resolve-path (fn [{:keys [path action]}]
+                       (if (= :delete action)
+                         (policy-fs/safe-worktree-entry-path worktree-path path)
+                         (policy-fs/safe-worktree-path worktree-path path)))
+        escaped      (into [] (comp (remove resolve-path) (map :path)) files)
+        traversal    (fn [paths]
+                       (dag/err :fix-path-traversal
+                                (str "Fix paths escape the worktree, pass through a symlink "
+                                     "(fixes never need to write through one), "
+                                     "or reach its git dir: "
+                                     (str/join ", " paths))
+                                {:paths paths}))]
+    (if (seq escaped)
+      (do
         (when logger
-          (log/error logger :pr-lifecycle :fix/apply-failed
-                     {:message "Failed to apply fix"
-                      :data {:error (.getMessage e)}}))
-        (dag/err :fix-apply-failed (.getMessage e))))))
+          (log/error logger :pr-lifecycle :fix/path-traversal
+                     {:message "Rejected fix with paths outside the worktree, through a symlink, or in its git dir"
+                      :data {:worktree-path worktree-path :paths escaped}}))
+        (traversal escaped))
+      (try
+        ;; Resolve again right before each op: an earlier op in the same
+        ;; artifact changes the tree a later path is checked against.
+        (or (reduce (fn [_ {:keys [path content action] :as file}]
+                      (if-let [full-path (resolve-path file)]
+                        (do (if (= :delete action)
+                              (io/delete-file full-path true)
+                              ;; :create, :modify, and any other action write the content
+                              (spit full-path content))
+                            nil)
+                        (reduced (traversal [path]))))
+                    nil files)
+            (dag/ok {:files-modified (count files)
+                     :paths (mapv :path files)}))
+        (catch Exception e
+          (when logger
+            (log/error logger :pr-lifecycle :fix/apply-failed
+                       {:message "Failed to apply fix"
+                        :data {:error (.getMessage e)}}))
+          (dag/err :fix-apply-failed (.getMessage e)))))))
 
 (defn ^{:stratum 0} commit-fix
-  "Commit fix changes and push to the PR branch.
+  "Stage the files the fix wrote or deleted, commit them, and push to the
+   PR branch, every git command with hooks disabled: the fix just wrote
+   LLM-proposed files, and a hook they changed must not run inside the
+   loop.
+
+   Only `files` are staged, never the whole tree: the worktree can hold
+   changes the fix did not make. They are staged and committed under
+   git's own index lock (`fix-stage`): the lock file replaces the index
+   only after the commit succeeds, so a staging or commit failure leaves
+   the index as it was, a retry never commits leftovers, and a concurrent
+   git command is never overwritten.
 
    Arguments:
    - worktree-path: Path to git worktree
    - fix-context: Fix context for commit message
    - branch: Branch name to push to
+   - files: The applied artifact's `:code/files` (`:path`, `:action`)
 
    Returns result with commit SHA."
-  [worktree-path fix-context branch logger]
+  [worktree-path fix-context branch logger files]
   (let [fix-type (:fix/type fix-context)
         commit-msg (str "fix: " (case fix-type
                                   :ci-failure "resolve CI failures"
@@ -220,15 +264,23 @@
                 {:message "Committing fix"
                  :data {:branch branch :fix-type fix-type}}))
 
-    ;; Stage and commit changes
-    (let [stage-result (release/commit-changes! worktree-path commit-msg)]
-      (if (:success? stage-result)
-        (let [push-result (release/push-branch! worktree-path branch)]
-          (if (:success? push-result)
-            (dag/ok {:commit-sha (:commit-sha stage-result)
-                     :branch branch})
-            (dag/err :push-failed (:error push-result))))
-        (dag/err :commit-failed (:error stage-result))))))
+    (let [staged (fix-stage/stage-files! worktree-path files)]
+      (if-let [stage-error (:error staged)]
+        (dag/err :stage-failed stage-error)
+        (let [commit-result (release/commit-changes! worktree-path commit-msg
+                                                     git-dir/hooks-disabled-args
+                                                     {"GIT_INDEX_FILE" (:lock staged)})]
+          (if-not (:success? commit-result)
+            (do (fix-stage/discard-index! staged)
+                (dag/err :commit-failed (:error commit-result)))
+            (if-let [install-error (fix-stage/install-index! staged)]
+              (dag/err :index-update-failed install-error)
+              (let [push-result (release/push-branch! worktree-path branch nil
+                                                      git-dir/hooks-disabled-args)]
+                (if (:success? push-result)
+                  (dag/ok {:commit-sha (:commit-sha commit-result)
+                           :branch branch})
+                  (dag/err :push-failed (:error push-result)))))))))))
 
 ;; Conversation follow-up
 (defn ^{:stratum 0} resolve-comment-thread
@@ -363,7 +415,8 @@
 
               (if (dag/ok? apply-result)
                 ;; Commit and push
-                (let [commit-result (commit-fix worktree-path fix-context branch logger)]
+                (let [commit-result (commit-fix worktree-path fix-context branch logger
+                                                (:code/files artifact))]
                   (if (dag/ok? commit-result)
                     (do
                       (when logger

@@ -31,7 +31,7 @@
    [ai.miniforge.llm.network-monitor :as nnm]
    [ai.miniforge.llm.progress-monitor :as pm]
    [ai.miniforge.response.interface :as response]
-   [slingshot.slingshot :refer [try+]])
+   [slingshot.slingshot :refer [throw+ try+]])
   (:import
    [java.io ByteArrayInputStream]
    [java.net HttpURLConnection]
@@ -262,7 +262,7 @@
 
 ;; `:probe-endpoint` on each backend entry is the stable provider edge
 ;; URL that the network-monitor (PR-B) probes via
-;; `network-health/network-healthy?`. We only care that the connection
+;; `network-health/probe-network`. We only care that the connection
 ;; completed, not the response status — a 4xx is the typical case (HEAD
 ;; against api.anthropic.com unauthenticated returns 405). Backends
 ;; without a provider-controlled endpoint (`:echo`) get the generic
@@ -379,6 +379,39 @@
   [k]
   (System/getenv k))
 
+(def ^{:stratum 0} ^:private network-monitor-env-var
+  "Environment variable that switches the network-drop monitor off for
+   streaming CLI calls, for a network where the provider's probe
+   endpoint is unreachable although the agent CLI works (for example a
+   gateway set through the CLI's own base-URL setting)."
+  "MINIFORGE_NETWORK_MONITOR")
+
+(def ^{:stratum 0} ^:private env-flag-off-values
+  "Values (trimmed, any case) that read as off for an on/off environment
+   variable: `network-monitor-env-var` and the provider switches in a
+   backend's `:probe-endpoint-routes`."
+  #{"off" "false" "0" "no"})
+
+(def ^{:stratum 0} ^:private probe-region-pattern
+  "Shape of a cloud region name substituted into a route's
+   `:regional-url`; anything else is ignored rather than spliced into
+   a URL."
+  #"[a-z0-9-]+")
+
+(defn- ^{:stratum 0} http-url
+  "`value`, trimmed, when it is an absolute http(s) URL with a host;
+   nil otherwise."
+  [value]
+  (when (string? value)
+    (try+
+      (let [url (str/trim value)
+            uri (java.net.URI. url)]
+        (when (and (#{"http" "https"} (some-> (.getScheme uri) str/lower-case))
+                   (.getHost uri))
+          url))
+      (catch java.net.URISyntaxException _
+        nil))))
+
 (defn ^{:stratum 0} rate-limited?
   "Detect Claude CLI rate limit messages in content.
    Claude CLI returns exit 0 but emits a rate limit message as content."
@@ -482,6 +515,26 @@
   (if (.waitFor process (long timeout-ms) TimeUnit/MILLISECONDS)
     {:exit (.exitValue process)}
     {:exit -1 :err "Process timed out"}))
+
+(defn- ^{:stratum 0} destroy-process-tree!
+  "Forcibly kill `process` and every process it spawned.
+
+   `.destroyForcibly` alone kills only the agent CLI: its MCP servers and
+   Bash tool children are re-parented and keep running, still writing to
+   the worktree. The descendants are listed while the parent is alive
+   (once it dies they are re-parented and drop out of the list), killed
+   leaf-first, then the parent: the same tree kill verify and the
+   dag-executor runtime use. Does not wait for exit."
+  [^Process process]
+  (let [descendants (try+
+                      (vec (.toArray (.descendants process)))
+                      ;; A Process with no native handle (a test proxy)
+                      ;; has no descendants to list.
+                      (catch UnsupportedOperationException _
+                        []))]
+    (doseq [^java.lang.ProcessHandle child (rseq descendants)]
+      (.destroyForcibly child))
+    (.destroyForcibly process)))
 
 (def ^{:stratum 0} ^:private keepalive-min-interval-ms
   "Floor on the keepalive interval so the worker doesn't burn cycles
@@ -720,6 +773,25 @@
    envelope type outside the known taxonomy)."
   [timeout-info]
   (get timeout-type->terminated-by (:type timeout-info)))
+
+(defn- ^{:stratum 1} env-flag-off?
+  "True when `value` is one of `env-flag-off-values`."
+  [value]
+  (contains? env-flag-off-values
+             (some-> value str/trim str/lower-case)))
+
+(defn- ^{:stratum 1} route-endpoint
+  "The probe URL a `:probe-endpoint-routes` entry yields from the
+   environment: the URL in its `:base-url-env`, else its `:global-url`
+   or `:regional-url` for the region in its `:region-env`. Nil when
+   none of those is set (or usable)."
+  [{:keys [base-url-env region-env regional-url global-url]}]
+  (let [region (some-> region-env getenv-value str/trim str/lower-case not-empty)]
+    (or (some-> base-url-env getenv-value http-url)
+        (when (and global-url (= "global" region))
+          global-url)
+        (when (and regional-url region (re-matches probe-region-pattern region))
+          (format regional-url region)))))
 
 (def ^{:stratum 1} ^:private client-defaults
   (delay (load-client-defaults)))
@@ -1123,8 +1195,26 @@
       (enqueue-stream-line! line-queue eof-sentinel))))
 
 (defn- ^{:stratum 1} stop-stream-reader!
+  "Release the reader daemon once the consumer has stopped polling.
+
+   The close runs on its own daemon thread. `BufferedReader.close` takes
+   the lock `readLine` holds while it blocks on the process pipe, so an
+   inline close waits for the next line or EOF; a silent subprocess sends
+   neither, and the lock wait ignores interrupts, so the calling thread
+   would hang before it could kill the process. Callers kill the process
+   tree on every abnormal exit; that ends the blocked read and lets the
+   close through."
   [^Thread reader-thread out-reader]
-  (try (.close out-reader) (catch Exception _))
+  (daemon-thread! "llm-stream-reader-close"
+                  (fn []
+                    (try+
+                      (.close out-reader)
+                      ;; JVM Errors stay fatal; anything else, ex-info
+                      ;; included (`Object`), is a best-effort close.
+                      (catch Error fatal
+                        (throw fatal))
+                      (catch Object _
+                        nil))))
   (.interrupt reader-thread)
   (.join reader-thread stream-reader-join-timeout-ms))
 
@@ -1163,10 +1253,17 @@
          (reset! output (or (ex-message e) (str e))))))))
 
 (defn- ^{:stratum 1} stop-stream-process!
-  [{:keys [^Process process stdin-thread stderr-thread stderr]} timeout? join-timeout]
-  (when timeout?
-    (try (.destroyForcibly process) (catch Exception _ nil)))
+  "Wait up to `join-timeout` ms for the stream subprocess to exit and
+   collect its stderr. `kill?` (the stream ended on a timeout or an
+   anomaly) destroys the process tree first. A process still running
+   when the wait runs out (it closed stdout but did not exit) is
+   destroyed too, so the agent CLI never outlives the call."
+  [{:keys [^Process process stdin-thread stderr-thread stderr]} kill? join-timeout]
+  (when kill?
+    (destroy-process-tree! process))
   (let [result (wait-for-stream-process process join-timeout)]
+    (when (and (not kill?) (= -1 (:exit result)))
+      (destroy-process-tree! process))
     (when stdin-thread
       (.join ^Thread stdin-thread stream-reader-join-timeout-ms))
     (when stderr-thread
@@ -1252,6 +1349,20 @@
                                    chars-per-token-estimate)}))
 
 ;------------------------------------------------------------------------------ Layer 2
+
+(defn- ^{:stratum 2} network-monitor-enabled?
+  "False when `network-monitor-env-var` reads as off."
+  []
+  (not (env-flag-off? (getenv-value network-monitor-env-var))))
+
+(defn- ^{:stratum 2} route-applies?
+  "A route applies when it has no `:when-env` switch, or the switch is
+   set and does not read as off (`CLAUDE_CODE_USE_BEDROCK=1`)."
+  [{:keys [when-env]}]
+  (or (nil? when-env)
+      (let [value (getenv-value when-env)]
+        (and (not (str/blank? value))
+             (not (env-flag-off? value))))))
 
 (defn ^{:stratum 2} log-streaming-result
   "Log the outcome of a streamed run. A cut run (any adaptive timeout)
@@ -1364,8 +1475,9 @@
    2. Clean shutdown via `stop-stream-reader!` — the consumer
       (`process-stream-lines`) has stopped polling, so `stop-stream-reader!`
       closes the reader and calls `.interrupt`. `BufferedReader.readLine`
-      is NOT interruptible, so a reader blocked there unblocks via the
-      `.close` (the read returns nil or throws `IOException`). A reader
+      is NOT interruptible, and the close cannot cut it short either (it
+      waits for the lock `readLine` holds), so a reader blocked there
+      unblocks when the process dies and the pipe reaches EOF. A reader
       blocked in `.put` on a full queue unblocks via the `.interrupt` and
       raises `InterruptedException`. Both cases land in the same silent
       catch: the consumer already left the queue; no anomaly to publish.
@@ -1875,21 +1987,37 @@
          TimeUnit/MILLISECONDS))
 
 (defn- ^{:stratum 4} stop-capture-process!
+  "Wait up to `timeout-ms` for the capture subprocess to exit and collect
+   its output. On timeout the process tree is destroyed, not just the CLI
+   (its MCP servers and tool children would otherwise keep running), and
+   the call waits again briefly. If the waiting thread is interrupted or
+   anything else throws, the tree is destroyed before the throwable
+   propagates; on interrupt the flag the exception cleared is restored
+   first."
   [{:keys [^Process process stdin-thread stdout-thread stderr-thread stdout stderr]}
    timeout-ms]
-  (let [initial-result (wait-for-stream-process process timeout-ms)
-        timed-out? (= -1 (:exit initial-result))
-        result (if timed-out?
-                 (do
-                   (try (.destroyForcibly process) (catch Exception _ nil))
-                   (wait-for-stream-process process (post-kill-join-timeout-ms)))
-                 initial-result)]
-    (doseq [thread [stdin-thread stdout-thread stderr-thread]
-            :when thread]
-      (.join ^Thread thread stream-reader-join-timeout-ms))
-    {:out (or @stdout "")
-     :err (or (not-empty (:err result)) @stderr "")
-     :exit (:exit result)}))
+  (try+
+    (let [initial-result (wait-for-stream-process process timeout-ms)
+          timed-out? (= -1 (:exit initial-result))
+          result (if timed-out?
+                   (do
+                     (destroy-process-tree! process)
+                     (wait-for-stream-process process (post-kill-join-timeout-ms)))
+                   initial-result)]
+      (doseq [thread [stdin-thread stdout-thread stderr-thread]
+              :when thread]
+        (.join ^Thread thread stream-reader-join-timeout-ms))
+      {:out (or @stdout "")
+       :err (or (not-empty (:err result)) @stderr "")
+       :exit (:exit result)})
+    (catch InterruptedException _
+      (destroy-process-tree! process)
+      (.interrupt (Thread/currentThread))
+      (throw+))
+    ;; `Object` also matches ex-info, which a `Throwable` selector misses.
+    (catch Object _
+      (destroy-process-tree! process)
+      (throw+))))
 
 (defn- ^{:stratum 4} keepalive-interval-ms
   "Refresh interval for the stream-side keepalive thread.
@@ -2050,18 +2178,25 @@
 ;------------------------------------------------------------------------------ Layer 7
 
 (defn ^{:stratum 7} probe-endpoint-for
-  "Resolve the network-health probe URL for `backend-key`. Returns the
-   backend entry's `:probe-endpoint` when set, the generic Cloudflare
-   DNS connectivity URL otherwise (covers unknown backends and any
-   future entry added without an explicit endpoint).
+  "Resolve the network-health probe URL for `backend-key`: the endpoint
+   the agent CLI actually talks to, read from the environment through
+   the backend's `:probe-endpoint-routes` (`ANTHROPIC_BASE_URL`, the
+   Bedrock and Vertex settings, `OPENAI_BASE_URL`). The first route that
+   applies decides; when it yields no URL, or no route applies, the
+   backend entry's static `:probe-endpoint` is used, and the generic
+   Cloudflare DNS connectivity URL when there is none (unknown
+   backends, entries without an endpoint).
 
    The caller (e.g. `stream-exec-fn` in PR-B) resolves the URL here and
-   passes it to `network-health/network-healthy?` directly, keeping
+   passes it to `network-health/probe-network` directly, keeping
    that namespace endpoint-agnostic and free of backend-config
    dependencies."
   [backend-key]
-  (or (get-in backends [backend-key :probe-endpoint])
-      generic-connectivity-probe-url))
+  (let [{:keys [probe-endpoint probe-endpoint-routes]} (get backends backend-key)
+        route (first (filter route-applies? probe-endpoint-routes))]
+    (or (some-> route route-endpoint)
+        probe-endpoint
+        generic-connectivity-probe-url)))
 
 (defn ^{:stratum 7} http-stream-complete
   "Complete request using HTTP API with streaming.
@@ -2134,7 +2269,12 @@
                                (probe-interval-ms, failure-threshold,
                                probe-fn). Tests inject `:probe-fn` here
                                to drive the monitor deterministically
-                               without real network I/O."
+                               without real network I/O.
+
+   Every exit other than a clean one (timeout, stream anomaly, network
+   drop, an exception, or this thread being interrupted) destroys the
+   subprocess and everything it spawned. On interrupt the interrupt flag
+   is restored before the InterruptedException is rethrown."
   ([cmd on-line]
    (stream-exec-fn cmd on-line {}))
   ([cmd on-line {:keys [progress-monitor workdir stdin backend-key
@@ -2142,87 +2282,101 @@
    (let [monitor (or progress-monitor (default-progress-monitor))
          stream-process (start-stream-process! cmd {:workdir workdir
                                                     :stdin stdin})
-         process (:process stream-process)
-         out-reader (java.io.BufferedReader.
-                     (java.io.InputStreamReader. (.getInputStream process)))
-         ;; Decouple stagnation from the CLI's emission cadence.
-         ;; claude in --input-format text mode does not emit
-         ;; rate_limit_event during the model's think phase, so the
-         ;; stream-heartbeat-based stagnation guard has no signal
-         ;; during legitimate thinking on heavy prompts (2026-05-07
-         ;; stage-3 dogfood: stagnation timeout at 180s with 6
-         ;; init-time chunks then nothing for the model's full
-         ;; think). Keepalive refreshes the monitor while the JVM-side
-         ;; reader is alive; max-total-ms remains the wedge backstop.
-         stop-keepalive! (pm/start-keepalive! monitor
-                                              (keepalive-interval-ms monitor))
-         ;; Network-drop monitor — independent of the keepalive. PR-B
-         ;; of the network-resilience stack. Probes the provider every
-         ;; `default-probe-interval-ms` (10s) and fires once after
-         ;; `default-failure-threshold` (3) consecutive failures.
-         ;; on-drop: stamps the network-drop reason into the shared
-         ;; atom and forcibly destroys the subprocess so the reader
-         ;; loop exits immediately (the agent is hung on socket I/O
-         ;; that will never recover without process restart).
-         ;; Disabled when no :backend-key is provided so legacy
-         ;; callers (tests with synthetic streams, the `:echo` test
-         ;; backend) keep working unchanged.
-         network-drop-reason (atom nil)
-         stop-network-monitor!
-         (when backend-key
-           ;; Caller opts merged FIRST so the integration-owned
-           ;; :backend-key, :probe-url, and :on-drop always win — a
-           ;; test fixture that mistakenly carries those keys can't
-           ;; clobber the monitor's correctness contract. Test-only
-           ;; knobs (:probe-interval-ms, :failure-threshold, :probe-fn)
-           ;; still flow through.
-           (nnm/start-network-monitor!
-             (merge network-monitor-opts
-                    {:backend-key backend-key
-                     :probe-url   (probe-endpoint-for backend-key)
-                     :on-drop     (fn [diag]
-                                    (compare-and-set! network-drop-reason nil
-                                                      (network-drop-timeout diag))
-                                    ;; Kill the subprocess so the
-                                    ;; consumer's reader sees EOF and
-                                    ;; the loop exits.
-                                    ;; .destroyForcibly is the same
-                                    ;; call stop-stream-process! makes;
-                                    ;; safe to double-tap.
-                                    (try (.destroyForcibly process)
-                                         (catch Exception _ nil)))})))
-         {:keys [lines timeout anomaly]}
-         (try
-           (process-stream-lines out-reader monitor on-line)
-           (finally
-             (stop-keepalive!)
-             (when stop-network-monitor! (stop-network-monitor!))))
-         ;; A network-drop signal (if any) supersedes whatever
-         ;; pm/check-timeout returned — the subprocess was killed by
-         ;; the network monitor, so `process-stream-lines` likely
-         ;; observed a stream-idle as a knock-on effect. Surface the
-         ;; root cause for the workflow / PR-C auto-resumer.
-         effective-timeout (or @network-drop-reason timeout)
-         ;; Stream ended with a timeout reason (stream-idle,
-         ;; stagnation, total-max, or network-drop) — the subprocess
-         ;; is hung or silent. Kill it so `deref` returns immediately
-         ;; instead of waiting 10 min for a process that will not exit.
-         terminal-failure (or effective-timeout anomaly)
-         join-timeout (if terminal-failure
-                        (post-kill-join-timeout-ms)
-                        (process-join-timeout-ms))
-         result (stop-stream-process! stream-process
-                                      (boolean terminal-failure)
-                                      join-timeout)]
-     (cond
-       effective-timeout
-       (timeout-result lines effective-timeout)
+         process (:process stream-process)]
+     ;; The implement watchdog stops a stalled agent by interrupting this
+     ;; thread. Unless the agent CLI dies here it keeps running, MCP
+     ;; servers and Bash children included, and keeps editing the
+     ;; worktree while the phase retries with a second agent.
+     (try+
+       (let [out-reader (java.io.BufferedReader.
+                         (java.io.InputStreamReader. (.getInputStream process)))
+             ;; Decouple stagnation from the CLI's emission cadence.
+             ;; claude in --input-format text mode does not emit
+             ;; rate_limit_event during the model's think phase, so the
+             ;; stream-heartbeat-based stagnation guard has no signal
+             ;; during legitimate thinking on heavy prompts (2026-05-07
+             ;; stage-3 dogfood: stagnation timeout at 180s with 6
+             ;; init-time chunks then nothing for the model's full
+             ;; think). Keepalive refreshes the monitor while the JVM-side
+             ;; reader is alive; max-total-ms remains the wedge backstop.
+             stop-keepalive! (pm/start-keepalive! monitor
+                                                  (keepalive-interval-ms monitor))
+             ;; Network-drop monitor — independent of the keepalive. PR-B
+             ;; of the network-resilience stack. Probes the provider every
+             ;; `default-probe-interval-ms` (10s) and fires once after
+             ;; `default-failure-threshold` (3) consecutive failures.
+             ;; on-drop: stamps the network-drop reason into the shared
+             ;; atom and destroys the subprocess tree so the reader
+             ;; loop exits immediately (the agent is hung on socket I/O
+             ;; that will never recover without process restart).
+             ;; Disabled when no :backend-key is provided so legacy
+             ;; callers (tests with synthetic streams, the `:echo` test
+             ;; backend) keep working unchanged.
+             network-drop-reason (atom nil)
+             stop-network-monitor!
+             (when backend-key
+               ;; Caller opts merged FIRST so the integration-owned
+               ;; :backend-key, :probe-url, and :on-drop always win — a
+               ;; test fixture that mistakenly carries those keys can't
+               ;; clobber the monitor's correctness contract. Test-only
+               ;; knobs (:probe-interval-ms, :failure-threshold, :probe-fn)
+               ;; still flow through.
+               (nnm/start-network-monitor!
+                 (merge network-monitor-opts
+                        {:backend-key backend-key
+                         :probe-url   (probe-endpoint-for backend-key)
+                         :on-drop     (fn [diag]
+                                        (compare-and-set! network-drop-reason nil
+                                                          (network-drop-timeout diag))
+                                        ;; Kill the subprocess tree so the
+                                        ;; consumer's reader sees EOF (no
+                                        ;; child left holding stdout) and
+                                        ;; the loop exits. stop-stream-process!
+                                        ;; kills again; that is a no-op.
+                                        (destroy-process-tree! process))})))
+             {:keys [lines timeout anomaly]}
+             (try
+               (process-stream-lines out-reader monitor on-line)
+               (finally
+                 (stop-keepalive!)
+                 (when stop-network-monitor! (stop-network-monitor!))))
+             ;; A network-drop signal (if any) supersedes whatever
+             ;; pm/check-timeout returned — the subprocess was killed by
+             ;; the network monitor, so `process-stream-lines` likely
+             ;; observed a stream-idle as a knock-on effect. Surface the
+             ;; root cause for the workflow / PR-C auto-resumer.
+             effective-timeout (or @network-drop-reason timeout)
+             ;; Stream ended with a timeout reason (stream-idle,
+             ;; stagnation, total-max, or network-drop) — the subprocess
+             ;; is hung or silent. Kill it so `deref` returns immediately
+             ;; instead of waiting 10 min for a process that will not exit.
+             terminal-failure (or effective-timeout anomaly)
+             join-timeout (if terminal-failure
+                            (post-kill-join-timeout-ms)
+                            (process-join-timeout-ms))
+             result (stop-stream-process! stream-process
+                                          (boolean terminal-failure)
+                                          join-timeout)]
+         (cond
+           effective-timeout
+           (timeout-result lines effective-timeout)
 
-       anomaly
-       (stream-anomaly-result lines anomaly)
+           anomaly
+           (stream-anomaly-result lines anomaly)
 
-       :else
-       (success-result lines result)))))
+           :else
+           (success-result lines result)))
+       (catch InterruptedException _
+         ;; Kill first, then restore the flag the exception cleared, so
+         ;; the caller still sees the interrupt.
+         (destroy-process-tree! process)
+         (.interrupt (Thread/currentThread))
+         (throw+))
+       ;; `Object` is slingshot's catch-all: it also matches ex-info and
+       ;; throw+ payloads, which a `Throwable` selector would miss.
+       (catch Object _
+         (destroy-process-tree! process)
+         (throw+))))))
 
 (defn ^{:stratum 8} handle-non-streaming-fallback [client request on-chunk]
   (let [result (complete-impl client request)]
@@ -2261,8 +2415,10 @@
                 {:data (assoc (prompt-size-telemetry (:system request) prompt)
                               :backend backend
                               :model model)}))
-    (let [base-opts {:progress-monitor progress-monitor
-                     :workdir (:workdir request)}
+    ;; :backend-key starts the network-drop monitor in stream-exec-fn.
+    (let [base-opts (cond-> {:progress-monitor progress-monitor
+                             :workdir (:workdir request)}
+                      (network-monitor-enabled?) (assoc :backend-key backend))
           stream-opts (merge base-opts
                              (exec-opts-for-prompt-via prompt-via prompt))
           result (stream-fn

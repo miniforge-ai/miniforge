@@ -28,17 +28,20 @@
    [ai.miniforge.cli.workflow-runner :as workflow-runner]
    [ai.miniforge.cli.main.commands.plan-executor :as plan-executor]
    [ai.miniforge.cli.main.commands.resume :as resume]
+   [ai.miniforge.cli.main.commands.shared :as shared]
    [ai.miniforge.agent-runtime.interface :as agent-runtime]
+   [ai.miniforge.phase.interface :as phase]
    [slingshot.slingshot :refer [try+]]))
 
 ;------------------------------------------------------------------------------ Layer 0
 
 ;; Error handling
 (defn- ^{:stratum 0} classify-error
-  "Attempt runtime error classification. Returns classification or nil."
-  [e]
+  "Attempt runtime error classification of `message`. Returns
+   classification or nil."
+  [message data]
   (try
-    (agent-runtime/classify-error e (ex-data e))
+    (agent-runtime/classify-error message data)
     (catch Exception _ nil)))
 
 ;; Input type detection
@@ -57,6 +60,16 @@
   [path]
   (edn/read-string (slurp (str path))))
 
+(defn ^{:stratum 0} run-succeeded?
+  "True when a run's result counts as success for the process exit code: a
+   workflow that completed (or found its work already done), or a plan/DAG
+   run whose :success? is true. nil (a spec that failed validation) and
+   every other outcome count as failure."
+  [result]
+  (boolean (or (phase/succeeded? result)
+               (phase/already-done? result)
+               (true? (:success? result)))))
+
 (defn ^{:stratum 0} markdown-spec?
   "True if path has a markdown extension."
   [path]
@@ -72,7 +85,7 @@
   (let [source-dir (str (fs/parent (fs/absolutize spec-path)))
         execution-opts (cond-> {}
                          (:worktree opts) (assoc :worktree-path (:worktree opts)))
-        parsed-spec (-> (spec-parser/parse-spec-file spec-path)
+        parsed-spec (-> (spec-parser/read-spec-file spec-path)
                         (assoc :spec/source-dir source-dir))
         validation  (spec-parser/validate-spec parsed-spec)
         runner-opts (cond-> {:output :pretty :quiet false}
@@ -93,20 +106,58 @@
         (workflow-runner/run-workflow-from-spec!
          (assoc parsed-spec :spec/path spec-path) runner-opts)))))
 
+(defn ^{:stratum 0} resume-reporting-failure
+  "Resume `workflow-id`, for `mf resume` and `mf run --resume`, and return
+   the result for `finish!`. A resume that throws is reported on stderr
+   (see `resume/print-resume-failure`), exits 1 and returns nil, instead
+   of ending in a stack trace; an interrupt or a JVM error still
+   propagates. resume-workflow itself returns nil only after reporting
+   the run already complete, a no-op success."
+  [workflow-id opts]
+  (try+
+    (resume/resume-workflow workflow-id opts)
+    (catch InterruptedException interrupted
+      (.interrupt (Thread/currentThread))
+      (throw interrupted))
+    (catch Error fatal (throw fatal))
+    (catch Object caught
+      (resume/print-resume-failure caught (:throwable &throw-context))
+      (shared/exit! 1)
+      nil)))
+
 ;------------------------------------------------------------------------------ Layer 1
 
 (defn- ^{:stratum 1} print-run-error-and-exit!
-  "Print error details and exit with code 1."
+  "Report a run that threw, on stderr, and exit 1. The message is a thrown
+   anomaly's :anomaly/message, as `mf workflow run` and `mf resume` print
+   it (for a throw+ map, ex-message is slingshot's \"throw+: {...}\"
+   text holding the whole map), else the exception's. As in
+   `resume/print-resume-failure`, the classified view is shown only when
+   the agent-runtime classifier matched a known error pattern; its
+   catch-all would call any unmatched error a task-code error.
+   Otherwise one line: `Failed to run workflow: <message>`."
   [e]
-  (let [classification (classify-error e)]
-    (if classification
-      (classified-error/print-classified-error classification)
-      (do
-        (display/print-error (messages/t :run/failed {:error (ex-message e)}))
-        (when-let [data (ex-data e)]
-          (println (messages/t :run/error-details {:details (pr-str data)}))))))
+  (let [data           (ex-data e)
+        message        (or (:anomaly/message data)
+                           (ex-message e)
+                           (.getName (class e)))
+        classification (classify-error message data)]
+    (if (:regex classification)
+      (binding [*out* *err*]
+        (classified-error/print-classified-error classification)
+        (flush))
+      (display/print-error (messages/t :run/failed {:error message}))))
   (flush)
-  (System/exit 1))
+  (shared/exit! 1))
+
+(defn ^{:stratum 1} finish!
+  "Return `result` when the run succeeded; otherwise exit 1, so a script or
+   CI job running `run` sees the failure instead of a zero exit. Also used
+   by `mf resume`, `mf workflow run` and `mf chain run` in `cli.main`."
+  [result]
+  (if (run-succeeded? result)
+    result
+    (shared/exit! 1)))
 
 ;------------------------------------------------------------------------------ Layer 2
 
@@ -116,45 +167,58 @@
 
    Dispatch order:
    1. Markdown files (.md/.markdown) → spec-parser directly (no EDN pre-read)
-   2. EDN/JSON files → read and detect type (:spec, :dag, :plan)"
+   2. EDN/JSON files → read and detect type (:spec, :dag, :plan)
+
+   Exits 1 when the run fails, when the spec is invalid, and on a usage
+   error; returns the result (exit 0) only when the run succeeded. The
+   exit happens outside the try+ blocks, which catch everything."
   [opts]
   (let [{:keys [spec interactive]} opts
         resume-id (:resume opts)]
     (cond
-      ;; Resume mode
+      ;; Resume mode. nil is a resume already complete or one whose
+      ;; failure was reported, not the invalid-spec nil finish! rejects.
       resume-id
-      (resume/resume-workflow resume-id opts)
+      (some-> (resume-reporting-failure resume-id opts) finish!)
 
       ;; Interactive mode
       interactive
       (do
         (display/print-info (messages/t :run/interactive-not-implemented))
-        (println (messages/t :run/interactive-coming-soon)))
+        (println (messages/t :run/interactive-coming-soon))
+        (shared/exit! 1))
 
       ;; No file specified
       (not spec)
-      (display/print-error
-       (messages/t :run/usage
-                   {:command (app-config/command-string "run <spec-file> [--interactive] [--resume <workflow-id>]")}))
+      (do
+        (display/print-error
+         (messages/t :run/usage
+                     {:command (app-config/command-string "run <spec-file> [--interactive] [--resume <workflow-id>]")}))
+        (shared/exit! shared/usage-exit-code))
 
       ;; File not found
       (not (fs/exists? spec))
-      (display/print-error (messages/t :run/file-not-found {:path spec}))
+      (do
+        (display/print-error (messages/t :run/file-not-found {:path spec}))
+        (shared/exit! 1))
 
       ;; Markdown spec — route directly through spec-parser (no EDN pre-read)
       (markdown-spec? spec)
-      (try+
-        (run-spec-workflow spec opts)
-        (catch Object _ (print-run-error-and-exit! (:throwable &throw-context))))
+      (finish!
+       (try+
+         (run-spec-workflow spec opts)
+         (catch Object _ (print-run-error-and-exit! (:throwable &throw-context)))))
 
       ;; EDN/JSON — dispatch based on file content
       :else
-      (try+
-        (let [parsed     (read-edn-file spec)
-              input-type (detect-input-type parsed)]
-          (case input-type
-            :spec      (run-spec-workflow spec opts)
-            (:dag :plan) (do (display/print-info (messages/t :run/detected-format {:format (name input-type) :path spec}))
-                             (plan-executor/execute-plan parsed opts))
-            (display/print-error (messages/t :run/unrecognized-format {:path spec}))))
-        (catch Object _ (print-run-error-and-exit! (:throwable &throw-context)))))))
+      (finish!
+       (try+
+         (let [parsed     (read-edn-file spec)
+               input-type (detect-input-type parsed)]
+           (case input-type
+             :spec      (run-spec-workflow spec opts)
+             (:dag :plan) (do (display/print-info (messages/t :run/detected-format {:format (name input-type) :path spec}))
+                              (plan-executor/execute-plan parsed opts))
+             (do (display/print-error (messages/t :run/unrecognized-format {:path spec}))
+                 nil)))
+         (catch Object _ (print-run-error-and-exit! (:throwable &throw-context))))))))

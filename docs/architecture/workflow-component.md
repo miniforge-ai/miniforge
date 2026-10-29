@@ -110,6 +110,41 @@ The shared runtime executes whichever workflow definition it is given.
 
 The runtime should not assume software delivery as the only domain.
 
+## run-pipeline Options
+
+`run-pipeline` takes `[workflow input opts]`. These options are part of its
+contract for anyone embedding the runtime:
+
+- `:event-stream` is required when any phase has gates. Each gate decision is
+  published on the stream as a `:gate/decision` event, and the phase advances
+  only on an acknowledged publication. With no stream the decision is
+  unacknowledged and the gated phase fails closed, so a gated workflow run
+  without a stream always fails.
+- `:retention` belongs to the stream, not to `run-pipeline`. A process that
+  keeps one stream for days creates it with
+  `(create-event-stream {:retention bounded-retention})`, which bounds the
+  in-memory history. Sinks and subscribers still see every event. A one-shot
+  run can leave it out.
+- `:logger` is the run's structured logger, kept as `:execution/logger`. The
+  default logger writes human-readable lines.
+- `:policy-packs` is the vector of packs the pack gates evaluate. Without it,
+  `:policy-verify` and `:policy-review` evaluate the shipped standards pack,
+  and `:policy-pack` blocks.
+- `:checkpoint/root` is where checkpoints are written. The default is the
+  configured root, which defaults under `MINIFORGE_HOME` (otherwise `~/.miniforge`).
+  Tests and embedders that must not touch it pass an explicit root.
+  On POSIX filesystems, new checkpoint directories are private (`0700`).
+  Existing directories retain their permissions, including read-only sharing.
+  Writes require trusted directory ownership and protection against entry replacement throughout the resolved ancestry.
+  Group/world-writable checkpoint directories are rejected; sticky ancestors such as `/tmp` remain supported.
+  New files are private (`0600`); replacements preserve existing POSIX permission bits.
+  A rejected checkpoint is reported through the runner's existing failure handling.
+
+Options copied onto the context are listed in
+`workflow.context/execution-passthrough-option-keys`. An option missing from
+that list stays only in `:execution/opts`, so a phase or gate that reads the
+top-level context key does not see it.
+
 ## Related App-Owned Configuration
 
 The workflow runtime now expects several important choices to come from the app
@@ -134,9 +169,8 @@ than hardcoded kernel literals.
 
 ### Chains and workflow families
 
-Chains and workflow families are discovered from every matching classpath
-resource root, so the kernel does not need to know which app owns which
-workflow family.
+Chains and workflow families are discovered from every matching classpath resource root.
+The kernel does not need to know which app owns each workflow family.
 
 ## What Belongs in the Shared Component
 

@@ -23,7 +23,8 @@
    workflow and phase components."
   (:require
    [ai.miniforge.release-executor.core :as core]
-   [ai.miniforge.release-executor.git :as git]))
+   [ai.miniforge.release-executor.git :as git]
+   [ai.miniforge.release-executor.shell :as shell]))
 
 ;------------------------------------------------------------------------------ Layer 0
 
@@ -60,13 +61,32 @@
    Returns {:success? bool :branch string :base-branch string :error string}"
   git/create-branch!)
 
+;; Git child-process environment
+(def ^{:stratum 0} repository-env-vars
+  "The variables that bind a git command to one repository (what `git
+   rev-parse --local-env-vars` prints). Every git call the release and
+   fix-loop paths make drops them, so it acts on the worktree it runs in."
+  shell/repository-env-vars)
+
+(def ^{:stratum 0} without-repository-env
+  "`env` (a map) without `repository-env-vars`. Args: [env]."
+  shell/without-repository-env)
+
+(def ^{:stratum 0} local-git-env
+  "This process's environment without `repository-env-vars`, for a git
+   child process. Args: []."
+  shell/local-git-env)
+
 (def ^{:stratum 0} commit-changes!
-  "Commit staged changes.
+  "Commit staged changes. Args: [worktree-path message], plus optional
+   git-args (global git options placed before `commit`, e.g. to disable
+   hooks) and extra-env (e.g. GIT_INDEX_FILE for a temporary index).
    Returns {:success? bool :commit-sha string :error string}"
   git/commit-changes!)
 
 (def ^{:stratum 0} push-branch!
-  "Push branch to remote.
+  "Push branch to remote. Args: [worktree-path branch], plus optional
+   github-token and git-args (global git options placed before `push`).
    Returns {:success? bool :error string}"
   git/push-branch!)
 

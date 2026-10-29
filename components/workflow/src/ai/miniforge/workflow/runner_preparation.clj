@@ -49,10 +49,22 @@
                      :repo-path       repo-path
                      :execution-mode  (:execution-mode opts)
                      :executor-config (:executor-config opts)
+                     :runtime-config  (:runtime-config opts)
                      :resume-workspace (:resume-workspace opts)})]
       [acquired (if acquired
                   (merge opts {:branch branch} acquired)
                   opts)])))
+
+(defn ^{:stratum 0} admit-input
+  "Caller input as a fresh run admits it, once: without the input keys a
+   pipeline phase's lifecycle owns (its interceptor's :owned-input-keys).
+   Only that lifecycle writes them, so a caller's value is never trusted. A
+   resume is not admitted: it continues the checkpointed run's input whole,
+   lifecycle-owned keys included."
+  [pipeline input opts]
+  (if (or (not (map? input)) (:resume-machine-snapshot opts) (:resume-phase-results opts))
+    input
+    (apply dissoc input (mapcat :owned-input-keys pipeline))))
 
 (defn- ^{:stratum 0} governed-capsule? [opts]
   (boolean (and (= :governed (:execution-mode opts))
@@ -89,7 +101,11 @@
                            dag-exec/execute!
                            (get opts :executor)
                            (get opts :environment-id)
-                           (get opts :worktree-path (defaults/default-workdir))))
+                           ;; The capsule's own checkout: the host worktree path
+                           ;; a runner-acquired capsule records does not exist in it.
+                           (or (get opts :capsule-workdir)
+                               (get opts :worktree-path)
+                               (defaults/default-workdir))))
         base-context (if (and resume-machine-snapshot resume-phase-results)
                        (ctx/restore-context workflow input
                                             resume-machine-snapshot
@@ -104,6 +120,7 @@
                :execution/worktree-path (get opts :worktree-path
                                              (get opts :sandbox-workdir))
                :execution/mode mode
+               :execution/capsule-workdir (get opts :capsule-workdir)
                :execution/started-at (java.time.Instant/now)
                :execution/environment-metadata environment-metadata
                :execution/execute-fn (when governed? dag-exec/execute!)

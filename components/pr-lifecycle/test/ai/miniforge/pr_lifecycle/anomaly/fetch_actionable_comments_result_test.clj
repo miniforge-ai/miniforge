@@ -37,6 +37,7 @@
                   (fn [_ _]
                     (dag/ok {:comments [{:comment/type :review-comment
                                          :comment/author "alice"
+                                         :comment/author-association "MEMBER"
                                          :comment/path "src/x.clj"
                                          :comment/body "fix this"}]}))]
       (let [result (responder/fetch-actionable-comments-result "/tmp" 42)]
@@ -55,6 +56,7 @@
                                          :comment/body "auto comment"}
                                         {:comment/type :review-comment
                                          :comment/author "alice"
+                                         :comment/author-association "MEMBER"
                                          :comment/path "src/x.clj"
                                          :comment/body "real comment"}]}))]
       (let [result (responder/fetch-actionable-comments-result "/tmp" 42)]

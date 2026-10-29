@@ -23,6 +23,7 @@
   (:require [clojure.test :refer [deftest is testing]]
             [ai.miniforge.dag-executor.interface :as dag]
             [ai.miniforge.dag-executor.result :as result]
+            [ai.miniforge.gate.interface :as gate]
             [ai.miniforge.logging.interface :as log]
             [ai.miniforge.workflow.runner-environment :as env]))
 
@@ -62,6 +63,7 @@
 (deftest ^{:stratum 1} worktree-known-only-to-the-phase-context-still-persists
   (let [sink (atom []) opts-seen (atom nil)]
     (with-redefs [env/env-logger (capturing-logger sink)
+                  gate/outgoing-secrets (constantly {:passed? true})
                   dag/persist-workspace! (fn [_ _ opts] (reset! opts-seen opts)
                                            (result/ok {:persisted? false :no-changes? true :branch "task-x"}))]
       (env/persist-workspace-at-phase-boundary!
@@ -74,6 +76,7 @@
 (deftest ^{:stratum 1} rejected-persist-is-logged
   (let [sink (atom [])]
     (with-redefs [env/env-logger (capturing-logger sink)
+                  gate/outgoing-secrets (constantly {:passed? true})
                   dag/persist-workspace! (fn [& _] (result/err :worktree-missing "gone"))]
       (env/persist-workspace-at-phase-boundary!
        {:execution/executor ::stub :execution/environment-id (random-uuid)
@@ -83,3 +86,47 @@
       (is (= "Workspace persist rejected at implement: :worktree-missing"
              (:log/message (first @sink)))
           "the executor's error code is in the message"))))
+
+(deftest ^{:stratum 1} an-unscannable-worktree-is-committed-but-not-pushed
+  (let [sink (atom []) opts-seen (atom nil)]
+    (with-redefs [env/env-logger (capturing-logger sink)
+                  dag/persist-workspace! (fn [_ _ opts] (reset! opts-seen opts)
+                                           (result/ok {:persisted? true :pushed? false :branch "task-x"}))]
+      (env/persist-workspace-at-phase-boundary!
+       {:execution/executor ::stub :execution/environment-id (random-uuid)
+        :execution/worktree-path "/nonexistent/not-a-repo"}
+       {:execution/current-phase :plan})
+      (is (false? (:push? @opts-seen)) "the commit is held back from the remote")
+      (is (= [[:workflow/persist-unscanned :worktree-uninspectable]
+              [:workflow/persist-held :worktree-uninspectable]]
+             (events-of sink))
+          "a warning names the reason"))))
+
+(deftest ^{:stratum 1} the-persist-scan-uses-the-carried-task-base
+  (testing "the implement phase's recorded base refs reach the scan, ahead of the environment base"
+    (let [seen (atom nil)]
+      (with-redefs [env/env-logger (capturing-logger (atom []))
+                    gate/outgoing-secrets (fn [ctx] (reset! seen ctx) {:passed? true})
+                    dag/persist-workspace! (fn [& _] (result/ok {:persisted? false :no-changes? true}))]
+        (env/persist-workspace-at-phase-boundary!
+         {:execution/executor ::stub :execution/environment-id (random-uuid)
+          :execution/worktree-path "/tmp/wt"
+          :execution/environment-metadata {:base-sha "restored-head"}}
+         {:execution/current-phase :plan
+          :execution/phase-results {:implement {:artifact {:code/base-refs ["task-base"]}}}})
+        (is (= ["task-base"] (:execution/task-base-refs @seen)))))))
+
+(deftest ^{:stratum 1} governed-persistence-runs-in-the-capsule-checkout
+  (testing "the capsule executor is given the capsule's checkout, not the host worktree path"
+    (let [opts-seen (atom nil)]
+      (with-redefs [env/env-logger (capturing-logger (atom []))
+                    gate/outgoing-secrets (constantly {:passed? true})
+                    dag/persist-workspace! (fn [_ _ opts] (reset! opts-seen opts)
+                                             (result/ok {:persisted? false :no-changes? true}))]
+        (env/persist-workspace-at-phase-boundary!
+         {:execution/executor ::capsule :execution/environment-id (random-uuid)
+          :execution/mode :governed
+          :execution/worktree-path "/host/worktrees/task-1"
+          :execution/capsule-workdir "/workspace"}
+         {:execution/current-phase :implement})
+        (is (= "/workspace" (:workdir @opts-seen)))))))

@@ -50,6 +50,7 @@
    ;; :no-secrets capabilities without an explicit caller.
    [ai.miniforge.gate.capabilities]
    [ai.miniforge.event-stream.interface :as events]
+   [ai.miniforge.gate.no-secrets :as no-secrets]
    [ai.miniforge.gate.registry :as registry]
    [ai.miniforge.response.interface :as response]
    [ai.miniforge.schema.interface :as schema]))
@@ -77,6 +78,14 @@
    Returns:
      Set of gate keywords"
   registry/list-gates)
+
+(defn ^{:stratum 0} outgoing-secrets
+  "The :no-secrets check over CTX's worktree alone, with no artifact: its
+   working changes and the commits since the task base, i.e. what a
+   commit or push from it would publish. Same result shape as a gate
+   check; emits no gate event, since no phase gate is running."
+  [ctx]
+  (no-secrets/check-no-secrets {} ctx))
 
 ;;------------------------------------------------------------------------------ Layer 0.5
 ;; Gate result predicates
