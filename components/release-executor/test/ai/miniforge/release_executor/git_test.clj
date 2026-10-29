@@ -77,12 +77,11 @@
           (is (false? @called) "no gh process is spawned for an unsafe base")))))
   (testing "check-gh-auth! injects GH_TOKEN on the auth-status call"
     (let [calls (atom [])]
-      (with-redefs [shell/run-bounded (fn [args opts] (apply process/shell opts args))
+      (with-redefs [fs/which (fn [& _] "/usr/bin/gh")
+                    shell/run-bounded (fn [args opts] (apply process/shell opts args))
                     process/shell (fn [opts & args]
                                     (swap! calls conj {:opts opts :args (vec args)})
-                                    (if (= "which" (first args))
-                                      {:exit 0 :out "/usr/bin/gh" :err ""}
-                                      {:exit 0 :out "Logged in to github.com account me (X)" :err ""}))]
+                                    {:exit 0 :out "Logged in to github.com account me (X)" :err ""})]
         (git/check-gh-auth! "tok-123"))
       (let [auth (first (filter #(= "gh" (first (:args %))) @calls))]
         (is (= "tok-123" (get-in auth [:opts :extra-env "GH_TOKEN"])))))))
@@ -101,7 +100,7 @@
   (testing "a timed-out `gh auth status` keeps :timed-out? and the :timeout anomaly
             instead of reading as an ordinary auth failure"
     (let [anom {:anomaly/type :timeout :anomaly/message "gh auth status timed out"}]
-      (with-redefs [process/shell     (fn [& _] {:exit 0 :out "/usr/bin/gh" :err ""})
+      (with-redefs [fs/which          (fn [& _] "/usr/bin/gh")
                     shell/run-bounded (fn [_args _opts]
                                         {:exit 124 :out "" :err "gh auth status timed out"
                                          :timed-out? true :anomaly anom})]
@@ -111,6 +110,25 @@
           (is (= anom (:anomaly r)))
           (is (= "gh auth status timed out" (:error r))
               "a deadline is not reported as missing auth"))))))
+
+(deftest ^{:stratum 0} check-gh-auth-finds-gh-without-which-test
+  (testing "gh is located with fs/which; no `which` process is run (Windows has none)"
+    (with-redefs [fs/which          (fn [cmd & _] (when (= "gh" cmd) "C:\\Program Files\\GitHub CLI\\gh.exe"))
+                  process/shell     (fn [& args]
+                                      (throw (java.io.IOException.
+                                              (str "Cannot run program " (pr-str (last args))))))
+                  shell/run-bounded (fn [_args _opts]
+                                      {:exit 0 :out "Logged in to github.com account me (X)" :err ""})]
+      (let [r (git/check-gh-auth! "tok")]
+        (is (true? (:available? r)))
+        (is (true? (:authenticated? r))))))
+  (testing "gh that fs/which cannot find is reported missing without an auth call"
+    (let [auth-called (atom false)]
+      (with-redefs [fs/which          (fn [& _] nil)
+                    shell/run-bounded (fn [_args _opts] (reset! auth-called true) {:exit 0 :out "" :err ""})]
+        (let [r (git/check-gh-auth! "tok")]
+          (is (false? (:available? r)))
+          (is (false? @auth-called)))))))
 
 (deftest ^{:stratum 0} commit-changes-rev-parse-failure-test
   (testing "commit-changes! surfaces a rev-parse failure instead of reporting a

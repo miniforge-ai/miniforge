@@ -105,6 +105,25 @@
         (workflow-runner/run-workflow-from-spec!
          (assoc parsed-spec :spec/path spec-path) runner-opts)))))
 
+(defn ^{:stratum 0} resume-reporting-failure
+  "Resume `workflow-id`, for `mf resume` and `mf run --resume`, and return
+   the result for `finish!`. A resume that throws is reported on stderr
+   (see `resume/print-resume-failure`), exits 1 and returns nil, instead
+   of ending in a stack trace; an interrupt or a JVM error still
+   propagates. resume-workflow itself returns nil only after reporting
+   the run already complete, a no-op success."
+  [workflow-id opts]
+  (try+
+    (resume/resume-workflow workflow-id opts)
+    (catch InterruptedException interrupted
+      (.interrupt (Thread/currentThread))
+      (throw interrupted))
+    (catch Error fatal (throw fatal))
+    (catch Object caught
+      (resume/print-resume-failure caught (:throwable &throw-context))
+      (shared/exit! 1)
+      nil)))
+
 ;------------------------------------------------------------------------------ Layer 1
 
 (defn- ^{:stratum 1} print-run-error-and-exit!
@@ -146,11 +165,10 @@
   (let [{:keys [spec interactive]} opts
         resume-id (:resume opts)]
     (cond
-      ;; Resume mode. resume-workflow returns nil only after reporting the
-      ;; run already complete (its failures throw), so nil is a no-op
-      ;; success here, not the invalid-spec nil finish! rejects.
+      ;; Resume mode. nil is a resume already complete or one whose
+      ;; failure was reported, not the invalid-spec nil finish! rejects.
       resume-id
-      (some-> (resume/resume-workflow resume-id opts) finish!)
+      (some-> (resume-reporting-failure resume-id opts) finish!)
 
       ;; Interactive mode
       interactive

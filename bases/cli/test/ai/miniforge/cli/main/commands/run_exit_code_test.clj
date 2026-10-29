@@ -20,6 +20,7 @@
    can tell a failed workflow from a finished one."
   (:require
    [babashka.fs :as fs]
+   [clojure.string :as str]
    [clojure.test :refer [deftest is testing]]
    [ai.miniforge.cli.main.commands.plan-executor :as plan-executor]
    [ai.miniforge.cli.main.commands.resume :as resume]
@@ -27,7 +28,8 @@
    [ai.miniforge.cli.main.commands.shared :as shared]
    [ai.miniforge.cli.main.display :as display]
    [ai.miniforge.cli.spec-parser :as spec-parser]
-   [ai.miniforge.cli.workflow-runner :as workflow-runner]))
+   [ai.miniforge.cli.workflow-runner :as workflow-runner]
+   [ai.miniforge.response.interface :as response]))
 
 ;------------------------------------------------------------------------------ Layer 0
 
@@ -47,6 +49,21 @@
       (binding [*out* (java.io.StringWriter.)]
         (sut/run-cmd opts)))
     @code))
+
+(defn- ^{:stratum 0} resume-failure-output
+  "Run `mf run --resume wf-1` with resume-workflow calling `throw!`, and
+   the real error printers. Returns {:exit code-or-:no-exit :out stdout
+   :err stderr}."
+  [throw!]
+  (let [code (atom :no-exit)
+        out  (java.io.StringWriter.)
+        err  (java.io.StringWriter.)]
+    (with-redefs [shared/exit! (fn [c] (reset! code c) nil)
+                  resume/resume-workflow (fn [& _] (throw!))]
+      (binding [*out* out
+                *err* err]
+        (sut/run-cmd {:resume "wf-1"})))
+    {:exit @code :out (str out) :err (str err)}))
 
 (defn- ^{:stratum 0} temp-file
   [suffix content]
@@ -92,3 +109,18 @@
           (binding [*out* (java.io.StringWriter.)]
             (sut/run-cmd {:spec md})))
         (is (= 1 @code))))))
+
+(deftest ^{:stratum 1} run-resume-failure-is-reported-on-stderr-test
+  (testing "a refused resume prints the anomaly's message on stderr, exits 1"
+    (let [{:keys [exit out err]}
+          (resume-failure-output
+           #(response/throw-anomaly! :anomalies/not-found
+                                     "No events found for workflow wf-1"
+                                     {:workflow-id "wf-1"}))]
+      (is (= 1 exit))
+      (is (str/includes? err "Resume failed: No events found for workflow wf-1"))
+      (is (not (str/includes? err "throw+")) "the message, not slingshot's wrapper text")
+      (is (= "" out))))
+
+  (testing "a resume that throws a plain exception exits 1"
+    (is (= 1 (:exit (resume-failure-output #(throw (ex-info "disk full" {}))))))))
