@@ -49,6 +49,7 @@
                      :repo-path       repo-path
                      :execution-mode  (:execution-mode opts)
                      :executor-config (:executor-config opts)
+                     :runtime-config  (:runtime-config opts)
                      :resume-workspace (:resume-workspace opts)})]
       [acquired (if acquired
                   (merge opts {:branch branch} acquired)

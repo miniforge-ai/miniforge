@@ -793,11 +793,13 @@
   poller/post-comment)
 
 (def ^{:stratum 0} load-watermarks
-  "Load polling watermarks from persistent storage."
+  "Load the polling watermarks saved for a repo: (load-watermarks \"owner/name\")
+   → {:repo-slug :prs}, or an anomaly when the slug or the file is unusable."
   poller/load-watermarks)
 
 (def ^{:stratum 0} save-watermarks!
-  "Persist polling watermarks to disk."
+  "Merge watermarks (as load-watermarks returns them) into those saved for
+   their repo, under a file lock. The merged watermarks or an anomaly."
   poller/save-watermarks!)
 
 ;; PR Monitor Loop (autonomous comment resolution)
@@ -809,6 +811,8 @@
    - :self-author — miniforge's GitHub login
 
    Optional config keys:
+   - :repo-slug — owner/name keying the state on disk (default: resolved
+     from :worktree-path with gh)
    - :poll-interval-ms — polling interval (default 60000)
    - :event-bus — event bus for TUI visibility
    - :logger — structured logger

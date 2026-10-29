@@ -20,6 +20,7 @@
    the directory miniforge runs in and the binaries on PATH."
   (:require
    [ai.miniforge.agent.artifact-session :as session]
+   [babashka.fs :as fs]
    [clojure.java.io :as io]
    [clojure.test :refer [deftest testing is]])
   (:import
@@ -76,6 +77,14 @@
          :hook   (session/resolve-miniforge-command)})
       (finally
         (System/setProperty "user.dir" original)))))
+
+(deftest ^{:stratum 0} command-on-path-uses-fs-which-test
+  (testing "PATH lookup goes through fs/which, not the `which` binary Windows lacks"
+    (with-redefs [fs/which (fn [cmd & _] (when (= cmd "miniforge-fake-cmd") "/opt/fake/bin/miniforge-fake-cmd"))]
+      (is (true? (session/command-on-path? "miniforge-fake-cmd")))
+      (is (false? (session/command-on-path? "sh")) "found by `which`, not by fs/which")))
+  (testing "a missing command name is not on PATH"
+    (is (false? (session/command-on-path? nil)))))
 
 ;------------------------------------------------------------------------------ Layer 1
 

@@ -1,29 +1,12 @@
 {:description "Fallback default user configuration for MiniForge Core"
  :config
- {:llm {:backend :opencode
-        :model "anthropic/claude-sonnet-4-5"
-        :timeout-ms 300000
-        :line-timeout-ms 60000
-        ;; Keep in sync with resources/config/default-user-config.edn.
-        ;; OPSV convergence target — see work/n07-opsv-agent-budgets.spec.edn.
-        :max-tokens 32000}
-  :workflow {:max-iterations 50
-             :max-tokens 150000
-             :failure-strategy :retry
-             :checkpoint-root "~/.miniforge/checkpoints"}
+ ;; Keep in sync with resources/config/default-user-config.edn, which says
+ ;; why there is no :llm :model and no :agents :default-models.
+ {:llm {:backend :opencode}
+  :workflow {:checkpoint-root "~/.miniforge/checkpoints"}
   ;; Keep in sync with resources/config/default-user-config.edn.
   ;; /tmp opt-in: override to "/tmp/miniforge-worktrees" for CI/sandbox runs.
   :workflow/worktree-root "~/.miniforge/worktrees"
-  :artifacts {:dir "~/.miniforge/artifacts"}
-  :meta-loop {:enabled true
-              :max-convergence-iterations 10
-              :convergence-threshold 0.95}
-  ;; Keep in sync with resources/config/default-user-config.edn.
-  ;; See work/multi-backend-cli-parity.spec.edn for why thinking defaults
-  ;; to Claude today rather than gpt-5.4.
-  :agents {:default-models {:thinking   "anthropic/claude-opus-4-6"
-                            :execution  "anthropic/claude-sonnet-4-6"
-                            :escalation "anthropic/claude-opus-4-7"}}
   :model-selection {:enabled true
                     :strategy :automatic
                     :cost-limit-per-task 0.10

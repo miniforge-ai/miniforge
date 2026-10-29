@@ -11,9 +11,11 @@ on:
         required: true
         type: string
 
+# Read-only by default. Only the `release` job, which creates the tag and
+# GitHub release, gets `contents: write`; the Homebrew and Scoop jobs
+# push with their own GitHub App tokens.
 permissions:
-  contents: write
-  packages: write
+  contents: read
 
 env:
   # Public identifier for the read-only Miniforge CI GitHub App (the one
@@ -22,25 +24,91 @@ env:
   MINIFORGE_CI_BOT_APP_ID: "3360143"
 
 jobs:
+  # Refuses to release a commit that is not on main, or whose newest
+  # ci.yml push run on main did not pass. Tag pushes and manual
+  # dispatches both release github.sha. `bb release` (tasks/release.clj)
+  # applies the same CI rule before it tags. No checkout or toolchain:
+  # `gh` is preinstalled on the runner.
+  gate:
+    name: Release gate
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    permissions:
+      contents: read
+      actions: read
+    env:
+      GH_TOKEN: ${{ github.token }}
+      SHA: ${{ github.sha }}
+    steps:
+      - name: Commit is on main
+        run: |
+          status=$(gh api "repos/$GITHUB_REPOSITORY/compare/main...$SHA" --jq .status)
+          case "$status" in
+            identical|behind) echo "$SHA is on main (compare status: $status)." ;;
+            *) echo "::error::$SHA is not on main (compare status: $status); refusing to release."
+               exit 1 ;;
+          esac
+
+      # Waits while CI is still running (a tag pushed right after a
+      # merge), up to 40 minutes; a commit with no CI run gets 3 minutes
+      # for the run to appear (only the tip of each push to main gets one).
+      - name: CI passed for this commit
+        run: |
+          start=$(date +%s)
+          while :; do
+            newest=$(gh api "repos/$GITHUB_REPOSITORY/actions/workflows/ci.yml/runs?head_sha=$SHA&event=push&branch=main&per_page=100" \
+              --jq 'if (.workflow_runs | length) == 0 then "none" else (.workflow_runs | sort_by(.id) | last | "\(.status) \(.conclusion) \(.html_url)") end')
+            echo "Newest ci.yml push run for $SHA: $newest"
+            elapsed=$(( $(date +%s) - start ))
+            case "$newest" in
+              "completed success "*)
+                exit 0 ;;
+              completed\ *)
+                echo "::error::ci.yml did not pass for $SHA; refusing to release."
+                exit 1 ;;
+              none)
+                if (( elapsed >= 180 )); then
+                  echo "::error::No ci.yml push run on main for $SHA; refusing to release."
+                  exit 1
+                fi ;;
+              *)
+                if (( elapsed >= 2400 )); then
+                  echo "::error::ci.yml still running for $SHA after 40 minutes; re-run this workflow once it passes."
+                  exit 1
+                fi ;;
+            esac
+            sleep 30
+          done
+
   # Resolves the release version once, before any build, so every
   # artifact is stamped with it (MINIFORGE_VERSION -> miniforge/version.edn
   # in the jar, read by `mf version`).
   version:
     name: Determine version
+    needs: gate
     runs-on: ubuntu-latest
     outputs:
       version: ${{ steps.version.outputs.version }}
       release_tag: ${{ steps.version.outputs.release_tag }}
     steps:
+      # The dispatch input reaches the shell through env, not expression
+      # interpolation, and must be DateVer before any job uses it: every
+      # later job reads the version from this job's outputs.
       - name: Determine version
         id: version
+        env:
+          INPUT_VERSION: ${{ github.event.inputs.version }}
         run: |
-          if [[ "${{ github.event_name }}" == "workflow_dispatch" ]]; then
-            VERSION="${{ github.event.inputs.version }}"
+          if [[ "$GITHUB_EVENT_NAME" == "workflow_dispatch" ]]; then
+            VERSION="$INPUT_VERSION"
             RELEASE_TAG="v${VERSION}"
           else
             VERSION="${GITHUB_REF#refs/tags/v}"
             RELEASE_TAG="${GITHUB_REF_NAME}"
+          fi
+          if [[ ! "$VERSION" =~ ^[0-9]{4}\.[0-9]{2}\.[0-9]{2}\.[0-9]+$ ]]; then
+            echo "::error::Version '$VERSION' is not DateVer (YYYY.MM.DD.N); refusing to release."
+            exit 1
           fi
           echo "version=$VERSION" >> $GITHUB_OUTPUT
           echo "release_tag=$RELEASE_TAG" >> $GITHUB_OUTPUT
@@ -63,11 +131,11 @@ jobs:
 
     steps:
       - name: Checkout code
-        uses: actions/checkout@v4
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
 
       - name: Generate workbench contract token
         id: workbench-contract-token
-        uses: actions/create-github-app-token@v1
+        uses: actions/create-github-app-token@d72941d797fd3113feb6b93fd0dec494b13a2547 # v1.12.0
         with:
           app-id: ${{ env.MINIFORGE_CI_BOT_APP_ID }}
           private-key: ${{ secrets.MINIFORGE_CI_BOT_KEY }}
@@ -81,19 +149,24 @@ jobs:
           git config --global url."https://x-access-token:${WORKBENCH_CONTRACT_TOKEN}@github.com/miniforge-ai/workbench-contract.git".insteadOf "ssh://git@github.com/miniforge-ai/workbench-contract.git"
 
       - name: Set up Java
-        uses: actions/setup-java@v4
+        uses: actions/setup-java@cf277c60eb25467037889841efdb72551f06f6c3 # v4.9.1
         with:
           distribution: 'temurin'
           java-version: '21'
 
+      # Exact toolchain versions live in .github/tool-versions.json.
+      - name: Read pinned tool versions
+        id: tools
+        run: jq -r 'to_entries[] | "\(.key)=\(.value)"' .github/tool-versions.json >> "$GITHUB_OUTPUT"
+
       - name: Install Clojure
-        uses: DeLaGuardo/setup-clojure@12.5
+        uses: DeLaGuardo/setup-clojure@bc7570e912b028bbcc22f457adec7fdf98e2f4ed # 12.5
         with:
-          cli: latest
-          bb: latest
+          cli: ${{ steps.tools.outputs.clojure-cli }}
+          bb: ${{ steps.tools.outputs.babashka }}
 
       - name: Cache Clojure dependencies
-        uses: actions/cache@v4
+        uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4.3.0
         with:
           path: |
             ~/.m2/repository
@@ -106,6 +179,18 @@ jobs:
         env:
           MINIFORGE_VERSION: ${{ needs.version.outputs.version }}
         run: bb build:cli
+
+      - name: Smoke-test the built jar
+        env:
+          VERSION: ${{ needs.version.outputs.version }}
+        run: |
+          out=$(bb --jar dist/miniforge.jar -m ai.miniforge.cli.main version)
+          echo "$out"
+          first=$(head -n1 <<<"$out")
+          if [[ "$first" != *" $VERSION" ]]; then
+            echo "::error::Built jar reports '$first'; expected version $VERSION."
+            exit 1
+          fi
 
       - name: Create artifact name
         id: artifact
@@ -123,7 +208,7 @@ jobs:
           shasum -a 256 ${{ steps.artifact.outputs.name }} > ${{ steps.artifact.outputs.name }}.sha256
 
       - name: Upload artifact
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
           name: ${{ steps.artifact.outputs.name }}
           path: |
@@ -141,13 +226,18 @@ jobs:
     needs: version
     runs-on: windows-latest
     continue-on-error: true
+    # Set only when every step through the upload succeeded; the scoop
+    # job keys on it rather than on needs.build-windows.result, which
+    # continue-on-error can report as success for a failed job.
+    outputs:
+      built: ${{ steps.built.outputs.built }}
     steps:
       - name: Checkout code
-        uses: actions/checkout@v4
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
 
       - name: Generate workbench contract token
         id: workbench-contract-token
-        uses: actions/create-github-app-token@v1
+        uses: actions/create-github-app-token@d72941d797fd3113feb6b93fd0dec494b13a2547 # v1.12.0
         with:
           app-id: ${{ env.MINIFORGE_CI_BOT_APP_ID }}
           private-key: ${{ secrets.MINIFORGE_CI_BOT_KEY }}
@@ -162,16 +252,24 @@ jobs:
           git config --global url."https://x-access-token:${WORKBENCH_CONTRACT_TOKEN}@github.com/miniforge-ai/workbench-contract.git".insteadOf "ssh://git@github.com/miniforge-ai/workbench-contract.git"
 
       - name: Set up Java
-        uses: actions/setup-java@v4
+        uses: actions/setup-java@cf277c60eb25467037889841efdb72551f06f6c3 # v4.9.1
         with:
           distribution: 'temurin'
           java-version: '21'
 
+      # Exact toolchain versions live in .github/tool-versions.json.
+      - name: Read pinned tool versions
+        id: tools
+        shell: pwsh
+        run: |
+          (Get-Content -Raw .github/tool-versions.json | ConvertFrom-Json).PSObject.Properties |
+            ForEach-Object { "$($_.Name)=$($_.Value)" } >> $env:GITHUB_OUTPUT
+
       - name: Install Clojure + bb (Windows)
-        uses: DeLaGuardo/setup-clojure@12.5
+        uses: DeLaGuardo/setup-clojure@bc7570e912b028bbcc22f457adec7fdf98e2f4ed # 12.5
         with:
-          cli: latest
-          bb: latest
+          cli: ${{ steps.tools.outputs.clojure-cli }}
+          bb: ${{ steps.tools.outputs.babashka }}
 
       # `bb build:cli` shells out to `clojure` through Java
       # ProcessBuilder. On GitHub-hosted Windows runners setup-clojure
@@ -194,7 +292,7 @@ jobs:
           Write-Host "clojure/clj installed at $depsDir (via deps.clj $depsVersion)"
 
       - name: Cache Clojure dependencies
-        uses: actions/cache@v4
+        uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4.3.0
         with:
           path: |
             ~/.m2/repository
@@ -208,6 +306,18 @@ jobs:
           MINIFORGE_VERSION: ${{ needs.version.outputs.version }}
         run: bb build:cli
         shell: pwsh
+
+      - name: Smoke-test the built jar
+        shell: pwsh
+        env:
+          VERSION: ${{ needs.version.outputs.version }}
+        run: |
+          $out = @(bb --jar dist/miniforge.jar -m ai.miniforge.cli.main version)
+          $out
+          if ($LASTEXITCODE -ne 0 -or -not $out[0].EndsWith(" $env:VERSION")) {
+            Write-Error "Built jar reports '$($out[0])'; expected version $env:VERSION."
+            exit 1
+          }
 
       - name: Package zip with mf.cmd launcher
         shell: pwsh
@@ -227,13 +337,18 @@ jobs:
           "$sha  $name.zip" | Out-File -Encoding ascii "dist/$name.zip.sha256"
 
       - name: Upload artifact
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
           name: miniforge-windows-x86_64
           path: |
             dist/miniforge-windows-x86_64.zip
             dist/miniforge-windows-x86_64.zip.sha256
           retention-days: 5
+
+      - name: Mark Windows build complete
+        id: built
+        shell: bash
+        run: echo "built=true" >> "$GITHUB_OUTPUT"
 
   release:
     name: Create GitHub Release
@@ -242,6 +357,8 @@ jobs:
     needs: [version, build, build-windows]
     if: always() && needs.build.result == 'success'
     runs-on: ubuntu-latest
+    permissions:
+      contents: write
     outputs:
       version: ${{ needs.version.outputs.version }}
       release_tag: ${{ needs.version.outputs.release_tag }}
@@ -249,10 +366,10 @@ jobs:
 
     steps:
       - name: Checkout code
-        uses: actions/checkout@v4
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
 
       - name: Download all artifacts
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
         with:
           path: artifacts
 
@@ -265,9 +382,43 @@ jobs:
           find artifacts -type f -name 'miniforge-*' -exec cp {} release/ \;
           ls -lh release/
 
+      # The gate checked github.sha, so the release tag must point there.
+      # GitHub ignores target_commitish when the tag already exists (a
+      # dispatch reusing a version, or a tag push), so check the tag
+      # itself: create it at the gated commit when absent, and refuse to
+      # publish when it points anywhere else. A tag pushed with
+      # GITHUB_TOKEN does not start another workflow run.
+      - name: Pin the release tag to the gated commit
+        env:
+          TAG: ${{ needs.version.outputs.release_tag }}
+          SHA: ${{ github.sha }}
+        run: |
+          set -euo pipefail
+          tag_commit() {
+            git fetch --quiet --depth=1 origin "+refs/tags/$TAG:refs/tags/$TAG" 2>/dev/null &&
+              git rev-parse "refs/tags/$TAG^{commit}"
+          }
+          if ! tagged=$(tag_commit); then
+            echo "Tag $TAG does not exist; creating it at $SHA."
+            if git push --quiet origin "$SHA:refs/tags/$TAG"; then
+              tagged=$SHA
+            else
+              echo "Could not create $TAG (another run may have just created it); re-reading it."
+              if ! tagged=$(tag_commit); then
+                echo "::error::Could not create or read tag $TAG; refusing to publish."
+                exit 1
+              fi
+            fi
+          fi
+          if [[ "$tagged" != "$SHA" ]]; then
+            echo "::error::Tag $TAG points at $tagged, not the gated commit $SHA; refusing to publish."
+            exit 1
+          fi
+          echo "Tag $TAG points at the gated commit $SHA."
+
       - name: Create Release
         id: create_release
-        uses: softprops/action-gh-release@v1
+        uses: softprops/action-gh-release@de2c0eb89ae2a093876385947365aca7b0e5f844 # v0.1.15
         with:
           tag_name: ${{ needs.version.outputs.release_tag }}
           name: Release ${{ needs.version.outputs.version }}
@@ -285,22 +436,31 @@ jobs:
             brew install miniforge-ai/tap/miniforge
             ```
 
-            #### Direct download
-            Download the binary for your platform from the assets below, make it executable, and move it to your PATH:
-
-            **macOS ARM64 (Apple Silicon)**
+            #### Direct download (macOS and Linux)
+            The `miniforge-macos-arm64` and `miniforge-linux-x86_64` assets are
+            Babashka uberjars, not native executables: they run with
+            [Babashka](https://github.com/babashka/babashka#installation) (`bb`)
+            on your PATH, through a small `mf` launcher. Set `ASSET` to
+            `miniforge-macos-arm64` (Apple Silicon) or `miniforge-linux-x86_64`.
+            The subshell stops at the first failed step, so a failed download
+            or checksum installs nothing:
             ```bash
-            curl -L https://github.com/${{ github.repository }}/releases/download/v${{ needs.version.outputs.version }}/miniforge-macos-arm64 -o miniforge
-            chmod +x miniforge
-            sudo mv miniforge /usr/local/bin/
+            ASSET=miniforge-macos-arm64
+            ( set -euo pipefail
+              base=https://github.com/${{ github.repository }}/releases/download/v${{ needs.version.outputs.version }}
+              curl -fLO "$base/$ASSET"
+              curl -fLO "$base/$ASSET.sha256"
+              shasum -a 256 -c "$ASSET.sha256"   # Linux: sha256sum -c "$ASSET.sha256"
+              mkdir -p ~/.local/lib/miniforge ~/.local/bin
+              mv "$ASSET" ~/.local/lib/miniforge/miniforge.jar
+              printf '%s\n' '#!/bin/sh' \
+                'exec bb --jar "$HOME/.local/lib/miniforge/miniforge.jar" -m ai.miniforge.cli.main "$@"' \
+                > ~/.local/bin/mf
+              chmod +x ~/.local/bin/mf
+              ~/.local/bin/mf version
+            )
             ```
-
-            **Linux x86_64**
-            ```bash
-            curl -L https://github.com/${{ github.repository }}/releases/download/v${{ needs.version.outputs.version }}/miniforge-linux-x86_64 -o miniforge
-            chmod +x miniforge
-            sudo mv miniforge /usr/local/bin/
-            ```
+            Add `~/.local/bin` to your PATH to run `mf`.
 
             **Windows x86_64 (preview)**
 
@@ -333,7 +493,7 @@ jobs:
     steps:
       - name: Generate GitHub App token
         id: app-token
-        uses: actions/create-github-app-token@v1
+        uses: actions/create-github-app-token@d72941d797fd3113feb6b93fd0dec494b13a2547 # v1.12.0
         with:
           app-id: ${{ secrets.HOMEBREW_APP_ID }}
           private-key: ${{ secrets.HOMEBREW_APP_PRIVATE_KEY }}
@@ -341,31 +501,45 @@ jobs:
           repositories: homebrew-tap
 
       - name: Checkout homebrew tap
-        uses: actions/checkout@v4
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
         with:
           repository: miniforge-ai/homebrew-tap
           token: ${{ steps.app-token.outputs.token }}
           path: homebrew-tap
 
+      # bb.edn's :min-bb-version becomes the mf launcher's babashka floor.
+      - name: Checkout bb.edn
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          path: miniforge
+          sparse-checkout: bb.edn
+          sparse-checkout-cone-mode: false
+
       - name: Download macOS ARM64 artifact
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
         with:
           name: miniforge-macos-arm64
           path: artifacts/macos-arm64
 
       - name: Download Linux x86_64 artifact
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
         with:
           name: miniforge-linux-x86_64
           path: artifacts/linux-x86_64
 
       - name: Generate formula
+        env:
+          VERSION: ${{ needs.release.outputs.version }}
         run: |
-          VERSION="${{ needs.release.outputs.version }}"
-
           # Read SHA256 checksums
           MACOS_ARM64_SHA=$(cat artifacts/macos-arm64/miniforge-macos-arm64.sha256 | awk '{print $1}')
           LINUX_X86_SHA=$(cat artifacts/linux-x86_64/miniforge-linux-x86_64.sha256 | awk '{print $1}')
+
+          # Babashka floor from bb.edn (0, i.e. no floor, if it declares none).
+          # Homebrew's depends_on cannot carry a version, so the launcher checks.
+          MIN_BB=$(sed -nE 's/.*:min-bb-version "([0-9]+(\.[0-9]+)*)".*/\1/p' miniforge/bb.edn | head -n1)
+          MIN_BB=${MIN_BB:-0}
+          echo "babashka floor: $MIN_BB"
 
           # Create Formula directory if it doesn't exist
           mkdir -p homebrew-tap/Formula
@@ -399,12 +573,18 @@ jobs:
 
               (bin/"mf").write <<~SH
                 #!/bin/bash
+                min="MIN_BB_VERSION"
+                have="$(bb --version 2>/dev/null | sed 's/^babashka v//')"
+                if [ "$(printf '%s\\n' "$min" "$have" | sort -V | head -n1)" != "$min" ]; then
+                  echo "mf: needs babashka >= $min (found: ${have:-none}); run: brew upgrade babashka" >&2
+                  exit 1
+                fi
                 exec bb --jar "#{libexec}/#{jar_name}" -m ai.miniforge.cli.main "$@"
               SH
             end
 
             test do
-              assert_match "miniforge", shell_output("#{bin}/mf --help 2>&1")
+              assert_match version.to_s, shell_output("#{bin}/mf version")
             end
           end
           FORMULA_EOF
@@ -413,14 +593,17 @@ jobs:
           sed -i "s/RELEASE_VERSION/${VERSION}/g" homebrew-tap/Formula/miniforge.rb
           sed -i "s/MACOS_SHA_PLACEHOLDER/${MACOS_ARM64_SHA}/g" homebrew-tap/Formula/miniforge.rb
           sed -i "s/LINUX_SHA_PLACEHOLDER/${LINUX_X86_SHA}/g" homebrew-tap/Formula/miniforge.rb
+          sed -i "s/MIN_BB_VERSION/${MIN_BB}/g" homebrew-tap/Formula/miniforge.rb
 
       - name: Commit and push formula
+        env:
+          VERSION: ${{ needs.release.outputs.version }}
         run: |
           cd homebrew-tap
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
           git add Formula/miniforge.rb
-          git commit -m "Update miniforge to ${{ needs.release.outputs.version }}"
+          git commit -m "Update miniforge to ${VERSION}"
           git push
 
   # Trigger the scoop bucket's autoupdate workflow so the manifest picks
@@ -429,16 +612,21 @@ jobs:
   # type `miniforge-release`. Reuses the existing GitHub App that the
   # homebrew job authenticates with — the app already has access to all
   # repos in the org, so we just point at scoop-bucket here.
+  #
+  # Runs only when the Windows preview build succeeded: without its zip in
+  # the release, the bucket's autoupdate would point at a missing asset.
   scoop:
     name: Trigger Scoop Bucket Autoupdate
-    needs: release
+    needs: [release, build-windows]
     runs-on: ubuntu-latest
-    if: github.event_name == 'push' || github.event_name == 'workflow_dispatch'
+    if: >-
+      needs.build-windows.outputs.built == 'true' &&
+      (github.event_name == 'push' || github.event_name == 'workflow_dispatch')
 
     steps:
       - name: Generate GitHub App token
         id: app-token
-        uses: actions/create-github-app-token@v1
+        uses: actions/create-github-app-token@d72941d797fd3113feb6b93fd0dec494b13a2547 # v1.12.0
         with:
           app-id: ${{ secrets.HOMEBREW_APP_ID }}
           private-key: ${{ secrets.HOMEBREW_APP_PRIVATE_KEY }}
