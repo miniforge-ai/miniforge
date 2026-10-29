@@ -156,18 +156,20 @@
     (boolean (and leaf (not (#{"." ".."} leaf))))))
 
 (defn- ^{:stratum 0} metadata-rejection
-  "Error message when `action` on `full-path` would reach the worktree's git
-   metadata, or nil. An agent-written `.git/hooks/pre-commit`, or a file
-   in the `core.hooksPath` directory, runs on the host's next git
-   command. Reuses pr-lifecycle's worktree guard, which asks git where its
-   metadata is and refuses every path when git cannot answer. Runs after
-   the containment check, so `full-path` is inside `worktree-path`."
+  "Error message when `action` on `full-path` would pass through a
+   symlink or reach the worktree's git metadata, or nil. An agent-written
+   `.git/hooks/pre-commit`, or a file in the `core.hooksPath` directory,
+   runs on the host's next git command. Reuses pr-lifecycle's worktree
+   guard, which refuses any path with a symlink component, asks git where
+   its metadata is, and refuses every path when git cannot answer. Runs
+   after the containment check, so `full-path` is inside `worktree-path`."
   [worktree-path full-path action]
   (let [relative (str (fs/relativize (fs/absolutize worktree-path) (fs/absolutize full-path)))]
     (when-not (if (= :delete action)
                 (pr-lifecycle/safe-worktree-entry-path worktree-path relative)
                 (pr-lifecycle/safe-worktree-path worktree-path relative))
-      (str "Path rejected: " relative " reaches the worktree's git metadata"))))
+      (str "Path rejected: " relative " passes through a symlink (agent output never"
+           " needs to write through one) or reaches the worktree's git metadata"))))
 
 ;------------------------------------------------------------------------------ Layer 1
 

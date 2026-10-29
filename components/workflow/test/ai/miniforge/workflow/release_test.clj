@@ -267,7 +267,8 @@
         (is (re-find #"(?i)traversal" (:error result)))
         (is (fs/exists? link {:nofollow-links true}) "the outside entry is still there"))))
 
-  (testing "delete removes a symlink inside the worktree without touching its target"
+  (testing "delete refuses a symlink inside the worktree; the link and its target stay"
+    ;; The shared worktree guard denies every path with a symlink component.
     (let [worktree (create-temp-dir)
           outside  (create-temp-dir)
           target   (fs/path outside "target.txt")]
@@ -276,8 +277,8 @@
       (let [result (release/process-file-action worktree
                                                 {:action :delete :path "link.txt"}
                                                 nil)]
-        (is (true? (:success? result)))
-        (is (false? (fs/exists? (fs/path worktree "link.txt") {:nofollow-links true})))
+        (is (false? (:success? result)))
+        (is (fs/exists? (fs/path worktree "link.txt") {:nofollow-links true}))
         (is (= "outside" (slurp (str target))) "the link's target is untouched"))))
 
   (testing "delete refuses the worktree root itself"
