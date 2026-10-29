@@ -28,6 +28,7 @@
    [ai.miniforge.logging.interface :as log]
    [ai.miniforge.redaction.interface :as redaction]
    [ai.miniforge.response.interface :as response]
+   [ai.miniforge.event-stream.retention :as retention]
    [ai.miniforge.event-stream.sinks :as sinks]))
 
 ;------------------------------------------------------------------------------ Layer 0
@@ -57,6 +58,16 @@
                             `:event/id` falls back to `random-uuid`
                             and the file sink uses the legacy
                             `{timestamp}-{uuid}.json` filename.
+     :retention           - Optional bound on the in-memory history that
+                            `get-events` reads. A map over
+                            `retention/bounded-policy`
+                            (:max-workflows, :max-events-per-workflow,
+                            :lifecycle-types,
+                            :latest-per-dependency-types). Absent = keep
+                            every event, which suits one-shot CLI runs;
+                            a stream that lives for days should pass
+                            one. Sinks and subscribers still see every
+                            event.
 
    Returns: Event stream atom
 
@@ -71,7 +82,10 @@
      (create-event-stream {:config user-config})
 
      ;; With a Snowflake event-id generator (BD-2b)
-     (create-event-stream {:snowflake-generator generator})"
+     (create-event-stream {:snowflake-generator generator})
+
+     ;; Long-lived process: bounded in-memory history
+     (create-event-stream {:retention retention/bounded-policy})"
   [& [opts]]
   (let [;; Create sinks from config or use provided sinks or default
         event-sinks (cond
@@ -96,12 +110,15 @@
            ;; BD-2b: optional Snowflake event-id generator. When present,
            ;; `create-envelope` calls it for `:event/id` so events sort
            ;; lexically by creation order. nil = random-uuid fallback.
-           :snowflake-generator (:snowflake-generator opts)})))
+           :snowflake-generator (:snowflake-generator opts)
+           ;; nil = unbounded history (one-shot runs). See retention ns.
+           :retention (retention/init (:retention opts))})))
 
 (defn- ^{:stratum 0} record-event!
-  "Append `event` to the in-memory event log."
+  "Append `event` to the in-memory event log, bounded by the stream's
+   retention policy when it has one."
   [stream event]
-  (swap! stream update :events conj event))
+  (swap! stream retention/record event))
 
 (defn- ^{:stratum 0} deliver-to-sink!
   "Invoke `sink` with `event`, swallowing exceptions and logging them.

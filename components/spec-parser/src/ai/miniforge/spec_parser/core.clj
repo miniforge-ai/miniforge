@@ -176,19 +176,26 @@
 (defn- ^{:stratum 0} assemble-normalized-spec
   "Build the normalized :spec/* payload. Caller is responsible for running
    [[spec-shape-anomaly]] first; reaching this fn with a malformed spec is
-   a programmer error."
+   a programmer error.
+
+   The workflow comes from :spec/workflow-type, then :workflow/type (the
+   key Markdown frontmatter `type:` maps to), then :canonical-sdlc — the
+   same precedence the CLI's workflow selection reads. The version follows
+   the same order: :spec/workflow-version, :workflow/version, \"latest\"."
   [spec]
   (let [{:spec/keys [title description intent constraints tags
                      acceptance-criteria code-artifact
-                     repo-url branch llm-backend sandbox plan-tasks]
+                     repo-url branch llm-backend sandbox plan-tasks
+                     workflow-type workflow-version]
          :workflow/keys [type version]} spec]
     (cond-> {:spec/title            title
              :spec/description      description
              :spec/intent           (or intent {:type :general})
              :spec/constraints      (or constraints [])
              :spec/tags             (or tags [])
-             :spec/workflow-type    (or (some-> type keyword) :canonical-sdlc)
-             :spec/workflow-version (or version "latest")
+             :spec/workflow-type    (or (some-> (or workflow-type type) keyword)
+                                        :canonical-sdlc)
+             :spec/workflow-version (or workflow-version version "latest")
              :spec/raw-data         spec}
       acceptance-criteria (assoc :spec/acceptance-criteria acceptance-criteria)
       code-artifact       (assoc :spec/code-artifact code-artifact)

@@ -20,12 +20,14 @@
    the run did not succeed or the command was misused, so scripts and CI can
    tell a failed run from a finished one."
   (:require
+   [clojure.string :as str]
    [clojure.test :refer [deftest is testing]]
    [ai.miniforge.cli.main :as sut]
    [ai.miniforge.cli.main.commands.resume :as cmd-resume]
    [ai.miniforge.cli.main.commands.shared :as shared]
    [ai.miniforge.cli.main.display :as display]
-   [ai.miniforge.cli.workflow-runner :as workflow-runner]))
+   [ai.miniforge.cli.workflow-runner :as workflow-runner]
+   [ai.miniforge.response.interface :as response]))
 
 ;------------------------------------------------------------------------------ Layer 0
 
@@ -48,6 +50,21 @@
       (binding [*out* (java.io.StringWriter.)]
         (cmd-fn {:opts opts})))
     @code))
+
+(defn- ^{:stratum 0} resume-failure-output
+  "Run `mf resume wf-1` with resume-workflow calling `throw!`, and the
+   real error printers. Returns {:exit code-or-:no-exit :out stdout
+   :err stderr}."
+  [throw!]
+  (let [code (atom :no-exit)
+        out  (java.io.StringWriter.)
+        err  (java.io.StringWriter.)]
+    (with-redefs [shared/exit! (fn [c] (reset! code c) nil)
+                  cmd-resume/resume-workflow (fn [& _] (throw!))]
+      (binding [*out* out
+                *err* err]
+        (sut/resume-cmd {:opts {:workflow-id "wf-1"}})))
+    {:exit @code :out (str out) :err (str err)}))
 
 ;------------------------------------------------------------------------------ Layer 1
 
@@ -81,5 +98,41 @@
       (is (= 1 (exit-code sut/resume-cmd opts {:execution/status :failed}))))
     (testing "resuming a run that is already complete is a no-op, not a failure"
       (is (= :no-exit (exit-code sut/resume-cmd opts nil))))
+    (testing "a resume that throws exits 1"
+      (is (= 1 (exit-code sut/resume-cmd opts :throw))))
     (testing "a missing workflow id exits 1"
       (is (= 1 (exit-code sut/resume-cmd {} {:execution/status :completed}))))))
+
+(deftest ^{:stratum 1} resume-failure-is-reported-on-stderr-test
+  (testing "a refused resume prints the anomaly's message on stderr, exits 1"
+    (let [{:keys [exit out err]}
+          (resume-failure-output
+           #(response/throw-anomaly! :anomalies/not-found
+                                     "No events found for workflow wf-1"
+                                     {:workflow-id "wf-1"}))]
+      (is (= 1 exit))
+      (is (str/includes? err "Resume failed: No events found for workflow wf-1"))
+      (is (not (str/includes? err "throw+")) "the message, not slingshot's wrapper text")
+      (is (not (str/includes? err "Task Code Error")) "no catch-all classification")
+      (is (= "" out))))
+
+  (testing "an error the classifier recognises is shown classified, on stderr"
+    (let [{:keys [exit out err]}
+          (resume-failure-output
+           #(throw (ex-info "handoff failed for agent implementer" {})))]
+      (is (= 1 exit))
+      (is (str/includes? err "Agent System Error"))
+      (is (str/includes? err "handoff failed for agent implementer"))
+      (is (= "" out))))
+
+  (testing "an interrupt or a JVM error propagates instead of being reported"
+    (is (thrown? StackOverflowError
+                 (resume-failure-output #(throw (StackOverflowError.)))))
+    ;; Read the flag before any `is`: clojure.test's reporting clears it.
+    (let [thrown (try
+                   (resume-failure-output #(throw (InterruptedException.)))
+                   nil
+                   (catch InterruptedException e e))
+          interrupted? (Thread/interrupted)]
+      (is (instance? InterruptedException thrown))
+      (is interrupted? "the interrupt flag is restored"))))
