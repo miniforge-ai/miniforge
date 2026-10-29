@@ -403,7 +403,7 @@
 (comment
   ;; Load/save watermarks
   (load-watermarks "miniforge-ai/miniforge")
-  ;; => {}
+  ;; => {:repo-slug "miniforge-ai/miniforge" :prs {}}
 
   ;; Poll open PRs
   (poll-open-prs "/path/to/repo" "miniforge[bot]")
