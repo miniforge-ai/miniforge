@@ -144,6 +144,62 @@
       (is (= [:workflow/started :phase/started] (mapv :event/type @published))
           "the event seen before the idle gap is not published again"))))
 
+(deftest ^{:stratum 1} a-completion-written-before-a-long-pause-is-read
+  (let [events-dir (temp-events-dir)
+        base       (str events-dir)
+        stream     (file-sink-stream events-dir)
+        wf-id      (random-uuid)
+        published  (atom [])
+        publish    #(swap! published conj %)]
+    (es/publish! stream (wf-event :workflow/started wf-id))
+    (let [t0 (System/currentTimeMillis)
+          s1 (sut/poll-once! (sut/initial-state base t0 window-ms) base publish (+ t0 500))]
+      (es/publish! stream (wf-event :workflow/completed wf-id :workflow/status :success))
+      ;; Polling paused past the window: the run leaves the active set.
+      (let [s2 (sut/poll-once! s1 base publish (+ t0 window-ms sut/sweep-ms))]
+        (is (not (contains? (:active s2) (str wf-id))))
+        (is (= [:workflow/started :workflow/completed] (mapv :event/type @published))
+            "read before the run leaves the active set")))))
+
+(deftest ^{:stratum 1} a-file-that-fails-to-decode-is-read-again
+  (let [events-dir (temp-events-dir)
+        base       (str events-dir)
+        stream     (file-sink-stream events-dir)
+        wf-id      (random-uuid)
+        published  (atom [])
+        publish    #(swap! published conj %)
+        read-event layout/read-event]
+    (es/publish! stream (wf-event :workflow/started wf-id))
+    (es/publish! stream (wf-event :workflow/completed wf-id :workflow/status :success))
+    (let [t0        (System/currentTimeMillis)
+          completed (last (layout/event-files (es/workflow-dir base wf-id)))
+          s1        (with-redefs [layout/read-event #(when-not (= completed %) (read-event %))]
+                      (sut/poll-once! (sut/initial-state base t0 window-ms) base publish (+ t0 500)))]
+      (is (= [:workflow/started] (mapv :event/type @published)) "a transient read failure")
+      (sut/poll-once! s1 base publish (+ t0 1000))
+      (is (= [:workflow/started :workflow/completed] (mapv :event/type @published))))))
+
+(deftest ^{:stratum 1} tracking-keeps-a-window-of-names-and-finds-late-files-in-it
+  (let [events-dir (temp-events-dir)
+        base       (str events-dir)
+        wf-id      (random-uuid)
+        published  (atom [])
+        publish    #(swap! published conj %)
+        t0         (System/currentTimeMillis)
+        write-at   #(write-event-file! events-dir wf-id (wf-event %2 wf-id) (- t0 %1))]
+    (write-at 120000 :workflow/started)
+    (write-at 90000 :phase/started)
+    (write-at 0 :phase/completed)
+    (let [s1 (sut/poll-once! (sut/initial-state base t0 window-ms) base publish (+ t0 500))]
+      (is (= 3 (count @published)))
+      (is (= 1 (count (get-in s1 [:tracked (str wf-id) :names])))
+          "names more than a minute behind the newest give way to the watermark")
+      (write-at 30000 :phase/started)
+      (write-at 100000 :phase/started)
+      (sut/poll-once! s1 base publish (+ t0 1000))
+      (is (= 4 (count @published))
+          "a late file within the minute is read; one below the watermark is given up"))))
+
 (deftest ^{:stratum 1} a-directory-created-in-the-same-mtime-tick-as-the-listing-is-found
   (let [events-dir (temp-events-dir)
         base       (str events-dir)
@@ -204,6 +260,29 @@
       (-> (sut/poll-once! s1 base publish (+ t0 2500))
           (sut/poll-once! base publish (+ t0 4000)))
       (is (= [:workflow/started :workflow/completed] (mapv :event/type @published))))))
+
+(deftest ^{:stratum 1} a-run-archived-as-it-resumes-replays-nothing
+  (let [events-dir (temp-events-dir)
+        base       (str events-dir)
+        stream     (file-sink-stream events-dir)
+        wf-id      (random-uuid)
+        dir        (es/workflow-dir base wf-id)
+        published  (atom [])
+        publish    #(swap! published conj %)
+        list-files layout/event-files]
+    (es/publish! stream (wf-event :workflow/started wf-id))
+    (let [t0 (System/currentTimeMillis)
+          s1 (sut/poll-once! (sut/initial-state base t0 window-ms) base publish (+ t0 500))
+          t1 (+ t0 window-ms sut/sweep-ms)
+          s2 (sut/poll-once! s1 base publish t1)]
+      (es/publish! stream (wf-event :workflow/resumed wf-id))
+      (.setLastModified dir (+ t1 1000))
+      ;; Active again, but archived before this poll lists it: the listing finds nothing.
+      (let [s3 (with-redefs [layout/event-files (fn [d] (archive! events-dir wf-id) (list-files d))]
+                 (sut/poll-once! s2 base publish (+ t1 sut/sweep-ms)))]
+        (sut/poll-once! s3 base publish (+ t1 sut/sweep-ms 2000))
+        (is (= [:workflow/started :workflow/resumed] (mapv :event/type @published))
+            "the event read before the idle gap is not read again")))))
 
 ;------------------------------------------------------------------------------ Layer 2
 
