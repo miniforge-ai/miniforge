@@ -20,6 +20,7 @@
    Public API groups live under ai.miniforge.workflow.interface.* namespaces,
    while this namespace remains the Polylith entrypoint."
   (:require
+   [ai.miniforge.workflow.checkpoint-store-gc :as checkpoint-gc]
    [ai.miniforge.workflow.fsm :as fsm]
    [ai.miniforge.workflow.interface.checkpoints :as checkpoints]
    [ai.miniforge.workflow.interface.configurable :as configurable]
@@ -470,3 +471,12 @@
   "Render a compiled execution machine as a Mermaid stateDiagram-v2
    block — Phase 6 visual-audit export."
   visualize/machine->mermaid)
+
+;; Checkpoint retention
+(def ^{:stratum 0} gc-checkpoints!
+  "Delete checkpoint directories unchanged for the retention period
+   (default 30 days), keeping pinned runs, runs whose manifest does not
+   read, and runs whose events are still live. Args: [opts] with optional
+   :checkpoint/root, :max-age-days, :events-dir. Returns {:checkpoint/root
+   :deleted [run-id] :kept {reason [run-id]} :failures [anomaly]}."
+  checkpoint-gc/gc-checkpoints!)
