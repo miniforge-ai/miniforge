@@ -33,6 +33,7 @@
    [ai.miniforge.release-executor.messages :as msg]
    [ai.miniforge.release-executor.result :as result]
    [ai.miniforge.release-executor.shell :as shell]
+   [babashka.fs :as fs]
    [babashka.process :as process]
    [clojure.string :as str]))
 
@@ -251,24 +252,23 @@
   ([] (check-gh-auth! nil))
   ([github-token]
    (try
-    (let [which-r (process/shell
-                   {:out :string :err :string :continue true}
-                   "which" "gh")]
-      (if-not (zero? (:exit which-r))
-        (gh-unavailable "gh CLI not found. Install with: brew install gh")
-        (let [auth-r (shell/run-bounded ["gh" "auth" "status"]
-                                        (gh-shell-opts nil github-token))]
-          (if (zero? (:exit auth-r))
-            (let [output (get auth-r :out "")
-                  user-match (re-find #"Logged in to [^\s]+ account (\S+)" output)]
-              (gh-authenticated (or (second user-match) "unknown")))
-            ;; A timeout is not an auth failure: report its own message and
-            ;; carry :timed-out? / :anomaly like the other bounded calls.
-            (merge (gh-available-unauthenticated
-                    (if (:timed-out? auth-r)
-                      (get auth-r :err "")
-                      (str "gh not authenticated. Run: gh auth login\n" (get auth-r :err ""))))
-                   (timeout-data auth-r))))))
+    ;; fs/which, not the `which` binary: Windows has none, so shelling out
+    ;; to it reported gh missing on every Windows host.
+    (if-not (fs/which "gh")
+      (gh-unavailable "gh CLI not found. Install with: brew install gh")
+      (let [auth-r (shell/run-bounded ["gh" "auth" "status"]
+                                      (gh-shell-opts nil github-token))]
+        (if (zero? (:exit auth-r))
+          (let [output (get auth-r :out "")
+                user-match (re-find #"Logged in to [^\s]+ account (\S+)" output)]
+            (gh-authenticated (or (second user-match) "unknown")))
+          ;; A timeout is not an auth failure: report its own message and
+          ;; carry :timed-out? / :anomaly like the other bounded calls.
+          (merge (gh-available-unauthenticated
+                  (if (:timed-out? auth-r)
+                    (get auth-r :err "")
+                    (str "gh not authenticated. Run: gh auth login\n" (get auth-r :err ""))))
+                 (timeout-data auth-r)))))
     (catch Exception e
       (gh-unavailable (.getMessage e))))))
 
