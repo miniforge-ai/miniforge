@@ -26,12 +26,21 @@ Output of the pinned `stratum-lint --fix`: regenerated headings,
 
 ## Verification plan
 
-Behaviour-neutral, checked by reading every top-level form of the old and new
-file without eval: the same multiset of forms (62 in core.clj, 47 in the test;
-compared by `pr-str` with reader gensyms normalized, so metadata, comments and
-whitespace are ignored), an identical `ns` form, the same set of defs, and
-`:stratum` as the only metadata added or changed on any def. The namespace
-loads in its new order; all 94 pr-sync tests pass.
+Behaviour-neutral, checked by reading every top-level form of main's file and
+this branch's without eval, compared by `pr-str` with reader gensyms normalized
+(so metadata, comments and whitespace are ignored):
+
+1. core_test.clj: the same multiset of 47 forms.
+2. core.clj: 62 forms on main, 61 here. The one difference is
+   `(declare run-glab)`. The autofix kept it but moved the defn above it, where
+   it would re-def the Var and replace its metadata, so a follow-up commit
+   removes it; the defn precedes every use.
+3. Both files: an identical `ns` form, and `:stratum` as the only metadata added
+   or changed on any def.
+
+A multiset comparison cannot see order, and the declare was the one form whose
+meaning depends on it. The namespace loads in its new order and the pr-sync
+tests pass.
 
 ## Scope and deployment
 
