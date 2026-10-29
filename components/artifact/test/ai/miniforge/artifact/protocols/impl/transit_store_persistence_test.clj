@@ -242,3 +242,52 @@
       (finally
         (deliver resume true)
         (delete-dir! dir)))))
+
+(deftest ^{:stratum 1} test-index-keeps-another-stores-newer-entry
+  (let [dir (temp-dir)]
+    (try
+      (let [s (open-store dir)]
+        (p/save s (artifact "x"))
+        (p/close s))
+      (let [a (open-store dir)
+            b (open-store dir)]
+        (p/save a (assoc (artifact "x") :artifact/version "2.0.0"))
+        (p/close a)
+        (p/save b (artifact "y"))
+        (p/close b))
+      (testing "a store that did not change x leaves x's newer index entry alone"
+        (is (= "2.0.0" (get-in (read-or-unreadable (impl/index-file-path (artifacts-path dir)))
+                               ["x" :artifact/version]))))
+      (finally
+        (delete-dir! dir)))))
+
+(deftest ^{:stratum 1} test-resave-drops-fields-it-no-longer-has
+  (let [dir (temp-dir)]
+    (try
+      (let [s (open-store dir)]
+        (p/save s (assoc (artifact "x") :artifact/origin {:phase :plan}))
+        (p/close s)
+        (p/save s (artifact "x"))
+        (p/close s))
+      (testing "the file holds the re-saved artifact, without the removed field"
+        (is (= (artifact "x") (read-or-unreadable (impl/artifact-file-path (artifacts-path dir) "x")))))
+      (finally
+        (delete-dir! dir)))))
+
+(deftest ^{:stratum 1} test-resave-keeps-links
+  (let [dir (temp-dir)]
+    (try
+      (let [s (open-store dir)]
+        (run! #(p/save s (artifact %)) ["parent" "child"])
+        (p/link s "parent" "child")
+        (p/close s)
+        (p/save s (artifact "parent"))
+        (testing "in memory, where a children query matches the cached copy"
+          (is (= ["child"] (:artifact/children (p/load-artifact s "parent"))))
+          (is (= [["child"]] (map :artifact/children (p/query s {:artifact/children ["child"]})))))
+        (p/close s))
+      (testing "and in the file"
+        (is (= ["child"] (:artifact/children
+                          (read-or-unreadable (impl/artifact-file-path (artifacts-path dir) "parent"))))))
+      (finally
+        (delete-dir! dir)))))

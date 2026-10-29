@@ -139,16 +139,23 @@
       (update-in [parent-id :artifact/children] (fnil conj []) child-id)
       (update-in [child-id :artifact/parents] (fnil conj []) parent-id)))
 
-(defn- ^{:stratum 0} merge-index-entry
-  "Combine the on-disk and in-memory copies of one artifact's index
-   entry or artifact file. Links are only ever added, so the parents and
-   children of both are kept; the in-memory copy wins every other field."
-  [disk-entry memory-entry]
-  (assoc (merge disk-entry memory-entry)
-         :artifact/parents (vec (distinct (concat (:artifact/parents disk-entry)
-                                                  (:artifact/parents memory-entry))))
-         :artifact/children (vec (distinct (concat (:artifact/children disk-entry)
-                                                   (:artifact/children memory-entry))))))
+(defn- ^{:stratum 0} carry-links
+  "Return `entry` (an artifact or an index entry) with the parents and
+   children of `previous` kept in front of its own. Links are
+   append-only: link-artifacts or a save that lists them adds them, and
+   no later save removes them. Every other field comes from `entry`."
+  [previous entry]
+  (reduce (fn [acc k]
+            (let [links (distinct (concat (get previous k) (get acc k)))]
+              (if (seq links) (assoc acc k (vec links)) acc)))
+          entry
+          [:artifact/parents :artifact/children]))
+
+(defn- ^{:stratum 0} drop-written
+  "Remove from `changed` (id -> change count) the ids whose count is
+   still the one `written` recorded, i.e. not changed since that write."
+  [changed written]
+  (reduce-kv (fn [m id n] (if (= n (get m id)) (dissoc m id) m)) changed written))
 
 ;; Protocol implementations
 (defn ^{:stratum 0} log-artifact-saved
@@ -227,9 +234,17 @@
       {}))
 
 (defn ^{:stratum 1} merge-indexes
-  "Merge the on-disk index with the in-memory one; see merge-index-entry."
-  [disk-index memory-index]
-  (merge-with merge-index-entry disk-index memory-index))
+  "Merge the in-memory index into the on-disk one. Ids this store changed
+   since its last index write take the in-memory entry with the on-disk
+   links carried forward; other ids keep the on-disk entry, or the
+   in-memory one when the disk has none."
+  [disk-index memory-index changed-ids]
+  (reduce-kv (fn [merged id entry]
+               (cond (contains? changed-ids id) (assoc merged id (carry-links (get merged id) entry))
+                     (contains? merged id) merged
+                     :else (assoc merged id entry)))
+             disk-index
+             memory-index))
 
 (defn ^{:stratum 1} load-artifact-from-disk
   "Load an artifact from disk.
@@ -268,8 +283,8 @@
 
 (defn ^{:stratum 2} persist-artifact!
   "Persist an artifact to disk in Transit format. Under the index lock,
-   links already in the file on disk are kept: another store may have
-   linked this artifact since this one cached it."
+   links already in the file on disk are carried forward (carry-links):
+   another store may have linked this artifact since this one cached it."
   [artifacts-dir artifact]
   (let [id (:artifact/id artifact)
         file-path (artifact-file-path artifacts-dir id)]
@@ -277,25 +292,32 @@
      artifacts-dir
      (fn []
        (let [on-disk (try (read-transit file-path) (catch Exception _ nil))]
-         (write-transit file-path (if (map? on-disk) (merge-index-entry on-disk artifact) artifact)))))
+         (write-transit file-path (carry-links (when (map? on-disk) on-disk) artifact)))))
     id))
 
 (defn ^{:stratum 2} persist-index-action
   "Writer action: under the index lock, merge the in-memory index with
-   the one on disk (other stores and processes write it too), keep the
-   result in memory and write it. The writer's state is the index last
+   the one on disk (other stores and processes write it too; see
+   merge-indexes), keep the result in memory and write it. `changed`
+   (id -> change count) names the ids this store changed; written ones
+   are dropped from it. The writer's state is the index last
    written; if memory still holds it, an earlier queued write already
    covered this one and it is skipped. Failures are logged and leave the
    state alone, so the next queued write retries."
-  [last-written artifacts-dir index logger]
+  [last-written artifacts-dir index changed logger]
   (if (identical? last-written @index)
     last-written
     (try
       (call-with-index-lock
        artifacts-dir
        (fn []
-         (let [merged (swap! index (partial merge-indexes (load-index artifacts-dir)))]
+         (let [disk-index (load-index artifacts-dir)
+               seen (volatile! nil)
+               merged (swap! index (fn [memory]
+                                     (merge-indexes disk-index memory
+                                                    (set (keys (vreset! seen @changed))))))]
            (write-transit (index-file-path artifacts-dir) merged)
+           (swap! changed drop-written @seen)
            merged)))
       (catch Exception e
         (log/error logger :system :artifact/index-save-failed
@@ -367,17 +389,21 @@
 ;------------------------------------------------------------------------------ Layer 4
 
 (defn ^{:stratum 4} save-artifact
-  "Save artifact implementation. Updates cache and index and queues the
-   file and index writes under the writer's monitor, so queue order
-   matches update order when a link or another save runs concurrently.
+  "Save artifact implementation. Under the writer's monitor (so queue
+   order matches update order when a link or another save runs at the
+   same time): carries the cached and indexed links into the artifact
+   (carry-links), marks it changed, updates cache and index, and queues
+   the file and index writes.
    An index entry whose file never landed loads as nil; query skips it."
-  [{:keys [artifacts-dir cache index logger writer]} artifact]
-  (let [id (:artifact/id artifact)]
+  [{:keys [artifacts-dir cache index logger writer changed]} saved]
+  (let [id (:artifact/id saved)]
     (locking writer
-      (swap! cache assoc id artifact)
-      (swap! index add-to-index artifact)
-      (send-off writer persist-artifact-action artifacts-dir artifact logger)
-      (send-off writer persist-index-action artifacts-dir index logger))
+      (let [artifact (carry-links (get @index id) (carry-links (get @cache id) saved))]
+        (swap! changed update id (fnil inc 0))
+        (swap! cache assoc id artifact)
+        (swap! index add-to-index artifact)
+        (send-off writer persist-artifact-action artifacts-dir artifact logger)
+        (send-off writer persist-index-action artifacts-dir index changed logger)))
     id))
 
 (defn ^{:stratum 4} query-artifacts
@@ -395,7 +421,7 @@
 (defn ^{:stratum 4} link-artifacts
   "Link artifacts, preserving the ArtifactStore boolean facade.
    Missing link targets are represented as anomalies internally and logged."
-  [{:keys [artifacts-dir cache index logger writer] :as record} parent-id child-id]
+  [{:keys [artifacts-dir cache index logger writer changed] :as record} parent-id child-id]
   (let [parent-result (find-link-target record parent-id :parent)
         child-result  (find-link-target record child-id  :child)]
     (if (or (anomaly? parent-result) (anomaly? child-result))
@@ -412,11 +438,12 @@
       (do
         ;; Under the writer's monitor, as in save-artifact
         (locking writer
+          (swap! changed #(-> % (update parent-id (fnil inc 0)) (update child-id (fnil inc 0))))
           (swap! index update-index-links parent-id child-id)
           (update-cache-links cache parent-id child-id)
           ;; Re-persist both artifacts, then the index, on the writer
           (send-off writer persist-linked-artifacts record artifacts-dir parent-id child-id logger)
-          (send-off writer persist-index-action artifacts-dir index logger))
+          (send-off writer persist-index-action artifacts-dir index changed logger))
 
         (when logger
           (log/debug logger :system :artifact/linked

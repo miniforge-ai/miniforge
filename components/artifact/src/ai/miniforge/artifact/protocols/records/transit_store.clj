@@ -49,7 +49,7 @@
 ;------------------------------------------------------------------------------ Layer 0
 
 (defrecord ^{:stratum 0} TransitArtifactStore [artifacts-dir cache index logger
-                                               writer close-timeout-ms]
+                                               writer close-timeout-ms changed]
   p/ArtifactStore
 
   (save [this artifact]
@@ -94,4 +94,5 @@
         ;; failures; :continue keeps one that slips through from
         ;; blocking every later write.
         (agent nil :error-mode :continue)
-        (or close-timeout-ms impl/default-close-timeout-ms))))))
+        (or close-timeout-ms impl/default-close-timeout-ms)
+        (atom {}))))))  ; ids changed since the last index write -> change count
