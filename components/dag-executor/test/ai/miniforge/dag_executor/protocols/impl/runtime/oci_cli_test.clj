@@ -501,6 +501,24 @@
       (is (= "sha256:abc123def456"
              (oci-cli/container-image-digest (docker-descriptor) "my-container"))))))
 
+(deftest ^{:stratum 1} image-env-reads-the-image-env-test
+  (testing "image-env inspects the given image's Config.Env, one JSON string
+            per entry, so a value with a line break reads back whole; nil
+            on failure"
+    (let [seen (atom nil)]
+      (with-redefs [oci-cli/run-runtime
+                    (fn [_d & args]
+                      (reset! seen args)
+                      {:exit 0 :err ""
+                       :out  "\"PATH=/bin\"\n\"PEM=-----BEGIN\\nkey==\"\n\"GH_TOKEN=t\"\n"})]
+        (is (= {"PATH" "/bin" "PEM" "-----BEGIN\nkey==" "GH_TOKEN" "t"}
+               (oci-cli/image-env (docker-descriptor) "sha256:abc")))
+        (is (= ["image" "inspect" "sha256:abc"
+                "--format" "{{range .Config.Env}}{{json .}}{{println}}{{end}}"]
+               @seen))))
+    (with-redefs [oci-cli/run-runtime (fn [& _] {:exit 1 :out "" :err "no such image"})]
+      (is (nil? (oci-cli/image-env (docker-descriptor) "sha256:abc"))))))
+
 (deftest ^{:stratum 1} container-image-digest-normalizes-podman-bare-hex-test
   (testing "Podman prints the image ID as bare 64-hex; the digest is
             normalized to the sha256:-prefixed form the gate expects"

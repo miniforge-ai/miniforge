@@ -164,16 +164,23 @@
 (deftest ^{:stratum 1} build-launch-plan-blanks-image-secrets-and-proxies-test
   (testing "an :untrusted plan sets an empty value for each proxy variable it
             does not supply, so Docker cannot add the client's, and for each
-            secret or git config name in the image's ENV, so the image's
-            value is overridden; :trusted sets none"
-    (let [image-env #{"GH_TOKEN" "DB_PASSPHRASE" "GIT_CONFIG_VALUE_0" "GIT_CONFIG_PARAMETERS"
-                      "ANTHROPIC_API_KEY" "JAVA_HOME" "CLAUDE_CODE_MAX_OUTPUT_TOKENS"}
+            image ENV entry with a secret's name or value or git config, so
+            the image's value is overridden; :trusted sets none"
+    (let [image-env {"GH_TOKEN" "t" "DB_PASSPHRASE" "p" "DEPLOY_KEY" "k" "GITHUB_PAT" "p"
+                     "MYSQL_PWD" "p" "NPM_CONFIG__AUTH" "a"
+                     "DATABASE_URL" "postgres://app:s3cret@db:5432/app"
+                     "GIT_CONFIG_VALUE_0" "v" "GIT_CONFIG_PARAMETERS" "p"
+                     "ANTHROPIC_API_KEY" "k" "JAVA_HOME" "/opt/java"
+                     "CLAUDE_CODE_MAX_OUTPUT_TOKENS" "8000"}
           plan      (oci-cli/build-launch-plan valid-digest
                                                {:env {"HTTPS_PROXY" "http://proxy:3128"}}
                                                image-env)]
-      (is (= (merge proxy-blanks {"HTTPS_PROXY" "http://proxy:3128" "GH_TOKEN" ""
-                                  "DB_PASSPHRASE" "" "GIT_CONFIG_VALUE_0" ""
-                                  "GIT_CONFIG_PARAMETERS" ""})
+      (is (= (merge proxy-blanks
+                    {"HTTPS_PROXY" "http://proxy:3128"}
+                    (zipmap ["GH_TOKEN" "DB_PASSPHRASE" "DEPLOY_KEY" "GITHUB_PAT" "MYSQL_PWD"
+                             "NPM_CONFIG__AUTH" "DATABASE_URL" "GIT_CONFIG_VALUE_0"
+                             "GIT_CONFIG_PARAMETERS"]
+                            (repeat "")))
              (:env plan)))
       (is (= {:valid? true} (execution-plan/validate-plan plan)))
       (is (= {} (:env (oci-cli/build-launch-plan valid-digest {:trust-level :trusted}
@@ -198,7 +205,7 @@
                      :git-remotes (atom {})})]
       (with-redefs [oci-cli/image-exists?          (fn [_ _] true)
                     oci-cli/resolve-image-digest!  (fn [_ _] valid-digest)
-                    oci-cli/image-env-names        (fn [_ _] #{})
+                    oci-cli/image-env              (fn [_ _] {})
                     oci-cli/create-container       (fn [_d container-name & _]
                                                      (result/ok {:container-name container-name}))
                     oci-cli/bootstrap-workspace!   (fn [& _] (result/ok {:base-branch "main"}))
@@ -216,7 +223,7 @@
                 repo URL without the user:password@ it was given"
         (with-redefs [oci-cli/image-exists?          (fn [_ _] true)
                       oci-cli/resolve-image-digest!  (fn [_ _] valid-digest)
-                      oci-cli/image-env-names        (fn [_ _] #{})
+                      oci-cli/image-env              (fn [_ _] {})
                       oci-cli/create-container       (fn [_d container-name & _]
                                                        (result/ok {:container-name container-name}))
                       oci-cli/bootstrap-workspace!   (fn [& _] (result/ok {:base-branch "main"}))
@@ -236,7 +243,7 @@
                      :image      "task-runner:latest"})]
       (with-redefs [oci-cli/image-exists?         (fn [_ _] true)
                     oci-cli/resolve-image-digest! (fn [_ _] valid-digest)
-                    oci-cli/image-env-names       (fn [_ _] #{})
+                    oci-cli/image-env             (fn [_ _] {})
                     oci-cli/create-container      (fn [_d container-name & _]
                                                     (result/ok {:container-name container-name}))
                     oci-cli/bootstrap-workspace!  (fn [& _] (result/err :container-command-failed "no branch"))
@@ -257,16 +264,22 @@
                          "LANG"               "C.UTF-8"}}))))))
 
 (deftest ^{:stratum 1} build-launch-plan-strips-proxy-and-git-c-credentials-test
-  (testing "an :untrusted plan keeps proxy addresses without user:password@
-            and drops GIT_CONFIG_PARAMETERS, which can carry an extraheader"
+  (testing "an :untrusted plan keeps proxy addresses without user:password@,
+            even with an unencoded @ or leading space, empties one it cannot
+            parse, and drops GIT_CONFIG_PARAMETERS, which can carry an
+            extraheader"
     (is (= {"HTTPS_PROXY" "http://proxy:3128" "http_proxy" "proxy:8080"
-            "ALL_PROXY" "socks5://proxy:1080" "NO_PROXY" "localhost"}
+            "ALL_PROXY" "socks5://proxy:1080" "NO_PROXY" "localhost"
+            "FTP_PROXY" "http://proxy:21" "https_proxy" "http://proxy:3128"}
            (set-env (oci-cli/build-launch-plan
                   valid-digest
                   {:env {"HTTPS_PROXY" "http://u:pw@proxy:3128"
                          "http_proxy" "u:pw@proxy:8080"
                          "ALL_PROXY" "socks5://proxy:1080"
                          "NO_PROXY" "localhost"
+                         "FTP_PROXY" " http://u:pw@proxy:21"
+                         "https_proxy" "http://u:p@ss@proxy:3128"
+                         "all_proxy" "http://u:p/w@proxy:3128"
                          "GIT_CONFIG_PARAMETERS" "'http.extraheader=Authorization: Basic eDp0b2s='"}}))))))
 
 (deftest ^{:stratum 1} acquire-launches-from-checked-plan-test
@@ -281,7 +294,7 @@
                      :network    nil})]
       (with-redefs [oci-cli/image-exists?          (fn [_ _] true)
                     oci-cli/resolve-image-digest!  (fn [_ _] valid-digest)
-                    oci-cli/image-env-names        (fn [_ _] #{})
+                    oci-cli/image-env              (fn [_ _] {})
                     oci-cli/create-container       (fn [_d container-name image _workdir
                                                         _env _resources _network
                                                         & {:keys [execution-plan]}]

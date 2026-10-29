@@ -45,6 +45,7 @@
    [ai.miniforge.dag-executor.protocols.impl.runtime.registry :as registry]
    [ai.miniforge.llm.interface :as llm]
    [ai.miniforge.redaction.interface :as redaction]
+   [clojure.edn :as edn]
    [clojure.java.io]
    [clojure.string :as str]))
 
@@ -180,10 +181,20 @@
     "TZ" "TMPDIR" "CI" "NO_COLOR"})
 
 (def ^{:stratum 0} credential-word-pattern
-  "A `_`-separated word that makes a CLAUDE_CODE_* variable a credential
-   (CLAUDE_CODE_OAUTH_TOKEN, CLAUDE_CODE_CLIENT_KEY_PASSPHRASE) rather than
-   a knob (CLAUDE_CODE_MAX_OUTPUT_TOKENS)."
-  #"(?i)(?:^|_)(?:TOKEN|KEY|SECRET|PASSWORD|PASSPHRASE|CREDENTIALS?|AUTHORIZATION|OAUTH|COOKIE)(?:_|$)")
+  "A `_`-separated word that makes a variable a credential: it keeps a
+   CLAUDE_CODE_* name out of the allowlist (CLAUDE_CODE_OAUTH_TOKEN, but not
+   the knob CLAUDE_CODE_MAX_OUTPUT_TOKENS) and blanks an image's ENV entry
+   (DEPLOY_KEY, GITHUB_PAT, MYSQL_PWD, NPM_CONFIG__AUTH)."
+  #"(?i)(?:^|_)(?:TOKEN|KEY|SECRET|PASS|PASSWORD|PASSPHRASE|PWD|PAT|AUTH|AUTHORIZATION|CREDENTIALS?|OAUTH|COOKIE|WEBHOOK)(?:_|$)")
+
+(defn- ^{:stratum 0} proxy-without-userinfo
+  "Proxy setting `v` without `user:password@`: everything from the scheme
+   to the last `@` before the path goes. A value that still holds an `@`
+   or a line break, which this cannot parse safely, becomes empty, so the
+   result is safe on argv."
+  [v]
+  (let [s (str/replace (str/trim (str v)) #"^([A-Za-z][A-Za-z0-9+.-]*://)?[^/]*@" "$1")]
+    (if (re-find #"[@\r\n]" s) "" s)))
 
 (def ^{:stratum 0} proxy-env-names
   "Proxy variables curl and git read, in both cases. Docker adds them to a
@@ -660,15 +671,21 @@
 (defn- ^{:stratum 2} untrusted-env-blanks
   "Empty values that override, in an untrusted capsule, what it would get
    from outside env-config: every proxy variable (`proxy-env-names`), and
-   each name in `image-env` (the image's ENV) that the redaction policy
-   calls a secret or that is GIT_CONFIG_PARAMETERS or in a GIT_CONFIG_*
-   tuple, unless `keep-names` or `untrusted-env-allowed?` allow it."
+   each entry of `image-env` (the image's ENV, {name value}) whose name the
+   redaction policy calls a secret or has a `credential-word-pattern` word,
+   whose value has a secret's shape (`redaction/secret-string?`: a token,
+   a URL with `user:password@`), or that is GIT_CONFIG_PARAMETERS or in a
+   GIT_CONFIG_* tuple, unless `keep-names` or `untrusted-env-allowed?`
+   allow it. The image's own toolchain settings (JAVA_HOME and the like)
+   are left alone, so this side is a denylist."
   [image-env keep-names]
   (into (zipmap proxy-env-names (repeat ""))
-        (for [n image-env
+        (for [[n v] image-env
               :when (and (not (contains? keep-names n))
                          (not (untrusted-env-allowed? n))
                          (or (redaction/secret-key? n)
+                             (re-find credential-word-pattern n)
+                             (redaction/secret-string? v)
                              (re-matches git-config-env-pattern n)
                              (= "GIT_CONFIG_PARAMETERS" n)))]
           [n ""])))
@@ -684,7 +701,8 @@
    agent's own credentials, `agent-credential-names` unless given, which
    N11 §8.1 injects at every trust level) or `untrusted-env-allowed?`. A
    proxy variable (`proxy-env-names`) stays without any `user:password@`
-   in its URL, so an authenticating proxy needs a trusted launch."
+   (`proxy-without-userinfo`), so an authenticating proxy needs a trusted
+   launch."
   ([env-map trust-level] (filter-env-by-trust env-map trust-level agent-credential-names))
   ([env-map trust-level keep-names]
    (if (contains? #{:trusted :privileged} trust-level)
@@ -692,8 +710,7 @@
      (into {} (keep (fn [[k v :as entry]]
                       (let [n (name k)]
                         (cond
-                          (contains? proxy-env-names n)
-                          [k (str/replace (str v) #"^([A-Za-z][A-Za-z0-9+.-]*://)?[^/@]*@" "$1")]
+                          (contains? proxy-env-names n) [k (proxy-without-userinfo v)]
                           (or (contains? keep-names n) (untrusted-env-allowed? n)) entry))))
            env-map))))
 
@@ -880,13 +897,13 @@
    the agent's credentials: `agent-credential-names` and those of the agent
    backend, env-config's :agent-backend or else the configured [:llm :backend],
    plus the names env-config's :env-passthrough lists. An :untrusted plan
-   also sets `untrusted-env-blanks` for `image-env`, the names the image's
-   ENV sets, under any value env-config gives.
+   also sets `untrusted-env-blanks` for `image-env`, the image's ENV as
+   {name value}, under any value env-config gives.
 
    This one plan is both what `check-plan-security` inspects and what
    `create-container` receives as :execution-plan, so the plan the gate
    checked is the plan that runs."
-  ([image-digest env-config] (build-launch-plan image-digest env-config #{}))
+  ([image-digest env-config] (build-launch-plan image-digest env-config {}))
   ([image-digest env-config image-env]
    (let [trust-level (get execution-plan/trust-levels (:trust-level env-config) :untrusted)
          ;; `or`, not a get default: the user config is read only when
@@ -1038,13 +1055,18 @@
         (normalize-image-id (:out result))))
     (catch Exception _ nil)))
 
-(defn ^{:stratum 3} image-env-names
-  "The names the ENV of local image `image` sets, or nil on failure."
+(defn ^{:stratum 3} image-env
+  "The ENV of local image `image` as {name value}, or nil on failure. Each
+   entry comes back as a JSON string on its own line, which the EDN reader
+   reads, so a value with a line break reads back whole."
   [descriptor image]
-  (let [result (run-runtime descriptor "image" "inspect" image
-                            "--format" "{{range .Config.Env}}{{println .}}{{end}}")]
-    (when (zero? (:exit result))
-      (into #{} (keep #(second (re-find #"^([^=]+)=" %))) (str/split-lines (:out result))))))
+  (try
+    (let [result (run-runtime descriptor "image" "inspect" image
+                              "--format" "{{range .Config.Env}}{{json .}}{{println}}{{end}}")]
+      (when (zero? (:exit result))
+        (into {} (map #(let [[k v] (str/split (edn/read-string %) #"=" 2)] [k (or v "")]))
+              (remove str/blank? (str/split-lines (:out result))))))
+    (catch Exception _ nil)))
 
 (defn ^{:stratum 3} image-exists?
   "Check if a container image exists locally."
@@ -1151,11 +1173,11 @@
    :execution-plan.
 
    `image-env-fn` (injected; by default it reports an empty ENV) gives the
-   names the pinned image's ENV sets, which an :untrusted plan blanks
+   pinned image's ENV, whose secrets an :untrusted plan blanks
    (`untrusted-env-blanks`). An :untrusted launch whose image ENV cannot be
    read fails closed."
   ([descriptor image env-config digest-fn]
-   (security-gate-check descriptor image env-config digest-fn (constantly #{})))
+   (security-gate-check descriptor image env-config digest-fn (constantly {})))
   ([descriptor image env-config digest-fn image-env-fn]
    (let [digest          (digest-fn descriptor image)
          image-env       (when digest (image-env-fn descriptor digest))
@@ -1322,7 +1344,7 @@
         ;; digest and check the plan BEFORE launch. A hard-stop (forbidden)
         ;; aborts the acquire without creating a container.
         (let [gate-result (security-gate-check descriptor image env-config
-                                               resolve-image-digest! image-env-names)]
+                                               resolve-image-digest! image-env)]
           (if (result/err? gate-result)
             gate-result
             (let [container-name (str container-name-prefix
