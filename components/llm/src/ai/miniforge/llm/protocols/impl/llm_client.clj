@@ -379,6 +379,39 @@
   [k]
   (System/getenv k))
 
+(def ^{:stratum 0} ^:private network-monitor-env-var
+  "Environment variable that switches the network-drop monitor off for
+   streaming CLI calls, for a network where the provider's probe
+   endpoint is unreachable although the agent CLI works (for example a
+   gateway set through the CLI's own base-URL setting)."
+  "MINIFORGE_NETWORK_MONITOR")
+
+(def ^{:stratum 0} ^:private env-flag-off-values
+  "Values (trimmed, any case) that read as off for an on/off environment
+   variable: `network-monitor-env-var` and the provider switches in a
+   backend's `:probe-endpoint-routes`."
+  #{"off" "false" "0" "no"})
+
+(def ^{:stratum 0} ^:private probe-region-pattern
+  "Shape of a cloud region name substituted into a route's
+   `:regional-url`; anything else is ignored rather than spliced into
+   a URL."
+  #"[a-z0-9-]+")
+
+(defn- ^{:stratum 0} http-url
+  "`value`, trimmed, when it is an absolute http(s) URL with a host;
+   nil otherwise."
+  [value]
+  (when (string? value)
+    (try+
+      (let [url (str/trim value)
+            uri (java.net.URI. url)]
+        (when (and (#{"http" "https"} (some-> (.getScheme uri) str/lower-case))
+                   (.getHost uri))
+          url))
+      (catch java.net.URISyntaxException _
+        nil))))
+
 (defn ^{:stratum 0} rate-limited?
   "Detect Claude CLI rate limit messages in content.
    Claude CLI returns exit 0 but emits a rate limit message as content."
@@ -720,6 +753,25 @@
    envelope type outside the known taxonomy)."
   [timeout-info]
   (get timeout-type->terminated-by (:type timeout-info)))
+
+(defn- ^{:stratum 1} env-flag-off?
+  "True when `value` is one of `env-flag-off-values`."
+  [value]
+  (contains? env-flag-off-values
+             (some-> value str/trim str/lower-case)))
+
+(defn- ^{:stratum 1} route-endpoint
+  "The probe URL a `:probe-endpoint-routes` entry yields from the
+   environment: the URL in its `:base-url-env`, else its `:global-url`
+   or `:regional-url` for the region in its `:region-env`. Nil when
+   none of those is set (or usable)."
+  [{:keys [base-url-env region-env regional-url global-url]}]
+  (let [region (some-> region-env getenv-value str/trim str/lower-case not-empty)]
+    (or (some-> base-url-env getenv-value http-url)
+        (when (and global-url (= "global" region))
+          global-url)
+        (when (and regional-url region (re-matches probe-region-pattern region))
+          (format regional-url region)))))
 
 (def ^{:stratum 1} ^:private client-defaults
   (delay (load-client-defaults)))
@@ -1252,6 +1304,20 @@
                                    chars-per-token-estimate)}))
 
 ;------------------------------------------------------------------------------ Layer 2
+
+(defn- ^{:stratum 2} network-monitor-enabled?
+  "False when `network-monitor-env-var` reads as off."
+  []
+  (not (env-flag-off? (getenv-value network-monitor-env-var))))
+
+(defn- ^{:stratum 2} route-applies?
+  "A route applies when it has no `:when-env` switch, or the switch is
+   set and does not read as off (`CLAUDE_CODE_USE_BEDROCK=1`)."
+  [{:keys [when-env]}]
+  (or (nil? when-env)
+      (let [value (getenv-value when-env)]
+        (and (not (str/blank? value))
+             (not (env-flag-off? value))))))
 
 (defn ^{:stratum 2} log-streaming-result
   "Log the outcome of a streamed run. A cut run (any adaptive timeout)
@@ -2050,18 +2116,25 @@
 ;------------------------------------------------------------------------------ Layer 7
 
 (defn ^{:stratum 7} probe-endpoint-for
-  "Resolve the network-health probe URL for `backend-key`. Returns the
-   backend entry's `:probe-endpoint` when set, the generic Cloudflare
-   DNS connectivity URL otherwise (covers unknown backends and any
-   future entry added without an explicit endpoint).
+  "Resolve the network-health probe URL for `backend-key`: the endpoint
+   the agent CLI actually talks to, read from the environment through
+   the backend's `:probe-endpoint-routes` (`ANTHROPIC_BASE_URL`, the
+   Bedrock and Vertex settings, `OPENAI_BASE_URL`). The first route that
+   applies decides; when it yields no URL, or no route applies, the
+   backend entry's static `:probe-endpoint` is used, and the generic
+   Cloudflare DNS connectivity URL when there is none (unknown
+   backends, entries without an endpoint).
 
    The caller (e.g. `stream-exec-fn` in PR-B) resolves the URL here and
    passes it to `network-health/network-healthy?` directly, keeping
    that namespace endpoint-agnostic and free of backend-config
    dependencies."
   [backend-key]
-  (or (get-in backends [backend-key :probe-endpoint])
-      generic-connectivity-probe-url))
+  (let [{:keys [probe-endpoint probe-endpoint-routes]} (get backends backend-key)
+        route (first (filter route-applies? probe-endpoint-routes))]
+    (or (some-> route route-endpoint)
+        probe-endpoint
+        generic-connectivity-probe-url)))
 
 (defn ^{:stratum 7} http-stream-complete
   "Complete request using HTTP API with streaming.
@@ -2261,8 +2334,10 @@
                 {:data (assoc (prompt-size-telemetry (:system request) prompt)
                               :backend backend
                               :model model)}))
-    (let [base-opts {:progress-monitor progress-monitor
-                     :workdir (:workdir request)}
+    ;; :backend-key starts the network-drop monitor in stream-exec-fn.
+    (let [base-opts (cond-> {:progress-monitor progress-monitor
+                             :workdir (:workdir request)}
+                      (network-monitor-enabled?) (assoc :backend-key backend))
           stream-opts (merge base-opts
                              (exec-opts-for-prompt-via prompt-via prompt))
           result (stream-fn
