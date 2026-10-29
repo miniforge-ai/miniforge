@@ -77,3 +77,20 @@
                                              [{:path "src/core.clj" :content "(def x 1)"}])]
       (is (= 1 (count (get-in result [:by-rule :std/a]))) "untagged attributed to rule-a")
       (is (= 1 (count (get-in result [:by-rule :std/b]))) "and to rule-b — fail-closed"))))
+
+(deftest ^{:stratum 0} analyze-rules-on-files-deadline-fails-closed-test
+  (testing "files still unjudged when the deadline passes are judge failures
+            for their applicable rules; no call is spent on them"
+    (let [rule   {:rule/id :std/a :rule/title "A" :rule/category "001" :rule/severity :high
+                  :rule/knowledge-content "k" :rule/applies-to {:file-globs ["src/*.clj"]}}
+          calls  (atom 0)
+          mock   (fn [_client _request] (swap! calls inc) {:success true :content "[]"})
+          result (sut/analyze-rules-on-files :mock mock [rule]
+                                             [{:path "src/a.clj" :content "(def a 1)"}
+                                              {:path "docs/b.md" :content "text"}]
+                                             {:deadline-ms 0})]
+      (is (= 0 @calls))
+      (is (= :deadline-exceeded (:status result)))
+      (is (= [:deadline-exceeded]
+             (mapv :semantic/judge-failure (get-in result [:by-rule :std/a])))
+          "only the file a rule applies to becomes a failure"))))

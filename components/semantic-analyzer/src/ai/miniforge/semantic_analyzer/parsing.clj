@@ -5,13 +5,17 @@
   "Judge response parsing: the LLM's text into canonical violation maps.
 
    Everything here tolerates a model that answers badly — unparseable
-   output and unplaceable rule tags are normalized, never thrown.
+   output and unplaceable rule tags are normalized, never thrown. An answer
+   that is not a finding list parses to nil, never to an empty list, so a
+   caller cannot mistake it for a clean file.
 
    Layer 0: code-fence stripping, per-violation canonicalization,
-     rule-id coercion, by-rule indexing
-   Layer 1: whole-response parsing and canonicalization (over Layer 0)"
+     rule-id coercion, by-rule indexing, failure message keys
+   Layer 1: whole-response parsing, canonicalization and judge-failure
+     violations (over Layer 0)"
   (:require
    [ai.miniforge.compliance-scanner.interface :as factory]
+   [ai.miniforge.semantic-analyzer.messages :as messages]
    [clojure.edn :as edn]
    [clojure.string :as str]))
 
@@ -49,6 +53,12 @@
                   (catch Exception _ nil))
     :else        nil))
 
+(def ^{:stratum 0} ^:private failure-message-keys
+  "Message key for each way the judge can fail to give a judgement."
+  {:call-failed       :judge/call-failed
+   :unparseable       :judge/unparseable
+   :deadline-exceeded :judge/deadline-exceeded})
+
 (defn ^{:stratum 0} index-by-rule
   "Fold a flat seq of canonical violations onto `by-rule` as
    {rule-id [violation...]}."
@@ -59,15 +69,26 @@
 
 (defn ^{:stratum 1} parse-judge-response
   "Parse the LLM's EDN response into violation maps.
-   Returns a vector of violations, or empty vector on parse failure."
+   Returns a vector of violations (empty when the judge found none), or nil
+   when the response is not an EDN vector — the judge gave no judgement."
   [response-text]
   (try
     (let [cleaned (-> (str response-text) str/trim strip-code-fences str/trim)
           parsed  (edn/read-string cleaned)]
-      (if (vector? parsed)
-        (filterv map? parsed)
-        []))
-    (catch Exception _ [])))
+      (when (vector? parsed)
+        (filterv map? parsed)))
+    (catch Exception _ nil)))
+
+(defn ^{:stratum 1} judge-failure-violation
+  "A violation standing in for a judgement the judge did not give on
+   `file-path`. `failure` is :call-failed, :unparseable or
+   :deadline-exceeded; `detail` fills the message. It blocks `rule` like a
+   finding, so a judge outage never reads as compliance."
+  [rule file-path failure detail]
+  (assoc (raw->violation rule file-path
+                         {:message (messages/t (get failure-message-keys failure)
+                                               {:detail detail})})
+         :semantic/judge-failure failure))
 
 (defn ^{:stratum 1} judge-response->violations
   "Convert parsed judge response to canonical violation maps."
