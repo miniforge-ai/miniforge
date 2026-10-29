@@ -15,7 +15,6 @@
 ;; WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 ;; See the License for the specific language governing permissions and
 ;; limitations under the License.
-
 (ns ai.miniforge.workflow-security-compliance.phases
   "Phase interceptors for the 5-phase security compliance workflow (issue #552).
 
@@ -35,19 +34,19 @@
    [ai.miniforge.workflow-security-compliance.core :as core]))
 
 ;------------------------------------------------------------------------------ Layer 0
-;; Config + context helpers
 
-(defn- register-defaults!
+;; Config + context helpers
+(defn- ^{:stratum 0} register-defaults!
   "Register phase defaults for every phase declared in the workflow resource."
   []
   (doseq [phase-kw (config/registered-phase-keys)]
     (phase/register-phase-defaults! phase-kw (config/phase-defaults phase-kw))))
 
-(defn- phase-config
+(defn- ^{:stratum 0} phase-config
   [ctx phase-kw]
   (get ctx :phase-config (config/phase-defaults phase-kw)))
 
-(defn- enter-success
+(defn- ^{:stratum 0} enter-success
   [ctx phase-kw phase-config output]
   (let [start-time (System/currentTimeMillis)
         agent (get phase-config :agent)
@@ -62,7 +61,7 @@
                          {:status :success
                           :output output})))
 
-(defn- complete-phase
+(defn- ^{:stratum 0} complete-phase
   [ctx phase-kw metrics]
   (let [start-time (get-in ctx [:phase :started-at])
         end-time (System/currentTimeMillis)
@@ -78,70 +77,68 @@
         (update-in [:execution :phases-completed] (fnil conj []) phase-kw)
         (update-in [:execution/metrics :duration-ms] (fnil + 0) duration-ms))))
 
-(defn- fail-phase
+(defn- ^{:stratum 0} fail-phase
   [ctx ex]
   (-> ctx
       (assoc-in [:phase :status] :failed)
       (assoc-in [:phase :error] (phase/exception-error ex))))
 
-(register-defaults!)
-
 ;------------------------------------------------------------------------------ Layer 1
-;; Phase implementation
 
-(defn enter-sec-parse-scan
+;; Phase implementation
+(defn ^{:stratum 1} enter-sec-parse-scan
   [ctx]
   (let [config (phase-config ctx :sec-parse-scan)
         scan-paths (get-in ctx [:execution/input :scan-paths] [])
         violations (core/parse-scan-paths scan-paths)]
     (enter-success ctx :sec-parse-scan config {:violations violations})))
 
-(defn leave-sec-parse-scan [ctx]
+(defn ^{:stratum 1} leave-sec-parse-scan [ctx]
   (let [violations (get-in ctx [:phase :result :output :violations] [])
         violation-count (count violations)]
     (complete-phase ctx :sec-parse-scan {:violation-count violation-count})))
 
-(defn error-sec-parse-scan [ctx ex]
+(defn ^{:stratum 1} error-sec-parse-scan [ctx ex]
   (fail-phase ctx ex))
 
-(defn enter-sec-trace-source [ctx]
+(defn ^{:stratum 1} enter-sec-trace-source [ctx]
   (let [config (phase-config ctx :sec-trace-source)
         violations (get-in ctx [:execution/phase-results :sec-parse-scan :result :output :violations] [])
         traced (core/trace-violations violations)]
     (enter-success ctx :sec-trace-source config {:traced-violations traced})))
 
-(defn leave-sec-trace-source [ctx]
+(defn ^{:stratum 1} leave-sec-trace-source [ctx]
   (let [traced (get-in ctx [:phase :result :output :traced-violations] [])
         traced-count (count traced)]
     (complete-phase ctx :sec-trace-source {:traced-count traced-count})))
 
-(defn error-sec-trace-source [ctx ex]
+(defn ^{:stratum 1} error-sec-trace-source [ctx ex]
   (fail-phase ctx ex))
 
-(defn enter-sec-verify-docs [ctx]
+(defn ^{:stratum 1} enter-sec-verify-docs [ctx]
   (let [phase-config (phase-config ctx :sec-verify-docs)
         traced (get-in ctx [:execution/phase-results :sec-trace-source :result :output :traced-violations] [])
         known-apis (get-in ctx [:execution/input :known-apis] (config/known-apis))
         verified (core/verify-violations traced known-apis)]
     (enter-success ctx :sec-verify-docs phase-config {:verified-violations verified})))
 
-(defn leave-sec-verify-docs [ctx]
+(defn ^{:stratum 1} leave-sec-verify-docs [ctx]
   (let [verified (get-in ctx [:phase :result :output :verified-violations] [])
         verified-count (count verified)
         documented-count (count (filter :verified/documented? verified))]
     (complete-phase ctx :sec-verify-docs {:verified-count verified-count
                                           :documented-count documented-count})))
 
-(defn error-sec-verify-docs [ctx ex]
+(defn ^{:stratum 1} error-sec-verify-docs [ctx ex]
   (fail-phase ctx ex))
 
-(defn enter-sec-classify [ctx]
+(defn ^{:stratum 1} enter-sec-classify [ctx]
   (let [config (phase-config ctx :sec-classify)
         verified (get-in ctx [:execution/phase-results :sec-verify-docs :result :output :verified-violations] [])
         classified (core/classify-violations verified)]
     (enter-success ctx :sec-classify config {:classified-violations classified})))
 
-(defn leave-sec-classify [ctx]
+(defn ^{:stratum 1} leave-sec-classify [ctx]
   (let [classified (get-in ctx [:phase :result :output :classified-violations] [])
         true-positives (count (filter #(= :true-positive (get % :classification/category)) classified))
         false-positives (count (filter #(= :false-positive (get % :classification/category)) classified))
@@ -150,10 +147,10 @@
                                        :false-positives false-positives
                                        :needs-review needs-review})))
 
-(defn error-sec-classify [ctx ex]
+(defn ^{:stratum 1} error-sec-classify [ctx ex]
   (fail-phase ctx ex))
 
-(defn enter-sec-generate-exclusions [ctx]
+(defn ^{:stratum 1} enter-sec-generate-exclusions [ctx]
   (let [config (phase-config ctx :sec-generate-exclusions)
         classified (get-in ctx [:execution/phase-results :sec-classify :result :output :classified-violations] [])
         output-dir (get-in ctx [:execution/input :output-dir] ".")
@@ -162,20 +159,20 @@
         output (assoc exclusion-output :output-file output-file)]
     (enter-success ctx :sec-generate-exclusions config output)))
 
-(defn leave-sec-generate-exclusions [ctx]
+(defn ^{:stratum 1} leave-sec-generate-exclusions [ctx]
   (let [output (get-in ctx [:phase :result :output])
         excluded (get output :total-excluded 0)
         flagged (get output :total-flagged 0)]
     (complete-phase ctx :sec-generate-exclusions {:excluded excluded
                                                   :flagged flagged})))
 
-(defn error-sec-generate-exclusions [ctx ex]
+(defn ^{:stratum 1} error-sec-generate-exclusions [ctx ex]
   (fail-phase ctx ex))
 
 ;------------------------------------------------------------------------------ Layer 2
-;; Registry methods
 
-(defmethod phase/get-phase-interceptor-method :sec-parse-scan
+;; Registry methods
+(defmethod ^{:stratum 2} phase/get-phase-interceptor-method :sec-parse-scan
   [config]
   (let [merged (phase/merge-with-defaults config)]
     {:name   ::sec-parse-scan
@@ -184,7 +181,7 @@
      :leave  leave-sec-parse-scan
      :error  error-sec-parse-scan}))
 
-(defmethod phase/get-phase-interceptor-method :sec-trace-source
+(defmethod ^{:stratum 2} phase/get-phase-interceptor-method :sec-trace-source
   [config]
   (let [merged (phase/merge-with-defaults config)]
     {:name   ::sec-trace-source
@@ -193,7 +190,7 @@
      :leave  leave-sec-trace-source
      :error  error-sec-trace-source}))
 
-(defmethod phase/get-phase-interceptor-method :sec-verify-docs
+(defmethod ^{:stratum 2} phase/get-phase-interceptor-method :sec-verify-docs
   [config]
   (let [merged (phase/merge-with-defaults config)]
     {:name   ::sec-verify-docs
@@ -202,7 +199,7 @@
      :leave  leave-sec-verify-docs
      :error  error-sec-verify-docs}))
 
-(defmethod phase/get-phase-interceptor-method :sec-classify
+(defmethod ^{:stratum 2} phase/get-phase-interceptor-method :sec-classify
   [config]
   (let [merged (phase/merge-with-defaults config)]
     {:name   ::sec-classify
@@ -211,7 +208,7 @@
      :leave  leave-sec-classify
      :error  error-sec-classify}))
 
-(defmethod phase/get-phase-interceptor-method :sec-generate-exclusions
+(defmethod ^{:stratum 2} phase/get-phase-interceptor-method :sec-generate-exclusions
   [config]
   (let [merged (phase/merge-with-defaults config)]
     {:name   ::sec-generate-exclusions
@@ -219,6 +216,8 @@
      :enter  (fn [ctx] (enter-sec-generate-exclusions (assoc ctx :phase-config merged)))
      :leave  leave-sec-generate-exclusions
      :error  error-sec-generate-exclusions}))
+
+(register-defaults!)
 
 ;------------------------------------------------------------------------------ Rich Comment
 (comment

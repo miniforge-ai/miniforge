@@ -11,7 +11,6 @@
 ;; WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 ;; See the License for the specific language governing permissions and
 ;; limitations under the License.
-
 (ns ai.miniforge.workflow.observe-phase
   "N2 Observe phase: autonomous PR monitoring after release.
 
@@ -35,9 +34,9 @@
             [slingshot.slingshot :refer [try+]]))
 
 ;------------------------------------------------------------------------------ Layer 0
-;; Config loading + defaults
 
-(def ObservePhaseDefaults
+;; Config loading + defaults
+(def ^{:stratum 0} ObservePhaseDefaults
   [:map
    [:agent {:optional true} [:maybe keyword?]]
    [:gates [:vector keyword?]]
@@ -46,11 +45,7 @@
              [:iterations pos-int?]
              [:time-seconds pos-int?]]]])
 
-(def ObservePhaseConfig
-  [:map
-   [:observe/phase-defaults ObservePhaseDefaults]])
-
-(def ObserveMonitorConfig
+(def ^{:stratum 0} ObserveMonitorConfig
   [:map
    [:worktree-path :string]
    [:self-author [:maybe :string]]
@@ -62,42 +57,25 @@
    [:max-total-fix-attempts-per-pr pos-int?]
    [:abandon-after-hours pos-int?]])
 
-(defn- validate!
+(defn- ^{:stratum 0} validate!
   [result-schema value]
   (schema/validate result-schema value))
 
-(defn- load-observe-phase-config
-  []
-  (->> (config/load-config-resource
-        "config/workflow/observe-phase.edn"
-        [:observe/phase-defaults]
-        {:hint "Add components/workflow/resources to your classpath"})
-       (validate! ObservePhaseConfig)))
-
-(defn- load-monitor-defaults
+(defn- ^{:stratum 0} load-monitor-defaults
   []
   (pr-lifecycle/monitor-defaults))
 
-(defn- present-overrides
+(defn- ^{:stratum 0} present-overrides
   [overrides]
   (into {} (remove (comp nil? val)) overrides))
 
-(def default-config
-  "Default Observe phase configuration loaded from EDN."
-  (:observe/phase-defaults (load-observe-phase-config)))
-
-;; Register defaults on load
-(phase/register-phase-defaults! :observe default-config)
-
-;------------------------------------------------------------------------------ Layer 1
 ;; Pure worklist helpers
-
-(def ^:private ms-per-second
+(def ^{:stratum 0} ^:private ms-per-second
   "Milliseconds per second. Converts poll-interval-ms to the integer-seconds
    value the worklist entry stores under :pr/poll-interval."
   1000)
 
-(defn- pr-url->repo
+(defn- ^{:stratum 0} pr-url->repo
   "Extract `owner/repo` from a GitHub-style PR URL, or nil."
   [pr-url]
   (when (string? pr-url)
@@ -109,7 +87,65 @@
                "/"
                (nth parts (dec pull-idx))))))))
 
-(defn- pr-info->worklist-entry
+(defn- ^{:stratum 0} resolve-pr-infos
+  "Resolve the PR(s) to observe from the execution context. Returns a vector
+   of pr-info maps, or nil when there is nothing to observe.
+
+   DAG runs populate `[:execution/dag-pr-infos]`. For a single-PR run, the PR
+   info is read via `response/release-pr-info` from the one canonical location
+   (the release phase-result's `[:result :output :workflow/pr-info]`) — the
+   same accessor `dag-orchestrator/extract-pr-info-from-result` uses. (An
+   earlier shallow `[:release :pr-info]` read and a `[:metrics :release
+   :pr-info]` fallback are both gone — observe used to see nil and skip, so a
+   single-PR dogfood opened its PR and exited without ever monitoring it.)"
+  [ctx]
+  (let [dag-prs (get-in ctx [:execution/dag-pr-infos])]
+    (cond
+      (seq dag-prs) (vec dag-prs)
+      :else (when-let [pr-info (response/release-pr-info
+                                (get-in ctx [:execution/phase-results :release]))]
+              [pr-info]))))
+
+(defn- ^{:stratum 0} remote-origin-url
+  "Shell `git config --get remote.origin.url` in worktree-path.
+   Returns the trimmed URL string, or nil on blank/nil path or process failure."
+  [worktree-path]
+  (when-not (str/blank? worktree-path)
+    (try+
+     (let [proc @(process/process ["git" "config" "--get" "remote.origin.url"]
+                                  {:dir worktree-path :out :string :err :string :throw false})]
+       (when (zero? (:exit proc))
+         (str/trim (:out proc))))
+     (catch Object _ nil))))
+
+(defn ^{:stratum 0} leave-observe
+  "Post-processing for Observe phase. Records evidence and duration metrics."
+  [ctx]
+  (let [start-time (get-in ctx [:phase :started-at] (System/currentTimeMillis))
+        end-time (System/currentTimeMillis)
+        duration-ms (- end-time start-time)]
+    (-> ctx
+        (assoc-in [:phase :ended-at] end-time)
+        (assoc-in [:phase :duration-ms] duration-ms)
+        (assoc-in [:metrics :observe :duration-ms] duration-ms)
+        (update-in [:execution :phases-completed] (fnil conj []) :observe)
+        (update-in [:execution/metrics :duration-ms] (fnil + 0) duration-ms))))
+
+(defn ^{:stratum 0} error-observe
+  "Handle Observe phase errors. Observe is single-shot (fails on first
+   error) and historically never honored `:on-fail`. Pass
+   `default-budget = 0` and `redirect? = false` to preserve that
+   semantics."
+  [ctx ex]
+  (phase/handle-error ctx ex 0 false))
+
+;------------------------------------------------------------------------------ Layer 1
+
+(def ^{:stratum 1} ObservePhaseConfig
+  [:map
+   [:observe/phase-defaults ObservePhaseDefaults]])
+
+(defn- ^{:stratum 1} pr-info->worklist-entry
   "Map a pr-info map to a WorklistPrEntry. Returns nil when required
    fields (url, number, repo) cannot be resolved. Accepts both the
    `:pr/url`/`:pr/number` (DAG) and `:pr-url`/`:pr-number` (release)
@@ -132,10 +168,8 @@
         abandon-after-hours
         (assoc :pr/abandon-after-hours (int abandon-after-hours))))))
 
-;------------------------------------------------------------------------------ Layer 2
 ;; Interceptor implementation
-
-(defn- resolve-monitor-config
+(defn- ^{:stratum 1} resolve-monitor-config
   [ctx logger generate-fn event-bus]
   (let [worktree-path (or (get-in ctx [:execution/worktree-path])
                           (get-in ctx [:worktree-path]))
@@ -165,38 +199,17 @@
               :abandon-after-hours
               (get-in ctx [:config :pr-monitor/abandon-after-hours])})))))
 
-(defn- resolve-pr-infos
-  "Resolve the PR(s) to observe from the execution context. Returns a vector
-   of pr-info maps, or nil when there is nothing to observe.
+;------------------------------------------------------------------------------ Layer 2
 
-   DAG runs populate `[:execution/dag-pr-infos]`. For a single-PR run, the PR
-   info is read via `response/release-pr-info` from the one canonical location
-   (the release phase-result's `[:result :output :workflow/pr-info]`) — the
-   same accessor `dag-orchestrator/extract-pr-info-from-result` uses. (An
-   earlier shallow `[:release :pr-info]` read and a `[:metrics :release
-   :pr-info]` fallback are both gone — observe used to see nil and skip, so a
-   single-PR dogfood opened its PR and exited without ever monitoring it.)"
-  [ctx]
-  (let [dag-prs (get-in ctx [:execution/dag-pr-infos])]
-    (cond
-      (seq dag-prs) (vec dag-prs)
-      :else (when-let [pr-info (response/release-pr-info
-                                (get-in ctx [:execution/phase-results :release]))]
-              [pr-info]))))
+(defn- ^{:stratum 2} load-observe-phase-config
+  []
+  (->> (config/load-config-resource
+        "config/workflow/observe-phase.edn"
+        [:observe/phase-defaults]
+        {:hint "Add components/workflow/resources to your classpath"})
+       (validate! ObservePhaseConfig)))
 
-(defn- remote-origin-url
-  "Shell `git config --get remote.origin.url` in worktree-path.
-   Returns the trimmed URL string, or nil on blank/nil path or process failure."
-  [worktree-path]
-  (when-not (str/blank? worktree-path)
-    (try+
-     (let [proc @(process/process ["git" "config" "--get" "remote.origin.url"]
-                                  {:dir worktree-path :out :string :err :string :throw false})]
-       (when (zero? (:exit proc))
-         (str/trim (:out proc))))
-     (catch Object _ nil))))
-
-(defn- try-persist-worklist!
+(defn- ^{:stratum 2} try-persist-worklist!
   "Best-effort: persist the PR monitor worklist before detaching the
    monitor future. Derives the repo key from the git remote origin URL,
    resolves the worklist path under `config/miniforge-home`, and writes
@@ -233,7 +246,13 @@
                              :worktree-path worktree-path
                              :remote-url remote-url}})))))))
 
-(defn enter-observe
+;------------------------------------------------------------------------------ Layer 3
+
+(def ^{:stratum 3} default-config
+  "Default Observe phase configuration loaded from EDN."
+  (:observe/phase-defaults (load-observe-phase-config)))
+
+(defn ^{:stratum 3} enter-observe
   "Execute the Observe phase.
 
    Reads PR info from context (set by Release phase) and starts the PR
@@ -323,31 +342,10 @@
                (assoc-in [:phase :result] (response/success result-data))
                (assoc :execution/pr-monitor-future monitor-future))))))))
 
-(defn leave-observe
-  "Post-processing for Observe phase. Records evidence and duration metrics."
-  [ctx]
-  (let [start-time (get-in ctx [:phase :started-at] (System/currentTimeMillis))
-        end-time (System/currentTimeMillis)
-        duration-ms (- end-time start-time)]
-    (-> ctx
-        (assoc-in [:phase :ended-at] end-time)
-        (assoc-in [:phase :duration-ms] duration-ms)
-        (assoc-in [:metrics :observe :duration-ms] duration-ms)
-        (update-in [:execution :phases-completed] (fnil conj []) :observe)
-        (update-in [:execution/metrics :duration-ms] (fnil + 0) duration-ms))))
+;------------------------------------------------------------------------------ Layer 4
 
-(defn error-observe
-  "Handle Observe phase errors. Observe is single-shot (fails on first
-   error) and historically never honored `:on-fail`. Pass
-   `default-budget = 0` and `redirect? = false` to preserve that
-   semantics."
-  [ctx ex]
-  (phase/handle-error ctx ex 0 false))
-
-;------------------------------------------------------------------------------ Layer 3
 ;; Registry method
-
-(defmethod phase/get-phase-interceptor-method :observe
+(defmethod ^{:stratum 4} phase/get-phase-interceptor-method :observe
   [config]
   (let [merged (phase/merge-with-defaults config)]
     {:name ::observe
@@ -356,6 +354,9 @@
               (enter-observe (assoc ctx :phase-config merged)))
      :leave leave-observe
      :error error-observe}))
+
+;; Register defaults on load
+(phase/register-phase-defaults! :observe default-config)
 
 ;------------------------------------------------------------------------------ Rich Comment
 (comment
