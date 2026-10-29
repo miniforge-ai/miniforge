@@ -74,19 +74,27 @@
                         dropped))))
 
 (defn ^{:stratum 0} tail-dir
-  "Hand the unseen events of directory `dir`, named `wf-name`, to
-   `on-event` in creation order. Returns `state` with the directory's
-   seen names. A failing `on-event` skips that event only."
+  "Hand the unseen events of directory `dir` (workflow `wf-name`) to
+   `on-event` in creation order. Seen names (a file is named after its
+   event, under either root) only grow, and a file gone before decoding
+   is not counted, so a move to archived/ neither skips nor repeats
+   events. A failing `on-event` skips that event only."
   [on-event state wf-name dir]
-  (let [[names files] (layout/unseen-files
-                       dir
-                       (get-in state [:seen wf-name])
-                       (get-in state [:since wf-name] (:since-ms state)))]
-    (doseq [event (layout/read-ordered files)]
+  (let [seen          (get-in state [:seen wf-name])
+        [names files] (layout/unseen-files
+                       dir seen (get-in state [:since wf-name] (:since-ms state)))
+        events        (layout/read-ordered files)
+        decoded       (into #{} (map layout/source-file) events)
+        vanished      (into #{}
+                            (comp (remove decoded)
+                                  (remove #(.exists ^java.io.File %))
+                                  (map layout/file-name))
+                            files)]
+    (doseq [event events]
       (try+
         (on-event event)
         (catch Exception _ nil)))
-    (assoc-in state [:seen wf-name] names)))
+    (assoc-in state [:seen wf-name] (into (or seen #{}) (remove vanished) names))))
 
 ;------------------------------------------------------------------------------ Layer 1
 

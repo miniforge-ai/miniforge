@@ -20,6 +20,7 @@
    and the started thread."
   (:require
    [ai.miniforge.event-stream.interface :as es]
+   [ai.miniforge.event-stream.layout-reader :as layout]
    [ai.miniforge.event-stream.layout-tail :as sut]
    [clojure.java.io :as io]
    [clojure.test :refer [deftest testing is]]))
@@ -54,6 +55,13 @@
         hour-ago (- (System/currentTimeMillis) (* 60 60 1000))]
     (doseq [f (.listFiles dir)] (.setLastModified f hour-ago))
     (.setLastModified dir hour-ago)))
+
+(defn- ^{:stratum 0} archive!
+  "Move the workflow's live directory to archived/, as the archive does."
+  [events-dir wf-id]
+  (let [to (io/file events-dir "archived" (str wf-id))]
+    (.mkdirs (.getParentFile to))
+    (.renameTo (es/workflow-dir (str events-dir) wf-id) to)))
 
 ;------------------------------------------------------------------------------ Layer 1
 
@@ -166,3 +174,64 @@
       (is (= [[wf-id :workflow/started]] (mapv (juxt :workflow/id :event/type) @seen))
           "once, with a UUID id; the temp file is not read")
       (finally (stop!)))))
+
+(defn- ^{:stratum 1} archive-after-listing
+  "An `event-files` stand-in that archives the run right after listing."
+  [list-files events-dir wf-id]
+  (fn [dir] (let [files (doall (list-files dir))] (archive! events-dir wf-id) files)))
+
+(deftest ^{:stratum 1} a-run-moved-before-the-poll-lists-it-repeats-nothing
+  (let [events-dir (temp-events-dir)
+        base       (str events-dir)
+        stream     (file-sink-stream events-dir)
+        wf-id      (random-uuid)
+        published  (atom [])
+        publish    #(swap! published conj %)
+        t0         (System/currentTimeMillis)
+        s0         (sut/initial-state base t0 window-ms)]
+    (es/publish! stream (wf-event :workflow/started wf-id))
+    (let [s1 (sut/poll-once! s0 base publish (+ t0 2000))]
+      (es/publish! stream (wf-event :workflow/completed wf-id :workflow/status :success))
+      (archive! events-dir wf-id)
+      ;; Too soon to relist: this poll lists the live path, now gone.
+      (-> (sut/poll-once! s1 base publish (+ t0 2500))
+          (sut/poll-once! base publish (+ t0 4000)))
+      (is (= [:workflow/started :workflow/completed] (mapv :event/type @published))))))
+
+;------------------------------------------------------------------------------ Layer 2
+
+(deftest ^{:stratum 2} a-run-moved-between-listing-and-decoding-loses-nothing
+  (let [events-dir (temp-events-dir)
+        base       (str events-dir)
+        stream     (file-sink-stream events-dir)
+        wf-id      (random-uuid)
+        published  (atom [])
+        publish    #(swap! published conj %)
+        list-files layout/event-files
+        t0         (System/currentTimeMillis)
+        s0         (sut/initial-state base t0 window-ms)]
+    (es/publish! stream (wf-event :workflow/started wf-id))
+    (let [s1 (sut/poll-once! s0 base publish (+ t0 2000))]
+      (es/publish! stream (wf-event :workflow/completed wf-id :workflow/status :success))
+      (let [s2 (with-redefs [layout/event-files (archive-after-listing list-files events-dir wf-id)]
+                 (sut/poll-once! s1 base publish (+ t0 2500)))]
+        (sut/poll-once! s2 base publish (+ t0 4000))
+        (is (= [:workflow/started :workflow/completed] (mapv :event/type @published))
+            "the completion, listed under live/ but read from archived/")))))
+
+(deftest ^{:stratum 2} a-run-moved-during-its-first-listing-loses-nothing
+  (let [events-dir (temp-events-dir)
+        base       (str events-dir)
+        stream     (file-sink-stream events-dir)
+        wf-id      (random-uuid)
+        published  (atom [])
+        list-files layout/event-files
+        t0         (System/currentTimeMillis)
+        s0         (sut/initial-state base t0 window-ms)]
+    (es/publish! stream (wf-event :workflow/started wf-id))
+    (es/publish! stream (wf-event :workflow/completed wf-id :workflow/status :success))
+    (let [s1 (with-redefs [layout/event-files (archive-after-listing list-files events-dir wf-id)]
+               (sut/poll-once! s0 base #(swap! published conj %) (+ t0 2000)))]
+      (sut/poll-once! s1 base #(swap! published conj %) (+ t0 4000))
+      (is (= #{:workflow/started :workflow/completed} (set (map :event/type @published)))
+          "first found under live/, read from archived/"))))

@@ -26,7 +26,8 @@
    [ai.miniforge.event-stream.reader :as reader]
    [ai.miniforge.event-stream.sinks :as sinks]
    [clojure.java.io :as io]
-   [clojure.string :as str])
+   [clojure.string :as str]
+   [slingshot.slingshot :refer [try+]])
   (:import
    [java.io File]))
 
@@ -46,14 +47,30 @@
   (sinks/event-file-ms (.getName f)))
 
 (defn ^{:stratum 0} read-event
-  "Decode one event file; nil when unreadable or not an event."
+  "Decode one event file; nil when unreadable or not an event. Event,
+   workflow and artifact ids come back as UUIDs and :event/timestamp as a
+   Date, as a live event carries them."
   [f]
-  (let [event (reader/read-event-file f)
-        as-uuid #(or (when (string? %) (parse-uuid %)) %)]
+  (let [event    (reader/read-event-file f)
+        as-uuid  #(or (when (string? %) (parse-uuid %)) %)
+        as-date  (fn [s] (try+ (java.util.Date/from (java.time.Instant/parse s))
+                               (catch Exception _ s)))
+        artifact (fn [a] (if (map? a)
+                           (cond-> a
+                             (contains? a :artifact/id) (update :artifact/id as-uuid)
+                             (contains? a :id)          (update :id as-uuid))
+                           (as-uuid a)))]
     (when (:event/type event)
       (cond-> event
-        (contains? event :event/id)    (update :event/id as-uuid)
-        (contains? event :workflow/id) (update :workflow/id as-uuid)))))
+        (contains? event :event/id)            (update :event/id as-uuid)
+        (contains? event :workflow/id)         (update :workflow/id as-uuid)
+        (string? (:event/timestamp event))     (update :event/timestamp as-date)
+        (sequential? (:phase/artifacts event)) (update :phase/artifacts (partial mapv artifact))))))
+
+(defn ^{:stratum 0} source-file
+  "The file `read-ordered` decoded `event` from."
+  [event]
+  (::file (meta event)))
 
 (defn ^{:stratum 0} roots
   "The per-workflow roots under `events-dir`, live first: a directory
@@ -85,10 +102,11 @@
 
 (defn ^{:stratum 1} read-ordered
   "Decode `files` and return their events by recorded ms, then
-   :event/sequence-number."
+   :event/sequence-number. Each event knows its file (`source-file`)."
   [files]
   (->> files
-       (keep (fn [f] (some->> (read-event f) (vector (file-ms f)))))
+       (keep (fn [f] (when-let [event (read-event f)]
+                       [(file-ms f) (vary-meta event assoc ::file f)])))
        (sort-by (fn [[ms event]] [ms (get event :event/sequence-number 0)]))
        (mapv second)))
 
@@ -103,7 +121,8 @@
     [(into #{} (map file-name) files)
      (if seen
        (filterv #(not (contains? seen (file-name %))) files)
-       (filterv #(>= (mtime %) since-ms) files))]))
+       ;; mtime 0: gone since the listing (moved); a caller retries it.
+       (filterv #(let [m (mtime %)] (or (>= m since-ms) (zero? m))) files))]))
 
 (defn ^{:stratum 2} active-dirs
   "{name dir} of the workflow directories modified at or after
