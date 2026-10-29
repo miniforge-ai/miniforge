@@ -216,6 +216,42 @@
                           (< (.lastModified f) cutoff))))
                  children))))
 
+(defn- ^{:stratum 0} no-events?
+  "True when workflow directory `dir` holds no event file."
+  [^java.io.File dir]
+  (not-any? #(str/ends-with? (.getName ^java.io.File %) ".json") (.listFiles dir)))
+
+(defn- ^{:stratum 0} finished-run?
+  "True when one of the 20 newest files of workflow directory `dir`
+   records a terminal workflow event (completed, failed or cancelled),
+   read from the transit-JSON this namespace writes."
+  [^java.io.File dir]
+  (let [event-type (fn [^java.io.File f]
+                     (try+ (get (json/parse-string (slurp f :encoding "UTF-8")) "~:event/type")
+                           (catch Exception _ nil)))]
+    (->> (.listFiles dir)
+         (filter #(str/ends-with? (.getName ^java.io.File %) ".json"))
+         (sort-by #(- (.lastModified ^java.io.File %)))
+         (take 20)
+         (keep event-type)
+         (some #{"~:workflow/completed" "~:workflow/failed" "~:workflow/cancelled"}))))
+
+(defn- ^{:stratum 0} archive-finished-run!
+  "Move live workflow directory `dir` into `archived-root` and mark it
+   archived, as the JVM runner's archive does when a run ends. Returns 1
+   when moved, 0 when that name is already archived or the move fails."
+  [^java.io.File dir ^java.io.File archived-root]
+  (let [target (io/file archived-root (.getName dir))]
+    (if (.exists target)
+      0
+      (try+
+        (.mkdirs archived-root)
+        (Files/move (.toPath dir) (.toPath target)
+                    (into-array StandardCopyOption [StandardCopyOption/ATOMIC_MOVE]))
+        (spit (io/file target (layout/archived-marker-filename)) "")
+        1
+        (catch Exception _ 0)))))
+
 ;; Stream Sinks
 (defn ^{:stratum 0} stdout-sink
   "Create a stdout sink that prints events to standard output.
@@ -369,9 +405,14 @@
   "Prune stored events whose retention has run out. What goes depends on
    where it lives under the events directory:
 
-     live/{wid}/      Nothing. An in-flight, paused or not-yet-archived
-                      workflow keeps every event file and its manifest
-                      however old they are: resume replays them.
+     live/{wid}/      Nothing of a run that has a manifest (the JVM
+                      runner's; its archive moves it) or that is still
+                      written to: resume replays it. A manifest-less run
+                      (a Babashka run, which never archives) idle for
+                      the TTL is archived here if one of its newest
+                      events is terminal (completed, failed, cancelled),
+                      so the archived/ rules below apply to it next; if
+                      it holds no event file, its directory goes.
      archived/{wid}/  The whole directory, once its archive is older
                       than the TTL (by its `archived.marker`). One still
                       missing the marker is left for archive recovery.
@@ -424,6 +465,7 @@
                             (when-not (Files/isSymbolicLink (.toPath d)) d)))
             archived-root (real-subdir (layout/archived-subdir))
             operator-root (real-subdir (layout/operator-subdir))
+            live-root     (real-subdir (layout/live-subdir))
             archives (when archived-root
                        (->> (child-dirs archived-root)
                             (filter #(archive-expired? % cutoff))
@@ -441,8 +483,16 @@
                        0)
             temps (->> (walk-tree events-dir)
                        (filter #(stale? % ".transit.tmp"))
-                       delete-all!)]
-        (+ pruned operator temps))
+                       delete-all!)
+            idle-live (when live-root
+                        (filter #(legacy-workflow-expired? % cutoff manifest-filename)
+                                (child-dirs live-root)))
+            emptied (reduce + 0 (map #(delete-all! (reverse (walk-tree %)))
+                                     (filter no-events? idle-live)))]
+        (when archived-root
+          (doseq [dir (filter finished-run? (remove no-events? idle-live))]
+            (archive-finished-run! dir archived-root)))
+        (+ pruned operator temps emptied))
       0)))
 
 ;; Fleet Sink
