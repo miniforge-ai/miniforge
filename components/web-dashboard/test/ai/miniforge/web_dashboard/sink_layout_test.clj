@@ -258,15 +258,20 @@
 
 (deftest ^{:stratum 1} the-archive-wide-history-keeps-a-bounded-window-per-workflow
   (let [events-dir (temp-events-dir)
-        stream     (file-sink-stream events-dir)
+        stream     (es/create-event-stream {:sinks []})
         dashboard  (core/create-state {:event-stream (es/create-event-stream {:sinks []})})
         wf-id      (random-uuid)
-        chunk!     #(es/publish! stream (envelope stream :agent/chunk wf-id :chunk/delta %))
+        dir        (doto (es/workflow-dir (str events-dir) wf-id) .mkdirs)
+        ;; One file per millisecond. The real sink, on a fast machine, puts
+        ;; several in one, and tracking keeps every name of its floor's
+        ;; millisecond, so the name count would depend on timing.
+        write!     #(write-event! dir (legacy-name (+ snowflake-epoch-ms %1) "ffffffff") %2)
+        chunk!     #(write! (+ 3 (parse-long %)) (envelope stream :agent/chunk wf-id :chunk/delta %))
         disk-events #(filter (comp #{wf-id} :workflow/id) (workflows/get-events dashboard {:limit 1000}))]
-    (es/publish! stream (envelope stream :workflow/started wf-id :workflow/spec {:name "Long run"}))
-    (es/publish! stream (envelope stream :workflow/phase-started wf-id :workflow/phase :implement))
+    (write! 0 (envelope stream :workflow/started wf-id :workflow/spec {:name "Long run"}))
+    (write! 1 (envelope stream :workflow/phase-started wf-id :workflow/phase :implement))
     (run! chunk! (map str (range 20)))
-    (es/publish! stream (envelope stream :workflow/completed wf-id :workflow/status :success))
+    (write! 30 (envelope stream :workflow/completed wf-id :workflow/status :success))
     (with-redefs [workflows/events-dir-path (str events-dir)
                   workflows/disk-retention (merge es/bounded-retention {:max-events-per-workflow 5})]
       (let [events (disk-events)]
