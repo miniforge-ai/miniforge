@@ -143,7 +143,11 @@
    :deny. Skips gate checks when phase indicates work is already done. When
    gates are configured they run even if the canonical artifact
    ([:result :output]) is nil — a nil artifact fails the gate (fail-closed),
-   never bypasses it; the envelope carries :reason/missing-artifact."
+   never bypasses it; the envelope carries :reason/missing-artifact.
+
+   The decision is published before the result is returned. When it is not
+   acknowledged, the result also carries :phase/decision-unacknowledged (the
+   anomaly); `execution-step` refuses the phase boundary on it."
   [interceptor phase-result ctx]
   (if (already-done? phase-result)
     phase-result
@@ -162,29 +166,32 @@
         (let [gate-result (gate/check-gates gate-keywords artifact ctx)
               minted (gate/gates->envelope gate-result (nil? artifact))
               ;; envelope minting can itself anomaly; fail closed on that too
-              envelope (when (:envelope/id minted) minted)]
-          (exec-events/emit-phase-decision! ctx phase-result envelope)
-          (if (and (:passed? gate-result)
-                   envelope
-                   (gate/decision-allowed? envelope))
-            (assoc phase-result :phase/decision-envelope envelope)
-            (assoc phase-result
-                   :phase/status :failed
-                   :phase/decision-envelope envelope
-                   :phase/gate-errors (if envelope
-                                        (vec (:envelope/reasons envelope))
-                                        (vec (:failed-gates gate-result)))
-                   ;; The envelope's Reasons are schema-bound strings; the
-                   ;; repair loop needs the gates' STRUCTURED errors (which
-                   ;; gate, which token, which files). This rides the phase
-                   ;; result into :execution/phase-results, the one channel
-                   ;; a redirect re-entry can still read.
-                   ;; gate/passed? handles response-shaped results too;
-                   ;; a bare (remove :passed?) would misfile them.
-                   :phase/gate-failures (->> (:results gate-result)
-                                             (remove gate/passed?)
-                                             (mapv #(-> (select-keys % [:gate :errors])
-                                                        (update :errors (fnil vec []))))))))
+              envelope (when (:envelope/id minted) minted)
+              receipt (exec-events/emit-phase-decision! ctx phase-result envelope)]
+          (cond->
+            (if (and (:passed? gate-result)
+                     envelope
+                     (gate/decision-allowed? envelope))
+              (assoc phase-result :phase/decision-envelope envelope)
+              (assoc phase-result
+                     :phase/status :failed
+                     :phase/decision-envelope envelope
+                     :phase/gate-errors (if envelope
+                                          (vec (:envelope/reasons envelope))
+                                          (vec (:failed-gates gate-result)))
+                     ;; The envelope's Reasons are schema-bound strings; the
+                     ;; repair loop needs the gates' STRUCTURED errors (which
+                     ;; gate, which token, which files). This rides the phase
+                     ;; result into :execution/phase-results, the one channel
+                     ;; a redirect re-entry can still read.
+                     ;; gate/passed? handles response-shaped results too;
+                     ;; a bare (remove :passed?) would misfile them.
+                     :phase/gate-failures (->> (:results gate-result)
+                                               (remove gate/passed?)
+                                               (mapv #(-> (select-keys % [:gate :errors])
+                                                          (update :errors (fnil vec [])))))))
+            (anomaly/any-anomaly? receipt)
+            (assoc :phase/decision-unacknowledged receipt)))
         phase-result))))
 
 ;------------------------------------------------------------------------------ Layer 2

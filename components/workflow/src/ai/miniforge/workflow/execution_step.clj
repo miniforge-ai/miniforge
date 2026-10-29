@@ -2,12 +2,14 @@
 ;; Copyright 2025-2026 Christopher Lester (christopher@miniforge.ai)
 ;; Licensed under the Apache License, Version 2.0.
 (ns ai.miniforge.workflow.execution-step
-  "Advance a selected phase only after its boundary callbacks accept the operation."
+  "Advance a selected phase only after its boundary callbacks accept the operation
+   and its gate decision, when it has one, was acknowledged."
   (:require [ai.miniforge.anomaly.interface :as anomaly]
             [ai.miniforge.response.interface :as response]
             [ai.miniforge.workflow.execution-dag :as dag]
             [ai.miniforge.workflow.execution-lifecycle :as lifecycle]
             [ai.miniforge.workflow.execution-transition :as transition]
+            [ai.miniforge.workflow.messages :as messages]
             [ai.miniforge.workflow.runner-outcome :as outcome]))
 
 ;------------------------------------------------------------------------------ Layer 0
@@ -24,6 +26,18 @@
   (if-let [prepare (:phase-context callbacks)]
     (prepare context interceptor)
     context))
+
+(defn- ^{:stratum 0} recorded-result
+  "A phase whose gate decision was not acknowledged is recorded as failed, so a
+   resume re-runs it. Its output and decision envelope are kept."
+  [result]
+  (if (:phase/decision-unacknowledged result)
+    (-> result
+        (assoc :status :failed)
+        (update :phase/gate-errors (fnil conj [])
+                {:code :gate/decision-unacknowledged
+                 :message (messages/t :gate/decision-unacknowledged)}))
+    result))
 
 (defn- ^{:stratum 0} refused [context boundary failure fail]
   (let [message (:message (response/anomaly->event-data failure))
@@ -43,15 +57,21 @@
 
 ;------------------------------------------------------------------------------ Layer 1
 
-(defn- ^{:stratum 1} execute-entered [pipeline context callbacks interceptor ports]
+(defn- ^{:stratum 1} execute-entered
+  "An unacknowledged gate decision refuses the boundary before the DAG handoff
+   and the machine transition; the completion callback still observes the phase."
+  [pipeline context callbacks interceptor ports]
   (let [entered (phase-context callbacks context interceptor)
-        [updated result] (lifecycle/execute-phase-lifecycle interceptor entered)
+        [updated lifecycle-result] (lifecycle/execute-phase-lifecycle interceptor entered)
+        unacknowledged (:phase/decision-unacknowledged lifecycle-result)
+        result (recorded-result lifecycle-result)
         phase (:execution/current-phase context)
         processed (lifecycle/process-phase-result updated phase result (:merge-metrics ports))
         receipt (invoke (:on-phase-complete callbacks) processed interceptor result)]
-    (if (anomaly/any-anomaly? receipt)
-      (refused processed :on-phase-complete receipt (:fail ports))
-      (advance pipeline processed interceptor result ports))))
+    (cond
+      unacknowledged (refused processed :gate-decision unacknowledged (:fail ports))
+      (anomaly/any-anomaly? receipt) (refused processed :on-phase-complete receipt (:fail ports))
+      :else (advance pipeline processed interceptor result ports))))
 
 ;------------------------------------------------------------------------------ Layer 2
 

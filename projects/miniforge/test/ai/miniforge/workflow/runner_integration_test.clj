@@ -18,6 +18,7 @@
 (ns ai.miniforge.workflow.runner-integration-test
   "Integration tests for the workflow runner that execute real phase pipelines."
   (:require
+   [ai.miniforge.event-stream.interface :as events]
    [ai.miniforge.workflow.isolation-support :as isolation]
    [clojure.test :refer [deftest is testing use-fixtures]]
    [ai.miniforge.workflow.checkpoint-root-support :as checkpoint-root-support]
@@ -54,26 +55,43 @@
           result (runner/run-pipeline workflow {:task "Test"} {:max-phases 50})]
       (is (= :completed (:execution/status result))))))
 
-(deftest ^{:stratum 0} response-chain-records-phases-test
+(def ^{:stratum 0} plan-workflow
+  {:workflow/id :test
+   :workflow/version "1.0.0"
+   :workflow/pipeline [{:phase :plan}
+                       {:phase :done}]})
+
+(def ^{:stratum 0} plan-input
+  {:task "Test"
+   :title "Test"
+   :plan/tasks [{:task/type :implement
+                 :task/title "Draft the change"
+                 :task/description "Create a plan artifact without invoking the LLM"}]})
+
+;------------------------------------------------------------------------------ Layer 1
+
+(deftest ^{:stratum 1} response-chain-records-phases-test
   (testing "response chain records phase results"
-    (let [workflow {:workflow/id :test
-                    :workflow/version "1.0.0"
-                    :workflow/pipeline [{:phase :plan}
-                                        {:phase :done}]}
-          result (runner/run-pipeline
-                  workflow
-                  {:task "Test"
-                   :title "Test"
-                   :plan/tasks [{:task/type :implement
-                                 :task/title "Draft the change"
-                                 :task/description "Create a plan artifact without invoking the LLM"}]}
-                  {})
+    (let [;; Gated phases advance only on an acknowledged :gate/decision.
+          result (runner/run-pipeline plan-workflow plan-input
+                                      {:event-stream (events/create-event-stream {:sinks []})})
           chain (:execution/response-chain result)]
       (is (= :completed (:execution/status result)))
       (is (= 1 (count (:response-chain chain))))
       (is (= :plan (get-in chain [:response-chain 0 :operation])))
       (is (= :completed (get-in result [:execution/phase-results :implement :status])))
       (is (true? (:succeeded? chain))))))
+
+(deftest ^{:stratum 1} unacknowledged-plan-decision-never-reaches-the-dag-test
+  (testing "without an event stream the plan's gate decision is not acknowledged:
+            the run fails before the DAG executor receives the plan's tasks"
+    (let [result (runner/run-pipeline plan-workflow plan-input {})
+          refusal (some #(when (= :gate-decision (:boundary %)) %) (:execution/errors result))]
+      (is (= :failed (:execution/status result)))
+      (is (= :plan (:phase refusal)))
+      (is (= :failed (get-in result [:execution/phase-results :plan :status])))
+      (is (some? (get-in result [:execution/phase-results :plan :phase/decision-envelope])))
+      (is (not (contains? (:execution/phase-results result) :implement))))))
 
 ;; Every pipeline this namespace runs acquires its worktree from a
 ;; throwaway host repository and checkpoints into a throwaway root — never
