@@ -490,6 +490,7 @@
                ;; other author, including mf's own release commit in this clone.
                (when install-hooks? (run 'setup:hooks))
                (println "\n📦 Installing the mf CLI...\n")
+               (bootstrap/check-private-dep-access!)
                (run 'install:local)
                (bootstrap/check-mf-install! (str (fs/home) "/.local/bin/mf"))
                (println "\n🎉 Bootstrap complete. Run 'mf version' to check the CLI, 'bb' to list tasks.\n"))}

@@ -142,6 +142,12 @@ The first workflow opens a pull request: miniforge pushes a branch to
 `origin` and runs `gh pr create`. Fork `miniforge-ai/miniforge` and clone
 your fork, so the push goes to a repository you can write to.
 
+Building `mf` from source currently needs read access to the private
+`miniforge-ai/workbench-contract` repository, a dependency of the CLI
+build. Until that dependency is published or removed, the steps below
+work only for GitHub accounts with that access; for others, `bb bootstrap`
+stops before the build and says so.
+
 ```bash
 git clone https://github.com/<you>/miniforge.git
 cd miniforge

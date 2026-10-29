@@ -66,6 +66,20 @@
     (is (str/includes? (sut/mf-path-problem "/h/.local/bin/mf" "/opt/homebrew/bin/mf")
                        "/opt/homebrew/bin/mf"))))
 
+(deftest ^{:stratum 0} private-dep-test
+  (testing "the coordinate is read from a deps.edn map, nil once the dependency is gone"
+    (is (= {:git/url "ssh://x" :git/sha "abc"}
+           (sut/private-dep {:deps {'io.github.miniforge-ai/workbench-contract
+                                    {:git/url "ssh://x" :git/sha "abc"}}})))
+    (is (nil? (sut/private-dep {:deps {'cheshire/cheshire {:mvn/version "5.13.0"}}}))))
+  (testing "the cache path matches the Clojure CLI's gitlibs layout"
+    (is (= "/g/libs/io.github.miniforge-ai/workbench-contract/abc"
+           (sut/gitlibs-checkout "/g" "abc"))))
+  (testing "the failure names the private repository, not a git error"
+    (let [msg (sut/private-dep-message "ssh://git@github.com/miniforge-ai/workbench-contract.git")]
+      (is (str/includes? msg "private"))
+      (is (str/includes? msg "miniforge-ai/workbench-contract")))))
+
 ;------------------------------------------------------------------------------ Layer 1
 
 (deftest ^{:stratum 1} bootstrap-installs-mf-test
@@ -74,4 +88,6 @@
       (is (or (mentions? (:depends task) 'install:local)
               (mentions? (:task task) 'install:local))))
     (testing "bootstrap decides on hooks through bootstrap/hooks-plan, not unconditionally"
-      (is (mentions? (:task task) 'bootstrap/hooks-plan)))))
+      (is (mentions? (:task task) 'bootstrap/hooks-plan)))
+    (testing "bootstrap checks the private dependency before building"
+      (is (mentions? (:task task) 'bootstrap/check-private-dep-access!)))))
