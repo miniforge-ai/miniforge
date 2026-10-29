@@ -26,7 +26,8 @@
    [clojure.string :as str]
    [clojure.test :refer [deftest is testing]]
    [ai.miniforge.release-executor.core :as core]
-   [ai.miniforge.release-executor.git :as git]))
+   [ai.miniforge.release-executor.git :as git]
+   [ai.miniforge.release-executor.shell :as shell]))
 
 ;------------------------------------------------------------------------------ Layer 0
 
@@ -52,27 +53,31 @@
 (deftest ^{:stratum 0} gh-token-injection-test
   (testing "create-pr! injects GH_TOKEN via :extra-env when a token is present"
     (let [seen (atom nil)]
-      (with-redefs [process/shell (fn [opts & _]
+      (with-redefs [shell/run-bounded (fn [args opts] (apply process/shell opts args))
+                    process/shell (fn [opts & _]
                                     (reset! seen opts)
                                     {:exit 0 :out "https://github.com/o/r/pull/7" :err ""})]
         (git/create-pr! "/tmp/wt" {:title "t" :body "b" :base-branch "main"} "sekret"))
       (is (= "sekret" (get-in @seen [:extra-env "GH_TOKEN"])))))
   (testing "create-pr! omits :extra-env when no token (inherits ambient env)"
     (let [seen (atom :unset)]
-      (with-redefs [process/shell (fn [opts & _]
+      (with-redefs [shell/run-bounded (fn [args opts] (apply process/shell opts args))
+                    process/shell (fn [opts & _]
                                     (reset! seen opts)
                                     {:exit 0 :out "https://github.com/o/r/pull/7" :err ""})]
         (git/create-pr! "/tmp/wt" {:title "t" :body "b" :base-branch "main"} nil))
       (is (nil? (:extra-env @seen)))))
   (testing "create-pr! rejects an unsafe base branch without shelling out"
     (let [called (atom false)]
-      (with-redefs [process/shell (fn [& _] (reset! called true) {:exit 0 :out "" :err ""})]
+      (with-redefs [shell/run-bounded (fn [args opts] (apply process/shell opts args))
+                    process/shell (fn [& _] (reset! called true) {:exit 0 :out "" :err ""})]
         (let [r (git/create-pr! "/tmp/wt" {:title "t" :body "b" :base-branch "-x"} "tok")]
           (is (not (:success? r)))
           (is (false? @called) "no gh process is spawned for an unsafe base")))))
   (testing "check-gh-auth! injects GH_TOKEN on the auth-status call"
     (let [calls (atom [])]
-      (with-redefs [process/shell (fn [opts & args]
+      (with-redefs [shell/run-bounded (fn [args opts] (apply process/shell opts args))
+                    process/shell (fn [opts & args]
                                     (swap! calls conj {:opts opts :args (vec args)})
                                     (if (= "which" (first args))
                                       {:exit 0 :out "/usr/bin/gh" :err ""}
@@ -84,11 +89,27 @@
 (deftest ^{:stratum 0} force-push-injects-token-test
   (testing "force-push! passes GH_TOKEN via :extra-env"
     (let [seen (atom nil)]
-      (with-redefs [process/shell (fn [opts & _]
+      (with-redefs [shell/run-bounded (fn [args opts] (apply process/shell opts args))
+                    process/shell (fn [opts & _]
                                     (reset! seen opts)
                                     {:exit 0 :out "" :err ""})]
         (git/force-push! "/tmp/wt" "push-tok"))
       (is (= "push-tok" (get-in @seen [:extra-env "GH_TOKEN"]))))))
+
+(deftest ^{:stratum 0} check-gh-auth-timeout-test
+  (testing "a timed-out `gh auth status` keeps :timed-out? and the :timeout anomaly
+            instead of reading as an ordinary auth failure"
+    (let [anom {:anomaly/type :timeout :anomaly/message "gh auth status timed out"}]
+      (with-redefs [process/shell     (fn [& _] {:exit 0 :out "/usr/bin/gh" :err ""})
+                    shell/run-bounded (fn [_args _opts]
+                                        {:exit 124 :out "" :err "gh auth status timed out"
+                                         :timed-out? true :anomaly anom})]
+        (let [r (git/check-gh-auth! "tok")]
+          (is (false? (:authenticated? r)))
+          (is (true? (:timed-out? r)))
+          (is (= anom (:anomaly r)))
+          (is (= "gh auth status timed out" (:error r))
+              "a deadline is not reported as missing auth"))))))
 
 (deftest ^{:stratum 0} commit-changes-rev-parse-failure-test
   (testing "commit-changes! surfaces a rev-parse failure instead of reporting a
@@ -130,7 +151,8 @@
   (testing "push fails with a token → rewrite SSH origin to https-with-token, retry, restore"
     (let [calls   (atom [])
           push-n  (atom 0)]
-      (with-redefs [process/shell
+      (with-redefs [shell/run-bounded (fn [args opts] (apply process/shell opts args))
+                    process/shell
                     (fn [_opts & args]
                       (let [a (vec args)]
                         (swap! calls conj a)
@@ -155,7 +177,8 @@
 (deftest ^{:stratum 0} push-branch-restore-failure-fails-loud-test
   (testing "restore of origin failing after the https fallback fails loud with a scrub hint"
     (let [push-n (atom 0) seturl-n (atom 0)]
-      (with-redefs [process/shell
+      (with-redefs [shell/run-bounded (fn [args opts] (apply process/shell opts args))
+                    process/shell
                     (fn [_opts & args]
                       (let [a (vec args)]
                         (cond
@@ -182,7 +205,8 @@
   (testing "force-push over SSH fails with a token → rewrite to https-with-token, retry, restore"
     (let [calls  (atom [])
           push-n (atom 0)]
-      (with-redefs [process/shell
+      (with-redefs [shell/run-bounded (fn [args opts] (apply process/shell opts args))
+                    process/shell
                     (fn [_opts & args]
                       (let [a (vec args)]
                         (swap! calls conj a)
@@ -208,7 +232,8 @@
 (deftest ^{:stratum 0} force-push-restore-failure-fails-loud-test
   (testing "force-push restore failure after the https fallback fails loud with a scrub hint"
     (let [push-n (atom 0) seturl-n (atom 0)]
-      (with-redefs [process/shell
+      (with-redefs [shell/run-bounded (fn [args opts] (apply process/shell opts args))
+                    process/shell
                     (fn [_opts & args]
                       (let [a (vec args)]
                         (cond
@@ -233,7 +258,8 @@
 (deftest ^{:stratum 0} force-push-push-and-restore-both-fail-test
   (testing "https retry push AND restore both fail → error carries both, push-succeeded? false"
     (let [push-n (atom 0) seturl-n (atom 0)]
-      (with-redefs [process/shell
+      (with-redefs [shell/run-bounded (fn [args opts] (apply process/shell opts args))
+                    process/shell
                     (fn [_opts & args]
                       (let [a (vec args)]
                         (cond
@@ -260,7 +286,8 @@
 (deftest ^{:stratum 0} force-push-https-setup-failure-test
   (testing "repointing origin to the token URL fails → report it, skip the retry push, no restore"
     (let [push-n (atom 0) seturl-n (atom 0)]
-      (with-redefs [process/shell
+      (with-redefs [shell/run-bounded (fn [args opts] (apply process/shell opts args))
+                    process/shell
                     (fn [_opts & args]
                       (let [a (vec args)]
                         (cond
@@ -377,3 +404,37 @@
         (is (nil? (git/count-test-defs-range dir "--upload-pack=evil")))
         (is (nil? (git/commits-ahead-of-base dir "a;rm -rf /"))))
       (finally (fs/delete-tree dir)))))
+
+;;------------------------------------------- remote calls are bounded
+(deftest ^{:stratum 2} remote-calls-time-out-test
+  (testing "fetch and push to a remote that never answers fail with a :timeout
+            anomaly at the deadline, and git's children see prompts disabled"
+    (let [dir    (fs/create-temp-dir {:prefix "git-host-mode-hang-"})
+          wt     (fs/path dir "wt")
+          fake   (str (fs/path dir "hang"))
+          prompt (str (fs/path dir "prompt.txt"))]
+      (try
+        (fs/create-dirs wt)
+        (init-repo! wt)
+        (sh! dir "git" "init" "-q" "--bare" "remote.git")
+        ;; git starts the remote's upload-pack / receive-pack through these
+        ;; settings; the stand-in records the prompt setting it inherited and
+        ;; then stalls like a dead connection.
+        (spit fake (str "#!/bin/sh\necho \"$GIT_TERMINAL_PROMPT\" > " prompt "\nsleep 15\n"))
+        (fs/set-posix-file-permissions fake "rwx------")
+        (sh! wt "git" "remote" "add" "origin" (str (fs/path dir "remote.git")))
+        (sh! wt "git" "config" "remote.origin.uploadpack" fake)
+        (sh! wt "git" "config" "remote.origin.receivepack" fake)
+        (sh! wt "git" "checkout" "-q" "-b" "release/hang")
+        (with-redefs [shell/default-timeout-ms 1000]
+          (doseq [[label call] [["fetch-branch!" #(git/fetch-branch! wt "main")]
+                                ["push-branch!" #(git/push-branch! wt "release/hang")]]]
+            (let [started (System/currentTimeMillis)
+                  r       (call)]
+              (is (not (:success? r)) label)
+              (is (:timed-out? r) label)
+              (is (= :timeout (get-in r [:anomaly :anomaly/type])) label)
+              (is (< (- (System/currentTimeMillis) started) 10000)
+                  (str label " returns at the deadline, not when the remote gives up")))))
+        (is (= "0" (str/trim (slurp prompt))) "GIT_TERMINAL_PROMPT=0 reaches git's children")
+        (finally (fs/delete-tree dir))))))

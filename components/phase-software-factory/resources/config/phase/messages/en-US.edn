@@ -36,9 +36,11 @@
   :verify/gate-failed         "Gate validation failed"
   :verify/failed              "Verification failed"
   :verify/timed-out           "Verify test runner timed out after {timeout-ms}ms (cmd: {test-cmd})"
+  :verify/interrupted         "Verify test run was interrupted; its process tree was killed (cmd: {test-cmd})"
 
   ;; Release phase
   :release/zero-files                   "Release phase received code artifact with zero files"
+  :release/git-status-failed            "Release could not list changed files in {worktree-path}: {detail}"
   :release/skipped-already-implemented  "Release skipped — task was already implemented"
   :release/changes-description          "Changes from implementation"
   :release/phase-failed                 "Release phase failed"}}

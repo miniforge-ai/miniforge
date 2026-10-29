@@ -21,6 +21,15 @@
 ;; llm_client.clj and are merged onto these maps at load time. See the
 ;; `backends` var there for the merge and for the rationale of each
 ;; field (prompt delivery, probe endpoints, credential handling).
+;;
+;; :probe-endpoint-routes point the network-drop probe at the endpoint
+;; the CLI is configured to use (llm-client/probe-endpoint-for). The
+;; first route that applies decides: a route with :when-env applies
+;; only when that switch is set and not off. It yields the URL in
+;; :base-url-env, else :global-url or :regional-url (%s = region) for
+;; the region in :region-env; when it yields nothing the static
+;; :probe-endpoint is used. Bedrock and Vertex come first because the
+;; Claude CLI does not use ANTHROPIC_BASE_URL when either is on.
 {:claude {:cmd "claude"
           :streaming? true
           :description "Claude via Anthropic CLI"
@@ -31,7 +40,18 @@
           ;; past POSIX ARG_MAX. Claude CLI supports --input-format text
           ;; to read the user prompt from stdin; we use that instead.
           :prompt-via :stdin
-          :probe-endpoint "https://api.anthropic.com/"}
+          :probe-endpoint "https://api.anthropic.com/"
+          :probe-endpoint-routes
+          [{:when-env "CLAUDE_CODE_USE_BEDROCK"
+            :base-url-env "ANTHROPIC_BEDROCK_BASE_URL"
+            :region-env "AWS_REGION"
+            :regional-url "https://bedrock-runtime.%s.amazonaws.com/"}
+           {:when-env "CLAUDE_CODE_USE_VERTEX"
+            :base-url-env "ANTHROPIC_VERTEX_BASE_URL"
+            :region-env "CLOUD_ML_REGION"
+            :global-url "https://aiplatform.googleapis.com/"
+            :regional-url "https://%s-aiplatform.googleapis.com/"}
+           {:base-url-env "ANTHROPIC_BASE_URL"}]}
 
  :codex {:cmd "codex"
          :streaming? true
@@ -41,7 +61,8 @@
          ;; Prompt delivery: stdin. Codex supports `-` as the prompt
          ;; placeholder; this keeps large synthesis prompts off argv.
          :prompt-via :stdin
-         :probe-endpoint "https://api.openai.com/"}
+         :probe-endpoint "https://api.openai.com/"
+         :probe-endpoint-routes [{:base-url-env "OPENAI_BASE_URL"}]}
 
  :ollama {:cmd "http"
           :streaming? true

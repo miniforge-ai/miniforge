@@ -282,7 +282,7 @@
              (println "Usage: bb build:script <project>")))}
 
   build:cli
-  {:doc  "Build miniforge CLI as distributable uberjar"
+  {:doc  "Build miniforge CLI as distributable uberjar (MINIFORGE_VERSION=<v> stamps its version)"
    :requires ([build])
    :task (build/cli)}
 

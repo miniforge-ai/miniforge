@@ -42,6 +42,7 @@
    merged config carries that value even under an empty home."
   (:require
    [ai.miniforge.workflow.checkpoint-store-paths :as checkpoint-paths]
+   [ai.miniforge.workflow.context :as context]
    [babashka.fs :as fs]
    [slingshot.slingshot :refer [try+]])
   (:import
@@ -69,6 +70,27 @@
     (fs/delete-tree root)
     (catch Exception _
       nil)))
+
+(defn ^{:stratum 0} unwritable-checkpoint-root
+  "A checkpoint root beneath a regular file in `dir`: creating a run
+   directory under it fails with an I/O exception whatever the process's
+   permissions, so a test using it holds when run as root too."
+  [dir]
+  (let [blocker (fs/file dir "not-a-directory")]
+    (spit blocker "")
+    (str (fs/path blocker "checkpoints"))))
+
+(defn ^{:stratum 0} plan-completed-context
+  "A one-phase run that has just completed :plan, checkpointing under
+   `root`; `opts` are merged into its execution options."
+  [root opts]
+  (-> (context/create-context {:workflow/id :checkpoint-test
+                               :workflow/version "1.0.0"
+                               :workflow/pipeline [{:phase :plan}]}
+                              {:task "Test"}
+                              (assoc opts :checkpoint/root root))
+      (assoc :execution/current-phase :plan
+             :execution/phase-results {:plan {:status :completed}})))
 
 ;------------------------------------------------------------------------------ Layer 1
 

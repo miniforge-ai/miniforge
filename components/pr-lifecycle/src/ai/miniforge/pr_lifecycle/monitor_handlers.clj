@@ -24,7 +24,8 @@
    [ai.miniforge.pr-lifecycle.monitor-budget :as budget]
    [ai.miniforge.pr-lifecycle.monitor-events :as mevents]
    [ai.miniforge.pr-lifecycle.monitor-state :as state]
-   [ai.miniforge.pr-lifecycle.pr-poller :as poller]))
+   [ai.miniforge.pr-lifecycle.pr-poller :as poller]
+   [ai.miniforge.redaction.interface :as redaction]))
 
 ;------------------------------------------------------------------------------ Layer 0
 
@@ -40,6 +41,7 @@
    :question       :answer
    :approval       :approve
    :bot-comment    :skip
+   :untrusted      :skip
    :noise          :skip})
 
 (defn ^{:stratum 0} handle-question
@@ -71,7 +73,9 @@
                                      :data {:error (.getMessage e)}}))
                        nil))]
         (if answer
-          (let [reply-body (str answer
+          ;; The answer becomes a public PR comment, and an LLM that saw a
+          ;; token in its context can repeat it verbatim.
+          (let [reply-body (str (redaction/redact answer)
                                 "\n\n---\n*Answered by miniforge's autonomous PR monitor.*")
                 post-result (poller/post-comment worktree-path pr-number reply-body)]
             (if (dag/ok? post-result)
