@@ -29,6 +29,7 @@
   (:require
    [ai.miniforge.agent.file-artifacts :as file-artifacts]
    [ai.miniforge.anomaly.interface :as anomaly]
+   [babashka.fs :as fs]
    [cheshire.core :as json]
    [clojure.edn :as edn]
    [clojure.java.io :as io]
@@ -76,12 +77,10 @@
    "INFO: MCP artifact not submitted — worktree-promotion succeeded (workdir: %s)"})
 
 (defn ^{:stratum 0} command-on-path?
-  "Check if a command exists on PATH."
+  "Check if a command exists on PATH. `fs/which` resolves it on every OS
+   (with PATHEXT on Windows, which has no `which` binary)."
   [cmd]
-  (try
-    (let [proc (.exec (Runtime/getRuntime) (into-array String ["which" cmd]))]
-      (zero? (.waitFor proc)))
-    (catch Exception _ false)))
+  (boolean (some-> cmd fs/which)))
 
 (defn- ^{:stratum 0} find-bb-root
   "Find the nearest ancestor directory whose bb.edn is miniforge's own: its
