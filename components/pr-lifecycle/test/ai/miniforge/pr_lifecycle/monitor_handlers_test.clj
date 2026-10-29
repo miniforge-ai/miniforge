@@ -29,6 +29,7 @@
     (is (= :answer  (#'handlers/decision-action :question)))
     (is (= :approve (#'handlers/decision-action :approval)))
     (is (= :skip    (#'handlers/decision-action :bot-comment)))
+    (is (= :skip    (#'handlers/decision-action :untrusted)))
     (is (= :skip    (#'handlers/decision-action :noise)))
     (is (= :skip    (#'handlers/decision-action :anything-unrecognised)))))
 

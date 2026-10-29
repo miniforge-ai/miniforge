@@ -736,19 +736,23 @@
 ;; Comment classification (category-based, complements triage)
 (def ^{:stratum 0} categorize-comment
   "Classify a comment into a category: :change-request :question :approval
-   :bot-comment :noise.
+   :bot-comment :untrusted :noise. Humans without an OWNER, MEMBER or
+   COLLABORATOR author association (and not in :trusted-authors) are
+   :untrusted and never acted on.
 
    Arguments:
-   - comment: Map with :body, :author, :id, :path, :line keys
+   - comment: Map with :body, :author, :author-association, :id, :path, :line keys
 
    Options:
    - :generate-fn — LLM generation function for ambiguous comments
    - :self-author — Author login to filter self-comments (loop prevention)
+   - :trusted-authors — Logins acted on regardless of author association
 
    Returns {:category keyword :confidence keyword :method keyword :comment map}
 
    Example:
-     (categorize-comment {:body \"Please fix the null pointer\" :author \"alice\"})
+     (categorize-comment {:body \"Please fix the null pointer\" :author \"alice\"
+                          :author-association \"MEMBER\"})
      ; => {:category :change-request :confidence :medium :method :heuristic ...}"
   classifier/classify-comment)
 
@@ -756,11 +760,14 @@
   "Classify a batch of comments into categories.
 
    Returns {:change-requests [...] :questions [...] :approvals [...]
-            :bot-comments [...] :noise [...] :all [...] :stats {...}}
+            :bot-comments [...] :untrusted [...] :noise [...] :all [...]
+            :stats {...}}
 
    Example:
-     (categorize-comments [{:body \"Add tests\" :author \"alice\"}
-                           {:body \"LGTM!\" :author \"bob\"}]
+     (categorize-comments [{:body \"Add tests\" :author \"alice\"
+                            :author-association \"MEMBER\"}
+                           {:body \"LGTM!\" :author \"bob\"
+                            :author-association \"OWNER\"}]
                           :self-author \"miniforge[bot]\")"
   classifier/classify-comments)
 
@@ -1004,12 +1011,14 @@
   ; => {:status :failure :passed [...] :failed [...] ...}
 
   ;; Comment classification example
-  (categorize-comment {:body "Please fix the null pointer" :author "alice"})
+  (categorize-comment {:body "Please fix the null pointer" :author "alice"
+                       :author-association "MEMBER"})
   ; => {:category :change-request :confidence :medium :method :heuristic ...}
 
-  (categorize-comments [{:body "Add tests" :author "alice"}
-                        {:body "LGTM!" :author "bob"}
-                        {:body "Why this approach?" :author "charlie"}
+  (categorize-comments [{:body "Add tests" :author "alice" :author-association "MEMBER"}
+                        {:body "LGTM!" :author "bob" :author-association "OWNER"}
+                        {:body "Why this approach?" :author "charlie"
+                         :author-association "COLLABORATOR"}
                         {:body "Security scan ok" :author "codeql[bot]"}])
   ; => {:change-requests [...] :questions [...] :approvals [...] ...}
 

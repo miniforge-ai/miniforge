@@ -40,6 +40,7 @@
    :question       :answer
    :approval       :approve
    :bot-comment    :skip
+   :untrusted      :skip
    :noise          :skip})
 
 (defn ^{:stratum 0} handle-question
