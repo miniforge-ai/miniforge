@@ -57,6 +57,14 @@
     (throw (ex-info "executor lost the capsule" {:command command}))
     (result/ok {:stdout "" :stderr "" :exit-code 0})))
 
+(defn- ^{:stratum 0} fatal-cleanup-execute!
+  "Fake executor whose session-directory removal throws a JVM Error;
+   every other command succeeds."
+  [_executor _env-id command & [_opts]]
+  (if (.startsWith ^String command "rm -rf ")
+    (throw (LinkageError. "fixture: class failed to link during cleanup"))
+    (result/ok {:stdout "" :stderr "" :exit-code 0})))
+
 (defn- ^{:stratum 0} capsule-context
   "Governed execution context for the fake capsule, using `execute-fn`."
   [execute-fn]
@@ -114,6 +122,12 @@
     (let [outcome (session/with-session (capsule-context throwing-cleanup-execute!)
                                         (constantly :agent-result))]
       (is (= :agent-result (:llm-result outcome))))))
+
+(deftest ^{:stratum 1} cleanup-error-stays-fatal-test
+  (testing "a JVM Error from the cleanup propagates instead of being swallowed"
+    (is (thrown? LinkageError
+                 (session/with-session (capsule-context fatal-cleanup-execute!)
+                                       (constantly :agent-result))))))
 
 ;------------------------------------------------------------------------------ Rich Comment
 (comment

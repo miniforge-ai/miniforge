@@ -360,6 +360,10 @@
     (try+
       ((:exec! session) (:executor session) (:environment-id session)
                         (str "rm -rf " (file-artifacts/shell-quote (:dir session))) {:workdir (:workdir session)})
+      ;; JVM Errors stay fatal. A new interrupt during the cleanup is
+      ;; kept visible as the flag, without replacing the session outcome.
+      (catch Error fatal (throw fatal))
+      (catch InterruptedException _ (.interrupt (Thread/currentThread)))
       ;; `Object`, not `Exception`: try+ matches an ex-info by its data
       ;; map, so a class selector would let it escape and replace the
       ;; outcome of the session being cleaned up.
