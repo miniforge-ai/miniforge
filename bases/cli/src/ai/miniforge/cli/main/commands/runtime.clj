@@ -141,18 +141,6 @@
 
 ;------------------------------------------------------------------------------ Layer 3
 
-(defn ^{:stratum 3} print-doctor-runtime-section
-  "Emit the runtime block of `mf doctor`. Picked up by main.clj's
-   doctor-cmd."
-  []
-  (let [{:keys [ok? summary details]} (doctor-runtime-report)
-        mark (if ok?
-               (display/style "✓" :foreground :green)
-               (display/style "✗" :foreground :red))]
-    (println mark summary)
-    (doseq [line details]
-      (println "  " line))))
-
 (defn ^{:stratum 3} runtime-info-cmd
   "Resolve the runtime per N11-delta §3 and print the result. Used both
    from `mf runtime info` and from the doctor."
