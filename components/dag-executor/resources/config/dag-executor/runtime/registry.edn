@@ -22,13 +22,6 @@
 ;;                   :tmpfs-size   Tmpfs size for `--tmpfs <path>:size=`
 ;;   :flags        CLI flag dialect map keyed by capability:
 ;;                   :info-format-template  Go template for `<exe> info --format`
-;;   :cli-env-names Env var names the CLI reads from its own process
-;;                 environment (daemon address, config and storage paths).
-;;                 Container env is passed as `-e NAME` with the value set
-;;                 on the CLI process, so values stay off argv; an entry
-;;                 named here goes inline as `-e NAME=value` instead, so a
-;;                 container's HOME cannot redirect the CLI to another
-;;                 config or storage root.
 {:docker  {:executable   "docker"
            :supported?   true
            :capabilities #{:oci-images
@@ -46,11 +39,7 @@
                           :memory     "512m"
                           :cpu        0.5
                           :tmpfs-size "512m"}
-           :flags        {:info-format-template "{{.ServerVersion}}"}
-           :cli-env-names #{"HOME" "PATH"
-                            "DOCKER_HOST" "DOCKER_CONTEXT" "DOCKER_CONFIG"
-                            "DOCKER_CERT_PATH" "DOCKER_TLS_VERIFY"
-                            "DOCKER_API_VERSION"}}
+           :flags        {:info-format-template "{{.ServerVersion}}"}}
 
  :podman  {:executable   "podman"
            :supported?   true
@@ -80,16 +69,7 @@
            ;; Podman's `info` structure differs from Docker's: server
            ;; version lives under .Version.Version rather than top-level
            ;; .ServerVersion.
-           :flags        {:info-format-template "{{.Version.Version}}"}
-           ;; Rootless Podman locates its storage under HOME / XDG_* and
-           ;; its socket under XDG_RUNTIME_DIR; remote mode reads
-           ;; CONTAINER_HOST / CONTAINER_CONNECTION.
-           :cli-env-names #{"HOME" "PATH" "TMPDIR"
-                            "XDG_RUNTIME_DIR" "XDG_CONFIG_HOME" "XDG_DATA_HOME"
-                            "CONTAINER_HOST" "CONTAINER_CONNECTION"
-                            "CONTAINER_SSHKEY" "CONTAINERS_CONF"
-                            "CONTAINERS_STORAGE_CONF"
-                            "CONTAINERS_REGISTRIES_CONF"}}
+           :flags        {:info-format-template "{{.Version.Version}}"}}
 
  :nerdctl {:executable   "nerdctl"
            :supported?   false
