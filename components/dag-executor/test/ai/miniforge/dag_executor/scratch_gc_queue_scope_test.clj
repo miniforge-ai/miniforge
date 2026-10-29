@@ -18,8 +18,9 @@
 (ns ai.miniforge.dag-executor.scratch-gc-queue-scope-test
   "The scratch-ref GC queue keeps each repository's entries to itself,
    lives under MINIFORGE_HOME, and reports an unreadable queue instead of
-   reading it as empty. Uses throwaway git repositories (init, rev-parse,
-   one empty commit for a worktree); `gc-scratch-refs!` is stubbed."
+   reading it as empty. Uses throwaway git repositories, including bare and
+   --separate-git-dir ones; `gc-scratch-refs!` is stubbed except where a
+   test checks that real scratch refs are deleted."
   (:require
    [ai.miniforge.config.interface :as mf-config]
    [ai.miniforge.dag-executor.result :as result]
@@ -28,6 +29,7 @@
    [babashka.fs :as fs]
    [clojure.edn :as edn]
    [clojure.java.shell :as shell]
+   [clojure.string :as str]
    [clojure.test :refer [deftest is testing]]))
 
 ;------------------------------------------------------------------------------ Layer 0
@@ -36,12 +38,31 @@
   (java.util.Date. (- (System/currentTimeMillis) (* 8 24 60 60 1000))))
 
 (defn- ^{:stratum 0} git-repo!
-  "A new git repository `dir`/`repo-name`; returns its canonical path."
-  [dir repo-name]
+  "A new git repository `dir`/`repo-name` (`git init` plus `init-args`);
+   returns its canonical path."
+  [dir repo-name & init-args]
   (let [repo (fs/file dir repo-name)]
     (fs/create-dirs repo)
-    (shell/sh "git" "init" "-q" (str repo))
+    (apply shell/sh "git" "init" "-q" (concat init-args [(str repo)]))
     (.getCanonicalPath repo)))
+
+(defn- ^{:stratum 0} git-dir
+  "Canonical path of `path`/.git, the GC queue's key for a plain checkout."
+  [path]
+  (.getCanonicalPath (fs/file path ".git")))
+
+(defn- ^{:stratum 0} scratch-ref!
+  "Point refs/miniforge/scratch/`workflow-id` in git dir `repo` at a new
+   commit of the empty tree."
+  [repo workflow-id]
+  (let [commit (:out (shell/sh "git" "-C" repo "-c" "user.name=t" "-c" "user.email=t@example.com"
+                               "commit-tree" "4b825dc642cb6eb9a060e54bf8d69288fbee4904" "-m" "scratch"))]
+    (shell/sh "git" "-C" repo "update-ref" (str "refs/miniforge/scratch/" workflow-id) (str/trim commit))))
+
+(defn- ^{:stratum 0} scratch-refs
+  [repo]
+  (str/split-lines (str/trim (:out (shell/sh "git" "-C" repo "for-each-ref" "--format=%(refname)"
+                                             "refs/miniforge/scratch/")))))
 
 (defn- ^{:stratum 0} queued-ids
   [queue]
@@ -61,8 +82,8 @@
         repo-a   (git-repo! dir "a")
         repo-b   (git-repo! dir "b")
         gc-calls (atom [])]
-    (spit queue (pr-str [{:workflow-id "wf-a" :finished-at eight-days-ago :repo-path repo-a}
-                         {:workflow-id "wf-b" :finished-at eight-days-ago :repo-path repo-b}]))
+    (spit queue (pr-str [{:workflow-id "wf-a" :finished-at eight-days-ago :git-dir (git-dir repo-a)}
+                         {:workflow-id "wf-b" :finished-at eight-days-ago :git-dir (git-dir repo-b)}]))
     (with-redefs [sut/gc-queue-path               (constantly queue)
                   scratch-commit/gc-scratch-refs! (fn [repo _]
                                                     (swap! gc-calls conj repo)
@@ -70,7 +91,7 @@
       (let [r (sut/run-deferred-gc! repo-b 7)]
         (testing "a pass in repository B prunes only B's stale entry and GCs only B"
           (is (= ["wf-b"] (:pruned-ids (result/unwrap r))))
-          (is (= [repo-b] @gc-calls)))
+          (is (= [(git-dir repo-b)] @gc-calls)))
         (testing "A's entry stays queued for A's own pass"
           (is (= ["wf-a"] (queued-ids queue))))))
     (fs/delete-tree dir)))
@@ -88,7 +109,7 @@
                   scratch-commit/gc-scratch-refs! (fn [_ _] (result/ok {:deleted [] :retained 0}))]
       (testing "an entry enqueued from a worktree names the repository"
         (sut/enqueue-workflow-gc! "wf-wt" worktree)
-        (is (= repo (:repo-path (first (edn/read-string (slurp queue)))))))
+        (is (= (git-dir repo) (:git-dir (first (edn/read-string (slurp queue)))))))
       (testing "and a pass from the main checkout prunes it"
         (is (= ["wf-wt"] (:pruned-ids (result/unwrap (sut/run-deferred-gc! repo 0)))))))
     (testing "outside any git repository nothing is enqueued"
@@ -114,4 +135,55 @@
           (run! fs/delete copies)))
       (testing "the queue is usable again afterwards"
         (is (result/ok? (sut/enqueue-workflow-gc! "wf-next")))))
+    (fs/delete-tree dir)))
+
+(deftest ^{:stratum 1} bare-repositories-in-one-directory-are-kept-apart-test
+  (let [dir   (str (fs/create-temp-dir))
+        queue (str dir "/queue.edn")
+        bare-a (git-repo! dir "a.git" "--bare")
+        bare-b (git-repo! dir "b.git" "--bare")]
+    (scratch-ref! bare-a "wf-a")
+    (scratch-ref! bare-b "wf-b")
+    (spit queue (pr-str [{:workflow-id "wf-a" :finished-at eight-days-ago :git-dir bare-a}
+                         {:workflow-id "wf-b" :finished-at eight-days-ago :git-dir bare-b}]))
+    (with-redefs [sut/gc-queue-path (constantly queue)]
+      (testing "a pass on a.git prunes its entry and deletes its scratch ref"
+        (is (= ["wf-a"] (:pruned-ids (result/unwrap (sut/run-deferred-gc! bare-a 0)))))
+        (is (= [""] (scratch-refs bare-a))))
+      (testing "b.git, in the same directory, keeps its entry and its ref"
+        (is (= ["wf-b"] (queued-ids queue)))
+        (is (= ["refs/miniforge/scratch/wf-b"] (scratch-refs bare-b)))))
+    (fs/delete-tree dir)))
+
+(deftest ^{:stratum 1} separate-git-dir-repository-is-collected-in-its-git-dir-test
+  (let [dir     (str (fs/create-temp-dir))
+        queue   (str dir "/queue.edn")
+        sep-dir (str dir "/sep.git")
+        work    (git-repo! dir "work" "--separate-git-dir" sep-dir)
+        sep-dir (.getCanonicalPath (fs/file sep-dir))]
+    (scratch-ref! sep-dir "wf-sep")
+    (with-redefs [sut/gc-queue-path (constantly queue)]
+      (testing "an entry enqueued from the checkout names the separate git dir"
+        (sut/enqueue-workflow-gc! "wf-sep" work)
+        (is (= sep-dir (:git-dir (first (edn/read-string (slurp queue)))))))
+      (testing "and a pass from the checkout deletes the ref there"
+        (is (= ["wf-sep"] (:pruned-ids (result/unwrap (sut/run-deferred-gc! work 0)))))
+        (is (= [""] (scratch-refs sep-dir)))))
+    (fs/delete-tree dir)))
+
+(deftest ^{:stratum 1} stale-entry-without-git-dir-triggers-a-sweep-test
+  (let [dir      (str (fs/create-temp-dir))
+        queue    (str dir "/queue.edn")
+        repo     (git-repo! dir "a")
+        gc-calls (atom [])]
+    (spit queue (pr-str [{:workflow-id "wf-old" :finished-at eight-days-ago}]))
+    (with-redefs [sut/gc-queue-path               (constantly queue)
+                  scratch-commit/gc-scratch-refs! (fn [target _]
+                                                    (swap! gc-calls conj target)
+                                                    (result/ok {:deleted [] :retained 0}))]
+      (sut/run-deferred-gc! repo 0)
+      (testing "a queue holding only pre-upgrade entries still sweeps the repository by age"
+        (is (= [(git-dir repo)] @gc-calls)))
+      (testing "and keeps the entry, whose repository is unknown"
+        (is (= ["wf-old"] (queued-ids queue)))))
     (fs/delete-tree dir)))

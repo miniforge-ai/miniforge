@@ -29,20 +29,22 @@
 
    **Phase 1 — enqueue on finish**
    `enqueue-workflow-gc!` appends
-   `{:workflow-id wid :finished-at #inst <now> :repo-path <repo>}` to
+   `{:workflow-id wid :finished-at #inst <now> :git-dir <dir>}` to
    `<miniforge-home>/scratch-gc-queue.edn` (MINIFORGE_HOME, else ~/.miniforge).
-   The file is an EDN vector that survives process restarts. `:repo-path` is
-   the canonical path of the repository that holds the ref (see `repo-key`),
-   the same for every worktree of that repository.
+   The file is an EDN vector that survives process restarts. `:git-dir` is
+   the canonical git common dir of the repository that holds the ref (see
+   `repo-key`), the same for every worktree of that repository.
 
    **Phase 2 — GC pass on next start (or explicit subcommand)**
    `run-deferred-gc!` reads the queue and looks only at entries whose
-   `:repo-path` is the repository it was given, partitioning them into stale
+   `:git-dir` is the repository it was given, partitioning them into stale
    (≥ max-age-days old) and fresh.  If any are stale it calls
    `gc-scratch-refs!` once on that repository with `max-age-days`, then removes
-   only those stale entries.  Entries of other repositories, and entries
-   without `:repo-path` (written before it existed), are kept as they are:
-   removing them here would drop them without deleting their refs.
+   only those stale entries.  Entries of other repositories are kept as they
+   are: removing them here would drop them without deleting their refs.
+   Entries without `:git-dir` (written before it existed) name no repository.
+   They stay queued, and a stale one also triggers the age-based sweep of
+   the repository being collected, so an upgraded queue still gets GC.
 
    **Unreadable queue**
    A queue file that is not an EDN vector is never silently read as empty.
@@ -99,13 +101,18 @@
   25)
 
 (defn ^{:stratum 0} repo-key
-  "Canonical path of the repository that owns `path`: the parent of its git
-   common dir, so every worktree of one repository gets the same key.
-   result/ok string, or result/err `:scratch-gc-queue/no-repo`."
+  "Identity of the repository that owns `path`: the canonical path of its
+   git common dir. A main checkout, its linked worktrees and its .git dir
+   share it; bare repositories, submodules and --separate-git-dir layouts
+   each get their own git dir. Git commands run with it as their working
+   directory, so it is also the GC target. result/ok string, or result/err
+   `:scratch-gc-queue/no-repo`."
   [path]
-  (let [derived (worktree-impl/derive-parent-repo-path (str path))]
-    (if (result/ok? derived)
-      (result/ok (.getCanonicalPath (io/file (:parent-repo-path (result/unwrap derived)))))
+  (let [r   (worktree-impl/run-git "-C" (str path) "rev-parse" "--git-common-dir")
+        out (str/trim (str (:out r)))]
+    (if (and (zero? (:exit r)) (seq out))
+      ;; A relative answer is relative to `path`.
+      (result/ok (.getCanonicalPath (let [f (io/file out)] (if (.isAbsolute f) f (io/file (str path) out)))))
       (result/err :scratch-gc-queue/no-repo
                   (str "not inside a git repository: " path)
                   {:path (str path)}))))
@@ -258,8 +265,8 @@
 (defn ^{:stratum 2} enqueue-workflow-gc!
   "Append a GC entry for `workflow-id` to the queue at `gc-queue-path`.
 
-   Writes `{:workflow-id <str> :finished-at #inst <now> :repo-path <repo>}`
-   at the end of the queue vector, `<repo>` being the `repo-key` of
+   Writes `{:workflow-id <str> :finished-at #inst <now> :git-dir <dir>}`
+   at the end of the queue vector, `<dir>` being the `repo-key` of
    `repo-path` (default: the current directory).  The file is created when
    absent.
 
@@ -293,7 +300,7 @@
                   ;; through edn/read-string — do not substitute Instant here.
                   (let [entry   {:workflow-id (str workflow-id)
                                  :finished-at (java.util.Date/from (Instant/now))
-                                 :repo-path   repo}
+                                 :git-dir     repo}
                         updated (conj (result/unwrap queue) entry)]
                     ;; Nested try so that spit failures surface as :enqueue-failed
                     ;; rather than being re-caught by with-queue-lock!'s outer handler
@@ -314,11 +321,10 @@
 (defn ^{:stratum 2} prune-stale-queue-entries!
   "Core of a deferred-GC pass, run while holding the queue lock.
 
-   Reads the queue at `path` and takes the entries whose `:repo-path` is
-   `repo` (a `repo-key`).  When any of them is stale (age ≥ `max-age-days`)
-   it runs `gc-scratch-refs!` once on `repo`, then writes back every other
-   entry: this repository's fresh ones and all entries of other
-   repositories or without `:repo-path`.  On git-level GC failure the queue
+   Reads the queue at `path` and takes the entries whose `:git-dir` is
+   `repo` (a `repo-key`).  When any of them is stale (age ≥ `max-age-days`),
+   or an entry without `:git-dir` is, it runs `gc-scratch-refs!` once on
+   `repo`, then writes back every entry but this repository's stale ones.  On git-level GC failure the queue
    is left untouched (the error propagates) so stale entries are retried
    next pass.  An unreadable queue is quarantined and reported.
 
@@ -336,10 +342,9 @@
       (let [entries   (result/unwrap queue)
             max-age-s (* (long max-age-days) seconds-per-day)
             now-s     (epoch-seconds)
-            stale?    (fn [e] (and (= repo (:repo-path e))
-                                   (>= (- now-s (finished-at-epoch-seconds e)) max-age-s)))
-            {stale true kept false} (group-by (comp boolean stale?) entries)]
-        (if (seq stale)
+            old?      (fn [e] (>= (- now-s (finished-at-epoch-seconds e)) max-age-s))
+            {stale true kept false} (group-by #(boolean (and (= repo (:git-dir %)) (old? %))) entries)]
+        (if (or (seq stale) (some #(and (nil? (:git-dir %)) (old? %)) entries))
           (let [gc-result (scratch-commit/gc-scratch-refs! repo max-age-days)]
             (if (result/ok? gc-result)
               (do
@@ -365,7 +370,8 @@
    2. Acquire an exclusive file lock on the queue file.
    3. Take the entries of that repository and find the stale ones
       (age ≥ max-age-days).
-   4. If any are stale, call `gc-scratch-refs!` once on the repository with
+   4. If any are stale, or an entry without `:git-dir` is, call
+      `gc-scratch-refs!` once on the repository with
       `max-age-days` — this deletes *all* scratch refs in it older than the
       threshold, not just the stale queue entries.
    5. **Only on success** remove those stale entries; on git-level failure the

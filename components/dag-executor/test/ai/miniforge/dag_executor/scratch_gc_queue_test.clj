@@ -25,7 +25,7 @@
 
    `repo-key` is stubbed with `one-repo`, which puts every path in the
    repository \"/unused\", so neither enqueue nor a GC pass runs git, and
-   hand-written entries carry `:repo-path \"/unused\"` to belong to it.
+   hand-written entries carry `:git-dir \"/unused\"` to belong to it.
 
    Tests that DO trigger GC use `with-redefs` to mock
    `scratch-commit/gc-scratch-refs!` so no git subprocess is ever spawned.
@@ -219,7 +219,7 @@
                                                           :retained 0}))]
           ;; Write a stale entry directly to the queue file, bypassing
           ;; enqueue! so we can control the :finished-at timestamp.
-          (spit tmp-path (pr-str [{:repo-path "/unused" :workflow-id "wf-old"
+          (spit tmp-path (pr-str [{:git-dir "/unused" :workflow-id "wf-old"
                                    :finished-at eight-days-ago}]))
           ;; Enqueue a fresh entry via the normal API.
           (sut/enqueue-workflow-gc! "wf-fresh-2")
@@ -247,8 +247,8 @@
         (with-redefs [scratch-commit/gc-scratch-refs! (fn [_ _]
                                                          (result/ok {:deleted ["refs/miniforge/scratch/wf-old"]
                                                                      :retained 0}))]
-          (spit tmp-path (pr-str [{:repo-path "/unused" :workflow-id "wf-old"   :finished-at eight-days-ago}
-                                  {:repo-path "/unused" :workflow-id "wf-fresh" :finished-at now}]))
+          (spit tmp-path (pr-str [{:git-dir "/unused" :workflow-id "wf-old"   :finished-at eight-days-ago}
+                                  {:git-dir "/unused" :workflow-id "wf-fresh" :finished-at now}]))
           ;; Call the extracted fn directly (no lock thunk) with a 7-day window.
           (let [r    (sut/prune-stale-queue-entries! tmp-path "/unused" 7)
                 data (result/unwrap r)]
@@ -268,7 +268,7 @@
           gc-calls (atom 0)]
       (try
         (with-redefs [scratch-commit/gc-scratch-refs! (fn [_ _] (swap! gc-calls inc) (result/ok {}))]
-          (spit tmp-path (pr-str [{:repo-path "/unused" :workflow-id "wf-fresh" :finished-at (java.util.Date.)}]))
+          (spit tmp-path (pr-str [{:git-dir "/unused" :workflow-id "wf-fresh" :finished-at (java.util.Date.)}]))
           (let [r    (sut/prune-stale-queue-entries! tmp-path "/unused" 7)
                 data (result/unwrap r)]
             (is (result/ok? r))
@@ -286,7 +286,7 @@
       (try
         (with-redefs [scratch-commit/gc-scratch-refs! (fn [_ _]
                                                          (result/err :scratch-commit/gc-list-failed "boom" {}))]
-          (spit tmp-path (pr-str [{:repo-path "/unused" :workflow-id "wf-old" :finished-at stale}]))
+          (spit tmp-path (pr-str [{:git-dir "/unused" :workflow-id "wf-old" :finished-at stale}]))
           (let [r (sut/prune-stale-queue-entries! tmp-path "/unused" 7)]
             (is (result/err? r) "the GC error must propagate"))
           ;; Queue is untouched so the stale entry is retried next pass.
@@ -315,7 +315,7 @@
       (try
         (with-redefs [sut/gc-queue-path (constantly tmp-path) sut/repo-key one-repo]
           ;; Write an entry with no :finished-at (manually crafted or migrated).
-          (spit tmp-path (pr-str [{:repo-path "/unused" :workflow-id "wf-no-timestamp"}]))
+          (spit tmp-path (pr-str [{:git-dir "/unused" :workflow-id "wf-no-timestamp"}]))
           ;; Even with max-age-days=0 the entry must NOT be pruned.
           ;; finished-at-epoch-seconds returns Long/MAX_VALUE for absent values,
           ;; so the age check never qualifies → gc-scratch-refs! is never called
@@ -350,7 +350,7 @@
                                                          :scratch-commit/gc-list-failed
                                                          "simulated git failure"
                                                          {}))]
-          (spit tmp-path (pr-str [{:repo-path "/unused" :workflow-id "wf-stale-err"
+          (spit tmp-path (pr-str [{:git-dir "/unused" :workflow-id "wf-stale-err"
                                    :finished-at eight-days-ago}]))
           ;; age=0 → entry is stale immediately; gc-scratch-refs! is mocked to fail.
           (let [r (sut/run-deferred-gc! "/any-path" 0)]
