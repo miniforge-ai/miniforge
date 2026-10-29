@@ -43,6 +43,7 @@ The integration runner discovers that project test automatically.
 
 The adversarial pass traces first creation, replacement, aliases, unsafe ancestry, and cleanup.
 The shared cleanup boundary preserves original failures.
+The standards scan against the merged prose prerequisite reports zero violations.
 Normal hooks, signing, standards, review, and CI remain required.
 
 ## Limits

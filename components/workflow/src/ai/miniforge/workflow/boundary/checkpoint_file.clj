@@ -27,7 +27,9 @@
 (defn- ^{:stratum 1} create-temporary! [target prepare-directory! prefix]
   (let [directory (prepare-directory! (fs/parent (fs/absolutize target)))]
     (fs/create-temp-file
-     (cond-> {:dir directory :prefix prefix :suffix temporary-suffix}
+     (cond-> {:dir directory
+              :prefix prefix
+              :suffix temporary-suffix}
        (permissions/posix? directory)
        (assoc :posix-file-permissions permissions/private-permissions)))))
 
@@ -41,11 +43,12 @@
 (defn ^{:stratum 2} write!
   ([target data] (write! target data {}))
   ([target data {:keys [prepare-directory! prefix]
-                 :or {prepare-directory! directory/prepare! prefix temporary-prefix}}]
-  (let [temporary (create-temporary! target prepare-directory! prefix)
-        published (fs/path (fs/parent temporary) (fs/file-name target))]
-    (cleanup/finish! (partial publish! temporary published data)
-                     (partial remove-temporary! temporary))
-    target)))
+                :or {prepare-directory! directory/prepare!
+                     prefix temporary-prefix}}]
+   (let [temporary (create-temporary! target prepare-directory! prefix)
+         published (fs/path (fs/parent temporary) (fs/file-name target))]
+     (cleanup/finish! (partial publish! temporary published data)
+                      (partial remove-temporary! temporary))
+     target)))
 
 (comment ::temporary-file-ownership)
