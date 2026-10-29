@@ -482,6 +482,18 @@
   (for [i (range (or (parse-long (get env "GIT_CONFIG_COUNT" "")) 0))]
     [(get env (str "GIT_CONFIG_KEY_" i)) (get env (str "GIT_CONFIG_VALUE_" i))]))
 
+(def ^{:stratum 0} git-trace-off-env
+  "Env that keeps git's tracing from recording the Authorization header:
+   header redaction forced on, over an inherited GIT_TRACE_REDACT=0, and
+   each trace target empty, which git reads as off. GIT_CURL_VERBOSE stays
+   as inherited: git only checks that it is set, so an empty value would
+   turn it on; its stderr output goes through the same redaction."
+  (into {"GIT_TRACE_REDACT" "1"}
+        (map vector ["GIT_TRACE" "GIT_TRACE_CURL" "GIT_TRACE_PACKET" "GIT_TRACE_PACK_ACCESS"
+                     "GIT_TRACE_PERFORMANCE" "GIT_TRACE_SETUP" "GIT_TRACE_SHALLOW"
+                     "GIT_TRACE2" "GIT_TRACE2_EVENT" "GIT_TRACE2_PERF"]
+             (repeat ""))))
+
 ;------------------------------------------------------------------------------ Layer 1
 
 (defn- ^{:stratum 1} untrusted-env-allowed?
@@ -961,11 +973,14 @@
    GIT_CONFIG_* entries the container's own environment sets
    (`container-git-config`). An exec's GIT_CONFIG_COUNT replaces the
    container's, so without them a trusted launch's or image's tuple, such
-   as an http.proxy, would be lost; the credential's come last and win."
+   as an http.proxy, would be lost; the credential's come last and win.
+   `git-trace-off-env` keeps a trace setting the container inherits from
+   writing the header to a file the capsule can read."
   [descriptor container-id https-url auth]
   (let [cred (git-credential-env https-url auth)]
     (if (seq cred)
-      (combine-git-env (container-git-config descriptor container-id) cred)
+      (merge (combine-git-env (container-git-config descriptor container-id) cred)
+             git-trace-off-env)
       cred)))
 
 ;; ============================================================================

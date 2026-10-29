@@ -816,6 +816,21 @@
           (is (some #{["core.hooksPath" "/dev/null"]} entries))
           (is (= "t" (get-in @seen [:env "GH_TOKEN"]))))))))
 
+(deftest ^{:stratum 1} credential-env-forces-git-trace-redaction-test
+  (testing "a credentialed git command runs with header redaction forced on
+            and git's trace targets off, so a GIT_TRACE_CURL file and
+            GIT_TRACE_REDACT=0 inherited from the container cannot record
+            the Authorization header"
+    (let [seen (atom nil)]
+      (with-redefs [oci-cli/resolve-git-token    (fn [_url _opts] fake-token)
+                    oci-cli/container-git-config (fn [_ _] {})
+                    oci-cli/exec-in-container    (fn [_d _id _cmd opts] (reset! seen opts)
+                                                   (result/ok {:exit-code 0}))]
+        (proto/execute! (recorded-remote-executor) "c1" ["git" "push"] {:git-credentials? true})
+        (is (= "1" (get-in @seen [:env "GIT_TRACE_REDACT"])))
+        (is (= ["" "" ""] (map #(get-in @seen [:env %]) ["GIT_TRACE" "GIT_TRACE_CURL" "GIT_TRACE2_EVENT"])))
+        (is (not (contains? (:env @seen) "GIT_CURL_VERBOSE")))))))
+
 (deftest ^{:stratum 1} credential-env-follows-the-containers-git-config-test
   (testing "the credential's GIT_CONFIG_* entries are numbered after the
             tuple the container's own env sets (an image's http.proxy), so
