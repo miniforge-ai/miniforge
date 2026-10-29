@@ -283,3 +283,15 @@
       (is (= valid-digest (:image-digest plan)))
       (is (= :untrusted (:trust-level plan)))
       (is (= ["sleep" "infinity"] (:command plan))))))
+
+(deftest ^{:stratum 2} non-identifier-env-name-hard-stops-test
+  (testing "an env name such as * or GH_*, which Podman's `-e NAME` reads as
+            a pattern over its own environment, stops the launch"
+    (doseq [n ["*" "GH_*" "A B"]]
+      (let [env (assoc base-env :env {n "x"} :trust-level :trusted)
+            r   (oci-cli/security-gate-check rootless-descriptor "img" env good-digest-fn)]
+        (is (= :security-policy-violation (get-in r [:error :code])) (pr-str n))
+        (is (str/includes? (get-in r [:error :message]) (pr-str n)))))
+    (is (result/ok? (oci-cli/security-gate-check
+                     rootless-descriptor "img"
+                     (assoc base-env :env {"_A1" "x"} :trust-level :trusted) good-digest-fn)))))
