@@ -76,6 +76,24 @@
       (is (not (contains? (sut/finish-check spec {:ok? true :detail "a@b.c"})
                           :check/require-output?))))))
 
+(deftest ^{:stratum 0} config-check-test
+  (let [dir (fs/create-temp-dir {:prefix "doctor-config-"})
+        path (fn [n] (str (fs/path dir n)))]
+    (try
+      (spit (path "bad.edn") "{:llm {:backend :claude}")
+      (spit (path "good.edn") "{:llm {:backend :claude}}")
+      (testing "a config.edn that does not parse fails, naming the error, with a hint"
+        (let [result (sut/config-check (path "bad.edn"))]
+          (is (false? (:check/ok? result)))
+          (is (false? (:check/required? result)) "runs still work, on defaults")
+          (is (str/includes? (:check/detail result) "does not parse"))
+          (is (seq (:check/details result)))))
+      (testing "a config.edn that parses passes"
+        (is (true? (:check/ok? (sut/config-check (path "good.edn"))))))
+      (testing "no config.edn: optional, defaults apply"
+        (is (false? (:check/ok? (sut/config-check (path "absent.edn"))))))
+      (finally (fs/delete-tree dir)))))
+
 (deftest ^{:stratum 0} unknown-backend-fails-without-running-anything-test
   (let [result (sut/command-check (sut/backend-spec :no-such-backend))]
     (is (true? (:check/required? result)))
