@@ -40,17 +40,33 @@
       (events/publish! event-bus event logger))))
 
 (defn ^{:stratum 0} load-budget-from-disk!
-  "Load a persisted budget into monitor state when it exists."
+  "Load a persisted budget into monitor state when it exists. While the
+   monitor has no usable state for its repo (`:state-error`: no owner/name
+   slug, or unreadable watermarks), every PR gets an exhausted budget
+   instead: it cannot tell which comments it already answered or fixed."
   [monitor pr-number]
-  (when-let [persisted (budget/load-budget pr-number)]
-    (swap! monitor assoc-in [:budgets pr-number] persisted)
-    persisted))
+  (let [{:keys [config state-error]} @monitor
+        persisted (if state-error
+                    (budget/exhausted-budget pr-number (:anomaly/message state-error))
+                    (budget/load-budget (:repo-slug config) pr-number))]
+    (when persisted
+      (swap! monitor assoc-in [:budgets pr-number] persisted)
+      persisted)))
 
 (defn ^{:stratum 0} update-budget!
-  "Persist the latest budget state for a PR."
+  "Persist the latest budget state for a PR. Keeps the merged copy that was
+   written, or `budget-state` when the save fails (logged). Returns the save
+   result."
   [monitor pr-number budget-state]
-  (swap! monitor assoc-in [:budgets pr-number] budget-state)
-  (budget/save-budget! budget-state))
+  (let [{:keys [repo-slug logger]} (:config @monitor)
+        saved   (budget/save-budget! repo-slug budget-state)
+        failed? (anomaly/anomaly? saved)]
+    (swap! monitor assoc-in [:budgets pr-number] (if failed? budget-state saved))
+    (when (and failed? logger)
+      (log/warn logger :pr-monitor :budget/save-failed
+                {:message (:anomaly/message saved)
+                 :data {:pr-number pr-number}}))
+    saved))
 
 (defn ^{:stratum 0} log-loop-start!
   "Log loop startup when a logger is present."
@@ -67,7 +83,7 @@
   "Create a PR monitor loop state atom from config. State on disk is kept
    per `:repo-slug` (owner/name), resolved from `:worktree-path` with gh when
    not given. `:state-error` holds the anomaly when it cannot be resolved or
-   its watermarks cannot be read."
+   its watermarks cannot be read; see `load-budget-from-disk!`."
   [config]
   (let [merged      (merge default-config config)
         repo-slug   (or (:repo-slug merged)

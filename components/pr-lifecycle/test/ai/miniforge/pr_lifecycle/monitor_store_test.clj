@@ -16,10 +16,11 @@
 ;; See the License for the specific language governing permissions and
 ;; limitations under the License.
 (ns ai.miniforge.pr-lifecycle.monitor-store-test
-  "Repo-slug paths, file reads and watermark saves for PR monitor state."
+  "Repo-slug paths, merge rules and write refusals for PR monitor state."
   (:require
    [ai.miniforge.anomaly.interface :as anomaly]
    [ai.miniforge.config.interface :as mf-config]
+   [ai.miniforge.pr-lifecycle.monitor-budget :as budget]
    [ai.miniforge.pr-lifecycle.monitor-store :as sut]
    [ai.miniforge.pr-lifecycle.pr-poller :as poller]
    [babashka.fs :as fs]
@@ -37,6 +38,33 @@
       (is (= {1 (wm "2026-10-03") 2 (wm "2026-10-02") 3 (wm "2026-10-01")}
              (poller/merge-watermarks {1 (wm "2026-10-03") 2 (wm "2026-10-01") 3 (wm "2026-10-01")}
                                       {1 (wm "2026-10-02") 2 (wm "2026-10-02")}))))))
+
+(deftest ^{:stratum 0} merge-budgets-test
+  (let [earlier (java.util.Date. 1000)
+        on-disk (assoc (budget/create-budget 42) :comment-attempts {1 2 2 1} :total-attempts 3
+                       :questions-answered 4 :fixes-pushed 1 :started-at earlier)
+        merged  (budget/merge-budgets on-disk (assoc (budget/create-budget 42)
+                                                     :comment-attempts {1 1 3 1} :total-attempts 2))]
+    (testing "no counter goes below what is already on disk"
+      (is (= [{1 2 2 1 3 1} 3 4 1]
+             ((juxt :comment-attempts :total-attempts :questions-answered :fixes-pushed) merged))))
+    (testing "the earlier start time is kept, so the time limit is not extended"
+      (is (= earlier (:started-at merged))))))
+
+(deftest ^{:stratum 0} save-budget-refusals-test
+  (testing "a stand-in for an unreadable budget is never written"
+    (let [held (budget/exhausted-budget 42 "unreadable")]
+      (is (anomaly/anomaly? (budget/save-budget! "acme/app" held)))
+      (is (not (fs/exists? (sut/repo-file "acme/app" "budget-42.edn"))))))
+  (testing "a file holding something else is not overwritten"
+    (let [file (sut/repo-file "acme/app" "budget-7.edn")]
+      (fs/create-dirs (fs/parent file))
+      (spit file "{:pr-number 99}")
+      (is (anomaly/anomaly? (budget/save-budget! "acme/app" (budget/create-budget 7))))
+      (is (= "{:pr-number 99}" (slurp file)))))
+  (testing "without an owner/name slug nothing is written and the load is exhausted"
+    (is (anomaly/anomaly? (budget/save-budget! nil (budget/create-budget 7))))
+    (is (some? (budget/any-budget-exhausted? (budget/load-budget nil 7) nil)))))
 
 (deftest ^{:stratum 0} save-watermarks-test
   (let [wm (fn [pr ts] {:repo-slug "acme/app" :prs {pr {:last-seen-at ts :advanced-at ts}}})]
