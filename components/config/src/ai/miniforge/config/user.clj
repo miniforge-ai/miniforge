@@ -130,15 +130,8 @@
    Supports these env vars:
    - MINIFORGE_LLM_BACKEND
    - MINIFORGE_LLM_MODEL
-   - MINIFORGE_LLM_TIMEOUT
-   - MINIFORGE_LLM_LINE_TIMEOUT
-   - MINIFORGE_LLM_MAX_TOKENS
    - MINIFORGE_AGENT_THINKING_MODEL
    - MINIFORGE_AGENT_EXECUTION_MODEL
-   - MINIFORGE_MAX_ITERATIONS
-   - MINIFORGE_MAX_TOKENS
-   - MINIFORGE_FAILURE_STRATEGY
-   - MINIFORGE_ARTIFACTS_DIR
    - MINIFORGE_MODEL_SELECTION_ENABLED
    - MINIFORGE_MODEL_SELECTION_STRATEGY
    - MINIFORGE_MODEL_SELECTION_COST_LIMIT
@@ -146,7 +139,12 @@
    - MINIFORGE_SELF_HEALING_ENABLED
    - MINIFORGE_SELF_HEALING_AUTO_APPLY
    - MINIFORGE_BACKEND_AUTO_SWITCH
-   - MINIFORGE_BACKEND_HEALTH_THRESHOLD"
+   - MINIFORGE_BACKEND_HEALTH_THRESHOLD
+
+   Map a variable only when code reads the key it sets: an operator who sets
+   a variable that nothing reads believes a setting is in force. The
+   MODEL_SELECTION_*, SELF_HEALING_* and BACKEND_* entries do not meet that
+   yet; no run reads :model-selection or :self-healing from this config."
   [config]
   (cond-> config
     ;; LLM settings
@@ -156,35 +154,12 @@
     (get-env-var "MINIFORGE_LLM_MODEL")
     (assoc-in [:llm :model] (get-env-var "MINIFORGE_LLM_MODEL"))
 
-    (get-env-var "MINIFORGE_LLM_TIMEOUT")
-    (assoc-in [:llm :timeout-ms] (parse-env-value (get-env-var "MINIFORGE_LLM_TIMEOUT")))
-
-    (get-env-var "MINIFORGE_LLM_LINE_TIMEOUT")
-    (assoc-in [:llm :line-timeout-ms] (parse-env-value (get-env-var "MINIFORGE_LLM_LINE_TIMEOUT")))
-
-    (get-env-var "MINIFORGE_LLM_MAX_TOKENS")
-    (assoc-in [:llm :max-tokens] (parse-env-value (get-env-var "MINIFORGE_LLM_MAX_TOKENS")))
-
     ;; Agent model defaults
     (get-env-var "MINIFORGE_AGENT_THINKING_MODEL")
     (assoc-in [:agents :default-models :thinking] (get-env-var "MINIFORGE_AGENT_THINKING_MODEL"))
 
     (get-env-var "MINIFORGE_AGENT_EXECUTION_MODEL")
     (assoc-in [:agents :default-models :execution] (get-env-var "MINIFORGE_AGENT_EXECUTION_MODEL"))
-
-    ;; Workflow settings
-    (get-env-var "MINIFORGE_MAX_ITERATIONS")
-    (assoc-in [:workflow :max-iterations] (parse-env-value (get-env-var "MINIFORGE_MAX_ITERATIONS")))
-
-    (get-env-var "MINIFORGE_MAX_TOKENS")
-    (assoc-in [:workflow :max-tokens] (parse-env-value (get-env-var "MINIFORGE_MAX_TOKENS")))
-
-    (get-env-var "MINIFORGE_FAILURE_STRATEGY")
-    (assoc-in [:workflow :failure-strategy] (keyword (get-env-var "MINIFORGE_FAILURE_STRATEGY")))
-
-    ;; Artifact settings
-    (get-env-var "MINIFORGE_ARTIFACTS_DIR")
-    (assoc-in [:artifacts :dir] (get-env-var "MINIFORGE_ARTIFACTS_DIR"))
 
     ;; Model selection settings
     (get-env-var "MINIFORGE_MODEL_SELECTION_ENABLED")
