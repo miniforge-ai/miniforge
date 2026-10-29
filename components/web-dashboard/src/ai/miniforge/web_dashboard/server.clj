@@ -48,22 +48,45 @@
 (def ^{:stratum 0} ^:private defaults dashboard-config/defaults)
 
 (defn ^{:stratum 0} loopback-host?
-  "True for a host string that only this machine can reach. Matched on the
-   string rather than resolved, so no DNS lookup or reflection is needed."
+  "True for a host string only this machine can reach: localhost, a literal
+   IPv4 address in 127.0.0.0/8, or ::1. Matched on the string, never
+   resolved, so a DNS name that merely starts with `127.` does not count,
+   and no lookup or reflection is needed."
   [host]
   (let [h (str/lower-case (str host))]
     (or (= "localhost" h)
-        (str/starts-with? h "127.")
-        (contains? #{"::1" "[::1]" "0:0:0:0:0:0:0:1"} h))))
+        (contains? #{"::1" "[::1]" "0:0:0:0:0:0:0:1"} h)
+        (boolean (some->> (re-matches #"127\.(\d{1,3})\.(\d{1,3})\.(\d{1,3})" h)
+                          rest
+                          (every? #(<= (parse-long %) 255)))))))
+
+(defn ^{:stratum 0} connect-host
+  "The host a client on this machine should dial for a listener bound to
+   `host`: a wildcard bind (0.0.0.0, ::) answers on localhost; any other
+   address is dialed as given, bracketed when it is an IPv6 literal."
+  [host]
+  (let [h (str host)]
+    (cond
+      (contains? #{"0.0.0.0" "::" "[::]"} h) "localhost"
+      (and (str/includes? h ":") (not (str/starts-with? h "["))) (str "[" h "]")
+      :else h)))
+
+(defn- ^{:stratum 0} banner-line
+  "One line of the startup box: `text` padded to the box's inner width."
+  [text]
+  (str "│ " text (apply str (repeat (max 1 (- 52 (count text))) " ")) "│"))
 
 ;; Discovery file
 (defn ^{:stratum 0} write-discovery-file!
-  "Write dashboard discovery file for auto-connect."
-  [port]
+  "Write dashboard discovery file for auto-connect. `host` is the address
+   clients should dial (see `connect-host`); readers default to localhost
+   when it is absent, as in files written before it was published."
+  [port host]
   (try
     (let [discovery-dir (config/miniforge-home)
           discovery-file (str discovery-dir "/dashboard.port")
           info {:port port
+                :host host
                 :pid (.pid (java.lang.ProcessHandle/current))
                 :started (str (java.time.Instant/now))}]
       (.mkdirs (io/file discovery-dir))
@@ -443,14 +466,14 @@
     (println "│ Miniforge Web Dashboard                             │")
     (println "│ Production-ready fleet control interface            │")
     (println "├─────────────────────────────────────────────────────┤")
-    (println  "│ URL: http://localhost:" actual-port (apply str (repeat (- 28 (count (str actual-port))) " ")) "│")
-    (println  "│ WebSocket: ws://localhost:" actual-port "/ws" (apply str (repeat (- 21 (count (str actual-port))) " ")) "│")
+    (println (banner-line (str "URL: http://" (connect-host host) ":" actual-port)))
+    (println (banner-line (str "WebSocket: ws://" (connect-host host) ":" actual-port "/ws")))
     (println  "│ Events: " events-dir (apply str (repeat (max 1 (- 40 (count events-dir))) " ")) "│")
     (println "└─────────────────────────────────────────────────────┘")
     ;; No fallible startup work follows listener acquisition.
     (control-identity/attach! state)
     ;; Discovery publication is best-effort and follows control readiness.
-    (write-discovery-file! actual-port)
+    (write-discovery-file! actual-port (connect-host host))
     {:server server
      :port actual-port
      :state state
