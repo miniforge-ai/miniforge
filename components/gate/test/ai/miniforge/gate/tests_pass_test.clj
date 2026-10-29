@@ -94,6 +94,9 @@
     (let [result (gate-test/check-coverage {} {})]
       (is (false? (:passed? result)))
       (is (= :no-coverage (-> result :errors first :type)))))
+  (testing "an explicitly nil threshold falls back to the default"
+    (is (true? (:passed? (gate-test/check-coverage {:metadata {:coverage 85}}
+                                                   {:coverage-threshold nil})))))
   (testing "coverage at or above the threshold passes; below it fails"
     (is (true? (:passed? (gate-test/check-coverage {:metadata {:coverage 85}} {}))))
     (is (false? (:passed? (gate-test/check-coverage {:metadata {:coverage 70}} {}))))))

@@ -136,7 +136,7 @@
    measurement has not shown the threshold was met. Nothing in miniforge
    measures coverage yet, so the gate is not in any phase's defaults."
   [artifact ctx]
-  (let [threshold (get ctx :coverage-threshold default-coverage-threshold)
+  (let [threshold (or (get ctx :coverage-threshold) default-coverage-threshold)
         coverage (or (get-in artifact [:metadata :coverage])
                      (get-in artifact [:artifact/metadata :coverage]))]
     (cond
