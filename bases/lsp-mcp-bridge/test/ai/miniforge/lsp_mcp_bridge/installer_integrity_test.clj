@@ -264,3 +264,34 @@
               (is (response/anomaly-map? result) (pr-str result))
               (is (= "stale" (slurp target)))
               (is (not (fs/executable? target))))))))))
+
+(deftest ^{:stratum 1} archive-install-keeps-distribution-test
+  (testing "a tar.gz install keeps the whole tree; the target is a symlink resolve-binary accepts"
+    (with-base-dir
+      (fn [base]
+        (let [src   (str (fs/create-dirs (fs/path base "src")))
+              tgz   (str (fs/path base "dist.tar.gz"))
+              asset {:file "tool.tar.gz" :extract :tar-gz :binary-in-archive "bin/tool"}
+              lua   #(fs/path (fs/parent (fs/parent (fs/real-path %))) "script" "x.lua")]
+          (fs/create-dirs (fs/path src "bin"))
+          (fs/create-dirs (fs/path src "script"))
+          (spit (str src "/bin/tool") script)
+          (fs/set-posix-file-permissions (str src "/bin/tool") "rwxr-xr-x")
+          (spit (str src "/script/x.lua") "return 1")
+          (bp/sh ["tar" "czf" tgz "-C" src "bin" "script"])
+          (let [[result bin-dir] (install! base asset #(fs/copy tgz % {:replace-existing true}))
+                target (:installed result)]
+            (is (= (str bin-dir "/tool") target) (pr-str result))
+            (is (fs/sym-link? target))
+            (is (fs/exists? (lua target)) "runtime file kept beside the real binary")
+            (is (= "ok" (str/trim (:out (bp/sh [target])))))
+            (with-redefs [installer/bin-dir (constantly bin-dir)]
+              (is (= target (installer/resolve-binary "tool"))))
+            (testing "and a failed reinstall leaves that install intact"
+              (let [bytes      (fs/read-all-bytes tgz)
+                    [again _]  (install! base asset
+                                         #(fs/write-bytes (str %) (java.util.Arrays/copyOf
+                                                                   bytes (quot (alength bytes) 2))))]
+                (is (response/anomaly-map? again))
+                (is (fs/exists? (lua target)))
+                (is (= "ok" (str/trim (:out (bp/sh [target])))))))))))))
