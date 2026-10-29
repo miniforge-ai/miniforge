@@ -39,7 +39,6 @@
    to fuller JVM code paths when the CLI only needs thin orchestration."
   (:require
    [babashka.cli :as cli]
-   [babashka.fs :as fs]
    [clojure.string :as str]
    [ai.miniforge.cli.app-config :as app-config]
    [ai.miniforge.cli.messages :as messages]
@@ -57,7 +56,6 @@
    [ai.miniforge.cli.main.status.summary :as status-summary]
    [ai.miniforge.cli.main.version :as version]
    [ai.miniforge.cli.main.commands.run :as cmd-run]
-   [ai.miniforge.cli.main.commands.resume :as cmd-resume]
    [ai.miniforge.cli.main.commands.shared :as cmd-shared]
    [ai.miniforge.cli.main.commands.monitoring :as cmd-monitoring]
    [ai.miniforge.cli.main.commands.fleet :as cmd-fleet]
@@ -71,6 +69,7 @@
    [ai.miniforge.cli.main.commands.init :as cmd-init]
    [ai.miniforge.cli.main.commands.worktree :as cmd-worktree]
    [ai.miniforge.cli.main.commands.runtime :as cmd-runtime]
+   [ai.miniforge.cli.main.commands.doctor :as cmd-doctor]
    ;; N5 command modules
    [ai.miniforge.cli.main.commands.workflow-commands :as cmd-workflow]
    [ai.miniforge.cli.main.commands.policy :as cmd-policy]
@@ -156,38 +155,7 @@
 (def ^{:stratum 0} tui-launcher
   (util/optional-composition-var 'ai.miniforge.tui-views.interface 'start-standalone-tui!))
 
-(defn ^{:stratum 0} doctor-cmd
-  [_m]
-  (println "\n" (display/style (app-config/system-check-title) :foreground :cyan :bold true) "\n")
-
-  (let [checks (messages/t :doctor/checks)]
-
-    (doseq [[cmd name desc] checks]
-      (let [available? (util/check-command cmd)
-            status (if available?
-                     (display/style "✓" :foreground :green)
-                     (display/style "✗" :foreground :red))
-            name-styled (if available? name (display/style name :foreground :red))]
-        (println (format "  %s %-12s %s" status name-styled desc))))
-
-    (println)
-
-    ;; Container runtime (N11-delta Phase 3)
-    (println (display/style (messages/t :runtime/doctor-section-title)
-                            :foreground :cyan :bold true))
-    (cmd-runtime/print-doctor-runtime-section)
-    (println)
-
-    ;; Check config
-    (if (fs/exists? config/default-user-config-path)
-      (println (display/style "✓" :foreground :green)
-               (messages/t :doctor/config-exists
-                           {:config-path config/default-user-config-path}))
-      (println (display/style "!" :foreground :yellow)
-               (messages/t :doctor/no-config
-                           {:command (app-config/command-string "config init")})))
-
-    (println)))
+(defn ^{:stratum 0} doctor-cmd [m] (cmd-doctor/doctor-cmd (util/get-opts m)))
 
 ;; Config commands — one-liner delegates
 (defn ^{:stratum 0} config-init-cmd [m] (config/cmd-init (util/get-opts m)))
@@ -227,8 +195,11 @@
            :quiet (boolean quiet)
            :dashboard-url dashboard-url})
          (catch Exception e
+           ;; A throw+ anomaly's ex-message is slingshot's "throw+: {...}"
+           ;; wrapper around the whole map; print the anomaly's message.
            (display/print-error (messages/t :workflow-run/failed
-                                            {:error (ex-message e)}))
+                                            {:error (or (:anomaly/message (ex-data e))
+                                                        (ex-message e))}))
            nil))))))
 
 ;; Workflow subcommands — spec-driven execution and lifecycle (N5)
@@ -259,8 +230,11 @@
            :input-json input-json
            :quiet (boolean quiet)})
          (catch Exception e
+           ;; A throw+ anomaly's ex-message is slingshot's "throw+: {...}"
+           ;; wrapper around the whole map; print the anomaly's message.
            (display/print-error (messages/t :chain-run/failed
-                                            {:error (ex-message e)}))
+                                            {:error (or (:anomaly/message (ex-data e))
+                                                        (ex-message e))}))
            nil))))))
 
 ;; Observability commands
@@ -295,17 +269,7 @@
     (if (str/blank? (str wf-id))
       (do (display/print-error (messages/t :resume/missing-workflow-id))
           (cmd-shared/exit! 1))
-      (some-> (try+
-                (cmd-resume/resume-workflow wf-id opts)
-                (catch InterruptedException interrupted
-                  (.interrupt (Thread/currentThread))
-                  (throw interrupted))
-                (catch Error fatal (throw fatal))
-                (catch Object caught
-                  (cmd-resume/print-resume-failure caught (:throwable &throw-context))
-                  (cmd-shared/exit! 1)
-                  nil))
-              cmd-run/finish!))))
+      (some-> (cmd-run/resume-reporting-failure wf-id opts) cmd-run/finish!))))
 
 (defn ^{:stratum 0} scan-cmd [m] (cmd-scan/scan-cmd (util/get-opts m)))
 
@@ -427,7 +391,11 @@
 ;; CLI dispatch
 (def ^{:stratum 1} dispatch-table
   [{:cmds ["version"] :fn version-cmd}
-   {:cmds ["doctor"]  :fn doctor-cmd}
+   {:cmds ["doctor"]
+    :fn doctor-cmd
+    :restrict true
+    :spec {:backend        {:coerce :keyword :alias :b}
+           :execution-mode {:coerce :keyword :alias :m}}}
    {:cmds ["help"]    :fn help-cmd}
    {:cmds []          :fn (parse-errors/help-unless-unknown help-cmd)}  ; default
 
@@ -508,7 +476,8 @@
            :quiet       {:coerce :boolean :alias :q}
            :run-id      {}
            :correlation-id {}
-           :from-phase  {:coerce :keyword}}}
+           :from-phase  {:coerce :keyword}
+           :force       {:coerce :boolean}}}
 
    ;; Status command
    {:cmds ["status"]
@@ -577,6 +546,11 @@
     :fn (wr-help/handler-with-help :workflow-gc-scratch workflow-gc-scratch-cmd)
     :restrict true
     :spec (wr-help-registry/spec-for :workflow-gc-scratch)}
+
+   {:cmds ["workflow" "gc-checkpoints"]
+    :fn (wr-help/handler-with-help :workflow-gc-checkpoints cmd-workflow/workflow-gc-checkpoints-cmd)
+    :restrict true
+    :spec (wr-help-registry/spec-for :workflow-gc-checkpoints)}
 
    ;; Chain parent — `mf chain --help` / `mf chain` lists the group's
    ;; subcommands with their one-line summaries.

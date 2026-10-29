@@ -16,9 +16,10 @@
 ;; See the License for the specific language governing permissions and
 ;; limitations under the License.
 (ns ai.miniforge.cli.workflow-runner.display-print
-  "Printing of workflow header, summary, and final result to stdout."
+  "Printing of workflow header, summary, and final result."
   (:require
    [clojure.pprint]
+   [clojure.walk :as walk]
    [cheshire.core :as json]
    [ai.miniforge.cli.app-config :as app-config]
    [ai.miniforge.cli.messages :as messages]
@@ -62,12 +63,32 @@
   [result]
   (println (summary/format-compact-summary result)))
 
+(defn- ^{:stratum 0} json-encodable
+  "`x` with every value cheshire cannot encode replaced by its string
+   form. A run's result is its whole execution context, which holds
+   runtime handles (the event-stream atom, the logger fn, the compiled
+   FSM's fns), and java.time values that the JVM's cheshire refuses;
+   encoding it as-is throws."
+  [x]
+  (walk/postwalk
+   (fn [v]
+     (if (or (nil? v) (string? v) (number? v) (boolean? v) (keyword? v)
+             (symbol? v) (char? v) (uuid? v) (instance? java.util.Date v)
+             (coll? v))
+       v
+       (str v)))
+   x))
+
 ;------------------------------------------------------------------------------ Layer 1
 
-(defn ^{:stratum 1} print-result [result {:keys [output quiet]}]
-  (when-not quiet
+(defn ^{:stratum 1} print-result
+  "Print `result` in the `:output` format. `quiet` suppresses only the
+   human-readable forms: :json and :edn are always printed, since the
+   caller asked for them in order to read them."
+  [result {:keys [output quiet]}]
+  (when (or (not quiet) (contains? #{:json :edn} output))
     (case output
-      :json   (println (json/generate-string result {:pretty true}))
+      :json   (println (json/generate-string (json-encodable result) {:pretty true}))
       :pretty (print-pretty-result result)
       :edn    (clojure.pprint/pprint result)
       (clojure.pprint/pprint result)))

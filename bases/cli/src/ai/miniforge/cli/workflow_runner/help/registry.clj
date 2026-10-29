@@ -41,7 +41,7 @@
 (def ^{:stratum 0} workflow-subcommand-keys
   "Display order for `mf workflow --help`."
   [:workflow-run :workflow-list :workflow-execute :workflow-status
-   :workflow-inspect :workflow-cancel :workflow-gc-scratch])
+   :workflow-inspect :workflow-cancel :workflow-gc-scratch :workflow-gc-checkpoints])
 
 (def ^{:stratum 0} chain-subcommand-keys
   "Display order for `mf chain --help`."
@@ -81,6 +81,10 @@
                          :summary-key :workflow-runner.help/workflow-gc-scratch-summary
                          :spec        flag-specs/workflow-gc-scratch-flag-spec
                          :positional  []}
+   :workflow-gc-checkpoints {:subcommand  "workflow gc-checkpoints"
+                             :summary-key :workflow-runner.help/workflow-gc-checkpoints-summary
+                             :spec        flag-specs/workflow-gc-checkpoints-flag-spec
+                             :positional  []}
    :chain-run        {:subcommand  "chain run"
                       :summary-key :workflow-runner.help/chain-run-summary
                       :spec        flag-specs/chain-run-flag-spec

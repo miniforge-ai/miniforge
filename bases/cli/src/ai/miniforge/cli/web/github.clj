@@ -18,6 +18,7 @@
 (ns ai.miniforge.cli.web.github
   "GitHub CLI operations."
   (:require
+   [babashka.fs :as fs]
    [babashka.process :as process]
    [clojure.string :as str]
    [cheshire.core :as json]
@@ -40,15 +41,18 @@
 (defn ^{:stratum 0} sh-error-msg [result default]
   (str/trim (or (:err result) (:out result) default)))
 
+(defn ^{:stratum 0} check-claude-cli
+  "True when the claude CLI is on PATH. `fs/which` resolves it on every OS
+   (with PATHEXT on Windows, which has no `which` binary)."
+  []
+  (some? (fs/which "claude")))
+
 ;------------------------------------------------------------------------------ Layer 1
 
 (defn ^{:stratum 1} check-auth []
   (let [result (process/sh "gh" "auth" "status")]
     {:available (sh-success? result)
      :message (if (sh-success? result) "Authenticated" "Not authenticated")}))
-
-(defn ^{:stratum 1} check-claude-cli []
-  (sh-success? (process/sh "which" "claude")))
 
 (defn ^{:stratum 1} check-repo [repo]
   {:accessible (sh-success? (process/sh "gh" "repo" "view" repo "--json" "name"))
@@ -129,6 +133,18 @@
                 (str "❌ Failed to request changes: "
                      (sh-error-msg result "Unknown error. Check gh CLI authentication.")))}))
 
+(defn ^{:stratum 1} chat-about-pr [repo number question diff-context]
+  (if-not (check-claude-cli)
+    {:success false :response "❌ Claude CLI not available."}
+    (let [prompt (str "You are reviewing PR #" number " in " repo ".\n\n"
+                      "Here is the diff:\n```\n" (subs diff-context 0 (min 8000 (count diff-context))) "\n```\n\n"
+                      "User question: " question "\n\n"
+                      "Please provide a concise, helpful answer focused on the code changes.")
+          result (process/sh "claude" "-p" prompt)]
+      (if (sh-success? result)
+        {:success true :response (str/trim (:out result))}
+        {:success false :response (str "❌ Claude CLI error: " (sh-error-msg result "Unknown"))}))))
+
 ;------------------------------------------------------------------------------ Layer 2
 
 (defn ^{:stratum 2} fetch-all-prs [repos]
@@ -155,15 +171,3 @@
           (if (sh-success? result)
             {:success true :summary (str/trim (:out result))}
             {:success false :summary (str "Claude CLI error: " (sh-error-msg result "Unknown"))}))))))
-
-(defn ^{:stratum 2} chat-about-pr [repo number question diff-context]
-  (if-not (check-claude-cli)
-    {:success false :response "❌ Claude CLI not available."}
-    (let [prompt (str "You are reviewing PR #" number " in " repo ".\n\n"
-                      "Here is the diff:\n```\n" (subs diff-context 0 (min 8000 (count diff-context))) "\n```\n\n"
-                      "User question: " question "\n\n"
-                      "Please provide a concise, helpful answer focused on the code changes.")
-          result (process/sh "claude" "-p" prompt)]
-      (if (sh-success? result)
-        {:success true :response (str/trim (:out result))}
-        {:success false :response (str "❌ Claude CLI error: " (sh-error-msg result "Unknown"))}))))

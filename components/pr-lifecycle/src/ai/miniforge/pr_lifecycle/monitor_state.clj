@@ -18,6 +18,7 @@
 (ns ai.miniforge.pr-lifecycle.monitor-state
   "Shared monitor loop state and persistence helpers."
   (:require
+   [ai.miniforge.anomaly.interface :as anomaly]
    [ai.miniforge.logging.interface :as log]
    [ai.miniforge.pr-lifecycle.events :as events]
    [ai.miniforge.pr-lifecycle.monitor-budget :as budget]
@@ -39,17 +40,66 @@
       (events/publish! event-bus event logger))))
 
 (defn ^{:stratum 0} load-budget-from-disk!
-  "Load a persisted budget into monitor state when it exists."
+  "Load a persisted budget into monitor state when it exists. While the
+   monitor has no usable state for its repo (`:state-error`: no owner/name
+   slug, or unreadable watermarks), every PR gets an exhausted budget
+   instead: it cannot tell which comments it already answered or fixed."
   [monitor pr-number]
-  (when-let [persisted (budget/load-budget pr-number)]
-    (swap! monitor assoc-in [:budgets pr-number] persisted)
-    persisted))
+  (let [{:keys [config state-error]} @monitor
+        persisted (if state-error
+                    (budget/exhausted-budget pr-number (:anomaly/message state-error))
+                    (budget/load-budget (:repo-slug config) pr-number))]
+    (when persisted
+      (swap! monitor assoc-in [:budgets pr-number] persisted)
+      persisted)))
 
 (defn ^{:stratum 0} update-budget!
-  "Persist the latest budget state for a PR."
+  "Persist the latest budget state for a PR. Keeps the merged copy that was
+   written, or `budget-state` when the save fails (logged). Returns the save
+   result."
   [monitor pr-number budget-state]
-  (swap! monitor assoc-in [:budgets pr-number] budget-state)
-  (budget/save-budget! budget-state))
+  (let [{:keys [repo-slug logger]} (:config @monitor)
+        saved   (budget/save-budget! repo-slug budget-state)
+        failed? (anomaly/anomaly? saved)]
+    (swap! monitor assoc-in [:budgets pr-number] (if failed? budget-state saved))
+    (when (and failed? logger)
+      (log/warn logger :pr-monitor :budget/save-failed
+                {:message (:anomaly/message saved)
+                 :data {:pr-number pr-number}}))
+    saved))
+
+(defn ^{:stratum 0} change-budget!
+  "Apply `f` to PR `pr-number`'s budget as saved on disk merged with
+   `budget-state` (see `budget/change-saved-budget!`) and cache the result.
+   Returns the budget written, or the anomaly.
+
+   A refusal (an anomaly carrying a budget in [:anomaly/data :budget])
+   caches that budget. Any other failure is logged; with `on-failure`
+   :retry the change is applied to the cached budget, so the next save of
+   this PR writes it. Budgets record actions by id, so a change that did
+   reach disk before the failure was reported is not counted twice. The
+   default, :block, leaves the cache alone: it is for reserving a fix
+   attempt, which must not run unless it was saved."
+  ([monitor pr-number budget-state f]
+   (change-budget! monitor pr-number budget-state f :block))
+  ([monitor pr-number budget-state f on-failure]
+   (let [{:keys [repo-slug logger]} (:config @monitor)
+         changed (budget/change-saved-budget! repo-slug budget-state f)]
+     (cond
+       (not (anomaly/anomaly? changed))
+       (swap! monitor assoc-in [:budgets pr-number] changed)
+
+       (get-in changed [:anomaly/data :budget])
+       (swap! monitor assoc-in [:budgets pr-number] (get-in changed [:anomaly/data :budget]))
+
+       :else
+       (do (when (= :retry on-failure)
+             (swap! monitor assoc-in [:budgets pr-number] (f budget-state)))
+           (when logger
+             (log/warn logger :pr-monitor :budget/save-failed
+                       {:message (:anomaly/message changed)
+                        :data {:pr-number pr-number :kept-in-cache (= :retry on-failure)}}))))
+     changed)))
 
 (defn ^{:stratum 0} log-loop-start!
   "Log loop startup when a logger is present."
@@ -63,11 +113,19 @@
 ;------------------------------------------------------------------------------ Layer 1
 
 (defn ^{:stratum 1} create-monitor
-  "Create a PR monitor loop state atom from config."
+  "Create a PR monitor loop state atom from config. State on disk is kept
+   per `:repo-slug` (owner/name), resolved from `:worktree-path` with gh when
+   not given. `:state-error` holds the anomaly when it cannot be resolved or
+   its watermarks cannot be read; see `load-budget-from-disk!`."
   [config]
-  (let [merged (merge default-config config)]
-    (atom {:config merged
-           :watermarks (poller/load-watermarks)
+  (let [merged      (merge default-config config)
+        repo-slug   (or (:repo-slug merged)
+                        (some-> (:worktree-path merged) poller/resolve-repo-slug))
+        watermarks  (poller/load-watermarks repo-slug)
+        unreadable? (anomaly/anomaly? watermarks)]
+    (atom {:config (assoc merged :repo-slug repo-slug)
+           :watermarks (if unreadable? (poller/empty-watermarks repo-slug) watermarks)
+           :state-error (when unreadable? watermarks)
            :budgets {}
            :running? false
            :started-at nil

@@ -133,13 +133,26 @@ enforce hard stops. All decisions produce evidence bundles for traceability.
 - An OCI-compatible local container runtime (see below). [Podman](https://podman.io/)
   is the recommended default; [Docker](https://www.docker.com/) is supported.
   Other Docker-CLI hosts (Colima, OrbStack) work as `:runtime-kind :docker`.
+- The [GitHub CLI](https://cli.github.com/) (`gh`), signed in with
+  `gh auth login`. The release phase opens pull requests with it.
 
 ### Install and Run
 
+The first workflow opens a pull request: miniforge pushes a branch to
+`origin` and runs `gh pr create`. Fork `miniforge-ai/miniforge` and clone
+your fork, so the push goes to a repository you can write to.
+
+Building `mf` from source currently needs read access to the private
+`miniforge-ai/workbench-contract` repository, a dependency of the CLI
+build. Until that dependency is published or removed, the steps below
+work only for GitHub accounts with that access; for others, `bb bootstrap`
+stops before the build and says so.
+
 ```bash
-git clone https://github.com/miniforge-ai/miniforge.git
+git clone https://github.com/<you>/miniforge.git
 cd miniforge
-bb bootstrap
+gh repo set-default <you>/miniforge   # gh opens the PR on your fork
+bb bootstrap                          # also installs mf to ~/.local/bin
 
 # Configure provider auth for agent runs:
 # opencode auth login
@@ -149,9 +162,14 @@ mf run examples/workflows/simple-refactor.edn
 ```
 
 `bb bootstrap` installs the development dependencies (Java, Clojure CLI,
-clj-kondo, Polylith, markdownlint), configures the repo, prefetches the
-coverage tool used by `bb ccov`, and on macOS brew-installs Podman and
-initializes a default `podman machine`. Linux users install Podman via
+clj-kondo, Polylith, markdownlint), prefetches the coverage tool used by
+`bb ccov`, builds the CLI and installs it as `~/.local/bin/mf` (it tells
+you if that directory is not on your `PATH`; rerun `bb install:local`
+after pulling to update `mf`), and on macOS brew-installs Podman and
+initializes a default `podman machine`. It installs the repo's git hooks
+only when your git email is `@miniforge.ai`: the pre-commit hook rejects
+other commit emails, including the commit miniforge makes when it
+releases. Linux users install Podman via
 their distro package manager (`apt install podman`, `dnf install podman`,
 etc.); Docker users can stay on Docker by setting
 `MINIFORGE_RUNTIME=docker` or `:runtime-kind :docker` in config.
@@ -223,10 +241,14 @@ loop — the PR monitor will autonomously address reviewer feedback after releas
 # LLM backend: OpenCode is the default provider/auth wrapper.
 opencode auth login
 
-# Tune execution
-export MINIFORGE_MAX_ITERATIONS=50     # max phase retries
-export MINIFORGE_MAX_TOKENS=150000     # token budget per workflow
+# Pick the backend and the default models
+mf config backend opencode
+export MINIFORGE_AGENT_THINKING_MODEL=anthropic/claude-opus-4-6     # planner, architect
+export MINIFORGE_AGENT_EXECUTION_MODEL=anthropic/claude-sonnet-4-6  # other roles
 ```
+
+There is no environment variable for token budgets or retry limits; phase
+retries are set per phase in the workflow definition.
 
 See [Configuration Guide](docs/user-guide/configuration.md) for all options.
 
