@@ -375,7 +375,7 @@
   [cmd]
   (and (vector? cmd)
        (= "git" (first cmd))
-       (contains? #{"push" "fetch"} (second cmd))))
+       (contains? #{"ls-remote" "push" "fetch"} (second cmd))))
 
 ;; ============================================================================
 ;; Capsule security gate — runtime enforcement of the runtime-* policies
@@ -1106,7 +1106,7 @@
 
 (defn- ^{:stratum 4} workspace-exec-fn
   "exec-fn for `workspace/git-persist!` and `git-restore!`. Given a
-   credential env, only push and fetch receive it, and they run with hooks
+   credential env, only ls-remote, push and fetch receive it, with hooks
    off: untrusted code writes the workspace, and a planted pre-push or
    reference-transaction hook would inherit the credential from git."
   [descriptor container-id workdir cred-env]

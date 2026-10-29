@@ -718,11 +718,11 @@
           (is (some #{"http://git.example.com/r.git"} cmd))
           (is (some #{(str "Authorization: Basic " (basic-auth "bob" "pw"))} (vals env))))))))
 
-(deftest ^{:stratum 1} persist-workspace-authenticates-push-only-test
-  (testing "with a recorded remote, only the push gets the credential, with
-            hooks off, and it pushes to the recorded URL rather than the
-            capsule's origin; add/commit (which run workspace hooks) never
-            see it"
+(deftest ^{:stratum 1} persist-workspace-authenticates-remote-calls-only-test
+  (testing "with a recorded remote, only ls-remote and push get the
+            credential, with hooks off, and both target the recorded URL
+            rather than the capsule's origin; add/commit (which run
+            workspace hooks) never see it"
     (let [executor (recorded-remote-executor)
           calls    (atom [])]
       (with-redefs [oci-cli/resolve-git-token (fn [_url _opts] fake-token)
@@ -735,13 +735,15 @@
                               :stdout (if (= cmd "git status --porcelain") " M f" "sha")}})]
         (is (true? (get-in (proto/persist-workspace! executor "c1" {:branch "task/x"})
                            [:data :persisted?])))
-        (let [[[cmd opts] & more] (credentialed-calls @calls)]
-          (is (empty? more))
-          (is (= ["git" "-c" "core.hooksPath=/dev/null" "push" "--force-with-lease=task/x:sha"
-                  "https://github.com/o/r.git" "HEAD:task/x"]
-                 cmd))
-          (is (= (str "Authorization: Basic " (basic-auth "x-access-token" fake-token))
-                 (get-in opts [:env "GIT_CONFIG_VALUE_0"]))))
+        (let [authed (credentialed-calls @calls)]
+          (is (= [["git" "-c" "core.hooksPath=/dev/null" "ls-remote" "https://github.com/o/r.git"
+                   "refs/heads/task/x"]
+                  ["git" "-c" "core.hooksPath=/dev/null" "push" "--force-with-lease=task/x:sha"
+                   "https://github.com/o/r.git" "HEAD:task/x"]]
+                 (map first authed)))
+          (is (every? #(= (str "Authorization: Basic " (basic-auth "x-access-token" fake-token))
+                          (get-in (second %) [:env "GIT_CONFIG_VALUE_0"]))
+                      authed)))
         (proto/release-environment! executor "c1")
         (is (= {} @(:git-remotes executor)))))))
 
