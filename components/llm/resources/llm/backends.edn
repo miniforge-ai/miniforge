@@ -34,12 +34,18 @@
 ;; :credential-env names the env vars a CLI backend reads its credential
 ;; from, which a default-trust task capsule keeps for the agent (see
 ;; `backend-credential-env` in the llm interface).
+;;
+;; :catalog-backend names the model-catalog backend whose models a
+;; single-provider backend serves (the Anthropic API serves the catalog's
+;; :claude models). A backend without one routes to many providers and
+;; takes any model. See llm.interface/backend-serves-model?.
 {:claude {:cmd "claude"
           :streaming? true
           :description "Claude via Anthropic CLI"
           :provider "Anthropic"
           :requires-cli? true
           :credential-env ["ANTHROPIC_API_KEY"]
+          :catalog-backend :claude
           ;; Prompt delivery: stdin. The planner path's system-prompt +
           ;; spec text + existing-files context regularly pushes argv
           ;; past POSIX ARG_MAX. Claude CLI supports --input-format text
@@ -64,6 +70,7 @@
          :provider "Codex"
          :requires-cli? true
          :credential-env ["OPENAI_API_KEY"]
+         :catalog-backend :codex
          ;; Prompt delivery: stdin. Codex supports `-` as the prompt
          ;; placeholder; this keeps large synthesis prompts off argv.
          :prompt-via :stdin
@@ -75,6 +82,7 @@
           :description "Local models via Ollama"
           :provider "Ollama"
           :requires-cli? false
+          :catalog-backend :ollama
           :api-endpoint "http://localhost:11434/api/chat"
           :default-model "codellama"
           :models ["codellama" "llama2" "mistral"]
@@ -90,6 +98,7 @@
                  :description "Claude via Anthropic Messages API"
                  :provider "Anthropic"
                  :requires-cli? false
+                 :catalog-backend :claude
                  :api-endpoint "https://api.anthropic.com/v1/messages"
                  :api-key-env "ANTHROPIC_API_KEY"
                  :probe-endpoint "https://api.anthropic.com/"}
@@ -99,6 +108,7 @@
               :description "GPT via OpenAI Chat Completions API"
               :provider "OpenAI"
               :requires-cli? false
+              :catalog-backend :codex
               :api-endpoint "https://api.openai.com/v1/chat/completions"
               :api-key-env "OPENAI_API_KEY"
               :probe-endpoint "https://api.openai.com/"}
@@ -144,6 +154,7 @@
               :description "Gemini via Google Generative Language API"
               :provider "Gemini"
               :requires-cli? false
+              :catalog-backend :gemini-api
               :api-endpoint "https://generativelanguage.googleapis.com/v1beta/models/%s:generateContent"
               :model-in-url? true
               :api-key-env "GEMINI_API_KEY"

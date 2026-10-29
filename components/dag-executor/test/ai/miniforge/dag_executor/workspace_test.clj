@@ -18,6 +18,7 @@
 (ns ai.miniforge.dag-executor.workspace-test
   (:require
    [clojure.test :refer [deftest is testing]]
+   [clojure.java.shell :as shell]
    [clojure.string :as str]
    [ai.miniforge.dag-executor.workspace :as sut]
    [ai.miniforge.dag-executor.result :as result]))
@@ -105,6 +106,40 @@
           r (sut/git-persist! exec-fn {:branch "task/x"})]
       (is (= :persist-status-failed (get-in r [:error :code]))))))
 
+(defn- ^{:stratum 0} single-branch-clone
+  "A bare remote with one commit on main, cloned with --single-branch as
+   the governed bootstrap does. Returns the clone's directory."
+  []
+  (let [tmp    (str (java.nio.file.Files/createTempDirectory
+                     "persist-single-branch" (make-array java.nio.file.attribute.FileAttribute 0)))
+        remote (str tmp "/remote.git")
+        seed   (str tmp "/seed")
+        clone  (str tmp "/clone")
+        git    (fn [dir & args] (apply shell/sh "git" "-C" dir args))]
+    (shell/sh "git" "init" "-q" "--bare" "-b" "main" remote)
+    (shell/sh "git" "init" "-q" "-b" "main" seed)
+    (doseq [dir [seed]]
+      (git dir "config" "user.email" "t@t") (git dir "config" "user.name" "t"))
+    (spit (str seed "/a.txt") "a\n")
+    (git seed "add" "-A")
+    (git seed "-c" "commit.gpgsign=false" "commit" "-qm" "base")
+    (git seed "push" "-q" remote "main")
+    (shell/sh "git" "clone" "-q" "--branch" "main" "--single-branch" remote clone)
+    (git clone "config" "user.email" "t@t")
+    (git clone "config" "user.name" "t")
+    clone))
+
+(defn- ^{:stratum 0} single-branch-clone-of
+  "A second --single-branch clone of CLONE's origin, at main."
+  [clone]
+  (let [remote (str/trim (:out (shell/sh "git" "-C" clone "remote" "get-url" "origin")))
+        dir    (str (java.nio.file.Files/createTempDirectory
+                     "persist-second-clone" (make-array java.nio.file.attribute.FileAttribute 0)) "/c")]
+    (shell/sh "git" "clone" "-q" "--branch" "main" "--single-branch" remote dir)
+    (shell/sh "git" "-C" dir "config" "user.email" "t@t")
+    (shell/sh "git" "-C" dir "config" "user.name" "t")
+    dir))
+
 ;------------------------------------------------------------------------------ Layer 1
 
 (defn- ^{:stratum 1} cmd-has?
@@ -176,14 +211,58 @@
       (is (= :invalid-branch (-> r :error :code)))
       (is (false? @exec-called) "exec-fn must not be invoked for an empty branch"))))
 
+(deftest ^{:stratum 1} git-persist!-creates-a-destination-branch-head-already-reaches-test
+  (testing "HEAD on another remote branch (here the base) is not the destination: the branch is created"
+    (let [clone   (single-branch-clone)
+          exec-fn (fn [cmd]
+                    (let [r (if (string? cmd)
+                              (shell/sh "sh" "-c" cmd :dir clone)
+                              (apply shell/sh (concat cmd [:dir clone])))]
+                      {:data {:exit-code (:exit r) :stdout (:out r) :stderr (:err r)}}))
+          r       (sut/git-persist! exec-fn {:branch "task/new"})]
+      (is (true? (:pushed? (result/unwrap r))) "a clean worktree still publishes a missing branch")
+      (is (str/includes? (:out (shell/sh "git" "-C" clone "ls-remote" "origin" "refs/heads/task/new"))
+                         (:commit-sha (result/unwrap r)))))))
+
+(deftest ^{:stratum 1} git-persist!-a-clean-persist-never-rewinds-the-remote-test
+  (testing "the destination moved ahead of a clean checkout: the push is rejected, not forced"
+    (let [ahead   (single-branch-clone)
+          behind  (single-branch-clone-of ahead)
+          run-in  (fn [dir]
+                    (fn [cmd]
+                      (let [r (if (string? cmd)
+                                (shell/sh "sh" "-c" cmd :dir dir)
+                                (apply shell/sh (concat cmd [:dir dir])))]
+                        {:data {:exit-code (:exit r) :stdout (:out r) :stderr (:err r)}})))]
+      (spit (str ahead "/a.txt") "a\nahead\n")
+      (let [pushed (:commit-sha (result/unwrap (sut/git-persist! (run-in ahead) {:branch "task/x"})))
+            r      (sut/git-persist! (run-in behind) {:branch "task/x"})]
+        (is (= :persist-push-failed (get-in r [:error :code])))
+        (is (str/starts-with? (:out (shell/sh "git" "-C" ahead "ls-remote" "origin" "refs/heads/task/x"))
+                              pushed)
+            "the remote branch still points at the newer commit")))))
+
+(deftest ^{:stratum 1} git-persist!-after-a-push-a-clean-persist-is-a-no-op-test
+  (testing "--single-branch: the pushed task branch is not re-pushed by the next clean persist"
+    (let [clone   (single-branch-clone)
+          exec-fn (fn [cmd]
+                    (let [r (if (string? cmd)
+                              (shell/sh "sh" "-c" cmd :dir clone)
+                              (apply shell/sh (concat cmd [:dir clone])))]
+                      {:data {:exit-code (:exit r) :stdout (:out r) :stderr (:err r)}}))]
+      (spit (str clone "/a.txt") "a\nb\n")
+      (is (true? (:pushed? (result/unwrap (sut/git-persist! exec-fn {:branch "task/x"})))))
+      (is (true? (:no-changes? (result/unwrap (sut/git-persist! exec-fn {:branch "task/x"}))))))))
+
 ;------------------------------------------------------------------------------ Layer 2
 
 ;; git-persist!
 (deftest ^{:stratum 2} git-persist!-no-changes-test
-  (testing "Empty `git status --porcelain` ⇒ no commit, no push, ok with :no-changes? true"
+  (testing "Empty `git status --porcelain` and the branch already at HEAD ⇒ no commit, no push, :no-changes? true"
     (let [[exec-fn calls] (recording-exec-fn
-                           {"git status" (shell-result "")
-                            "rev-parse"  (shell-result head-sha)})
+                           {"git status"    (shell-result "")
+                            "git ls-remote" (shell-result (str head-sha "\trefs/heads/task/foo\n"))
+                            "rev-parse"     (shell-result head-sha)})
           r (sut/git-persist! exec-fn {:branch "task/foo" :message "checkpoint"})]
       (is (result/ok? r))
       (let [data (result/unwrap r)]
@@ -200,7 +279,8 @@
 (deftest ^{:stratum 2} git-persist!-with-changes-commits-and-pushes-test
   (testing "Dirty `git status` ⇒ commit + push + read HEAD sha; ok carries the sha and branch"
     (let [[exec-fn calls] (recording-exec-fn
-                           {"git status"   (shell-result " M src/foo.clj\n")
+                           {"git status"    (shell-result " M src/foo.clj\n")
+                            "git ls-remote" (shell-result "abc999\trefs/heads/feature/bar\n")
                             "git rev-parse" (shell-result (str head-sha "\n"))})
           r (sut/git-persist! exec-fn {:branch "feature/bar"
                                        :message "phase: implement"})]
@@ -215,8 +295,10 @@
         (is (some #(cmd-has? % "git add -A") cmds))
         (is (some #(and (vector? %) (cmd-has? % "-c commit.gpgsign=false commit -m phase: implement")) cmds)
             "commit must be an arg vector, not a shell string")
-        (is (some #(and (vector? %) (cmd-has? % "git push origin HEAD:feature/bar --force")) cmds)
-            "push must be an arg vector, not a shell string")))))
+        (is (some #(and (vector? %)
+                        (cmd-has? % "git push --force-with-lease=feature/bar:abc999 origin HEAD:feature/bar"))
+                  cmds)
+            "push is an arg vector, forced only over the remote SHA just read")))))
 
 (deftest ^{:stratum 2} git-persist!-defaults-branch-and-message-test
   (testing "Missing :branch and :message use 'task/unknown' and 'phase checkpoint'"
@@ -255,8 +337,9 @@
             "checkout must be an arg vector, not a shell string")))))
 
 (deftest ^{:stratum 2} remote-url-replaces-origin-test
-  (testing "a :remote URL is the push target, and the fetch from it writes
-            origin's tracking ref so the checkout still finds the branch"
+  (testing "a :remote URL is the ls-remote and push target, and the fetch
+            from it writes origin's tracking ref so the checkout still finds
+            the branch"
     (let [url "https://github.com/o/r.git"
           [persist-fn persist-calls] (recording-exec-fn
                                       {"git status" (shell-result " M f")
@@ -265,7 +348,8 @@
                                       {"git rev-parse" (shell-result head-sha)})]
       (sut/git-persist! persist-fn {:branch "task/x" :remote url})
       (sut/git-restore! restore-fn {:branch "task/x" :remote url})
-      (is (some #{["git" "push" url "HEAD:task/x" "--force"]} @persist-calls))
+      (is (some #{["git" "ls-remote" url "refs/heads/task/x"]} @persist-calls))
+      (is (some #{["git" "push" "--force-with-lease=task/x:" url "HEAD:task/x"]} @persist-calls))
       (is (some #{["git" "fetch" url "+refs/heads/task/x:refs/remotes/origin/task/x"]}
                 @restore-calls)))))
 
@@ -283,3 +367,51 @@
                        {"git rev-parse" (shell-result (str "\n" head-sha "\n"))})
           r (sut/git-restore! exec-fn {:branch "task/x"})]
       (is (= head-sha (:commit-sha (result/unwrap r)))))))
+
+(deftest ^{:stratum 2} git-persist!-push?-false-commits-without-pushing-test
+  (testing ":push? false commits locally, never pushes, and says so"
+    (let [[exec-fn calls] (recording-exec-fn
+                           {"git status"    (shell-result " M src/a.clj")
+                            "git rev-parse" (shell-result head-sha)})
+          r (sut/git-persist! exec-fn {:branch "task/x" :message "m" :push? false})]
+      (is (result/ok? r))
+      (is (= {:persisted? true :pushed? false :commit-sha head-sha :branch "task/x"}
+             (result/unwrap r)))
+      (is (some #(cmd-has? % "commit") @calls))
+      (is (not-any? #(cmd-has? % "push") @calls))))
+  (testing "the default still pushes"
+    (let [[exec-fn calls] (recording-exec-fn
+                           {"git status"    (shell-result " M src/a.clj")
+                            "git rev-parse" (shell-result head-sha)})]
+      (is (true? (:pushed? (result/unwrap (sut/git-persist! exec-fn {:branch "task/x"})))))
+      (is (some #(cmd-has? % "git push") @calls)))))
+
+(deftest ^{:stratum 2} git-persist!-pushes-a-held-commit-from-a-clean-worktree-test
+  (testing "a held commit followed by a clean, allowed persist is pushed"
+    (let [[held-exec held-calls] (recording-exec-fn {"git status"    (shell-result " M src/a.clj")
+                                                     "git rev-parse" (shell-result head-sha)})
+          [clean-exec calls]     (recording-exec-fn {"git status"    (shell-result "")
+                                                     "git ls-remote" (shell-result "abc\trefs/heads/task/x\n")
+                                                     "git rev-parse" (shell-result head-sha)})
+          held  (sut/git-persist! held-exec {:branch "task/x" :push? false})
+          later (sut/git-persist! clean-exec {:branch "task/x"})]
+      (is (false? (:pushed? (result/unwrap held))))
+      (is (not-any? #(cmd-has? % "push") @held-calls))
+      (is (= {:persisted? true :pushed? true :commit-sha head-sha :branch "task/x"}
+             (result/unwrap later)))
+      (is (some #(cmd-has? % "git push") @calls))
+      (is (not-any? #(cmd-has? % "commit") @calls) "nothing new to commit")))
+  (testing "a clean worktree with nothing pending is still a no-op"
+    (let [[exec-fn calls] (recording-exec-fn {"git status"    (shell-result "")
+                                              "git ls-remote" (shell-result (str head-sha "\trefs/heads/task/x\n"))
+                                              "git rev-parse" (shell-result head-sha)})]
+      (is (true? (:no-changes? (result/unwrap (sut/git-persist! exec-fn {:branch "task/x"})))))
+      (is (not-any? #(cmd-has? % "push") @calls)))))
+
+(deftest ^{:stratum 2} git-persist!-pending-check-failure-is-an-error-test
+  (testing "a failed ls-remote on a clean worktree is an error, not :no-changes?"
+    (let [[exec-fn calls] (recording-exec-fn {"git status"    (shell-result "")
+                                              "git ls-remote" {:data {:exit-code 128 :stderr "bad"}}})
+          r (sut/git-persist! exec-fn {:branch "task/x"})]
+      (is (= :persist-pending-failed (get-in r [:error :code])))
+      (is (not-any? #(cmd-has? % "push") @calls)))))

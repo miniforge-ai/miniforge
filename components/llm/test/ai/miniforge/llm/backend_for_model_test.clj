@@ -18,7 +18,8 @@
 (ns ai.miniforge.llm.backend-for-model-test
   (:require
    [clojure.test :refer [deftest testing is]]
-   [ai.miniforge.llm.interface :as llm]))
+   [ai.miniforge.llm.interface :as llm]
+   [ai.miniforge.llm.model-registry :as registry]))
 
 ;------------------------------------------------------------------------------ Layer 0
 
@@ -31,3 +32,28 @@
   (testing "an unlisted id returns the caller's not-found value"
     (is (nil? (llm/backend-for-model "anthropic/claude-sonnet-4-6" nil)))
     (is (= :opencode (llm/backend-for-model "qwen3:32b" :opencode)))))
+
+(deftest ^{:stratum 0} catalog-backends-are-registered-test
+  (testing "every catalog model names a backend create-client accepts"
+    (doseq [[model-key {:keys [backend]}] registry/model-registry]
+      (is (contains? llm/backends backend)
+          (str model-key " names unregistered backend " backend))))
+  (testing "a gemini catalog model gets a Gemini API client"
+    (is (= :gemini-api (llm/backend-for-model "gemini-2.5-pro" nil)))
+    (is (= :gemini-api (llm/client-backend
+                        (llm/create-client-for-model "gemini-2.5-flash"))))))
+
+(deftest ^{:stratum 0} backend-serves-model-test
+  (testing "the catalog family of a model, through a provider prefix"
+    (is (= :claude (llm/catalog-backend-for-model "claude-sonnet-4-6")))
+    (is (= :claude (llm/catalog-backend-for-model "anthropic/claude-sonnet-4-5")))
+    (is (= :codex (llm/catalog-backend-for-model "openai/gpt-5.4")))
+    (is (nil? (llm/catalog-backend-for-model "qwen3:32b"))))
+  (testing "single-provider backends serve their family only"
+    (is (llm/backend-serves-model? :anthropic-api "claude-sonnet-4-6"))
+    (is (not (llm/backend-serves-model? :codex "anthropic/claude-sonnet-4-5")))
+    (is (not (llm/backend-serves-model? :claude "gpt-5.4")))
+    (is (not (llm/backend-serves-model? :gemini-api "claude-sonnet-4-6"))))
+  (testing "routing backends and models the catalog does not know pass"
+    (is (llm/backend-serves-model? :opencode "anthropic/claude-sonnet-4-6"))
+    (is (llm/backend-serves-model? :codex "gpt-6-preview"))))

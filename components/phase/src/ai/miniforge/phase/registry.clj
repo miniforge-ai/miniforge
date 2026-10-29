@@ -65,8 +65,11 @@
    ;; the contract-drift worry be deterministically enforced: the trap bench
    ;; measured prose delivery changing nothing (eight of eight sprung), so
    ;; the check lives here where a workflow override cannot drop it.
+  ;; :no-secrets joined when it became an implement default: a credential
+  ;; the implementer writes into a file is committed and pushed, so no
+  ;; workflow override may switch the check off.
   #{:policy-verify :policy-review :policy-pack :codex-consultation
-    :stale-references})
+    :stale-references :no-secrets})
 
 ;; Phase status predicates
 ;;

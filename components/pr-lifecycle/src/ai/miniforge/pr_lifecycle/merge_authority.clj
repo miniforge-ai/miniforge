@@ -19,6 +19,7 @@
   "Runtime authority preparation for one exact pull-request merge."
   (:require
    [ai.miniforge.anomaly.interface :as anomaly]
+   [ai.miniforge.config.interface :as config]
    [ai.miniforge.execution-grant.interface :as grant]
    [ai.miniforge.gate.interface :as gate])
   (:import
@@ -27,7 +28,7 @@
 ;------------------------------------------------------------------------------ Layer 0
 
 (def ^{:stratum 0} default-breach-dir-property
-  ".miniforge/grant-breaches")
+  "grant-breaches")
 
 (def ^{:stratum 0} empty-classification
   {:blocking []
@@ -66,7 +67,7 @@
 (defn- ^{:stratum 1} breach-dir
   [context]
   (or (:grant-breach-dir context)
-      (str (System/getProperty "user.home") "/" default-breach-dir-property)))
+      (str (config/miniforge-home) "/" default-breach-dir-property)))
 
 (defn ^{:stratum 1} permitted?
   "True only when both the grant check and DecisionEnvelope allow the effect."

@@ -30,25 +30,18 @@
 (deftest ^{:stratum 0} default-config-prefers-opencode-test
   (let [cfg config/default-config]
     (testing "default llm backend routes provider auth through OpenCode"
-      (is (= :opencode (get-in cfg [:llm :backend])))
-      (is (= "anthropic/claude-sonnet-4-5" (get-in cfg [:llm :model]))))
+      (is (= :opencode (get-in cfg [:llm :backend]))))
 
-    (testing "default agent models are OpenCode provider/model selectors"
-      (is (= "anthropic/claude-opus-4-6" (get-in cfg [:agents :default-models :thinking])))
-      (is (= "anthropic/claude-sonnet-4-6" (get-in cfg [:agents :default-models :execution]))))
+    (testing "defaults name no model, which would reach every backend"
+      (is (nil? (get-in cfg [:llm :model])))
+      (is (nil? (get-in cfg [:agents :default-models]))))
 
     (testing "default self-healing keeps failover inside OpenCode"
       (is (= [:opencode] (get-in cfg [:self-healing :allowed-failover-backends]))))
 
-    (testing "default workflow checkpoint root is configured as data"
-      (is (= "~/.miniforge/checkpoints"
-             (get-in cfg [:workflow :checkpoint-root]))))
-
-    (testing "default worktree root lives under ~/.miniforge and not /tmp"
-      (is (= "~/.miniforge/worktrees"
-             (get cfg :workflow/worktree-root))
-          ":workflow/worktree-root must be present in the default config so
-           create-worktree-executor picks it up without a disk read"))))
+    (testing "defaults name no checkpoint or worktree root: both follow MINIFORGE_HOME"
+      (is (nil? (get-in cfg [:workflow :checkpoint-root])))
+      (is (nil? (get cfg :workflow/worktree-root))))))
 
 (deftest ^{:stratum 0} load-default-config-falls-back-to-edn-resource-test
   (let [orig-resource io/resource]
@@ -60,13 +53,10 @@
                                          nil))]
       (let [cfg (user/load-default-config)]
         (is (= :opencode (get-in cfg [:llm :backend])))
-        (is (= "anthropic/claude-sonnet-4-6" (get-in cfg [:agents :default-models :execution])))
-        (is (= "~/.miniforge/checkpoints"
-               (get-in cfg [:workflow :checkpoint-root])))
-        (is (= "~/.miniforge/worktrees"
-               (get cfg :workflow/worktree-root))
-            "fallback EDN must carry :workflow/worktree-root so the dag-executor
-             can locate worktrees even when the primary resource is missing")))))
+        (is (nil? (get-in cfg [:llm :model])))
+        (is (nil? (get-in cfg [:agents :default-models])))
+        (is (nil? (get-in cfg [:workflow :checkpoint-root])))
+        (is (nil? (get cfg :workflow/worktree-root)))))))
 
 (deftest ^{:stratum 0} repo-config-support-test
   (testing "repo-config-path appends .miniforge/config.edn to the provided root"
@@ -116,13 +106,30 @@
         (is (str/includes? (str err) (.getPath tmp)))
         (finally (.delete tmp))))))
 
+(deftest ^{:stratum 0} unparseable-user-config-is-reported-once-test
+  (testing "one process reading an unparseable config.edn many times warns once"
+    (let [tmp (java.io.File/createTempFile "unparseable-user-config-once" ".edn")
+          err (java.io.StringWriter.)]
+      (try
+        (spit tmp "{:llm {:backend :claude}")
+        (binding [*err* err]
+          (dotimes [_ 10] (config/load-user-config (.getPath tmp))))
+        (is (= 1 (count (re-seq (re-pattern (java.util.regex.Pattern/quote (.getPath tmp)))
+                                (str err)))))
+        (finally (.delete tmp))))))
+
 ;; Variables that used to be mapped onto keys nothing reads. Setting one
 ;; changed nothing, while the docs presented some of them as hard budget
-;; stops.
+;; stops. No run reads :model-selection or :self-healing from the merged
+;; config either.
 (def ^{:stratum 0} ^:private unread-env-vars
   #{"MINIFORGE_LLM_TIMEOUT" "MINIFORGE_LLM_LINE_TIMEOUT" "MINIFORGE_LLM_MAX_TOKENS"
     "MINIFORGE_MAX_ITERATIONS" "MINIFORGE_MAX_TOKENS" "MINIFORGE_FAILURE_STRATEGY"
-    "MINIFORGE_ARTIFACTS_DIR"})
+    "MINIFORGE_ARTIFACTS_DIR"
+    "MINIFORGE_MODEL_SELECTION_ENABLED" "MINIFORGE_MODEL_SELECTION_STRATEGY"
+    "MINIFORGE_MODEL_SELECTION_COST_LIMIT" "MINIFORGE_MODEL_SELECTION_REQUIRE_LOCAL"
+    "MINIFORGE_SELF_HEALING_ENABLED" "MINIFORGE_SELF_HEALING_AUTO_APPLY"
+    "MINIFORGE_BACKEND_AUTO_SWITCH" "MINIFORGE_BACKEND_HEALTH_THRESHOLD"})
 
 (def ^{:stratum 0} ^:private unread-keys
   [[:llm :timeout-ms] [:llm :line-timeout-ms] [:llm :max-tokens]

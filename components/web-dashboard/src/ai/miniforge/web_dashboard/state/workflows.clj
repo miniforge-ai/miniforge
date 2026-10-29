@@ -19,6 +19,7 @@
    [clojure.java.io :as io]
    [clojure.string :as str]
    [ai.miniforge.web-dashboard.config :as dashboard-config]
+   [ai.miniforge.web-dashboard.event-files :as event-files]
    [ai.miniforge.web-dashboard.watcher :as watcher]))
 
 ;------------------------------------------------------------------------------ Layer 0
@@ -29,6 +30,19 @@
 (def ^{:stratum 0} events-dir-path
   "Default event archive directory shared by the CLI and dashboard."
   (str (config/miniforge-home) "/events"))
+
+(def ^{:stratum 0} ^:private recent-dir-reads
+  "{dir-path {:tracked tracking :events [event]}} for the workflow
+   directories `historical-events` read last, so a refresh reads only
+   the event files added since."
+  (atom {}))
+
+(def ^{:stratum 0} disk-retention
+  "What `historical-events` keeps of each workflow directory it reads:
+   the dashboard stream's own in-memory bound (every lifecycle event, the
+   newest health event per dependency, the newest 500 others). A deeper
+   history is read from disk per workflow, on demand."
+  es/bounded-retention)
 
 (def ^{:stratum 0} phase-lifecycle-types
   "Event types that carry phase classification data."
@@ -117,6 +131,22 @@
     (catch Exception _
       [])))
 
+(defn- ^{:stratum 0} compact-into
+  "`events` plus the events of `files`, compacted under `policy`. Files
+   are decoded a batch at a time, newest first (a batch never splits a
+   millisecond), each older batch in front of what is kept, so a long run
+   is never held in full. The result is merged with `events` by
+   `event-files/order-key` before the last compaction, since a delayed
+   file can be older than events already kept."
+  [policy events files]
+  (es/compact-events
+   (->> (event-files/newest-batches files (:max-events-per-workflow policy))
+        (reduce (fn [kept batch] (es/compact-events (into batch kept) policy)) [])
+        (into events)
+        (sort-by event-files/order-key)
+        vec)
+   policy))
+
 (defn ^{:stratum 0} wf-name-from-started
   "Extract a display name for a workflow from its started event."
   [started id]
@@ -187,6 +217,19 @@
 
 ;------------------------------------------------------------------------------ Layer 1
 
+(defn- ^{:stratum 1} read-dir
+  "[path read] for workflow directory `dir`: only files not read before
+   (per `reads`, see `recent-dir-reads`) are decoded, and both the events
+   and the file tracking stay bounded by `policy`. A file that turns up
+   among those already passed rebuilds the directory's events from all
+   its files."
+  [reads policy dir]
+  (let [path (str dir)
+        {:keys [tracked events] :or {events []}} (get reads path)
+        [tracked' files rebuild?] (event-files/unseen-files dir tracked
+                                                            (:max-events-per-workflow policy))]
+    [path {:tracked tracked' :events (compact-into policy (if rebuild? [] events) files)}]))
+
 (def ^{:stratum 1} stale-threshold-ms
   "Workflows with no events for this long are considered stale (10 minutes)."
   (:stale-threshold-ms defaults))
@@ -203,10 +246,11 @@
     0))
 
 (defn ^{:stratum 1} workflow-id=
-  "String-normalized workflow-id equality so UUID/string forms match."
+  "Workflow-id equality through `event-files/canonical-id`, so UUID,
+   string and keyword forms match."
   [expected event]
-  (= (some-> expected str)
-     (some-> (wf-id event) str)))
+  (= (event-files/canonical-id expected)
+     (event-files/canonical-id (wf-id event))))
 
 (defn ^{:stratum 1} workflow-event-file
   "Resolve the event file for a specific workflow-id."
@@ -215,20 +259,24 @@
 
 (defn ^{:stratum 1} dedupe-events
   "Deduplicate live + historical events by event-id, falling back to a
-   composite key of stable fields when no id is present."
+   composite key of stable fields when no id is present, keeping the
+   first of each in the order seen. Ids compare in their
+   `event-files/canonical-id` form."
   [events]
-  (->> events
-       (reduce (fn [acc event]
-                 (let [event-key (get event :event/id
-                                      [(get event :event/type)
-                                       (some-> (wf-id event) str)
-                                       (event-ts event)
-                                       (get event :event/sequence-number)
-                                       (get event :message)])]
-                   (assoc acc event-key event)))
-               {})
-       vals
-       vec))
+  (first
+   (reduce (fn [[kept seen :as acc] event]
+             (let [event-key (if-let [id (get event :event/id)]
+                               (event-files/canonical-id id)
+                               [(get event :event/type)
+                                (event-files/canonical-id (wf-id event))
+                                (event-ts event)
+                                (get event :event/sequence-number)
+                                (get event :message)])]
+               (if (contains? seen event-key)
+                 acc
+                 [(conj kept event) (conj seen event-key)])))
+           [[] #{}]
+           events)))
 
 (defn ^{:stratum 1} workflow-progress
   "Progress percentage for a workflow: 100 when terminal, 50 while running."
@@ -277,6 +325,13 @@
         (not (.isBefore evt-inst since-inst)))))
 
 ;------------------------------------------------------------------------------ Layer 2
+
+(defn ^{:stratum 2} event-order
+  "An event's place in creation order: its timestamp, then its
+   :event/sequence-number for events of one millisecond. A live event
+   has no file, so `event-files/order-key` cannot place it."
+  [event]
+  [(ts-epoch-ms (event-ts event)) (get event :event/sequence-number 0)])
 
 (defn ^{:stratum 2} wf-phase
   "Derive the current phase of a workflow from its events."
@@ -357,18 +412,30 @@
        vec))
 
 (defn ^{:stratum 2} historical-events
-  "Read archived events from disk for one workflow or the full archive."
+  "Events from disk (legacy `<workflow-id>.edn` files and file sink
+   directories) for one workflow, or, without a workflow-id, for the
+   `max-recent-workflows` most recently modified live/ and archived/
+   directories: no more than the list shows; the archive scan covers the
+   rest. Each directory (not the one-workflow read) is kept within
+   `disk-retention`."
   [workflow-id]
   (if workflow-id
-    (read-event-file (workflow-event-file workflow-id))
+    (into (or (read-event-file (workflow-event-file workflow-id)) [])
+          (event-files/workflow-events events-dir-path workflow-id))
     (let [edn-file? #(str/ends-with? (.getName ^java.io.File %) ".edn")
-          events-dir (io/file events-dir-path)]
+          events-dir (io/file events-dir-path)
+          reads (into {}
+                      (map (partial read-dir @recent-dir-reads disk-retention))
+                      (event-files/recent-dirs events-dir-path max-recent-workflows))]
+      (reset! recent-dir-reads reads)
       (if (.isDirectory events-dir)
-        (->> events-dir
-             .listFiles
-             (filter edn-file?)
-             (mapcat read-event-file)
-             vec)
+        (into (->> events-dir
+                   .listFiles
+                   (filter edn-file?)
+                   (mapcat read-event-file)
+                   vec)
+              (mapcat :events)
+              (vals reads))
         []))))
 
 (defn- ^{:stratum 2} matches-workflow? [workflow-id event]
@@ -404,7 +471,7 @@
                    (and (matches-workflow? workflow-id event)
                         (matches-event-type? event-type event)
                         (matches-since? since-inst event))))
-         (sort-by #(ts-epoch-ms (event-ts %)) >)
+         (sort-by event-order #(compare %2 %1))
          (take limit)
          vec)))
 
@@ -416,9 +483,9 @@
    keeps test isolation when callers use a non-default state."
   [state]
   (let [live-events (live-stream-events state)
-        live-wf-ids (into #{} (keep wf-id live-events))
+        live-wf-ids (into #{} (keep (comp event-files/canonical-id wf-id)) live-events)
         disk-events (->> (historical-events nil)
-                         (remove #(live-wf-ids (wf-id %))))]
+                         (remove #(live-wf-ids (event-files/canonical-id (wf-id %)))))]
     (into live-events disk-events)))
 
 ;------------------------------------------------------------------------------ Layer 4
@@ -428,7 +495,7 @@
    chronologically-ordered events. Returns the summary with
    dependency-health attached."
   [id wf-events]
-  (let [wf-events         (->> wf-events (sort-by #(ts-epoch-ms (event-ts %))) vec)
+  (let [wf-events         (->> wf-events (sort-by event-order) vec)
         started           (first-event :workflow/started   wf-events)
         completed         (last-event  :workflow/completed wf-events)
         failed            (last-event  :workflow/failed    wf-events)
@@ -474,8 +541,11 @@
   [state]
   (try
     (let [grouped-events (->> (merged-events state)
+                              ;; A watcher rebuild republishes events;
+                              ;; metrics must not sum the repeats.
+                              dedupe-events
                               (filter (comp some? wf-id))
-                              (group-by wf-id))]
+                              (group-by (comp event-files/canonical-id wf-id)))]
       (->> grouped-events
            (map (fn [[id wf-events]] (workflow-summary-from-events id wf-events)))
            (sort-by workflow-recency >)
@@ -508,7 +578,8 @@
   "Get workflow detail by string id."
   [state id]
   (let [workflows (get-workflows state)]
-    (or (first (filter #(= (str (:id %)) id) workflows))
+    (or (first (filter #(= (event-files/canonical-id (:id %)) (event-files/canonical-id id))
+                       workflows))
         {:error "Workflow not found"})))
 
 ;; Workflow command queue

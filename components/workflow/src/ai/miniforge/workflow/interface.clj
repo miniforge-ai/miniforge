@@ -20,7 +20,9 @@
    Public API groups live under ai.miniforge.workflow.interface.* namespaces,
    while this namespace remains the Polylith entrypoint."
   (:require
+   [ai.miniforge.workflow.checkpoint-store :as checkpoint-store]
    [ai.miniforge.workflow.checkpoint-store-gc :as checkpoint-gc]
+   [ai.miniforge.workflow.checkpoint-store-spec :as checkpoint-spec]
    [ai.miniforge.workflow.fsm :as fsm]
    [ai.miniforge.workflow.interface.checkpoints :as checkpoints]
    [ai.miniforge.workflow.interface.configurable :as configurable]
@@ -221,7 +223,23 @@
    [workflow input] or [workflow input opts]. Acquires the execution
    environment, runs phases, validates, publishes, and always cleans up.
    Returns the final execution context map; throws a slingshot anomaly on
-   governed-mode misconfiguration."
+   governed-mode misconfiguration.
+
+   Options an embedder supplies (see docs/architecture/workflow-component.md):
+   - :event-stream - required when any phase has gates. Each gate decision
+     is published as a :gate/decision event, and only an acknowledged
+     publication lets the phase advance. With no stream the decision is
+     unacknowledged and the gated phase fails closed. A process that keeps
+     its stream for days creates it with `:retention` (event-stream
+     `bounded-retention`) so the in-memory history stays bounded; sinks and
+     subscribers still see every event.
+   - :logger - the run's structured logger, kept as :execution/logger; the
+     default writes human-readable lines.
+   - :policy-packs - the packs the pack gates evaluate. Without it,
+     :policy-verify and :policy-review use the shipped standards pack, and
+     :policy-pack blocks.
+   - :checkpoint/root - where checkpoints are written; the default is the
+     configured root under the user's home."
   pipeline/run-pipeline)
 
 (def ^{:stratum 0} build-pipeline
@@ -258,6 +276,19 @@
    `:checkpoint/read-failures`; an unreadable snapshot or manifest
    returns an `:unavailable` anomaly naming every unreadable file."
   checkpoints/load-checkpoint-data)
+
+(def ^{:stratum 0} run-checkpoint-root
+  "The checkpoint root a run was checkpointed under: the default root when
+   it holds the run, else the root its events announce, else nil. Args:
+   [workflow-run-id events-dir]."
+  checkpoint-gc/run-checkpoint-root)
+
+(def ^{:stratum 0} pin-checkpoint!
+  "Pin a run's checkpoint: `:pinned? true` in its manifest, which the
+   checkpoint GC never collects and later checkpoints keep. Args:
+   [workflow-run-id] or [workflow-run-id opts]. Returns the manifest path,
+   or an anomaly (:not-found without a manifest, :unavailable on I/O)."
+  checkpoints/pin-checkpoint!)
 
 (def ^{:stratum 0} run-chain
   "Run a sequence of workflows, feeding each step's output into the next.
@@ -477,6 +508,12 @@
   visualize/machine->mermaid)
 
 ;; Checkpoint retention
+(def ^{:stratum 0} checkpoint-usage
+  "Read-only summary of the checkpoint root for `mf doctor`: {:checkpoint/root
+   :runs :older :oldest-days :max-age-days}, ages from run directory mtimes.
+   Args: [opts], as `gc-checkpoints!`. Deletes nothing."
+  checkpoint-gc/checkpoint-usage)
+
 (def ^{:stratum 0} gc-checkpoints!
   "Delete checkpoint directories unchanged for the retention period
    (default 30 days), keeping pinned runs, runs whose manifest does not
@@ -484,3 +521,33 @@
    :checkpoint/root, :max-age-days, :events-dir. Returns {:checkpoint/root
    :deleted [run-id] :kept {reason [run-id]} :failures [anomaly]}."
   checkpoint-gc/gc-checkpoints!)
+
+;; Spec integrity on resume
+(def ^{:stratum 0} spec-drift
+  "How the spec file a run was started from has changed since its first
+   checkpoint, or nil when it has not (or none was recorded). Args: the
+   run's checkpoint manifest. Returns {:workflow/spec-path
+   :spec/expected-hash :spec/actual-hash}; actual is nil when the file is
+   gone."
+  checkpoint-spec/spec-drift)
+
+(def ^{:stratum 0} spec-content-hash
+  "The digest `spec-file-hash` records, of spec text already read. Args:
+   [content]."
+  checkpoint-spec/spec-content-hash)
+
+(def ^{:stratum 0} spec-file-hash
+  "The SHA-256 digest a run's manifest records for its spec file, or nil
+   when `path` is not a readable file. Args: [path]."
+  checkpoint-spec/spec-file-hash)
+
+(def ^{:stratum 0} read-checkpoint-manifest
+  "A run's checkpoint manifest alone, readable even when its snapshot is
+   not. Args: [workflow-run-id] or [workflow-run-id opts]. Returns the
+   manifest, nil when absent, or an anomaly naming an unreadable file."
+  checkpoint-store/read-checkpoint-manifest)
+
+(def ^{:stratum 0} record-spec-path!
+  "Point a run's manifest at where its spec file now lives, keeping the
+   recorded hash. Args: [workflow-run-id spec-path] or [... opts]."
+  checkpoint-store/record-spec-path!)

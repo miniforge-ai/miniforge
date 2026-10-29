@@ -18,9 +18,12 @@
 (ns ai.miniforge.self-healing.stream-recovery-test
   "Tests for resume-on-kill / stall-recovery logic."
   (:require
-   [clojure.test :refer [deftest is testing]]
+   [clojure.test :refer [deftest is testing use-fixtures]]
    [ai.miniforge.self-healing.stream-recovery :as sut]
-   [ai.miniforge.self-healing.backend-health :as health]))
+   [ai.miniforge.self-healing.backend-health :as health]
+   [ai.miniforge.self-healing.home-test-support :as home]))
+
+(use-fixtures :each home/with-temp-home)
 
 ;------------------------------------------------------------------------------ Layer 0
 

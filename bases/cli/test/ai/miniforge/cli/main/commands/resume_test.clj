@@ -91,6 +91,19 @@
 (defn- ^{:stratum 0} write-event! [^java.io.File dir filename event-map]
   (spit (io/file dir filename) (json/generate-string event-map)))
 
+(defn- ^{:stratum 0} with-running-run
+  "Call `body-fn` with `sut/events-dir` at a temp events dir in which run
+   `id` is live and still running (its newest lifecycle event a start):
+   the only kind of run resumed under its own id."
+  [id body-fn]
+  (let [base (doto (io/file (System/getProperty "java.io.tmpdir") (str "mf-resume-test-" (random-uuid)))
+               .mkdirs)]
+    (spit (io/file (doto (io/file base "live" (str id)) .mkdirs) "20260420T000001Z-a.json")
+          (json/generate-string {"~:event/type" "~:workflow/started" "~:workflow/id" (str "~u" id)}))
+    (try
+      (with-redefs [sut/events-dir (.getPath base)] (body-fn))
+      (finally (doseq [^java.io.File f (reverse (file-seq base))] (.delete f))))))
+
 (deftest ^{:stratum 0} resume-workflow-passes-dag-recovery-data-test
   (let [workflow-id (random-uuid)
         run-pipeline-opts (atom nil)
@@ -240,8 +253,9 @@
         (is (= [{:phase :implement} {:phase :verify}]
                (:workflow/pipeline @run-pipeline-workflow)))
         (is (true? (:resume-reset-terminal? @run-pipeline-opts)))
-        (is (= workflow-id
-               (get-in @run-pipeline-opts [:resume-machine-snapshot :execution/id])))))))
+        (is (not= workflow-id
+                  (get-in @run-pipeline-opts [:resume-machine-snapshot :execution/id]))
+            "a run with no live, unfinished run directory resumes as a new attempt")))))
 
 (defn- ^{:stratum 0} resume-with
   "Run `resume-workflow` over `reconstructed` with every runtime seam
@@ -367,9 +381,10 @@
         snapshotted {:completed-phases [:plan]
                      :phase-results {:plan {}}
                      :machine-snapshot {:execution/id snapshot-id}}]
-    (testing "a snapshot resumes under its own id, which --run-id may repeat"
-      (is (= snapshot-id (:workflow-id (:opts (resume-with snapshotted {})))))
-      (is (= snapshot-id (:registered (resume-with snapshotted {:run-id (str snapshot-id)})))))
+    (testing "a snapshot of a live, unfinished run resumes under its own id, which --run-id may repeat"
+      (with-running-run snapshot-id
+        #(do (is (= snapshot-id (:workflow-id (:opts (resume-with snapshotted {})))))
+             (is (= snapshot-id (:registered (resume-with snapshotted {:run-id (str snapshot-id)})))))))
     (testing "another --run-id starts a new attempt: the snapshot's state under that id"
       (let [run-id (random-uuid)
             {:keys [opts registered]} (resume-with snapshotted {:run-id (str run-id)})]
@@ -378,8 +393,9 @@
     (testing "a run whose snapshot carries the run's own id takes a new --run-id too"
       (let [run-id (random-uuid)]
         (is (= run-id (:registered (resume-with snapshotted {::workflow-id snapshot-id :run-id (str run-id)}))))
-        (is (= snapshot-id (:registered (resume-with snapshotted {::workflow-id snapshot-id
-                                                                  :run-id (str snapshot-id)}))))))
+        (with-running-run snapshot-id
+          #(is (= snapshot-id (:registered (resume-with snapshotted {::workflow-id snapshot-id
+                                                                    :run-id (str snapshot-id)})))))))
     (testing "a --run-id naming a run with anything checkpointed is refused"
       (let [taken (random-uuid)]
         (with-redefs [workflow/checkpoint-present? #(= (str taken) (str %))]
@@ -468,6 +484,74 @@
             (is (= snapshot-id (:registered (resume-with snapshotted {}))))
             (is (= snapshot-id (:registered (resume-with snapshotted {:run-id (str snapshot-id)}))))))))))
 
+(deftest ^{:stratum 1} an-ended-live-run-resumes-as-a-new-attempt-test
+  (with-temp-events-dir
+    (fn [base-dir]
+      (with-redefs [sut/events-dir (.getPath ^java.io.File base-dir)]
+        (let [snapshot-id (random-uuid)
+              sink        {:config {:observability {:event-sinks [{:type :file :base-dir (str base-dir)
+                                                                     :ttl-ms Long/MAX_VALUE}]}}}
+              original    (es/create-event-stream sink)
+              month-ago   (- (System/currentTimeMillis) (* 30 24 60 60 1000))
+              snapshotted {:completed-phases [:plan]
+                           :phase-results {:plan {}}
+                           :machine-snapshot {:execution/id snapshot-id}}]
+          ;; A run that failed a month ago, still in live/.
+          (doseq [t [:workflow/started :workflow/failed]]
+            (es/publish! original (es/create-envelope original t snapshot-id (name t))))
+          (doseq [^java.io.File f (reverse (file-seq (io/file base-dir "live" (str snapshot-id))))]
+            (.setLastModified f month-ago))
+          (let [{:keys [registered]} (resume-with snapshotted {})
+                attempt (es/create-event-stream sink)]
+            (is (not= snapshot-id registered) "a new attempt, under a fresh id")
+            ;; The cleanup archives the original between the id choice and
+            ;; the attempt's first event.
+            (es/cleanup-stale-events! {:events-dir base-dir})
+            (is (.isDirectory (io/file base-dir "archived" (str snapshot-id))))
+            (es/publish! attempt (es/create-envelope attempt :workflow/started registered "resumed"))
+            (is (= [:workflow/started] (mapv :event/type (es/read-workflow-events-by-id base-dir registered)))
+                "readers of the attempt's id see its events")
+            (is (thrown-with-msg? clojure.lang.ExceptionInfo #"has ended or is archived"
+                                  (resume-with snapshotted {:run-id (str snapshot-id)}))
+                "a --run-id naming the ended run itself is refused")))))))
+
+(deftest ^{:stratum 1} the-newest-lifecycle-event-goes-by-time-not-file-name-test
+  (with-temp-events-dir
+    (fn [base-dir]
+      (with-redefs [sut/events-dir (.getPath ^java.io.File base-dir)]
+        (let [snapshot-id (random-uuid)
+              dir         (doto (io/file base-dir "live" (str snapshot-id)) .mkdirs)
+              event       (fn [type seq-num] {"~:event/type" type "~:workflow/id" (str "~u" snapshot-id)
+                                              "~:event/timestamp" "~t2026-04-20T00:00:01.000Z"
+                                              "~:event/sequence-number" seq-num})]
+          ;; One legacy second: the names put the start last, its sequence number first.
+          (write-event! dir "20260420T000001Z-a.json" (event "~:workflow/failed" 2))
+          (write-event! dir "20260420T000001Z-b.json" (event "~:workflow/started" 1))
+          (is (not= snapshot-id
+                    (:registered (resume-with {:completed-phases [:plan] :phase-results {:plan {}}
+                                               :machine-snapshot {:execution/id snapshot-id}}
+                                              {})))
+              "the failure is the newest event, so the run resumes as a new attempt"))))))
+
+(deftest ^{:stratum 1} a-run-archived-while-its-events-are-read-resumes-as-a-new-attempt-test
+  (let [snapshot-id (random-uuid)
+        snapshotted {:completed-phases [:plan] :phase-results {:plan {}}
+                     :machine-snapshot {:execution/id snapshot-id}}]
+    (doseq [[label partial-read] [["the scan comes back empty" (constantly nil)]
+                                  ["the scan misses the moved files"
+                                   (fn [_ _] (with-meta [{:event/type :workflow/started}]
+                                               {:event-stream/unreadable-files ["gone.json"]}))]]]
+      (with-running-run snapshot-id
+        (fn []
+          (with-redefs [es/read-workflow-events-by-id
+                        (fn [base id]
+                          ;; The cleanup archives the run during the read.
+                          (.mkdirs (io/file base "archived"))
+                          (.renameTo (io/file base "live" (str id)) (io/file base "archived" (str id)))
+                          (partial-read base id))]
+            (testing label
+              (is (not= snapshot-id (:registered (resume-with snapshotted {})))))))))))
+
 (deftest ^{:stratum 1} read-event-file-reads-per-event-json-from-workflow-dir-test
   ;; Regression guard for the iter-20 resume bug. Before this fix,
   ;; read-event-file looked for a single {workflow-id}.edn file that
@@ -522,6 +606,7 @@
     (testing "a rewind of that attempt restores a workspace from a phase it keeps"
       (is (= "after-implement" (:branch (:resume-workspace (:opts (resume attempt-events {:from-phase :verify})))))))
     (testing "a resume under the run's own id records nothing and keeps its metrics"
-      (let [{:keys [opts stream]} (resume (mapv persisted [["after-plan" :plan]]) {})]
-        (is (empty? (es/get-events stream)))
-        (is (= 9 (get-in opts [:resume-machine-snapshot :execution/metrics :tokens])))))))
+      (with-running-run (get-in history [:machine-snapshot :execution/id])
+        #(let [{:keys [opts stream]} (resume (mapv persisted [["after-plan" :plan]]) {})]
+           (is (empty? (es/get-events stream)))
+           (is (= 9 (get-in opts [:resume-machine-snapshot :execution/metrics :tokens]))))))))

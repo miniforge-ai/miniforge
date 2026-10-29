@@ -51,6 +51,23 @@
         (cmd-fn {:opts opts})))
     @code))
 
+(defn- ^{:stratum 0} run-failure-err
+  "Run `cmd-fn` with both runners throwing a not-found anomaly through
+   slingshot and the real error printer. Returns what went to stderr."
+  [cmd-fn opts]
+  (let [err (java.io.StringWriter.)
+        run (fn [& _]
+              (response/throw-anomaly! :anomalies/not-found
+                                       "Workflow not found: wf"
+                                       {:workflow-id "wf"}))]
+    (with-redefs [shared/exit! (fn [_] nil)
+                  workflow-runner/run-workflow! run
+                  workflow-runner/run-chain! run]
+      (binding [*out* (java.io.StringWriter.)
+                *err* err]
+        (cmd-fn {:opts opts})))
+    (str err)))
+
 (defn- ^{:stratum 0} resume-failure-output
   "Run `mf resume wf-1` with resume-workflow calling `throw!`, and the
    real error printers. Returns {:exit code-or-:no-exit :out stdout
@@ -76,8 +93,8 @@
       (is (= 1 (exit-code sut/workflow-run-cmd opts {:execution/status :failed}))))
     (testing "a workflow that throws exits 1"
       (is (= 1 (exit-code sut/workflow-run-cmd opts :throw))))
-    (testing "a missing workflow id exits 1"
-      (is (= 1 (exit-code sut/workflow-run-cmd {} {:execution/status :completed}))))))
+    (testing "a missing workflow id is a usage error: exit 2"
+      (is (= 2 (exit-code sut/workflow-run-cmd {} {:execution/status :completed}))))))
 
 (deftest ^{:stratum 1} chain-run-exit-code-test
   (let [opts {:chain-id "c"}]
@@ -87,8 +104,8 @@
       (is (= 1 (exit-code sut/chain-run-cmd opts {:chain/status :failed}))))
     (testing "a chain that throws exits 1"
       (is (= 1 (exit-code sut/chain-run-cmd opts :throw))))
-    (testing "a missing chain id exits 1"
-      (is (= 1 (exit-code sut/chain-run-cmd {} {:chain/status :completed}))))))
+    (testing "a missing chain id is a usage error: exit 2"
+      (is (= 2 (exit-code sut/chain-run-cmd {} {:chain/status :completed}))))))
 
 (deftest ^{:stratum 1} resume-exit-code-test
   (let [opts {:workflow-id "wf-1"}]
@@ -100,8 +117,8 @@
       (is (= :no-exit (exit-code sut/resume-cmd opts nil))))
     (testing "a resume that throws exits 1"
       (is (= 1 (exit-code sut/resume-cmd opts :throw))))
-    (testing "a missing workflow id exits 1"
-      (is (= 1 (exit-code sut/resume-cmd {} {:execution/status :completed}))))))
+    (testing "a missing workflow id is a usage error: exit 2"
+      (is (= 2 (exit-code sut/resume-cmd {} {:execution/status :completed}))))))
 
 (deftest ^{:stratum 1} resume-failure-is-reported-on-stderr-test
   (testing "a refused resume prints the anomaly's message on stderr, exits 1"
@@ -136,3 +153,13 @@
           interrupted? (Thread/interrupted)]
       (is (instance? InterruptedException thrown))
       (is interrupted? "the interrupt flag is restored"))))
+
+(deftest ^{:stratum 1} run-failure-prints-anomaly-message-test
+  (testing "a thrown anomaly is reported by its message, not as the raw map"
+    (doseq [[label cmd-fn opts prefix]
+            [["workflow run" sut/workflow-run-cmd {:workflow-id "wf"} "Workflow execution failed: "]
+             ["chain run" sut/chain-run-cmd {:chain-id "c"} "Chain execution failed: "]]]
+      (let [err (run-failure-err cmd-fn opts)]
+        (is (str/includes? err (str prefix "Workflow not found: wf")) label)
+        (is (not (str/includes? err "throw+")) label)
+        (is (not (str/includes? err ":anomaly/category")) label)))))

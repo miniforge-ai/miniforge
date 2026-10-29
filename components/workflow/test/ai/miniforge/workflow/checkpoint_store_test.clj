@@ -204,6 +204,21 @@
           (is (= :allow (get-in phase-file [:phase/result :phase/decision-envelope :envelope/decision]))
               "the phase checkpoint holds only the last iteration — the reason the history exists"))))))
 
+(deftest ^{:stratum 0} task-base-refs-survive-a-checkpoint-test
+  ;; A resumed implement measures the change from the base it recorded;
+  ;; dropped at checkpoint, it would recompute from the restored HEAD and
+  ;; exempt the task's earlier commits from the :no-secrets scan.
+  (checkpoint-test-support/call-with-temp-checkpoint-root
+    (fn [checkpoint-root]
+      (let [refs     ["spec-sha...HEAD" "task-base-sha"]
+            workflow {:workflow/id :test :workflow/version "1.0.0" :workflow/pipeline [{:phase :done}]}
+            ctx      (assoc (ctx/create-context workflow {:task "Test"} {:checkpoint/root checkpoint-root})
+                            :execution/task-base-refs refs)
+            _        (checkpoint-store/persist-execution-state! ctx)
+            snapshot (:machine-snapshot (checkpoint-store/load-checkpoint-data
+                                         (:execution/id ctx) {:checkpoint/root checkpoint-root}))]
+        (is (= refs (:execution/task-base-refs snapshot)))))))
+
 ;------------------------------------------------------------------------------ Layer 1
 
 (deftest ^{:stratum 1} persist-and-load-checkpoint-data-test

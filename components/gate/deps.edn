@@ -7,11 +7,14 @@
         ai.miniforge/decision-envelope {:local/root "../decision-envelope"}
         ai.miniforge/policy-clause {:local/root "../policy-clause"}
         ai.miniforge/policy-pack {:local/root "../policy-pack"}
+        ai.miniforge/redaction {:local/root "../redaction"}
         ai.miniforge/repo-analyzer {:local/root "../repo-analyzer"}
         ai.miniforge/response {:local/root "../response"}
         ai.miniforge/semantic-analyzer {:local/root "../semantic-analyzer"}
         ai.miniforge/logging {:local/root "../logging"}
         ai.miniforge/tool-registry {:local/root "../tool-registry"}
+        babashka/fs {:mvn/version "0.5.34"}
+        cheshire/cheshire {:mvn/version "5.13.0"}
         slingshot/slingshot {:mvn/version "0.12.2"}}
  :aliases
  {:test {:extra-paths ["test"]

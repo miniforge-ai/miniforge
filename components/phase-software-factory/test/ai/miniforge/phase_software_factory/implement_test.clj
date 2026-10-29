@@ -86,18 +86,40 @@
 (deftest ^{:stratum 0} default-config-test
   (testing "implement phase has correct default configuration"
     (is (= :implementer (:agent implement/default-config)))
-    (is (= [:syntax :format :lint :codex-consultation :stale-references] (:gates implement/default-config)))
+    (is (= [:syntax :format :lint :no-secrets :codex-consultation :stale-references] (:gates implement/default-config)))
     (is (map? (:budget implement/default-config)))
     (is (= 30000 (get-in implement/default-config [:budget :tokens])))
     (is (= 8 (get-in implement/default-config [:budget :iterations])))
     (is (= 600 (get-in implement/default-config [:budget :time-seconds])))))
+
+(deftest ^{:stratum 0} implement-re-entry-keeps-the-recorded-task-base-test
+  (testing "a resumed implement recovers the base its earlier attempt recorded, not the restored HEAD"
+    (is (= ["task-base"]
+           (#'implement/task-base-refs
+            {:execution/environment-metadata {:base-sha "restored-head"}
+             :execution/phase-results {:implement {:artifact {:code/base-refs ["task-base"]}}}}))))
+  (testing "with nothing recorded it computes fresh candidates"
+    (is (= ["restored-head"]
+           (#'implement/task-base-refs {:execution/environment-metadata {:base-sha "restored-head"}})))))
+
+(deftest ^{:stratum 0} capsule-file-reads-use-the-capsule-checkout-test
+  (testing "scope files are read from the capsule's checkout, not the host worktree path"
+    (let [seen (atom [])
+          ctx  {:execution/execute-fn (fn [_executor _env-id _cmd opts]
+                                        (swap! seen conj (:workdir opts))
+                                        {:data {:stdout "x" :exit-code 0}})
+                :execution/executor ::capsule
+                :execution/environment-id "env-1"
+                :execution/capsule-workdir "/workspace"}]
+      (#'implement/resolve-existing-files ctx {} "/host/worktrees/task-1" ["src/a.clj"])
+      (is (= ["/workspace"] (distinct @seen))))))
 
 (deftest ^{:stratum 0} phase-defaults-registration-test
   (testing "implement phase defaults are registered"
     (let [defaults (phase/phase-defaults :implement)]
       (is (some? defaults))
       (is (= :implementer (:agent defaults)))
-      (is (= [:syntax :format :lint :codex-consultation :stale-references] (:gates defaults))))))
+      (is (= [:syntax :format :lint :no-secrets :codex-consultation :stale-references] (:gates defaults))))))
 
 (deftest ^{:stratum 0} base-ref-candidates-include-resume-merge-base-ranges-test
   (testing "resumed workspaces diff from the original spec base to restored HEAD"

@@ -32,6 +32,7 @@
             [ai.miniforge.agent.interface :as agent]
             [ai.miniforge.logging.interface :as log]
             [ai.miniforge.phase.interface :as phase]
+            [ai.miniforge.phase.interface.gate :as phase-gate]
             [ai.miniforge.phase-software-factory.codex-pin :as codex-pin]
             [ai.miniforge.phase-software-factory.gap-wiring :as gap-wiring]
             [ai.miniforge.phase-software-factory.messages :as messages]
@@ -99,6 +100,23 @@
                  (str command " exited " exit))
      :data   (cond-> {:command command :exit exit :stderr stderr}
                executor-error (assoc :executor/error executor-error))}))
+
+(defn- ^{:stratum 0} porcelain-z-entries
+  "Parse `git status --porcelain -z` output into [status path] pairs.
+   With -z each entry is NUL-terminated and its path is never quoted or
+   escaped (without -z git wraps a path with spaces or non-ASCII bytes in
+   C-style quotes). A rename or copy entry is followed by its source
+   path, which is skipped."
+  [out]
+  (loop [records (str/split (or out "") #"\u0000")
+         entries []]
+    (if-let [record (first records)]
+      (if (< (count record) 4)
+        (recur (next records) entries)
+        (let [status (subs record 0 2)]
+          (recur (if (some #{\R \C} status) (nnext records) (next records))
+                 (conj entries [status (subs record 3)]))))
+      entries)))
 
 (defn- ^{:stratum 0} git-status-failed
   "Anomaly for a working-tree scan that could not run (git exited non-zero,
@@ -236,19 +254,20 @@
    these must not count as releasable work. Matches the same filter the
    curator applies upstream (iter-23 regression: empty-diff PRs).
 
+   Reads `git status -z`, whose paths are never quoted: without -z git
+   wraps a path with a space or non-ASCII bytes in C-style quotes, which
+   names no file on disk, and the file was left out of the release.
+
    Returns a `:release/git-status-failed` anomaly when the scan cannot
    run, never `[]` (which release would report as zero files)."
   [root-path]
   (try
-    (let [{:keys [exit out err]} (shell/sh "git" "status" "--porcelain" "-uall" :dir root-path)]
-      (if-let [failure (command-failure "git status --porcelain -uall" exit err nil)]
+    (let [{:keys [exit out err]} (shell/sh "git" "status" "--porcelain" "-uall" "-z" :dir root-path)]
+      (if-let [failure (command-failure "git status --porcelain -uall -z" exit err nil)]
         (git-status-failed root-path failure)
-        (->> (str/split-lines (or out ""))
-             (remove str/blank?)
-             (keep (fn [line]
-                     (let [xy   (subs line 0 2)
-                           path (str/trim (subs line 3))
-                           file (io/file root-path path)]
+        (->> (porcelain-z-entries out)
+             (keep (fn [[xy path]]
+                     (let [file (io/file root-path path)]
                        (cond
                          (str/includes? xy "D") {:path path :content "" :action :delete}
                          (.isFile file)         {:path path
@@ -282,33 +301,29 @@
                                              (get-in result [:data :exit-code])
                                              (get-in result [:data :stderr])
                                              (:error result))}))
-          path-of (fn [line] (str/trim (subs line 3)))
-          substantive-line? (fn [line]
-                              (and (>= (count line) 3)
-                                   (agent/substantive-file? {:path (path-of line)})))
-          read-entry (fn [line]
-                       (let [status (str/trim (subs line 0 2))
-                             path   (path-of line)]
-                         (if (str/includes? status "D")
-                           {:path path :content "" :action :delete}
-                           (let [{:keys [out failure]} (run (str "cat " root-path "/" path))]
-                             (if failure
-                               (git-status-failed root-path failure)
-                               {:path    path
-                                :content out
-                                :action  (if (= "??" status) :create :modify)})))))
-          {:keys [out failure]} (run "git status --porcelain -uall")]
+          read-entry (fn [[status path]]
+                       (if (str/includes? status "D")
+                         {:path path :content "" :action :delete}
+                         ;; The command runs under `sh -c`: quote the path so
+                         ;; spaces, `$`, `;` and the like reach cat as-is.
+                         (let [{:keys [out failure]}
+                               (run (str "cat " (agent/shell-quote (str root-path "/" path))))]
+                           (if failure
+                             (git-status-failed root-path failure)
+                             {:path    path
+                              :content out
+                              :action  (if (= "??" status) :create :modify)}))))
+          {:keys [out failure]} (run "git status --porcelain -uall -z")]
       (if failure
         (git-status-failed root-path failure)
-        (reduce (fn [files line]
-                  (let [entry (read-entry line)]
+        (reduce (fn [files entry]
+                  (let [entry (read-entry entry)]
                     (if (anomaly/anomaly? entry)
                       (reduced entry)
                       (conj files entry))))
                 []
-                (->> (str/split-lines out)
-                     (remove str/blank?)
-                     (filter substantive-line?)))))
+                (filter (fn [[_status path]] (agent/substantive-file? {:path path}))
+                        (porcelain-z-entries out)))))
     (catch Exception e
       (git-status-failed root-path {:detail (or (ex-message e) (.getName (class e)))
                                     :data   {:exception/class (.getName (class e))}}))))
@@ -427,7 +442,10 @@
                                (get-in default-config [:budget :iterations]))
         zero-files? (= :release/zero-files
                        (get-in result [:error :data :type]))
-        phase-status (if zero-files?
+        ;; A gate denial (projected onto :phase/status by the workflow's
+        ;; gate validation) fails the release whatever the agent returned.
+        gate-failed? (phase-gate/gate-failed? (:phase ctx))
+        phase-status (if (or zero-files? gate-failed?)
                        :failed
                        (phase/determine-phase-status
                         agent-status iterations max-iterations))

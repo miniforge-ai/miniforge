@@ -34,12 +34,8 @@
    also needs the path, to pass as `:checkpoint/root` or to read back.
 
    The override is a `with-redefs` on the single resolution point, below
-   config. Nothing above it works from inside a test: `MINIFORGE_HOME`
-   is process environment a running JVM cannot change, and it would not
-   move the root anyway — the default config resource
-   (`config/default-user-config-fallback.edn`) sets
-   `[:workflow :checkpoint-root]` to `~/.miniforge/checkpoints`, so the
-   merged config carries that value even under an empty home."
+   config: `MINIFORGE_HOME` is process environment a running JVM cannot
+   change, and a user's own config.edn may name a root of its own."
   (:require
    [ai.miniforge.workflow.checkpoint-store-paths :as checkpoint-paths]
    [ai.miniforge.workflow.context :as context]
@@ -91,6 +87,18 @@
                               (assoc opts :checkpoint/root root))
       (assoc :execution/current-phase :plan
              :execution/phase-results {:plan {:status :completed}})))
+
+(defn ^{:stratum 0} expired-run!
+  "A run checkpoint directory under `root`, last changed 90 days ago, with
+   a minimal manifest. Returns its id."
+  [root]
+  (let [id (random-uuid)
+        dir (fs/file root (str id))]
+    (fs/create-dirs dir)
+    (spit (fs/file dir "manifest.edn") "{:workflow/id 1}")
+    (doseq [f (reverse (file-seq dir))]
+      (.setLastModified ^java.io.File f (- (System/currentTimeMillis) (* 90 24 60 60 1000))))
+    id))
 
 ;------------------------------------------------------------------------------ Layer 1
 

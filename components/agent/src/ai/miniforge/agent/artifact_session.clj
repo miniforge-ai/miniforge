@@ -29,6 +29,7 @@
   (:require
    [ai.miniforge.agent.file-artifacts :as file-artifacts]
    [ai.miniforge.anomaly.interface :as anomaly]
+   [babashka.fs :as fs]
    [cheshire.core :as json]
    [clojure.edn :as edn]
    [clojure.java.io :as io]
@@ -76,12 +77,10 @@
    "INFO: MCP artifact not submitted — worktree-promotion succeeded (workdir: %s)"})
 
 (defn ^{:stratum 0} command-on-path?
-  "Check if a command exists on PATH."
+  "Check if a command exists on PATH. `fs/which` resolves it on every OS
+   (with PATHEXT on Windows, which has no `which` binary)."
   [cmd]
-  (try
-    (let [proc (.exec (Runtime/getRuntime) (into-array String ["which" cmd]))]
-      (zero? (.waitFor proc)))
-    (catch Exception _ false)))
+  (boolean (some-> cmd fs/which)))
 
 (defn- ^{:stratum 0} find-bb-root
   "Find the nearest ancestor directory whose bb.edn is miniforge's own: its
@@ -459,6 +458,17 @@
     (some #{:recorded} logs)   :recorded
     :else                      :absent))
 
+(defn ^{:stratum 0} pre-tool-use-settings
+  "Claude Code settings that run `hook-cmd` before every tool call. Each
+   PreToolUse entry is a matcher group, {\"matcher\" ... \"hooks\" [handler]},
+   as https://code.claude.com/docs/en/hooks and the settings JSON schema
+   require (the group's \"hooks\" key is required, and no other keys are
+   allowed); \"*\" matches every tool. A handler placed directly in the
+   PreToolUse array is not a valid entry, so Claude never runs it."
+  [hook-cmd]
+  {"hooks" {"PreToolUse" [{"matcher" "*"
+                           "hooks"   [{"type" "command" "command" hook-cmd}]}]}})
+
 ;------------------------------------------------------------------------------ Layer 1
 
 (defn- ^{:stratum 1} split-answers-segment
@@ -735,23 +745,23 @@
 
 (defn ^{:stratum 1} write-capsule-mcp-config!
   "Write MCP config and Claude settings inside the capsule.
-   The server command resolves to capsule-local bb/miniforge binary."
+   The server command resolves to capsule-local bb/miniforge binary:
+   `bb miniforge` runs the CLI, whose subcommand is `context-server`
+   (`mcp-context-server` is the name of the bb task, not a CLI command)."
   [session]
   (let [exec!       (:exec! session)
         executor    (:executor session)
         env-id      (:environment-id session)
         session-dir (:dir session)
         ;; Inside the capsule, bb and miniforge are available directly
-        srv-cmd     {:command "bb" :args ["miniforge" "mcp-context-server"
+        srv-cmd     {:command "bb" :args ["miniforge" "context-server"
                                           "--artifact-dir" session-dir]}
         mcp-config  (json/generate-string
                      {"mcpServers" {"context" {"command" (:command srv-cmd)
                                                "args"    (:args srv-cmd)}}}
                      {:pretty true})
         hook-cmd    "bb miniforge hook-eval"
-        settings    (json/generate-string
-                     {"hooks" {"PreToolUse" [{"type" "command" "command" hook-cmd}]}}
-                     {:pretty true})]
+        settings    (json/generate-string (pre-tool-use-settings hook-cmd) {:pretty true})]
     ;; Write configs inside capsule
     (exec! executor env-id (str "cat > " (file-artifacts/shell-quote (:mcp-config-path session)) " << 'MCPEOF'\n" mcp-config "\nMCPEOF")
            {:workdir (:workdir session)})
@@ -863,12 +873,8 @@
   [session-dir]
   (let [[cmd & args] (resolve-miniforge-command)
         hook-command (str/join " " (concat [cmd] args ["hook-eval"]))
-        settings {"hooks"
-                  {"PreToolUse"
-                   [{"type" "command"
-                     "command" hook-command}]}}
         path (str session-dir "/claude-settings.json")]
-    (spit path (json/generate-string settings {:pretty true}))
+    (spit path (json/generate-string (pre-tool-use-settings hook-command) {:pretty true}))
     path))
 
 ;; High-level session helpers
@@ -1305,7 +1311,7 @@
     (if (governed? context)
       (let [executor (:execution/executor context)
             env-id   (:execution/environment-id context)
-            workdir  (or (:execution/worktree-path context) "/workspace")
+            workdir  (or (:execution/capsule-workdir context) (:execution/worktree-path context) "/workspace")
             exec!    (or (:execution/execute-fn context) (missing-execute-fn!))
             session  (-> (create-capsule-session! executor env-id workdir exec!)
                          write-capsule-mcp-config!)]
@@ -1495,7 +1501,7 @@
     (if (governed? context)
       (let [executor (:execution/executor context)
             env-id   (:execution/environment-id context)
-            workdir  (or (:execution/worktree-path context) "/workspace")
+            workdir  (or (:execution/capsule-workdir context) (:execution/worktree-path context) "/workspace")
             exec!    (or (:execution/execute-fn context) (missing-execute-fn!))
             session  (-> (create-capsule-session! executor env-id workdir exec!)
                        write-capsule-mcp-config!)]

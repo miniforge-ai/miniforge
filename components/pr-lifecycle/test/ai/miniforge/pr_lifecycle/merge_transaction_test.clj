@@ -20,6 +20,7 @@
    merging, and a SHA read from the local worktree is not the merge
    commit."
   (:require
+   [ai.miniforge.config.interface :as config]
    [ai.miniforge.effect-transaction.interface :as fx]
    [ai.miniforge.pr-lifecycle.merge-authority :as authority]
    [ai.miniforge.pr-lifecycle.merge-transaction :as mt]
@@ -60,7 +61,9 @@
   ;; An audit trail written to whatever directory the process started in
   ;; is an audit trail nobody can find.
   (is (= "/tmp/x" (mt/store-dir {:effect-store-dir "/tmp/x"})))
-  (is (.startsWith ^String (mt/store-dir {}) (System/getProperty "user.home"))))
+  (with-redefs [config/miniforge-home (constantly "/mf-home")]
+    (is (= "/mf-home/effects" (mt/store-dir {}))))
+  (is (.isAbsolute (java.io.File. ^String (mt/store-dir {})))))
 
 ;------------------------------------------------------------------------------ Layer 1
 

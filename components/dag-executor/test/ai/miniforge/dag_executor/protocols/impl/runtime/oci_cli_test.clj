@@ -737,8 +737,8 @@
                            [:data :persisted?])))
         (let [[[cmd opts] & more] (credentialed-calls @calls)]
           (is (empty? more))
-          (is (= ["git" "-c" "core.hooksPath=/dev/null" "push" "https://github.com/o/r.git"
-                  "HEAD:task/x" "--force"]
+          (is (= ["git" "-c" "core.hooksPath=/dev/null" "push" "--force-with-lease=task/x:sha"
+                  "https://github.com/o/r.git" "HEAD:task/x"]
                  cmd))
           (is (= (str "Authorization: Basic " (basic-auth "x-access-token" fake-token))
                  (get-in opts [:env "GIT_CONFIG_VALUE_0"]))))

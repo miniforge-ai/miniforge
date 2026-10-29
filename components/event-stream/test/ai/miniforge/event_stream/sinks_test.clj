@@ -73,30 +73,6 @@
     (doseq [^java.io.File f files]
       (.setLastModified f t))))
 
-;; create-sink factory
-(deftest ^{:stratum 0} create-sink-keyword-test
-  (testing ":file produces a function"
-    (is (fn? (sinks/create-sink :file))))
-
-  (testing ":stdout produces a function"
-    (is (fn? (sinks/create-sink :stdout))))
-
-  (testing ":stderr produces a function"
-    (is (fn? (sinks/create-sink :stderr)))))
-
-(deftest ^{:stratum 0} create-sink-map-test
-  (testing "map with :type :file produces file sink"
-    (is (fn? (sinks/create-sink {:type :file}))))
-
-  (testing "map with :type :stdout produces stdout sink"
-    (is (fn? (sinks/create-sink {:type :stdout}))))
-
-  (testing "map with :type :stderr and filter produces stderr sink"
-    (is (fn? (sinks/create-sink {:type :stderr :filter (constantly true)}))))
-
-  (testing "map with unknown type throws"
-    (is (thrown? Exception (sinks/create-sink {:type :unknown})))))
-
 (deftest ^{:stratum 0} create-sink-vector-test
   (testing "vector creates multi-sink"
     (let [_received-1 (atom [])
@@ -111,25 +87,6 @@
     (is (thrown? Exception (sinks/create-sink 42)))
     (is (thrown? Exception (sinks/create-sink "invalid")))))
 
-;; create-sinks-from-config
-(deftest ^{:stratum 0} create-sinks-from-config-test
-  (testing "defaults to file sink when no config"
-    (let [created-sinks (sinks/create-sinks-from-config {})]
-      (is (= 1 (count created-sinks)))
-      (is (fn? (first created-sinks)))))
-
-  (testing "creates sinks from :observability :event-sinks"
-    (let [created-sinks (sinks/create-sinks-from-config
-                         {:observability {:event-sinks [:stdout]}})]
-      (is (= 1 (count created-sinks)))
-      (is (fn? (first created-sinks)))))
-
-  (testing "multiple sinks from config"
-    (let [created-sinks (sinks/create-sinks-from-config
-                         {:observability {:event-sinks [:file :stdout]}})]
-      (is (= 2 (count created-sinks)))
-      (is (every? fn? created-sinks)))))
-
 (deftest ^{:stratum 0} safe-ids-keep-their-directory-names-test
   (testing "UUIDs and keyword names are used as is, so existing event directories stay put"
     (let [id (random-uuid)]
@@ -140,6 +97,53 @@
           "an encoded id maps to the same directory every time"))))
 
 ;------------------------------------------------------------------------------ Layer 1
+
+(deftest ^{:stratum 1} file-sink-keeps-the-dir-it-was-created-with-test
+  ;; The sink is made while the default points at `dir`. The background
+  ;; cleanup is held until the default has moved on to `other`, then
+  ;; released, and an event is written then too: both must still use
+  ;; `dir`. Deletion is stubbed: the stub only records what it was given.
+  (with-temp-dir
+    (fn [dir]
+      (with-temp-dir
+        (fn [other]
+          (let [release (java.util.concurrent.CountDownLatch. 1)
+                seen (promise)
+                wf (random-uuid)]
+            (with-redefs [sinks/cleanup-stale-events! (fn [opts]
+                                                        (.await release 10 java.util.concurrent.TimeUnit/SECONDS)
+                                                        (deliver seen opts)
+                                                        0)]
+              (let [sink (with-redefs [sinks/default-events-dir (constantly dir)]
+                           (sinks/file-sink))]
+                (with-redefs [sinks/default-events-dir (constantly other)]
+                  (.countDown release)
+                  (sink (sample-event {:workflow/id wf}))
+                  (is (= (str dir) (str (:events-dir (deref seen 10000 ::never))))
+                      "cleanup runs on the creation-time dir")
+                  (is (seq (list-files (io/file dir "live" (str wf))))
+                      "writes go to the creation-time dir")
+                  (is (empty? (list-files (io/file other "live" (str wf))))))))))))))
+
+(deftest ^{:stratum 1} file-sink-with-an-explicit-nil-dir-uses-the-default-test
+  (with-temp-dir
+    (fn [dir]
+      (with-redefs [sinks/default-events-dir (constantly dir)]
+        (let [sink (sinks/file-sink {:base-dir nil})
+              wf (random-uuid)]
+          (sink (sample-event {:workflow/id wf}))
+          (is (seq (list-files (io/file dir "live" (str wf))))
+              "written under the default dir, not a relative live/"))))))
+
+(defn ^{:stratum 1} with-temp-default-events-dir
+  "Run `f` with the default events dir pointed at a temp dir, so a file
+   sink made without :base-dir neither writes nor prunes under the user's
+   ~/.miniforge/events."
+  [f]
+  (with-temp-dir
+    (fn [dir]
+      (with-redefs [sinks/default-events-dir (constantly dir)]
+        (f)))))
 
 ;; `mock-http-client` lives in the shared
 ;; `ai.miniforge.event-stream.test-helpers.http-mock` namespace so other
@@ -696,3 +700,54 @@
           (let [files (list-files (io/file root "live" (str wf-id)))]
             (is (= 1 (count files)))
             (is (not (str/includes? (.getName ^java.io.File (first files)) "..")))))))))
+
+;------------------------------------------------------------------------------ Layer 2
+
+;; create-sink factory
+(deftest ^{:stratum 2} create-sink-keyword-test
+  (with-temp-default-events-dir
+   (fn []
+    (testing ":file produces a function"
+      (is (fn? (sinks/create-sink :file))))
+
+    (testing ":stdout produces a function"
+      (is (fn? (sinks/create-sink :stdout))))
+
+    (testing ":stderr produces a function"
+      (is (fn? (sinks/create-sink :stderr)))))))
+
+(deftest ^{:stratum 2} create-sink-map-test
+  (with-temp-default-events-dir
+   (fn []
+    (testing "map with :type :file produces file sink"
+      (is (fn? (sinks/create-sink {:type :file}))))
+
+    (testing "map with :type :stdout produces stdout sink"
+      (is (fn? (sinks/create-sink {:type :stdout}))))
+
+    (testing "map with :type :stderr and filter produces stderr sink"
+      (is (fn? (sinks/create-sink {:type :stderr :filter (constantly true)}))))
+
+    (testing "map with unknown type throws"
+      (is (thrown? Exception (sinks/create-sink {:type :unknown})))))))
+
+;; create-sinks-from-config
+(deftest ^{:stratum 2} create-sinks-from-config-test
+  (with-temp-default-events-dir
+   (fn []
+    (testing "defaults to file sink when no config"
+      (let [created-sinks (sinks/create-sinks-from-config {})]
+        (is (= 1 (count created-sinks)))
+        (is (fn? (first created-sinks)))))
+
+    (testing "creates sinks from :observability :event-sinks"
+      (let [created-sinks (sinks/create-sinks-from-config
+                           {:observability {:event-sinks [:stdout]}})]
+        (is (= 1 (count created-sinks)))
+        (is (fn? (first created-sinks)))))
+
+    (testing "multiple sinks from config"
+      (let [created-sinks (sinks/create-sinks-from-config
+                           {:observability {:event-sinks [:file :stdout]}})]
+        (is (= 2 (count created-sinks)))
+        (is (every? fn? created-sinks)))))))

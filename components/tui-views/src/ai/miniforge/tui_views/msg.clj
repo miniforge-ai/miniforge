@@ -128,6 +128,12 @@
 (defn ^{:stratum 0} workflow-failed [wf-id error]
   [:msg/workflow-failed {:workflow-id wf-id :error error}])
 
+(defn ^{:stratum 0} workflow-resumed [wf-id]
+  [:msg/workflow-resumed {:workflow-id wf-id}])
+
+(defn ^{:stratum 0} workflow-named [wf-id wf-name]
+  [:msg/workflow-named {:workflow-id wf-id :name wf-name}])
+
 (defn ^{:stratum 0} gate-result [wf-id gate passed?]
   [:msg/gate-result {:workflow-id wf-id :gate gate :passed? passed?}])
 

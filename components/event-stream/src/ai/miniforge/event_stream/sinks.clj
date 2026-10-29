@@ -49,8 +49,8 @@
   (:import
    [java.io ByteArrayOutputStream]
    [java.net.http HttpClient HttpResponse$BodyHandlers]
-   [java.nio.file Files StandardCopyOption]
-   [java.time Instant ZonedDateTime ZoneOffset]
+   [java.nio.file Files LinkOption OpenOption StandardCopyOption StandardOpenOption]
+   [java.time Instant LocalDateTime ZonedDateTime ZoneOffset]
    [java.time.format DateTimeFormatter]))
 
 ;------------------------------------------------------------------------------ Layer 0
@@ -63,6 +63,11 @@
    debug a failed run days later; short enough that the on-disk event log
    doesn't grow unbounded on a busy fleet."
   (* 7 24 60 60 1000))
+
+(def ^{:stratum 0} ^:private warned-runs
+  "Live run directories cleanup has warned about keeping, so each is
+   reported once per process."
+  (atom #{}))
 
 (def ^{:stratum 0} ^:private manifest-filename
   "The per-workflow manifest's file name, read from the manifest
@@ -216,6 +221,96 @@
                           (< (.lastModified f) cutoff))))
                  children))))
 
+(defn- ^{:stratum 0} no-events?
+  "True when workflow directory `dir` holds no event file."
+  [^java.io.File dir]
+  (not-any? #(str/ends-with? (.getName ^java.io.File %) ".json") (.listFiles dir)))
+
+(defn- ^{:stratum 0} idle-unmanaged-run?
+  "True when live workflow directory `dir` has a visible name, no
+   manifest (no JVM runner manages it), nothing but event and temp files
+   besides an `archived.marker` an interrupted archive left (a regular
+   file: a symlink or a directory of that name makes the run ineligible),
+   and neither it nor any event file was modified since `cutoff`."
+  [^java.io.File dir cutoff manifest-name marker-name]
+  (let [children (.listFiles dir)]
+    (and (some? children)
+         (not (str/starts-with? (.getName dir) "."))
+         (< (.lastModified dir) cutoff)
+         (every? (fn [^java.io.File f]
+                   (let [n (.getName f)]
+                     (or (and (= marker-name n)
+                              (Files/isRegularFile (.toPath f)
+                                                   (into-array LinkOption [LinkOption/NOFOLLOW_LINKS])))
+                         (and (.isFile f)
+                              (not= manifest-name n)
+                              (or (str/ends-with? n ".json") (str/ends-with? n ".transit.tmp"))
+                              (< (.lastModified f) cutoff)))))
+                 children))))
+
+(defn- ^{:stratum 0} run-verdict
+  ":archive when the newest workflow lifecycle event in live run `dir`,
+   by event timestamp then sequence number across all of its event files,
+   ends the run: :workflow/completed (whatever its status),
+   :workflow/failed or :workflow/cancelled. Only a run idle for the TTL
+   is asked about, and resuming an archived run starts a new attempt from
+   archived/. :keep when the newest is a start or a resume (running, or
+   crashed). When any file in `dir` is a symlink, or an event file cannot
+   be read or decoded, a string saying which: the run stays, since the
+   event it cannot see could be a later start. File mtimes play no part
+   here; only the idle check reads them. Reads the transit-JSON this
+   namespace writes."
+  [^java.io.File dir]
+  (let [children (.listFiles dir)
+        parse (fn [^java.io.File f]
+                (try+ (json/parse-string (slurp f :encoding "UTF-8"))
+                      (catch Exception _ nil)))
+        order (fn [e] [(some-> (get e "~:event/timestamp") (subs 2) Instant/parse .toEpochMilli)
+                       (get e "~:event/sequence-number" 0)])
+        lifecycle #{"~:workflow/started" "~:workflow/resumed" "~:workflow/completed"
+                    "~:workflow/failed" "~:workflow/cancelled"}
+        symlink (some #(when (Files/isSymbolicLink (.toPath ^java.io.File %)) %) children)
+        events  (when-not symlink
+                  (->> children
+                       (filter #(str/ends-with? (.getName ^java.io.File %) ".json"))
+                       (map (juxt identity parse))))
+        bad     (some (fn [[f e]] (when-not (map? e) f)) events)
+        newest  (->> (map second events)
+                     (filter #(lifecycle (get % "~:event/type")))
+                     (sort-by order #(compare %2 %1))
+                     first)]
+    (cond
+      symlink (str "symlinked file " (.getName ^java.io.File symlink))
+      bad     (str "unreadable or undecodable event file " (.getName ^java.io.File bad))
+      (#{"~:workflow/completed" "~:workflow/failed" "~:workflow/cancelled"}
+       (get newest "~:event/type"))
+      :archive
+      :else :keep)))
+
+(defn- ^{:stratum 0} archive-completed-run!
+  "Archive live workflow directory `dir` into `archived-root` as the JVM
+   runner does at the end of a run: write its `archived.marker` first,
+   then move the directory in one atomic rename, so an archived
+   directory always has its marker; an interrupted attempt leaves the
+   run in live/ for the next cleanup. Returns 1 when moved, else 0."
+  [^java.io.File dir ^java.io.File archived-root marker-name]
+  (let [target (io/file archived-root (.getName dir))]
+    (if (.exists target)
+      0
+      (try+
+        (.mkdirs archived-root)
+        ;; NOFOLLOW_LINKS: a symlinked marker fails here instead of
+        ;; truncating whatever it points to outside the events tree.
+        (.close (Files/newOutputStream (.toPath (io/file dir marker-name))
+                                       (into-array OpenOption [StandardOpenOption/CREATE
+                                                               StandardOpenOption/TRUNCATE_EXISTING
+                                                               StandardOpenOption/WRITE
+                                                               LinkOption/NOFOLLOW_LINKS])))
+        (Files/move (.toPath dir) (.toPath target)
+                    (into-array StandardCopyOption [StandardCopyOption/ATOMIC_MOVE]))
+        1
+        (catch Exception _ 0)))))
+
 ;; Stream Sinks
 (defn ^{:stratum 0} stdout-sink
   "Create a stdout sink that prints events to standard output.
@@ -288,6 +383,20 @@
         (catch Exception _e
           ;; Continue with other sinks even if one fails
           nil)))))
+
+(defn ^{:stratum 0} event-file-ms
+  "The epoch ms an event file name records, inverting `event-filename`:
+   a legacy `{yyyyMMddTHHmmss[SSS]Z}-{uuid}.json` timestamp, or a
+   `{snowflake-hex16}__{seq12}.transit.json` id's timestamp bits. Orders
+   a directory mixing the grammars; nil for any other name."
+  [^String file-name]
+  (if-let [[_ ts ms] (re-matches #"(\d{8}T\d{6})(\d{3})?Z-[^/]+\.json" file-name)]
+    (+ (.toEpochMilli (.toInstant (LocalDateTime/parse ts (DateTimeFormatter/ofPattern "yyyyMMdd'T'HHmmss"))
+                                  ZoneOffset/UTC))
+       (if ms (Long/parseLong ms) 0))
+    (when-let [[_ hex] (re-matches #"([0-9a-f]{16})__\d{12}\.transit\.json" file-name)]
+      (+ snowflake/miniforge-epoch-ms
+         (bit-shift-right (Long/parseUnsignedLong hex 16) snowflake/ts-shift)))))
 
 ;------------------------------------------------------------------------------ Layer 1
 
@@ -369,9 +478,18 @@
   "Prune stored events whose retention has run out. What goes depends on
    where it lives under the events directory:
 
-     live/{wid}/      Nothing. An in-flight, paused or not-yet-archived
-                      workflow keeps every event file and its manifest
-                      however old they are: resume replays them.
+     live/{wid}/      Nothing of a run that has a manifest (the JVM
+                      runner's; its archive moves it) or that is still
+                      written to: resume replays it. A manifest-less run
+                      (a Babashka run, which never archives) idle for
+                      the TTL is archived here when its newest lifecycle
+                      event ends it (completed, failed or cancelled; a
+                      resume after that is a new attempt read from
+                      archived/), so the archived/ rules below apply to
+                      it next; one running or crashed stays; if it
+                      holds no event file, its directory goes. A run
+                      with a symlinked, unreadable or undecodable file
+                      stays, with one warning per process.
      archived/{wid}/  The whole directory, once its archive is older
                       than the TTL (by its `archived.marker`). One still
                       missing the marker is left for archive recovery.
@@ -424,6 +542,7 @@
                             (when-not (Files/isSymbolicLink (.toPath d)) d)))
             archived-root (real-subdir (layout/archived-subdir))
             operator-root (real-subdir (layout/operator-subdir))
+            live-root     (real-subdir (layout/live-subdir))
             archives (when archived-root
                        (->> (child-dirs archived-root)
                             (filter #(archive-expired? % cutoff))
@@ -441,8 +560,24 @@
                        0)
             temps (->> (walk-tree events-dir)
                        (filter #(stale? % ".transit.tmp"))
-                       delete-all!)]
-        (+ pruned operator temps))
+                       delete-all!)
+            marker    (layout/archived-marker-filename)
+            idle-live (when live-root
+                        (filter #(idle-unmanaged-run? % cutoff manifest-filename marker)
+                                (child-dirs live-root)))
+            emptied (reduce + 0 (map #(delete-all! (reverse (walk-tree %)))
+                                     (filter no-events? idle-live)))]
+        (when archived-root
+          (doseq [dir (remove no-events? idle-live)
+                  :let [verdict (run-verdict dir)
+                        key     (str dir)]]
+            (cond
+              (= :archive verdict) (archive-completed-run! dir archived-root marker)
+              (and (string? verdict)
+                   (not (contains? (first (swap-vals! warned-runs conj key)) key)))
+              (binding [*out* *err*]
+                (println (str "WARNING: event cleanup keeps " dir " in live/: " verdict))))))
+        (+ pruned operator temps emptied))
       0)))
 
 ;; Fleet Sink
@@ -626,36 +761,42 @@
 
    Returns: Sink function (fn [event] -> nil)"
   [& [opts]]
-  ;; Non-blocking cleanup on sink creation
-  (future (try (cleanup-stale-events! opts) (catch Exception _ nil)))
-  (fn [event]
-    (try
-      (let [base-dir (or (:base-dir opts) (default-events-dir))
-            file-path (if-let [workflow-id (:workflow/id event)]
-                        (event-file-path base-dir workflow-id event)
-                        (operator-event-file-path base-dir event))
-            f   (io/file file-path)
-            dir (or (.getParentFile f) (io/file "."))
-            _   (.mkdirs dir)
-            tmp (java.io.File/createTempFile ".es-" ".transit.tmp" dir)]
-        (try
-          ;; Explicit UTF-8: payload strings can carry non-ASCII and these
-          ;; files are a cross-language contract surface — platform default
-          ;; encoding must never decide the on-disk bytes.
-          (spit tmp (event->transit-json event) :encoding "UTF-8")
-          (Files/move (.toPath tmp) (.toPath f)
-                      (into-array StandardCopyOption
-                                  [StandardCopyOption/ATOMIC_MOVE
-                                   StandardCopyOption/REPLACE_EXISTING]))
-          (catch Throwable e
-            (try (Files/deleteIfExists (.toPath tmp))
-                 (catch Throwable cleanup-e (.addSuppressed e cleanup-e)))
-            (throw e))))
-      (catch Exception e
-        ;; Log to stderr so failures are visible without breaking the event stream
-        (binding [*out* *err*]
-          (println (str "WARNING: Event sink write failed: " (ex-message e))))
-        nil))))
+  ;; The directory is resolved once, at creation (an explicit nil
+  ;; :base-dir included): the background cleanup and every write use the
+  ;; one the sink was created for, never one resolved later (a test
+  ;; pointing the default at a temp dir while it creates the sink keeps
+  ;; the cleanup there too).
+  (let [base-dir (or (:base-dir opts) (default-events-dir))]
+    ;; Non-blocking cleanup on sink creation
+    (future (try (cleanup-stale-events! (update opts :events-dir #(or % base-dir)))
+                 (catch Exception _ nil)))
+    (fn [event]
+      (try
+        (let [file-path (if-let [workflow-id (:workflow/id event)]
+                          (event-file-path base-dir workflow-id event)
+                          (operator-event-file-path base-dir event))
+              f   (io/file file-path)
+              dir (or (.getParentFile f) (io/file "."))
+              _   (.mkdirs dir)
+              tmp (java.io.File/createTempFile ".es-" ".transit.tmp" dir)]
+          (try
+            ;; Explicit UTF-8: payload strings can carry non-ASCII and these
+            ;; files are a cross-language contract surface — platform default
+            ;; encoding must never decide the on-disk bytes.
+            (spit tmp (event->transit-json event) :encoding "UTF-8")
+            (Files/move (.toPath tmp) (.toPath f)
+                        (into-array StandardCopyOption
+                                    [StandardCopyOption/ATOMIC_MOVE
+                                     StandardCopyOption/REPLACE_EXISTING]))
+            (catch Throwable e
+              (try (Files/deleteIfExists (.toPath tmp))
+                   (catch Throwable cleanup-e (.addSuppressed e cleanup-e)))
+              (throw e))))
+        (catch Exception e
+          ;; Log to stderr so failures are visible without breaking the event stream
+          (binding [*out* *err*]
+            (println (str "WARNING: Event sink write failed: " (ex-message e))))
+          nil)))))
 
 ;------------------------------------------------------------------------------ Layer 5
 

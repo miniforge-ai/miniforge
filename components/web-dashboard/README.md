@@ -52,6 +52,32 @@ miniforge dashboard --open
 
 Visit <http://localhost:8080> to see the dashboard.
 
+## Security
+
+The dashboard binds to `127.0.0.1` unless `MINIFORGE_WEB_HOST` names another
+address. On a loopback bind it answers only to `localhost`, `127.0.0.1`, `[::1]` or
+its configured address on its own port in the `Host` header (a `Host`
+without a port means 80), so a DNS rebinding attack cannot reach it.
+
+On any bind it:
+
+1. refuses a WebSocket upgrade (`/ws`, `/ws/events`) or a state-changing
+   request whose `Origin` is not the dashboard's own;
+2. refuses a state-changing request with a `text/plain` body;
+3. accepts events on `/api/events/ingest` and `/ws/events` only with this
+   start's token in the `X-Miniforge-Ingest-Token` header. The token is in
+   the discovery file `~/.miniforge/dashboard.port`, which only its owner
+   can read.
+
+A public bind requires operator login (`MINIFORGE_WEB_USERNAME` and
+`MINIFORGE_WEB_PASSWORD`). The dashboard does not terminate TLS, so put a
+public bind behind a TLS proxy that sets `X-Forwarded-Proto: https`, and
+set `MINIFORGE_WEB_TRUST_PROXY=true` so the dashboard believes that
+header (an explicit `:trust-proxy? false` option overrides it, and a
+loopback bind ignores forwarded headers). Origins are then compared as `https` on port 443, and the session
+cookie carries the `Secure` flag. Without the setting, X-Forwarded-Proto
+is ignored.
+
 ## Structure
 
 ```text

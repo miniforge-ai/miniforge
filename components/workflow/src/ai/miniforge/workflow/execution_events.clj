@@ -18,13 +18,18 @@
 (ns ai.miniforge.workflow.execution-events
   "Events the phase executor publishes: the gate decision for a gated
    transition, and whether the DAG executor took over after the plan
-   phase. Every publisher swallows its own failures — observability must
-   not break execution.
+   phase. The gate decision returns its acknowledgment or an anomaly,
+   because a gated phase may not advance on a decision that was not
+   recorded. The DAG publishers swallow their own failures —
+   observability must not break execution.
 
    Split out of `execution` (rule 210), which held these alongside the
    phase lifecycle, gate/transition logic and DAG integration as one
    six-stratum file."
-  (:require [ai.miniforge.event-stream.interface :as events]))
+  (:require [ai.miniforge.anomaly.interface :as anomaly]
+            [ai.miniforge.event-stream.interface :as events]
+            [ai.miniforge.workflow.messages :as messages]
+            [slingshot.slingshot :refer [try+]]))
 
 ;------------------------------------------------------------------------------ Layer 0
 
@@ -39,24 +44,38 @@
   [ctx]
   (or (:execution/id ctx) (:workflow/id ctx) (:workflow-id ctx)))
 
+(defn- ^{:stratum 0} resolve-phase
+  "Phase maps built by `phase/enter-context` carry their name under :name;
+   the active phase identity is the fallback."
+  [ctx phase-result]
+  (or (:phase/name phase-result) (:name phase-result) (:phase phase-result)
+      (:execution/current-phase ctx)))
+
+(defn- ^{:stratum 0} nonfatal? [value]
+  (not (instance? Error value)))
+
+(defn- ^{:stratum 0} decision-failure [reason data]
+  (anomaly/anomaly :unavailable (messages/t :gate/decision-unacknowledged)
+                   (assoc data :gate/publication-reason reason)))
+
 ;------------------------------------------------------------------------------ Layer 1
 
-(defn ^{:stratum 1} emit-phase-decision!
-  "Publish the :gate/decision event for a gated transition; never breaks
-   enforcement. Stream and workflow id come from the canonical resolvers
-   (same lookup as phase telemetry), so contexts carrying the stream under
-   :execution/opts publish too."
-  [ctx phase-result envelope]
-  (try
-    (when-let [stream (resolve-event-stream ctx)]
-      (when envelope
-        (events/publish! stream
-                         (events/phase-decision stream (resolve-workflow-id ctx)
-                                                (or (:phase/name phase-result)
-                                                    (:phase phase-result))
-                                                envelope))))
-    (catch Exception _ nil))
-  nil)
+(defn- ^{:stratum 1} acknowledged-decision
+  "Return the receipt only when it is this decision at an assigned stream position.
+   A current stream returns it after a durable journal commit. A legacy stream
+   returns the event it delivered; its sinks swallow write failures, so a legacy
+   receipt shows delivery to the stream, not persistence."
+  [event receipt]
+  (let [identity-fields [:event/id :event/type :event/version :workflow/id :scope/type
+                         :gate/phase :envelope/id :gate/decision-envelope]]
+    (cond
+      (anomaly/any-anomaly? receipt) receipt
+      (and (map? receipt) (not (:rejected? receipt))
+           (= (select-keys event identity-fields) (select-keys receipt identity-fields))
+           (nat-int? (:event/sequence-number receipt))
+           (or (not (contains? event :event/sequence-number))
+               (= (:event/sequence-number event) (:event/sequence-number receipt)))) receipt
+      :else (decision-failure :unconfirmed (select-keys event [:event/id :envelope/id])))))
 
 (defn ^{:stratum 1} emit-dag-considered!
   "Emit a :workflow/dag-considered event describing whether DAG fired and why.
@@ -105,3 +124,32 @@
                                       :dag/reason      reason}
                                      extra))
       (catch Exception _ nil))))
+
+;------------------------------------------------------------------------------ Layer 2
+
+(defn ^{:stratum 2} emit-phase-decision!
+  "Publish the :gate/decision event for a gated transition. Returns the
+   acknowledged receipt, or an anomaly when there is no envelope or no event
+   stream, when construction or publication returns an anomaly, when the
+   receipt is rejected or does not match the decision, or when publication
+   throws. Errors propagate; an interrupt is restored on the thread. Stream
+   and workflow id come from the same resolvers as phase telemetry."
+  [ctx phase-result envelope]
+  (let [stream (resolve-event-stream ctx)]
+    (cond
+      (nil? envelope) (decision-failure :missing-envelope {})
+      (nil? stream) (decision-failure :missing-stream {})
+      :else
+      (try+
+        (let [event (events/phase-decision stream (resolve-workflow-id ctx)
+                                           (resolve-phase ctx phase-result) envelope)]
+          (if (anomaly/any-anomaly? event)
+            event
+            (acknowledged-decision event (events/publish! stream event))))
+        (catch anomaly/any-anomaly? failure failure)
+        #_{:clj-kondo/ignore [:unresolved-symbol]}
+        (catch nonfatal? _
+          (let [thrown (:throwable &throw-context)]
+            (when (instance? InterruptedException thrown)
+              (.interrupt (Thread/currentThread)))
+            (decision-failure :exception {:error (ex-message thrown)})))))))
