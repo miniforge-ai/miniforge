@@ -123,6 +123,16 @@
       (is (str/includes? out (app-config/artifacts-dir)))
       (is (not (str/includes? out stale-dir))))))
 
+(deftest ^{:stratum 0} cli-defaults-name-no-model-test
+  (testing "the defaults that config init writes name no model"
+    ;; In the user's file a model is read as their choice for every role
+    ;; on every backend.
+    (is (nil? (get-in config/default-config [:llm :model]))))
+  (testing "config list says when no model is set"
+    (let [out (with-out-str
+                (config/display-config {:llm {:backend :codex}} "/nonexistent/config.edn"))]
+      (is (str/includes? out "model: not set")))))
+
 (deftest ^{:stratum 0} parse-config-value-rejects-reader-eval-test
   (testing "parse-config-value returns the raw string for #=() reader-eval forms"
     ;; edn/read-string rejects #=(...) — the catch block returns the literal

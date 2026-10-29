@@ -635,6 +635,7 @@
   :config/llm-backend "  backend: {backend} ({provider})"
   :config/llm-backend-provider-unknown "Unknown"
   :config/llm-model "  model: {model}"
+  :config/llm-model-unset "  model: not set (each role uses its default for the backend)"
   :config/section-artifacts "Artifacts:"
   :config/artifacts-dir "  dir: {dir}"
   :config/section-config-files "Config Files:"

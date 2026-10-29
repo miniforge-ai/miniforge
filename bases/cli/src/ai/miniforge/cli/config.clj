@@ -146,7 +146,9 @@
                         :provider (or (get-in backend-config/backend-specs
                                               [(get-in config [:llm :backend]) :provider])
                                       (messages/t :config/llm-backend-provider-unknown))}))
-  (println (messages/t :config/llm-model {:model (get-in config [:llm :model])}))
+  (println (if-let [model (get-in config [:llm :model])]
+             (messages/t :config/llm-model {:model model})
+             (messages/t :config/llm-model-unset)))
   (println)
 
   ;; Artifacts. The directory comes from MINIFORGE_HOME, not from
