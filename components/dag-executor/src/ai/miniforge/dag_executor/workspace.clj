@@ -95,12 +95,18 @@
                            (exec-fn ["git" "-c" "commit.gpgsign=false" "commit" "-m" (str message)]))
                 push-r (when (and push? (not (failed-step commit-r "")))
                          (exec-fn ["git" "push" "origin" (str "HEAD:" branch) "--force"]))
+                ;; A --single-branch clone's fetch refspec never moves the
+                ;; task branch's tracking ref, so the pending count above
+                ;; would stay positive after every push: move it here.
+                track-r (when (and push-r (not (failed-step push-r "")))
+                          (exec-fn ["git" "update-ref" (str "refs/remotes/origin/" branch) "HEAD"]))
                 sha-r (when (and (not (failed-step commit-r ""))
-                                 (or (not push?) (and push-r (not (failed-step push-r "")))))
+                                 (or (not push?) (and track-r (not (failed-step track-r "")))))
                         (exec-fn "git rev-parse HEAD"))]
             (cond
               (failed-step commit-r "") (result/err :persist-commit-failed (failed-step commit-r "git commit failed"))
               (failed-step push-r "")   (result/err :persist-push-failed (failed-step push-r "git push failed"))
+              (failed-step track-r "")  (result/err :persist-tracking-failed (failed-step track-r "git update-ref failed"))
               (failed-step sha-r "")    (result/err :persist-sha-failed (failed-step sha-r "git rev-parse failed"))
               :else (result/ok {:persisted? true
                                 :pushed? (boolean push?)
