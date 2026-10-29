@@ -27,6 +27,7 @@
             [ai.miniforge.gate.registry  :as registry]
             [ai.miniforge.policy-pack.interface :as policy-pack]
             [ai.miniforge.response.interface :as response]
+            [cheshire.core               :as json]
             [slingshot.slingshot         :refer [try+]]))
 
 ;------------------------------------------------------------------------------ Layer 0
@@ -125,8 +126,11 @@
 
    Arguments:
      artifact - Artifact with :artifact/content (and optional :artifact/path),
-                forwarded to policy-pack/check-artifact
-     ctx      - Execution context with :policy-packs, :task-type, :phase
+                forwarded to policy-pack/check-artifact. A map without content
+                is scanned as its JSON encoding.
+     ctx      - Execution context with :policy-packs, :task-type and :phase
+                (a phase keyword, or the lifecycle's phase map, whose :name
+                is used)
 
    Returns:
      {:passed? bool :errors [] :warnings [] :approval-required []}. Blocking
@@ -137,7 +141,21 @@
   (try+
     (let [packs (get ctx :policy-packs [])
           task-type (get ctx :task-type :implement)
-          phase (get ctx :phase :implement)]
+          ;; In the workflow lifecycle ctx :phase is the phase MAP; reading it
+          ;; as the phase matched no phase-scoped rule, so none applied.
+          ctx-phase (:phase ctx)
+          phase (cond
+                  (keyword? ctx-phase) ctx-phase
+                  (map? ctx-phase) (get ctx-phase :name (get ctx :execution/current-phase :implement))
+                  :else (get ctx :execution/current-phase :implement))
+          ;; Rules scan text. A structured artifact without content (the
+          ;; provision phase's parsed Pulumi preview) is scanned as its JSON
+          ;; encoding, the format deployment rules are written against;
+          ;; scanning nothing let every rule pass.
+          artifact (if (and (map? artifact)
+                            (not-any? #(contains? artifact %) [:artifact/content :content :code/files]))
+                     (assoc artifact :artifact/content (json/generate-string artifact))
+                     artifact)]
       (if (empty? packs)
         {:passed? false
          :errors [{:type :no-policy-packs
@@ -187,42 +205,44 @@
                  :message "Potential hardcoded secrets detected"
                  :matches matches}]})))
 
-(defmethod ^{:stratum 1} registry/get-gate :no-secrets
+;------------------------------------------------------------------------------ Layer 2
+
+(defmethod ^{:stratum 2} registry/get-gate :no-secrets
   [_]
   {:name :no-secrets
    :description "Validates no hardcoded secrets in content"
    :check check-no-secrets
    :repair nil})
 
-(defmethod ^{:stratum 1} registry/get-gate :plan-complete
+(defmethod ^{:stratum 2} registry/get-gate :plan-complete
   [_]
   {:name :plan-complete
    :description "Validates plan artifact is complete"
    :check check-plan-complete
    :repair nil})
 
-(defmethod ^{:stratum 1} registry/get-gate :review-approved
+(defmethod ^{:stratum 2} registry/get-gate :review-approved
   [_]
   {:name :review-approved
    :description "Validates review is approved"
    :check check-review-approved
    :repair nil})
 
-(defmethod ^{:stratum 1} registry/get-gate :quality-check
+(defmethod ^{:stratum 2} registry/get-gate :quality-check
   [_]
   {:name :quality-check
    :description "General quality validation"
    :check check-quality
    :repair nil})
 
-(defmethod ^{:stratum 1} registry/get-gate :release-ready
+(defmethod ^{:stratum 2} registry/get-gate :release-ready
   [_]
   {:name :release-ready
    :description "Validates artifact is ready for release"
    :check check-release-ready
    :repair nil})
 
-(defmethod ^{:stratum 1} registry/get-gate :policy-pack
+(defmethod ^{:stratum 2} registry/get-gate :policy-pack
   [_]
   {:name :policy-pack
    :description "Validates code against loaded policy packs by enforcement action"

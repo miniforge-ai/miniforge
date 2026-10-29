@@ -225,6 +225,19 @@
           result ((:leave interceptor) ctx)]
       (is (= :failed (get-in result [:phase :status]))))))
 
+(deftest ^{:stratum 0} leave-release-keeps-a-gate-failure-test
+  (testing "a release its gates failed leaves :failed although the agent succeeded"
+    (let [interceptor (phase/get-phase-interceptor {:phase :release})
+          ctx {:phase {:started-at (System/currentTimeMillis)
+                       :result {:status :success :output {}}
+                       :phase/status :failed
+                       :budget {:iterations 2}
+                       :iterations 1}
+               :execution/metrics {:tokens 0 :duration-ms 0}}
+          result ((:leave interceptor) ctx)]
+      (is (= :failed (get-in result [:phase :status])))
+      (is (not (some #{:release} (get-in result [:execution :phases-completed])))))))
+
 (deftest ^{:stratum 0} leave-release-skips-verdict-on-retrying-status-test
   ;; Phase 3b regression guard. compute-verdict's `phase-failed?`
   ;; predicate is false when status is :retrying — without the

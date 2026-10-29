@@ -19,6 +19,7 @@
   "Backend and model selection for agent roles: the backend never changes,
    and the model follows the backend unless the user config names one."
   (:require
+   [clojure.string :as str]
    [clojure.test :refer [deftest testing is]]
    [ai.miniforge.agent.model :as model]
    [ai.miniforge.config.interface :as config]
@@ -157,9 +158,45 @@
       (is (= [:anthropic-api "claude-sonnet-4-6"] (backend+model resolved)))
       (is (= "test-key" (get-in resolved [:config :api-key]))
           "the client keeps the rest of its config")))
-  (testing "a catalog model of another backend stays on the configured backend"
-    (is (= [:claude "gpt-5.4"]
-           (backend+model
-            (resolve-with-config {:agents {:default-models {:thinking "gpt-5.4"}}}
-                                 :planner
-                                 (llm/create-client {:backend :claude})))))))
+  (testing "a catalog model of another backend is skipped; the backend stays"
+    (is (= [:claude "claude-opus-4-6"]
+           (binding [*err* (java.io.StringWriter.)]
+             (backend+model
+              (resolve-with-config {:llm {:backend :claude}
+                                    :agents {:default-models {:thinking "gpt-5.4"}}}
+                                   :planner
+                                   (llm/create-client {:backend :claude}))))))))
+
+;; A setting the backend cannot serve never reaches its CLI
+(deftest ^{:stratum 1} mismatched-catalog-model-is-skipped-test
+  (testing "an older config's anthropic/ llm.model on codex: warned once, codex default"
+    (some-> (resolve 'ai.miniforge.agent.model/warned-mismatches) deref (reset! #{}))
+    (let [err (java.io.StringWriter.)
+          cfg (over-shipped-defaults {:llm {:backend :codex
+                                            :model "anthropic/claude-sonnet-4-5"}})
+          resolved (binding [*err* err]
+                     (doall (for [role [:implementer :reviewer]]
+                              (backend+model (resolve-with-config
+                                              cfg role (llm/create-client {:backend :codex}))))))]
+      (is (= [[:codex nil] [:codex nil]] resolved))
+      (is (= 1 (count (re-seq #"Ignoring llm\.model" (str err)))))
+      (is (str/includes? (str err) "anthropic/claude-sonnet-4-5"))
+      (is (str/includes? (str err) "codex"))))
+  (testing "a Claude id on gemini-api is skipped too"
+    (is (= [:gemini-api nil]
+           (binding [*err* (java.io.StringWriter.)]
+             (backend+model (resolve-with-config
+                             {:llm {:backend :gemini-api :model "claude-sonnet-4-6"}}
+                             :implementer (llm/create-client {:backend :gemini-api})))))))
+  (testing "a skipped tier setting falls through to llm.model"
+    (is (= "claude-sonnet-4-5"
+           (binding [*err* (java.io.StringWriter.)]
+             (with-redefs [config/load-merged-config
+                           (constantly {:llm {:backend :claude :model "claude-sonnet-4-5"}
+                                        :agents {:default-models {:execution "gpt-5.4"}}})]
+               (model/default-model-for-role :implementer))))))
+  (testing "a model the catalog does not know is used as given"
+    (is (= [:codex "gpt-6-preview"]
+           (backend+model (resolve-with-config
+                           {:llm {:backend :codex :model "gpt-6-preview"}}
+                           :implementer (llm/create-client {:backend :codex})))))))

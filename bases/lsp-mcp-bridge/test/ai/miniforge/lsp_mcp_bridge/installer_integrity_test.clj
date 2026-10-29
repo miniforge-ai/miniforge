@@ -59,7 +59,7 @@
         entry    {:github "example/tool" :version "v1" :binary "tool"
                   :assets {"test-platform" asset}}]
     (with-redefs [installer/bin-dir       (constantly bin-dir)
-                  fs/create-temp-dir      (fn [opts] (fs/create-dirs (fs/path (:dir opts) "staging tmp's")))
+                  fs/create-temp-dir      (fn [opts] (fs/create-dirs (fs/path (:dir opts) (str "staging tmp's " (random-uuid)))))
                   installer/download-file (fn [_url dest] (write-archive! dest) nil)]
       [(binding [*err* (java.io.StringWriter.)]
          (installer/install-via-github entry "test-platform"))
@@ -93,6 +93,58 @@
     (fs/create-dirs (fs/parent path))
     (spit path "stale")
     (f path)))
+
+(def ^{:stratum 0} gz-entry
+  {:github "example/tool" :version "v1" :binary "tool"
+   :assets {(installer/platform-key) {:file "tool.gz" :extract :gzip}}})
+
+(defn ^{:stratum 0} await-latch
+  "Wait at most 10 s for `latch`, so a failed prerequisite cannot hang the
+   suite; true when it opened."
+  [^java.util.concurrent.CountDownLatch latch]
+  (.await latch 10 java.util.concurrent.TimeUnit/SECONDS))
+
+(defn ^{:stratum 0} deref-bounded
+  "Deref future `f`, waiting at most 10 s; ::timed-out otherwise."
+  [f]
+  (deref f 10000 ::timed-out))
+
+(defn ^{:stratum 0} await-parked
+  "Spin (no sleep) until the thread delivered to promise `p` parks, WAITING
+   or TIMED_WAITING. Each step waits at most 10 s."
+  [p]
+  (when-let [^Thread thread (deref p 10000 nil)]
+    (let [deadline (+ (System/nanoTime) 10000000000)]
+      (while (and (not (#{"WAITING" "TIMED_WAITING"} (str (.getState thread))))
+                  (< (System/nanoTime) deadline))
+        (Thread/onSpinWait)))))
+
+(def ^{:stratum 0} lock-holder-script
+  "bb program for a second process: take the FileChannel lock on argv[0],
+   print \"locked\", wait for a line on stdin, write an executable target at
+   argv[1] (the install it completed), then exit, which releases the lock."
+  (str "(let [[lock-file target] *command-line-args*"
+       "      ch (java.nio.channels.FileChannel/open (java.nio.file.Paths/get lock-file (make-array String 0))"
+       "           (into-array java.nio.file.OpenOption [java.nio.file.StandardOpenOption/CREATE"
+       "                                                 java.nio.file.StandardOpenOption/WRITE]))"
+       "      held (.tryLock ch)]"
+       "  (println (if held \"locked\" \"busy\")) (flush) (read-line)"
+       "  (spit target \"#!/bin/sh\\necho ok\\n\")"
+       "  (babashka.fs/set-posix-file-permissions target \"rwxr-xr-x\"))"))
+
+(defn ^{:stratum 0} write-tool-tgz!
+  "Write a tar.gz under `base` holding bin/tool (prints its own $0) and
+   script/x.lua; return its path."
+  [base]
+  (let [src (str (fs/create-dirs (fs/path base "src")))
+        tgz (str (fs/path base "dist.tar.gz"))]
+    (fs/create-dirs (fs/path src "bin"))
+    (fs/create-dirs (fs/path src "script"))
+    (spit (str src "/bin/tool") "#!/bin/sh\necho \"$0\"\n")
+    (fs/set-posix-file-permissions (str src "/bin/tool") "rwxr-xr-x")
+    (spit (str src "/script/x.lua") "return 1")
+    (bp/sh ["tar" "czf" tgz "-C" src "bin" "script"])
+    tgz))
 
 ;------------------------------------------------------------------------------ Layer 1
 
@@ -314,3 +366,295 @@
                 (is (response/anomaly-map? result) (pr-str result))
                 (is (= "stale" (slurp target)))
                 (is (not (fs/executable? target)))))))))))
+
+(defn ^{:stratum 1} install-tgz!
+  "Install `tgz` as an archive asset. Returns [result tree bin-dir], where
+   tree is the .dist dir the launcher runs from (nil when it failed)."
+  [base tgz]
+  (let [[result bin-dir] (install! base {:file "tool.tar.gz" :extract :tar-gz
+                                         :binary-in-archive "bin/tool"}
+                                   #(fs/copy tgz % {:replace-existing true}))
+        launched (some-> (:installed result) vector bp/sh :out str/trim)]
+    [result (some-> launched fs/parent fs/parent str) bin-dir]))
+
+(deftest ^{:stratum 1} checksum-error-discards-staging-test
+  (testing "an error while hashing fails the install as an anomaly and leaves no staging dir"
+    (with-base-dir
+      (fn [base]
+        (let [[result bin-dir] (with-redefs [installer/file-sha256
+                                             (fn [_] (throw (java.io.IOException. "read failed")))]
+                                 (install! base {:file "tool.gz" :extract :gzip
+                                                 :sha256 (apply str (repeat 64 "0"))}
+                                           #(write-gzip! % script)))]
+          (is (response/anomaly-map? result))
+          (is (str/includes? (str (:anomaly/message result)) "read failed"))
+          (is (not-any? #(str/starts-with? (str (fs/file-name %)) "staging tmp's")
+                        (fs/list-dir bin-dir))))))))
+
+(deftest ^{:stratum 1} concurrent-installs-of-one-binary-serialize-test
+  (testing "a second auto-install of the same binary waits for the first, then uses its result"
+    (with-base-dir
+      (fn [base]
+        (let [bin-dir   (str (fs/path base "bin dir's"))
+              entered   (java.util.concurrent.CountDownLatch. 1)
+              release   (java.util.concurrent.CountDownLatch. 1)
+              downloads (atom 0)
+              b-thread  (promise)
+              install   #(binding [*err* (java.io.StringWriter.)]
+                           (installer/run-install gz-entry))]
+          (with-redefs [installer/bin-dir       (constantly bin-dir)
+                        installer/download-file (fn [_url dest]
+                                                  (swap! downloads inc)
+                                                  (.countDown entered)
+                                                  (await-latch release)
+                                                  (write-gzip! dest script)
+                                                  nil)]
+            (let [a (future (install))
+                  b (future (when (await-latch entered)
+                              (deliver b-thread (Thread/currentThread))
+                              (install)))]
+              (try
+                ;; A is inside its download. Wait until B parks: on the install
+                ;; lock when installs serialize, inside its own download when not.
+                (await-parked b-thread)
+                (.countDown release)
+                (is (= {:installed (str bin-dir "/tool")} (deref-bounded a)))
+                (is (= {:installed (str bin-dir "/tool")} (deref-bounded b)))
+                (is (= 1 @downloads) "the waiting install rechecked the target instead of downloading")
+                (finally
+                  (.countDown release)
+                  (future-cancel a)
+                  (future-cancel b))))))))))
+
+(deftest ^{:stratum 1} file-lock-serializes-installs-across-processes-test
+  (testing "an auto-install waits while another process holds the file lock, then uses its install"
+    (if-not (installer/which "bb")
+      (println "SKIP cross-process lock test: bb is not on PATH")
+      (with-base-dir
+        (fn [base]
+          (let [bin-dir   (str (fs/path base "bin dir's"))
+                lock-file (str (fs/path bin-dir ".dist" "tool" ".lock"))
+                target    (str bin-dir "/tool")
+                downloads (atom 0)
+                _         (fs/create-dirs (fs/parent lock-file))
+                holder    (bp/process ["bb" "-e" lock-holder-script lock-file target]
+                                      {:in :pipe :out :pipe :err :inherit})
+                locked    (future (.readLine ^java.io.BufferedReader (io/reader (:out holder))))
+                b-thread  (promise)]
+            (try
+              (is (= "locked" (deref-bounded locked)) "the other process holds the lock")
+              (with-redefs [installer/bin-dir       (constantly bin-dir)
+                            installer/download-file (fn [_url dest]
+                                                      (swap! downloads inc)
+                                                      (write-gzip! dest script)
+                                                      nil)]
+                (let [ours (future (deliver b-thread (Thread/currentThread))
+                                   (binding [*err* (java.io.StringWriter.)]
+                                     (installer/run-install gz-entry)))]
+                  (try
+                    (await-parked b-thread)
+                    (is (not (realized? ours)) "this process waits for the other's file lock")
+                    (doto ^java.io.Writer (io/writer (:in holder)) (.write "go\n") (.flush))
+                    (is (= {:installed target} (deref-bounded ours)))
+                    (is (zero? @downloads) "the install the other process completed is used")
+                    (finally (future-cancel ours)))))
+              (finally (bp/destroy holder)))))))))
+
+(deftest ^{:stratum 1} ensure-installed-passes-install-warnings-test
+  (testing "ensure-installed keeps a successful install's warnings on its result"
+    (with-base-dir
+      (fn [base]
+        (with-redefs [installer/bin-dir     (constantly base)
+                      installer/run-install (constantly {:installed "/opt/lsp/tool"
+                                                         :lsp-installer/warnings ["could not prune"]})]
+          (is (= {:command ["/opt/lsp/tool" "--stdio"] :lsp-installer/warnings ["could not prune"]}
+                 (installer/ensure-installed {:servers {:t {:tool-id :lsp/t :binary "lsp-warn-probe"}}}
+                                             :lsp/t ["lsp-warn-probe" "--stdio"]))))))))
+
+(deftest ^{:stratum 1} auto-install-rechecks-after-an-earlier-install-test
+  (testing "an auto-install that runs after another one finished uses it instead of downloading"
+    (with-base-dir
+      (fn [base]
+        (let [downloads (atom 0)]
+          (with-redefs [installer/bin-dir       (constantly (str (fs/path base "bin")))
+                        installer/download-file (fn [_url dest]
+                                                  (swap! downloads inc)
+                                                  (write-gzip! dest script)
+                                                  nil)]
+            (binding [*err* (java.io.StringWriter.)]
+              (let [first-result (installer/run-install gz-entry)]
+                (is (= first-result (installer/run-install gz-entry)))
+                (is (= 1 @downloads))))))))))
+
+(deftest ^{:stratum 1} explicit-reinstall-does-not-reuse-a-failed-install-test
+  (testing "an explicit install queued behind a failing one performs its own install"
+    (with-base-dir
+      (fn [base]
+        (let [bin-dir  (str (fs/path base "bin"))
+              calls    (atom 0)
+              entered  (java.util.concurrent.CountDownLatch. 1)
+              release  (java.util.concurrent.CountDownLatch. 1)
+              b-thread (promise)
+              install  #(binding [*err* (java.io.StringWriter.)]
+                          (installer/install-via-github gz-entry (installer/platform-key)))]
+          (with-redefs [installer/bin-dir       (constantly bin-dir)
+                        installer/download-file (fn [_url dest]
+                                                  (case (swap! calls inc)
+                                                    1 (do (write-gzip! dest "#!/bin/sh\necho old\n") nil)
+                                                    2 (do (.countDown entered)
+                                                          (await-latch release)
+                                                          (response/make-anomaly :anomalies/fault "download failed"))
+                                                    (do (write-gzip! dest "#!/bin/sh\necho new\n") nil)))]
+            (install)
+            (let [a (future (install))
+                  b (future (when (await-latch entered)
+                              (deliver b-thread (Thread/currentThread))
+                              (install)))]
+              (try
+                (await-parked b-thread)
+                (.countDown release)
+                (is (response/anomaly-map? (deref-bounded a)))
+                (is (= {:installed (str bin-dir "/tool")} (deref-bounded b)))
+                (is (= "#!/bin/sh\necho new\n" (slurp (str bin-dir "/tool"))) "B installed its own download")
+                (is (= 3 @calls))
+                (finally
+                  (.countDown release)
+                  (future-cancel a)
+                  (future-cancel b))))))))))
+
+(deftest ^{:stratum 1} interrupted-lock-wait-returns-an-anomaly-test
+  (testing "interrupting an install waiting for the lock returns an anomaly and keeps the interrupt flag"
+    (with-base-dir
+      (fn [base]
+        (let [entered  (java.util.concurrent.CountDownLatch. 1)
+              release  (java.util.concurrent.CountDownLatch. 1)
+              b-thread (promise)
+              install  #(binding [*err* (java.io.StringWriter.)]
+                          (installer/install-via-github gz-entry (installer/platform-key)))]
+          (with-redefs [installer/bin-dir       (constantly (str (fs/path base "bin")))
+                        installer/download-file (fn [_url dest]
+                                                  (.countDown entered)
+                                                  (await-latch release)
+                                                  (write-gzip! dest script)
+                                                  nil)]
+            (let [a (future (install))
+                  b (future (when (await-latch entered)
+                              (deliver b-thread (Thread/currentThread))
+                              [(install) (Thread/interrupted)]))]
+              (try
+                (await-parked b-thread)
+                (when-let [^Thread t (deref b-thread 10000 nil)] (.interrupt t))
+                (let [[result flag] (deref b 10000 [::timed-out false])]
+                  (is (= :anomalies/interrupted (:anomaly/category result)) (pr-str result))
+                  (is flag "the interrupt flag is restored"))
+                (.countDown release)
+                (is (contains? (deref-bounded a) :installed))
+                (finally
+                  (.countDown release)
+                  (future-cancel a)
+                  (future-cancel b))))))))))
+
+(deftest ^{:stratum 1} lock-release-failure-is-a-warning-test
+  (testing "a lock release failure after a successful install is a warning, not a failure"
+    (with-base-dir
+      (fn [base]
+        (let [bin-dir (str (fs/path base "bin"))
+              install #(installer/install-via-github gz-entry (installer/platform-key))]
+          (with-redefs [installer/bin-dir               (constantly bin-dir)
+                        installer/acquire-install-lock! (constantly
+                                                         [(fn [] (throw (java.io.IOException. "release failed")))])
+                        installer/download-file         (fn [_url dest] (write-gzip! dest script) nil)]
+            (binding [*err* (java.io.StringWriter.)]
+              (let [ok (install)]
+                (is (= (str bin-dir "/tool") (:installed ok)) (pr-str ok))
+                (is (some #(str/includes? % "release failed") (:lsp-installer/warnings ok))))
+              (testing "and a failed install keeps its own anomaly"
+                (with-redefs [installer/download-file (fn [_url dest] (spit (str dest) "not gzip") nil)]
+                  (let [bad (install)]
+                    (is (str/includes? (str (:anomaly/message bad)) "Extraction failed"))
+                    (is (some #(str/includes? % "release failed") (:lsp-installer/warnings bad)))))))))))))
+
+;------------------------------------------------------------------------------ Layer 2
+
+(deftest ^{:stratum 2} archive-installs-prune-to-current-and-previous-test
+  (testing "trees live under .dist/<binary>/; all but the current and the previous one are pruned"
+    (with-base-dir
+      (fn [base]
+        (let [tgz             (write-tool-tgz! base)
+              [_ t1]          (install-tgz! base tgz)
+              [_ t2]          (install-tgz! base tgz)
+              [r3 t3 bin-dir] (install-tgz! base tgz)]
+          (is (= (str (fs/real-path (fs/path bin-dir ".dist" "tool"))) (some-> t3 fs/parent str)))
+          (is (not (contains? r3 :lsp-installer/warnings)) (pr-str r3))
+          (is (fs/exists? t3) "current tree kept")
+          (is (fs/exists? t2) "previous tree kept for a server still running from it")
+          (is (not (fs/exists? t1)) "older tree pruned")
+          (is (= 2 (count (filter fs/directory? (fs/list-dir (fs/path bin-dir ".dist" "tool")))))))))))
+
+(deftest ^{:stratum 2} cleanup-errors-after-replace-are-warnings-test
+  (testing "once the target is replaced, failing to delete staging or prune is a warning"
+    (with-base-dir
+      (fn [base]
+        (let [tgz     (write-tool-tgz! base)
+              [_ t1]  (install-tgz! base tgz)
+              _       (install-tgz! base tgz)
+              [r3 t3] (with-redefs [fs/delete-tree (fn [& _] (throw (java.io.IOException. "busy")))]
+                        (install-tgz! base tgz))]
+          (is (not (response/anomaly-map? r3)) (pr-str r3))
+          (is (some? t3) "the new install runs")
+          (is (= 2 (count (:lsp-installer/warnings r3))) "staging dir and the pruned tree")
+          (is (fs/exists? t1) "its removal failed, so the oldest tree is still there"))))))
+
+(deftest ^{:stratum 2} prune-keeps-recorded-previous-over-a-newer-orphan-test
+  (testing "the tree kept beside the current one is the recorded previous install, not the newest dir"
+    (with-base-dir
+      (fn [base]
+        (let [tgz            (write-tool-tgz! base)
+              [_ t1]         (install-tgz! base tgz)
+              [_ t2 bin-dir] (install-tgz! base tgz)
+              orphan         (fs/create-dirs (fs/path bin-dir ".dist" "tool" "v1-interrupted"))
+              [_ t3]         (install-tgz! base tgz)]
+          (is (fs/exists? t3))
+          (is (fs/exists? t2) "recorded previous install kept")
+          (is (not (fs/exists? orphan)) "tree from an interrupted install pruned")
+          (is (not (fs/exists? t1))))))))
+
+(deftest ^{:stratum 2} prune-reads-previous-tree-from-launcher-test
+  (testing "the tree kept as previous is the one the launcher ran, not one a lagging marker names"
+    (with-base-dir
+      (fn [base]
+        (let [tgz            (write-tool-tgz! base)
+              [_ t1]         (install-tgz! base tgz)
+              [_ t2 bin-dir] (install-tgz! base tgz)]
+          ;; As if t2's install swapped the launcher but never updated a marker.
+          (spit (str (fs/path bin-dir ".dist" "tool" "active")) (str (fs/file-name t1)))
+          (let [[_ t3] (install-tgz! base tgz)]
+            (is (fs/exists? t3))
+            (is (fs/exists? t2) "the tree the launcher ran before the swap is kept")
+            (is (not (fs/exists? t1)))))))))
+
+(deftest ^{:stratum 2} unreadable-old-target-does-not-block-reinstall-test
+  (testing "a mode-000 old target is replaced; an archive install then skips the prune and warns"
+    (with-base-dir
+      (fn [base]
+        (let [tgz            (write-tool-tgz! base)
+              [_ t1 bin-dir] (install-tgz! base tgz)
+              target         (str bin-dir "/tool")
+              gz-bin         (str (fs/path base "gz-bin"))]
+          (fs/set-posix-file-permissions target "---------")
+          (if (fs/readable? target)
+            (println "SKIP unreadable-old-target test: this user can read mode-000 files")
+            (do
+              (let [[result t2] (install-tgz! base tgz)]
+                (is (= target (:installed result)) (pr-str result))
+                (is (some #(str/includes? % "could not be read") (:lsp-installer/warnings result)))
+                (is (fs/exists? t1) "nothing pruned when the old launcher is unknown")
+                (is (fs/exists? t2)))
+              (testing "and a gzip install never reads the old target"
+                (with-redefs [installer/bin-dir       (constantly gz-bin)
+                              installer/download-file (fn [_url dest] (write-gzip! dest script) nil)]
+                  (binding [*err* (java.io.StringWriter.)]
+                    (installer/install-via-github gz-entry (installer/platform-key))
+                    (fs/set-posix-file-permissions (str gz-bin "/tool") "---------")
+                    (is (= {:installed (str gz-bin "/tool")}
+                           (installer/install-via-github gz-entry (installer/platform-key))))))))))))))

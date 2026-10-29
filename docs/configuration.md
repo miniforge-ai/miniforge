@@ -56,8 +56,7 @@ mf config init | edit | reset | validate
 
 Every role runs on the run's backend: `llm.backend`, unless the run
 chooses another (the spec's `:spec/llm-backend`, for one). Choosing a
-model never moves a role to another backend; a model the backend cannot
-serve fails the call.
+model never moves a role to another backend.
 
 The planner and architect use the thinking tier; every other role uses
 the execution tier. A role's model is the first of these that is set:
@@ -81,9 +80,19 @@ config file key it maps to. A blank setting counts as unset, and
 `mf config set llm.model nil` clears one. `claude` and `anthropic-api`
 take an `anthropic/...` id without the prefix.
 
+A setting that names a model from the catalog the backend does not serve
+is skipped, with one warning on stderr naming the key, the model and the
+backend; the next source applies. Examples are `gpt-5.4` on `claude`, or a
+Claude id on `codex` or `gemini-api`. `opencode`, `openrouter`,
+`openai-compat` and `cursor` route to many providers and take any model.
+A model the catalog does not know is used as given, since it may be newer
+than the catalog.
+
 A config file that an older `mf config init`, `set`, `backend` or `edit`
-created may carry `:llm {:model "anthropic/claude-sonnet-4-5"}`, which
-applies to every role. Remove it to get the defaults above.
+created may carry `:llm {:model "anthropic/claude-sonnet-4-5"}`. On
+`opencode`, `claude` and `anthropic-api` it applies to every role; on
+`codex`, `openai-api`, `gemini-api` and `ollama` it is skipped as above.
+Remove it to get the defaults.
 
 `mf config set` stores `llm.model` and the two tier keys as strings, so a
 model id needs no quoting.
