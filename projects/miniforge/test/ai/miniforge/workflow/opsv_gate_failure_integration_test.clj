@@ -31,7 +31,8 @@
           :opsv/metric-snapshot-artifact-refs :opsv/policy-diff-artifact-refs))
 
 (defn- ^{:stratum 0} gated-workflow
-  "The shipped OPSV workflow with a denying :review-approved gate on one phase."
+  "The shipped OPSV workflow with a denying :review-approved gate on one phase
+   (none when `gated-phase` is nil)."
   [gated-phase]
   (update (:workflow (workflow/load-workflow :opsv "1.0.0" {:skip-cache? true}))
           :workflow/pipeline
@@ -65,11 +66,22 @@
                    (assoc (:machine-snapshot saved) :execution/opts options))]
     (get-in recovered [:opsv/evidence-bundle :evidence/outcome])))
 
+(defn- ^{:stratum 0} terminal-recovered-outcome
+  "Resume through the failed-actuation recovery API from the saved checkpoint,
+   then read the finalized bundle's outcome. nil when recovery refuses."
+  [root {:keys [options]}]
+  (let [saved (workflow/load-checkpoint-data (:workflow-id options) {:checkpoint/root root})
+        recovered (opsv/recover-actuation-evidence!
+                   (assoc (:machine-snapshot saved) :execution/opts options))]
+    (when-not (anomaly/any-anomaly? recovered)
+      (get-in (opsv/publish-finalized-evidence! recovered)
+              [:opsv/evidence-bundle :evidence/outcome]))))
+
 ;------------------------------------------------------------------------------ Layer 1
 
 (defn- ^{:stratum 1} run-gated!
   "Run the shipped OPSV workflow with a denying gate on `gated-phase`."
-  [root gated-phase {:keys [evidence? failing-kind oversize?]}]
+  [root gated-phase {:keys [evidence? failing-kind oversize? extra-input]}]
   (let [workflow-id (random-uuid)
         stream (events/create-event-stream {:sinks []})
         options (cond-> (assoc (support/workflow-options stream root)
@@ -85,7 +97,8 @@
                                 artifact/encode-snapshot encode]
                     ;; Without evidence the input carries its own evidence references.
                     (workflow/run-pipeline (gated-workflow gated-phase)
-                                           (if evidence? (material-input) (support/workflow-input))
+                                           (merge (if evidence? (material-input) (support/workflow-input))
+                                                  extra-input)
                                            options))]
     {:completed completed :options options :stream stream}))
 
@@ -133,6 +146,39 @@
        (is (contains? types :opsv.experiment/started) "the load that ran is journaled")
        (is (contains? types :opsv/load-step))
        (is (not (contains? types :opsv.actuation/emitted)))))))
+
+(deftest ^{:stratum 2} terminal-recovery-rebuilds-a-gate-failed-actuation
+  ;; Failure material interrupted, terminal checkpoint past the bound: the
+  ;; failed-actuation recovery API rebuilds the phase from the small record.
+  (checkpoint/call-with-temp-checkpoint-root
+   (fn [root]
+     (let [run (run-gated! root :opsv/actuate {:evidence? true :failing-kind :actuation-failure
+                                                :oversize? true})]
+       (is (false? (:outcome/success (terminal-recovered-outcome root run))))))))
+
+(deftest ^{:stratum 2} a-gate-failure-after-a-failed-first-publication-is-still-recorded
+  ;; The actuation's first artifact publication fails, and its gate fails: the
+  ;; publication error stays the phase error, and the gate record still lets
+  ;; recovery finalize a failure past an oversized terminal checkpoint.
+  (checkpoint/call-with-temp-checkpoint-root
+   (fn [root]
+     (let [run (run-gated! root :opsv/actuate {:evidence? true :failing-kind :actuation
+                                                :oversize? true})]
+       (is (= :failed (:execution/status (:completed run))))
+       (is (false? (:outcome/success (recovered-outcome root run))))))))
+
+(deftest ^{:stratum 2} a-caller-cannot-supply-the-gate-failure-record
+  ;; No gate at all; the caller puts a nil record in workflow input. Without
+  ;; validation and stripping it suppressed the terminal snapshot after a
+  ;; publication failure, and recovery sealed a success bundle.
+  (checkpoint/call-with-temp-checkpoint-root
+   (fn [root]
+     (let [run (run-gated! root nil {:evidence? true :failing-kind :actuation :oversize? true
+                                     :extra-input {:opsv/post-actuation-gate-failure nil}})]
+       (is (not (contains? (get-in run [:completed :execution/input])
+                           :opsv/post-actuation-gate-failure)))
+       (is (not (true? (:outcome/success (recovered-outcome root run))))
+           "recovery never seals a success for the failed actuation")))))
 
 (use-fixtures :once isolation/with-isolated-host)
 

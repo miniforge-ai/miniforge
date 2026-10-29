@@ -6,6 +6,7 @@
   (:require [ai.miniforge.anomaly.interface :as anomaly]
             [ai.miniforge.phase-opsv.evidence-base :as base]
             [ai.miniforge.phase-opsv.evidence-snapshot :as snapshot]
+            [ai.miniforge.phase-opsv.lifecycle-outcome :as outcome]
             [ai.miniforge.phase-opsv.post-actuation-checkpoint :as post-actuation]
             [ai.miniforge.phase-opsv.terminal-model :as terminal]))
 
@@ -29,6 +30,22 @@
       (:opsv/evidence-assembly input)
       (snapshot/decode ctx :checkpoint (:opsv/evidence-snapshot input)))))
 
+(defn- ^{:stratum 0} restore-gate-failed-phase
+  "Rebuild the failed :opsv/actuate phase from the post-actuation snapshot and
+   the gate-failure record, for a run whose terminal snapshot was not kept."
+  [ctx]
+  (let [restored (post-actuation/restore ctx)]
+    (if (anomaly/any-anomaly? restored)
+      restored
+      (let [failure (post-actuation/gate-failure ctx)
+            output (:opsv/recovered-actuation-output restored)
+            phase-failure (anomaly/anomaly (:anomaly/type failure) (:anomaly/message failure)
+                                           {:opsv/phase-output output})]
+        (-> restored
+            (dissoc :opsv/recovered-actuation-output)
+            (assoc :phase {:name :opsv/actuate :status :failed
+                           :result (outcome/phase-result phase-failure)}))))))
+
 (defn- ^{:stratum 0} restore-phase [ctx phase]
   (if (anomaly/any-anomaly? phase) phase
     (-> ctx
@@ -38,11 +55,17 @@
 
 ;------------------------------------------------------------------------------ Layer 1
 
-(defn ^{:stratum 1} restore-terminal [ctx]
-  (if-not (terminal-pending? ctx)
-    ctx
+(defn ^{:stratum 1} restore-terminal
+  "Restore the failed actuation phase from its terminal snapshot or, when a
+   gate-failed actuation's terminal snapshot could not be kept, from the
+   post-actuation snapshot and the gate-failure record."
+  [ctx]
+  (cond
+    (terminal-pending? ctx)
     (restore-phase ctx (snapshot/decode ctx :terminal-checkpoint
-                                        (get-in ctx [:execution/input :opsv/terminal-snapshot])))))
+                                        (get-in ctx [:execution/input :opsv/terminal-snapshot])))
+    (post-actuation/gate-failure-recoverable? ctx) (restore-gate-failed-phase ctx)
+    :else ctx))
 
 (defn- ^{:stratum 1} persist-terminal [ctx]
   (if (and (contains? (:execution/opts ctx) :opsv/evidence-base)

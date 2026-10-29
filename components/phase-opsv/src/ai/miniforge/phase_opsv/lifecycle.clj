@@ -66,16 +66,13 @@
    that keeps its output (:opsv/phase-failure names the gate failure). The
    terminal path then journals its events, publishes its material and
    finalizes evidence with :outcome/success false. A result that already
-   failed is returned unchanged."
-  [phase-result]
-  (let [output (:output phase-result)
-        message (msg/t :gate/actuation-gate-failed)]
+   failed (for example its first artifact publication) is returned unchanged."
+  [failure phase-result]
+  (let [output (:output phase-result)]
     (if (and (map? output) (not (anomaly/any-anomaly? output)))
       (lifecycle-result/phase-result
-       (anomaly/anomaly :unauthorized message
-                        {:opsv/phase-output
-                         (assoc output :opsv/phase-failure {:anomaly/type :unauthorized
-                                                            :anomaly/message message})}))
+       (anomaly/anomaly (:anomaly/type failure) (:anomaly/message failure)
+                        {:opsv/phase-output (assoc output :opsv/phase-failure failure)}))
       phase-result)))
 
 ;------------------------------------------------------------------------------ Layer 1
@@ -95,10 +92,13 @@
         evidence-failure? (and gate-failed? (= :opsv/actuate phase-key)
                                (finalization-config/enabled? ctx))
         raw-result (get-in ctx [:phase :result])
-        recorded (if evidence-failure? (gate-failure-result raw-result) raw-result)
-        phase-failure (get-in recorded [:output :anomaly/data :opsv/phase-output :opsv/phase-failure])
-        recovery-ctx (if (and evidence-failure? phase-failure)
-                       (checkpoint/record-gate-failure ctx phase-failure)
+        gate-failure {:anomaly/type :unauthorized
+                      :anomaly/message (msg/t :gate/actuation-gate-failed)}
+        recorded (if evidence-failure? (gate-failure-result gate-failure raw-result) raw-result)
+        ;; Recorded whenever the gate failed, including when the result already
+        ;; failed its first artifact publication (that error is kept).
+        recovery-ctx (if evidence-failure?
+                       (checkpoint/record-gate-failure ctx gate-failure)
                        ctx)
         published (lifecycle-result/after-publication recovery-ctx phase-key recorded)
         result (terminal/complete-failure! recovery-ctx phase-key published)
@@ -111,7 +111,7 @@
 
 (defn- ^{:stratum 1} enter-phase
   [phase-key transform config ctx]
-  (let [runtime-ctx (isolate-runtime-adapter ctx)
+  (let [runtime-ctx (checkpoint/without-gate-failure (isolate-runtime-adapter ctx))
         assembled-ctx (evidence-runtime/ensure-assembly runtime-ctx)
         active-ctx (flow/continue assembled-ctx artifacts/prepare)
         prepared-ctx (flow/continue active-ctx finalization/prepare)
