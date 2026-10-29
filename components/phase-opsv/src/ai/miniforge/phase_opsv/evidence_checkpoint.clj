@@ -6,6 +6,7 @@
   (:require [ai.miniforge.anomaly.interface :as anomaly]
             [ai.miniforge.phase-opsv.evidence-base :as base]
             [ai.miniforge.phase-opsv.evidence-snapshot :as snapshot]
+            [ai.miniforge.phase-opsv.post-actuation-checkpoint :as post-actuation]
             [ai.miniforge.phase-opsv.terminal-model :as terminal]))
 
 ;------------------------------------------------------------------------------ Layer 0
@@ -48,9 +49,14 @@
            (= :opsv/actuate (get-in ctx [:phase :name]))
            (= :error (get-in ctx [:phase :result :status]))
            (terminal/recoverable? (get-in ctx [:phase :result :output])))
-    (assoc-in ctx [:execution/input :opsv/terminal-snapshot]
-              (snapshot/encode ctx :terminal-checkpoint
-                               (terminal-record ctx)))
+    (let [encoded (snapshot/encode ctx :terminal-checkpoint (terminal-record ctx))]
+      ;; For an actuation its gate failed, an encoding failure (for example past
+      ;; the 16 MiB bound) must not shadow the usable post-actuation snapshot:
+      ;; recovery restores that snapshot and the recorded gate failure instead.
+      ;; Other terminal encoding failures still surface on recovery.
+      (if (and (anomaly/any-anomaly? encoded) (post-actuation/gate-failure-recoverable? ctx))
+        ctx
+        (assoc-in ctx [:execution/input :opsv/terminal-snapshot] encoded)))
     ctx))
 
 ;------------------------------------------------------------------------------ Layer 2

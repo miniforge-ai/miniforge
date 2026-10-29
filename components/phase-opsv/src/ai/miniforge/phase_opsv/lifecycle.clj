@@ -25,6 +25,7 @@
    [ai.miniforge.phase-opsv.artifact-model :as artifact-model]
    [ai.miniforge.phase-opsv.evidence-runtime :as evidence-runtime]
    [ai.miniforge.phase-opsv.finalization-boundary :as finalization]
+   [ai.miniforge.phase-opsv.finalization-config :as finalization-config]
    [ai.miniforge.phase-opsv.terminal-evidence :as terminal]
    [ai.miniforge.phase-opsv.flow :as flow]
    [ai.miniforge.phase-opsv.post-actuation-checkpoint :as checkpoint]
@@ -82,19 +83,22 @@
 (defn- ^{:stratum 1} leave-phase
   "A gate failure stops success claims, never the record of what happened.
    Phase events are journaled either way (they record effects that already
-   ran). An :opsv/actuate attempt its gates failed is finalized as a failed
-   actuation, and its post-actuation snapshot is replaced by that failed
-   output, so recovery cannot finalize it as a success. The phase completes
-   as failed."
+   ran). With evidence enabled, an :opsv/actuate attempt its gates failed is
+   finalized as a failed actuation, and the gate failure is recorded beside
+   the post-actuation snapshot, so recovery cannot finalize it as a success.
+   The phase completes as failed."
   [ctx]
   (let [phase-key (get-in ctx [:phase :name])
         gate-failed? (phase-gate/gate-failed? (:phase ctx))
-        actuation? (= :opsv/actuate phase-key)
+        ;; Without evidence there is nothing to finalize: the actuation's
+        ;; events are published normally and the success? guard fails the phase.
+        evidence-failure? (and gate-failed? (= :opsv/actuate phase-key)
+                               (finalization-config/enabled? ctx))
         raw-result (get-in ctx [:phase :result])
-        recorded (if (and gate-failed? actuation?) (gate-failure-result raw-result) raw-result)
-        recovery-ctx (if (and gate-failed? actuation? (not= recorded raw-result))
-                       (checkpoint/capture ctx phase-key
-                                           (get-in recorded [:output :anomaly/data :opsv/phase-output]))
+        recorded (if evidence-failure? (gate-failure-result raw-result) raw-result)
+        phase-failure (get-in recorded [:output :anomaly/data :opsv/phase-output :opsv/phase-failure])
+        recovery-ctx (if (and evidence-failure? phase-failure)
+                       (checkpoint/record-gate-failure ctx phase-failure)
                        ctx)
         published (lifecycle-result/after-publication recovery-ctx phase-key recorded)
         result (terminal/complete-failure! recovery-ctx phase-key published)

@@ -5,7 +5,8 @@
   "A gate failure on an OPSV phase stops success claims, never the record of
    what happened: events for effects that ran are journaled, and evidence for
    an actuation whose gate failed is finalized as a failure, also on recovery."
-  (:require [ai.miniforge.artifact.interface :as artifact]
+  (:require [ai.miniforge.anomaly.interface :as anomaly]
+            [ai.miniforge.artifact.interface :as artifact]
             [ai.miniforge.event-stream.interface :as events]
             [ai.miniforge.phase-opsv.artifact-test-support :as fixture]
             [ai.miniforge.phase-opsv.interface :as opsv]
@@ -14,6 +15,7 @@
             [ai.miniforge.workflow.isolation-support :as isolation]
             [ai.miniforge.workflow.opsv-lifecycle-support :as support]
             [clojure.java.io :as io]
+            [clojure.string :as str]
             [clojure.test :refer [deftest is testing use-fixtures]]))
 
 ;------------------------------------------------------------------------------ Layer 0
@@ -28,13 +30,29 @@
   (dissoc (support/workflow-input) :opsv/evidence-refs
           :opsv/metric-snapshot-artifact-refs :opsv/policy-diff-artifact-refs))
 
-(defn- ^{:stratum 0} gate-step [gated-phase step]
-  (cond-> step (= gated-phase (:phase step)) (assoc :gates [:review-approved])))
+(defn- ^{:stratum 0} gated-workflow
+  "The shipped OPSV workflow with a denying :review-approved gate on one phase."
+  [gated-phase]
+  (update (:workflow (workflow/load-workflow :opsv "1.0.0" {:skip-cache? true}))
+          :workflow/pipeline
+          (partial mapv #(cond-> % (= gated-phase (:phase %)) (assoc :gates [:review-approved])))))
 
-(defn- ^{:stratum 0} publish-unless-bundle [publish fail? directory record]
-  (if (and fail? (= :evidence-bundle (get-in record [:artifact/metadata :opsv/material-kind])))
+(defn- ^{:stratum 0} publish-unless-kind
+  "Interrupt publication of one OPSV material kind; publish everything else."
+  [publish failing-kind directory record]
+  (if (and failing-kind (= failing-kind (get-in record [:artifact/metadata :opsv/material-kind])))
     (throw (java.io.IOException. "publication interrupted"))
     (publish directory record)))
+
+(defn- ^{:stratum 0} oversize-gate-failure-snapshots
+  "The snapshot encoder's answer for a record past its 16 MiB bound, given to
+   the terminal checkpoint and to any snapshot that carries the gate failure.
+   The post-actuation snapshot taken when the actuation ran still encodes."
+  [encode value]
+  (if (or (= :terminal-checkpoint (get-in value [:artifact/metadata :opsv/material-kind]))
+          (str/includes? (pr-str value) ":opsv/phase-failure"))
+    (anomaly/anomaly :invalid-input "snapshot exceeds 16 MiB" {})
+    (encode value)))
 
 (defn- ^{:stratum 0} event-types [stream]
   (set (map :event/type (events/get-events stream))))
@@ -49,59 +67,72 @@
 
 ;------------------------------------------------------------------------------ Layer 1
 
-(defn- ^{:stratum 1} gated-workflow
-  "The shipped OPSV workflow with a denying :review-approved gate on one phase."
-  [gated-phase]
-  (update (:workflow (workflow/load-workflow :opsv "1.0.0" {:skip-cache? true}))
-          :workflow/pipeline (partial mapv (partial gate-step gated-phase))))
+(defn- ^{:stratum 1} run-gated!
+  "Run the shipped OPSV workflow with a denying gate on `gated-phase`."
+  [root gated-phase {:keys [evidence? failing-kind oversize?]}]
+  (let [workflow-id (random-uuid)
+        stream (events/create-event-stream {:sinks []})
+        options (cond-> (assoc (support/workflow-options stream root)
+                               :workflow-id workflow-id
+                               :workflow/intent declared-intent)
+                  evidence? (assoc :opsv/artifact-directory (.getCanonicalPath (io/file root))
+                                   :opsv/evidence-base (evidence-base workflow-id)))
+        publish (partial publish-unless-kind artifact/publish! failing-kind)
+        encode (if oversize?
+                 (partial oversize-gate-failure-snapshots artifact/encode-snapshot)
+                 artifact/encode-snapshot)
+        completed (with-redefs [artifact/publish! publish
+                                artifact/encode-snapshot encode]
+                    ;; Without evidence the input carries its own evidence references.
+                    (workflow/run-pipeline (gated-workflow gated-phase)
+                                           (if evidence? (material-input) (support/workflow-input))
+                                           options))]
+    {:completed completed :options options :stream stream}))
 
 ;------------------------------------------------------------------------------ Layer 2
 
-(defn- ^{:stratum 2} run-gated!
-  [root gated-phase fail-bundle-publication?]
-  (let [workflow-id (random-uuid)
-        stream (events/create-event-stream {:sinks []})
-        options (assoc (support/workflow-options stream root)
-                       :workflow-id workflow-id
-                       :workflow/intent declared-intent
-                       :opsv/artifact-directory (.getCanonicalPath (io/file root))
-                       :opsv/evidence-base (evidence-base workflow-id))
-        publish (partial publish-unless-bundle artifact/publish! fail-bundle-publication?)
-        completed (with-redefs [artifact/publish! publish]
-                    (workflow/run-pipeline (gated-workflow gated-phase) (material-input) options))]
-    {:completed completed :options options :stream stream}))
+(deftest ^{:stratum 2} denied-actuation-is-finalized-as-a-failure
+  (doseq [[label run-options]
+          {"evidence published in the run"
+           {:evidence? true}
+           "bundle publication interrupted, then recovered from the checkpoint"
+           {:evidence? true :failing-kind :evidence-bundle}
+           (str "failure material interrupted before finalization, and the terminal "
+                "checkpoint and any snapshot carrying the gate failure past the 16 MiB "
+                "bound: recovery restores the post-actuation snapshot")
+           {:evidence? true :failing-kind :actuation-failure :oversize? true}}]
+    (testing label
+      (checkpoint/call-with-temp-checkpoint-root
+       (fn [root]
+         (let [run (run-gated! root :opsv/actuate run-options)
+               completed (:completed run)
+               outcome (recovered-outcome root run)]
+           (is (= :failed (:execution/status completed)))
+           (is (= :failed (get-in completed [:execution/phase-results :opsv/actuate :status])))
+           (is (not (contains? completed :workflow/evidence-bundle-id)))
+           (is (false? (:outcome/success outcome))
+               "recovered evidence records a failed actuation, never a success")
+           (is (contains? (event-types (:stream run)) :opsv.actuation/emitted)
+               "the actuation that ran is journaled, by the run or by recovery")))))))
 
-;------------------------------------------------------------------------------ Layer 3
+(deftest ^{:stratum 2} denied-actuation-without-evidence-journals-its-events
+  (checkpoint/call-with-temp-checkpoint-root
+   (fn [root]
+     (let [run (run-gated! root :opsv/actuate {:evidence? false})]
+       (is (= :failed (:execution/status (:completed run))))
+       (is (= :failed (get-in run [:completed :execution/phase-results :opsv/actuate :status])))
+       (is (contains? (event-types (:stream run)) :opsv.actuation/emitted)
+           "without evidence, the actuation's events are still journaled")))))
 
-(defn- ^{:stratum 3} verify-denied-actuation [fail-bundle-publication? root]
-  (let [run (run-gated! root :opsv/actuate fail-bundle-publication?)
-        completed (:completed run)]
-    (is (= :failed (:execution/status completed)))
-    (is (= :failed (get-in completed [:execution/phase-results :opsv/actuate :status])))
-    (is (not (contains? completed :workflow/evidence-bundle-id)))
-    (is (contains? (event-types (:stream run)) :opsv.actuation/emitted)
-        "the actuation that ran is journaled")
-    (is (false? (:outcome/success (recovered-outcome root run)))
-        "recovered evidence records a failed actuation, never a success")))
-
-(defn- ^{:stratum 3} verify-denied-execution [root]
-  (let [run (run-gated! root :opsv/execute false)
-        types (event-types (:stream run))]
-    (is (= :failed (:execution/status (:completed run))))
-    (is (contains? types :opsv.experiment/started) "the load that ran is journaled")
-    (is (contains? types :opsv/load-step))
-    (is (not (contains? types :opsv.actuation/emitted)))))
-
-;------------------------------------------------------------------------------ Layer 4
-
-(deftest ^{:stratum 4} denied-actuation-is-finalized-as-a-failure
-  (testing "evidence published in the run"
-    (checkpoint/call-with-temp-checkpoint-root (partial verify-denied-actuation false)))
-  (testing "bundle publication interrupted, then recovered from the checkpoint"
-    (checkpoint/call-with-temp-checkpoint-root (partial verify-denied-actuation true))))
-
-(deftest ^{:stratum 4} denied-execution-still-journals-its-load
-  (checkpoint/call-with-temp-checkpoint-root verify-denied-execution))
+(deftest ^{:stratum 2} denied-execution-still-journals-its-load
+  (checkpoint/call-with-temp-checkpoint-root
+   (fn [root]
+     (let [run (run-gated! root :opsv/execute {:evidence? true})
+           types (event-types (:stream run))]
+       (is (= :failed (:execution/status (:completed run))))
+       (is (contains? types :opsv.experiment/started) "the load that ran is journaled")
+       (is (contains? types :opsv/load-step))
+       (is (not (contains? types :opsv.actuation/emitted)))))))
 
 (use-fixtures :once isolation/with-isolated-host)
 
