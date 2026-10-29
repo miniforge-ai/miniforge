@@ -128,11 +128,11 @@
     (impl/probe-endpoint-for backend-key)))
 
 (defn- ^{:stratum 0} probe-request
-  "The request map `network-healthy?` sends for `url` under environment
+  "The request map `probe-network` sends for `url` under environment
    `env`."
   [url env]
   (let [captured (atom nil)]
-    (nh/network-healthy? url {:env env
+    (nh/probe-network url {:env env
                               :http-client (fn [request]
                                              (reset! captured request)
                                              (delay {:status 200}))})
@@ -296,7 +296,7 @@
             env {"HTTPS_PROXY" (str "http://127.0.0.1:" (.getLocalPort server))}]
         (serve-connects! server seen connect-established-reply)
         (dotimes [_ probe-count]
-          (is (true? (nh/network-healthy? anthropic-probe-url {:env env}))))
+          (is (= :healthy (nh/probe-network anthropic-probe-url {:env env}))))
         (is (= (mapv (fn [n] [n expected-connect-line]) (range 1 (inc probe-count)))
                @seen)
             "one connection per probe, each a CONNECT to api.anthropic.com:443")))))
@@ -306,13 +306,14 @@
     (doseq [status-line failed-connect-status-lines]
       (with-open [server (java.net.ServerSocket. 0)]
         (serve-connects! server (atom []) (connect-reply status-line))
-        (is (false? (nh/network-healthy? anthropic-probe-url {:env (local-proxy-env server)}))
+        (is (= :unreachable (nh/probe-network anthropic-probe-url {:env (local-proxy-env server)}))
             status-line))))
 
-  (testing "a CONNECT answered 407 still counts as reachable"
+  (testing "a CONNECT answered 407 is reported as proxy-auth-required, not healthy"
     (with-open [server (java.net.ServerSocket. 0)]
       (serve-connects! server (atom []) (connect-reply auth-required-status-line))
-      (is (true? (nh/network-healthy? anthropic-probe-url {:env (local-proxy-env server)}))))))
+      (is (= :proxy-auth-required
+             (nh/probe-network anthropic-probe-url {:env (local-proxy-env server)}))))))
 
 (deftest ^{:stratum 2} handle-streaming-starts-network-monitor-test
   (testing "a streaming CLI call passes :backend-key, which starts the network-drop monitor"

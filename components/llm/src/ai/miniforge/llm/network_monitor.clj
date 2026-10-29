@@ -19,7 +19,7 @@
   "Network-drop scheduler for the per-LLM-call lifecycle.
 
    PR-B of the network-resilience stack — builds on
-   `ai.miniforge.llm.network-health/network-healthy?` (PR-A):
+   `ai.miniforge.llm.network-health/probe-network` (PR-A):
    - Spawns a daemon that probes the provider every N seconds while an
      LLM call is in flight.
    - Counts consecutive failures so a transient blip (1 dropped probe)
@@ -62,7 +62,22 @@
   200)
 
 ;; Scheduler
-(defn- ^{:stratum 0} run-monitor-loop!
+(defn- ^{:stratum 0} next-failure-count
+  "Consecutive-failure count after a probe that returned `status`.
+   `:healthy` (or true, for boolean probe-fns) resets it to 0.
+   `:proxy-auth-required` leaves it as it was: the proxy answered but
+   wants credentials, so the probe says nothing about the provider, and
+   it must neither count toward a drop nor clear earlier failures.
+   Anything else (`:unreachable`, false, nil) adds one."
+  [status consecutive-failures]
+  (case status
+    (:healthy true) 0
+    :proxy-auth-required consecutive-failures
+    (inc consecutive-failures)))
+
+;------------------------------------------------------------------------------ Layer 1
+
+(defn- ^{:stratum 1} run-monitor-loop!
   "Inner worker loop. Polls `probe-fn` every `probe-interval-ms`;
    tracks consecutive failures. On `failure-threshold` consecutive
    failures, atomically claims the firing slot via `compare-and-set!`
@@ -71,16 +86,17 @@
    The CAS is the single-fire latch — `stop!` and the worker race for
    the false→true (wait, true→false) transition; whichever wins gets
    to do its job. A healthy probe resets the counter so a brief blip
-   does not push the workflow toward a network-drop verdict."
+   does not push the workflow toward a network-drop verdict; see
+   `next-failure-count`."
   [{:keys [running? probe-url backend-key probe-interval-ms failure-threshold
            probe-fn on-drop]}]
   (loop [consecutive-failures 0]
     (when @running?
       (Thread/sleep ^long probe-interval-ms)
       (when @running?
-        (let [healthy? (try (probe-fn probe-url)
-                            (catch Exception _ false))
-              next-failures (if healthy? 0 (inc consecutive-failures))]
+        (let [status (try (probe-fn probe-url)
+                          (catch Exception _ :unreachable))
+              next-failures (next-failure-count status consecutive-failures)]
           (cond
             (>= next-failures failure-threshold)
             ;; CAS the running? atom from true → false. If we win, no
@@ -97,9 +113,9 @@
             :else
             (recur next-failures)))))))
 
-;------------------------------------------------------------------------------ Layer 1
+;------------------------------------------------------------------------------ Layer 2
 
-(defn ^{:stratum 1} start-network-monitor!
+(defn ^{:stratum 2} start-network-monitor!
   "Spawn a daemon thread that probes `:probe-url` every
    `:probe-interval-ms` ms and fires `:on-drop` after
    `:failure-threshold` consecutive failures (single-fire).
@@ -122,9 +138,11 @@
                               `:failure-threshold`,
                               `:probe-interval-ms`.
    - `:probe-fn`            — override for tests; defaults to
-                              `network-health/network-healthy?`. Must
-                              accept `(fn [probe-url])` and return
-                              truthy/falsey.
+                              `network-health/probe-network`. Must
+                              accept `(fn [probe-url])` and return a
+                              status as `next-failure-count` reads it
+                              (`:healthy`/true, `:proxy-auth-required`,
+                              or anything else for a failure).
 
    ## Returns
 
@@ -142,7 +160,7 @@
   [{:keys [probe-url backend-key probe-interval-ms failure-threshold on-drop probe-fn]
     :or   {probe-interval-ms default-probe-interval-ms
            failure-threshold default-failure-threshold
-           probe-fn          nh/network-healthy?}}]
+           probe-fn          nh/probe-network}}]
   (assert (and (string? probe-url) (seq probe-url))
           "start-network-monitor! requires a non-blank :probe-url string")
   (assert (and (integer? probe-interval-ms) (pos? probe-interval-ms))

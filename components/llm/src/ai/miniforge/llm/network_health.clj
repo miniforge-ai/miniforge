@@ -99,9 +99,10 @@
     (str "http://" proxy)))
 
 (def ^{:stratum 0} ^:private proxy-auth-required-status
-  "407 answer to a CONNECT: the proxy wants credentials, which the probe
-   does not send (the agent CLI may hold them). It proves the proxy is
-   reachable, so it counts as healthy rather than as a drop."
+  "407: the proxy wants credentials, which the probe does not send (the
+   agent CLI may hold them, or authenticate another way). The proxy is
+   reachable but the provider path is unknown, so the probe reports
+   `:proxy-auth-required`: neither healthy nor a failure."
   407)
 
 (defn- ^{:stratum 0} success-status?
@@ -111,22 +112,31 @@
 ;------------------------------------------------------------------------------ Layer 1
 
 ;; Probe primitive
-(defn- ^{:stratum 1} response-proves-connectivity?
-  "True when an http-kit response map shows the request reached an HTTP
-   peer and got a response back. From the origin (a direct probe, or an
-   http probe relayed by a proxy) any status counts: a 4xx or even a 5xx
-   means the network is up. A `tunneled?` probe's response is the
-   proxy's answer to CONNECT, so only 2xx (tunnel open) or 407 counts; a
-   502/503/504 there means the proxy could not reach the provider. An
-   exception (`:error`) or a missing `:status` is always a failure."
+(defn- ^{:stratum 1} response-status
+  "Classify an http-kit response as `:healthy`, `:unreachable` or
+   `:proxy-auth-required`.
+
+   An exception (`:error`) or a missing `:status` is `:unreachable`. A
+   407 comes from a proxy that wants credentials: `:proxy-auth-required`.
+   From the origin (a direct probe, or an http probe relayed by a proxy)
+   any other status is `:healthy`: a 4xx or even a 5xx means the network
+   is up. A `tunneled?` probe's response is the proxy's answer to
+   CONNECT, so only 2xx (tunnel open) is `:healthy`; a 502/503/504 there
+   means the proxy could not reach the provider."
   [response tunneled?]
   (let [status (:status response)]
-    (boolean (and (map? response)
-                  (nil? (:error response))
-                  (pos-int? status)
-                  (or (not tunneled?)
-                      (success-status? status)
-                      (= proxy-auth-required-status status))))))
+    (cond
+      (not (and (map? response) (nil? (:error response)) (pos-int? status)))
+      :unreachable
+
+      (= proxy-auth-required-status status)
+      :proxy-auth-required
+
+      (or (not tunneled?) (success-status? status))
+      :healthy
+
+      :else
+      :unreachable)))
 
 (defn ^{:stratum 1} proxy-request-opts
   "http-kit request options that send a probe of `probe-url` through the
@@ -165,21 +175,24 @@
 
 ;------------------------------------------------------------------------------ Layer 2
 
-(defn ^{:stratum 2} network-healthy?
-  "Probe `probe-url` for a live HTTP response and return true/false.
+(defn ^{:stratum 2} probe-network
+  "Probe `probe-url` and return `:healthy`, `:unreachable` or
+   `:proxy-auth-required`.
 
-   Returns true when the probe receives an HTTP response within
+   `:healthy` when the probe receives an HTTP response within
    `:timeout-ms` (any status code from the origin counts — a 4xx still
    proves the network reached the server; through a CONNECT tunnel only
-   2xx or 407, see `response-proves-connectivity?`). Returns false on
-   any failure mode:
+   2xx, see `response-status`). `:proxy-auth-required` when a proxy
+   answers 407: the probe cannot tell whether the provider is reachable,
+   so callers must treat it as neither healthy nor failed.
+   `:unreachable` on any failure mode:
    - http-kit's response carries `:error` (DNS failure, connection
      refused, timeout, etc.).
    - The request map promise is missing `:status` for any reason.
    - The http call itself throws or the `@` deref throws (http-kit can
      surface failures via either channel; both must be treated as
-     `down` so the probe stays safe to call from the PR-B scheduler
-     loop).
+     `:unreachable` so the probe stays safe to call from the PR-B
+     scheduler loop).
 
    Options (`opts`):
    - `:timeout-ms`  — per-probe deadline; defaults to
@@ -194,7 +207,7 @@
    request — no logging, no event emission, no telemetry. PR-B layers
    those on top so the primitive stays cheap to call."
   ([probe-url]
-   (network-healthy? probe-url {}))
+   (probe-network probe-url {}))
   ([probe-url {:keys [timeout-ms http-client env]
                :or   {timeout-ms  default-probe-timeout-ms
                       http-client http/request
@@ -206,10 +219,10 @@
                            :as      :text}
                           (proxy-request-opts probe-url env))
            response @(http-client request)]
-       (response-proves-connectivity? response (boolean (:tunnel? request))))
+       (response-status response (boolean (:tunnel? request))))
      (catch Exception _
        ;; http-kit can also surface connection failures as a thrown
        ;; exception (see `llm_client/http-post-request` comments).
        ;; Swallow both shapes here so the scheduler loop never crashes
        ;; on a probe.
-       false))))
+       :unreachable))))
