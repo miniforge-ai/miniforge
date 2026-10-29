@@ -97,4 +97,7 @@
                           (get-in aliases [:test :extra-paths])))))
     (testing "the :integration alias carries the test directories"
       (is (= ["test" "integration"]
-             (get-in aliases [:integration :extra-paths]))))))
+             (get-in aliases [:integration :extra-paths]))))
+    (testing "the :e2e alias carries test/, whose support namespaces e2e requires"
+      (is (= ["test" "e2e"]
+             (get-in aliases [:e2e :extra-paths]))))))

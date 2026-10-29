@@ -144,6 +144,8 @@
   ;; `poly test :all` would run them a second time inside `bb test:all`.
   :integration {:extra-paths ["test" "integration"]}
   ;; Real-backend tests (claude CLI, Docker). Not run in CI; see e2e/README.md.
-  :e2e {:extra-paths ["e2e"]}
+  ;; Carries test/ too: the e2e namespaces require its support namespaces
+  ;; (ai.miniforge.workflow.isolation-support).
+  :e2e {:extra-paths ["test" "e2e"]}
   :uberjar
   {:main ai.miniforge.cli.main}}}
