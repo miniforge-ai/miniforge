@@ -15,7 +15,6 @@
 ;; WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 ;; See the License for the specific language governing permissions and
 ;; limitations under the License.
-
 (ns ai.miniforge.agent.protocols.records.specialized
   "Record that implements Agent protocol with functional callbacks.
 
@@ -26,7 +25,9 @@
    [ai.miniforge.schema.interface :as schema]
    [ai.miniforge.logging.interface :as log]))
 
-(defrecord FunctionalAgent [role config system-prompt invoke-fn validate-fn repair-fn logger]
+;------------------------------------------------------------------------------ Layer 0
+
+(defrecord ^{:stratum 0} FunctionalAgent [role config system-prompt invoke-fn validate-fn repair-fn logger]
   ;; Implement the main Agent protocol for compatibility with workflow/core.clj
   ;; The Agent protocol signature is: (invoke [this task context])
   ;; The invoke-fn expects: (invoke-fn context input)
@@ -41,10 +42,26 @@
   (repair [this output errors context]
     (impl/repair-impl this output errors context)))
 
-;------------------------------------------------------------------------------ Layer 1
-;; Factory functions
+(defn ^{:stratum 0} make-validator
+  [malli-schema]
+  (fn [output]
+    (if (schema/valid? malli-schema output)
+      {:valid? true :errors nil}
+      {:valid? false :errors (schema/explain malli-schema output)})))
 
-(defn create-base-agent
+(defn ^{:stratum 0} cycle-agent
+  "Execute a full invoke-validate-repair cycle on a specialized agent.
+   Returns the final result after up to max-iterations of repair attempts.
+
+   Options:
+   - :max-iterations - Maximum repair attempts (default 3)"
+  [agent context input & {:keys [max-iterations] :or {max-iterations 3}}]
+  (impl/cycle-agent-impl agent context input max-iterations))
+
+;------------------------------------------------------------------------------ Layer 1
+
+;; Factory functions
+(defn ^{:stratum 1} create-base-agent
   "Create a base agent with the given configuration.
    Used by specialized agents (planner, implementer, tester).
 
@@ -67,19 +84,3 @@
          (fn? validate-fn)
          (fn? repair-fn)]}
   (->FunctionalAgent role config system-prompt invoke-fn validate-fn repair-fn logger))
-
-(defn make-validator
-  [malli-schema]
-  (fn [output]
-    (if (schema/valid? malli-schema output)
-      {:valid? true :errors nil}
-      {:valid? false :errors (schema/explain malli-schema output)})))
-
-(defn cycle-agent
-  "Execute a full invoke-validate-repair cycle on a specialized agent.
-   Returns the final result after up to max-iterations of repair attempts.
-
-   Options:
-   - :max-iterations - Maximum repair attempts (default 3)"
-  [agent context input & {:keys [max-iterations] :or {max-iterations 3}}]
-  (impl/cycle-agent-impl agent context input max-iterations))
