@@ -734,14 +734,16 @@
 
 (defn ^{:stratum 1} write-capsule-mcp-config!
   "Write MCP config and Claude settings inside the capsule.
-   The server command resolves to capsule-local bb/miniforge binary."
+   The server command resolves to capsule-local bb/miniforge binary:
+   `bb miniforge` runs the CLI, whose subcommand is `context-server`
+   (`mcp-context-server` is the name of the bb task, not a CLI command)."
   [session]
   (let [exec!       (:exec! session)
         executor    (:executor session)
         env-id      (:environment-id session)
         session-dir (:dir session)
         ;; Inside the capsule, bb and miniforge are available directly
-        srv-cmd     {:command "bb" :args ["miniforge" "mcp-context-server"
+        srv-cmd     {:command "bb" :args ["miniforge" "context-server"
                                           "--artifact-dir" session-dir]}
         mcp-config  (json/generate-string
                      {"mcpServers" {"context" {"command" (:command srv-cmd)

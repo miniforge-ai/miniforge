@@ -63,6 +63,13 @@
             (when (str/starts-with? command prefix) result))
           responses)))
 
+(defn ^{:stratum 0} local-sh-execute-fn
+  "Executor stand-in that runs a string command with `sh -c` in the
+   workdir, as the OCI and Kubernetes executors do inside a capsule."
+  [_executor _env-id command {:keys [workdir]}]
+  (let [{:keys [exit out err]} (shell/sh "sh" "-c" command :dir workdir)]
+    {:ok? true :data {:exit-code exit :stdout out :stderr err}}))
+
 (defn ^{:stratum 0} release-interceptor []
   (phase/get-phase-interceptor {:phase :release}))
 
@@ -135,7 +142,7 @@
   (testing "a failed cat of a listed file returns an anomaly instead of empty content"
     (let [result (scan-capsule (stub-execute-fn {"git status" {:ok? true
                                                                :data {:exit-code 0
-                                                                      :stdout "?? src/feature.clj\n"}}
+                                                                      :stdout "?? src/feature.clj\u0000"}}
                                                  "cat"        {:ok? true
                                                                :data {:exit-code 1
                                                                       :stdout ""
@@ -155,7 +162,7 @@
   (testing "a successful capsule scan still returns the listed files with content"
     (let [result (scan-capsule (stub-execute-fn {"git status" {:ok? true
                                                                :data {:exit-code 0
-                                                                      :stdout "?? src/feature.clj\n D src/old.clj\n"}}
+                                                                      :stdout "?? src/feature.clj\u0000 D src/old.clj\u0000"}}
                                                  "cat"        {:ok? true
                                                                :data {:exit-code 0
                                                                       :stdout "(ns feature)"}}})
@@ -163,6 +170,20 @@
       (is (= [{:path "src/feature.clj" :content "(ns feature)" :action :create}
               {:path "src/old.clj" :content "" :action :delete}]
              result)))))
+
+(deftest ^{:stratum 1} capsule-scan-reads-paths-shell-would-mangle-test
+  (testing "paths with a space, $, ; or non-ASCII are read as named, through a real sh -c"
+    (let [dir   (str (fs/create-temp-dir {:prefix "release-scan-names-"}))
+          names ["my file.clj" "Foo$Bar.clj" "semi;colon.clj" "\u00e9.clj"]]
+      (try
+        (shell/sh "git" "init" "-q" :dir dir)
+        (doseq [n names] (spit (io/file dir n) (str "content of " n)))
+        (let [result (scan-capsule local-sh-execute-fn dir)]
+          (is (not (anomaly/anomaly? result)) (str "scan failed: " (:anomaly/message result)))
+          (is (= (set (map (fn [n] {:path n :content (str "content of " n) :action :create}) names))
+                 (set result))))
+        (finally
+          (fs/delete-tree dir))))))
 
 ;------------------------------------------------------------------------------ Layer 2
 
