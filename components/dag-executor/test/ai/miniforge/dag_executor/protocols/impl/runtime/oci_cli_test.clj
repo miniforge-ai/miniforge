@@ -296,6 +296,21 @@
   [calls]
   (filter (fn [[_ opts]] (:env opts)) calls))
 
+(deftest ^{:stratum 0} exec-never-passes-a-refused-env-name-test
+  (testing "an exec env name the launch gate refuses (DOCKER_CUSTOM_HEADERS
+            or *) never reaches the runtime argv or the CLI's environment"
+    (let [calls (atom [])]
+      (with-redefs [oci-cli/run-runtime-process-timed
+                    (fn [_ms _d args & {:as opts}]
+                      (swap! calls conj [args (:env opts)])
+                      {:exit 0 :out "" :err "" :out-bytes (byte-array 0) :err-bytes (byte-array 0)})]
+        (doseq [n ["DOCKER_CUSTOM_HEADERS" "*"]]
+          (proto/execute! (oci-cli/create-docker-executor {:image "test:latest"}) "c1" ["true"]
+                          {:env {n "Authorization=Bearer x"}}))
+        (doseq [[args env] @calls]
+          (is (not-any? #(or (= "*" %) (clojure.string/includes? % "Bearer x")) args))
+          (is (not-any? #{"DOCKER_CUSTOM_HEADERS" "*"} (keys env))))))))
+
 ;------------------------------------------------------------------------------ Layer 1
 
 (defn- ^{:stratum 1} token-in? [s]

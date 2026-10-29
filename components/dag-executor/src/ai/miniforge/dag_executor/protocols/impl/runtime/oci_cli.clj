@@ -176,12 +176,15 @@
    matches."
   #"GIT_CONFIG_(COUNT|KEY_\d+|VALUE_\d+)")
 
-(def ^{:stratum 0} refused-env-names
-  "Container env names a launch refuses whatever its trust level.
-   DOCKER_CUSTOM_HEADERS is a docker CLI variable (registry :cli-env-names),
-   so `env-arg` would put it inline on argv, where `ps` shows the headers
-   it carries; passed by name instead, it would set the CLI's own headers."
-  #{"DOCKER_CUSTOM_HEADERS"})
+(defn- ^{:stratum 0} refused-env-name?
+  "True for a container env name no launch or exec passes, whatever the
+   trust level: a non-identifier, which Podman's `-e NAME` reads as a
+   pattern over its own environment, or DOCKER_CUSTOM_HEADERS, a docker CLI
+   variable `env-arg` would put inline on argv for `ps` to show (by name,
+   it would set the CLI's own headers)."
+  [n]
+  (or (= "DOCKER_CUSTOM_HEADERS" n)
+      (not (re-matches #"[A-Za-z_][A-Za-z0-9_]*" n))))
 
 (def ^{:stratum 0} proxy-env-pattern
   "Proxy variables curl and git read. Their URL can carry `user:password@`."
@@ -526,8 +529,12 @@
    name (`-e NAME`) so its value never appears on the runtime argv, where
    `ps` shows it to every host user; the CLI reads the value from its own
    environment, which `build-child-env` supplies. Names the CLI itself
-   reads go inline as `-e NAME=value`."
+   reads go inline as `-e NAME=value`. A `refused-env-name?` name throws,
+   so every launch and exec path refuses it, not only the launch gate."
   [descriptor env-map]
+  (when-let [bad (seq (filter refused-env-name? (map name (keys env-map))))]
+    (throw (ex-info (messages/t :oci/env-name-refused {:names (str/join ", " (map pr-str bad))})
+                    {:names (vec bad)})))
   (let [cli-names (registry/cli-env-names (descriptor/kind descriptor))]
     (mapcat (fn [entry] ["-e" (env-arg cli-names entry)]) env-map)))
 
@@ -1005,19 +1012,16 @@
    the immutable image reference, the plan itself as create-container's
    :execution-plan.
 
-   A plan env name that is not a plain identifier, or is in
-   `refused-env-names`, is a hard-stop at every trust level: the launch
-   passes each name as `-e NAME`, and Podman reads `*` or a trailing `*`
-   there as a pattern that copies every matching variable of its own
-   environment into the container."
+   A plan env name `refused-env-name?` flags is a hard-stop at every
+   trust level: the launch passes each name as `-e NAME`, and Podman
+   reads `*` or a trailing `*` there as a pattern that copies every
+   matching variable of its own environment into the container."
   [descriptor image env-config digest-fn]
   (let [plan            (build-launch-plan (digest-fn descriptor image) env-config)
         security-config {:host-path-allowlist #{(get env-config :workdir default-workdir)}
                          :rootless-action     plan-security/default-rootless-action}
         decision        (plan-security/check-plan-security plan descriptor security-config)
-        bad-names       (filter #(or (contains? refused-env-names %)
-                                     (not (re-matches #"[A-Za-z_][A-Za-z0-9_]*" %)))
-                                (keys (:env plan)))]
+        bad-names       (filter refused-env-name? (keys (:env plan)))]
     (cond
       (response/anomaly-map? decision)
       (result/err :security-policy-violation
