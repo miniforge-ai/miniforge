@@ -374,3 +374,59 @@
           (is (not (leaked? config)) "no token, plain or encoded, in .git/config afterwards")
           (is (= origin (:output (git/exec! dir ["git" "remote" "get-url" "origin"]))))
           (finally (fs/delete-tree dir)))))))
+
+;;------------------------------------------- token retry scope
+(deftest ^{:stratum 2} push-fallback-retry-scope-test
+  (let [h      "https://github.com/o/r.git"
+        header (str "Authorization: Basic "
+                    (.encodeToString (java.util.Base64/getEncoder)
+                                     (.getBytes "x-access-token:tok" "UTF-8")))
+        github ["remote" "add" "origin" "git@github.com:o/r.git"]
+        add    (fn [url] ["config" "--add" "remote.origin.pushurl" url])]
+    (doseq [[label setup expected]
+            [["SSH github.com origin" [github] :retry]
+             ["HTTPS github.com origin" [["remote" "add" "origin" h]] :retry]
+             ["single SSH pushurl on github.com"
+              [["remote" "add" "origin" h] (add "git@github.com:o/r.git")] :retry]
+             ["mirror pushurl"
+              [github (add "git@github.com:o/r.git") (add "git@mirror.example.com:o/r.git")]
+              :push/token-retry-not-single-target]
+             ["mixed remotes"
+              [github (add "git@github.com:o/r.git") (add "/srv/git/r.git")]
+              :push/token-retry-not-single-target]
+             ["pushurl on another host"
+              [["remote" "add" "origin" h] (add "git@gitlab.example.com:o/r.git")]
+              :push/token-retry-untrusted-host]
+             ["equal-length pushInsteadOf"
+              [["remote" "add" "origin" h] ["config" "url.git@github.com:o/r.git.pushInsteadOf" h]]
+              :push/token-retry-rewritten]
+             ["insteadOf alias"
+              [["remote" "add" "origin" "gh:o/r.git"] ["config" "url.git@github.com:.insteadOf" "gh:"]]
+              :push/token-retry-rewritten]]]
+      (testing label
+        (let [dir (fs/create-temp-dir {:prefix "git-host-mode-scope-"})]
+          (try
+            (init-repo! dir)
+            (doseq [args setup] (apply sh! dir "git" args))
+            (sh! dir "git" "config" (str "http." h ".extraHeader") "Authorization: Basic OLD")
+            (let [envs     (atom [])
+                  r        (with-redefs [shell/run-bounded (fn [_args opts]
+                                                             (swap! envs conj (:extra-env opts))
+                                                             {:exit 1 :out "" :err "denied"})]
+                             (git/push-branch! dir "main" "tok"))
+                  real-git (fn [& args]
+                             (str/trim (:out (apply process/shell
+                                                    {:dir (str dir) :extra-env (second @envs)
+                                                     :out :string :continue true}
+                                                    "git" args))))]
+              (if (= :retry expected)
+                (do (is (= 2 (count @envs)))
+                    (is (= h (real-git "remote" "get-url" "--push" "origin"))
+                        "the retry pushes to the HTTPS URL")
+                    (is (= header (real-git "config" "--get-urlmatch" "http.extraHeader" h))
+                        "the token header replaces a repository-scoped one"))
+                (do (is (= 1 (count @envs)) "no retry, so the token is sent nowhere")
+                    (is (= expected (:token-retry-skipped r)))
+                    (is (str/includes? (:error r) "no credential was sent"))
+                    (is (str/includes? (:error r) "denied") "the original push error is kept"))))
+            (finally (fs/delete-tree dir))))))))
