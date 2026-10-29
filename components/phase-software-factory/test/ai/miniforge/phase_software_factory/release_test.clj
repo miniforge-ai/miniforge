@@ -292,6 +292,20 @@
       (is (= :release/zero-files
              (get-in result [:phase :error :data :type]))))))
 
+(deftest ^{:stratum 0} leave-release-fails-without-prepared-work-test
+  (testing "a successful result with no prepared branch fails instead of completing"
+    (let [interceptor (phase/get-phase-interceptor {:phase :release})
+          left ((:leave interceptor)
+                {:phase {:started-at (System/currentTimeMillis)
+                         :result {:status :success :output {:release/status :prepared}}
+                         :budget {:iterations 2}
+                         :iterations 2}
+                 :phase-config {:phase :release}
+                 :execution/metrics {:tokens 0 :duration-ms 0}})]
+      (is (= :failed (get-in left [:phase :status])))
+      (is (= :release/not-prepared
+             (get-in left [:phase :result :error :data :type]))))))
+
 ;------------------------------------------------------------------------------ Layer 1
 
 (deftest ^{:stratum 1} release-readiness-test
@@ -805,6 +819,25 @@
                 "PR URL should be captured")
             (is (= "feature/test-123" (:branch pr-info))
                 "Branch name should be captured"))))))))
+
+(deftest ^{:stratum 3} release-enter-prepares-without-publishing-test
+  (testing "enter-release branches and commits but pushes nothing and opens no PR"
+    (with-test-worktree
+      (fn [worktree]
+        (let [published (atom 0)
+              prepared  {:branch "feature/test-123" :commit-sha "def456"}]
+          (with-redefs [release-executor/prepare-release
+                        (constantly {:success? true :artifacts [] :prepared prepared :metrics {}})
+                        release-executor/publish-release (fn [& _] (swap! published inc))]
+            (let [interceptor (phase/get-phase-interceptor {:phase :release})
+                  entered ((:enter interceptor) (assoc (create-base-context worktree)
+                                                       :phase-config {:phase :release}))
+                  output  (get-in entered [:phase :result :output])]
+              (is (zero? @published) "publish-release must not run in :enter")
+              (is (nil? (:workflow/pr-info entered)))
+              (is (= prepared (:release/prepared output)))
+              (is (false? (get-in output [:release/readiness :ready?]))
+                  "a context with no verify or review evidence is not ready"))))))))
 
 (deftest ^{:stratum 3} release-propagates-streaming-callback-test
   (testing "release phase passes event-stream-backed on-chunk callback to the executor"
