@@ -8,7 +8,6 @@
   :help-examples ["doctor"
                   "run analysis.spec.edn"
                   "workflow list"
-                  "workflow run :simple"
                   "workflow run :workflow-id --input-json '{\"task\": \"Prepare report\"}'"
                   "chain list"
                   "config init"
