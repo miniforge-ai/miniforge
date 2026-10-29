@@ -25,20 +25,31 @@
    - :plan-complete - Plan completeness check"
   (:require [ai.miniforge.gate.messages  :as msg]
             [ai.miniforge.gate.registry  :as registry]
+            [ai.miniforge.gate.stale-references :as stale-references]
             [ai.miniforge.policy-pack.interface :as policy-pack]
+            [ai.miniforge.redaction.interface :as redaction]
             [ai.miniforge.response.interface :as response]
             [cheshire.core               :as json]
+            [clojure.string              :as str]
             [slingshot.slingshot         :refer [try+]]))
 
 ;------------------------------------------------------------------------------ Layer 0
 
 ;; Policy checks
-(def ^{:stratum 0} secret-patterns
-  "Patterns that might indicate hardcoded secrets."
-  [#"(?i)(password|secret|api[_-]?key|token)\s*=\s*[\"'][^\"']{8,}"
-   #"(?i)aws[_-]?(access|secret)[_-]?key[_-]?id?\s*=\s*[\"'][A-Z0-9]{16,}"
-   #"sk-[a-zA-Z0-9]{32,}"  ; OpenAI keys
-   #"ghp_[a-zA-Z0-9]{36}"])  ; GitHub tokens
+(defn ^{:stratum 0} secret-lines
+  "1-based numbers of the lines of TEXT that carry a secret-shaped value
+   (components/redaction's patterns, without the payment-card checksum,
+   which ordinary numbers in code pass). A line equal to one in KNOWN is
+   skipped: KNOWN holds the file's lines before this change, so a token
+   that was already in the file (a test fixture, a docstring example) is
+   not charged to the change that left it alone."
+  [text known]
+  (into []
+        (keep-indexed (fn [i line]
+                        (when (and (not (contains? known line))
+                                   (redaction/pattern-secret-string? line))
+                          (inc i))))
+        (str/split-lines text)))
 
 (defn ^{:stratum 0} check-plan-complete
   "Check if plan artifact is complete."
@@ -187,30 +198,49 @@
 ;------------------------------------------------------------------------------ Layer 1
 
 (defn ^{:stratum 1} check-no-secrets
-  "Check for hardcoded secrets in content."
-  [artifact _ctx]
-  (let [content (or (:content artifact)
-                    (get-in artifact [:artifact/content])
-                    "")
-        content-str (if (string? content) content (pr-str content))
-        matches (for [pattern secret-patterns
-                      :let [matches (re-seq pattern content-str)]
-                      :when (seq matches)]
-                  {:pattern (str pattern)
-                   :count (count matches)})]
-    (if (empty? matches)
+  "Fail when the change puts a secret-shaped value in a file.
+
+   Scans every :code/files entry's :content, and the artifact's own
+   :content / :artifact/content (named by :artifact/path when present).
+   For a file git already tracks, only lines that are new against HEAD
+   in :execution/worktree-path count; with no worktree, no git, or a
+   new file, every line does.
+
+   Findings carry file and line, never the matched value: the gate
+   result is logged and shown to the agent, so quoting the secret would
+   copy it into both."
+  [artifact ctx]
+  (let [worktree (get ctx :execution/worktree-path)
+        content  (or (:content artifact) (:artifact/content artifact))
+        sources  (cond-> (vec (for [{:keys [path content]} (:code/files artifact)
+                                    :when (string? content)]
+                                [path content]))
+                   (some? content)
+                   (conj [(:artifact/path artifact)
+                          (if (string? content) content (pr-str content))]))
+        locations (vec (for [[path text] sources
+                             :let [before (when (and worktree path)
+                                            (stale-references/before-content worktree path))]
+                             line (secret-lines text (if before (set (str/split-lines before)) #{}))]
+                         {:file path :line line}))]
+    (if (empty? locations)
       {:passed? true}
       {:passed? false
-       :errors [{:type :secrets-detected
-                 :message "Potential hardcoded secrets detected"
-                 :matches matches}]})))
+       :errors [{:type      :secrets-detected
+                 :message   (msg/t :no-secrets/detected
+                                   {:locations (str/join ", "
+                                                         (map (fn [{:keys [file line]}]
+                                                                (str (or file (msg/t :no-secrets/artifact-content))
+                                                                     ":" line))
+                                                              locations))})
+                 :locations locations}]})))
 
 ;------------------------------------------------------------------------------ Layer 2
 
 (defmethod ^{:stratum 2} registry/get-gate :no-secrets
   [_]
   {:name :no-secrets
-   :description "Validates no hardcoded secrets in content"
+   :description (msg/t :no-secrets/description)
    :check check-no-secrets
    :repair nil})
 
@@ -264,7 +294,9 @@
 
 ;------------------------------------------------------------------------------ Rich Comment
 (comment
-  (check-no-secrets {:content "(def password \"secret123\")"} {})
+  ;; => {:passed? false :errors [{... :locations [{:file "src/a.py" :line 1}]}]}
+  (check-no-secrets {:code/files [{:path "src/a.py"
+                                   :content (str "api_key = '" "abcdefgh12" "'")}]} {})
   (check-no-secrets {:content "(def x 42)"} {})
   (check-plan-complete {:plan {:steps [{:name "step1"}]}} {})
   :leave-this-here)

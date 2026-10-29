@@ -1,0 +1,130 @@
+;; Title: Miniforge.ai
+;; Subtitle: An agentic SDLC / fleet-control platform
+;; Author: Christopher Lester
+;; Line: Founder, Miniforge.ai (project)
+;; Copyright 2025-2026 Christopher Lester (christopher@miniforge.ai)
+;;
+;; Licensed under the Apache License, Version 2.0 (the "License");
+;; you may not use this file except in compliance with the License.
+;; You may obtain a copy of the License at
+;;
+;;     http://www.apache.org/licenses/LICENSE-2.0
+;;
+;; Unless required by applicable law or agreed to in writing, software
+;; distributed under the License is distributed on an "AS IS" BASIS,
+;; WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+;; See the License for the specific language governing permissions and
+;; limitations under the License.
+(ns ai.miniforge.gate.no-secrets-test
+  "The :no-secrets gate scans the files a change writes, names each
+   finding by file and line, and never repeats the value."
+  (:require [ai.miniforge.gate.interface :as gate]
+            [clojure.java.shell :as shell]
+            [clojure.string :as str]
+            [clojure.test :refer [deftest is testing]])
+  (:import (java.nio.file Files)
+           (java.nio.file.attribute FileAttribute)))
+
+;------------------------------------------------------------------------------ Layer 0
+
+(def ^{:stratum 0} gh-token
+  "Shaped like a GitHub token; not a credential. Built from parts so the
+   source holds no token-shaped literal."
+  (str "ghp" "_" "abcdefghijklmnopqrstuvwxyz0123456789"))
+
+(def ^{:stratum 0} opaque
+  "A password literal with no recognisable shape."
+  "hunter2hunter2")
+
+(defn ^{:stratum 0} temp-git-repo
+  "A git repo with `files` ({path content}) committed at HEAD, in a fresh
+   temp directory. Returns the directory."
+  [files]
+  (let [dir (str (Files/createTempDirectory "no-secrets-test" (make-array FileAttribute 0)))]
+    (shell/sh "git" "-C" dir "init" "-q")
+    (shell/sh "git" "-C" dir "config" "user.email" "test@test")
+    (shell/sh "git" "-C" dir "config" "user.name" "test")
+    (shell/sh "git" "-C" dir "config" "commit.gpgsign" "false")
+    (doseq [[path content] files]
+      (let [f (java.io.File. dir path)]
+        (.mkdirs (.getParentFile f))
+        (spit f content)))
+    (shell/sh "git" "-C" dir "add" "-A")
+    (shell/sh "git" "-C" dir "commit" "-q" "-m" "base")
+    dir))
+
+(defn ^{:stratum 0} check
+  "Run the :no-secrets gate on `artifact` with `ctx`."
+  ([artifact] (check artifact {}))
+  ([artifact ctx] (gate/check-gate :no-secrets artifact ctx)))
+
+;------------------------------------------------------------------------------ Layer 1
+
+(deftest ^{:stratum 1} code-files-are-scanned-test
+  (testing "a token in a :code/files entry fails the gate (main read only :content)"
+    (let [result (check {:code/files [{:path    "src/app/config.py"
+                                       :content (str "import os\napi_key = '" gh-token "'\n")
+                                       :action  :create}]})]
+      (is (false? (:passed? result)))
+      (is (= [{:file "src/app/config.py" :line 2}]
+             (-> result :errors first :locations)))))
+  (testing "every file is scanned, and an opaque password literal is caught"
+    (let [result (check {:code/files [{:path "src/a.clj" :content "(ns a)"}
+                                      {:path "deploy/run.sh" :content (str "#!/bin/sh\n\nGH_TOKEN=opaqueVALUE123 mf run\n")}
+                                      {:path "app/db.py" :content (str "password = \"" opaque "\"\n")}]})]
+      (is (false? (:passed? result)))
+      (is (= [{:file "deploy/run.sh" :line 3} {:file "app/db.py" :line 1}]
+             (-> result :errors first :locations))))))
+
+(deftest ^{:stratum 1} findings-never-carry-the-value-test
+  (testing "the result names file and line only"
+    (let [result (check {:code/files [{:path "a.py" :content (str "token = '" gh-token "'\npassword = '" opaque "'")}]})
+          text   (pr-str result)]
+      (is (false? (:passed? result)))
+      (is (str/includes? (-> result :errors first :message) "a.py:1"))
+      (is (str/includes? (-> result :errors first :message) "a.py:2"))
+      (is (not (str/includes? text gh-token)))
+      (is (not (str/includes? text opaque))))))
+
+(deftest ^{:stratum 1} artifact-content-is-still-scanned-test
+  (testing ":content and :artifact/content are scanned as before"
+    (is (= [{:file nil :line 2}]
+           (-> (check {:content (str "x = 1\nGH_TOKEN=" gh-token)}) :errors first :locations)))
+    (is (= [{:file "secrets.clj" :line 1}]
+           (-> (check {:artifact/content (str "(def api-key \"" gh-token "\")")
+                       :artifact/path "secrets.clj"})
+               :errors first :locations)))))
+
+(deftest ^{:stratum 1} ordinary-code-passes-test
+  (testing "numbers, hashes, ids, token counts and code that reads a secret are not secrets"
+    (is (:passed? (check {:code/files
+                          [{:path    "src/a.clj"
+                            :content (str/join "\n"
+                                               ["(def retention-ms (* 20 24 60 60 1000))"
+                                                "(def max-long 9223372036854775807)"
+                                                "(def sha \"3f2a9c1d8e7b6a5f4c3d2e1f0a9b8c7d6e5f4a3b\")"
+                                                "(def id #uuid \"123e4567-e89b-12d3-a456-426614174000\")"
+                                                ";; MAX_TOKENS=4096, token_count=3, :tokens 12"
+                                                "API_TOKEN = fetch_token()"
+                                                "GH_TOKEN=$GH_TOKEN"
+                                                "token = \"short\""])}]})))))
+
+(deftest ^{:stratum 1} only-lines-new-against-head-count-test
+  (let [fixture (str "(def fake-token \"" gh-token "\")")
+        dir     (temp-git-repo {"test/fixture_test.clj" (str "(ns fixture-test)\n" fixture "\n")})
+        ctx     {:execution/worktree-path dir}]
+    (testing "a token the file already had at HEAD is not charged to this change"
+      (is (:passed? (check {:code/files [{:path    "test/fixture_test.clj"
+                                          :content (str "(ns fixture-test)\n" fixture "\n(def x 1)\n")}]}
+                           ctx))))
+    (testing "a token the change adds is, at its new line number"
+      (is (= [{:file "test/fixture_test.clj" :line 4}]
+             (-> (check {:code/files [{:path    "test/fixture_test.clj"
+                                       :content (str "(ns fixture-test)\n" fixture "\n(def x 1)\n"
+                                                     "(def y \"" opaque "\") (def api-key \"" gh-token "x\")\n")}]}
+                        ctx)
+                 :errors first :locations))))
+    (testing "a new file has every line scanned"
+      (is (= [{:file "src/new.clj" :line 1}]
+             (-> (check {:code/files [{:path "src/new.clj" :content fixture}]} ctx)
+                 :errors first :locations))))))

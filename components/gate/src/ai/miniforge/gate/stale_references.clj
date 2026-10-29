@@ -173,8 +173,9 @@
   (into (set (re-seq keyword-pattern (str content)))
         (map second (re-seq def-name-pattern (str content)))))
 
-(defn- ^{:stratum 1} before-content
-  "The pre-change content of `path`, or nil when the file is new."
+(defn ^{:stratum 1} before-content
+  "The pre-change content of `path`, or nil when the file is new or git
+   cannot read it. Public: the no-secrets gate reads it too."
   [worktree path]
   (git worktree "show" (str "HEAD:" path)))
 
