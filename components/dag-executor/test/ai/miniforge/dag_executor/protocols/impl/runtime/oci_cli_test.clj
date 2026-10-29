@@ -342,13 +342,18 @@
 (deftest ^{:stratum 1} git-credential-env-test
   (let [cred-env (private-fn 'git-credential-env)
         auth     {:user "x-access-token" :token "tok"}]
-    (testing "an Authorization header scoped to the remote's host"
-      (is (= {"GIT_CONFIG_COUNT"    "1"
-              "GIT_CONFIG_KEY_0"    "http.https://github.com/.extraheader"
-              "GIT_CONFIG_VALUE_0"  (str "Authorization: Basic "
-                                         (basic-auth "x-access-token" "tok"))
-              "GIT_TERMINAL_PROMPT" "0"}
-             (cred-env "https://github.com/o/r.git" auth))))
+    (testing "an Authorization header scoped to the remote's host, with no
+              hooks, credential helper, askpass or non-https transport"
+      (let [env (cred-env "https://github.com/o/r.git" auth)]
+        (is (= {"core.hooksPath"       "/dev/null"
+                "credential.helper"    ""
+                "protocol.allow"       "never"
+                "protocol.https.allow" "always"
+                "http.https://github.com/.extraheader"
+                (str "Authorization: Basic " (basic-auth "x-access-token" "tok"))}
+               (git-config-of env)))
+        (is (= "0" (get env "GIT_TERMINAL_PROMPT")))
+        (is (= "" (get env "GIT_ASKPASS")))))
     (testing "no token, or a URL that is not https, yields no credential"
       (is (= {} (cred-env "https://github.com/o/r.git" nil)))
       (is (= {} (cred-env "http://github.com/o/r.git" auth)))
@@ -687,9 +692,7 @@
                            [:data :persisted?])))
         (let [[[cmd opts] & more] (credentialed-calls @calls)]
           (is (empty? more))
-          (is (= ["git" "-c" "core.hooksPath=/dev/null" "push" "https://github.com/o/r.git"
-                  "HEAD:task/x" "--force"]
-                 cmd))
+          (is (= ["git" "push" "https://github.com/o/r.git" "HEAD:task/x" "--force"] cmd))
           (is (= (str "Authorization: Basic " (basic-auth "x-access-token" fake-token))
                  (get (git-config-of (:env opts)) "http.https://github.com/.extraheader"))))
         (proto/release-environment! executor "c1")
@@ -707,7 +710,7 @@
         (is (true? (get-in (proto/restore-workspace! (recorded-remote-executor) "c1"
                                                      {:branch "task/x"})
                            [:data :restored?])))
-        (is (= [["git" "-c" "core.hooksPath=/dev/null" "fetch" "https://github.com/o/r.git"
+        (is (= [["git" "fetch" "https://github.com/o/r.git"
                  "+refs/heads/task/x:refs/remotes/origin/task/x"]]
                (map first (credentialed-calls @calls))))))))
 
@@ -763,20 +766,24 @@
         (run! #(.delete ^java.io.File %) (reverse (file-seq dir)))))))
 
 (deftest ^{:stratum 2} git-credential-env-is-read-by-git-test
-  (testing "git takes the header from the env alone; the repo config file
-            never holds it"
+  (testing "git takes the credential config from the env over the
+            workspace's own .git/config, and the config file never holds it"
     (let [dir (.toFile (java.nio.file.Files/createTempDirectory
                         "cred-env" (make-array java.nio.file.attribute.FileAttribute 0)))
           env ((private-fn 'git-credential-env) "https://github.com/o/r.git"
                                                 {:user "x-access-token" :token fake-token})
           git (fn [& args]
                 (apply shell/sh "git" "-C" (str dir)
-                       (concat args [:env (merge (into {} (System/getenv)) env)])))]
+                       (concat args [:env (merge (into {} (System/getenv)) env)])))
+          get-config #(clojure.string/trim (:out (git "config" "--get" %)))]
       (try
         (git "init" "-q")
-        (is (= (get env "GIT_CONFIG_VALUE_0")
-               (clojure.string/trim
-                (:out (git "config" "--get" "http.https://github.com/.extraheader")))))
+        (git "config" "--local" "core.hooksPath" "/workspace/.evil-hooks")
+        (git "config" "--local" "credential.helper" "/workspace/evil-helper")
+        (is (= (get (git-config-of env) "http.https://github.com/.extraheader")
+               (get-config "http.https://github.com/.extraheader")))
+        (is (= "/dev/null" (get-config "core.hooksPath")))
+        (is (= "" (get-config "credential.helper")))
         (is (not (token-in? (slurp (java.io.File. dir ".git/config")))))
         (finally
           (run! #(.delete ^java.io.File %) (reverse (file-seq dir))))))))

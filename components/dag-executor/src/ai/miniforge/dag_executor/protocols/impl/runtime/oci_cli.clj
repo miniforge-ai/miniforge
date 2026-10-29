@@ -340,6 +340,25 @@
        (.encodeToString (java.util.Base64/getEncoder)
                         (.getBytes (str user ":" token) "UTF-8"))))
 
+(def ^{:stratum 0} ^:private git-credential-config
+  "Config every credentialed git command runs with, set through the
+   environment, which overrides the workspace's .git/config (written by
+   untrusted code): no hooks, no credential helper, and https as the only
+   transport, so no hook, helper, ssh command or ext:: transport named in
+   that config runs while the credential is in git's environment."
+  [["core.hooksPath" "/dev/null"]
+   ["credential.helper" ""]
+   ["protocol.allow" "never"]
+   ["protocol.https.allow" "always"]])
+
+(defn- ^{:stratum 0} git-config-env
+  "GIT_CONFIG_COUNT / GIT_CONFIG_KEY_n / GIT_CONFIG_VALUE_n for `entries`,
+   a seq of [key value]."
+  [entries]
+  (into {"GIT_CONFIG_COUNT" (str (count entries))}
+        (mapcat (fn [i [k v]] [[(str "GIT_CONFIG_KEY_" i) k] [(str "GIT_CONFIG_VALUE_" i) v]])
+                (range) entries)))
+
 (defn- ^{:stratum 0} percent-decode
   "Decode %XX escapes in a URL component; `+` stays a plus."
   [s]
@@ -557,16 +576,18 @@
   "Env that authenticates one git command to the host of `https-url` with
    `auth`: an Authorization header set through GIT_CONFIG_COUNT/KEY/VALUE
    (git 2.31+), scoped by `http.<origin>/.extraheader` so git sends it to
-   that host only. Env-supplied config is never written to .git/config, and
-   exec passes the value by name, so the token lands in neither the
-   capsule's repo state nor the runtime argv (N11 §2.2). Empty without a
-   token or for a non-https URL."
+   that host only, plus `git-credential-config` and no askpass program.
+   Env-supplied config is never written to .git/config, and exec passes the
+   values in an env file, so the token lands in neither the capsule's repo
+   state nor the runtime argv (N11 §2.2). Empty without a token or for a
+   non-https URL."
   [https-url {:keys [user token]}]
   (if-let [[_ origin] (when token (re-find #"^(https://[^/]+)/" https-url))]
-    {"GIT_CONFIG_COUNT"    "1"
-     "GIT_CONFIG_KEY_0"    (str "http." origin "/.extraheader")
-     "GIT_CONFIG_VALUE_0"  (basic-auth-header user token)
-     "GIT_TERMINAL_PROMPT" "0"}
+    (merge (git-config-env (conj git-credential-config
+                                 [(str "http." origin "/.extraheader")
+                                  (basic-auth-header user token)]))
+           {"GIT_TERMINAL_PROMPT" "0"
+            "GIT_ASKPASS"         ""})
     {}))
 
 ;------------------------------------------------------------------------------ Layer 2
@@ -1043,17 +1064,13 @@
 
 (defn- ^{:stratum 4} workspace-exec-fn
   "exec-fn for `workspace/git-persist!` and `git-restore!`. Given a
-   credential env, only push and fetch receive it, and they run with hooks
-   off: untrusted code writes the workspace, and a planted pre-push or
-   reference-transaction hook would inherit the credential from git."
+   credential env, only push and fetch receive it: add, status and commit
+   run hooks and fsmonitor the untrusted workspace defines, so they must
+   not see the credential."
   [descriptor container-id workdir cred-env]
   (let [exec! (container-exec-fn descriptor container-id workdir)]
-    (if (empty? cred-env)
-      exec!
-      (fn [cmd]
-        (if (git-network-command? cmd)
-          (exec! (into ["git" "-c" "core.hooksPath=/dev/null"] (rest cmd)) cred-env)
-          (exec! cmd))))))
+    (fn [cmd]
+      (exec! cmd (when (git-network-command? cmd) cred-env)))))
 
 ;------------------------------------------------------------------------------ Layer 5
 
