@@ -20,7 +20,10 @@
            "mcp__context__context_glob"
            "mcp__context__consider_situation"
            "mcp__context__answer_peg"
-           "TodoWrite"
+           ;; The session checklist. Current Claude Code replaces TodoWrite
+           ;; with the Task* tools; older CLIs still call TodoWrite.
+           "TaskCreate" "TaskGet" "TaskList" "TaskUpdate" "TodoWrite"
+           ;; Loads deferred tool schemas; it runs nothing itself.
            "ToolSearch"}
 
  :roles
@@ -29,12 +32,15 @@
   :planner     #{"mcp__context__context_write" "Write" "Edit" "MultiEdit"
                  "WebSearch" "WebFetch"}
 
-  ;; Edits the worktree and runs build and git steps.
+  ;; Edits the worktree and runs build and git steps. TaskStop stops a
+  ;; Bash command it ran in the background. Monitor and PowerShell also
+  ;; run commands but skip the Bash checks, so no role gets them.
   :implementer #{"mcp__context__context_write" "Write" "Edit" "MultiEdit"
-                 "NotebookEdit" "Bash"}
+                 "NotebookEdit" "Bash" "TaskStop"}
 
   ;; Writes test files and runs them.
-  :tester      #{"mcp__context__context_write" "Write" "Edit" "MultiEdit" "Bash"}
+  :tester      #{"mcp__context__context_write" "Write" "Edit" "MultiEdit" "Bash"
+                 "TaskStop"}
 
   ;; Inspects only: no write path, MCP or native, and no shell.
   :reviewer    #{}

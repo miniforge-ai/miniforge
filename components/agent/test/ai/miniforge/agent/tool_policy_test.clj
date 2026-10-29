@@ -40,7 +40,10 @@
   (testing "a tool the role's set does not list is refused, not allowed by default"
     (is (= "deny" (decision :implementer "SomeNewTool" {})))
     (is (= "deny" (decision :implementer "mcp__other__exfiltrate" {})))
-    (is (= "deny" (decision :implementer nil {})))))
+    (is (= "deny" (decision :implementer nil {}))))
+  (testing "tools that run commands outside the Bash checks are refused even to Bash roles"
+    (doseq [role [:implementer :tester] tool ["Monitor" "PowerShell" "Agent" "Skill"]]
+      (is (= "deny" (decision role tool {:command "printenv"})) (str role " " tool)))))
 
 (deftest ^{:stratum 1} missing-or-unknown-role-denies-every-tool-test
   (testing "with no role, or one the policy does not list, nothing is allowed"
