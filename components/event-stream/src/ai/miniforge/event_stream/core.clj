@@ -120,6 +120,13 @@
   [stream event]
   (swap! stream retention/record event))
 
+(def ^{:stratum 0 :dynamic true} *replaying*
+  "The streams `replay!` is delivering to on this thread (nested replays
+   add to it). A publish to one of them meanwhile derives from a stored
+   event, which its own process derives and stores, so it skips the sinks;
+   a publish to any other stream keeps them."
+  #{})
+
 (defn- ^{:stratum 0} deliver-to-sink!
   "Invoke `sink` with `event`, swallowing exceptions and logging them.
    A failing sink must not break others or the publish path."
@@ -419,7 +426,8 @@
           (let [result (fence/with-in-flight stream event
                          (fn []
                            (let [{:keys [sinks subscribers filters logger]} @stream]
-                             (deliver-to-sinks! sinks event logger)
+                             (when-not (contains? *replaying* stream)
+                               (deliver-to-sinks! sinks event logger))
                              (record-event! stream event)
                              (deliver-to-subscribers! subscribers filters event logger)
                              (log-published! logger event)
@@ -431,6 +439,27 @@
             (if (= result fence/quiesced-sentinel)
               (fence/reject! stream event)
               result))))))
+
+(defn ^{:stratum 2} replay!
+  "Deliver `event`, already stored by the process that published it, to
+   this legacy stream's log and subscribers without its sinks, which would
+   store a second copy. Subscribers' publishes to this stream meanwhile
+   skip its sinks too (`*replaying*`). Returns the redacted event; a
+   current-profile stream returns an :unsupported anomaly."
+  [stream event]
+  (cond
+    (current/active? stream)
+    (anomaly/anomaly :unsupported (messages/system :delivery/replay-unsupported) {})
+
+    (response/anomaly-map? event) event
+
+    :else
+    (let [event (redaction/redact event)
+          {:keys [subscribers filters logger]} @stream]
+      (binding [*replaying* (conj *replaying* stream)]
+        (record-event! stream event)
+        (deliver-to-subscribers! subscribers filters event logger))
+      event)))
 
 ;; Event constructors (N3 compliant)
 (defn ^{:stratum 2} workflow-started

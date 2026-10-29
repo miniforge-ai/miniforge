@@ -16,37 +16,20 @@
 ;; See the License for the specific language governing permissions and
 ;; limitations under the License.
 (ns ai.miniforge.web-dashboard.watcher
-  "File-based event watcher for the dashboard.
-
-   Tail-follows ~/.miniforge/events/*.edn and publishes parsed events
-   to the dashboard's internal event stream. Replaces the HTTP event bridge
-   with a zero-network architecture: CLI writes events to files via the
-   default file sink, and this watcher reads them."
+  "Polls the file sink's live/ and archived/ workflow directories and
+   publishes each new event (see `event-files`). Polling, not a watch per
+   directory: it runs under babashka, with a directory per run ever made.
+   A poll reads only directories modified within the stale threshold; the
+   set is recomputed when a root's mtime changes (at most every
+   `relist-min-ms`) and every `sweep-ms`. Runs active at startup are read
+   in full; older files are left to the archive scan and history."
   (:require
-   [clojure.java.io :as io]
-   [clojure.edn :as edn])
-  (:import
-   [java.io RandomAccessFile]))
+   [ai.miniforge.web-dashboard.config :as dashboard-config]
+   [ai.miniforge.web-dashboard.event-files :as event-files]
+   [clojure.edn :as edn]
+   [slingshot.slingshot :refer [try+]]))
 
 ;------------------------------------------------------------------------------ Layer 0
-
-;; File reading
-(defn ^{:stratum 0} read-new-lines
-  "Read new lines from file starting at byte offset.
-   Returns [new-offset lines] where lines is a vector of strings."
-  [^java.io.File file ^long offset]
-  (let [length (.length file)]
-    (if (<= length offset)
-      [offset []]
-      (let [raf (RandomAccessFile. file "r")]
-        (try
-          (.seek raf offset)
-          (loop [lines (transient [])]
-            (if-let [line (.readLine raf)]
-              (recur (conj! lines line))
-              [(.getFilePointer raf) (persistent! lines)]))
-          (finally
-            (.close raf)))))))
 
 (defn ^{:stratum 0} parse-edn-line
   "Parse a single EDN line, returning nil on parse failure."
@@ -57,74 +40,111 @@
     (catch Exception _
       nil)))
 
-;; Watcher lifecycle
-(defn ^{:stratum 0} initialize-offsets
-  "Scan existing .edn files and set offsets to end-of-file.
-   This skips historical data so the watcher only sees new events."
-  [events-dir]
-  (let [dir (io/file events-dir)]
-    (if (and (.exists dir) (.isDirectory dir))
-      (->> (.listFiles dir)
-           (filter #(.endsWith (.getName ^java.io.File %) ".edn"))
-           (reduce (fn [acc ^java.io.File file]
-                     (assoc acc (.getPath file) (.length file)))
-                   {}))
-      {})))
+(def ^{:stratum 0} poll-ms "Interval between polls." 500)
+
+(def ^{:stratum 0} relist-min-ms "Least time between relists on a root change." 1000)
+
+(def ^{:stratum 0} sweep-ms "Longest time between relists." 10000)
+
+(def ^{:stratum 0} active-window-ms
+  "A directory modified within this window is active."
+  (:stale-threshold-ms dashboard-config/defaults))
+
+(def ^{:stratum 0} mtime-slack-ms
+  "Mtimes can be kept to the second: times this close count as new."
+  1000)
+
+(defn ^{:stratum 0} relist
+  "`state` with its active directories recomputed at `now`. A directory
+   idle for `window-ms` was listed after its last write, so its seen
+   names give way to the time `now - window-ms`."
+  [state events-dir roots window-ms now]
+  (let [active  (event-files/active-dirs events-dir (- now window-ms))
+        dropped (remove (set (keys active)) (keys (:seen state)))]
+    (assoc state
+           :active active
+           :roots roots
+           :listed-at now
+           :seen (select-keys (:seen state) (keys active))
+           :since (into (get state :since {})
+                        (map #(vector % (- now window-ms)))
+                        dropped))))
+
+(defn ^{:stratum 0} tail-dir
+  "Publish the unseen events of directory `dir` (workflow `wf-name`) in
+   creation order. Seen names (a file is named after its event, under
+   either root) only grow, and a file gone before decoding is not
+   counted, so a move to archived/ neither skips nor repeats events."
+  [publish-fn state wf-name dir]
+  (let [seen          (get-in state [:seen wf-name])
+        [names files] (event-files/unseen-files
+                       dir seen (get-in state [:since wf-name] (:since-ms state)))
+        events        (event-files/read-ordered files)
+        decoded       (into #{} (map event-files/source-file) events)
+        vanished      (into #{}
+                            (comp (remove decoded)
+                                  (remove #(.exists ^java.io.File %))
+                                  (map event-files/file-name))
+                            files)]
+    (doseq [event events]
+      (try+
+        (publish-fn event)
+        (catch Exception _ nil)))
+    (assoc-in state [:seen wf-name] (into (or seen #{}) (remove vanished) names))))
 
 ;------------------------------------------------------------------------------ Layer 1
 
-;; Polling
+(defn ^{:stratum 1} initial-state
+  "Watcher state at `now`: directories active now are read in full on
+   the first poll; elsewhere files modified before `now` are skipped."
+  [events-dir now]
+  (let [roots (event-files/root-mtimes events-dir)
+        state (relist {:since-ms (- now mtime-slack-ms) :seen {}}
+                      events-dir roots active-window-ms now)]
+    (assoc state :seen (zipmap (keys (:active state)) (repeat #{})))))
+
 (defn ^{:stratum 1} poll-once!
-  "Scan events dir, read new EDN lines from each .edn file,
-   call publish-fn for each parsed event. Returns updated offsets map."
-  [events-dir offsets publish-fn]
-  (let [dir (io/file events-dir)]
-    (if (and (.exists dir) (.isDirectory dir))
-      (let [edn-files (->> (.listFiles dir)
-                           (filter #(.endsWith (.getName ^java.io.File %) ".edn")))]
-        (reduce
-         (fn [acc ^java.io.File file]
-           (let [path (.getPath file)
-                 current-offset (get acc path 0)
-                 [new-offset lines] (read-new-lines file current-offset)]
-             (doseq [line lines]
-               (when-let [event (parse-edn-line line)]
-                 (try
-                   (publish-fn event)
-                   (catch Exception _ nil))))
-             (assoc acc path new-offset)))
-         offsets
-         edn-files))
-      offsets)))
+  "One poll at `now`: relist when a sweep is due or a root changed (or
+   changed within `mtime-slack-ms` of the last listing, which one mtime
+   tick could hide), then publish the new events of each active one."
+  [state events-dir publish-fn now]
+  (let [{:keys [listed-at]} state
+        roots   (event-files/root-mtimes events-dir)
+        elapsed (- now listed-at)
+        changed? (or (not= roots (:roots state))
+                     (some #(>= % (- listed-at mtime-slack-ms)) roots))
+        relist? (or (>= elapsed sweep-ms)
+                    (and changed? (>= elapsed relist-min-ms)))
+        state   (if relist?
+                  (relist state events-dir roots active-window-ms now)
+                  state)]
+    (reduce-kv (partial tail-dir publish-fn) state (:active state))))
 
 ;------------------------------------------------------------------------------ Layer 2
 
 (defn ^{:stratum 2} start-watcher!
-  "Start a daemon thread that polls events dir every 500ms.
-   Publishes parsed events via publish-fn.
-
-   On startup, seeks to end of all existing files (skips history).
-   Only new bytes appended after startup and new files are published.
-
-   Arguments:
-     events-dir  - Path to ~/.miniforge/events directory
-     publish-fn  - Function (fn [event-map] ...) called for each new event
-
-   Returns: cleanup function that stops the watcher."
+  "Start a daemon thread that polls `events-dir` every `poll-ms` and
+   calls `publish-fn` with each new event. Returns a function that stops
+   it."
   [events-dir publish-fn]
   (let [running (atom true)
-        offsets (atom (initialize-offsets events-dir))
         thread (Thread.
                 (fn []
-                  (while @running
-                    (try
-                      (swap! offsets poll-once! events-dir publish-fn)
-                      (Thread/sleep 500)
-                      (catch InterruptedException _
-                        (reset! running false))
-                      (catch Exception _
-                        ;; Transient I/O error — retry on next poll
-                        (try (Thread/sleep 1000) (catch InterruptedException _ nil)))))))]
+                  (let [state (atom nil)]
+                    (while @running
+                      (try+
+                        (let [now (System/currentTimeMillis)]
+                          (reset! state (if-let [s @state]
+                                          (poll-once! s events-dir publish-fn now)
+                                          (initial-state events-dir now))))
+                        (Thread/sleep (long poll-ms))
+                        (catch InterruptedException _
+                          (reset! running false))
+                        (catch Exception _
+                          ;; Transient I/O error — retry on next poll
+                          (try+ (Thread/sleep 1000)
+                                (catch InterruptedException _
+                                  (reset! running false)))))))))]
     (.setDaemon thread true)
     (.setName thread "miniforge-event-watcher")
     (.start thread)
