@@ -896,8 +896,6 @@
          :sync-statuses statuses
          :summary       (build-sync-summary statuses)}))))
 
-(declare run-glab)
-
 ;------------------------------------------------------------------------------ Rich Comment
 (comment
   ;; Config management
