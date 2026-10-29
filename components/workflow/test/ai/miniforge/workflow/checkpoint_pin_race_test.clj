@@ -12,7 +12,7 @@
             [ai.miniforge.workflow.interface :as workflow]
             [babashka.fs :as fs]
             [clojure.java.io :as io]
-            [clojure.test :refer [deftest is testing]])
+            [clojure.test :refer [deftest is]])
   (:import (java.util.concurrent CountDownLatch TimeUnit)))
 
 ;------------------------------------------------------------------------------ Layer 0
