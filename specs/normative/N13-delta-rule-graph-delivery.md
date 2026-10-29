@@ -233,23 +233,28 @@ Every query takes and returns data. The same inputs, graph digest and ledger sna
  :scope-paths  [string]                         ; intent scope, files-in-scope, explore results
  :repo-paths   [string]                         ; tracked files, passed in by the caller
  :failed-rules [keyword]                        ; ids failed by the prior attempt's gate or review
- :enforcement  {:gate-checks {keyword keyword}  ; rule id → :acting or :non-acting, for rules the gates check
+ :enforcement  {:gate-checks {keyword {:check keyword :rule/digest string}} ; per rule the gates check
                 :reviewer?   boolean}           ; an LLM reviewer runs for this changeset
  :budget       {:behavior-tokens int :manifest-tokens int}}
 ```
 
 `:enforcement` is a snapshot of the enforcement context. The caller builds `:gate-checks` from the pack set the
-policy gates load, with the §7.2 predicates. A rule absent from `:gate-checks` has no check. The snapshot keeps
-both queries pure while their output depends on gate coverage and reviewer availability.
+policy gates load, with the §7.2 predicates. Each entry gives the check kind (`:acting` or `:non-acting`) and the
+content digest of the rule definition the gates evaluate. Classification MUST credit a check only when that digest
+equals the digest of the resolved rule (§4.6). A missing entry or a digest mismatch means no check. A repo override
+under the same id therefore never inherits the shipped rule's gate. The snapshot keeps both queries pure while their
+output depends on gate coverage and reviewer availability.
 
 At review and release, `:changeset` MUST come from the artifact resolution the policy gates use. It MUST NOT come
-from `:files-in-scope`, which describes intended scope rather than the change.
+from `:files-in-scope`, which describes intended scope rather than the change. An empty resolved changeset stays
+empty at those phases.
 
 The query runs these steps in order:
 
 1. **Candidates.** Keep resolved rules whose phase and task type match. Keep a file-scoped rule only when a glob
-   matches a path. Paths are the changeset; when it is empty, the scope paths; when those are empty, the repo
-   paths. Glob matching MUST use the gate's function. At plan and implement, always-on rules bypass phase, task and
+   matches a path. At review and release, paths are the changeset only. At plan and implement, paths are the
+   changeset; when it is empty, the scope paths; when those are empty, the repo paths. Glob matching MUST use the
+   gate's function. At plan and implement, always-on rules bypass phase, task and
    file filtering. At review they are filtered like any rule. At release they are not delivered (§6.3).
 2. **Classify.** Compute each candidate's enforcement class (§7.2).
 3. **Rank.** Always-on rules come first, then failed rules, then rules one edge from a failed rule. Next comes ledger
@@ -368,7 +373,8 @@ reviewer availability from the `:enforcement` snapshot (§5.1).
 1. The gate's predicates for whether a check runs MUST move into the `policy-pack` interface. Today they are private
    to the gate. Gate and graph then call one definition.
 2. A rule from a pack the gates do not load is `:judged` at best. The built-ins `:400-check-existing-work` and
-   `:420-structural-validity` are examples. Both apply at implement only, so both are `:unenforced`.
+   `:420-structural-validity` are examples. Both apply at implement only, so both are `:unenforced`. A rule whose
+   resolved definition differs from the one the gates check is also `:judged` at best (§5.1).
 3. A rule is applicable when it applies to the changeset at any phase of the run. A `:checked` or `:judged` rule
    whose phases exclude `:review` has no reviewer, so it is `:unenforced`. `:std/standards` is an example.
 4. A `:checked` rule's detector often covers one pattern of a longer rule. `:std/clojure` is an example. The rest of
@@ -552,6 +558,8 @@ Each obligation names the stage from which it applies.
 8. Stage 1. `:policy-verify` and `:policy-review` verdicts are identical with the graph present and absent.
 9. Stage 1. A recompile of unchanged rules keeps every graph digest.
 10. Stage 1. A shipped graph edited to drop a rule is not used; the load-time rebuild is, and a fact is emitted.
+11. Stage 1. A repo override of a gated rule id with a non-acting detector is not classed `:gated`.
+12. Stage 1. An empty review changeset selects no file-scoped rule and reports no file-scoped rule `:unenforced`.
 
 ---
 
