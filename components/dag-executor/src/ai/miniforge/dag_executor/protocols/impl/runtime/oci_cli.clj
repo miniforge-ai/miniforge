@@ -423,11 +423,19 @@
 
 (defn- ^{:stratum 0} git-config-env
   "GIT_CONFIG_COUNT / GIT_CONFIG_KEY_n / GIT_CONFIG_VALUE_n for `entries`,
-   a seq of [key value]."
-  [entries]
-  (into {"GIT_CONFIG_COUNT" (str (count entries))}
-        (mapcat (fn [i [k v]] [[(str "GIT_CONFIG_KEY_" i) k] [(str "GIT_CONFIG_VALUE_" i) v]])
-                (range) entries)))
+   a seq of [key value], numbered from `offset` (default 0); the count
+   also covers the `offset` entries before them."
+  ([entries] (git-config-env entries 0))
+  ([entries offset]
+   (into {"GIT_CONFIG_COUNT" (str (+ offset (count entries)))}
+         (mapcat (fn [i [k v]] [[(str "GIT_CONFIG_KEY_" i) k] [(str "GIT_CONFIG_VALUE_" i) v]])
+                 (iterate inc offset) entries))))
+
+(defn- ^{:stratum 0} git-config-count
+  "The GIT_CONFIG_COUNT in `env`; an empty or non-numeric one, as git reads
+   it, is 0."
+  [env]
+  (or (parse-long (get env "GIT_CONFIG_COUNT" "")) 0))
 
 (defn- ^{:stratum 0} percent-decode
   "Decode %XX escapes in a URL component; `+` stays a plus."
@@ -903,30 +911,29 @@
   (let [result (run-runtime-timed default-release-timeout-ms descriptor "rm" "-f" container-id)]
     (result/ok {:released? (zero? (:exit result))})))
 
-(defn- ^{:stratum 2} container-git-config
-  "The GIT_CONFIG_* entries the container's own environment sets: its image
-   ENV and launch env as the runtime recorded them, which no process in the
+(defn- ^{:stratum 2} container-git-count
+  "The GIT_CONFIG_COUNT of the container's own environment: its image ENV
+   and launch env as the runtime recorded them, which no process in the
    capsule can change. Each entry is read whole (`parse-inspected-env`), so
-   a multi-line value can neither add entries nor lose its later lines. {}
-   when there are none or inspect fails."
+   a multi-line value cannot fake a count. 0 when none is set or inspect
+   fails."
   [descriptor container-id]
   (let [r (run-runtime-timed default-exec-timeout-ms descriptor "inspect" "--format"
                              env-inspect-format container-id)]
     (try
-      (if (zero? (:exit r))
-        (into {} (filter #(re-matches git-config-env-pattern (key %)))
-              (parse-inspected-env (:out r)))
-        {})
-      (catch Exception _ {}))))
+      (if (zero? (:exit r)) (git-config-count (parse-inspected-env (:out r))) 0)
+      (catch Exception _ 0))))
 
 (defn- ^{:stratum 2} combine-git-env
-  "`base` then `extra`, with their GIT_CONFIG_* entries renumbered into one
-   block, `extra`'s after `base`'s so its settings win, and their other
-   variables merged, `extra` winning."
+  "`base` then `extra`: `extra`'s GIT_CONFIG_* entries are numbered after
+   base's GIT_CONFIG_COUNT, so they apply later and win, and base's entries
+   stay as they are, including ones it counts but does not hold (the
+   container's own, which its env keeps). Other variables merge, `extra`
+   winning."
   [base extra]
-  (let [entries (concat (git-config-entries base) (git-config-entries extra))]
-    (cond-> (merge (without-git-config base) (without-git-config extra))
-      (seq entries) (merge (git-config-env entries)))))
+  (let [entries (git-config-entries extra)]
+    (cond-> (merge base (without-git-config extra))
+      (seq entries) (merge (git-config-env entries (git-config-count base))))))
 
 ;------------------------------------------------------------------------------ Layer 3
 
@@ -987,17 +994,17 @@
     opts))
 
 (defn- ^{:stratum 3} capsule-credential-env
-  "`git-credential-env` for one command in `container-id`, after the
-   GIT_CONFIG_* entries the container's own environment sets
-   (`container-git-config`). An exec's GIT_CONFIG_COUNT replaces the
-   container's, so without them a trusted launch's or image's tuple, such
-   as an http.proxy, would be lost; the credential's come last and win.
-   `git-trace-off-env` keeps a trace setting the container inherits from
-   writing the header to a file the capsule can read."
+  "`git-credential-env` for one command in `container-id`, its GIT_CONFIG_*
+   entries numbered after the container's own (`container-git-count`), so
+   a trusted launch's or image's tuple (an http.proxy) stays in effect from
+   the container env, unsent, and the credential's come last and win.
+   `git-trace-off-env` keeps an inherited trace setting from writing the
+   header to a file the capsule can read."
   [descriptor container-id https-url auth]
   (let [cred (git-credential-env https-url auth)]
     (if (seq cred)
-      (merge (combine-git-env (container-git-config descriptor container-id) cred)
+      (merge (combine-git-env {"GIT_CONFIG_COUNT" (str (container-git-count descriptor container-id))}
+                              cred)
              git-trace-off-env)
       cred)))
 
