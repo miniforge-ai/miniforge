@@ -214,6 +214,13 @@
    base-dir to ~/.miniforge/events; (base-dir)."
   sinks/archived-dir)
 
+(def ^{:stratum 0} event-file-ms
+  "`(event-file-ms file-name)`: the epoch ms an event file's name records
+   (legacy `{ts}-{uuid}.json` or Snowflake `{hex}__{seq}.transit.json`),
+   which orders a directory holding both; nil for a name that is not an
+   event file (manifest, snapshot, temp file)."
+  sinks/event-file-ms)
+
 (def ^{:stratum 0} serialize-event
   "Serialize an event map to the canonical Transit-JSON wire string —
    the exact encoding the file sink writes to disk (verbose mode: no
