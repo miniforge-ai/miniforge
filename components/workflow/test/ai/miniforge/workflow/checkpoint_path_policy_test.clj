@@ -47,6 +47,14 @@
     (with-redefs [permissions/posix? (constantly false)]
       (is (= (fs/path (fs/real-path target) "nested") (directory/prepare! (fs/path alias "nested")))))))
 
+(defn- ^{:stratum 0} verify-created-parent-traversal [root]
+  (let [requested (fs/path root "unused" ".." "checkpoint")
+        prepared (directory/prepare! requested)
+        expected (fs/path (fs/real-path root) "checkpoint")]
+    (is (= expected prepared))
+    (fs/delete (fs/path root "unused"))
+    (is (fs/directory? prepared))))
+
 ;------------------------------------------------------------------------------ Layer 1
 
 (defn- ^{:stratum 1} verify-new-directories [root]
@@ -87,6 +95,9 @@
 (deftest ^{:stratum 1} writable-original-ancestry-cannot-hide-behind-an-alias (fixture/call-with-posix-checkpoint-root verify-writable-original-path))
 
 (deftest ^{:stratum 1} native-providers-also-return-resolved-directories (fixture/call-with-posix-checkpoint-root verify-native-alias))
+
+(deftest ^{:stratum 1} parent-traversal-returns-a-path-independent-of-unused-directories
+  (fixture/call-with-posix-checkpoint-root verify-created-parent-traversal))
 
 ;------------------------------------------------------------------------------ Layer 2
 

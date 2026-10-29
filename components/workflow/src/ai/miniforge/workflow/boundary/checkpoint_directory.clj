@@ -43,7 +43,8 @@
     (if (permissions/posix? ancestor)
       (do
         (path-policy/check! directory)
-        (reduce create-private! (check-ancestry! (fs/real-path ancestor) (empty? segments)) segments))
+        (fs/real-path
+         (reduce create-private! (check-ancestry! (fs/real-path ancestor) (empty? segments)) segments)))
       (fs/real-path (fs/create-dirs directory)))))
 
 (comment ::checkpoint-directory-creation)

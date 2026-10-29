@@ -3,4 +3,5 @@
 ;; Licensed under the Apache License, Version 2.0.
 {:workflow/system-messages
  {:env/persisted "Workspace persisted: {reference}"
-  :checkpoint/unsafe-directory "Unsafe checkpoint directory {path}: trusted ownership and protection from entry replacement are required."}}
+  :checkpoint/unsafe-directory "Unsafe checkpoint directory {path}: trusted ownership and protection from entry replacement are required."
+  :checkpoint/unsafe-history "Checkpoint audit history must be a regular file: {path}."}}

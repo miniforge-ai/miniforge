@@ -4,8 +4,10 @@
 (ns ai.miniforge.workflow.boundary.checkpoint-history
   "Append audit records without following links; create private POSIX files."
   (:require [ai.miniforge.workflow.boundary.checkpoint-permissions :as permissions]
+            [ai.miniforge.workflow.messages :as messages]
             [babashka.fs :as fs])
-  (:import [java.nio ByteBuffer]
+  (:import [java.io IOException]
+           [java.nio ByteBuffer]
            [java.nio.channels FileChannel]
            [java.nio.charset StandardCharsets]
            [java.nio.file LinkOption StandardOpenOption]
@@ -17,6 +19,11 @@
   #{StandardOpenOption/CREATE StandardOpenOption/WRITE
     StandardOpenOption/APPEND LinkOption/NOFOLLOW_LINKS})
 
+(defn- ^{:stratum 0} require-regular-history! [path]
+  (when (and (fs/exists? path {:nofollow-links true})
+             (not (fs/regular-file? path {:nofollow-links true})))
+    (throw (IOException. (messages/system :checkpoint/unsafe-history {:path (str path)})))))
+
 (defn- ^{:stratum 0} creation-attributes [path]
   (into-array FileAttribute
               (when (permissions/posix? (fs/parent path))
@@ -26,6 +33,7 @@
 ;------------------------------------------------------------------------------ Layer 1
 
 (defn ^{:stratum 1} append! [path text]
+  (require-regular-history! path)
   (let [buffer (ByteBuffer/wrap (.getBytes ^String text StandardCharsets/UTF_8))]
     (with-open [channel (FileChannel/open (fs/path path) append-options (creation-attributes path))]
       (while (.hasRemaining buffer) (.write channel buffer)))))

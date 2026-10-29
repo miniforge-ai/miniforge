@@ -50,12 +50,16 @@
 
 (defn- ^{:stratum 1} verify-sticky-hop [root]
   (let [sticky (fs/create-dir (fs/path root "sticky"))
-        alias (fs/create-sym-link (fs/path root "alias") sticky)]
+        _hop (fs/create-sym-link (fs/path root "hop") sticky)
+        alias (fs/create-sym-link (fs/path root "alias") (fs/path "hop"))]
     (java.nio.file.Files/setAttribute sticky "unix:mode" (int sticky-world-writable-mode)
                                      (make-array java.nio.file.LinkOption 0))
     (is (= (fs/path (fs/real-path sticky) "private")
            (directory/prepare! (fs/path alias "private"))))
-    (is (thrown? IOException (directory/existing! alias)))))
+    (is (= (fs/path (fs/real-path sticky) "private")
+           (directory/existing! (fs/path alias "private"))))
+    (is (thrown? IOException (directory/existing! alias)))
+    (is (thrown? IOException (directory/prepare! alias)))))
 
 (deftest ^{:stratum 1} intermediate-writable-targets-are-refused
   (fixture/call-with-posix-checkpoint-root verify-unsafe-hop))
