@@ -157,6 +157,18 @@
       (fs/directory? (es/workflow-dir events-dir id)) :live
       :else (or (manifest-hold dir) :expired))))
 
+(defn ^{:stratum 1} run-checkpoint-root
+  "The checkpoint root run `workflow-id` was checkpointed under: the
+   default root when it holds the run, else the root the run's own events
+   (under `events-dir`) announce, else nil."
+  [workflow-id events-dir]
+  (if (checkpoint-store/checkpoint-present? workflow-id)
+    (checkpoint-paths/resolve-checkpoint-root {})
+    (let [run-dir (announced-run-dir events-dir workflow-id)]
+      (when (and run-dir (not= :unknown run-dir)
+                 (= (str workflow-id) (str (fs/file-name run-dir))))
+        (str (fs/parent run-dir))))))
+
 ;------------------------------------------------------------------------------ Layer 2
 
 (defn ^{:stratum 2} gc-checkpoints!

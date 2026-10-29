@@ -45,9 +45,14 @@
        (str lock-file)))
 
 (defn ^{:stratum 1} lock-file
-  "The lock file of run `workflow-run-id` under `checkpoint-root`."
+  "The lock file of run `workflow-run-id` under `checkpoint-root`, built
+   from the root's real path, so every path to one root (a symlink, a
+   relative path) names one lock file and one in-process lock."
   [checkpoint-root workflow-run-id]
-  (fs/path checkpoint-root locks-directory-name (str workflow-run-id ".lock")))
+  (let [root (if (fs/exists? checkpoint-root)
+               (fs/real-path checkpoint-root)
+               (fs/absolutize checkpoint-root))]
+    (fs/path root locks-directory-name (str workflow-run-id ".lock"))))
 
 (defn- ^{:stratum 1} acquire-file-lock!
   "Open run `workflow-run-id`'s lock file and take its lock by `deadline`

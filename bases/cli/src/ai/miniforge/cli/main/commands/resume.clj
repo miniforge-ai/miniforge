@@ -365,10 +365,14 @@
         _ (doseq [failure (:checkpoint-read-failures recorded)]
             (display/print-info (messages/t :resume/checkpoint-unreadable
                                             {:error (:anomaly/message failure)})))
-        ;; `--pin`: the checkpoint GC keeps a pinned run. Nothing to pin
-        ;; is reported, and the resume goes on.
+        ;; `--pin`: the checkpoint GC keeps a pinned run, pinned under the
+        ;; root its checkpoint lives in. Nothing to pin is reported, and the
+        ;; resume goes on.
         _ (when (:pin opts)
-            (let [pinned (workflow/pin-checkpoint! (str workflow-id))]
+            (let [root (workflow/run-checkpoint-root (str workflow-id) events-dir)
+                  pinned (if root
+                           (workflow/pin-checkpoint! (str workflow-id) {:checkpoint/root root})
+                           (workflow/pin-checkpoint! (str workflow-id)))]
               (cond
                 (anomaly/anomaly? pinned)
                 (display/print-info (messages/t :resume/pin-failed
