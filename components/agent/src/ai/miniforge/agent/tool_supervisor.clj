@@ -32,7 +32,8 @@
    [cheshire.core :as json]
    [clojure.edn :as edn]
    [clojure.java.io :as io]
-   [ai.miniforge.event-stream.interface :as events])
+   [ai.miniforge.event-stream.interface :as events]
+   [slingshot.slingshot :refer [try+]])
   (:import
    [java.io PushbackReader]))
 
@@ -42,7 +43,8 @@
 (def ^{:stratum 0} tool-policy
   "The tool policy, read from the classpath resource
    config/agent/tool-policy.edn on first use, with its
-   :bash/deny-patterns compiled to regexes."
+   :bash/deny-patterns compiled to regexes. A missing or unreadable
+   resource throws there, and the hook then refuses the tool call."
   (delay (-> (io/resource "config/agent/tool-policy.edn")
              slurp
              edn/read-string
@@ -88,6 +90,20 @@
   []
   (json/parse-stream (PushbackReader. *in*) true))
 
+(defn ^{:stratum 0} hook-reply
+  "The PreToolUse reply for an evaluation `result`: {} for allow (no
+   decision, so Claude's normal permission flow applies), and for deny
+   hookSpecificOutput with hookEventName PreToolUse, permissionDecision
+   deny and the reason. That is the current PreToolUse output
+   (https://code.claude.com/docs/en/hooks); the top-level
+   {\"decision\": \"block\"} it replaces is deprecated for this event."
+  [result]
+  (if (= "deny" (:decision result))
+    {:hookSpecificOutput {:hookEventName "PreToolUse"
+                          :permissionDecision "deny"
+                          :permissionDecisionReason (:reason result)}}
+    {}))
+
 ;------------------------------------------------------------------------------ Layer 1
 
 ;; Core evaluation function
@@ -129,39 +145,29 @@
 
    Reads Claude PreToolUse JSON from stdin:
      {\"tool_name\": \"Bash\", \"tool_input\": {\"command\": \"ls\"}}
+   evaluates it and writes `hook-reply` to stdout.
 
-   Writes Claude hook response to stdout:
-     {} for allow (no decision: Claude's normal permission flow applies)
-     {\"hookSpecificOutput\": {\"hookEventName\": \"PreToolUse\",
-                             \"permissionDecision\": \"deny\",
-                             \"permissionDecisionReason\": \"...\"}} for deny
-   The deny form is the current PreToolUse output
-   (https://code.claude.com/docs/en/hooks); the top-level
-   {\"decision\": \"block\"} it replaces is deprecated for this event.
-
-  Returns exit code 0 always (non-zero would crash the hook)."
+   Returns the exit code: 0 once a reply is written. When reading or
+   evaluating the request throws, it writes nothing to stdout, explains on
+   stderr and returns 2: for PreToolUse, Claude reads exit code 2 as a
+   blocking error, refuses the tool call and shows the agent stderr. Any
+   other non-zero code lets the call through."
   []
-  (try
-    (let [input (read-hook-request)
-          tool-name (:tool_name input)
-          tool-input (get input :tool_input {})
-          tool-input-kw (into {} (map (fn [[k v]] [(keyword k) v]) tool-input))
-          result (evaluate-tool-use tool-name tool-input-kw)
-          ;; Emit event (no-ops if no event stream bound)
-          _ (emit-tool-use-event! tool-name result)]
-      (if (= "deny" (:decision result))
-        (println (json/generate-string
-                  {:hookSpecificOutput {:hookEventName "PreToolUse"
-                                        :permissionDecision "deny"
-                                        :permissionDecisionReason (:reason result)}}))
-        ;; Empty object = allow (no objection from hook)
-        (println (json/generate-string {}))))
-    (catch Exception e
-      ;; On error, allow (fail-open) — don't block the inner agent
-      (binding [*out* *err*]
-        (println (str "WARN: hook-eval error: " (ex-message e))))
-      (println (json/generate-string {}))))
-  0)
+  (try+
+   (let [input (read-hook-request)
+         tool-name (:tool_name input)
+         tool-input (get input :tool_input {})
+         tool-input-kw (into {} (map (fn [[k v]] [(keyword k) v]) tool-input))
+         result (evaluate-tool-use tool-name tool-input-kw)
+         ;; Emit event (no-ops if no event stream bound)
+         _ (emit-tool-use-event! tool-name result)]
+     (println (json/generate-string (hook-reply result)))
+     0)
+   (catch Object _
+     (binding [*out* *err*]
+       (println (str "hook-eval refused the tool call: evaluation failed: "
+                     (get &throw-context :message "no message"))))
+     2)))
 
 ;------------------------------------------------------------------------------ Rich Comment
 (comment
