@@ -56,6 +56,11 @@
 (def ^{:stratum 0} ^:private t
   (messages/create-translator "config/config/messages/system.edn" :config/system))
 
+(defonce ^{:stratum 0} ^:private warned-unparseable
+  ;; Config files already reported as not parsing in this process. One
+  ;; command reads the config many times; the warning is printed once.
+  (atom #{}))
+
 ;; Repo-level configuration
 (def ^{:stratum 0} repo-config-dir-name
   ".miniforge")
@@ -74,14 +79,16 @@
 (defn ^{:stratum 1} read-edn-file
   "Read an EDN file; nil when it is absent or does not parse. A parse failure
    is reported on stderr, naming the file, so a typo in config.edn does not
-   silently run every workflow on defaults."
+   silently run every workflow on defaults. The report is printed once per
+   file per process: one command reads the config many times."
   [path]
   (try
     (when (and path (fs/exists? path))
       (edn/read-string (slurp path)))
     (catch Exception e
-      (binding [*out* *err*]
-        (println (t :config-file/ignored {:path path :error (.getMessage e)})))
+      (when-not (contains? (first (swap-vals! warned-unparseable conj (str path))) (str path))
+        (binding [*out* *err*]
+          (println (t :config-file/ignored {:path path :error (.getMessage e)}))))
       nil)))
 
 (defn- ^{:stratum 1} read-config-resource

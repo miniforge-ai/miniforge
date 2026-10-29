@@ -116,6 +116,18 @@
         (is (str/includes? (str err) (.getPath tmp)))
         (finally (.delete tmp))))))
 
+(deftest ^{:stratum 0} unparseable-user-config-is-reported-once-test
+  (testing "one process reading an unparseable config.edn many times warns once"
+    (let [tmp (java.io.File/createTempFile "unparseable-user-config-once" ".edn")
+          err (java.io.StringWriter.)]
+      (try
+        (spit tmp "{:llm {:backend :claude}")
+        (binding [*err* err]
+          (dotimes [_ 10] (config/load-user-config (.getPath tmp))))
+        (is (= 1 (count (re-seq (re-pattern (java.util.regex.Pattern/quote (.getPath tmp)))
+                                (str err)))))
+        (finally (.delete tmp))))))
+
 ;; Variables that used to be mapped onto keys nothing reads. Setting one
 ;; changed nothing, while the docs presented some of them as hard budget
 ;; stops. No run reads :model-selection or :self-healing from the merged
