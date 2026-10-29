@@ -21,7 +21,7 @@
    Runs the test suite directly inside the executor environment.
    No tester agent: the implementer wrote both source and test files;
    this phase validates them by running the test suite.
-   Default gates: [:tests-pass :coverage]"
+   Default gates: [:pre-verify-lint :tests-pass :policy-verify]"
   (:require [ai.miniforge.anomaly.interface :as anomaly]
             [ai.miniforge.phase.interface :as phase]
             [ai.miniforge.phase.interface.gate :as phase-gate]
@@ -413,6 +413,10 @@
                                                 (get test-results :output ""))
                      (:parse-error? test-results)
                      (assoc :parse-error? true)
+                     ;; The runner's own "nothing to test" claim; :tests-pass
+                     ;; tells it apart from a run that counted no tests.
+                     (:no-tests? test-results)
+                     (assoc :no-tests? true)
                      (seq (:failures test-results))
                      (assoc :failures (:failures test-results)))
         summary    (if passed?
