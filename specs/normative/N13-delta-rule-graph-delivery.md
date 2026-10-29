@@ -286,9 +286,13 @@ Budget rules:
 |---|---|---|
 | `rule` | `:id`, `:detail` (`:behavior` or `:body`) | text at the pinned pack version; explicit not-found |
 | `related` | `:id`, `:hops` (1–2), `:edge-types` | entries with edge type and source |
-| `rules-for-paths` | `:paths`, `:phase` | manifest entries; for a new file type met mid-task |
-| `search` | `:text`, `:dewey-prefix` | manifest entries; lexical over title, behavior and body |
+| `rules-for-paths` | `:paths`, `:phase`, `:enforcement` | manifest entries; for a new file type met mid-task |
+| `search` | `:text`, `:dewey-prefix`, `:phase`, `:changeset`, `:enforcement` | manifest entries; lexical match |
 | `enforcement-classes` | `:phase`, `:task-type`, `:changeset`, `:enforcement` | class for every applicable rule (§7) |
+
+Every query that returns manifest entries takes the phase, changeset and enforcement snapshot, because each entry
+carries a class. The pull tools (§6.2) bind these from the session's delivery context. The agent supplies only the
+lookup terms. `search` matches its text against title, behavior and body.
 
 ---
 
@@ -414,18 +418,24 @@ rule from review delivery.
 The end state: the compiler takes enforcement action and severity only from explicit fields, and a change to
 `alwaysApply` alone changes no gate outcome. The migration runs in two steps, so no rule weakens on the way.
 
-1. Stage 1. A rule without explicit values keeps its `alwaysApply`-derived values, and the compiler warns for it.
-   The §7.7 diff shows any change those values cause.
-2. Stage 2. After standards declares `enforcement.action` and severity on every rule, and miniforge re-pins, the
+1. Stage 1. The compiler MUST read an explicit `severity` frontmatter field; today it reads none. Action and
+   severity are decided separately. Each comes from its explicit field when present, and from `alwaysApply`
+   otherwise. The compiler warns for each value it derives, and the §7.7 diff shows any change those values cause.
+2. Stage 2. After standards declares `enforcement.action` and `severity` on every rule, and miniforge re-pins, the
    compiler MUST NOT derive either value from `alwaysApply`.
 
-Under this rule, D4's downgrade of `:std/clojure` shows in the re-pin diff. The fix is an explicit
-`enforcement.action` upstream before that re-pin.
+An explicit action alone does not hold severity. With `enforcement.action: warn` and `alwaysApply: false`, today's
+compiler yields `:warn`/`:low`. Under this rule, D4's downgrade of `:std/clojure` shows in the re-pin diff. The fix
+is explicit `enforcement.action: warn` and `severity: high` upstream, after Stage 1 compiler support, before that
+re-pin.
 
 ### 7.7 Pack Diff
 
 Any change to a compiled pack MUST attach a rule-by-rule diff, whether from a pin bump or a compiler change. The
-diff covers action, severity, detector, applies-to, always-on membership and enforcement class. The October 2026 pin
+diff covers action, severity, detector, applies-to, always-on membership and static check kind. The static check
+kind is the check the gates would run if they load the rule: `:acting`, `:non-acting` or none. It depends on pack
+data only. The diff MUST NOT report per-run enforcement classes, which also depend on the changeset and the
+enforcement snapshot. The October 2026 pin
 analysis produced this diff by hand. It becomes a build output.
 
 ### 7.8 Always-On Set
@@ -483,8 +493,8 @@ share this one function. The compiler MUST reject a glob that this function cann
 1. **Stage 0 (this delta).** Spec and index entry. Register the §6.4 facts in N3 before Stage 1 code.
 2. **Stage 1 (MUST).** Build the resolver, the graph, `delivery-set` and `enforcement-classes`. Match per file at
    review and release, and show ids in every block. Declare always-on as data. Emit `:unenforced` facts through a
-   reporting coverage gate. Add the §7.6 step 1 warnings and the §7.7 diff. Delivery is push only. Plan and implement filter
-   candidates by the seed list plus the always-on set.
+   reporting coverage gate. Add §7.6 step 1 (explicit `severity`, warnings) and the §7.7 diff. Delivery is push
+   only. Plan and implement filter candidates by the seed list plus the always-on set.
 3. **Stage 2 (SHOULD).** Pull tools. Plan and implement switch to `delivery-set` with the seed as prior. Manifest
    and overflow output, release narrowing, fail-closed coverage (§7.3), and §7.6 step 2.
 4. **Stage 3 (SHOULD).** Ledger rank (N13 Stage 2), `:co-violated` edges, and reviewer bodies on demand after §7.4
@@ -549,8 +559,8 @@ Each obligation names the stage from which it applies.
    appears as a manifest entry or in the count.
 3. Stage 2. At implement, with a non-empty always-on set and a one-token budget, loading fails with a configuration
    error.
-4. Stage 1. A fixture rule with explicit `enforcement.action: hard-halt` keeps its action and severity when
-   `alwaysApply` flips. A fixture rule without explicit values gets a compiler warning and a §7.7 diff entry.
+4. Stage 1. A fixture rule with explicit `enforcement.action: warn` and `severity: high` keeps `:warn`/`:high`
+   when `alwaysApply` flips. A fixture rule without explicit values gets a compiler warning and a §7.7 diff entry.
 5. Stage 2. Both fixtures in item 4 keep their action and severity when `alwaysApply` flips.
 6. Stage 1. A review without an LLM backend emits `policy/rule-unenforced` for applicable `:checked` and `:judged`
    rules. It reports none of them as passed.
