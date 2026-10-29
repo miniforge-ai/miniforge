@@ -79,15 +79,28 @@
    Substring replacement rather than whole-value replacement, so
    `\"deploying with sk-live-abc…\"` keeps its sentence and loses only
    the key. Whole-value replacement would destroy the audit trail the
-   marker exists to preserve."
+   marker exists to preserve.
+
+   A pattern with a named group `secret` has only that group replaced;
+   the rest of its match (a variable name, an `=`, quotes) is context
+   that locates the secret and stays. Any other pattern has its whole
+   match replaced."
   [s]
-  ;; One str/replace per pattern rather than a single alternation over
-  ;; all of them: the alternation measured ~45% slower, because Java can
-  ;; use a literal-prefix optimization on each pattern separately and
-  ;; loses it once they are combined.
+  ;; One pass per pattern rather than a single alternation over all of
+  ;; them: the alternation measured ~45% slower, because Java can use a
+  ;; literal-prefix optimization on each pattern separately and loses
+  ;; it once they are combined.
   (let [marker (policy/marker)]
     (payment-card/redact
-      (reduce (fn [acc pattern] (str/replace acc pattern marker))
+      (reduce (fn [acc ^java.util.regex.Pattern pattern]
+                (if (str/includes? (.pattern pattern) "(?<secret>")
+                  (let [m (re-matcher pattern acc)]
+                    (loop [from 0 parts []]
+                      (if (.find m)
+                        (recur (.end m "secret")
+                               (conj parts (subs acc from (.start m "secret")) marker))
+                        (apply str (conj parts (subs acc from))))))
+                  (str/replace acc pattern marker)))
               s (:redaction/secret-value-patterns @policy/policy)) marker)))
 
 (defn ^{:stratum 0} redact-number [value]
