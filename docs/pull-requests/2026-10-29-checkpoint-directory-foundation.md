@@ -13,6 +13,8 @@ Provide private creation, protected canonical ancestry, and validation of the
 original path and symlink owners before resolving aliases. Preserve trusted
 aliases and existing read-only sharing. Reject unsafe existing directories
 without changing permissions. Return canonical directories on native providers.
+Provide a no-follow append boundary that creates private POSIX history files
+while preserving existing file permissions and append semantics.
 
 The immediate consumer is atomic checkpoint and pin publication in #2094;
 this PR does not yet change the store's publication path. POSIX checks cover
@@ -22,5 +24,6 @@ ownership and mode bits; deployments must also protect directory ACLs.
 
 Regression tests cover private creation, read-only sharing, writable leaves,
 trusted and foreign aliases, unsafe original ancestry, and native path resolution.
-The focused JVM suite passes eight tests and 19 assertions.
+History regressions cover private creation, retained sharing, append order,
+and refusal to follow a symlink.
 Run normal hooks, standards, fresh-head review, and CI before merging.
