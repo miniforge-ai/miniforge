@@ -109,6 +109,13 @@
   (or (get-in (entry k) [:defaults default-key])
       (get-in (entry :docker) [:defaults default-key])))
 
+(defn ^{:stratum 3} cli-env-names
+  "Set of env var names the CLI for runtime kind `k` reads from its own
+   process environment. Falls back to Docker's set, like `default`."
+  [k]
+  (or (get (entry k) :cli-env-names)
+      (get (entry :docker) :cli-env-names #{})))
+
 ;------------------------------------------------------------------------------ Layer 4
 
 (defn ^{:stratum 4} user-spec

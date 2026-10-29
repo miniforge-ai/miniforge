@@ -136,10 +136,25 @@
   [s]
   (str "'" (str/replace s "'" "'\"'\"'") "'"))
 
-(defn ^{:stratum 0} build-env-args
-  "Build -e arguments for environment variables."
-  [env-map]
-  (mapcat (fn [[k v]] ["-e" (str (name k) "=" v)]) env-map))
+(defn- ^{:stratum 0} env-arg
+  "The `-e` value for one env entry: NAME alone, or NAME=value when the
+   name is in `cli-names` (registry :cli-env-names), the names the runtime
+   CLI reads from its own environment. Passing one of those by name would
+   reconfigure the CLI, so it goes inline."
+  [cli-names [k v]]
+  (if (contains? cli-names (name k))
+    (str (name k) "=" v)
+    (name k)))
+
+(defn ^{:stratum 0} build-child-env
+  "The entries `build-env-args` passed by name, as the string map to add to
+   the runtime CLI process's environment."
+  [descriptor env-map]
+  (let [cli-names (registry/cli-env-names (descriptor/kind descriptor))]
+    (into {}
+          (for [[k v] env-map
+                :when (not (contains? cli-names (name k)))]
+            [(name k) (str v)]))))
 
 (def ^{:stratum 0} secret-pattern
   "Regex matching env var names that carry sensitive values."
@@ -389,9 +404,12 @@
    When `timeout-ms` is nil or <= 0 the call is unbounded. On timeout the
    process tree is destroyed forcibly and a result with :exit 124 is returned
    so callers that check `(zero? :exit)` surface it as a command failure."
-  [timeout-ms descriptor args & {:keys [stdin-bytes]}]
+  [timeout-ms descriptor args & {:keys [stdin-bytes env]}]
   (try
-    (let [pb (ProcessBuilder. (into-array String (apply runtime-cmd descriptor args)))
+    (let [pb (doto (ProcessBuilder. (into-array String (apply runtime-cmd descriptor args)))
+               ;; `env` joins the CLI's own environment, where `-e NAME`
+               ;; args read their values (`build-child-env`).
+               (-> .environment (.putAll (or env {}))))
           process (.start pb)
           stdout-fut (runtime-process/read-stream-future (.getInputStream process))
           stderr-fut (runtime-process/read-stream-future (.getErrorStream process))
@@ -439,6 +457,16 @@
            :err-bytes (byte-array 0)})))
     (catch Exception e
       {:exit 1 :err (.getMessage e) :out "" :out-bytes (byte-array 0) :err-bytes (byte-array 0)})))
+
+(defn ^{:stratum 1} build-env-args
+  "Build -e arguments for environment variables. Each entry is passed by
+   name (`-e NAME`) so its value never appears on the runtime argv, where
+   `ps` shows it to every host user; the CLI reads the value from its own
+   environment, which `build-child-env` supplies. Names the CLI itself
+   reads go inline as `-e NAME=value`."
+  [descriptor env-map]
+  (let [cli-names (registry/cli-env-names (descriptor/kind descriptor))]
+    (mapcat (fn [entry] ["-e" (env-arg cli-names entry)]) env-map)))
 
 (defn ^{:stratum 1} filter-env-by-trust
   "Return env-map with sensitive entries removed for :untrusted trust level.
@@ -540,11 +568,12 @@
   (apply run-runtime-timed nil descriptor args))
 
 (defn ^{:stratum 2} run-runtime-process
-  "Execute a runtime CLI command with optional stdin bytes.
+  "Execute a runtime CLI command with optional stdin bytes and extra
+   environment entries for the CLI process.
    Internal callers that need a bounded deadline use `run-runtime-process-timed`
    directly; this public entry point is unbounded for backward-compatibility."
-  [descriptor args & {:keys [stdin-bytes]}]
-  (run-runtime-process-timed nil descriptor args :stdin-bytes stdin-bytes))
+  [descriptor args & {:keys [stdin-bytes env]}]
+  (run-runtime-process-timed nil descriptor args :stdin-bytes stdin-bytes :env env))
 
 (defn ^{:stratum 2} exec-in-container
   "Execute a command in a running container."
@@ -553,7 +582,7 @@
                    ["sh" "-c" command]
                    command)
         workdir-args (when (:workdir opts) ["-w" (:workdir opts)])
-        env-args (build-env-args (:env opts))
+        env-args (build-env-args descriptor (:env opts))
         full-args (concat ["exec"]
                           workdir-args
                           env-args
@@ -563,7 +592,8 @@
                      (:timeout-ms opts)
                      default-exec-timeout-ms)
         start-time (System/currentTimeMillis)
-        result (apply run-runtime-timed timeout-ms descriptor full-args)]
+        result (run-runtime-process-timed timeout-ms descriptor full-args
+                                          :env (build-child-env descriptor (:env opts)))]
     (result/ok {:exit-code (:exit result)
                 :stdout (:out result)
                 :stderr (:err result)
@@ -666,7 +696,7 @@
                                (contains? execution-plan :env))
                         (:env execution-plan)
                         env-map)
-        env-args      (build-env-args effective-env)
+        env-args      (build-env-args descriptor effective-env)
         resource-args (build-resource-args
                        descriptor resources
                        {:omit-memory? (some? (:memory-limit-mb execution-plan))})
@@ -694,7 +724,8 @@
                               env-args
                               resource-args
                               (into [image] (get execution-plan :command ["sleep" "infinity"])))
-        result        (apply run-runtime descriptor cmd-args)]
+        result        (run-runtime-process descriptor cmd-args
+                                           :env (build-child-env descriptor effective-env))]
     (if (zero? (:exit result))
       (result/ok {:container-id (str/trim (:out result))
                   :container-name container-name})
