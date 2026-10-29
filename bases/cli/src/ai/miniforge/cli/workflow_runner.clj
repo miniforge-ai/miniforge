@@ -287,7 +287,9 @@
     (catch Object _
       (let [e (:throwable &throw-context)]
         (when-not quiet
-          (println (display/colorize :red (messages/t :workflow-runner/spec-execution-failed {:error (ex-message e)})))
+          (println (display/colorize :red (messages/t :workflow-runner/spec-execution-failed
+                                                      {:error (or (:anomaly/message (ex-data e))
+                                                                  (ex-message e))})))
           (flush))
         (throw+)))))
 
