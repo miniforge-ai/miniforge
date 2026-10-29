@@ -54,16 +54,21 @@
     (when (:event/type event) event)))
 
 (defn ^{:stratum 0} roots
-  "The file sink's per-workflow roots under `events-dir`, live first."
+  "The file sink's per-workflow roots under `events-dir`, live first: a
+   directory moving to archived/ is then seen in at least one of them."
   [events-dir]
   [(es/live-dir events-dir) (es/archived-dir events-dir)])
 
 ;------------------------------------------------------------------------------ Layer 1
 
 (defn ^{:stratum 1} unseen
-  "The files of `files` whose names are not in `seen`."
-  [files seen]
-  (remove (comp seen file-name) files))
+  "The files of `files` not read yet: names not in `seen` or, when `seen`
+   is nil (the directory not listed yet), files modified at or after
+   `since-ms`."
+  [files seen since-ms]
+  (if seen
+    (remove (comp seen file-name) files)
+    (filter #(>= (mtime %) since-ms) files)))
 
 (defn ^{:stratum 1} event-files
   "Event files directly in `dir`, sorted by name. Empty when `dir` does
@@ -78,17 +83,34 @@
   [events-dir]
   (mapcat #(remove hidden? (.listFiles ^File %)) (roots events-dir)))
 
+(defn ^{:stratum 1} root-mtimes
+  "Last-modified times of the roots; one changes when a workflow
+   directory is created, moved or removed."
+  [events-dir]
+  (mapv mtime (roots events-dir)))
+
 ;------------------------------------------------------------------------------ Layer 2
 
 (defn ^{:stratum 2} read-unseen
-  "Read the events in `dir` whose file names are not in `seen`. Returns
+  "Read the events in `dir` not read yet (see `unseen`). Returns
    [names events]: the names of every event file now in `dir`, and the
    new events in file-name order. The sink names each file after its
    event, so a name read once need not be read again."
-  [dir seen]
-  (let [files (event-files dir)]
-    [(into #{} (map file-name) files)
-     (into [] (keep read-event) (unseen files seen))]))
+  ([dir seen]
+   (read-unseen dir seen 0))
+  ([dir seen since-ms]
+   (let [files (event-files dir)]
+     [(into #{} (map file-name) files)
+      (into [] (keep read-event) (unseen files seen since-ms))])))
+
+(defn ^{:stratum 2} active-dirs
+  "{name dir} of the workflow directories modified at or after
+   `since-ms`. A name under both roots maps to its archived directory."
+  [events-dir since-ms]
+  (into {}
+        (comp (filter #(>= (mtime %) since-ms))
+              (map (juxt file-name identity)))
+        (workflow-dirs events-dir)))
 
 (defn ^{:stratum 2} workflow-events
   "Every event of `workflow-id` in the sink layout (its archived, live or
