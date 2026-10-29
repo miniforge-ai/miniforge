@@ -179,7 +179,7 @@
   [worktree path]
   (git worktree "show" (str "HEAD:" path)))
 
-(defn- ^{:stratum 1} worktree-changed-paths
+(defn ^{:stratum 1} worktree-changed-paths
   "Every path the worktree has changed against HEAD — tracked
    modifications AND untracked files — regardless of which implement
    attempt produced them. A retry that changes nothing must still be
@@ -187,7 +187,7 @@
    the attempt's own artifact let an empty-diff retry pass vacuously
    while the stale rename persisted (trap-bench REPAIR DEMONSTRATION,
    reps rq1-rq3: every run's final iteration was decision :allow on
-   zero files)."
+   zero files). Public: the no-secrets gate scans the same set."
   [worktree]
   (let [tracked (str (git worktree "diff" "--name-only" "HEAD" "--"))
         untracked (str (git worktree "ls-files" "--others" "--exclude-standard"))]

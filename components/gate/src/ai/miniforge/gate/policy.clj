@@ -30,6 +30,7 @@
             [ai.miniforge.redaction.interface :as redaction]
             [ai.miniforge.response.interface :as response]
             [cheshire.core               :as json]
+            [clojure.java.io             :as io]
             [clojure.string              :as str]
             [slingshot.slingshot         :refer [try+]]))
 
@@ -50,6 +51,30 @@
                                    (redaction/pattern-secret-string? line))
                           (inc i))))
         (str/split-lines text)))
+
+(defn ^{:stratum 0} change-sources
+  "[path text] for everything the change wrote: each :code/files entry
+   with string :content, the artifact's own :content / :artifact/content
+   (path from :artifact/path), and every other file the worktree has
+   changed or added against HEAD, read from disk. The last set is what
+   a retry that writes nothing leaves behind from the attempt before."
+  [artifact worktree]
+  (let [content (or (:content artifact) (:artifact/content artifact))
+        files   (for [{:keys [path content]} (:code/files artifact)
+                      :when (string? content)]
+                  [path content])
+        listed  (set (map first files))
+        on-disk (when worktree
+                  (for [path (stale-references/worktree-changed-paths worktree)
+                        :when (not (contains? listed path))
+                        :let [f (io/file worktree path)
+                              text (when (.isFile f)
+                                     (try+ (slurp f) (catch Exception _ nil)))]
+                        :when text]
+                    [path text]))]
+    (cond-> (into (vec files) on-disk)
+      (some? content) (conj [(:artifact/path artifact)
+                             (if (string? content) content (pr-str content))]))))
 
 (defn ^{:stratum 0} check-plan-complete
   "Check if plan artifact is complete."
@@ -200,25 +225,18 @@
 (defn ^{:stratum 1} check-no-secrets
   "Fail when the change puts a secret-shaped value in a file.
 
-   Scans every :code/files entry's :content, and the artifact's own
-   :content / :artifact/content (named by :artifact/path when present).
-   For a file git already tracks, only lines that are new against HEAD
-   in :execution/worktree-path count; with no worktree, no git, or a
-   new file, every line does.
+   Scans what `change-sources` returns: the artifact's files and
+   content, plus the worktree's other uncommitted changes. For a file
+   git already tracks, only lines that are new against HEAD in
+   :execution/worktree-path count; with no worktree, no git, or a new
+   file, every line does.
 
    Findings carry file and line, never the matched value: the gate
    result is logged and shown to the agent, so quoting the secret would
    copy it into both."
   [artifact ctx]
-  (let [worktree (get ctx :execution/worktree-path)
-        content  (or (:content artifact) (:artifact/content artifact))
-        sources  (cond-> (vec (for [{:keys [path content]} (:code/files artifact)
-                                    :when (string? content)]
-                                [path content]))
-                   (some? content)
-                   (conj [(:artifact/path artifact)
-                          (if (string? content) content (pr-str content))]))
-        locations (vec (for [[path text] sources
+  (let [worktree  (get ctx :execution/worktree-path)
+        locations (vec (for [[path text] (change-sources artifact worktree)
                              :let [before (when (and worktree path)
                                             (stale-references/before-content worktree path))]
                              line (secret-lines text (if before (set (str/split-lines before)) #{}))]

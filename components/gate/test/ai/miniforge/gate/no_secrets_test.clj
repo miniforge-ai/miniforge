@@ -128,3 +128,12 @@
       (is (= [{:file "src/new.clj" :line 1}]
              (-> (check {:code/files [{:path "src/new.clj" :content fixture}]} ctx)
                  :errors first :locations))))))
+
+(deftest ^{:stratum 1} uncommitted-worktree-changes-are-scanned-test
+  (testing "a retry that writes nothing is still judged on what the last attempt left"
+    (let [dir (temp-git-repo {"src/app.clj" "(ns app)\n"})]
+      (spit (str dir "/src/app.clj") (str "(ns app)\n(def api-key \"" gh-token "\")\n"))
+      (spit (str dir "/deploy.env") (str "GH_TOKEN=opaqueVALUE123\n"))
+      (is (= #{{:file "src/app.clj" :line 2} {:file "deploy.env" :line 1}}
+             (-> (check {:code/files []} {:execution/worktree-path dir})
+                 :errors first :locations set))))))
