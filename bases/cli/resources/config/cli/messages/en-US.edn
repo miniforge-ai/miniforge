@@ -696,6 +696,7 @@
   :workflow-runner/validation-failed "Workflow validation failed: {errors}"
   :workflow-runner/artifact-store-warning "Warning: Could not create artifact store, running without persistence"
   :workflow-runner/artifact-store-close-warning "Warning: some artifacts may not have been saved or indexed in the artifact store"
+  :workflow-runner/local-mode-notice "   Local mode: the agent runs on this machine with your user's privileges, unisolated. Run with --execution-mode governed to isolate it in a container capsule."
   :workflow-runner/runtime-source "   Source: {path}"
   :workflow-runner/runtime-worktree "   Worktree: {path}"
   :workflow-runner/runtime-branch "   Branch: {branch}"
