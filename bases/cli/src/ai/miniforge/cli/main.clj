@@ -56,7 +56,6 @@
    [ai.miniforge.cli.main.status.summary :as status-summary]
    [ai.miniforge.cli.main.version :as version]
    [ai.miniforge.cli.main.commands.run :as cmd-run]
-   [ai.miniforge.cli.main.commands.resume :as cmd-resume]
    [ai.miniforge.cli.main.commands.shared :as cmd-shared]
    [ai.miniforge.cli.main.commands.monitoring :as cmd-monitoring]
    [ai.miniforge.cli.main.commands.fleet :as cmd-fleet]
@@ -196,8 +195,11 @@
            :quiet (boolean quiet)
            :dashboard-url dashboard-url})
          (catch Exception e
+           ;; A throw+ anomaly's ex-message is slingshot's "throw+: {...}"
+           ;; wrapper around the whole map; print the anomaly's message.
            (display/print-error (messages/t :workflow-run/failed
-                                            {:error (ex-message e)}))
+                                            {:error (or (:anomaly/message (ex-data e))
+                                                        (ex-message e))}))
            nil))))))
 
 ;; Workflow subcommands — spec-driven execution and lifecycle (N5)
@@ -228,8 +230,11 @@
            :input-json input-json
            :quiet (boolean quiet)})
          (catch Exception e
+           ;; A throw+ anomaly's ex-message is slingshot's "throw+: {...}"
+           ;; wrapper around the whole map; print the anomaly's message.
            (display/print-error (messages/t :chain-run/failed
-                                            {:error (ex-message e)}))
+                                            {:error (or (:anomaly/message (ex-data e))
+                                                        (ex-message e))}))
            nil))))))
 
 ;; Observability commands
@@ -264,17 +269,7 @@
     (if (str/blank? (str wf-id))
       (do (display/print-error (messages/t :resume/missing-workflow-id))
           (cmd-shared/exit! 1))
-      (some-> (try+
-                (cmd-resume/resume-workflow wf-id opts)
-                (catch InterruptedException interrupted
-                  (.interrupt (Thread/currentThread))
-                  (throw interrupted))
-                (catch Error fatal (throw fatal))
-                (catch Object caught
-                  (cmd-resume/print-resume-failure caught (:throwable &throw-context))
-                  (cmd-shared/exit! 1)
-                  nil))
-              cmd-run/finish!))))
+      (some-> (cmd-run/resume-reporting-failure wf-id opts) cmd-run/finish!))))
 
 (defn ^{:stratum 0} scan-cmd [m] (cmd-scan/scan-cmd (util/get-opts m)))
 
@@ -482,7 +477,8 @@
            :quiet       {:coerce :boolean :alias :q}
            :run-id      {}
            :correlation-id {}
-           :from-phase  {:coerce :keyword}}}
+           :from-phase  {:coerce :keyword}
+           :force       {:coerce :boolean}}}
 
    ;; Status command
    {:cmds ["status"]

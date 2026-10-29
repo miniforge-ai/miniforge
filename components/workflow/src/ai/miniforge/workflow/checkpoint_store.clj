@@ -37,6 +37,7 @@
    [ai.miniforge.coerce.interface :as coerce]
    [ai.miniforge.workflow.checkpoint-store-paths :as checkpoint-paths]
    [ai.miniforge.workflow.checkpoint-store-records :as checkpoint-records]
+   [ai.miniforge.workflow.checkpoint-store-spec :as checkpoint-spec]
    [ai.miniforge.workflow.messages :as messages]
    [ai.miniforge.workflow.schemas :as schemas]
    [babashka.fs :as fs]
@@ -303,6 +304,36 @@
 
        :else nil))))
 
+(defn ^{:stratum 2} read-checkpoint-manifest
+  "A run's checkpoint manifest on its own, whatever the state of its
+   snapshot: the manifest, nil when there is none, or an anomaly naming
+   the file when it does not read. Resume checks the spec against it even
+   when the snapshot cannot be restored."
+  ([workflow-run-id]
+   (read-checkpoint-manifest workflow-run-id {}))
+  ([workflow-run-id opts]
+   (read-checkpoint-file
+    (checkpoint-paths/manifest-path (checkpoint-paths/resolve-checkpoint-root opts)
+                                    workflow-run-id))))
+
+(defn ^{:stratum 2} record-spec-path!
+  "Point a run's manifest at where its spec file now lives (the CLI moves
+   a work spec to work/done or work/failed when the run ends), keeping the
+   recorded hash. Returns the manifest path; nil when the run has no
+   readable manifest; an anomaly when it cannot be written."
+  ([workflow-run-id spec-path]
+   (record-spec-path! workflow-run-id spec-path {}))
+  ([workflow-run-id spec-path opts]
+   (let [path (checkpoint-paths/manifest-path (checkpoint-paths/resolve-checkpoint-root opts)
+                                              workflow-run-id)
+         manifest (read-checkpoint-file path)]
+     (when (and (map? manifest) (not (anomaly/anomaly? manifest)))
+       (try+
+         (write-edn-atomically! path (assoc manifest :workflow/spec-path (str spec-path)))
+         path
+         (catch Exception e
+           (write-failure (checkpoint-paths/resolve-checkpoint-root opts) workflow-run-id nil e)))))))
+
 (defn ^{:stratum 2} persist-execution-state!
   "Persist a machine snapshot, manifest, and current phase checkpoint,
    and append the phase's gate decision (if any) to the run's
@@ -341,8 +372,10 @@
       ;; the manifest actually written (merged with it) is validated
       ;; before anything is written.
       (try+
-        (let [merged-manifest (checkpoint-records/build-manifest ctx checkpoint-root
-                                                                 (read-edn-file manifest-path))
+        (let [existing-manifest (read-edn-file manifest-path)
+              merged-manifest (merge (checkpoint-records/build-manifest ctx checkpoint-root
+                                                                        existing-manifest)
+                                     (checkpoint-spec/spec-fields ctx existing-manifest))
               validation (schemas/validate-checkpoint-data
                           (assoc checkpoint-data :manifest merged-manifest))]
           (if (anomaly/anomaly? validation)

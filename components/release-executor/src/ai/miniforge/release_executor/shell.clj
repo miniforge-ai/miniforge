@@ -58,6 +58,22 @@
   {"GIT_TERMINAL_PROMPT" "0"
    "GH_PROMPT_DISABLED"  "1"})
 
+(defn ^{:stratum 0} parent-env
+  "The environment children start from: this process's. A function so
+   tests can supply a fixed environment."
+  []
+  (into {} (System/getenv)))
+
+(defn ^{:stratum 0} trace-env-var?
+  "True for git's tracing variables: GIT_TRACE, GIT_TRACE_* (CURL, PACKET,
+   REDACT, ...), GIT_TRACE2*, and GIT_CURL_VERBOSE. With a credential in a
+   child's environment, GIT_TRACE_CURL or GIT_CURL_VERBOSE can write the
+   Authorization header to a log, and GIT_TRACE_REDACT=0 turns git's
+   default redaction off."
+  [var-name]
+  (or (str/starts-with? var-name "GIT_TRACE")
+      (= "GIT_CURL_VERBOSE" var-name)))
+
 (def ^{:stratum 0} poll-ms
   "How often a running call's descendants are recorded. A helper whose
    parent exits (git-remote-https, a credential helper) is reparented and
@@ -131,7 +147,9 @@
   "Run argv `args` with empty stdin, `non-interactive-env`, and a deadline.
 
    opts: :dir, :extra-env (merged over `non-interactive-env`), :timeout-ms
-   (default `default-timeout-ms`).
+   (default `default-timeout-ms`), :no-trace? (drop `trace-env-var?`
+   variables from the child's environment; set it for any call that
+   carries a credential). The child starts from `parent-env`.
 
    Returns {:exit :out :err} when the process finishes. At the deadline it
    kills the process, its descendants, and any process recorded as a
@@ -140,14 +158,16 @@
    :anomaly <:timeout anomaly> :readers-done? <bool>}. :readers-done? is
    false when an output reader had to be cancelled. A process that cannot
    be started throws, as `process/shell` does; callers already catch that."
-  [args {:keys [dir extra-env timeout-ms]}]
+  [args {:keys [dir extra-env timeout-ms no-trace?]}]
   (let [timeout-ms (or timeout-ms default-timeout-ms)
         label      (command-label args)
+        base-env   (cond->> (parent-env)
+                     no-trace? (into {} (remove #(trace-env-var? (key %)))))
         proc       (apply process/process
-                          (cond-> {:in        ""
-                                   :out       :string
-                                   :err       :string
-                                   :extra-env (merge non-interactive-env extra-env)}
+                          (cond-> {:in  ""
+                                   :out :string
+                                   :err :string
+                                   :env (merge base-env non-interactive-env extra-env)}
                             dir (assoc :dir (str dir)))
                           args)
         ;; bb's process record has no timed deref, so wait on a future.

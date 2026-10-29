@@ -298,7 +298,6 @@
   :run/detected-format "Detected {format} format: {path}"
   :run/unrecognized-format "Unrecognized file format in: {path}\nExpected :spec/title (spec), :dag-id (DAG), or :plan/id (plan)"
   :run/failed "Failed to run workflow: {error}"
-  :run/error-details "  Details: {details}"
 
   ;; ── Worktree ──────────────────────────────────────────────────────────
   :worktree/root-not-found "No git worktree found from: {path}"
@@ -689,6 +688,7 @@
   :workflow-runner/not-found "Workflow '{workflow-id}' not found. Use 'workflow list' to see available workflows."
   :workflow-runner/validation-failed "Workflow validation failed: {errors}"
   :workflow-runner/artifact-store-warning "Warning: Could not create artifact store, running without persistence"
+  :workflow-runner/artifact-store-close-warning "Warning: some artifacts may not have been saved or indexed in the artifact store"
   :workflow-runner/runtime-source "   Source: {path}"
   :workflow-runner/runtime-worktree "   Worktree: {path}"
   :workflow-runner/runtime-branch "   Branch: {branch}"
@@ -732,6 +732,12 @@
   :resume/completed-phases "Completed phases: {phases}"
   :resume/completed-phases-none "none"
   :resume/events-found "Events found: {count}"
+  :resume/spec-changed "The spec has changed since workflow {workflow-id} was started: {path} (expected hash {expected}, got {actual}). Pass --force to resume anyway; the result may be incorrect."
+  :resume/spec-changed-forced "Warning: the spec has changed since workflow {workflow-id} was started ({path}: expected hash {expected}, got {actual}); resuming anyway because of --force."
+  :resume/spec-unreadable "no readable file"
+  :resume/spec-unverified "Warning: cannot check that the spec of workflow {workflow-id} is unchanged since it started: {reason}. Resuming without that check."
+  :resume/spec-unverified-no-manifest "its checkpoint manifest is missing or unreadable"
+  :resume/spec-unverified-no-hash "no spec hash was recorded when it started"
   :resume/checkpoint-unreadable "Warning: a checkpoint file was not restored, so phases it recorded may run again. {error}"
   :resume/rewinding-to-unreadable "Rewinding to phase {phase}: a checkpointed result the run needs from there on did not read, so {phase} and the phases after it run again."
   :resume/resuming-from-phase "Resuming from phase: {phase} ({count} phases remaining)"
@@ -767,6 +773,7 @@
   :workflow-runner/chain-steps-label "{steps} step(s)"
   :workflow-runner/list-chains-failed "Failed to list chains: {error}"
   :workflow-runner/chain-step-completed "chain {chain-id} completed"
+  :workflow-runner/unknown-backend "Unknown LLM backend {backend}. Known backends: {available}. Set one with `{command}` or --backend."
 
   ;; workflow-runner subcommand --help support (per-subcommand usage)
   :workflow-runner.help/subcommand-heading "{subcommand}"

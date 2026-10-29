@@ -5,7 +5,7 @@
   "Admit terminal publication before returning and checkpointing its outcome."
   (:require [ai.miniforge.anomaly.interface :as anomaly]
             [ai.miniforge.workflow.boundary.terminal :as boundary]
-            [ai.miniforge.workflow.checkpoint-store :as checkpoints]
+            [ai.miniforge.workflow.runner-checkpoint :as runner-checkpoint]
             [ai.miniforge.workflow.runner-events :as events]
             [ai.miniforge.workflow.runner-terminal-failure :as failure]))
 
@@ -14,7 +14,7 @@
 (defn- ^{:stratum 0} refuse! [stream ctx receipt output-ctx-vol]
   (let [failed (failure/failed-context ctx receipt)]
     (vreset! output-ctx-vol failed)
-    (checkpoints/persist-execution-state! failed)
+    (runner-checkpoint/persist! failed)
     (failure/publish! stream ctx failed)))
 
 ;------------------------------------------------------------------------------ Layer 1
@@ -31,7 +31,7 @@
   (let [admitted (boundary/with-failed-cleanup!
                  output-ctx-vol (partial admit! stream ctx skip-lifecycle? output-ctx-vol))]
     (vreset! output-ctx-vol admitted)
-    (checkpoints/persist-execution-state! admitted)
+    (runner-checkpoint/persist! admitted)
     admitted))
 
 (comment ::terminal-admission)

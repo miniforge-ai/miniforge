@@ -89,7 +89,8 @@
 
 (defn ^{:stratum 0} backend-for-model
   "Look up the backend keyword for a model-id string.
-   Returns :claude, :codex, :gemini, :ollama, etc. based on the model catalog.
+   Returns :claude, :codex, :gemini-api, :ollama, etc. based on the model
+   catalog; every catalog backend is one `create-client` accepts.
    For a model-id the catalog does not list, returns `not-found`, which
    defaults to :codex. Pass nil as `not-found` to tell an unlisted model
    apart from a listed one."

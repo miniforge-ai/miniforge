@@ -203,6 +203,53 @@
         (flush))
       (display/print-error (messages/t :resume/failed {:error message})))))
 
+(defn- ^{:stratum 0} check-spec-drift!
+  "Check the spec file run `workflow-id` started from against the hash its
+   checkpoint manifest recorded, reading the manifest on its own so an
+   unrestorable snapshot does not skip the check. A changed or missing
+   spec refuses the resume; with --force it goes ahead after a warning.
+   When no hash can be checked (no readable manifest, or none recorded
+   for a run started from a spec or one whose snapshot was not restored),
+   a warning says so: an unknown hash is
+   not a pass, but refusing would block every run checkpointed before
+   hashes were recorded. Returns the recorded spec fields to carry into
+   the resumed run's checkpoints, or nil."
+  [workflow-id recorded force?]
+  (let [manifest (workflow/read-checkpoint-manifest (str workflow-id))
+        readable (when (and (map? manifest) (not (anomaly/anomaly? manifest))) manifest)
+        drift (some-> readable workflow/spec-drift)
+        params (when drift
+                 {:workflow-id (str workflow-id)
+                  :path (:workflow/spec-path drift)
+                  :expected (:spec/expected-hash drift)
+                  :actual (or (:spec/actual-hash drift) (messages/t :resume/spec-unreadable))})
+        ;; Without a restored snapshot nothing shows the run was not
+        ;; started from a spec, so a missing hash is reported then too.
+        spec-run? (or (nil? (:machine-snapshot recorded))
+                      (some? (get-in recorded [:machine-snapshot :execution/input :spec/path])))]
+    (cond
+      (and drift force?)
+      (display/print-info (messages/t :resume/spec-changed-forced params))
+
+      drift
+      (response/throw-anomaly! :anomalies/conflict
+                               (messages/t :resume/spec-changed params)
+                               (assoc drift :workflow-id (str workflow-id)))
+
+      (:workflow/spec-hash readable) nil
+
+      (nil? readable)
+      (display/print-info (messages/t :resume/spec-unverified
+                                      {:workflow-id (str workflow-id)
+                                       :reason (messages/t :resume/spec-unverified-no-manifest)}))
+
+      spec-run?
+      (display/print-info (messages/t :resume/spec-unverified
+                                      {:workflow-id (str workflow-id)
+                                       :reason (messages/t :resume/spec-unverified-no-hash)})))
+    (when (:workflow/spec-hash readable)
+      (select-keys readable [:workflow/spec-path :workflow/spec-hash]))))
+
 ;------------------------------------------------------------------------------ Layer 1
 
 (defn- ^{:stratum 1} throw-resume-anomaly!
@@ -351,7 +398,8 @@
     (if (:completed? reconstructed)
       (do (display/print-info (messages/t :resume/already-completed)) nil)
 
-      (let [completed-phases (:completed-phases reconstructed)
+      (let [recorded-spec (check-spec-drift! workflow-id recorded (:force opts))
+            completed-phases (:completed-phases reconstructed)
             _ (when-not quiet
                 (display/print-info
                   (messages/t :resume/completed-phases
@@ -447,6 +495,9 @@
                                       :resume-phase-results (when (wr/checkpointed-phase-results recorded)
                                                               (:phase-results reconstructed))
                                       :resume-workspace (:workspace-checkpoint reconstructed)
+                                      ;; A new attempt keeps checking against the
+                                      ;; spec the run started from.
+                                      :checkpoint/spec recorded-spec
                                       :skip-lifecycle-events false
                                       :pre-completed-dag-tasks (:completed-dag-tasks reconstructed)
                                       :pre-completed-artifacts (:completed-dag-artifacts reconstructed)
