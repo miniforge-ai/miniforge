@@ -286,8 +286,9 @@
 
 (deftest ^{:stratum 2} non-identifier-env-name-hard-stops-test
   (testing "an env name such as * or GH_*, which Podman's `-e NAME` reads as
-            a pattern over its own environment, stops the launch"
-    (doseq [n ["*" "GH_*" "A B"]]
+            a pattern over its own environment, stops the launch, as does
+            DOCKER_CUSTOM_HEADERS, which would go inline on argv"
+    (doseq [n ["*" "GH_*" "A B" "DOCKER_CUSTOM_HEADERS"]]
       (let [env (assoc base-env :env {n "x"} :trust-level :trusted)
             r   (oci-cli/security-gate-check rootless-descriptor "img" env good-digest-fn)]
         (is (= :security-policy-violation (get-in r [:error :code])) (pr-str n))
