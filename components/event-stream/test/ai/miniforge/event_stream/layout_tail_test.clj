@@ -162,8 +162,11 @@
         stream     (file-sink-stream events-dir)
         wf-id      (random-uuid)
         published  (atom [])
-        publish    #(swap! published conj %)
-        [logger entries] (log/collecting-logger)]
+        publish    #(do (swap! published conj %) (throw (ex-info "view down" {})))
+        entries    (atom [])
+        ;; The log write fails, as on a full disk: delivery must go on.
+        logger     (log/create-logger {:output (fn [e] (swap! entries conj e)
+                                                 (throw (ex-info "disk full" {})))})]
     (es/publish! stream (wf-event :workflow/started wf-id))
     (Thread/sleep 2)
     (spit (io/file (es/workflow-dir base wf-id) (str (.format (java.time.format.DateTimeFormatter/ofPattern "yyyyMMdd'T'HHmmssSSS'Z'")
@@ -175,9 +178,9 @@
     (let [t0    (System/currentTimeMillis)
           polls (iterate #(sut/poll-once! % base publish (+ t0 500))
                          (assoc (sut/initial-state base t0 window-ms) :logger logger))]
-      (nth polls (dec layout/max-read-attempts))
+      (dorun (take layout/max-read-attempts polls))
       (is (= [:workflow/started] (mapv :event/type @published)) "held while it is retried")
-      (nth polls layout/max-read-attempts)
+      (dorun (take (inc layout/max-read-attempts) polls))
       (is (= [:workflow/started :workflow/completed] (mapv :event/type @published)))
       (is (= [:event-tail/gap] (map :log/event @entries))))))
 
@@ -259,7 +262,9 @@
           s1 (sut/poll-once! (sut/initial-state base t0 window-ms) base publish (+ t0 500))
           t1 (+ t0 window-ms sut/sweep-ms)
           s2 (sut/poll-once! s1 base publish t1)]
-      (es/publish! stream (wf-event :workflow/resumed wf-id))
+      ;; The resume's file records the start's millisecond, as a fast run can.
+      (write-event-file! events-dir wf-id (wf-event :workflow/resumed wf-id)
+                         (layout/file-ms (first (layout/event-files dir))))
       (.setLastModified dir (+ t1 1000))
       ;; Active again, but archived before this poll lists it: the listing finds nothing.
       (let [s3 (with-redefs [layout/event-files (fn [d] (archive! events-dir wf-id) (list-files d))]
