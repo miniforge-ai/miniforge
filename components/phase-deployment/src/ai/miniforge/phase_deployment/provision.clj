@@ -15,7 +15,6 @@
 ;; WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 ;; See the License for the specific language governing permissions and
 ;; limitations under the License.
-
 (ns ai.miniforge.phase-deployment.provision
   "Provision phase interceptor."
   (:require [ai.miniforge.logging.interface :as log]
@@ -28,13 +27,13 @@
             [ai.miniforge.schema.interface :as schema]))
 
 ;------------------------------------------------------------------------------ Layer 0
-;; Defaults + schemas
 
-(def default-config
+;; Defaults + schemas
+(def ^{:stratum 0} default-config
   "Provision phase defaults loaded from EDN."
   (defaults/phase-defaults :provision))
 
-(def ProvisionRunConfig
+(def ^{:stratum 0} ProvisionRunConfig
   [:map
    [:phase-config map?]
    [:stack-dir :string]
@@ -42,7 +41,7 @@
    [:env [:map-of :string :string]]
    [:gcp-project {:optional true} [:maybe :string]]])
 
-(def PreviewAnalysis
+(def ^{:stratum 0} PreviewAnalysis
   [:map
    [:creates nat-int?]
    [:updates nat-int?]
@@ -55,20 +54,18 @@
       [:name {:optional true} [:maybe :string]]
       [:action {:optional true} [:maybe :string]]]]]])
 
-(defn- validate!
+(defn- ^{:stratum 0} validate!
   [result-schema value]
   (schema/validate result-schema value))
 
-;------------------------------------------------------------------------------ Layer 1
 ;; Shared helpers
-
-(defn- get-logger
+(defn- ^{:stratum 0} get-logger
   "Resolve logger from ctx, creating a default if absent."
   [ctx]
   (or (get-in ctx [:execution/logger])
       (log/create-logger {:min-level :info :output :human})))
 
-(defn- failed-enter
+(defn- ^{:stratum 0} failed-enter
   "Build a :failed phase context for enter-time failures."
   [ctx start-time result-map]
   (-> ctx
@@ -77,12 +74,27 @@
       (assoc-in [:phase :started-at] start-time)
       (assoc-in [:phase :result] result-map)))
 
-(defn- merged-phase-config
+(defn- ^{:stratum 0} merged-phase-config
   [ctx phase-kw]
   (phase/merge-with-defaults
    (assoc (or (get-in ctx [:phase-config]) {}) :phase phase-kw)))
 
-(defn- resolve-provision-config
+(defn- ^{:stratum 0} preview-result
+  [preview-data analysis preview-command]
+  {:status   :preview-complete
+   :output   preview-data
+   :artifact {:content  preview-data
+              :type     :pulumi-preview
+              :analysis analysis}
+   :command  preview-command
+   :metrics  {:duration-ms (:duration-ms preview-command)
+              :creates     (:creates analysis)
+              :updates     (:updates analysis)
+              :deletes     (:deletes analysis)}})
+
+;------------------------------------------------------------------------------ Layer 1
+
+(defn- ^{:stratum 1} resolve-provision-config
   [ctx]
   (let [phase-config (merged-phase-config ctx :provision)
         input        (or (get-in ctx [:execution/input]) {})
@@ -99,7 +111,7 @@
                               gcp-project (assoc "GOOGLE_PROJECT" gcp-project))}
        true (assoc :gcp-project gcp-project)))))
 
-(defn analyze-preview
+(defn ^{:stratum 1} analyze-preview
   "Extract summary metrics from Pulumi preview JSON output."
   [preview-json]
   (let [steps   (or (:steps preview-json) (:Steps preview-json) [])
@@ -117,51 +129,7 @@
                           :action (or (:op step) (:Op step))})
                        steps)})))
 
-(defn- preview-result
-  [preview-data analysis preview-command]
-  {:status   :preview-complete
-   :output   preview-data
-   :artifact {:content  preview-data
-              :type     :pulumi-preview
-              :analysis analysis}
-   :command  preview-command
-   :metrics  {:duration-ms (:duration-ms preview-command)
-              :creates     (:creates analysis)
-              :updates     (:updates analysis)
-              :deletes     (:deletes analysis)}})
-
-(defn- store-provision-preview
-  [ctx start-time config preview-command]
-  (let [preview-data     (get preview-command :parsed {})
-        analysis         (analyze-preview preview-data)
-        preview-evidence (evidence/create-evidence
-                          :evidence/pulumi-preview
-                          preview-data
-                          {:stack (:stack config)
-                           :stack-dir (:stack-dir config)
-                           :analysis analysis})]
-    (log/info (get-logger ctx) :provision :provision/preview-complete
-              {:data {:creates (:creates analysis)
-                      :updates (:updates analysis)
-                      :deletes (:deletes analysis)}})
-    (-> ctx
-        ;; Supply the deployment policy pack so the :policy-pack gate has
-        ;; something to evaluate. Absent this, the gate sees no packs and fails
-        ;; closed (a deploy must carry deployment policy).
-        (assoc :policy-packs (policy/deployment-policy-packs))
-        (assoc-in [:phase :name] :provision)
-        (assoc-in [:phase :gates] (get-in config [:phase-config :gates]))
-        (assoc-in [:phase :budget] (get-in config [:phase-config :budget]))
-        (assoc-in [:phase :started-at] start-time)
-        (assoc-in [:phase :status] :pending-gates)
-        (assoc-in [:phase :result] (preview-result preview-data
-                                                   analysis
-                                                   preview-command))
-        (evidence/add-evidence-to-ctx preview-evidence)
-        (assoc-in [:phase :provision-config]
-                  (select-keys config [:stack-dir :stack :env])))))
-
-(defn- store-provision-failure
+(defn- ^{:stratum 1} store-provision-failure
   [ctx start-time logger preview-result]
   (let [error-type (shell/classify-error preview-result)]
     (log/error logger :provision :provision/preview-failed
@@ -174,38 +142,14 @@
                    :command    (:command preview-result)
                    :metrics    {:duration-ms (:duration-ms preview-result)}})))
 
-(defn- invalid-config-result
+(defn- ^{:stratum 1} invalid-config-result
   [ctx start-time ex]
   (failed-enter ctx start-time
                 {:status :error
                  :error  (msg/t :provision/invalid-config
                                 {:error (ex-message ex)})}))
 
-;------------------------------------------------------------------------------ Layer 2
-;; Phase interceptors + registration
-
-(defn enter-provision
-  "Execute provisioning preview and capture the artifact used by gates."
-  [ctx]
-  (let [start-time (System/currentTimeMillis)
-        logger     (get-logger ctx)]
-    (try
-      (let [config         (resolve-provision-config ctx)
-            stack-dir      (:stack-dir config)
-            stack          (:stack config)
-            preview-result (do
-                             (log/info logger :provision :provision/preview-starting
-                                       {:data {:stack-dir stack-dir :stack stack}})
-                             (shell/pulumi-preview! stack-dir
-                                                    :stack stack
-                                                    :env (:env config)))]
-        (if (schema/failed? preview-result)
-          (store-provision-failure ctx start-time logger preview-result)
-          (store-provision-preview ctx start-time config preview-result)))
-      (catch clojure.lang.ExceptionInfo ex
-        (invalid-config-result ctx start-time ex)))))
-
-(defn leave-provision
+(defn ^{:stratum 1} leave-provision
   "After gates pass: execute pulumi up and capture outputs.
 
    Only applies if :enter succeeded and gates passed."
@@ -250,7 +194,7 @@
                                               {:apply-duration-ms (:duration-ms apply-result)})})
                   (evidence/add-evidence-to-ctx outputs-evidence)))))))))
 
-(defn error-provision
+(defn ^{:stratum 1} error-provision
   "Handle provision phase errors."
   [ctx ex]
   (let [logger (get-logger ctx)]
@@ -265,9 +209,67 @@
                  :message (ex-message ex)
                  :data    (ex-data ex)}))))
 
-;; Registration
+;------------------------------------------------------------------------------ Layer 2
 
-(defmethod phase/get-phase-interceptor-method :provision
+(defn- ^{:stratum 2} store-provision-preview
+  [ctx start-time config preview-command]
+  (let [preview-data     (get preview-command :parsed {})
+        analysis         (analyze-preview preview-data)
+        preview-evidence (evidence/create-evidence
+                          :evidence/pulumi-preview
+                          preview-data
+                          {:stack (:stack config)
+                           :stack-dir (:stack-dir config)
+                           :analysis analysis})]
+    (log/info (get-logger ctx) :provision :provision/preview-complete
+              {:data {:creates (:creates analysis)
+                      :updates (:updates analysis)
+                      :deletes (:deletes analysis)}})
+    (-> ctx
+        ;; Supply the deployment policy pack so the :policy-pack gate has
+        ;; something to evaluate. Absent this, the gate sees no packs and fails
+        ;; closed (a deploy must carry deployment policy).
+        (assoc :policy-packs (policy/deployment-policy-packs))
+        (assoc-in [:phase :name] :provision)
+        (assoc-in [:phase :gates] (get-in config [:phase-config :gates]))
+        (assoc-in [:phase :budget] (get-in config [:phase-config :budget]))
+        (assoc-in [:phase :started-at] start-time)
+        (assoc-in [:phase :status] :pending-gates)
+        (assoc-in [:phase :result] (preview-result preview-data
+                                                   analysis
+                                                   preview-command))
+        (evidence/add-evidence-to-ctx preview-evidence)
+        (assoc-in [:phase :provision-config]
+                  (select-keys config [:stack-dir :stack :env])))))
+
+;------------------------------------------------------------------------------ Layer 3
+
+;; Phase interceptors + registration
+(defn ^{:stratum 3} enter-provision
+  "Execute provisioning preview and capture the artifact used by gates."
+  [ctx]
+  (let [start-time (System/currentTimeMillis)
+        logger     (get-logger ctx)]
+    (try
+      (let [config         (resolve-provision-config ctx)
+            stack-dir      (:stack-dir config)
+            stack          (:stack config)
+            preview-result (do
+                             (log/info logger :provision :provision/preview-starting
+                                       {:data {:stack-dir stack-dir :stack stack}})
+                             (shell/pulumi-preview! stack-dir
+                                                    :stack stack
+                                                    :env (:env config)))]
+        (if (schema/failed? preview-result)
+          (store-provision-failure ctx start-time logger preview-result)
+          (store-provision-preview ctx start-time config preview-result)))
+      (catch clojure.lang.ExceptionInfo ex
+        (invalid-config-result ctx start-time ex)))))
+
+;------------------------------------------------------------------------------ Layer 4
+
+;; Registration
+(defmethod ^{:stratum 4} phase/get-phase-interceptor-method :provision
   [_]
   {:name   :provision
    :enter  enter-provision
