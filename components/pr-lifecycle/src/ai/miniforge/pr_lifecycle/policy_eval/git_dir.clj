@@ -71,20 +71,6 @@
   (let [file (io/file path)]
     (.getCanonicalPath (if (.isAbsolute file) file (io/file root path)))))
 
-(defn ^{:stratum 0} gitdir-file-target
-  "Canonical path of the directory a `gitdir: <path>` file names, or nil
-   when `dot-git` is not such a file. A relative path is resolved against
-   the file's own directory, as git does."
-  [^java.io.File dot-git]
-  (when (.isFile dot-git)
-    (let [line   (str/trim (or (first (str/split-lines (slurp dot-git))) ""))
-          prefix "gitdir:"]
-      (when (str/starts-with? line prefix)
-        (let [target (io/file (str/trim (subs line (count prefix))))]
-          (.getCanonicalPath (if (.isAbsolute target)
-                               target
-                               (io/file (.getParentFile dot-git) (str target)))))))))
-
 ;------------------------------------------------------------------------------ Layer 1
 
 (defn ^{:stratum 1} metadata-dirs
@@ -112,16 +98,6 @@
   (let [relative (if (under? root path) (subs path (count root)) path)]
     (boolean (or (some git-dir-name? (segments relative))
                  (some #(under? % path) dirs)))))
-
-(defn ^{:stratum 1} git-dirs
-  "Canonical paths of the git dirs of the worktree at canonical `root`:
-   `<root>/.git` when it exists, plus the target of a gitdir file."
-  [root]
-  (let [dot-git (io/file root ".git")
-        target  (gitdir-file-target dot-git)]
-    (cond-> []
-      (.exists dot-git) (conj (.getCanonicalPath dot-git))
-      target            (conj target))))
 
 ;------------------------------------------------------------------------------ Layer 2
 
@@ -151,22 +127,6 @@
   (let [root (.getCanonicalPath (io/file (str worktree-root)))
         dirs (metadata-dirs root)]
     (or (nil? dirs) (in-metadata? root dirs (str entry)))))
-
-(defn ^{:stratum 2} inside-git-dir?
-  "True when `path`, an absolute path at or under `worktree-root` whose
-   parent is already canonical, is a git dir or inside one: a segment
-   below the root is named `.git` (any case), or the path equals or sits
-   under one of `git-dirs`."
-  [worktree-root path]
-  (let [root     (.getCanonicalPath (io/file (str worktree-root)))
-        path     (str path)
-        relative (if (str/starts-with? path root) (subs path (count root)) path)]
-    (boolean
-     (or (some git-dir-name? (str/split relative #"[/\\\\]"))
-         (some (fn [dir]
-                 (or (= path dir)
-                     (str/starts-with? path (str dir java.io.File/separator))))
-               (git-dirs root))))))
 
 ;------------------------------------------------------------------------------ Rich Comment
 (comment

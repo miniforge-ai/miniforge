@@ -366,3 +366,90 @@
                                              {:path ".github/CODEOWNERS" :content "* @o\n"
                                               :action :create}]} nil))))
       (finally (fs/delete-tree base)))))
+
+(deftest ^{:stratum 1} apply-fix-to-worktree-refuses-an-outward-hooks-symlink-test
+  (testing "with .git/hooks -> ../hooks, neither path to the active hook is writable"
+    (let [{:keys [base worktree]} (temp-layout)
+          hook (fs/path worktree "hooks" "pre-commit")]
+      (try
+        (fs/delete-tree (fs/path worktree ".git" "hooks"))
+        (fs/create-dirs (fs/path worktree "hooks"))
+        (spit (str hook) "#!/bin/sh\nexit 0\n")
+        (fs/create-sym-link (fs/path worktree ".git" "hooks") (fs/path ".." "hooks"))
+        (is (refused? worktree ".git/hooks/pre-commit" :modify))
+        (is (refused? worktree "hooks/pre-commit" :modify))
+        (is (refused? worktree "hooks/pre-commit" :delete))
+        (is (= "#!/bin/sh\nexit 0\n" (slurp (str hook))))
+        (finally (fs/delete-tree base))))))
+
+(deftest ^{:stratum 1} apply-fix-to-worktree-keeps-the-space-in-a-gitfile-target-test
+  (testing "a gitdir: file naming `metadata ` protects that directory, trailing space included"
+    (let [{:keys [base worktree]} (temp-layout)
+          metadata (fs/path worktree "metadata ")
+          config   (str (fs/path metadata "config"))]
+      (try
+        (fs/move (fs/path worktree ".git") metadata)
+        (spit (str (fs/path worktree ".git")) "gitdir: metadata \n")
+        (let [before (slurp config)]
+          (is (refused? worktree "metadata /config" :modify))
+          (is (refused? worktree "metadata /hooks/pre-commit" :create))
+          (is (= before (slurp config))))
+        (fs/create-dirs (fs/path worktree "metadata"))
+        (is (dag/ok? (fix/apply-fix-to-worktree
+                      worktree {:code/files [{:path "metadata/notes.txt" :content "x"
+                                              :action :create}]} nil)))
+        (finally (fs/delete-tree base))))))
+
+(deftest ^{:stratum 1} apply-fix-to-worktree-refuses-a-linked-worktree-common-dir-test
+  (testing "a linked worktree's admin dir and the commondir it names are both refused"
+    (let [{:keys [base worktree]} (temp-layout)
+          common (fs/path worktree "modules" "common")
+          admin  (fs/path worktree "modules" "sub")
+          dot-git (str (fs/path worktree ".git"))]
+      (try
+        (fs/delete-tree dot-git)
+        (git! base "init" "-q" "--bare" (str common))
+        (fs/create-dirs admin)
+        (spit (str (fs/path admin "HEAD")) "ref: refs/heads/wt\n")
+        (spit (str (fs/path admin "commondir")) "../common\n")
+        (spit (str (fs/path admin "gitdir")) (str dot-git "\n"))
+        (spit dot-git "gitdir: modules/sub\n")
+        (let [config (str (fs/path common "config"))
+              before (slurp config)]
+          (is (refused? worktree "modules/common/config" :modify))
+          (is (refused? worktree "modules/common/hooks/pre-commit" :create))
+          (is (refused? worktree "modules/sub/HEAD" :modify))
+          (is (refused? worktree ".git" :modify))
+          (is (refused? worktree ".git" :delete))
+          (is (= before (slurp config)))
+          (is (= "gitdir: modules/sub\n" (slurp dot-git))))
+        (is (dag/ok? (fix/apply-fix-to-worktree
+                      worktree {:code/files [{:path "modules/readme.md" :content "x"
+                                              :action :create}]} nil)))
+        (finally (fs/delete-tree base))))))
+
+(deftest ^{:stratum 1} apply-fix-to-worktree-refuses-the-core-hooks-path-test
+  (testing "with core.hooksPath = .githooks, the tracked hook directory is refused"
+    (let [{:keys [base worktree]} (temp-layout)
+          hook (fs/path worktree ".githooks" "pre-commit")]
+      (try
+        (git! worktree "config" "core.hooksPath" ".githooks")
+        (fs/create-dirs (fs/path worktree ".githooks"))
+        (spit (str hook) "#!/bin/sh\nexit 0\n")
+        (is (refused? worktree ".githooks/pre-commit" :modify))
+        (is (refused? worktree ".githooks/post-checkout" :create))
+        (is (refused? worktree ".githooks/pre-commit" :delete))
+        (is (refused? worktree ".githooks" :delete))
+        (is (= "#!/bin/sh\nexit 0\n" (slurp (str hook))))
+        (is (not (fs/exists? (fs/path worktree ".githooks" "post-checkout"))))
+        (finally (fs/delete-tree base))))))
+
+(deftest ^{:stratum 1} apply-fix-to-worktree-refuses-every-path-when-git-cannot-answer-test
+  (testing "a .git file naming a missing directory leaves git unable to answer, so nothing is written"
+    (let [{:keys [base worktree]} (temp-layout)]
+      (try
+        (fs/delete-tree (fs/path worktree ".git"))
+        (spit (str (fs/path worktree ".git")) (str "gitdir: " (fs/path base "missing") "\n"))
+        (is (refused? worktree "notes.txt" :create))
+        (is (not (fs/exists? (fs/path worktree "notes.txt"))))
+        (finally (fs/delete-tree base))))))
