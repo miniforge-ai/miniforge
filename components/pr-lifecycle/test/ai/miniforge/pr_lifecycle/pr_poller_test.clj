@@ -37,12 +37,13 @@
 (deftest ^{:stratum 0} parse-gh-comments-test
   (testing "normalizes review comments with file context"
     (let [comments (#'sut/parse-gh-comments
-                    "[{\"id\":1,\"body\":\"Please fix\",\"created_at\":\"2026-04-01T12:00:00Z\",\"path\":\"src/core.clj\",\"line\":42,\"user\":{\"login\":\"reviewer\"}}]"
+                    "[{\"id\":1,\"body\":\"Please fix\",\"created_at\":\"2026-04-01T12:00:00Z\",\"path\":\"src/core.clj\",\"line\":42,\"user\":{\"login\":\"reviewer\"},\"author_association\":\"MEMBER\"}]"
                     :review-comment)]
       (is (= 1 (count comments)))
       (is (= :review-comment (:comment/type (first comments))))
       (is (= "src/core.clj" (:comment/path (first comments))))
-      (is (= 42 (:comment/line (first comments)))))))
+      (is (= 42 (:comment/line (first comments))))
+      (is (= "MEMBER" (:comment/author-association (first comments)))))))
 
 (deftest ^{:stratum 0} comments-since-test
   (testing "returns comments strictly newer than the watermark"

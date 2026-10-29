@@ -81,10 +81,14 @@
 
 ;------------------------------------------------------------------------------ Layer 2
 
-(defn ^{:stratum 2} print-error [msg]
-  (println (style (messages/t :classified-error/error-prefix
-                              {:message msg})
-                  :foreground :red)))
+(defn ^{:stratum 2} print-error
+  "Print `msg` as an error on stderr, so stdout carries only the command's
+   output (`-o json`, pipes)."
+  [msg]
+  (binding [*out* *err*]
+    (println (style (messages/t :classified-error/error-prefix
+                                {:message msg})
+                    :foreground :red))))
 
 (defn ^{:stratum 2} print-success [msg]
   (println (style msg :foreground :green)))
