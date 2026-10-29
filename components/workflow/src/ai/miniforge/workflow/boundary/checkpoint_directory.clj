@@ -23,18 +23,19 @@
     (policy/check! path (and leaf? (= path directory))))
   directory)
 
-(defn- ^{:stratum 0} create-private! [directory [segment leaf?]]
-  (let [path (fs/path directory segment)]
-    (try+
-      (fs/create-dir path {:posix-file-permissions policy/private-permissions})
-      (catch FileAlreadyExistsException _ nil))
-    (policy/check! path leaf?)))
-
 (defn- ^{:stratum 0} creation-steps [segments]
   (let [final-index (dec (count segments))]
     (map-indexed #(vector %2 (= %1 final-index)) segments)))
 
 ;------------------------------------------------------------------------------ Layer 1
+
+(defn- ^{:stratum 1} create-private! [directory [segment leaf?]]
+  (let [path (fs/path directory segment)]
+    (try+
+      (fs/create-dir path {:posix-file-permissions policy/private-permissions})
+      (catch FileAlreadyExistsException _ nil))
+    (path-policy/check! path leaf?)
+    (check-ancestry! (fs/real-path path) leaf?)))
 
 (defn ^{:stratum 1} existing! [directory]
   (when (permissions/posix? directory) (path-policy/check! directory))
@@ -42,7 +43,9 @@
     (when (permissions/posix? path) (check-ancestry! path true))
     path))
 
-(defn ^{:stratum 1} prepare! [directory]
+;------------------------------------------------------------------------------ Layer 2
+
+(defn ^{:stratum 2} prepare! [directory]
   (let [[ancestor segments] (existing-ancestor directory)]
     (if (permissions/posix? ancestor)
       (do

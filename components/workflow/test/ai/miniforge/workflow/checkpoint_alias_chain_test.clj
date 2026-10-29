@@ -38,6 +38,24 @@
     (is (thrown? IOException (directory/prepare! alias)))
     (is (thrown? IOException (directory/existing! alias)))))
 
+(defn- ^{:stratum 0} verify-alias-after-missing-parent [root]
+  (let [target (fs/create-dir (fs/path root "target"))
+        _alias (fs/create-sym-link (fs/path root "alias") target)
+        requested (fs/path root "unused" ".." "alias" "nested")
+        expected (fs/path (fs/real-path target) "nested")]
+    (is (= expected (directory/prepare! requested)))
+    (is (= expected (directory/existing! requested)))))
+
+(defn- ^{:stratum 0} verify-unsafe-alias-after-missing-parent [root]
+  (let [target (fs/create-dir (fs/path root "target"))
+        unsafe (fs/create-dir (fs/path root "unsafe"))
+        _hop (fs/create-sym-link (fs/path unsafe "hop") target)
+        _alias (fs/create-sym-link (fs/path root "alias") (fs/path "unsafe" "hop"))
+        requested (fs/path root "unused" ".." "alias" "nested")]
+    (fs/set-posix-file-permissions unsafe "rwxrwxrwx")
+    (is (thrown? IOException (directory/prepare! requested)))
+    (is (empty? (fs/list-dir target)))))
+
 ;------------------------------------------------------------------------------ Layer 1
 
 (defn- ^{:stratum 1} verify-root-owner [_root]
@@ -69,6 +87,12 @@
 
 (deftest ^{:stratum 1} relative-link-cycles-terminate-without-creation
   (fixture/call-with-posix-checkpoint-root verify-cycle))
+
+(deftest ^{:stratum 1} trusted-aliases-reached-after-missing-parent-traversal-remain-supported
+  (fixture/call-with-posix-checkpoint-root verify-alias-after-missing-parent))
+
+(deftest ^{:stratum 1} unsafe-alias-targets-reached-after-missing-parent-traversal-are-refused
+  (fixture/call-with-posix-checkpoint-root verify-unsafe-alias-after-missing-parent))
 
 (defn- ^{:stratum 1} verify-sticky-parent-traversal [root]
   (let [sticky (fs/create-dir (fs/path root "sticky"))

@@ -34,4 +34,6 @@ Root-identity and chained-alias regressions fail on the earlier publication head
 The focused suites also cover bare relative history filenames and parent
 traversal through sticky aliases. Ancestor restrictions remain distinct from
 checkpoint-leaf restrictions during creation.
+Creation revalidates aliases revealed after missing components and parent
+traversal, checking their complete target chains before descending.
 Run normal hooks, standards, fresh-head review, and CI before merging.
