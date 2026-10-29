@@ -104,7 +104,8 @@
 
 ;; Git operations
 (defn ^{:stratum 0} stage-files!
-  "Stage files in git worktree using git add.
+  "Stage files in git worktree using git add, with hooks disabled.
+   Explicit paths are literal pathspecs after `--`.
    
    Arguments:
    - worktree-path - Path to git worktree root
@@ -113,9 +114,12 @@
    Returns {:success? boolean :output string :error string}"
   [worktree-path file-paths]
   (try
-    (let [git-args (if (= file-paths :all)
-                     ["git" "add" "."]
-                     (into ["git" "add"] (map str file-paths)))
+    ;; Hooks off: `git add` can run post-index-change, and the files just
+    ;; staged are agent output (a tracked script a hook links to included).
+    (let [git     (into ["git"] pr-lifecycle/hooks-disabled-git-args)
+          git-args (if (= file-paths :all)
+                     (into git ["add" "."])
+                     (into git (concat ["--literal-pathspecs" "add" "--"] (map str file-paths))))
           result (apply process/shell
                         {:dir (str worktree-path)
                          :out :string
@@ -155,21 +159,28 @@
                      str)]
     (boolean (and leaf (not (#{"." ".."} leaf))))))
 
-(defn- ^{:stratum 0} metadata-rejection
-  "Error message when `action` on `full-path` would pass through a
-   symlink or reach the worktree's git metadata, or nil. An agent-written
-   `.git/hooks/pre-commit`, or a file in the `core.hooksPath` directory,
-   runs on the host's next git command. Reuses pr-lifecycle's worktree
-   guard, which refuses any path with a symlink component, asks git where
-   its metadata is, and refuses every path when git cannot answer. Runs
-   after the containment check, so `full-path` is inside `worktree-path`."
-  [worktree-path full-path action]
-  (let [relative (str (fs/relativize (fs/absolutize worktree-path) (fs/absolutize full-path)))]
-    (when-not (if (= :delete action)
-                (pr-lifecycle/safe-worktree-entry-path worktree-path relative)
-                (pr-lifecycle/safe-worktree-path worktree-path relative))
-      (str "Path rejected: " relative " passes through a symlink (agent output never"
-           " needs to write through one) or reaches the worktree's git metadata"))))
+(defn- ^{:stratum 0} guard-path
+  "Validate the artifact `path` for `action` with pr-lifecycle's worktree
+   guard, on the path exactly as the agent wrote it. Returns
+   `{:path p}` with the validated path to operate on, or `{:error msg}`.
+
+   A `..` component is refused outright: agent output never needs one,
+   and normalising it away first would check a different path than the
+   one written (`tools/../config` with `tools -> .git/hooks` reaches
+   `.git/config`). The guard refuses absolute paths, any symlink
+   component, and paths into git metadata, where an agent-written hook
+   runs on the host's next git command; it refuses every path when git
+   cannot say where its metadata is."
+  [worktree-path path action]
+  (let [validated (when-not (some #(= ".." (str %)) (fs/components (str path)))
+                    (if (= :delete action)
+                      (pr-lifecycle/safe-worktree-entry-path worktree-path (str path))
+                      (pr-lifecycle/safe-worktree-path worktree-path (str path))))]
+    (if validated
+      {:path validated}
+      {:error (str "Path rejected: " path " has a .. component, passes through a symlink"
+                   " (agent output never needs either), or reaches the worktree's git"
+                   " metadata")})))
 
 ;------------------------------------------------------------------------------ Layer 1
 
@@ -208,16 +219,16 @@
   [worktree-path {:keys [path content]} logger]
   (try
     (let [full-path (fs/path worktree-path path)
-          rejection (if (inside-worktree? worktree-path full-path)
-                      (metadata-rejection worktree-path full-path :create)
-                      (str "Path traversal rejected: " path " escapes worktree root"))]
-      (if rejection
+          guarded   (if (inside-worktree? worktree-path full-path)
+                      (guard-path worktree-path path :create)
+                      {:error (str "Path traversal rejected: " path " escapes worktree root")})]
+      (if-let [rejection (:error guarded)]
         {:success? false
          :action :create
          :path path
          :error rejection}
         (do
-          (write-file! full-path content)
+          (write-file! (:path guarded) content)
           (when logger
             (log/debug logger :workflow :release/file-created
                       {:data {:path path}}))
@@ -238,16 +249,16 @@
   [worktree-path {:keys [path content]} logger]
   (try
     (let [full-path (fs/path worktree-path path)
-          rejection (if (inside-worktree? worktree-path full-path)
-                      (metadata-rejection worktree-path full-path :modify)
-                      (str "Path traversal rejected: " path " escapes worktree root"))]
-      (if rejection
+          guarded   (if (inside-worktree? worktree-path full-path)
+                      (guard-path worktree-path path :modify)
+                      {:error (str "Path traversal rejected: " path " escapes worktree root")})]
+      (if-let [rejection (:error guarded)]
         {:success? false
          :action :modify
          :path path
          :error rejection}
         (do
-          (write-file! full-path content)
+          (write-file! (:path guarded) content)
           (when logger
             (log/debug logger :workflow :release/file-modified
                       {:data {:path path}}))
@@ -268,15 +279,15 @@
   [worktree-path {:keys [path]} logger]
   (try
     (let [full-path (fs/path worktree-path path)
-          rejection (if (entry-inside-worktree? worktree-path full-path)
-                      (metadata-rejection worktree-path full-path :delete)
-                      (str "Path traversal rejected: " path " escapes worktree root"))]
-      (if rejection
+          guarded   (if (entry-inside-worktree? worktree-path full-path)
+                      (guard-path worktree-path path :delete)
+                      {:error (str "Path traversal rejected: " path " escapes worktree root")})]
+      (if-let [rejection (:error guarded)]
         {:success? false
          :action :delete
          :path path
          :error rejection}
-        (let [deleted? (delete-file! full-path)]
+        (let [deleted? (delete-file! (:path guarded))]
           (when logger
             (log/debug logger :workflow :release/file-deleted
                       {:data {:path path :existed? deleted?}}))

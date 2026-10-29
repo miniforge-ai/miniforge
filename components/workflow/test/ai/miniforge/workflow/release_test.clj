@@ -23,7 +23,8 @@
    [clojure.test :refer [deftest is testing use-fixtures]]
    [ai.miniforge.workflow.release :as release]
    [babashka.fs :as fs]
-   [babashka.process :as process]))
+   [babashka.process :as process]
+   [clojure.string :as str]))
 
 ;------------------------------------------------------------------------------ Layer 0
 
@@ -235,7 +236,7 @@
         (is (false? (fs/exists? (fs/path outside "newdir")))
             "no directory is created outside the worktree"))))
 
-  (testing "'..' within an existing directory still resolves normally"
+  (testing "'..' is refused outright, even within an existing directory"
     (let [worktree (create-temp-dir)]
       (fs/create-dirs (fs/path worktree "src"))
       (let [result (release/process-file-action worktree
@@ -243,8 +244,8 @@
                                                  :path    "src/../README.md"
                                                  :content "ok"}
                                                 nil)]
-        (is (true? (:success? result)))
-        (is (= "ok" (slurp (str (fs/path worktree "README.md")))))))))
+        (is (false? (:success? result)))
+        (is (false? (fs/exists? (fs/path worktree "README.md"))))))))
 
 (deftest ^{:stratum 2} process-file-action-delete-removes-only-entries-inside-test
   (testing "delete rejects an entry whose parent resolves outside, even if it links back in"
@@ -319,5 +320,37 @@
       (is (true? (:success? (release/process-file-action
                              worktree {:action :create :path "src/a.clj" :content "(ns a)"}
                              nil)))))))
+
+(deftest ^{:stratum 2} process-file-action-checks-the-path-as-written-test
+  (testing "with tools -> .git/hooks, tools/../config would reach .git/config"
+    (let [worktree (create-temp-dir)
+          config   (str (fs/path worktree ".git" "config"))
+          before   (slurp config)]
+      (fs/create-sym-link (fs/path worktree "tools") (fs/path worktree ".git" "hooks"))
+      (doseq [action [:create :modify :delete]]
+        (is (false? (:success? (release/process-file-action
+                                worktree {:action action :path "tools/../config"
+                                          :content "[core]\n\thooksPath = tools\n"}
+                                nil)))
+            (str action)))
+      (is (= before (slurp config))))))
+
+(deftest ^{:stratum 2} stage-files-runs-no-hook-test
+  (testing "staging agent output runs no hook, even one linked to a tracked script"
+    (let [worktree (create-temp-dir)
+          ran      (str (fs/path (create-temp-dir) "hook-ran"))
+          script   (fs/path worktree "scripts" "index-hook")]
+      (fs/create-dirs (fs/parent script))
+      (spit (str script) (str "#!/bin/sh\necho ran >> '" ran "'\n"))
+      (fs/set-posix-file-permissions script "rwxr-xr-x")
+      (git! worktree "add" "scripts/index-hook")
+      (fs/create-sym-link (fs/path worktree ".git" "hooks" "post-index-change")
+                          (fs/path ".." ".." "scripts" "index-hook"))
+      (spit (str (fs/path worktree "agent.txt")) "agent output\n")
+      (is (true? (:success? (release/stage-files! worktree :all))))
+      (is (true? (:success? (release/stage-files! worktree ["agent.txt"]))))
+      (is (not (fs/exists? ran)))
+      (is (= "A  agent.txt" (first (filter #(str/includes? % "agent.txt")
+                                           (str/split-lines (:out (git! worktree "status" "--short"))))))))))
 
 (use-fixtures :each cleanup-temp-dirs)
