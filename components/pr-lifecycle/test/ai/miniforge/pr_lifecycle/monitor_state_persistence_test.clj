@@ -24,10 +24,12 @@
    [ai.miniforge.config.interface :as mf-config]
    [ai.miniforge.dag-executor.interface :as dag]
    [ai.miniforge.pr-lifecycle.events :as events]
+   [ai.miniforge.pr-lifecycle.fix-loop :as fix-loop]
    [ai.miniforge.pr-lifecycle.monitor-budget :as budget]
    [ai.miniforge.pr-lifecycle.monitor-handlers :as handlers]
    [ai.miniforge.pr-lifecycle.monitor-loop :as monitor-loop]
    [ai.miniforge.pr-lifecycle.monitor-state :as state]
+   [ai.miniforge.pr-lifecycle.monitor-store :as store]
    [ai.miniforge.pr-lifecycle.pr-poller :as poller]
    [babashka.fs :as fs]
    [clojure.test :refer [deftest is testing use-fixtures]]))
@@ -133,6 +135,25 @@
                                         [(review-comment 1 "2026-10-01T00:00:00Z")])]
     (is (true? (:stopped? result)))
     (is (empty? routed))))
+
+(deftest ^{:stratum 1} unsaved-fix-attempt-is-not-started-test
+  (let [bus     (events/create-event-bus)
+        monitor (monitor-for "acme/app" {:event-bus bus :generate-fn (constantly "patch")})
+        fixes   (atom 0)
+        file    (store/repo-file "acme/app" "budget-42.edn")]
+    (state/get-or-create-budget monitor 42)
+    (fs/create-dirs (fs/parent file))
+    (spit (str file) "[]")
+    (with-redefs [fix-loop/run-fix-loop (fn [& _] (swap! fixes inc) {:success? true :commit-sha "abc123"})
+                  poller/post-comment   (fn [& _] (dag/ok {:comment-posted true}))]
+      (let [result (handlers/handle-change-request monitor {:pr/number 42}
+                                                   {:category :change-request
+                                                    :comment (review-comment 9 "2026-10-01T00:00:00Z")})]
+        (testing "an attempt whose budget cannot be saved does not run"
+          (is (zero? @fixes))
+          (is (= :budget-unsaved (:reason result))))
+        (testing "and is escalated"
+          (is (some #(= :pr-monitor/escalated (:event/type %)) (:events @bus))))))))
 
 ;------------------------------------------------------------------------------ Layer 2
 
