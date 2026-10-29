@@ -45,6 +45,11 @@
 (defn- ^{:stratum 0} count-call [counter _event]
   (swap! counter inc))
 
+(defn- ^{:stratum 0} newest-health-id
+  "Event id of the newest health event for `dependency-id` in `events`."
+  [events dependency-id]
+  (->> events (filter #(= dependency-id (:dependency/id %))) last :event/id))
+
 (defn- ^{:stratum 0} publish-all! [stream events]
   (doseq [e events] (es/publish! stream e))
   stream)
@@ -67,6 +72,22 @@
                (repeatedly chunks (partial event :agent/chunk workflow-id))
                [(event :workflow/phase-completed workflow-id)
                 (event :workflow/completed workflow-id)])))
+
+(deftest ^{:stratum 1} bounded-stream-caps-dependency-health-history-test
+  (let [stream       (es/create-event-stream {:sinks [] :retention small-policy})
+        dependencies [:anthropic :openai :github]
+        statuses     (cycle [:degraded :unavailable :healthy])
+        published    (vec (for [[i id] (map-indexed vector (take 300 (cycle dependencies)))]
+                            (es/dependency-health-updated
+                             stream {:dependency/id id :dependency/status (nth statuses i)})))]
+    (publish-all! stream published)
+    (let [retained (es/get-events stream)]
+      (is (every? (comp nil? :workflow/id) published) "health events carry no workflow id")
+      (is (<= (count retained) 23)
+          "300 updates for 3 dependencies leave 3 newest + 10 tail + 10 slack")
+      (doseq [id dependencies]
+        (is (= (newest-health-id published id) (newest-health-id retained id))
+            (str "newest health event kept for " id))))))
 
 ;------------------------------------------------------------------------------ Layer 2
 

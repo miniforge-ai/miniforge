@@ -62,10 +62,12 @@
                             `get-events` reads. A map over
                             `retention/bounded-policy`
                             (:max-workflows, :max-events-per-workflow,
-                            :lifecycle-types). Absent = keep every event,
-                            which suits one-shot CLI runs; a stream that
-                            lives for days should pass one. Sinks and
-                            subscribers still see every event.
+                            :lifecycle-types,
+                            :latest-per-dependency-types). Absent = keep
+                            every event, which suits one-shot CLI runs;
+                            a stream that lives for days should pass
+                            one. Sinks and subscribers still see every
+                            event.
 
    Returns: Event stream atom
 

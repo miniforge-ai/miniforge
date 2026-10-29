@@ -101,8 +101,9 @@
 
 (def ^{:stratum 0} bounded-retention
   "Retention policy for a stream that lives for days (the web dashboard):
-   per workflow, every lifecycle event plus the newest 500 others, for the
-   100 most recently active workflows. Pass as `:retention` to
+   per workflow, every lifecycle event, the newest health event per
+   dependency and the newest 500 others, for the 100 most recently active
+   workflows. Pass as `:retention` to
    `create-event-stream`; merge over it to change a limit."
   stream/bounded-retention)
 

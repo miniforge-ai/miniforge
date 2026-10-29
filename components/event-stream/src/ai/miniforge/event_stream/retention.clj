@@ -20,10 +20,11 @@
 
    A stream created with a `:retention` policy keeps, for the
    `:max-workflows` workflows that published most recently, every event
-   whose type is in `:lifecycle-types` plus the newest
+   whose type is in `:lifecycle-types`, the newest event of a
+   `:latest-per-dependency-types` type for each dependency, and the newest
    `:max-events-per-workflow` other events. Older workflows leave the
    in-memory history entirely. Events without a `:workflow/id` share one
-   bucket. Retention shapes only what `get-events` returns: sinks and
+   bucket (dependency-health events are emitted without one). Retention shapes only what `get-events` returns: sinks and
    subscribers still receive every event.
 
    Compaction runs once the history grows `:max-events-per-workflow`
@@ -38,24 +39,31 @@
   "Retention for a stream that lives for days, such as the web dashboard's.
    500 per workflow covers the dashboard's largest per-workflow query
    (the 500-event evidence view); 100 workflows covers its 50-workflow
-   list. The lifecycle types are what a workflow summary is built from."
-  {:max-workflows           100
-   :max-events-per-workflow 500
-   :lifecycle-types         #{:workflow/started :workflow/resumed
-                              :workflow/completed :workflow/failed :workflow/cancelled
-                              :workflow/phase-started :workflow/phase-completed
-                              :dependency/health-updated :dependency/recovered}})
+   list. The lifecycle types are what a workflow summary is built from;
+   for dependency health only the newest event per dependency is the
+   projection, so older ones count against the cap."
+  {:max-workflows               100
+   :max-events-per-workflow     500
+   :lifecycle-types             #{:workflow/started :workflow/resumed
+                                  :workflow/completed :workflow/failed :workflow/cancelled
+                                  :workflow/phase-started :workflow/phase-completed}
+   :latest-per-dependency-types #{:dependency/health-updated :dependency/recovered}})
 
 (defn- ^{:stratum 0} retain-step
   "Reduction step over events newest-first. Admits a workflow while fewer
    than `max-workflows` are admitted, then keeps an admitted workflow's
-   lifecycle events and its first `max-events-per-workflow` others."
-  [{:keys [max-workflows max-events-per-workflow lifecycle-types]}
-   {:keys [workflows counts] :as acc} event]
+   lifecycle events, its newest dependency-health event per dependency
+   (keyed as the dashboard projects it), and its first
+   `max-events-per-workflow` others."
+  [{:keys [max-workflows max-events-per-workflow lifecycle-types latest-per-dependency-types]}
+   {:keys [workflows counts dependencies] :as acc} event]
   (let [workflow-id (:workflow/id event)
         workflows   (cond-> workflows
                       (< (count workflows) max-workflows) (conj workflow-id))
         kept        (get counts workflow-id 0)
+        dependency  (when (contains? latest-per-dependency-types (:event/type event))
+                      [workflow-id (or (:dependency/id event) (:dependency/vendor event)
+                                       (:dependency/source event))])
         acc         (assoc acc :workflows workflows)]
     (cond
       (not (contains? workflows workflow-id))
@@ -63,6 +71,11 @@
 
       (contains? lifecycle-types (:event/type event))
       (update acc :kept conj event)
+
+      (and dependency (not (contains? dependencies dependency)))
+      (-> acc
+          (update :kept conj event)
+          (update :dependencies conj dependency))
 
       (< kept max-events-per-workflow)
       (-> acc
@@ -79,7 +92,8 @@
    retains, still in publish order."
   [events policy]
   (->> (rseq events)
-       (reduce (partial retain-step policy) {:workflows #{} :counts {} :kept ()})
+       (reduce (partial retain-step policy)
+               {:workflows #{} :counts {} :dependencies #{} :kept ()})
        :kept
        vec))
 

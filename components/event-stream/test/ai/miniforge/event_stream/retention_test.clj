@@ -30,6 +30,12 @@
 (defn- ^{:stratum 0} event [event-type workflow-id]
   {:event/type event-type :event/id (random-uuid) :workflow/id workflow-id})
 
+(defn- ^{:stratum 0} health-event
+  "A dependency-health update as the constructor emits it: no workflow id."
+  [dependency-id status]
+  {:event/type :dependency/health-updated :event/id (random-uuid) :workflow/id nil
+   :dependency/id dependency-id :dependency/status status})
+
 (deftest ^{:stratum 0} init-test
   (testing "no policy means an unbounded history"
     (is (nil? (retention/init nil))))
@@ -56,6 +62,11 @@
             done    (event :workflow/completed a)]
         (is (= (into [started] (conj (subvec chunks 1) done))
                (retention/compact (conj (into [started] chunks) done) policy)))))
+    (testing "only the newest health event per dependency escapes the cap"
+      (let [events [(health-event :anthropic :degraded) (health-event :anthropic :unavailable)
+                    (health-event :openai :degraded) (event :agent/chunk nil) (event :agent/chunk nil)]]
+        (is (= [(events 1) (events 2) (events 3) (events 4)]
+               (retention/compact events policy)))))
     (testing "events without a workflow id share one capped bucket"
       (let [orphans (vec (repeatedly 3 (partial event :pr-train/updated nil)))]
         (is (= (subvec orphans 1) (retention/compact orphans policy)))))))
