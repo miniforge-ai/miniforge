@@ -3,10 +3,8 @@
  ;; Keep in sync with resources/config/default-user-config.edn, which says
  ;; why there is no :llm :model and no :agents :default-models.
  {:llm {:backend :opencode}
-  :workflow {:checkpoint-root "~/.miniforge/checkpoints"}
-  ;; Keep in sync with resources/config/default-user-config.edn.
-  ;; /tmp opt-in: override to "/tmp/miniforge-worktrees" for CI/sandbox runs.
-  :workflow/worktree-root "~/.miniforge/worktrees"
+  ;; No checkpoint or worktree root: both derive from MINIFORGE_HOME (see
+  ;; resources/config/default-user-config.edn).
   :model-selection {:enabled true
                     :strategy :automatic
                     :cost-limit-per-task 0.10

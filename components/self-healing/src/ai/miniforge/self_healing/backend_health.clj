@@ -44,11 +44,9 @@
 (defn ^{:stratum 0} backend-health-path
   "Get path to backend health tracking file.
 
-   Returns: String path to ~/.miniforge/backend_health.edn"
+   Returns: String path to <miniforge-home>/backend_health.edn"
   []
-  (let [home (System/getProperty "user.home")
-        miniforge-dir (io/file home ".miniforge")]
-    (.getPath (io/file miniforge-dir "backend_health.edn"))))
+  (.getPath (io/file (cfg/miniforge-home) "backend_health.edn")))
 
 (defn ^{:stratum 0} ensure-directory-exists
   "Ensure parent directory exists for a file path.

@@ -10,16 +10,12 @@
  ;; ai.miniforge.agent.model/default-model-for-role); setting either key in
  ;; ~/.miniforge/config.edn overrides that.
  {:llm {:backend :opencode}
-  :workflow {:checkpoint-root "~/.miniforge/checkpoints"}
-  ;; Base directory under which git worktrees are created. Persists across
-  ;; reboots — the 2026-04-17 gates workflow lost 8+ min of working code when
-  ;; its /tmp worktree was wiped on macOS tmpfs cleanup.
-  ;;
-  ;; /tmp opt-in: override this key to "/tmp/miniforge-worktrees" for CI runs
-  ;; or sandbox tests that want ephemeral isolation. A warning is emitted at
-  ;; worktree-creation time if the legacy /tmp/miniforge-worktrees directory
-  ;; still has entries — safe to ignore if intentional.
-  :workflow/worktree-root "~/.miniforge/worktrees"
+  ;; No [:workflow :checkpoint-root] and no :workflow/worktree-root here:
+  ;; both default to <miniforge-home>/checkpoints and
+  ;; <miniforge-home>/worktrees, so MINIFORGE_HOME moves them. A default
+  ;; naming ~/.miniforge would win over MINIFORGE_HOME and send checkpoint
+  ;; GC to the real home. Set either key in config.edn to choose another
+  ;; place (for example "/tmp/miniforge-worktrees" for ephemeral CI runs).
   :model-selection {:enabled true
                     :strategy :automatic
                     :cost-limit-per-task 0.10
