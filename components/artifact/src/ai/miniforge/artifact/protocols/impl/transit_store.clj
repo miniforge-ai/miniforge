@@ -37,11 +37,13 @@
    [ai.miniforge.artifact.messages :as messages]
    [ai.miniforge.config.interface :as config]
    [clojure.java.io :as io]
+   [clojure.string :as str]
    [cognitect.transit :as transit]
    [ai.miniforge.artifact.core :as core]
    [ai.miniforge.artifact.interface.protocols.artifact-store :as p]
    [ai.miniforge.logging.interface :as log])
   (:import
+   [java.io File]
    [java.nio.channels FileChannel]
    [java.nio.file CopyOption Files OpenOption StandardCopyOption StandardOpenOption]))
 
@@ -220,18 +222,48 @@
         (.lock channel)
         (f)))))
 
-;; Index management
-(defn ^{:stratum 1} load-index
-  "Load the artifact metadata index.
-   Returns empty map if index doesn't exist."
+(defn ^{:stratum 1} read-index
+  "Read the index on disk. Returns {} when there is none, or a :fault
+   anomaly when the file cannot be read as a map."
   [artifacts-dir]
-  (or (read-transit (index-file-path artifacts-dir))
-      {}))
+  (let [path (index-file-path artifacts-dir)]
+    (try
+      (let [data (read-transit path)]
+        (if (or (nil? data) (map? data))
+          (or data {})
+          (anomaly/anomaly :fault (messages/t :index/unreadable)
+                           {:path path :value-type (str (type data))})))
+      (catch Exception e
+        (anomaly/exception-anomaly :fault (messages/t :index/unreadable) {:path path} e)))))
 
 (defn ^{:stratum 1} merge-indexes
   "Merge the on-disk index with the in-memory one; see merge-index-entry."
   [disk-index memory-index]
   (merge-with merge-index-entry disk-index memory-index))
+
+(defn ^{:stratum 1} rebuild-index
+  "Rebuild the metadata index from the per-artifact files in
+   artifacts-dir. Returns {:index m :skipped [file-name ...]}; a file
+   that cannot be read, or whose content is not the artifact its name
+   says, is skipped."
+  [artifacts-dir]
+  (let [index-name (.getName (io/file (index-file-path artifacts-dir)))
+        files (->> (.listFiles (io/file artifacts-dir))
+                   (filter (fn [^File f]
+                             (and (.isFile f)
+                                  (str/ends-with? (.getName f) ".transit.json")
+                                  (not= index-name (.getName f))))))]
+    (reduce
+     (fn [acc ^File f]
+       (let [artifact (try (read-transit (.getPath f)) (catch Exception _ nil))
+             expected-name (when (map? artifact)
+                             (.getName (io/file (artifact-file-path artifacts-dir
+                                                                    (:artifact/id artifact)))))]
+         (if (and (some? (:artifact/id artifact)) (= expected-name (.getName f)))
+           (update acc :index add-to-index artifact)
+           (update acc :skipped conj (.getName f)))))
+     {:index {} :skipped []}
+     files)))
 
 (defn ^{:stratum 1} persist-artifact!
   "Persist an artifact to disk in Transit format."
@@ -276,11 +308,38 @@
 
 ;------------------------------------------------------------------------------ Layer 2
 
+(defn ^{:stratum 2} recover-index!
+  "Under the index lock, re-read the index; if it is still unreadable,
+   move it aside to index.transit.json.corrupt-<millis>, rebuild it from
+   the per-artifact files and write the rebuilt index. Returns the index."
+  [artifacts-dir logger]
+  (call-with-index-lock
+   artifacts-dir
+   (fn []
+     (let [index (read-index artifacts-dir)]
+       (if-not (anomaly? index)
+         index
+         (let [path (index-file-path artifacts-dir)
+               moved-to (str path ".corrupt-" (System/currentTimeMillis))
+               {rebuilt :index skipped :skipped} (rebuild-index artifacts-dir)]
+           (Files/move (.toPath (io/file path)) (.toPath (io/file moved-to))
+                       (into-array CopyOption [StandardCopyOption/REPLACE_EXISTING]))
+           (write-transit path rebuilt)
+           (log/warn logger :system :artifact/index-rebuilt
+                     {:message (messages/t :index/rebuilt)
+                      :data {:moved-to moved-to
+                             :cause (:anomaly/data index)
+                             :artifact-count (count rebuilt)
+                             :skipped skipped}})
+           rebuilt))))))
+
 (defn ^{:stratum 2} persist-index-action
   "Writer action: under the index lock, merge the in-memory index with
    the one on disk, keep the result in memory and write it. Another
    store or process may have added artifacts since this store loaded
-   the index; writing only the in-memory map would drop them.
+   the index; writing only the in-memory map would drop them. An
+   unreadable on-disk index is replaced by one rebuilt from the
+   artifact files before merging.
 
    The writer's state is the index value last written. When the
    in-memory index is still that value, an earlier action already wrote
@@ -295,7 +354,9 @@
       (call-with-index-lock
        artifacts-dir
        (fn []
-         (let [merged (swap! index (partial merge-indexes (load-index artifacts-dir)))]
+         (let [on-disk (read-index artifacts-dir)
+               disk-index (if (anomaly? on-disk) (:index (rebuild-index artifacts-dir)) on-disk)
+               merged (swap! index (partial merge-indexes disk-index))]
            (write-transit (index-file-path artifacts-dir) merged)
            merged)))
       (catch Exception e
@@ -352,6 +413,18 @@
   state)
 
 ;------------------------------------------------------------------------------ Layer 3
+
+(defn ^{:stratum 3} load-index
+  "Load the artifact metadata index; {} when there is none.
+   An unreadable index is moved aside and rebuilt from the per-artifact
+   files (see recover-index!) instead of failing store creation, which
+   would leave every later run without persistence."
+  ([artifacts-dir] (load-index artifacts-dir nil))
+  ([artifacts-dir logger]
+   (let [index (read-index artifacts-dir)]
+     (if (anomaly? index)
+       (recover-index! artifacts-dir logger)
+       index))))
 
 (defn ^{:stratum 3} save-artifact
   "Save artifact implementation. Caches the artifact, adds it to the

@@ -17,8 +17,8 @@
 ;; limitations under the License.
 (ns ai.miniforge.artifact.protocols.impl.transit-store-persistence-test
   "Disk persistence of the transit store: atomic file writes, close
-   waiting for queued writes, and index merge across stores that share
-   a directory."
+   waiting for queued writes, index merge across stores that share a
+   directory, and recovery from an unreadable index."
   (:require [ai.miniforge.artifact.interface.protocols.artifact-store :as p]
             [ai.miniforge.artifact.protocols.impl.transit-store :as impl]
             [ai.miniforge.artifact.protocols.records.transit-store :as store]
@@ -28,8 +28,9 @@
             [clojure.test :refer [deftest is testing]]
             [cognitect.transit :as transit])
   (:import [java.io File]
-           [java.nio.file Files]
-           [java.nio.file.attribute FileAttribute]))
+           [java.nio.file Files OpenOption]
+           [java.nio.file.attribute FileAttribute]
+           [java.util Arrays]))
 
 ;------------------------------------------------------------------------------ Layer 0
 
@@ -64,6 +65,13 @@
     (impl/read-transit path)
     (catch Exception _ ::unreadable)))
 
+(defn- ^{:stratum 0} on-disk-index
+  "The index file's content; {} when absent, ::unreadable when corrupt."
+  [^File dir]
+  (try
+    (or (impl/read-transit (impl/index-file-path (impl/artifacts-dir (.getPath dir)))) {})
+    (catch Exception _ ::unreadable)))
+
 (defn- ^{:stratum 0} on-disk-ids
   "Artifact ids in the index file, or ::unreadable when it is corrupt."
   [^File dir]
@@ -76,6 +84,12 @@
 
 (defn- ^{:stratum 0} logged-events [entries]
   (set (map :log/event @entries)))
+
+(defn- ^{:stratum 0} truncate-to-half! [path]
+  (let [p (.toPath (io/file path))
+        bytes (Files/readAllBytes p)]
+    (Files/write p (Arrays/copyOf bytes (quot (alength bytes) 2))
+                 (make-array OpenOption 0))))
 
 ;------------------------------------------------------------------------------ Layer 1
 
@@ -194,4 +208,35 @@
             (is (= (set ids) (on-disk-ids dir))))))
       (finally
         (deliver release true)
+        (delete-dir! dir)))))
+
+(deftest ^{:stratum 1} test-unreadable-index-is-rebuilt-from-artifact-files
+  (let [dir (temp-dir)
+        index-path (impl/index-file-path (artifacts-path dir))
+        [logger entries] (log/collecting-logger)]
+    (try
+      (let [s (open-store dir)]
+        (p/save s (artifact "parent"))
+        (p/save s (artifact "child"))
+        (p/link s "parent" "child")
+        (p/close s))
+      ;; An index write cut off half-way, and a torn artifact file.
+      (truncate-to-half! index-path)
+      (spit (impl/artifact-file-path (artifacts-path dir) "torn") "[\"^ \",\"~:artifact/id")
+      (let [s (open-store dir {:logger logger})]
+        (testing "the store opens and finds the artifacts"
+          (is (= #{"parent" "child"} (set (map :artifact/id (p/query s {}))))))
+        (testing "links are read back from the artifact files"
+          (is (= ["child"] (:artifact/children (p/load-artifact s "parent"))))
+          (is (= ["parent"] (get-in (on-disk-index dir) ["child" :artifact/parents]))))
+        (testing "the rebuilt index is on disk and the unreadable one is kept aside"
+          (is (= #{"parent" "child"} (on-disk-ids dir)))
+          (is (= 1 (count (filter #(str/starts-with? % "index.transit.json.corrupt-")
+                                  (file-names (artifacts-path dir)))))))
+        (testing "with a warning naming the skipped file"
+          (is (contains? (logged-events entries) :artifact/index-rebuilt))
+          (is (= [["torn.transit.json"]]
+                 (keep #(get-in % [:data :skipped]) @entries))))
+        (p/close s))
+      (finally
         (delete-dir! dir)))))
