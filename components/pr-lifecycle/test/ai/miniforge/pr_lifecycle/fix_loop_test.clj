@@ -561,7 +561,8 @@
         (spit (str (fs/path worktree "a.txt")) "1\n")
         (git! worktree "add" "a.txt")
         (git! worktree "commit" "-q" "-m" "init")
-        (doseq [hook ["pre-commit" "commit-msg" "post-commit" "reference-transaction" "pre-push"]]
+        (doseq [hook ["pre-commit" "commit-msg" "post-commit" "reference-transaction"
+                      "post-index-change" "pre-push"]]
           (let [f (fs/path worktree ".git" "hooks" hook)]
             (spit (str f) (str "#!/bin/sh\necho " hook " >> '" ran "'\n"))
             (fs/set-posix-file-permissions f "rwxr-xr-x")))
