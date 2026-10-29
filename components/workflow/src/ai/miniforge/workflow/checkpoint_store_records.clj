@@ -98,13 +98,13 @@
 ;------------------------------------------------------------------------------ Layer 1
 
 (defn ^{:stratum 1} readable-format?
-  "True when this build can read `record`: it carries no format version
+  "True when this build can read `record`: it has no format-version key
    (legacy, or no record at all), or an integer version no newer than
-   `checkpoint-format-version`. A newer or malformed version is not
-   guessed at."
+   `checkpoint-format-version`. A newer or malformed version, an explicit
+   nil included, is not guessed at."
   [record]
   (let [version (:checkpoint/format-version record)]
-    (or (nil? version)
+    (or (not (contains? record :checkpoint/format-version))
         (and (integer? version) (<= version checkpoint-format-version)))))
 
 (defn ^{:stratum 1} active-or-last-phase

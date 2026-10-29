@@ -38,6 +38,10 @@
 (defn- ^{:stratum 0} rewrite! [path f]
   (spit path (pr-str (f (edn/read-string (slurp path))))))
 
+(deftest ^{:stratum 0} an-explicit-nil-version-is-not-legacy
+  (is (true? (records/readable-format? {:workflow/id 1})) "no key: legacy")
+  (is (false? (records/readable-format? {:checkpoint/format-version nil}))))
+
 ;------------------------------------------------------------------------------ Layer 1
 
 (deftest ^{:stratum 1} every-record-is-written-with-the-format-version
@@ -78,7 +82,7 @@
 (deftest ^{:stratum 1} a-newer-or-malformed-phase-format-costs-that-phase
   (fixture/call-with-temp-checkpoint-root
    (fn [root]
-     (doseq [version [(inc records/checkpoint-format-version) "1"]]
+     (doseq [version [(inc records/checkpoint-format-version) "1" nil]]
        (let [[run-id files] (record-paths root)]
          (rewrite! (:plan files) #(assoc % :checkpoint/format-version version))
          (let [loaded (workflow/load-checkpoint-data run-id {:checkpoint/root root})
