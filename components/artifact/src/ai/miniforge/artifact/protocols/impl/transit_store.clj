@@ -314,62 +314,26 @@
          (write-transit file-path (if (map? on-disk) (merge-index-entry on-disk artifact) artifact)))))
     id))
 
-(defn ^{:stratum 2} recover-index!
-  "Under the index lock, re-read the index; if it is still unreadable,
-   move it aside to index.transit.json.corrupt-<millis>, rebuild it from
-   the per-artifact files and write the rebuilt index. Returns the index."
-  [artifacts-dir logger]
-  (call-with-index-lock
-   artifacts-dir
-   (fn []
-     (let [index (read-index artifacts-dir)]
-       (if-not (anomaly? index)
-         index
-         (let [path (index-file-path artifacts-dir)
-               moved-to (str path ".corrupt-" (System/currentTimeMillis))
-               {rebuilt :index skipped :skipped} (rebuild-index artifacts-dir)]
-           (Files/move (.toPath (io/file path)) (.toPath (io/file moved-to))
-                       (into-array CopyOption [StandardCopyOption/REPLACE_EXISTING]))
-           (write-transit path rebuilt)
-           (log/warn logger :system :artifact/index-rebuilt
-                     {:message (messages/t :index/rebuilt)
-                      :data {:moved-to moved-to
-                             :cause (:anomaly/data index)
-                             :artifact-count (count rebuilt)
-                             :skipped skipped}})
-           rebuilt))))))
-
-(defn ^{:stratum 2} persist-index-action
-  "Writer action: under the index lock, merge the in-memory index with
-   the one on disk, keep the result in memory and write it. Another
-   store or process may have added artifacts since this store loaded
-   the index; writing only the in-memory map would drop them. An
-   unreadable on-disk index is replaced by one rebuilt from the
-   artifact files before merging.
-
-   The writer's state is the index value last written. When the
-   in-memory index is still that value, an earlier action already wrote
-   what this one was queued for (a burst of saves queues one write
-   each), so it is skipped. Failures are logged and leave the state
-   alone, so the next queued write retries: an agent action is the
-   outermost frame of the writer thread."
-  [last-written artifacts-dir index logger]
-  (if (identical? last-written @index)
-    last-written
-    (try
-      (call-with-index-lock
-       artifacts-dir
-       (fn []
-         (let [on-disk (read-index artifacts-dir)
-               disk-index (if (anomaly? on-disk) (:index (rebuild-index artifacts-dir)) on-disk)
-               merged (swap! index (partial merge-indexes disk-index))]
-           (write-transit (index-file-path artifacts-dir) merged)
-           merged)))
-      (catch Exception e
-        (log/error logger :system :artifact/index-save-failed
-                   {:message (.getMessage e)
-                    :data {:artifacts-dir artifacts-dir}})
-        last-written))))
+(defn ^{:stratum 2} quarantine-index!
+  "With the index lock held and the index unreadable: copy it aside to
+   index.transit.json.corrupt-<millis>, rebuild the index from the
+   per-artifact files, write the rebuilt index over the live path and
+   log :artifact/index-rebuilt. Only that atomic write replaces the live
+   file, so no reader sees a missing index. Returns the rebuilt index."
+  [artifacts-dir logger unreadable]
+  (let [path (index-file-path artifacts-dir)
+        copied-to (str path ".corrupt-" (System/currentTimeMillis))
+        {rebuilt :index skipped :skipped} (rebuild-index artifacts-dir)]
+    (Files/copy (.toPath (io/file path)) (.toPath (io/file copied-to))
+                (into-array CopyOption [StandardCopyOption/REPLACE_EXISTING]))
+    (write-transit path rebuilt)
+    (log/warn logger :system :artifact/index-rebuilt
+              {:message (messages/t :index/rebuilt)
+               :data {:copied-to copied-to
+                      :cause (:anomaly/data unreadable)
+                      :artifact-count (count rebuilt)
+                      :skipped skipped}})
+    rebuilt))
 
 (defn ^{:stratum 2} load-artifact-impl
   "Load artifact implementation."
@@ -392,6 +356,51 @@
     id))
 
 ;------------------------------------------------------------------------------ Layer 3
+
+(defn ^{:stratum 3} recover-index!
+  "Under the index lock, re-read the index and, if it is still
+   unreadable, quarantine and rebuild it (see quarantine-index!).
+   Returns the index."
+  [artifacts-dir logger]
+  (call-with-index-lock
+   artifacts-dir
+   (fn []
+     (let [index (read-index artifacts-dir)]
+       (if (anomaly? index)
+         (quarantine-index! artifacts-dir logger index)
+         index)))))
+
+(defn ^{:stratum 3} persist-index-action
+  "Writer action: under the index lock, merge the in-memory index with
+   the one on disk, keep the result in memory and write it. Another
+   store or process may have added artifacts since this store loaded
+   the index; writing only the in-memory map would drop them. An
+   unreadable on-disk index is quarantined and rebuilt first, as at
+   store creation (see quarantine-index!).
+
+   The writer's state is the index value last written. When the
+   in-memory index is still that value, an earlier action already wrote
+   what this one was queued for (a burst of saves queues one write
+   each), so it is skipped. Failures are logged and leave the state
+   alone, so the next queued write retries: an agent action is the
+   outermost frame of the writer thread."
+  [last-written artifacts-dir index logger]
+  (if (identical? last-written @index)
+    last-written
+    (try
+      (call-with-index-lock
+       artifacts-dir
+       (fn []
+         (let [on-disk (read-index artifacts-dir)
+               disk-index (if (anomaly? on-disk) (quarantine-index! artifacts-dir logger on-disk) on-disk)
+               merged (swap! index (partial merge-indexes disk-index))]
+           (write-transit (index-file-path artifacts-dir) merged)
+           merged)))
+      (catch Exception e
+        (log/error logger :system :artifact/index-save-failed
+                   {:message (.getMessage e)
+                    :data {:artifacts-dir artifacts-dir}})
+        last-written))))
 
 (defn ^{:stratum 3} persist-artifact-action
   "Writer action: persist one artifact file, logging the outcome."
@@ -420,18 +429,6 @@
                            :child-id child-id}}))))
   state)
 
-(defn ^{:stratum 3} load-index
-  "Load the artifact metadata index; {} when there is none.
-   An unreadable index is moved aside and rebuilt from the per-artifact
-   files (see recover-index!) instead of failing store creation, which
-   would leave every later run without persistence."
-  ([artifacts-dir] (load-index artifacts-dir nil))
-  ([artifacts-dir logger]
-   (let [index (read-index artifacts-dir)]
-     (if (anomaly? index)
-       (recover-index! artifacts-dir logger)
-       index))))
-
 (defn ^{:stratum 3} filter-by-criteria
   "Filter artifacts by criteria."
   [index criteria]
@@ -445,6 +442,18 @@
     (link-target-anomaly artifact-id role)))
 
 ;------------------------------------------------------------------------------ Layer 4
+
+(defn ^{:stratum 4} load-index
+  "Load the artifact metadata index; {} when there is none.
+   An unreadable index is copied aside and rebuilt from the per-artifact
+   files (see recover-index!) instead of failing store creation, which
+   would leave every later run without persistence."
+  ([artifacts-dir] (load-index artifacts-dir nil))
+  ([artifacts-dir logger]
+   (let [index (read-index artifacts-dir)]
+     (if (anomaly? index)
+       (recover-index! artifacts-dir logger)
+       index))))
 
 (defn ^{:stratum 4} save-artifact
   "Save artifact implementation. Caches the artifact, adds it to the

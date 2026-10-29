@@ -289,3 +289,44 @@
       (finally
         (deliver resume true)
         (delete-dir! dir)))))
+
+(deftest ^{:stratum 1} test-failed-recovery-keeps-the-index-in-place
+  (let [dir (temp-dir)
+        index-path (impl/index-file-path (artifacts-path dir))
+        write impl/write-transit]
+    (try
+      (let [s (open-store dir)]
+        (p/save s (artifact "a1"))
+        (p/close s))
+      (truncate-to-half! index-path)
+      (testing "a recovery whose index write fails leaves the index file in place"
+        (with-redefs [impl/write-transit (fn [path data]
+                                           (when (= path index-path) (throw (ex-info "disk full" {})))
+                                           (write path data))]
+          (is (thrown? Exception (open-store dir))))
+        (is (.exists (io/file index-path))))
+      (testing "so the next open still recovers every artifact"
+        (let [s (open-store dir)]
+          (is (= #{"a1"} (set (map :artifact/id (p/query s {})))))
+          (p/close s)))
+      (finally
+        (delete-dir! dir)))))
+
+(deftest ^{:stratum 1} test-open-store-quarantines-an-index-gone-unreadable
+  (let [dir (temp-dir)
+        [logger entries] (log/collecting-logger)]
+    (try
+      (let [s (open-store dir {:logger logger})]
+        (p/save s (artifact "a1"))
+        (p/close s)
+        (truncate-to-half! (impl/index-file-path (artifacts-path dir)))
+        (p/save s (artifact "a2"))
+        (p/close s))
+      (testing "the unreadable index is kept aside, with a warning"
+        (is (= 1 (count (filter #(str/starts-with? % "index.transit.json.corrupt-")
+                                (file-names (artifacts-path dir))))))
+        (is (contains? (logged-events entries) :artifact/index-rebuilt)))
+      (testing "and the index on disk holds both artifacts"
+        (is (= #{"a1" "a2"} (on-disk-ids dir))))
+      (finally
+        (delete-dir! dir)))))
