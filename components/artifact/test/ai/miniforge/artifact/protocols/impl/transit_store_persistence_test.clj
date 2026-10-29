@@ -494,7 +494,7 @@
           (p/save s (artifact "a1"))
           (testing "close returns false and warns when a written artifact is not indexed"
             (is (false? (p/close s)))
-            (is (contains? (logged-events entries) :artifact/store-close-unindexed)))))
+            (is (contains? (logged-events entries) :artifact/store-close-incomplete)))))
       (finally
         (delete-dir! dir)))))
 
@@ -525,5 +525,30 @@
         (testing "a.transit.json claiming id ../a is not indexed"
           (is (= #{"b"} (set (keys @(:index s))))))
         (p/close s))
+      (finally
+        (delete-dir! dir)))))
+
+(deftest ^{:stratum 1} test-close-reports-failed-writes-and-queued-changes
+  (let [dir (temp-dir)
+        write impl/write-transit]
+    (try
+      (let [s (open-store dir)]
+        (with-redefs [impl/write-transit (fn [path data]
+                                           (when (str/ends-with? path "/a1.transit.json")
+                                             (throw (ex-info "disk full" {})))
+                                           (write path data))]
+          (p/save s (artifact "a1"))
+          (testing "close returns false after a failed artifact-file write"
+            (is (false? (p/close s)))))
+        (p/save s (artifact "a1"))
+        (testing "and true once a later write of that artifact succeeds"
+          (is (true? (p/close s))))
+        ;; A directory where the lock file goes: taking the lock fails.
+        (let [lock (io/file (impl/lock-file-path (artifacts-path dir)))]
+          (io/delete-file lock true)
+          (.mkdirs lock))
+        (p/save s (artifact "a2"))
+        (testing "close returns false while a change is still queued"
+          (is (false? (p/close s)))))
       (finally
         (delete-dir! dir)))))

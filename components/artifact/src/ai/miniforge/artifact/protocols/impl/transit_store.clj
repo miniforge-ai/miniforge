@@ -290,23 +290,26 @@
 
 (defn ^{:stratum 1} close-store
   "Close store implementation. Waits up to the store's close timeout
-   for queued disk writes. Returns true when they all finished and every
-   written artifact is indexed; otherwise logs a warning and returns
-   false."
-  [{:keys [cache logger writer close-timeout-ms]}]
+   for queued disk writes. Returns true when they all finished, nothing
+   is still queued, no file write failed without a later success, and
+   every written artifact is indexed; otherwise logs a warning and
+   returns false."
+  [{:keys [cache logger pending writer close-timeout-ms]}]
   (let [timeout-ms (or close-timeout-ms default-close-timeout-ms)
         flushed? (if writer (await-for timeout-ms writer) true)
-        unindexed (when (and writer flushed?) (seq @writer))]
+        {:keys [unindexed failed]} (when (and writer flushed?) @writer)
+        queued (if pending (count @pending) 0)
+        incomplete? (boolean (or (seq unindexed) (seq failed) (pos? queued)))]
     (cond
       (not flushed?) (log/warn logger :system :artifact/store-close-timeout
                                {:message (messages/t :store/close-timeout)
                                 :data {:timeout-ms timeout-ms}})
-      unindexed (log/warn logger :system :artifact/store-close-unindexed
-                          {:message (messages/t :store/close-unindexed)
-                           :data {:artifact-ids (vec unindexed)}})
+      incomplete? (log/warn logger :system :artifact/store-close-incomplete
+                            {:message (messages/t :store/close-incomplete)
+                             :data {:unindexed (vec unindexed) :failed (vec failed) :queued queued}})
       :else (log/info logger :system :artifact/store-closed
                       {:data {:artifact-count (count @cache)}}))
-    (and flushed? (empty? unindexed))))
+    (and flushed? (not incomplete?))))
 
 ;------------------------------------------------------------------------------ Layer 2
 
@@ -314,8 +317,8 @@
   "Apply one queued change to the artifact files on disk and write them.
    A save keeps the on-disk links and takes every other field from the
    save (carry-links); a link adds each side to the other's file. A
-   missing or unreadable file falls back to the queued copy. Returns the
-   [queued written] pairs written; failures are logged."
+   missing or unreadable file falls back to the queued copy. Returns
+   {:written [[queued written] ...] :failed [id ...]}; failures are logged."
   [{:keys [artifacts-dir logger]} [op a b]]
   (let [on-disk (fn [artifact]
                   (or (try (load-artifact-from-disk artifacts-dir (:artifact/id artifact))
@@ -325,16 +328,16 @@
                 :save [[a (carry-links (on-disk a) a)]]
                 :link [[a (add-link (on-disk a) :artifact/children (:artifact/id b))]
                        [b (add-link (on-disk b) :artifact/parents (:artifact/id a))]])]
-    (reduce (fn [written [_ artifact :as pair]]
+    (reduce (fn [result [_ artifact :as pair]]
               (let [id (:artifact/id artifact)]
                 (try
                   (write-transit (artifact-file-path artifacts-dir id) artifact)
                   (log-artifact-saved logger id artifact)
-                  (conj written pair)
+                  (update result :written conj pair)
                   (catch Exception e
                     (log-artifact-save-failed logger id e)
-                    written))))
-            []
+                    (update result :failed conj id)))))
+            {:written [] :failed []}
             pairs)))
 
 (defn ^{:stratum 2} quarantine-index!
@@ -399,45 +402,52 @@
   "Writer action: one critical section under the index lock for every
    change queued so far, including changes queued while it runs (so a
    burst of saves costs one index write). Writes each change's artifact
-   files (write-change!), then re-reads the on-disk index (quarantined
-   and rebuilt first if unreadable), sets the entries of the written ids to their projection from their files and
-   writes it. Last, under the writer's monitor, puts each written
+   files (write-change!); under the writer's monitor, puts each written
    artifact in the cache and index unless a later save or link has
-   replaced the queued copy. The writer's state is the set of ids whose
-   files were written but not yet indexed: a failed index write keeps
-   them, and the next drain re-projects them from their current files."
-  [unindexed {:keys [artifacts-dir cache index logger pending writer] :as store}]
-  (let [ids (volatile! unindexed)]
+   replaced the queued copy; then re-reads the on-disk index
+   (quarantined and rebuilt first if unreadable), sets the written ids'
+   entries to their projection from their files and writes it.
+   The writer's state is {:unindexed ids :failed ids}: ids whose files
+   were written but are not indexed yet (the next drain re-projects them
+   from their current files), and ids whose last file write failed
+   (cleared by a later successful write). close-store reports both."
+  [state {:keys [artifacts-dir cache index logger pending writer] :as store}]
+  (let [next-state (volatile! state)]
     (try
       (call-with-index-lock
        artifacts-dir
        (fn []
-         (loop [written []]
+         (loop [written [] failed (:failed state)]
            (let [[batch] (swap-vals! pending empty)]
              (if (seq batch)
-               (recur (into written (mapcat (partial write-change! store)) batch))
-               (do
-                 (vswap! ids into (map (comp :artifact/id second)) written)
-                 (when (seq @ids)
-                   (let [on-disk (read-index artifacts-dir)
-                         disk-index (if (anomaly? on-disk) (quarantine-index! artifacts-dir logger on-disk) on-disk)]
-                     (write-transit (index-file-path artifacts-dir)
-                                    (reduce add-to-index disk-index
-                                            (keep #(try (load-artifact-from-disk artifacts-dir %)
-                                                        (catch Exception _ nil))
-                                                  @ids)))))
+               (let [results (mapv (partial write-change! store) batch)]
+                 (recur (into written (mapcat :written) results)
+                        (reduce (fn [f r]
+                                  (into (apply disj f (map (comp :artifact/id second) (:written r)))
+                                        (:failed r)))
+                                failed results)))
+               (let [ids (into (:unindexed state) (map (comp :artifact/id second)) written)]
+                 (vreset! next-state {:unindexed ids :failed failed})
                  (locking writer
                    (doseq [[queued artifact] written
                            :let [id (:artifact/id artifact)]
                            :when (identical? queued (get @cache id))]
                      (swap! cache assoc id artifact)
                      (swap! index add-to-index artifact)))
-                 #{}))))))
+                 (when (seq ids)
+                   (let [on-disk (read-index artifacts-dir)
+                         disk-index (if (anomaly? on-disk) (quarantine-index! artifacts-dir logger on-disk) on-disk)]
+                     (write-transit (index-file-path artifacts-dir)
+                                    (reduce add-to-index disk-index
+                                            (keep #(try (load-artifact-from-disk artifacts-dir %)
+                                                        (catch Exception _ nil))
+                                                  ids)))
+                     (vswap! next-state assoc :unindexed #{})))))))))
       (catch Exception e
         (log/error logger :system :artifact/index-save-failed
                    {:message (.getMessage e)
-                    :data {:artifacts-dir artifacts-dir}})
-        @ids))))
+                    :data {:artifacts-dir artifacts-dir}})))
+    @next-state))
 
 (defn ^{:stratum 3} filter-by-criteria
   "Filter artifacts by criteria."

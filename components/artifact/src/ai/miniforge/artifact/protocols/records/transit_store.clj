@@ -91,9 +91,9 @@
         (atom {})           ; Empty cache initially
         (atom index)        ; Load existing index
         logger
-        ;; State: ids written but not yet indexed (impl/drain-action).
+        ;; State: {:unindexed ids :failed ids} (impl/drain-action).
         ;; Every action catches its own failures; :continue keeps one
         ;; that slips through from blocking every later write.
-        (agent #{} :error-mode :continue)
+        (agent {:unindexed #{} :failed #{}} :error-mode :continue)
         (or close-timeout-ms impl/default-close-timeout-ms)
-        (atom []))))))   ; changes queued for impl/drain-action
+        (atom []))))))  ; changes queued for impl/drain-action
