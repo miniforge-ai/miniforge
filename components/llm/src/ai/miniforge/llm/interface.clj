@@ -337,8 +337,9 @@
      :require-local)
 
    Returns a selection map; :sonnet-4.6 with :fallback-used true when
-   nothing qualifies. With :require-local, an anomaly instead of any model
-   that is not local.
+   nothing qualifies. A :not-found anomaly instead when the model it would
+   return fails a constraint the caller set (:require-local,
+   :context-size, :cost-limit).
 
    Example:
      (select-model {:type :execution-focused
