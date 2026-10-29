@@ -2,8 +2,8 @@
 ;; Copyright 2025-2026 Christopher Lester (christopher@miniforge.ai)
 ;; Licensed under the Apache License, Version 2.0.
 (ns ai.miniforge.workflow.checkpoint-atomic-write-test
-  (:require [ai.miniforge.file-durability.interface :as durability]
-            [ai.miniforge.workflow.checkpoint-store :as store]
+  (:require [ai.miniforge.workflow.checkpoint-store :as store]
+            [ai.miniforge.workflow.boundary.checkpoint-permissions :as permissions]
             [ai.miniforge.workflow.checkpoint-test-support :as fixture]
             [ai.miniforge.workflow.context :as context]
             [ai.miniforge.workflow.interface :as workflow]
@@ -19,11 +19,11 @@
     :workflow/pipeline [{:phase :plan}]}
    {} {:checkpoint/root root}))
 
-(defn- ^{:stratum 0} discard-written-file! [write! path content]
-  ;; Force the actual rename to fail after a complete temporary write.
-  (let [result (write! path content)]
-    (fs/delete path)
-    result))
+(defn- ^{:stratum 0} discard-prepared-file! [prepare! prepared path target]
+  ;; Remove only after preparation succeeds, so Files/move itself must fail.
+  (prepare! path target)
+  (swap! prepared inc)
+  (fs/delete path))
 
 ;------------------------------------------------------------------------------ Layer 1
 
@@ -48,11 +48,13 @@
         run-id (:execution/id ctx)
         persisted (store/persist-execution-state! ctx)
         before (workflow/load-checkpoint-data run-id opts)
-        discard! (partial discard-written-file! durability/write-temporary-bytes!)]
+        prepared (atom 0)
+        discard! (partial discard-prepared-file! permissions/prepare! prepared)]
     (is (map? persisted))
-    (with-redefs [durability/write-temporary-bytes! discard!]
+    (with-redefs [permissions/prepare! discard!]
       (is (nil? (store/persist-execution-state!
                  (assoc ctx :execution/redirect-count 1)))))
+    (is (= 1 @prepared))
     (is (= before (workflow/load-checkpoint-data run-id opts)))
     (is (fs/exists? (:checkpoint/machine-snapshot-path persisted)))
     (is (fs/exists? (:checkpoint/manifest-path persisted)))))

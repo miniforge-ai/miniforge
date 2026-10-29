@@ -15,6 +15,17 @@
 
 (def ^{:stratum 0} ^:private shared-permissions "rw-r-----")
 
+(defn- ^{:stratum 0} verify-symlink-replacement [root]
+  (let [original (fs/path root "original.edn")
+        target (fs/path root "snapshot.edn")]
+    (support/write! original :original)
+    (fs/create-sym-link target original)
+    (support/write! target :replacement)
+    (is (not (fs/sym-link? target)))
+    (is (= permissions/private-permissions (support/permission-mode target)))
+    (is (= :replacement (edn/read-string (slurp (fs/file target)))))
+    (is (= :original (edn/read-string (slurp (fs/file original)))))))
+
 (defn- ^{:stratum 0} verify-permission-failure [root]
   (let [target (fs/path root "snapshot.edn")
         failure (IOException. "injected permission failure")]
@@ -29,6 +40,10 @@
 (deftest ^{:stratum 1} permission-failure-preserves-the-previous-checkpoint
   (fixture/call-with-temp-checkpoint-root
    (fn [root] (when (permissions/posix? root) (verify-permission-failure root)))))
+
+(deftest ^{:stratum 1} symlink-replacement-does-not-copy-the-links-permissions
+  (fixture/call-with-temp-checkpoint-root
+   (fn [root] (when (permissions/posix? root) (verify-symlink-replacement root)))))
 
 (defn- ^{:stratum 1} verify-permissions [root]
   (let [target (fs/path root "snapshot.edn")

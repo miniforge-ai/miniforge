@@ -21,7 +21,8 @@
 
 (defn- ^{:stratum 1} existing-permissions [target]
   (try+
-    (fs/posix-file-permissions target {:nofollow-links true})
+    (let [attributes (fs/read-attributes target "posix:*" {:nofollow-links true})]
+      (if (:isSymbolicLink attributes) private-permissions (:permissions attributes)))
     (catch NoSuchFileException _ private-permissions)))
 
 ;------------------------------------------------------------------------------ Layer 2

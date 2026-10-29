@@ -42,6 +42,9 @@ Permission transfer follows completed byte writing and precedes atomic rename.
 Published-file confirmation then forces the final file and directory metadata.
 The aligned consumers pass in 2m28s; isolated packaged suites pass 18 tests and
 70 assertions, including the permission and relocated persistence scenarios.
+The subsequent symlink correction and true rename-failure test are also retained.
+After that alignment, consumers pass in 2m08s and the rebuilt package passes
+19 tests and 75 assertions without production source overlays.
 
 No checkpoint format migration. Multi-file transactional recovery and runner failure
 events remain separate integration work. This PR does not claim complete N7 recovery.
