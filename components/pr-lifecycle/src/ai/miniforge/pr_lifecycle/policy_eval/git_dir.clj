@@ -29,10 +29,12 @@
    this namespace does not re-implement them. It asks git, run in the
    worktree, for its git dir, common dir and hooks dir. A symlink directly
    inside one of those that points back into the worktree (a symlinked
-   `.git/config`, a hook linked to a script) protects its target too,
-   unless git tracks that target: a tracked file shows in the PR diff and
-   stays editable, and the fix loop runs git with hooks disabled
-   (`hooks-disabled-args`). When git cannot answer, every path is refused.
+   `.git/config` or `.git/refs`, a hook linked to a script) protects its
+   target and everything below it, except a path git's index holds
+   exactly: a tracked file shows in the PR diff and stays editable, and
+   the fix loop runs git with hooks disabled (`hooks-disabled-args`). A
+   tracked file inside such a directory does not make its untracked
+   neighbours editable. When git cannot answer, every path is refused.
 
    Paths are compared as java.nio components, never by splitting strings:
    a whitespace-only name is a name, and on POSIX a backslash is part of
@@ -93,64 +95,64 @@
         :when (java.nio.file.Files/isSymbolicLink (.toPath f))]
     (.getCanonicalPath f)))
 
-(defn ^{:stratum 0} tracked?
-  "True when `tracked` (paths `git ls-files` printed) holds `relative` or
-   a path below it."
-  [tracked relative]
-  (let [rel (java.nio.file.Paths/get (str relative) (make-array String 0))]
-    (boolean (some #(.startsWith (java.nio.file.Paths/get (str %) (make-array String 0)) rel)
-                   tracked))))
-
 ;------------------------------------------------------------------------------ Layer 1
 
 (defn ^{:stratum 1} metadata
   "Ask git, run in canonical `root`, where this worktree's metadata lives.
-   Returns `{:dirs [...] :files [...]}` of canonical paths, or nil when git
+   Returns `{:dirs [...] :links [...]}` of canonical paths, or nil when git
    cannot answer (not a repository, git missing, any other failure).
    `:dirs` are `--absolute-git-dir`, `--git-common-dir` and
-   `--git-path hooks` (which honours `core.hooksPath`). `:files` are the
+   `--git-path hooks` (which honours `core.hooksPath`). `:links` are the
    targets of symlinks directly inside those that point elsewhere in the
-   worktree and that git does not track."
+   worktree."
   [root]
   (try+
-   (let [env  (git-env)
-         ;; One path per line, spaces kept: git treats them as part of the name.
-         rev  (process/sh {:dir root :env env}
+   ;; One path per line, spaces kept: git treats them as part of the name.
+   (let [rev  (process/sh {:dir root :env (git-env)}
                           "git" "rev-parse" "--absolute-git-dir"
                           "--git-common-dir" "--git-path" "hooks")
          dirs (when (zero? (:exit rev))
                 (mapv #(canonical-under root %) (str/split-lines (str (:out rev)))))]
      (when (= 3 (count dirs))
-       (let [outward (->> (distinct dirs)
-                          (mapcat link-targets)
-                          (remove (fn [target] (some #(under? % target) dirs)))
-                          (filter #(under? root %))
-                          distinct
-                          vec)
-             root-p  (java.nio.file.Paths/get root (make-array String 0))
-             rels    (mapv #(str (.relativize root-p (java.nio.file.Paths/get % (make-array String 0))))
-                           outward)
-             ls      (when (seq outward)
-                       (apply process/sh {:dir root :env env}
-                              "git" "--literal-pathspecs" "ls-files" "-z" "--" rels))]
-         (when (or (nil? ls) (zero? (:exit ls)))
-           (let [tracked (remove str/blank? (str/split (str (:out ls)) #"\u0000"))]
-             {:dirs  dirs
-              :files (vec (keep-indexed (fn [i target]
-                                          (when-not (tracked? tracked (nth rels i)) target))
-                                        outward))})))))
+       {:dirs  dirs
+        :links (->> (distinct dirs)
+                    (mapcat link-targets)
+                    (remove (fn [target] (some #(under? % target) dirs)))
+                    (filter #(under? root %))
+                    distinct
+                    vec)}))
    (catch Exception _ nil)))
+
+(defn ^{:stratum 1} tracked-exactly?
+  "True when git's index holds exactly canonical `path` of the worktree at
+   canonical `root`; a tracked path below it does not count. False when
+   git cannot answer."
+  [root path]
+  (try+
+   (let [rel (.relativize (java.nio.file.Paths/get (str root) (make-array String 0))
+                          (java.nio.file.Paths/get (str path) (make-array String 0)))
+         {:keys [exit out]} (process/sh {:dir root :env (git-env)}
+                                        "git" "--literal-pathspecs" "ls-files" "-z" "--"
+                                        (str rel))]
+     (boolean (and (zero? exit)
+                   (some #(= rel (java.nio.file.Paths/get (str %) (make-array String 0)))
+                         (remove str/blank? (str/split (str out) #"\u0000"))))))
+   (catch Exception _ false)))
 
 (defn ^{:stratum 1} in-metadata?
   "True when canonical `path` is metadata of the worktree at canonical
-   `root`: a component below `root` is named `.git`, or `path` is at or
-   under one of `found`'s `:dirs` or `:files`."
-  [root {:keys [dirs files]} path]
+   `root`: a component below `root` is named `.git`, `path` is at or under
+   one of `found`'s `:dirs`, or, when `tracked?` is given, `path` is at or
+   under one of its `:links` and `(tracked? path)` is false."
+  [root {:keys [dirs links]} path tracked?]
   (let [root-p   (java.nio.file.Paths/get (str root) (make-array String 0))
         path-p   (java.nio.file.Paths/get (str path) (make-array String 0))
         relative (if (.startsWith path-p root-p) (.relativize root-p path-p) path-p)]
     (boolean (or (some git-dir-name? (segments relative))
-                 (some #(under? % path) (concat dirs files))))))
+                 (some #(under? % path) dirs)
+                 (and tracked?
+                      (some #(under? % path) links)
+                      (not (tracked? path)))))))
 
 ;------------------------------------------------------------------------------ Layer 2
 
@@ -158,8 +160,10 @@
   "True when following `relative-path` from `worktree-root` reaches git
    metadata: the canonical target, or the canonical directory at any step
    on the way to it, is `in-metadata?`. Checking every step catches a
-   symlink into the git dir followed by one back out. Also true when git
-   cannot say where the metadata is."
+   symlink into the git dir followed by one back out. Symlinked metadata
+   targets (`:links`) apply to the final target only, where tracked-ness is
+   decided for that exact path. Also true when git cannot say where the
+   metadata is."
   [worktree-root relative-path]
   (let [root   (.getCanonicalPath (io/file (str worktree-root)))
         found  (metadata root)
@@ -169,7 +173,8 @@
      (or (nil? found)
          (some (fn [n]
                  (in-metadata? root found
-                               (.getCanonicalPath (.toFile (.resolve root-p (.subpath rel 0 n))))))
+                               (.getCanonicalPath (.toFile (.resolve root-p (.subpath rel 0 n))))
+                               (when (= n (.getNameCount rel)) #(tracked-exactly? root %))))
                (range 1 (inc (.getNameCount rel))))))))
 
 (defn ^{:stratum 2} metadata-entry?
@@ -182,7 +187,8 @@
   (try+
    (let [root  (.getCanonicalPath (io/file (str worktree-root)))
          found (metadata root)]
-     (or (nil? found) (in-metadata? root found (str entry))))
+     (or (nil? found)
+         (in-metadata? root found (str entry) #(tracked-exactly? root %))))
    (catch IllegalArgumentException _ true)))
 
 ;------------------------------------------------------------------------------ Rich Comment

@@ -494,6 +494,30 @@
         (is (refused? worktree "gitconfig" :modify)))
       (finally (fs/delete-tree base)))))
 
+(deftest ^{:stratum 1} apply-fix-to-worktree-protects-untracked-refs-in-a-symlinked-refs-dir-test
+  (testing "with .git/refs -> ../refs and only refs/README tracked, branch refs stay protected"
+    (let [{:keys [base worktree]} (temp-layout)
+          ref (str (fs/path worktree "refs" "heads" "work"))]
+      (try
+        (doseq [args [["config" "user.email" "t@example.com"] ["config" "user.name" "t"]
+                      ["checkout" "-q" "-b" "work"]]]
+          (apply git! worktree args))
+        (fs/move (fs/path worktree ".git" "refs") (fs/path worktree "refs"))
+        (fs/create-sym-link (fs/path worktree ".git" "refs") (fs/path ".." "refs"))
+        (spit (str (fs/path worktree "refs" "README")) "refs
+")
+        (git! worktree "add" "refs/README")
+        (git! worktree "commit" "-q" "-m" "init")
+        (let [sha (slurp ref)]
+          (is (refused? worktree "refs/heads/work" :modify))
+          (is (refused? worktree "refs/heads/work" :delete))
+          (is (refused? worktree "refs/tags/v1" :create))
+          (is (= sha (slurp ref))))
+        (is (dag/ok? (fix/apply-fix-to-worktree
+                      worktree {:code/files [{:path "refs/README" :content "x"
+                                              :action :modify}]} nil)))
+        (finally (fs/delete-tree base))))))
+
 (deftest ^{:stratum 1} commit-fix-runs-git-with-hooks-disabled-test
   (testing "the fix loop's commit and push run no hook"
     (let [{:keys [base worktree]} (temp-layout)
