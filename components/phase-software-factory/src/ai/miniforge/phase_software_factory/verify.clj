@@ -473,10 +473,6 @@
    leave-verify routes it as a non-actionable verify failure rather than
    redirecting back to implement.
 
-   When the calling thread is interrupted the test process tree is
-   destroyed too, the interrupt flag is restored, and a failed result
-   carrying `:interrupted? true` is returned.
-
    Returns parsed test results map."
   [worktree-path & {:keys [test-cmd timeout-ms]}]
   (let [cmd        (or test-cmd (infer-test-command worktree-path))
@@ -489,40 +485,27 @@
                        {:dir (str worktree-path)
                         :out :string :err :string :continue true}
                        "sh" "-c" cmd)
-            done-fut (future @proc)]
-        ;; Plain `try`: this component has no slingshot dependency
-        ;; (rule 211 exemption a).
-        (try
-          (if (not= ::timeout (deref done-fut timeout-ms ::timeout))
-            (let [result @done-fut]
-              (parse-test-output (str (:out result "") "\n" (:err result ""))
-                                 (:exit result 1)))
-            (do
-              ;; .destroyForcibly on the `sh` parent does NOT reliably kill the
-              ;; test runner child (the actual JVM running `bb test`). Walk the
-              ;; descendant tree first so children die before the shell does;
-              ;; this is what produced the orphan polylith poly-cli process
-              ;; observed on 2026-05-18.
-              (destroy-process-tree! (:proc proc))
-              ;; Bounded wait for the reader threads to drain; if they don't,
-              ;; cancel the future so the thread doesn't leak across verify runs.
-              (when (= ::timeout (deref done-fut 5000 ::timeout))
-                (future-cancel done-fut))
-              (assoc (test-error-result
-                       (messages/t :verify/timed-out
-                                   {:timeout-ms timeout-ms :test-cmd cmd}))
-                     :timed-out? true)))
-          (catch InterruptedException _
-            ;; The phase thread was interrupted mid-run. Kill the test
-            ;; process tree (it would keep running against the worktree),
-            ;; release the waiting future, then restore the interrupt flag
-            ;; the exception cleared so the caller still sees it.
+            done-fut (future @proc)
+            done?    (not= ::timeout (deref done-fut timeout-ms ::timeout))]
+        (if done?
+          (let [result @done-fut]
+            (parse-test-output (str (:out result "") "\n" (:err result ""))
+                               (:exit result 1)))
+          (do
+            ;; .destroyForcibly on the `sh` parent does NOT reliably kill the
+            ;; test runner child (the actual JVM running `bb test`). Walk the
+            ;; descendant tree first so children die before the shell does;
+            ;; this is what produced the orphan polylith poly-cli process
+            ;; observed on 2026-05-18.
             (destroy-process-tree! (:proc proc))
-            (future-cancel done-fut)
-            (.interrupt (Thread/currentThread))
+            ;; Bounded wait for the reader threads to drain; if they don't,
+            ;; cancel the future so the thread doesn't leak across verify runs.
+            (when (= ::timeout (deref done-fut 5000 ::timeout))
+              (future-cancel done-fut))
             (assoc (test-error-result
-                     (messages/t :verify/interrupted {:test-cmd cmd}))
-                   :interrupted? true))))
+                     (messages/t :verify/timed-out
+                                 {:timeout-ms timeout-ms :test-cmd cmd}))
+                   :timed-out? true))))
       (catch Exception e
         (test-error-result (.getMessage e))))))
 
