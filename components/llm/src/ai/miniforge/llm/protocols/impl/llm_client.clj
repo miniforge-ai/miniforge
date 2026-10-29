@@ -1157,7 +1157,10 @@
                   (fn []
                     (try+
                       (.close out-reader)
-                      ;; Catch-all (`Object` also matches ex-info).
+                      ;; JVM Errors stay fatal; anything else, ex-info
+                      ;; included (`Object`), is a best-effort close.
+                      (catch Error fatal
+                        (throw fatal))
                       (catch Object _
                         nil))))
   (.interrupt reader-thread)
