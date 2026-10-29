@@ -122,7 +122,8 @@
   [worktree-path args]
   (try
     (let [r (apply process/shell
-                   {:dir (str worktree-path) :out :string :err :string :continue true}
+                   {:dir (str worktree-path) :out :string :err :string :continue true
+                    :env (shell/local-git-env)}
                    args)]
       (if (zero? (:exit r))
         (result/shell-success {:output (str/trim (get r :out ""))})
@@ -143,7 +144,8 @@
                    {:dir (str worktree-path)
                     :out :string
                     :err :string
-                    :continue true}
+                    :continue true
+                    :env (shell/local-git-env)}
                    git-args)]
       (if (zero? (:exit r))
         (result/shell-success {:output (get r :out "")})
@@ -158,7 +160,8 @@
   [worktree-path]
   (try
     (let [r (process/shell
-             {:dir (str worktree-path) :out :string :err :string :continue true}
+             {:dir (str worktree-path) :out :string :err :string :continue true
+              :env (shell/local-git-env)}
              "git" "diff" "--cached" "--numstat")]
       (when (zero? (:exit r))
         (let [lines (str/split-lines (str/trim (get r :out "")))
@@ -179,7 +182,8 @@
   [worktree-path]
   (try
     (let [r (process/shell
-             {:dir (str worktree-path) :out :string :err :string :continue true}
+             {:dir (str worktree-path) :out :string :err :string :continue true
+              :env (shell/local-git-env)}
              "git" "diff" "--cached" "-U0")]
       (when (zero? (:exit r))
         (let [diff-text (get r :out "")
@@ -206,7 +210,8 @@
    (commit-changes! worktree-path commit-message git-args nil))
   ([worktree-path commit-message git-args extra-env]
    (try
-     (let [opts     (cond-> {:dir (str worktree-path) :out :string :err :string :continue true}
+     (let [opts     (cond-> {:dir (str worktree-path) :out :string :err :string :continue true
+                             :env (shell/local-git-env)}
                       extra-env (assoc :extra-env extra-env))
            commit-r (apply process/shell opts
                            "git" (concat git-args ["commit" "-m" (redaction/redact commit-message)]))]
@@ -301,7 +306,8 @@
   (or
    (validate-safe-branch-name branch-name)
    (try
-    (let [dir-opts {:dir (str worktree-path) :out :string :err :string :continue true}
+    (let [dir-opts {:dir (str worktree-path) :out :string :err :string :continue true
+                    :env (shell/local-git-env)}
           default-branch-r (process/shell dir-opts
                                           "git" "symbolic-ref" "refs/remotes/origin/HEAD")
           default-branch (if (zero? (:exit default-branch-r))
@@ -355,7 +361,8 @@
   (when-not (validate-safe-branch-name base-branch)
     (try
       (let [r (process/shell
-               {:dir (str worktree-path) :out :string :err :string :continue true}
+               {:dir (str worktree-path) :out :string :err :string :continue true
+                :env (shell/local-git-env)}
                "git" "rev-list" "--count" "--right-only"
                (str "origin/" base-branch "...HEAD"))]
         (when (zero? (:exit r))
@@ -372,7 +379,8 @@
   (when-not (validate-safe-branch-name base-branch)
     (try
       (let [r (process/shell
-               {:dir (str worktree-path) :out :string :err :string :continue true}
+               {:dir (str worktree-path) :out :string :err :string :continue true
+                :env (shell/local-git-env)}
                "git" "diff" (str "origin/" base-branch "...HEAD") "--numstat")]
         (when (zero? (:exit r))
           (let [lines (str/split-lines (str/trim (get r :out "")))
@@ -393,7 +401,8 @@
   (when-not (validate-safe-branch-name base-branch)
     (try
       (let [r (process/shell
-               {:dir (str worktree-path) :out :string :err :string :continue true}
+               {:dir (str worktree-path) :out :string :err :string :continue true
+                :env (shell/local-git-env)}
                "git" "diff" (str "origin/" base-branch "...HEAD") "-U0")]
         (when (zero? (:exit r))
           (let [diff-text (get r :out "")
