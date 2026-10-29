@@ -49,6 +49,10 @@
   :warn/heartbeat-stop       "Warning: Failed to stop phase heartbeat: {error}"
   :warn/health-check         "Warning: Self-healing health check failed: {error}"
 
+  ;; Checkpoint persistence
+  :checkpoint/write-failed   "Checkpoint write failed for run {run-id}: {error}"
+  :warn/checkpoint-write-failed "Warning: Could not write the checkpoint for phase {phase}; the run continues, but cannot be resumed from this point: {error}"
+
   ;; Workflow status messages
   :status/failed             "Workflow failed"
   :status/gate-failed        "Gate validation failed"
