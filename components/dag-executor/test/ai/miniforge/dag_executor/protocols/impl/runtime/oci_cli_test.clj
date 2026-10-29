@@ -359,6 +359,10 @@
             "an empty extraheader first drops any header image or workspace config set")
         (is (= "0" (get env "GIT_TERMINAL_PROMPT")))
         (is (= "" (get env "GIT_ASKPASS")))))
+    (testing "a repository served at the host root is authenticated too"
+      (is (= (str "Authorization: Basic " (basic-auth "x-access-token" "tok"))
+             (get (git-config-of (cred-env "https://git.example.com" auth))
+                  "http.https://git.example.com/.extraheader"))))
     (testing "no token, or a URL that is not https, yields no credential"
       (is (= {} (cred-env "https://github.com/o/r.git" nil)))
       (is (= {} (cred-env "http://github.com/o/r.git" auth)))

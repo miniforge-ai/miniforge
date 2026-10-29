@@ -614,7 +614,7 @@
    state nor the runtime argv (N11 §2.2). Empty without a token or for a
    non-https URL."
   [https-url {:keys [user token]}]
-  (if-let [[_ origin] (when token (re-find #"^(https://[^/]+)/" https-url))]
+  (if-let [[_ origin] (when token (re-find #"^(https://[^/]+)(?:/|$)" https-url))]
     (merge (git-config-env (conj git-credential-config
                                  [(str "http." origin "/.extraheader") ""]
                                  [(str "http." origin "/.extraheader")
