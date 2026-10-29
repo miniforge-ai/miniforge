@@ -8,9 +8,9 @@
 
 **Experimental.** The model selector is a library API that picks a model from the model catalog for a classified
 task. No workflow, phase or CLI command calls it: a run gives each role the model its configuration names, as
-[Configuration Management](configuration.md) describes. No environment variable or `config.edn` key reaches the
-selector; earlier versions of this page listed `MINIFORGE_MODEL_SELECTION_*` variables and a `:model-selection`
-config block, which nothing read.
+[Configuration Management](configuration.md) describes. No miniforge setting configures it: the
+`MINIFORGE_MODEL_SELECTION_*` variables and the `:model-selection` config block that earlier versions of this page
+listed were never read. It does read provider API-key variables (see Known limitations).
 
 ## API
 
@@ -46,8 +46,9 @@ config block, which nothing read.
 (agent/create-agent :implementer {:privacy-required true :cost-limit 0.05})
 ```
 
-When nothing qualifies, `select-model` returns Claude Sonnet 4.6 with `:fallback-used true`. The result, the
-fallback included, is checked against each constraint the caller set (`:require-local`, `:context-size`,
+When the chosen strategy picks no candidate, `select-model` returns Claude Sonnet 4.6 with `:fallback-used true`;
+another strategy might have found one (`:cost-optimized` skips the local tiers of `:privacy-sensitive`). The result,
+the fallback included, is checked against each constraint the caller set (`:require-local`, `:context-size`,
 `:cost-limit`); a model that fails one becomes a `:not-found` anomaly naming the unmet constraints.
 
 **Selection routes nothing.** `create-agent` stores the selected model id in the agent's config; `invoke` sends the
