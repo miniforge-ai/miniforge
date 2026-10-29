@@ -55,15 +55,35 @@
                                  {:output (str/trim (or stdout ""))})))
        (result/shell-failure (str "Executor error: " (:error r)) {:output ""})))))
 
-(defn- ^{:stratum 0} ssh->https-with-token
-  "Convert an SSH or HTTPS git remote URL to HTTPS with token auth.
-   Returns the authenticated URL, or nil if conversion fails."
+(defn- ^{:stratum 0} token-auth-env
+  "Environment for one push that authenticates to GitHub with `token`, or
+   nil when `remote-url` is not a github.com SSH (git@github.com:path) or
+   HTTPS URL. Untrusted code can repoint the capsule's origin, and GH_TOKEN
+   is a GitHub credential, so no other host gets it.
+
+   The settings travel as GIT_CONFIG_COUNT / GIT_CONFIG_KEY_n /
+   GIT_CONFIG_VALUE_n (git 2.31+), so the token is never written to the
+   capsule's .git/config:
+   url.https://github.com/.insteadOf sends an SSH origin over HTTPS for
+   this command only, and after an empty http.https://github.com/.extraHeader
+   drops headers from other config, the token goes as Basic
+   x-access-token:<token>."
   [remote-url token]
-  (when remote-url
-    (if-let [[_ host path] (re-matches #"git@([^:]+):(.+)" remote-url)]
-      (str "https://x-access-token:" token "@" host "/" path)
-      (when (str/starts-with? (str remote-url) "https://")
-        (str/replace remote-url #"https://" (str "https://x-access-token:" token "@"))))))
+  (let [url      (str remote-url)
+        ssh-host (second (re-matches #"git@([^:/]+):.+" url))
+        host     (or ssh-host (second (re-matches #"https://(?:[^@/]*@)?([^/]+)/.+" url)))]
+    (when (= "github.com" host)
+      (let [base    (str "https://" host "/")
+            header  (str "Authorization: Basic "
+                         (.encodeToString (java.util.Base64/getEncoder)
+                                          (.getBytes (str "x-access-token:" token) "UTF-8")))
+            entries (cond-> [[(str "http." base ".extraHeader") ""]
+                             [(str "http." base ".extraHeader") header]]
+                      ssh-host (conj [(str "url." base ".insteadOf") (str "git@" host ":")]))]
+        (reduce-kv (fn [env i [k v]]
+                     (assoc env (str "GIT_CONFIG_KEY_" i) k (str "GIT_CONFIG_VALUE_" i) v))
+                   {"GIT_CONFIG_COUNT" (str (count entries))}
+                   entries)))))
 
 (defn- ^{:stratum 0} parse-pr-ref
   "Parse a gh PR URL into {:pr-url :pr-number}, or nil when the output carries
@@ -225,46 +245,6 @@
           (result/shell-failure (:error sha-r) {:commit-sha nil})))
       (result/shell-failure (:error commit-r) {:commit-sha nil}))))
 
-(defn- ^{:stratum 1} push-with-https-fallback!
-  "Push using HTTPS + token auth after SSH fails. Temporarily sets the
-   remote URL to include the token, pushes, then restores the original URL
-   so the token never persists in git config.
-
-   The token-bearing URL is passed to `git remote set-url` as an argv
-   vector, never a shell string — `exec!` routes string commands through
-   `sh -c`, which would otherwise expose the embedded token to shell
-   interpolation. Mirrors `git/with-https-token-fallback!`: a failed
-   set-url aborts before pushing against a remote that was never actually
-   repointed; a failed restore fails loud with a scrub command rather than
-   silently leaving the token persisted in git config. All three exec!
-   calls share the caller's `opts` (e.g. `:workdir`) so the repoint, push,
-   and restore all target the same executor context — a `:workdir`
-   applied only to the push would otherwise leave set-url/restore running
-   against the wrong directory."
-  [executor env-id branch-name remote-url https-url push-error opts]
-  (let [set-r (exec! executor env-id ["git" "remote" "set-url" "origin" https-url] opts)]
-    (if-not (result/succeeded? set-r)
-      (result/shell-failure
-       (msg/t :push/https-fallback-setup-failed
-              {:push-error    push-error
-               :set-url-error (:error set-r)})
-       {:push-succeeded? false})
-      (let [retry     (exec! executor env-id (str "git push -u origin " branch-name) opts)
-            restore-r (exec! executor env-id ["git" "remote" "set-url" "origin" remote-url] opts)]
-        (if (result/succeeded? restore-r)
-          retry
-          (let [pushed? (result/succeeded? retry)]
-            (result/shell-failure
-             (if pushed?
-               (msg/t :push/https-fallback-restore-failed
-                      {:remote-url    remote-url
-                       :restore-error (:error restore-r)})
-               (msg/t :push/https-fallback-push-and-restore-failed
-                      {:remote-url    remote-url
-                       :push-error    (:error retry)
-                       :restore-error (:error restore-r)}))
-             {:push-succeeded? pushed?})))))))
-
 (defn- ^{:stratum 1} reuse-existing-pr!
   "Resolve the PR already open for the current branch via gh pr view, so a
    release retry reuses it instead of opening a duplicate. Falls back to a
@@ -415,7 +395,9 @@
 (defn ^{:stratum 2} push-branch!
   "Push branch to origin inside the sandbox container.
    Optional opts supports :env for credential injection.
-   Retries with GH_TOKEN HTTPS auth if SSH push fails."
+   If the push fails and opts carry GH_TOKEN, retries once with the token in
+   that push's environment (`token-auth-env`), which also covers an SSH
+   origin; origin and .git/config are never modified."
   ([executor env-id branch-name] (push-branch! executor env-id branch-name {}))
   ([executor env-id branch-name opts]
    (or (validate-safe-branch-name branch-name)
@@ -424,11 +406,10 @@
        result
        (if-let [token (get-in opts [:env "GH_TOKEN"])]
          (let [url-r (exec! executor env-id "git remote get-url origin" opts)
-               remote-url (when (result/succeeded? url-r) (str/trim (get url-r :output "")))
-               https-url (ssh->https-with-token remote-url token)]
-           (if https-url
-             (push-with-https-fallback! executor env-id branch-name remote-url https-url
-                                        (:error result) opts)
+               remote-url (when (result/succeeded? url-r) (str/trim (get url-r :output "")))]
+           (if-let [auth-env (token-auth-env remote-url token)]
+             (exec! executor env-id (str "git push -u origin " branch-name)
+                    (update opts :env merge auth-env))
              result))
          result))))))
 

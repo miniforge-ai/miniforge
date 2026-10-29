@@ -70,15 +70,19 @@
   (.encodeToString (java.util.Base64/getEncoder)
                    (.getBytes (str user ":" token) "UTF-8")))
 
-(defn- ^{:stratum 0} parse-fake-runtime-log [lines]
-  (->> lines
-       (partition-by #(= "END" %))
-       (remove #(= ["END"] %))
-       (mapv (fn [call]
-               {:argv (vec (keep #(when (.startsWith ^String % "ARG ") (subs % 4)) call))
-                :env  (into {} (keep #(when (.startsWith ^String % "ENV ")
-                                        (clojure.string/split (subs % 4) #"=" 2)))
-                            call)}))))
+(defn- ^{:stratum 0} prefixed-entries [prefix call]
+  (into {} (keep #(when (.startsWith ^String % prefix)
+                    (clojure.string/split (subs % (count prefix)) #"=" 2)))
+        call))
+
+(defn- ^{:stratum 0} git-config-of
+  "{key value} that GIT_CONFIG_COUNT / KEY_n / VALUE_n in `env` set."
+  [env]
+  (into {} (for [i (range (parse-long (get env "GIT_CONFIG_COUNT" "0")))]
+             [(get env (str "GIT_CONFIG_KEY_" i)) (get env (str "GIT_CONFIG_VALUE_" i))])))
+
+(defn- ^{:stratum 0} env-file-path [argv]
+  (second (drop-while #(not= "--env-file" %) argv)))
 
 ;; ============================================================================
 ;; descriptor — basic construction
@@ -313,35 +317,18 @@
 
 ;------------------------------------------------------------------------------ Layer 1
 
+(defn- ^{:stratum 1} parse-fake-runtime-log [lines]
+  (->> lines
+       (partition-by #(= "END" %))
+       (remove #(= ["END"] %))
+       (mapv (fn [call]
+               {:argv     (vec (keep #(when (.startsWith ^String % "ARG ") (subs % 4)) call))
+                :env      (prefixed-entries "ENV " call)
+                :env-file (prefixed-entries "FILE " call)}))))
+
 (defn- ^{:stratum 1} token-in? [s]
   (or (clojure.string/includes? s fake-token)
       (clojure.string/includes? s (basic-auth "x-access-token" fake-token))))
-
-(defn- ^{:stratum 1} with-fake-runtime
-  "Run (f descriptor calls) against a stand-in runtime CLI for `kind`: a
-   script that logs each invocation's argv and the values of `env-names` in
-   its own environment, then prints a fake id. `calls` returns the
-   invocations as [{:argv [...] :env {name value}}] — what `ps` and the
-   CLI's environment would show."
-  [kind env-names f]
-  (let [dir    (.toFile (java.nio.file.Files/createTempDirectory
-                         "fake-runtime" (make-array java.nio.file.attribute.FileAttribute 0)))
-        log    (java.io.File. dir "calls.log")
-        script (java.io.File. dir "runtime")]
-    (try
-      (spit script
-            (str "#!/bin/sh\n"
-                 "log='" log "'\n"
-                 "for a in \"$@\"; do printf 'ARG %s\\n' \"$a\" >> \"$log\"; done\n"
-                 (apply str (for [n env-names]
-                              (str "[ -n \"${" n "+x}\" ] && printf 'ENV " n "=%s\\n' \"$" n "\" >> \"$log\"\n")))
-                 "echo END >> \"$log\"\n"
-                 "echo abc123\n"))
-      (.setExecutable script true)
-      (f (descriptor/make-descriptor {:runtime-kind kind :executable (str script)})
-         #(if (.exists log) (parse-fake-runtime-log (clojure.string/split-lines (slurp log))) []))
-      (finally
-        (run! #(.delete ^java.io.File %) (reverse (file-seq dir)))))))
 
 ;; ============================================================================
 ;; sanitize-token
@@ -370,13 +357,18 @@
 (deftest ^{:stratum 1} git-credential-env-test
   (let [cred-env (private-fn 'git-credential-env)
         auth     {:user "x-access-token" :token "tok"}]
-    (testing "an Authorization header scoped to the remote's host"
-      (is (= {"GIT_CONFIG_COUNT"    "1"
-              "GIT_CONFIG_KEY_0"    "http.https://github.com/.extraheader"
-              "GIT_CONFIG_VALUE_0"  (str "Authorization: Basic "
-                                         (basic-auth "x-access-token" "tok"))
-              "GIT_TERMINAL_PROMPT" "0"}
-             (cred-env "https://github.com/o/r.git" auth))))
+    (testing "an Authorization header scoped to the remote's host, with no
+              hooks, credential helper, askpass or non-https transport"
+      (let [env (cred-env "https://github.com/o/r.git" auth)]
+        (is (= {"core.hooksPath"       "/dev/null"
+                "credential.helper"    ""
+                "protocol.allow"       "never"
+                "protocol.https.allow" "always"
+                "http.https://github.com/.extraheader"
+                (str "Authorization: Basic " (basic-auth "x-access-token" "tok"))}
+               (git-config-of env)))
+        (is (= "0" (get env "GIT_TERMINAL_PROMPT")))
+        (is (= "" (get env "GIT_ASKPASS")))))
     (testing "an http remote gets its header too"
       (is (some #{(str "Authorization: Basic " (basic-auth "x-access-token" "tok"))}
                 (vals (cred-env "http://git.example.com/r.git" auth)))))
@@ -477,17 +469,15 @@
     (let [captured (atom nil)
           run! (fn [plan]
                  (with-redefs [oci-cli/run-runtime-process
-                               (fn [_d args & {:keys [env]}]
-                                 (reset! captured {:args (vec args) :env env})
+                               (fn [_d args & _]
+                                 (reset! captured (slurp (env-file-path args)))
                                  {:exit 0 :out "cid\n" :err ""})]
                    (oci-cli/create-container
                     (docker-descriptor) "c" "img" "/w" {"SOURCE" "legacy"} nil nil
                     :execution-plan plan)
                    @captured))]
-      (let [{:keys [args env]} (run! {:env {"SOURCE" "plan"}})]
-        (is (some #{"SOURCE"} args))
-        (is (= {"SOURCE" "plan"} env)))
-      (is (= {"SOURCE" "legacy"} (:env (run! {})))))))
+      (is (= "SOURCE=plan\n" (run! {:env {"SOURCE" "plan"}})))
+      (is (= "SOURCE=legacy\n" (run! {}))))))
 
 (deftest ^{:stratum 1} create-container-runs-plan-command-test
   (testing "the container command comes from the plan's :command, defaulting
@@ -719,10 +709,9 @@
           (is (some #{(str "Authorization: Basic " (basic-auth "bob" "pw"))} (vals env))))))))
 
 (deftest ^{:stratum 1} persist-workspace-authenticates-push-only-test
-  (testing "with a recorded remote, only the push gets the credential, with
-            hooks off, and it pushes to the recorded URL rather than the
-            capsule's origin; add/commit (which run workspace hooks) never
-            see it"
+  (testing "with a recorded remote, only the push gets the credential, and
+            it pushes to the recorded URL rather than the capsule's origin;
+            add/commit (which run workspace hooks) never see it"
     (let [executor (recorded-remote-executor)
           calls    (atom [])]
       (with-redefs [oci-cli/resolve-git-token (fn [_url _opts] fake-token)
@@ -737,11 +726,9 @@
                            [:data :persisted?])))
         (let [[[cmd opts] & more] (credentialed-calls @calls)]
           (is (empty? more))
-          (is (= ["git" "-c" "core.hooksPath=/dev/null" "push" "https://github.com/o/r.git"
-                  "HEAD:task/x" "--force"]
-                 cmd))
+          (is (= ["git" "push" "https://github.com/o/r.git" "HEAD:task/x" "--force"] cmd))
           (is (= (str "Authorization: Basic " (basic-auth "x-access-token" fake-token))
-                 (get-in opts [:env "GIT_CONFIG_VALUE_0"]))))
+                 (get (git-config-of (:env opts)) "http.https://github.com/.extraheader"))))
         (proto/release-environment! executor "c1")
         (is (= {} @(:git-remotes executor)))))))
 
@@ -757,7 +744,7 @@
         (is (true? (get-in (proto/restore-workspace! (recorded-remote-executor) "c1"
                                                      {:branch "task/x"})
                            [:data :restored?])))
-        (is (= [["git" "-c" "core.hooksPath=/dev/null" "fetch" "https://github.com/o/r.git"
+        (is (= [["git" "fetch" "https://github.com/o/r.git"
                  "+refs/heads/task/x:refs/remotes/origin/task/x"]]
                (map first (credentialed-calls @calls))))))))
 
@@ -774,68 +761,112 @@
           (proto/execute! executor "c1" ["git" "push"] {:env {"GH_TOKEN" "t"}}))
         (let [[with-creds without] @seen]
           (is (= "t" (get-in with-creds [:env "GH_TOKEN"])))
-          (is (contains? (:env with-creds) "GIT_CONFIG_VALUE_0"))
+          (is (contains? (git-config-of (:env with-creds)) "http.https://github.com/.extraheader"))
           (is (= {"GH_TOKEN" "t"} (:env without))))))))
 
 ;------------------------------------------------------------------------------ Layer 2
 
+(defn- ^{:stratum 2} with-fake-runtime
+  "Run (f descriptor calls) against a stand-in runtime CLI for `kind`: a
+   script that logs each invocation's argv, the contents of any
+   `--env-file`, and the values of `env-names` in its own environment (line
+   breaks shown as |), then prints a fake id. `calls` returns the
+   invocations as [{:argv [...] :env {name value} :env-file {name value}}]:
+   what `ps`, the CLI's environment and the container would see."
+  [kind env-names f]
+  (let [dir    (.toFile (java.nio.file.Files/createTempDirectory
+                         "fake-runtime" (make-array java.nio.file.attribute.FileAttribute 0)))
+        log    (java.io.File. dir "calls.log")
+        script (java.io.File. dir "runtime")]
+    (try
+      (spit script
+            (str "#!/bin/sh\n"
+                 "log='" log "'\n"
+                 "prev=''\n"
+                 "for a in \"$@\"; do\n"
+                 "  printf 'ARG %s\\n' \"$a\" >> \"$log\"\n"
+                 "  [ \"$prev\" = --env-file ] && sed 's/^/FILE /' \"$a\" >> \"$log\"\n"
+                 "  prev=\"$a\"\n"
+                 "done\n"
+                 (apply str (for [n env-names]
+                              (str "[ -n \"${" n "+x}\" ] && printf 'ENV " n "=%s\\n' "
+                                   "\"$(printf '%s' \"$" n "\" | tr '\\n' '|')\" >> \"$log\"\n")))
+                 "echo END >> \"$log\"\n"
+                 "echo abc123\n"))
+      (.setExecutable script true)
+      (f (descriptor/make-descriptor {:runtime-kind kind :executable (str script)})
+         #(if (.exists log) (parse-fake-runtime-log (clojure.string/split-lines (slurp log))) []))
+      (finally
+        (run! #(.delete ^java.io.File %) (reverse (file-seq dir)))))))
+
 (deftest ^{:stratum 2} git-credential-env-is-read-by-git-test
-  (testing "git takes the header from the env alone; the repo config file
-            never holds it"
+  (testing "git takes the credential config from the env over the
+            workspace's own .git/config, and the config file never holds it"
     (let [dir (.toFile (java.nio.file.Files/createTempDirectory
                         "cred-env" (make-array java.nio.file.attribute.FileAttribute 0)))
           env ((private-fn 'git-credential-env) "https://github.com/o/r.git"
                                                 {:user "x-access-token" :token fake-token})
           git (fn [& args]
                 (apply shell/sh "git" "-C" (str dir)
-                       (concat args [:env (merge (into {} (System/getenv)) env)])))]
+                       (concat args [:env (merge (into {} (System/getenv)) env)])))
+          get-config #(clojure.string/trim (:out (git "config" "--get" %)))]
       (try
         (git "init" "-q")
-        (is (= (get env "GIT_CONFIG_VALUE_0")
-               (clojure.string/trim
-                (:out (git "config" "--get" "http.https://github.com/.extraheader")))))
+        (git "config" "--local" "core.hooksPath" "/workspace/.evil-hooks")
+        (git "config" "--local" "credential.helper" "/workspace/evil-helper")
+        (is (= (get (git-config-of env) "http.https://github.com/.extraheader")
+               (get-config "http.https://github.com/.extraheader")))
+        (is (= "/dev/null" (get-config "core.hooksPath")))
+        (is (= "" (get-config "credential.helper")))
         (is (not (token-in? (slurp (java.io.File. dir ".git/config")))))
         (finally
           (run! #(.delete ^java.io.File %) (reverse (file-seq dir))))))))
+
+;------------------------------------------------------------------------------ Layer 3
 
 ;; ============================================================================
 ;; Credentials stay off the runtime argv and out of capsule git config
 ;; (N11 §2.2). These drive a stand-in runtime CLI, so they observe what the
 ;; real `docker` / `podman` process would receive.
 ;; ============================================================================
-(deftest ^{:stratum 2} create-container-passes-env-values-by-name-test
+(deftest ^{:stratum 3} create-container-passes-env-through-an-env-file-test
   (doseq [kind supported-kinds-under-test]
-    (testing (str "runtime " kind ": container env is `-e NAME` on argv, the
-                   value only in the runtime CLI's environment")
+    (testing (str "runtime " kind ": container env reaches the runtime in an
+                   env file, not on argv or in the runtime CLI's environment,
+                   and the file is gone afterwards")
       (with-fake-runtime kind ["GH_TOKEN"]
         (fn [descriptor calls]
           (oci-cli/create-container descriptor "c" "img" "/w" nil nil nil
                                     :execution-plan {:env {"GH_TOKEN" fake-token}})
-          (let [{:keys [argv env]} (first (calls))]
-            (is (some #{"GH_TOKEN"} argv))
+          (let [{:keys [argv env env-file]} (first (calls))]
             (is (not-any? token-in? argv))
-            (is (= fake-token (get env "GH_TOKEN")))))))))
+            (is (= {"GH_TOKEN" fake-token} env-file))
+            (is (not= fake-token (get env "GH_TOKEN")))
+            (is (some-> (env-file-path argv) java.io.File. .exists not))))))))
 
-(deftest ^{:stratum 2} exec-in-container-passes-env-values-by-name-test
-  (testing "per-command env (release's GH_TOKEN) stays off argv; a name the
-            runtime CLI reads itself goes inline so it cannot reconfigure
-            the CLI"
-    (with-fake-runtime :podman ["GH_TOKEN" "HOME"]
+(deftest ^{:stratum 3} exec-in-container-passes-env-through-an-env-file-test
+  (testing "per-command env (release's GH_TOKEN, a HOME for the container)
+            leaves the runtime CLI's own environment alone; a value an env
+            file cannot hold goes by name"
+    (with-fake-runtime :podman ["GH_TOKEN" "HOME" "PEM"]
       (fn [descriptor calls]
         (oci-cli/exec-in-container descriptor "c" ["gh" "pr" "create"]
-                                   {:env {"GH_TOKEN" fake-token "HOME" "/capsule-home"}})
-        (let [{:keys [argv env]} (first (calls))]
-          (is (some #{"GH_TOKEN"} argv))
+                                   {:env {"GH_TOKEN" fake-token
+                                          "HOME"     "/capsule-home"
+                                          "PEM"      "line1\nline2"}})
+        (let [{:keys [argv env env-file]} (first (calls))]
           (is (not-any? token-in? argv))
-          (is (= fake-token (get env "GH_TOKEN")))
-          (is (some #{"HOME=/capsule-home"} argv))
-          (is (not= "/capsule-home" (get env "HOME"))))))))
+          (is (= {"GH_TOKEN" fake-token "HOME" "/capsule-home"} env-file))
+          (is (not= fake-token (get env "GH_TOKEN")))
+          (is (not= "/capsule-home" (get env "HOME")))
+          (is (some #{"PEM"} argv))
+          (is (= "line1|line2" (get env "PEM"))))))))
 
-(deftest ^{:stratum 2} bootstrap-workspace-keeps-token-out-of-git-config-test
-  (testing "the clone gets the token through its environment: no runtime
-            argv carries it, origin is the plain URL, no push URL is set,
-            and no later command receives the credential"
-    (with-fake-runtime :docker ["GIT_CONFIG_KEY_0" "GIT_CONFIG_VALUE_0"]
+(deftest ^{:stratum 3} bootstrap-workspace-keeps-token-out-of-git-config-test
+  (testing "the clone gets the token through its env file: no runtime argv
+            carries it, origin is the plain URL, no push URL is set, and no
+            later command receives the credential"
+    (with-fake-runtime :docker []
       (fn [descriptor calls]
         (with-redefs [oci-cli/resolve-git-token (fn [_url _opts] fake-token)]
           (let [result ((private-fn 'bootstrap-workspace!)
@@ -848,19 +879,15 @@
             (is (not-any? token-in? (mapcat :argv all)))
             (is (some #{"https://github.com/o/r.git"} (:argv clone)))
             (is (not-any? #(some #{"set-url"} (:argv %)) all))
-            (is (= "http.https://github.com/.extraheader"
-                   (get-in clone [:env "GIT_CONFIG_KEY_0"])))
             (is (= (str "Authorization: Basic " (basic-auth "x-access-token" fake-token))
-                   (get-in clone [:env "GIT_CONFIG_VALUE_0"])))
+                   (get (git-config-of (:env-file clone)) "http.https://github.com/.extraheader")))
             (is (seq later))
-            ;; The fake runtime inherits this process's env, so a host
-            ;; GIT_CONFIG_VALUE_0 may show up; the credential must not.
-            (is (not-any? #(token-in? (str (get-in % [:env "GIT_CONFIG_VALUE_0"]))) later))))))))
+            (is (not-any? (comp seq :env-file) later))))))))
 
-(deftest ^{:stratum 2} bootstrap-workspace-strips-url-credentials-test
+(deftest ^{:stratum 3} bootstrap-workspace-strips-url-credentials-test
   (testing "a repo URL carrying user:password@ is cloned without it; the
-            password authenticates the clone through its environment"
-    (with-fake-runtime :docker ["GIT_CONFIG_VALUE_0"]
+            password authenticates the clone through the env file"
+    (with-fake-runtime :docker []
       (fn [descriptor calls]
         (with-redefs [oci-cli/resolve-git-token (fn [_url _opts] nil)]
           ((private-fn 'bootstrap-workspace!)
@@ -870,9 +897,10 @@
             (is (not-any? token-in? (mapcat :argv all)))
             (is (some #{"https://github.com/o/r.git"} (:argv clone)))
             (is (= (str "Authorization: Basic " (basic-auth "bob" fake-token))
-                   (get-in clone [:env "GIT_CONFIG_VALUE_0"])))))))))
+                   (get (git-config-of (:env-file clone))
+                        "http.https://github.com/.extraheader")))))))))
 
-(deftest ^{:stratum 2} container-env-leaves-runtime-cli-variables-alone-test
+(deftest ^{:stratum 3} container-env-leaves-runtime-cli-variables-alone-test
   (testing "a container's DOCKER_DEFAULT_PLATFORM reaches the container but
             not the docker CLI's own environment, where it would change the
             platform `docker run` pulls and starts"
