@@ -30,6 +30,7 @@
    [ai.miniforge.cli.app-config :as app-config]
    [ai.miniforge.cli.main.commands.shared :as shared]
    [ai.miniforge.cli.main.display :as display]
+   [ai.miniforge.cli.main.util :as util]
    [ai.miniforge.cli.messages :as messages]
    [ai.miniforge.cli.main.commands.run :as cmd-run]
    [ai.miniforge.cli.worktree :as worktree]
@@ -228,6 +229,31 @@
              (messages/t :workflow-cmd/gc-scratch-failed
                          {:error (get-in result [:error :message] "unknown error")}))
             (shared/exit! exit-code-error)))))))
+
+(defn ^{:stratum 1} workflow-gc-checkpoints-cmd
+  "Delete checkpoint directories under ~/.miniforge/checkpoints unchanged
+   for `--max-age-days` days (default 30). A pinned run, a run whose
+   manifest does not read, and a run whose events are still live are
+   kept. Takes the dispatch map (or bare opts), so the dispatch table
+   calls it directly. Exits 1 on a bad age or a failed delete."
+  [m]
+  (let [max-age-days (:max-age-days (util/get-opts m))]
+    (if (and (some? max-age-days) (neg? max-age-days))
+      (do (display/print-error (messages/t :workflow-cmd/gc-checkpoints-bad-age
+                                           {:days max-age-days}))
+          (shared/exit! exit-code-error))
+      (let [{:keys [deleted kept failures] :as result}
+            (workflow/gc-checkpoints! (cond-> {} max-age-days (assoc :max-age-days max-age-days)))]
+        (doseq [run-id (:unreadable kept)]
+          (display/print-info (messages/t :workflow-cmd/gc-checkpoints-unreadable {:run-id run-id})))
+        (println (messages/t :workflow-cmd/gc-checkpoints-success
+                             {:deleted (count deleted)
+                              :kept (reduce + 0 (map count (vals kept)))
+                              :root (:checkpoint/root result)}))
+        (when (seq failures)
+          (doseq [failure failures]
+            (display/print-error (:anomaly/message failure)))
+          (shared/exit! exit-code-error))))))
 
 ;------------------------------------------------------------------------------ Rich Comment
 (comment
