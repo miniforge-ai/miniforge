@@ -749,7 +749,9 @@
             (is (= (str "Authorization: Basic " (basic-auth "x-access-token" fake-token))
                    (get-in clone [:env "GIT_CONFIG_VALUE_0"])))
             (is (seq later))
-            (is (not-any? #(get-in % [:env "GIT_CONFIG_VALUE_0"]) later))))))))
+            ;; The fake runtime inherits this process's env, so a host
+            ;; GIT_CONFIG_VALUE_0 may show up; the credential must not.
+            (is (not-any? #(token-in? (str (get-in % [:env "GIT_CONFIG_VALUE_0"]))) later))))))))
 
 ;------------------------------------------------------------------------------ Rich Comment
 (comment
