@@ -56,6 +56,23 @@
    `development` is their only runner."
   "development/test")
 
+(def ^{:stratum 0} ^:private external-tests-env
+  "Environment variable that, set to \"true\", makes `development` also
+   run the tests tagged ^:external. Those call a real external backend
+   (the claude CLI) and may send billable requests, so they are opt-in."
+  "MINIFORGE_TEST_EXTERNAL")
+
+(defn ^{:stratum 0} external-test-skip-form
+  "Clojure source for the test JVM, evaluated after `nses` load: removes
+   :test from every var tagged ^:external in them, so
+   clojure.test/run-tests skips it, and prints each one skipped."
+  [nses]
+  (str "(doseq [v (mapcat (comp vals ns-interns) ["
+       (apply str (map (fn [n] (str " '" n)) nses))
+       "]) :when (:external (meta v))] "
+       "(println \"Skipping external-backend test:\" (symbol v)) "
+       "(alter-meta! v dissoc :test))"))
+
 (def ^{:stratum 0} known-failing-project-tests
   "Discovered project test namespaces that fail on main, skipped by name
    until fixed. `integration` prints each skip and its reason on every
@@ -194,16 +211,22 @@
 (defn ^{:stratum 2} development
   "Run every development/test namespace from the repo root on the
    :dev:test:build classpath (:build because build-test loads build.clj,
-   which needs tools.build). Exits non-zero on any failure or error, or
-   when nothing is discovered."
+   which needs tools.build). Tests tagged ^:external are skipped unless
+   `external-tests-env` is \"true\". Exits non-zero on any failure or
+   error, or when nothing is discovered."
   []
   (println "🧪 Running development tests...")
   (let [nses (discovered-development-tests)
         _ (when (empty? nses)
             (println "❌ No development tests discovered under" development-test-root)
             (System/exit 1))
+        include-external? (= "true" (System/getenv external-tests-env))
+        _ (when-not include-external?
+            (println (str "Tests tagged ^:external call a real backend and are skipped; "
+                          "set " external-tests-env "=true to run them.")))
         ns-args (apply str (map (fn [n] (str " '" n)) nses))
         expr (str "(require 'clojure.test" ns-args ") "
+                  (when-not include-external? (external-test-skip-form nses))
                   "(let [r (clojure.test/run-tests" ns-args ")] "
                   "  (shutdown-agents) "
                   "  (System/exit (if (zero? (+ (:fail r 0) (:error r 0))) 0 1)))")

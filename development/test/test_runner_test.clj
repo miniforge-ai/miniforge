@@ -76,6 +76,29 @@
   (testing "each skip carries a reason"
     (is (every? (comp not str/blank?) (vals sut/known-failing-project-tests)))))
 
+(deftest ^{:stratum 0} external-tests-are-skipped-by-default-test
+  (testing "the skip form drops :test from ^:external vars only"
+    (let [test-ns (create-ns 'test-runner-test.external-fixture)
+          external (intern test-ns (with-meta 'calls-backend {:external true :test (fn [])}) nil)
+          local (intern test-ns (with-meta 'stays-local {:test (fn [])}) nil)]
+      (try
+        (binding [*out* (java.io.StringWriter.)]
+          (load-string (sut/external-test-skip-form ["test-runner-test.external-fixture"])))
+        (is (nil? (:test (meta external))))
+        (is (some? (:test (meta local))))
+        (finally
+          (remove-ns 'test-runner-test.external-fixture)))))
+  (testing "every development test that needs the real claude CLI is tagged ^:external"
+    (require 'ai.miniforge.cli-integration-test 'ai.miniforge.dogfood-test)
+    (doseq [v ['ai.miniforge.cli-integration-test/cli-availability-test
+               'ai.miniforge.cli-integration-test/claude-simple-prompt-test
+               'ai.miniforge.cli-integration-test/claude-system-prompt-test
+               'ai.miniforge.cli-integration-test/claude-code-generation-test
+               'ai.miniforge.dogfood-test/real-docstring-addition-test
+               'ai.miniforge.dogfood-test/real-test-generation-test
+               'ai.miniforge.dogfood-test/real-bug-fix-test]]
+      (is (:external (meta (resolve v))) (str v)))))
+
 ;------------------------------------------------------------------------------ Layer 1
 
 (deftest ^{:stratum 1} discovers-every-miniforge-project-test-test
