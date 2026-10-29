@@ -24,9 +24,11 @@
    Claude never runs it."
   (:require
    [cheshire.core :as json]
+   [clojure.java.shell :as shell]
    [clojure.string :as str]
    [clojure.test :refer [deftest testing is]]
-   [ai.miniforge.agent.artifact-session :as session]))
+   [ai.miniforge.agent.artifact-session :as session]
+   [ai.miniforge.agent.protocols.records.specialized :as specialized]))
 
 ;------------------------------------------------------------------------------ Layer 0
 
@@ -66,10 +68,32 @@
       :environment-id  "env-1"
       :dir             "/tmp/session"
       :mcp-config-path "/tmp/session/mcp-config.json"
-      :workdir         "/workspace"})
+      :workdir         "/workspace"
+      :role            :reviewer})
     (->> @scripts
          (some #(second (re-find #"(?s)<< 'SETTINGSEOF'\n(.*)\nSETTINGSEOF" %)))
          json/parse-string)))
+
+(deftest ^{:stratum 0} agent-sessions-hand-the-role-to-the-hook-test
+  (testing "a session opened inside an agent's invoke-fn gets that agent's role"
+    (let [agent (specialized/create-base-agent
+                 {:role          :tester
+                  :system-prompt "test"
+                  :invoke-fn     (fn [context _input]
+                                   (session/with-session context
+                                     #(get-in % [:supervision :hook-eval-cmd])))
+                  :validate-fn   (constantly {:valid? true})
+                  :repair-fn     (fn [output _errors _context] output)})]
+      (is (str/ends-with? (:llm-result ((:invoke-fn agent) {} "task"))
+                          "hook-eval --role 'tester' || exit 2"))))
+  (testing "a session with no :agent/role has no --role, so hook-eval refuses every tool"
+    (is (str/ends-with? (:llm-result (session/with-session {} #(get-in % [:supervision :hook-eval-cmd])))
+                        "hook-eval || exit 2"))))
+
+(deftest ^{:stratum 0} hook-that-cannot-start-blocks-the-call-test
+  (testing "a missing miniforge command exits 2, the code Claude reads as block, not 127"
+    (let [cmd (session/hook-eval-command "/nonexistent/miniforge-cmd" :implementer)]
+      (is (= 2 (:exit (shell/sh "sh" "-c" cmd :in "{}")))))))
 
 ;------------------------------------------------------------------------------ Layer 1
 
@@ -87,10 +111,10 @@
   (testing "write-claude-settings! (host sessions)"
     (let [s (session/create-session!)]
       (try
-        (let [settings (json/parse-string (slurp (session/write-claude-settings! (:dir s))))]
+        (let [settings (json/parse-string (slurp (session/write-claude-settings! (:dir s) :implementer)))]
           (is (= [] (settings-problems settings)))
           (is (str/ends-with? (str (get-in settings ["hooks" "PreToolUse" 0 "hooks" 0 "command"]))
-                              "hook-eval")))
+                              "hook-eval --role 'implementer' || exit 2")))
         (finally
           (session/cleanup-session! s))))))
 
@@ -98,5 +122,5 @@
   (testing "write-capsule-mcp-config! (capsule sessions)"
     (let [settings (capsule-settings)]
       (is (= [] (settings-problems settings)))
-      (is (= "bb miniforge hook-eval"
+      (is (= "bb miniforge hook-eval --role 'reviewer' || exit 2"
              (get-in settings ["hooks" "PreToolUse" 0 "hooks" 0 "command"]))))))

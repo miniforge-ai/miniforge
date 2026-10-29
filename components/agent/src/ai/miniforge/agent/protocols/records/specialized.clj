@@ -74,7 +74,11 @@
 
    Optional:
    - :config - Agent configuration map (model, temperature, etc.)
-   - :logger - Logger instance (defaults to silent logger)"
+   - :logger - Logger instance (defaults to silent logger)
+
+   The agent calls `invoke-fn` and `repair-fn` with `:agent/role` set to
+   `role` in the context, whichever path calls them. Artifact sessions
+   read it to pick the tool policy the agent's hook enforces."
   [{:keys [role system-prompt invoke-fn validate-fn repair-fn config logger]
     :or {config {}
          logger (log/create-logger {:min-level :info :output (fn [_])})}}]
@@ -83,4 +87,9 @@
          (fn? invoke-fn)
          (fn? validate-fn)
          (fn? repair-fn)]}
-  (->FunctionalAgent role config system-prompt invoke-fn validate-fn repair-fn logger))
+  (->FunctionalAgent role config system-prompt
+                     (fn [context input] (invoke-fn (assoc context :agent/role role) input))
+                     validate-fn
+                     (fn [output errors context]
+                       (repair-fn output errors (assoc context :agent/role role)))
+                     logger))
