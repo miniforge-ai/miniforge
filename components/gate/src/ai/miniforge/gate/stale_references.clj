@@ -173,13 +173,12 @@
   (into (set (re-seq keyword-pattern (str content)))
         (map second (re-seq def-name-pattern (str content)))))
 
-(defn ^{:stratum 1} before-content
-  "The pre-change content of `path`, or nil when the file is new or git
-   cannot read it. Public: the no-secrets gate reads it too."
+(defn- ^{:stratum 1} before-content
+  "The pre-change content of `path`, or nil when the file is new."
   [worktree path]
   (git worktree "show" (str "HEAD:" path)))
 
-(defn ^{:stratum 1} worktree-changed-paths
+(defn- ^{:stratum 1} worktree-changed-paths
   "Every path the worktree has changed against HEAD — tracked
    modifications AND untracked files — regardless of which implement
    attempt produced them. A retry that changes nothing must still be
@@ -187,13 +186,13 @@
    the attempt's own artifact let an empty-diff retry pass vacuously
    while the stale rename persisted (trap-bench REPAIR DEMONSTRATION,
    reps rq1-rq3: every run's final iteration was decision :allow on
-   zero files). Public: the no-secrets gate scans the same set."
+   zero files). NUL-delimited and untrimmed, so a name git would quote
+   (non-ASCII, a quote, a leading space) is listed as it is on disk."
   [worktree]
-  (let [tracked (str (git worktree "diff" "--name-only" "HEAD" "--"))
-        untracked (str (git worktree "ls-files" "--others" "--exclude-standard"))]
-    (->> (concat (str/split-lines tracked) (str/split-lines untracked))
-         (map str/trim)
-         (remove str/blank?)
+  (let [tracked (str (git worktree "diff" "-z" "--name-only" "HEAD" "--"))
+        untracked (str (git worktree "ls-files" "-z" "--others" "--exclude-standard"))]
+    (->> (concat (str/split tracked #"\u0000") (str/split untracked #"\u0000"))
+         (remove empty?)
          distinct
          vec)))
 
