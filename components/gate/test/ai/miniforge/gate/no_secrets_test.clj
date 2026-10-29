@@ -77,16 +77,19 @@
       (finally (fs/delete-tree dir)))))
 
 (defn ^{:stratum 0} capsule-ctx
-  "A governed-run context whose worktree path exists only inside the
-   \"capsule\": the execute-fn runs each command in DIR, so only the
-   execution environment can read it, as in a real capsule."
+  "A governed-run context: the host path does not exist, and the fake
+   execute-fn runs a command in DIR only when given the capsule's own
+   workdir (/workspace), as a real capsule checkout would."
   [dir]
-  {:execution/worktree-path "/workspace/not-on-this-host"
+  {:execution/worktree-path "/host/path/not-in-the-capsule"
+   :execution/capsule-workdir "/workspace"
    :execution/executor ::capsule
    :execution/environment-id "env-1"
-   :execution/execute-fn (fn [_executor _env-id cmd _opts]
-                           (let [r (shell/sh "sh" "-c" cmd :dir dir)]
-                             {:ok? true :data {:exit-code (:exit r) :stdout (:out r)}}))})
+   :execution/execute-fn (fn [_executor _env-id cmd opts]
+                           (if (= "/workspace" (:workdir opts))
+                             (let [r (shell/sh "sh" "-c" cmd :dir dir)]
+                               {:ok? true :data {:exit-code (:exit r) :stdout (:out r)}})
+                             {:ok? true :data {:exit-code 128 :stdout ""}}))})
 
 (def ^{:stratum 0} pem-body
   "Base64-looking key material; not a key."
@@ -96,6 +99,11 @@
   "A PEM private-key block around BODY."
   [body]
   (str "-----BEGIN RSA PRIVATE KEY-----\n" body "\n-----END RSA PRIVATE KEY-----\n"))
+
+(defn ^{:stratum 0} head-of
+  "HEAD's commit id in DIR."
+  [dir]
+  (str/trim (:out (shell/sh "git" "-C" dir "rev-parse" "HEAD"))))
 
 ;------------------------------------------------------------------------------ Layer 1
 
@@ -216,7 +224,7 @@
           (is (str/includes? (-> result :errors first :message) (subs leaky 0 12))))))))
 
 (deftest ^{:stratum 1} unreadable-history-is-uninspectable-test
-  (testing "a git show that fails while scanning history fails the gate"
+  (testing "a blob read that fails while scanning history fails the gate"
     (let [dir  (temp-git-repo {"a.py" "x = 1\n"})
           base (str/trim (:out (sh! dir "rev-parse" "HEAD")))
           ctx  (capsule-ctx dir)
@@ -227,10 +235,45 @@
              (-> (check {:code/files [] :code/base-refs [base]}
                         (assoc ctx :execution/execute-fn
                                (fn [executor env-id cmd opts]
-                                 (if (str/includes? cmd "'show'")
+                                 (if (str/includes? cmd "'cat-file'")
                                    {:ok? true :data {:exit-code 128 :stdout ""}}
                                    (real executor env-id cmd opts)))))
                  :errors first :type))))))
+
+(deftest ^{:stratum 1} a-submodule-pointer-update-passes-test
+  (testing "a gitlink has no content here: it is skipped, not unreadable"
+    (let [dir  (temp-git-repo {"README.md" "x\n"})
+          base (head-of dir)]
+      (sh! dir "update-index" "--add" "--cacheinfo"
+           (str "160000," (apply str (repeat 40 "a")) ",standards/miniforge"))
+      (sh! dir "commit" "-qm" "pin submodule")
+      (is (:passed? (check {:code/files [] :code/base-refs [base]} {:execution/worktree-path dir}))))))
+
+(deftest ^{:stratum 1} findings-beat-unreadability-test
+  (testing "a secret found anywhere is reported even when another part cannot be read"
+    (let [dir  (temp-git-repo {"README.md" "x\n"})
+          ctx  (capsule-ctx dir)
+          real (:execution/execute-fn ctx)]
+      (spit (str dir "/deploy.env") "DB_PASSWORD=opaqueVALUE123\n")
+      (let [result (check {:code/files []}
+                          (assoc ctx :execution/execute-fn
+                                 (fn [executor env-id cmd opts]
+                                   (if (str/includes? cmd "'rev-list'")
+                                     {:ok? true :data {:exit-code 128 :stdout ""}}
+                                     (real executor env-id cmd opts)))))]
+        (is (= :secrets-detected (-> result :errors first :type)))
+        (is (= [{:file "deploy.env" :line 1}] (-> result :errors first :locations)))))))
+
+(deftest ^{:stratum 1} the-task-base-precedes-the-environment-base-test
+  (testing "with no artifact (a persistence-boundary check), the carried task base is used"
+    (let [dir       (temp-git-repo {"src/app.py" "import os\n"})
+          task-base (head-of dir)]
+      (spit (str dir "/src/app.py") (str "import os\npassword = \"" opaque "\"\n"))
+      (sh! dir "commit" "-qam" "restored task work")
+      (let [ctx {:execution/worktree-path dir
+                 :execution/task-base-refs [task-base]
+                 :execution/environment-metadata {:base-sha (head-of dir)}}]
+        (is (= :secrets-detected (-> (check {} ctx) :errors first :type)))))))
 
 ;------------------------------------------------------------------------------ Layer 2
 
@@ -326,3 +369,17 @@
     (let [dir (temp-git-repo {"key.pem" (pem pem-body)})]
       (spit (str dir "/key.pem") (str (pem pem-body) "# rotated yearly\n"))
       (is (= #{} (locations {:code/files []} dir))))))
+
+(deftest ^{:stratum 2} content-and-line-numbers-come-from-the-same-blob-test
+  (testing "a clean filter that drops a line does not shift the credential out of view"
+    (let [dir (temp-git-repo {".gitattributes" "*.cfg filter=strip\n"})]
+      (sh! dir "config" "filter.strip.clean" "sed 1d")
+      (spit (str dir "/app.cfg") "GENERATED\nx\n")
+      (sh! dir "add" "-A") (sh! dir "commit" "-qm" "cfg")
+      (spit (str dir "/app.cfg") (str "GENERATED\nx\napi_key = '" gh-token "'\n"))
+      (is (= #{{:file "app.cfg" :line 2}} (locations {:code/files []} dir)))))
+  (testing "configured diff.interHunkContext does not renumber added lines"
+    (let [dir (temp-git-repo {"list.txt" "a\nb\nc\nd\n"})]
+      (sh! dir "config" "diff.interHunkContext" "5")
+      (spit (str dir "/list.txt") (str "a\nnew\nb\nc\napi_key = '" gh-token "'\nd\n"))
+      (is (= #{{:file "list.txt" :line 5}} (locations {:code/files []} dir))))))
