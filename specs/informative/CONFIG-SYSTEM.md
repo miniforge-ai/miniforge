@@ -26,7 +26,7 @@ frictionless.
 
 - User config at `~/.miniforge/config.edn`
 - Auto-created on first use
-- Configuration precedence: user config > env vars > defaults
+- Configuration precedence: env vars > user config > defaults
 - Implemented in `components/config/src/ai/miniforge/config/user.clj`
 
 ### Phase 3: Multiple Backend Support ✅
@@ -135,13 +135,6 @@ Current Configuration:
 LLM Settings:
   backend: codex (OpenAI)
   model: gpt-4-turbo
-  max-tokens: 4000
-  timeout: 5 minutes
-
-Workflow Settings:
-  max-iterations: 50
-  max-tokens: 150000
-  failure-strategy: retry
 
 Artifacts:
   dir: /Users/you/.miniforge/artifacts
@@ -161,12 +154,12 @@ Override with environment variables:
 $ miniforge config get llm.backend
 :codex
 
-$ miniforge config set llm.max-tokens 8000
-✅ Set llm.max-tokens to 8000
+$ miniforge config set llm.backend claude
+✅ Set llm.backend to :claude
    Saved to: /Users/you/.miniforge/config.edn
 
-$ miniforge config get llm.max-tokens
-8000
+$ miniforge config get llm.backend
+:claude
 ```
 
 ## Configuration Precedence
@@ -176,9 +169,29 @@ Configuration is merged from three sources (in order of precedence):
 1. **Environment variables** (highest priority)
    - `MINIFORGE_LLM_BACKEND`
    - `MINIFORGE_LLM_MODEL`
-   - `MINIFORGE_LLM_TIMEOUT`
-   - `MINIFORGE_MAX_ITERATIONS`
-   - etc.
+   - `MINIFORGE_AGENT_THINKING_MODEL`
+   - `MINIFORGE_AGENT_EXECUTION_MODEL`
+
+   A role's model is its tier variable or key (`THINKING` for the planner
+   and architect, `EXECUTION` for every other role), else `llm.model`,
+   else miniforge's default for the backend, else the backend's own. The
+   shipped defaults set no model. A setting naming a catalog model the
+   backend does not serve is skipped with a warning.
+   `docs/configuration.md` gives the full rules.
+
+   These four are the only LLM variables mapped into the user config.
+   Backends also read their own variables directly, outside the config:
+   `ANTHROPIC_API_KEY` (anthropic-api), `OPENAI_API_KEY` (openai-api),
+   `OPENROUTER_API_KEY` (openrouter), `GEMINI_API_KEY` (gemini-api), and
+   `MINIFORGE_OPENAI_COMPAT_BASE_URL` and `MINIFORGE_OPENAI_COMPAT_API_KEY`
+   (openai-compat endpoint and key).
+   `MINIFORGE_LLM_TIMEOUT`, `MINIFORGE_LLM_LINE_TIMEOUT`,
+   `MINIFORGE_LLM_MAX_TOKENS`, `MINIFORGE_MAX_ITERATIONS`,
+   `MINIFORGE_MAX_TOKENS`, `MINIFORGE_FAILURE_STRATEGY`,
+   `MINIFORGE_ARTIFACTS_DIR`, `MINIFORGE_MODEL_SELECTION_*`,
+   `MINIFORGE_SELF_HEALING_*` and `MINIFORGE_BACKEND_*` were once mapped,
+   but nothing read them and they are no longer accepted.
+   `docs/configuration.md` is the current reference.
 
 2. **User config file** (`~/.miniforge/config.edn`)
    - Created automatically on first use

@@ -135,12 +135,8 @@ Configuration keys:
   :require-local false}}            ; Require local models only
 ```
 
-Environment variables:
-
-- `MINIFORGE_MODEL_SELECTION_ENABLED`
-- `MINIFORGE_MODEL_SELECTION_STRATEGY`
-- `MINIFORGE_MODEL_SELECTION_COST_LIMIT`
-- `MINIFORGE_MODEL_SELECTION_REQUIRE_LOCAL`
+No run reads this block, and the `MINIFORGE_MODEL_SELECTION_*` environment variables that once mapped onto it
+are no longer accepted. Selection takes its options as arguments to `llm/select-model` and `agent/create-agent`.
 
 ## Tests Implemented
 
@@ -258,29 +254,6 @@ Override: :spec/model-override :opus-4.6
 ```
 
 ## Usage Examples
-
-### Automatic Selection in Workflows
-
-```bash
-# Create agent - automatically selects based on role and phase
-miniforge workflow run spec.edn
-```
-
-### Cost-Optimized Mode
-
-```bash
-export MINIFORGE_MODEL_SELECTION_STRATEGY=cost-optimized
-miniforge workflow run spec.edn
-# Uses free local models or cheapest cloud models
-```
-
-### Privacy Mode
-
-```bash
-export MINIFORGE_MODEL_SELECTION_REQUIRE_LOCAL=true
-miniforge workflow run spec.edn
-# Only uses local models (Llama, Qwen, DeepSeek, etc.)
-```
 
 ### Programmatic API
 
