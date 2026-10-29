@@ -478,6 +478,7 @@
     :restrict true
     :spec {:workflow-id {:alias :w}
            :resume      {:alias :r}
+           :pin         {:coerce :boolean}
            :quiet       {:coerce :boolean :alias :q}
            :run-id      {}
            :correlation-id {}

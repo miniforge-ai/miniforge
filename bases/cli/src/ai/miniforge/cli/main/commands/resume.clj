@@ -203,6 +203,19 @@
         (flush))
       (display/print-error (messages/t :resume/failed {:error message})))))
 
+;; Thin delegations kept for compatibility with existing callers/tests
+(defn- ^{:stratum 0} pin-run!
+  "`--pin`: mark the run's checkpoint pinned, so the checkpoint GC keeps
+   it. A run with no checkpoint to pin is reported, and the resume goes
+   on."
+  [workflow-id quiet]
+  (let [pinned (workflow/pin-checkpoint! (str workflow-id))]
+    (if (anomaly/anomaly? pinned)
+      (display/print-info (messages/t :resume/pin-failed {:run-id (str workflow-id)
+                                                          :error (:anomaly/message pinned)}))
+      (when-not quiet
+        (display/print-info (messages/t :resume/pinned {:run-id (str workflow-id)}))))))
+
 ;------------------------------------------------------------------------------ Layer 1
 
 (defn- ^{:stratum 1} throw-resume-anomaly!
@@ -215,7 +228,6 @@
                                                     :anomaly/subtype
                                                     :anomaly/at])))))
 
-;; Thin delegations kept for compatibility with existing callers/tests
 (defn ^{:stratum 1} read-event-file
   "Read events for a workflow. Thin wrapper — the actual replay lives
    in `event-stream/reader`. Prefer calling the component directly in
@@ -318,6 +330,7 @@
         _ (doseq [failure (:checkpoint-read-failures recorded)]
             (display/print-info (messages/t :resume/checkpoint-unreadable
                                             {:error (:anomaly/message failure)})))
+        _ (when (:pin opts) (pin-run! workflow-id quiet))
         ;; A phase whose checkpointed result did not read is rewound to, as
         ;; `--from-phase` would: the snapshot is parked after it, and
         ;; restoring it would run later phases without that output.
@@ -419,6 +432,9 @@
                                      (get reconstructed :input {})
                                      {:llm-backend llm-client
                                       :acting (:acting reconstructed)
+                                      ;; `--pin` also pins the checkpoints this
+                                      ;; attempt writes, under a new run id too.
+                                      :checkpoint/pin? (boolean (:pin opts))
                                       ;; The id announced and registered
                                       ;; above; without it a snapshot-less
                                       ;; resume minted a second id.
