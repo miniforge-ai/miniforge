@@ -101,7 +101,11 @@
                            dag-exec/execute!
                            (get opts :executor)
                            (get opts :environment-id)
-                           (get opts :worktree-path (defaults/default-workdir))))
+                           ;; The capsule's own checkout: the host worktree path
+                           ;; a runner-acquired capsule records does not exist in it.
+                           (or (get opts :capsule-workdir)
+                               (get opts :worktree-path)
+                               (defaults/default-workdir))))
         base-context (if (and resume-machine-snapshot resume-phase-results)
                        (ctx/restore-context workflow input
                                             resume-machine-snapshot

@@ -427,7 +427,8 @@
         (load-files-from-capsule execute-fn
                                  (get ctx :execution/executor)
                                  (get ctx :execution/environment-id)
-                                 worktree-path files-in-scope))
+                                 (or (get ctx :execution/capsule-workdir) worktree-path)
+                                 files-in-scope))
       (phase/load-files-in-scope worktree-path files-in-scope)))
 
 (defn- ^{:stratum 1} suspicious-short-termination?
@@ -883,7 +884,10 @@
           (agent/curate-implement-output
            {:implementer-result impl-result
             :env-id (get ctx :execution/environment-id)
-            :worktree-path (resolve-worktree-path ctx)
+            ;; Capsule collection reads the capsule's checkout, not the host path.
+            :worktree-path (or (when (get ctx :execution/execute-fn)
+                                 (get ctx :execution/capsule-workdir))
+                               (resolve-worktree-path ctx))
             :executor (get ctx :execution/executor)
             :execute-fn (get ctx :execution/execute-fn)
             :pre-session-snapshot (get ctx :execution/pre-session-snapshot)

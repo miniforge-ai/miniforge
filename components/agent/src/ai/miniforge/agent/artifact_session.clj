@@ -1311,7 +1311,7 @@
     (if (governed? context)
       (let [executor (:execution/executor context)
             env-id   (:execution/environment-id context)
-            workdir  (or (:execution/worktree-path context) "/workspace")
+            workdir  (or (:execution/capsule-workdir context) (:execution/worktree-path context) "/workspace")
             exec!    (or (:execution/execute-fn context) (missing-execute-fn!))
             session  (-> (create-capsule-session! executor env-id workdir exec!)
                          write-capsule-mcp-config!)]
@@ -1501,7 +1501,7 @@
     (if (governed? context)
       (let [executor (:execution/executor context)
             env-id   (:execution/environment-id context)
-            workdir  (or (:execution/worktree-path context) "/workspace")
+            workdir  (or (:execution/capsule-workdir context) (:execution/worktree-path context) "/workspace")
             exec!    (or (:execution/execute-fn context) (missing-execute-fn!))
             session  (-> (create-capsule-session! executor env-id workdir exec!)
                        write-capsule-mcp-config!)]
