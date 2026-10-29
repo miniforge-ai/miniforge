@@ -4,6 +4,7 @@
 (ns ai.miniforge.workflow.boundary.checkpoint-file
   "Own one same-directory temporary file through atomic publication."
   (:require [ai.miniforge.resource-cleanup.interface :as cleanup]
+            [ai.miniforge.workflow.boundary.checkpoint-directory :as directory]
             [ai.miniforge.workflow.boundary.checkpoint-permissions :as permissions]
             [babashka.fs :as fs])
   (:import [java.nio.file Files StandardCopyOption]))
@@ -24,8 +25,7 @@
 ;------------------------------------------------------------------------------ Layer 1
 
 (defn- ^{:stratum 1} create-temporary! [target]
-  (let [directory (fs/parent (fs/absolutize target))]
-    (fs/create-dirs directory)
+  (let [directory (directory/prepare! (fs/parent (fs/absolutize target)))]
     (fs/create-temp-file
      (cond-> {:dir directory :prefix temporary-prefix :suffix temporary-suffix}
        (permissions/posix? directory)
@@ -39,8 +39,9 @@
 ;------------------------------------------------------------------------------ Layer 2
 
 (defn ^{:stratum 2} write! [target data]
-  (let [temporary (create-temporary! target)]
-    (cleanup/finish! (partial publish! temporary target data)
+  (let [temporary (create-temporary! target)
+        published (fs/path (fs/parent temporary) (fs/file-name target))]
+    (cleanup/finish! (partial publish! temporary published data)
                      (partial remove-temporary! temporary))
     target))
 
