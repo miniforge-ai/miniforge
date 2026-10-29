@@ -49,6 +49,12 @@ All configuration values can be overridden with environment variables using Aero
 - `MINIFORGE_LLM_TIMEOUT` - Total timeout for LLM calls in milliseconds (default: `300000` = 5 minutes)
 - `MINIFORGE_LLM_LINE_TIMEOUT` - Per-line timeout for streaming in milliseconds (default: `60000` = 1 minute)
 - `MINIFORGE_LLM_MAX_TOKENS` - Maximum tokens per LLM request (default: `4000`)
+- `MINIFORGE_NETWORK_MONITOR` - Set to `off` (or `false`, `0`, `no`) to turn
+  off the network-drop monitor. During a streaming CLI call (`:claude`,
+  `:codex`) it probes the provider every 10 s and stops the call after 3
+  failed probes in a row. The probe follows `HTTPS_PROXY` / `HTTP_PROXY` /
+  `NO_PROXY` the way the agent CLI does. Read directly from the environment,
+  not through Aero.
 
 ### Workflow Configuration
 

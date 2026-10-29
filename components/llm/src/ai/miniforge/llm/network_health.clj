@@ -32,8 +32,15 @@
    that URL here. Keeping endpoint resolution out of this ns avoids a
    require cycle with `llm-client` (which carries the backend config
    and itself depends on the network monitor that schedules this
-   probe)."
-  (:require [org.httpkit.client :as http]))
+   probe).
+
+   The agent CLI reaches its provider through the proxy named in the
+   standard proxy environment variables, so the probe goes through the
+   same proxy (`proxy-request-opts`). A probe that went direct would
+   fail on every attempt behind a proxy, and the monitor would kill a
+   healthy agent."
+  (:require [clojure.string :as str]
+            [org.httpkit.client :as http]))
 
 ;------------------------------------------------------------------------------ Layer 0
 
@@ -44,6 +51,52 @@
    provider responds in <500ms; a 3s ceiling tolerates a slow CDN edge
    without making the probe itself a stagnation source."
   3000)
+
+(def ^{:stratum 0} ^:private https-proxy-env-vars
+  "Where the proxy for an https URL is looked up, first non-blank wins:
+   lowercase before uppercase, then the plain-http proxy. This is the
+   order of Node's EnvHttpProxyAgent; the Claude CLI runs on Node."
+  ["https_proxy" "HTTPS_PROXY" "http_proxy" "HTTP_PROXY"])
+
+(def ^{:stratum 0} ^:private http-proxy-env-vars
+  "Where the proxy for an http URL is looked up, first non-blank wins."
+  ["http_proxy" "HTTP_PROXY"])
+
+(def ^{:stratum 0} ^:private no-proxy-env-vars
+  "Where the proxy exemption list is looked up, first non-blank wins."
+  ["no_proxy" "NO_PROXY"])
+
+(def ^{:stratum 0} ^:private default-ports
+  "Port implied by a URL scheme when the URL names none."
+  {"http" 80
+   "https" 443})
+
+;; Proxy selection
+(defn- ^{:stratum 0} env-value
+  "First non-blank value in `env` among the variable `names`."
+  [env names]
+  (some (fn [k] (some-> (get env k) str/trim not-empty)) names))
+
+(defn- ^{:stratum 0} no-proxy-token-matches?
+  "Node's NO_PROXY rule for one `host` or `host:port` token: a token
+   that starts with `.` or `*` matches any host ending in it (the `*`
+   dropped, so a bare `*` matches every host); any other token matches
+   only that exact host. A port on the token must equal `port`."
+  [host port token]
+  (let [[_ host-part port-part] (or (re-matches #"(.+):(\d+)" token)
+                                    [token token nil])
+        token-host (str/lower-case host-part)]
+    (and (or (nil? port-part) (= (parse-long port-part) port))
+         (if (re-find #"^[.*]" token-host)
+           (str/ends-with? host (str/replace token-host #"^\*" ""))
+           (= host token-host)))))
+
+(defn- ^{:stratum 0} with-proxy-scheme
+  "A proxy given as `host:port` is an http proxy, as curl and Node read it."
+  [proxy]
+  (if (str/includes? proxy "://")
+    proxy
+    (str "http://" proxy)))
 
 ;; Probe primitive
 (defn- ^{:stratum 0} response-proves-connectivity?
@@ -58,7 +111,39 @@
 
 ;------------------------------------------------------------------------------ Layer 1
 
-(defn ^{:stratum 1} network-healthy?
+(defn ^{:stratum 1} proxy-request-opts
+  "http-kit request options that send a probe of `probe-url` through the
+   proxy the agent CLI would use, read from `env` (a map of environment
+   variable names to values). Returns {} when no proxy applies: none is
+   set for the URL's scheme, or NO_PROXY exempts its host.
+
+   An https URL goes through a CONNECT tunnel (`:tunnel? true`); the
+   proxy's answer to the CONNECT is the probe's response. http-kit writes
+   the CONNECT target from the URL and leaves out a default port, which
+   proxies reject, so the returned `:url` names the port. An http URL is
+   sent to the proxy as an absolute URI."
+  [probe-url env]
+  (let [uri (java.net.URI. probe-url)
+        scheme (some-> (.getScheme uri) str/lower-case)
+        host (some-> (.getHost uri) str/lower-case)
+        port (if (neg? (.getPort uri)) (get default-ports scheme) (.getPort uri))
+        proxy (env-value env (if (= "https" scheme)
+                               https-proxy-env-vars
+                               http-proxy-env-vars))
+        no-proxy-tokens (some-> (env-value env no-proxy-env-vars)
+                                (str/split #"[,\s]+"))
+        exempt? (and host (some #(no-proxy-token-matches? host port %)
+                                no-proxy-tokens))
+        query (some->> (.getRawQuery uri) (str "?"))]
+    (if (or (nil? proxy) (nil? host) (nil? port) exempt?)
+      {}
+      {:url (str scheme "://" host ":" port (.getRawPath uri) query)
+       :proxy-url (with-proxy-scheme proxy)
+       :tunnel? (= "https" scheme)})))
+
+;------------------------------------------------------------------------------ Layer 2
+
+(defn ^{:stratum 2} network-healthy?
   "Probe `probe-url` for a live HTTP response and return true/false.
 
    Returns true when the probe receives an HTTP response within
@@ -78,21 +163,25 @@
    - `:http-client` — override for tests; expects an http-kit-shaped
      function `(fn [request-map] (promise/deref-able))`. Defaults to
      `org.httpkit.client/request`.
+   - `:env`         — environment variables the proxy is read from
+     (see `proxy-request-opts`); defaults to `(System/getenv)`.
 
    The function intentionally has no side effects beyond the HTTP
    request — no logging, no event emission, no telemetry. PR-B layers
    those on top so the primitive stays cheap to call."
   ([probe-url]
    (network-healthy? probe-url {}))
-  ([probe-url {:keys [timeout-ms http-client]
+  ([probe-url {:keys [timeout-ms http-client env]
                :or   {timeout-ms  default-probe-timeout-ms
-                      http-client http/request}}]
+                      http-client http/request
+                      env         (System/getenv)}}]
    (try
-     (let [response @(http-client
-                       {:url     probe-url
-                        :method  :head
-                        :timeout timeout-ms
-                        :as      :text})]
+     (let [request (merge {:url     probe-url
+                           :method  :head
+                           :timeout timeout-ms
+                           :as      :text}
+                          (proxy-request-opts probe-url env))
+           response @(http-client request)]
        (response-proves-connectivity? response))
      (catch Exception _
        ;; http-kit can also surface connection failures as a thrown

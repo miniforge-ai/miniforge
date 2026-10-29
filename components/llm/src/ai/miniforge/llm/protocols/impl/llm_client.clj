@@ -379,6 +379,18 @@
   [k]
   (System/getenv k))
 
+(def ^{:stratum 0} ^:private network-monitor-env-var
+  "Environment variable that switches the network-drop monitor off for
+   streaming CLI calls, for a network where the provider's probe
+   endpoint is unreachable although the agent CLI works (for example a
+   gateway set through the CLI's own base-URL setting)."
+  "MINIFORGE_NETWORK_MONITOR")
+
+(def ^{:stratum 0} ^:private network-monitor-off-values
+  "Values of `network-monitor-env-var` (trimmed, any case) that switch
+   the monitor off. Unset or any other value leaves it on."
+  #{"off" "false" "0" "no"})
+
 (defn ^{:stratum 0} rate-limited?
   "Detect Claude CLI rate limit messages in content.
    Claude CLI returns exit 0 but emits a rate limit message as content."
@@ -720,6 +732,15 @@
    envelope type outside the known taxonomy)."
   [timeout-info]
   (get timeout-type->terminated-by (:type timeout-info)))
+
+(defn- ^{:stratum 1} network-monitor-enabled?
+  "False when `network-monitor-env-var` holds one of
+   `network-monitor-off-values`."
+  []
+  (not (contains? network-monitor-off-values
+                  (some-> (getenv-value network-monitor-env-var)
+                          str/trim
+                          str/lower-case))))
 
 (def ^{:stratum 1} ^:private client-defaults
   (delay (load-client-defaults)))
@@ -2261,8 +2282,10 @@
                 {:data (assoc (prompt-size-telemetry (:system request) prompt)
                               :backend backend
                               :model model)}))
-    (let [base-opts {:progress-monitor progress-monitor
-                     :workdir (:workdir request)}
+    ;; :backend-key starts the network-drop monitor in stream-exec-fn.
+    (let [base-opts (cond-> {:progress-monitor progress-monitor
+                             :workdir (:workdir request)}
+                      (network-monitor-enabled?) (assoc :backend-key backend))
           stream-opts (merge base-opts
                              (exec-opts-for-prompt-via prompt-via prompt))
           result (stream-fn
