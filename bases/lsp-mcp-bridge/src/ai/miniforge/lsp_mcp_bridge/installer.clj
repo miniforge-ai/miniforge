@@ -102,10 +102,13 @@
    just part of the path). Writes beside the archive first and moves
    into place only after the whole stream decompressed, so a corrupt
    or truncated archive leaves nothing at `dest-path`. Throws on a
-   corrupt stream."
+   corrupt stream. The raw file stream is its own with-open binding:
+   the GZIPInputStream constructor reads the header and throws on a bad
+   one, and the file must still be closed (the bridge is long-running)."
   [archive-path dest-path]
   (let [staged (str archive-path ".out")]
-    (with-open [in  (GZIPInputStream. (io/input-stream (str archive-path)))
+    (with-open [raw (io/input-stream (str archive-path))
+                in  (GZIPInputStream. raw)
                 out (io/output-stream staged)]
       (io/copy in out))
     (fs/move staged dest-path {:replace-existing true})))
@@ -147,14 +150,23 @@
           (recur (.read in buf)))))
     (apply str (map #(format "%02x" %) (.digest md)))))
 
-(defn ^{:stratum 0} discard-install!
-  "Remove the temp dir and any partial binary extraction left at the
-   final path, so a later resolve-binary does not pick it up. Called
-   only after extraction ran; ensure-installed installs only when
-   resolve-binary found nothing at that path."
-  [{:keys [temp-dir dest-dir binary]}]
-  (fs/delete-tree temp-dir)
-  (fs/delete-if-exists (str dest-dir "/" binary)))
+(defn ^{:stratum 0} fail-and-discard
+  "Fail the pipeline with `anomaly` after removing the temp dir and
+   whatever the install created at the final binary path, recursively
+   (a symlink there is removed, not followed). A final path that existed
+   before the download is left alone. A cleanup error is recorded on the
+   anomaly as `:lsp-installer/cleanup-error` instead of replacing it.
+   Plain try: this base declares no slingshot dep (rule 211 exemption 1)."
+  [{:keys [temp-dir dest-dir binary final-preexisted?] :as state} anomaly]
+  (let [cleanup-error (try
+                        (when-not final-preexisted?
+                          (fs/delete-tree (str dest-dir "/" binary)))
+                        (some-> temp-dir fs/delete-tree)
+                        nil
+                        (catch Exception e e))]
+    (assoc state :failure
+           (cond-> anomaly
+             cleanup-error (assoc :lsp-installer/cleanup-error (ex-message cleanup-error))))))
 
 ;; Installation orchestration
 (defn ^{:stratum 0} find-server-entry
@@ -169,11 +181,13 @@
 
 (defn ^{:stratum 1} resolve-binary
   "Find a binary, checking PATH first then ~/.miniforge/bin/.
-   Returns the full path to the binary or nil."
+   Returns the full path to the binary or nil. The local path counts
+   only as a regular executable file: a directory or partial file left
+   by a failed install must trigger a reinstall, not be launched."
   [binary]
   (or (which binary)
       (let [local-path (str (bin-dir) "/" binary)]
-        (when (fs/exists? local-path)
+        (when (and (fs/regular-file? local-path) (fs/executable? local-path))
           local-path))))
 
 (defn ^{:stratum 1} extract-archive
@@ -217,7 +231,9 @@
               (assoc state :failure download-anomaly))
             (assoc state
                    :url url :temp-dir temp-dir :archive-path archive-path
-                   :dest-dir dest-dir :binary binary))
+                   :dest-dir dest-dir :binary binary
+                   :final-preexisted? (fs/exists? (str dest-dir "/" binary)
+                                                  {:nofollow-links true})))
           (catch Exception e
             (fs/delete-tree temp-dir)
             (fail state (str "Download failed: " (.getMessage e))))))))
@@ -241,12 +257,11 @@
           state
 
           :else
-          (do (fs/delete-tree (:temp-dir state))
-              (assoc state :failure
-                     (response/make-anomaly :anomalies/fault
-                                            (str "Checksum mismatch for " (:file platform-asset))
-                                            {:lsp-installer/expected-sha256 expected
-                                             :lsp-installer/actual-sha256   actual})))))))
+          (fail-and-discard state
+                            (response/make-anomaly :anomalies/fault
+                                                   (str "Checksum mismatch for " (:file platform-asset))
+                                                   {:lsp-installer/expected-sha256 expected
+                                                    :lsp-installer/actual-sha256   actual}))))))
 
 (defn ^{:stratum 1} step-place-binary
   "Move a nested binary into the bin dir, check it is there, and make it
@@ -265,14 +280,15 @@
                              (sh-anomaly "chmod" (bp/sh ["chmod" "+x" final-binary]))
                              (response/make-anomaly
                               :anomalies/fault
-                              (str "Binary not found after extraction: " final-binary)))]
-            (do (discard-install! state)
-                (assoc state :failure anomaly))
+                              (str "Binary not found after extraction (no regular file at "
+                                   final-binary ")")))]
+            (fail-and-discard state anomaly)
             (do (fs/delete-tree temp-dir)
                 (assoc state :installed final-binary)))
           (catch Exception e
-            (fs/delete-tree temp-dir)
-            (fail state (str "Binary placement failed: " (.getMessage e))))))))
+            (fail-and-discard state (response/make-anomaly
+                                     :anomalies/fault
+                                     (str "Binary placement failed: " (.getMessage e)))))))))
 
 (defn ^{:stratum 1} install-pipeline->result
   "Convert pipeline state to result."
@@ -316,12 +332,12 @@
       (let [{:keys [archive-path dest-dir platform-asset binary]} state]
         (try
           (if-let [anomaly (extract-archive archive-path dest-dir (:extract platform-asset) binary)]
-            (do (discard-install! state)
-                (assoc state :failure anomaly))
+            (fail-and-discard state anomaly)
             state)
           (catch Exception e
-            (discard-install! state)
-            (fail state (str "Extraction failed: " (.getMessage e))))))))
+            (fail-and-discard state (response/make-anomaly
+                                     :anomalies/fault
+                                     (str "Extraction failed: " (.getMessage e)))))))))
 
 ;------------------------------------------------------------------------------ Layer 3
 

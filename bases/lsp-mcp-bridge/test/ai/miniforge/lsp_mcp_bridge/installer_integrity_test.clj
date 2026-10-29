@@ -151,3 +151,73 @@
                                    #(fs/copy fixture % {:replace-existing true}))]
           (is (not (response/anomaly-map? result)) (pr-str result))
           (is (= script (some-> (:installed result) slurp))))))))
+
+(deftest ^{:stratum 1} gzip-bad-header-closes-archive-stream-test
+  (testing "a bad gzip header (thrown by the GZIPInputStream constructor) still closes the file"
+    (with-base-dir
+      (fn [base]
+        (let [archive (str (fs/path base "tool.gz"))
+              _       (spit archive "not gzip")
+              raw     (java.io.FileInputStream. archive)
+              orig    io/input-stream]
+          (try
+            (with-redefs [io/input-stream (fn [x & opts]
+                                            (if (= archive (str x)) raw (apply orig x opts)))]
+              (is (thrown? java.util.zip.ZipException
+                           (installer/extract-gzip archive (str (fs/path base "tool"))))))
+            (is (not (.isOpen (.getChannel raw))) "the archive's file stream was closed")
+            (finally (.close raw))))))))
+
+(deftest ^{:stratum 1} directory-at-binary-path-fails-cleanly-test
+  (testing "an archive that creates tool/README instead of a tool binary fails with its own
+            error, and the directory is removed"
+    (with-base-dir
+      (fn [base]
+        (let [[result bin-dir] (install! base {:file "tool.zip" :extract :zip}
+                                         #(write-zip! % "tool/README" "not a binary"))]
+          (is (response/anomaly-map? result))
+          (is (str/includes? (str (:anomaly/message result)) "Binary not found")
+              (pr-str (:anomaly/message result)))
+          (is (not (fs/exists? (str bin-dir "/tool") {:nofollow-links true}))))))))
+
+(deftest ^{:stratum 1} cleanup-failure-does-not-mask-install-error-test
+  (testing "when cleanup throws, the install's own anomaly is returned with the cleanup error on it"
+    (with-base-dir
+      (fn [base]
+        (let [[result _] (with-redefs [fs/delete-tree (fn [& _]
+                                                        (throw (java.io.IOException. "cleanup failed")))]
+                           (install! base {:file "tool.zip" :extract :zip}
+                                     #(spit (str %) "not a zip")))]
+          (is (response/anomaly-map? result))
+          (is (= "unzip" (:lsp-installer/step result)) "the install's own error is kept")
+          (is (= "cleanup failed" (:lsp-installer/cleanup-error result))))))))
+
+(deftest ^{:stratum 1} cleanup-removes-symlink-without-following-it-test
+  (testing "a symlink the archive put at the binary path is removed; its target is not touched"
+    (with-base-dir
+      (fn [base]
+        (let [outside (str (fs/create-dirs (fs/path base "outside")))
+              staging (str (fs/create-dirs (fs/path base "staging")))
+              _       (spit (str outside "/keep") "keep")
+              _       (fs/create-sym-link (fs/path staging "tool") outside)
+              [result bin-dir] (install! base {:file "tool.tar.gz" :extract :tar-gz}
+                                         #(bp/sh ["tar" "czf" (str %) "-C" staging "tool"]))]
+          (is (response/anomaly-map? result))
+          (is (not (fs/exists? (str bin-dir "/tool") {:nofollow-links true})))
+          (is (fs/exists? (str outside "/keep")) "symlink target untouched"))))))
+
+(deftest ^{:stratum 1} resolve-binary-requires-regular-executable-file-test
+  (testing "resolve-binary accepts ~/.miniforge/bin/<name> only as a regular executable file"
+    (with-base-dir
+      (fn [base]
+        (let [bin  (str (fs/path base "bin"))
+              tool "lsp-integrity-probe-tool"
+              path (str bin "/" tool)]
+          (fs/create-dirs (fs/path path "sub"))
+          (with-redefs [installer/bin-dir (constantly bin)]
+            (is (nil? (installer/resolve-binary tool)) "a directory is not a binary")
+            (fs/delete-tree path)
+            (spit path script)
+            (is (nil? (installer/resolve-binary tool)) "a non-executable file is not a binary")
+            (fs/set-posix-file-permissions path "rwxr-xr-x")
+            (is (= path (installer/resolve-binary tool)))))))))
