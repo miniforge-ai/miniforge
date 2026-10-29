@@ -161,12 +161,14 @@ pack: ids and behavior first, bodies only on demand.
 
 | Node | Key | Attributes |
 |---|---|---|
-| rule | `:rule/id` | Dewey code, behavior and body digests and sizes, detector, action, severity, enabled, pack, source path |
+| rule | `:rule/id` | Dewey code, text digests and sizes, detector, action, severity, static check kind, enabled, pack, source path |
 | category | taxonomy id | Dewey range, label |
 | scope | glob, phase or task type | none |
-| detector | detector kind | whether it acts |
+| detector | detector kind | deterministic or semantic |
 
-Every attribute is a projection of pack or ledger data. Rule text, meaning title, behavior and body, resolves from
+Every attribute is a projection of pack or ledger data. Whether a check acts depends on each rule's action, not on
+its detector. So the static check kind (§7.7) is a rule attribute, and the shared detector node records only its
+kind. Rule text, meaning title, behavior and body, resolves from
 the pack by id (§4.4). The graph reads `:rule/applies-to` as the compiled map of
 `:phases`, `:file-globs` and `:task-types`, not as the N4 §2.3 vector.
 
