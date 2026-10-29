@@ -28,7 +28,9 @@
    [ai.miniforge.cli.workflow-runner :as workflow-runner]
    [ai.miniforge.cli.main.commands.plan-executor :as plan-executor]
    [ai.miniforge.cli.main.commands.resume :as resume]
+   [ai.miniforge.cli.main.commands.shared :as shared]
    [ai.miniforge.agent-runtime.interface :as agent-runtime]
+   [ai.miniforge.phase.interface :as phase]
    [slingshot.slingshot :refer [try+]]))
 
 ;------------------------------------------------------------------------------ Layer 0
@@ -56,6 +58,16 @@
   "Read an EDN file, returning the parsed data."
   [path]
   (edn/read-string (slurp (str path))))
+
+(defn ^{:stratum 0} run-succeeded?
+  "True when a run's result counts as success for the process exit code: a
+   workflow that completed (or found its work already done), or a plan/DAG
+   run whose :success? is true. nil (a spec that failed validation) and
+   every other outcome count as failure."
+  [result]
+  (boolean (or (phase/succeeded? result)
+               (phase/already-done? result)
+               (true? (:success? result)))))
 
 (defn ^{:stratum 0} markdown-spec?
   "True if path has a markdown extension."
@@ -108,6 +120,14 @@
   (flush)
   (System/exit 1))
 
+(defn- ^{:stratum 1} finish!
+  "Return `result` when the run succeeded; otherwise exit 1, so a script or
+   CI job running `run` sees the failure instead of a zero exit."
+  [result]
+  (if (run-succeeded? result)
+    result
+    (shared/exit! 1)))
+
 ;------------------------------------------------------------------------------ Layer 2
 
 ;; Run command
@@ -116,45 +136,57 @@
 
    Dispatch order:
    1. Markdown files (.md/.markdown) → spec-parser directly (no EDN pre-read)
-   2. EDN/JSON files → read and detect type (:spec, :dag, :plan)"
+   2. EDN/JSON files → read and detect type (:spec, :dag, :plan)
+
+   Exits 1 when the run fails, when the spec is invalid, and on a usage
+   error; returns the result (exit 0) only when the run succeeded. The
+   exit happens outside the try+ blocks, which catch everything."
   [opts]
   (let [{:keys [spec interactive]} opts
         resume-id (:resume opts)]
     (cond
       ;; Resume mode
       resume-id
-      (resume/resume-workflow resume-id opts)
+      (finish! (resume/resume-workflow resume-id opts))
 
       ;; Interactive mode
       interactive
       (do
         (display/print-info (messages/t :run/interactive-not-implemented))
-        (println (messages/t :run/interactive-coming-soon)))
+        (println (messages/t :run/interactive-coming-soon))
+        (shared/exit! 1))
 
       ;; No file specified
       (not spec)
-      (display/print-error
-       (messages/t :run/usage
-                   {:command (app-config/command-string "run <spec-file> [--interactive] [--resume <workflow-id>]")}))
+      (do
+        (display/print-error
+         (messages/t :run/usage
+                     {:command (app-config/command-string "run <spec-file> [--interactive] [--resume <workflow-id>]")}))
+        (shared/exit! 1))
 
       ;; File not found
       (not (fs/exists? spec))
-      (display/print-error (messages/t :run/file-not-found {:path spec}))
+      (do
+        (display/print-error (messages/t :run/file-not-found {:path spec}))
+        (shared/exit! 1))
 
       ;; Markdown spec — route directly through spec-parser (no EDN pre-read)
       (markdown-spec? spec)
-      (try+
-        (run-spec-workflow spec opts)
-        (catch Object _ (print-run-error-and-exit! (:throwable &throw-context))))
+      (finish!
+       (try+
+         (run-spec-workflow spec opts)
+         (catch Object _ (print-run-error-and-exit! (:throwable &throw-context)))))
 
       ;; EDN/JSON — dispatch based on file content
       :else
-      (try+
-        (let [parsed     (read-edn-file spec)
-              input-type (detect-input-type parsed)]
-          (case input-type
-            :spec      (run-spec-workflow spec opts)
-            (:dag :plan) (do (display/print-info (messages/t :run/detected-format {:format (name input-type) :path spec}))
-                             (plan-executor/execute-plan parsed opts))
-            (display/print-error (messages/t :run/unrecognized-format {:path spec}))))
-        (catch Object _ (print-run-error-and-exit! (:throwable &throw-context)))))))
+      (finish!
+       (try+
+         (let [parsed     (read-edn-file spec)
+               input-type (detect-input-type parsed)]
+           (case input-type
+             :spec      (run-spec-workflow spec opts)
+             (:dag :plan) (do (display/print-info (messages/t :run/detected-format {:format (name input-type) :path spec}))
+                              (plan-executor/execute-plan parsed opts))
+             (do (display/print-error (messages/t :run/unrecognized-format {:path spec}))
+                 nil)))
+         (catch Object _ (print-run-error-and-exit! (:throwable &throw-context))))))))
