@@ -70,3 +70,50 @@
       (is (thrown? java.io.IOException
                    (format/write-manifest (str dir) "run-1" {:run/id "run-1"})))
       (is (empty? (leftover-temp-files dir))))))
+
+(deftest ^{:stratum 1} overwrite-preserves-restricted-permissions-test
+  (testing "overwriting an existing output does not widen its restricted mode"
+    (let [dir  (temp-dir)
+          path (format/write-manifest (str dir) "run-1" {:version 1})
+          f    (io/file path)]
+      (when (.supportsFileAttributeView
+             (java.nio.file.Files/getFileStore (.toPath f)) "posix")
+        (java.nio.file.Files/setPosixFilePermissions
+         (.toPath f)
+         (java.util.EnumSet/of
+          java.nio.file.attribute.PosixFilePermission/OWNER_READ
+          java.nio.file.attribute.PosixFilePermission/OWNER_WRITE))
+        (format/write-manifest (str dir) "run-1" {:version 2})
+        (is (= (java.util.EnumSet/of
+                java.nio.file.attribute.PosixFilePermission/OWNER_READ
+                java.nio.file.attribute.PosixFilePermission/OWNER_WRITE)
+               (java.nio.file.Files/getPosixFilePermissions
+                (.toPath f) (make-array java.nio.file.LinkOption 0)))
+            "restricted mode is not widened by an overwrite")))))
+
+(deftest ^{:stratum 1} existing-output-survives-failed-overwrite-test
+  (testing "when the write fails the original output is left untouched"
+    (let [dir     (temp-dir)
+          out-dir (io/file dir "run-1")
+          path    (format/write-manifest (str dir) "run-1" {:version 1})
+          original (slurp path)]
+      (when (.supportsFileAttributeView
+             (java.nio.file.Files/getFileStore (.toPath out-dir)) "posix")
+        ;; Remove write permission so temp-file creation inside out-dir fails.
+        (java.nio.file.Files/setPosixFilePermissions
+         (.toPath out-dir)
+         (java.util.EnumSet/of
+          java.nio.file.attribute.PosixFilePermission/OWNER_READ
+          java.nio.file.attribute.PosixFilePermission/OWNER_EXECUTE))
+        (try
+          (is (thrown? java.io.IOException
+                       (format/write-manifest (str dir) "run-1" {:version 2})))
+          (is (= original (slurp path)) "original bytes intact after failed overwrite")
+          (is (empty? (leftover-temp-files out-dir)) "no temp file survives")
+          (finally
+            (java.nio.file.Files/setPosixFilePermissions
+             (.toPath out-dir)
+             (java.util.EnumSet/of
+              java.nio.file.attribute.PosixFilePermission/OWNER_READ
+              java.nio.file.attribute.PosixFilePermission/OWNER_WRITE
+              java.nio.file.attribute.PosixFilePermission/OWNER_EXECUTE))))))))

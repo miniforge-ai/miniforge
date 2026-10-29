@@ -40,13 +40,24 @@
    visible to readers. The temp file sits beside the target so the
    rename stays on one filesystem, and its name is unique so two writers
    never share one. On failure it is removed and the original exception
-   rethrown."
+   rethrown.
+
+   When the target already exists its POSIX permissions are copied to
+   the temp file before the rename, so an overwrite does not widen the
+   file's mode. On non-POSIX filesystems the step is skipped silently."
   [path write-fn]
   (let [target (io/file path)
         tmp    (io/file (.getParentFile target)
-                        (str "." (.getName target) "." (random-uuid) ".tmp"))]
+                        (str "." (random-uuid) ".tmp"))]
     (try
       (write-fn tmp)
+      (try
+        (Files/setPosixFilePermissions
+         (.toPath tmp)
+         (Files/getPosixFilePermissions
+          (.toPath target) (make-array java.nio.file.LinkOption 0)))
+        (catch java.nio.file.NoSuchFileException _)
+        (catch UnsupportedOperationException _))
       (Files/move (.toPath tmp) (.toPath target)
                   (into-array StandardCopyOption
                               [StandardCopyOption/ATOMIC_MOVE
