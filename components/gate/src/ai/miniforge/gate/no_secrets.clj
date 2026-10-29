@@ -38,6 +38,7 @@
    code pass."
   (:require [ai.miniforge.gate.messages :as msg]
             [ai.miniforge.redaction.interface :as redaction]
+            [babashka.fs :as fs]
             [clojure.java.io :as io]
             [clojure.java.shell :as shell]
             [clojure.string :as str]
@@ -71,6 +72,14 @@
       (str/starts-with? line "@@") (recur more (some-> (re-find #"\+(\d+)" line) second parse-long) acc)
       (and n (str/starts-with? line "+")) (recur more (inc n) (conj acc [n (subs line 1)]))
       :else (recur more n acc))))
+
+(defn ^{:stratum 0} scratch-dir
+  "A fresh temp directory only its owner can enter, created with that
+   mode in one step: the base and artifact copies written into it can
+   hold the very credentials being looked for. Public for tests."
+  []
+  (fs/file (fs/create-temp-dir {:prefix "mf-no-secrets-"
+                                :posix-file-permissions "rwx------"})))
 
 (defn- ^{:stratum 0} findings
   "{:file :line} for each numbered line that carries a secret-shaped value."
@@ -136,7 +145,9 @@
 (defn- ^{:stratum 1} added-against
   "Numbered lines NEW adds over OLD (files), or nil when git cannot diff."
   [old new]
-  (let [r (git nil "UTF-8" "diff" "--no-index" "--no-color" "--no-ext-diff" "-U0" "--"
+  ;; --text: a version holding a NUL byte would otherwise come back as a
+  ;; hunk-less "Binary files differ" and its added lines would go unseen.
+  (let [r (git nil "UTF-8" "diff" "--no-index" "--text" "--no-color" "--no-ext-diff" "-U0" "--"
                (str old) (str new))]
     (when (#{0 1} (:exit r))
       (added-lines (:out r)))))
@@ -159,9 +170,7 @@
                                                                   (str/split-lines %)))
                                      texts)))
                 versions)
-          (let [tmp (doto (io/file (System/getProperty "java.io.tmpdir")
-                                   (str "mf-no-secrets-" (random-uuid)))
-                      .mkdirs)]
+          (let [tmp (scratch-dir)]
             (try
               (into []
                     (comp (map-indexed
@@ -183,8 +192,7 @@
                           (distinct))
                     (distinct (concat on-disk (keys versions))))
               (finally
-                (doseq [f (reverse (file-seq tmp))]
-                  (io/delete-file f true))))))]
+                (fs/delete-tree tmp)))))]
     (if (empty? locations)
       {:passed? true}
       {:passed? false

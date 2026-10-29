@@ -20,6 +20,7 @@
    finding by file and line, and never repeats the value."
   (:require [ai.miniforge.gate.interface :as gate]
             [ai.miniforge.gate.no-secrets :as no-secrets]
+            [babashka.fs :as fs]
             [clojure.java.shell :as shell]
             [clojure.string :as str]
             [clojure.test :refer [deftest is testing]])
@@ -68,6 +69,12 @@
   (is (= [[3 "x"] [4 "+y"] [9 "z"]]
          (no-secrets/added-lines
           (str "--- a/f\n+++ b/f\n@@ -2,0 +3,2 @@\n+x\n++y\n@@ -5 +8,0 @@\n-gone\n@@ -7 +9 @@\n-old\n+z\n")))))
+
+(deftest ^{:stratum 0} scratch-dir-is-owner-only-test
+  (let [dir (no-secrets/scratch-dir)]
+    (try
+      (is (= "rwx------" (fs/posix->str (fs/posix-file-permissions dir))))
+      (finally (fs/delete-tree dir)))))
 
 ;------------------------------------------------------------------------------ Layer 1
 
@@ -191,3 +198,9 @@
       (spit (str dir "/ lead.env") "DB_PASSWORD=opaqueVALUE123\n")
       (is (= #{{:file "café.py" :line 1} {:file " lead.env" :line 1}}
              (locations {:code/files []} dir))))))
+
+(deftest ^{:stratum 2} a-file-with-a-nul-byte-is-still-scanned-test
+  (testing "git would call it binary and show no hunks; --text keeps its lines"
+    (let [dir (temp-git-repo {"README.md" "x\n"})]
+      (spit (str dir "/blob.dat") (str "head\u0000\napi_key = '" gh-token "'\n"))
+      (is (= #{{:file "blob.dat" :line 2}} (locations {:code/files []} dir))))))
