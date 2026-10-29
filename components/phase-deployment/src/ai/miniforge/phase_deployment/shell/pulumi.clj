@@ -16,9 +16,13 @@
 ;; See the License for the specific language governing permissions and
 ;; limitations under the License.
 (ns ai.miniforge.phase-deployment.shell.pulumi
-  "Pulumi CLI wrappers for deployment phases."
-  (:require [ai.miniforge.phase-deployment.shell.exec :as exec]
-            [ai.miniforge.phase-deployment.shell.timeouts :as timeouts]))
+  "Pulumi CLI wrappers for deployment phases. `pulumi up` applies only the
+   plan a gated preview saved (`--save-plan`, then `--plan`)."
+  (:require [ai.miniforge.phase-deployment.messages :as msg]
+            [ai.miniforge.phase-deployment.shell.exec :as exec]
+            [ai.miniforge.phase-deployment.shell.timeouts :as timeouts]
+            [ai.miniforge.schema.interface :as schema]
+            [clojure.java.io :as io]))
 
 ;------------------------------------------------------------------------------ Layer 0
 
@@ -42,6 +46,23 @@
       (exec/with-parsed-json result)
       result)))
 
+(defn ^{:stratum 0} saved-plan?
+  "True when `plan-file` names a non-empty file: the plan a preview saved."
+  [plan-file]
+  (let [file (some-> plan-file io/file)]
+    (boolean (and file (.isFile file) (pos? (.length file))))))
+
+(defn ^{:stratum 0} plan-missing
+  "The failure `pulumi-up!` returns, without running anything, when there is
+   no saved plan to apply."
+  [plan-file]
+  (let [message (msg/t :shell/pulumi-plan-missing {:plan-file (str plan-file)})]
+    (schema/failure :stdout message {:stderr message
+                                     :exit-code -1
+                                     :duration-ms 0
+                                     :command "pulumi up"
+                                     :error-type :plan-missing})))
+
 (defn ^{:stratum 0} pulumi-outputs!
   [stack-dir & {:keys [stack]}]
   (let [args (cond-> ["stack" "output" "--json"]
@@ -53,25 +74,32 @@
 ;------------------------------------------------------------------------------ Layer 1
 
 (defn ^{:stratum 1} pulumi-preview!
-  [stack-dir & {:keys [stack extra-args timeout-ms env]}]
+  "Preview the stack. With `:plan-file`, Pulumi also saves the proposed
+   operations there (`--save-plan`), for `pulumi-up!` to apply."
+  [stack-dir & {:keys [stack plan-file extra-args timeout-ms env]}]
   (pulumi! "preview"
            stack-dir
            :stack stack
            :json? true
-           :extra-args extra-args
+           :extra-args (cond-> (vec extra-args) plan-file (into ["--save-plan" plan-file]))
            :timeout-ms timeout-ms
            :env env))
 
 (defn ^{:stratum 1} pulumi-up!
-  [stack-dir & {:keys [stack extra-args timeout-ms env]}]
-  (pulumi! "up"
-           stack-dir
-           :stack stack
-           :json? true
-           :yes? true
-           :extra-args extra-args
-           :timeout-ms timeout-ms
-           :env env))
+  "Apply exactly the plan a preview saved: `pulumi up --plan <plan-file>`.
+   Pulumi refuses any operation the plan does not contain. Without a saved
+   plan at `plan-file` this returns a failure and runs nothing."
+  [stack-dir & {:keys [stack plan-file extra-args timeout-ms env]}]
+  (if-not (saved-plan? plan-file)
+    (plan-missing plan-file)
+    (pulumi! "up"
+             stack-dir
+             :stack stack
+             :json? true
+             :yes? true
+             :extra-args (into ["--plan" plan-file] extra-args)
+             :timeout-ms timeout-ms
+             :env env)))
 
 ;------------------------------------------------------------------------------ Rich Comment
 (comment

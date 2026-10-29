@@ -86,4 +86,6 @@
   :shell/kustomize-build-failed
   "kustomize build failed: {error}"
   :shell/kubectl-apply-failed
-  "kubectl apply failed"}}
+  "kubectl apply failed"
+  :shell/pulumi-plan-missing
+  "No saved Pulumi plan at {plan-file}; pulumi up applies only the plan its gated preview saved"}}
