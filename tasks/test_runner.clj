@@ -50,14 +50,6 @@
   {"miniforge"      ["test" "integration"]
    "miniforge-core" ["test"]})
 
-(def ^{:stratum 0} known-failing-project-tests
-  "Discovered project test namespaces that fail on main, skipped by name
-   until fixed. `integration` prints each skip and its reason on every
-   run, so the gap stays visible in CI logs."
-  {"ai.miniforge.workflow.meta-agent-test"
-   (str "its mock LLM is a bare IFn reify; agent model resolution now calls "
-        "the LLMClient protocol (get-config), so every workflow fails at :plan")})
-
 (defn- ^{:stratum 0} project-test-alias-flag
   "The -M flag selecting whichever of the project's test aliases exist."
   [deps-edn]
@@ -79,7 +71,7 @@
 
 (defn ^{:stratum 1} discovered-project-tests
   "Every *_test.clj namespace under `project`'s test roots, as sorted
-   strings. Known-failing namespaces are included; the caller skips them."
+   strings."
   [project]
   (->> (get project-test-roots project)
        (map #(str "projects/" project "/" %))
@@ -156,17 +148,11 @@
 
 (defn ^{:stratum 2} integration
   "Run every discovered project integration test (see
-   `project-test-roots`), skipping only `known-failing-project-tests`,
-   each named with its reason."
+   `project-test-roots`)."
   []
   (println "🧪 Running project integration tests...")
   (doseq [project (sort (keys project-test-roots))]
-    (let [all-nses  (discovered-project-tests project)
-          skipped   (filter #(contains? known-failing-project-tests %) all-nses)
-          test-nses (remove #(contains? known-failing-project-tests %) all-nses)]
-      (doseq [ns-name skipped]
-        (println (str "⚠️  Skipping known-failing " ns-name ": "
-                      (get known-failing-project-tests ns-name))))
+    (let [test-nses (discovered-project-tests project)]
       (when (empty? test-nses)
         (println "❌ No integration tests discovered in project:" project)
         (System/exit 1))

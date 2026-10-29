@@ -68,14 +68,6 @@
   (is (= ["ai.miniforge.workflow.kernel-loader-integration-test"]
          (sut/discovered-project-tests "miniforge-core"))))
 
-(deftest ^{:stratum 0} known-failing-skips-name-real-tests-test
-  (testing "each skip names a discovered test, so a rename cannot leave a dead entry"
-    (let [discovered (set (sut/discovered-project-tests "miniforge"))]
-      (doseq [ns-name (keys sut/known-failing-project-tests)]
-        (is (contains? discovered ns-name) ns-name))))
-  (testing "each skip carries a reason"
-    (is (every? (comp not str/blank?) (vals sut/known-failing-project-tests)))))
-
 ;------------------------------------------------------------------------------ Layer 1
 
 (deftest ^{:stratum 1} discovers-every-miniforge-project-test-test
