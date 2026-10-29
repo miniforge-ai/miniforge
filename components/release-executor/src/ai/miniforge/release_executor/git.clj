@@ -189,33 +189,37 @@
     (catch Exception _ nil)))
 
 (defn ^{:stratum 0} commit-changes!
-  "Commit staged changes with the given message.
+  "Commit staged changes with the given message. Optional `git-args` are
+   global git options placed before `commit`, such as
+   `[\"-c\" \"core.hooksPath=/dev/null\"]` to keep every hook from running.
 
    Secrets in `commit-message` are replaced with the redaction marker
    (components/redaction) before git records it: a commit is pushed and
    kept in history, so the message is written once, redacted.
 
    Returns {:success? bool :commit-sha string :error string}"
-  [worktree-path commit-message]
-  (try
-    (let [commit-r (process/shell
-                    {:dir (str worktree-path) :out :string :err :string :continue true}
-                    "git" "commit" "-m" (redaction/redact commit-message))]
-      (if (zero? (:exit commit-r))
-        (let [sha-r (process/shell
-                     {:dir (str worktree-path) :out :string :err :string :continue true}
-                     "git" "rev-parse" "HEAD")]
-          (if (zero? (:exit sha-r))
-            (result/shell-success {:commit-sha (str/trim (get sha-r :out ""))
-                                   :output (get commit-r :out "")})
-            ;; The commit itself succeeded, but resolving its sha didn't — do
-            ;; NOT report shell-success with an empty/missing :commit-sha,
-            ;; which would mislead callers that expect a real sha. Surface
-            ;; the rev-parse failure instead.
-            (result/shell-failure (get sha-r :err "") {:commit-sha nil})))
-        (result/shell-failure (get commit-r :err "") {:commit-sha nil})))
-    (catch Exception e
-      (result/shell-failure (.getMessage e) {:commit-sha nil}))))
+  ([worktree-path commit-message]
+   (commit-changes! worktree-path commit-message nil))
+  ([worktree-path commit-message git-args]
+   (try
+     (let [commit-r (apply process/shell
+                           {:dir (str worktree-path) :out :string :err :string :continue true}
+                           "git" (concat git-args ["commit" "-m" (redaction/redact commit-message)]))]
+       (if (zero? (:exit commit-r))
+         (let [sha-r (process/shell
+                      {:dir (str worktree-path) :out :string :err :string :continue true}
+                      "git" "rev-parse" "HEAD")]
+           (if (zero? (:exit sha-r))
+             (result/shell-success {:commit-sha (str/trim (get sha-r :out ""))
+                                    :output (get commit-r :out "")})
+             ;; The commit itself succeeded, but resolving its sha didn't — do
+             ;; NOT report shell-success with an empty/missing :commit-sha,
+             ;; which would mislead callers that expect a real sha. Surface
+             ;; the rev-parse failure instead.
+             (result/shell-failure (get sha-r :err "") {:commit-sha nil})))
+         (result/shell-failure (get commit-r :err "") {:commit-sha nil})))
+     (catch Exception e
+       (result/shell-failure (.getMessage e) {:commit-sha nil})))))
 
 (defn- ^{:stratum 0} inside-worktree?
   "True when `file` resolves inside `worktree-path` after canonicalization
@@ -396,12 +400,13 @@
       (catch Exception _ nil))))
 
 (defn- ^{:stratum 1} raw-push!
-  "One `git push -u origin <branch-refspec>` with GH_TOKEN and `auth-env`
-   (nil, or the fallback's `push-auth/retry-plan` env) injected. Returns a
-   shell-result."
-  [worktree-path branch-name github-token auth-env]
+  "One `git <git-args> push -u origin <branch-refspec>` with GH_TOKEN and
+   `auth-env` (nil, or the fallback's `push-auth/retry-plan` env) injected.
+   Returns a shell-result."
+  [worktree-path branch-name github-token auth-env git-args]
   (try
-    (let [r (shell/run-bounded ["git" "push" "-u" "origin" (branch-refspec branch-name)]
+    (let [r (shell/run-bounded (into ["git"] (concat git-args ["push" "-u" "origin"
+                                                                (branch-refspec branch-name)]))
                                (gh-shell-opts worktree-path github-token auth-env))]
       (if (zero? (:exit r))
         (result/shell-success {:output (get r :out "")})
@@ -540,16 +545,19 @@
 
    The optional `github-token` drives GH_TOKEN injection and the HTTPS
    fallback; the 2-arity keeps the historical public-interface signature
-   (ambient credentials, no fallback).
+   (ambient credentials, no fallback). Optional `git-args` are global git
+   options placed before `push`, such as `[\"-c\" \"core.hooksPath=/dev/null\"]`.
 
    Returns {:success? bool :error string}"
   ([worktree-path branch-name] (push-branch! worktree-path branch-name nil))
   ([worktree-path branch-name github-token]
+   (push-branch! worktree-path branch-name github-token nil))
+  ([worktree-path branch-name github-token git-args]
    (or
     (validate-safe-branch-name branch-name)
     (with-https-token-fallback!
      worktree-path github-token
-     #(raw-push! worktree-path branch-name github-token %)))))
+     #(raw-push! worktree-path branch-name github-token % git-args)))))
 
 (defn ^{:stratum 2} force-push!
   "Force-push the current branch with --force-with-lease, injecting

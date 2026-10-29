@@ -25,6 +25,7 @@
    [ai.miniforge.pr-lifecycle.events :as events]
    [ai.miniforge.pr-lifecycle.github-conversation :as conversation]
    [ai.miniforge.pr-lifecycle.policy-eval.fs :as policy-fs]
+   [ai.miniforge.pr-lifecycle.policy-eval.git-dir :as git-dir]
    [ai.miniforge.pr-lifecycle.triage :as triage]
    [ai.miniforge.loop.interface :as loop]
    [ai.miniforge.logging.interface :as log]
@@ -166,12 +167,14 @@
   "Apply a fix artifact to the git worktree.
 
    Each `:path` comes from the LLM, so every one is resolved before
-   anything touches disk: writes must stay inside the worktree once
-   symlinks are followed, and a `:delete` must name an entry inside it
-   (the policy-eval.fs guards). One escaping path rejects the whole
-   artifact with `:fix-path-traversal`, so a hostile fix writes nothing.
-   Each path is resolved again just before its own op, since an earlier
-   op in the same artifact can change what it points at.
+   anything touches disk: writes must stay inside the worktree, and a
+   `:delete` must name an entry inside it (the policy-eval.fs guards).
+   Neither may pass through a symlink (a fix never needs to) or reach the
+   worktree's git dir, where a planted hook or config would run on the
+   commit that follows. One refused path rejects the whole artifact with
+   `:fix-path-traversal`, so a hostile fix writes nothing. Each path is
+   resolved again just before its own op, since an earlier op in the
+   same artifact changes the tree the later ones are checked against.
 
    Arguments:
    - worktree-path: Path to git worktree
@@ -193,19 +196,21 @@
         escaped      (into [] (comp (remove resolve-path) (map :path)) files)
         traversal    (fn [paths]
                        (dag/err :fix-path-traversal
-                                (str "Fix paths escape the worktree: " (str/join ", " paths))
+                                (str "Fix paths escape the worktree, pass through a symlink "
+                                     "(fixes never need to write through one), "
+                                     "or reach its git dir: "
+                                     (str/join ", " paths))
                                 {:paths paths}))]
     (if (seq escaped)
       (do
         (when logger
           (log/error logger :pr-lifecycle :fix/path-traversal
-                     {:message "Rejected fix with paths outside the worktree"
+                     {:message "Rejected fix with paths outside the worktree, through a symlink, or in its git dir"
                       :data {:worktree-path worktree-path :paths escaped}}))
         (traversal escaped))
       (try
-        ;; Resolve again right before each op: an earlier delete in the same
-        ;; artifact can change where a later path lands. Deleting link.txt and
-        ;; then creating it must write a new file, not the link's old target.
+        ;; Resolve again right before each op: an earlier op in the same
+        ;; artifact changes the tree a later path is checked against.
         (or (reduce (fn [_ {:keys [path content action] :as file}]
                       (if-let [full-path (resolve-path file)]
                         (do (if (= :delete action)
@@ -226,7 +231,9 @@
 
 (defn ^{:stratum 0} commit-fix
   "Stage the files the fix wrote or deleted, commit them, and push to the
-   PR branch.
+   PR branch, every git command with hooks disabled: the fix just wrote
+   LLM-proposed files, and a hook they changed must not run inside the
+   loop.
 
    Only `files` are staged, never the whole tree: the worktree can hold
    changes the fix did not make. Pathspecs are literal, so a name with
@@ -265,16 +272,19 @@
                                      r    (apply process/shell
                                                  {:dir (str worktree-path) :continue true
                                                   :out :string :err :string}
-                                                 "git" "--literal-pathspecs" args)]
+                                                 "git" (concat git-dir/hooks-disabled-args
+                                                               ["--literal-pathspecs"] args))]
                                  (when-not (zero? (:exit r))
                                    (str path ": " (str/trim (str (:err r)))))))
                              files)
                        (catch Exception e (.getMessage e)))]
       (if stage-error
         (dag/err :stage-failed stage-error)
-        (let [stage-result (release/commit-changes! worktree-path commit-msg)]
+        (let [stage-result (release/commit-changes! worktree-path commit-msg
+                                                    git-dir/hooks-disabled-args)]
           (if (:success? stage-result)
-            (let [push-result (release/push-branch! worktree-path branch)]
+            (let [push-result (release/push-branch! worktree-path branch nil
+                                                    git-dir/hooks-disabled-args)]
               (if (:success? push-result)
                 (dag/ok {:commit-sha (:commit-sha stage-result)
                          :branch branch})
