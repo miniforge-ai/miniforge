@@ -138,6 +138,37 @@
     (sinks/cleanup-stale-events! {:events-dir dir})
     (is (.isDirectory (archived dir wf-id)) "the completion is still the newest event")))
 
+(deftest ^{:stratum 1} a-run-with-a-file-cleanup-cannot-trust-stays
+  (let [dir      (temp-events-dir)
+        outside  (temp-events-dir)
+        linked   (write-run! dir :workflow/started :workflow/completed)
+        locked   (write-run! dir :workflow/started :workflow/completed)
+        garbled  (write-run! dir :workflow/started :workflow/completed)
+        event-at #(first (.listFiles (live dir %)))
+        link     (event-at linked)
+        moved    (io/file outside (.getName link))
+        unread   (doto (io/file (live dir locked) "20260101T000000000Z-locked.json")
+                   (spit "{}")
+                   (.setReadable false false))
+        err      (java.io.StringWriter.)]
+    (.renameTo link moved)
+    (java.nio.file.Files/createSymbolicLink (.toPath link) (.toPath moved)
+                                            (make-array java.nio.file.attribute.FileAttribute 0))
+    (spit (io/file (live dir garbled) "20260101T000000000Z-garbled.json") "{not json")
+    (run! #(age-tree! (live dir %)) [linked locked garbled])
+    (is (not (.canRead unread)) "precondition: the test does not run as root")
+    (binding [*err* err]
+      (sinks/cleanup-stale-events! {:events-dir dir})
+      (sinks/cleanup-stale-events! {:events-dir dir}))
+    (testing "a symlinked event file"
+      (is (.isDirectory (live dir linked))))
+    (testing "an unreadable event file"
+      (is (.isDirectory (live dir locked))))
+    (testing "an undecodable event file"
+      (is (.isDirectory (live dir garbled))))
+    (is (= 3 (count (re-seq #"WARNING: event cleanup keeps" (str err))))
+        "one warning per run across both passes")))
+
 (deftest ^{:stratum 1} a-directory-named-like-the-marker-keeps-the-run
   (let [dir       (temp-events-dir)
         no-events (io/file dir "live" "no-events")

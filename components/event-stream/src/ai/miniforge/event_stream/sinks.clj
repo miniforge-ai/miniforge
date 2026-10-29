@@ -64,6 +64,11 @@
    doesn't grow unbounded on a busy fleet."
   (* 7 24 60 60 1000))
 
+(def ^{:stratum 0} ^:private warned-runs
+  "Live run directories cleanup has warned about keeping, so each is
+   reported once per process."
+  (atom #{}))
+
 (def ^{:stratum 0} ^:private manifest-filename
   "The per-workflow manifest's file name, read from the manifest
    contract defaults. The manifest namespace is JVM-only; this one also
@@ -243,30 +248,42 @@
                               (< (.lastModified f) cutoff)))))
                  children))))
 
-(defn- ^{:stratum 0} completed-run?
-  "True when the newest workflow lifecycle event in `dir` is a successful
-   :workflow/completed, the newest by event timestamp then sequence
-   number across all of its event files. A started, resumed, failed or
-   cancelled run is not: resume can still write to it. File mtimes play
-   no part here (a touched or restored file must not reorder events);
-   only the idle check reads them. Reads the transit-JSON this namespace
-   writes."
+(defn- ^{:stratum 0} run-verdict
+  ":archive when the newest workflow lifecycle event in live run `dir` is
+   a successful :workflow/completed, the newest by event timestamp then
+   sequence number across all of its event files; :keep when it is not
+   (a started, resumed, failed or cancelled run: resume can still write
+   to it). When any file in `dir` is a symlink, or an event file cannot
+   be read or decoded, a string saying which: the run stays, since the
+   event it cannot see could be a later start. File mtimes play no part
+   here; only the idle check reads them. Reads the transit-JSON this
+   namespace writes."
   [^java.io.File dir]
-  (let [parse (fn [^java.io.File f]
+  (let [children (.listFiles dir)
+        parse (fn [^java.io.File f]
                 (try+ (json/parse-string (slurp f :encoding "UTF-8"))
                       (catch Exception _ nil)))
         order (fn [e] [(some-> (get e "~:event/timestamp") (subs 2) Instant/parse .toEpochMilli)
                        (get e "~:event/sequence-number" 0)])
         lifecycle #{"~:workflow/started" "~:workflow/resumed" "~:workflow/completed"
                     "~:workflow/failed" "~:workflow/cancelled"}
-        newest (->> (.listFiles dir)
-                    (filter #(str/ends-with? (.getName ^java.io.File %) ".json"))
-                    (keep parse)
-                    (filter #(lifecycle (get % "~:event/type")))
-                    (sort-by order #(compare %2 %1))
-                    first)]
-    (and (= "~:workflow/completed" (get newest "~:event/type"))
-         (not (#{"~:failure" "~:failed" "~:cancelled"} (get newest "~:workflow/status"))))))
+        symlink (some #(when (Files/isSymbolicLink (.toPath ^java.io.File %)) %) children)
+        events  (when-not symlink
+                  (->> children
+                       (filter #(str/ends-with? (.getName ^java.io.File %) ".json"))
+                       (map (juxt identity parse))))
+        bad     (some (fn [[f e]] (when-not (map? e) f)) events)
+        newest  (->> (map second events)
+                     (filter #(lifecycle (get % "~:event/type")))
+                     (sort-by order #(compare %2 %1))
+                     first)]
+    (cond
+      symlink (str "symlinked file " (.getName ^java.io.File symlink))
+      bad     (str "unreadable or undecodable event file " (.getName ^java.io.File bad))
+      (and (= "~:workflow/completed" (get newest "~:event/type"))
+           (not (#{"~:failure" "~:failed" "~:cancelled"} (get newest "~:workflow/status"))))
+      :archive
+      :else :keep)))
 
 (defn- ^{:stratum 0} archive-completed-run!
   "Archive live workflow directory `dir` into `archived-root` as the JVM
@@ -467,7 +484,9 @@
                       event is a successful completion (a failed or
                       cancelled run may still be resumed), so the
                       archived/ rules below apply to it next; if it
-                      holds no event file, its directory goes.
+                      holds no event file, its directory goes. A run
+                      with a symlinked, unreadable or undecodable file
+                      stays, with one warning per process.
      archived/{wid}/  The whole directory, once its archive is older
                       than the TTL (by its `archived.marker`). One still
                       missing the marker is left for archive recovery.
@@ -546,8 +565,15 @@
             emptied (reduce + 0 (map #(delete-all! (reverse (walk-tree %)))
                                      (filter no-events? idle-live)))]
         (when archived-root
-          (doseq [dir (filter completed-run? (remove no-events? idle-live))]
-            (archive-completed-run! dir archived-root marker)))
+          (doseq [dir (remove no-events? idle-live)
+                  :let [verdict (run-verdict dir)
+                        key     (str dir)]]
+            (cond
+              (= :archive verdict) (archive-completed-run! dir archived-root marker)
+              (and (string? verdict)
+                   (not (contains? (first (swap-vals! warned-runs conj key)) key)))
+              (binding [*out* *err*]
+                (println (str "WARNING: event cleanup keeps " dir " in live/: " verdict))))))
         (+ pruned operator temps emptied))
       0)))
 
