@@ -17,8 +17,6 @@
 ;; limitations under the License.
 (ns ai.miniforge.workflow.checkpoint-store-test
   (:require
-   [clojure.edn :as edn]
-   [clojure.string :as str]
    [clojure.java.io :as io]
    [clojure.test :refer [deftest is testing]]
    [ai.miniforge.workflow.checkpoint-store :as checkpoint-store]
@@ -96,48 +94,6 @@
                               #"Invalid checkpoint data"
                               (checkpoint-store/persist-execution-state! invalid-ctx)))))))
 
-(deftest ^{:stratum 0} persist-execution-state-preserves-existing-phase-checkpoints-test
-  (testing "a resumed partial pipeline does not shrink the checkpoint manifest"
-    (checkpoint-test-support/call-with-temp-checkpoint-root
-      (fn [checkpoint-root]
-        (let [workflow-id (random-uuid)
-              initial-workflow {:workflow/id :test
-                                :workflow/version "1.0.0"
-                                :workflow/pipeline [{:phase :explore}
-                                                    {:phase :plan}
-                                                    {:phase :implement}
-                                                    {:phase :review}]}
-              resumed-workflow {:workflow/id :test
-                                :workflow/version "1.0.0"
-                                :workflow/pipeline [{:phase :release}]}
-              initial-ctx (-> (ctx/create-context initial-workflow {:task "Test"}
-                                                  {:checkpoint/root checkpoint-root})
-                              (assoc :execution/id workflow-id)
-                              (assoc :execution/phase-results
-                                     {:explore {:status :completed}
-                                      :plan {:status :completed}
-                                      :implement {:status :completed}
-                                      :review {:status :completed}}))
-              resumed-ctx (-> (ctx/create-context resumed-workflow {:task "Test"}
-                                                  {:checkpoint/root checkpoint-root})
-                              (assoc :execution/id workflow-id)
-                              (assoc :execution/phase-results
-                                     {:plan {:status :completed}
-                                      :implement {:status :completed}
-                                      :release {:status :failed}})
-                              (assoc :execution/current-phase :release))]
-          (checkpoint-store/persist-execution-state! initial-ctx)
-          (checkpoint-store/persist-execution-state! resumed-ctx)
-          (let [checkpoint-data (checkpoint-store/load-checkpoint-data
-                                 workflow-id
-                                 {:checkpoint/root checkpoint-root})]
-            (is (= [:explore :plan :implement :review :release]
-                   (get-in checkpoint-data [:manifest :workflow/phases-completed])))
-            (is (= {:status :completed}
-                   (get-in checkpoint-data [:phase-results :explore])))
-            (is (= {:status :failed}
-                   (get-in checkpoint-data [:phase-results :release])))))))))
-
 (deftest ^{:stratum 0} persist-execution-state-preserves-phase-handoffs-test
   (checkpoint-test-support/call-with-temp-checkpoint-root
     (fn [checkpoint-root]
@@ -164,44 +120,6 @@
         (is (= handoff
                (get-in checkpoint-data
                        [:phase-results :review :phase/handoff])))))))
-
-(deftest ^{:stratum 0} gate-history-survives-phase-re-entry-test
-  (testing "phase re-entry overwrites the phase checkpoint but every gate
-            decision survives in the append-only gate history"
-    (checkpoint-test-support/call-with-temp-checkpoint-root
-      (fn [checkpoint-root]
-        (let [workflow {:workflow/id :gate-history-test
-                        :workflow/version "1.0.0"
-                        :workflow/pipeline [{:phase :implement} {:phase :done}]}
-              base (-> (ctx/create-context workflow {:task "Test"}
-                                           {:checkpoint/root checkpoint-root})
-                       (assoc :execution/current-phase :implement))
-              denied (assoc-in base [:execution/phase-results :implement]
-                               {:status :failed
-                                :phase/decision-envelope {:envelope/decision :deny}
-                                :phase/gate-failures [{:gate :stale-references
-                                                       :errors [{:message "stale"
-                                                                 ;; policy-pack violations carry Instants
-                                                                 :timestamp (java.time.Instant/parse "2026-08-29T00:00:00Z")}]}]})
-              allowed (assoc-in base [:execution/phase-results :implement]
-                                {:status :completed
-                                 :phase/decision-envelope {:envelope/decision :allow}})
-              _ (checkpoint-store/persist-execution-state! denied)
-              _ (checkpoint-store/persist-execution-state! allowed)
-              run-dir (str checkpoint-root "/" (:execution/id base))
-              history (->> (slurp (str run-dir "/" checkpoint-store/gate-history-filename))
-                           str/split-lines
-                           (mapv edn/read-string))
-              phase-file (edn/read-string
-                          (slurp (str run-dir "/phases/implement.edn")))]
-          (is (= 2 (count history)) "both iterations recorded")
-          (is (= [:deny :allow] (mapv :decision history)))
-          (is (= :stale-references (-> history first :phase/gate-failures first :gate)))
-          (is (= "2026-08-29T00:00:00Z"
-                 (-> history first :phase/gate-failures first :errors first :timestamp))
-              "Instants inside gate errors are normalized to strings so the history stays EDN-readable")
-          (is (= :allow (get-in phase-file [:phase/result :phase/decision-envelope :envelope/decision]))
-              "the phase checkpoint holds only the last iteration — the reason the history exists"))))))
 
 ;------------------------------------------------------------------------------ Layer 1
 

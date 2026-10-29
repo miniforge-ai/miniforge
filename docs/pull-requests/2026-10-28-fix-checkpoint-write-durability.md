@@ -29,7 +29,9 @@ The parent CLI fails four new assertions. All three workflow consumers pass
 serially (2m15s). The rebuilt CLI is 39,233,857 bytes; isolated checkpoint suites
 pass 17 tests and 68 assertions with no production source overlays.
 New durability tests take 23–41 ms on the JVM. Two existing store scenarios now
-take 139–161 ms and must move to project integration tests before this PR opens.
+take 139–161 ms and have moved to registered project integration tests.
+The moved scenarios and remaining store suite pass nine tests and 35 assertions
+on the project JVM. Shared factories preserve the original phase and gate shapes.
 
 ## Limits
 

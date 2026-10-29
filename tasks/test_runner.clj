@@ -160,6 +160,7 @@
                          "ai.miniforge.phase-opsv.terminal-boundary-integration-test"
                          "ai.miniforge.workflow.opsv-terminal-integration-test"
                          "ai.miniforge.workflow.opsv-checkpoint-integration-test"
+                         "ai.miniforge.workflow.checkpoint-persistence-integration-test"
                          "ai.miniforge.event-stream.gate-contract-integration-test"
                          "ai.miniforge.event-stream.heartbeat-runtime-integration-test"
                          "ai.miniforge.event-stream.heartbeat-stop-integration-test"
