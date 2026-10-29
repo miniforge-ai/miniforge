@@ -1,0 +1,83 @@
+;; Title: Miniforge.ai
+;; Copyright 2025-2026 Christopher Lester (christopher@miniforge.ai)
+;; Licensed under the Apache License, Version 2.0.
+(ns ai.miniforge.phase-deployment.manifest-credentials-test
+  (:require [ai.miniforge.phase-deployment.manifest-credentials :as credentials]
+            [clojure.string :as str]
+            [clojure.test :refer [deftest is testing]]))
+
+;------------------------------------------------------------------------------ Layer 0
+
+(def ^{:stratum 0} rule
+  {:rule/detection {:detector-config
+                    {:allow-secret-data? false
+                     :fallback-patterns ["(?i)(password|secret|api[_-]?key|token)\\s*[:=]\\s*[^\\s\"'#{}\\[\\],&*!|>%@`$][^\\s#]{7,}"
+                                         "(?i)PRIVATE KEY"]}}})
+
+(deftest ^{:stratum 0} credential-names-end-in-a-credential-term
+  (doseq [n ["password" "DB_PASSWORD" "apiKey" "API_KEY" "client-secret" "AWS_SECRET_ACCESS_KEY"
+             "auth-token" "passphrase"]]
+    (is (credentials/credential-name? n) n))
+  (doseq [n ["secretName" "passwordRef" "secretKeyRef" "ACCESS_KEY_ID" "tokenExpirationSeconds"
+             "name" "region"]]
+    (is (not (credentials/credential-name? n)) n)))
+
+(deftest ^{:stratum 0} placeholder-only-values-are-not-literal
+  (doseq [v ["$(DB_PASSWORD)" "${DB_PASSWORD}" "{{ .Values.password }}" " ${DB_PASSWORD} "]]
+    (is (not (credentials/literal-value? v)) v))
+  (doseq [v ["hunter2" "${DB_PASSWORD:hunter2}" "$(DB_PASSWORD}" "pw-${DB_PASSWORD}"]]
+    (is (credentials/literal-value? v) v)))
+
+;------------------------------------------------------------------------------ Layer 1
+
+(defn- ^{:stratum 1} findings [manifest]
+  (:findings (credentials/check {:artifact/content manifest} {:policy-pack/rule rule})))
+
+(deftest ^{:stratum 1} secret-data-is-allowed-only-when-the-pack-says-so
+  (is (nil? (credentials/check {:artifact/content "kind: Secret\nmetadata:\n  name: db\ndata:\n  password: eA==\n"}
+                               {:policy-pack/rule (assoc-in rule [:rule/detection :detector-config
+                                                                  :allow-secret-data?] true)}))))
+
+;------------------------------------------------------------------------------ Layer 2
+
+(deftest ^{:stratum 2} structural-findings-name-the-place-never-the-value
+  (testing "Secret data and stringData"
+    (is (= ["Secret/db: stringData.password"]
+           (findings "kind: Secret\nmetadata:\n  name: db\nstringData:\n  password: x\n"))))
+  (testing "a multiword ConfigMap value"
+    (is (= ["ConfigMap/cfg: data.password"]
+           (findings "kind: ConfigMap\nmetadata:\n  name: cfg\ndata:\n  password: correct horse battery staple\n"))))
+  (testing "a credential-named env entry with a literal value, in any workload"
+    (is (= ["CronJob/job: env API_KEY"]
+           (findings (str "kind: CronJob\nmetadata:\n  name: job\nspec:\n  jobTemplate:\n    spec:\n"
+                          "      template:\n        spec:\n          containers:\n            - name: c\n"
+                          "              env:\n                - name: API_KEY\n                  value: sk-live-1\n")))))
+  (testing "a credential assignment inside a ConfigMap file value"
+    (is (= ["ConfigMap/cfg: data.application.properties"]
+           (findings "kind: ConfigMap\nmetadata:\n  name: cfg\ndata:\n  application.properties: |\n    db.password=correct-horse-battery\n"))))
+  (testing "a null valueFrom is no reference"
+    (is (= ["Deployment/api: env API_KEY"]
+           (findings (str "kind: Deployment\nmetadata:\n  name: api\nspec:\n  template:\n    spec:\n"
+                          "      containers:\n        - name: api\n          env:\n"
+                          "            - name: API_KEY\n              value: sk-live-1\n"
+                          "              valueFrom: null\n")))))
+  (testing "values are never echoed"
+    (is (not-any? #(str/includes? % "horse")
+                  (findings "kind: ConfigMap\nmetadata:\n  name: cfg\ndata:\n  password: correct horse\n")))))
+
+(deftest ^{:stratum 2} references-and-metadata-are-not-credentials
+  (is (empty? (findings (str "kind: Deployment\nmetadata:\n  name: api\n  annotations:\n"
+                             "    checksum/secret: 9f86d081884c7d659a2feaa0c55ad015\n"
+                             "    nginx.ingress.kubernetes.io/auth-secret: basic-auth\n"
+                             "spec:\n  template:\n    spec:\n      containers:\n        - name: api\n"
+                             "          env:\n            - name: API_KEY\n              valueFrom:\n"
+                             "                secretKeyRef: {name: keys, key: api}\n"
+                             "            - name: DB_PASSWORD\n              value: $(SHARED_PASSWORD)\n")))))
+
+(deftest ^{:stratum 2} non-yaml-content-falls-back-to-the-line-patterns
+  (is (seq (findings "key: [unclosed\n-----BEGIN PRIVATE KEY-----\n")) "not YAML")
+  (is (seq (findings "-----BEGIN PRIVATE KEY----- abc")) "a YAML scalar, not a manifest")
+  (is (nil? (findings "key: [unclosed\nplain text\n"))))
+
+(comment
+  (clojure.test/run-tests 'ai.miniforge.phase-deployment.manifest-credentials-test))
