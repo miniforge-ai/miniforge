@@ -419,8 +419,10 @@ The end state: the compiler takes enforcement action and severity only from expl
 `alwaysApply` alone changes no gate outcome. The migration runs in two steps, so no rule weakens on the way.
 
 1. Stage 1. The compiler MUST read an explicit `severity` frontmatter field; today it reads none. Action and
-   severity are decided separately. Each comes from its explicit field when present, and from `alwaysApply`
-   otherwise. The compiler warns for each value it derives, and the §7.7 diff shows any change those values cause.
+   severity are decided separately, each from its explicit field when present. Without one, today's derivation
+   stays. Action is `:warn` under `alwaysApply: true`, else `:audit`. Severity is `:high` for a `:hard-halt` action
+   or under `alwaysApply: true`, else `:low`. The compiler warns for each derived value, and the §7.7 diff shows any
+   change those values cause.
 2. Stage 2. After standards declares `enforcement.action` and `severity` on every rule, and miniforge re-pins, the
    compiler MUST NOT derive either value from `alwaysApply`.
 
