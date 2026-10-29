@@ -292,15 +292,18 @@
 (defn ^{:stratum 0} event-file-ms
   "The epoch milliseconds an event file's name records, inverting the
    `event-filename` grammar: the timestamp of a legacy
-   `{yyyyMMddTHHmmssSSSZ}-{uuid}.json` name, the timestamp bits of a
-   `{snowflake-hex16}__{seq12}.transit.json` name. Both record when the
-   event was made, so this orders a directory holding both grammars,
-   which their names alone do not. nil for any other name (the manifest,
-   the snapshot, a temp file), so it also tells event files apart."
+   `{yyyyMMddTHHmmssSSSZ}-{uuid}.json` name (or of the older
+   seconds-resolution `{yyyyMMddTHHmmssZ}-{uuid}.json`, at .000), the
+   timestamp bits of a `{snowflake-hex16}__{seq12}.transit.json` name.
+   All record when the event was made, so this orders a directory
+   holding several grammars, which their names alone do not. nil for
+   any other name (the manifest, the snapshot, a temp file), so it also
+   tells event files apart."
   [^String file-name]
-  (if-let [[_ ts] (re-matches #"(\d{8}T\d{9}Z)-[^/]+\.json" file-name)]
-    (.toEpochMilli (.toInstant (LocalDateTime/parse ts (DateTimeFormatter/ofPattern "yyyyMMdd'T'HHmmssSSS'Z'"))
-                               ZoneOffset/UTC))
+  (if-let [[_ ts ms] (re-matches #"(\d{8}T\d{6})(\d{3})?Z-[^/]+\.json" file-name)]
+    (+ (.toEpochMilli (.toInstant (LocalDateTime/parse ts (DateTimeFormatter/ofPattern "yyyyMMdd'T'HHmmss"))
+                                  ZoneOffset/UTC))
+       (if ms (Long/parseLong ms) 0))
     (when-let [[_ hex] (re-matches #"([0-9a-f]{16})__\d{12}\.transit\.json" file-name)]
       (+ snowflake/miniforge-epoch-ms
          (bit-shift-right (Long/parseUnsignedLong hex 16) snowflake/ts-shift)))))
