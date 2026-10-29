@@ -94,6 +94,24 @@
     (catch java.io.IOException _
       nil)))
 
+(def ^{:stratum 0} ^:private failed-connect-status-lines
+  "Answers a proxy gives to CONNECT when it cannot reach the provider."
+  ["502 Bad Gateway" "503 Service Unavailable" "504 Gateway Timeout"])
+
+(def ^{:stratum 0} ^:private auth-required-status-line
+  "Answer to CONNECT from a proxy that wants credentials."
+  "407 Proxy Authentication Required")
+
+(defn- ^{:stratum 0} connect-reply
+  "A bodiless proxy answer with `status-line`."
+  [status-line]
+  (str "HTTP/1.1 " status-line "\r\nContent-Length: 0\r\n\r\n"))
+
+(defn- ^{:stratum 0} local-proxy-env
+  "Environment that routes https probes through the proxy on `server`."
+  [^java.net.ServerSocket server]
+  {"HTTPS_PROXY" (str "http://127.0.0.1:" (.getLocalPort server))})
+
 (defn- ^{:stratum 0} probe-request
   "The request map `network-healthy?` sends for `url` under environment
    `env`."
@@ -223,6 +241,19 @@
         (is (= (mapv (fn [n] [n expected-connect-line]) (range 1 (inc probe-count)))
                @seen)
             "one connection per probe, each a CONNECT to api.anthropic.com:443")))))
+
+(deftest ^{:stratum 2} probe-through-proxy-that-cannot-reach-provider-test
+  (testing "a CONNECT answered 502/503/504 is a failed probe"
+    (doseq [status-line failed-connect-status-lines]
+      (with-open [server (java.net.ServerSocket. 0)]
+        (serve-connects! server (atom []) (connect-reply status-line))
+        (is (false? (nh/network-healthy? anthropic-probe-url {:env (local-proxy-env server)}))
+            status-line))))
+
+  (testing "a CONNECT answered 407 still counts as reachable"
+    (with-open [server (java.net.ServerSocket. 0)]
+      (serve-connects! server (atom []) (connect-reply auth-required-status-line))
+      (is (true? (nh/network-healthy? anthropic-probe-url {:env (local-proxy-env server)}))))))
 
 (deftest ^{:stratum 2} handle-streaming-starts-network-monitor-test
   (testing "a streaming CLI call passes :backend-key, which starts the network-drop monitor"

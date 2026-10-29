@@ -98,18 +98,35 @@
     proxy
     (str "http://" proxy)))
 
-;; Probe primitive
-(defn- ^{:stratum 0} response-proves-connectivity?
-  "True when an http-kit response map shows the request reached an HTTP
-   peer and got a response back — regardless of status code. A 4xx or
-   even a 5xx means the network is up; only an exception (`:error`) or
-   a missing `:status` indicates connectivity failure."
-  [response]
-  (boolean (and (map? response)
-                (nil? (:error response))
-                (pos-int? (:status response)))))
+(def ^{:stratum 0} ^:private proxy-auth-required-status
+  "407 answer to a CONNECT: the proxy wants credentials, which the probe
+   does not send (the agent CLI may hold them). It proves the proxy is
+   reachable, so it counts as healthy rather than as a drop."
+  407)
+
+(defn- ^{:stratum 0} success-status?
+  [status]
+  (<= 200 status 299))
 
 ;------------------------------------------------------------------------------ Layer 1
+
+;; Probe primitive
+(defn- ^{:stratum 1} response-proves-connectivity?
+  "True when an http-kit response map shows the request reached an HTTP
+   peer and got a response back. From the origin (a direct probe, or an
+   http probe relayed by a proxy) any status counts: a 4xx or even a 5xx
+   means the network is up. A `tunneled?` probe's response is the
+   proxy's answer to CONNECT, so only 2xx (tunnel open) or 407 counts; a
+   502/503/504 there means the proxy could not reach the provider. An
+   exception (`:error`) or a missing `:status` is always a failure."
+  [response tunneled?]
+  (let [status (:status response)]
+    (boolean (and (map? response)
+                  (nil? (:error response))
+                  (pos-int? status)
+                  (or (not tunneled?)
+                      (success-status? status)
+                      (= proxy-auth-required-status status))))))
 
 (defn ^{:stratum 1} proxy-request-opts
   "http-kit request options that send a probe of `probe-url` through the
@@ -152,8 +169,10 @@
   "Probe `probe-url` for a live HTTP response and return true/false.
 
    Returns true when the probe receives an HTTP response within
-   `:timeout-ms` (any status code counts — a 4xx still proves the
-   network reached the server). Returns false on any failure mode:
+   `:timeout-ms` (any status code from the origin counts — a 4xx still
+   proves the network reached the server; through a CONNECT tunnel only
+   2xx or 407, see `response-proves-connectivity?`). Returns false on
+   any failure mode:
    - http-kit's response carries `:error` (DNS failure, connection
      refused, timeout, etc.).
    - The request map promise is missing `:status` for any reason.
@@ -187,7 +206,7 @@
                            :as      :text}
                           (proxy-request-opts probe-url env))
            response @(http-client request)]
-       (response-proves-connectivity? response))
+       (response-proves-connectivity? response (boolean (:tunnel? request))))
      (catch Exception _
        ;; http-kit can also surface connection failures as a thrown
        ;; exception (see `llm_client/http-post-request` comments).
