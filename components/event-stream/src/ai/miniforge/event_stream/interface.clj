@@ -193,6 +193,13 @@
    events-dir is the events root being cleaned."
   sinks/retention-hold)
 
+(def ^{:stratum 0} cleanup-stale-events!
+  "`(cleanup-stale-events! {:events-dir dir :ttl-ms ms})`: run the event
+   retention pass now, as the file sink does in the background when it is
+   created (which runs are archived or pruned: see the sinks namespace).
+   Returns the number of files removed."
+  sinks/cleanup-stale-events!)
+
 (def ^{:stratum 0} default-events-dir
   "The default events root (`~/.miniforge/events`) as a java.io.File —
    the base every other path fn in this family defaults to. Exposed so

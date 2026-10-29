@@ -159,12 +159,24 @@
 
 (defn- ^{:stratum 0} resumable-in-place?
   "True when a run resumed under `id` writes its events where readers of
-   `id` look: `id` has no run directory yet, or a live one. An archived
-   run's readers keep reading the archive, and a legacy run's are pointed
-   away from its own events by the new live directory."
+   `id` look, and they stay there: `id` has no run directory yet, or a
+   live one whose newest lifecycle event does not end the run. An
+   archived run's readers keep reading the archive, and a legacy run's
+   are pointed away from its own events by the new live directory. A live
+   run that ended (completed, failed or cancelled) is archived by the
+   event cleanup once idle, which may happen between choosing the id and
+   the attempt's first event, so it is not resumed in place either."
   [events-dir id]
   (let [dir (es/workflow-events-dir events-dir (str id))]
-    (or (nil? dir) (= dir (es/workflow-dir events-dir (str id))))))
+    (or (nil? dir)
+        (and (= dir (es/workflow-dir events-dir (str id)))
+             (not (#{:workflow/completed :workflow/failed :workflow/cancelled}
+                   (->> (es/read-workflow-events-by-id events-dir (str id))
+                        (filter (comp #{:workflow/started :workflow/resumed :workflow/completed
+                                        :workflow/failed :workflow/cancelled}
+                                      :event/type))
+                        last
+                        :event/type)))))))
 
 (defn- ^{:stratum 0} checkpointed?
   "True when anything is stored under `run-id`'s checkpoint directory. Not
@@ -306,11 +318,12 @@
    so its events never land beside the finished run's (archived) ones.
    The operator's resume launcher passes a fresh one on every retry.
 
-   A snapshot whose run is archived (or in the legacy layout) is not
-   resumed under its own id: it gets a fresh one, as a new attempt, and a
-   `--run-id` naming it is refused. Resumed in place, its events would go
-   to a live directory its readers do not read (see
-   `resumable-in-place?`). A `--run-id` naming another run that has a run
+   A snapshot whose run is archived (or in the legacy layout), or live
+   but ended (completed, failed or cancelled), is not resumed under its
+   own id: it gets a fresh one, as a new attempt, and a `--run-id` naming
+   it is refused. Resumed in place, its events would go to a live
+   directory its readers do not read, now or once the cleanup archives
+   it (see `resumable-in-place?`). A `--run-id` naming another run that has a run
    directory under `events-dir` or a checkpoint is refused: the attempt
    would write into that run."
   [events-dir workflow-id machine-snapshot run-id-opt]

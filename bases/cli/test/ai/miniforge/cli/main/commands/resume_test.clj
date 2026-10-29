@@ -468,6 +468,37 @@
             (is (= snapshot-id (:registered (resume-with snapshotted {}))))
             (is (= snapshot-id (:registered (resume-with snapshotted {:run-id (str snapshot-id)}))))))))))
 
+(deftest ^{:stratum 1} an-ended-live-run-resumes-as-a-new-attempt-test
+  (with-temp-events-dir
+    (fn [base-dir]
+      (with-redefs [sut/events-dir (.getPath ^java.io.File base-dir)]
+        (let [snapshot-id (random-uuid)
+              sink        {:config {:observability {:event-sinks [{:type :file :base-dir (str base-dir)
+                                                                     :ttl-ms Long/MAX_VALUE}]}}}
+              original    (es/create-event-stream sink)
+              month-ago   (- (System/currentTimeMillis) (* 30 24 60 60 1000))
+              snapshotted {:completed-phases [:plan]
+                           :phase-results {:plan {}}
+                           :machine-snapshot {:execution/id snapshot-id}}]
+          ;; A run that failed a month ago, still in live/.
+          (doseq [t [:workflow/started :workflow/failed]]
+            (es/publish! original (es/create-envelope original t snapshot-id (name t))))
+          (doseq [^java.io.File f (reverse (file-seq (io/file base-dir "live" (str snapshot-id))))]
+            (.setLastModified f month-ago))
+          (let [{:keys [registered]} (resume-with snapshotted {})
+                attempt (es/create-event-stream sink)]
+            (is (not= snapshot-id registered) "a new attempt, under a fresh id")
+            ;; The cleanup archives the original between the id choice and
+            ;; the attempt's first event.
+            (es/cleanup-stale-events! {:events-dir base-dir})
+            (is (.isDirectory (io/file base-dir "archived" (str snapshot-id))))
+            (es/publish! attempt (es/create-envelope attempt :workflow/started registered "resumed"))
+            (is (= [:workflow/started] (mapv :event/type (es/read-workflow-events-by-id base-dir registered)))
+                "readers of the attempt's id see its events")
+            (is (thrown-with-msg? clojure.lang.ExceptionInfo #"has ended or is archived"
+                                  (resume-with snapshotted {:run-id (str snapshot-id)}))
+                "a --run-id naming the ended run itself is refused")))))))
+
 (deftest ^{:stratum 1} read-event-file-reads-per-event-json-from-workflow-dir-test
   ;; Regression guard for the iter-20 resume bug. Before this fix,
   ;; read-event-file looked for a single {workflow-id}.edn file that
