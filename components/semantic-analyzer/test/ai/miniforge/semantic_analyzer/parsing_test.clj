@@ -36,17 +36,12 @@
       (is (= 1 (count result))))))
 
 (deftest ^{:stratum 0} parse-judge-response-invalid-test
-  (testing "returns empty for non-EDN response"
-    (is (= [] (sut/parse-judge-response "The code looks fine, no violations."))))
-
-  (testing "returns empty for nil"
-    (is (= [] (sut/parse-judge-response nil))))
-
-  (testing "returns empty for malformed EDN"
-    (is (= [] (sut/parse-judge-response "[{:line broken"))))
-
-  (testing "returns empty for non-vector EDN"
-    (is (= [] (sut/parse-judge-response "{:not \"a vector\"}")))))
+  (testing "an answer that is not an EDN vector is no answer (nil), never
+            an empty finding list"
+    (is (nil? (sut/parse-judge-response "The code looks fine, no violations.")))
+    (is (nil? (sut/parse-judge-response nil)))
+    (is (nil? (sut/parse-judge-response "[{:line broken")))
+    (is (nil? (sut/parse-judge-response "{:not \"a vector\"}")))))
 
 ;; ============================================================================
 ;; Violation canonicalization

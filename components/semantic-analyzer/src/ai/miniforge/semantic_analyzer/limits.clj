@@ -28,6 +28,10 @@
    Kept low to stay within per-rule timeout when using CLI backends."
   (get limits :max-files-per-rule 5))
 
+(def ^{:stratum 1} judge-answer-excerpt-chars
+  "How much of an unparseable judge answer a judge-failure message quotes."
+  (get limits :judge-answer-excerpt-chars 200))
+
 (def ^{:stratum 1} default-rule-timeout-ms
   "Maximum time to spend analyzing one rule before giving up.
    5 files × ~30s per CLI backend call = ~150s, so 300s gives headroom."

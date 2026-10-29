@@ -1,0 +1,11 @@
+{:semantic-analyzer/messages
+ {;; Judge failures — a violation standing in for a judgement the judge did
+  ;; not give. {detail} is the call's error, an answer excerpt, or the deadline.
+  :judge/call-failed
+  "The policy judge call failed, so this file was not judged: {detail}"
+
+  :judge/unparseable
+  "The policy judge's answer was not a list of findings, so this file was not judged: {detail}"
+
+  :judge/deadline-exceeded
+  "The policy judge reached its {detail} ms deadline before judging this file"}}
