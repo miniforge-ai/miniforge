@@ -104,6 +104,20 @@
   [events-dir]
   (mapv mtime (roots events-dir)))
 
+(defn ^{:stratum 1} count-before
+  "How many of `files` (in creation order) were recorded before `ms`."
+  [files ms]
+  (count (take-while #(< (file-ms %) ms) files)))
+
+(defn ^{:stratum 1} unread?
+  "True when event file `f` is not covered by `tracked` (see
+   `unseen-files`): no floor yet, or recorded at or after the floor under
+   a name not tracked. A file before the floor counts as covered."
+  [{:keys [names floor]} f]
+  (or (nil? floor)
+      (and (>= (file-ms f) floor)
+           (not (contains? names (file-name f))))))
+
 (defn ^{:stratum 1} read-ordered
   "Decode `files` and return their events in creation order: by recorded
    ms, then :event/sequence-number (files from one millisecond)."
@@ -116,21 +130,30 @@
 ;------------------------------------------------------------------------------ Layer 2
 
 (defn ^{:stratum 2} unseen-files
-  "[names files] for workflow directory `dir`: the names of all its event
-   files, and the event files whose names are not in `seen`, in creation
-   order. The sink names each file after its event, so a name read once
-   need not be read again; a file that turns up late is read whatever
-   its name. With no names yet (`seen` nil, a directory not listed
-   before), the files modified at or after `since-ms` are the unseen
-   ones."
-  ([dir seen]
-   (unseen-files dir seen 0))
-  ([dir seen since-ms]
-   (let [files (event-files dir)]
-     [(into #{} (map file-name) files)
-      (if seen
-        (filterv #(not (contains? seen (file-name %))) files)
-        (filterv #(>= (mtime %) since-ms) files))])))
+  "[tracked files rebuild?] for workflow directory `dir`: its event files
+   not covered by `tracked`, in creation order, and the tracking after
+   them. Tracking stays bounded for a long run: the names of the files
+   from the millisecond of the `keep-names`-th newest on, and a count of
+   the older ones. Should a file appear among the older ones later (a
+   delayed rename), that count grows; then all files come back with
+   rebuild? true, for the caller to start over. With no tracking yet
+   (nil), the files modified at or after `since-ms` are the unseen ones."
+  ([dir tracked keep-names]
+   (unseen-files dir tracked keep-names 0))
+  ([dir tracked keep-names since-ms]
+   (let [files    (event-files dir)
+         floor    (some-> (take-last keep-names files) first file-ms)
+         below    (if floor (count-before files floor) 0)
+         rebuild? (boolean (when-let [old-floor (:floor tracked)]
+                             (> (count-before files old-floor) (:below tracked))))]
+     [{:names (into #{} (map file-name) (drop below files))
+       :floor floor
+       :below below}
+      (cond
+        rebuild? (vec files)
+        tracked  (filterv (partial unread? tracked) files)
+        :else    (filterv #(>= (mtime %) since-ms) files))
+      rebuild?])))
 
 (defn ^{:stratum 2} active-dirs
   "{name dir} of the workflow directories modified at or after

@@ -107,6 +107,13 @@
    `create-event-stream`; merge over it to change a limit."
   stream/bounded-retention)
 
+(def ^{:stratum 0} compact-events
+  "`(compact-events events policy)`: the events of `events` (a vector in
+   publish order) that a retention policy such as `bounded-retention`
+   keeps, still in publish order. For a reader that bounds history it
+   loads from disk the way a bounded stream bounds its own. Pure."
+  stream/compact-events)
+
 (def ^{:stratum 0} prepare-current-publication
   "Prepare a supported current-write draft as [scope redacted-draft] or an anomaly.
    This validates chain v2, intervention v2, Spec snapshots, OPSV and workflow lifecycle drafts;

@@ -32,10 +32,17 @@
   (str (config/miniforge-home) "/events"))
 
 (def ^{:stratum 0} ^:private recent-dir-reads
-  "{dir-path {:names #{file-name} :events [event]}} for the workflow
+  "{dir-path {:tracked tracking :events [event]}} for the workflow
    directories `historical-events` read last, so a refresh reads only
    the event files added since."
   (atom {}))
+
+(def ^{:stratum 0} disk-retention
+  "What `historical-events` keeps of each workflow directory it reads:
+   the dashboard stream's own in-memory bound (every lifecycle event, the
+   newest health event per dependency, the newest 500 others). A deeper
+   history is read from disk per workflow, on demand."
+  es/bounded-retention)
 
 (def ^{:stratum 0} phase-lifecycle-types
   "Event types that carry phase classification data."
@@ -124,14 +131,20 @@
     (catch Exception _
       [])))
 
-(defn- ^{:stratum 0} read-dir
-  "[path read] for workflow directory `dir`: only the event files not
-   read before (per `reads`, see `recent-dir-reads`) are decoded."
-  [reads dir]
-  (let [path (str dir)
-        {:keys [names events] :or {events []}} (get reads path)
-        [names' files] (event-files/unseen-files dir names)]
-    [path {:names names' :events (into events (event-files/read-ordered files))}]))
+(defn- ^{:stratum 0} compact-into
+  "`events` plus the events of `files` (newer), compacted under `policy`.
+   The files are decoded a batch at a time, newest first, so a long run
+   is never held in full; a batch never splits a same-millisecond group,
+   and each older batch goes in front of what is kept, so compaction
+   sees publish order. Compacting newest-first keeps what compacting all
+   at once would: every lifecycle event, the newest others."
+  [policy events files]
+  (es/compact-events
+   (into events
+         (reduce (fn [kept batch] (es/compact-events (into batch kept) policy))
+                 []
+                 (event-files/newest-batches files (:max-events-per-workflow policy))))
+   policy))
 
 (defn ^{:stratum 0} wf-name-from-started
   "Extract a display name for a workflow from its started event."
@@ -202,6 +215,19 @@
   (or (nil? event-type) (= event-type (:event/type event))))
 
 ;------------------------------------------------------------------------------ Layer 1
+
+(defn- ^{:stratum 1} read-dir
+  "[path read] for workflow directory `dir`: only files not read before
+   (per `reads`, see `recent-dir-reads`) are decoded, and both the events
+   and the file tracking stay bounded by `policy`. A file that turns up
+   among those already passed rebuilds the directory's events from all
+   its files."
+  [reads policy dir]
+  (let [path (str dir)
+        {:keys [tracked events] :or {events []}} (get reads path)
+        [tracked' files rebuild?] (event-files/unseen-files dir tracked
+                                                            (:max-events-per-workflow policy))]
+    [path {:tracked tracked' :events (compact-into policy (if rebuild? [] events) files)}]))
 
 (def ^{:stratum 1} stale-threshold-ms
   "Workflows with no events for this long are considered stale (10 minutes)."
@@ -377,10 +403,10 @@
 
    Sources: legacy `<workflow-id>.edn` files, and the event-stream file
    sink's workflow directories. For one workflow: its archived, live or
-   older flat directory. Without a workflow-id: the
+   older flat directory, in full. Without a workflow-id: the
    `max-recent-workflows` most recently modified live/ and archived/
    directories, since the workflow list shows no more than that and the
-   archive scan covers the rest."
+   archive scan covers the rest, each kept within `disk-retention`."
   [workflow-id]
   (if workflow-id
     (into (or (read-event-file (workflow-event-file workflow-id)) [])
@@ -388,7 +414,7 @@
     (let [edn-file? #(str/ends-with? (.getName ^java.io.File %) ".edn")
           events-dir (io/file events-dir-path)
           reads (into {}
-                      (map (partial read-dir @recent-dir-reads))
+                      (map (partial read-dir @recent-dir-reads disk-retention))
                       (event-files/recent-dirs events-dir-path max-recent-workflows))]
       (reset! recent-dir-reads reads)
       (if (.isDirectory events-dir)
