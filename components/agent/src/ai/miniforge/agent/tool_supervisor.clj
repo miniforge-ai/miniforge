@@ -24,61 +24,41 @@
 
    Architecture:
    - evaluate-tool-use: core policy function (pure, no side effects)
-   - meta-evaluate:     semantic LLM-powered quality/relevance check
    - hook-eval-stdin!:  CLI entry point — reads Claude PreToolUse JSON from
                         stdin, evaluates, writes decision to stdout
 
-   Layered evaluation:
-   1. Regex guardrails (fast, cheap) — defense-in-depth
-   2. Meta-evaluator (LLM call) — quality/relevance judgment
-   Container sandbox handles safety; supervision handles quality."
+   The policy data is config/agent/tool-policy.edn."
   (:require
    [cheshire.core :as json]
-   [clojure.string :as str]
-   [ai.miniforge.event-stream.interface :as events]
-   [ai.miniforge.llm.interface :as llm]
-   [ai.miniforge.agent.meta-evaluator :as meta-eval])
+   [clojure.edn :as edn]
+   [clojure.java.io :as io]
+   [ai.miniforge.event-stream.interface :as events])
   (:import
    [java.io PushbackReader]))
 
 ;------------------------------------------------------------------------------ Layer 0
 
+;; Policy data
+(def ^{:stratum 0} tool-policy
+  "The tool policy, read from the classpath resource
+   config/agent/tool-policy.edn on first use, with its
+   :bash/deny-patterns compiled to regexes."
+  (delay (-> (io/resource "config/agent/tool-policy.edn")
+             slurp
+             edn/read-string
+             (update :bash/deny-patterns #(mapv re-pattern %)))))
+
 ;; Bash command policy
-(def ^{:stratum 0} dangerous-patterns
-  "Regex patterns for commands that should be denied.
-   These are destructive or exfiltration-risk commands."
-  [#"rm\s+-rf\s+/"
-   #"rm\s+-rf\s+~"
-   #"rm\s+-rf\s+\*"
-   #"mkfs\b"
-   #"dd\s+.*of=/dev/"
-   #"chmod\s+-R\s+777\s+/"
-   #"chown\s+-R\s+.*\s+/"
-   #">\s*/dev/sd"
-   #"curl\s+.*\|\s*sh"
-   #"curl\s+.*\|\s*bash"
-   #"wget\s+.*\|\s*sh"
-   #"wget\s+.*\|\s*bash"
-   #"eval\s+.*\$\("
-   #":()\s*\{\s*:\|:\s*&\s*\}\s*;"  ;; fork bomb
-   #"shutdown\b"
-   #"reboot\b"
-   #"init\s+0"
-   #"halt\b"
-   #"poweroff\b"])
+(defn ^{:stratum 0} evaluate-bash-command
+  "Evaluate a Bash command against `deny-patterns`.
 
-;------------------------------------------------------------------------------ Layer 1.5
-;; Semantic meta-evaluation (LLM-powered quality/relevance check)
-(defn ^{:stratum 0} trivially-safe-tool?
-  "Tools that are always on-task and never need semantic review."
-  [tool-name]
-  (contains? #{"Read" "Glob" "Grep" "WebSearch" "WebFetch" "LS"
-               "mcp__context__context_read"
-               "mcp__context__context_grep"
-               "mcp__context__context_glob"}
-             tool-name))
+   Returns {:decision \"allow\"} or {:decision \"deny\" :reason string}."
+  [deny-patterns command]
+  (if-let [pattern (some #(when (re-find % (str command)) %) deny-patterns)]
+    {:decision "deny"
+     :reason (str "Command matches dangerous pattern: " pattern)}
+    {:decision "allow"}))
 
-;------------------------------------------------------------------------------ Layer 1.7
 ;; Event emission
 (defn ^{:stratum 0} emit-tool-use-event!
   "Emit a tool-use-evaluated event to the event stream (if available).
@@ -87,14 +67,10 @@
   [tool-name result & [{:keys [event-stream workflow-id phase]}]]
   (try
     (when (and event-stream workflow-id)
-      (let [meta-eval (:meta-eval result)
-            event (events/tool-use-evaluated
+      (let [event (events/tool-use-evaluated
                     event-stream workflow-id tool-name
                     (:decision result)
                     (cond-> {}
-                      (:reasoning meta-eval) (assoc :reasoning (:reasoning meta-eval))
-                      (:meta-eval? meta-eval) (assoc :meta-eval? true)
-                      (:confidence meta-eval) (assoc :confidence (:confidence meta-eval))
                       phase (assoc :phase phase)))]
         (events/publish! event-stream event)))
     (catch Exception _e
@@ -114,34 +90,8 @@
 
 ;------------------------------------------------------------------------------ Layer 1
 
-(defn ^{:stratum 1} matches-dangerous-pattern?
-  "Check if a command matches any dangerous pattern."
-  [command]
-  (some #(re-find % command) dangerous-patterns))
-
-;------------------------------------------------------------------------------ Layer 2
-
-(defn ^{:stratum 2} evaluate-bash-command
-  "Evaluate a Bash command against policy.
-
-   Returns {:decision \"allow\"} or {:decision \"deny\" :reason string}."
-  [command]
-  (cond
-    (str/blank? command)
-    {:decision "allow"}
-
-    (matches-dangerous-pattern? command)
-    {:decision "deny"
-     :reason (str "Command matches dangerous pattern: "
-                  (first (filter #(re-find % command) dangerous-patterns)))}
-
-    :else
-    {:decision "allow"}))
-
-;------------------------------------------------------------------------------ Layer 3
-
 ;; Core evaluation function
-(defn ^{:stratum 3} evaluate-tool-use
+(defn ^{:stratum 1} evaluate-tool-use
   "Evaluate a tool use request against policy.
 
    Returns {:decision \"allow\"} or {:decision \"deny\" :reason string}.
@@ -167,67 +117,18 @@
 
     ;; Bash: evaluate command against policy
     "Bash"
-    (evaluate-bash-command (:command tool-input))
+    (evaluate-bash-command (:bash/deny-patterns @tool-policy) (:command tool-input))
 
     ;; Default: allow (permissive — only deny known-dangerous)
     {:decision "allow"}))
 
-;------------------------------------------------------------------------------ Layer 4
+;------------------------------------------------------------------------------ Layer 2
 
-(defn ^{:stratum 4} evaluate-with-meta
-  "Two-layer evaluation: regex guardrails first, then semantic LLM check.
-
-   Arguments:
-     tool-name  - Tool name string
-     tool-input - Tool input map (keyword keys)
-     opts       - Map with :llm-client, :task-context, :phase
-
-   Returns {:decision \"allow\"|\"deny\" :reason string? :meta-eval map?}
-
-   Layer 1 (regex) denials are final. Layer 2 (meta-eval) only runs for
-   non-trivial tools that passed Layer 1."
-  [tool-name tool-input opts]
-  (let [regex-result (evaluate-tool-use tool-name tool-input)]
-    (cond
-      ;; Layer 1 denied — don't override
-      (= "deny" (:decision regex-result))
-      regex-result
-
-      ;; Trivially safe tools — skip LLM call
-      (trivially-safe-tool? tool-name)
-      regex-result
-
-      ;; No LLM client — regex only
-      (nil? (:llm-client opts))
-      regex-result
-
-      ;; Layer 2: meta-evaluator LLM call
-      :else
-      (let [eval-result (meta-eval/evaluate
-                         {:tool-name tool-name
-                          :tool-input tool-input
-                          :task-context (:task-context opts)
-                          :phase (:phase opts)}
-                         {:llm-client (:llm-client opts)})
-            decision (:decision eval-result)]
-        (if (= :deny decision)
-          {:decision "deny"
-           :reason (:reasoning eval-result)
-           :meta-eval eval-result}
-          {:decision "allow"
-           :meta-eval eval-result})))))
-
-;------------------------------------------------------------------------------ Layer 5
-
-(defn ^{:stratum 5} hook-eval-stdin!
+(defn ^{:stratum 2} hook-eval-stdin!
   "CLI entry point for `miniforge hook-eval`.
 
    Reads Claude PreToolUse JSON from stdin:
      {\"tool_name\": \"Bash\", \"tool_input\": {\"command\": \"ls\"}}
-
-   Optionally includes meta-eval context:
-     {\"tool_name\": \"Bash\", \"tool_input\": {...},
-      \"meta_eval\": {\"task_context\": \"...\", \"phase\": \"implement\"}}
 
    Writes Claude hook response to stdout:
      {} for allow (no decision: Claude's normal permission flow applies)
@@ -245,19 +146,7 @@
           tool-name (:tool_name input)
           tool-input (get input :tool_input {})
           tool-input-kw (into {} (map (fn [[k v]] [(keyword k) v]) tool-input))
-          meta-eval-config (:meta_eval input)
-          result (if meta-eval-config
-                   ;; Meta-eval enabled: two-layer evaluation
-                   (let [llm-client (when-let [backend (keyword (get meta-eval-config :backend "claude"))]
-                                      (try
-                                        (llm/create-client {:backend backend})
-                                        (catch Exception _e nil)))]
-                     (evaluate-with-meta tool-name tool-input-kw
-                                         {:llm-client llm-client
-                                          :task-context (:task_context meta-eval-config)
-                                          :phase (some-> (:phase meta-eval-config) keyword)}))
-                   ;; No meta-eval: regex only
-                   (evaluate-tool-use tool-name tool-input-kw))
+          result (evaluate-tool-use tool-name tool-input-kw)
           ;; Emit event (no-ops if no event stream bound)
           _ (emit-tool-use-event! tool-name result)]
       (if (= "deny" (:decision result))
