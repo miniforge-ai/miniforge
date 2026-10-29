@@ -90,14 +90,17 @@
 (defn ^{:stratum 0} backend-for-model
   "Look up the backend keyword for a model-id string.
    Returns :claude, :codex, :gemini, :ollama, etc. based on the model catalog.
-   Falls back to :codex for unknown models."
-  [model-id]
-  (or (->> registry/model-registry
-           vals
-           (filter #(= (:model-id %) model-id))
-           first
-           :backend)
-      :codex))
+   For a model-id the catalog does not list, returns `not-found`, which
+   defaults to :codex. Pass nil as `not-found` to tell an unlisted model
+   apart from a listed one."
+  ([model-id] (backend-for-model model-id :codex))
+  ([model-id not-found]
+   (or (->> registry/model-registry
+            vals
+            (filter #(= (:model-id %) model-id))
+            first
+            :backend)
+       not-found)))
 
 (defn ^{:stratum 0} client-backend
   "Return the backend keyword configured for an LLM client."

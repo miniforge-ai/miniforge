@@ -1011,7 +1011,8 @@
    timestamp-prefixed filename, parsed as transit-JSON and de-prefixed.
    Arg `dir` is a java.io.File or String path. Returns a vector of
    parsed event maps, or nil when the directory does not exist.
-   Unparseable files are silently dropped."
+   Unreadable files are skipped; their paths are in the vector's
+   metadata under `:event-stream/unreadable-files`."
   reader/read-workflow-events)
 
 (def ^{:stratum 0} stored-workflow-ids
@@ -1028,7 +1029,8 @@
    archived → live → legacy layouts and reading the first that exists.
    Args: base-dir, workflow-id (UUID, keyword, or string). Returns a
    vector of parsed event maps, or nil when no layout contains the
-   workflow."
+   workflow. Unreadable files are skipped; their paths are in the
+   vector's metadata under `:event-stream/unreadable-files`."
   reader/read-workflow-events-by-id)
 
 ;; ────────────────────────────────────────────────────────────────────────────
