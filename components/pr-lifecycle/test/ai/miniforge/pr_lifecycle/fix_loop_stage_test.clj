@@ -236,3 +236,23 @@
           (is (= "d.txt" (git! dir "diff" "--cached" "--name-only")))
           (is (not (fs/exists? (fs/path dir ".git" "index.lock")))))
         (finally (fs/delete-tree dir))))))
+
+(deftest ^{:stratum 2} stage-files-stays-in-the-worktree-when-git-dir-names-another-repo-test
+  (testing "GIT_DIR and GIT_WORK_TREE bound to another repository do not move the staging there"
+    (let [dir   (repo-with-unrelated-change)
+          other (repo-with-unrelated-change)]
+      (try
+        (spit (str (fs/path dir "a.txt")) "a2\n")
+        (let [env    (assoc (into {} (System/getenv))
+                            "GIT_DIR" (str (fs/path other ".git"))
+                            "GIT_WORK_TREE" other)
+              result (fix-stage/stage-files! dir [{:path "a.txt" :action :modify}] env)]
+          (is (nil? (:error result)))
+          (is (= (str (fs/canonicalize (fs/path dir ".git" "index")))
+                 (str (fs/canonicalize (:index result)))))
+          (is (fs/exists? (fs/path dir ".git" "index.lock")))
+          (is (not (fs/exists? (fs/path other ".git" "index.lock"))))
+          (fix-stage/discard-index! result))
+        (finally
+          (fs/delete-tree dir)
+          (fs/delete-tree other))))))
