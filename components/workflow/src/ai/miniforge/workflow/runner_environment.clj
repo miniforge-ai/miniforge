@@ -285,7 +285,12 @@
                                   :data {:phase phase :reason hold}}))
               result (dag/persist-workspace! executor env-id
                                              (cond-> (-> (persist-opts context phase env-id)
-                                                         (assoc :workdir workdir))
+                                                         ;; A governed capsule has its own
+                                                         ;; checkout (/workspace by default);
+                                                         ;; the host worktree path does not
+                                                         ;; exist inside it.
+                                                         (assoc :workdir (or (get context :execution/capsule-workdir)
+                                                                             workdir)))
                                                hold (assoc :push? false)))
               data   (when (dag/ok? result) (dag/unwrap result))]
           (cond

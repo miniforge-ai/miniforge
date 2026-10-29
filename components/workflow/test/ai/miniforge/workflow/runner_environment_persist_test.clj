@@ -115,3 +115,18 @@
          {:execution/current-phase :plan
           :execution/phase-results {:implement {:artifact {:code/base-refs ["task-base"]}}}})
         (is (= ["task-base"] (:execution/task-base-refs @seen)))))))
+
+(deftest ^{:stratum 1} governed-persistence-runs-in-the-capsule-checkout
+  (testing "the capsule executor is given the capsule's checkout, not the host worktree path"
+    (let [opts-seen (atom nil)]
+      (with-redefs [env/env-logger (capturing-logger (atom []))
+                    gate/outgoing-secrets (constantly {:passed? true})
+                    dag/persist-workspace! (fn [_ _ opts] (reset! opts-seen opts)
+                                             (result/ok {:persisted? false :no-changes? true}))]
+        (env/persist-workspace-at-phase-boundary!
+         {:execution/executor ::capsule :execution/environment-id (random-uuid)
+          :execution/mode :governed
+          :execution/worktree-path "/host/worktrees/task-1"
+          :execution/capsule-workdir "/workspace"}
+         {:execution/current-phase :implement})
+        (is (= "/workspace" (:workdir @opts-seen)))))))
