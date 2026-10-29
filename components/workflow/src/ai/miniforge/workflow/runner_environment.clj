@@ -31,7 +31,8 @@
    [ai.miniforge.workflow.environment-records :as records]
    [ai.miniforge.workflow.governed-environment :as governed]
    [ai.miniforge.workflow.messages :as messages]
-   [ai.miniforge.workflow.runner-defaults :as defaults]))
+   [ai.miniforge.workflow.runner-defaults :as defaults]
+   [clojure.string :as str]))
 
 ;------------------------------------------------------------------------------ Layer 0
 
@@ -46,6 +47,7 @@
    :select-exec     dag/select-executor
    :acquire-env!    dag/acquire-environment!
    :executor-type   dag/executor-type
+   :available?      dag/executor-available?
    :result-ok?      dag/ok?
    :result-unwrap   dag/unwrap})
 
@@ -61,6 +63,16 @@
                        {:docker {:image (defaults/default-docker-image)}}))
     {:worktree {}}))
 
+(defn ^{:stratum 0} with-runtime-config
+  "Merge the caller's container-runtime selection config (the CLI sets
+   :runtime-kind from MINIFORGE_RUNTIME) into the registry's :docker slot.
+   Without an explicit kind the dag-executor auto-probes the host runtime
+   (Podman first, then Docker)."
+  [registry-config runtime-config]
+  (cond-> registry-config
+    (and (:docker registry-config) (seq runtime-config))
+    (update :docker merge runtime-config)))
+
 (defn ^{:stratum 0} select-capsule-executor
   "Select executor for mode; rejects worktree fallback in governed mode (N11 §7.4)."
   [registry mode {:keys [select-exec executor-type]}]
@@ -70,6 +82,28 @@
     (when-not (and (= :governed mode) raw (= :worktree (executor-type raw)))
       raw)))
 
+(defn ^{:stratum 0} runtime-selection-failure
+  "The container-runtime selection error behind an empty capsule slot, or
+   nil. A registry slot whose runtime selection failed holds an executor
+   of type :unavailable; its availability result carries the selector's
+   error ({:code :message :data}). Returns that error with :detail added:
+   the message followed by each runtime's reason as `kind: reason` (the
+   explicit kind's, or every probed kind's after an auto-probe)."
+  [registry {:keys [executor-type available?]}]
+  (when-let [error (when (and (map? registry) available?)
+                     (some (fn [exec]
+                             (when (= :unavailable (executor-type exec))
+                               (get-in (available? exec) [:data :error])))
+                           (vals registry)))]
+    (let [data    (:data error)
+          reasons (->> (get data :probed [data])
+                       (keep (fn [{:keys [kind reason]}]
+                               (when (and kind reason)
+                                 (str (name kind) ": " reason))))
+                       (str/join "; "))]
+      (assoc error :detail (cond-> (str (:message error))
+                             (seq reasons) (str " (" reasons ")"))))))
+
 (defn ^{:stratum 0} check-executor-for-mode
   "Validate executor / mode pairing per the N11 §7.4 invariant.
 
@@ -77,17 +111,29 @@
    anomaly when `:governed` mode was requested but no capsule executor
    was supplied. The anomaly's `:anomaly/data` carries `:mode` and a
    `:hint` string for surface code that wants to suggest remediation.
+   Given the `selection-failure` that left the capsule slot empty (see
+   `runtime-selection-failure`), the anomaly names it, and its data
+   carries it under `:runtime-selection`.
 
    This is the canonical, anomaly-returning entry point. Boundary
    sites that need to escalate to a thrown error (e.g.
    `acquire-execution-environment!`) inline a `response/throw-anomaly!`
    at the call site rather than calling a separate thrower."
-  [executor mode]
-  (when (and (nil? executor) (= :governed mode))
-    (anomaly/anomaly :unavailable
-                     (messages/t :governed/no-capsule)
-                     {:mode :governed
-                      :hint (messages/t :governed/no-capsule-hint)})))
+  ([executor mode]
+   (check-executor-for-mode executor mode nil))
+  ([executor mode selection-failure]
+   (when (and (nil? executor) (= :governed mode))
+     (if selection-failure
+       (anomaly/anomaly :unavailable
+                        (messages/t :governed/runtime-selection-failed
+                                    {:detail (:detail selection-failure)})
+                        {:mode :governed
+                         :hint (messages/t :governed/runtime-selection-hint)
+                         :runtime-selection (dissoc selection-failure :detail)})
+       (anomaly/anomaly :unavailable
+                        (messages/t :governed/no-capsule)
+                        {:mode :governed
+                         :hint (messages/t :governed/no-capsule-hint)})))))
 
 ;; Environment record construction
 (def ^{:stratum 0} build-env-record records/build)
@@ -237,11 +283,12 @@
    rely on try+ exception flow; prefer anomaly-returning helpers such as
    `check-executor-for-mode` for non-boundary branching."
   [workflow-id {:keys [repo-url branch repo-path execution-mode executor-config
-                       resume-workspace]}]
+                       runtime-config resume-workspace]}]
   (let [mode (get {:governed :governed} execution-mode :local)]
     (try
       (let [fns      (dag-executor-fns)
-            config   (registry-config-for-mode mode executor-config)
+            config   (with-runtime-config (registry-config-for-mode mode executor-config)
+                                          runtime-config)
             registry ((:create-registry fns) config)
             executor (select-capsule-executor registry mode fns)
             branch   (or (:branch resume-workspace) branch)
@@ -249,15 +296,18 @@
                          repo-url (assoc :repo-url repo-url)
                          branch   (assoc :branch branch)
                          repo-path (assoc :repo-path repo-path))]
-        (when-let [a (check-executor-for-mode executor mode)]
+        (when-let [a (check-executor-for-mode
+                      executor mode
+                      (when-not executor (runtime-selection-failure registry fns)))]
           ;; Boundary throw: acquire-execution-environment! is the
           ;; runner's escalation point for governed-mode unavailability.
           ;; The slingshot shape preserves the contract that legacy
           ;; try+ callers above this layer rely on.
           (response/throw-anomaly! :anomalies.executor/unavailable
                                    (:anomaly/message a)
-                                   {:anomaly.executor/mode (get-in a [:anomaly/data :mode])
-                                    :hint (get-in a [:anomaly/data :hint])}))
+                                   (merge {:anomaly.executor/mode (get-in a [:anomaly/data :mode])
+                                           :hint (get-in a [:anomaly/data :hint])}
+                                          (select-keys (:anomaly/data a) [:runtime-selection]))))
         (when (= :local mode)
           (restore-local-workspace-checkpoint! executor repo-path resume-workspace))
         (when executor
