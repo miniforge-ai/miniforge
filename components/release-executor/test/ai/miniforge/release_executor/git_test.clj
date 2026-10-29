@@ -24,7 +24,7 @@
    [babashka.fs :as fs]
    [babashka.process :as process]
    [clojure.string :as str]
-   [clojure.test :refer [deftest is testing]]
+   [clojure.test :refer [deftest is testing use-fixtures]]
    [ai.miniforge.release-executor.core :as core]
    [ai.miniforge.release-executor.git :as git]
    [ai.miniforge.release-executor.push-auth :as push-auth]
@@ -173,7 +173,7 @@
                   the token only in the retry's environment")
       (let [pushes (atom [])
             shells (atom [])
-            r      (with-redefs [push-auth/inherited-env-config? (constantly false)
+            r      (with-redefs [shell/parent-env (constantly {})
                                  shell/run-bounded
                                  (fn [args opts]
                                    (swap! pushes conj {:args args :opts opts})
@@ -224,7 +224,7 @@
 (deftest ^{:stratum 0} push-https-fallback-origin-kinds-test
   (let [retry-env (fn [origin token]
                     (let [pushes (atom [])]
-                      (with-redefs [push-auth/inherited-env-config? (constantly false)
+                      (with-redefs [shell/parent-env (constantly {})
                                     shell/run-bounded (fn [_args opts]
                                                         (swap! pushes conj opts)
                                                         {:exit 1 :out "" :err "denied"})
@@ -245,7 +245,7 @@
       (is (= 1 (:pushes (retry-env "git@github.com:o/r.git" nil))))))
   (testing "git config already in the environment: no retry, reason given"
     (let [pushes (atom 0)
-          r      (with-redefs [push-auth/inherited-env-config? (constantly true)
+          r      (with-redefs [shell/parent-env (constantly {"GIT_CONFIG_COUNT" "1"})
                                shell/run-bounded (fn [_args _opts]
                                                    (swap! pushes inc)
                                                    {:exit 1 :out "" :err "denied"})
@@ -286,6 +286,26 @@
       (is (core/failed? r))
       (is (= :missing-worktree-path (:type (:failure r)))
           "reports the typed missing-worktree-path failure"))))
+
+(defn- ^{:stratum 0} isolate-git
+  "Fixture: run every git child of a test — process/shell calls and
+   shell/run-bounded children — from the test JVM's environment with all
+   GIT_* variables removed (hook leaks such as GIT_DIR, GIT_CONFIG_*,
+   GIT_SSH_COMMAND, tracing) and global/system git config ignored, so the
+   real-git tests behave the same on any machine. Tests that need a
+   variable set it through shell/parent-env."
+  [f]
+  (let [env    (-> (into {} (remove #(str/starts-with? (key %) "GIT_")) (System/getenv))
+                   (assoc "GIT_CONFIG_GLOBAL" "/dev/null" "GIT_CONFIG_NOSYSTEM" "1"))
+        shell* process/shell]
+    (with-redefs [shell/parent-env (constantly env)
+                  process/shell    (fn [opts & args]
+                                     (apply shell*
+                                            (-> opts
+                                                (dissoc :extra-env)
+                                                (assoc :env (merge env (:extra-env opts))))
+                                            args))]
+      (f))))
 
 ;------------------------------------------------------------------------------ Layer 1
 
@@ -407,8 +427,7 @@
           ;; reaches github.com.
           (sh! dir "git" "config" "core.sshCommand" "false")
           (sh! dir "git" "config" "http.proxy" (str "http://127.0.0.1:" (.getLocalPort proxy)))
-          (with-redefs [shell/default-timeout-ms 2000
-                        push-auth/inherited-env-config? (constantly false)]
+          (with-redefs [shell/default-timeout-ms 2000]
             (let [push (future (git/push-branch! dir "release/token" token))]
               (with-open [_conn (.accept proxy)]
                 (is (not (leaked? config))
@@ -460,8 +479,7 @@
             (doseq [args setup] (apply sh! dir "git" args))
             (sh! dir "git" "config" (str "http." h ".extraHeader") "Authorization: Basic OLD")
             (let [envs     (atom [])
-                  r        (with-redefs [push-auth/inherited-env-config? (constantly false)
-                                         shell/run-bounded (fn [_args opts]
+                  r        (with-redefs [shell/run-bounded (fn [_args opts]
                                                              (swap! envs conj (:extra-env opts))
                                                              {:exit 1 :out "" :err "denied"})]
                              (git/push-branch! dir "main" "tok"))
@@ -506,3 +524,36 @@
                (:output (git/exec! remote ["git" "for-each-ref" "--format=%(refname)"])))
             "nothing was pushed to review/release/x")
         (finally (fs/delete-tree dir))))))
+
+;;------------------------------------------- no git tracing with a credential
+(deftest ^{:stratum 2} credentialed-push-drops-trace-env-test
+  (testing "a push carrying the token starts without git's tracing variables,
+            even when the parent environment sets them"
+    (let [dir    (fs/create-temp-dir {:prefix "git-host-mode-trace-"})
+          wt     (fs/path dir "wt")
+          dump   (str (fs/path dir "child-env"))
+          fake   (str (fs/path dir "receive-pack"))
+          log    (str (fs/path dir "trace.log"))
+          traced {"GIT_TRACE" log "GIT_TRACE_CURL" log "GIT_TRACE_PACKET" log
+                  "GIT_TRACE2_EVENT" log "GIT_TRACE_REDACT" "0" "GIT_CURL_VERBOSE" "1"}
+          seen   #(set (keep (fn [line] (some (fn [v] (when (str/starts-with? line (str v "=")) v))
+                                              (keys traced)))
+                             (str/split-lines (slurp dump))))]
+      (try
+        (fs/create-dirs wt)
+        (init-repo! wt)
+        (sh! dir "git" "init" "-q" "--bare" "remote.git")
+        ;; receive-pack stand-in: record the push child's environment, refuse.
+        (spit fake (str "#!/bin/sh\nenv > " dump "\nexit 1\n"))
+        (fs/set-posix-file-permissions fake "rwx------")
+        (sh! wt "git" "remote" "add" "origin" (str (fs/path dir "remote.git")))
+        (sh! wt "git" "config" "remote.origin.receivepack" fake)
+        (sh! wt "git" "checkout" "-q" "-b" "release/t")
+        (with-redefs [shell/parent-env (constantly (merge (shell/parent-env) traced))]
+          (git/push-branch! wt "release/t")
+          (is (= (set (keys traced)) (seen)) "control: without a token they reach the child")
+          (git/push-branch! wt "release/t" "tok")
+          (is (empty? (seen)) "with the token none of them reach the child"))
+        (finally (fs/delete-tree dir))))))
+
+(use-fixtures :each isolate-git)
