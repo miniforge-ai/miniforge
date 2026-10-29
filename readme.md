@@ -222,10 +222,14 @@ loop — the PR monitor will autonomously address reviewer feedback after releas
 # LLM backend: OpenCode is the default provider/auth wrapper.
 opencode auth login
 
-# Tune execution
-export MINIFORGE_MAX_ITERATIONS=50     # max phase retries
-export MINIFORGE_MAX_TOKENS=150000     # token budget per workflow
+# Pick the backend and the default models
+mf config backend opencode
+export MINIFORGE_AGENT_THINKING_MODEL=anthropic/claude-opus-4-6     # planner, architect
+export MINIFORGE_AGENT_EXECUTION_MODEL=anthropic/claude-sonnet-4-6  # other roles
 ```
+
+There is no environment variable for token budgets or retry limits; phase
+retries are set per phase in the workflow definition.
 
 See [Configuration Guide](docs/user-guide/configuration.md) for all options.
 
