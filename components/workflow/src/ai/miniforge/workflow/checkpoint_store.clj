@@ -274,7 +274,9 @@
    none under its id: a resume under a new run id (a retried attempt, a
    rewind) can then itself be resumed with them.
 
-   Returns the written paths, nil for a context with no run id, or —
+   Returns the written paths (with `:checkpoint/phase` and
+   `:checkpoint/phase-path` when a phase checkpoint was written), nil for
+   a context with no run id, or —
    when a read or write fails — an `:unavailable` anomaly naming the
    run, phase and root; an existing manifest that would merge into an
    invalid one is an `:invalid-input` anomaly, with nothing written. A failed write is reported, not thrown: the
@@ -322,8 +324,12 @@
                 (append-gate-history! checkpoint-root workflow-run-id phase-name phase-result ctx))
               (write-edn-atomically! snapshot-path snapshot)
               (write-edn-atomically! manifest-path merged-manifest)
-              {:checkpoint/root checkpoint-root
-               :checkpoint/machine-snapshot-path snapshot-path
-               :checkpoint/manifest-path manifest-path})))
+              (cond-> {:checkpoint/root checkpoint-root
+                       :checkpoint/machine-snapshot-path snapshot-path
+                       :checkpoint/manifest-path manifest-path}
+                (and phase-name phase-result)
+                (assoc :checkpoint/phase phase-name
+                       :checkpoint/phase-path (checkpoint-paths/phase-checkpoint-path
+                                               checkpoint-root workflow-run-id phase-name))))))
         (catch Exception e
           (write-failure checkpoint-root workflow-run-id phase-name e))))))
