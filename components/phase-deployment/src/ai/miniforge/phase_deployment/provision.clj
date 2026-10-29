@@ -24,6 +24,7 @@
             [ai.miniforge.phase-deployment.policy :as policy]
             [ai.miniforge.phase-deployment.shell :as shell]
             [ai.miniforge.phase.interface :as phase]
+            [ai.miniforge.phase.interface.gate :as phase-gate]
             [ai.miniforge.schema.interface :as schema]))
 
 ;------------------------------------------------------------------------------ Layer 0
@@ -152,11 +153,14 @@
 (defn ^{:stratum 1} leave-provision
   "After gates pass: execute pulumi up and capture outputs.
 
-   Only applies if :enter succeeded and gates passed."
+   Only applies if :enter succeeded and gates passed. A gate denial or an
+   unacknowledged gate decision is read from the phase map, not :status:
+   the workflow's gate validation leaves :status as :enter set it."
   [ctx]
   (let [phase-status (get-in ctx [:phase :status])
         logger       (get-logger ctx)]
     (if (or (= :failed phase-status)
+            (phase-gate/gate-failed? (:phase ctx))
             (= :error (get-in ctx [:phase :result :status])))
       (assoc-in ctx [:phase :status] :failed)
       (let [config    (get-in ctx [:phase :provision-config])
