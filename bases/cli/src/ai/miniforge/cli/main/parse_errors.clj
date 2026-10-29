@@ -16,14 +16,19 @@
 ;; See the License for the specific language governing permissions and
 ;; limitations under the License.
 (ns ai.miniforge.cli.main.parse-errors
-  "How `-main` answers babashka.cli dispatch errors. An unknown command
-   prints the error and the commands available there on stderr and exits
-   2. A command group named without a subcommand (`mf config`,
-   `mf fleet --help`) lists its subcommands.
+  "How `-main` answers babashka.cli dispatch errors. An unknown command,
+   or a bad, unknown or missing option, prints the error and that
+   command's usage (or its subcommands) on stderr and exits 2. A command
+   group named without a subcommand (`mf config`, `mf fleet --help`)
+   lists its subcommands.
 
-   Layer 0: the unknown-command report and the group listing
-   Layer 1: the help-only handler wrapper"
+   Layer 0: option and usage-line spelling, the error-fn a dispatch entry
+            carries, the unknown-command report and the group listing
+   Layer 1: the dispatch-entry guard, the help-only handler wrapper, the
+            error line and the usage block
+   Layer 2: the parse-error handler `-main` calls"
   (:require
+   [babashka.cli :as cli]
    [clojure.string :as str]
    [ai.miniforge.cli.app-config :as app-config]
    [ai.miniforge.cli.main.commands.shared :as shared]
@@ -31,6 +36,28 @@
    [ai.miniforge.cli.messages :as messages]))
 
 ;------------------------------------------------------------------------------ Layer 0
+
+(defn ^{:stratum 0} option-flag
+  "The command-line spelling of option key `k`: `--port`, or `-p` for a
+   one-letter key."
+  [k]
+  (str (if (= 1 (count (name k))) "-" "--") (name k)))
+
+(defn ^{:stratum 0} usage-line
+  "`mf <cmds...> <positional>... [options]` for one command."
+  [cmds positional]
+  (apply app-config/command-string
+         (concat cmds
+                 (map #(str "<" (name %) ">") positional)
+                 ["[options]"])))
+
+(defn- ^{:stratum 0} rethrow-with-command
+  "babashka.cli `:error-fn` for the dispatch entry at `cmds`: throw the
+   parse error with the command path and positional keys attached, so the
+   handler can print that command's usage."
+  [cmds positional]
+  (fn [{:keys [msg] :as data}]
+    (throw (ex-info (str msg) (assoc data :dispatch cmds :positional positional)))))
 
 (defn ^{:stratum 0} handle-unknown-command!
   "Report an unrecognized command on stderr, list the commands available
@@ -75,6 +102,12 @@
 
 ;------------------------------------------------------------------------------ Layer 1
 
+(defn ^{:stratum 1} guard-entry
+  "Prepare one dispatch-table entry for babashka.cli: a parse error names
+   the entry's command, so the handler can print that command's usage."
+  [{:keys [cmds args->opts] :as entry}]
+  (assoc entry :error-fn (rethrow-with-command cmds args->opts)))
+
 (defn ^{:stratum 1} help-unless-unknown
   "Wrap `help-fn`, the handler of an entry that only prints help (the bare
    binary, a command group). babashka.cli hands such an entry any word
@@ -84,3 +117,36 @@
     (if-let [wrong-input (first args)]
       (handle-unknown-command! {:wrong-input wrong-input :dispatch dispatch})
       (help-fn m))))
+
+(defn ^{:stratum 1} error-message
+  "One line naming what was wrong with the command line."
+  [{:keys [cause option msg]}]
+  (let [flag (some-> option option-flag)]
+    (cond
+      (nil? flag)          (str msg)
+      (= :restrict cause)  (messages/t :main/unknown-option {:option flag})
+      (= :require cause)   (messages/t :main/missing-option {:option flag})
+      :else                (messages/t :main/invalid-option {:option flag :message msg}))))
+
+(defn ^{:stratum 1} print-usage!
+  "Print the usage line and option table of the command a guarded parse
+   error names."
+  [{:keys [dispatch positional spec]}]
+  (println (messages/t :main/usage {:line (usage-line dispatch positional)}))
+  (when (seq spec)
+    (println (messages/t :main/options))
+    (println (cli/format-opts {:spec spec}))))
+
+;------------------------------------------------------------------------------ Layer 2
+
+(defn ^{:stratum 2} handle-parse-error!
+  "Answer a babashka.cli parse error: a bad value, or an unknown or missing
+   option. Prints the error, the usage when the command is known, and a
+   pointer to `help`, all on stderr, then exits 2."
+  [{:keys [dispatch] :as data}]
+  (binding [*out* *err*]
+    (display/print-error (error-message data))
+    (when dispatch
+      (print-usage! data))
+    (println (messages/t :main/run-help {:command (app-config/command-string "help")})))
+  (shared/exit! 2))

@@ -20,7 +20,8 @@
    [clojure.test :refer [deftest is testing]]
    [ai.miniforge.cli.main :as main]
    [ai.miniforge.cli.main.commands.shared :as shared]
-   [ai.miniforge.cli.main.parse-errors :as sut]))
+   [ai.miniforge.cli.main.parse-errors :as sut]
+   [slingshot.slingshot :refer [try+]]))
 
 ;------------------------------------------------------------------------------ Layer 0
 
@@ -47,3 +48,21 @@
     (is (.contains (str err) "fleet nosuch"))
     (is (.contains (str err) "fleet watch") "lists the group's commands")
     (is (= "" out))))
+
+(deftest ^{:stratum 0} option-flag-test
+  (is (= "--port" (sut/option-flag :port)))
+  (is (= "-p" (sut/option-flag :p))))
+
+(deftest ^{:stratum 0} error-message-test
+  (is (.contains (sut/error-message {:cause :restrict :option :backnd}) "--backnd"))
+  (is (.contains (sut/error-message {:cause :require :option :artifact-dir}) "--artifact-dir"))
+  (is (.contains (sut/error-message {:cause :coerce :option :port :msg "cannot coerce"}) "cannot coerce"))
+  (is (= "raw" (sut/error-message {:cause :other :msg "raw"}))))
+
+(deftest ^{:stratum 0} guard-entry-test
+  (testing "a parse error carries the entry's command and positional keys"
+    (let [error-fn (:error-fn (sut/guard-entry {:cmds ["web"] :fn identity :args->opts [:x]}))
+          data (try+ (error-fn {:msg "boom" :cause :coerce :option :port})
+                     (catch map? thrown thrown))]
+      (is (= ["web"] (:dispatch data)))
+      (is (= [:x] (:positional data))))))

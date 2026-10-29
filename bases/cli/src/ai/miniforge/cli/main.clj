@@ -677,18 +677,22 @@
 ;------------------------------------------------------------------------------ Layer 2
 
 (defn ^{:stratum 2} -main
-  "CLI entry point. An unknown command exits 2 and lists the available
-   ones; a command group named without a subcommand lists its
-   subcommands."
+  "CLI entry point. A command-line error exits 2: an unknown command lists
+   the available ones, and a bad, unknown or missing option prints that
+   command's usage (see `parse-errors`). A command group named without a
+   subcommand lists its subcommands."
   [& args]
   (try+
-    (cli/dispatch dispatch-table args)
+    (cli/dispatch (mapv parse-errors/guard-entry dispatch-table) args)
     #_{:clj-kondo/ignore [:unresolved-symbol]}
     (catch [:type :org.babashka/cli :cause :no-match] data
       (parse-errors/handle-unknown-command! data))
     #_{:clj-kondo/ignore [:unresolved-symbol]}
     (catch [:type :org.babashka/cli :cause :input-exhausted] data
-      (parse-errors/print-group-usage! data))))
+      (parse-errors/print-group-usage! data))
+    #_{:clj-kondo/ignore [:unresolved-symbol]}
+    (catch [:type :org.babashka/cli] data
+      (parse-errors/handle-parse-error! data))))
 
 (alter-var-root #'cmd-monitoring/*web-available?* (constantly web-available?))
 

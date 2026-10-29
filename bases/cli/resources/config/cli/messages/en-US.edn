@@ -98,6 +98,10 @@
   :main/available-commands "Available {scope}commands:"
   :main/run-help "Run '{command}' for more information."
   :main/usage "Usage: {line}"
+  :main/options "Options:"
+  :main/unknown-option "Unknown option: {option}"
+  :main/missing-option "Missing required option: {option}"
+  :main/invalid-option "Invalid value for {option}: {message}"
   :doctor/checks
   [["bb" "Babashka" "Required for CLI"]
    ["gum" "Charm Gum" "Required for TUI"]

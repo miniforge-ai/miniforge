@@ -16,9 +16,10 @@
 ;; See the License for the specific language governing permissions and
 ;; limitations under the License.
 (ns ai.miniforge.cli.main-parse-errors-test
-  "Command-line errors seen through `-main`: an unknown command exits 2,
-   and a command group named alone lists its own subcommands instead of
-   the global help."
+  "Command-line errors seen through `-main`: a bad value or a missing
+   option prints that command's usage on stderr and exits 2, an unknown
+   command exits 2, and a command group named alone lists its own
+   subcommands instead of the global help."
   (:require
    [clojure.test :refer [deftest is testing]]
    [ai.miniforge.cli.app-config :as app-config]
@@ -45,7 +46,32 @@
                       (reset! thrown (or (:message &throw-context) "thrown, no message")))))))]
     {:exit @code :out out :err (str err) :thrown @thrown}))
 
+(defn- ^{:stratum 0} usage-for
+  "The usage line `-main` prints for a command."
+  [& words]
+  (str "Usage: " (apply app-config/command-string words)))
+
 ;------------------------------------------------------------------------------ Layer 1
+
+(deftest ^{:stratum 1} bad-option-values-exit-2-with-usage-test
+  (testing "a value that does not coerce names the option and prints the command's usage"
+    (let [{:keys [exit out err thrown]} (run-main "web" "--port" "abc")]
+      (is (nil? thrown))
+      (is (= 2 exit))
+      (is (.contains err "--port"))
+      (is (.contains err (usage-for "web" "[options]")))
+      (is (= "" out) "nothing on stdout")))
+  (testing "the short alias of a coerced option too"
+    (let [{:keys [exit err]} (run-main "events" "show" "-g" "x")]
+      (is (= 2 exit))
+      (is (.contains err "--gap-threshold"))
+      (is (.contains err (usage-for "events" "show" "<workflow-id>" "[options]"))))))
+
+(deftest ^{:stratum 1} missing-required-option-exits-2-test
+  (let [{:keys [exit err thrown]} (run-main "context-server")]
+    (is (nil? thrown))
+    (is (= 2 exit))
+    (is (.contains err "--artifact-dir"))))
 
 (deftest ^{:stratum 1} command-groups-list-their-own-subcommands-test
   (testing "a group with no handler of its own"
