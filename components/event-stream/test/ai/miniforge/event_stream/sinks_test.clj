@@ -98,6 +98,16 @@
 
 ;------------------------------------------------------------------------------ Layer 1
 
+(deftest ^{:stratum 1} file-sink-with-an-explicit-nil-dir-uses-the-default-test
+  (with-temp-dir
+    (fn [dir]
+      (with-redefs [sinks/default-events-dir (constantly dir)]
+        (let [sink (sinks/file-sink {:base-dir nil})
+              wf (random-uuid)]
+          (sink (sample-event {:workflow/id wf}))
+          (is (seq (list-files (io/file dir "live" (str wf))))
+              "written under the default dir, not a relative live/"))))))
+
 (defn ^{:stratum 1} with-temp-default-events-dir
   "Run `f` with the default events dir pointed at a temp dir, so a file
    sink made without :base-dir neither writes nor prunes under the user's

@@ -4,7 +4,8 @@
 (ns ai.miniforge.cli.main.commands.doctor.checkpoints-check-test
   "`mf doctor` reports the checkpoint root and recommends
    `workflow gc-checkpoints` once runs are older than the GC's retention."
-  (:require [ai.miniforge.cli.main.commands.doctor :as doctor]
+  (:require [ai.miniforge.anomaly.interface :as anomaly]
+            [ai.miniforge.cli.main.commands.doctor :as doctor]
             [ai.miniforge.cli.main.commands.doctor.checks :as sut]
             [ai.miniforge.workflow.interface :as workflow]
             [clojure.string :as str]
@@ -15,6 +16,13 @@
 (def ^{:stratum 0} ^:private usage
   {:checkpoint/root "/home/u/.miniforge/checkpoints" :runs 12 :older 0
    :oldest-days 9 :max-age-days 30})
+
+(deftest ^{:stratum 0} an-unreadable-root-is-an-optional-failed-check
+  (let [result (sut/checkpoints-check
+                (anomaly/anomaly :unavailable "Could not read the checkpoint root /x: denied" {}))]
+    (is (false? (:check/ok? result)))
+    (is (false? (:check/required? result)) "the doctor still passes")
+    (is (str/includes? (:check/detail result) "denied"))))
 
 ;------------------------------------------------------------------------------ Layer 1
 

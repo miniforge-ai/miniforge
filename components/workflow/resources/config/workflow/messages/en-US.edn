@@ -162,6 +162,7 @@
 
   ;; Checkpoint retention
   :checkpoint/gc-delete-failed "Could not delete checkpoint {path}: {error}"
+  :checkpoint/usage-failed   "Could not read the checkpoint root {root}: {error}"
   :warn/checkpoint-announce-failed "Warning: The checkpoint for phase {phase} was written, but announcing it failed: {error}"
 
   ;; Environment lifecycle

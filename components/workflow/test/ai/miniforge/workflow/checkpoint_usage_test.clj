@@ -3,7 +3,8 @@
 ;; Licensed under the Apache License, Version 2.0.
 (ns ai.miniforge.workflow.checkpoint-usage-test
   "`checkpoint-usage` summarises the checkpoint root without changing it."
-  (:require [ai.miniforge.workflow.interface :as workflow]
+  (:require [ai.miniforge.anomaly.interface :as anomaly]
+            [ai.miniforge.workflow.interface :as workflow]
             [babashka.fs :as fs]
             [clojure.java.io :as io]
             [clojure.test :refer [deftest is testing]]))
@@ -41,5 +42,31 @@
              (dissoc usage :checkpoint/root)))
       (testing "nothing is deleted"
         (is (= 4 (count (fs/list-dir root))))))))
+
+(deftest ^{:stratum 2} a-run-that-vanishes-mid-read-is-skipped
+  ;; A concurrent GC deletes a run between the listing and the mtime read.
+  (fs/with-temp-dir [root {:prefix "checkpoint-usage-"}]
+    (let [gone (run-dir! root 90)
+          _ (run-dir! root 2)
+          mtime fs/last-modified-time]
+      (with-redefs [fs/last-modified-time (fn [path & args]
+                                            (when (= (str path) (str gone))
+                                              (throw (java.nio.file.NoSuchFileException. (str path))))
+                                            (apply mtime path args))]
+        (is (= {:runs 1 :older 0 :oldest-days 2 :max-age-days 30}
+               (dissoc (workflow/checkpoint-usage {:checkpoint/root (str root)})
+                       :checkpoint/root)))))))
+
+(deftest ^{:stratum 2} an-unreadable-root-is-an-anomaly-naming-it
+  (fs/with-temp-dir [root {:prefix "checkpoint-usage-"}]
+    (run-dir! root 2)
+    (let [list-dir fs/list-dir]
+      (with-redefs [fs/list-dir (fn [path & args]
+                                  (if (= (str path) (str root))
+                                    (throw (java.nio.file.AccessDeniedException. (str path)))
+                                    (apply list-dir path args)))]
+        (let [usage (workflow/checkpoint-usage {:checkpoint/root (str root)})]
+          (is (anomaly/anomaly? usage))
+          (is (= (str root) (get-in usage [:anomaly/data :checkpoint/root]))))))))
 
 (comment ::checkpoint-usage)

@@ -143,23 +143,33 @@
    (each file is renamed into place), not the full-tree walk the GC does;
    `:older` counts runs past `:max-age-days` (default 30) by that measure,
    an estimate of what `gc-checkpoints!` would collect before pins and
-   live events are considered. Options as `gc-checkpoints!`."
+   live events are considered. Options as `gc-checkpoints!`.
+
+   A run that vanishes while it is read (a concurrent GC) is skipped. A
+   root that cannot be listed is an `:unavailable` anomaly naming it."
   [opts]
   (let [root (checkpoint-paths/resolve-checkpoint-root opts)
         days (get opts :max-age-days default-retention-days)
         now (get opts :now-ms (System/currentTimeMillis))
-        ages (if (fs/directory? root)
-               (into []
-                     (comp (filter #(and (run-id %) (fs/directory? % {:nofollow-links true})))
-                           (map #(- now (fs/file-time->millis
-                                         (fs/last-modified-time % {:nofollow-links true})))))
-                     (fs/list-dir root))
-               [])]
-    {:checkpoint/root root
-     :runs (count ages)
-     :older (count (filter #(> % (* days day-ms)) ages))
-     :oldest-days (when (seq ages) (quot (reduce max ages) day-ms))
-     :max-age-days days}))
+        age (fn [dir]
+              (try+
+                (when (and (run-id dir) (fs/directory? dir {:nofollow-links true}))
+                  (- now (fs/file-time->millis (fs/last-modified-time dir {:nofollow-links true}))))
+                (catch Exception _ nil)))]
+    (try+
+      (let [ages (if (fs/directory? root) (into [] (keep age) (fs/list-dir root)) [])]
+        {:checkpoint/root root
+         :runs (count ages)
+         :older (count (filter #(> % (* days day-ms)) ages))
+         :oldest-days (when (seq ages) (quot (reduce max ages) day-ms))
+         :max-age-days days})
+      (catch Exception e
+        (anomaly/exception-anomaly :unavailable
+                                   (messages/t :checkpoint/usage-failed
+                                               {:root root
+                                                :error (or (ex-message e) (.getName (class e)))})
+                                   {:checkpoint/root root}
+                                   e)))))
 
 ;------------------------------------------------------------------------------ Layer 2
 
