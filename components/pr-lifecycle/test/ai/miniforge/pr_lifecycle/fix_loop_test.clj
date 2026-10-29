@@ -518,6 +518,24 @@
                                               :action :modify}]} nil)))
         (finally (fs/delete-tree base))))))
 
+(deftest ^{:stratum 1} apply-fix-to-worktree-protects-a-dangling-config-link-target-test
+  (let [{:keys [base worktree]} (temp-layout)
+        config (fs/path worktree ".git" "config")]
+    (try
+      (testing "with .git/config -> ../gitconfig missing, creating gitconfig is refused"
+        (fs/delete config)
+        (fs/create-sym-link config (fs/path ".." "gitconfig"))
+        (is (refused? worktree "gitconfig" :create))
+        (is (not (fs/exists? (fs/path worktree "gitconfig")))))
+      (testing "with .git/config -> ../conf-a -> conf-b missing, neither link nor target is writable"
+        (fs/delete config)
+        (fs/create-sym-link config (fs/path ".." "conf-a"))
+        (fs/create-sym-link (fs/path worktree "conf-a") "conf-b")
+        (is (refused? worktree "conf-b" :create))
+        (is (refused? worktree "conf-a" :modify))
+        (is (not (fs/exists? (fs/path worktree "conf-b")))))
+      (finally (fs/delete-tree base)))))
+
 (deftest ^{:stratum 1} commit-fix-runs-git-with-hooks-disabled-test
   (testing "the fix loop's commit and push run no hook"
     (let [{:keys [base worktree]} (temp-layout)

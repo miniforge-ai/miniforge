@@ -89,11 +89,19 @@
     (.getCanonicalPath (if (.isAbsolute file) file (io/file root path)))))
 
 (defn ^{:stratum 0} link-targets
-  "Canonical targets of the symbolic links directly inside directory `dir`."
+  "Where each symbolic link directly inside directory `dir` finally
+   points, as canonical paths. Follows a chain of links, resolving each
+   target against its link's directory, so a dangling link or chain still
+   yields the path it would create; `getCanonicalPath` alone stops at a
+   dangling link itself."
   [dir]
   (for [^java.io.File f (.listFiles (io/file dir))
         :when (java.nio.file.Files/isSymbolicLink (.toPath f))]
-    (.getCanonicalPath f)))
+    (loop [^java.nio.file.Path p (.toPath f)
+           hops 0]
+      (if (and (java.nio.file.Files/isSymbolicLink p) (< hops 40))
+        (recur (.resolve (.getParent p) (java.nio.file.Files/readSymbolicLink p)) (inc hops))
+        (.getCanonicalPath (.toFile p))))))
 
 ;------------------------------------------------------------------------------ Layer 1
 
@@ -103,8 +111,8 @@
    cannot answer (not a repository, git missing, any other failure).
    `:dirs` are `--absolute-git-dir`, `--git-common-dir` and
    `--git-path hooks` (which honours `core.hooksPath`). `:links` are the
-   targets of symlinks directly inside those that point elsewhere in the
-   worktree."
+   final targets of symlinks directly inside those that point elsewhere
+   in the worktree."
   [root]
   (try+
    ;; One path per line, spaces kept: git treats them as part of the name.
