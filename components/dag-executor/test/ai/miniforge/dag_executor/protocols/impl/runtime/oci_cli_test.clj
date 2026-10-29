@@ -20,6 +20,7 @@
    management, descriptor wiring."
   (:require
    [ai.miniforge.anomaly.interface :as anomaly]
+   [clojure.java.shell :as shell]
    [clojure.test :refer [deftest is testing]]
    [clojure.string]
    [ai.miniforge.dag-executor.result :as result]
@@ -336,19 +337,25 @@
              (sanitize "git clone https://github.com/o/r.git"))))))
 
 ;; ============================================================================
-;; authenticated-https-url
+;; git-credential-env — per-command git auth (N11 §2.2)
 ;; ============================================================================
-(deftest ^{:stratum 1} authenticated-url-github-test
-  (testing "injects GitHub x-access-token"
-    (let [auth-url (private-fn 'authenticated-https-url)]
-      (is (= "https://x-access-token:tok123@github.com/o/r.git"
-             (auth-url "https://github.com/o/r.git" "tok123" :github))))))
-
-(deftest ^{:stratum 1} authenticated-url-gitlab-test
-  (testing "injects GitLab oauth2 token"
-    (let [auth-url (private-fn 'authenticated-https-url)]
-      (is (= "https://oauth2:tok456@gitlab.com/g/p.git"
-             (auth-url "https://gitlab.com/g/p.git" "tok456" :gitlab))))))
+(deftest ^{:stratum 1} git-credential-env-test
+  (let [cred-env (private-fn 'git-credential-env)]
+    (testing "an Authorization header scoped to the remote's host"
+      (is (= {"GIT_CONFIG_COUNT"    "1"
+              "GIT_CONFIG_KEY_0"    "http.https://github.com/.extraheader"
+              "GIT_CONFIG_VALUE_0"  (str "Authorization: Basic "
+                                         (basic-auth "x-access-token" "tok"))
+              "GIT_TERMINAL_PROMPT" "0"}
+             (cred-env "https://github.com/o/r.git" "tok" :github))))
+    (testing "GitLab pairs the token with oauth2"
+      (is (= (str "Authorization: Basic " (basic-auth "oauth2" "tok"))
+             (get (cred-env "https://gitlab.com/g/p.git" "tok" :gitlab)
+                  "GIT_CONFIG_VALUE_0"))))
+    (testing "no token, or a URL that is not https, yields no credential"
+      (is (= {} (cred-env "https://github.com/o/r.git" nil :github)))
+      (is (= {} (cred-env "http://github.com/o/r.git" "tok" :github)))
+      (is (= {} (cred-env "git@github.com:o/r.git" "tok" :github))))))
 
 ;; ============================================================================
 ;; image-exists? (public)
@@ -641,6 +648,24 @@
 
 ;------------------------------------------------------------------------------ Layer 2
 
+(deftest ^{:stratum 2} git-credential-env-is-read-by-git-test
+  (testing "git takes the header from the env alone; the repo config file
+            never holds it"
+    (let [dir (.toFile (java.nio.file.Files/createTempDirectory
+                        "cred-env" (make-array java.nio.file.attribute.FileAttribute 0)))
+          env ((private-fn 'git-credential-env) "https://github.com/o/r.git" fake-token :github)
+          git (fn [& args]
+                (apply shell/sh "git" "-C" (str dir)
+                       (concat args [:env (merge (into {} (System/getenv)) env)])))]
+      (try
+        (git "init" "-q")
+        (is (= (get env "GIT_CONFIG_VALUE_0")
+               (clojure.string/trim
+                (:out (git "config" "--get" "http.https://github.com/.extraheader")))))
+        (is (not (token-in? (slurp (java.io.File. dir ".git/config")))))
+        (finally
+          (run! #(.delete ^java.io.File %) (reverse (file-seq dir))))))))
+
 ;; ============================================================================
 ;; Credentials stay off the runtime argv and out of capsule git config
 ;; (N11 §2.2). These drive a stand-in runtime CLI, so they observe what the
@@ -673,6 +698,30 @@
           (is (= fake-token (get env "GH_TOKEN")))
           (is (some #{"HOME=/capsule-home"} argv))
           (is (not= "/capsule-home" (get env "HOME"))))))))
+
+(deftest ^{:stratum 2} bootstrap-workspace-keeps-token-out-of-git-config-test
+  (testing "the clone gets the token through its environment: no runtime
+            argv carries it, origin is the plain URL, no push URL is set,
+            and no later command receives the credential"
+    (with-fake-runtime :docker ["GIT_CONFIG_KEY_0" "GIT_CONFIG_VALUE_0"]
+      (fn [descriptor calls]
+        (with-redefs [oci-cli/resolve-git-token (fn [_url _opts] fake-token)]
+          (let [result ((private-fn 'bootstrap-workspace!)
+                        descriptor "c1" "/workspace"
+                        {:repo-url "git@github.com:o/r.git" :branch "main"})
+                all    (calls)
+                [clone & later] all]
+            (is (result/ok? result))
+            (is (some #{"clone"} (:argv clone)))
+            (is (not-any? token-in? (mapcat :argv all)))
+            (is (some #{"https://github.com/o/r.git"} (:argv clone)))
+            (is (not-any? #(some #{"set-url"} (:argv %)) all))
+            (is (= "http.https://github.com/.extraheader"
+                   (get-in clone [:env "GIT_CONFIG_KEY_0"])))
+            (is (= (str "Authorization: Basic " (basic-auth "x-access-token" fake-token))
+                   (get-in clone [:env "GIT_CONFIG_VALUE_0"])))
+            (is (seq later))
+            (is (not-any? #(get-in % [:env "GIT_CONFIG_VALUE_0"]) later))))))))
 
 ;------------------------------------------------------------------------------ Rich Comment
 (comment

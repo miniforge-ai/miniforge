@@ -321,14 +321,19 @@
   [_repo-url {:keys [host-kind]}]
   (config/resolve-token host-kind))
 
-(defn- ^{:stratum 0} authenticated-https-url
-  "Inject token credentials into an HTTPS git URL.
-   Uses the host-appropriate token format based on host-kind."
-  [https-url token host-kind]
-  (str/replace https-url #"https://"
-               (if (= host-kind :gitlab)
-                 (str "https://oauth2:" token "@")
-                 (str "https://x-access-token:" token "@"))))
+(def ^{:stratum 0} ^:private git-auth-users
+  "HTTP basic-auth username each host kind pairs with a token; hosts not
+   listed take `default-git-auth-user`."
+  {:gitlab "oauth2"})
+
+(def ^{:stratum 0} ^:private default-git-auth-user "x-access-token")
+
+(defn- ^{:stratum 0} basic-auth-header
+  "HTTP Basic Authorization header carrying `token` for `user`."
+  [user token]
+  (str "Authorization: Basic "
+       (.encodeToString (java.util.Base64/getEncoder)
+                        (.getBytes (str user ":" token) "UTF-8"))))
 
 ;; ============================================================================
 ;; Capsule security gate — runtime enforcement of the runtime-* policies
@@ -496,6 +501,37 @@
 
        (:cpu merged)
        (into ["--cpus" (str (:cpu merged))])))))
+
+(defn- ^{:stratum 1} git-remote
+  "The repo to bootstrap, from env-config: {:repo-url :https-url :host-kind},
+   or nil when env-config carries no :repo-url. SSH URLs become HTTPS, since
+   containers lack an SSH agent. The executor keeps this, not anything read
+   back from the capsule, as the host its git credential is scoped to, so
+   repointing origin inside the capsule cannot redirect the credential."
+  [env-config]
+  (when-let [repo-url (:repo-url env-config)]
+    {:repo-url  repo-url
+     :https-url (if-let [[_ host path] (re-matches #"git@([^:]+):(.+)" repo-url)]
+                  (str "https://" host "/" path)
+                  repo-url)
+     :host-kind (get env-config :host-kind (infer-host-kind repo-url))}))
+
+(defn- ^{:stratum 1} git-credential-env
+  "Env that authenticates one git command to the host of `https-url`: an
+   Authorization header set through GIT_CONFIG_COUNT/KEY/VALUE (git 2.31+),
+   scoped by `http.<origin>/.extraheader` so git sends it to that host only.
+   Env-supplied config is never written to .git/config, and exec passes the
+   value by name, so the token lands in neither the capsule's repo state nor
+   the runtime argv (N11 §2.2). Empty without a token or for a non-https URL."
+  [https-url token host-kind]
+  (if-let [[_ origin] (when token (re-find #"^(https://[^/]+)/" https-url))]
+    {"GIT_CONFIG_COUNT"    "1"
+     "GIT_CONFIG_KEY_0"    (str "http." origin "/.extraheader")
+     "GIT_CONFIG_VALUE_0"  (basic-auth-header
+                            (get git-auth-users host-kind default-git-auth-user)
+                            token)
+     "GIT_TERMINAL_PROMPT" "0"}
+    {}))
 
 ;------------------------------------------------------------------------------ Layer 2
 
@@ -803,7 +839,8 @@
 
 (defn- ^{:stratum 3} container-exec-fn
   "Build a function that executes commands inside a container.
-   Returns (fn [cmd] -> result-map).
+   Returns (fn [cmd] -> result-map); the (fn [cmd env]) arity adds `env`
+   to that one command's environment.
 
    Options:
    - :error-on-failure? — return result/err on non-zero exit (default false)
@@ -812,22 +849,25 @@
   [descriptor container-id workdir
    & {:keys [error-on-failure? error-prefix sanitize?]
       :or {error-on-failure? false error-prefix (messages/t :oci/command-failed) sanitize? false}}]
-  (fn [cmd]
-    (let [r (exec-in-container descriptor container-id cmd {:workdir workdir})]
-      (if (and error-on-failure?
-               (not (zero? (get-in r [:data :exit-code] 1))))
-        (let [safe-cmd (if sanitize? (sanitize-token (str cmd)) (str cmd))
-              stderr   (if sanitize?
-                         (sanitize-token (or (get-in r [:data :stderr]) ""))
-                         (or (get-in r [:data :stderr]) ""))]
-          (result/err :container-command-failed
-                      (messages/t :oci/command-failed-detail
-                                  {:prefix error-prefix :command safe-cmd
-                                   :stderr (if (seq stderr) (str "\n" stderr) "")})
-                      {:cmd safe-cmd
-                       :stderr stderr
-                       :exit (get-in r [:data :exit-code])}))
-        r))))
+  (fn exec!
+    ([cmd] (exec! cmd nil))
+    ([cmd env]
+     (let [r (exec-in-container descriptor container-id cmd
+                                (cond-> {:workdir workdir} (seq env) (assoc :env env)))]
+       (if (and error-on-failure?
+                (not (zero? (get-in r [:data :exit-code] 1))))
+         (let [safe-cmd (if sanitize? (sanitize-token (str cmd)) (str cmd))
+               stderr   (if sanitize?
+                          (sanitize-token (or (get-in r [:data :stderr]) ""))
+                          (or (get-in r [:data :stderr]) ""))]
+           (result/err :container-command-failed
+                       (messages/t :oci/command-failed-detail
+                                   {:prefix error-prefix :command safe-cmd
+                                    :stderr (if (seq stderr) (str "\n" stderr) "")})
+                       {:cmd safe-cmd
+                        :stderr stderr
+                        :exit (get-in r [:data :exit-code])}))
+         r)))))
 
 (defn ^{:stratum 3} security-gate-check
   "Run the capsule-isolation security gate for a pending launch. Resolves the
@@ -897,27 +937,20 @@
    Returns a result map with bootstrap metadata. No-op success when
    repo-url is nil (local mode / pre-existing workspace).
    Uses config-based token resolution (profile + env fallback) rather than
-   URL-guessing. Converts SSH URLs to HTTPS for containers where SSH agents
-   are not available."
+   URL-guessing. With a token, clones the plain HTTPS URL and hands the
+   token to the clone command alone (`git-credential-env`): origin's URL
+   in the capsule carries no credential, and no push URL is set."
   [descriptor container-name workdir env-config]
-  (if-let [repo-url (:repo-url env-config)]
+  (if-let [{:keys [repo-url https-url host-kind]} (git-remote env-config)]
     (let [branch    (get env-config :branch "main")
-          host-kind (or (:host-kind env-config)
-                        (infer-host-kind repo-url))
           token     (resolve-git-token repo-url {:host-kind host-kind})
-          ;; Convert SSH URL to HTTPS (containers lack SSH agent)
-          https-url (if-let [[_ host path] (re-matches #"git@([^:]+):(.+)" repo-url)]
-                      (str "https://" host "/" path)
-                      repo-url)
-          clone-url (if token
-                      (authenticated-https-url https-url token host-kind)
-                      repo-url)
+          clone-url (if token https-url repo-url)
           exec!  (container-exec-fn descriptor container-name "/"
                                     :error-on-failure? true
                                     :error-prefix (messages/t :oci/bootstrap-failed)
                                     :sanitize? true)
           clone-cmd ["git" "clone" "--branch" (str branch) "--single-branch" "--" clone-url workdir]
-          result (-> (exec! clone-cmd)
+          result (-> (exec! clone-cmd (git-credential-env https-url token host-kind))
                      ;; Use --local (not --global) since container rootfs is read-only
                      (chain-container-command
                       #(exec! ["git" "-C" workdir "config" "user.email" "miniforge@miniforge.ai"]))
@@ -925,13 +958,7 @@
                       #(exec! ["git" "-C" workdir "config" "user.name" "miniforge"])))]
       (if (result/err? result)
         result
-        (let [push-url-result (if token
-                                (exec! ["git" "-C" workdir "remote" "set-url" "--push" "origin" "--"
-                                        (authenticated-https-url https-url token host-kind)])
-                                result)
-              sha-r (chain-container-command
-                     push-url-result
-                     #(exec! ["git" "-C" workdir "rev-parse" "HEAD"]))]
+        (let [sha-r (exec! ["git" "-C" workdir "rev-parse" "HEAD"])]
           (if (result/ok? sha-r)
             (let [base-sha (str/trim (get-in sha-r [:data :stdout] ""))]
               (result/ok (cond-> {:base-branch (str branch)}
