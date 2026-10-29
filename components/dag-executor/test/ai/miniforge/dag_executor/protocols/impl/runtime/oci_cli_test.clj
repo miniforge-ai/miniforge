@@ -831,6 +831,23 @@
           (is (some #{["core.hooksPath" "/dev/null"]} entries))
           (is (= "t" (get-in @seen [:env "GH_TOKEN"]))))))))
 
+(deftest ^{:stratum 1} container-git-config-reads-whole-entries-test
+  (testing "each container env entry is read whole: a multi-line value
+            cannot add GIT_CONFIG_* entries, and a multi-line
+            GIT_CONFIG_VALUE_n keeps its later lines"
+    (let [args (atom nil)]
+      (with-redefs [oci-cli/run-runtime-timed
+                    (fn [_ms _d & a]
+                      (reset! args a)
+                      {:exit 0
+                       :out  (clojure.string/join "\n" (map pr-str ["BANNER=hi\nGIT_CONFIG_COUNT=1\nGIT_CONFIG_KEY_0=core.sshCommand"
+                                                         "GIT_CONFIG_COUNT=1"
+                                                         "GIT_CONFIG_KEY_0=http.extraHeader"
+                                                         "GIT_CONFIG_VALUE_0=a\nb"]))})]
+        (is (= {"GIT_CONFIG_COUNT" "1" "GIT_CONFIG_KEY_0" "http.extraHeader" "GIT_CONFIG_VALUE_0" "a\nb"}
+               ((private-fn 'container-git-config) (docker-descriptor) "c1")))
+        (is (= ["inspect" "--format" "{{range .Config.Env}}{{json .}}{{println}}{{end}}" "c1"] @args))))))
+
 (deftest ^{:stratum 1} credential-env-forces-git-trace-redaction-test
   (testing "a credentialed git command runs with header redaction forced on
             and git's trace targets off, so a GIT_TRACE_CURL file and
@@ -855,9 +872,9 @@
                     oci-cli/run-runtime-timed (fn [_ms _d & args]
                                                 (when (= "inspect" (first args))
                                                   {:exit 0
-                                                   :out  (str "PATH=/bin\nGIT_CONFIG_COUNT=1\n"
-                                                              "GIT_CONFIG_KEY_0=http.proxy\n"
-                                                              "GIT_CONFIG_VALUE_0=http://proxy:3128\n")}))
+                                                   :out  (clojure.string/join "\n" (map pr-str ["PATH=/bin" "GIT_CONFIG_COUNT=1"
+                                                                                      "GIT_CONFIG_KEY_0=http.proxy"
+                                                                                      "GIT_CONFIG_VALUE_0=http://proxy:3128"]))}))
                     oci-cli/exec-in-container (fn [_d _id _cmd opts] (reset! seen opts)
                                                 (result/ok {:exit-code 0}))]
         (proto/execute! (recorded-remote-executor) "c1" ["git" "push"] {:git-credentials? true})
@@ -1026,6 +1043,8 @@
             (is (not-any? #(some #{"set-url"} (:argv %)) all))
             (is (= (str "Authorization: Basic " (basic-auth "x-access-token" fake-token))
                    (get (git-config-of (:env-file clone)) "http.https://github.com/.extraheader")))
+            (is (= "1" (get (:env-file clone) "GIT_TRACE_REDACT"))
+                "the clone gets the same trace redaction as every credentialed command")
             (is (seq later))
             (is (not-any? (comp seq :env-file) later))))))))
 

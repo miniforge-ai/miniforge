@@ -485,6 +485,18 @@
   (for [i (range (or (parse-long (get env "GIT_CONFIG_COUNT" "")) 0))]
     [(get env (str "GIT_CONFIG_KEY_" i)) (get env (str "GIT_CONFIG_VALUE_" i))]))
 
+(def ^{:stratum 0} env-inspect-format
+  "`inspect --format` template printing each Config.Env entry as a JSON
+   string on its own line, so a value with a line break stays one entry."
+  "{{range .Config.Env}}{{json .}}{{println}}{{end}}")
+
+(defn- ^{:stratum 0} parse-inspected-env
+  "{name value} from `env-inspect-format` output: each line is a JSON string,
+   which the EDN reader reads, split once at the first `=`."
+  [out]
+  (into {} (map #(let [[k v] (str/split (edn/read-string %) #"=" 2)] [k (or v "")]))
+        (remove str/blank? (str/split-lines out))))
+
 (def ^{:stratum 0} git-trace-off-env
   "Env that keeps git's tracing from recording the Authorization header:
    header redaction forced on, over an inherited GIT_TRACE_REDACT=0, and
@@ -894,15 +906,18 @@
 (defn- ^{:stratum 2} container-git-config
   "The GIT_CONFIG_* entries the container's own environment sets: its image
    ENV and launch env as the runtime recorded them, which no process in the
-   capsule can change. {} when there are none or inspect fails."
+   capsule can change. Each entry is read whole (`parse-inspected-env`), so
+   a multi-line value can neither add entries nor lose its later lines. {}
+   when there are none or inspect fails."
   [descriptor container-id]
   (let [r (run-runtime-timed default-exec-timeout-ms descriptor "inspect" "--format"
-                             "{{range .Config.Env}}{{println .}}{{end}}" container-id)]
-    (if (zero? (:exit r))
-      (into {} (keep #(when-let [[_ k v] (re-matches #"(GIT_CONFIG_[A-Z0-9_]+)=(.*)" %)]
-                        (when (re-matches git-config-env-pattern k) [k v])))
-            (str/split-lines (:out r)))
-      {})))
+                             env-inspect-format container-id)]
+    (try
+      (if (zero? (:exit r))
+        (into {} (filter #(re-matches git-config-env-pattern (key %)))
+              (parse-inspected-env (:out r)))
+        {})
+      (catch Exception _ {}))))
 
 (defn- ^{:stratum 2} combine-git-env
   "`base` then `extra`, with their GIT_CONFIG_* entries renumbered into one
@@ -1091,16 +1106,13 @@
     (catch Exception _ nil)))
 
 (defn ^{:stratum 3} image-env
-  "The ENV of local image `image` as {name value}, or nil on failure. Each
-   entry comes back as a JSON string on its own line, which the EDN reader
-   reads, so a value with a line break reads back whole."
+  "The ENV of local image `image` as {name value} (`parse-inspected-env`),
+   or nil on failure."
   [descriptor image]
   (try
-    (let [result (run-runtime descriptor "image" "inspect" image
-                              "--format" "{{range .Config.Env}}{{json .}}{{println}}{{end}}")]
+    (let [result (run-runtime descriptor "image" "inspect" image "--format" env-inspect-format)]
       (when (zero? (:exit result))
-        (into {} (map #(let [[k v] (str/split (edn/read-string %) #"=" 2)] [k (or v "")]))
-              (remove str/blank? (str/split-lines (:out result))))))
+        (parse-inspected-env (:out result))))
     (catch Exception _ nil)))
 
 (defn ^{:stratum 3} image-exists?
