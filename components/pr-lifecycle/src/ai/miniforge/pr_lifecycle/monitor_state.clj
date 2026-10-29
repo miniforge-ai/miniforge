@@ -18,6 +18,7 @@
 (ns ai.miniforge.pr-lifecycle.monitor-state
   "Shared monitor loop state and persistence helpers."
   (:require
+   [ai.miniforge.anomaly.interface :as anomaly]
    [ai.miniforge.logging.interface :as log]
    [ai.miniforge.pr-lifecycle.events :as events]
    [ai.miniforge.pr-lifecycle.monitor-budget :as budget]
@@ -63,11 +64,19 @@
 ;------------------------------------------------------------------------------ Layer 1
 
 (defn ^{:stratum 1} create-monitor
-  "Create a PR monitor loop state atom from config."
+  "Create a PR monitor loop state atom from config. State on disk is kept
+   per `:repo-slug` (owner/name), resolved from `:worktree-path` with gh when
+   not given. `:state-error` holds the anomaly when it cannot be resolved or
+   its watermarks cannot be read."
   [config]
-  (let [merged (merge default-config config)]
-    (atom {:config merged
-           :watermarks (poller/load-watermarks)
+  (let [merged      (merge default-config config)
+        repo-slug   (or (:repo-slug merged)
+                        (some-> (:worktree-path merged) poller/resolve-repo-slug))
+        watermarks  (poller/load-watermarks repo-slug)
+        unreadable? (anomaly/anomaly? watermarks)]
+    (atom {:config (assoc merged :repo-slug repo-slug)
+           :watermarks (if unreadable? (poller/empty-watermarks repo-slug) watermarks)
+           :state-error (when unreadable? watermarks)
            :budgets {}
            :running? false
            :started-at nil

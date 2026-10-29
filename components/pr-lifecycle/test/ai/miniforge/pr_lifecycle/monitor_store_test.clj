@@ -16,11 +16,12 @@
 ;; See the License for the specific language governing permissions and
 ;; limitations under the License.
 (ns ai.miniforge.pr-lifecycle.monitor-store-test
-  "Repo-slug paths and file reads for PR monitor state."
+  "Repo-slug paths, file reads and watermark saves for PR monitor state."
   (:require
    [ai.miniforge.anomaly.interface :as anomaly]
    [ai.miniforge.config.interface :as mf-config]
    [ai.miniforge.pr-lifecycle.monitor-store :as sut]
+   [ai.miniforge.pr-lifecycle.pr-poller :as poller]
    [babashka.fs :as fs]
    [clojure.test :refer [deftest is testing use-fixtures]]))
 
@@ -29,6 +30,26 @@
 (def ^{:stratum 0} test-home
   "One temporary miniforge home for this namespace, emptied before each test."
   (str (fs/create-temp-dir {:prefix "mf-pr-monitor-store-"})))
+
+(deftest ^{:stratum 0} merge-watermarks-test
+  (testing "per PR the later watermark wins, and PRs from both sides survive"
+    (let [wm (fn [ts] {:last-seen-at ts :advanced-at ts})]
+      (is (= {1 (wm "2026-10-03") 2 (wm "2026-10-02") 3 (wm "2026-10-01")}
+             (poller/merge-watermarks {1 (wm "2026-10-03") 2 (wm "2026-10-01") 3 (wm "2026-10-01")}
+                                      {1 (wm "2026-10-02") 2 (wm "2026-10-02")}))))))
+
+(deftest ^{:stratum 0} save-watermarks-test
+  (let [wm (fn [pr ts] {:repo-slug "acme/app" :prs {pr {:last-seen-at ts :advanced-at ts}}})]
+    (testing "the save returns the merged watermarks, including PRs saved by others"
+      (poller/save-watermarks! (wm 1 "2026-10-01"))
+      (is (= #{1 2} (set (keys (:prs (poller/save-watermarks! (wm 2 "2026-10-02")))))))
+      (is (= #{1 2} (set (keys (:prs (poller/load-watermarks "acme/app")))))))
+    (testing "a file holding something else is reported and not overwritten"
+      (let [file (sut/repo-file "acme/app" "watermarks.edn")]
+        (spit file "{\"7\" :seen}")
+        (is (anomaly/anomaly? (poller/load-watermarks "acme/app")))
+        (is (anomaly/anomaly? (poller/save-watermarks! (wm 3 "2026-10-03"))))
+        (is (= "{\"7\" :seen}" (slurp file)))))))
 
 ;------------------------------------------------------------------------------ Layer 1
 
