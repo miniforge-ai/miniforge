@@ -27,6 +27,7 @@
    [ai.miniforge.phase.loader :as loader]
    [ai.miniforge.phase-software-factory.gap-wiring :as gap-wiring]
    [ai.miniforge.phase-software-factory.messages :as messages]
+   [ai.miniforge.phase-software-factory.verify.output-config :as output-config]
    [ai.miniforge.phase-software-factory.verify :as verify]))
 
 ;------------------------------------------------------------------------------ Layer 0
@@ -166,8 +167,8 @@
 
 (deftest ^{:stratum 1} verify-bounds-unparseable-output-preview-test
   (testing "long unparseable output is bounded in the verify error message"
-    (let [preview-limit @#'verify/verify-error-preview-limit
-          suffix @#'verify/truncated-output-suffix
+    (let [preview-limit output-config/verify-error-preview-limit
+          suffix output-config/truncated-output-suffix
           output (apply str (repeat (+ preview-limit 50) "x"))]
       (with-redefs-fn
         {run-tests-var (fn [_ & _opts] {:passed? false
