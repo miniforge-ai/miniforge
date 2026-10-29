@@ -198,23 +198,26 @@ mf version
 #### Direct Download
 
 The jar runs under Babashka (`bb` on your PATH). Download it under its asset name so the `.sha256` file matches, verify
-it, then install it behind an `mf` launcher:
+it, then install it behind an `mf` launcher. The subshell stops at the first failed step, so a failed download or
+checksum installs nothing, and your own shell keeps running:
 
 ```bash
 # macOS ARM64 (use miniforge-linux-x86_64 on Linux, and sha256sum -c instead of shasum)
 ASSET=miniforge-macos-arm64
-curl -fLO https://github.com/miniforge-ai/miniforge/releases/download/v2026.01.20.1/$ASSET
-curl -fLO https://github.com/miniforge-ai/miniforge/releases/download/v2026.01.20.1/$ASSET.sha256
-shasum -a 256 -c "$ASSET.sha256"
-
-mkdir -p ~/.local/lib/miniforge ~/.local/bin
-mv "$ASSET" ~/.local/lib/miniforge/miniforge.jar
-cat > ~/.local/bin/mf <<'SH'
-#!/bin/sh
-exec bb --jar "$HOME/.local/lib/miniforge/miniforge.jar" -m ai.miniforge.cli.main "$@"
-SH
-chmod +x ~/.local/bin/mf
-mf version   # needs ~/.local/bin on your PATH
+( set -euo pipefail
+  base=https://github.com/miniforge-ai/miniforge/releases/download/v2026.01.20.1
+  curl -fLO "$base/$ASSET"
+  curl -fLO "$base/$ASSET.sha256"
+  shasum -a 256 -c "$ASSET.sha256"
+  mkdir -p ~/.local/lib/miniforge ~/.local/bin
+  mv "$ASSET" ~/.local/lib/miniforge/miniforge.jar
+  printf '%s\n' '#!/bin/sh' \
+    'exec bb --jar "$HOME/.local/lib/miniforge/miniforge.jar" -m ai.miniforge.cli.main "$@"' \
+    > ~/.local/bin/mf
+  chmod +x ~/.local/bin/mf
+  ~/.local/bin/mf version
+)
+# Add ~/.local/bin to your PATH to run mf
 ```
 
 ```powershell

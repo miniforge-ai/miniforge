@@ -428,21 +428,26 @@ jobs:
             Babashka uberjars, not native executables: they run with
             [Babashka](https://github.com/babashka/babashka#installation) (`bb`)
             on your PATH, through a small `mf` launcher. Set `ASSET` to
-            `miniforge-macos-arm64` (Apple Silicon) or `miniforge-linux-x86_64`:
+            `miniforge-macos-arm64` (Apple Silicon) or `miniforge-linux-x86_64`.
+            The subshell stops at the first failed step, so a failed download
+            or checksum installs nothing:
             ```bash
             ASSET=miniforge-macos-arm64
-            curl -fLO https://github.com/${{ github.repository }}/releases/download/v${{ needs.version.outputs.version }}/$ASSET
-            curl -fLO https://github.com/${{ github.repository }}/releases/download/v${{ needs.version.outputs.version }}/$ASSET.sha256
-            shasum -a 256 -c "$ASSET.sha256"   # Linux: sha256sum -c "$ASSET.sha256"
-            mkdir -p ~/.local/lib/miniforge ~/.local/bin
-            mv "$ASSET" ~/.local/lib/miniforge/miniforge.jar
-            cat > ~/.local/bin/mf <<'SH'
-            #!/bin/sh
-            exec bb --jar "$HOME/.local/lib/miniforge/miniforge.jar" -m ai.miniforge.cli.main "$@"
-            SH
-            chmod +x ~/.local/bin/mf
-            mf version   # needs ~/.local/bin on your PATH
+            ( set -euo pipefail
+              base=https://github.com/${{ github.repository }}/releases/download/v${{ needs.version.outputs.version }}
+              curl -fLO "$base/$ASSET"
+              curl -fLO "$base/$ASSET.sha256"
+              shasum -a 256 -c "$ASSET.sha256"   # Linux: sha256sum -c "$ASSET.sha256"
+              mkdir -p ~/.local/lib/miniforge ~/.local/bin
+              mv "$ASSET" ~/.local/lib/miniforge/miniforge.jar
+              printf '%s\n' '#!/bin/sh' \
+                'exec bb --jar "$HOME/.local/lib/miniforge/miniforge.jar" -m ai.miniforge.cli.main "$@"' \
+                > ~/.local/bin/mf
+              chmod +x ~/.local/bin/mf
+              ~/.local/bin/mf version
+            )
             ```
+            Add `~/.local/bin` to your PATH to run `mf`.
 
             **Windows x86_64 (preview)**
 
