@@ -15,8 +15,11 @@
       literal value is a finding; multiword values count. A data value that
       is a whole file (application.yaml, application.properties) is also
       scanned with the rule's line patterns, so `password: \"...\"` and
-      `db.password=...` inside it are findings.
+      `db.password=...` inside it are findings, unless the value the line
+      assigns is a placeholder (rule 5).
    4. Annotations and labels (`metadata`) are never read.
+   5. One rule decides what is literal, for fields and file lines alike: a
+      placeholder-only value, `$(NAME)`, `${NAME}` or `{{ ... }}`, is not.
    A literal value holding a PEM private key is a finding wherever rules 2
    and 3 look. Findings name where the value is, never the value.
 
@@ -44,13 +47,15 @@
     (boolean (some #(= % (vec (take-last (count %) tokens))) terms))))
 
 (defn ^{:stratum 0} literal-value?
-  "A non-empty literal value. A reference to another env var, `$(NAME)` or
-   `${NAME}`, is not a literal."
+  "A non-empty literal value. A placeholder-only value is not one: a reference
+   to another env var, `$(NAME)` or `${NAME}`, or a template, `{{ ... }}`. A
+   placeholder carrying a default, `${DB_PASSWORD:hunter2}`, holds a literal."
   [v]
   (and (some? v)
        (not (coll? v))
        (not (str/blank? (str v)))
-       (not (re-matches #"\$[({][A-Za-z_][A-Za-z0-9_]*[)}]" (str/trim (str v))))))
+       (not (re-matches #"\$\([A-Za-z_]\w*\)|\$\{[A-Za-z_]\w*\}|\{\{[^{}]*\}\}"
+                        (str/trim (str v))))))
 
 (defn- ^{:stratum 0} reference?
   "True when valueFrom names a source. A null or empty valueFrom is no source,
@@ -75,11 +80,22 @@
        (filter map?)))
 
 (defn- ^{:stratum 0} fallback-match?
-  "For content that is not YAML: does any line match a fallback pattern?"
-  [patterns content]
-  (let [compiled (map re-pattern patterns)]
-    (boolean (some (fn [line] (some #(re-find % line) compiled))
-                   (str/split-lines (str content))))))
+  "Does any line match a fallback pattern? With `literal?`, a matching line
+   counts only when the value it assigns is literal by that rule, or it assigns
+   none. The assigned value is a quoted value's content, or a plain value up
+   to a ` #` comment."
+  ([patterns content] (fallback-match? patterns content (constantly true)))
+  ([patterns content literal?]
+   (let [compiled (map re-pattern patterns)
+         assigned (fn [line]
+                    (when-let [[_ v] (re-find #"[:=]\s*(.*)$" line)]
+                      (if-let [[_ _ quoted] (re-find #"^([\"'])(.*?)\1" v)]
+                        quoted
+                        (str/trim (first (str/split v #"\s+#" 2))))))
+         counts? (fn [line]
+                   (and (some #(re-find % line) compiled)
+                        (let [value (assigned line)] (or (nil? value) (literal? value)))))]
+     (boolean (some counts? (str/split-lines (str content)))))))
 
 (defn- ^{:stratum 0} documents
   "Parse rendered multi-document YAML, or nil when it is not YAML."
@@ -103,7 +119,7 @@
                  (for [[k v] (get document "data")
                        :when (or (and (credential-name? k) (literal-value? v))
                                  (private-key? v)
-                                 (and (string? v) (fallback-match? patterns v)))]
+                                 (and (string? v) (fallback-match? patterns v literal-value?)))]
                    (str label ": data." k)))
         env (for [entry (env-entries document)
                   :let [value (get entry "value")]

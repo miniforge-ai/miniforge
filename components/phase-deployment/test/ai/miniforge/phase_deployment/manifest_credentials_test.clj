@@ -22,6 +22,12 @@
              "name" "region"]]
     (is (not (credentials/credential-name? n)) n)))
 
+(deftest ^{:stratum 0} placeholder-only-values-are-not-literal
+  (doseq [v ["$(DB_PASSWORD)" "${DB_PASSWORD}" "{{ .Values.password }}" " ${DB_PASSWORD} "]]
+    (is (not (credentials/literal-value? v)) v))
+  (doseq [v ["hunter2" "${DB_PASSWORD:hunter2}" "$(DB_PASSWORD}" "pw-${DB_PASSWORD}"]]
+    (is (credentials/literal-value? v) v)))
+
 ;------------------------------------------------------------------------------ Layer 1
 
 (defn- ^{:stratum 1} findings [manifest]

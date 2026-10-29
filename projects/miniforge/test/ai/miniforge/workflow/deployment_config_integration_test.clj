@@ -87,7 +87,11 @@
         "    spec:\n      containers:\n        - name: api\n          image: api@sha256:abc\n"
         "---\napiVersion: networking.k8s.io/v1\nkind: Ingress\nmetadata:\n  name: api\n"
         "  annotations:\n    nginx.ingress.kubernetes.io/auth-secret: basic-auth\n"
-        "spec:\n  rules: []\n")})
+        "spec:\n  rules: []\n")
+   "placeholders inside a ConfigMap application.yaml value"
+   (str "apiVersion: v1\nkind: ConfigMap\nmetadata:\n  name: api-config\n"
+        "data:\n  application.yaml: |\n    datasource:\n      password: \"${DB_PASSWORD}\"\n"
+        "    api:\n      token: '{{ .Values.apiToken }}'\n")})
 
 ;------------------------------------------------------------------------------ Layer 1
 
