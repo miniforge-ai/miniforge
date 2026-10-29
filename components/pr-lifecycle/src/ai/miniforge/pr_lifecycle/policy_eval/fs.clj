@@ -44,7 +44,9 @@
    canonical absolute path string when the target stays inside the
    worktree root, or returns nil when `relative-path` escapes
    (path-traversal guard). Use it for reads and writes, which follow
-   a final symlink; deletes use `safe-worktree-entry-path`.
+   a final symlink; deletes use `safe-worktree-entry-path`. With
+   `{:allow-root? true}` a path that resolves to the root itself also
+   passes, as a delete's parent directory may.
 
    Three layers of defense:
    1. Syntactic — reject absolute paths (leading `/`) and any
@@ -58,29 +60,32 @@
       the canonical worktree root, and not be a dangling symlink:
       `getCanonicalPath` cannot resolve one, so it looks inside, but a
       write follows it and creates the file wherever it points."
-  [worktree-root relative-path]
-  (try
-    (let [path-str (str relative-path)]
-      (cond
-        (str/blank? path-str)
-        nil
+  ([worktree-root relative-path]
+   (safe-worktree-path worktree-root relative-path nil))
+  ([worktree-root relative-path {:keys [allow-root?]}]
+   (try
+     (let [path-str (str relative-path)]
+       (cond
+         (str/blank? path-str)
+         nil
 
-        ;; Layer 1: syntactic rejection. Absolute paths or any
-        ;; ../ component bail before File-API canonicalization.
-        (str/starts-with? path-str "/")
-        nil
+         ;; Layer 1: syntactic rejection. Absolute paths or any
+         ;; ../ component bail before File-API canonicalization.
+         (str/starts-with? path-str "/")
+         nil
 
-        (some #{".."} (str/split path-str #"[/\\\\]"))
-        nil
+         (some #{".."} (str/split path-str #"[/\\\\]"))
+         nil
 
-        :else
-        (let [root   (.getCanonicalPath (io/file (str worktree-root)))
-              target (.getCanonicalPath (io/file (str worktree-root) path-str))]
-          (when (and (str/starts-with? target (str root java.io.File/separator))
-                     (not (and (fs/sym-link? target) (not (fs/exists? target)))))
-            target))))
-    (catch java.io.IOException _ nil)
-    (catch SecurityException _ nil)))
+         :else
+         (let [root   (.getCanonicalPath (io/file (str worktree-root)))
+               target (.getCanonicalPath (io/file (str worktree-root) path-str))]
+           (when (and (or (str/starts-with? target (str root java.io.File/separator))
+                          (and allow-root? (= target root)))
+                      (not (and (fs/sym-link? target) (not (fs/exists? target)))))
+             target))))
+     (catch java.io.IOException _ nil)
+     (catch SecurityException _ nil))))
 
 ;; ── content read/write (trailing-newline preserving) ─────────────────
 (defn- ^{:stratum 0} read-content
@@ -117,21 +122,19 @@
    nil when the entry would sit outside the worktree.
 
    A delete removes the last component and does not follow it, so only
-   the parent goes through `safe-worktree-path`, and the last component
-   must be a plain name (not `.` or `..`). A top-level entry's parent
-   (none, or `.`) is the worktree root itself. Resolving the whole path
-   would follow a final symlink and validate where it points instead of
-   the entry being removed: with `link` pointing outside and
-   `outside/back` pointing back in, `link/back` resolves inside while the
-   delete removes `outside/back`."
+   the parent goes through `safe-worktree-path`, which may resolve to
+   the worktree root itself (no parent, `.`, or a link to the root), and
+   the last component must be a plain name (not `.` or `..`). Resolving
+   the whole path would follow a final symlink and validate where it
+   points instead of the entry being removed: with `link` pointing
+   outside and `outside/back` pointing back in, `link/back` resolves
+   inside while the delete removes `outside/back`."
   [worktree-root relative-path]
   (let [file   (io/file (str relative-path))
         leaf   (.getName file)
         parent (.getParent file)]
     (when-not (or (str/blank? leaf) (contains? #{"." ".."} leaf))
-      (some-> (if (contains? #{nil "."} parent)
-                (str worktree-root)
-                (safe-worktree-path worktree-root parent))
+      (some-> (safe-worktree-path worktree-root (or parent ".") {:allow-root? true})
               (io/file leaf)
               str))))
 

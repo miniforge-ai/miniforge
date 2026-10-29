@@ -261,6 +261,38 @@
           (is (not (fs/exists? (fs/path outside "pwned.txt")))))
         (finally (fs/delete-tree base))))))
 
+(deftest ^{:stratum 1} apply-fix-to-worktree-resolves-each-op-in-order-test
+  (testing "deleting a symlink and recreating its name writes a new file, not the old target"
+    (let [{:keys [base worktree]} (temp-layout)
+          target (str (fs/path worktree "target.txt"))
+          link   (fs/path worktree "link.txt")]
+      (try
+        (spit target "orig")
+        (fs/create-sym-link link target)
+        (let [result (fix/apply-fix-to-worktree
+                      worktree {:code/files [{:path "link.txt" :action :delete}
+                                             {:path "link.txt" :content "new" :action :create}]} nil)]
+          (is (dag/ok? result))
+          (is (= "orig" (slurp target)))
+          (is (not (fs/sym-link? link)))
+          (is (= "new" (slurp (str link)))))
+        (finally (fs/delete-tree base))))))
+
+(deftest ^{:stratum 1} apply-fix-to-worktree-deletes-under-a-root-parent-test
+  (testing "a delete whose parent resolves to the worktree root itself applies"
+    (let [{:keys [base worktree]} (temp-layout)]
+      (try
+        (spit (str (fs/path worktree "a.txt")) "a")
+        (spit (str (fs/path worktree "b.txt")) "b")
+        (fs/create-sym-link (fs/path worktree "self") worktree)
+        (let [result (fix/apply-fix-to-worktree
+                      worktree {:code/files [{:path "self/a.txt" :action :delete}
+                                             {:path "././b.txt" :action :delete}]} nil)]
+          (is (dag/ok? result))
+          (is (not (fs/exists? (fs/path worktree "a.txt"))))
+          (is (not (fs/exists? (fs/path worktree "b.txt")))))
+        (finally (fs/delete-tree base))))))
+
 (deftest ^{:stratum 1} apply-fix-to-worktree-in-tree-changes-test
   (testing "create, modify and delete inside the worktree still apply"
     (let [{:keys [base worktree]} (temp-layout)]

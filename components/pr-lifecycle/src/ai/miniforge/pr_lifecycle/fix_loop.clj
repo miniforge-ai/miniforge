@@ -168,6 +168,8 @@
    symlinks are followed, and a `:delete` must name an entry inside it
    (the policy-eval.fs guards). One escaping path rejects the whole
    artifact with `:fix-path-traversal`, so a hostile fix writes nothing.
+   Each path is resolved again just before its own op, since an earlier
+   op in the same artifact can change what it points at.
 
    Arguments:
    - worktree-path: Path to git worktree
@@ -181,30 +183,38 @@
                :data {:worktree-path worktree-path
                       :file-count (count (:code/files fix-artifact))}}))
 
-  (let [files    (:code/files fix-artifact)
-        resolved (vec (for [{:keys [path action] :as file} files]
-                        (assoc file :full-path
-                               (if (= :delete action)
-                                 (policy-fs/safe-worktree-entry-path worktree-path path)
-                                 (policy-fs/safe-worktree-path worktree-path path)))))
-        escaped  (into [] (comp (remove :full-path) (map :path)) resolved)]
+  (let [files        (:code/files fix-artifact)
+        resolve-path (fn [{:keys [path action]}]
+                       (if (= :delete action)
+                         (policy-fs/safe-worktree-entry-path worktree-path path)
+                         (policy-fs/safe-worktree-path worktree-path path)))
+        escaped      (into [] (comp (remove resolve-path) (map :path)) files)
+        traversal    (fn [paths]
+                       (dag/err :fix-path-traversal
+                                (str "Fix paths escape the worktree: " (str/join ", " paths))
+                                {:paths paths}))]
     (if (seq escaped)
       (do
         (when logger
           (log/error logger :pr-lifecycle :fix/path-traversal
                      {:message "Rejected fix with paths outside the worktree"
                       :data {:worktree-path worktree-path :paths escaped}}))
-        (dag/err :fix-path-traversal
-                 (str "Fix paths escape the worktree: " (str/join ", " escaped))
-                 {:paths escaped}))
+        (traversal escaped))
       (try
-        (doseq [{:keys [full-path content action]} resolved]
-          (if (= :delete action)
-            (io/delete-file full-path true)
-            ;; :create, :modify, and any other action write the content
-            (spit full-path content)))
-        (dag/ok {:files-modified (count files)
-                 :paths (mapv :path files)})
+        ;; Resolve again right before each op: an earlier delete in the same
+        ;; artifact can change where a later path lands. Deleting link.txt and
+        ;; then creating it must write a new file, not the link's old target.
+        (or (reduce (fn [_ {:keys [path content action] :as file}]
+                      (if-let [full-path (resolve-path file)]
+                        (do (if (= :delete action)
+                              (io/delete-file full-path true)
+                              ;; :create, :modify, and any other action write the content
+                              (spit full-path content))
+                            nil)
+                        (reduced (traversal [path]))))
+                    nil files)
+            (dag/ok {:files-modified (count files)
+                     :paths (mapv :path files)}))
         (catch Exception e
           (when logger
             (log/error logger :pr-lifecycle :fix/apply-failed
