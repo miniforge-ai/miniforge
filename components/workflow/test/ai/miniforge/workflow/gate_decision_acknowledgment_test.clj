@@ -6,6 +6,7 @@
   (:require [ai.miniforge.anomaly.interface :as anomaly]
             [ai.miniforge.event-stream.interface :as events]
             [ai.miniforge.gate.interface :as gate]
+            [ai.miniforge.workflow.execution-transition :as transition]
             [ai.miniforge.workflow.gate-decision-test-support :as support]
             [ai.miniforge.workflow.phase-event-test-support :as journal]
             [clojure.test :refer [deftest is testing]]))
@@ -107,6 +108,15 @@
     (is (= :failed (:status recorded)) "a :leave cannot turn a denied phase back to :completed")
     (is (= [:dag :transition] calls))
     (is (empty? (:execution/errors result)) "a denial is a phase failure, not a refusal")))
+
+(deftest ^{:stratum 1} denied-enter-only-phase-cannot-advance
+  (let [denying {:config {:phase :review :gates [:review-approved]} :enter enter-rejected}
+        [result calls] (support/execute denying (support/context (support/legacy-stream)) false)
+        recorded (get-in result [:execution/phase-results :review])]
+    (is (= :deny (get-in recorded [:phase/decision-envelope :envelope/decision])))
+    (is (= :failed (:status recorded)) "no :leave left it :running")
+    (is (= :phase/fail (transition/determine-phase-event {} recorded)))
+    (is (= [:dag :transition] calls))))
 
 ;------------------------------------------------------------------------------ Layer 2
 
