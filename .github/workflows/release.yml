@@ -154,11 +154,16 @@ jobs:
           distribution: 'temurin'
           java-version: '21'
 
+      # Exact toolchain versions live in .github/tool-versions.json.
+      - name: Read pinned tool versions
+        id: tools
+        run: jq -r 'to_entries[] | "\(.key)=\(.value)"' .github/tool-versions.json >> "$GITHUB_OUTPUT"
+
       - name: Install Clojure
         uses: DeLaGuardo/setup-clojure@bc7570e912b028bbcc22f457adec7fdf98e2f4ed # 12.5
         with:
-          cli: latest
-          bb: latest
+          cli: ${{ steps.tools.outputs.clojure-cli }}
+          bb: ${{ steps.tools.outputs.babashka }}
 
       - name: Cache Clojure dependencies
         uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4.3.0
@@ -252,11 +257,19 @@ jobs:
           distribution: 'temurin'
           java-version: '21'
 
+      # Exact toolchain versions live in .github/tool-versions.json.
+      - name: Read pinned tool versions
+        id: tools
+        shell: pwsh
+        run: |
+          (Get-Content -Raw .github/tool-versions.json | ConvertFrom-Json).PSObject.Properties |
+            ForEach-Object { "$($_.Name)=$($_.Value)" } >> $env:GITHUB_OUTPUT
+
       - name: Install Clojure + bb (Windows)
         uses: DeLaGuardo/setup-clojure@bc7570e912b028bbcc22f457adec7fdf98e2f4ed # 12.5
         with:
-          cli: latest
-          bb: latest
+          cli: ${{ steps.tools.outputs.clojure-cli }}
+          bb: ${{ steps.tools.outputs.babashka }}
 
       # `bb build:cli` shells out to `clojure` through Java
       # ProcessBuilder. On GitHub-hosted Windows runners setup-clojure
@@ -458,6 +471,14 @@ jobs:
           token: ${{ steps.app-token.outputs.token }}
           path: homebrew-tap
 
+      # bb.edn's :min-bb-version becomes the mf launcher's babashka floor.
+      - name: Checkout bb.edn
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          path: miniforge
+          sparse-checkout: bb.edn
+          sparse-checkout-cone-mode: false
+
       - name: Download macOS ARM64 artifact
         uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
         with:
@@ -477,6 +498,12 @@ jobs:
           # Read SHA256 checksums
           MACOS_ARM64_SHA=$(cat artifacts/macos-arm64/miniforge-macos-arm64.sha256 | awk '{print $1}')
           LINUX_X86_SHA=$(cat artifacts/linux-x86_64/miniforge-linux-x86_64.sha256 | awk '{print $1}')
+
+          # Babashka floor from bb.edn (0, i.e. no floor, if it declares none).
+          # Homebrew's depends_on cannot carry a version, so the launcher checks.
+          MIN_BB=$(sed -nE 's/.*:min-bb-version "([0-9]+(\.[0-9]+)*)".*/\1/p' miniforge/bb.edn | head -n1)
+          MIN_BB=${MIN_BB:-0}
+          echo "babashka floor: $MIN_BB"
 
           # Create Formula directory if it doesn't exist
           mkdir -p homebrew-tap/Formula
@@ -510,12 +537,18 @@ jobs:
 
               (bin/"mf").write <<~SH
                 #!/bin/bash
+                min="MIN_BB_VERSION"
+                have="$(bb --version 2>/dev/null | sed 's/^babashka v//')"
+                if [ "$(printf '%s\\n' "$min" "$have" | sort -V | head -n1)" != "$min" ]; then
+                  echo "mf: needs babashka >= $min (found: ${have:-none}); run: brew upgrade babashka" >&2
+                  exit 1
+                fi
                 exec bb --jar "#{libexec}/#{jar_name}" -m ai.miniforge.cli.main "$@"
               SH
             end
 
             test do
-              assert_match "miniforge", shell_output("#{bin}/mf --help 2>&1")
+              assert_match version.to_s, shell_output("#{bin}/mf version")
             end
           end
           FORMULA_EOF
@@ -524,6 +557,7 @@ jobs:
           sed -i "s/RELEASE_VERSION/${VERSION}/g" homebrew-tap/Formula/miniforge.rb
           sed -i "s/MACOS_SHA_PLACEHOLDER/${MACOS_ARM64_SHA}/g" homebrew-tap/Formula/miniforge.rb
           sed -i "s/LINUX_SHA_PLACEHOLDER/${LINUX_X86_SHA}/g" homebrew-tap/Formula/miniforge.rb
+          sed -i "s/MIN_BB_VERSION/${MIN_BB}/g" homebrew-tap/Formula/miniforge.rb
 
       - name: Commit and push formula
         env:
