@@ -155,12 +155,16 @@
     (.toFile path)))
 
 (defn- ^{:stratum 0} run-with-runtime-env
-  "Call (run-fn), then delete the env file `prepare-runtime-env!` wrote."
-  [{:keys [file]} run-fn]
-  (try
-    (run-fn)
-    (finally
-      (when file (.delete ^java.io.File file)))))
+  "Call (run-fn), then delete the env file `prepare-runtime-env!` wrote.
+   An env it refused is a failed runtime call (exit 1) carrying the reason,
+   and run-fn does not run."
+  [{:keys [file error]} run-fn]
+  (if error
+    {:exit 1 :out "" :err error :out-bytes (byte-array 0) :err-bytes (byte-array 0)}
+    (try
+      (run-fn)
+      (finally
+        (when file (.delete ^java.io.File file))))))
 
 (def ^{:stratum 0} secret-pattern
   "Regex matching env var names that carry sensitive values."
@@ -401,13 +405,20 @@
         env))
 
 (defn- ^{:stratum 0} workspace-opts
-  "persist/restore opts. With a credential, push and fetch target the
-   recorded repository URL rather than the capsule's `origin`, which
-   untrusted code can repoint at another repository on the same host."
-  [opts git-remotes environment-id cred-env]
-  (if (seq cred-env)
-    (assoc opts :remote (get-in @git-remotes [environment-id :https-url]))
+  "persist/restore opts. With a recorded remote, push and fetch target its
+   repository URL rather than the capsule's `origin`, which untrusted code
+   can repoint at another repository on the same host."
+  [opts git-remotes environment-id]
+  (if-let [url (some-> git-remotes deref (get-in [environment-id :https-url]))]
+    (assoc opts :remote url)
     opts))
+
+(defn- ^{:stratum 0} git-config-entries
+  "The [key value] pairs GIT_CONFIG_COUNT / KEY_n / VALUE_n in `env` set,
+   in order."
+  [env]
+  (for [i (range (parse-long (get env "GIT_CONFIG_COUNT" "0")))]
+    [(get env (str "GIT_CONFIG_KEY_" i)) (get env (str "GIT_CONFIG_VALUE_" i))]))
 
 ;------------------------------------------------------------------------------ Layer 1
 
@@ -415,17 +426,17 @@
   "Deliver env-map to the container without putting its values on the
    runtime argv (`ps` shows argv to every host user) or into the runtime
    CLI's own environment (where LD_PRELOAD or DOCKER_DEFAULT_PLATFORM would
-   change the CLI itself). Entries go to an owner-only temp file passed as
-   `--env-file`; a value an env file cannot hold goes as `-e NAME`, read
-   from :child-env, the CLI's environment. Returns {:args :child-env :file};
-   the caller deletes :file with `run-with-runtime-env`."
+   change the CLI itself): entries go to an owner-only temp file passed as
+   `--env-file`. Returns {:args :file}; the caller deletes :file with
+   `run-with-runtime-env`. An env file holds one line per entry, and every
+   other channel exposes the value, so env-map with a line break in a value
+   is refused: {:error message}, and nothing is written."
   [env-map]
-  (let [{file-entries true by-name false} (group-by env-file-entry? env-map)
-        file (when (seq file-entries) (write-env-file! file-entries))]
-    {:args      (concat (when file ["--env-file" (str file)])
-                        (mapcat (fn [[k _]] ["-e" (name k)]) by-name))
-     :child-env (into {} (for [[k v] by-name] [(name k) (str v)]))
-     :file      file}))
+  (if-let [bad (seq (remove env-file-entry? env-map))]
+    {:error (messages/t :oci/env-line-break {:names (str/join ", " (map (comp name key) bad))})}
+    (let [file (when (seq env-map) (write-env-file! env-map))]
+      {:args (when file ["--env-file" (str file)])
+       :file file})))
 
 (defn- ^{:stratum 1} split-userinfo
   "[url auth] for an http(s) URL: the URL without any `user[:password]@`,
@@ -494,12 +505,9 @@
    When `timeout-ms` is nil or <= 0 the call is unbounded. On timeout the
    process tree is destroyed forcibly and a result with :exit 124 is returned
    so callers that check `(zero? :exit)` surface it as a command failure."
-  [timeout-ms descriptor args & {:keys [stdin-bytes env]}]
+  [timeout-ms descriptor args & {:keys [stdin-bytes]}]
   (try
-    (let [pb (doto (ProcessBuilder. (into-array String (apply runtime-cmd descriptor args)))
-               ;; `env` joins the CLI's own environment, where `-e NAME`
-               ;; args read their values (`prepare-runtime-env!`).
-               (-> .environment (.putAll (or env {}))))
+    (let [pb (ProcessBuilder. (into-array String (apply runtime-cmd descriptor args)))
           process (.start pb)
           stdout-fut (runtime-process/read-stream-future (.getInputStream process))
           stderr-fut (runtime-process/read-stream-future (.getErrorStream process))
@@ -598,6 +606,9 @@
    `auth`: an Authorization header set through GIT_CONFIG_COUNT/KEY/VALUE
    (git 2.31+), scoped by `http.<origin>/.extraheader` so git sends it to
    that host only, plus `git-credential-config` and no askpass program.
+   extraheader is multi-valued, so an empty entry first drops any header the
+   image or workspace config set for that host; otherwise git would send
+   two Authorization headers.
    Env-supplied config is never written to .git/config, and exec passes the
    values in an env file, so the token lands in neither the capsule's repo
    state nor the runtime argv (N11 §2.2). Empty without a token or for a
@@ -605,11 +616,17 @@
   [https-url {:keys [user token]}]
   (if-let [[_ origin] (when token (re-find #"^(https://[^/]+)/" https-url))]
     (merge (git-config-env (conj git-credential-config
+                                 [(str "http." origin "/.extraheader") ""]
                                  [(str "http." origin "/.extraheader")
                                   (basic-auth-header user token)]))
            {"GIT_TERMINAL_PROMPT" "0"
             "GIT_ASKPASS"         ""})
     {}))
+
+(defn- ^{:stratum 1} without-git-config
+  "`env` without its GIT_CONFIG_* tuple."
+  [env]
+  (into {} (remove (fn [[k _]] (re-matches git-config-env-pattern (name k)))) env))
 
 ;------------------------------------------------------------------------------ Layer 2
 
@@ -683,12 +700,11 @@
   (apply run-runtime-timed nil descriptor args))
 
 (defn ^{:stratum 2} run-runtime-process
-  "Execute a runtime CLI command with optional stdin bytes and extra
-   environment entries for the CLI process.
+  "Execute a runtime CLI command with optional stdin bytes.
    Internal callers that need a bounded deadline use `run-runtime-process-timed`
    directly; this public entry point is unbounded for backward-compatibility."
-  [descriptor args & {:keys [stdin-bytes env]}]
-  (run-runtime-process-timed nil descriptor args :stdin-bytes stdin-bytes :env env))
+  [descriptor args & {:keys [stdin-bytes]}]
+  (run-runtime-process-timed nil descriptor args :stdin-bytes stdin-bytes))
 
 (defn ^{:stratum 2} exec-in-container
   "Execute a command in a running container."
@@ -708,8 +724,7 @@
                      default-exec-timeout-ms)
         start-time (System/currentTimeMillis)
         result (run-with-runtime-env
-                env #(run-runtime-process-timed timeout-ms descriptor full-args
-                                                :env (:child-env env)))]
+                env #(run-runtime-process-timed timeout-ms descriptor full-args))]
     (result/ok {:exit-code (:exit result)
                 :stdout (:out result)
                 :stderr (:err result)
@@ -797,15 +812,27 @@
       (:network-profile env-config) (assoc :network-profile (:network-profile env-config))
       (:secrets-refs env-config)    (assoc :secrets-refs (:secrets-refs env-config)))))
 
+(defn- ^{:stratum 2} combine-git-env
+  "`base` then `extra`, with their GIT_CONFIG_* entries renumbered into one
+   block, `extra`'s after `base`'s so its settings win, and their other
+   variables merged, `extra` winning."
+  [base extra]
+  (let [entries (concat (git-config-entries base) (git-config-entries extra))]
+    (cond-> (merge (without-git-config base) (without-git-config extra))
+      (seq entries) (merge (git-config-env entries)))))
+
 ;------------------------------------------------------------------------------ Layer 3
 
 (defn- ^{:stratum 3} with-git-credentials
   "execute! opts: when they ask for :git-credentials?, the recorded remote's
    credential env joins :env. Release's in-capsule fetch and push use this;
-   since origin carries no credential, they are unauthenticated without it."
+   since origin carries no credential, they are unauthenticated without it.
+   The two GIT_CONFIG_* blocks are combined (`combine-git-env`), the
+   caller's last, so a caller's own git config, such as release's push
+   retry, is kept and wins."
   [opts git-remotes environment-id]
   (if (:git-credentials? opts)
-    (update opts :env merge (remote-credential-env git-remotes environment-id))
+    (update opts :env #(combine-git-env (remote-credential-env git-remotes environment-id) %))
     opts))
 
 ;; ============================================================================
@@ -859,7 +886,7 @@
                               resource-args
                               (into [image] (get execution-plan :command ["sleep" "infinity"])))
         result        (run-with-runtime-env
-                       env #(run-runtime-process descriptor cmd-args :env (:child-env env)))]
+                       env #(run-runtime-process descriptor cmd-args))]
     (if (zero? (:exit result))
       (result/ok {:container-id (str/trim (:out result))
                   :container-name container-name})
@@ -1086,14 +1113,14 @@
     (result/ok nil)))
 
 (defn- ^{:stratum 4} workspace-exec-fn
-  "exec-fn for `workspace/git-persist!` and `git-restore!`. Given a
-   credential env, only push and fetch receive it: add, status and commit
-   run hooks and fsmonitor the untrusted workspace defines, so they must
-   not see the credential."
+  "exec-fn for `workspace/git-persist!` and `git-restore!`. `cred-env` is a
+   delay that only push and fetch force: a persist with nothing to push
+   resolves no token, and add, status and commit, which run hooks and
+   fsmonitor the untrusted workspace defines, never see the credential."
   [descriptor container-id workdir cred-env]
   (let [exec! (container-exec-fn descriptor container-id workdir)]
     (fn [cmd]
-      (exec! cmd (when (git-network-command? cmd) cred-env)))))
+      (exec! cmd (when (git-network-command? cmd) @cred-env)))))
 
 ;------------------------------------------------------------------------------ Layer 5
 
@@ -1236,16 +1263,16 @@
         (result/ok {:status :unknown :error (.getMessage e)}))))
 
   (persist-workspace! [_this environment-id opts]
-    (let [cred-env (remote-credential-env git-remotes environment-id)
+    (let [cred-env (delay (remote-credential-env git-remotes environment-id))
           exec!    (workspace-exec-fn descriptor environment-id
                                       (get opts :workdir default-workdir) cred-env)]
-      (workspace/git-persist! exec! (workspace-opts opts git-remotes environment-id cred-env))))
+      (workspace/git-persist! exec! (workspace-opts opts git-remotes environment-id))))
 
   (restore-workspace! [_this environment-id opts]
-    (let [cred-env (remote-credential-env git-remotes environment-id)
+    (let [cred-env (delay (remote-credential-env git-remotes environment-id))
           exec!    (workspace-exec-fn descriptor environment-id
                                       (get opts :workdir default-workdir) cred-env)]
-      (workspace/git-restore! exec! (workspace-opts opts git-remotes environment-id cred-env)))))
+      (workspace/git-restore! exec! (workspace-opts opts git-remotes environment-id)))))
 
 ;------------------------------------------------------------------------------ Layer 6
 

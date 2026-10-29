@@ -352,6 +352,11 @@
                 "http.https://github.com/.extraheader"
                 (str "Authorization: Basic " (basic-auth "x-access-token" "tok"))}
                (git-config-of env)))
+        (is (= [["http.https://github.com/.extraheader" ""]
+                ["http.https://github.com/.extraheader"
+                 (str "Authorization: Basic " (basic-auth "x-access-token" "tok"))]]
+               (take-last 2 ((private-fn 'git-config-entries) env)))
+            "an empty extraheader first drops any header image or workspace config set")
         (is (= "0" (get env "GIT_TERMINAL_PROMPT")))
         (is (= "" (get env "GIT_ASKPASS")))))
     (testing "no token, or a URL that is not https, yields no credential"
@@ -730,6 +735,37 @@
           (is (contains? (git-config-of (:env with-creds)) "http.https://github.com/.extraheader"))
           (is (= {"GH_TOKEN" "t"} (:env without))))))))
 
+(deftest ^{:stratum 1} execute-git-credentials-keeps-callers-git-config-test
+  (testing "a caller's own GIT_CONFIG_* block (release's push retry) is kept
+            alongside the recorded remote's, renumbered after it so the
+            caller's settings win, rather than overwritten"
+    (let [seen (atom nil)]
+      (with-redefs [oci-cli/resolve-git-token (fn [_url _opts] fake-token)
+                    oci-cli/exec-in-container (fn [_d _id _cmd opts] (reset! seen opts)
+                                                (result/ok {:exit-code 0}))]
+        (proto/execute! (recorded-remote-executor) "c1" ["git" "push"]
+                        {:git-credentials? true
+                         :env {"GH_TOKEN"           "t"
+                               "GIT_CONFIG_COUNT"   "1"
+                               "GIT_CONFIG_KEY_0"   "url.https://github.com/.insteadOf"
+                               "GIT_CONFIG_VALUE_0" "git@github.com:"}})
+        (let [entries ((private-fn 'git-config-entries) (:env @seen))]
+          (is (= ["url.https://github.com/.insteadOf" "git@github.com:"] (last entries)))
+          (is (some #{["core.hooksPath" "/dev/null"]} entries))
+          (is (= "t" (get-in @seen [:env "GH_TOKEN"]))))))))
+
+(deftest ^{:stratum 1} persist-without-changes-resolves-no-token-test
+  (testing "a persist with nothing to push never resolves the credential,
+            so a slow token lookup (gh auth token) cannot hold it up"
+    (let [lookups (atom 0)]
+      (with-redefs [oci-cli/resolve-git-token (fn [_url _opts] (swap! lookups inc) fake-token)
+                    oci-cli/exec-in-container (fn [_d _id _cmd _opts]
+                                                {:data {:exit-code 0 :stdout ""}})]
+        (is (true? (get-in (proto/persist-workspace! (recorded-remote-executor) "c1"
+                                                     {:branch "task/x"})
+                           [:data :no-changes?])))
+        (is (zero? @lookups))))))
+
 ;------------------------------------------------------------------------------ Layer 2
 
 (defn- ^{:stratum 2} with-fake-runtime
@@ -812,21 +848,32 @@
 
 (deftest ^{:stratum 3} exec-in-container-passes-env-through-an-env-file-test
   (testing "per-command env (release's GH_TOKEN, a HOME for the container)
-            leaves the runtime CLI's own environment alone; a value an env
-            file cannot hold goes by name"
-    (with-fake-runtime :podman ["GH_TOKEN" "HOME" "PEM"]
+            leaves the runtime CLI's own environment alone"
+    (with-fake-runtime :podman ["GH_TOKEN" "HOME"]
       (fn [descriptor calls]
         (oci-cli/exec-in-container descriptor "c" ["gh" "pr" "create"]
                                    {:env {"GH_TOKEN" fake-token
-                                          "HOME"     "/capsule-home"
-                                          "PEM"      "line1\nline2"}})
+                                          "HOME"     "/capsule-home"}})
         (let [{:keys [argv env env-file]} (first (calls))]
           (is (not-any? token-in? argv))
           (is (= {"GH_TOKEN" fake-token "HOME" "/capsule-home"} env-file))
           (is (not= fake-token (get env "GH_TOKEN")))
-          (is (not= "/capsule-home" (get env "HOME")))
-          (is (some #{"PEM"} argv))
-          (is (= "line1|line2" (get env "PEM"))))))))
+          (is (not= "/capsule-home" (get env "HOME"))))))))
+
+(deftest ^{:stratum 3} env-with-line-break-is-refused-test
+  (testing "a value with a line break, which an env file cannot hold, is
+            refused: the runtime CLI never runs, so the value reaches neither
+            its argv nor its environment (where LD_PRELOAD would load it)"
+    (with-fake-runtime :podman ["LD_PRELOAD"]
+      (fn [descriptor calls]
+        (let [r (oci-cli/exec-in-container descriptor "c" ["true"]
+                                           {:env {"LD_PRELOAD" "\n/tmp/evil.so"}})]
+          (is (= 1 (get-in r [:data :exit-code])))
+          (is (clojure.string/includes? (get-in r [:data :stderr]) "LD_PRELOAD"))
+          (is (empty? (calls))))
+        (is (result/err? (oci-cli/create-container descriptor "c" "img" "/w" nil nil nil
+                                                   :execution-plan {:env {"PEM" "a\nb"}})))
+        (is (empty? (calls)))))))
 
 (deftest ^{:stratum 3} bootstrap-workspace-keeps-token-out-of-git-config-test
   (testing "the clone gets the token through its env file: no runtime argv
