@@ -16,13 +16,15 @@
 ;; See the License for the specific language governing permissions and
 ;; limitations under the License.
 (ns ai.miniforge.artifact.protocols.impl.transit-store-persistence-test
-  "Disk persistence of the transit store: atomic file writes and
-   close waiting for queued writes."
+  "Disk persistence of the transit store: atomic file writes, close
+   waiting for queued writes, and index merge across stores that share
+   a directory."
   (:require [ai.miniforge.artifact.interface.protocols.artifact-store :as p]
             [ai.miniforge.artifact.protocols.impl.transit-store :as impl]
             [ai.miniforge.artifact.protocols.records.transit-store :as store]
             [ai.miniforge.logging.interface :as log]
             [clojure.java.io :as io]
+            [clojure.string :as str]
             [clojure.test :refer [deftest is testing]]
             [cognitect.transit :as transit])
   (:import [java.io File]
@@ -128,6 +130,68 @@
           (testing "the queued writes still land once the write unblocks"
             (is (true? (p/close s)))
             (is (= #{"a1"} (on-disk-ids dir))))))
+      (finally
+        (deliver release true)
+        (delete-dir! dir)))))
+
+(deftest ^{:stratum 1} test-stores-sharing-a-directory-keep-each-others-entries
+  (let [dir (temp-dir)]
+    (try
+      ;; Both open before either saves and so hold the same empty index,
+      ;; as two CLI processes started close together do.
+      (let [a (open-store dir)
+            b (open-store dir)]
+        (p/save a (artifact "from-a"))
+        (p/close a)
+        (p/save b (artifact "from-b"))
+        (p/close b))
+      (testing "the later writer does not drop the earlier writer's entries"
+        (is (= #{"from-a" "from-b"} (on-disk-ids dir))))
+      (testing "a store opened afterwards finds both artifacts"
+        (let [s (open-store dir)]
+          (is (= #{"from-a" "from-b"} (set (map :artifact/id (p/query s {})))))
+          (p/close s)))
+      (finally
+        (delete-dir! dir)))))
+
+(deftest ^{:stratum 1} test-concurrent-saves-all-reach-the-index
+  (let [dir (temp-dir)]
+    (try
+      (let [stores [(open-store dir) (open-store dir)]
+            ids (mapv #(str "art-" %) (range 40))
+            saves (doall (map-indexed (fn [i id]
+                                        (future (p/save (nth stores (mod i 2)) (artifact id))))
+                                      ids))]
+        (run! deref saves)
+        (run! p/close stores)
+        (testing "every save from both stores is in the index on disk, and it parses"
+          (is (= (set ids) (on-disk-ids dir))))
+        (testing "no temp files are left behind"
+          (is (empty? (filter #(str/ends-with? % ".tmp") (file-names (artifacts-path dir)))))))
+      (finally
+        (delete-dir! dir)))))
+
+(deftest ^{:stratum 1} test-queued-index-writes-collapse-into-one
+  (let [dir (temp-dir)
+        release (promise)
+        index-writes (atom 0)
+        write impl/write-transit]
+    (try
+      ;; Hold the writer on its first write so all saves queue behind it.
+      (with-redefs [impl/write-transit (fn [path data]
+                                         @release
+                                         (when (str/ends-with? path "/index.transit.json")
+                                           (swap! index-writes inc))
+                                         (write path data))]
+        (let [s (open-store dir)
+              ids (mapv #(str "art-" %) (range 20))]
+          (run! #(p/save s (artifact %)) ids)
+          (deliver release true)
+          (p/close s)
+          (testing "twenty queued index writes cost one write"
+            (is (= 1 @index-writes)))
+          (testing "and that write holds every save"
+            (is (= (set ids) (on-disk-ids dir))))))
       (finally
         (deliver release true)
         (delete-dir! dir)))))

@@ -87,7 +87,9 @@
         (atom {})           ; Empty cache initially
         (atom index)        ; Load existing index
         logger
-        ;; Every action catches its own failures; :continue keeps one
-        ;; that slips through from blocking every later write.
+        ;; State: the index value last written (see
+        ;; impl/persist-index-action). Every action catches its own
+        ;; failures; :continue keeps one that slips through from
+        ;; blocking every later write.
         (agent nil :error-mode :continue)
         (or close-timeout-ms impl/default-close-timeout-ms))))))

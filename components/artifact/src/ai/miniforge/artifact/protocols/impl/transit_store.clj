@@ -19,7 +19,19 @@
   "Implementation functions for TransitArtifactStore protocol.
 
    These functions implement the ArtifactStore protocol for the Transit-based store.
-   They are used by the TransitArtifactStore record."
+   They are used by the TransitArtifactStore record.
+
+   Disk writes run as actions on the store's writer agent, one at a time
+   and in submission order; close-store waits for them with a bounded
+   timeout. Every file is written to a sibling temp file and renamed over
+   the target, so a reader, or a process cut off mid-write, never sees a
+   partial file. Index writes also hold the index lock (a per-directory
+   monitor in this JVM plus an OS file lock across processes) and merge
+   with the index already on disk, so concurrent stores and processes do
+   not drop each other's entries.
+
+   Plain `try` throughout: the artifact component has no slingshot
+   dependency (rule 211, exemption 1)."
   (:require
    [ai.miniforge.anomaly.interface :as anomaly]
    [ai.miniforge.artifact.messages :as messages]
@@ -30,7 +42,8 @@
    [ai.miniforge.artifact.interface.protocols.artifact-store :as p]
    [ai.miniforge.logging.interface :as log])
   (:import
-   [java.nio.file CopyOption Files StandardCopyOption]))
+   [java.nio.channels FileChannel]
+   [java.nio.file CopyOption Files OpenOption StandardCopyOption StandardOpenOption]))
 
 ;------------------------------------------------------------------------------ Layer 0
 
@@ -40,6 +53,13 @@
    example, another process holds the index lock) and keeps CLI exit from
    hanging on it."
   10000)
+
+(defonce ^{:stratum 0 :private true} index-monitors
+  ;; Canonical artifacts-dir path -> monitor object. The OS file lock
+  ;; serializes processes, but one JVM may hold only one lock per file:
+  ;; a second store on the same directory would get
+  ;; OverlappingFileLockException instead of waiting.
+  (atom {}))
 
 ;; Pure functions for path handling
 (defn ^{:stratum 0} artifacts-dir
@@ -60,6 +80,12 @@
   "Get the path to the metadata index file."
   [artifacts-dir]
   (str artifacts-dir "/index.transit.json"))
+
+(defn ^{:stratum 0} lock-file-path
+  "Get the path to the file locked while the index is rewritten.
+   Separate from the index itself, which is replaced by rename."
+  [artifacts-dir]
+  (str artifacts-dir "/index.lock"))
 
 (defn ^{:stratum 0} ensure-artifacts-dir!
   "Ensure the artifacts directory exists."
@@ -115,6 +141,17 @@
       (update-in [parent-id :artifact/children] (fnil conj []) child-id)
       (update-in [child-id :artifact/parents] (fnil conj []) parent-id)))
 
+(defn- ^{:stratum 0} merge-index-entry
+  "Combine the on-disk and in-memory index entries for one artifact.
+   Links are only ever added, so the parents and children of both are
+   kept; the in-memory entry wins every other field."
+  [disk-entry memory-entry]
+  (assoc (merge disk-entry memory-entry)
+         :artifact/parents (vec (distinct (concat (:artifact/parents disk-entry)
+                                                  (:artifact/parents memory-entry))))
+         :artifact/children (vec (distinct (concat (:artifact/children disk-entry)
+                                                   (:artifact/children memory-entry))))))
+
 ;; Protocol implementations
 (defn ^{:stratum 0} log-artifact-saved
   "Log artifact save operation."
@@ -167,6 +204,22 @@
 
 ;------------------------------------------------------------------------------ Layer 1
 
+(defn ^{:stratum 1} call-with-index-lock
+  "Call f while holding the index lock for artifacts-dir and return its
+   result. Closing the channel releases the OS lock (FileLock's own
+   methods are not callable under babashka)."
+  [artifacts-dir f]
+  (let [dir-key (.getCanonicalPath (io/file artifacts-dir))
+        monitor (-> (swap! index-monitors
+                           (fn [m] (if (contains? m dir-key) m (assoc m dir-key (Object.)))))
+                    (get dir-key))]
+    (locking monitor
+      (with-open [channel (FileChannel/open (.toPath (io/file (lock-file-path artifacts-dir)))
+                                            (into-array OpenOption [StandardOpenOption/CREATE
+                                                                    StandardOpenOption/WRITE]))]
+        (.lock channel)
+        (f)))))
+
 ;; Index management
 (defn ^{:stratum 1} load-index
   "Load the artifact metadata index.
@@ -175,10 +228,10 @@
   (or (read-transit (index-file-path artifacts-dir))
       {}))
 
-(defn ^{:stratum 1} save-index!
-  "Save the artifact metadata index."
-  [artifacts-dir index]
-  (write-transit (index-file-path artifacts-dir) index))
+(defn ^{:stratum 1} merge-indexes
+  "Merge the on-disk index with the in-memory one; see merge-index-entry."
+  [disk-index memory-index]
+  (merge-with merge-index-entry disk-index memory-index))
 
 (defn ^{:stratum 1} persist-artifact!
   "Persist an artifact to disk in Transit format."
@@ -224,16 +277,32 @@
 ;------------------------------------------------------------------------------ Layer 2
 
 (defn ^{:stratum 2} persist-index-action
-  "Writer action: write the in-memory index to disk. Failures are
-   logged: an agent action is the outermost frame of the writer thread."
-  [state artifacts-dir index logger]
-  (try
-    (save-index! artifacts-dir @index)
-    (catch Exception e
-      (log/error logger :system :artifact/index-save-failed
-                 {:message (.getMessage e)
-                  :data {:artifacts-dir artifacts-dir}})))
-  state)
+  "Writer action: under the index lock, merge the in-memory index with
+   the one on disk, keep the result in memory and write it. Another
+   store or process may have added artifacts since this store loaded
+   the index; writing only the in-memory map would drop them.
+
+   The writer's state is the index value last written. When the
+   in-memory index is still that value, an earlier action already wrote
+   what this one was queued for (a burst of saves queues one write
+   each), so it is skipped. Failures are logged and leave the state
+   alone, so the next queued write retries: an agent action is the
+   outermost frame of the writer thread."
+  [last-written artifacts-dir index logger]
+  (if (identical? last-written @index)
+    last-written
+    (try
+      (call-with-index-lock
+       artifacts-dir
+       (fn []
+         (let [merged (swap! index (partial merge-indexes (load-index artifacts-dir)))]
+           (write-transit (index-file-path artifacts-dir) merged)
+           merged)))
+      (catch Exception e
+        (log/error logger :system :artifact/index-save-failed
+                   {:message (.getMessage e)
+                    :data {:artifacts-dir artifacts-dir}})
+        last-written))))
 
 (defn ^{:stratum 2} persist-artifact-action
   "Writer action: persist one artifact file, logging the outcome."
