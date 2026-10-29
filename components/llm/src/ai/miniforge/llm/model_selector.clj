@@ -27,12 +27,19 @@
    code-side FALLBACKS used only when that resource is absent at
    classpath load."
   (:require
+   [ai.miniforge.anomaly.interface :as anomaly]
+   [ai.miniforge.llm.messages :as msg]
    [ai.miniforge.llm.model-registry :as registry]
    [ai.miniforge.logging.interface :as log]
    [clojure.edn :as edn]
    [clojure.java.io :as io]))
 
 ;------------------------------------------------------------------------------ Layer 0
+
+(def ^{:stratum 0} ^:private default-logger
+  "Where select-model reports a fallback when its config carries no
+   :logger; the module-level EDN logger network-monitor also uses."
+  (log/create-logger {:min-level :info :output :edn}))
 
 ;; Constraints and availability
 (def ^{:stratum 0} ^:private default-cost-limit-usd
@@ -259,8 +266,15 @@
 
    Input:
    - task-classification: Result from task-classifier/classify-task
-   - config: Optional configuration overrides
+   - config: Optional configuration overrides; :logger receives the
+     fallback warning (default: a module-level EDN logger)
    - constraints: Optional constraints {:context-size :cost-limit :require-local}
+
+   When the strategy selects nothing, the result is :sonnet-4.6 with
+   :fallback-used true. :require-local is a hard constraint: when the
+   model it would return is not a local one, the result is a :not-found
+   anomaly instead, so a caller that asked for local inference never
+   gets a cloud model.
 
    Output:
    {:model :sonnet-4.6
@@ -295,21 +309,31 @@
          model (registry/get-model model-key)
          fallback-used (not selected)]
 
-     (when fallback-used
-       (log/warn ::model-selection-fallback
-                 "No model met constraints, using fallback"
-                 {:task-type task-type
-                  :fallback model-key}))
-
-     {:model model-key
-      :model-id (:model-id model)
-      :provider (:provider model)
-      :backend (:backend model)
-      :task-type task-type
-      :confidence confidence
-      :strategy strategy
-      :rationale (build-selection-rationale model-key task-classification strategy constraints)
-      :fallback-used fallback-used})))
+     (if (and (:require-local constraints)
+              (not (get-in model [:capabilities :local])))
+       (anomaly/anomaly :not-found
+                        (msg/t :model-selection/no-local-model
+                               {:task-type task-type :strategy strategy :model model-key})
+                        {:task-type task-type
+                         :strategy strategy
+                         :non-local-model model-key})
+       (do
+         (when fallback-used
+           (log/warn (get merged-config :logger default-logger)
+                     :system :llm/model-selection-fallback
+                     {:message (msg/t :model-selection/fallback
+                                      {:task-type task-type :model model-key})
+                      :data {:task-type task-type
+                             :fallback model-key}}))
+         {:model model-key
+          :model-id (:model-id model)
+          :provider (:provider model)
+          :backend (:backend model)
+          :task-type task-type
+          :confidence confidence
+          :strategy strategy
+          :rationale (build-selection-rationale model-key task-classification strategy constraints)
+          :fallback-used fallback-used})))))
 
 ;------------------------------------------------------------------------------ Layer 6
 

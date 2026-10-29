@@ -332,8 +332,13 @@
 
    Arguments:
    - task-classification - Map with :type, :confidence, :reason
-   - config - Optional configuration map
-   - constraints - Optional constraints map
+   - config - Optional configuration map (:strategy, :logger)
+   - constraints - Optional constraints map (:context-size, :cost-limit,
+     :require-local)
+
+   Returns a selection map; :sonnet-4.6 with :fallback-used true when
+   nothing qualifies. With :require-local, an anomaly instead of any model
+   that is not local.
 
    Example:
      (select-model {:type :execution-focused
