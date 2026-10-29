@@ -287,6 +287,11 @@
                                             {:workflow-id workflow-id})))
         recorded (wr/reconstruct-context events-dir (str workflow-id))
         _ (throw-resume-anomaly! recorded)
+        ;; Shown even when quiet: an unreadable checkpoint file means work
+        ;; the run already paid for may be done again.
+        _ (doseq [failure (:checkpoint-read-failures recorded)]
+            (display/print-info (messages/t :resume/checkpoint-unreadable
+                                            {:error (:anomaly/message failure)})))
         reconstructed (apply-from-phase recorded (:from-phase opts)
                                         #(wr/extract-workspace-checkpoints (read-event-file workflow-id)))
         ;; Checked before a completed run is reported done: an invalid

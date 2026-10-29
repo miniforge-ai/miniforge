@@ -112,11 +112,15 @@
    :workflow-spec :workflow-id :completed? bool :failed? bool
    :event-count int :completed-dag-tasks set :completed-dag-artifacts vector
    :workspace-checkpoint :dag-paused? bool :dag-pause-reason keyword-or-nil
-   :machine-snapshot :checkpoint-manifest}.
+   :machine-snapshot :checkpoint-manifest :checkpoint-read-failures}.
+   `:checkpoint-read-failures` holds one anomaly per checkpoint file that
+   exists but could not be read; adapters should tell the user, since
+   what those files held was not restored.
 
    Returns a canonical anomaly when no valid events exist for the
-   workflow or input args are invalid. Events failing shape validation
-   (missing/non-keyword `:event/type`) are dropped silently."
+   workflow (the unreadable checkpoint's own when there is one) or input
+   args are invalid. Events failing shape validation (missing/non-keyword
+   `:event/type`) are dropped silently."
   core/reconstruct-context)
 
 (def ^{:stratum 0} trim-pipeline
