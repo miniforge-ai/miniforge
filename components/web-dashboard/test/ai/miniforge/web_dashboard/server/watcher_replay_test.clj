@@ -16,9 +16,7 @@
 ;; See the License for the specific language governing permissions and
 ;; limitations under the License.
 (ns ai.miniforge.web-dashboard.server.watcher-replay-test
-  "`mf web` keeps the file sink on its stream, so its control and
-   supervisory events stay on disk. Events its watcher reads from disk
-   must reach the dashboard without being written a second time."
+  "Events the watcher reads reach `mf web`'s file-sink stream unwritten."
   (:require
    [ai.miniforge.config.interface :as config]
    [ai.miniforge.event-stream.interface :as es]
@@ -93,11 +91,16 @@
         component  (supervisory/ensure-attached! stream)
         cli-stream (file-sink-stream events-dir)
         wf-id      (random-uuid)
+        artifact-a (random-uuid)
+        artifact-b (random-uuid)
         stop!      (watcher/start-watcher! (str events-dir) (partial es/replay! stream))]
     (try
       (es/publish! cli-stream (envelope cli-stream :workflow/started wf-id))
-      (is (await-true #(some (comp #{wf-id} :workflow-run/id) (supervisory/workflows component)))
-          "the attached supervisory view takes in the replayed run")
+      (es/publish! cli-stream (assoc (envelope cli-stream :workflow/phase-completed wf-id)
+                                     :phase/artifacts [artifact-a {:artifact/id artifact-b}]))
+      (is (await-true #(some (comp #{[artifact-a artifact-b]} :workflow-run/artifact-ids)
+                             (supervisory/workflows component)))
+          "the attached supervisory view takes in the replayed run and its artifacts")
       (is (instance? java.util.Date
                      (->> (es/get-events stream)
                           (filter #(= :workflow/started (:event/type %)))

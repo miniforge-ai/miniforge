@@ -19,7 +19,6 @@
   "replay! delivers an event another process already stored without
    storing it again."
   (:require
-   [ai.miniforge.anomaly.interface :as anomaly]
    [ai.miniforge.event-stream.interface :as events]
    [ai.miniforge.event-stream.publication-store :as store]
    [clojure.test :refer [deftest testing is]]))
@@ -64,9 +63,20 @@
       (events/publish! stream (stored-event :control-action/requested wf-id))
       (is (= [:control-action/requested] (mapv :event/type @stored))))))
 
+(deftest ^{:stratum 1} a-publish-to-another-stream-during-replay-reaches-its-sinks
+  (let [stored-a (atom [])
+        stored-b (atom [])
+        stream-a (collecting-stream stored-a)
+        stream-b (collecting-stream stored-b)
+        wf-id    (random-uuid)]
+    (events/subscribe! stream-a ::forward #(events/publish! stream-b (assoc % :event/id (str (random-uuid)))))
+    (events/replay! stream-a (stored-event :workflow/started wf-id))
+    (is (empty? @stored-a) "the replayed stream stores nothing")
+    (is (= [:workflow/started] (mapv :event/type @stored-b))
+        "stream B, published to from A's subscriber, still runs its sinks")))
+
 (deftest ^{:stratum 1} a-current-stream-refuses-replay
   (let [stream (with-redefs [store/durable-store (constantly (store/volatile-store))]
                  (events/create-current-event-stream {:journal-directory "fixture"}))]
     (is (= :unsupported
-           (:anomaly/type (events/replay! stream (stored-event :workflow/started (random-uuid))))))
-    (is (anomaly/anomaly? (events/replay! stream (stored-event :workflow/started (random-uuid)))))))
+           (:anomaly/type (events/replay! stream (stored-event :workflow/started (random-uuid))))))))

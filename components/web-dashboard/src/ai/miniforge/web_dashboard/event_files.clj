@@ -59,19 +59,25 @@
 
 (defn ^{:stratum 0} read-event
   "Decode one event file; nil when unreadable or not an event. The
-   reader returns UUIDs and instants as strings; :event/id and
-   :workflow/id come back as UUIDs and :event/timestamp as a
-   java.util.Date, as a live event carries them."
+   reader returns UUIDs and instants as strings; event, workflow and
+   artifact ids come back as UUIDs and :event/timestamp as a Date, as a
+   live event carries them."
   [f]
-  (let [event   (es/read-event-file f)
-        as-uuid #(or (when (string? %) (parse-uuid %)) %)
-        as-date (fn [s] (try+ (java.util.Date/from (java.time.Instant/parse s))
-                              (catch Exception _ s)))]
+  (let [event    (es/read-event-file f)
+        as-uuid  #(or (when (string? %) (parse-uuid %)) %)
+        as-date  (fn [s] (try+ (java.util.Date/from (java.time.Instant/parse s))
+                               (catch Exception _ s)))
+        artifact (fn [a] (if (map? a)
+                           (cond-> a
+                             (contains? a :artifact/id) (update :artifact/id as-uuid)
+                             (contains? a :id)          (update :id as-uuid))
+                           (as-uuid a)))]
     (when (:event/type event)
       (cond-> event
-        (contains? event :event/id)         (update :event/id as-uuid)
-        (contains? event :workflow/id)      (update :workflow/id as-uuid)
-        (string? (:event/timestamp event))  (update :event/timestamp as-date)))))
+        (contains? event :event/id)            (update :event/id as-uuid)
+        (contains? event :workflow/id)         (update :workflow/id as-uuid)
+        (string? (:event/timestamp event))     (update :event/timestamp as-date)
+        (sequential? (:phase/artifacts event)) (update :phase/artifacts (partial mapv artifact))))))
 
 (defn ^{:stratum 0} source-file
   "The file `read-ordered` decoded `event` from."
@@ -168,7 +174,8 @@
       (cond
         rebuild? (vec files)
         tracked  (filterv (partial unread? tracked) files)
-        :else    (filterv #(>= (mtime %) since-ms) files))
+        ;; mtime 0: gone since the listing (moved); a caller retries it.
+        :else    (filterv #(let [m (mtime %)] (or (>= m since-ms) (zero? m))) files))
       rebuild?])))
 
 (defn ^{:stratum 2} active-dirs

@@ -111,11 +111,8 @@
   core/publish!)
 
 (def ^{:stratum 0} replay!
-  "Deliver an event another process already stored (e.g. read back from
-   its file sink) to a legacy stream's in-memory log and subscribers,
-   without this stream's sinks; publishes subscribers make meanwhile skip
-   the sinks too. Returns the event; a current-profile stream returns an
-   :unsupported anomaly."
+  "Deliver a stored event to a legacy stream's log and subscribers
+   without its sinks. See `core/replay!`."
   core/replay!)
 
 (def ^{:stratum 0} subscribe!
