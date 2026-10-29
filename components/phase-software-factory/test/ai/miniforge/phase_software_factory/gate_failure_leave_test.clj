@@ -5,8 +5,6 @@
   "Leave handlers never record or publish success for a phase its gates failed."
   (:require [ai.miniforge.phase.interface :as phase]
             [ai.miniforge.phase-software-factory.interface]
-            ;; :pr-monitor is not registered by the interface namespace.
-            [ai.miniforge.phase-software-factory.pr-monitor]
             [clojure.test :refer [deftest is testing]]))
 
 ;------------------------------------------------------------------------------ Layer 0
