@@ -29,7 +29,8 @@
      impl/drain-action); close waits for it (bounded by
      :close-timeout-ms, default impl/default-close-timeout-ms)
    - The artifact files are the source of truth; the index is a
-     projection of them. Files are written via temp file + rename
+     projection of them, rebuilt from them if it is unreadable. Files
+     are written via temp file + rename
 
    File structure:
      ~/.miniforge/artifacts/
@@ -77,8 +78,8 @@
      ;; Ensure directory exists
      (impl/ensure-artifacts-dir! artifacts-dir)
 
-     ;; Load existing index
-     (let [index (impl/load-index artifacts-dir)]
+     ;; Load existing index (rebuilt from artifact files if unreadable)
+     (let [index (impl/load-index artifacts-dir logger)]
        (when logger
          (log/info logger :system :artifact/store-created
                    {:data {:type :transit
@@ -90,9 +91,9 @@
         (atom {})           ; Empty cache initially
         (atom index)        ; Load existing index
         logger
-        ;; State: ids written but not yet indexed (impl/drain-action).
+        ;; State: {:unindexed ids :failed ids} (impl/drain-action).
         ;; Every action catches its own failures; :continue keeps one
         ;; that slips through from blocking every later write.
-        (agent #{} :error-mode :continue)
+        (agent {:unindexed #{} :failed #{}} :error-mode :continue)
         (or close-timeout-ms impl/default-close-timeout-ms)
         (atom []))))))  ; changes queued for impl/drain-action

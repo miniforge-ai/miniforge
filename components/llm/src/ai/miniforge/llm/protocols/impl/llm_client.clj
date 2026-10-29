@@ -262,7 +262,7 @@
 
 ;; `:probe-endpoint` on each backend entry is the stable provider edge
 ;; URL that the network-monitor (PR-B) probes via
-;; `network-health/network-healthy?`. We only care that the connection
+;; `network-health/probe-network`. We only care that the connection
 ;; completed, not the response status — a 4xx is the typical case (HEAD
 ;; against api.anthropic.com unauthenticated returns 405). Backends
 ;; without a provider-controlled endpoint (`:echo`) get the generic
@@ -2172,7 +2172,7 @@
    backends, entries without an endpoint).
 
    The caller (e.g. `stream-exec-fn` in PR-B) resolves the URL here and
-   passes it to `network-health/network-healthy?` directly, keeping
+   passes it to `network-health/probe-network` directly, keeping
    that namespace endpoint-agnostic and free of backend-config
    dependencies."
   [backend-key]
