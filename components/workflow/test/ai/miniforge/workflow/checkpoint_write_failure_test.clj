@@ -32,4 +32,21 @@
        (spit manifest "{:workflow/id")
        (is (anomaly/anomaly? (store/persist-execution-state! ctx)))))))
 
+(deftest ^{:stratum 0} invalid-existing-manifest-is-not-saved-over
+  (fixture/call-with-temp-checkpoint-root
+   (fn [root]
+     (let [ctx (fixture/plan-completed-context root {})
+           run-id (:execution/id ctx)
+           manifest (paths/manifest-path root run-id)
+           ;; Parses, but fails the manifest schema once merged into the
+           ;; new one: a phase path that is not a string.
+           invalid (pr-str {:workflow/phase-checkpoints {:review 42}})]
+       (fs/create-dirs (fs/parent manifest))
+       (spit manifest invalid)
+       (let [written (store/persist-execution-state! ctx)]
+         (is (anomaly/anomaly? written))
+         (is (= :plan (get-in written [:anomaly/data :phase/name]))))
+       (is (= invalid (slurp manifest)))
+       (is (not (fs/exists? (paths/machine-snapshot-path root run-id))))))))
+
 (comment ::checkpoint-write-failure)

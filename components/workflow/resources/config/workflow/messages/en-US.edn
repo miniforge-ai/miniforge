@@ -51,6 +51,7 @@
 
   ;; Checkpoint persistence
   :checkpoint/write-failed   "Checkpoint write failed for run {run-id}: {error}"
+  :checkpoint/manifest-invalid "the existing manifest {path} fails the checkpoint schema"
   :warn/checkpoint-write-failed "Warning: Could not write the checkpoint for phase {phase}; the run continues, but cannot be resumed from this point: {error}"
 
   ;; Workflow status messages
