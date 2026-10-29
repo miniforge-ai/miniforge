@@ -61,9 +61,11 @@
    the earliest whose checkpointed result did not read. The snapshot is
    parked after it, and restoring it as is would run later phases
    without that phase's output. Without a snapshot there is nothing to
-   rewind from."
+   rewind from, and a completed run has nothing left to run: it is not
+   rewound (and re-executed) for a lost file; only an explicit rewind
+   does that."
   [reconstructed]
-  (when (:machine-snapshot reconstructed)
+  (when (and (:machine-snapshot reconstructed) (not (:completed? reconstructed)))
     (first (unreadable-phases reconstructed))))
 
 (defn ^{:stratum 1} refusal

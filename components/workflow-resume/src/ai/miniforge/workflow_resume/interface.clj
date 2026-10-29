@@ -162,8 +162,8 @@
 (def ^{:stratum 0} unreadable-checkpoint-phase
   "The phase a resume must rewind to because its checkpointed result did
    not read, nil when there is none. Arg: a `reconstruct-context` map.
-   Only a run with an FSM snapshot has one: the snapshot is parked after
-   that phase and cannot be restored as is."
+   Only an unfinished run with an FSM snapshot has one: the snapshot is
+   parked after that phase and cannot be restored as is."
   rewind/unreadable-phase)
 
 (def ^{:stratum 0} rewind-refusal

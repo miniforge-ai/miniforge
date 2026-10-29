@@ -93,4 +93,19 @@
   (is (thrown-with-msg? clojure.lang.ExceptionInfo #"no checkpointed result for plan"
                         (resume-with (parked-at-implement) {:from-phase :implement}))))
 
+(deftest ^{:stratum 2} a-completed-run-with-a-lost-phase-result-stays-completed
+  (doseq [status [:completed :completed-with-warnings]]
+    (let [ran? (atom false)
+          output (with-redefs [wr/reconstruct-context
+                               (fn [_ _]
+                                 (-> (parked-at-implement)
+                                     (assoc :completed? true)
+                                     (assoc-in [:machine-snapshot :execution/status] status)))
+                               sut/run-pipeline (fn [& _] (reset! ran? true) {:execution/status :completed})]
+                   (with-out-str (sut/resume-workflow (str (random-uuid)) {:quiet true})))]
+      (testing "no phase runs again"
+        (is (false? @ran?) (name status)))
+      (testing "the unreadable file is still reported"
+        (is (str/includes? output "/tmp/run/phases/plan.edn could not be read") (name status))))))
+
 (comment ::resume-checkpoint-warning)
