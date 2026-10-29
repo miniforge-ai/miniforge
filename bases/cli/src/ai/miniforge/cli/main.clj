@@ -447,6 +447,7 @@
    {:cmds ["scan"]
     :fn scan-cmd
     :args->opts [:repo]
+    :restrict true
     :spec {:pack      {:alias :p}
            :rules     {:alias :r}
            :since     {:alias :s}
@@ -460,6 +461,7 @@
    {:cmds ["run"]
     :fn run-cmd
     :args->opts [:spec]
+    :restrict true
     :spec {:interactive     {:coerce :boolean :alias :i}
            :worktree        {:alias :w}
            :resume          {:alias :r}
@@ -471,7 +473,9 @@
    {:cmds ["resume"]
     :fn resume-cmd
     :args->opts [:workflow-id]
+    :restrict true
     :spec {:workflow-id {:alias :w}
+           :resume      {:alias :r}
            :quiet       {:coerce :boolean :alias :q}
            :run-id      {}
            :correlation-id {}
@@ -480,11 +484,13 @@
    ;; Status command
    {:cmds ["status"]
     :fn status-cmd
-    :args->opts [:workflow-id]}
+    :args->opts [:workflow-id]
+    :restrict true}
 
    ;; Monitoring commands
    {:cmds ["web"]
     :fn web-cmd
+    :restrict true
     :spec {:port {:coerce :int :alias :p :default 7878}
            :open {:coerce :boolean :alias :o}}}
 
@@ -505,10 +511,12 @@
    {:cmds ["workflow" "run"]
     :fn (wr-help/handler-with-help :workflow-run workflow-run-cmd)
     :args->opts [:workflow-id]
+    :restrict true
     :spec (wr-help-registry/spec-for :workflow-run)}
 
    {:cmds ["workflow" "list"]
     :fn (wr-help/handler-with-help :workflow-list workflow-list-cmd)
+    :restrict true
     :spec (wr-help-registry/spec-for :workflow-list)}
 
    ;; Workflow subcommands — spec-driven execution and lifecycle (N5)
@@ -520,20 +528,24 @@
    {:cmds ["workflow" "status"]
     :fn (wr-help/handler-with-help :workflow-status workflow-status-cmd)
     :args->opts [:id]
+    :restrict true
     :spec (wr-help-registry/spec-for :workflow-status)}
 
    {:cmds ["workflow" "inspect"]
     :fn (wr-help/handler-with-help :workflow-inspect workflow-inspect-cmd)
     :args->opts [:path]
+    :restrict true
     :spec (wr-help-registry/spec-for :workflow-inspect)}
 
    {:cmds ["workflow" "cancel"]
     :fn (wr-help/handler-with-help :workflow-cancel workflow-cancel-cmd)
     :args->opts [:id]
+    :restrict true
     :spec (wr-help-registry/spec-for :workflow-cancel)}
 
    {:cmds ["workflow" "gc-scratch"]
     :fn (wr-help/handler-with-help :workflow-gc-scratch workflow-gc-scratch-cmd)
+    :restrict true
     :spec (wr-help-registry/spec-for :workflow-gc-scratch)}
 
    ;; Chain parent — `mf chain --help` / `mf chain` lists the group's
@@ -546,10 +558,12 @@
    {:cmds ["chain" "run"]
     :fn (wr-help/handler-with-help :chain-run chain-run-cmd)
     :args->opts [:chain-id]
+    :restrict true
     :spec (wr-help-registry/spec-for :chain-run)}
 
    {:cmds ["chain" "list"]
     :fn (wr-help/handler-with-help :chain-list chain-list-cmd)
+    :restrict true
     :spec (wr-help-registry/spec-for :chain-list)}
 
    ;; Config subcommands
@@ -567,6 +581,7 @@
    {:cmds ["logs" "tail"]
     :fn logs-tail-cmd
     :args->opts [:workflow-id]
+    :restrict true
     :spec {:file {:alias :f}
            :lines {:coerce :int :alias :n :default 10}
            :follow {:coerce :boolean :default true}
@@ -578,6 +593,7 @@
    {:cmds ["events" "tail"]
     :fn events-tail-cmd
     :args->opts [:workflow-id]
+    :restrict true
     :spec {:file {:alias :f}
            :lines {:coerce :int :alias :n :default 20}
            :follow {:coerce :boolean :default true}
@@ -590,6 +606,7 @@
    {:cmds ["events" "show"]
     :fn events-show-cmd
     :args->opts [:workflow-id]
+    :restrict true
     :spec {:gap-threshold {:coerce :int    :alias :g :default 60}
            :raw           {:coerce :boolean :alias :r :default false}}}
 
@@ -616,13 +633,15 @@
            :pr-number {:coerce :long}}}
    {:cmds ["pr" "respond"] :fn pr-respond-cmd :args->opts [:url]}
    {:cmds ["pr" "merge"]   :fn pr-merge-cmd   :args->opts [:url]}
-   {:cmds ["pr" "monitor"] :fn pr-monitor-cmd :spec {:author {:alias :a}
-                                                      :poll-interval {:alias :p}
-                                                      :repo {}}}
+   {:cmds ["pr" "monitor"] :fn pr-monitor-cmd :restrict true
+    :spec {:author        {:alias :a}
+           :poll-interval {:alias :p}
+           :repo          {}}}
 
    ;; N13 §2.2 Standards Reviewer auto-trigger (single-pass v0)
    {:cmds ["pr" "review-monitor"]
     :fn pr-review-monitor-cmd
+    :restrict true
     :spec {:repo      {}
            :author    {:alias :a}
            :standards {:default "standards/miniforge"}
@@ -633,6 +652,7 @@
    ;; N13 §2.7 Resume Signal Dispatcher (single-pass v0)
    {:cmds ["pr" "resume-dispatch"]
     :fn pr-resume-dispatcher-cmd
+    :restrict true
     :spec {:repo {}
            :once {:coerce :boolean :default true}}}
 
@@ -646,6 +666,7 @@
    {:cmds ["control-plane" "decisions"] :fn cp-decisions-cmd}
    {:cmds ["control-plane" "resolve"]   :fn cp-resolve-cmd
     :args->opts [:decision-id :resolution]
+    :restrict true
     :spec {:comment {:alias :c}}}
    {:cmds ["control-plane" "terminate"] :fn cp-terminate-cmd
     :args->opts [:agent-id]}

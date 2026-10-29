@@ -18,9 +18,10 @@
 (ns ai.miniforge.cli.main.parse-errors
   "How `-main` answers babashka.cli dispatch errors. An unknown command,
    or a bad, unknown or missing option, prints the error and that
-   command's usage (or its subcommands) on stderr and exits 2. A command
-   group named without a subcommand (`mf config`, `mf fleet --help`)
-   lists its subcommands.
+   command's usage (or its subcommands) on stderr and exits 2.
+   `--help`/`-h` on a command that restricts its options prints the
+   command's usage and exits 0. A command group named without a
+   subcommand (`mf config`, `mf fleet --help`) lists its subcommands.
 
    Layer 0: option and usage-line spelling, the error-fn a dispatch entry
             carries, the unknown-command report and the group listing
@@ -36,6 +37,11 @@
    [ai.miniforge.cli.messages :as messages]))
 
 ;------------------------------------------------------------------------------ Layer 0
+
+(def ^{:stratum 0} help-options
+  "Options that ask for help. A command that restricts its options refuses
+   them like any unknown option; the handler answers with the usage."
+  #{:help :h})
 
 (defn ^{:stratum 0} option-flag
   "The command-line spelling of option key `k`: `--port`, or `-p` for a
@@ -104,9 +110,13 @@
 
 (defn ^{:stratum 1} guard-entry
   "Prepare one dispatch-table entry for babashka.cli: a parse error names
-   the entry's command, so the handler can print that command's usage."
-  [{:keys [cmds args->opts] :as entry}]
-  (assoc entry :error-fn (rethrow-with-command cmds args->opts)))
+   the entry's command, and `:restrict true` admits the entry's `:spec`
+   keys plus its `:args->opts` keys. babashka.cli's own `true` admits only
+   the spec keys, so it would refuse the positional argument of
+   `run <spec>`."
+  [{:keys [cmds spec args->opts restrict] :as entry}]
+  (cond-> (assoc entry :error-fn (rethrow-with-command cmds args->opts))
+    (true? restrict) (assoc :restrict (into (set (keys spec)) args->opts))))
 
 (defn ^{:stratum 1} help-unless-unknown
   "Wrap `help-fn`, the handler of an entry that only prints help (the bare
@@ -141,12 +151,17 @@
 
 (defn ^{:stratum 2} handle-parse-error!
   "Answer a babashka.cli parse error: a bad value, or an unknown or missing
-   option. Prints the error, the usage when the command is known, and a
-   pointer to `help`, all on stderr, then exits 2."
-  [{:keys [dispatch] :as data}]
-  (binding [*out* *err*]
-    (display/print-error (error-message data))
-    (when dispatch
-      (print-usage! data))
-    (println (messages/t :main/run-help {:command (app-config/command-string "help")})))
-  (shared/exit! 2))
+   option. `--help`/`-h` refused by a restricted command prints that
+   command's usage (exit 0). Anything else prints the error, the usage
+   when the command is known, and a pointer to `help`, all on stderr, then
+   exits 2."
+  [{:keys [cause option dispatch] :as data}]
+  (if (and (= :restrict cause) (contains? help-options option))
+    (print-usage! data)
+    (do
+      (binding [*out* *err*]
+        (display/print-error (error-message data))
+        (when dispatch
+          (print-usage! data))
+        (println (messages/t :main/run-help {:command (app-config/command-string "help")})))
+      (shared/exit! 2))))

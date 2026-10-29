@@ -16,7 +16,7 @@
 ;; See the License for the specific language governing permissions and
 ;; limitations under the License.
 (ns ai.miniforge.cli.main-parse-errors-test
-  "Command-line errors seen through `-main`: a bad value or a missing
+  "Command-line errors seen through `-main`: a bad, unknown or missing
    option prints that command's usage on stderr and exits 2, an unknown
    command exits 2, and a command group named alone lists its own
    subcommands instead of the global help."
@@ -24,6 +24,7 @@
    [clojure.test :refer [deftest is testing]]
    [ai.miniforge.cli.app-config :as app-config]
    [ai.miniforge.cli.main :as main]
+   [ai.miniforge.cli.main.commands.resume :as cmd-resume]
    [ai.miniforge.cli.main.commands.shared :as shared]
    [slingshot.slingshot :refer [try+]]))
 
@@ -72,6 +73,30 @@
     (is (nil? thrown))
     (is (= 2 exit))
     (is (.contains err "--artifact-dir"))))
+
+(deftest ^{:stratum 1} unknown-option-is-refused-test
+  (testing "a misspelt option on a restricted command is an error, not silently ignored"
+    (let [{:keys [exit err]} (run-main "run" "x.edn" "--backnd" "claude")]
+      (is (= 2 exit))
+      (is (.contains err "--backnd"))
+      (is (.contains err (usage-for "run" "<spec>" "[options]")))))
+  (testing "the positional argument and declared options still pass"
+    (let [{:keys [exit out err]} (run-main "run" "/nonexistent/x.edn" "-b" "claude")]
+      (is (= 1 exit) "reaches run, which reports the missing file")
+      (is (.contains (str out err) "/nonexistent/x.edn")))))
+
+(deftest ^{:stratum 1} help-on-a-restricted-command-prints-its-usage-test
+  (let [{:keys [exit out]} (run-main "run" "--help")]
+    (is (nil? exit))
+    (is (.contains out (usage-for "run" "<spec>" "[options]")))))
+
+(deftest ^{:stratum 1} legacy-resume-alias-reaches-resume-test
+  (let [resumed (atom nil)]
+    (with-redefs [cmd-resume/resume-workflow (fn [workflow-id _opts]
+                                               (reset! resumed workflow-id)
+                                               {:execution/status :completed})]
+      (run-main "resume" "-r" "wf-1"))
+    (is (= "wf-1" @resumed) "-r is the documented short form of --resume")))
 
 (deftest ^{:stratum 1} command-groups-list-their-own-subcommands-test
   (testing "a group with no handler of its own"

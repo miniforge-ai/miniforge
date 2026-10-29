@@ -60,9 +60,21 @@
   (is (= "raw" (sut/error-message {:cause :other :msg "raw"}))))
 
 (deftest ^{:stratum 0} guard-entry-test
+  (testing "`:restrict true` admits the spec keys and the positional keys"
+    (is (= #{:spec :backend}
+           (:restrict (sut/guard-entry {:cmds ["run"] :fn identity :args->opts [:spec]
+                                        :spec {:backend {}} :restrict true})))))
+  (testing "an entry without `:restrict` stays unrestricted"
+    (is (nil? (:restrict (sut/guard-entry {:cmds ["config" "get"] :fn identity :args->opts [:key]})))))
   (testing "a parse error carries the entry's command and positional keys"
     (let [error-fn (:error-fn (sut/guard-entry {:cmds ["web"] :fn identity :args->opts [:x]}))
           data (try+ (error-fn {:msg "boom" :cause :coerce :option :port})
                      (catch map? thrown thrown))]
       (is (= ["web"] (:dispatch data)))
       (is (= [:x] (:positional data))))))
+
+(deftest ^{:stratum 0} every-restricted-entry-admits-its-positionals-test
+  (doseq [entry main/dispatch-table
+          :when (:restrict entry)
+          :let [allowed (:restrict (sut/guard-entry entry))]]
+    (is (every? allowed (:args->opts entry)) (str (:cmds entry)))))
