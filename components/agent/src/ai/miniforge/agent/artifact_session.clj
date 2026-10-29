@@ -89,7 +89,8 @@
 
    Any other bb.edn (a user repository's own, or one that does not parse)
    is skipped. Taking it would point both commands at tasks that do not
-   exist there, and a failing PreToolUse hook does not block the tool."
+   exist there: the MCP server would not start, and the PreToolUse hook
+   would fail and so block every tool (`hook-eval-command`)."
   []
   (loop [dir (.getCanonicalFile (io/file (System/getProperty "user.dir")))]
     (let [bb-file (io/file dir "bb.edn")
@@ -459,17 +460,25 @@
     :else                      :absent))
 
 (defn ^{:stratum 0} hook-eval-command
-  "The PreToolUse hook command for a session of `role`: `base` (the
-   miniforge command, e.g. `mf` or `bb miniforge`) running `hook-eval
-   --role <role>`, then `|| exit 2`. Claude runs the command through
-   `sh -c` and blocks the tool call only on exit code 2, so a hook that
-   cannot start (miniforge not on PATH, a crash before it replies) blocks
-   too instead of letting the call through. A nil `role` leaves `--role`
-   off, and hook-eval then refuses every tool."
-  [base role]
-  (str base " hook-eval"
-       (when role (str " --role " (file-artifacts/shell-quote (name role))))
-       " || exit 2"))
+  "The PreToolUse hook command for a session of `role`: the miniforge
+   command `words` (e.g. [\"mf\"] or [\"bb\" \"miniforge\"]) running
+   `hook-eval --role <role>`, then `|| exit 2`. Claude runs the command
+   through `sh -c` and blocks the tool call only on exit code 2, so a hook
+   that cannot start (miniforge not on PATH, a crash before it replies)
+   blocks too instead of letting the call through. A nil `role` leaves
+   `--role` off, and hook-eval then refuses every tool.
+
+   A word holding anything beyond letters, digits and `_./:=@%+,-` is
+   shell-quoted, so a checkout path with a space stays one argument."
+  [words role]
+  (let [word (fn [w]
+               (if (re-matches #"[A-Za-z0-9_./:=@%+,-]+" w)
+                 w
+                 (file-artifacts/shell-quote w)))]
+    (str/join " " (concat (map word words)
+                          ["hook-eval"]
+                          (when role ["--role" (word (name role))])
+                          ["||" "exit" "2"]))))
 
 (defn ^{:stratum 0} pre-tool-use-settings
   "Claude Code settings that run `hook-cmd` before every tool call. Each
@@ -773,7 +782,7 @@
                      {"mcpServers" {"context" {"command" (:command srv-cmd)
                                                "args"    (:args srv-cmd)}}}
                      {:pretty true})
-        hook-cmd    (hook-eval-command "bb miniforge" (:role session))
+        hook-cmd    (hook-eval-command ["bb" "miniforge"] (:role session))
         settings    (json/generate-string (pre-tool-use-settings hook-cmd) {:pretty true})]
     ;; Write configs inside capsule
     (exec! executor env-id (str "cat > " (file-artifacts/shell-quote (:mcp-config-path session)) " << 'MCPEOF'\n" mcp-config "\nMCPEOF")
@@ -885,7 +894,7 @@
 
    Returns the path to the settings file."
   [session-dir role]
-  (let [hook-command (hook-eval-command (str/join " " (resolve-miniforge-command)) role)
+  (let [hook-command (hook-eval-command (resolve-miniforge-command) role)
         path (str session-dir "/claude-settings.json")]
     (spit path (json/generate-string (pre-tool-use-settings hook-command) {:pretty true}))
     path))
@@ -1014,8 +1023,7 @@
         cursor-path   (write-cursor-mcp-config! config-root srv-cmd)
         _             (backup-cursor-permissions! config-root)
         cursor-perms  (write-cursor-permissions! config-root mcp-tools nil)
-        hook-eval-cmd (hook-eval-command (str/join " " (resolve-miniforge-command))
-                                         (:role session))]
+        hook-eval-cmd (hook-eval-command (resolve-miniforge-command) (:role session))]
     (assoc session
            :mcp-allowed-tools mcp-tools
            :mcp-cleanup-files [codex-path cursor-path cursor-perms]

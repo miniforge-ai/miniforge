@@ -21,6 +21,10 @@
    gets none."
   (:require
    [clojure.test :refer [deftest is testing]]
+   [ai.miniforge.agent.implementer :as implementer]
+   [ai.miniforge.agent.planner :as planner]
+   [ai.miniforge.agent.reviewer :as reviewer]
+   [ai.miniforge.agent.tester :as tester]
    [ai.miniforge.agent.tool-supervisor :as sut]))
 
 ;------------------------------------------------------------------------------ Layer 0
@@ -64,10 +68,11 @@
     (is (= "allow" (decision :reviewer "mcp__context__context_read" {:path "x.clj"})))))
 
 (deftest ^{:stratum 1} disallowed-native-tools-stay-denied-test
-  (testing "tools a role's --disallowedTools list removes are refused by the hook too"
-    (doseq [[role tools] {:implementer ["Read" "Grep" "Glob" "LS" "Agent"]
-                          :planner     ["Read" "Bash" "Grep" "Glob" "Agent" "LS"]
-                          :tester      ["Read" "Grep" "Glob" "WebSearch" "WebFetch" "LS"]}
+  (testing "every tool a role's --disallowedTools list removes is refused by the hook too"
+    (doseq [[role tools] {:implementer @#'implementer/implementer-disallowed-tools
+                          :planner     @#'planner/planner-disallowed-tools
+                          :tester      @#'tester/tester-disallowed-tools
+                          :reviewer    @#'reviewer/reviewer-disallowed-tools}
             tool tools]
       (is (= "deny" (decision role tool {})) (str role " " tool)))))
 

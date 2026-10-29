@@ -74,28 +74,70 @@
          (some #(second (re-find #"(?s)<< 'SETTINGSEOF'\n(.*)\nSETTINGSEOF" %)))
          json/parse-string)))
 
-(deftest ^{:stratum 0} agent-sessions-hand-the-role-to-the-hook-test
-  (testing "a session opened inside an agent's invoke-fn gets that agent's role"
-    (let [agent (specialized/create-base-agent
-                 {:role          :tester
-                  :system-prompt "test"
-                  :invoke-fn     (fn [context _input]
-                                   (session/with-session context
-                                     #(get-in % [:supervision :hook-eval-cmd])))
-                  :validate-fn   (constantly {:valid? true})
-                  :repair-fn     (fn [output _errors _context] output)})]
-      (is (str/ends-with? (:llm-result ((:invoke-fn agent) {} "task"))
-                          "hook-eval --role 'tester' || exit 2"))))
-  (testing "a session with no :agent/role has no --role, so hook-eval refuses every tool"
-    (is (str/ends-with? (:llm-result (session/with-session {} #(get-in % [:supervision :hook-eval-cmd])))
-                        "hook-eval || exit 2"))))
+(defn- ^{:stratum 0} settings-command
+  "The PreToolUse hook command in the Claude settings file a host session
+   wrote: the file `--settings` hands Claude."
+  [session]
+  (-> (get-in session [:supervision :settings-path])
+      slurp
+      json/parse-string
+      (get-in ["hooks" "PreToolUse" 0 "hooks" 0 "command"])))
 
-(deftest ^{:stratum 0} hook-that-cannot-start-blocks-the-call-test
+(defn- ^{:stratum 0} role-agent
+  "An agent of `role` whose invoke-fn returns what `session-fn` returns
+   when called with the context the agent passes it."
+  [role session-fn]
+  (specialized/create-base-agent
+   {:role          role
+    :system-prompt "test"
+    :invoke-fn     (fn [context _input] (session-fn context))
+    :validate-fn   (constantly {:valid? true})
+    :repair-fn     (fn [output _errors _context] output)}))
+
+(defn- ^{:stratum 0} capsule-context
+  "A governed execution context whose exec! records each script."
+  [scripts]
+  {:execution/mode           :governed
+   :execution/executor       :capsule
+   :execution/environment-id "env-1"
+   :execution/worktree-path  "/workspace"
+   :execution/execute-fn     (fn [_executor _env-id script _opts]
+                               (swap! scripts conj script)
+                               {:exit-code 0 :data {:stdout ""}})})
+
+(deftest ^{:stratum 0} hook-command-runs-under-sh-test
   (testing "a missing miniforge command exits 2, the code Claude reads as block, not 127"
-    (let [cmd (session/hook-eval-command "/nonexistent/miniforge-cmd" :implementer)]
-      (is (= 2 (:exit (shell/sh "sh" "-c" cmd :in "{}")))))))
+    (let [cmd (session/hook-eval-command ["/nonexistent/miniforge-cmd"] :implementer)]
+      (is (= 2 (:exit (shell/sh "sh" "-c" cmd :in "{}"))))))
+  (testing "a miniforge command whose path has a space stays one word"
+    (let [dir (java.nio.file.Files/createTempDirectory "hook dir " (make-array java.nio.file.attribute.FileAttribute 0))
+          mf  (str dir "/mf")]
+      (try
+        (spit mf "#!/bin/sh\necho \"$@\"\n")
+        (.setExecutable (java.io.File. mf) true)
+        (let [{:keys [exit out]} (shell/sh "sh" "-c" (session/hook-eval-command [mf] :tester) :in "{}")]
+          (is (= 0 exit))
+          (is (= "hook-eval --role tester\n" out)))
+        (finally
+          (run! #(.delete ^java.io.File %) (reverse (file-seq (.toFile dir)))))))))
 
 ;------------------------------------------------------------------------------ Layer 1
+
+(deftest ^{:stratum 1} agent-sessions-hand-the-role-to-the-hook-test
+  (testing "host sessions opened in an agent's invoke-fn write that agent's role into the settings file"
+    (doseq [[open-session role] [[session/with-session :tester]
+                                 [session/with-readonly-session :reviewer]]]
+      (let [agent (role-agent role #(open-session % settings-command))]
+        (is (str/ends-with? (:llm-result ((:invoke-fn agent) {} "task"))
+                            (str "hook-eval --role " (name role) " || exit 2"))))))
+  (testing "a capsule session writes the role into the settings it puts in the capsule"
+    (let [scripts (atom [])
+          agent   (role-agent :implementer #(session/with-session % (constantly nil)))]
+      ((:invoke-fn agent) (capsule-context scripts) "task")
+      (is (some #(str/includes? % "bb miniforge hook-eval --role implementer || exit 2") @scripts))))
+  (testing "a session with no :agent/role has no --role, so hook-eval refuses every tool"
+    (is (str/ends-with? (:llm-result (session/with-session {} settings-command))
+                        "hook-eval || exit 2"))))
 
 (defn- ^{:stratum 1} settings-problems
   "Problems with a settings map's PreToolUse hooks, or [] when conforming."
@@ -114,7 +156,7 @@
         (let [settings (json/parse-string (slurp (session/write-claude-settings! (:dir s) :implementer)))]
           (is (= [] (settings-problems settings)))
           (is (str/ends-with? (str (get-in settings ["hooks" "PreToolUse" 0 "hooks" 0 "command"]))
-                              "hook-eval --role 'implementer' || exit 2")))
+                              "hook-eval --role implementer || exit 2")))
         (finally
           (session/cleanup-session! s))))))
 
@@ -122,5 +164,5 @@
   (testing "write-capsule-mcp-config! (capsule sessions)"
     (let [settings (capsule-settings)]
       (is (= [] (settings-problems settings)))
-      (is (= "bb miniforge hook-eval --role 'reviewer' || exit 2"
+      (is (= "bb miniforge hook-eval --role reviewer || exit 2"
              (get-in settings ["hooks" "PreToolUse" 0 "hooks" 0 "command"]))))))

@@ -18,9 +18,9 @@
 (ns ai.miniforge.agent.tool-supervisor
   "Uniform tool-use supervision for inner LLM agents.
 
-   Evaluates tool-use requests against policy. This is the control-plane
-   bridge: vendor-specific mechanisms (Claude hooks, Codex sandbox, Cursor
-   flags) call into this uniform evaluation function.
+   Evaluates tool-use requests against policy. Today only Claude sessions
+   reach it, through the PreToolUse hook; Codex and Cursor sessions get
+   their own CLI permission configs (artifact-session) and no role policy.
 
    Default-deny: a role may call only the tools config/agent/tool-policy.edn
    lists for it. Any other tool is refused, every tool is refused when the
@@ -28,7 +28,8 @@
    call.
 
    Architecture:
-   - evaluate-tool-use: core policy function (pure, no side effects)
+   - evaluate-tool-use: core policy function (pure given a policy; the
+                        three-argument form reads tool-policy once)
    - hook-eval-stdin!:  CLI entry point — reads Claude PreToolUse JSON from
                         stdin, evaluates, writes decision to stdout"
   (:require
@@ -126,9 +127,7 @@
    `evaluate-bash-command` refuses. The three-argument form reads
    `tool-policy`.
 
-   This is the uniform supervision function — vendor-specific mechanisms
-   (hooks, sandbox, flags) call into this. Each vendor maps the result
-   to its own response format."
+   `hook-eval-stdin!` maps the result to Claude's PreToolUse reply."
   ([role tool-name tool-input]
    (evaluate-tool-use @tool-policy role tool-name tool-input))
   ([policy role tool-name tool-input]
