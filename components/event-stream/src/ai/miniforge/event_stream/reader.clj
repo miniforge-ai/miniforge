@@ -154,7 +154,7 @@
                          files)]
         (with-meta (into [] (keep second) parsed)
           {:event-stream/unreadable-files
-           (into [] (comp (remove second) (map first)) parsed)})))))
+           (into [] (comp (filter (comp nil? second)) (map first)) parsed)})))))
 
 ;------------------------------------------------------------------------------ Layer 2
 

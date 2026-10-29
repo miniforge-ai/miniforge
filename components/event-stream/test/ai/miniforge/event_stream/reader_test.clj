@@ -139,7 +139,17 @@
         (write-event! dir "20260420T000001Z-good.json"
                       {"~:event/type" "~:workflow/started"})
         (is (= [] (:event-stream/unreadable-files
-                   (meta (reader/read-workflow-events dir)))))))))
+                   (meta (reader/read-workflow-events dir))))))))
+
+  (testing "the metadata lists exactly the files left out of the vector"
+    (with-temp-dir
+      (fn [dir]
+        (spit (io/file dir "20260420T000001Z-false.json") "false")
+        (spit (io/file dir "20260420T000002Z-null.json") "null")
+        (let [events (reader/read-workflow-events dir)]
+          (is (= [false] events) "a parseable non-nil value stays in the vector")
+          (is (= [(str (io/file dir "20260420T000002Z-null.json"))]
+                 (:event-stream/unreadable-files (meta events)))))))))
 
 (deftest ^{:stratum 1} read-workflow-events-by-id-composes-path-test
   (with-temp-dir
