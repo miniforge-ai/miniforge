@@ -4,8 +4,8 @@
 (ns ai.miniforge.workflow.checkpoint-lock-test
   "A run's checkpoint lock held past the timeout makes the GC report a
    failure for that run and leave it alone. Locks use fixed slot files,
-   none per run; the GC removes the previous design's per-run lock files
-   of runs that are gone."
+   none per run, and take an older version's per-run lock file when it
+   exists without creating or removing it."
   (:require [ai.miniforge.anomaly.interface :as anomaly]
             [ai.miniforge.workflow.checkpoint-store :as store]
             [ai.miniforge.workflow.checkpoint-store-lock :as checkpoint-lock]
@@ -146,39 +146,20 @@
 
 ;------------------------------------------------------------------------------ Layer 1
 
-(deftest ^{:stratum 1} a-legacy-lock-file-goes-with-the-deleted-run
+(deftest ^{:stratum 1} a-legacy-lock-file-is-never-created-or-removed
+  ;; Older processes lock <run-id>.lock; a newer one takes that lock when
+  ;; the file exists but never makes or deletes it.
   (fs/with-temp-dir [root {:prefix "pin-lock-"}]
     (fs/with-temp-dir [events-dir {:prefix "pin-lock-events-"}]
       (let [root (str root)
             id (fixture/expired-run! root)
+            fresh (random-uuid)
             legacy (checkpoint-lock/legacy-lock-file root id)]
         (fs/create-dirs (fs/parent legacy))
         (spit (str legacy) "")
         (is (= [id] (:deleted (gc! root events-dir))))
-        (is (not (fs/exists? legacy)))))))
-
-(deftest ^{:stratum 1} legacy-lock-files-of-runs-already-gone-are-pruned
-  (fs/with-temp-dir [root {:prefix "pin-lock-"}]
-    (fs/with-temp-dir [events-dir {:prefix "pin-lock-events-"}]
-      (let [root (str root)
-            gone (random-uuid)
-            kept (random-uuid)]
-        (fs/create-dirs (fs/path root ".locks"))
-        (doseq [id [gone kept]] (spit (str (checkpoint-lock/legacy-lock-file root id)) ""))
-        (fs/create-dirs (fs/path root (str kept)))
-        (spit (str (fs/path root (str kept) "manifest.edn")) "{:workflow/id 1}")
-        (let [result (gc! root events-dir)]
-          (is (= 1 (:locks-pruned result)))
-          (is (not (fs/exists? (checkpoint-lock/legacy-lock-file root gone))))
-          (is (fs/exists? (checkpoint-lock/legacy-lock-file root kept))))))))
-
-(deftest ^{:stratum 1} only-lock-files-really-removed-are-counted
-  (fs/with-temp-dir [root {:prefix "pin-lock-"}]
-    (fs/with-temp-dir [events-dir {:prefix "pin-lock-events-"}]
-      (let [root (str root)]
-        (fs/create-dirs (fs/path root ".locks"))
-        (spit (str (checkpoint-lock/legacy-lock-file root (random-uuid))) "")
-        (with-redefs [checkpoint-lock/remove-legacy-lock-file! (constantly false)]
-          (is (zero? (:locks-pruned (gc! root events-dir)))))))))
+        (is (fs/exists? legacy) "the old process's lock file stays")
+        (checkpoint-lock/with-run-lock root fresh (constantly nil))
+        (is (not (fs/exists? (checkpoint-lock/legacy-lock-file root fresh))))))))
 
 (comment ::checkpoint-lock)
