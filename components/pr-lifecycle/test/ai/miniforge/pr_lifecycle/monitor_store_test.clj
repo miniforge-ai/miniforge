@@ -111,6 +111,16 @@
         (is (anomaly/anomaly? (poller/save-watermarks! watermarks)))
         (is (= [damage damage] [(slurp budget-file) (slurp wm-file)]))))))
 
+(deftest ^{:stratum 0} invalid-floor-loads-as-exhausted-test
+  (let [file (sut/repo-file "acme/app" "budget-42.edn")]
+    (fs/create-dirs (fs/parent file))
+    (doseq [floor [{:total-attempts -5} {:comment-attempts {9 -1}} {:total-attempts "bad"}]]
+      (testing (str "a budget whose :floor is " (pr-str floor))
+        (spit file (pr-str (assoc (budget/create-budget 42) :floor floor)))
+        (let [loaded (budget/load-budget "acme/app" 42)]
+          (is (some? (:load-error loaded)))
+          (is (some? (budget/any-budget-exhausted? loaded 9))))))))
+
 ;------------------------------------------------------------------------------ Layer 1
 
 (defn- ^{:stratum 1} isolated-home

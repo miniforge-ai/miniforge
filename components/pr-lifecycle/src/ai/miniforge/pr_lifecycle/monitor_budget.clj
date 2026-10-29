@@ -47,7 +47,11 @@
    [:attempts {:optional true} [:map-of :string int?]]
    [:answered {:optional true} [:set int?]]
    [:pushed {:optional true} [:set :string]]
-   [:floor {:optional true} [:maybe map?]]])
+   [:floor {:optional true} [:maybe [:map
+                                     [:total-attempts {:optional true} nat-int?]
+                                     [:comment-attempts {:optional true} [:map-of int? nat-int?]]
+                                     [:questions-answered {:optional true} nat-int?]
+                                     [:fixes-pushed {:optional true} nat-int?]]]]])
 
 (defn- ^{:stratum 0} validate!
   [result-schema value]
