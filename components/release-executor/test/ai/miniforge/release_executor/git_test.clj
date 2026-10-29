@@ -197,6 +197,26 @@
                  (real-git "config" "--get-urlmatch" "http.extraHeader"
                            "https://github.com/o/r.git"))))))))
 
+(deftest ^{:stratum 0} push-https-fallback-origin-kinds-test
+  (let [retry-env (fn [origin token]
+                    (let [pushes (atom [])]
+                      (with-redefs [shell/run-bounded (fn [_args opts]
+                                                        (swap! pushes conj opts)
+                                                        {:exit 1 :out "" :err "denied"})
+                                    process/shell (fn [& _] {:exit 0 :out origin :err ""})]
+                        (git/push-branch! "/tmp/wt" "b" token))
+                      {:pushes (count @pushes)
+                       :env    (get-in (second @pushes) [:extra-env])}))]
+    (testing "an HTTPS origin gets the header but no URL rewrite"
+      (let [{:keys [pushes env]} (retry-env "https://github.com/o/r.git" "tok")]
+        (is (= 2 pushes))
+        (is (= "2" (get env "GIT_CONFIG_COUNT")))
+        (is (= "http.https://github.com/.extraHeader" (get env "GIT_CONFIG_KEY_1")))))
+    (testing "an origin that is neither scp-style SSH nor HTTPS is not retried"
+      (is (= 1 (:pushes (retry-env "/srv/git/r.git" "tok")))))
+    (testing "no token, no retry"
+      (is (= 1 (:pushes (retry-env "git@github.com:o/r.git" nil)))))))
+
 ;;------------------------------------------- core host-mode dispatch
 (deftest ^{:stratum 0} step-validate-inputs-host-mode-test
   (testing "no executor + no environment-id + worktree present → :host-mode? true"
@@ -326,3 +346,33 @@
                   (str label " returns at the deadline, not when the remote gives up")))))
         (is (= "0" (str/trim (slurp prompt))) "GIT_TERMINAL_PROMPT=0 reaches git's children")
         (finally (fs/delete-tree dir))))))
+
+;;------------------------------------------- token never reaches git config
+(deftest ^{:stratum 2} push-fallback-keeps-token-out-of-git-config-test
+  (testing "while the HTTPS token-fallback push hangs, and after it is killed,
+            .git/config holds no token and origin is unchanged"
+    (let [dir    (fs/create-temp-dir {:prefix "git-host-mode-token-"})
+          token  "ghp_fallbackTestToken0000000000000000000"
+          origin "git@fallback.invalid:o/r.git"
+          config (str (fs/path dir ".git" "config"))]
+      (with-open [proxy (java.net.ServerSocket. 0 1 (java.net.InetAddress/getLoopbackAddress))]
+        (try
+          (.setSoTimeout proxy 20000)
+          (init-repo! dir)
+          (sh! dir "git" "checkout" "-q" "-b" "release/token")
+          (sh! dir "git" "remote" "add" "origin" origin)
+          ;; The SSH push fails at once; the HTTPS retry goes through a proxy
+          ;; that accepts the connection and never answers.
+          (sh! dir "git" "config" "core.sshCommand" "false")
+          (sh! dir "git" "config" "http.proxy" (str "http://127.0.0.1:" (.getLocalPort proxy)))
+          (with-redefs [shell/default-timeout-ms 2000]
+            (let [push (future (git/push-branch! dir "release/token" token))]
+              (with-open [_conn (.accept proxy)]
+                (is (not (str/includes? (slurp config) token))
+                    "no token in .git/config while the retry is in flight")
+                (let [r (deref push 30000 ::stuck)]
+                  (is (not= ::stuck r) "the hung retry is killed at the deadline")
+                  (is (:timed-out? r))))))
+          (is (not (str/includes? (slurp config) token)) "no token in .git/config afterwards")
+          (is (= origin (:output (git/exec! dir ["git" "remote" "get-url" "origin"]))))
+          (finally (fs/delete-tree dir)))))))
