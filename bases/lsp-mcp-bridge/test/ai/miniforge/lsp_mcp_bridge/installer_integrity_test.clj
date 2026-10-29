@@ -50,16 +50,16 @@
     (.closeEntry out)))
 
 (defn ^{:stratum 0} install!
-  "Run `install-via-github` for `asset` with the bin dir and download
-   temp dir under `base`. `write-archive!` gets the archive path the
-   stubbed download must fill. Returns [result bin-dir]."
+  "Run `install-via-github` for `asset` with the bin dir under `base` and
+   the staging dir (inside the bin dir) named with a space and a quote.
+   `write-archive!` gets the archive path the stubbed download must
+   fill. Returns [result bin-dir]."
   [base asset write-archive!]
   (let [bin-dir  (str (fs/path base "bin dir's"))
-        tmp-dir  (fs/path base "download tmp's")
         entry    {:github "example/tool" :version "v1" :binary "tool"
                   :assets {"test-platform" asset}}]
     (with-redefs [installer/bin-dir       (constantly bin-dir)
-                  fs/create-temp-dir      (fn [_opts] (fs/create-dirs tmp-dir))
+                  fs/create-temp-dir      (fn [opts] (fs/create-dirs (fs/path (:dir opts) "staging tmp's")))
                   installer/download-file (fn [_url dest] (write-archive! dest) nil)]
       [(binding [*err* (java.io.StringWriter.)]
          (installer/install-via-github entry "test-platform"))
@@ -84,6 +84,15 @@
         (binding [*err* (java.io.StringWriter.)]
           (installer/download-file "https://example.test/tool.gz" "/tmp/tool.gz")))
       (is (some #{"--fail"} @argv) (pr-str @argv)))))
+
+(defn ^{:stratum 0} with-stale-binary
+  "Call `f` with `base` after placing a non-executable `tool` holding
+   \"stale\" at the bin path install! uses."
+  [base f]
+  (let [path (str (fs/path base "bin dir's" "tool"))]
+    (fs/create-dirs (fs/parent path))
+    (spit path "stale")
+    (f path)))
 
 ;------------------------------------------------------------------------------ Layer 1
 
@@ -221,3 +230,37 @@
             (is (nil? (installer/resolve-binary tool)) "a non-executable file is not a binary")
             (fs/set-posix-file-permissions path "rwxr-xr-x")
             (is (= path (installer/resolve-binary tool)))))))))
+
+(deftest ^{:stratum 1} failed-reinstall-leaves-existing-target-untouched-test
+  (testing "tar writing the binary and then failing (truncated archive) does not touch the target"
+    (with-base-dir
+      (fn [base]
+        (with-stale-binary base
+          (fn [target]
+            (let [src   (str (fs/create-dirs (fs/path base "src")))
+                  noise (byte-array 200000)
+                  full  (str (fs/path base "full.tar.gz"))]
+              (spit (str src "/tool") script)
+              (fs/set-posix-file-permissions (str src "/tool") "rwxr-xr-x")
+              (.nextBytes (java.util.Random. 1) noise)
+              (fs/write-bytes (str src "/noise") noise)
+              (bp/sh ["tar" "czf" full "-C" src "tool" "noise"])
+              (let [bytes      (fs/read-all-bytes full)
+                    [result _] (install! base {:file "tool.tar.gz" :extract :tar-gz}
+                                         #(fs/write-bytes (str %) (java.util.Arrays/copyOf
+                                                                   bytes (quot (alength bytes) 2))))]
+                (is (response/anomaly-map? result))
+                (is (= "stale" (slurp target)) "target content unchanged")
+                (is (not (fs/executable? target)))))))))))
+
+(deftest ^{:stratum 1} archive-without-binary-does-not-adopt-existing-file-test
+  (testing "a verified archive without the binary fails; the stale file is not chmod'ed or reported"
+    (with-base-dir
+      (fn [base]
+        (with-stale-binary base
+          (fn [target]
+            (let [[result _] (install! base {:file "tool.zip" :extract :zip}
+                                       #(write-zip! % "README" "no binary here"))]
+              (is (response/anomaly-map? result) (pr-str result))
+              (is (= "stale" (slurp target)))
+              (is (not (fs/executable? target))))))))))

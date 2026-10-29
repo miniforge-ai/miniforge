@@ -30,6 +30,7 @@
    [clojure.string :as str]
    [ai.miniforge.response.interface :as response])
   (:import
+   (java.nio.file CopyOption Files StandardCopyOption)
    (java.security MessageDigest)
    (java.util.zip GZIPInputStream)))
 
@@ -151,16 +152,14 @@
     (apply str (map #(format "%02x" %) (.digest md)))))
 
 (defn ^{:stratum 0} fail-and-discard
-  "Fail the pipeline with `anomaly` after removing the temp dir and
-   whatever the install created at the final binary path, recursively
-   (a symlink there is removed, not followed). A final path that existed
-   before the download is left alone. A cleanup error is recorded on the
-   anomaly as `:lsp-installer/cleanup-error` instead of replacing it.
+  "Fail the pipeline with `anomaly` after deleting the staging dir
+   (delete-tree removes symlinks, it does not follow them). Nothing is
+   written to the install target before the final move, so there is
+   nothing else to undo. A cleanup error is recorded on the anomaly as
+   `:lsp-installer/cleanup-error` instead of replacing it.
    Plain try: this base declares no slingshot dep (rule 211 exemption 1)."
-  [{:keys [temp-dir dest-dir binary final-preexisted?] :as state} anomaly]
+  [{:keys [temp-dir] :as state} anomaly]
   (let [cleanup-error (try
-                        (when-not final-preexisted?
-                          (fs/delete-tree (str dest-dir "/" binary)))
                         (some-> temp-dir fs/delete-tree)
                         nil
                         (catch Exception e e))]
@@ -213,27 +212,35 @@
           (fail state (str "No binary available for platform: " platform))
           (assoc state :platform-asset platform-asset)))))
 
-(defn ^{:stratum 1} step-download
-  "Download the asset archive to a temp directory."
+(defn ^{:stratum 1} step-stage
+  "Create a fresh staging dir inside the bin dir: the same filesystem as
+   the install target, so the finished binary can be renamed over it
+   atomically. Failing to create it fails the install as an anomaly."
   [state]
   (if (failed? state) state
-      (let [{:keys [server-entry platform-asset]} state
+      (try
+        (let [dest-dir (bin-dir)]
+          (assoc state
+                 :dest-dir dest-dir
+                 :temp-dir (str (fs/create-temp-dir {:dir    (fs/create-dirs dest-dir)
+                                                     :prefix ".install-"}))))
+        (catch Exception e
+          (fail state (str "Could not create staging dir: " (.getMessage e)))))))
+
+(defn ^{:stratum 1} step-download
+  "Download the asset archive into the staging dir."
+  [state]
+  (if (failed? state) state
+      (let [{:keys [server-entry platform-asset temp-dir]} state
             {:keys [github version binary]} server-entry
             url (github-release-url github version (:file platform-asset))
-            temp-dir (str (fs/create-temp-dir {:prefix "miniforge-install-"}))
-            archive-path (str temp-dir "/" (:file platform-asset))
-            dest-dir (bin-dir)]
+            archive-path (str temp-dir "/" (:file platform-asset))]
         (try
-          (fs/create-dirs dest-dir)
           (if-let [download-anomaly (download-file url archive-path)]
             (do
               (fs/delete-tree temp-dir)
               (assoc state :failure download-anomaly))
-            (assoc state
-                   :url url :temp-dir temp-dir :archive-path archive-path
-                   :dest-dir dest-dir :binary binary
-                   :final-preexisted? (fs/exists? (str dest-dir "/" binary)
-                                                  {:nofollow-links true})))
+            (assoc state :url url :archive-path archive-path :binary binary))
           (catch Exception e
             (fs/delete-tree temp-dir)
             (fail state (str "Download failed: " (.getMessage e))))))))
@@ -264,26 +271,29 @@
                                                     :lsp-installer/actual-sha256   actual}))))))
 
 (defn ^{:stratum 1} step-place-binary
-  "Move a nested binary into the bin dir, check it is there, and make it
-   executable. Fails the install when the binary is missing after
-   extraction or chmod exits non-zero."
+  "Check the extracted binary is a regular file in the staging dir (a
+   symlink does not count), chmod it there, then rename it over the
+   install target in one atomic move (Files/move, which refuses a
+   directory target rather than moving into it as fs/move would). On
+   any failure the staging dir is deleted and the target is untouched."
   [state]
   (if (failed? state) state
-      (let [{:keys [dest-dir platform-asset binary temp-dir]} state
+      (let [{:keys [dest-dir extract-dir platform-asset binary temp-dir]} state
+            in-archive   (get platform-asset :binary-in-archive binary)
+            staged       (str extract-dir "/" in-archive)
             final-binary (str dest-dir "/" binary)]
         (try
-          (when-let [nested (:binary-in-archive platform-asset)]
-            (let [nested-path (str dest-dir "/" nested)]
-              (when (and (not= nested-path final-binary) (fs/exists? nested-path))
-                (fs/move nested-path final-binary {:replace-existing true}))))
-          (if-let [anomaly (if (fs/regular-file? final-binary)
-                             (sh-anomaly "chmod" (bp/sh ["chmod" "+x" final-binary]))
+          (if-let [anomaly (if (fs/regular-file? staged {:nofollow-links true})
+                             (sh-anomaly "chmod" (bp/sh ["chmod" "+x" staged]))
                              (response/make-anomaly
                               :anomalies/fault
-                              (str "Binary not found after extraction (no regular file at "
-                                   final-binary ")")))]
+                              (str "Binary not found in the archive (no regular file at "
+                                   in-archive ")")))]
             (fail-and-discard state anomaly)
-            (do (fs/delete-tree temp-dir)
+            (do (Files/move (fs/path staged) (fs/path final-binary)
+                            (into-array CopyOption [StandardCopyOption/ATOMIC_MOVE
+                                                    StandardCopyOption/REPLACE_EXISTING]))
+                (fs/delete-tree temp-dir)
                 (assoc state :installed final-binary)))
           (catch Exception e
             (fail-and-discard state (response/make-anomaly
@@ -325,15 +335,18 @@
 ;------------------------------------------------------------------------------ Layer 2
 
 (defn ^{:stratum 2} step-extract
-  "Extract the archive into the bin dir. An extractor anomaly or throw
-   (corrupt archive) fails the install and discards the partial install."
+  "Extract the archive into the staging dir's `extract/`, never into the
+   bin dir. An extractor anomaly or throw (corrupt archive) fails the
+   install and deletes the staging dir."
   [state]
   (if (failed? state) state
-      (let [{:keys [archive-path dest-dir platform-asset binary]} state]
+      (let [{:keys [archive-path temp-dir platform-asset binary]} state
+            extract-dir (str temp-dir "/extract")]
         (try
-          (if-let [anomaly (extract-archive archive-path dest-dir (:extract platform-asset) binary)]
+          (fs/create-dirs extract-dir)
+          (if-let [anomaly (extract-archive archive-path extract-dir (:extract platform-asset) binary)]
             (fail-and-discard state anomaly)
-            state)
+            (assoc state :extract-dir extract-dir))
           (catch Exception e
             (fail-and-discard state (response/make-anomaly
                                      :anomalies/fault
@@ -346,6 +359,7 @@
   [server-entry platform]
   (-> {:server-entry server-entry :platform platform}
       step-resolve-asset
+      step-stage
       step-download
       step-verify-checksum
       step-extract
