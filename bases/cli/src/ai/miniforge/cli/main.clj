@@ -297,6 +297,10 @@
           (cmd-shared/exit! 1))
       (some-> (try+
                 (cmd-resume/resume-workflow wf-id opts)
+                (catch InterruptedException interrupted
+                  (.interrupt (Thread/currentThread))
+                  (throw interrupted))
+                (catch Error fatal (throw fatal))
                 (catch Object caught
                   (cmd-resume/print-resume-failure caught (:throwable &throw-context))
                   (cmd-shared/exit! 1)

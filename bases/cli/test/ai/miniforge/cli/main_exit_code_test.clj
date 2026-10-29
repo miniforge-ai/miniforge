@@ -123,4 +123,16 @@
       (is (= 1 exit))
       (is (str/includes? err "Agent System Error"))
       (is (str/includes? err "handoff failed for agent implementer"))
-      (is (= "" out)))))
+      (is (= "" out))))
+
+  (testing "an interrupt or a JVM error propagates instead of being reported"
+    (is (thrown? StackOverflowError
+                 (resume-failure-output #(throw (StackOverflowError.)))))
+    ;; Read the flag before any `is`: clojure.test's reporting clears it.
+    (let [thrown (try
+                   (resume-failure-output #(throw (InterruptedException.)))
+                   nil
+                   (catch InterruptedException e e))
+          interrupted? (Thread/interrupted)]
+      (is (instance? InterruptedException thrown))
+      (is interrupted? "the interrupt flag is restored"))))
