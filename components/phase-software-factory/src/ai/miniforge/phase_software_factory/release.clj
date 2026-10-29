@@ -38,6 +38,7 @@
             [ai.miniforge.phase-software-factory.messages :as messages]
             [ai.miniforge.phase-software-factory.phase-config :as phase-config]
             [ai.miniforge.phase-software-factory.phase-terminal :as phase-terminal]
+            [ai.miniforge.phase-software-factory.release-publish :as release-publish]
             [ai.miniforge.release-executor.interface :as release-executor]
             [ai.miniforge.response.interface :as response]))
 
@@ -188,23 +189,6 @@
    :environment-id (:environment-id impl-result)
    :worktree-path  worktree-path})
 
-(defn- ^{:stratum 0} resolve-github-token
-  "Resolve GitHub token for capsule PR operations.
-   Mirrors the resolution order from docker.clj's resolve-git-token:
-   1. Execution context (passed by task runner)
-   2. MINIFORGE_GIT_TOKEN env var (universal override)
-   3. GH_TOKEN env var (GitHub-specific)
-   4. `gh auth token` CLI fallback (host-side only, pre-capsule)"
-  [ctx]
-  (or (get-in ctx [:execution/opts :github-token])
-      (get-in ctx [:execution/github-token])
-      (System/getenv "MINIFORGE_GIT_TOKEN")
-      (System/getenv "GH_TOKEN")
-      (try (let [r (shell/sh "gh" "auth" "token")]
-             (when (zero? (:exit r))
-               (str/trim (:out r))))
-           (catch Exception _ nil))))
-
 (defn- ^{:stratum 0} compute-verdict
   "Pick the verdict that should flow on the phase result.
 
@@ -255,6 +239,41 @@
     (-> ctx
         (assoc-in [:phase :verdict] verdict)
         (assoc-in [:phase :result :output :phase/verdict] verdict))))
+
+(defn ^{:stratum 0} build-executor-context
+  "Build context for the release executor from phase context: the
+   publish context (release-publish/build-publish-context) plus what the
+   releaser agent needs.
+
+   Also computes the phase-filtered policy-pack behavior addendum via
+   `phase/load-and-filter-behaviors :release` and threads it as
+   `:task/behavior-addendum` so `release-executor/invoke-releaser` can
+   forward it into the agent input. Mirrors the wiring review (#945)
+   and plan use; closes the gap where the releaser ran without the
+   compiled standards pack."
+  [ctx config logger]
+  (let [on-chunk (phase/create-streaming-callback ctx :release)
+        input (get-in ctx [:execution/input])
+        ;; Codex consultation for the release situation, delivered through
+        ;; the same addendum channel as the compiled standards pack — the
+        ;; releaser has no existing-files channel (SPEC T1 s7.4). The
+        ;; outcome rides on the exec-context so enter-release can attach
+        ;; provenance without consulting twice.
+        codex-outcome (codex-pin/landings-outcome :release logger)
+        pack-addendum (phase/load-and-filter-behaviors
+                        :release {:task {:task/intent (:intent input)}})
+        behavior-addendum (let [t (:text codex-outcome)]
+                            (cond
+                              (and pack-addendum t) (str pack-addendum "\n\n" t)
+                              t t
+                              :else pack-addendum))]
+    (cond-> (assoc (release-publish/build-publish-context ctx config logger)
+                   :llm-backend (get-in ctx [:execution/llm-backend]))
+      on-chunk (assoc :on-chunk on-chunk)
+      behavior-addendum (assoc :task/behavior-addendum behavior-addendum)
+      ;; :text already rode into the behavior addendum; the summary only
+      ;; needs the status fields — don't ship the rendered prose twice.
+      codex-outcome (assoc :codex/outcome (dissoc codex-outcome :text)))))
 
 ;------------------------------------------------------------------------------ Layer 1
 
@@ -367,78 +386,6 @@
                          :anomalies.phase/enter-failed
                          (messages/t :release/zero-files)
                          (zero-files-data impl-result worktree-path))))
-
-(defn ^{:stratum 1} build-executor-context
-  "Build context for the release executor from phase context.
-   Includes :github-token so the release executor can inject GH_TOKEN
-   into the capsule's environment for gh CLI authentication.
-
-   The phase-local `logger` is threaded in so the release executor's
-   log calls (phase-started / fail / phase-completed) are emitted
-   even when the workflow ctx lacks :execution/logger — observed in
-   the 2026-05-03 dogfood, where release failed in 0ms with zero
-   visible log lines because the executor's logger was nil.
-
-   Also computes the phase-filtered policy-pack behavior addendum via
-   `phase/load-and-filter-behaviors :release` and threads it as
-   `:task/behavior-addendum` so `release-executor/invoke-releaser` can
-   forward it into the agent input. Mirrors the wiring review (#945)
-   and plan use; closes the gap where the releaser ran without the
-   compiled standards pack."
-  [ctx config logger]
-  (let [on-chunk (phase/create-streaming-callback ctx :release)
-        input (get-in ctx [:execution/input])
-        ;; Codex consultation for the release situation, delivered through
-        ;; the same addendum channel as the compiled standards pack — the
-        ;; releaser has no existing-files channel (SPEC T1 s7.4). The
-        ;; outcome rides on the exec-context so enter-release can attach
-        ;; provenance without consulting twice.
-        codex-outcome (codex-pin/landings-outcome :release logger)
-        pack-addendum (phase/load-and-filter-behaviors
-                        :release {:task {:task/intent (:intent input)}})
-        behavior-addendum (let [t (:text codex-outcome)]
-                            (cond
-                              (and pack-addendum t) (str pack-addendum "\n\n" t)
-                              t t
-                              :else pack-addendum))]
-    (cond-> {;; Preserve the original precedence — explicit ctx worktree paths
-             ;; win over config; the blessed resolver is the LAST resort,
-             ;; adding the opts key + the governed-fail / CWD decision (no
-             ;; silent user.dir downgrade) in place of the old bare fallback.
-             :worktree-path (or (get-in ctx [:execution/worktree-path])
-                                (get-in ctx [:worktree-path])
-                                (get-in config [:worktree-path])
-                                (workspace/resolve-execution-workdir ctx "release"))
-             :executor (get-in ctx [:execution/executor])
-             :environment-id (get-in ctx [:execution/environment-id])
-             :logger (or (get-in ctx [:execution/logger]) logger)
-             :llm-backend (get-in ctx [:execution/llm-backend])
-             :artifact-store (get-in ctx [:execution/artifact-store])
-             :event-stream (:event-stream ctx)
-             ;; Allow disabling PR creation via config or execution opts
-             :create-pr? (or (get-in ctx [:execution/opts :create-pr?])
-                             (get config :create-pr? true))
-             ;; PR base override for a dependency-chained DAG task: the DAG
-             ;; orchestrator passes the parent task's branch so this task's PR
-             ;; STACKS on the parent (base = parent branch) instead of opening
-             ;; against the default branch with a cumulative diff. Absent (root
-             ;; tasks / non-DAG runs) → executor falls back to the default branch.
-             :base-branch (get-in ctx [:execution/opts :release/base-branch])
-             ;; PR provenance → rendered as YAML frontmatter on the PR body so
-             ;; a PR maps deterministically back to its workflow run + spec.
-             ;; :workflow is the PARENT run id for a DAG sub-task (shared across
-             ;; the run's PRs) else this run's id; :task distinguishes DAG tasks.
-             :provenance {:workflow (or (get-in ctx [:execution/input :workflow/parent-id])
-                                        (get-in ctx [:execution/id]))
-                          :spec     (get-in ctx [:execution/input :spec/path])
-                          :task     (get-in ctx [:execution/input :task/id])}
-             ;; Resolve and inject GitHub token for capsule gh CLI auth
-             :github-token (resolve-github-token ctx)}
-      on-chunk (assoc :on-chunk on-chunk)
-      behavior-addendum (assoc :task/behavior-addendum behavior-addendum)
-      ;; :text already rode into the behavior addendum; the summary only
-      ;; needs the status fields — don't ship the rendered prose twice.
-      codex-outcome (assoc :codex/outcome (dissoc codex-outcome :text)))))
 
 (defn ^{:stratum 1} leave-release
   "Post-processing for release phase.
