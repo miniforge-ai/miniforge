@@ -27,10 +27,12 @@
    — for backward compatibility — via the `--resume <id>` flag on
    `mf run`."
   (:require
+   [ai.miniforge.agent-runtime.interface :as agent-runtime]
    [ai.miniforge.anomaly.interface :as anomaly]
    [clojure.string :as str]
    [ai.miniforge.cli.app-config :as app-config]
    [ai.miniforge.cli.main.display :as display]
+   [ai.miniforge.cli.main.display.classified-error :as classified-error]
    [ai.miniforge.cli.messages :as messages]
    [ai.miniforge.cli.workflow-selection-config :as selection-config]
    [ai.miniforge.cli.workflow-runner.context :as context]
@@ -40,7 +42,8 @@
    [ai.miniforge.supervisory-state.interface :as supervisory]
    [ai.miniforge.automation-edge-correlator.interface :as correlator]
    [ai.miniforge.workflow.interface :as workflow]
-   [ai.miniforge.workflow-resume.interface :as wr]))
+   [ai.miniforge.workflow-resume.interface :as wr]
+   [slingshot.slingshot :refer [try+]]))
 
 ;------------------------------------------------------------------------------ Layer 0
 
@@ -177,6 +180,28 @@
         (response/throw-anomaly! :anomalies/fault
                                  (messages/t :resume/run-id-unchecked {:run-id (str run-id) :error error})
                                  {:run-id (str run-id) :error error})))))
+
+(defn ^{:stratum 0} print-resume-failure
+  "Report a resume that threw, on stderr, for the CLI boundary. `caught`
+   is what was thrown (an anomaly map, for most resume refusals) and
+   `throwable` the exception carrying it. The message is the anomaly's,
+   else the exception's. It is printed in the classified view when the
+   agent-runtime classifier matched one of its known error patterns, and
+   as `Resume failed: <message>` otherwise. The classifier's catch-all
+   (an unmatched error reads as a task-code error) is not shown: for a
+   missing run or a refused option it would misdirect."
+  [caught throwable]
+  (let [message (or (when (map? caught) (:anomaly/message caught))
+                    (ex-message throwable)
+                    (.getName (class throwable)))
+        classification (try+
+                         (agent-runtime/classify-error message (ex-data throwable))
+                         (catch Object _ nil))]
+    (if (:regex classification)
+      (binding [*out* *err*]
+        (classified-error/print-classified-error classification)
+        (flush))
+      (display/print-error (messages/t :resume/failed {:error message})))))
 
 ;------------------------------------------------------------------------------ Layer 1
 
@@ -436,9 +461,5 @@
                 {:workflow-id workflow-id
                  :status final-status}))
             result)
-          (catch Exception e
-            (display/print-error (messages/t :resume/failed
-                                             {:error (ex-message e)}))
-            (throw e))
           (finally
             (control/release-workflow-control! resume-run-id)))))))
