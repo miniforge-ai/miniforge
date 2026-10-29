@@ -64,6 +64,12 @@
   (binding [*print-length* nil *print-level* nil *print-namespace-maps* false]
     (with-out-str (pprint/pprint config))))
 
+(defn ^{:stratum 0} publish-target
+  "The file a write to `path` replaces and locks: a symlink's target, so writers
+   going through the link and through the target take the same lock."
+  [path]
+  (if (fs/exists? path) (fs/real-path path) (fs/absolutize path)))
+
 (defn ^{:stratum 0} read-forms
   "Every top-level EDN form in `text`. Throws on malformed EDN."
   [^String text]
@@ -79,7 +85,7 @@
   "Rename a forced sibling temp file holding `text` over `path`, through a
    symlink to its target, keeping the old mode. nil, or an anomaly naming `path`."
   [path ^String text]
-  (let [target (if (fs/exists? path) (fs/real-path path) (fs/absolutize path))
+  (let [target (publish-target path)
         tmp    (fs/create-temp-file {:dir (fs/parent target) :prefix ".config-" :suffix ".tmp"})
         failed #(anomaly/anomaly :fault (t :config-file/write-failed {:path path :error (:anomaly/message %)})
                                  {:config/path (str path) :config/cause %})]
@@ -121,7 +127,7 @@
   "`(thunk)` under the config lock for `path`; an anomaly
    when the lock stays busy past `lock-timeout-ms` or the thunk throws."
   [path thunk]
-  (let [lock-file (Paths/get (str path lock-file-suffix) (make-array String 0))
+  (let [lock-file (Paths/get (str (publish-target path) lock-file-suffix) (make-array String 0))
         failure   #(anomaly/anomaly :fault (t :config-file/write-failed {:path path :error (ex-text %)})
                                     {:config/path (str path)})]
     (try+
