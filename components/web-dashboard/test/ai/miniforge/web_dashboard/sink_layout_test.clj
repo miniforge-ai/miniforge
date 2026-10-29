@@ -182,6 +182,29 @@
            (mapv :event/type (state-archive/get-archived-workflow-events
                               (atom {:archived-workflows (atom @found)}) wf-id))))))
 
+(deftest ^{:stratum 1} seconds-resolution-file-names-are-read
+  (let [events-dir (temp-events-dir)
+        stream     (es/create-event-stream {:sinks []})
+        dashboard  (core/create-state {:event-stream (es/create-event-stream {:sinks []})})
+        wf-id      (random-uuid)
+        ;; The older flat layout and seconds-resolution names an earlier sink wrote.
+        dir        (doto (io/file events-dir (str wf-id)) .mkdirs)
+        found      (atom {})]
+    (write-event! dir "20260420T000001Z-eventA.json"
+                  (envelope stream :workflow/started wf-id :workflow/spec {:name "Seconds run"}))
+    (write-event! dir "20260420T000002Z-eventB.json"
+                  (envelope stream :workflow/phase-started wf-id :workflow/phase :plan))
+    (write-event! dir "20260420T000003Z-eventC.json"
+                  (envelope stream :workflow/completed wf-id :workflow/status :success))
+    (archive/scan-archive! (str events-dir) #(swap! found assoc (str (:id %)) %) (constantly nil))
+    (is (= {:name "Seconds run" :status :completed}
+           (select-keys (get @found (str wf-id)) [:name :status])))
+    (with-redefs [workflows/events-dir-path (str events-dir)]
+      (is (= [:workflow/started :workflow/phase-started :workflow/completed]
+             (->> (workflows/get-events dashboard {:workflow-id wf-id})
+                  (sort-by :event/sequence-number)
+                  (mapv :event/type)))))))
+
 ;------------------------------------------------------------------------------ Layer 2
 
 (deftest ^{:stratum 2} archive-scan-lists-live-archived-and-edn-workflows

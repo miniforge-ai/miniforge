@@ -41,6 +41,9 @@
 (deftest ^{:stratum 1} both-name-grammars-give-the-recorded-time
   (is (= (+ epoch-ms 500)
          (es/event-file-ms "20260101T000000500Z-0f0e0d0c-0000-4000-8000-000000000000.json")))
+  (is (= (+ epoch-ms (* 1000 60 60 24 109) 1000)
+         (es/event-file-ms "20260420T000001Z-eventA.json"))
+      "the older seconds-resolution name, at .000")
   (is (= (+ epoch-ms 1000)
          (es/event-file-ms (format "%016x__%012d.transit.json" (bit-shift-left 1000 22) 7)))
       "a Snowflake name's timestamp bits, though it sorts before every legacy name")
