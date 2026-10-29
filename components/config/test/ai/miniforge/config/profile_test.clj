@@ -98,8 +98,39 @@
             rather than blocking the lookup"
     (let [gh-cli-token #'profile/gh-cli-token
           started      (System/currentTimeMillis)]
-      (is (nil? (gh-cli-token ["sleep" "10"] 200)))
+      (is (= :timeout (gh-cli-token ["sleep" "10"] 200)))
       (is (< (- (System/currentTimeMillis) started) 5000)))))
+
+(deftest ^{:stratum 0} gh-cli-token-bounds-the-stdout-read-test
+  (testing "a gh that exits while a child keeps its stdout open cannot hold
+            the read past the deadline"
+    (let [started (System/currentTimeMillis)]
+      (is (= :timeout (#'profile/gh-cli-token ["sh" "-c" "sleep 3 & sleep 0.2; exit 0"] 1000)))
+      (is (< (- (System/currentTimeMillis) started) 2500)))))
+
+(deftest ^{:stratum 0} gh-cli-token-interrupt-kills-gh-and-keeps-the-flag-test
+  (testing "an interrupted lookup kills gh's process tree, returns
+            :interrupted and leaves the thread's interrupt flag set"
+    (let [pid-file (java.io.File/createTempFile "gh-child" ".pid")
+          outcome  (promise)
+          worker   (Thread. #(deliver outcome
+                                      [(#'profile/gh-cli-token
+                                        ["sh" "-c" (str "sleep 30 & echo $! > " pid-file "; wait")]
+                                        30000)
+                                       (.isInterrupted (Thread/currentThread))]))]
+      (.start worker)
+      (while (str/blank? (slurp pid-file)) (Thread/sleep 20))
+      (.interrupt worker)
+      (let [[r flag] (deref outcome 5000 [::hung nil])
+            child    (java.lang.ProcessHandle/of (parse-long (str/trim (slurp pid-file))))
+            deadline (+ (System/currentTimeMillis) 5000)]
+        (while (and (some-> child (.orElse nil) .isAlive)
+                    (< (System/currentTimeMillis) deadline))
+          (Thread/sleep 50))
+        (is (= :interrupted r))
+        (is (true? flag))
+        (is (not (some-> child (.orElse nil) .isAlive))))
+      (.delete pid-file))))
 
 (deftest ^{:stratum 0} gh-cli-token-timeout-kills-the-process-tree-test
   (testing "a child the stalled gh started is killed too, not left orphaned"

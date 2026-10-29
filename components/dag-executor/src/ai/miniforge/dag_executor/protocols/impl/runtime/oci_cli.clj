@@ -140,10 +140,14 @@
 
 (defn- ^{:stratum 0} env-file-entry?
   "True when an env entry fits an env file. Docker and Podman read one
-   NAME=value line at a time and take the value literally, so only a value
-   with a line break cannot go there."
-  [[_ v]]
-  (not (re-find #"[\r\n]" (str v))))
+   NAME=value line at a time and take the value literally, so the value
+   must have no line break and the name must match
+   `execution-plan/env-name-pattern`: a line break in it would start a
+   second assignment the plan does not show, and a bare NAME line copies
+   that variable from the runtime CLI's own environment."
+  [[k v]]
+  (and (re-find execution-plan/env-name-pattern (name k))
+       (not (re-find #"[\r\n]" (str v)))))
 
 (defn- ^{:stratum 0} write-env-file!
   "Write `entries` as NAME=value lines to a new temp file for `--env-file`.
@@ -448,11 +452,12 @@
    change the CLI itself): entries go to an owner-only temp file passed as
    `--env-file`. Returns {:args :file}; the caller deletes :file with
    `run-with-runtime-env`. An env file holds one line per entry, and every
-   other channel exposes the value, so env-map with a line break in a value
-   is refused: {:error message}, and nothing is written."
+   other channel exposes the value, so env-map with an entry that does not
+   fit one line (`env-file-entry?`) is refused: {:error message}, and
+   nothing is written."
   [env-map]
   (if-let [bad (seq (remove env-file-entry? env-map))]
-    {:error (messages/t :oci/env-line-break {:names (str/join ", " (map (comp name key) bad))})}
+    {:error (messages/t :oci/env-line-break {:names (str/join ", " (map (comp pr-str name key) bad))})}
     (let [file (when (seq env-map) (write-env-file! env-map))]
       {:args (when file ["--env-file" (str file)])
        :file file})))

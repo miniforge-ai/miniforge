@@ -73,29 +73,47 @@
    credential store) must not block every token lookup behind it."
   10000)
 
+(defn- ^{:stratum 0} destroy-process-tree!
+  "Kill `p` and every process it started, leaf first, as the llm and
+   dag-executor `destroy-process-tree!` helpers do; config sits below both
+   components, so it cannot call them. Descendants are found while `p` is
+   alive: a child that outlives `p` is reparented and out of reach."
+  [^Process p]
+  (doseq [^java.lang.ProcessHandle child (rseq (vec (.toArray (.descendants p))))]
+    (.destroyForcibly child))
+  (.destroyForcibly p))
+
 ;------------------------------------------------------------------------------ Layer 1
 
 (defn- ^{:stratum 1} gh-cli-token
   "Attempt to get a GitHub token from the gh CLI (`cmd`, by default
-   `gh auth token`), giving up after `timeout-ms`.
-   Returns the token string or nil. At the timeout it kills gh and every
-   process gh started (a credential helper, or the real gh behind a
-   wrapper): descendants are listed while gh is alive and killed leaf
-   first, then gh, as the llm and dag-executor `destroy-process-tree!`
-   helpers do. config sits below both components, so it cannot call them."
+   `gh auth token`). Returns the token; nil when gh gives none; :timeout
+   when gh has not printed it and exited within `timeout-ms`; or
+   :interrupted when the calling thread is interrupted, with its interrupt
+   flag set again. A reader thread takes gh's first output line under the
+   same deadline, so a child that keeps stdout open after gh exits cannot
+   hold the read. However it ends, gh and every process it started (a
+   credential helper, or the real gh behind a wrapper) are killed."
   ([] (gh-cli-token ["gh" "auth" "token"] gh-token-timeout-ms))
   ([cmd timeout-ms]
    (try
-     (let [p (.start (doto (ProcessBuilder. ^java.util.List cmd)
-                       (.redirectError java.lang.ProcessBuilder$Redirect/DISCARD)))]
-       (if (.waitFor p timeout-ms java.util.concurrent.TimeUnit/MILLISECONDS)
-         (when (zero? (.exitValue p))
-           (let [token (str/trim (slurp (.getInputStream p)))]
-             (when (seq token) token)))
-         (do (doseq [^java.lang.ProcessHandle child (rseq (vec (.toArray (.descendants p))))]
-               (.destroyForcibly child))
-             (.destroyForcibly p)
-             nil)))
+     (let [p        (.start (doto (ProcessBuilder. ^java.util.List cmd)
+                              (.redirectError java.lang.ProcessBuilder$Redirect/DISCARD)))
+           deadline (+ (System/nanoTime) (* timeout-ms 1000000))
+           line     (future (.readLine (io/reader (.getInputStream p))))]
+       (try
+         (let [token (deref line timeout-ms ::timeout)]
+           (cond
+             (= ::timeout token) :timeout
+             (not (.waitFor p (- deadline (System/nanoTime))
+                            java.util.concurrent.TimeUnit/NANOSECONDS)) :timeout
+             (zero? (.exitValue p)) (some-> token str/trim not-empty)))
+         (catch InterruptedException _
+           (.interrupt (Thread/currentThread))
+           :interrupted)
+         (finally
+           (destroy-process-tree! p)
+           (future-cancel line))))
      (catch Exception _ nil))))
 
 ;; Load and validate
@@ -133,6 +151,8 @@
         (get-in profile [:tokens host-kind])
         (case host-kind
           :gitlab  (System/getenv "GITLAB_TOKEN")
-          :github  (or (System/getenv "GH_TOKEN") (gh-cli-token))
+          ;; :timeout and :interrupted are no token; an interrupt stays
+          ;; set on the thread, so the caller's next wait stops too.
+          :github  (or (System/getenv "GH_TOKEN") (let [t (gh-cli-token)] (when (string? t) t)))
           ;; bitbucket, custom — no additional fallback
           nil))))

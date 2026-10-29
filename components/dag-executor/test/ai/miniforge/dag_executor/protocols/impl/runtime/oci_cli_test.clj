@@ -914,6 +914,20 @@
                                                    :execution-plan {:env {"PEM" "a\nb"}})))
         (is (empty? (calls)))))))
 
+(deftest ^{:stratum 3} env-name-that-is-not-an-identifier-is-refused-test
+  (testing "a name with a line break, which would write a second assignment
+            (here an unsanitized HTTPS_PROXY) or a bare line copying the
+            runtime CLI's own variable, is refused before the env file"
+    (with-fake-runtime :docker []
+      (fn [descriptor calls]
+        (is (result/err? (oci-cli/create-container
+                          descriptor "c" "img" "/w" nil nil nil
+                          :execution-plan {:env {"SAFE\nHTTPS_PROXY" "http://u:pw@proxy:3128"}})))
+        (let [r (oci-cli/exec-in-container descriptor "c" ["true"] {:env {"GH_TOKEN\n" ""}})]
+          (is (= 1 (get-in r [:data :exit-code])))
+          (is (clojure.string/includes? (get-in r [:data :stderr]) "GH_TOKEN\\n")))
+        (is (empty? (calls)))))))
+
 (deftest ^{:stratum 3} bootstrap-workspace-keeps-token-out-of-git-config-test
   (testing "the clone gets the token through its env file: no runtime argv
             carries it, origin is the plain URL, no push URL is set, and no
