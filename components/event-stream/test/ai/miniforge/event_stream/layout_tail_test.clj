@@ -281,14 +281,21 @@
           s1 (sut/poll-once! (sut/initial-state base t0 window-ms) base publish (+ t0 500))
           t1 (+ t0 window-ms sut/sweep-ms)]
       (es/publish! stream (wf-event :workflow/completed wf-id :workflow/status :success))
-      ;; Polling paused past the window, and the leaving read of the completion fails.
-      (let [s2 (with-redefs [layout/read-event #(when (= :workflow/started (:event/type (read-event %)))
-                                                  (read-event %))]
-                 (sut/poll-once! s1 base publish t1))
-            s3 (sut/poll-once! s2 base publish (+ t1 500))]
-        (is (contains? (:retrying s2) (str wf-id)) "kept for another read, not retired")
+      ;; Polling paused past the window, and the leaving poll cannot list the run.
+      (let [dir (es/workflow-dir base wf-id)
+            s2  (try (.setReadable dir false)
+                     (is (nil? (.listFiles dir)) "precondition: the test does not run as root")
+                     (sut/poll-once! s1 base publish t1)
+                     (finally (.setReadable dir true)))
+            ;; Then the listing works, but the completion's read fails.
+            s3  (with-redefs [layout/read-event #(when (= :workflow/started (:event/type (read-event %)))
+                                                   (read-event %))]
+                  (sut/poll-once! s2 base publish (+ t1 500)))
+            s4  (sut/poll-once! s3 base publish (+ t1 1000))]
+        (is (contains? (:retrying s2) (str wf-id)) "a failed listing is not a final read")
+        (is (contains? (:retrying s3) (str wf-id)) "nor is a failed decode")
         (is (= [:workflow/started :workflow/completed] (mapv :event/type @published)))
-        (is (empty? (:retrying s3)) "retired once its read succeeded")))))
+        (is (empty? (:retrying s4)) "retired once its read succeeded")))))
 
 ;------------------------------------------------------------------------------ Layer 2
 
