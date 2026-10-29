@@ -142,7 +142,9 @@
       :phase/result phase-result})))
 
 (defn ^{:stratum 1} build-manifest
-  "Build the durable checkpoint manifest for an execution context."
+  "Build the durable checkpoint manifest for an execution context. It
+   keeps a legacy `:pinned? true` from the existing manifest (a run pinned
+   before pins moved to their own marker file), so the GC still keeps it."
   ([ctx checkpoint-root]
    (build-manifest ctx checkpoint-root nil))
   ([ctx checkpoint-root existing-manifest]
@@ -164,12 +166,15 @@
                                    current-phase-ids)
          phase-paths (merge existing-phase-paths current-phase-paths)]
      (coerce/stringify-instants
-      {:checkpoint/format-version checkpoint-format-version
-       :workflow/id workflow-run-id
-       :workflow/workflow-id (:execution/workflow-id ctx)
-       :workflow/workflow-version (:execution/workflow-version ctx)
-       :workflow/phases-completed phase-ids
-       :workflow/machine-snapshot-path
-       (checkpoint-paths/machine-snapshot-path checkpoint-root workflow-run-id)
-       :workflow/phase-checkpoints phase-paths
-       :workflow/last-checkpoint-at (current-checkpoint-timestamp)}))))
+      (cond-> {:checkpoint/format-version checkpoint-format-version
+               :workflow/id workflow-run-id
+               :workflow/workflow-id (:execution/workflow-id ctx)
+               :workflow/workflow-version (:execution/workflow-version ctx)
+               :workflow/phases-completed phase-ids
+               :workflow/machine-snapshot-path
+               (checkpoint-paths/machine-snapshot-path checkpoint-root workflow-run-id)
+               :workflow/phase-checkpoints phase-paths
+               :workflow/last-checkpoint-at (current-checkpoint-timestamp)}
+        ;; A legacy manifest pin stays: the checkpoint GC never collects it.
+        (true? (:pinned? existing-manifest))
+        (assoc :pinned? true))))))

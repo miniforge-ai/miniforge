@@ -22,6 +22,7 @@
    [ai.miniforge.event-stream.interface :as es]
    [ai.miniforge.event-stream.layout-reader :as layout]
    [ai.miniforge.event-stream.layout-tail :as sut]
+   [ai.miniforge.logging.interface :as log]
    [clojure.java.io :as io]
    [clojure.test :refer [deftest testing is]]))
 
@@ -118,30 +119,6 @@
       (is (= [:workflow/started :workflow/completed] (mapv :event/type @published))
           "after the move to archived/, only the event not yet seen is published"))))
 
-(deftest ^{:stratum 1} a-run-idle-past-the-window-repeats-nothing-when-written-again
-  (let [events-dir (temp-events-dir)
-        base       (str events-dir)
-        stream     (file-sink-stream events-dir)
-        wf-id      (random-uuid)
-        dir        (es/workflow-dir base wf-id)
-        published  (atom [])
-        publish    #(swap! published conj %)]
-    (es/publish! stream (wf-event :workflow/started wf-id))
-    (let [t0 (System/currentTimeMillis)
-          s1 (sut/poll-once! (sut/initial-state base t0 window-ms) base publish (+ t0 500))
-          seen (get-in s1 [:tracked (str wf-id) :names])
-          ;; Nothing written for the whole window: the sweep drops the directory.
-          t1 (+ t0 window-ms 1000)
-          s2 (sut/poll-once! s1 base publish t1)]
-      (is (not (contains? (:active s2) (str wf-id))))
-      (es/publish! stream (wf-event :phase/started wf-id))
-      ;; The new file (and so the directory) carries a time after t1.
-      (doseq [f (cons dir (remove #(contains? seen (.getName ^java.io.File %)) (.listFiles dir)))]
-        (.setLastModified ^java.io.File f (+ t1 1000)))
-      (sut/poll-once! s2 base publish (+ t1 sut/sweep-ms))
-      (is (= [:workflow/started :phase/started] (mapv :event/type @published))
-          "the event seen before the idle gap is not published again"))))
-
 (deftest ^{:stratum 1} a-completion-written-before-a-long-pause-is-read
   (let [events-dir (temp-events-dir)
         base       (str events-dir)
@@ -159,7 +136,7 @@
         (is (= [:workflow/started :workflow/completed] (mapv :event/type @published))
             "read before the run leaves the active set")))))
 
-(deftest ^{:stratum 1} a-file-that-fails-to-decode-is-read-again
+(deftest ^{:stratum 1} later-events-wait-behind-a-file-that-fails-to-decode
   (let [events-dir (temp-events-dir)
         base       (str events-dir)
         stream     (file-sink-stream events-dir)
@@ -168,14 +145,41 @@
         publish    #(swap! published conj %)
         read-event layout/read-event]
     (es/publish! stream (wf-event :workflow/started wf-id))
+    (Thread/sleep 2)
     (es/publish! stream (wf-event :workflow/completed wf-id :workflow/status :success))
-    (let [t0        (System/currentTimeMillis)
-          completed (last (layout/event-files (es/workflow-dir base wf-id)))
-          s1        (with-redefs [layout/read-event #(when-not (= completed %) (read-event %))]
-                      (sut/poll-once! (sut/initial-state base t0 window-ms) base publish (+ t0 500)))]
-      (is (= [:workflow/started] (mapv :event/type @published)) "a transient read failure")
+    (let [t0      (System/currentTimeMillis)
+          started (first (filter #(= :workflow/started (:event/type (read-event %)))
+                                 (layout/event-files (es/workflow-dir base wf-id))))
+          s1      (with-redefs [layout/read-event #(when-not (= started %) (read-event %))]
+                    (sut/poll-once! (sut/initial-state base t0 window-ms) base publish (+ t0 500)))]
+      (is (= [] @published) "the completion waits behind the start's failed read")
       (sut/poll-once! s1 base publish (+ t0 1000))
       (is (= [:workflow/started :workflow/completed] (mapv :event/type @published))))))
+
+(deftest ^{:stratum 1} a-corrupt-file-is-given-up-after-retries-with-a-logged-gap
+  (let [events-dir (temp-events-dir)
+        base       (str events-dir)
+        stream     (file-sink-stream events-dir)
+        wf-id      (random-uuid)
+        published  (atom [])
+        publish    #(swap! published conj %)
+        [logger entries] (log/collecting-logger)]
+    (es/publish! stream (wf-event :workflow/started wf-id))
+    (Thread/sleep 2)
+    (spit (io/file (es/workflow-dir base wf-id) (str (.format (java.time.format.DateTimeFormatter/ofPattern "yyyyMMdd'T'HHmmssSSS'Z'")
+                                                              (java.time.LocalDateTime/now java.time.ZoneOffset/UTC))
+                                                     "-corrupt.json"))
+          "{not transit")
+    (Thread/sleep 2)
+    (es/publish! stream (wf-event :workflow/completed wf-id :workflow/status :success))
+    (let [t0    (System/currentTimeMillis)
+          polls (iterate #(sut/poll-once! % base publish (+ t0 500))
+                         (assoc (sut/initial-state base t0 window-ms) :logger logger))]
+      (nth polls (dec layout/max-read-attempts))
+      (is (= [:workflow/started] (mapv :event/type @published)) "held while it is retried")
+      (nth polls layout/max-read-attempts)
+      (is (= [:workflow/started :workflow/completed] (mapv :event/type @published)))
+      (is (= [:event-tail/gap] (map :log/event @entries))))))
 
 (deftest ^{:stratum 1} tracking-keeps-a-window-of-names-and-finds-late-files-in-it
   (let [events-dir (temp-events-dir)
@@ -241,24 +245,6 @@
   [list-files events-dir wf-id]
   (fn [dir] (let [files (doall (list-files dir))] (archive! events-dir wf-id) files)))
 
-(deftest ^{:stratum 1} a-run-moved-before-the-poll-lists-it-repeats-nothing
-  (let [events-dir (temp-events-dir)
-        base       (str events-dir)
-        stream     (file-sink-stream events-dir)
-        wf-id      (random-uuid)
-        published  (atom [])
-        publish    #(swap! published conj %)
-        t0         (System/currentTimeMillis)
-        s0         (sut/initial-state base t0 window-ms)]
-    (es/publish! stream (wf-event :workflow/started wf-id))
-    (let [s1 (sut/poll-once! s0 base publish (+ t0 2000))]
-      (es/publish! stream (wf-event :workflow/completed wf-id :workflow/status :success))
-      (archive! events-dir wf-id)
-      ;; Too soon to relist: this poll lists the live path, now gone.
-      (-> (sut/poll-once! s1 base publish (+ t0 2500))
-          (sut/poll-once! base publish (+ t0 4000)))
-      (is (= [:workflow/started :workflow/completed] (mapv :event/type @published))))))
-
 (deftest ^{:stratum 1} a-run-archived-as-it-resumes-replays-nothing
   (let [events-dir (temp-events-dir)
         base       (str events-dir)
@@ -281,6 +267,28 @@
         (sut/poll-once! s3 base publish (+ t1 sut/sweep-ms 2000))
         (is (= [:workflow/started :workflow/resumed] (mapv :event/type @published))
             "the event read before the idle gap is not read again")))))
+
+(deftest ^{:stratum 1} a-run-whose-last-read-fails-is-read-again-before-it-retires
+  (let [events-dir (temp-events-dir)
+        base       (str events-dir)
+        stream     (file-sink-stream events-dir)
+        wf-id      (random-uuid)
+        published  (atom [])
+        publish    #(swap! published conj %)
+        read-event layout/read-event]
+    (es/publish! stream (wf-event :workflow/started wf-id))
+    (let [t0 (System/currentTimeMillis)
+          s1 (sut/poll-once! (sut/initial-state base t0 window-ms) base publish (+ t0 500))
+          t1 (+ t0 window-ms sut/sweep-ms)]
+      (es/publish! stream (wf-event :workflow/completed wf-id :workflow/status :success))
+      ;; Polling paused past the window, and the leaving read of the completion fails.
+      (let [s2 (with-redefs [layout/read-event #(when (= :workflow/started (:event/type (read-event %)))
+                                                  (read-event %))]
+                 (sut/poll-once! s1 base publish t1))
+            s3 (sut/poll-once! s2 base publish (+ t1 500))]
+        (is (contains? (:retrying s2) (str wf-id)) "kept for another read, not retired")
+        (is (= [:workflow/started :workflow/completed] (mapv :event/type @published)))
+        (is (empty? (:retrying s3)) "retired once its read succeeded")))))
 
 ;------------------------------------------------------------------------------ Layer 2
 

@@ -92,6 +92,18 @@
       (assoc :execution/current-phase :plan
              :execution/phase-results {:plan {:status :completed}})))
 
+(defn ^{:stratum 0} expired-run!
+  "A run checkpoint directory under `root`, last changed 90 days ago, with
+   a minimal manifest. Returns its id."
+  [root]
+  (let [id (random-uuid)
+        dir (fs/file root (str id))]
+    (fs/create-dirs dir)
+    (spit (fs/file dir "manifest.edn") "{:workflow/id 1}")
+    (doseq [f (reverse (file-seq dir))]
+      (.setLastModified ^java.io.File f (- (System/currentTimeMillis) (* 90 24 60 60 1000))))
+    id))
+
 ;------------------------------------------------------------------------------ Layer 1
 
 (defn ^{:stratum 1} call-with-temp-checkpoint-root

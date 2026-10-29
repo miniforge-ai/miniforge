@@ -79,6 +79,13 @@
         (string? (:event/timestamp event))     (update :event/timestamp as-date)
         (sequential? (:phase/artifacts event)) (update :phase/artifacts (partial mapv artifact))))))
 
+(defn ^{:stratum 0} order-key
+  "An event's place in creation order: the ms its file's name records,
+   then its :event/sequence-number."
+  [event]
+  [(some-> ^File (::file (meta event)) .getName es/event-file-ms)
+   (get event :event/sequence-number 0)])
+
 (defn ^{:stratum 0} roots
   "The file sink's per-workflow roots under `events-dir`, live first: a
    directory moving to archived/ is then seen in at least one of them."
@@ -109,33 +116,56 @@
   [events-dir]
   (mapcat #(remove hidden? (.listFiles ^File %)) (roots events-dir)))
 
+(defn ^{:stratum 1} count-before
+  "How many of `files` (in creation order) were recorded before `ms`."
+  [files ms]
+  (count (take-while #(< (file-ms %) ms) files)))
+
+(defn ^{:stratum 1} unread?
+  "True when event file `f` is not covered by `tracked` (see
+   `unseen-files`): a name not tracked, recorded at or after the floor
+   (or with no floor yet). A file before the floor counts as covered."
+  [{:keys [names floor]} f]
+  (and (not (contains? names (file-name f)))
+       (or (nil? floor) (>= (file-ms f) floor))))
+
 (defn ^{:stratum 1} read-ordered
   "Decode `files` and return their events in creation order: by recorded
    ms, then :event/sequence-number (files from one millisecond). Each
-   event carries its file as `::file` metadata."
+   event carries its file as `::file` metadata (see `order-key`)."
   [files]
   (->> files
-       (keep (fn [f] (when-let [event (read-event f)]
-                       [(file-ms f) (vary-meta event assoc ::file f)])))
-       (sort-by (fn [[ms event]] [ms (get event :event/sequence-number 0)]))
-       (mapv second)))
+       (keep (fn [f] (some-> (read-event f) (vary-meta assoc ::file f))))
+       (sort-by order-key)
+       vec))
 
 ;------------------------------------------------------------------------------ Layer 2
 
 (defn ^{:stratum 2} unseen-files
-  "[names files]: the names of all event files in `dir`, and those files
-   whose names are not in `seen`. A file name always holds one event.
-   With no names yet (`seen` nil), the unseen files are those modified at
-   or after `since-ms`."
-  ([dir seen]
-   (unseen-files dir seen 0))
-  ([dir seen since-ms]
-   (let [files (event-files dir)]
-     [(into #{} (map file-name) files)
-      (if seen
-        (filterv #(not (contains? seen (file-name %))) files)
+  "[tracked files rebuild?] for workflow directory `dir`: its event files
+   not covered by `tracked`, and the tracking after them. Tracking stays
+   bounded: the names from the millisecond of the `keep-names`-th newest
+   file on, and a count of the older files. A file that appears among the
+   older ones later (a delayed rename) raises that count; then all files
+   come back with rebuild? true. With no tracking yet (nil), the unseen
+   files are those modified at or after `since-ms`."
+  ([dir tracked keep-names]
+   (unseen-files dir tracked keep-names 0))
+  ([dir tracked keep-names since-ms]
+   (let [files    (event-files dir)
+         floor    (some-> (take-last keep-names files) first file-ms)
+         below    (if floor (count-before files floor) 0)
+         rebuild? (boolean (when-let [old-floor (:floor tracked)]
+                             (> (count-before files old-floor) (:below tracked))))]
+     [{:names (into #{} (map file-name) (drop below files))
+       :floor floor
+       :below below}
+      (cond
+        rebuild? (vec files)
+        tracked  (filterv (partial unread? tracked) files)
         ;; mtime 0: gone since the listing (moved); a caller retries it.
-        (filterv #(let [m (mtime %)] (or (>= m since-ms) (zero? m))) files))])))
+        :else    (filterv #(let [m (mtime %)] (or (>= m since-ms) (zero? m))) files))
+      rebuild?])))
 
 (defn ^{:stratum 2} workflow-events
   "Every event of `workflow-id` in the sink layout (its archived, live or

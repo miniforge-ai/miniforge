@@ -61,9 +61,9 @@
   git/create-branch!)
 
 (def ^{:stratum 0} commit-changes!
-  "Commit staged changes. Args: [worktree-path message] or
-   [worktree-path message git-args], git-args being global git options
-   placed before `commit` (e.g. to disable hooks).
+  "Commit staged changes. Args: [worktree-path message], plus optional
+   git-args (global git options placed before `commit`, e.g. to disable
+   hooks) and extra-env (e.g. GIT_INDEX_FILE for a temporary index).
    Returns {:success? bool :commit-sha string :error string}"
   git/commit-changes!)
 

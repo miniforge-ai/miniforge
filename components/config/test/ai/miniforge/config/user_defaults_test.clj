@@ -118,11 +118,16 @@
 
 ;; Variables that used to be mapped onto keys nothing reads. Setting one
 ;; changed nothing, while the docs presented some of them as hard budget
-;; stops.
+;; stops. No run reads :model-selection or :self-healing from the merged
+;; config either.
 (def ^{:stratum 0} ^:private unread-env-vars
   #{"MINIFORGE_LLM_TIMEOUT" "MINIFORGE_LLM_LINE_TIMEOUT" "MINIFORGE_LLM_MAX_TOKENS"
     "MINIFORGE_MAX_ITERATIONS" "MINIFORGE_MAX_TOKENS" "MINIFORGE_FAILURE_STRATEGY"
-    "MINIFORGE_ARTIFACTS_DIR"})
+    "MINIFORGE_ARTIFACTS_DIR"
+    "MINIFORGE_MODEL_SELECTION_ENABLED" "MINIFORGE_MODEL_SELECTION_STRATEGY"
+    "MINIFORGE_MODEL_SELECTION_COST_LIMIT" "MINIFORGE_MODEL_SELECTION_REQUIRE_LOCAL"
+    "MINIFORGE_SELF_HEALING_ENABLED" "MINIFORGE_SELF_HEALING_AUTO_APPLY"
+    "MINIFORGE_BACKEND_AUTO_SWITCH" "MINIFORGE_BACKEND_HEALTH_THRESHOLD"})
 
 (def ^{:stratum 0} ^:private unread-keys
   [[:llm :timeout-ms] [:llm :line-timeout-ms] [:llm :max-tokens]

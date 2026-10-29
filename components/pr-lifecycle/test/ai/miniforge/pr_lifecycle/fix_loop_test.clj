@@ -561,15 +561,15 @@
         (spit (str (fs/path worktree "a.txt")) "1\n")
         (git! worktree "add" "a.txt")
         (git! worktree "commit" "-q" "-m" "init")
-        (doseq [hook ["pre-commit" "commit-msg" "post-commit" "reference-transaction" "pre-push"]]
+        (doseq [hook ["pre-commit" "commit-msg" "post-commit" "reference-transaction"
+                      "post-index-change" "pre-push"]]
           (let [f (fs/path worktree ".git" "hooks" hook)]
             (spit (str f) (str "#!/bin/sh\necho " hook " >> '" ran "'\n"))
             (fs/set-posix-file-permissions f "rwxr-xr-x")))
         (spit (str (fs/path worktree "a.txt")) "2\n")
-        (git! worktree "add" "a.txt")
         (let [result (fix/commit-fix worktree {:fix/type :review-changes
                                                :fix/affected-files ["a.txt"]}
-                                     "fix/x" nil)]
+                                     "fix/x" nil [{:path "a.txt" :action :modify}])]
           (is (dag/ok? result))
           (is (not (fs/exists? ran)))
           (is (= (get-in result [:data :commit-sha])
