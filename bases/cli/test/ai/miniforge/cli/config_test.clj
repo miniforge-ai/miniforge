@@ -21,6 +21,7 @@
             [ai.miniforge.cli.backends.status :as backend-status]
             [ai.miniforge.cli.config :as config]
             [ai.miniforge.cli.main.commands.shared :as shared]
+            [clojure.edn :as edn]
             [clojure.java.io :as io]
             [clojure.string :as str]))
 
@@ -64,6 +65,10 @@
   (testing "get-llm-backend returns :opencode as default"
     (is (= :opencode (config/get-llm-backend {} nil)))
     (is (= :opencode (config/get-llm-backend {:llm {}} nil)))))
+
+(deftest ^{:stratum 0} get-llm-backend-reads-words-as-keywords-test
+  (is (= :opencode (config/get-llm-backend {:llm {:backend 'opencode}} nil)))
+  (is (= :claude (config/get-llm-backend {} "claude"))))
 
 (deftest ^{:stratum 0} get-llm-timeout-test
   (testing "get-llm-timeout returns config value"
@@ -166,3 +171,14 @@
           (is (= [1] @exits))
           (is (str/includes? (str err) (.getPath tmp)))
           (finally (.delete tmp)))))))
+
+(deftest ^{:stratum 0} config-set-stores-typed-values-test
+  (testing "the usage example `config set llm.backend opencode` stores a keyword; a model id stays a string"
+    (let [dir  (java.nio.file.Files/createTempDirectory "config-set" (make-array java.nio.file.attribute.FileAttribute 0))
+          path (str (.resolve dir "config.edn"))]
+      (with-out-str
+        (config/cmd-set {:config path :key "llm.backend" :value "opencode"})
+        (config/cmd-set {:config path :key "llm.model" :value "anthropic/claude-sonnet-4-5"}))
+      (let [saved (edn/read-string (slurp path))]
+        (is (= :opencode (get-in saved [:llm :backend])))
+        (is (= "anthropic/claude-sonnet-4-5" (get-in saved [:llm :model])))))))
