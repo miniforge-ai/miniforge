@@ -83,20 +83,25 @@
   "(?i)\\bBasic\\s+[A-Za-z0-9+/]{16,}=*"
   ;; An opaque value assigned to a credential-named variable, where no
   ;; rule above knows the value's shape: GH_TOKEN=abc, DB_PASSWORD: abc,
-  ;; "refresh_token": "abc". Only the value is replaced; the name and
-  ;; any quotes stay. Two patterns: a quoted value runs to the next
-  ;; quote, spaces included; an unquoted one runs to whitespace.
+  ;; "refresh_token": "abc". These patterns name a `secret` group, and
+  ;; only that group is replaced, so the name, `=` and quotes stay.
   ;;
   ;; Kept narrow on purpose. The name must END in _TOKEN, _SECRET,
   ;; _PASSWORD or _API_KEY, so MAX_TOKENS=4096 and token_count=3 do not
   ;; match. `=` must touch the name (env and shell style), so code such
-  ;; as `API_TOKEN = fetch()` does not match. Only spaces or tabs may
-  ;; follow `:`, so a match never crosses a line. A value starting with
-  ;; `$` is a variable reference, not a secret. The marker (keep it in
-  ;; step with :redaction/marker) is not matched again, so redacted text
-  ;; does not read as secret-bearing.
-  "(?i)(?<=\\b[A-Za-z0-9_]{0,64}_(?:TOKEN|SECRET|PASSWORD|API_KEY)[\"']?(?:=|:[ \\t]{0,4})[\"'])(?!\\[REDACTED\\]|\\$)[^\"'\\n]+"
-  "(?i)(?<=\\b[A-Za-z0-9_]{0,64}_(?:TOKEN|SECRET|PASSWORD|API_KEY)[\"']?(?:=|:[ \\t]{0,4}))(?!\\[REDACTED\\]|\\$)[^\\s'\"]+"
+  ;; as `API_TOKEN = fetch()` does not match. Any run of spaces or tabs
+  ;; may follow `:`, never a newline. A value starting with `$` is a
+  ;; variable reference, not a secret. A value that is exactly the
+  ;; marker (keep it in step with :redaction/marker) is not matched
+  ;; again, so redacted text does not read as secret-bearing; a value
+  ;; that merely begins with the marker still is.
+  ;;
+  ;; Quoted value: runs to the matching closing quote, so the other
+  ;; quote character and backslash-escaped quotes are part of it.
+  "(?i)\\b[A-Za-z0-9_]*_(?:TOKEN|SECRET|PASSWORD|API_KEY)[\"']?(?:=|:[ \\t]*)(?<q>[\"'])(?!\\$|\\[REDACTED\\]\\k<q>)(?<secret>(?:\\\\.|(?!\\k<q>)[^\\\\\\n])+)\\k<q>"
+  ;; Unquoted value, or a quoted one whose closing quote was lost: runs
+  ;; to whitespace or a quote.
+  "(?i)\\b[A-Za-z0-9_]*_(?:TOKEN|SECRET|PASSWORD|API_KEY)[\"']?(?:=|:[ \\t]*)[\"']?(?!\\$|\\[REDACTED\\](?:[\\s'\"]|$))(?<secret>[^\\s'\"]+)"
   ;; The password half of GitHub's x-access-token:<token> pair outside a
   ;; URL. Inside a URL the userinfo rule above has already removed it.
-  "(?i)(?<=\\bx-access-token:)(?!\\[REDACTED\\]|\\$)[^\\s@/'\"]+"]}
+  "(?i)\\bx-access-token:(?!\\$|\\[REDACTED\\](?:[\\s@/'\"]|$))(?<secret>[^\\s@/'\"]+)"]}

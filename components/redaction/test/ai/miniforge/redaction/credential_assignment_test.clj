@@ -18,85 +18,75 @@
 (ns ai.miniforge.redaction.credential-assignment-test
   "Opaque secrets with no recognisable shape, caught by what names them:
    a credential-named assignment, or GitHub's x-access-token pair.
-   Look-alikes that are not credentials pass through unchanged."
+
+   One table, every row run through both `redact` and `secret-string?`:
+   the two must agree, so a row that redaction changes is one detection
+   reports, and a row it leaves alone is one detection passes."
   (:require
    [ai.miniforge.redaction.interface :as sut]
-   [clojure.string :as str]
    [clojure.test :refer [deftest is testing]]))
 
 ;------------------------------------------------------------------------------ Layer 0
 
-(def ^{:stratum 0} secret
-  "An opaque value: no prefix, no fixed length, nothing shape rules know."
-  "opaqueVALUE123")
+(def ^{:stratum 0} rows
+  "[input expected-redaction why]. `opaqueVALUE123` is the secret in
+   every row that has one; a row whose input equals its expectation
+   carries no secret."
+  [;; credential-named assignment, unquoted
+   ["GH_TOKEN=opaqueVALUE123" "GH_TOKEN=[REDACTED]" "env style"]
+   ["export gh_token=opaqueVALUE123 && run" "export gh_token=[REDACTED] && run" "any case"]
+   ["CLIENT_SECRET=opaqueVALUE123" "CLIENT_SECRET=[REDACTED]" "_SECRET"]
+   ["OPENAI_API_KEY=opaqueVALUE123" "OPENAI_API_KEY=[REDACTED]" "_API_KEY"]
+   ["DB_PASSWORD: opaqueVALUE123" "DB_PASSWORD: [REDACTED]" "header style"]
+   ["DB_PASSWORD:opaqueVALUE123" "DB_PASSWORD:[REDACTED]" "no space after colon"]
+   ["DB_PASSWORD=\"opaqueVALUE123" "DB_PASSWORD=\"[REDACTED]" "closing quote lost"]
+   ;; credential-named assignment, quoted
+   ["{\"refresh_token\": \"opaqueVALUE123\"}" "{\"refresh_token\": \"[REDACTED]\"}" "JSON keeps its quotes"]
+   ["DB_PASSWORD='correct horse opaqueVALUE123'" "DB_PASSWORD='[REDACTED]'" "spaces inside quotes"]
+   ;; review 4409406742: the closing quote must match the opening one
+   ["DB_PASSWORD=\"prefix'opaqueVALUE123\"" "DB_PASSWORD=\"[REDACTED]\"" "single quote inside double"]
+   ["DB_PASSWORD='prefix\"opaqueVALUE123'" "DB_PASSWORD='[REDACTED]'" "double quote inside single"]
+   ["DB_PASSWORD=\"pre\\\"fix opaqueVALUE123\"" "DB_PASSWORD=\"[REDACTED]\"" "escaped quote inside"]
+   ["DB_PASSWORD=\"opaqueVALUE123\\\\\" next" "DB_PASSWORD=\"[REDACTED]\" next" "escaped backslash before the close"]
+   ;; review 4409406791: aligned values, any run of spaces or tabs
+   ["GH_TOKEN:     opaqueVALUE123" "GH_TOKEN:     [REDACTED]" "five spaces"]
+   ["GH_TOKEN:\t\t   \"opaque VALUE123\"" "GH_TOKEN:\t\t   \"[REDACTED]\"" "tabs and spaces, quoted"]
+   ;; review 4409406839: only a value that IS the marker is exempt
+   ["DB_PASSWORD=\"sk-abcdefghijklmnopqrst opaqueVALUE123\"" "DB_PASSWORD=\"[REDACTED]\"" "shape rule ran first, quoted"]
+   ["GH_TOKEN=[REDACTED]opaqueVALUE123" "GH_TOKEN=[REDACTED]" "marker prefix, unquoted"]
+   ["x-access-token:[REDACTED]opaqueVALUE123" "x-access-token:[REDACTED]" "marker prefix, x-access-token"]
+   ["GH_TOKEN=[REDACTED]" "GH_TOKEN=[REDACTED]" "exactly the marker, unquoted"]
+   ["DB_PASSWORD: \"[REDACTED]\"" "DB_PASSWORD: \"[REDACTED]\"" "exactly the marker, quoted"]
+   ["x-access-token:[REDACTED]@github.com" "x-access-token:[REDACTED]@github.com" "exactly the marker, x-access-token"]
+   ;; x-access-token
+   ["auth x-access-token:opaqueVALUE123" "auth x-access-token:[REDACTED]" "outside a URL"]
+   ["push x-access-token:opaqueVALUE123@github.com/o/r" "push x-access-token:[REDACTED]@github.com/o/r" "host survives"]
+   ["https://x-access-token:opaqueVALUE123@github.com/o/r" "[REDACTED]github.com/o/r" "URL userinfo rule"]
+   ;; look-alikes that carry no credential
+   ["MAX_TOKENS=4096" "MAX_TOKENS=4096" "plural name"]
+   [":tokens 12" ":tokens 12" "token count"]
+   ["token_count=3" "token_count=3" "name does not end in _TOKEN"]
+   ["3f2a9c1d8e7b6a5f4c3d2e1f0a9b8c7d6e5f4a3b" "3f2a9c1d8e7b6a5f4c3d2e1f0a9b8c7d6e5f4a3b" "SHA"]
+   ["API_TOKEN = fetch_token()" "API_TOKEN = fetch_token()" "code assignment"]
+   ["GH_TOKEN=$GH_TOKEN" "GH_TOKEN=$GH_TOKEN" "variable reference"]
+   ["GH_TOKEN: \"${GH_TOKEN}\"" "GH_TOKEN: \"${GH_TOKEN}\"" "quoted variable reference"]
+   ["GH_TOKEN: ${{ secrets.GH_TOKEN }}" "GH_TOKEN: ${{ secrets.GH_TOKEN }}" "CI secret reference"]
+   ["GH_TOKEN_PATH=/tmp/token" "GH_TOKEN_PATH=/tmp/token" "name ends in _PATH"]
+   ["API_KEY=4096" "API_KEY=4096" "bare name, no prefix"]
+   ["DB_PASSWORD=\"\"" "DB_PASSWORD=\"\"" "empty value"]
+   ["authenticate as x-access-token with the app token" "authenticate as x-access-token with the app token" "the word alone"]
+   ["GH_TOKEN:\nnext line" "GH_TOKEN:\nnext line" "never crosses a newline"]])
 
-(def ^{:stratum 0} ordinary-texts
-  "Text that mentions tokens or looks random but carries no credential."
-  ["MAX_TOKENS=4096"
-   ":tokens 12"
-   "token_count=3"
-   "3f2a9c1d8e7b6a5f4c3d2e1f0a9b8c7d6e5f4a3b"
-   "API_TOKEN = fetch_token()"
-   "GH_TOKEN=$GH_TOKEN"
-   "GH_TOKEN: ${{ secrets.GH_TOKEN }}"
-   "GH_TOKEN_PATH=/tmp/token"
-   "API_KEY=4096"
-   "authenticate as x-access-token with the app token"
-   "GH_TOKEN:\nnext line"])
+(deftest ^{:stratum 0} token-counts-in-data-stay-numbers-test
+  (is (= {:tokens 12 :max_tokens 4096} (sut/redact {:tokens 12 :max_tokens 4096}))))
 
 ;------------------------------------------------------------------------------ Layer 1
 
-(defn- ^{:stratum 1} redacted-to
-  "Redact TEXT; assert the secret is gone, then return the result."
-  [text]
-  (let [out (sut/redact text)]
-    (is (not (str/includes? out secret)) (str "leaked from " (pr-str text)))
-    out))
-
-(deftest ^{:stratum 1} look-alikes-pass-through-test
-  (testing "token counts, SHAs, code, variable references and bare names are untouched"
-    (doseq [text ordinary-texts]
-      (is (= text (sut/redact text)))
-      (is (not (sut/secret-string? text)) (pr-str text))))
-  (testing "a token count in data stays a number"
-    (is (= {:tokens 12 :max_tokens 4096} (sut/redact {:tokens 12 :max_tokens 4096})))))
-
-(deftest ^{:stratum 1} redacted-text-reads-clean-test
-  (testing "the marker is not matched again: redaction is idempotent and its output is clean"
-    (doseq [text [(str "GH_TOKEN=" secret)
-                  (str "DB_PASSWORD: \"" secret "\"")
-                  (str "x-access-token:" secret)]]
-      (let [out (sut/redact text)]
-        (is (= out (sut/redact out)))
-        (is (sut/clean? out))
-        (is (not (sut/secret-string? out)))))))
-
-;------------------------------------------------------------------------------ Layer 2
-
-(deftest ^{:stratum 2} credential-named-assignment-redacts-its-value-test
-  (let [marker (sut/marker)]
-    (testing "env and shell style NAME=value, any case"
-      (is (= (str "GH_TOKEN=" marker) (redacted-to (str "GH_TOKEN=" secret))))
-      (is (= (str "export gh_token=" marker " && run")
-             (redacted-to (str "export gh_token=" secret " && run"))))
-      (is (= (str "CLIENT_SECRET=" marker) (redacted-to (str "CLIENT_SECRET=" secret))))
-      (is (= (str "OPENAI_API_KEY=" marker) (redacted-to (str "OPENAI_API_KEY=" secret)))))
-    (testing "header and YAML style NAME: value"
-      (is (= (str "DB_PASSWORD: " marker) (redacted-to (str "DB_PASSWORD: " secret))))
-      (is (= (str "DB_PASSWORD:" marker) (redacted-to (str "DB_PASSWORD:" secret)))))
-    (testing "a quoted value is redacted whole, spaces included, and keeps its quotes"
-      (is (= (str "{\"refresh_token\": \"" marker "\"}")
-             (redacted-to (str "{\"refresh_token\": \"" secret "\"}"))))
-      (is (= (str "DB_PASSWORD='" marker "'")
-             (redacted-to (str "DB_PASSWORD='correct horse " secret "'")))))))
-
-(deftest ^{:stratum 2} x-access-token-redacts-its-value-test
-  (let [marker (sut/marker)]
-    (testing "outside a URL, the host after @ survives"
-      (is (= (str "auth x-access-token:" marker)
-             (redacted-to (str "auth x-access-token:" secret))))
-      (is (= (str "push x-access-token:" marker "@github.com/o/r")
-             (redacted-to (str "push x-access-token:" secret "@github.com/o/r")))))
-    (testing "inside a URL, the userinfo rule still applies"
-      (is (= (str marker "github.com/o/r")
-             (redacted-to (str "https://x-access-token:" secret "@github.com/o/r")))))))
+(deftest ^{:stratum 1} redaction-and-detection-agree-on-every-row-test
+  (is (= "[REDACTED]" (sut/marker)) "the rows spell out the marker")
+  (doseq [[input expected why] rows]
+    (testing (str why ": " (pr-str input))
+      (is (= expected (sut/redact input)) "redact")
+      (is (= (not= input expected) (sut/secret-string? input)) "secret-string? on the input")
+      (is (= expected (sut/redact expected)) "redaction is idempotent")
+      (is (not (sut/secret-string? expected)) "redacted text reads clean"))))
