@@ -556,3 +556,29 @@
             (is (fs/exists? t3))
             (is (fs/exists? t2) "the tree the launcher ran before the swap is kept")
             (is (not (fs/exists? t1)))))))))
+
+(deftest ^{:stratum 2} unreadable-old-target-does-not-block-reinstall-test
+  (testing "a mode-000 old target is replaced; an archive install then skips the prune and warns"
+    (with-base-dir
+      (fn [base]
+        (let [tgz            (write-tool-tgz! base)
+              [_ t1 bin-dir] (install-tgz! base tgz)
+              target         (str bin-dir "/tool")
+              gz-bin         (str (fs/path base "gz-bin"))]
+          (fs/set-posix-file-permissions target "---------")
+          (if (fs/readable? target)
+            (println "SKIP unreadable-old-target test: this user can read mode-000 files")
+            (do
+              (let [[result t2] (install-tgz! base tgz)]
+                (is (= target (:installed result)) (pr-str result))
+                (is (some #(str/includes? % "could not be read") (:lsp-installer/warnings result)))
+                (is (fs/exists? t1) "nothing pruned when the old launcher is unknown")
+                (is (fs/exists? t2)))
+              (testing "and a gzip install never reads the old target"
+                (with-redefs [installer/bin-dir       (constantly gz-bin)
+                              installer/download-file (fn [_url dest] (write-gzip! dest script) nil)]
+                  (binding [*err* (java.io.StringWriter.)]
+                    (installer/install-via-github gz-entry (installer/platform-key))
+                    (fs/set-posix-file-permissions (str gz-bin "/tool") "---------")
+                    (is (= {:installed (str gz-bin "/tool")}
+                           (installer/install-via-github gz-entry (installer/platform-key))))))))))))))

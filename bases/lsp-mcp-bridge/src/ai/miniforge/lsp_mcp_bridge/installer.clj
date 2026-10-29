@@ -200,13 +200,18 @@
         (throw e)))))
 
 (defn ^{:stratum 0} launcher-target
-  "The path an install-dist! launcher at `path` execs, or nil when `path`
-   is not such a launcher (missing, a plain binary, anything else)."
+  "The path an install-dist! launcher at `path` execs; nil when `path` is
+   not such a launcher (missing, a plain binary, anything else); :unreadable
+   when it cannot be read (e.g. mode 000), which does not stop the target
+   from being replaced but does stop the prune.
+   Plain try: this base declares no slingshot dep (rule 211 exemption 1)."
   [path]
   (when (and (fs/regular-file? path) (< (fs/size path) 4096))
-    (some-> (re-find #"(?s)\A#!/bin/sh\nexec '((?:[^']|'\\'')*)' \"\$@\"\n\z" (slurp (str path)))
-            second
-            (str/replace "'\\''" "'"))))
+    (try
+      (some-> (re-find #"(?s)\A#!/bin/sh\nexec '((?:[^']|'\\'')*)' \"\$@\"\n\z" (slurp (str path)))
+              second
+              (str/replace "'\\''" "'"))
+      (catch Exception _ :unreadable))))
 
 (defn ^{:stratum 0} finish-install!
   "Cleanup once the target has been replaced, so the install has already
@@ -229,11 +234,13 @@
                                                (filter #(fs/directory? % {:nofollow-links true}))
                                                (map #(str (fs/file-name %)))
                                                (remove #{(str (fs/file-name dist))}))
-                                prev-tree (some-> prev fs/path
+                                prev-tree (some-> (when (string? prev) prev) fs/path
                                                   (->> (fs/relativize (fs/real-path root)))
                                                   fs/components first str)]
                             (cond
                               (empty? others) []
+                              (= :unreadable prev)
+                              [(str "not pruning " root ": the previous launcher could not be read")]
                               (or (nil? prev-tree) (= ".." prev-tree))
                               [(str "not pruning " root ": the previous launcher did not point into it")]
                               :else (into [] (keep delete!)
@@ -312,10 +319,10 @@
               channel   (FileChannel/open lock-file (into-array OpenOption [StandardOpenOption/CREATE
                                                                             StandardOpenOption/WRITE]))
               _         (swap! held conj #(.close channel))
-              deadline  (+ (System/currentTimeMillis) install-lock-wait-ms)
+              deadline  (+ (System/nanoTime) (* install-lock-wait-ms 1000000))
               file-lock (loop []
                           (or (.tryLock channel)
-                              (when (< (System/currentTimeMillis) deadline)
+                              (when (neg? (- (System/nanoTime) deadline))
                                 (Thread/sleep 100)
                                 (recur))))]
           (if file-lock
@@ -447,8 +454,9 @@
                               (str "Binary not found in the archive (no regular file at "
                                    in-archive ")")))]
             (fail-and-discard state anomaly)
-            (let [prev     (launcher-target final-binary)
-                  dist     (if (#{:zip :tar-gz} (:extract platform-asset))
+            (let [archive? (#{:zip :tar-gz} (:extract platform-asset))
+                  prev     (when archive? (launcher-target final-binary))
+                  dist     (if archive?
                              (install-dist! state final-binary)
                              (do (Files/move (fs/path staged) (fs/path final-binary)
                                              (into-array CopyOption [StandardCopyOption/ATOMIC_MOVE
