@@ -9,8 +9,10 @@
 ;------------------------------------------------------------------------------ Layer 0
 
 (def ^{:stratum 0} rule
-  {:rule/detection {:detector-config {:allow-secret-data? false
-                                      :fallback-patterns ["(?i)PRIVATE KEY"]}}})
+  {:rule/detection {:detector-config
+                    {:allow-secret-data? false
+                     :fallback-patterns ["(?i)(password|secret|api[_-]?key|token)\\s*[:=]\\s*[^\\s\"'#{}\\[\\],&*!|>%@`$][^\\s#]{7,}"
+                                         "(?i)PRIVATE KEY"]}}})
 
 (deftest ^{:stratum 0} credential-names-end-in-a-credential-term
   (doseq [n ["password" "DB_PASSWORD" "apiKey" "API_KEY" "client-secret" "AWS_SECRET_ACCESS_KEY"
@@ -44,6 +46,15 @@
            (findings (str "kind: CronJob\nmetadata:\n  name: job\nspec:\n  jobTemplate:\n    spec:\n"
                           "      template:\n        spec:\n          containers:\n            - name: c\n"
                           "              env:\n                - name: API_KEY\n                  value: sk-live-1\n")))))
+  (testing "a credential assignment inside a ConfigMap file value"
+    (is (= ["ConfigMap/cfg: data.application.properties"]
+           (findings "kind: ConfigMap\nmetadata:\n  name: cfg\ndata:\n  application.properties: |\n    db.password=correct-horse-battery\n"))))
+  (testing "a null valueFrom is no reference"
+    (is (= ["Deployment/api: env API_KEY"]
+           (findings (str "kind: Deployment\nmetadata:\n  name: api\nspec:\n  template:\n    spec:\n"
+                          "      containers:\n        - name: api\n          env:\n"
+                          "            - name: API_KEY\n              value: sk-live-1\n"
+                          "              valueFrom: null\n")))))
   (testing "values are never echoed"
     (is (not-any? #(str/includes? % "horse")
                   (findings "kind: ConfigMap\nmetadata:\n  name: cfg\ndata:\n  password: correct horse\n")))))

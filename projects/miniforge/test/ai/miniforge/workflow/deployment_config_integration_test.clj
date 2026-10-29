@@ -110,7 +110,21 @@
    (str "apiVersion: apps/v1\nkind: Deployment\nmetadata:\n  name: api\n"
         "spec:\n  template:\n    spec:\n      containers:\n"
         "        - name: api\n          image: api@sha256:abc\n          env:\n"
-        "            - name: API_KEY\n              value: sk-live-0123456789abcdef\n")})
+        "            - name: API_KEY\n              value: sk-live-0123456789abcdef\n")
+   "an API_KEY env literal with a null valueFrom"
+   (str "apiVersion: apps/v1\nkind: Deployment\nmetadata:\n  name: api\n"
+        "spec:\n  template:\n    spec:\n      containers:\n"
+        "        - name: api\n          image: api@sha256:abc\n          env:\n"
+        "            - name: API_KEY\n              value: sk-live-0123456789abcdef\n"
+        "              valueFrom: null\n")
+   "a password inside a ConfigMap application.yaml value"
+   (str "apiVersion: v1\nkind: ConfigMap\nmetadata:\n  name: api-config\n"
+        "data:\n  application.yaml: |\n    datasource:\n      url: jdbc:postgresql://db/api\n"
+        "      password: \"correct-horse-battery-staple\"\n")
+   "a password inside a ConfigMap application.properties value"
+   (str "apiVersion: v1\nkind: ConfigMap\nmetadata:\n  name: api-config\n"
+        "data:\n  application.properties: |\n    db.url=jdbc:postgresql://db/api\n"
+        "    db.password=correct-horse-battery-staple\n")})
 
 (defn- ^{:stratum 1} deploy
   "Run the real deploy interceptor through the real lifecycle and gates with

@@ -12,7 +12,10 @@
    2. A container env entry whose name is a credential name and that has a
       literal `value` (not `valueFrom`) is a finding.
    3. A ConfigMap `data` key that is a credential name with a non-empty
-      literal value is a finding; multiword values count.
+      literal value is a finding; multiword values count. A data value that
+      is a whole file (application.yaml, application.properties) is also
+      scanned with the rule's line patterns, so `password: \"...\"` and
+      `db.password=...` inside it are findings.
    4. Annotations and labels (`metadata`) are never read.
    A literal value holding a PEM private key is a finding wherever rules 2
    and 3 look. Findings name where the value is, never the value.
@@ -49,6 +52,14 @@
        (not (str/blank? (str v)))
        (not (re-matches #"\$[({][A-Za-z_][A-Za-z0-9_]*[)}]" (str/trim (str v))))))
 
+(defn- ^{:stratum 0} reference?
+  "True when valueFrom names a source. A null or empty valueFrom is no source,
+   so the entry's literal value is what the container gets."
+  [value-from]
+  (and (map? value-from)
+       (boolean (some #(map? (get value-from %))
+                      ["secretKeyRef" "configMapKeyRef" "fieldRef" "resourceFieldRef"]))))
+
 (defn- ^{:stratum 0} private-key? [v]
   (and (string? v) (str/includes? v "-----BEGIN") (str/includes? v "PRIVATE KEY")))
 
@@ -80,7 +91,7 @@
 ;------------------------------------------------------------------------------ Layer 1
 
 (defn- ^{:stratum 1} document-findings
-  [allow-secret-data? document]
+  [allow-secret-data? patterns document]
   (let [kind (get document "kind")
         label (str kind "/" (get-in document ["metadata" "name"]))
         secret (when (and (= "Secret" kind) (not allow-secret-data?))
@@ -90,11 +101,13 @@
                    (str label ": " field "." k)))
         config (when (= "ConfigMap" kind)
                  (for [[k v] (get document "data")
-                       :when (or (and (credential-name? k) (literal-value? v)) (private-key? v))]
+                       :when (or (and (credential-name? k) (literal-value? v))
+                                 (private-key? v)
+                                 (and (string? v) (fallback-match? patterns v)))]
                    (str label ": data." k)))
         env (for [entry (env-entries document)
                   :let [value (get entry "value")]
-                  :when (and (not (contains? entry "valueFrom"))
+                  :when (and (not (reference? (get entry "valueFrom")))
                              (literal-value? value)
                              (or (credential-name? (get entry "name")) (private-key? value)))]
               (str label ": env " (get entry "name")))]
@@ -109,11 +122,12 @@
   (let [content (or (:artifact/content artifact) (:content artifact))
         config (get-in context [:policy-pack/rule :rule/detection :detector-config])
         parsed (documents content)
-        structural (mapcat (partial document-findings (true? (:allow-secret-data? config)))
+        patterns (:fallback-patterns config [])
+        structural (mapcat (partial document-findings (true? (:allow-secret-data? config)) patterns)
                            (filter map? parsed))
         ;; Not YAML, or YAML that is not all manifests: the line patterns apply.
         fallback (when (and (or (nil? parsed) (not-every? map? parsed))
-                            (fallback-match? (:fallback-patterns config []) content))
+                            (fallback-match? patterns content))
                    [(msg/t :policy/manifest-not-yaml)])
         findings (vec (concat structural fallback))]
     (when (seq findings)
