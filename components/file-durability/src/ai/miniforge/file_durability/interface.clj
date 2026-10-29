@@ -27,6 +27,16 @@
     (core/write-temporary-bytes! file bytes)
     (boundary/invalid-input :write-temporary)))
 
+(defn ^{:stratum 0} publish-bytes!
+  "Force temporary bytes, invoke publish! once, then force the held file and
+   destination ancestry. publish! returns the destination java.io.File after
+   applying permissions and atomic rename. The caller owns paths and cleanup.
+   Holding the writable channel permits publication with read-only permissions."
+  [file bytes publish!]
+  (if (m/validate spec/PublicationWrite [file bytes publish!])
+    (core/publish-bytes! file bytes publish!)
+    (boundary/invalid-input :publish)))
+
 (defn ^{:stratum 0} sync-ancestry!
   "Force directory entries from the supplied directory through its ancestors."
   [directory]
