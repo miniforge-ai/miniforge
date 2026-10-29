@@ -19,6 +19,7 @@
    [clojure.java.io :as io]
    [clojure.string :as str]
    [ai.miniforge.web-dashboard.config :as dashboard-config]
+   [ai.miniforge.web-dashboard.event-files :as event-files]
    [ai.miniforge.web-dashboard.watcher :as watcher]))
 
 ;------------------------------------------------------------------------------ Layer 0
@@ -29,6 +30,12 @@
 (def ^{:stratum 0} events-dir-path
   "Default event archive directory shared by the CLI and dashboard."
   (str (config/miniforge-home) "/events"))
+
+(def ^{:stratum 0} ^:private recent-dir-reads
+  "{dir-path {:names #{file-name} :events [event]}} for the workflow
+   directories `historical-events` read last, so a refresh reads only
+   the event files added since."
+  (atom {}))
 
 (def ^{:stratum 0} phase-lifecycle-types
   "Event types that carry phase classification data."
@@ -116,6 +123,16 @@
              vec)))
     (catch Exception _
       [])))
+
+(defn- ^{:stratum 0} read-dir
+  "[path read] for workflow directory `dir`: the event files it held at
+   the previous read (in `reads`, see `recent-dir-reads`) are not read
+   again."
+  [reads dir]
+  (let [path (str dir)
+        {:keys [names events] :or {names #{} events []}} (get reads path)
+        [names' new-events] (event-files/read-unseen dir names)]
+    [path {:names names' :events (into events new-events)}]))
 
 (defn ^{:stratum 0} wf-name-from-started
   "Extract a display name for a workflow from its started event."
@@ -357,18 +374,32 @@
        vec))
 
 (defn ^{:stratum 2} historical-events
-  "Read archived events from disk for one workflow or the full archive."
+  "Read events from disk for one workflow, or for the archive.
+
+   Sources: legacy `<workflow-id>.edn` files, and the event-stream file
+   sink's workflow directories. For one workflow: its archived, live or
+   older flat directory. Without a workflow-id: the
+   `max-recent-workflows` most recently modified live/ and archived/
+   directories, since the workflow list shows no more than that and the
+   archive scan covers the rest."
   [workflow-id]
   (if workflow-id
-    (read-event-file (workflow-event-file workflow-id))
+    (into (or (read-event-file (workflow-event-file workflow-id)) [])
+          (event-files/workflow-events events-dir-path workflow-id))
     (let [edn-file? #(str/ends-with? (.getName ^java.io.File %) ".edn")
-          events-dir (io/file events-dir-path)]
+          events-dir (io/file events-dir-path)
+          reads (into {}
+                      (map (partial read-dir @recent-dir-reads))
+                      (event-files/recent-dirs events-dir-path max-recent-workflows))]
+      (reset! recent-dir-reads reads)
       (if (.isDirectory events-dir)
-        (->> events-dir
-             .listFiles
-             (filter edn-file?)
-             (mapcat read-event-file)
-             vec)
+        (into (->> events-dir
+                   .listFiles
+                   (filter edn-file?)
+                   (mapcat read-event-file)
+                   vec)
+              (mapcat :events)
+              (vals reads))
         []))))
 
 (defn- ^{:stratum 2} matches-workflow? [workflow-id event]

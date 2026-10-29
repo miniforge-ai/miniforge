@@ -19,6 +19,7 @@
   "Archived workflow state — queries, deletion, retention."
   (:require
    [clojure.java.io :as io]
+   [ai.miniforge.web-dashboard.event-files :as event-files]
    [ai.miniforge.web-dashboard.watcher :as watcher]
    [ai.miniforge.web-dashboard.state.workflows :as workflows]))
 
@@ -50,27 +51,37 @@
     (if flag @flag false)))
 
 (defn ^{:stratum 0} get-archived-workflow-events
-  "Read full events from an archived workflow's .edn file on demand.
-   Returns events vector (most recent first, limited to 200)."
+  "Read full events from an archived workflow's .edn file, or its event
+   directory, on demand. Returns events vector (most recent first, limited
+   to 200)."
   [state workflow-id]
   (let [archive-atom (:archived-workflows @state)
         summary      (when archive-atom (get @archive-atom (str workflow-id)))]
     (if-let [file-path (:file-path summary)]
       (try
         (let [file (io/file file-path)]
-          (when (.exists file)
-            (with-open [rdr (io/reader file)]
-              (->> (line-seq rdr)
-                   (keep watcher/parse-edn-line)
-                   reverse
-                   (take 200)
-                   vec))))
+          (if (.isDirectory file)
+            (->> (event-files/event-files file)
+                 reverse
+                 (keep event-files/read-event)
+                 (take 200)
+                 vec)
+            (when (.exists file)
+              (with-open [rdr (io/reader file)]
+                (->> (line-seq rdr)
+                     (keep watcher/parse-edn-line)
+                     reverse
+                     (take 200)
+                     vec)))))
         (catch Exception _ []))
       [])))
 
 ;; Mutations
 (defn ^{:stratum 0} delete-archived-workflow!
-  "Remove an archived workflow from state and delete its .edn file."
+  "Remove an archived workflow from state and delete its .edn file. An
+   event directory (the file sink's layout) stays on disk: the
+   event-stream cleanup owns its retention, and a live/ directory can
+   belong to a paused run that resume still needs."
   [state workflow-id]
   (let [archive-atom (:archived-workflows @state)
         wf-id-str    (str workflow-id)
@@ -79,7 +90,7 @@
     (when-let [path (:file-path summary)]
       (try
         (let [f (io/file path)]
-          (when (.exists f) (.delete f)))
+          (when (.isFile f) (.delete f)))
         (catch Exception _ nil)))
     true))
 
