@@ -64,11 +64,30 @@
            (container-slot {:podman true :docker true} {:image "img"})))))
 
 (deftest ^{:stratum 2} explicit-kind-never-falls-back-test
-  (testing "explicit :runtime-kind :docker on a Podman-only host stays Docker and reports unavailable"
-    (is (= {:kind :docker :available? false}
+  (testing "explicit :runtime-kind :docker on a Podman-only host: unavailable, never Podman"
+    (is (= {:kind :unavailable :available? false}
            (container-slot {:podman true} {:image "img" :runtime-kind :docker})))))
 
 (deftest ^{:stratum 2} no-runtime-yields-an-unavailable-slot-test
-  (testing "nothing answers: the slot is built but unavailable, so select-executor skips it"
-    (is (= {:kind :docker :available? false}
+  (testing "nothing answers: the slot is unavailable, so select-executor skips it"
+    (is (= {:kind :unavailable :available? false}
            (container-slot {} {:image "img"})))))
+
+(deftest ^{:stratum 2} executable-without-kind-stays-rejected-test
+  (testing "an :executable override without a kind is a selection error, even when the binary answers"
+    (is (= {:kind :unavailable :available? false}
+           (container-slot {:podman true :docker true}
+                           {:image "img" :executable "/opt/custom/docker"}))))
+  (testing "every operation returns the selection error"
+    (with-redefs [descriptor/runtime-info (stub-runtime-info {:docker true})]
+      (let [executor (:docker (sut/create-executor-registry
+                               {:docker {:executable "/opt/custom/docker"}}))
+            acquired (sut/acquire-environment! executor (random-uuid) {})]
+        (is (result/err? acquired))
+        (is (= :runtime/executable-requires-kind (get-in acquired [:error :code])))))))
+
+(deftest ^{:stratum 2} legacy-docker-path-means-docker-test
+  (testing ":docker-path names a Docker binary, so it selects Docker explicitly"
+    (is (= {:kind :docker :available? true}
+           (container-slot {:podman true :docker true}
+                           {:image "img" :docker-path "/usr/local/bin/docker"})))))

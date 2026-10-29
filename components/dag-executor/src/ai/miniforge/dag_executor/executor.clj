@@ -40,6 +40,7 @@
    [ai.miniforge.dag-executor.protocols.impl.runtime.oci-cli :as oci-cli]
    [ai.miniforge.dag-executor.protocols.impl.runtime.selector :as selector]
    [ai.miniforge.dag-executor.protocols.impl.kubernetes :as k8s]
+   [ai.miniforge.dag-executor.protocols.impl.unavailable :as unavailable]
    [ai.miniforge.dag-executor.protocols.impl.worktree :as worktree]))
 
 ;------------------------------------------------------------------------------ Layer 0
@@ -101,18 +102,23 @@
 (defn ^{:stratum 0} create-selected-oci-executor
   "Create an OCI-CLI executor on the runtime `select-runtime` picks for
    `config` (N11-delta §3): an explicit :runtime-kind wins, otherwise the
-   auto-probe winner (Podman first, then Docker).
+   auto-probe winner (Podman first, then Docker). The legacy :docker-path
+   alias names a Docker binary, so it counts as an explicit :docker.
 
-   When selection fails, the executor is built for the explicit kind, else
-   Docker (the legacy :docker-path case). Its `available?` then reports the
-   failure and `select-executor` skips it, so nothing switches runtime
-   silently."
+   When selection fails (no runtime answers, an explicit kind is down, or
+   an :executable override comes without a kind) the slot gets an
+   UnavailableExecutor carrying the selection error: `available?` reports
+   it and `select-executor` skips the slot. A rejected configuration never
+   becomes a usable executor, and nothing switches runtime silently."
   [config]
-  (let [selection (selector/select-runtime config)
-        kind      (if (result/ok? selection)
-                    (get-in selection [:data :kind])
-                    (get config :runtime-kind :docker))]
-    (oci-cli/create-oci-cli-executor (assoc config :runtime-kind kind))))
+  (let [config    (cond-> config
+                    (and (:docker-path config) (nil? (:runtime-kind config)))
+                    (assoc :runtime-kind :docker))
+        selection (selector/select-runtime config)]
+    (if (result/ok? selection)
+      (oci-cli/create-oci-cli-executor
+       (assoc config :runtime-kind (get-in selection [:data :kind])))
+      (unavailable/->UnavailableExecutor (:error selection)))))
 
 (def ^{:stratum 0} create-kubernetes-executor
   "Create a Kubernetes executor.
