@@ -1,0 +1,226 @@
+;; Title: Miniforge.ai
+;; Subtitle: An agentic SDLC / fleet-control platform
+;; Author: Christopher Lester
+;; Line: Founder, Miniforge.ai (project)
+;; Copyright 2025-2026 Christopher Lester (christopher@miniforge.ai)
+;;
+;; Licensed under the Apache License, Version 2.0 (the "License");
+;; you may not use this file except in compliance with the License.
+;; You may obtain a copy of the License at
+;;
+;;     http://www.apache.org/licenses/LICENSE-2.0
+;;
+;; Unless required by applicable law or agreed to in writing, software
+;; distributed under the License is distributed on an "AS IS" BASIS,
+;; WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+;; See the License for the specific language governing permissions and
+;; limitations under the License.
+(ns ai.miniforge.event-stream.live-retention-test
+  "A Babashka run never archives, so its live/ directory stays forever.
+   The cleanup archives it once it is finished and idle for the TTL."
+  (:require
+   [ai.miniforge.event-stream.interface :as es]
+   [ai.miniforge.event-stream.sinks :as sinks]
+   [cheshire.core :as json]
+   [clojure.java.io :as io]
+   [clojure.test :refer [deftest testing is]]))
+
+;------------------------------------------------------------------------------ Layer 0
+
+(defn- ^{:stratum 0} temp-events-dir
+  []
+  (doto (io/file (System/getProperty "java.io.tmpdir") (str "live-retention-" (random-uuid)))
+    .mkdirs))
+
+(defn- ^{:stratum 0} age-tree!
+  "Set the mtime of `dir` and everything in it to 30 days ago."
+  [^java.io.File dir]
+  (let [t (- (System/currentTimeMillis) (* 30 24 60 60 1000))]
+    (doseq [^java.io.File f (reverse (file-seq dir))]
+      (.setLastModified f t))))
+
+(defn- ^{:stratum 0} age-in-write-order!
+  "Age run directory `dir` 30 days, one second apart per event file in
+   the order its run wrote them, so the newest file holds the last event."
+  [^java.io.File dir]
+  (let [t0    (- (System/currentTimeMillis) (* 30 24 60 60 1000))
+        files (sort-by #(get (json/parse-string (slurp %)) "~:event/sequence-number")
+                       (.listFiles dir))]
+    (doseq [[i ^java.io.File f] (map-indexed vector files)]
+      (.setLastModified f (+ t0 (* i 1000))))
+    (.setLastModified dir (+ t0 (* (count files) 1000)))))
+
+(defn- ^{:stratum 0} write-run!
+  "Write `event-types` for a new workflow with the real file sink under
+   `events-dir`, as a Babashka run does (no manifest). Returns the id.
+   The sink's own start-up cleanup gets an endless TTL, so only the
+   test's cleanup calls act."
+  [events-dir & event-types]
+  (let [stream (es/create-event-stream
+                {:config {:observability {:event-sinks [{:type :file
+                                                         :base-dir (str events-dir)
+                                                         :ttl-ms Long/MAX_VALUE}]}}})
+        wf-id  (random-uuid)]
+    (doseq [t event-types]
+      (es/publish! stream (es/create-envelope stream t wf-id (name t))))
+    wf-id))
+
+(defn- ^{:stratum 0} live [events-dir wf-id] (io/file events-dir "live" (str wf-id)))
+
+(defn- ^{:stratum 0} archived [events-dir wf-id] (io/file events-dir "archived" (str wf-id)))
+
+(def ^{:stratum 0} ^:dynamic *held-id*
+  "The workflow id this test's retention hold keeps, when bound."
+  nil)
+
+;------------------------------------------------------------------------------ Layer 1
+
+(defmethod ^{:stratum 1} sinks/retention-hold ::checkpoint [_ workflow-id _]
+  (= workflow-id *held-id*))
+
+(deftest ^{:stratum 1} a-completed-idle-run-moves-to-archived
+  (let [dir   (temp-events-dir)
+        wf-id (write-run! dir :workflow/started :workflow/completed)]
+    (age-tree! (live dir wf-id))
+    (sinks/cleanup-stale-events! {:events-dir dir})
+    (is (not (.exists (live dir wf-id))))
+    (is (.isFile (io/file (archived dir wf-id) "archived.marker")))
+    (is (= #{:workflow/started :workflow/completed}
+           (set (map :event/type (es/read-workflow-events-by-id (str dir) wf-id))))
+        "its events stay readable, now from archived/")))
+
+(deftest ^{:stratum 1} an-interrupted-archive-is-finished-later
+  (let [dir   (temp-events-dir)
+        wf-id (write-run! dir :workflow/started :workflow/completed)]
+    ;; A cleanup wrote the marker, then stopped before the rename.
+    (spit (io/file (live dir wf-id) "archived.marker") "")
+    (age-tree! (live dir wf-id))
+    (sinks/cleanup-stale-events! {:events-dir dir})
+    (is (not (.exists (live dir wf-id))))
+    (is (.isFile (io/file (archived dir wf-id) "archived.marker")))))
+
+(deftest ^{:stratum 1} a-symlinked-marker-is-never-written-through
+  (let [dir     (temp-events-dir)
+        outside (doto (io/file (temp-events-dir) "outside.txt") (spit "keep me"))
+        wf-id   (write-run! dir :workflow/started :workflow/completed)]
+    (java.nio.file.Files/createSymbolicLink
+     (.toPath (io/file (live dir wf-id) "archived.marker")) (.toPath outside)
+     (make-array java.nio.file.attribute.FileAttribute 0))
+    (age-tree! (live dir wf-id))
+    (sinks/cleanup-stale-events! {:events-dir dir})
+    (is (= "keep me" (slurp outside)) "the file outside the events tree is untouched")
+    (is (.isDirectory (live dir wf-id)) "the run is skipped, not archived")))
+
+(deftest ^{:stratum 1} a-completion-behind-many-later-events-is-found
+  (let [dir     (temp-events-dir)
+        notices (repeat 60 :pr/created)
+        spaced  (apply write-run! dir :workflow/started :workflow/completed notices)
+        tied    (apply write-run! dir :workflow/started :workflow/completed notices)]
+    (age-in-write-order! (live dir spaced))
+    (age-tree! (live dir tied))
+    (sinks/cleanup-stale-events! {:events-dir dir})
+    (testing "60 notifications written after completion, each newer"
+      (is (.isDirectory (archived dir spaced))))
+    (testing "every file sharing one mtime"
+      (is (.isDirectory (archived dir tied))))))
+
+(deftest ^{:stratum 1} file-mtimes-do-not-reorder-events
+  (let [dir     (temp-events-dir)
+        wf-id   (write-run! dir :workflow/started :workflow/completed)
+        run     (live dir wf-id)
+        started (first (filter #(= "~:workflow/started"
+                                   (get (json/parse-string (slurp %)) "~:event/type"))
+                               (.listFiles run)))]
+    (age-tree! run)
+    ;; The start's file touched after the completion's (restored, say),
+    ;; still past the TTL: mtime order and event order disagree.
+    (.setLastModified started (- (System/currentTimeMillis) (* 20 24 60 60 1000)))
+    (sinks/cleanup-stale-events! {:events-dir dir})
+    (is (.isDirectory (archived dir wf-id)) "the completion is still the newest event")))
+
+(deftest ^{:stratum 1} a-run-with-a-file-cleanup-cannot-trust-stays
+  (let [dir      (temp-events-dir)
+        outside  (temp-events-dir)
+        linked   (write-run! dir :workflow/started :workflow/completed)
+        locked   (write-run! dir :workflow/started :workflow/completed)
+        garbled  (write-run! dir :workflow/started :workflow/completed)
+        event-at #(first (.listFiles (live dir %)))
+        link     (event-at linked)
+        moved    (io/file outside (.getName link))
+        unread   (doto (io/file (live dir locked) "20260101T000000000Z-locked.json")
+                   (spit "{}")
+                   (.setReadable false false))
+        err      (java.io.StringWriter.)]
+    (.renameTo link moved)
+    (java.nio.file.Files/createSymbolicLink (.toPath link) (.toPath moved)
+                                            (make-array java.nio.file.attribute.FileAttribute 0))
+    (spit (io/file (live dir garbled) "20260101T000000000Z-garbled.json") "{not json")
+    (run! #(age-tree! (live dir %)) [linked locked garbled])
+    (is (not (.canRead unread)) "precondition: the test does not run as root")
+    (binding [*err* err]
+      (sinks/cleanup-stale-events! {:events-dir dir})
+      (sinks/cleanup-stale-events! {:events-dir dir}))
+    (testing "a symlinked event file"
+      (is (.isDirectory (live dir linked))))
+    (testing "an unreadable event file"
+      (is (.isDirectory (live dir locked))))
+    (testing "an undecodable event file"
+      (is (.isDirectory (live dir garbled))))
+    (is (= 3 (count (re-seq #"WARNING: event cleanup keeps" (str err))))
+        "one warning per run across both passes")))
+
+(deftest ^{:stratum 1} a-directory-named-like-the-marker-keeps-the-run
+  (let [dir       (temp-events-dir)
+        no-events (io/file dir "live" "no-events")
+        completed (write-run! dir :workflow/started :workflow/completed)]
+    (doseq [run [no-events (live dir completed)]]
+      (spit (doto (io/file run "archived.marker" "notes.txt") io/make-parents) "keep me")
+      (age-tree! run))
+    (sinks/cleanup-stale-events! {:events-dir dir})
+    (is (.isFile (io/file no-events "archived.marker" "notes.txt"))
+        "a run with no events is not deleted through the directory")
+    (is (.isDirectory (live dir completed)) "a completed run is not archived")))
+
+(deftest ^{:stratum 1} live-runs-that-may-still-matter-stay
+  (let [dir      (temp-events-dir)
+        running  (write-run! dir :workflow/started :workflow/phase-started)
+        recent   (write-run! dir :workflow/started :workflow/completed)
+        failed   (write-run! dir :workflow/started :workflow/failed)
+        resumed  (write-run! dir :workflow/started :workflow/failed
+                             :workflow/started :workflow/phase-started)
+        jvm-run  (write-run! dir :workflow/started :workflow/completed)]
+    (spit (io/file (live dir jvm-run) "manifest.json") "{}")
+    (run! #(age-tree! (live dir %)) [running failed resumed jvm-run])
+    (sinks/cleanup-stale-events! {:events-dir dir})
+    (testing "no terminal event: running, or crashed"
+      (is (.isDirectory (live dir running))))
+    (testing "completed, but written within the TTL"
+      (is (.isDirectory (live dir recent))))
+    (testing "failed: mf resume may still reuse its id"
+      (is (.isDirectory (live dir failed))))
+    (testing "failed, then resumed and running: the failure is not the newest"
+      (is (.isDirectory (live dir resumed))))
+    (testing "a manifest: the JVM runner's archive owns it"
+      (is (.isDirectory (live dir jvm-run))))))
+
+(deftest ^{:stratum 1} an-empty-idle-live-directory-goes
+  (let [dir   (temp-events-dir)
+        old   (doto (io/file dir "live" "old-empty") .mkdirs)
+        fresh (doto (io/file dir "live" "fresh-empty") .mkdirs)]
+    (age-tree! old)
+    (sinks/cleanup-stale-events! {:events-dir dir})
+    (is (not (.exists old)))
+    (is (.isDirectory fresh) "a run may be about to write into it")))
+
+(deftest ^{:stratum 1} an-archived-run-a-hold-keeps-is-not-pruned
+  (let [dir   (temp-events-dir)
+        wf-id (write-run! dir :workflow/started :workflow/completed)]
+    (age-tree! (live dir wf-id))
+    (sinks/cleanup-stale-events! {:events-dir dir})
+    (age-tree! (archived dir wf-id))
+    (binding [*held-id* (str wf-id)]
+      (sinks/cleanup-stale-events! {:events-dir dir}))
+    (is (.isDirectory (archived dir wf-id))
+        "a run's checkpoint holds its events past the archived TTL")
+    (sinks/cleanup-stale-events! {:events-dir dir})
+    (is (not (.exists (archived dir wf-id))) "without the hold it goes")))
