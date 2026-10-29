@@ -113,7 +113,9 @@
    [:spec/sandbox {:optional true} :boolean]
    [:spec/plan-tasks {:optional true} [:vector [:or PlanTask :map]]]
 
-   ;; Workflow metadata (cross-domain, kept as :workflow/*)
+   ;; Workflow choice; :spec/* wins over the shorter :workflow/* keys
+   [:spec/workflow-type {:optional true} :keyword]
+   [:spec/workflow-version {:optional true} :string]
    [:workflow/type {:optional true} :keyword]
    [:workflow/version {:optional true} :string]])
 

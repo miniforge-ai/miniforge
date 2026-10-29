@@ -89,7 +89,9 @@
    "    resolve <id> <r>  Resolve a decision (--comment for note)"
    "    terminate <id>    Terminate an agent"
    ""
-   "  doctor              Check system health"
+   "  doctor              Check the tools a run needs; exits 1 if a required one fails"
+   "    -b, --backend <b> Check this LLM backend instead of the configured one"
+   "    -m, --execution-mode <m>  Execution mode to check for (local, governed)"
    "  version             Show version info"
    "  help                Show this help"]
   :help/note "{binary} (this CLI) uses Babashka for fast startup."
@@ -103,17 +105,32 @@
   :main/unknown-option "Unknown option: {option}"
   :main/missing-option "Missing required option: {option}"
   :main/invalid-option "Invalid value for {option}: {message}"
-  :doctor/checks
-  [["bb" "Babashka" "Required for CLI"]
-   ["gum" "Charm Gum" "Required for TUI"]
-   ["git" "Git" "Required for version control"]
-   ["gh" "GitHub CLI" "Required for PR operations"]
-   ["claude" "Claude CLI" "Required for LLM backend"]]
-  :doctor/config-exists "Config file exists at {config-path}"
-  :doctor/no-config "No config file. Run '{command}'"
+  :doctor/label-git "Git"
+  :doctor/label-git-identity "Git {key}"
+  :doctor/label-gh "GitHub CLI"
+  :doctor/label-gh-auth "GitHub CLI login"
+  :doctor/label-backend "LLM backend {backend}"
+  :doctor/label-runtime "Container runtime"
+  :doctor/label-config "Config file"
+  :doctor/required "required"
+  :doctor/optional "optional"
+  :doctor/not-found "{cmd} not found on PATH"
+  :doctor/timed-out "{cmd} did not finish within {timeout-ms} ms"
+  :doctor/command-failed "{cmd} exited {exit}: {output}"
+  :doctor/command-failed-silent "{cmd} exited {exit}"
+  :doctor/empty-output "set but empty"
+  :doctor/hint-git-identity "Set it with: git config --global {key} \"<value>\""
+  :doctor/gh-logged-in "logged in"
+  :doctor/hint-gh-auth "Log in with: gh auth login"
+  :doctor/backend-unknown "unknown backend; see '{command}'"
+  :doctor/backend-no-cli "no CLI needed"
+  :doctor/runtime-optional "Required only for --execution-mode governed"
+  :doctor/config-exists "{config-path}"
+  :doctor/no-config "none, defaults apply; create one with '{command}'"
+  :doctor/summary-ok "All required checks passed."
+  :doctor/summary-failed "{count} required check(s) failed."
 
   ;; Runtime adapter (N11-delta Phase 3)
-  :runtime/doctor-section-title "Container runtime"
   :runtime/doctor-line "Runtime: {kind} {runtime-version} (selected by {selection})"
   :runtime/doctor-error-line "No usable container runtime: {code} — {message}"
   :runtime/doctor-probed-line "Probed: {probed}"

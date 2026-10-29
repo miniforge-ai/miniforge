@@ -212,8 +212,9 @@ See [Demo Guide](docs/demo.md) for a guided walkthrough.
 | **Canonical SDLC** | explore, plan, implement, verify, review, release, observe | Features, refactors, bug fixes |
 | **Quick Fix** | implement, verify, done | Small, well-understood changes |
 
-The workflow is selected automatically from the spec's intent, or overridden
-with `:workflow/type :quick-fix`. Canonical SDLC includes the full observe
+A spec runs Canonical SDLC unless it names another workflow:
+`:spec/workflow-type :quick-fix` in an EDN spec, or `type: quick-fix` in
+Markdown frontmatter. Canonical SDLC includes the full observe
 loop — the PR monitor will autonomously address reviewer feedback after release.
 
 ## Configuration
