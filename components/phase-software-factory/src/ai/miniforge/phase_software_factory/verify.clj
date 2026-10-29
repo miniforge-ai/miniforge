@@ -47,6 +47,15 @@
   "Phase defaults loaded from config/phase/defaults.edn."
   (phase-config/defaults-for :verify))
 
+(defn- ^{:stratum 0} gate-output
+  "Verify's canonical phase :output, the artifact its gates validate.
+   Verify writes no code, so its output is the test verdict; the code under
+   verification stays in the worktree and the implement phase's artifact.
+   Without an :output the gate envelope records :reason/missing-artifact
+   and denies every verify."
+  [passed?]
+  {:verify/tests-passed? (boolean passed?)})
+
 (def ^{:stratum 0} ^:private timeout-message-fragment
   "Substring that marks a non-actionable verify timeout.
    Produced by `run-tests!` when the test command exceeds its deadline,
@@ -418,9 +427,10 @@
         summary    (if passed?
                      (messages/t :verify/tests-passed {:pass-count pass-count})
                      (output/verify-failure-message test-results raw-fails raw-errors))
-        result     (if passed?
-                     (phase/success env-id summary metrics)
-                     (phase/error   env-id summary summary metrics))]
+        result     (assoc (if passed?
+                            (phase/success env-id summary metrics)
+                            (phase/error   env-id summary summary metrics))
+                          :output (gate-output passed?))]
 
     (phase/enter-context ctx :verify nil gates budget start-time result)))
 
