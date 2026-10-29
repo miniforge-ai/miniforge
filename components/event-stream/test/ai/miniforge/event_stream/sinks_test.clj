@@ -59,6 +59,20 @@
   (when (.isDirectory dir)
     (vec (.listFiles dir))))
 
+(defn ^{:stratum 0} write-file!
+  "Create `f` and its parent directories with `content`; return `f`."
+  ^java.io.File [^java.io.File f content]
+  (io/make-parents f)
+  (spit f content)
+  f)
+
+(defn ^{:stratum 0} age!
+  "Set the mtime of each of `files` to `days` days ago."
+  [days & files]
+  (let [t (- (System/currentTimeMillis) (* days 24 60 60 1000))]
+    (doseq [^java.io.File f files]
+      (.setLastModified f t))))
+
 ;; create-sink factory
 (deftest ^{:stratum 0} create-sink-keyword-test
   (testing ":file produces a function"
@@ -463,7 +477,7 @@
       (fn [dir]
         (is (= 0 (sinks/cleanup-stale-events! {:ttl-ms 0 :events-dir dir}))))))
 
-  (testing "deletes old event files and preserves recent ones"
+  (testing "removes a legacy workflow directory untouched for the TTL and keeps a recent one"
     (with-temp-dir
       (fn [dir]
         (let [old-dir (io/file dir "workflow-old")
@@ -475,9 +489,10 @@
             (spit (str old-file) "{}")
             (spit (str new-file) "{}")
             (.setLastModified old-file (- (System/currentTimeMillis) (* 8 24 60 60 1000)))
+            (.setLastModified old-dir (- (System/currentTimeMillis) (* 8 24 60 60 1000)))
             (let [deleted (sinks/cleanup-stale-events! {:events-dir dir})]
               (is (= 1 deleted))
-              (is (not (.exists old-file)))
+              (is (not (.exists old-dir)) "the directory goes with its files")
               (is (.exists new-file))))))))
 
   (testing "removes temp files a killed writer left behind, once they are stale"
@@ -497,6 +512,20 @@
   (testing "returns 0 when directory does not exist"
     (is (= 0 (sinks/cleanup-stale-events!
               {:events-dir (io/file "/tmp/nonexistent-miniforge-test-dir")})))))
+
+(deftest ^{:stratum 1} cleanup-keeps-live-workflows-test
+  (testing "a paused live workflow keeps its events and manifest however old they are"
+    (with-temp-dir
+      (fn [dir]
+        (let [wf (io/file dir "live" "wf-paused")
+              started (write-file! (io/file wf "0000000000000001__000000000000.transit.json") "{}")
+              legacy-name (write-file! (io/file wf "20200101T000000Z-abc.json") "{}")
+              manifest (write-file! (io/file wf "manifest.json") "{}")]
+          (age! 30 started legacy-name manifest wf)
+          (is (= 0 (sinks/cleanup-stale-events! {:events-dir dir})))
+          (is (.exists started) "resume replays :workflow/started from here")
+          (is (.exists legacy-name))
+          (is (.exists manifest)))))))
 
 (deftest ^{:stratum 1} file-sink-keeps-hostile-ids-inside-the-events-dir-test
   (testing "a workflow id with .. or separators cannot place files outside base-dir"
