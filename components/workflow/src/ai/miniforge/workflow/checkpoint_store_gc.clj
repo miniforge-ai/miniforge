@@ -127,9 +127,8 @@
        (if (pinned-dir? dir)
          {:pinned id}
          (do (fs/delete-tree dir)
-             ;; With the run gone, a later holder of this lock (a late
-             ;; pin) finds nothing to act on, so the lock file can go.
-             (fs/delete-if-exists (checkpoint-lock/lock-file root id))
+             ;; The lock file stays: unlinking it would let a new caller
+             ;; lock a fresh file while a waiter holds the old one.
              id))
        (catch Exception e
          (delete-failure dir id e))))))

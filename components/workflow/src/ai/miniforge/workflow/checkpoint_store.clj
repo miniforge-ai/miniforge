@@ -398,17 +398,20 @@
               (write-edn-atomically! snapshot-path snapshot)
               (write-edn-atomically! manifest-path merged-manifest)
               ;; A run started pinned (`mf resume --pin` under a new run id)
-              ;; gets its pin marker with its first checkpoint.
-              (when (true? (get-in ctx [:execution/opts :checkpoint/pin?]))
-                (let [marker (checkpoint-paths/pin-marker-path checkpoint-root workflow-run-id)]
-                  (when-not (fs/exists? marker)
-                    (write-edn-atomically! marker {:pinned-at (str (java.time.Instant/now))}))))
-              (cond-> {:checkpoint/root checkpoint-root
-                       :checkpoint/machine-snapshot-path snapshot-path
-                       :checkpoint/manifest-path manifest-path}
-                (and phase-name phase-result)
-                (assoc :checkpoint/phase phase-name
-                       :checkpoint/phase-path (checkpoint-paths/phase-checkpoint-path
-                                               checkpoint-root workflow-run-id phase-name))))))
+              ;; is pinned with its first checkpoint, through the locked pin
+              ;; the GC excludes; a pin that fails is a failed checkpoint.
+              (let [pin (when (and (true? (get-in ctx [:execution/opts :checkpoint/pin?]))
+                                   (not (fs/exists? (checkpoint-paths/pin-marker-path
+                                                     checkpoint-root workflow-run-id))))
+                          (pin-checkpoint! workflow-run-id {:checkpoint/root checkpoint-root}))]
+                (if (anomaly/anomaly? pin)
+                  (assoc-in pin [:anomaly/data :phase/name] phase-name)
+                  (cond-> {:checkpoint/root checkpoint-root
+                           :checkpoint/machine-snapshot-path snapshot-path
+                           :checkpoint/manifest-path manifest-path}
+                    (and phase-name phase-result)
+                    (assoc :checkpoint/phase phase-name
+                           :checkpoint/phase-path (checkpoint-paths/phase-checkpoint-path
+                                                   checkpoint-root workflow-run-id phase-name))))))))
         (catch Exception e
           (write-failure checkpoint-root workflow-run-id phase-name e))))))
