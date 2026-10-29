@@ -35,7 +35,6 @@
    [aero.core :as aero]
    [ai.miniforge.config.user :as user]
    [clojure.java.io :as io]
-   [clojure.java.shell :as shell]
    [clojure.string :as str]))
 
 ;------------------------------------------------------------------------------ Layer 0
@@ -69,18 +68,28 @@
      :errors errors}))
 
 ;; Token resolution
-(defn- ^{:stratum 0} gh-cli-token
-  "Attempt to get a GitHub token from the gh CLI.
-   Returns the token string or nil."
-  []
-  (try
-    (let [r (shell/sh "gh" "auth" "token")]
-      (when (zero? (:exit r))
-        (let [token (str/trim (:out r))]
-          (when (seq token) token))))
-    (catch Exception _ nil)))
+(def ^{:stratum 0} ^:private gh-token-timeout-ms
+  "Ceiling on `gh auth token`. A gh that stalls (a keyring prompt, a hung
+   credential store) must not block every token lookup behind it."
+  10000)
 
 ;------------------------------------------------------------------------------ Layer 1
+
+(defn- ^{:stratum 1} gh-cli-token
+  "Attempt to get a GitHub token from the gh CLI (`cmd`, by default
+   `gh auth token`), giving up after `timeout-ms`.
+   Returns the token string or nil."
+  ([] (gh-cli-token ["gh" "auth" "token"] gh-token-timeout-ms))
+  ([cmd timeout-ms]
+   (try
+     (let [p (.start (doto (ProcessBuilder. ^java.util.List cmd)
+                       (.redirectError java.lang.ProcessBuilder$Redirect/DISCARD)))]
+       (if (.waitFor p timeout-ms java.util.concurrent.TimeUnit/MILLISECONDS)
+         (when (zero? (.exitValue p))
+           (let [token (str/trim (slurp (.getInputStream p)))]
+             (when (seq token) token)))
+         (do (.destroyForcibly p) nil)))
+     (catch Exception _ nil))))
 
 ;; Load and validate
 (defn ^{:stratum 1} load-profile

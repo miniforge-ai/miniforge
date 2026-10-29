@@ -91,3 +91,15 @@
   (testing "Nil profile with no env vars falls through"
     ;; With empty profile and no matching env var, should return nil for :custom
     (is (nil? (profile/resolve-token :custom {:profile {}})))))
+
+(deftest ^{:stratum 0} gh-cli-token-gives-up-after-its-timeout-test
+  (testing "a gh that stalls is killed at the timeout and yields no token,
+            rather than blocking the lookup"
+    (let [gh-cli-token #'profile/gh-cli-token
+          started      (System/currentTimeMillis)]
+      (is (nil? (gh-cli-token ["sleep" "10"] 200)))
+      (is (< (- (System/currentTimeMillis) started) 5000)))))
+
+(deftest ^{:stratum 0} gh-cli-token-reads-the-token-test
+  (testing "a gh that answers in time yields its trimmed output"
+    (is (= "tok-from-gh" (#'profile/gh-cli-token ["echo" " tok-from-gh "] 5000)))))
