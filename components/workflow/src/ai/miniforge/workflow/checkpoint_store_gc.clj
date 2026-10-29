@@ -110,18 +110,24 @@
   [dir]
   (fs/exists? (fs/file dir checkpoint-paths/pin-marker-filename)))
 
+(defn- ^{:stratum 0} held-under?
+  "A checkpoint for `workflow-id` under `root`: its run directory, or that
+   directory moved aside by a GC deciding whether to delete it."
+  [root workflow-id]
+  (or (checkpoint-store/checkpoint-present? workflow-id {:checkpoint/root root})
+      (fs/exists? (checkpoint-paths/aside-path root workflow-id))))
+
 ;------------------------------------------------------------------------------ Layer 1
 
 (defn- ^{:stratum 1} delete-run!
   "Delete one run's checkpoint directory without racing a pin, and without
    a lock. The directory is first renamed aside, atomically, so a pin
    writing into it by path either lands before the rename (and moves with
-   it) or fails. Then a pin marker in the moved directory sends it back;
+   it) or fails; the event-retention hold still sees the run there. Then a pin marker in the moved directory sends it back;
    otherwise it is deleted. Returns the run id when deleted,
    `{:pinned id}` when moved back, or an anomaly."
   [dir id]
-  (let [aside (fs/path (fs/parent dir)
-                       (str checkpoint-paths/deleting-prefix id "-" (random-uuid)))]
+  (let [aside (checkpoint-paths/aside-path (fs/parent dir) id)]
     (try+
       (fs/move dir aside {:atomic-move true})
       (if (pinned-dir? aside)
@@ -134,34 +140,44 @@
 
 (defn- ^{:stratum 1} finish-aside!
   "Finish what a GC that died mid-delete left beside the runs: a moved-aside
-   directory holding a pin marker goes back under its run id (when nothing
-   took that name meanwhile), any other is deleted."
+   directory holding a pin marker goes back under its run id, any other is
+   deleted. Returns an anomaly for each it could not finish, a pinned one
+   whose run id is taken included: GC reports them rather than leave a
+   pinned checkpoint hidden in silence."
   [root]
-  (doseq [dir (fs/list-dir root)
-          :let [name (str (fs/file-name dir))
-                id-start (count checkpoint-paths/deleting-prefix)]
-          :when (and (str/starts-with? name checkpoint-paths/deleting-prefix)
-                     (>= (count name) (+ id-start 36))
-                     (fs/directory? dir {:nofollow-links true}))
-          :let [run-dir (fs/path root (subs name id-start (+ id-start 36)))]]
-    (try+
-      (cond
-        (not (pinned-dir? dir)) (fs/delete-tree dir)
-        (not (fs/exists? run-dir)) (fs/move dir run-dir {:atomic-move true})
-        :else nil)
-      (catch Exception _ nil))))
+  (into []
+        (keep
+         (fn [dir]
+           (let [name (str (fs/file-name dir))
+                 id-start (count checkpoint-paths/deleting-prefix)
+                 id (subs name id-start (+ id-start 36))
+                 run-dir (fs/path root id)]
+             (try+
+               (cond
+                 (not (pinned-dir? dir)) (do (fs/delete-tree dir) nil)
+                 (not (fs/exists? run-dir)) (do (fs/move dir run-dir {:atomic-move true}) nil)
+                 :else (anomaly/anomaly :conflict
+                                        (messages/t :checkpoint/gc-restore-taken
+                                                    {:path (str dir) :run-id id})
+                                        {:workflow/run-id id :checkpoint/path (str dir)}))
+               (catch Exception e
+                 (delete-failure dir id e))))))
+        (filter #(let [name (str (fs/file-name %))]
+                   (and (str/starts-with? name checkpoint-paths/deleting-prefix)
+                        (>= (count name) (+ (count checkpoint-paths/deleting-prefix) 36))
+                        (fs/directory? % {:nofollow-links true})))
+                (fs/list-dir root))))
 
 (defmethod ^{:stratum 1} es/retention-hold ::checkpoint
   [_hold workflow-id events-dir]
-  (or (checkpoint-store/checkpoint-present? workflow-id)
+  (or (held-under? (checkpoint-paths/resolve-checkpoint-root {}) workflow-id)
       (let [run-dir (announced-run-dir events-dir workflow-id)]
         (cond
           ;; An unreadable file newer than any announcement may be the
           ;; one naming the root: the events are kept, not guessed about.
           (= :unknown run-dir) true
           (and run-dir (= (str workflow-id) (str (fs/file-name run-dir))))
-          (checkpoint-store/checkpoint-present? workflow-id
-                                                {:checkpoint/root (str (fs/parent run-dir))})
+          (held-under? (str (fs/parent run-dir)) workflow-id)
           :else false))))
 
 (defn- ^{:stratum 1} disposition
@@ -195,7 +211,7 @@
         days (get opts :max-age-days default-retention-days)
         cutoff-ms (- (get opts :now-ms (System/currentTimeMillis)) (* days day-ms))
         events-dir (get opts :events-dir (es/default-events-dir))
-        _ (when (fs/directory? root) (finish-aside! root))
+        aside-failures (if (fs/directory? root) (finish-aside! root) [])
         runs (when (fs/directory? root)
                (filter #(fs/directory? % {:nofollow-links true}) (fs/list-dir root)))
         by-disposition (group-by #(disposition % cutoff-ms events-dir) runs)
@@ -207,7 +223,7 @@
                          (map (fn [[k dirs]] [k (mapv run-id dirs)]))
                          (dissoc by-disposition :expired nil))
              (seq pinned-late) (update :pinned (fnil into []) pinned-late))
-     :failures (filterv anomaly/anomaly? results)}))
+     :failures (into aside-failures (filter anomaly/anomaly?) results)}))
 
 (comment
   (gc-checkpoints! {:max-age-days 30}))
