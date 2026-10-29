@@ -19,6 +19,13 @@
 
 ;------------------------------------------------------------------------------ Layer 1
 
+(defn- ^{:stratum 1} verify-file-type-refusal [root]
+  (let [target (fs/path root "history.edn")]
+    (spit (fs/file target) first-record)
+    (with-redefs [fs/regular-file? (constantly false)]
+      (is (thrown? IOException (history/append! target second-record))))
+    (is (= first-record (slurp (fs/file target))))))
+
 (defn- ^{:stratum 1} verify-private-history [root]
   (let [path (fs/path root "history.edn")]
     (history/append! path first-record)
@@ -37,6 +44,8 @@
     (is (= first-record (slurp (fs/file target))))))
 
 ;------------------------------------------------------------------------------ Layer 2
+
+(deftest ^{:stratum 2} nonregular-history-is-refused-before-opening (fixture/call-with-posix-checkpoint-root verify-file-type-refusal))
 
 (deftest ^{:stratum 2} new-history-is-private-and-existing-sharing-is-preserved (fixture/call-with-posix-checkpoint-root verify-private-history))
 
