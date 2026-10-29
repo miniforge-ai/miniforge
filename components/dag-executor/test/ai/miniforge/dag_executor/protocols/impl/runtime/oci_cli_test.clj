@@ -340,22 +340,47 @@
 ;; git-credential-env — per-command git auth (N11 §2.2)
 ;; ============================================================================
 (deftest ^{:stratum 1} git-credential-env-test
-  (let [cred-env (private-fn 'git-credential-env)]
+  (let [cred-env (private-fn 'git-credential-env)
+        auth     {:user "x-access-token" :token "tok"}]
     (testing "an Authorization header scoped to the remote's host"
       (is (= {"GIT_CONFIG_COUNT"    "1"
               "GIT_CONFIG_KEY_0"    "http.https://github.com/.extraheader"
               "GIT_CONFIG_VALUE_0"  (str "Authorization: Basic "
                                          (basic-auth "x-access-token" "tok"))
               "GIT_TERMINAL_PROMPT" "0"}
-             (cred-env "https://github.com/o/r.git" "tok" :github))))
-    (testing "GitLab pairs the token with oauth2"
-      (is (= (str "Authorization: Basic " (basic-auth "oauth2" "tok"))
-             (get (cred-env "https://gitlab.com/g/p.git" "tok" :gitlab)
-                  "GIT_CONFIG_VALUE_0"))))
+             (cred-env "https://github.com/o/r.git" auth))))
     (testing "no token, or a URL that is not https, yields no credential"
-      (is (= {} (cred-env "https://github.com/o/r.git" nil :github)))
-      (is (= {} (cred-env "http://github.com/o/r.git" "tok" :github)))
-      (is (= {} (cred-env "git@github.com:o/r.git" "tok" :github))))))
+      (is (= {} (cred-env "https://github.com/o/r.git" nil)))
+      (is (= {} (cred-env "http://github.com/o/r.git" auth)))
+      (is (= {} (cred-env "git@github.com:o/r.git" auth))))))
+
+(deftest ^{:stratum 1} git-remote-test
+  (let [git-remote (private-fn 'git-remote)]
+    (testing "an explicit nil :host-kind is inferred, like an absent one"
+      (is (= :github (:host-kind (git-remote {:repo-url "https://github.com/o/r.git"
+                                              :host-kind nil})))))
+    (testing "userinfo is stripped from both URLs and kept as the credential"
+      (is (= {:repo-url  "https://github.com/o/r.git"
+              :https-url "https://github.com/o/r.git"
+              :host-kind :github
+              :url-auth  {:user "bob" :token "s3cr%t"}}
+             (git-remote {:repo-url "https://bob:s3cr%25t@github.com/o/r.git"}))))
+    (testing "a username alone is stripped and carries no credential"
+      (is (= "https://github.com/o/r.git"
+             (:https-url (git-remote {:repo-url "https://bob@github.com/o/r.git"}))))
+      (is (nil? (:url-auth (git-remote {:repo-url "https://bob@github.com/o/r.git"})))))))
+
+(deftest ^{:stratum 1} git-auth-test
+  (let [git-auth (private-fn 'git-auth)]
+    (with-redefs [oci-cli/resolve-git-token (fn [_url _opts] "tok")]
+      (testing "GitLab pairs a resolved token with oauth2, others with x-access-token"
+        (is (= {:user "oauth2" :token "tok"} (git-auth {:host-kind :gitlab})))
+        (is (= {:user "x-access-token" :token "tok"} (git-auth {:host-kind :github}))))
+      (testing "a credential from the URL wins over the resolved token"
+        (is (= {:user "bob" :token "pw"}
+               (git-auth {:host-kind :github :url-auth {:user "bob" :token "pw"}})))))
+    (with-redefs [oci-cli/resolve-git-token (fn [_url _opts] nil)]
+      (is (nil? (git-auth {:host-kind :github}))))))
 
 ;; ============================================================================
 ;; image-exists? (public)
@@ -681,7 +706,8 @@
             never holds it"
     (let [dir (.toFile (java.nio.file.Files/createTempDirectory
                         "cred-env" (make-array java.nio.file.attribute.FileAttribute 0)))
-          env ((private-fn 'git-credential-env) "https://github.com/o/r.git" fake-token :github)
+          env ((private-fn 'git-credential-env) "https://github.com/o/r.git"
+                                                {:user "x-access-token" :token fake-token})
           git (fn [& args]
                 (apply shell/sh "git" "-C" (str dir)
                        (concat args [:env (merge (into {} (System/getenv)) env)])))]
@@ -750,6 +776,21 @@
                    (get-in clone [:env "GIT_CONFIG_VALUE_0"])))
             (is (seq later))
             (is (not-any? #(get-in % [:env "GIT_CONFIG_VALUE_0"]) later))))))))
+
+(deftest ^{:stratum 2} bootstrap-workspace-strips-url-credentials-test
+  (testing "a repo URL carrying user:password@ is cloned without it; the
+            password authenticates the clone through its environment"
+    (with-fake-runtime :docker ["GIT_CONFIG_VALUE_0"]
+      (fn [descriptor calls]
+        (with-redefs [oci-cli/resolve-git-token (fn [_url _opts] nil)]
+          ((private-fn 'bootstrap-workspace!)
+           descriptor "c1" "/workspace"
+           {:repo-url (str "https://bob:" fake-token "@github.com/o/r.git")})
+          (let [[clone :as all] (calls)]
+            (is (not-any? token-in? (mapcat :argv all)))
+            (is (some #{"https://github.com/o/r.git"} (:argv clone)))
+            (is (= (str "Authorization: Basic " (basic-auth "bob" fake-token))
+                   (get-in clone [:env "GIT_CONFIG_VALUE_0"])))))))))
 
 ;------------------------------------------------------------------------------ Rich Comment
 (comment

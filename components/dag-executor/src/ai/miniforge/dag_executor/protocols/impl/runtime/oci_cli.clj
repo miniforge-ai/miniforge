@@ -335,6 +335,11 @@
        (.encodeToString (java.util.Base64/getEncoder)
                         (.getBytes (str user ":" token) "UTF-8"))))
 
+(defn- ^{:stratum 0} percent-decode
+  "Decode %XX escapes in a URL component; `+` stays a plus."
+  [s]
+  (java.net.URLDecoder/decode (str/replace s "+" "%2B") "UTF-8"))
+
 (defn- ^{:stratum 0} git-network-command?
   "True for the git commands persist/restore send to the remote."
   [cmd]
@@ -358,6 +363,16 @@
         env))
 
 ;------------------------------------------------------------------------------ Layer 1
+
+(defn- ^{:stratum 1} split-userinfo
+  "[url auth] for an http(s) URL: the URL without any `user[:password]@`,
+   and {:user :token} when it carried a password, else nil."
+  [url]
+  (if-let [[_ scheme userinfo more] (re-matches #"(?i)(https?://)([^/]*)@(.*)" url)]
+    (let [[user password] (str/split userinfo #":" 2)]
+      [(str scheme more)
+       (when password {:user (percent-decode user) :token (percent-decode password)})])
+    [url nil]))
 
 (defn- ^{:stratum 1} call-acquire-body
   [body-fn]
@@ -509,38 +524,53 @@
        (:cpu merged)
        (into ["--cpus" (str (:cpu merged))])))))
 
-(defn- ^{:stratum 1} git-remote
-  "The repo to bootstrap, from env-config: {:repo-url :https-url :host-kind},
-   or nil when env-config carries no :repo-url. SSH URLs become HTTPS, since
-   containers lack an SSH agent. The executor keeps this, not anything read
-   back from the capsule, as the host its git credential is scoped to, so
-   repointing origin inside the capsule cannot redirect the credential."
-  [env-config]
-  (when-let [repo-url (:repo-url env-config)]
-    {:repo-url  repo-url
-     :https-url (if-let [[_ host path] (re-matches #"git@([^:]+):(.+)" repo-url)]
-                  (str "https://" host "/" path)
-                  repo-url)
-     :host-kind (get env-config :host-kind (infer-host-kind repo-url))}))
+(defn- ^{:stratum 1} git-auth
+  "{:user :token} that authenticates git to `remote`: the credential its URL
+   carried, else the token resolved for its host kind. nil without one."
+  [{:keys [repo-url host-kind url-auth]}]
+  (or url-auth
+      (when-let [token (resolve-git-token repo-url {:host-kind host-kind})]
+        {:user  (get git-auth-users host-kind default-git-auth-user)
+         :token token})))
 
 (defn- ^{:stratum 1} git-credential-env
-  "Env that authenticates one git command to the host of `https-url`: an
-   Authorization header set through GIT_CONFIG_COUNT/KEY/VALUE (git 2.31+),
-   scoped by `http.<origin>/.extraheader` so git sends it to that host only.
-   Env-supplied config is never written to .git/config, and exec passes the
-   value by name, so the token lands in neither the capsule's repo state nor
-   the runtime argv (N11 §2.2). Empty without a token or for a non-https URL."
-  [https-url token host-kind]
+  "Env that authenticates one git command to the host of `https-url` with
+   `auth`: an Authorization header set through GIT_CONFIG_COUNT/KEY/VALUE
+   (git 2.31+), scoped by `http.<origin>/.extraheader` so git sends it to
+   that host only. Env-supplied config is never written to .git/config, and
+   exec passes the value by name, so the token lands in neither the
+   capsule's repo state nor the runtime argv (N11 §2.2). Empty without a
+   token or for a non-https URL."
+  [https-url {:keys [user token]}]
   (if-let [[_ origin] (when token (re-find #"^(https://[^/]+)/" https-url))]
     {"GIT_CONFIG_COUNT"    "1"
      "GIT_CONFIG_KEY_0"    (str "http." origin "/.extraheader")
-     "GIT_CONFIG_VALUE_0"  (basic-auth-header
-                            (get git-auth-users host-kind default-git-auth-user)
-                            token)
+     "GIT_CONFIG_VALUE_0"  (basic-auth-header user token)
      "GIT_TERMINAL_PROMPT" "0"}
     {}))
 
 ;------------------------------------------------------------------------------ Layer 2
+
+(defn- ^{:stratum 2} git-remote
+  "The repo to bootstrap, from env-config: {:repo-url :https-url :host-kind},
+   plus :url-auth when :repo-url carried `user:password@`, or nil when
+   env-config has no :repo-url. Userinfo is stripped from both URLs, so it
+   reaches neither the clone's argv nor origin's config. SSH URLs become
+   HTTPS, since containers lack an SSH agent. The executor keeps this, not
+   anything read back from the capsule, as the repository its git
+   credential is for, so repointing origin inside the capsule cannot
+   redirect the credential."
+  [env-config]
+  (when-let [given-url (:repo-url env-config)]
+    (let [[repo-url url-auth] (split-userinfo given-url)]
+      (cond-> {:repo-url  repo-url
+               :https-url (if-let [[_ host path] (re-matches #"git@([^:]+):(.+)" repo-url)]
+                            (str "https://" host "/" path)
+                            repo-url)
+               ;; `or`, not a get default: an explicit nil :host-kind means
+               ;; infer it, as bootstrap always treated it.
+               :host-kind (or (:host-kind env-config) (infer-host-kind repo-url))}
+        url-auth (assoc :url-auth url-auth)))))
 
 (defn ^{:stratum 2} with-acquisition-timeout
   "Run `body-fn` (zero-arity) with a wall-clock deadline. Returns the
@@ -671,8 +701,8 @@
   "Credential env for the git remote recorded when `environment-id` was
    bootstrapped, or {} when none was recorded."
   [git-remotes environment-id]
-  (if-let [{:keys [repo-url https-url host-kind]} (some-> git-remotes deref (get environment-id))]
-    (git-credential-env https-url (resolve-git-token repo-url {:host-kind host-kind}) host-kind)
+  (if-let [remote (some-> git-remotes deref (get environment-id))]
+    (git-credential-env (:https-url remote) (git-auth remote))
     {}))
 
 (defn ^{:stratum 2} build-launch-plan
@@ -952,20 +982,20 @@
    Returns a result map with bootstrap metadata. No-op success when
    repo-url is nil (local mode / pre-existing workspace).
    Uses config-based token resolution (profile + env fallback) rather than
-   URL-guessing. With a token, clones the plain HTTPS URL and hands the
-   token to the clone command alone (`git-credential-env`): origin's URL
-   in the capsule carries no credential, and no push URL is set."
+   URL-guessing. With a credential, clones the plain HTTPS URL and hands the
+   credential to the clone command alone (`git-credential-env`): origin's
+   URL in the capsule carries none, and no push URL is set."
   [descriptor container-name workdir env-config]
-  (if-let [{:keys [repo-url https-url host-kind]} (git-remote env-config)]
+  (if-let [{:keys [repo-url https-url] :as remote} (git-remote env-config)]
     (let [branch    (get env-config :branch "main")
-          token     (resolve-git-token repo-url {:host-kind host-kind})
-          clone-url (if token https-url repo-url)
+          auth      (git-auth remote)
+          clone-url (if auth https-url repo-url)
           exec!  (container-exec-fn descriptor container-name "/"
                                     :error-on-failure? true
                                     :error-prefix (messages/t :oci/bootstrap-failed)
                                     :sanitize? true)
           clone-cmd ["git" "clone" "--branch" (str branch) "--single-branch" "--" clone-url workdir]
-          result (-> (exec! clone-cmd (git-credential-env https-url token host-kind))
+          result (-> (exec! clone-cmd (git-credential-env https-url auth))
                      ;; Use --local (not --global) since container rootfs is read-only
                      (chain-container-command
                       #(exec! ["git" "-C" workdir "config" "user.email" "miniforge@miniforge.ai"]))
