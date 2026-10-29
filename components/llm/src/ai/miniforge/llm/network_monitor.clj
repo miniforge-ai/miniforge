@@ -32,7 +32,9 @@
    `(start-network-monitor! ...)` returns a zero-arity stop-fn the
    caller invokes from `finally` to interrupt the worker and wait for
    it to exit."
-  (:require [ai.miniforge.llm.network-health :as nh]))
+  (:require [ai.miniforge.llm.messages :as msg]
+            [ai.miniforge.llm.network-health :as nh]
+            [ai.miniforge.logging.interface :as log]))
 
 ;------------------------------------------------------------------------------ Layer 0
 
@@ -61,6 +63,30 @@
    see the running? flag, and exit."
   200)
 
+(def ^{:stratum 0} ^:private default-logger
+  "Where the monitor reports a pause in outage detection when the caller
+   passes no `:logger`; the same module-level EDN logger the stream
+   watchdog uses."
+  (log/create-logger {:min-level :info :output :edn}))
+
+(defn- ^{:stratum 0} log-proxy-auth-change!
+  "Report that outage detection paused (`auth-required?`: the proxy
+   started answering 407) or resumed. Called only when the state changes,
+   so repeated 407s produce one warning, not one per probe."
+  [logger probe-url auth-required?]
+  (if auth-required?
+    (let [proxy (or (nh/probe-proxy-host probe-url (System/getenv))
+                    (msg/t :network-monitor.system/unknown-proxy))]
+      (log/warn logger :system :llm/network-probe-proxy-auth-required
+                {:message (msg/t :network-monitor.system/proxy-auth-required
+                                 {:proxy proxy :probe-url probe-url})
+                 :data {:proxy proxy
+                        :probe-url probe-url}}))
+    (log/info logger :system :llm/network-probe-proxy-auth-cleared
+              {:message (msg/t :network-monitor.system/proxy-auth-cleared
+                               {:probe-url probe-url})
+               :data {:probe-url probe-url}})))
+
 ;; Scheduler
 (defn- ^{:stratum 0} next-failure-count
   "Consecutive-failure count after a probe that returned `status`.
@@ -87,16 +113,21 @@
    the false→true (wait, true→false) transition; whichever wins gets
    to do its job. A healthy probe resets the counter so a brief blip
    does not push the workflow toward a network-drop verdict; see
-   `next-failure-count`."
+   `next-failure-count`. Entering and leaving `:proxy-auth-required`
+   is logged once each (`log-proxy-auth-change!`)."
   [{:keys [running? probe-url backend-key probe-interval-ms failure-threshold
-           probe-fn on-drop]}]
-  (loop [consecutive-failures 0]
+           probe-fn on-drop logger]}]
+  (loop [consecutive-failures 0
+         auth-paused? false]
     (when @running?
       (Thread/sleep ^long probe-interval-ms)
       (when @running?
         (let [status (try (probe-fn probe-url)
                           (catch Exception _ :unreachable))
-              next-failures (next-failure-count status consecutive-failures)]
+              next-failures (next-failure-count status consecutive-failures)
+              auth-required? (= :proxy-auth-required status)]
+          (when (not= auth-required? auth-paused?)
+            (log-proxy-auth-change! logger probe-url auth-required?))
           (cond
             (>= next-failures failure-threshold)
             ;; CAS the running? atom from true → false. If we win, no
@@ -111,7 +142,7 @@
                         :probe-interval-ms    probe-interval-ms}))
 
             :else
-            (recur next-failures)))))))
+            (recur next-failures auth-required?)))))))
 
 ;------------------------------------------------------------------------------ Layer 2
 
@@ -143,6 +174,9 @@
                               status as `next-failure-count` reads it
                               (`:healthy`/true, `:proxy-auth-required`,
                               or anything else for a failure).
+   - `:logger`              — where a pause in outage detection (a
+                              proxy answering 407) is reported; defaults
+                              to `default-logger`.
 
    ## Returns
 
@@ -157,10 +191,12 @@
    does not wait for it to return); callers should make `on-drop`
    idempotent or otherwise tolerate the trailing call. Matches the
    semantics of `progress-monitor/start-keepalive!`."
-  [{:keys [probe-url backend-key probe-interval-ms failure-threshold on-drop probe-fn]
+  [{:keys [probe-url backend-key probe-interval-ms failure-threshold on-drop probe-fn
+           logger]
     :or   {probe-interval-ms default-probe-interval-ms
            failure-threshold default-failure-threshold
-           probe-fn          nh/probe-network}}]
+           probe-fn          nh/probe-network
+           logger            default-logger}}]
   (assert (and (string? probe-url) (seq probe-url))
           "start-network-monitor! requires a non-blank :probe-url string")
   (assert (and (integer? probe-interval-ms) (pos? probe-interval-ms))
@@ -180,7 +216,8 @@
                           :probe-interval-ms probe-interval-ms
                           :failure-threshold failure-threshold
                           :probe-fn          probe-fn
-                          :on-drop           on-drop})
+                          :on-drop           on-drop
+                          :logger            logger})
                        (catch InterruptedException _
                          ;; stop! interrupted us mid-sleep; exit cleanly.
                          nil)))

@@ -19,11 +19,14 @@
   "A proxy that answers 407 wants credentials the probe does not send.
    The probe must report that as `:proxy-auth-required`, never as
    healthy, and the network-drop monitor must not stop a run over it:
-   a 407 neither counts toward a drop nor clears earlier failures."
+   a 407 neither counts toward a drop nor clears earlier failures. The
+   pause in outage detection is logged once when it starts and once
+   when it ends, not on every probe."
   (:require
    [clojure.test :refer [deftest is testing]]
    [ai.miniforge.llm.network-health :as nh]
-   [ai.miniforge.llm.network-monitor :as nnm]))
+   [ai.miniforge.llm.network-monitor :as nnm]
+   [ai.miniforge.logging.interface :as log]))
 
 ;------------------------------------------------------------------------------ Layer 0
 
@@ -59,6 +62,32 @@
           (reset! remaining more))
         status))))
 
+(def ^{:stratum 0} ^:private auth-required-event
+  "Log event for the start of a pause in outage detection."
+  :llm/network-probe-proxy-auth-required)
+
+(def ^{:stratum 0} ^:private auth-cleared-event
+  "Log event for the end of the pause."
+  :llm/network-probe-proxy-auth-cleared)
+
+(def ^{:stratum 0} ^:private auth-then-healthy-statuses
+  "A proxy that asks for credentials three times, then lets the probe
+   through (the last status repeats)."
+  [:proxy-auth-required :proxy-auth-required :proxy-auth-required :healthy])
+
+(defn- ^{:stratum 0} logged
+  "Entries in the collecting logger's `entries` with event `event`."
+  [entries event]
+  (filterv #(= event (:log/event %)) @entries))
+
+(defn- ^{:stratum 0} counting-407-probe
+  "A probe-fn answering :proxy-auth-required every time, counting calls
+   in `calls`."
+  [calls]
+  (fn [_probe-url]
+    (swap! calls inc)
+    :proxy-auth-required))
+
 (defn- ^{:stratum 0} stub-407-client
   "http-kit-shaped client whose every request gets a 407 from the proxy."
   [_request]
@@ -68,13 +97,15 @@
 
 (defn- ^{:stratum 1} monitor-opts
   "start-network-monitor! options that deliver the on-drop diagnostic to
-   the promise `drops`."
+   the promise `drops`. Log entries go to a collecting logger, so tests
+   that do not read them print nothing."
   [drops]
   {:probe-url "https://api.anthropic.com/"
    :backend-key :claude
    :probe-interval-ms probe-interval-ms
    :failure-threshold failure-threshold
-   :on-drop (partial deliver drops)})
+   :on-drop (partial deliver drops)
+   :logger (first (log/collecting-logger))})
 
 (deftest ^{:stratum 1} relayed-probe-answered-407-is-proxy-auth-required-test
   (testing "an http probe relayed by a proxy that answers 407 is not healthy"
@@ -106,6 +137,35 @@
                (:consecutive-failures (deref drops drop-timeout-ms nil))))
         (finally
           (stop!))))))
+
+(deftest ^{:stratum 2} monitor-warns-once-over-repeated-407s-test
+  (testing "repeated 407s log one warning that detection is paused, not one per probe"
+    (let [[logger entries] (log/collecting-logger)
+          calls (atom 0)
+          stop! (nnm/start-network-monitor!
+                 (assoc (monitor-opts (promise))
+                        :logger logger
+                        :probe-fn (counting-407-probe calls)))]
+      (Thread/sleep quiet-period-ms)
+      (stop!)
+      (is (< 1 @calls) "the proxy answered 407 more than once")
+      (let [warnings (logged entries auth-required-event)]
+        (is (= 1 (count warnings)))
+        (is (= :warn (:log/level (first warnings))))
+        (is (= "https://api.anthropic.com/" (get-in (first warnings) [:data :probe-url]))))
+      (is (empty? (logged entries auth-cleared-event))))))
+
+(deftest ^{:stratum 2} monitor-logs-once-when-the-proxy-accepts-again-test
+  (testing "leaving the 407 state logs once more, then nothing"
+    (let [[logger entries] (log/collecting-logger)
+          stop! (nnm/start-network-monitor!
+                 (assoc (monitor-opts (promise))
+                        :logger logger
+                        :probe-fn (scripted-probe auth-then-healthy-statuses)))]
+      (Thread/sleep quiet-period-ms)
+      (stop!)
+      (is (= 1 (count (logged entries auth-required-event))))
+      (is (= 1 (count (logged entries auth-cleared-event)))))))
 
 ;------------------------------------------------------------------------------ Rich Comment
 (comment

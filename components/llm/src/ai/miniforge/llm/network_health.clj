@@ -40,7 +40,8 @@
    fail on every attempt behind a proxy, and the monitor would kill a
    healthy agent."
   (:require [clojure.string :as str]
-            [org.httpkit.client :as http]))
+            [org.httpkit.client :as http]
+            [slingshot.slingshot :refer [try+]]))
 
 ;------------------------------------------------------------------------------ Layer 0
 
@@ -174,6 +175,20 @@
        :keepalive -1})))
 
 ;------------------------------------------------------------------------------ Layer 2
+
+(defn ^{:stratum 2} probe-proxy-host
+  "`host:port` of the proxy a probe of `probe-url` goes through under
+   `env`, for diagnostics; nil when it goes direct or the URL cannot be
+   read. Credentials in the proxy URL are never part of the result."
+  [probe-url env]
+  (try+
+    (when-let [proxy-url (:proxy-url (proxy-request-opts probe-url env))]
+      (let [uri (java.net.URI. proxy-url)
+            port (.getPort uri)]
+        (cond-> (.getHost uri)
+          (pos? port) (str ":" port))))
+    (catch java.net.URISyntaxException _
+      nil)))
 
 (defn ^{:stratum 2} probe-network
   "Probe `probe-url` and return `:healthy`, `:unreachable` or

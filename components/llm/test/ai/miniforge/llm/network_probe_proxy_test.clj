@@ -237,6 +237,14 @@
                                           "no_proxy" "api.anthropic.com"
                                           "NO_PROXY" "other.example"}))))))
 
+(deftest ^{:stratum 1} probe-proxy-host-leaves-out-credentials-test
+  (testing "the proxy host for diagnostics is host:port, never the credentials in the URL"
+    (is (= "proxy.corp.example:3128"
+           (nh/probe-proxy-host anthropic-probe-url
+                                {"HTTPS_PROXY" "http://user:secret@proxy.corp.example:3128"}))))
+  (testing "nil when the probe goes direct"
+    (is (nil? (nh/probe-proxy-host anthropic-probe-url {})))))
+
 (deftest ^{:stratum 1} probe-goes-direct-without-proxy-env-test
   (testing "no proxy variables: the request is the plain probe"
     (let [request (probe-request anthropic-probe-url {})]
