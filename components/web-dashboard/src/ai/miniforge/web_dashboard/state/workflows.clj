@@ -259,22 +259,24 @@
 
 (defn ^{:stratum 1} dedupe-events
   "Deduplicate live + historical events by event-id, falling back to a
-   composite key of stable fields when no id is present. Ids compare in
-   their `event-files/canonical-id` form."
+   composite key of stable fields when no id is present, keeping the
+   first of each in the order seen. Ids compare in their
+   `event-files/canonical-id` form."
   [events]
-  (->> events
-       (reduce (fn [acc event]
-                 (let [event-key (if-let [id (get event :event/id)]
-                                   (event-files/canonical-id id)
-                                   [(get event :event/type)
-                                    (event-files/canonical-id (wf-id event))
-                                    (event-ts event)
-                                    (get event :event/sequence-number)
-                                    (get event :message)])]
-                   (assoc acc event-key event)))
-               {})
-       vals
-       vec))
+  (first
+   (reduce (fn [[kept seen :as acc] event]
+             (let [event-key (if-let [id (get event :event/id)]
+                               (event-files/canonical-id id)
+                               [(get event :event/type)
+                                (event-files/canonical-id (wf-id event))
+                                (event-ts event)
+                                (get event :event/sequence-number)
+                                (get event :message)])]
+               (if (contains? seen event-key)
+                 acc
+                 [(conj kept event) (conj seen event-key)])))
+           [[] #{}]
+           events)))
 
 (defn ^{:stratum 1} workflow-progress
   "Progress percentage for a workflow: 100 when terminal, 50 while running."
@@ -323,6 +325,13 @@
         (not (.isBefore evt-inst since-inst)))))
 
 ;------------------------------------------------------------------------------ Layer 2
+
+(defn ^{:stratum 2} event-order
+  "An event's place in creation order: its timestamp, then its
+   :event/sequence-number for events of one millisecond. A live event
+   has no file, so `event-files/order-key` cannot place it."
+  [event]
+  [(ts-epoch-ms (event-ts event)) (get event :event/sequence-number 0)])
 
 (defn ^{:stratum 2} wf-phase
   "Derive the current phase of a workflow from its events."
@@ -462,7 +471,7 @@
                    (and (matches-workflow? workflow-id event)
                         (matches-event-type? event-type event)
                         (matches-since? since-inst event))))
-         (sort-by #(ts-epoch-ms (event-ts %)) >)
+         (sort-by event-order #(compare %2 %1))
          (take limit)
          vec)))
 
@@ -486,7 +495,7 @@
    chronologically-ordered events. Returns the summary with
    dependency-health attached."
   [id wf-events]
-  (let [wf-events         (->> wf-events (sort-by #(ts-epoch-ms (event-ts %))) vec)
+  (let [wf-events         (->> wf-events (sort-by event-order) vec)
         started           (first-event :workflow/started   wf-events)
         completed         (last-event  :workflow/completed wf-events)
         failed            (last-event  :workflow/failed    wf-events)
