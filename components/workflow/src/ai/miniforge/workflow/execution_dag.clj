@@ -73,17 +73,16 @@
      :dag-result dag-result}))
 
 (defn- ^{:stratum 0} phase-after-active
-  "The phase the workflow runs after the active one (the plan phase, when
-   the DAG executor ran), or nil when the active phase is the last. Read
-   from the compiled execution machine, whose phase entries are the
-   workflow's pipeline in order: callers may pass a nil `pipeline` to
-   apply-dag-success."
+  "The phase the workflow enters when the active one (the plan phase, when
+   the DAG executor ran) succeeds, or nil when success completes the
+   workflow. Read from the compiled execution machine's :phase/succeed
+   target for the current state, the same edge the normal transition
+   takes: pipeline order, or the phase's :on-success when it has one."
   [ctx]
   (let [machine (:execution/fsm-machine ctx)
-        active (when machine
-                 (workflow-fsm/machine-active-phase-entry machine (:execution/fsm-state ctx)))]
-    (when active
-      (:phase (get (:workflow/phase-entries machine) (inc (:index active)))))))
+        state-id (some-> (:execution/fsm-state ctx) workflow-fsm/current-state)
+        target (get-in machine [:workflow/source-states state-id :on :phase/succeed])]
+    (get-in machine [:workflow/state->entry target :phase])))
 
 ;------------------------------------------------------------------------------ Layer 1
 

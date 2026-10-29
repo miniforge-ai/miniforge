@@ -29,11 +29,14 @@
 
 (defn ^{:stratum 0} after-dag-success
   "Apply a successful, empty DAG result to a fresh context whose plan
-   phase (the first of `phases`) is active."
+   phase (the first of `phases`) is active. A phase is a keyword or a
+   full phase config map."
   [phases]
   (let [workflow {:workflow/id :dag-success-next-phase
                   :workflow/version "1.0.0"
-                  :workflow/pipeline (mapv (fn [phase] {:phase phase}) phases)}
+                  :workflow/pipeline (mapv (fn [phase]
+                                             (if (map? phase) phase {:phase phase}))
+                                           phases)}
         planned (assoc (context/create-context workflow {:task "Test"} {})
                        :execution/attempt-phase :plan)]
     (dag/apply-dag-success planned
@@ -59,6 +62,18 @@
 (deftest ^{:stratum 1} plan-then-implement-skips-implement-test
   (testing "when :implement follows :plan, the DAG's work stands in for it"
     (let [result (after-dag-success [:plan :implement :done])]
+      (is (= :running (:execution/status result)))
+      (is (= :done (:execution/current-phase result)))
+      (is (= :completed (get-in result [:execution/phase-results :implement :status]))))))
+
+(deftest ^{:stratum 1} plan-routed-to-implement-skips-implement-test
+  (testing "the next phase is plan's :on-success target, not the next in pipeline order"
+    ;; Pipeline order after :plan is :verify, but plan succeeds into
+    ;; :implement, the phase the DAG's work stands in for.
+    (let [result (after-dag-success [{:phase :plan :on-success :implement}
+                                     {:phase :verify}
+                                     {:phase :implement :on-fail :verify}
+                                     {:phase :done}])]
       (is (= :running (:execution/status result)))
       (is (= :done (:execution/current-phase result)))
       (is (= :completed (get-in result [:execution/phase-results :implement :status]))))))
