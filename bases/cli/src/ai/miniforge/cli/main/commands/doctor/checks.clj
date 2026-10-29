@@ -185,6 +185,25 @@
     (assoc (check-result :runtime (messages/t :doctor/label-runtime) required? ok? summary)
            :check/details details)))
 
+(defn ^{:stratum 1} checkpoints-check
+  "Optional: what the checkpoint root holds (`workflow/checkpoint-usage`).
+   Fails, with the GC command as its hint, when runs are older than the
+   GC's retention. Reports only; deletes nothing."
+  [{:keys [runs older oldest-days max-age-days] :as usage}]
+  (let [root (:checkpoint/root usage)
+        detail (if (pos? runs)
+                 (messages/t :doctor/checkpoints-summary
+                             {:runs runs :root root :oldest-days oldest-days})
+                 (messages/t :doctor/checkpoints-none {:root root}))]
+    (assoc (check-result :checkpoints (messages/t :doctor/label-checkpoints) false
+                         (zero? older) detail)
+           :check/details
+           (if (pos? older)
+             [(messages/t :doctor/hint-checkpoints-gc
+                          {:older older :days max-age-days
+                           :command (app-config/command-string "workflow gc-checkpoints")})]
+             []))))
+
 (defn ^{:stratum 1} config-check
   [config-path]
   (let [exists? (fs/exists? config-path)
