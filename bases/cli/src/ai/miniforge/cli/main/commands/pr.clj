@@ -18,6 +18,7 @@
 (ns ai.miniforge.cli.main.commands.pr
   "PR operations using GitHub CLI."
   (:require
+   [babashka.fs :as fs]
    [babashka.process :as process]
    [cheshire.core :as json]
    [clojure.string :as str]
@@ -39,16 +40,24 @@
 
 ;; PR commands
 (defn ^{:stratum 0} pr-list-cmd
-  "List PRs using GitHub CLI."
+  "List PRs using GitHub CLI. Exits 1 when gh is not on PATH."
   [opts load-config-fn]
   (let [{:keys [repo config]} opts
         cfg (load-config-fn config)
         repos (if repo [repo] (get-in cfg [:fleet :repos] []))]
 
-    (if (empty? repos)
+    (cond
+      (empty? repos)
       (do
         (display/print-error (messages/t :pr/no-repos))
         (println (messages/t :pr/no-repos-hint {:command (app-config/command-string "fleet add")})))
+
+      (nil? (fs/which "gh"))
+      (do
+        (display/print-error (messages/t :pr/gh-missing))
+        (shared/exit! 1))
+
+      :else
       (doseq [r repos]
         (println)
         (println (display/style (messages/t :pr/header {:repo r}) :foreground :cyan :bold true))

@@ -20,7 +20,8 @@
    [clojure.test :refer [deftest testing is]]
    [clojure.java.io :as io]
    [ai.miniforge.config.interface :as config]
-   [ai.miniforge.config.user :as user]))
+   [ai.miniforge.config.user :as user]
+   [clojure.string :as str]))
 
 ;------------------------------------------------------------------------------ Layer 0
 
@@ -103,3 +104,13 @@
         (finally
           (doseq [f (reverse (file-seq root))]
             (.delete ^java.io.File f)))))))
+
+(deftest ^{:stratum 0} unparseable-user-config-is-reported-test
+  (testing "a config.edn that does not parse is named on stderr, not silently replaced by defaults"
+    (let [tmp (java.io.File/createTempFile "unparseable-user-config" ".edn")
+          err (java.io.StringWriter.)]
+      (try
+        (spit tmp "{:llm {:backend :claude}")
+        (is (nil? (binding [*err* err] (config/load-user-config (.getPath tmp)))))
+        (is (str/includes? (str err) (.getPath tmp)))
+        (finally (.delete tmp))))))
