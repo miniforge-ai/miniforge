@@ -5,8 +5,8 @@
   "The per-run checkpoint lock excludes another process, not only other
    threads: while a second process (bb) holds a run's lock file, a pin and
    the GC in this process wait, then the pin lands and the GC keeps the
-   run. A waiter that locks a lock file after it was deleted and replaced
-   starts over on the new file. Skipped when bb is not on PATH."
+   run. The GC removes a legacy per-run lock file only under the run's
+   lock. Skipped when bb is not on PATH."
   (:require [ai.miniforge.workflow.checkpoint-store-lock :as checkpoint-lock]
             [ai.miniforge.workflow.checkpoint-test-support :as fixture]
             [ai.miniforge.workflow.interface :as workflow]
@@ -28,20 +28,6 @@
        "                                                 java.nio.file.StandardOpenOption/WRITE]))"
        "      held (.tryLock ch)]"
        "  (println (if held \"locked\" \"busy\")) (flush) (read-line))"))
-
-(def ^{:stratum 0} ^:private lock-swapper-script
-  "bb program: lock argv[0] and print \"locked\"; on a line from stdin,
-   delete it, lock a new file at the same path, release the old one and
-   print \"swapped\"; on the next line, exit (releasing the new one)."
-  (str "(let [[lock-file] *command-line-args*"
-       "      path (java.nio.file.Paths/get lock-file (make-array String 0))"
-       "      open #(java.nio.channels.FileChannel/open path (into-array java.nio.file.OpenOption"
-       "              [java.nio.file.StandardOpenOption/CREATE java.nio.file.StandardOpenOption/WRITE]))"
-       "      old (open) _ (.tryLock old)]"
-       "  (println \"locked\") (flush) (read-line)"
-       "  (java.nio.file.Files/delete path)"
-       "  (let [new (open)] (.tryLock new) (.close old)"
-       "    (println \"swapped\") (flush) (read-line)))"))
 
 (def ^{:stratum 0} lock-probe-script
   "bb program: try to lock each path in argv, then release; print
@@ -94,62 +80,34 @@
               (is (fs/exists? (fs/path root (str id))))))
           (finally (bp/destroy holder)))))))
 
-(deftest ^{:stratum 1} a-waiter-on-a-deleted-lock-file-starts-over
+(deftest ^{:stratum 1} gc-cannot-remove-a-legacy-lock-file-while-its-run-is-locked
+  ;; Another process inside the run's lock (holding its slot file): the
+  ;; GC's removal of the run's legacy lock file waits for it.
   (if-not (fs/which "bb")
     (println "SKIP cross-process checkpoint lock test: bb is not on PATH")
-    (fs/with-temp-dir [dir {:prefix "pin-lock-swap-"}]
-      (let [root (str dir)
-            id (random-uuid)
-            lock-file (str (checkpoint-lock/lock-file root id))
-            _ (fs/create-dirs (fs/parent lock-file))
-            other (bp/process ["bb" "-e" lock-swapper-script lock-file]
-                              {:in :pipe :out :pipe :err :inherit})
-            lines (io/reader (:out other))
-            read-line! #(deref-bounded (future (.readLine ^java.io.BufferedReader lines)))]
-        (try
-          (is (= "locked" (read-line!)))
-          (let [entered (future (checkpoint-lock/with-run-lock root id (constantly :entered)))]
-            (Thread/sleep 200)
-            (send-line! other)
-            (is (= "swapped" (read-line!)))
-            (Thread/sleep 300)
-            (testing "the old file's lock is free, the path's is not: still waiting"
-              (is (not (realized? entered))))
-            (send-line! other)
-            (is (= :entered (deref-bounded entered))))
-          (finally (bp/destroy other)))))))
-
-(deftest ^{:stratum 1} a-file-replaced-between-open-and-sample-is-not-accepted
-  ;; The acquirer opens the lock file; before it samples the file's
-  ;; identity, the file is unlinked (a GC removing it) and another process
-  ;; locks a replacement. The lock on the unlinked file must not count.
-  (if-not (fs/which "bb")
-    (println "SKIP cross-process checkpoint lock test: bb is not on PATH")
-    (fs/with-temp-dir [dir {:prefix "pin-lock-replaced-"}]
-      (let [root (str dir)
-            id (random-uuid)
-            other (atom nil)
-            open-channel @#'checkpoint-lock/open-lock-channel]
-        (try
-          (with-redefs-fn
-            {#'checkpoint-lock/open-lock-channel
-             (fn [path]
-               (let [channel (open-channel path)]
-                 (when-not @other
-                   (fs/delete path)
-                   (let [p (bp/process ["bb" "-e" lock-holder-script (str path)]
-                                       {:in :pipe :out :pipe :err :inherit})]
-                     (reset! other p)
-                     (is (= "locked" (.readLine ^java.io.BufferedReader (io/reader (:out p)))))))
-                 channel))}
-            (fn []
-              (let [entered (future (checkpoint-lock/with-run-lock root id (constantly :entered)))]
-                (Thread/sleep 500)
-                (testing "the other process holds the replacement: still waiting"
-                  (is (not (realized? entered))))
-                (send-line! @other)
-                (is (= :entered (deref-bounded entered))))))
-          (finally (some-> @other bp/destroy)))))))
+    (fs/with-temp-dir [dir {:prefix "pin-lock-legacy-"}]
+      (fs/with-temp-dir [events-dir {:prefix "pin-lock-legacy-events-"}]
+        (let [root (str dir)
+              id (random-uuid)
+              legacy (checkpoint-lock/legacy-lock-file root id)
+              slot (str (checkpoint-lock/lock-file root id))
+              gc! #(workflow/gc-checkpoints! {:checkpoint/root root :events-dir (fs/file events-dir)})
+              _ (fs/create-dirs (fs/parent legacy))
+              _ (spit (str legacy) "")
+              holder (bp/process ["bb" "-e" lock-holder-script slot]
+                                 {:in :pipe :out :pipe :err :inherit})]
+          (try
+            (is (= "locked" (deref-bounded (future (.readLine ^java.io.BufferedReader
+                                                              (io/reader (:out holder)))))))
+            (testing "while the other process holds the run's lock: kept"
+              (is (zero? (:locks-pruned (with-redefs [checkpoint-lock/lock-timeout-ms 300] (gc!)))))
+              (is (fs/exists? legacy)))
+            (send-line! holder)
+            (deref-bounded (future (bp/check holder)))
+            (testing "once it lets go: removed"
+              (is (= 1 (:locks-pruned (gc!))))
+              (is (not (fs/exists? legacy))))
+            (finally (bp/destroy holder))))))))
 
 ;------------------------------------------------------------------------------ Layer 2
 
