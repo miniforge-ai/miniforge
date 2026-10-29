@@ -43,11 +43,11 @@
   (parse-uuid (str (fs/file-name dir))))
 
 (defn- ^{:stratum 0} recorded-root
-  "The checkpoint root a run's own events say it wrote to: the root above
-   the run directory of the phase file its last
+  "The checkpoint root `events` (a run's own) say it wrote to: the root
+   above the run directory of the phase file its last
    `:workflow/checkpoint-written` names; nil when there is none."
-  [events-dir workflow-id]
-  (let [phase-path (some->> (es/read-workflow-events-by-id events-dir workflow-id)
+  [events workflow-id]
+  (let [phase-path (some->> events
                             (filter #(= :workflow/checkpoint-written (:event/type %)))
                             last
                             :checkpoint/path)
@@ -101,9 +101,13 @@
 (defmethod ^{:stratum 1} es/retention-hold ::checkpoint
   [_hold workflow-id events-dir]
   (or (checkpoint-store/checkpoint-present? workflow-id)
-      (boolean
-       (when-let [root (recorded-root events-dir workflow-id)]
-         (checkpoint-store/checkpoint-present? workflow-id {:checkpoint/root root})))))
+      (let [events (es/read-workflow-events-by-id events-dir workflow-id)]
+        ;; A file the reader skipped may be the one naming the root: with
+        ;; an incomplete history the events are kept, not guessed about.
+        (or (boolean (seq (:event-stream/unreadable-files (meta events))))
+            (boolean
+             (when-let [root (recorded-root events workflow-id)]
+               (checkpoint-store/checkpoint-present? workflow-id {:checkpoint/root root})))))))
 
 (defn- ^{:stratum 1} disposition
   "What the GC does with run directory `dir`: `:recent`, `:live`,

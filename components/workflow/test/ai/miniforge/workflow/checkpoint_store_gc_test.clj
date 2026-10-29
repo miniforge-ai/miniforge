@@ -26,6 +26,15 @@
     (io/make-parents file)
     (spit file (es/serialize-event event))))
 
+(deftest ^{:stratum 0} an-unreadable-event-file-holds-the-run
+  ;; The file that did not read may be the one naming the run's root.
+  (fs/with-temp-dir [events-dir {:prefix "gc-events-"}]
+    (let [id (random-uuid)
+          bad (io/file (str events-dir) "archived" (str id) "0000000000000001__000000000000.transit.json")]
+      (io/make-parents bad)
+      (spit bad "not transit")
+      (is (true? (es/retention-hold ::gc/checkpoint (str id) (fs/file events-dir)))))))
+
 ;------------------------------------------------------------------------------ Layer 1
 
 (defn- ^{:stratum 1} checkpointed-run!

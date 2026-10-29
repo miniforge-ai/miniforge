@@ -157,6 +157,7 @@
 
   ;; Checkpoint retention
   :checkpoint/gc-delete-failed "Could not delete checkpoint {path}: {error}"
+  :warn/checkpoint-announce-failed "Warning: The checkpoint for phase {phase} was written, but announcing it failed: {error}"
 
   ;; Environment lifecycle
   :env/acquisition-failed   "Environment acquisition failed: {error}"

@@ -18,7 +18,8 @@
             [ai.miniforge.workflow.checkpoint-store :as checkpoint-store]
             [ai.miniforge.workflow.messages :as messages]
             [ai.miniforge.workflow.runner-event-dispatch :as dispatch]
-            [babashka.fs :as fs]))
+            [babashka.fs :as fs]
+            [slingshot.slingshot :refer [try+]]))
 
 ;------------------------------------------------------------------------------ Layer 0
 
@@ -36,21 +37,34 @@
 
 (defn- ^{:stratum 0} announce-write!
   "Publish `:workflow/checkpoint-written` for the phase checkpoint just
-   written. The run's events then name its checkpoint root, which the
+   written, naming its absolute path (a relative root resolves against
+   this process's working directory, which a later event cleanup does not
+   share). The run's events then name its checkpoint root, which the
    event cleanup's retention hold reads to keep those events while the
    checkpoint exists, wherever the run wrote it. Needs a stateful stream
-   (see `report-write-failure!`); a refused publication is logged."
+   (see `report-write-failure!`). The write already succeeded, so a
+   failed or refused announcement is logged and never thrown; an Error
+   still propagates."
   [context {:checkpoint/keys [phase phase-path]}]
-  (let [stream (get-in context [:execution/opts :event-stream])]
+  (let [stream (get-in context [:execution/opts :event-stream])
+        logger (:execution/logger context)
+        warn! (fn [error]
+                (log/warn logger :system :workflow/checkpoint-written
+                          {:message (messages/t :warn/checkpoint-announce-failed
+                                                {:phase (some-> phase name) :error error})}))]
     (when (and phase-path (dispatch/stateful-stream? stream))
-      (let [receipt (dispatch/publish-event!
-                     stream
-                     (es/checkpoint-written stream (:execution/id context) phase
-                                            (str phase-path) (fs/size phase-path)))]
-        (when (anomaly/any-anomaly? receipt)
-          (log/warn (:execution/logger context) :system :workflow/checkpoint-written
-                    {:message (messages/t :warn/publish-event
-                                          {:error (:anomaly/message receipt)})}))))))
+      (try+
+        (let [path (str (fs/absolutize phase-path))
+              receipt (dispatch/publish-event!
+                       stream
+                       (es/checkpoint-written stream (:execution/id context) phase
+                                              path (fs/size path)))]
+          (when (anomaly/any-anomaly? receipt)
+            (warn! (:anomaly/message receipt))))
+        #_{:clj-kondo/ignore [:unresolved-symbol]}
+        (catch dispatch/nonfatal? _
+          (let [thrown (:throwable &throw-context)]
+            (warn! (or (ex-message thrown) (some-> thrown class .getName)))))))))
 
 ;------------------------------------------------------------------------------ Layer 1
 

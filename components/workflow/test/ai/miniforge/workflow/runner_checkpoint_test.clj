@@ -84,4 +84,40 @@
           (is (pos? (:checkpoint/size-bytes (first written)))))
         (finally (es/close-current-event-stream! stream))))))
 
+(defn- ^{:stratum 1} iterate-once [ctx]
+  (with-redefs [monitoring/check-workflow-supervision halted]
+    (runner/execute-single-iteration [] ctx {} 1 (atom {:paused false :stopped false}))))
+
+;------------------------------------------------------------------------------ Layer 2
+
+(deftest ^{:stratum 2} the-announced-path-is-absolute-for-a-relative-root
+  (fs/with-temp-dir [dir {:prefix "runner-checkpoint-"}]
+    (let [stream (journal-stream dir)
+          absolute (fs/create-dirs (fs/path dir "checkpoints"))
+          relative (str (fs/relativize (fs/absolutize (fs/cwd)) (fs/canonicalize absolute)))]
+      (try+
+        (let [ctx (fixture/plan-completed-context relative {:event-stream stream})
+              _ (iterate-once ctx)
+              written (first (filter #(= :workflow/checkpoint-written (:event/type %))
+                                     (es/get-events stream)))]
+          (is (not (fs/absolute? relative)) "the root really is relative")
+          (is (fs/absolute? (:checkpoint/path written)))
+          (is (fs/exists? (:checkpoint/path written))))
+        (finally (es/close-current-event-stream! stream))))))
+
+(deftest ^{:stratum 2} a-failed-announcement-warns-and-keeps-the-run-going
+  (fs/with-temp-dir [dir {:prefix "runner-checkpoint-"}]
+    (let [stream (journal-stream dir)
+          [logger entries] (log/collecting-logger {:min-level :debug})
+          root (str (fs/create-dirs (fs/path dir "checkpoints")))]
+      (try+
+        (let [ctx (fixture/plan-completed-context root {:event-stream stream :logger logger})
+              result (with-redefs [fs/size (fn [_] (throw (java.nio.file.NoSuchFileException. "gone")))]
+                       (iterate-once ctx))]
+          (is (= (:execution/id ctx) (:execution/id result)))
+          (is (some #(and (= :warn (:log/level %))
+                          (= :workflow/checkpoint-written (:log/event %)))
+                    @entries)))
+        (finally (es/close-current-event-stream! stream))))))
+
 (comment ::runner-checkpoint)
